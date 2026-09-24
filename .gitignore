@@ -1,0 +1,16 @@
+# Private working material — never publish
+sources/
+prompt-private-project.md
+MANIFEST.md
+
+# Local state and secrets
+.env
+.env.*
+.code-forge/
+*.log
+
+# Node
+node_modules/
+coverage/
+reports/
+.stryker-tmp/
