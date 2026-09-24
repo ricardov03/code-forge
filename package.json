@@ -1,0 +1,42 @@
+{
+  "name": "@ricardov/code-forge",
+  "version": "0.1.0",
+  "description": "Plan/harden/code/review orchestration CLI and Agent Skill for cross-model, parallel, evidence-gated feature delivery.",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "code-forge": "bin/code-forge.mjs"
+  },
+  "files": [
+    "bin",
+    "src",
+    "schema",
+    "skill",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "test": "node --experimental-test-module-mocks --test 'test/**/*.test.mjs'",
+    "typecheck": "tsc --checkJs --noEmit",
+    "stryker": "stryker run"
+  },
+  "dependencies": {
+    "@clack/prompts": "1.8.1",
+    "ajv": "8.20.0",
+    "yaml": "2.9.1"
+  },
+  "optionalDependencies": {
+    "@napi-rs/keyring": "2.1.0"
+  },
+  "devDependencies": {
+    "@stryker-mutator/core": "10.0.0",
+    "@types/node": "22.20.4",
+    "typescript": "7.0.2"
+  }
+}

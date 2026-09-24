@@ -1,0 +1,120 @@
+#!/usr/bin/env node
+/**
+ * Verb router. Discovers verbs by `readdir(src/cli)` — a verb is a `.mjs` file's basename.
+ * Adding a new verb NEVER requires editing this file (plan §10.2 acceptance 2): drop
+ * `src/cli/<verb>.mjs` exporting a default `async function run(args) -> number|void` and it is
+ * live. `--help`/`-h` (or no verb at all) and `--version`/`-v` are the only aliases this router
+ * knows by name, and only as a UX convenience — both simply dispatch to the `help`/`version`
+ * verb modules like any other invocation would.
+ */
+
+import { realpathSync } from 'node:fs';
+import { readdir } from 'node:fs/promises';
+import path from 'node:path';
+import { fileURLToPath, pathToFileURL } from 'node:url';
+import { redact } from '../src/util/redact.mjs';
+
+const __dirname = path.dirname(fileURLToPath(import.meta.url));
+const CLI_DIR = path.join(__dirname, '..', 'src', 'cli');
+
+const HELP_ALIASES = new Set(['--help', '-h']);
+const VERSION_ALIASES = new Set(['--version', '-v']);
+
+/**
+ * A verb file's basename must match this. Duplicated (not imported) in `src/cli/help.mjs` —
+ * both B0-owned files must stay in sync since there is no shared-util file in B0's scope to hold
+ * this once. Rejects `.mjs` (empty verb name) and names with spaces/other characters that would
+ * break the `/^ {2}\S+$/` verb-line pattern `help.mjs` prints.
+ */
+const VERB_FILE_PATTERN = /^[a-z][a-z0-9-]*\.mjs$/;
+
+/**
+ * @returns {Promise<string[]>} verb names, sorted, discovered from `src/cli/*.mjs`.
+ */
+export async function listVerbs() {
+  const entries = await readdir(CLI_DIR, { withFileTypes: true });
+  return entries
+    .filter((entry) => entry.isFile() && VERB_FILE_PATTERN.test(entry.name))
+    .map((entry) => entry.name.slice(0, -'.mjs'.length))
+    .sort();
+}
+
+/**
+ * @param {number} exitCode
+ * @returns {boolean}
+ */
+function isValidExitCode(exitCode) {
+  return Number.isInteger(exitCode) && exitCode >= 0 && exitCode <= 255;
+}
+
+/**
+ * @param {string[]} argv - e.g. `process.argv.slice(2)`.
+ * @returns {Promise<number>} the process exit code.
+ */
+export async function run(argv) {
+  const [first, ...rest] = argv;
+  const verbs = await listVerbs();
+
+  let verb = first;
+  if (verb === undefined || HELP_ALIASES.has(verb)) {
+    verb = 'help';
+  } else if (VERSION_ALIASES.has(verb)) {
+    verb = 'version';
+  }
+
+  if (!verbs.includes(verb)) {
+    process.stderr.write(
+      redact(`code-forge: unknown verb "${verb}"\nVerbs:\n${verbs.map((v) => `  ${v}`).join('\n')}\n`),
+    );
+    return 1;
+  }
+
+  const modulePath = path.join(CLI_DIR, `${verb}.mjs`);
+
+  let exitCode;
+  try {
+    const mod = await import(pathToFileURL(modulePath).href);
+    const handler = mod.default;
+    if (typeof handler !== 'function') {
+      process.stderr.write(redact(`code-forge: verb "${verb}" has no default export function\n`));
+      return 1;
+    }
+    exitCode = await handler(rest, { verbs, verb });
+  } catch (err) {
+    // A verb's error can carry an argv/env token (a fake key in a test, a real one in
+    // production); every stderr path here is redacted, this one included.
+    process.stderr.write(redact(`code-forge: verb "${verb}" failed: ${err?.stack ?? String(err)}\n`));
+    return 1;
+  }
+
+  if (exitCode === undefined || exitCode === null) {
+    return 0;
+  }
+  return isValidExitCode(exitCode) ? exitCode : 1;
+}
+
+/**
+ * Resolve `argv[1]` to the real path `import.meta.url` would report for the same file, so the
+ * comparison survives (a) Node resolving symlinks for the main module — `npm`/`npx .` bin shims
+ * under `node_modules/.bin` are symlinks, and macOS temp dirs are `/var` → realpath `/private/var`
+ * — and (b) `import.meta.url` being percent-encoded while `argv[1]` is a raw path (spaces, `#`,
+ * `%`). Falls back to `false` (never treated as main) if `argv[1]` doesn't resolve to a real file.
+ * @returns {boolean}
+ */
+function computeIsMain() {
+  if (!process.argv[1]) {
+    return false;
+  }
+  try {
+    const realArgvPath = realpathSync(process.argv[1]);
+    return import.meta.url === pathToFileURL(realArgvPath).href;
+  } catch {
+    return false;
+  }
+}
+
+const isMain = computeIsMain();
+if (isMain) {
+  const code = await run(process.argv.slice(2));
+  process.exitCode = code;
+}
