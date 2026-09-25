@@ -3,7 +3,7 @@
 A CLI (`code-forge`) plus one Agent Skill that runs the **plan → harden → code → review** pipeline
 for cross-model, parallel, evidence-gated feature delivery — on Claude Code, Codex, Grok, and Solo.
 
-> **Status:** built block by block per `plans/code-forge-plan-v1.3.md`. The CLI, decision layer,
+> **Status:** built block by block from a maintainer-only design plan. The CLI, decision layer,
 > review engine, worker, proof policy and installer are landed; the Agent Skill under `skill/` and
 > the shipped example repo under `examples/` land in later blocks (see
 > `docs/reference/blocks.json` for what has landed and what is still pending).
@@ -17,8 +17,8 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 - A JSON Schema for `.code-forge.yml` (`schema/code-forge.schema.json`), documented in
   `docs/reference/config.md` (generated — see below).
 
-See `plans/code-forge-plan-v1.3.md` for the full architecture, decision layer, review engine, proof
-policy, security model, and the build-block breakdown.
+See the skill's `skill/references/` for the full architecture, decision layer, review engine, proof
+policy and security model; `docs/reference/blocks.json` lists the build blocks.
 
 ## Install
 
@@ -124,4 +124,4 @@ npm run typecheck     # tsc --checkJs --noEmit
 
 Node >= 22 required (ruling R7). No build step — the package ships plain ESM `.mjs`, run directly
 by Node. `docs/reference/blocks.json` maps each build block to the files it owns and what it
-depends on, generated from `plans/code-forge-plan-v1.3.md` §10.4.
+depends on, kept in sync with the maintainer's design plan.

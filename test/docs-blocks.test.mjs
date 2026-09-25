@@ -11,7 +11,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -48,11 +48,13 @@ export function blockIdsFromPlanSection10_4(planText) {
  */
 const NIGHT_LOG_ADDED_IDS = ['B1.2', 'B4.1', 'B11.1', 'B12c'];
 
-const planText = readFileSync(PLAN_PATH, 'utf8');
+// The plan is maintainer-only (not tracked since 2026-09-25): the drift check runs where it exists.
+const HAS_PLAN = existsSync(PLAN_PATH);
+const planText = HAS_PLAN ? readFileSync(PLAN_PATH, 'utf8') : '';
 const blocksText = readFileSync(BLOCKS_JSON_PATH, 'utf8');
 const doc = JSON.parse(blocksText);
 
-test('blocks.json ids deep-equal §10.4\'s table rows plus the NIGHT-LOG additions — no drift either way', () => {
+test('blocks.json ids deep-equal §10.4\'s table rows plus the NIGHT-LOG additions — no drift either way', { skip: HAS_PLAN ? false : 'the maintainer plan is not in this checkout' }, () => {
   const fromPlan = blockIdsFromPlanSection10_4(planText);
   assert.equal(fromPlan.length, 19, `expected 19 §10.4 rows, parsed ${fromPlan.length}: ${fromPlan.join(', ')}`);
   const expected = [...fromPlan, ...NIGHT_LOG_ADDED_IDS].sort();

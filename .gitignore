@@ -21,3 +21,6 @@ package-lock.json
 
 # Maintainer-only design page (not package content; holds private project names) - 2026-09-25
 docs/design/
+
+# Maintainer-only planning notes (private; kept locally, not in the repo) - 2026-09-25
+plans/
