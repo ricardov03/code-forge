@@ -1,0 +1,21 @@
+
+   FAIL  Tests\Unit\MoneyTest
+  ⨯ it rounds half up                                                   0.02s  
+  ──────────
+   FAILED  Tests\Unit\MoneyTest > it rounds half up
+  Failed asserting that 10.0 is identical to 11.0.
+
+  at tests/Unit/MoneyTest.php:8
+      4▕ use App\Support\Money;
+      5▕
+      6▕ it('rounds half up', function () {
+      7▕     $money = new Money(1050);
+  ➜   8▕     expect($money->round())->toBe(11.0);
+      9▕ });
+
+  1   tests/Unit/MoneyTest.php:8
+
+
+  Tests:    1 failed (1 assertions)
+  Duration: 0.09s
+

@@ -1,0 +1,16 @@
+
+   FAIL  Tests\Unit\MoneyTest
+  ⨯ it rounds half up                                                   0.01s  
+  ──────────
+   FAILED  Tests\Unit\MoneyTest > it rounds half up                        Error
+  Class "App\Support\Money" not found
+
+  at tests/Unit/MoneyTest.php:7
+      6▕ it('rounds half up', function () {
+  ➜   7▕     $money = new Money(1050);
+      8▕     expect($money->round())->toBe(11.0);
+
+
+  Tests:    1 failed (0 assertions)
+  Duration: 0.08s
+

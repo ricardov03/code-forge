@@ -8,7 +8,8 @@
  *   proof lock <block> --run <r>
  *   proof unlock <block> --run <r>
  *   proof baseline            (held on Q16 — block B10c)
- *   proof restore             (the red→green journal — block B10b)
+ *   proof restore <block> --run <r>   (the red→green journal, B10b: restores the block's export
+ *                             and the workspace; refuses with exit 1 when neither holds a journal)
  *
  * `export` reads `proof.export.{link_dirs,copy_untracked}` from the workspace's `.code-forge.yml`
  * (defaults §1.3) and writes a signed `proof` row `isolation: export`; `lock`/`unlock` write
@@ -22,17 +23,18 @@ import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { redactJSON, writeSafe } from '../util/redact.mjs';
-import { DEFAULT_COPY_UNTRACKED, DEFAULT_LINK_DIRS, buildExport, recordProof, removeExport } from '../proof/export.mjs';
+import { DEFAULT_COPY_UNTRACKED, DEFAULT_LINK_DIRS, buildExport, exportDirFor, recordProof, removeExport } from '../proof/export.mjs';
 import { acquireProofLock, releaseProofLock } from '../proof/lock.mjs';
+import { readJournal, restoreJournal } from '../proof/red-green.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 
 const USAGE =
   'usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]\n' +
-  '       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>\n';
+  '       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>\n' +
+  '       code-forge proof restore <block> --run <r>\n';
 
 const NOT_LANDED = {
   baseline: 'proof baseline: held on Q16 (block B10c) — the gate enforces red→green only',
-  restore: 'proof restore: ships with the red→green runner (block B10b)',
 };
 
 /** @param {Record<string, any>} config @returns {string[]} */
@@ -73,7 +75,7 @@ export async function runProof(args, deps = {}) {
   const [sub, ...rest] = args;
 
   if (typeof sub === 'string' && Object.hasOwn(NOT_LANDED, sub)) {
-    err(`${NOT_LANDED[/** @type {'baseline' | 'restore'} */ (sub)]}\n`);
+    err(`${NOT_LANDED[/** @type {'baseline'} */ (sub)]}\n`);
     return 2;
   }
   try {
@@ -86,6 +88,24 @@ export async function runProof(args, deps = {}) {
       const config = await configAt(typeof flags.cwd === 'string' ? flags.cwd : process.cwd());
       const result = tierFor({ file: flags.file, risk: Number(flags.risk), securitySensitive: flags.security === true, highPaths: highPathsOf(config) });
       out({ file: flags.file, ...result });
+      return 0;
+    }
+
+    if (sub === 'restore') {
+      const { flags, positionals } = parseFlags(rest, { values: ['run'] });
+      const [blockId, extra] = positionals;
+      if (!blockId || extra !== undefined || typeof flags.run !== 'string') throw new StateError('usage', 'proof restore needs one block id and --run');
+      const record = await readRun(flags.run);
+      // The runner journals in the directory it measured in: the block's export, or the
+      // workspace itself under the proof lock.
+      const dirs = [exportDirFor(record.workspace, blockId), record.workspace];
+      const restored = [];
+      for (const workDir of dirs) {
+        if ((await readJournal(workDir)) === null) continue;
+        restored.push({ dir: workDir, files: (await restoreJournal({ workDir })).restored });
+      }
+      if (restored.length === 0) throw new StateError('no-journal', `no red→green journal for block ${blockId} — nothing to restore`);
+      out({ restored });
       return 0;
     }
 
