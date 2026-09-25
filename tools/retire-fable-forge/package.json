@@ -2,6 +2,15 @@
   "name": "@ricardov/retire-fable-forge",
   "version": "0.1.0",
   "description": "Retire the old /fable-forge Agent Skill: detect every install, back it up, then alias it to /code-forge or remove it.",
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/ricardov03/code-forge.git",
+    "directory": "tools/retire-fable-forge"
+  },
+  "homepage": "https://github.com/ricardov03/code-forge/tree/main/tools/retire-fable-forge",
+  "bugs": {
+    "url": "https://github.com/ricardov03/code-forge/issues"
+  },
   "license": "MIT",
   "type": "module",
   "publishConfig": {
