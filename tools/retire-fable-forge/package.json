@@ -1,0 +1,23 @@
+{
+  "name": "@ricardov/retire-fable-forge",
+  "version": "0.1.0",
+  "description": "Retire the old /fable-forge Agent Skill: detect every install, back it up, then alias it to /code-forge or remove it.",
+  "license": "MIT",
+  "type": "module",
+  "publishConfig": {
+    "access": "public"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "bin": {
+    "retire-fable-forge": "bin/retire-fable-forge.mjs"
+  },
+  "files": [
+    "bin",
+    "README.md"
+  ],
+  "scripts": {
+    "test": "node --test 'test/**/*.test.mjs'"
+  }
+}
