@@ -32,8 +32,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { randomBytes } from 'node:crypto';
-import { closeSync, existsSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { createHash, randomBytes } from 'node:crypto';
+import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { resolveLevel } from '../config/known-ids.mjs';
@@ -293,8 +293,11 @@ function childEnv(/** @type {NodeJS.ProcessEnv} */ env) {
  * @property {"L0"|"L1"|"L2"|"L3"} level
  * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"} role
  * @property {string} promptPath - the brief (coder) or the packet (closed-book).
- * @property {string} [cwd] - coder only: the project tree (default `process.cwd()`); closed-book
- *   roles always run in a fresh empty directory.
+ * @property {string} [cwd] - coder: the project tree (default `process.cwd()`); facts (B9b.1): an
+ *   existing read-only snapshot of the project to run in, inside `<runRoot>/facts/` or the
+ *   `facts/` area of {@link factsTmpRoot}, and under no git work tree (anything else, `''`
+ *   included, is a `usage` SessionError; default: a fresh empty directory); every
+ *   other closed-book role ignores it and always runs in a fresh empty directory.
  * @property {Record<string, any>} [schema] - source answer schema; compiled per provider.
  * @property {string} [systemPromptText]
  * @property {number} [maxBudgetUsd]
@@ -322,6 +325,98 @@ function childEnv(/** @type {NodeJS.ProcessEnv} */ env) {
  *   `status`: `ok`, `failed`, `timeout`, `invalid-output`, `unavailable` or `started` (background).
  */
 
+/** @param {string} p @returns {string} `p` realpath'd when it exists, else resolved as given. */
+function realOrResolved(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** @param {string} p @returns {boolean} true when anything (a symlink included) is at `p`. */
+function entryExists(p) {
+  try {
+    lstatSync(p);
+    return true;
+  } catch {
+    return false;
+  }
+}
+
+/**
+ * B9b.1: the nearest directory at or above `dir` (`dir` itself included, up to `/`) holding a
+ * `.git` entry — a directory (a work tree), a file (a linked work tree or submodule) or any other
+ * entry of that name — or null when no ancestor has one. Git and the harness's CLAUDE.md /
+ * `.claude` discovery walk up exactly this way, so a facts snapshot below such a directory would
+ * see the live repo.
+ * @param {string} dir - an absolute, realpath'd directory.
+ * @returns {string | null}
+ */
+export function gitWorkTreeAncestor(dir) {
+  for (let d = dir; ; d = path.dirname(d)) {
+    if (entryExists(path.join(d, '.git'))) return d;
+    if (path.dirname(d) === d) return null;
+  }
+}
+
+/**
+ * B9b.1: the private root a facts snapshot goes to when the run root itself sits inside a git work
+ * tree (`tmp.root` configured inside the project): `<os.tmpdir()>/code-forge/facts-<hash of the
+ * run root>`, a B0.1 run root (0700, owned by this process, `owner.json`, swept once it dies).
+ * `create: true` creates it through `runRoot` (trust checks included); otherwise it is only named.
+ * @param {string} runRootDir
+ * @param {{create?: boolean}} [opts]
+ * @returns {string}
+ */
+export function factsTmpRoot(runRootDir, opts = {}) {
+  const name = `facts-${createHash('sha256').update(realOrResolved(runRootDir)).digest('hex').slice(0, 16)}`;
+  return opts.create ? runRoot(name) : path.join(tmpBase(), name);
+}
+
+/**
+ * B9b.1, fail closed: the facts role's `cwd` override must be an existing directory inside a facts
+ * snapshot area — `<runRoot>/facts/`, or the `facts/` area of the run root's private tmp root
+ * ({@link factsTmpRoot}) when that root exists and is trusted (all realpath'd) — never the live
+ * tree (`process.cwd()`) and never inside a git work tree: every ancestor up to `/` is walked and
+ * any `.git` entry (a file or a directory) refuses, because git and the harness's CLAUDE.md /
+ * `.claude` discovery would walk up into the real project.
+ * @param {unknown} cwd @param {string} runRootDir
+ */
+function assertFactsCwd(cwd, runRootDir) {
+  const refuse = (/** @type {string} */ why) => new SessionError('usage', `facts cwd refused: ${why}`);
+  if (typeof cwd !== 'string' || cwd.length === 0) throw refuse('it must be a non-empty path');
+  let real;
+  try {
+    real = realpathSync(path.resolve(cwd));
+    if (!statSync(real).isDirectory()) throw refuse('it is not a directory');
+  } catch (err) {
+    if (err instanceof SessionError) throw err;
+    throw refuse('it does not exist');
+  }
+  /** @type {string[]} */
+  const areas = [];
+  const tmpRoot = factsTmpRoot(runRootDir);
+  for (const area of [path.join(runRootDir, 'facts'), ...(untrustedReason(tmpRoot) === null ? [path.join(tmpRoot, 'facts')] : [])]) {
+    try {
+      areas.push(realpathSync(area));
+    } catch {
+      // not built (yet): not an area
+    }
+  }
+  if (areas.length === 0) throw refuse('the run root has no facts snapshot area');
+  if (!areas.some((area) => real.startsWith(`${area}${path.sep}`))) throw refuse('it is outside the run root facts snapshot area');
+  let live = null;
+  try {
+    live = realpathSync(process.cwd());
+  } catch {
+    // the live cwd is gone: nothing can equal it
+  }
+  if (real === live) throw refuse('it is a live work tree');
+  const workTree = gitWorkTreeAncestor(real);
+  if (workTree !== null) throw refuse(`inside a git work tree (${workTree})`);
+}
+
 /**
  * @param {SessionOpts} opts
  * @param {SessionDeps} [deps]
@@ -334,6 +429,7 @@ export async function spawnSession(opts, deps = {}) {
   if (typeof promptPath !== 'string' || !path.isAbsolute(promptPath)) throw new SessionError('usage', 'promptPath must be an absolute path');
   const stderr = deps.stderr ?? process.stderr;
   const runRootDir = opts.runRoot ?? currentRunRoot();
+  if (role === 'facts' && opts.cwd !== undefined) assertFactsCwd(opts.cwd, runRootDir);
   const writeRow = deps.writeRow ?? (opts.slug ? (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: /** @type {string} */ (opts.slug) }) : null);
   const steps = ladderFor(resolveLevel(cfg, level), role);
   if (opts.background) steps.length = 1;
@@ -395,7 +491,8 @@ export async function spawnSession(opts, deps = {}) {
 }
 
 /**
- * Build one step's argv; closed-book roles get a fresh empty cwd inside the session dir, and Codex
+ * Build one step's argv; closed-book roles get a fresh empty cwd inside the session dir (the facts
+ * role: the caller's snapshot when `opts.cwd` names one), and Codex
  * its `-o` file and schema file next to it (never inside the cwd).
  * @param {SessionOpts} opts
  * @param {{provider: string, model: string, effort?: string, flagFallback?: {provider: string, model: string}}} step
@@ -403,8 +500,10 @@ export async function spawnSession(opts, deps = {}) {
  */
 function buildStep(opts, step, sessionDir) {
   const closedBook = opts.role !== 'coder';
-  const cwd = closedBook ? path.join(sessionDir, 'cwd') : path.resolve(opts.cwd ?? process.cwd());
-  if (closedBook) mkdirSync(cwd, { mode: 0o700 });
+  // B9b.1: the facts delegate may run in the caller's read-only project snapshot; nobody else may
+  const snapshot = opts.role === 'facts' && opts.cwd !== undefined ? realpathSync(path.resolve(opts.cwd)) : null; // validated by assertFactsCwd
+  const cwd = snapshot ?? (closedBook ? path.join(sessionDir, 'cwd') : path.resolve(opts.cwd ?? process.cwd()));
+  if (closedBook && snapshot === null) mkdirSync(cwd, { mode: 0o700 });
   const cli = cliNameForProvider(step.provider);
   if (cli === undefined) throw new SessionError('usage', `provider "${step.provider}" has no CLI mapping`);
   /** @type {Record<string, any>} */

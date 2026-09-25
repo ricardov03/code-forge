@@ -1,7 +1,8 @@
 /**
  * `code-forge facts --brief <file> [--sources <path>…] [--out <file>] [--run <id>] [--timeout <s>]`
  * (plan §3.8 step 1–3; block B9b). Builds the facts sheet: claim tokens, one L0 read-only delegate
- * session, validation, render. Default `--out`: `<project.plans_dir | plans>/<brief name>.facts.md`.
+ * session (run in a read-only snapshot of the project at HEAD plus the in-project `--sources`,
+ * B9b.1), validation, render. Default `--out`: `<project.plans_dir | plans>/<brief name>.facts.md`.
  * Exit codes: 0 written, 1 the session failed, the answer was refused, a file vanished mid-run or
  * the run raised a `SessionError`, 2 usage (only pre-run argument errors: flags, config, an
  * unreadable `--brief` / `--sources`, a bad `--run` id), 3 L0 and every fallback unavailable
@@ -79,7 +80,7 @@ export async function runFactsVerb(args, deps = {}) {
     let result;
     try {
       result = await buildFacts(
-        { cfg, briefPath, sources, outPath, run, runRoot, slug, timeoutMs: timeout === undefined ? undefined : timeout * 1000 },
+        { cfg, briefPath, sources, outPath, run, runRoot, slug, projectDir: cwd, timeoutMs: timeout === undefined ? undefined : timeout * 1000 },
         { ...deps, stderr },
       );
     } catch (err) {

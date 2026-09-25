@@ -5,9 +5,16 @@
  * Step 1 (deterministic): {@link extractClaims} lists every claim token of the brief and the
  * sources it names — CLI flags, `<cli> <verb>` commands (inside code spans), `~/…` and `./…`
  * paths, versions, http(s) endpoints, `@scope/name` packages and environment variables.
- * Step 2: ONE L0 `facts` session (closed-book, empty cwd; Claude gets `--tools "Bash"` with the
- * forbidden list rendered, §5.2) whose packet is the claim list and the rule "run the cheapest
- * read-only check, quote the command and the output line, tag it, never infer".
+ * Step 2: ONE L0 `facts` session (closed-book; Claude gets `--tools "Bash"` with the forbidden list
+ * rendered, §5.2) whose packet is the claim list and the rule "run the cheapest read-only check,
+ * quote the command and the output line, tag it, never infer". B9b.1: when the caller names the
+ * project (`projectDir`), the session runs in a READ-ONLY SNAPSHOT of it ({@link buildSnapshot}:
+ * `git archive HEAD` plus the `--sources` inside the project, symlinks and secret-looking files
+ * dropped, every file 0444 and directory 0555) so `./…` path claims can be checked; the snapshot
+ * lives under the run root — or, when that root itself sits inside a git work tree, under a
+ * private B0.1 root in `os.tmpdir()` (`factsTmpRoot`) — and is removed when the verb ends;
+ * `spawnSession` refuses a facts cwd below any `.git`. {@link pathViolation} still refuses
+ * `~`, `..` and absolute paths outside the tool roots, so the delegate cannot leave it.
  * Step 3 (deterministic): the answer is validated against `schema/facts.schema.json`; a row whose
  * `command` is not an allowed read-only form ({@link readOnlyViolation}'s allow-list; env claims only
  * `printenv NAME >/dev/null`, their excerpt always blanked) or a VERIFIED row with an empty excerpt
@@ -22,14 +29,16 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, fstatSync, mkdirSync, openSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, closeSync, constants as FS, fstatSync, lstatSync, mkdirSync, openSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, unlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { appendRow } from '../ledger/write.mjs';
+import { exec } from '../util/exec.mjs';
 import { redact } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
-import { spawnSession } from './spawn.mjs';
+import { factsTmpRoot, gitWorkTreeAncestor, spawnSession } from './spawn.mjs';
 
 /** @typedef {'flag'|'command'|'path'|'version'|'endpoint'|'package'|'env'} ClaimKind */
 /** @typedef {{token: string, kind: ClaimKind}} Claim */
@@ -74,7 +83,7 @@ export const EXCERPT_MAX = 200;
 /** Default `--max-budget-usd` of the facts session (§3.8: "typically under $0.10"). */
 export const FACTS_MAX_BUDGET_USD = 0.5;
 
-/** An error raised before or after the session (`code`: `usage`, `refused`, `stale`). */
+/** An error raised before or after the session (`code`: `usage`, `refused`, `stale`, `snapshot`). */
 export class FactsError extends Error {
   /** @param {string} code @param {string} message */
   constructor(code, message) {
@@ -281,7 +290,7 @@ const TOOL_ROOTS = ['/usr', '/opt/homebrew', '/bin'];
 
 /**
  * Why one argument reaches outside the delegate's cwd, or null. Relative paths stay inside the
- * (empty) cwd; `~`, a `..` segment and any absolute path outside {@link TOOL_ROOTS} are refused, so
+ * cwd (the read-only project snapshot, or an empty directory); `~`, a `..` segment and any absolute path outside {@link TOOL_ROOTS} are refused, so
  * a recursive reader (`rg . ~`, `find / -type f`, `ls -R /etc`) has nowhere to go.
  * @param {string} word
  * @returns {string | null}
@@ -301,7 +310,35 @@ const PLAIN_READERS = new Set(['ls', 'cat', 'head', 'tail', 'wc', 'grep', 'rg', 
 const GIT_READS = new Set(['log', 'show', 'status', 'rev-parse', 'ls-files', 'cat-file', '--version']);
 const NPM_READS = new Set(['view', 'ls', '--version']);
 const HELP_FORMS = new Set(['--help', '-h', '--version']);
-const FIND_ACTIONS = new Set(['-exec', '-execdir', '-ok', '-okdir', '-delete', '-fprint', '-fprint0', '-fprintf', '-fls']);
+/**
+ * find: an ALLOWED predicate list (B9b.1). Any other word starting with `-` (`-exec`, `-execdir`,
+ * `-ok`, `-okdir`, `-delete`, `-fls`, `-fprint*`, …) is refused by omission; `!` and bare words are
+ * operands (paths, patterns, numbers).
+ */
+export const FIND_PREDICATES = Object.freeze(['-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth', '-print', '-print0', '-newer', '-size', '-empty', '-mtime', '-mmin', '-not', '!', '-a', '-o', '-and', '-or']);
+const FIND_ALLOWED = new Set(FIND_PREDICATES);
+/** The predicates whose next word is their operand (`-mtime -1`, `-size -10k` stay operands). */
+const FIND_TAKES_VALUE = new Set(['-name', '-iname', '-path', '-ipath', '-type', '-maxdepth', '-mindepth', '-newer', '-size', '-mtime', '-mmin']);
+const FIND_MESSAGE = `find: only ${FIND_PREDICATES.join(' ')} and paths`;
+
+/**
+ * @param {string[]} rest - the words after `find`.
+ * @returns {string | null}
+ */
+function findViolation(rest) {
+  for (let i = 0; i < rest.length; i += 1) {
+    const t = rest[i];
+    if (FIND_ALLOWED.has(t)) {
+      if (FIND_TAKES_VALUE.has(t)) {
+        if (i + 1 >= rest.length) return FIND_MESSAGE;
+        i += 1;
+      }
+    } else if (t.startsWith('-') || ['(', ')', ','].includes(t)) {
+      return FIND_MESSAGE;
+    }
+  }
+  return null;
+}
 /** Build/task runners: their `help`/default targets run user recipes, so the `<cli> --help` case never admits them. */
 const BUILD_RUNNERS = new Set(['make', 'gmake', 'just', 'task', 'rake', 'gradle', 'gradlew', 'mvn', 'mvnw', 'ant', 'ninja', 'cmake', 'bazel', 'bazelisk', 'tox', 'nox', 'invoke', 'inv', 'doit', 'earthly', 'mage', 'npx', 'pnpx', 'bunx']);
 /** curl: the long options allowed; the short ones are any cluster of `s S I L f`; `--max-time <N>` is handled apart. */
@@ -358,7 +395,7 @@ function segmentViolation(argv) {
     case 'command':
       return rest.length === 2 && rest[0] === '-v' ? null : 'command: only command -v <name>';
     case 'find':
-      return rest.some((t) => FIND_ACTIONS.has(t)) ? 'find: -exec, -delete and -fprint* are not allowed' : null;
+      return findViolation(rest);
     case 'git':
       if (rest.length === 0 || !GIT_READS.has(rest[0])) return 'git: only log, show, status, rev-parse, ls-files, cat-file or --version, with no global option';
       return rest.some((t) => /^--(output|ext-diff|textconv)/.test(t)) ? 'git: --output, --ext-diff and --textconv are not allowed' : null;
@@ -527,8 +564,9 @@ const RULE = [
   '`<cli> --version`, `npm view <name> version`). Quote the exact command and the output line it printed (at most 200',
   'characters). Tag each claim VERIFIED (the output shows it), NOT-FOUND (the check ran and it is absent) or',
   'UNVERIFIABLE (no read-only check can decide it — say why in `why`). Never infer, never guess. Only these forms are',
-  'accepted, joined by `|` if needed: which, command -v, ls, cat, head, tail, wc, grep (no -r), rg, find (no -exec/-delete),',
-  'stat, file, uname, sw_vers, jq, `<cli> --help|-h|--version` (a bare CLI name, no path, no build runner), git',
+  'accepted, joined by `|` if needed: which, command -v, ls, cat, head, tail, wc, grep (no -r), rg,',
+  'find (only -name -iname -path -ipath -type -maxdepth -mindepth -print -print0 -newer -size -empty -mtime -mmin',
+  '-not ! -a -o -and -or, plus paths), stat, file, uname, sw_vers, jq, `<cli> --help|-h|--version` (a bare CLI name, no path, no build runner), git',
   'log|show|status|rev-parse|ls-files|cat-file, npm view|ls, node --version, test -e|-f|-d|-n, `curl -sI <one URL>`.',
   'No `$`, no backticks, no redirection, no unquoted glob, no `~`, no absolute path outside /usr, /opt/homebrew or',
   '/bin, no secret files.',
@@ -557,8 +595,203 @@ export function buildFactsPacket(claims) {
  * @property {string} outPath - absolute path of the sheet to write.
  * @property {string} [runRoot] @property {string} [run] @property {string} [slug]
  * @property {number} [maxBudgetUsd] @property {number} [timeoutMs]
+ * @property {string} [projectDir] - the project (the verb's cwd): the delegate runs in a read-only
+ *   snapshot of its git HEAD plus the in-project `sources`; absent ⇒ an empty cwd.
  * @property {() => Date} [now]
  */
+
+// ---------------------------------------------------------------------------------------------
+// B9b.1 — the delegate's read-only project snapshot
+// ---------------------------------------------------------------------------------------------
+
+const GIT_TIMEOUT_MS = 120000;
+
+/** `process.env` minus every inherited `GIT_*`, with no system/global git config. */
+function gitEnv() {
+  /** @type {NodeJS.ProcessEnv} */
+  const env = { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull };
+  for (const [key, value] of Object.entries(process.env)) {
+    if (!key.startsWith('GIT_')) env[key] = value;
+  }
+  return env;
+}
+
+/**
+ * Drop symlinks and secret-looking entries, then make every file 0444 and every directory 0555
+ * (children first). A symlink could point anywhere outside the snapshot; a secret file is never
+ * handed to the delegate even though its reads are refused by name.
+ * @param {string} dir @param {string} [rel] - `dir` relative to the snapshot root.
+ */
+function sealTree(dir, rel = '') {
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    const relPath = rel ? `${rel}/${name}` : name;
+    const st = lstatSync(full);
+    if (st.isSymbolicLink() || SECRET_PATH.some((re) => re.test(relPath))) {
+      rmSync(full, { recursive: true, force: true });
+    } else if (st.isDirectory()) {
+      sealTree(full, relPath);
+    } else if (st.isFile()) {
+      chmodSync(full, 0o444);
+    } else {
+      unlinkSync(full); // fifos, sockets, devices: never part of a read-only view
+    }
+  }
+  chmodSync(dir, 0o555);
+}
+
+/** @param {string} p @returns {string} `p` realpath'd when it exists, else resolved as given. */
+function realOrResolved(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/** @param {string} dir - make every directory under `dir` writable again, then remove it. */
+export function removeSnapshot(dir) {
+  /** @param {string} d */
+  const unseal = (d) => {
+    chmodSync(d, 0o700);
+    for (const name of readdirSync(d)) {
+      const full = path.join(d, name);
+      if (lstatSync(full).isDirectory()) unseal(full);
+    }
+  };
+  try {
+    unseal(dir);
+  } catch (err) {
+    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') throw err;
+  }
+  rmSync(dir, { recursive: true, force: true });
+}
+
+/** @param {string} p @returns {import('node:fs').Stats | null} lstat of `p`, or null when absent. */
+function lstatOrNull(p) {
+  try {
+    return lstatSync(p);
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Remove every symlink and special entry below `dir` (regular files and directories stay). Runs
+ * right after `tar -x`, BEFORE any source is copied in: a symlink tracked at HEAD (`foo -> ../..`)
+ * that the working tree has replaced with a real directory would otherwise turn a source copy
+ * into a write outside the snapshot.
+ * @param {string} dir
+ */
+function dropLinks(dir) {
+  for (const name of readdirSync(dir)) {
+    const full = path.join(dir, name);
+    const st = lstatSync(full);
+    if (st.isDirectory()) dropLinks(full);
+    else if (!st.isFile()) unlinkSync(full); // a symlink (to anything), fifo, socket or device
+  }
+}
+
+/**
+ * Refuse a path below `snapDir` that crosses a symlink: every segment from `snapDir` down to `dir`
+ * (inclusive) is lstat'd; a missing segment ends the walk (the copy creates it next).
+ * @param {string} snapDir @param {string} dir
+ */
+function assertNoLinkSegments(snapDir, dir) {
+  const rel = path.relative(snapDir, dir);
+  let cur = snapDir;
+  for (const seg of rel === '' ? [] : rel.split(path.sep)) {
+    cur = path.join(cur, seg);
+    const st = lstatOrNull(cur);
+    if (st === null) return;
+    if (st.isSymbolicLink()) throw new FactsError('snapshot', `the project snapshot refused a copy across a symlink (${path.relative(snapDir, cur)})`);
+    if (!st.isDirectory()) throw new FactsError('snapshot', `the project snapshot has a file where a directory is needed (${path.relative(snapDir, cur)})`);
+  }
+}
+
+/**
+ * Copy `src` (a working-tree file or directory) to `dst` inside `snapDir` without following any
+ * symlink: entries are lstat'd (symlinks, `.git` and secret-looking paths dropped), parents are
+ * created here and checked segment by segment, and every file is created with
+ * `O_EXCL | O_NOFOLLOW` — a HEAD file of the same name is unlinked first, never written through.
+ * @param {string} src @param {string} dst @param {string} snapDir
+ */
+function copyNoFollow(src, dst, snapDir) {
+  const rel = path.relative(snapDir, dst).split(path.sep).join('/');
+  const st = lstatSync(src);
+  if (st.isSymbolicLink() || /(^|\/)\.git(\/|$)/.test(rel) || SECRET_PATH.some((re) => re.test(rel))) return;
+  assertNoLinkSegments(snapDir, path.dirname(dst));
+  mkdirSync(path.dirname(dst), { recursive: true, mode: 0o700 }); // only segments the check found missing
+  const at = lstatOrNull(dst);
+  if (st.isDirectory()) {
+    if (at === null) mkdirSync(dst, { mode: 0o700 });
+    else if (!at.isDirectory()) throw new FactsError('snapshot', `the project snapshot has a file where a directory is needed (${rel})`);
+    for (const name of readdirSync(src)) copyNoFollow(path.join(src, name), path.join(dst, name), snapDir);
+    return;
+  }
+  if (!st.isFile()) return;
+  if (at !== null) {
+    if (!at.isFile()) throw new FactsError('snapshot', `the project snapshot has a directory where a file is needed (${rel})`);
+    unlinkSync(dst); // the HEAD copy: the source's current content replaces it
+  }
+  const fd = openSync(dst, FS.O_WRONLY | FS.O_CREAT | FS.O_EXCL | FS.O_NOFOLLOW, 0o600);
+  try {
+    writeFileSync(fd, readFileSync(src));
+  } finally {
+    closeSync(fd);
+  }
+}
+
+/**
+ * Build the facts delegate's read-only view of the project at `snapDir`: the tracked tree at HEAD
+ * (`git archive` + `tar -x`, binary-safe, the real index and tree never touched; every symlink and
+ * special entry dropped right after extraction) plus every `source` inside the project at its
+ * current content ({@link copyNoFollow}; untracked sources included; a source outside `projectDir`
+ * — a sibling directory of the repo included — is left out: it could only be reached through
+ * `..`). Not a git repo, or no commit yet (`git rev-parse --verify HEAD` fails) ⇒ the sources
+ * alone; HEAD resolves but the archive or the extraction fails ⇒ `FactsError('snapshot')`. The
+ * tar file never outlives the call.
+ * @param {string} projectDir @param {ReadonlyArray<string>} sources - absolute.
+ * @param {string} snapDir - created here. @param {string} workDir - scratch for the tar file.
+ * @param {typeof exec} [run] - the git/tar runner (tests inject a failing one).
+ * @returns {Promise<string>} the session cwd: `snapDir` joined with the project's path below the git
+ *   top level (the project itself when it is a subdirectory of the repo).
+ */
+export async function buildSnapshot(projectDir, sources, snapDir, workDir, run = exec) {
+  mkdirSync(snapDir, { recursive: true, mode: 0o700 });
+  const project = realpathSync(projectDir);
+  let root = project;
+  const top = await run(['git', 'rev-parse', '--show-toplevel'], { cwd: project, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+  if (top.result === 'ok' && top.stdout.trim().length > 0) {
+    root = realpathSync(top.stdout.trim());
+    const head = await run(['git', 'rev-parse', '--verify', '-q', 'HEAD'], { cwd: root, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    if (head.result === 'ok' && head.stdout.trim().length > 0) {
+      const tarPath = path.join(workDir, 'head.tar');
+      try {
+        const archived = await run(['git', 'archive', '--format=tar', '-o', tarPath, 'HEAD'], { cwd: root, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+        if (archived.result !== 'ok') throw new FactsError('snapshot', `the project snapshot could not be archived (git archive exit ${archived.code})`);
+        const untar = await run(['tar', '-xf', tarPath, '-C', snapDir], { timeoutMs: GIT_TIMEOUT_MS });
+        if (untar.result !== 'ok') throw new FactsError('snapshot', `the project snapshot could not be extracted (tar exit ${untar.code})`);
+      } finally {
+        rmSync(tarPath, { force: true });
+      }
+      dropLinks(snapDir);
+    }
+  }
+  // the project may be a subdirectory of the git top level: `./x` claims resolve against IT
+  const sub = path.relative(root, project);
+  const sessionCwd = path.join(snapDir, sub);
+  assertNoLinkSegments(snapDir, sessionCwd);
+  mkdirSync(sessionCwd, { recursive: true, mode: 0o700 });
+  for (const source of sources) {
+    const real = realpathSync(source);
+    const inProject = path.relative(project, real);
+    if (inProject === '' || inProject.startsWith('..') || path.isAbsolute(inProject)) continue;
+    copyNoFollow(real, path.join(sessionCwd, inProject), snapDir);
+  }
+  sealTree(snapDir);
+  return sessionCwd;
+}
 
 /**
  * Build the facts sheet (steps 1–3) and write it to `outPath`.
@@ -570,11 +803,17 @@ export async function buildFacts(opts, deps = {}) {
   const brief = readBriefOnce(opts.briefPath);
   const claims = extractClaims([brief.bytes.toString('utf8'), ...readSourcesText(opts.sources ?? [])].join('\n'));
   const root = opts.runRoot ?? currentRunRoot();
-  const dir = path.join(root, 'facts', `${Date.now()}-${randomBytes(4).toString('hex')}`);
+  // B9b.1: a run root inside a git work tree (`tmp.root` configured in the project) cannot hold
+  // the snapshot — git and the harness would walk up into the live repo — so the facts area moves
+  // to a private B0.1 root under os.tmpdir(); `spawnSession` refuses the cwd either way otherwise.
+  const area = gitWorkTreeAncestor(realOrResolved(root)) === null ? path.join(root, 'facts') : path.join(factsTmpRoot(root, { create: true }), 'facts');
+  const dir = path.join(area, `${Date.now()}-${randomBytes(4).toString('hex')}`);
   mkdirSync(dir, { recursive: true, mode: 0o700 });
   const packetPath = path.join(dir, 'packet.md');
+  const snapDir = path.join(dir, 'snapshot');
   try {
     writeFileSync(packetPath, buildFactsPacket(claims), { mode: 0o600 });
+    const cwd = opts.projectDir === undefined ? undefined : await buildSnapshot(opts.projectDir, opts.sources ?? [], snapDir, dir);
     const result = await spawnSession(
       {
         cfg: opts.cfg,
@@ -587,6 +826,7 @@ export async function buildFacts(opts, deps = {}) {
         run: opts.run,
         slug: opts.slug,
         timeoutMs: opts.timeoutMs,
+        ...(cwd === undefined ? {} : { cwd }),
       },
       deps,
     );
@@ -609,6 +849,7 @@ export async function buildFacts(opts, deps = {}) {
     }
     return { status: 'ok', outPath: opts.outPath, claims, facts };
   } finally {
+    removeSnapshot(snapDir);
     rmSync(dir, { recursive: true, force: true });
   }
 }
