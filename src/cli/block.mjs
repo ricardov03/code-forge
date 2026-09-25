@@ -19,7 +19,13 @@
  * `rule_break`, plus the transcript grep. The transcript is `--transcript`, else the block's
  * `transcript` in the run record, else `.code-forge/runs/<run>/<block>.log`; none ⇒ a signed
  * `gate.transcript_missing` row and a WARN line (never a silent pass, never a refusal). An id the
- * run does not know is `unknown_block` before any check runs.
+ * run does not know is `unknown_block` before any check runs. B20: every changed owned file of
+ * tier `high` (§7.1: `proof.tiers.high.paths`, a recorded `risk ≥ 2`, or `security_sensitive`)
+ * needs a signed, proven red→green `proof` row (`checkBlockProof`), else `unproven <file>`; the
+ * human's way out is `block waive <id> proof --file <path>`. The high paths are the union of the
+ * `.code-forge.yml` at the block's base and the current one (`highPathsAt`); either that exists
+ * but does not load or validate refuses the close (a typo must never drop a high path), and a
+ * base that is missing or not a commit of the workspace refuses it too (`git-failed`).
  *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
@@ -38,6 +44,11 @@ import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey } from '../state/signer.mjs';
 import { blockFileSet, reviewGateCheck, waiveFinding } from '../review/gate-check.mjs';
 import { writeSafe } from '../util/redact.mjs';
+import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
+import { validateConfig } from '../config/validate.mjs';
+import { migrateConfig } from '../config/migrate.mjs';
+import { exec } from '../util/exec.mjs';
+import { gitChildEnv } from '../worker/ticket.mjs';
 
 const USAGE =
   'usage: code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>]\n' +
@@ -138,15 +149,19 @@ export async function runBlock(args, deps = {}) {
         }
         // the human's way out of the per-file review check leaves a signed audit row before the close
         if (reviewsWaived) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
+        // B20: the high paths come first — a base the workspace does not know refuses the close here
+        const highPaths = await highPathsAt(record.workspace, entry.base_sha);
+        const fileSet = await blockFileSet({ repoRoot: record.workspace, base: entry.base_sha, owned: entry.owned_files, matchOwned: (f) => findOverlap(entry.owned_files, [f]) !== null });
         return {
           block: id,
           runId,
           rows,
           key: await loadKey(runId),
           transcript,
-          files: reviewsWaived
-            ? []
-            : await blockFileSet({ repoRoot: record.workspace, base: entry.base_sha, owned: entry.owned_files, matchOwned: (f) => findOverlap(entry.owned_files, [f]) !== null }),
+          files: reviewsWaived ? [] : fileSet,
+          // B20: high-tier files need a proven red→green row; `--no-require-reviews` does not lift it
+          proofFiles: fileSet,
+          highPaths,
         };
       });
       const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews] });
@@ -182,6 +197,63 @@ async function findTranscript(record, id, given) {
     }
   }
   return null;
+}
+
+/**
+ * The key paths of a config's validation errors (never values).
+ * @param {Record<string, any>} config @param {string} where
+ * @returns {string[]} `proof.tiers.high.paths`
+ * @throws {StateError} `bad-config`
+ */
+function validHighPaths(config, where) {
+  const result = validateConfig(config);
+  if (!result.valid) {
+    const at = [...new Set(result.errors.map((e) => (typeof e.path === 'string' ? e.path : e.rule)))].join(', ');
+    throw new StateError('bad-config', `${where} is invalid (${result.errors.length} error(s) at ${at}) — run code-forge validate`);
+  }
+  const paths = config?.proof?.tiers?.high?.paths;
+  return Array.isArray(paths) ? paths.filter((p) => typeof p === 'string') : [];
+}
+
+/**
+ * B20: `proof.tiers.high.paths` for the close — the UNION of the `.code-forge.yml` committed at
+ * the block's base (read with `git show <base>:.code-forge.yml`, argv only, GIT_* stripped) and
+ * the one in the working tree, so a coder that edits or deletes the high paths in its block can
+ * only ever add to them. Fails closed on the base: a base that is not a non-empty string, or that
+ * `git rev-parse --verify` does not know as a commit, refuses the close (`git-failed`), and so does
+ * any git call that times out, fails to spawn or exits non-zero. The base config counts as absent
+ * ONLY when a clean `git ls-tree <base> -- .code-forge.yml` lists nothing; the current config may
+ * be absent too. A side that exists but does not load or validate refuses the close (key paths
+ * only, never values).
+ * @param {string} workspace @param {string | undefined} base
+ * @returns {Promise<string[]>}
+ * @throws {StateError} `bad-config`, `git-failed`
+ */
+export async function highPathsAt(workspace, base) {
+  if (typeof base !== 'string' || base.length === 0 || base.startsWith('-')) throw new StateError('git-failed', 'the block has no base commit — the close cannot read the base config');
+  const paths = new Set();
+  const loaded = await loadProjectConfig(workspace);
+  if (loaded.ok && loaded.config) for (const p of validHighPaths(loaded.config, DEFAULT_CONFIG_FILENAME)) paths.add(p);
+  else if (loaded.error !== 'not-found') throw new StateError('bad-config', `${DEFAULT_CONFIG_FILENAME} does not load (${loaded.error ?? 'no config'}) — run code-forge validate`);
+
+  const git = { cwd: workspace, env: gitChildEnv(), timeoutMs: 30000 };
+  const known = await exec(['git', 'rev-parse', '--verify', '--quiet', `${base}^{commit}`], git);
+  if (known.result !== 'ok') throw new StateError('git-failed', 'the block base is not a commit of the workspace — the close cannot read the base config');
+  const listed = await exec(['git', 'ls-tree', base, '--', DEFAULT_CONFIG_FILENAME], git);
+  if (listed.result !== 'ok') throw new StateError('git-failed', `git could not check for ${DEFAULT_CONFIG_FILENAME} at the block base`);
+  if (listed.stdout.trim().length === 0) return [...paths]; // a clean git said the base has no config
+  const spec = `${base}:${DEFAULT_CONFIG_FILENAME}`;
+  const shown = await exec(['git', 'show', spec], git);
+  if (shown.result !== 'ok') throw new StateError('git-failed', `git could not read ${DEFAULT_CONFIG_FILENAME} at the block base`);
+  const where = `${DEFAULT_CONFIG_FILENAME} at the block base`;
+  let parsed;
+  try {
+    parsed = migrateConfig(parseYAML(shown.stdout, { prettyErrors: false }));
+  } catch {
+    throw new StateError('bad-config', `${where} does not load — run code-forge validate`);
+  }
+  for (const p of validHighPaths(parsed, where)) paths.add(p);
+  return [...paths];
 }
 
 /** @param {string[]} args @returns {Promise<number>} */

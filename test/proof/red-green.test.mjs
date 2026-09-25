@@ -17,11 +17,11 @@ import { cpSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync,
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
-import { after, before, test } from 'node:test';
+import { after, before, mock, test } from 'node:test';
 import { runProof } from '../../src/cli/proof.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { buildExport } from '../../src/proof/export.mjs';
-import { deleteAssertions, journalPath, runRedGreen } from '../../src/proof/red-green.mjs';
+import { MECHANISMS, deleteAssertions, journalPath, readJournal, restoreJournal, runRedGreen } from '../../src/proof/red-green.mjs';
 import { openBlock } from '../../src/state/block.mjs';
 import { startRun } from '../../src/state/run.mjs';
 import { loadKey, verifyRow } from '../../src/state/signer.mjs';
@@ -356,6 +356,7 @@ test('proof red-green <block> proves a new test by revert in a fresh export: RED
     ],
   );
   assert.equal(verifyRow(added[1], await loadKey(RUN)).ok, true);
+  assert.deepEqual(added[1].covers, ['src/math.mjs']); // B20: revert covers the sources it put back
   // the main tree was never touched: math.mjs is still the current (clamp implemented) version
   assert.equal(hashOf(path.join(repo.dir, 'src/math.mjs')), hashOf(path.join(FIXTURE, 'current/src/math.mjs')));
 });
@@ -378,6 +379,7 @@ test('proof red-green --mechanism assertion-deletion with a ::case label proves 
     ],
   );
   assert.equal(verifyRow(added[1], await loadKey(RUN)).ok, true);
+  assert.deepEqual(added[1].covers, ['test/add.spec.mjs']); // B20: assertion deletion covers the test only
   // measured in the export: the main tree's test file is byte-identical before and after
   assert.equal(hashOf(mainTest), hashBefore);
 });
@@ -412,4 +414,30 @@ test('proof red-green normalizes --test (./ dropped) and refuses an absolute pat
   const ok = await cli(['red-green', 'C', '--run', RUN, '--test', './test/./clamp.spec.mjs']);
   assert.equal(ok.code, 0, ok.stderr);
   assert.deepEqual([JSON.parse(ok.stdout).test, ok.stderr], ['test/clamp.spec.mjs', 'RED test/clamp.spec.mjs\nGREEN test/clamp.spec.mjs\n']);
+});
+
+test('fix 2: a red→green result with no red phase never throws in the row builder — exit 1, exactly 1 signed row with proven: false and red_kind: null', async () => {
+  if (typeof mock.module !== 'function') throw new Error('run with --experimental-test-module-mocks (npm test does)');
+  const handle = mock.module(RED_GREEN_URL, {
+    namedExports: { MECHANISMS, readJournal, restoreJournal, runRedGreen: async () => ({ label: 'test/clamp.spec.mjs', mechanism: 'revert', green: null, proven: false }) },
+  });
+  try {
+    // a fresh module instance (query string) so the mock is what THIS proof.mjs links against
+    const fresh = '../../src/cli/proof.mjs?no-red';
+    const { runProof: guarded } = /** @type {typeof import('../../src/cli/proof.mjs')} */ (await import(fresh));
+    const before = (await readAllRows(SLUG)).length;
+    let stdout = '';
+    let stderr = '';
+    const code = await guarded(['red-green', 'C', '--run', RUN, '--test', 'test/clamp.spec.mjs'], { stdout: { write: (s) => (stdout += s) }, stderr: { write: (s) => (stderr += s) } });
+    assert.deepEqual([code, stderr], [1, '']);
+    const printed = JSON.parse(stdout);
+    assert.deepEqual([printed.red, printed.red_kind, printed.green, printed.proven], [null, null, null, false]);
+    const added = (await readAllRows(SLUG)).slice(before);
+    const rows = added.filter((r) => r.event === 'proof' && r.step === 'red-green');
+    assert.deepEqual(added.map((r) => r.step), ['export', 'red-green']);
+    assert.deepEqual(rows.map((r) => [r.block, r.test, r.mechanism, r.red, r.red_kind, r.green, r.proven, r.failed, r.covers]), [['C', 'test/clamp.spec.mjs', 'revert', null, null, null, false, null, ['src/math.mjs']]]);
+    assert.equal(verifyRow(rows[0], await loadKey(RUN)).ok, true);
+  } finally {
+    handle.restore();
+  }
 });

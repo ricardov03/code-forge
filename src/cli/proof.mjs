@@ -13,7 +13,9 @@
  *   proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
  *                             (B17: one red→green proof through `runRedGreen`, measured in a
  *                             freshly built export — or in the workspace under `proof lock`,
- *                             which this block must hold; exit 0 proven, 1 not proven or refused)
+ *                             which this block must hold; exit 0 proven, 1 not proven or refused).
+ *                             The signed row carries `covers` (B20): the reverted sources, or
+ *                             the test file for `assertion-deletion`.
  *
  * `export` reads `proof.export.{link_dirs,copy_untracked}` from the workspace's `.code-forge.yml`
  * (defaults §1.3) and writes a signed `proof` row `isolation: export`; `lock`/`unlock` write
@@ -33,7 +35,7 @@ import { DEFAULT_COPY_UNTRACKED, DEFAULT_LINK_DIRS, buildExport, exportDirFor, r
 import { acquireProofLock, lockHolder, releaseProofLock } from '../proof/lock.mjs';
 import { MECHANISMS, readJournal, restoreJournal, runRedGreen } from '../proof/red-green.mjs';
 import { tierFor } from '../proof/tiers.mjs';
-import { blockFileSet } from '../review/gate-check.mjs';
+import { blockFileSet, repoRelativePath } from '../review/gate-check.mjs';
 import { findOverlap } from '../state/registry.mjs';
 
 const USAGE =
@@ -258,20 +260,45 @@ export async function runProof(args, deps = {}) {
         sources,
         isolation,
         print: (line) => err(`${line}\n`),
-        record: { runId, blockId, writeRow },
+      });
+      // B20: the signed row names what the proof covers — the block gate reads `covers` per
+      // high-tier file. `revert` covers the sources it put back to base; `assertion-deletion`
+      // covers only the test file itself (its `::case` label is never part of a path). Every entry
+      // is normalized exactly as the gate normalizes its changed files (`repoRelativePath`).
+      const covers = [...new Set((result.mechanism === 'revert' ? sources : [file]).map((f) => repoRelativePath(f)))].sort();
+      // A result with no red phase (refused before the tree was touched) is never proven: the row
+      // still lands, `proven: false` and `red_kind: null`, and the verb exits 1.
+      const red = result.red ?? null;
+      const proven = result.proven === true && red !== null;
+      await recordProof({
+        runId,
+        writeRow,
+        row: {
+          block: blockId,
+          isolation,
+          step: 'red-green',
+          test: result.label,
+          mechanism: result.mechanism,
+          red_kind: red?.red_kind ?? null,
+          red: red?.verdict ?? null,
+          green: result.green ?? null,
+          proven,
+          failed: red?.failed ?? null,
+          covers,
+        },
       });
       out({
         block: blockId,
         test: result.label,
         mechanism: result.mechanism,
         isolation,
-        red: result.red.verdict,
-        red_kind: result.red.red_kind,
-        green: result.green,
-        proven: result.proven,
+        red: red?.verdict ?? null,
+        red_kind: red?.red_kind ?? null,
+        green: result.green ?? null,
+        proven,
         ...(exp ? { export: { dir: exp.dir, restored: exp.restored, untracked: exp.untracked } } : {}),
       });
-      return result.proven ? 0 : 1;
+      return proven ? 0 : 1;
     }
   } catch (thrown) {
     const code = thrown instanceof StateError ? thrown.code : 'error';

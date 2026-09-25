@@ -6,8 +6,10 @@ Tier per file = `high` when `risk ≥ 2`, or a `proof.tiers.high.paths` match, o
 
 | tier | proof required | when |
 |---|---|---|
-| light | red→green for every new or changed test the block's acceptance names | the coder or orchestrator runs the runner per test (§2); the gate records the rows |
-| high | the same red→green, plus the deeper **review** depth of `review.md` §2 (two lenses and a judge) | as above |
+| light | red→green recommended for every new or changed test; **optional at the gate** | the coder or orchestrator runs the runner per test (§2) |
+| high | red→green **required at the gate** for every changed high-tier file, plus the deeper **review** depth of `review.md` §2 (two lenses and a judge) | as above; `block close` refuses `unproven <file>` |
+
+**`forge block close` enforces the high tier:** tier inputs are `proof.tiers.high.paths` (the union of the config at the block's base and the current one), the recorded `risk`, and `security_sensitive`; a row naming the file whose MAC fails makes it high. Each changed high-tier file needs a signed `proof` row of this run and block with `step: red-green`, `proven: true`, `red_kind: assertion` whose `covers` list names the file (`revert` covers the sources it put back; `assertion-deletion` covers only its test), else `unproven <file>`; only the human's `forge block waive <id> proof --file <path>` clears it.
 
 **Mutation testing is not part of this product.** The question whether tool-made mutants on changed lines (Infection, Stryker) should be a user-facing proof tier was decided: **cut**. There is no `proof mutate`, no nightly mutation run, no `min_msi` floor, and no mutation-tool key in `.code-forge.yml`; a consumer that runs a mutation tool does so outside code-forge and never beside a coder's test run in the same tree. What replaces it as proof is the rule itself: one exact test per acceptance clause plus one negative or boundary where the clause has a failure mode — assertions that say **which** element and **how many**, never merely whether something exists — and the isolated per-file review with the convergence rule, which on this package's own build found the defects green suites had missed.
 

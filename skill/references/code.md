@@ -36,6 +36,7 @@ The coder's report is a claim sheet. The gate reproduces each number in the meas
 | test count | the filtered run's delta equals the new tests' own count |
 | line and case forecast | `git diff --stat` net lines against `--lines`: > 1.25 × ⇒ stop (`===BLOCK <id> FAILED: forecast exceeded, split plan <id>a/<id>b===`); cases > 1.5 × forecast ⇒ a `forecast.cases_exceeded` WARN row, never a stop |
 | no rule break | the transcript grep for forbidden verbs and paths (`--transcript <file>`, else the run record's log); a missing transcript ⇒ a signed `gate.transcript_missing` row and a WARN, never silence |
+| high tier proven | every changed high-tier file (`proof.md` §1) has a signed, proven red→green row with `red_kind: assertion` for this block whose `covers` names it (light tier: optional), else `unproven <file>`; only the human's `block waive <id> proof --file <path>` clears it |
 | rows genuine | the MAC of every gate-relevant row verifies; the live worker matches the pinned pid |
 | nothing left open | no unruled `late_findings`; no file at `review_cap` without a signed `review.waived` row |
 

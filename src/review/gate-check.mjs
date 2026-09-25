@@ -10,7 +10,9 @@
  *    block-close sweep's L3 ruling) nor a signed `review.waived` row;
  *  - `review_cap`: a file stopped at `review_cap` has an open finding with no signed
  *    `review.waived {by: human}` row — unless the file has a signed approval at its current hash
- *    (the human fixed it by hand and it was reviewed).
+ *    (the human fixed it by hand and it was reviewed);
+ *  - `unproven`:   a changed owned file of tier `high` (B20, Ricardo 2026-09-25) has no covering
+ *    red→green proof (`checkBlockProof`, below). Light-tier files need no proof row.
  * Rulings and waivers only count when their MAC verifies AND name the finding's file exactly
  * (`file` + `finding`; a finding id is scoped to one file, so a waiver of `F1` in `a.mjs` never
  * clears `F1` in `b.mjs`); a late finding counts whether or not it is signed (fail closed).
@@ -28,10 +30,11 @@ import { exec } from '../util/exec.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { StateError } from '../state/paths.mjs';
 import { verifyRow } from '../state/signer.mjs';
+import { tierFor } from '../proof/tiers.mjs';
 import { DELETED_HASH, contentHash, gitChildEnv } from '../worker/ticket.mjs';
 
 /**
- * @typedef {{code: 'unreviewed' | 'unsigned' | 'rule_break' | 'late_unruled' | 'review_cap', file?: string, finding?: string, detail?: string}} Refusal
+ * @typedef {{code: 'unreviewed' | 'unsigned' | 'rule_break' | 'late_unruled' | 'review_cap' | 'unproven', file?: string, finding?: string, detail?: string}} Refusal
  */
 
 /** @param {Record<string, any>} row @param {Buffer} key */
@@ -39,13 +42,21 @@ const verified = (row, key) => verifyRow(row, key).ok;
 
 /**
  * @param {{
- *   block: string, runId?: string, files: Array<{file: string, content_hash: string}>,
+ *   block: string, runId: string, files: Array<{file: string, content_hash: string}>,
  *   rows: Array<Record<string, any>>, key: Buffer, transcript?: string | null,
- *   extraTokens?: string[],
- * }} opts
+ *   extraTokens?: string[], proofFiles: Array<{file: string, content_hash: string}>,
+ *   highPaths: ReadonlyArray<string>,
+ * }} opts `proofFiles` is the set the proof check reads — `--no-require-reviews` empties `files`
+ *   but never the proof check; `highPaths` is `proof.tiers.high.paths`. Both are REQUIRED: a
+ *   caller that leaves one out gets a TypeError, never a silent default that skips the proof.
+ *   `runId` is required too: the proof check matches its rows on this run only (fix round 4).
  * @returns {{ok: boolean, refusals: Refusal[]}}
+ * @throws {TypeError} `runId`, `proofFiles` or `highPaths` undefined
  */
-export function checkBlockReviews({ block, runId, files, rows, key, transcript = null, extraTokens = [] }) {
+export function checkBlockReviews({ block, runId, files, rows, key, transcript = null, extraTokens = [], proofFiles, highPaths }) {
+  if (runId === undefined) throw new TypeError('checkBlockReviews: runId is required (the proof check matches rows on this run only)');
+  if (proofFiles === undefined) throw new TypeError('checkBlockReviews: proofFiles is required (the changed owned files the proof check reads)');
+  if (highPaths === undefined) throw new TypeError('checkBlockReviews: highPaths is required (proof.tiers.high.paths)');
   const mine = rows.filter((r) => r?.block === block && (runId === undefined || r.run === undefined || r.run === runId));
   /** @type {Refusal[]} */
   const refusals = [];
@@ -81,12 +92,94 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
       if (!waived(cap.file, finding)) refusals.push({ code: 'review_cap', file: cap.file, finding, detail: `${cap.file} stopped at review_cap; finding ${finding} is open and not waived` });
     }
   }
+  for (const r of checkBlockProof({ runId, files: proofFiles, rows: mine, key, highPaths })) {
+    if (!waived(/** @type {string} */ (r.file), PROOF_FINDING)) refusals.push(r);
+  }
   return { ok: refusals.length === 0, refusals };
+}
+
+/** The finding id a human waives to clear an `unproven` file: `block waive <id> proof --file <path>`. */
+export const PROOF_FINDING = 'proof';
+
+/**
+ * The file's proof tier at close, from the same inputs `proof tier` uses (§7.1): the config's
+ * `proof.tiers.high.paths`, the highest `risk` any row of the block recorded for the file (the
+ * worker's `review.plan` rows), and `security_sensitive: true` on any such row. The MAC is checked
+ * FIRST and fails closed: when ANY row naming the file does not verify — with or without a `risk`
+ * field — the file counts as risk 3.
+ * @param {{file: string, rows: Array<Record<string, any>>, key: Buffer, highPaths: ReadonlyArray<string>}} opts
+ * @returns {import('../proof/tiers.mjs').Tier}
+ */
+export function closeTier({ file, rows, key, highPaths }) {
+  let risk = 0;
+  let securitySensitive = false;
+  for (const r of rows) {
+    if (r?.file !== file) continue;
+    if (!verified(r, key)) {
+      risk = 3;
+      continue;
+    }
+    if (typeof r.risk === 'number' && Number.isFinite(r.risk)) risk = Math.max(risk, Math.min(3, Math.max(0, r.risk)));
+    if (r.security_sensitive === true) securitySensitive = true;
+  }
+  return tierFor({ file, risk, securitySensitive, highPaths: [...highPaths] }).tier;
+}
+
+/**
+ * B20 (Ricardo 2026-09-25): every changed owned file of tier `high` needs a covering red→green
+ * proof, checked PER FILE. A file is covered by a `proof` row of this run and block (`rows` must
+ * already be the block's rows) with `step: 'red-green'`, `proven: true`, `red_kind: 'assertion'`,
+ * whose MAC verifies and whose `covers` list (written by `proof red-green`: the sources the
+ * `revert` mechanism put back to base, or the test file itself for `assertion-deletion`) names
+ * that file. A deleted file has nothing a test can exercise and is skipped (its review row is
+ * still required). Light-tier files need nothing.
+ * @param {{runId: string, files: Array<{file: string, content_hash: string}>, rows: Array<Record<string, any>>, key: Buffer, highPaths: ReadonlyArray<string>}} opts
+ *   `runId` and `highPaths` are required: a proof row counts only when `r.run === runId` (a row
+ *   of another run, or with no `run`, never covers anything), and there is no "no high path" default.
+ * @returns {Refusal[]} one `unproven` refusal per uncovered high-tier file.
+ * @throws {TypeError} `runId` or `highPaths` undefined
+ */
+export function checkBlockProof({ runId, files, rows, key, highPaths }) {
+  if (runId === undefined) throw new TypeError('checkBlockProof: runId is required (a proof row counts only for its own run)');
+  if (highPaths === undefined) throw new TypeError('checkBlockProof: highPaths is required (proof.tiers.high.paths)');
+  const high = files.filter((f) => f.content_hash !== DELETED_HASH && closeTier({ file: f.file, rows, key, highPaths }) === 'high');
+  if (high.length === 0) return [];
+  const proofs = rows.filter(
+    (r) =>
+      r?.event === 'proof' &&
+      r.step === 'red-green' &&
+      r.proven === true &&
+      r.red_kind === 'assertion' &&
+      r.run === runId &&
+      Array.isArray(r.covers) &&
+      verified(r, key),
+  );
+  return high
+    .filter(({ file }) => !proofs.some((r) => r.covers.includes(file)))
+    .map(({ file }) => ({ code: /** @type {const} */ ('unproven'), file, detail: `${file} is high tier and has no proven red→green row covering it` }));
+}
+
+/**
+ * A file as the gate names it: a repo-relative POSIX path with `./` segments dropped. This is the
+ * ONE normalization of the block file set and of a proof row's `covers` (B20), so a path written
+ * by `proof red-green` compares equal to the gate's changed-file path. An absolute path, a `..`
+ * escape, a backslash or a NUL is refused.
+ * @param {string} raw @returns {string}
+ * @throws {StateError} `bad-path`
+ */
+export function repoRelativePath(raw) {
+  if (typeof raw !== 'string' || raw.length === 0 || path.posix.isAbsolute(raw) || raw.includes('\\') || raw.includes('\0')) {
+    throw new StateError('bad-path', 'a block file must be a repo-relative POSIX path');
+  }
+  const normalized = path.posix.normalize(raw);
+  if (normalized === '.' || normalized === '..' || normalized.startsWith('../')) throw new StateError('bad-path', 'a block file must stay inside the repository');
+  return normalized;
 }
 
 /**
  * The block's file set (§4.1): changed tracked files since `base` (deletions included, hashed
  * `DELETED_HASH`) ∪ untracked files, filtered to `owned` (exact paths; a glob owned entry matches through `matchOwned`), each with its content hash.
+ * Every path goes through `repoRelativePath`.
  * @param {{repoRoot: string, base: string, owned: string[], matchOwned?: (file: string) => boolean}} opts
  * @returns {Promise<Array<{file: string, content_hash: string}>>}
  */
@@ -96,7 +189,9 @@ export async function blockFileSet({ repoRoot, base, owned, matchOwned }) {
   const changed = await exec(['git', 'diff', '--name-only', '-z', '--no-renames', base, '--'], { cwd: repoRoot, env, timeoutMs: 30000 });
   const untracked = await exec(['git', 'ls-files', '-z', '--others', '--exclude-standard'], { cwd: repoRoot, env, timeoutMs: 30000 });
   if (changed.result !== 'ok' || untracked.result !== 'ok') throw new StateError('git-failed', 'git could not list the block file set');
-  const all = new Set([...changed.stdout.split('\0'), ...untracked.stdout.split('\0')].filter((f) => f.length > 0));
+  const all = new Set(
+    [...changed.stdout.split('\0'), ...untracked.stdout.split('\0')].filter((f) => f.length > 0).map((f) => repoRelativePath(f)),
+  );
   const isOwned = matchOwned ?? ((/** @type {string} */ f) => owned.includes(f));
   return [...all]
     .filter((f) => isOwned(f))
