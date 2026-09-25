@@ -25,7 +25,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadProjectConfig } from '../config/load.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
-import { appendRow } from '../ledger/write.mjs';
+import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { spawnSession } from '../session/spawn.mjs';
 import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
@@ -82,6 +82,19 @@ export async function resolveJevKey(cfg, { store, env, opRead }) {
   return res.value;
 }
 
+/** The fix-loop fields of an engine outcome the result carries (B12c, §4.11). */
+const LOOP_FIELDS = Object.freeze(['round', 'kind', 'level', 'next', 'trigger', 'stopped', 'late']);
+
+/**
+ * @param {Record<string, any>} outcome @returns {Record<string, any>} the fix-loop fields present.
+ */
+export function loopResult(outcome) {
+  /** @type {Record<string, any>} */
+  const out = {};
+  for (const name of LOOP_FIELDS) if (outcome[name] !== undefined) out[name] = outcome[name];
+  return out;
+}
+
 /**
  * @typedef {object} WorkerOpts
  * @property {string} runId
@@ -102,7 +115,11 @@ export async function resolveJevKey(cfg, { store, env, opRead }) {
  * @property {NodeJS.ProcessEnv} [env]
  * @property {Partial<Record<'claude'|'codex'|'grok', string>>} [bins]
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow] - default: B6 `appendRow`.
+ * @property {() => Promise<Array<Record<string, any>>>} [readRows] - the ledger rows the fix-loop
+ *   state is anchored in; default: B6 `readAllRows(slug)`.
  * @property {{write: (s: string) => unknown}} [stderr]
+ * @property {import('../review/triage.mjs').JevAsk} [jev] - S1 for triage and the recheck (tests
+ *   inject a mock); default: `askJev` with the resolved Jev key, none without one.
  */
 
 /**
@@ -114,6 +131,7 @@ export async function createWorker(opts, deps = {}) {
   const review = deps.review ?? reviewTicket;
   const spawn = deps.spawn ?? spawnSession;
   const writeRow = deps.writeRow ?? ((/** @type {Record<string, any>} */ row) => appendRow(row, { slug }));
+  const readRows = deps.readRows ?? (() => readAllRows(slug));
   const store = deps.store ?? (await createDefaultKeyStore(env));
   const jevKey = await resolveJevKey(cfg, { store, env, opRead: deps.opRead });
   const childEnv = sessionEnv(env, [jevKey, key.toString('hex')]);
@@ -164,6 +182,9 @@ export async function createWorker(opts, deps = {}) {
           runRootDir,
           cfg,
           jevKey,
+          key, // signs the fix-loop state (B12c); the sessions never see it (`childEnv`)
+          readRows,
+          ...(deps.jev ? { jev: deps.jev } : {}),
           // `sessionOpts.cfg` (a per-call config, e.g. the consensus second reviewer's level) wins
           // over the worker's; everything else the worker pins.
           spawn: (sessionOpts) =>
@@ -182,6 +203,7 @@ export async function createWorker(opts, deps = {}) {
             engine: outcome.engine,
             ...(typeof outcome.reason === 'string' ? { reason: outcome.reason } : {}),
             ...(Array.isArray(outcome.findings) ? { findings: outcome.findings } : {}),
+            ...loopResult(outcome),
             sessions: outcome.sessions,
           };
         } catch {
@@ -201,7 +223,16 @@ export async function createWorker(opts, deps = {}) {
   async function complete(id, result) {
     const signed = writeResult({ repoRoot, runId, ticket: id, result, key });
     try {
-      await ledger({ event: 'review.result', ticket: id, block: result.block ?? null, file: result.file ?? null, content_hash: result.content_hash ?? null, status: result.status });
+      await ledger({
+        event: 'review.result',
+        ticket: id,
+        block: result.block ?? null,
+        file: result.file ?? null,
+        content_hash: result.content_hash ?? null,
+        status: result.status,
+        ...(typeof result.trigger === 'string' ? { trigger: result.trigger } : {}),
+        ...(typeof result.stopped === 'string' ? { stopped: result.stopped } : {}),
+      });
     } catch {
       // the signed result file stands; the gate reads it (§4.6)
     }

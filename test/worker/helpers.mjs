@@ -109,10 +109,19 @@ export async function makeRepo({ start = true } = {}) {
   return { repo, runId };
 }
 
+let fake = FAKE;
+/**
+ * Use another fake as `claude` for the rest of this test file (each test file is its own process).
+ * @param {string} file - an executable fake under `test/`.
+ */
+export function useFake(file) {
+  fake = file;
+}
+
 /** @returns {string} a PATH whose `claude` is the fake reviewer. */
 function fakePath() {
   const bin = freshDir('bin');
-  symlinkSync(FAKE, path.join(bin, 'claude'));
+  symlinkSync(fake, path.join(bin, 'claude'));
   return [bin, path.dirname(process.execPath), '/usr/bin', '/bin'].join(path.delimiter);
 }
 

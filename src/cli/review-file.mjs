@@ -5,6 +5,13 @@
  *   review-file --wait <ticket> [--max <90s>]      poll; prints {ticket, status: done, result} or
  *                                                  {ticket, status: pending} when --max elapses
  *
+ * The same content enqueued again after an `unavailable` result is a fresh attempt (`retry: true`),
+ * not the old result.
+ * A done result that is not approved and carries open findings adds `fix_list` (what the coder
+ * fixes before re-running `review-file <path>`, which is then a round-2 recheck of the fix hunks,
+ * §4.11); a result the loop stopped adds `stop` with the reason (`review_cap`, …) — the coder
+ * stops and reports; only the orchestrator and the human act on it.
+ *
  * Everything is a file read/write inside the workspace (a sandboxed coder has no network). The
  * path is given relative to the current directory and stored relative to the REPOSITORY ROOT
  * (V4); an absolute path or a `..` segment is refused with `bad-path`. With no live worker the
@@ -13,7 +20,7 @@
  * Exit codes: 0 queued/done/pending, 1 bad-path or another refusal, 2 usage, 3 worker_down.
  */
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { enqueue, isDone, liveWorker, queueDir } from '../worker/queue.mjs';
 import { assertBlockId, assertTicketId, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
@@ -52,6 +59,28 @@ function doneResult(repoRoot, ticket) {
 }
 
 /**
+ * The coder-facing summary of a done result: the fix list and the stop reason, when any.
+ * @param {Record<string, any> | null} result
+ * @returns {Record<string, any>}
+ */
+export function fixList(result) {
+  if (!result || result.approved === true) return {};
+  /** @type {Record<string, any>} */
+  const out = {};
+  if (Array.isArray(result.findings) && result.findings.length > 0) {
+    out.fix_list = result.findings.map((/** @type {Record<string, any>} */ f) => ({
+      id: f?.id ?? null,
+      severity: f?.severity ?? null,
+      lines: `${f?.line_start ?? '?'}-${f?.line_end ?? '?'}`,
+      claim: f?.claim ?? '',
+      fix: f?.fix ?? '',
+    }));
+  }
+  if (typeof result.stopped === 'string') out.stop = result.stopped;
+  return out;
+}
+
+/**
  * @param {string[]} args
  * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number}} [deps]
  * @returns {Promise<number>}
@@ -73,7 +102,7 @@ export async function runReviewFile(args, deps = {}) {
       for (;;) {
         if (isDone(repoRoot, ticket)) {
           const result = doneResult(repoRoot, ticket);
-          say({ ticket, status: 'done', result });
+          say({ ticket, status: 'done', result, ...fixList(result) });
           return 0;
         }
         if (!liveWorker(repoRoot)) {
@@ -96,7 +125,15 @@ export async function runReviewFile(args, deps = {}) {
       say({ status: 'worker_down', file });
       return 3;
     }
-    say(enqueue({ repoRoot, run: worker.run, block, file }));
+    const queued = enqueue({ repoRoot, run: worker.run, block, file });
+    if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'unavailable') {
+      // `unavailable` is never approval AND never final: drop the done marker so the worker runs
+      // the ticket again (the fix loop re-runs its pending round); the signed result is replaced.
+      rmSync(path.join(queueDir(repoRoot), `${queued.ticket}.done`), { force: true });
+      say({ ...enqueue({ repoRoot, run: worker.run, block, file }), retry: true });
+      return 0;
+    }
+    say(queued);
     return 0;
   } catch (err) {
     const code = err instanceof WorkerError || err?.name === 'StateError' ? err.code : 'error';
