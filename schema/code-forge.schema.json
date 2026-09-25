@@ -194,26 +194,11 @@
               "type": "object",
               "additionalProperties": false,
               "properties": {
-                "paths": { "type": "array", "items": { "type": "string" } },
-                "tool": { "type": "string" },
-                "min_msi": { "type": "number", "minimum": 0, "maximum": 100 }
+                "paths": { "type": "array", "items": { "type": "string" } }
               }
             },
             "light": { "type": "object", "additionalProperties": false, "properties": {} }
           }
-        },
-        "js": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "tool": { "type": "string" },
-            "min_msi": { "type": "number", "minimum": 0, "maximum": 100 }
-          }
-        },
-        "nightly": {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": { "enabled": { "type": "boolean" }, "report_only": { "type": "boolean" } }
         },
         "extra": { "type": "array", "items": { "type": "string" } },
         "isolation": { "type": "string", "enum": ["export", "lock"], "default": "export" },

@@ -332,7 +332,7 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'levels.L0.model',
   'levels.L3.fallback',
   'levels.L3.fallback.provider',
-  'proof.tiers.high.min_msi',
+  'proof.tiers.high.paths',
   'gates.extra.secret_scan',
   'telemetry',
   // v1.3 (B1.1): the six new collector paths behind the 142 -> 148 re-pin.
@@ -346,10 +346,15 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 
 /**
  * Exact collector output size for the current schema (measured 2026-09-24, round 3; B1.1 2026-09-25:
- * +6 = review.{max_rounds_per_file,recheck_scope,late_findings}, budget.block_cases, tmp, tmp.root) — re-pin, and
- * say why in the commit, whenever the schema gains or loses a property.
+ * +6 = review.{max_rounds_per_file,recheck_scope,late_findings}, budget.block_cases, tmp, tmp.root;
+ * B1.2 2026-09-25 (Q16 cut): -8 = proof.tiers.high.{tool,min_msi} (2 leaves) and the whole
+ * proof.js{,.tool,.min_msi} / proof.nightly{,.enabled,.report_only} subtrees (3 + 3 paths) — the
+ * mutation-tool-only keys leave the schema per plan §10.4 Wave 6. 148 - 8 = 140. The depth-3
+ * KNOWN_SCHEMA_PATHS sample under `proof.tiers.high` is re-pointed from the now-gone `.min_msi` to
+ * the surviving `.paths`) — re-pin, and say why in the commit, whenever the schema gains or loses
+ * a property.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 148;
+const EXPECTED_SCHEMA_PATH_COUNT = 140;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

@@ -593,33 +593,18 @@ test('rule 12 names BOTH missing providers when two distinct levels lack a CLI',
   assert.match(hits[0].message, /xai/);
 });
 
-// ── 13. proof-tool-absent-for-high-tier (WARN) ───────────────────────────────
+// ── B1.2 (v1.3, Q16 cut): rule 13 proof-tool-absent-for-high-tier removed ────
+//
+// The rule warned when `proof.tiers.high.paths` was set without `proof.tiers.high.tool`. Q16
+// answered "cut" (no tool-made mutation testing ships to consumers, plan §10.4 Wave 6): B1.2
+// removed `proof.tiers.high.tool` (and `.min_msi`, and the whole `proof.js`/`proof.nightly`
+// objects) from the schema in the same amendment, so there is no `tool` key left to be absent.
+// `proof.tiers.high.paths` alone is a complete, valid config now — see the schema-refusal test
+// below for what setting the removed keys does instead (an `additionalProperties` error).
 
-test('rule 13 proof-tool-absent-for-high-tier: high.paths set with no tool produces EXACTLY 1 warning', () => {
-  const cfg = validCfg();
-  cfg.proof = { tiers: { high: { paths: ['src/money/**'] } } };
-  const result = validateConfig(cfg);
-  assert.equal(result.valid, true);
-  assert.equal(issuesOf(result, 'proof-tool-absent-for-high-tier').length, 1);
-});
+// ── 13. shadow-rate-range (ERROR, "shadow_rate range") ───────────────────────
 
-test('rule 13 does not fire once tool is set — 0 hits', () => {
-  const cfg = validCfg();
-  cfg.proof = { tiers: { high: { paths: ['src/money/**'], tool: 'stryker' } } };
-  const result = validateConfig(cfg);
-  assert.equal(issuesOf(result, 'proof-tool-absent-for-high-tier').length, 0);
-});
-
-test('rule 13 does not fire when high.paths is present but EMPTY (nothing configured as high-tier yet)', () => {
-  const cfg = validCfg();
-  cfg.proof = { tiers: { high: { paths: [] } } };
-  const result = validateConfig(cfg);
-  assert.equal(issuesOf(result, 'proof-tool-absent-for-high-tier').length, 0);
-});
-
-// ── 14. shadow-rate-range (ERROR, "shadow_rate range") ───────────────────────
-
-test('rule 14 shadow-rate-range: shadow_rate above 0.5 produces EXACTLY 1 error with the exact path-only message', () => {
+test('rule 13 shadow-rate-range: shadow_rate above 0.5 produces EXACTLY 1 error with the exact path-only message', () => {
   const cfg = validCfg();
   cfg.calibration = { shadow_rate: 0.6 };
   const result = validateConfig(cfg);
@@ -630,27 +615,72 @@ test('rule 14 shadow-rate-range: shadow_rate above 0.5 produces EXACTLY 1 error 
   );
 });
 
-test('rule 14 shadow-rate-range: a negative shadow_rate also produces EXACTLY 1 error', () => {
+test('rule 13 shadow-rate-range: a negative shadow_rate also produces EXACTLY 1 error', () => {
   const cfg = validCfg();
   cfg.calibration = { shadow_rate: -0.1 };
   const result = validateConfig(cfg);
   assert.equal(issuesOf(result, 'shadow-rate-range').length, 1);
 });
 
-test('rule 14 refuses NaN (e.g. YAML .nan) — the old rate<0||rate>0.5 form let it through', () => {
+test('rule 13 refuses NaN (e.g. YAML .nan) — the old rate<0||rate>0.5 form let it through', () => {
   const cfg = validCfg();
   cfg.calibration = { shadow_rate: NaN };
   const result = validateConfig(cfg);
   assert.equal(issuesOf(result, 'shadow-rate-range').length, 1);
 });
 
-test('rule 14 allows the boundary values 0 and 0.5 — 0 hits at either edge', () => {
+test('rule 13 allows the boundary values 0 and 0.5 — 0 hits at either edge', () => {
   for (const rate of [0, 0.5]) {
     const cfg = validCfg();
     cfg.calibration = { shadow_rate: rate };
     const result = validateConfig(cfg);
     assert.equal(issuesOf(result, 'shadow-rate-range').length, 0, `rate ${rate} must be within range`);
   }
+});
+
+// ── B1.2 (v1.3, Q16 cut): proof.js / proof.nightly / proof.tiers.high.tool are now REFUSED ──
+
+test('proof.js is refused by the schema layer (additionalProperties) with the exact path /proof — B1.2, Q16 cut', () => {
+  const cfg = validCfg();
+  cfg.proof = { js: { tool: 'stryker' } };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.deepEqual(
+    result.errors.map((e) => [e.rule, e.path, e.keyword]),
+    [['schema', '/proof', 'additionalProperties']],
+  );
+  assert.equal(result.errors[0].message, '/proof must NOT have additional property "js"');
+});
+
+test('proof.nightly is refused by the schema layer (additionalProperties) with the exact path /proof — B1.2, Q16 cut', () => {
+  const cfg = validCfg();
+  cfg.proof = { nightly: { enabled: true } };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.deepEqual(
+    result.errors.map((e) => [e.rule, e.path, e.keyword]),
+    [['schema', '/proof', 'additionalProperties']],
+  );
+  assert.equal(result.errors[0].message, '/proof must NOT have additional property "nightly"');
+});
+
+test('proof.tiers.high.tool is refused by the schema layer (additionalProperties) with the exact path /proof/tiers/high — B1.2, Q16 cut', () => {
+  const cfg = validCfg();
+  cfg.proof = { tiers: { high: { paths: ['src/money/**'], tool: 'stryker' } } };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.deepEqual(
+    result.errors.map((e) => [e.rule, e.path, e.keyword]),
+    [['schema', '/proof/tiers/high', 'additionalProperties']],
+  );
+});
+
+test('proof.tiers.high.paths alone (no tool) is valid — 0 errors, 0 warnings — B1.2, Q16 cut', () => {
+  const cfg = validCfg();
+  cfg.proof = { tiers: { high: { paths: ['src/money/**'] } } };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, true);
+  assert.deepEqual(result.warnings, []);
 });
 
 // ── v1.3 (B1.1): review.max_rounds_per_file / budget.block_cases range refusals (schema layer) ──
@@ -704,9 +734,9 @@ test('budget.block_cases: 10 (the boundary) is valid — 0 errors', () => {
   assert.equal(result.valid, true);
 });
 
-// ── 15. caps-coders-exceeds-cap (WARN, v1.3/R10/B1.1) ───────────────────────
+// ── 14. caps-coders-exceeds-cap (WARN, v1.3/R10/B1.1) ───────────────────────
 
-test('rule 15 caps-coders-exceeds-cap: caps.coders: 3 validates (0 errors) with EXACTLY 1 warning naming caps.coders', () => {
+test('rule 14 caps-coders-exceeds-cap: caps.coders: 3 validates (0 errors) with EXACTLY 1 warning naming caps.coders', () => {
   const cfg = validCfg();
   cfg.caps = { coders: 3 };
   const result = validateConfig(cfg);
@@ -717,18 +747,19 @@ test('rule 15 caps-coders-exceeds-cap: caps.coders: 3 validates (0 errors) with 
   assert.equal(result.warnings.length, 1, 'exactly this one warning, no other domain-rule noise');
 });
 
-test('rule 15 does not fire at the cap itself — caps.coders: 2 produces 0 warnings', () => {
+test('rule 14 does not fire at the cap itself — caps.coders: 2 produces 0 warnings', () => {
   const cfg = validCfg();
   cfg.caps = { coders: 2 };
   const result = validateConfig(cfg);
   assert.equal(issuesOf(result, 'caps-coders-exceeds-cap').length, 0);
 });
 
-// ── All 15 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
+// ── All 14 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
+// (B1.2/v1.3, Q16 cut: 15 -> 14 — `proof-tool-absent-for-high-tier` removed, its key gone from schema.)
 
-test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 15 distinct ids', () => {
-  assert.equal(DOMAIN_RULE_IDS.length, 15);
-  assert.equal(new Set(DOMAIN_RULE_IDS).size, 15, 'no duplicate rule ids');
+test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 14 distinct ids', () => {
+  assert.equal(DOMAIN_RULE_IDS.length, 14);
+  assert.equal(new Set(DOMAIN_RULE_IDS).size, 14, 'no duplicate rule ids');
 });
 
 test('every rule id exercised by THIS test file is a member of the real DOMAIN_RULE_IDS set (catches a renamed/dropped rule)', () => {
@@ -745,7 +776,6 @@ test('every rule id exercised by THIS test file is a member of the real DOMAIN_R
     'secret-looking-value',
     'fallback-unknown-or-cli-absent',
     'engine-subprocess-no-cli',
-    'proof-tool-absent-for-high-tier',
     'shadow-rate-range',
     'caps-coders-exceeds-cap',
   ];

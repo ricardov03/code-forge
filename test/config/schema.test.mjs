@@ -18,6 +18,16 @@ import { resolveSchemaPath } from '../../src/config/schema-paths.mjs';
  * value, so it contributes 0 new entries here, not 1. The real growth is 5 new paths
  * (`review.max_rounds_per_file`, `review.recheck_scope`, `review.late_findings`,
  * `budget.block_cases`, `tmp.root`): 37 + 5 = **42**, asserted below as the reality-correct count.
+ *
+ * **B1.2 (v1.3, Q16 answered "cut") amendment:** `proof.tiers.high.tool`, `proof.tiers.high.min_msi`,
+ * `proof.js` (whole object: `.tool`, `.min_msi`) and `proof.nightly` (whole object: `.enabled`,
+ * `.report_only`) left the schema — those keys existed only to serve the tool-made-mutation feature
+ * that Q16 cut (plan §10.4 Wave 6, B10c deleted). No row of the §1.3 table disappears (the `proof`
+ * namespace still has a `tiers.high`/`tiers.light` row and an `extra`/`isolation`/`export` row), so
+ * the two representative paths that pointed at now-gone keys are re-pointed at the keys that survive
+ * in the SAME row rather than dropped: `proof.tiers.high.min_msi` → `proof.tiers.high.paths` (the
+ * only key left under `tiers.high`); `proof.js.tool` → `proof.extra` (the only key left of that row's
+ * `js`/`nightly`/`extra` trio). The enumeration count is unchanged at 42.
  */
 const CONFIG_CONTRACT_PATHS = Object.freeze([
   'version',
@@ -46,9 +56,9 @@ const CONFIG_CONTRACT_PATHS = Object.freeze([
   'gates.test',
   'gates.extra.secret_scan',
   'gates.full_suite_threshold_files',
-  'proof.tiers.high.min_msi',
+  'proof.tiers.high.paths',
   'proof.tiers.light',
-  'proof.js.tool',
+  'proof.extra',
   'proof.isolation',
   'proof.export.copy_untracked',
   'budget.block_lines',

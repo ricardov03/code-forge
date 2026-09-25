@@ -4,7 +4,7 @@
  *
  *  1. **Schema validation** (Ajv, draft 2020-12, `additionalProperties: false` almost everywhere)
  *     catches shape errors: unknown keys, wrong types, missing required fields.
- *  2. **Domain rules** (`DOMAIN_RULES` below, 15 of them as of B1.1/v1.3) catch things no JSON Schema can express:
+ *  2. **Domain rules** (`DOMAIN_RULES` below, 14 of them as of B1.2/v1.3) catch things no JSON Schema can express:
  *     cross-field comparisons (two levels resolving to the same tuple), a value that needs a
  *     second config value to be reachable (`second_levels.L2.provider` vs. the effective L2
  *     provider) and rules that reach outside the config object entirely (is a CLI on PATH, is a
@@ -14,9 +14,12 @@
  *     instead of touching `process.env.PATH` themselves, so a unit test never needs a real CLI on
  *     PATH to prove either branch.
  *
- * The 15 rules (B1's original 14 plus B1.1's `caps-coders-exceeds-cap`, v1.3), and how the plan's prose bullets map onto them (§1.3's "review.multimodel: true
- * with second_provider empty **or with** resolve(L2).provider == second_levels.L2.provider" is
- * two independently-firing conditions, so it is implemented — and tested — as two rules):
+ * The 14 rules (B1's original 14 plus B1.1's `caps-coders-exceeds-cap`, minus B1.2's removal of
+ * `proof-tool-absent-for-high-tier` — Q16 answered "cut", so `proof.tiers.high.tool` no longer
+ * exists to be absent, plan §10.4 Wave 6), and how the plan's prose bullets map onto them (§1.3's
+ * "review.multimodel: true with second_provider empty **or with**
+ * resolve(L2).provider == second_levels.L2.provider" is two independently-firing conditions, so it
+ * is implemented — and tested — as two rules):
  *   1  level-missing                        ERROR
  *   2  unknown-model-id                      WARN  (known_extra / seen-in-cache lift it, C15)
  *   3  duplicate-level-tuple                 ERROR
@@ -29,9 +32,15 @@
  *  10  secret-looking-value                  ERROR  (names the key)
  *  11  fallback-unknown-or-cli-absent        WARN   ("fallback validation")
  *  12  engine-subprocess-no-cli              ERROR
- *  13  proof-tool-absent-for-high-tier       WARN
- *  14  shadow-rate-range                     ERROR  ("shadow_rate range")
- *  15  caps-coders-exceeds-cap               WARN   (v1.3/R10/B1.1: caps.coders > 2)
+ *  13  shadow-rate-range                     ERROR  ("shadow_rate range")
+ *  14  caps-coders-exceeds-cap               WARN   (v1.3/R10/B1.1: caps.coders > 2)
+ *
+ * **B1.2 (v1.3, Q16 cut) removed rule:** `proof-tool-absent-for-high-tier` (formerly #13) — the
+ * key it warned about (`proof.tiers.high.tool`) left the schema in the same amendment, along with
+ * `proof.tiers.high.min_msi`, `proof.js` and `proof.nightly` (the tool-made-mutation-only keys).
+ * `proof.tiers.high.paths` alone no longer implies a missing tool, so the rule has nothing left to
+ * check. The 15 -> 14 count and the renumbering below (old 14/15 -> new 13/14) are this block's
+ * amendment.
  *
  * **No config value ever reaches a message (fix round 3, MAJOR).** The `validate` verb prints
  * every message, and a user can paste an API key into ANY string field — a model id, an effort,
@@ -586,23 +595,7 @@ function checkEngineSubprocessNoCli(cfg, opts = {}) {
   return [];
 }
 
-// ── 13. proof-tool-absent-for-high-tier (WARN) ──────────────────────────────
-
-function checkProofToolAbsentForHighTier(cfg) {
-  const high = cfg?.proof?.tiers?.high;
-  if (high && Array.isArray(high.paths) && high.paths.length > 0 && !high.tool) {
-    return [
-      {
-        rule: 'proof-tool-absent-for-high-tier',
-        severity: 'warning',
-        message: 'proof.tiers.high.paths is set but proof.tiers.high.tool is not',
-      },
-    ];
-  }
-  return [];
-}
-
-// ── 14. shadow-rate-range (ERROR) ───────────────────────────────────────────
+// ── 13. shadow-rate-range (ERROR) ───────────────────────────────────────────
 
 function checkShadowRateRange(cfg) {
   const rate = cfg?.calibration?.shadow_rate;
@@ -620,7 +613,7 @@ function checkShadowRateRange(cfg) {
   return [];
 }
 
-// ── 15. caps-coders-exceeds-cap (WARN, v1.3/B1.1) ───────────────────────────
+// ── 14. caps-coders-exceeds-cap (WARN, v1.3/B1.1) ───────────────────────────
 
 /**
  * R10 caps concurrent coders at 2 for THIS build, but a consumer's config is free to set more —
@@ -645,10 +638,10 @@ function checkCapsCodersExceedsCap(cfg) {
 }
 
 /**
- * The 15 domain rules paired with the exact `rule` id string each one emits — the single source
+ * The 14 domain rules paired with the exact `rule` id string each one emits — the single source
  * of truth both `DOMAIN_RULES` (below, what `validateConfig` runs) and the exported
  * `DOMAIN_RULE_IDS` are built from. `'schema'` (the ajv layer's own issues) is deliberately not
- * one of these 15.
+ * one of these 14. (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
  * @type {ReadonlyArray<{fn: (cfg: Record<string, any>, opts?: object) => ValidationIssue[], id: string}>}
  */
 const RULE_TABLE = Object.freeze([
@@ -664,15 +657,14 @@ const RULE_TABLE = Object.freeze([
   { fn: checkSecretLookingValue, id: 'secret-looking-value' },
   { fn: checkFallbackUnknownOrCliAbsent, id: 'fallback-unknown-or-cli-absent' },
   { fn: checkEngineSubprocessNoCli, id: 'engine-subprocess-no-cli' },
-  { fn: checkProofToolAbsentForHighTier, id: 'proof-tool-absent-for-high-tier' },
   { fn: checkShadowRateRange, id: 'shadow-rate-range' },
   { fn: checkCapsCodersExceedsCap, id: 'caps-coders-exceeds-cap' },
 ]);
 
-/** The 15 domain rules, in the order documented above. */
+/** The 14 domain rules, in the order documented above. */
 const DOMAIN_RULES = Object.freeze(RULE_TABLE.map((entry) => entry.fn));
 
-/** The 15 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
+/** The 14 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
 export const DOMAIN_RULE_IDS = Object.freeze(RULE_TABLE.map((entry) => entry.id));
 
 /**

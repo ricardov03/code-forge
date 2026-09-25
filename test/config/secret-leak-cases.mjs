@@ -232,18 +232,6 @@ export const SECRET_LEAK_CASES = [
     },
   },
   {
-    name: 'proof-tool-absent-for-high-tier',
-    rule: 'proof-tool-absent-for-high-tier',
-    count: 1,
-    secretHits: 1,
-    secret: fake('sk-', 'R', 40),
-    build: (s) => {
-      const c = baseConfig();
-      c.proof = { tiers: { high: { paths: [s] } } };
-      return c;
-    },
-  },
-  {
     name: 'shadow-rate-range',
     rule: 'shadow-rate-range',
     count: 1,
