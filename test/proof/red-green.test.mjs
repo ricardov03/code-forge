@@ -22,6 +22,7 @@ import { runProof } from '../../src/cli/proof.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { buildExport } from '../../src/proof/export.mjs';
 import { deleteAssertions, journalPath, runRedGreen } from '../../src/proof/red-green.mjs';
+import { openBlock } from '../../src/state/block.mjs';
 import { startRun } from '../../src/state/run.mjs';
 import { loadKey, verifyRow } from '../../src/state/signer.mjs';
 
@@ -331,4 +332,84 @@ test('SIGTERM mid-run leaves the journal; a second run refuses; proof restore br
       }
     }
   }
+});
+
+// ---- `proof red-green` (B17): the verb over runRedGreen, on a block opened in the run ----------
+
+test('proof red-green <block> proves a new test by revert in a fresh export: RED then GREEN, exit 0, 1 signed row', async () => {
+  await openBlock({ runId: RUN, id: 'C', level: 'L1', owned: ['src/math.mjs', 'test/clamp.spec.mjs'], acceptance: [{ clause: 'clamp caps at hi', tests: ['test/clamp.spec.mjs'] }], writeRow });
+  const before = (await readAllRows(SLUG)).length;
+  const res = await cli(['red-green', 'C', '--run', RUN, '--test', 'test/clamp.spec.mjs']);
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.stderr, 'RED test/clamp.spec.mjs\nGREEN test/clamp.spec.mjs\n');
+  const printed = JSON.parse(res.stdout);
+  assert.deepEqual(
+    [printed.block, printed.test, printed.mechanism, printed.isolation, printed.red, printed.red_kind, printed.green, printed.proven, printed.export.dir],
+    ['C', 'test/clamp.spec.mjs', 'revert', 'export', 'RED', 'assertion', 'GREEN', true, path.join(realpathSync(repo.dir), '.code-forge', 'export', 'C')],
+  );
+  const added = (await readAllRows(SLUG)).slice(before);
+  assert.deepEqual(
+    added.map((r) => [r.event, r.block, r.step, r.test ?? null, r.mechanism ?? null, r.red_kind ?? null]),
+    [
+      ['proof', 'C', 'export', null, null, null],
+      ['proof', 'C', 'red-green', 'test/clamp.spec.mjs', 'revert', 'assertion'],
+    ],
+  );
+  assert.equal(verifyRow(added[1], await loadKey(RUN)).ok, true);
+  // the main tree was never touched: math.mjs is still the current (clamp implemented) version
+  assert.equal(hashOf(path.join(repo.dir, 'src/math.mjs')), hashOf(path.join(FIXTURE, 'current/src/math.mjs')));
+});
+
+test('proof red-green --mechanism assertion-deletion with a ::case label proves a characterization test', async () => {
+  const mainTest = path.join(repo.dir, 'test/add.spec.mjs');
+  const hashBefore = hashOf(mainTest);
+  const before = (await readAllRows(SLUG)).length;
+  const res = await cli(['red-green', 'C', '--run', RUN, '--test', 'test/add.spec.mjs::add pins existing behaviour', '--mechanism', 'assertion-deletion']);
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(res.stderr, 'RED test/add.spec.mjs::add pins existing behaviour\nGREEN test/add.spec.mjs::add pins existing behaviour\n');
+  const printed = JSON.parse(res.stdout);
+  assert.deepEqual([printed.mechanism, printed.red_kind, printed.proven], ['assertion-deletion', 'assertion', true]);
+  const added = (await readAllRows(SLUG)).slice(before);
+  assert.deepEqual(
+    added.map((r) => [r.event, r.block, r.isolation, r.step, r.test ?? null, r.mechanism ?? null, r.red ?? null, r.red_kind ?? null, r.green ?? null, r.proven ?? null]),
+    [
+      ['proof', 'C', 'export', 'export', null, null, null, null, null, null],
+      ['proof', 'C', 'export', 'red-green', 'test/add.spec.mjs::add pins existing behaviour', 'assertion-deletion', 'RED', 'assertion', 'GREEN', true],
+    ],
+  );
+  assert.equal(verifyRow(added[1], await loadKey(RUN)).ok, true);
+  // measured in the export: the main tree's test file is byte-identical before and after
+  assert.equal(hashOf(mainTest), hashBefore);
+});
+
+test('proof red-green refuses: no --test (2), a bad mechanism (2), a block not open (1), a non-node test file (1)', async () => {
+  const cases = [
+    [['red-green', 'C', '--run', RUN], 2, 'proof red-green: proof red-green needs one block id, --run and --test <file[::case]>\n'],
+    [['red-green', 'C', '--run', RUN, '--test', 'test/clamp.spec.mjs', '--mechanism', 'mutate'], 2, 'proof red-green: --mechanism must be one of revert, assertion-deletion\n'],
+    [['red-green', 'Z', '--run', RUN, '--test', 'test/clamp.spec.mjs'], 1, `proof red-green: block Z is not open in run ${RUN}\n`],
+    [['red-green', 'C', '--run', RUN, '--test', 'tests/ClampTest.php'], 1, 'proof red-green: only node:test files (.mjs, .cjs, .js) have a filtered test command in this version\n'],
+  ];
+  const before = (await readAllRows(SLUG)).length;
+  for (const [args, code, stderr] of cases) {
+    const res = await cli(/** @type {string[]} */ (args));
+    assert.deepEqual([res.code, res.stdout, res.stderr], [code, '', stderr]);
+  }
+  assert.equal((await readAllRows(SLUG)).length, before);
+});
+
+test('proof red-green normalizes --test (./ dropped) and refuses an absolute path, a .. escape and a missing file (exit 2, 0 rows)', async () => {
+  const before = (await readAllRows(SLUG)).length;
+  const cases = [
+    [path.join(repo.dir, 'test/clamp.spec.mjs'), 'proof red-green: --test must be a repo-relative path\n'],
+    ['test/../../outside.spec.mjs', 'proof red-green: --test must stay inside the repository (no .. escape)\n'],
+    ['test/missing.spec.mjs', `proof red-green: --test test/missing.spec.mjs is not a file in ${repo.dir}\n`],
+  ];
+  for (const [test_, stderr] of cases) {
+    const res = await cli(['red-green', 'C', '--run', RUN, '--test', test_]);
+    assert.deepEqual([res.code, res.stdout, res.stderr], [2, '', stderr]);
+  }
+  assert.equal((await readAllRows(SLUG)).length, before);
+  const ok = await cli(['red-green', 'C', '--run', RUN, '--test', './test/./clamp.spec.mjs']);
+  assert.equal(ok.code, 0, ok.stderr);
+  assert.deepEqual([JSON.parse(ok.stdout).test, ok.stderr], ['test/clamp.spec.mjs', 'RED test/clamp.spec.mjs\nGREEN test/clamp.spec.mjs\n']);
 });

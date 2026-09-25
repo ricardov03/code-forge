@@ -1,0 +1,3 @@
+.code-forge/
+node_modules/
+.env

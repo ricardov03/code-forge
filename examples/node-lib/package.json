@@ -1,0 +1,19 @@
+{
+  "name": "node-lib-example",
+  "version": "0.3.0",
+  "description": "A tiny ESM library that code-forge's first-use run works on.",
+  "type": "module",
+  "private": true,
+  "license": "MIT",
+  "exports": {
+    "./math": "./src/math.mjs",
+    "./strings": "./src/strings.mjs",
+    "./list": "./src/list.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test"
+  }
+}

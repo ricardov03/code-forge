@@ -1,0 +1,8 @@
+- clause: clamp returns the value itself when it is inside [min, max]
+  tests: [test/clamp.test.mjs::clamp returns the value inside the range]
+- clause: clamp returns min when the value is below min
+  tests: [test/clamp.test.mjs::clamp returns min below the range]
+- clause: clamp returns max when the value is above max
+  tests: [test/clamp.test.mjs::clamp returns max above the range]
+- clause: clamp throws a RangeError when min > max
+  tests: [test/clamp.test.mjs::clamp refuses min above max]

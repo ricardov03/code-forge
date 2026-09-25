@@ -1,0 +1,3 @@
+# Release archives leave these out. code-forge's measurement export restores them (plan §4.7 b).
+/.github export-ignore
+CHANGELOG.md export-ignore
