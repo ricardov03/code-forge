@@ -1,0 +1,40 @@
+#!/bin/sh
+# code-forge skill shim: `forge <verb> [args…]` runs the package's `bin/code-forge.mjs`.
+#
+# Resolution order (first hit wins):
+#   1. $CODE_FORGE_BIN, when set and a file (a checkout or a pinned version);
+#   2. <this skill dir>/../../bin/code-forge.mjs — the skill lives inside the package, and a
+#      symlinked install (`code-forge init`, the default) resolves back into it;
+#   3. `code-forge` on PATH (a global npm install);
+#   4. `npx @ricardov/code-forge@<version>` pinned to the version this skill was built with (a
+#      copied install with no package next to it); `test/skill/shim.test.mjs` asserts the pin
+#      equals package.json's version.
+# The shim holds no logic of its own: every verb, flag and message is the CLI's.
+PINNED_VERSION="0.1.0"
+set -eu
+
+self="$0"
+while [ -L "$self" ]; do
+  link=$(readlink "$self")
+  case "$link" in
+    /*) self="$link" ;;
+    *) self="$(dirname "$self")/$link" ;;
+  esac
+done
+here=$(cd "$(dirname "$self")" && pwd -P)
+packaged="$here/../../bin/code-forge.mjs"
+
+if [ -n "${CODE_FORGE_BIN:-}" ] && [ -f "$CODE_FORGE_BIN" ]; then
+  exec node "$CODE_FORGE_BIN" "$@"
+fi
+if [ -f "$packaged" ]; then
+  exec node "$packaged" "$@"
+fi
+if on_path=$(command -v code-forge 2>/dev/null); then
+  exec "$on_path" "$@"
+fi
+if npx_path=$(command -v npx 2>/dev/null); then
+  exec "$npx_path" --yes "@ricardov/code-forge@$PINNED_VERSION" "$@"
+fi
+echo "forge: no code-forge found. Install it: npm install -g @ricardov/code-forge@$PINNED_VERSION (or set CODE_FORGE_BIN=<path>/bin/code-forge.mjs)" >&2
+exit 127

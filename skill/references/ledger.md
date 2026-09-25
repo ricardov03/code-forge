@@ -1,0 +1,23 @@
+# Ledger — `~/.code-forge/ledger/<slug>.jsonl`, append-only, never committed
+
+## §1 What a row carries
+
+Every row has the run, the block, the event and a timestamp; the ones the block gate relies on carry `mac` (`security.md` §3). Useful fields: `level`, `provider`, `model`, `effort`, `fallback_step` (every spawn), `role ∈ {coder, reviewer, judge, s2, author, facts}`, `trigger` (escalations), `source ∈ {jev, rules, s2, s2-fallback, shadow}` (decisions), `depth_unconstrained` / `depth_chosen` / `degrade_step` and `context_mode ∈ {whole, hunks, minimal, recheck}` (reviews), `round` and `kind ∈ {full, recheck, patch_check, sweep}` (rounds), `isolation ∈ {export, lock}` (proof), `l3_patch`, `l3_fallback`, `overspend`. **Tokens are facts, dollars are estimates**: `tokens_source: reported` when the CLI's JSON carries usage, else `estimated`. File paths in rows are relative to the repository root.
+
+Events you will read most: `run.start`, `run.stop {reason}`, `run.end`, `dispatch`, `gate.red`, `review.plan`, `review.round`, `review.done`, `review.approved`, `review.unavailable {reason}`, `review.late_finding`, `review.waived {by: human}`, `review.budget`, `forecast.cases_exceeded`, `proof`, `outcome`, `block.rebase`, `block.orphan`, `ledger.tamper`, `worker.replaced`, `facts.built`, `tmp.swept`.
+
+## §2 `forge report --slug <slug> [--json] [--export <dir>]`
+
+Terminal output in this version. Sections: cost per completed block (per level and lane, split review / coder / S1+S2 / facts / proof time) · lane distribution · escalations per block with `trigger` · S1 calls per block · S2 rate and overrule rate per question · the review budget table with `missed_after_degrade` per degrade step · review depth and context-mode distribution, findings by category and severity · fix rounds per file, rounds that stalled, files stopped at `review_cap` · `review.unavailable` by reason · proof time per block · forecast vs actual lines and cases with the measured lines-per-case · blocks stopped at L3 · `overspend` and `l3_fallback` counts · runs stopped for `no_engine`. `--export <dir>` writes one JSON file per section — the durable dataset a future UI reads.
+
+## §3 Live views
+
+`forge ledger tail --slug <slug> [--n <count>]` prints the last rows — the orchestrator's live view when no Solo process list exists. `forge run status --run <id>` prints the run record: active blocks, orphans, whether the worker is pinned.
+
+## §4 Calibration — `forge ledger calibration --slug <slug> [--question <id>]`
+
+Per question id and `source`: reliability buckets × outcome, the count of `≥ 0.99` answers later marked wrong, and a threshold recommendation per question — **never applied automatically**; the human edits `thresholds.<question>`. Ground truth arrives from four callers: shadow sampling (`calibration.shadow_rate`; ships at 0 — the code path exists, turn it on by config once outcome rows flow), the block gate's `outcome` rows (`next = complete` then a red gate ⇒ `wrong`; an escalation after a `lane` pick ⇒ `lane.under`), `forge ledger outcome --slug <slug> --pr <n> --ci red|green|reverted` from the shipped CI template, and `forge ledger outcome --slug <slug> --scan-git [--cwd <dir>] [--days <n>]`, which walks `git log` for reverts (the `This reverts commit <sha>` chain, parity-aware) and marks `reverted` on the matching review rows — run by `run start` and on demand, no CI needed.
+
+## §5 Durability
+
+Rotated at 10 MB; rows are signed only where the gate relies on them; `report --export` snapshots are what anything downstream reads. The ledger is per project slug, so a run from a sub-directory still lands in the same file.

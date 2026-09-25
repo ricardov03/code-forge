@@ -1,0 +1,42 @@
+# Review — per file, fresh L2 session, bounded rounds
+
+## §1 The trigger is a CLI call, and the file set is complete
+
+`forge review-file <path> --block <id> --run <r>` enqueues a ticket and returns `{ticket, status: queued}` in under a second; `forge review-file --wait <ticket> [--max 90s]` polls it. The worker computes the diff itself against the base sha `forge block open` recorded: tracked changes plus untracked files, filtered by `owned_files` for the review and unfiltered for the scope check. A coder that never calls `review-file` gains nothing: the block gate refuses any changed or new file without a signed `review.approved` row for its final content hash. The reviewer is always a new OS process (R1, R10) — identical under Solo, a harness subagent, a detached CLI process, or a human typing.
+
+## §2 Depth by risk (adaptive mode, `review.multimodel` off)
+
+1. Tools on the file first: lint, types, the file's own tests. Red ⇒ `tools_red` back to the coder, no model review, ledger `gate.red`.
+2. S1 `risk` (path floors first; `confidence < check` ⇒ S2 picks the depth).
+3. Planned depth: `risk < 1` ⇒ one L2 `quick` · `1 ≤ risk < 2` ⇒ one L2 `full` · `risk ≥ 2` ⇒ two blind L2 sessions (lens A correctness, lens B contracts and security) plus an L3 judge that reads the two reports — and the diff only when `review.judge_sees_diff` is true.
+4. Triage: findings from a single L2 session go to S1 `defect` (`thresholds.findings.fix` fix now · mid-band batched to one L3 ruling per file · below `thresholds.findings.nit` a nit). Findings that come from a judge are final.
+
+## §3 Isolation and the packet
+
+Every reviewer, recheck, judge and S2 session runs with cwd = a fresh empty temp dir under the run's temp root and the packet **on stdin** — a no-tools session never opens a path and the packet never enters argv. Packet order is fixed so provider prompt caching applies: lens, project rules digest (≤ 60 lines), facts-sheet excerpt for the symbols in the diff, context, diff. Context: a file at or under `review.context.whole_file_max_lines` travels whole; above it each hunk carries ± `review.context.hunk_context_lines` lines; over `review.budgets.full_in` the context shrinks to ± `review.context.min_context_lines`, then the digest is trimmed, never the diff; a diff alone over budget ⇒ `split_required`. The closed-book rule is in every lens: judge only what is in the packet; a file you cannot see goes in `needs_file`, and the worker attaches it (read-only, trimmed) for **one** more round.
+
+## §4 The stub guard — what counts as a review (R11)
+
+A result is a review only if the process exited 0, the JSON validates against the finding schema, `reviewed_hunks` equals the packet's hunk headers exactly and in order, and the output has at least `review.min_tokens_out` tokens. Anything else is ledger `review.unavailable` (`exit`, `schema`, `hunks_mismatch`, `too_short`, `timeout`) and **is not approval**; the worker retries once on the level's fallback, then the file stays unreviewed and the block cannot close. A session that hangs is killed at `review.session_timeout_s`, process group and all.
+
+## §5 The convergence rule — bounded fix rounds (R15)
+
+Per file, per block:
+
+1. Round 1 is the tiered review of §2 on the full packet.
+2. **Round n ≥ 2 reviews only the fix hunks**: the diff between the content hash reviewed in round n−1 and the current content, ± `review.context.hunk_context_lines`, plus the open findings by id (`review.recheck_scope: fix_hunks`, the default; `file` re-sends the whole packet for a consumer that wants it). The `recheck` lens answers `resolved[]` per finding — S1 `resolved` at or above `thresholds.findings.resolved` closes it, else the fresh L2 recheck decides — and may raise a new finding **only inside a fix hunk**; a finding outside becomes a `late_finding`, ruled at block close (`review.late_findings: sweep`; `block` makes it block the round).
+3. **Strictly shrinking**: the open `fix_now` set after round n is smaller than after round n−1, counting closures minus new in-hunk findings. Equal or larger ⇒ `review_stall` ⇒ the coder climbs one level now.
+4. **Ladder**: rounds 1–2 at the block's level; `escalation.review_rounds_per_level` exhausted with an open `fix_now` ⇒ +1 level; rounds 3–4 run at the higher level, coded by a fresh session with the open findings and the fix history in its brief.
+5. **Cap — four rounds per file** (`review.max_rounds_per_file`, default 4, range 2–6). Round 4 still open ⇒ the L3 rung once per block (a patch ≤ 80 lines, reviewed as a `patch_check` round outside the cap); still open ⇒ `stopped: review_cap`: the block cannot close, the ledger lists the open findings, and the human decides — fix by hand, `forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>` (a signed `review.waived` row, `by: human`), or re-decompose. The coder never sees a `waive` verb; it is on the forbidden list.
+6. **Block-close sweep**: `forge block close` batches the `late_findings` per file to one L3 judge ruling (`fix_now | nit`); a `fix_now` opens a round on that file at the block's current level and counts toward its cap.
+7. Ledger: one `review.round` row per round with `open_before`, `closed`, `new_in_hunks`, `late`, `open_after`; `forge report` prints rounds per file and rounds that stalled.
+
+Rechecks are never degraded by the budget: a round-2+ packet is already the minimum.
+
+## §6 Consensus mode (`review.multimodel` on)
+
+Two L2 reviewers, one per effective provider (`resolve(L2)` and `review.second_levels`), each a fresh blind session with the `full` lens; then a fresh L3 judge **from the third provider** reads the two reports and returns the findings plus `agreement: both|A-only|B-only`. The judge's `fix_now` list is final. Second provider unavailable at run start ⇒ `consensus unavailable: <reason>`; ask the human once per run whether to continue adaptive, stop when non-interactive. Rechecks run on the provider that raised the finding; §5 applies unchanged.
+
+## §7 The review budget per block
+
+`review.block_budget_tokens` (and optionally `review.block_budget_usd`) bounds every review, recheck, judge and S2 session made for the block. When the forecast exceeds it the worker degrades one step at a time, cheapest first: batch small files of one tier into one packet (`review.batch_small_files`) → one judge per block instead of per file → standard band `full` → `quick` → high tier `A + B + judge` → one `full` L2 + judge, the floor. Tools-only is never a review; a light `quick` stays `quick`. Still over ⇒ `review.over_budget`: raise the budget once per run (a config edit by the human, on record) or split the block — never silently, never below the floors. The ledger keeps `depth_unconstrained` and `depth_chosen` per file so `forge report` can show `missed_after_degrade`.
