@@ -4,9 +4,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { currentRunRoot } from '../../../src/util/tmp.mjs';
 import { test } from 'node:test';
-import { FORBIDDEN, renderForClaude, renderForCodex, renderForGrok } from '../../../src/util/forbidden.mjs';
+import { CODER_ONLY_FORBIDDEN, FORBIDDEN, mergeForbidden, renderForClaude, renderForCodex, renderForGrok } from '../../../src/util/forbidden.mjs';
 import { buildClaudeArgv } from '../../../src/engines/builders/claude.mjs';
 import { buildCodexArgv, VALID_EFFORTS as CODEX_VALID_EFFORTS } from '../../../src/engines/builders/codex.mjs';
+import { renderCodexRules } from '../../../src/engines/codex-home.mjs';
 import { buildGrokArgv } from '../../../src/engines/builders/grok.mjs';
 import { VALID_ROLES } from '../../../src/engines/builders/validate-params.mjs';
 import { idsMissingFromArgv, valuesAfterFlag, valuesAfterRepeatedFlag } from './argv-check.mjs';
@@ -73,7 +74,7 @@ test('Claude coder argv WITHOUT any same-provider fallback: no --fallback-model 
   // --disallowedTools list from the prompt, so the token before `--` is the LAST rule string.
   assert.equal(built.argv.at(-2), '--');
   assert.equal(built.argv.at(-1), '/p');
-  const lastRule = renderForClaude(FORBIDDEN).flatMap((e) => e.rules).at(-1);
+  const lastRule = renderForClaude(mergeForbidden()).flatMap((e) => e.rules).at(-1); // B4.2: the coder renders the merged list
   assert.equal(built.argv.at(-3), lastRule);
   assert.equal(built.argv.filter((t) => t === '/p').length, 1);
 });
@@ -114,13 +115,30 @@ test('Claude coder refuses a malformed fallback list with a clear TypeError nami
 
 test('Claude coder: EVERY forbidden entry is represented in --disallowedTools, exact rule-string count and set (not just "renderer length")', () => {
   const built = buildClaudeArgv({ role: 'coder', model: 'claude-opus-5-5', promptPath: '/p', cwd: '/c' });
-  const fresh = renderForClaude(FORBIDDEN);
-  assert.equal(fresh.length, FORBIDDEN.length); // "count = list length"
+  // B4.2: the coder's list is mergeForbidden() — FORBIDDEN + the 2 coder-only entries.
+  const fresh = renderForClaude(mergeForbidden());
+  assert.equal(fresh.length, FORBIDDEN.length + CODER_ONLY_FORBIDDEN.length); // "count = list length"
+  assert.equal(CODER_ONLY_FORBIDDEN.length, 2);
   const attached = valuesAfterFlag(built.argv, '--disallowedTools');
   const expectedRuleStrings = fresh.flatMap((e) => e.rules);
   assert.equal(attached.length, expectedRuleStrings.length); // exact count IN ARGV, not just the renderer's own output
   assert.deepEqual([...attached].sort(), [...expectedRuleStrings].sort());
   assert.deepEqual(idsMissingFromArgv(fresh, attached), []);
+});
+
+test('B4.2 Claude coder: --disallowedTools carries the 4 `block waive` deny rules; the `contains` --no-require-reviews entry renders none; facts (closed-book) is unchanged', () => {
+  const built = buildClaudeArgv({ role: 'coder', model: 'claude-opus-5-5', promptPath: '/p', cwd: '/c' });
+  const attached = valuesAfterFlag(built.argv, '--disallowedTools');
+  const waive = attached.filter((r) => r.includes('block waive'));
+  assert.deepEqual(waive, [
+    'Bash(code-forge block waive:*)',
+    'Bash(npx code-forge block waive:*)',
+    'Bash(npx @ricardov/code-forge block waive:*)',
+    'Bash(forge block waive:*)',
+  ]);
+  assert.equal(attached.filter((r) => r.includes('--no-require-reviews')).length, 0);
+  const facts = buildClaudeArgv({ role: 'facts', model: 'claude-opus-5-5', promptPath: '/p', cwd: '/c' });
+  assert.equal(facts.argv.filter((t) => t.includes('block waive')).length, 0);
 });
 
 test('Claude coder, using the REAL landed FORBIDDEN (no override): the ★ path entries render as Read(…)/Edit(…)/Write(…) (3 asserts + the exact real set)', () => {
@@ -225,17 +243,21 @@ test('Claude facts throws on an EMPTY forbidden render (a facts delegate with Ba
 
 // ── 4. Codex — coder ─────────────────────────────────────────────────────────
 
-test('Codex coder argv: exec + workspace-write + approve-for-me, -o output NEVER inside cwd, rules file EXACTLY matches renderForCodex', () => {
+test('Codex coder argv: exec + workspace-write + approval_policy="never" (no --approve-for-me, B4.2), -o output NEVER inside cwd, rules file EXACTLY matches renderForCodex(mergeForbidden())', () => {
   const built = buildCodexArgv({ role: 'coder', model: 'gpt-6-astra', effort: 'high', promptPath: '/tmp/brief.md', cwd: '/work/project' });
   assert.equal(built.cli, 'codex');
   assert.deepEqual(built.argv.slice(0, 6), ['codex', 'exec', '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort=high']);
-  assert.deepEqual(built.argv.slice(6, 14), [
+  assert.deepEqual(built.argv.slice(6, 15), [
     '-s', 'workspace-write',
     '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true',
     '-c', 'sandbox_workspace_write.exclude_slash_tmp=true',
-    '--approve-for-me', '-C',
+    '-c', 'approval_policy="never"',
+    '-C',
   ]);
-  assert.equal(built.argv[14], '/work/project');
+  assert.equal(built.argv[15], '/work/project');
+  assert.equal(built.argv.includes('--approve-for-me'), false); // B4.2: Codex 0.155.1 refuses it next to -s
+  assert.equal(built.argv.length, 20);
+  assert.deepEqual([built.argv[16], built.argv[17]], ['--json', '-o']);
   assert.equal(built.argv.includes('--json'), true);
   assert.equal(built.argv.at(-1), '/tmp/brief.md');
   assert.equal(built.argv.includes('read-only'), false);
@@ -260,11 +282,15 @@ test('Codex coder argv: exec + workspace-write + approve-for-me, -o output NEVER
   assert.equal(path.dirname(again.env.CODEX_HOME), path.dirname(coder.env.CODEX_HOME));
   assert.equal(coder.rulesFile.path, path.join(coder.env.CODEX_HOME, 'rules', 'code-forge.rules'));
   assert.equal(readFileSync(coder.rulesFile.path, 'utf8'), coder.rulesFile.content);
-  const expected = renderForCodex(FORBIDDEN).flatMap((e) => e.patterns.map((p) => `prefix_rule(pattern=${JSON.stringify(p).replaceAll(',', ', ')}, decision="forbidden", justification="code-forge: ${e.id}")`));
+  const expected = renderForCodex(mergeForbidden()).flatMap((e) => e.patterns.map((p) => `prefix_rule(pattern=${JSON.stringify(p).replaceAll(',', ', ')}, decision="forbidden", justification="code-forge: ${e.id}")`));
   const ruleLines = coder.rulesFile.content.split('\n').filter((l) => l.startsWith('prefix_rule('));
-  assert.equal(ruleLines.length, 46);
-  assert.equal(coder.rulesFile.count, 46);
+  // B4.2: FORBIDDEN's rules + the 4 `block waive` patterns (the `contains` entry renders none).
+  const expectedCount = renderCodexRules(renderForCodex(FORBIDDEN)).count + renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count;
+  assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 4);
+  assert.equal(ruleLines.length, expectedCount);
+  assert.equal(coder.rulesFile.count, expectedCount);
   assert.deepEqual(ruleLines, expected);
+  assert.equal(ruleLines.filter((l) => l.startsWith('prefix_rule(pattern=["code-forge", "block", "waive"], decision="forbidden"')).length, 1);
 });
 
 test('Codex coder throws on an EMPTY forbidden render', () => {
@@ -349,8 +375,9 @@ test('Grok coder argv: --prompt-file, no -p, every --deny pair matches a real re
   assert.deepEqual(built.argv.slice(0, 7), ['grok', '--prompt-file', '/tmp/brief.md', '-m', 'grok-4.7', '--reasoning-effort', 'high']);
   assert.deepEqual(built.argv.slice(7, 11), ['--permission-mode', 'bypassPermissions', '--cwd', '/work/project']);
   assert.equal(built.argv.includes('-p'), false);
-  const fresh = renderForGrok(FORBIDDEN);
+  const fresh = renderForGrok(mergeForbidden()); // B4.2: the coder renders the merged list
   const attached = valuesAfterRepeatedFlag(built.argv, '--deny');
+  assert.equal(attached.includes('Bash(code-forge block waive:*)'), true);
   const expectedRuleStrings = fresh.flatMap((e) => e.rules);
   assert.equal(attached.length, expectedRuleStrings.length); // exact count, not just "> 0"
   assert.deepEqual([...attached].sort(), [...expectedRuleStrings].sort());

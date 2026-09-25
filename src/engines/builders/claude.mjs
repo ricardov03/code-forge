@@ -40,7 +40,7 @@
  * Claude Code refuses to start when the two are equal.
  */
 
-import { FORBIDDEN, renderForClaude } from '../../util/forbidden.mjs';
+import { FORBIDDEN, mergeForbidden, renderForClaude } from '../../util/forbidden.mjs';
 import { flattenRuleStrings, hasAnyRenderedRule } from '../render-rules.mjs';
 import { assertBaseParams } from './validate-params.mjs';
 
@@ -62,8 +62,9 @@ export const CLI = 'claude';
  * @property {string} promptPath - the brief file (coder: passed as a pointer) or the packet file
  *   (closed-book: returned as `stdinFile`, its content is piped to stdin by the spawner).
  * @property {string} cwd - the project tree (coder) or an empty isolated temp dir (closed-book).
- * @property {ReadonlyArray<RenderedForbiddenEntry>} [renderedForbidden] - defaults to
- *   `renderForClaude(FORBIDDEN)`; used by the coder role and the `facts` role.
+ * @property {ReadonlyArray<RenderedForbiddenEntry>} [renderedForbidden] - used by the coder role
+ *   (default `renderForClaude(mergeForbidden())`, B4.2) and the `facts` role (default
+ *   `renderForClaude(FORBIDDEN)`, unchanged).
  * @property {ReadonlyArray<FallbackEntry>} [fallback] - coder role only; see the module doc.
  * @property {number} [maxBudgetUsd] - must be a finite number > 0 when given.
  * @property {Record<string, any>} [schema] - compiled JSON Schema object; closed-book roles only,
@@ -156,7 +157,11 @@ function assertValidBudget(maxBudgetUsd, builderName) {
  * @returns {BuiltCoder}
  */
 function buildCoderArgv(params) {
-  const { model, effort, promptPath, cwd, fallback, maxBudgetUsd, renderedForbidden = renderForClaude(FORBIDDEN) } = params;
+  // B4.2: a coder's deny list is `mergeForbidden()` — FORBIDDEN plus the coder-only entries
+  // (`code-forge block waive`, `--no-require-reviews`). A `contains` entry (`--no-require-reviews`)
+  // renders 0 rules (no pinned CLI has a match-anywhere rule), so it stays with the pre-spawn
+  // `isForbidden` check and the transcript grep, as before.
+  const { model, effort, promptPath, cwd, fallback, maxBudgetUsd, renderedForbidden = renderForClaude(mergeForbidden()) } = params;
   assertValidBudget(maxBudgetUsd, 'buildClaudeArgv');
   assertValidFallback(fallback);
   if (!hasAnyRenderedRule(renderedForbidden)) {

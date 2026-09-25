@@ -53,7 +53,6 @@ test('REQUIRED_FLAGS is EXACTLY the pinned per-provider list (deepEqual, not a l
       '-m, --model <MODEL>',
       '-c, --config <key=value>',
       '-s, --sandbox <SANDBOX_MODE>',
-      '--approve-for-me',
       '-C, --cd <DIR>',
       '--json',
       '-o, --output-last-message <FILE>',
@@ -119,7 +118,7 @@ test('every argv token each builder actually emits that looks like a flag name i
     '--output-format', '--permission-mode', '--restricted', '--safe-mode', '--strict-mcp-config', '--system-prompt', '--tools', '-p',
   ]);
   assert.deepEqual(unions.codex, [
-    '--approve-for-me', '--ephemeral', '--ignore-rules', '--ignore-user-config', '--json', '--output-schema', '--skip-git-repo-check', '-C', '-c', '-m', '-o', '-s',
+    '--ephemeral', '--ignore-rules', '--ignore-user-config', '--json', '--output-schema', '--skip-git-repo-check', '-C', '-c', '-m', '-o', '-s',
   ]);
   assert.deepEqual(unions.grok, [
     '--cwd', '--deny', '--disallowed-tools', '--json-schema', '--max-turns', '--no-plan', '--no-subagents', '--permission-mode', '--prompt-file',

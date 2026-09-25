@@ -34,7 +34,7 @@
  *  - `effort`, when given, must be a non-empty string (was pushed into argv unchecked).
  */
 
-import { FORBIDDEN, renderForGrok } from '../../util/forbidden.mjs';
+import { mergeForbidden, renderForGrok } from '../../util/forbidden.mjs';
 import { flattenRuleStrings, hasAnyRenderedRule } from '../render-rules.mjs';
 import { assertBaseParams } from './validate-params.mjs';
 
@@ -61,7 +61,7 @@ export const GROK_ALL_BUILTIN_TOOLS = Object.freeze(['Bash', 'Read', 'Write', 'E
  * @property {string} promptPath - `--prompt-file` value (brief for coder, packet for closed-book).
  * @property {string} cwd
  * @property {ReadonlyArray<RenderedGrokEntry>} [renderedForbidden] - coder role only; defaults to
- *   `renderForGrok(FORBIDDEN)`.
+ *   `renderForGrok(mergeForbidden())` (B4.2).
  * @property {Record<string, any>} [schema] - closed-book only; sent inline like Claude's.
  * @property {string} [systemPromptText] - closed-book only (`--system-prompt-override`).
  */
@@ -81,7 +81,9 @@ function assertValidEffort(effort) {
  * @returns {{cli: "grok", role: "coder", argv: string[], cwd: string, forbiddenRendered: ReadonlyArray<RenderedGrokEntry>}}
  */
 function buildCoderArgv(params) {
-  const { model, effort, promptPath, cwd, renderedForbidden = renderForGrok(FORBIDDEN) } = params;
+  // B4.2: the coder's deny list is `mergeForbidden()` (FORBIDDEN + the coder-only entries). A
+  // `contains` entry renders 0 `--deny` rules; the pre-spawn check and the transcript grep keep it.
+  const { model, effort, promptPath, cwd, renderedForbidden = renderForGrok(mergeForbidden()) } = params;
   assertValidEffort(effort);
   if (!hasAnyRenderedRule(renderedForbidden)) {
     throw new Error('buildGrokArgv: coder role requires a non-empty forbidden-list render (got 0 usable rules)');

@@ -55,7 +55,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { FORBIDDEN, renderForCodex } from '../../util/forbidden.mjs';
+import { mergeForbidden, renderForCodex } from '../../util/forbidden.mjs';
 import { CODEX_RULES_FILE_NAME, defaultCodexHome, isInside, prepareCodexHome } from '../codex-home.mjs';
 import { hasAnyRenderedRule } from '../render-rules.mjs';
 import { assertBaseParams } from './validate-params.mjs';
@@ -72,6 +72,18 @@ export const SANDBOX_TMP_EXCLUSIONS = Object.freeze([
   '-c',
   'sandbox_workspace_write.exclude_slash_tmp=true',
 ]);
+
+/**
+ * The coder's approval policy (B4.2). Codex 0.155.1 rejects `-s workspace-write` together with
+ * `--approve-for-me` (clap: "the argument '--sandbox <SANDBOX_MODE>' cannot be used with
+ * '--approve-for-me'"), so the coder drops `--approve-for-me` and keeps the sandbox. `codex exec`
+ * has no `-a/--ask-for-approval` flag (that one is on the interactive `codex` only), so the
+ * policy is set through the `approval_policy` config key, whose valid values the 0.155.1 config
+ * loader lists as `untrusted`, `on-failure`, `on-request`, `granular`, `never`. `never` = "Never
+ * ask for user approval. Execution failures are immediately returned to the model" (`codex
+ * --help`): a sandbox-denied command simply fails, nothing escalates out of the sandbox.
+ */
+export const CODER_APPROVAL_POLICY = Object.freeze(['-c', 'approval_policy="never"']);
 
 /** The `model_reasoning_effort` values Codex's TOML config is willing to receive from this builder. */
 export const VALID_EFFORTS = Object.freeze(['minimal', 'low', 'medium', 'high']);
@@ -94,7 +106,8 @@ export const VALID_EFFORTS = Object.freeze(['minimal', 'low', 'medium', 'high'])
  *   a path, unlike Claude/Grok's inline `--json-schema` string — see `test/fixtures/help/
  *   codex-0.155.1.txt`).
  * @property {ReadonlyArray<RenderedCodexEntry>} [renderedForbidden] - coder role only; defaults to
- *   `renderForCodex(FORBIDDEN)`.
+ *   `renderForCodex(mergeForbidden())` (B4.2: the coder-only entries too; a `contains` entry
+ *   renders 0 patterns, so it is left to the pre-spawn check and the transcript grep).
  * @property {string} [codexHome] - coder role only: the per-session Codex home to create (absolute,
  *   must not exist as the real `~/.codex` or inside it); defaults to `defaultCodexHome()` under the
  *   run temp root.
@@ -133,16 +146,12 @@ function assertValidEffort(effort) {
 }
 
 /**
- * @param {CodexBuildParams} params
- * @returns {{cli: "codex", role: "coder", argv: string[], cwd: string, outPath: string, env: {CODEX_HOME: string}, forbiddenRendered: ReadonlyArray<RenderedCodexEntry>, rulesFile: {fileName: string, path: string, content: string, count: number}}}
+ * The Codex coder argv itself — pure, no I/O, no rules file (B4.2). `buildCoderArgv` uses it, and
+ * the doctor's flags probe builds it with placeholder values for its static conflict check.
+ * @param {{model: string, effort?: string, cwd: string, outPath: string, promptPath: string}} p
+ * @returns {string[]}
  */
-function buildCoderArgv(params) {
-  const { model, effort, promptPath, cwd, renderedForbidden = renderForCodex(FORBIDDEN) } = params;
-  assertValidEffort(effort);
-  const outPath = effectiveOutPath(params.outPath, 'coder');
-  if (!hasAnyRenderedRule(renderedForbidden)) {
-    throw new Error('buildCodexArgv: coder role requires a non-empty forbidden-list render (got 0 usable patterns)');
-  }
+export function coderFlagArgv({ model, effort, cwd, outPath, promptPath }) {
   const argv = ['codex', 'exec', '-m', model];
   if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
   argv.push('-s', 'workspace-write');
@@ -150,11 +159,27 @@ function buildCoderArgv(params) {
   // sandbox must not make $TMPDIR or /tmp writable — the project cwd is then the only writable
   // root, and a home inside the cwd is refused below. See `../codex-home.mjs`.
   argv.push(...SANDBOX_TMP_EXCLUSIONS);
-  argv.push('--approve-for-me');
+  // B4.2: NO `--approve-for-me` (Codex 0.155.1 refuses it next to `-s`); see CODER_APPROVAL_POLICY.
+  argv.push(...CODER_APPROVAL_POLICY);
   argv.push('-C', cwd);
   argv.push('--json');
   argv.push('-o', outPath);
   argv.push(promptPath);
+  return argv;
+}
+
+/**
+ * @param {CodexBuildParams} params
+ * @returns {{cli: "codex", role: "coder", argv: string[], cwd: string, outPath: string, env: {CODEX_HOME: string}, forbiddenRendered: ReadonlyArray<RenderedCodexEntry>, rulesFile: {fileName: string, path: string, content: string, count: number}}}
+ */
+function buildCoderArgv(params) {
+  const { model, effort, promptPath, cwd, renderedForbidden = renderForCodex(mergeForbidden()) } = params;
+  assertValidEffort(effort);
+  const outPath = effectiveOutPath(params.outPath, 'coder');
+  if (!hasAnyRenderedRule(renderedForbidden)) {
+    throw new Error('buildCodexArgv: coder role requires a non-empty forbidden-list render (got 0 usable patterns)');
+  }
+  const argv = coderFlagArgv({ model, effort, cwd, outPath, promptPath });
   const codexHome = params.codexHome ?? defaultCodexHome();
   // Fix round 4: a non-absolute home is refused here, before any I/O, and the containment check
   // below then runs EVERY time (no `isAbsolute` short-circuit that could skip it).

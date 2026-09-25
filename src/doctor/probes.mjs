@@ -20,9 +20,9 @@ import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveLevel } from '../config/known-ids.mjs';
-import { buildCodexArgv, RULES_FILE_NAME, SANDBOX_TMP_EXCLUSIONS } from '../engines/builders/codex.mjs';
+import { buildCodexArgv, coderFlagArgv, RULES_FILE_NAME, SANDBOX_TMP_EXCLUSIONS } from '../engines/builders/codex.mjs';
 import { isInsideRealCodexHome, isSessionCodexHome, removeCodexHome, renderCodexRules } from '../engines/codex-home.mjs';
-import { FORBIDDEN, renderForCodex } from '../util/forbidden.mjs';
+import { mergeForbidden, renderForCodex } from '../util/forbidden.mjs';
 import { buildArgv } from '../engines/builders/index.mjs';
 import { probeHelpText } from '../engines/probe.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
@@ -87,11 +87,30 @@ function binOf(ctx, cli) {
 }
 
 /**
- * Presence, version and flag probe of one CLI.
+ * Static flag-conflict check of a Codex coder argv (B4.2): Codex 0.155.1's clap refuses
+ * `-s/--sandbox` together with `--approve-for-me` ("the argument '--sandbox <SANDBOX_MODE>' cannot
+ * be used with '--approve-for-me'"), so a coder argv carrying both could never start.
+ * @param {ReadonlyArray<string>} argv
+ * @returns {string | null} the conflict, or null when the argv is clear.
+ */
+export function codexCoderFlagConflict(argv) {
+  const sandbox = argv.some((a) => a === '-s' || a === '--sandbox' || a.startsWith('--sandbox='));
+  return sandbox && argv.includes('--approve-for-me') ? '-s/--sandbox cannot be used with --approve-for-me' : null;
+}
+
+/** The Codex coder argv with placeholder values (pure: no rules file, no CODEX_HOME). */
+function placeholderCodexCoderArgv() {
+  return coderFlagArgv({ model: 'probe', cwd: '/probe', outPath: '/probe/out.json', promptPath: '/probe/brief.md' });
+}
+
+/**
+ * Presence, version and flag probe of one CLI. For Codex the flags row also FAILs when the built
+ * coder argv holds a flag pair Codex refuses (`codexCoderFlagConflict`, B4.2).
  * @param {ProbeCtx} ctx @param {string} cli
+ * @param {{codexCoderArgv?: () => ReadonlyArray<string>}} [deps] - `codexCoderArgv` replaces the builder (tests).
  * @returns {Promise<{rows: Row[], present: boolean}>}
  */
-export async function probeCli(ctx, cli) {
+export async function probeCli(ctx, cli, deps = {}) {
   const bin = binOf(ctx, cli);
   const present = path.isAbsolute(bin) ? existsSync(bin) : await commandOnPath(bin, { pathEnv: ctx.env.PATH ?? '' });
   if (!present) return { rows: [row(`cli.${cli}`, 'FAIL', cli, 'not on PATH')], present: false };
@@ -100,6 +119,11 @@ export async function probeCli(ctx, cli) {
   const rows = [row(`cli.${cli}`, version.result === 'ok' ? 'OK' : 'WARN', cli, version.result === 'ok' ? `present, ${firstLine.slice(0, 80)}` : 'present, --version failed')];
   const help = await exec(cli === 'codex' ? [bin, 'exec', '--help'] : [bin, '--help'], { env: ctx.env, timeoutMs: 20000 });
   const probe = probeHelpText(/** @type {'claude'|'codex'|'grok'} */ (cli), help.stdout);
+  const conflict = cli === 'codex' ? codexCoderFlagConflict((deps.codexCoderArgv ?? placeholderCodexCoderArgv)()) : null;
+  if (conflict) {
+    rows.push(row(`flags.${cli}`, 'FAIL', `${cli} flags`, `coder argv conflict: ${conflict}`));
+    return { rows, present: true };
+  }
   rows.push(probe.ok
     ? row(`flags.${cli}`, 'OK', `${cli} flags`, 'every builder flag is in --help')
     : row(`flags.${cli}`, 'FAIL', `${cli} flags`, `missing from --help: ${probe.missing.join(' | ')}`));
@@ -322,7 +346,8 @@ export function probeCodexRules(ctx, deps = {}) {
     if (!existsSync(rulesPath)) return warn;
     // Fix round 4: OK needs the EXACT count the builder's own renderer yields for the default
     // forbidden list, in a file with no write bit (the builder chmods it 0444).
-    const expected = renderCodexRules(renderForCodex(FORBIDDEN)).count;
+    // B4.2: the coder build renders `mergeForbidden()` (FORBIDDEN + the coder-only entries).
+    const expected = renderCodexRules(renderForCodex(mergeForbidden())).count;
     const count = readFileSync(rulesPath, 'utf8').split('\n').filter((l) => l.startsWith('prefix_rule(') && l.includes('decision="forbidden"')).length;
     if (count === 0 || count !== expected) return warn;
     if ((statSync(rulesPath).mode & 0o222) !== 0) return warn;

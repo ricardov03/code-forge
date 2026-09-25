@@ -8,7 +8,7 @@ import { after, test } from 'node:test';
 delete process.env.CODEX_HOME;
 // HOME is pinned to a temp dir by the isolate preload before this module loads; src is imported after.
 // Nothing here writes under os.homedir(): the "real" Codex homes with an auth.json are fakes under PARENT.
-const { FORBIDDEN, renderForCodex } = await import('../../src/util/forbidden.mjs');
+const { CODER_ONLY_FORBIDDEN, FORBIDDEN, mergeForbidden, renderForCodex } = await import('../../src/util/forbidden.mjs');
 const { buildCodexArgv, SANDBOX_TMP_EXCLUSIONS } = await import('../../src/engines/builders/codex.mjs');
 const { isInsideRealCodexHome, isSessionCodexHome, prepareCodexHome, realCodexHome, removeCodexHome, renderCodexRules, sessionCodexHomesDir } = await import('../../src/engines/codex-home.mjs');
 const { currentRunRoot } = await import('../../src/util/tmp.mjs');
@@ -27,6 +27,15 @@ test('the default forbidden list renders exactly 46 Codex rules (pin)', () => {
   assert.equal(EXPECTED_RULES, 46);
 });
 
+// B4.2: the coder build renders mergeForbidden() — FORBIDDEN plus the coder-only entries, whose
+// `anyPrefix` `block waive` entry renders its spellings and whose `contains` entry renders none.
+const CODER_EXPECTED_RULES = renderCodexRules(renderForCodex(mergeForbidden())).count;
+test('the coder list renders FORBIDDEN\'s rules plus the coder-only rules', () => {
+  const coderOnly = renderForCodex(CODER_ONLY_FORBIDDEN);
+  assert.deepEqual(coderOnly.map((e) => [e.id, e.patterns.length]), [['code-forge-block-waive-from-coder', 4], ['code-forge-no-require-reviews', 0]]);
+  assert.equal(CODER_EXPECTED_RULES, EXPECTED_RULES + renderCodexRules(coderOnly).count);
+});
+
 /** A session home path where `prepareCodexHome` allows one: strictly inside <run root>/codex-homes/; removed in after(). */
 const sessionPath = (/** @type {string} */ name) => {
   const p = path.join(sessionCodexHomesDir(), `t-${name}`);
@@ -43,12 +52,14 @@ const coder = (/** @type {Record<string, any>} */ extra = {}) => {
 test('coder argv: exact sandbox elements — workspace-write then both tmp exclusions, once each', () => {
   const built = coder();
   assert.deepEqual([...SANDBOX_TMP_EXCLUSIONS], ['-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true', '-c', 'sandbox_workspace_write.exclude_slash_tmp=true']);
-  assert.deepEqual(built.argv.slice(0, 11), [
+  assert.deepEqual(built.argv.slice(0, 13), [
     'codex', 'exec', '-m', 'gpt-6-astra', '-s', 'workspace-write',
     '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true',
     '-c', 'sandbox_workspace_write.exclude_slash_tmp=true',
-    '--approve-for-me',
+    '-c', 'approval_policy="never"',
+    '-C',
   ]);
+  assert.equal(built.argv.includes('--approve-for-me'), false); // B4.2
   assert.equal(built.argv.filter((/** @type {string} */ t) => t.startsWith('sandbox_workspace_write.')).length, 2);
 });
 
@@ -60,10 +71,22 @@ test('coder build: env CODEX_HOME is a fresh dir under the run temp root; rules/
   assert.equal(isSessionCodexHome(home), true);
   const rulesPath = path.join(home, 'rules', 'code-forge.rules');
   assert.equal(built.rulesFile.path, rulesPath);
-  assert.equal(built.rulesFile.count, EXPECTED_RULES);
+  assert.equal(built.rulesFile.count, CODER_EXPECTED_RULES);
   const text = readFileSync(rulesPath, 'utf8');
-  assert.equal(text.split('\n').filter((l) => l.startsWith('prefix_rule(')).length, EXPECTED_RULES);
-  assert.equal(text.split('\n').filter((l) => l.includes('decision="forbidden"')).length, EXPECTED_RULES);
+  assert.equal(text.split('\n').filter((l) => l.startsWith('prefix_rule(')).length, CODER_EXPECTED_RULES);
+  assert.equal(text.split('\n').filter((l) => l.includes('decision="forbidden"')).length, CODER_EXPECTED_RULES);
+  // B4.2 literal oracle: each `block waive` spelling is one execpolicy line, exactly once.
+  const lines = text.split('\n');
+  for (const pattern of [
+    '["code-forge", "block", "waive"]',
+    '["npx", "code-forge", "block", "waive"]',
+    '["npx", "@ricardov/code-forge", "block", "waive"]',
+    '["forge", "block", "waive"]',
+  ]) {
+    const line = `prefix_rule(pattern=${pattern}, decision="forbidden", justification="code-forge: code-forge-block-waive-from-coder")`;
+    assert.equal(lines.filter((l) => l === line).length, 1, line);
+  }
+  assert.equal(lines.filter((l) => l.includes('"block", "waive"]')).length, 4);
   assert.equal(statSync(rulesPath).mode & 0o777, 0o444);
   assert.equal(statSync(path.join(home, 'rules')).mode & 0o777, 0o700);
   assert.equal(statSync(home).mode & 0o777, 0o700);

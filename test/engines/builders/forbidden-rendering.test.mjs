@@ -3,7 +3,18 @@ import { test } from 'node:test';
 import { buildClaudeArgv } from '../../../src/engines/builders/claude.mjs';
 import { buildGrokArgv } from '../../../src/engines/builders/grok.mjs';
 import { buildCodexArgv } from '../../../src/engines/builders/codex.mjs';
-import { FORBIDDEN, renderForClaude, renderForCodex, renderForGrok } from '../../../src/util/forbidden.mjs';
+import { FORBIDDEN, mergeForbidden, renderForClaude, renderForCodex, renderForGrok } from '../../../src/util/forbidden.mjs';
+
+/** B4.2: every coder build renders the merged list (FORBIDDEN + the coder-only entries). */
+const CODER_LIST = mergeForbidden();
+
+/** B4.2 literal oracle (hand-written, not from the renderer): the 4 `block waive` spellings as Claude/Grok rules. */
+const WAIVE_RULES = Object.freeze([
+  'Bash(code-forge block waive:*)',
+  'Bash(npx code-forge block waive:*)',
+  'Bash(npx @ricardov/code-forge block waive:*)',
+  'Bash(forge block waive:*)',
+]);
 import { idsMissingFromArgv, valuesAfterFlag, valuesAfterRepeatedFlag } from './argv-check.mjs';
 
 /**
@@ -58,32 +69,44 @@ test('the Claude facts builder renders the same synthetic list verbatim too, plu
 
 // ── "each coder builder contains every forbidden entry (count = list length)", against the REAL landed FORBIDDEN ──
 
-test('Claude coder: every real FORBIDDEN entry represented, exact argv-attached rule count (not just renderer length)', () => {
+test('Claude coder: every real merged-list entry represented, exact argv-attached rule count (not just renderer length)', () => {
   const built = buildClaudeArgv({ role: 'coder', model: 'claude-opus-5-5', promptPath: '/p', cwd: '/c' });
-  const fresh = renderForClaude(FORBIDDEN);
-  assert.equal(fresh.length, FORBIDDEN.length);
+  const fresh = renderForClaude(CODER_LIST);
+  assert.equal(fresh.length, FORBIDDEN.length + 2);
   const attached = valuesAfterFlag(built.argv, '--disallowedTools');
   assert.equal(attached.length, fresh.flatMap((e) => e.rules).length);
   assert.deepEqual(idsMissingFromArgv(fresh, attached), []);
   // Fix round 3 (MINOR): pin WHICH entries are unenforced to a literal — an entry that silently
   // flipped to enforced:false with no rules would drop out of both counts above.
-  assert.deepEqual(fresh.filter((e) => !e.enforced).map((e) => e.id), ['production-marker']);
-  assert.equal(fresh.filter((e) => e.enforced).length, FORBIDDEN.length - 1);
+  // B4.2: the coder-only `contains` entry is the second unenforced one (the transcript grep keeps it).
+  assert.deepEqual(fresh.filter((e) => !e.enforced).map((e) => e.id), ['production-marker', 'code-forge-no-require-reviews']);
+  assert.equal(fresh.filter((e) => e.enforced).length, CODER_LIST.length - 2);
+  // B4.2 literal oracle: each `block waive` rule is attached exactly once; the id owns exactly these 4.
+  for (const rule of WAIVE_RULES) assert.equal(attached.filter((r) => r === rule).length, 1, rule);
+  assert.equal(attached.filter((r) => r.includes('block waive')).length, 4);
+  assert.deepEqual(fresh.find((e) => e.id === 'code-forge-block-waive-from-coder')?.rules, [...WAIVE_RULES]);
 });
 
-test('Grok coder: every real FORBIDDEN entry represented, exact argv-attached rule count', () => {
+test('Grok coder: every real merged-list entry represented, exact argv-attached rule count', () => {
   const built = buildGrokArgv({ role: 'coder', model: 'grok-4.7', promptPath: '/p', cwd: '/c' });
-  const fresh = renderForGrok(FORBIDDEN);
-  assert.equal(fresh.length, FORBIDDEN.length);
+  const fresh = renderForGrok(CODER_LIST);
+  assert.equal(fresh.length, FORBIDDEN.length + 2);
   const attached = valuesAfterRepeatedFlag(built.argv, '--deny');
   assert.equal(attached.length, fresh.flatMap((e) => e.rules).length);
   assert.deepEqual(idsMissingFromArgv(fresh, attached), []);
+  // B4.2 literal oracle: the exact `--deny` values, each exactly once, each paired with its own flag.
+  for (const rule of WAIVE_RULES) {
+    assert.equal(attached.filter((r) => r === rule).length, 1, rule);
+    assert.equal(built.argv[built.argv.indexOf(rule) - 1], '--deny', rule);
+  }
+  assert.equal(attached.filter((r) => r.includes('block waive')).length, 4);
+  assert.deepEqual(fresh.find((e) => e.id === 'code-forge-block-waive-from-coder')?.rules, [...WAIVE_RULES]);
 });
 
-test('Codex coder: the rules file deep-equals the Starlark built from FORBIDDEN — id, exact pattern tokens, decision="forbidden" (46 rules, 15 ids)', () => {
+test('Codex coder: the rules file deep-equals the Starlark built from mergeForbidden() — id, exact pattern tokens, decision="forbidden" (FORBIDDEN\'s 15 ids + block waive)', () => {
   const built = buildCodexArgv({ role: 'coder', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c' });
-  const fresh = renderForCodex(FORBIDDEN);
-  assert.equal(fresh.length, FORBIDDEN.length);
+  const fresh = renderForCodex(CODER_LIST);
+  assert.equal(fresh.length, FORBIDDEN.length + 2);
   // The oracle is written out here from the render's data, not taken from the module under test.
   const expected = [
     '# code-forge forbidden list (src/util/forbidden.mjs). Generated per session; do not edit.',
@@ -94,14 +117,16 @@ test('Codex coder: the rules file deep-equals the Starlark built from FORBIDDEN 
   ];
   const content = /** @type {{rulesFile: {content: string}}} */ (built).rulesFile.content;
   assert.deepEqual(content.split('\n'), expected);
-  assert.equal(expected.length - 2, 46);
+  const forbiddenOnly = renderForCodex(FORBIDDEN).flatMap((e) => e.patterns).length;
+  assert.equal(expected.length - 2, forbiddenOnly + 4); // B4.2: + the 4 `block waive` spellings
   // spot-check two entries' exact tokens against FORBIDDEN itself
   assert.equal(content.includes('prefix_rule(pattern=["git", "reset", "--hard"], decision="forbidden", justification="code-forge: git-reset-hard")'), true);
   assert.equal(content.includes('prefix_rule(pattern=["gh", "pr", "merge"], decision="forbidden", justification="code-forge: gh-pr-merge")'), true);
   const ids = new Set(content.split('\n').map((l) => /justification="code-forge: ([^"]+)"/.exec(l)?.[1]).filter(Boolean));
-  // `contains` and `path` entries have 0 patterns (execpolicy cannot express them): 15 of 18 ids.
-  assert.deepEqual([...ids].sort(), FORBIDDEN.filter((e) => e.kind !== 'contains' && e.kind !== 'path').map((e) => e.id).sort());
-  assert.equal(ids.size, 15);
+  assert.equal(content.includes('prefix_rule(pattern=["npx", "@ricardov/code-forge", "block", "waive"], decision="forbidden", justification="code-forge: code-forge-block-waive-from-coder")'), true);
+  // `contains` and `path` entries have 0 patterns (execpolicy cannot express them): 16 of 20 ids.
+  assert.deepEqual([...ids].sort(), CODER_LIST.filter((e) => e.kind !== 'contains' && e.kind !== 'path').map((e) => e.id).sort());
+  assert.equal(ids.size, 16);
 });
 
 // ── idsMissingFromArgv itself: proves the .every fix and the enforced-vs-empty-rules distinction ──

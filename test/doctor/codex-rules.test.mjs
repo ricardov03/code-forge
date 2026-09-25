@@ -13,12 +13,12 @@ import { test } from 'node:test';
 import { buildCodexArgv } from '../../src/engines/builders/codex.mjs';
 import { removeCodexHome, renderCodexRules } from '../../src/engines/codex-home.mjs';
 import { probeCodexRules } from '../../src/doctor/probes.mjs';
-import { FORBIDDEN, renderForCodex } from '../../src/util/forbidden.mjs';
+import { mergeForbidden, renderForCodex } from '../../src/util/forbidden.mjs';
 
 const PROSE_ONLY = { id: 'codex-rules', status: 'WARN', label: 'codex rules', detail: 'codex: forbidden list is prose-only' };
 
-/** The exact rules file the builder writes for the default forbidden list (fix round 4). */
-const FULL_RULES = renderCodexRules(renderForCodex(FORBIDDEN));
+/** The exact rules file the builder writes for the default coder list (fix round 4; B4.2: `mergeForbidden()`). */
+const FULL_RULES = renderCodexRules(renderForCodex(mergeForbidden()));
 
 /** Write the FULL rendered rules file, read-only, into `<home>/rules/`, as the builder would. */
 function writeFullRules(home) {
@@ -40,7 +40,7 @@ function fakeUser(name) {
   return { home, realCodex, env: { HOME: home, PATH: '' } };
 }
 
-test('the Codex rules row is OK for the runner-default build: 46 rules under a per-session CODEX_HOME; the probe home is removed', () => {
+test('the Codex rules row is OK for the runner-default build: the merged coder list\'s rules under a per-session CODEX_HOME; the probe home is removed', () => {
   const { env } = fakeUser('codex-rules-ok-user');
   /** @type {string[]} */
   const homes = [];
@@ -52,7 +52,7 @@ test('the Codex rules row is OK for the runner-default build: 46 rules under a p
   };
   const rows = probeCodexRules(/** @type {any} */ ({ workDir: freshDir('codex-rules-ok'), env }), { build: /** @type {any} */ (spy) });
   assert.equal(rows.length, 1);
-  assert.deepEqual([rows[0].id, rows[0].status, rows[0].detail], ['codex-rules', 'OK', '46 execpolicy rules via CODEX_HOME=<session>/rules/code-forge.rules']);
+  assert.deepEqual([rows[0].id, rows[0].status, rows[0].detail], ['codex-rules', 'OK', `${FULL_RULES.count} execpolicy rules via CODEX_HOME=<session>/rules/code-forge.rules`]);
   assert.equal(homes.length, 1);
   assert.equal(existsSync(homes[0]), false);
 });

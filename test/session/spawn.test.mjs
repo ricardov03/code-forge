@@ -11,6 +11,8 @@ const { readAllRows } = await import('../../src/ledger/write.mjs');
 const { currentRunRoot, pidsDir } = await import('../../src/util/tmp.mjs');
 const { DEFAULT_ANSWER } = await import('../fixtures/bin/fake-common.mjs');
 const { S2_SCHEMA } = await import('../../src/session/s2.mjs');
+const { mergeForbidden, renderForCodex } = await import('../../src/util/forbidden.mjs');
+const { renderCodexRules } = await import('../../src/engines/codex-home.mjs');
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const CLAUDE = { provider: 'anthropic', model: 'fake-opus', effort: 'high' };
@@ -189,6 +191,18 @@ test('a coder argv that isForbidden is refused before anything spawns', async ()
   assert.equal(readdirSync(records).length, 0);
 });
 
+test('B4.2: the default pre-spawn check is mergeForbidden() — a coder argv naming --no-require-reviews (coder-only) is refused; a closed-book one is not checked', async () => {
+  const { deps, records } = fakeDeps();
+  const brief = writeIn(freshDir('brief'), 'x--no-require-reviews.md', 'code it');
+  await assert.rejects(
+    spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'coder', promptPath: brief, cwd: freshDir('coder-cwd') }, deps),
+    (err) => err instanceof SessionError && err.code === 'forbidden' && err.message === 'coder argv refused before spawn: forbidden entry code-forge-no-require-reviews',
+  );
+  assert.equal(readdirSync(records).length, 0);
+  const ok = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: brief }, deps);
+  assert.equal(ok.status, 'ok');
+});
+
 test('every spawn prints the level line on stderr', async () => {
   const { deps, stderr } = fakeDeps();
   const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
@@ -219,7 +233,7 @@ test('spawn verb: config from cwd, JSON result on stdout, exit 0; exit 3 when ev
   }
 });
 
-test('B4.1: a Codex coder spawn runs the fake codex with CODEX_HOME = the session home holding the 46 rules; the home is removed after', async () => {
+test('B4.1: a Codex coder spawn runs the fake codex with CODEX_HOME = the session home holding the merged coder list\'s rules; the home is removed after', async () => {
   const dir = freshDir('fake-codex-env');
   const out = path.join(dir, 'seen.json');
   const fake = writeIn(dir, 'codex', `#!/usr/bin/env node
@@ -240,6 +254,6 @@ process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'i', t
   assert.equal(typeof seen.home, 'string');
   assert.equal(path.basename(path.dirname(seen.home)), 'codex-homes');
   assert.equal(path.relative(currentRunRoot(), seen.home).startsWith('..'), false, seen.home);
-  assert.equal(seen.rules, 46);
+  assert.equal(seen.rules, renderCodexRules(renderForCodex(mergeForbidden())).count); // B4.2: FORBIDDEN + the coder-only entries
   assert.equal(existsSync(seen.home), false);
 });

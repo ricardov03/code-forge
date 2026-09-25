@@ -49,7 +49,6 @@ export const REQUIRED_FLAGS = Object.freeze({
     '-m, --model <MODEL>',
     '-c, --config <key=value>',
     '-s, --sandbox <SANDBOX_MODE>',
-    '--approve-for-me',
     '-C, --cd <DIR>',
     '--json',
     '-o, --output-last-message <FILE>',

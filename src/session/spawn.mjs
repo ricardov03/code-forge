@@ -45,7 +45,7 @@ import { parseSentinel } from '../engines/sentinel.mjs';
 import { parseUsage } from '../engines/usage-parse.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { exec } from '../util/exec.mjs';
-import { FORBIDDEN, isForbidden } from '../util/forbidden.mjs';
+import { isForbidden, mergeForbidden } from '../util/forbidden.mjs';
 import { readStartTime, registerPid, UNKNOWN_START_TIME } from '../util/reaper.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { currentRunRoot, pidsDir, runRoot, tmpBase, untrustedReason } from '../util/tmp.mjs';
@@ -304,7 +304,8 @@ function childEnv(/** @type {NodeJS.ProcessEnv} */ env) {
  * @property {string} [run] @property {string} [block] - copied to the ledger row.
  * @property {string} [slug] - ledger project slug; no slug and no `writeRow` ⇒ no row.
  * @property {Record<string, any>} [rowExtra] - extra ledger fields (e.g. S2's `source`).
- * @property {ReadonlyArray<any>} [forbidden] - the list checked for coders (default `FORBIDDEN`).
+ * @property {ReadonlyArray<any>} [forbidden] - the list checked for coders (default `mergeForbidden()`:
+ *   FORBIDDEN plus the coder-only entries, B4.2).
  */
 
 /**
@@ -349,7 +350,7 @@ export async function spawnSession(opts, deps = {}) {
       const cli = built.cli;
       built.argv[0] = deps.bins?.[cli] ?? built.argv[0];
       if (role === 'coder') {
-        const hit = isForbidden(built.argv, opts.forbidden ?? FORBIDDEN);
+        const hit = isForbidden(built.argv, opts.forbidden ?? mergeForbidden());
         if (hit) throw new SessionError('forbidden', `coder argv refused before spawn: forbidden entry ${hit.id}`);
       }
       writeSafe(stderr, `level=${level} provider=${step.provider} model=${step.model} effort=${step.effort ?? 'none'} fallback_step=${step.fallback_step}\n`);
