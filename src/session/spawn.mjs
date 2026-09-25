@@ -9,7 +9,9 @@
  * the child's stdin through `exec`'s `input` — closed-book prompts never sit in argv. Grok is the
  * exception by construction: its builder puts the packet in `--prompt-file` and returns no
  * `stdinFile`, so nothing is piped. When the build carries `outPath` (Codex, always), the answer is
- * read from it and the file is deleted.
+ * read from it and the file is deleted. When the build carries `env` (the Codex coder's
+ * `CODEX_HOME`, B4.1), it is merged over the child's environment; a foreground session removes
+ * that home when the child exits.
  *
  * Retry ladder (§5.6, V9): step 0 is the level's own model; step `k + 1` is `fallback[k]`. For a
  * Claude coder, `fallback[0]` (same provider) rides on `--fallback-model` inside step 0 and is not
@@ -37,6 +39,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { compileSchema } from '../config/schema-compile.mjs';
 import { buildArgv } from '../engines/builders/index.mjs';
+import { removeCodexHome } from '../engines/codex-home.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { parseSentinel } from '../engines/sentinel.mjs';
 import { parseUsage } from '../engines/usage-parse.mjs';
@@ -354,7 +357,9 @@ export async function spawnSession(opts, deps = {}) {
 
       if (opts.background) {
         keep = true;
-        const bg = startBackground(built, sessionDir, runRootDir, childEnv(deps.env ?? process.env));
+        // B4.1: the builder's env (the Codex coder's CODEX_HOME) wins over the caller's; a
+        // background session's home stays until the run root is swept.
+        const bg = startBackground(built, sessionDir, runRootDir, { ...childEnv(deps.env ?? process.env), ...(built.env ?? {}) });
         if (writeRow) await writeRow({ event: 'session.background', ...base, pid: bg.pid, status: 'started' });
         return { status: 'started', ...bg, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts };
       }
@@ -425,7 +430,7 @@ function buildStep(opts, step, sessionDir) {
 }
 
 /**
- * @param {{cli: string, argv: string[], cwd: string, stdinFile?: string, outPath?: string, compiled: Record<string, any> | null, strict: boolean}} built
+ * @param {{cli: string, argv: string[], cwd: string, stdinFile?: string, outPath?: string, env?: Record<string, string>, compiled: Record<string, any> | null, strict: boolean}} built
  * @param {SessionOpts} opts
  * @param {SessionDeps} deps
  * @returns {Promise<SessionResult & {usage: {tokens_in: number, tokens_out: number, tokens_source: string}, duration_ms: number}>}
@@ -434,12 +439,19 @@ async function runForeground(built, opts, deps) {
   const input = built.stdinFile ? readFileSync(built.stdinFile) : undefined;
   const started = Date.now();
   const run = deps.exec ?? exec;
-  const res = await run(built.argv, {
-    cwd: built.cwd,
-    env: childEnv(deps.env ?? process.env),
-    timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
-    ...(input !== undefined ? { input } : {}),
-  });
+  /** @type {import('../util/exec.mjs').ExecResult} */
+  let res;
+  try {
+    res = await run(built.argv, {
+      cwd: built.cwd,
+      env: { ...childEnv(deps.env ?? process.env), ...(built.env ?? {}) },
+      timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      ...(input !== undefined ? { input } : {}),
+    });
+  } finally {
+    // B4.1: the Codex coder's per-session CODEX_HOME (rules + auth copy) dies with the session.
+    if (built.env?.CODEX_HOME) removeCodexHome(built.env.CODEX_HOME);
+  }
   const duration_ms = Date.now() - started;
   /** @type {string | null} */
   let outText = null;

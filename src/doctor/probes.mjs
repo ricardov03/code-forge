@@ -9,17 +9,20 @@
  *  - the path-deny probe (C4, §0.6.7): a coder asked to print a canary file under
  *    `~/.code-forge/runs/` (a denied path) — the canary appearing in its answer WARNs
  *    `<cli>: path deny rules not honoured`;
- *  - the Codex rules probe (§0.6.3): B4's Codex coder argv never names its rules file, so the
- *    forbidden list reaches Codex as prose only — WARN `codex: forbidden list is prose-only`.
+ *  - the Codex rules probe (§0.6.3, B4.1): the Codex coder build writes the forbidden list as
+ *    execpolicy rules under a per-session `CODEX_HOME` — OK; WARN `codex: forbidden list is
+ *    prose-only` when it does not.
  * Every session runs with a fallback-free copy of the level (one call, no retry ladder) and writes
  * no ledger row.
  */
 
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { resolveLevel } from '../config/known-ids.mjs';
-import { buildCodexArgv, RULES_FILE_NAME } from '../engines/builders/codex.mjs';
+import { buildCodexArgv, RULES_FILE_NAME, SANDBOX_TMP_EXCLUSIONS } from '../engines/builders/codex.mjs';
+import { isInsideRealCodexHome, isSessionCodexHome, removeCodexHome, renderCodexRules } from '../engines/codex-home.mjs';
+import { FORBIDDEN, renderForCodex } from '../util/forbidden.mjs';
 import { buildArgv } from '../engines/builders/index.mjs';
 import { probeHelpText } from '../engines/probe.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
@@ -286,11 +289,45 @@ export async function probePathDeny(ctx) {
 }
 
 /**
- * The Codex rules probe: does the Codex coder argv hand Codex its rules file?
- * @param {ProbeCtx} ctx @returns {Row[]}
+ * The Codex rules probe (B4.1): does the Codex coder build hand Codex its execpolicy rules? The
+ * build runs exactly as the session runner's does (no `codexHome`: the builder's default home under
+ * the run temp root). OK when the build carries `env.CODEX_HOME` STRICTLY inside the run root's
+ * `codex-homes/` (realpath; fix round 3) — so never the user's real Codex home — whose
+ * `rules/<RULES_FILE_NAME>` holds at least one forbidden rule and whose argv keeps `$TMPDIR` and
+ * `/tmp` out of the sandbox; WARN `codex: forbidden list is prose-only` otherwise (including a
+ * build that throws). Only a home inside `codex-homes/` is removed afterwards, through the guarded
+ * `removeCodexHome`; a home anywhere else is reported WARN and left untouched.
+ * @param {ProbeCtx} ctx @param {{build?: typeof buildCodexArgv}} [deps] - `build` replaces the builder (tests).
+ * @returns {Row[]}
  */
-export function probeCodexRules(ctx) {
-  const built = buildCodexArgv({ role: 'coder', model: 'probe', promptPath: path.join(ctx.workDir, 'brief.md'), cwd: ctx.workDir, outPath: path.join(ctx.workDir, 'out.txt') });
-  const wired = built.argv.some((/** @type {string} */ a) => a.includes(RULES_FILE_NAME));
-  return [wired ? row('codex-rules', 'OK', 'codex rules', 'the rules file is passed to codex') : row('codex-rules', 'WARN', 'codex rules', 'codex: forbidden list is prose-only')];
+export function probeCodexRules(ctx, deps = {}) {
+  const build = deps.build ?? buildCodexArgv;
+  const warn = [row('codex-rules', 'WARN', 'codex rules', 'codex: forbidden list is prose-only')];
+  /** @type {any} */
+  let built;
+  try {
+    built = build({ role: 'coder', model: 'probe', promptPath: path.join(ctx.workDir, 'brief.md'), cwd: ctx.workDir, outPath: path.join(ctx.workDir, 'out.txt') });
+  } catch {
+    return warn;
+  }
+  const home = built?.env?.CODEX_HOME;
+  if (typeof home !== 'string' || !path.isAbsolute(home)) return warn;
+  // Outside <run root>/codex-homes/ (the real ~/.codex, the work dir, anything else): WARN, and
+  // nothing is deleted — the guarded `removeCodexHome` would refuse such a path anyway.
+  if (!isSessionCodexHome(home) || isInsideRealCodexHome(home, ctx.env)) return warn;
+  try {
+    const argv = Array.isArray(built.argv) ? built.argv.join('\u0000') : '';
+    if (!argv.includes(SANDBOX_TMP_EXCLUSIONS.join('\u0000'))) return warn;
+    const rulesPath = path.join(home, 'rules', RULES_FILE_NAME);
+    if (!existsSync(rulesPath)) return warn;
+    // Fix round 4: OK needs the EXACT count the builder's own renderer yields for the default
+    // forbidden list, in a file with no write bit (the builder chmods it 0444).
+    const expected = renderCodexRules(renderForCodex(FORBIDDEN)).count;
+    const count = readFileSync(rulesPath, 'utf8').split('\n').filter((l) => l.startsWith('prefix_rule(') && l.includes('decision="forbidden"')).length;
+    if (count === 0 || count !== expected) return warn;
+    if ((statSync(rulesPath).mode & 0o222) !== 0) return warn;
+    return [row('codex-rules', 'OK', 'codex rules', `${count} execpolicy rules via CODEX_HOME=<session>/rules/${RULES_FILE_NAME}`)];
+  } finally {
+    removeCodexHome(home); // confined: `isSessionCodexHome(home)` held above
+  }
 }

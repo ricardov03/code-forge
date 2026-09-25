@@ -80,13 +80,28 @@ test('Grok coder: every real FORBIDDEN entry represented, exact argv-attached ru
   assert.deepEqual(idsMissingFromArgv(fresh, attached), []);
 });
 
-test('Codex coder: rules file deep-equals renderForCodex(FORBIDDEN) exactly (ids AND content), count = list length', () => {
+test('Codex coder: the rules file deep-equals the Starlark built from FORBIDDEN — id, exact pattern tokens, decision="forbidden" (46 rules, 15 ids)', () => {
   const built = buildCodexArgv({ role: 'coder', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c' });
   const fresh = renderForCodex(FORBIDDEN);
   assert.equal(fresh.length, FORBIDDEN.length);
-  const parsed = JSON.parse(/** @type {{rulesFile: {content: string}}} */ (built).rulesFile.content).rules;
-  assert.deepEqual(parsed, fresh);
-  assert.equal(parsed.length, FORBIDDEN.length);
+  // The oracle is written out here from the render's data, not taken from the module under test.
+  const expected = [
+    '# code-forge forbidden list (src/util/forbidden.mjs). Generated per session; do not edit.',
+    ...fresh.flatMap((e) =>
+      e.patterns.map((tokens) => `prefix_rule(pattern=[${tokens.map((t) => `"${t}"`).join(', ')}], decision="forbidden", justification="code-forge: ${e.id}")`),
+    ),
+    '',
+  ];
+  const content = /** @type {{rulesFile: {content: string}}} */ (built).rulesFile.content;
+  assert.deepEqual(content.split('\n'), expected);
+  assert.equal(expected.length - 2, 46);
+  // spot-check two entries' exact tokens against FORBIDDEN itself
+  assert.equal(content.includes('prefix_rule(pattern=["git", "reset", "--hard"], decision="forbidden", justification="code-forge: git-reset-hard")'), true);
+  assert.equal(content.includes('prefix_rule(pattern=["gh", "pr", "merge"], decision="forbidden", justification="code-forge: gh-pr-merge")'), true);
+  const ids = new Set(content.split('\n').map((l) => /justification="code-forge: ([^"]+)"/.exec(l)?.[1]).filter(Boolean));
+  // `contains` and `path` entries have 0 patterns (execpolicy cannot express them): 15 of 18 ids.
+  assert.deepEqual([...ids].sort(), FORBIDDEN.filter((e) => e.kind !== 'contains' && e.kind !== 'path').map((e) => e.id).sort());
+  assert.equal(ids.size, 15);
 });
 
 // ── idsMissingFromArgv itself: proves the .every fix and the enforced-vs-empty-rules distinction ──

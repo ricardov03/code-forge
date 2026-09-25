@@ -1,4 +1,8 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { currentRunRoot } from '../../../src/util/tmp.mjs';
 import { test } from 'node:test';
 import { FORBIDDEN, renderForClaude, renderForCodex, renderForGrok } from '../../../src/util/forbidden.mjs';
 import { buildClaudeArgv } from '../../../src/engines/builders/claude.mjs';
@@ -225,8 +229,13 @@ test('Codex coder argv: exec + workspace-write + approve-for-me, -o output NEVER
   const built = buildCodexArgv({ role: 'coder', model: 'gpt-6-astra', effort: 'high', promptPath: '/tmp/brief.md', cwd: '/work/project' });
   assert.equal(built.cli, 'codex');
   assert.deepEqual(built.argv.slice(0, 6), ['codex', 'exec', '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort=high']);
-  assert.deepEqual(built.argv.slice(6, 10), ['-s', 'workspace-write', '--approve-for-me', '-C']);
-  assert.equal(built.argv[10], '/work/project');
+  assert.deepEqual(built.argv.slice(6, 14), [
+    '-s', 'workspace-write',
+    '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true',
+    '-c', 'sandbox_workspace_write.exclude_slash_tmp=true',
+    '--approve-for-me', '-C',
+  ]);
+  assert.equal(built.argv[14], '/work/project');
   assert.equal(built.argv.includes('--json'), true);
   assert.equal(built.argv.at(-1), '/tmp/brief.md');
   assert.equal(built.argv.includes('read-only'), false);
@@ -238,11 +247,24 @@ test('Codex coder argv: exec + workspace-write + approve-for-me, -o output NEVER
   assert.equal(built.outPath, built.argv[outIndex + 1]);
   assert.equal(built.argv.filter((t) => t === '-o').length, 1);
   assert.equal('stdinFile' in built, false); // coder keeps the pointer
-  // fix round 1, MINOR: full content (id + patterns + description), not just ids.
-  const fresh = renderForCodex(FORBIDDEN);
-  const parsedRules = JSON.parse(/** @type {{rulesFile: {content: string}}} */ (built).rulesFile.content).rules;
-  assert.deepEqual(parsedRules, fresh);
-  assert.equal(parsedRules.length, FORBIDDEN.length);
+  // B4.1: the rules reach Codex through env CODEX_HOME=<per-session home>/rules/code-forge.rules.
+  const coder = /** @type {{env: {CODEX_HOME: string}, rulesFile: {path: string, content: string, count: number}}} */ (built);
+  assert.deepEqual(Object.keys(coder.env), ['CODEX_HOME']);
+  // fix round 1: the home is under the run temp root, never the real ~/.codex, fresh per build.
+  assert.equal(path.relative(currentRunRoot(), coder.env.CODEX_HOME).startsWith('..'), false, coder.env.CODEX_HOME);
+  const realCodex = path.join(os.homedir(), '.codex');
+  assert.notEqual(coder.env.CODEX_HOME, realCodex);
+  assert.equal(path.relative(realCodex, coder.env.CODEX_HOME).startsWith('..'), true);
+  const again = /** @type {any} */ (buildCodexArgv({ role: 'coder', model: 'gpt-6-astra', promptPath: '/tmp/brief.md', cwd: '/work/project' }));
+  assert.notEqual(again.env.CODEX_HOME, coder.env.CODEX_HOME);
+  assert.equal(path.dirname(again.env.CODEX_HOME), path.dirname(coder.env.CODEX_HOME));
+  assert.equal(coder.rulesFile.path, path.join(coder.env.CODEX_HOME, 'rules', 'code-forge.rules'));
+  assert.equal(readFileSync(coder.rulesFile.path, 'utf8'), coder.rulesFile.content);
+  const expected = renderForCodex(FORBIDDEN).flatMap((e) => e.patterns.map((p) => `prefix_rule(pattern=${JSON.stringify(p).replaceAll(',', ', ')}, decision="forbidden", justification="code-forge: ${e.id}")`));
+  const ruleLines = coder.rulesFile.content.split('\n').filter((l) => l.startsWith('prefix_rule('));
+  assert.equal(ruleLines.length, 46);
+  assert.equal(coder.rulesFile.count, 46);
+  assert.deepEqual(ruleLines, expected);
 });
 
 test('Codex coder throws on an EMPTY forbidden render', () => {

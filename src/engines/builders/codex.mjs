@@ -1,7 +1,6 @@
 /**
  * Codex 0.155.1 argv builder (plan §5.2, pinned against `test/fixtures/help/codex-0.155.1.txt`).
- * No filesystem I/O and no spawning (a rules-file `content` is returned as data; a caller writes
- * it to disk). NOT fully deterministic: when `outPath` is omitted, a default is drawn from
+ * No spawning; the coder role writes its per-session rules file (see "Execpolicy rules" below). NOT fully deterministic: when `outPath` is omitted, a default is drawn from
  * `os.tmpdir()` + `randomBytes` — pass `outPath` for a reproducible argv (every snapshot test does).
  *
  * **Return contract (fix round 3):** `{cli, role, argv, cwd, outPath, stdinFile?, ...}`.
@@ -27,18 +26,16 @@
  * plan's flag table, so `facts` here is simply routed through the same closed-book branch as the
  * other four roles.
  *
- * §0.6.3 (an acceptance clause the facts sheet cannot back): "only `--ignore-rules` proves rules
- * files exist" — Codex's execpolicy rules-file WIRE FORMAT is not verified on this Mac. This
- * builder emits the forbidden list as a `rulesFile` (id + `renderForCodex` output, JSON), which is
- * what a later block writes into the project; `doctor` (B13) is the block that probes whether
- * Codex actually honours it and prints `codex: forbidden list is prose-only` when it does not.
- * **Where that file is written is NOT this module's decision** — it returns `{fileName, content}`
- * data only. Fix round 1 (MINOR) flagged that `-s workspace-write` lets the coder itself read/edit
- * the tree the file WOULD land in if a caller naively wrote it under `cwd`: whoever materializes
- * `rulesFile` onto disk (a later block: B9's session runner or B11's worker) is responsible for
- * placing it somewhere the coder's own `workspace-write` sandbox cannot reach (outside `cwd`, or
- * under a path `src/util/forbidden.mjs`'s `path` entries also deny writing to) — this comment
- * documents that responsibility since this module cannot discharge it itself.
+ * **Execpolicy rules (B4.1, §0.6.3, [A19]).** Codex 0.155.1 `exec` has no flag and no `-c` key
+ * naming a rules file; it loads the "user" rules from `$CODEX_HOME/rules/*.rules` (`--ignore-rules`
+ * help: "Do not load user or project execpolicy `.rules` files"). So the coder build creates a
+ * per-session Codex home under the run temp root (`../codex-home.mjs`, `codexHome` param or
+ * `defaultCodexHome()`), writes `rules/code-forge.rules` there (execpolicy Starlark, one
+ * `prefix_rule(..., decision="forbidden")` per `renderForCodex` pattern) and returns
+ * `env: {CODEX_HOME}` — the spawner MUST merge `env` into the child's environment. The home is
+ * never the user's real `~/.codex` (a `codexHome` there throws). This is the one builder that
+ * writes a file: the rules must exist before Codex starts, and the builder is the one place that
+ * holds the render.
  *
  * **Fix round 1 (isolated per-file review):**
  *  - Unknown `role` now throws (was silently routed to closed-book) — `assertBaseParams`.
@@ -59,13 +56,22 @@ import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { FORBIDDEN, renderForCodex } from '../../util/forbidden.mjs';
+import { CODEX_RULES_FILE_NAME, defaultCodexHome, isInside, prepareCodexHome } from '../codex-home.mjs';
 import { hasAnyRenderedRule } from '../render-rules.mjs';
 import { assertBaseParams } from './validate-params.mjs';
 
 export const CLI = 'codex';
 
-/** The rules-file name a caller writes `rulesFile.content` to (location is the caller's decision). */
-export const RULES_FILE_NAME = 'code-forge-execpolicy.rules.json';
+/** The rules file Codex loads from `<CODEX_HOME>/rules/` (B4.1). */
+export const RULES_FILE_NAME = CODEX_RULES_FILE_NAME;
+
+/** `-c` overrides that keep `$TMPDIR` and `/tmp` out of the coder's writable roots (B4.1). */
+export const SANDBOX_TMP_EXCLUSIONS = Object.freeze([
+  '-c',
+  'sandbox_workspace_write.exclude_tmpdir_env_var=true',
+  '-c',
+  'sandbox_workspace_write.exclude_slash_tmp=true',
+]);
 
 /** The `model_reasoning_effort` values Codex's TOML config is willing to receive from this builder. */
 export const VALID_EFFORTS = Object.freeze(['minimal', 'low', 'medium', 'high']);
@@ -89,6 +95,9 @@ export const VALID_EFFORTS = Object.freeze(['minimal', 'low', 'medium', 'high'])
  *   codex-0.155.1.txt`).
  * @property {ReadonlyArray<RenderedCodexEntry>} [renderedForbidden] - coder role only; defaults to
  *   `renderForCodex(FORBIDDEN)`.
+ * @property {string} [codexHome] - coder role only: the per-session Codex home to create (absolute,
+ *   must not exist as the real `~/.codex` or inside it); defaults to `defaultCodexHome()` under the
+ *   run temp root.
  */
 
 /**
@@ -114,14 +123,6 @@ function effectiveOutPath(outPath, role) {
 }
 
 /**
- * @param {ReadonlyArray<RenderedCodexEntry>} rendered
- * @returns {{fileName: string, content: string}}
- */
-function buildRulesFile(rendered) {
-  return { fileName: RULES_FILE_NAME, content: JSON.stringify({ rules: rendered }, null, 2) };
-}
-
-/**
  * @param {string | undefined} effort
  * @throws {TypeError} unless `effort` is `undefined` or one of {@link VALID_EFFORTS}.
  */
@@ -133,7 +134,7 @@ function assertValidEffort(effort) {
 
 /**
  * @param {CodexBuildParams} params
- * @returns {{cli: "codex", role: "coder", argv: string[], cwd: string, outPath: string, forbiddenRendered: ReadonlyArray<RenderedCodexEntry>, rulesFile: {fileName: string, content: string}}}
+ * @returns {{cli: "codex", role: "coder", argv: string[], cwd: string, outPath: string, env: {CODEX_HOME: string}, forbiddenRendered: ReadonlyArray<RenderedCodexEntry>, rulesFile: {fileName: string, path: string, content: string, count: number}}}
  */
 function buildCoderArgv(params) {
   const { model, effort, promptPath, cwd, renderedForbidden = renderForCodex(FORBIDDEN) } = params;
@@ -145,12 +146,38 @@ function buildCoderArgv(params) {
   const argv = ['codex', 'exec', '-m', model];
   if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
   argv.push('-s', 'workspace-write');
+  // INVARIANT (B4.1 fix round 1): the session CODEX_HOME lives under the run temp root, so the
+  // sandbox must not make $TMPDIR or /tmp writable — the project cwd is then the only writable
+  // root, and a home inside the cwd is refused below. See `../codex-home.mjs`.
+  argv.push(...SANDBOX_TMP_EXCLUSIONS);
   argv.push('--approve-for-me');
   argv.push('-C', cwd);
   argv.push('--json');
   argv.push('-o', outPath);
   argv.push(promptPath);
-  return { cli: CLI, role: 'coder', argv, cwd, outPath, forbiddenRendered: renderedForbidden, rulesFile: buildRulesFile(renderedForbidden) };
+  const codexHome = params.codexHome ?? defaultCodexHome();
+  // Fix round 4: a non-absolute home is refused here, before any I/O, and the containment check
+  // below then runs EVERY time (no `isAbsolute` short-circuit that could skip it).
+  if (typeof codexHome !== 'string' || !path.isAbsolute(codexHome)) {
+    throw new TypeError('buildCodexArgv: codexHome must be an absolute path');
+  }
+  // `isInside` realpaths BOTH sides through their nearest existing ancestor (fix round 3): a
+  // `/var/...` cwd and a `/private/var/...` home are the same tree on macOS, and a symlinked cwd
+  // is compared by its target, so a string-different alias cannot slip a home into the cwd.
+  if (isInside(codexHome, cwd)) {
+    throw new Error('buildCodexArgv: the session CODEX_HOME must not be inside the coder cwd (the sandbox can write there)');
+  }
+  const home = prepareCodexHome(codexHome, renderedForbidden);
+  return {
+    cli: CLI,
+    role: 'coder',
+    argv,
+    cwd,
+    outPath,
+    env: { CODEX_HOME: home.codexHome },
+    forbiddenRendered: renderedForbidden,
+    rulesFile: { fileName: RULES_FILE_NAME, path: home.rulesPath, content: home.content, count: home.count },
+  };
 }
 
 /**

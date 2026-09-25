@@ -1,6 +1,6 @@
 import { alive, cfgWith, fakeDeps, freshDir, readRecords, sink, waitFor, writeIn } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -217,4 +217,29 @@ test('spawn verb: config from cwd, JSON result on stdout, exit 0; exit 3 when ev
   } finally {
     process.chdir(before);
   }
+});
+
+test('B4.1: a Codex coder spawn runs the fake codex with CODEX_HOME = the session home holding the 46 rules; the home is removed after', async () => {
+  const dir = freshDir('fake-codex-env');
+  const out = path.join(dir, 'seen.json');
+  const fake = writeIn(dir, 'codex', `#!/usr/bin/env node
+import { existsSync, readFileSync, writeFileSync } from 'node:fs';
+import path from 'node:path';
+const home = process.env.CODEX_HOME ?? null;
+const rules = home ? path.join(home, 'rules', 'code-forge.rules') : null;
+const text = rules && existsSync(rules) ? readFileSync(rules, 'utf8') : '';
+writeFileSync(${JSON.stringify(out)}, JSON.stringify({ home, rules: text.split('\\n').filter((l) => l.startsWith('prefix_rule(')).length }));
+process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'i', type: 'agent_message', text: 'done' } }) + '\\n');
+`);
+  chmodSync(fake, 0o755);
+  const { deps } = fakeDeps();
+  const brief = writeIn(freshDir('brief'), 'brief.md', 'do nothing');
+  const result = await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L1', role: 'coder', promptPath: brief, cwd: freshDir('coder-cwd') }, { ...deps, bins: { ...deps.bins, codex: fake } });
+  assert.equal(result.status, 'ok');
+  const seen = JSON.parse(readFileSync(out, 'utf8'));
+  assert.equal(typeof seen.home, 'string');
+  assert.equal(path.basename(path.dirname(seen.home)), 'codex-homes');
+  assert.equal(path.relative(currentRunRoot(), seen.home).startsWith('..'), false, seen.home);
+  assert.equal(seen.rules, 46);
+  assert.equal(existsSync(seen.home), false);
 });
