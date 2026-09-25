@@ -11,9 +11,16 @@
  *  - On timeout the whole process GROUP is sent SIGTERM, then SIGKILL — the SIGKILL goes to the
  *    group as soon as the direct child exits (or after a grace period), so a grandchild that
  *    traps SIGTERM cannot outlive the call. The result is `failed`, never a partial success.
- *  - stdin is `ignore`d by default: nothing here writes to a child's stdin, so leaving it as the
- *    default `pipe` would make any child that reads stdin when it isn't a TTY (`claude -p`, for
- *    one) block forever waiting for an EOF nobody sends.
+ *  - stdin is `ignore`d by default, so a child that reads stdin when it isn't a TTY (`claude -p`,
+ *    for one) sees an immediate EOF instead of blocking forever. With `input` (a string or bytes),
+ *    stdin is a pipe: the content is written verbatim and then the pipe is closed, so the child
+ *    reads exactly those bytes followed by EOF (plan V3 — closed-book roles get the packet on
+ *    stdin, never in argv).
+ *  - Every child is recorded in the pid registry of this process's run root
+ *    (`<run-root>/pids/<pid>.json`, `./tmp.mjs` + `./reaper.mjs`) and the entry is removed when
+ *    the call settles. An entry that outlives its run (the parent was killed) is what the reaper
+ *    uses to find and kill the orphan later. Registry I/O failing never fails the spawn: the
+ *    registry is hygiene, the child is the caller's work.
  *  - This module does not know about the forbidden-command list (`./forbidden.mjs`); callers
  *    that spawn on a coder's behalf are expected to check argv against it first (`isForbidden`).
  *    `exec` only enforces the structural rules above (argv shape, no shell, valid timeout).
@@ -43,6 +50,8 @@
  */
 
 import { spawn } from 'node:child_process';
+import { registerPid, unregisterPid } from './reaper.mjs';
+import { pidsDir } from './tmp.mjs';
 
 /** Grace period after SIGTERM before escalating to SIGKILL, in milliseconds. */
 const KILL_GRACE_MS = 2000;
@@ -138,6 +147,8 @@ function untrackChild(pid) {
  * @param {number} [opts.maxBufferBytes] - Per-stream cap (default 10 MiB). Exceeding it on
  *   either stream kills the child and resolves `result: "failed"`; the stream's collected text is
  *   cut at exactly `maxBufferBytes` bytes.
+ * @param {string | Uint8Array} [opts.input] - Content written to the child's stdin, followed by
+ *   EOF. Omitted ⇒ stdin is `ignore`.
  * @param {boolean} [opts.shell] - Forbidden. Only exists so passing it throws immediately.
  * @returns {Promise<ExecResult>}
  */
@@ -151,15 +162,33 @@ export function exec(argv, opts = {}) {
   if (opts.timeoutMs !== undefined && !(Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0)) {
     throw new TypeError('exec: timeoutMs must be a finite number greater than 0 when given');
   }
+  if (opts.input !== undefined && typeof opts.input !== 'string' && !(opts.input instanceof Uint8Array)) {
+    throw new TypeError('exec: input must be a string or a Uint8Array/Buffer when given');
+  }
 
-  const { cwd, env, timeoutMs, okExitCodes = [0], maxBufferBytes = DEFAULT_MAX_BUFFER_BYTES } = opts;
+  const { cwd, env, timeoutMs, input, okExitCodes = [0], maxBufferBytes = DEFAULT_MAX_BUFFER_BYTES } = opts;
   const [command, ...args] = argv;
 
   return new Promise((resolve) => {
-    const child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: ['ignore', 'pipe', 'pipe'] });
+    const stdinMode = input === undefined ? 'ignore' : 'pipe';
+    const child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: [stdinMode, 'pipe', 'pipe'] });
     const pid = child.pid;
+    /** @type {string | null} */
+    let registryDir = null;
     if (typeof pid === 'number') {
       trackChild(pid);
+      try {
+        registryDir = pidsDir();
+        registerPid(registryDir, pid, command);
+      } catch {
+        registryDir = null;
+      }
+    }
+    if (input !== undefined && child.stdin) {
+      // A child that exits without reading its stdin makes the write fail with EPIPE; that is
+      // the child's business (its exit code says what happened), not an unhandled error here.
+      child.stdin.on('error', () => {});
+      child.stdin.end(input);
     }
 
     /** @type {Buffer[]} */
@@ -194,7 +223,15 @@ export function exec(argv, opts = {}) {
       if (killTimer) clearTimeout(killTimer);
       if (typeof pid === 'number') {
         untrackChild(pid);
+        if (registryDir !== null) {
+          try {
+            unregisterPid(registryDir, pid);
+          } catch {
+            // hygiene only — see the module comment
+          }
+        }
       }
+      child.stdin?.destroy();
       child.stdout?.destroy();
       child.stderr?.destroy();
       resolve(result);
@@ -231,7 +268,7 @@ export function exec(argv, opts = {}) {
       byteCounts[stream] += chunk.length;
     };
 
-    // Not optional chaining: stdio is always ['ignore', 'pipe', 'pipe'] above, so child.stdout
+    // Not optional chaining: stdout/stderr are always 'pipe' above, so child.stdout
     // and child.stderr are always real Readable streams, never null — Node only sets a stdio
     // stream to null for 'ignore'/'inherit' on that fd, neither of which is used for fds 1/2.
     child.stdout.on('data', (/** @type {Buffer} */ chunk) => collect('stdout', stdoutChunks, chunk));

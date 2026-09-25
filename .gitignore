@@ -13,12 +13,8 @@ MANIFEST.md
 node_modules/
 coverage/
 reports/
-.stryker-tmp/
 package-lock.json
 *.tsbuildinfo
-
-# Generated evidence — never publish (Verification Rules, CLAUDE.md)
-stryker-baseline.json
 
 # macOS
 .DS_Store

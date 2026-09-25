@@ -28,7 +28,14 @@ jobs:
       - name: Install (shrinkwrap-checked)
         run: npm ci
 
-      - name: Unit tests (node --test)
+      # `npm test` = three `node --import ./test/helpers/isolate.mjs … --test` invocations:
+      # test/no-leak.test.mjs with CODE_FORGE_NO_LEAK=snapshot (pre-suite snapshot of the real
+      # dirs), then 'test/**/*.test.mjs' (--experimental-test-module-mocks), then
+      # test/no-leak.test.mjs with CODE_FORGE_NO_LEAK=final (0 new entries under the real
+      # ~/.code-forge or <repo>/.code-forge since the snapshot). The preload pins HOME, TMPDIR
+      # and the cwd of every test worker to a per-process temp root and fails a worker that
+      # writes into those real dirs (plan §9.6). No mutation-testing job (ruling R14).
+      - name: Unit tests (node --test, isolated by the test/helpers/isolate.mjs preload)
         run: npm test
 
       - name: Typecheck (tsc --checkJs --noEmit)
@@ -49,71 +56,3 @@ jobs:
       # B15 (which owns `.claude-plugin/**` and `publish.yml`) adds real plugin-validation CI
       # coverage there, with an explicit decision about installing/authenticating the CLI.
 
-  stryker-baseline:
-    name: Stryker baseline (src/util)
-    runs-on: ubuntu-latest
-    needs: test
-    steps:
-      - uses: actions/checkout@v4
-
-      - uses: actions/setup-node@v4
-        with:
-          node-version: 22
-
-      - name: Install (shrinkwrap-checked)
-        run: npm ci
-
-      # Wave 1 rule (plan §9.4/O7): record the baseline, never gate on it here — no
-      # thresholds.break is set in stryker.config.mjs (and, since that file is B0-owned forever,
-      # nothing later can add one). `--reporters json,clear-text` is explicit here, redundant
-      # with the config default, so this step's own intent doesn't silently depend on the config
-      # file staying as written.
-      - name: Run Stryker on src/util/**/*.mjs
-        run: npx stryker run --mutate "src/util/**/*.mjs" --reporters json,clear-text
-
-      # Separate step, after Stryker: if the run above produced no report (e.g. the reporters
-      # list ever changed to drop `json`), fail here with a clear message instead of letting the
-      # baseline-writing script below crash on a missing file with a bare ENOENT stack.
-      - name: Verify the mutation report exists
-        run: |
-          if [ ! -f reports/mutation/mutation-report.json ]; then
-            echo "::error::reports/mutation/mutation-report.json was not produced by the Stryker run above (is the json reporter still configured?) — cannot record a baseline."
-            exit 1
-          fi
-
-      # Trimmed to per-file mutant counts (§9.4/O7's "baseline"): the full report the step above
-      # produces embeds every mutant's complete test-run output per file and is multiple MB; later
-      # waves only need each file's killed/survived/timeout/total to derive their min_msi floor
-      # (baseline - 5).
-      - name: Extract per-file counts into stryker-baseline.json
-        run: |
-          node --input-type=commonjs -e "
-            const fs = require('node:fs');
-            const report = JSON.parse(fs.readFileSync('reports/mutation/mutation-report.json', 'utf8'));
-            const files = {};
-            for (const [path, file] of Object.entries(report.files)) {
-              const counts = {};
-              for (const mutant of file.mutants) {
-                counts[mutant.status] = (counts[mutant.status] ?? 0) + 1;
-              }
-              const killed = counts.Killed ?? 0;
-              const timeout = counts.Timeout ?? 0;
-              const survived = counts.Survived ?? 0;
-              const validTotal = killed + timeout + survived;
-              files[path] = {
-                total: file.mutants.length,
-                counts,
-                mutationScore: validTotal > 0 ? Number((((killed + timeout) / validTotal) * 100).toFixed(2)) : null,
-              };
-            }
-            fs.writeFileSync('stryker-baseline.json', JSON.stringify({
-              mutate: 'src/util/**/*.mjs',
-              recordedAt: new Date().toISOString(),
-              files,
-            }, null, 2) + '\n');
-          "
-
-      - uses: actions/upload-artifact@v4
-        with:
-          name: stryker-baseline
-          path: stryker-baseline.json

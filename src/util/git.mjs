@@ -27,6 +27,13 @@
  * --upload-pack=evil` style option injection would otherwise reach git. `diffArgv`'s `path` is
  * the one exception: it already sits after a literal `--` in the built argv, so git treats it as
  * a pathspec no matter what it starts with.
+ *
+ * Every wrapper runs git with `process.env` minus the repository-context variables git itself
+ * lists in `git rev-parse --local-env-vars` (`GIT_DIR`, `GIT_WORK_TREE`, `GIT_INDEX_FILE`,
+ * `GIT_PREFIX`, `GIT_OBJECT_DIRECTORY`, …). Git hooks export them, so a code-forge call made from
+ * inside a hook would otherwise act on the hook's repository instead of `cwd` (plan V8).
+ * Everything else — `GIT_SSH_COMMAND`, `GIT_AUTHOR_*`, the user's global config — is kept.
+ * `fetch`/`push` additionally set `GIT_TERMINAL_PROMPT=0`.
  */
 
 import { exec } from './exec.mjs';
@@ -49,6 +56,39 @@ export const WRITE_COMMANDS = Object.freeze(['commit', 'push', 'rm']);
 
 /** Network helpers (`fetch`, `push`) get a default timeout so a credential prompt can't hang forever. */
 const DEFAULT_NETWORK_TIMEOUT_MS = 30000;
+
+/** Output of `git rev-parse --local-env-vars` (git 2.5x): the variables that pick a repository. */
+const LOCAL_REPO_ENV_VARS = Object.freeze([
+  'GIT_ALTERNATE_OBJECT_DIRECTORIES',
+  'GIT_CONFIG',
+  'GIT_CONFIG_PARAMETERS',
+  'GIT_CONFIG_COUNT',
+  'GIT_OBJECT_DIRECTORY',
+  'GIT_DIR',
+  'GIT_WORK_TREE',
+  'GIT_IMPLICIT_WORK_TREE',
+  'GIT_GRAFT_FILE',
+  'GIT_INDEX_FILE',
+  'GIT_NO_REPLACE_OBJECTS',
+  'GIT_REPLACE_REF_BASE',
+  'GIT_PREFIX',
+  'GIT_SHALLOW_FILE',
+  'GIT_COMMON_DIR',
+]);
+
+/**
+ * `process.env` without the repository-context variables, plus `extra`.
+ * @param {Record<string, string>} [extra]
+ * @returns {NodeJS.ProcessEnv}
+ */
+function gitEnv(extra = {}) {
+  /** @type {NodeJS.ProcessEnv} */
+  const env = { ...process.env };
+  for (const name of LOCAL_REPO_ENV_VARS) {
+    delete env[name];
+  }
+  return { ...env, ...extra };
+}
 
 /**
  * @param {string} subcommand
@@ -257,32 +297,32 @@ export function pushArgv(opts = {}) {
 
 /** @param {string} cwd */
 export function status(cwd) {
-  return exec(statusArgv(), { cwd });
+  return exec(statusArgv(), { cwd, env: gitEnv() });
 }
 
 /** @param {string} base @param {string} cwd */
 export function diffNameOnly(base, cwd) {
-  return exec(diffNameOnlyArgv(base), { cwd });
+  return exec(diffNameOnlyArgv(base), { cwd, env: gitEnv() });
 }
 
 /** @param {string} base @param {string} path @param {string} cwd */
 export function diff(base, path, cwd) {
-  return exec(diffArgv(base, path), { cwd });
+  return exec(diffArgv(base, path), { cwd, env: gitEnv() });
 }
 
 /** @param {string} path @param {string} cwd */
 export function diffNoIndex(path, cwd) {
-  return exec(diffNoIndexArgv(path), { cwd, okExitCodes: [0, 1] });
+  return exec(diffNoIndexArgv(path), { cwd, env: gitEnv(), okExitCodes: [0, 1] });
 }
 
 /** @param {string} ref @param {string} path @param {string} cwd */
 export function show(ref, path, cwd) {
-  return exec(showArgv(ref, path), { cwd });
+  return exec(showArgv(ref, path), { cwd, env: gitEnv() });
 }
 
 /** @param {string} ref @param {string} cwd */
 export function revParse(ref, cwd) {
-  return exec(revParseArgv(ref), { cwd });
+  return exec(revParseArgv(ref), { cwd, env: gitEnv() });
 }
 
 /**
@@ -293,7 +333,7 @@ export function revParse(ref, cwd) {
  *   never silently reported as `false`.
  */
 export async function isAncestor(ancestor, descendant, cwd) {
-  const res = await exec(isAncestorArgv(ancestor, descendant), { cwd, okExitCodes: [0, 1] });
+  const res = await exec(isAncestorArgv(ancestor, descendant), { cwd, env: gitEnv(), okExitCodes: [0, 1] });
   if (res.result !== 'ok') {
     throw new Error(
       `git.mjs: isAncestor(${ancestor}, ${descendant}) failed (code ${res.code}): ${res.stderr || res.error || 'unknown error'}`,
@@ -308,27 +348,27 @@ export async function isAncestor(ancestor, descendant, cwd) {
  */
 export function fetch(cwd, opts = {}) {
   const { timeoutMs = DEFAULT_NETWORK_TIMEOUT_MS } = opts;
-  return exec(fetchArgv(), { cwd, timeoutMs, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  return exec(fetchArgv(), { cwd, timeoutMs, env: gitEnv({ GIT_TERMINAL_PROMPT: '0' }) });
 }
 
 /** @param {string} ref @param {string} cwd */
 export function archive(ref, cwd) {
-  return exec(archiveArgv(ref), { cwd });
+  return exec(archiveArgv(ref), { cwd, env: gitEnv() });
 }
 
 /** @param {string} cwd @param {string[]} [args] */
 export function log(cwd, args) {
-  return exec(logArgv(args), { cwd });
+  return exec(logArgv(args), { cwd, env: gitEnv() });
 }
 
 /** @param {string} cwd @param {string[]} [args] */
 export function lsFiles(cwd, args) {
-  return exec(lsFilesArgv(args), { cwd });
+  return exec(lsFilesArgv(args), { cwd, env: gitEnv() });
 }
 
 /** @param {string} message @param {string} cwd */
 export function commit(message, cwd) {
-  return exec(commitArgv(message), { cwd });
+  return exec(commitArgv(message), { cwd, env: gitEnv() });
 }
 
 /**
@@ -337,5 +377,5 @@ export function commit(message, cwd) {
  */
 export function push(cwd, opts = {}) {
   const { timeoutMs = DEFAULT_NETWORK_TIMEOUT_MS, ...pushOpts } = opts;
-  return exec(pushArgv(pushOpts), { cwd, timeoutMs, env: { ...process.env, GIT_TERMINAL_PROMPT: '0' } });
+  return exec(pushArgv(pushOpts), { cwd, timeoutMs, env: gitEnv({ GIT_TERMINAL_PROMPT: '0' }) });
 }

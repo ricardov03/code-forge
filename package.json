@@ -22,9 +22,8 @@
     "LICENSE"
   ],
   "scripts": {
-    "test": "node --experimental-test-module-mocks --test 'test/**/*.test.mjs'",
-    "typecheck": "tsc --checkJs --noEmit",
-    "stryker": "stryker run"
+    "test": "CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test 'test/**/*.test.mjs' && CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs",
+    "typecheck": "tsc --checkJs --noEmit"
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",
@@ -35,7 +34,6 @@
     "@napi-rs/keyring": "2.1.0"
   },
   "devDependencies": {
-    "@stryker-mutator/core": "10.0.0",
     "@types/node": "22.20.4",
     "typescript": "7.0.2"
   }

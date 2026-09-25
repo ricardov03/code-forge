@@ -1,12 +1,25 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
+import { readdirSync } from 'node:fs';
 import { mkdtemp, readFile, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout } from 'node:timers/promises';
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { exec } from '../../src/util/exec.mjs';
+import { readStartTime } from '../../src/util/reaper.mjs';
+import { setRunRoot } from '../../src/util/tmp.mjs';
+
+/** One parent for every temp dir the B0.1 tests below create; removed in after(). */
+let PARENT = '';
+before(async () => {
+  PARENT = await mkdtemp(path.join(os.tmpdir(), 'code-forge-exec-b01-'));
+});
+after(async () => {
+  setRunRoot(null);
+  if (PARENT) await rm(PARENT, { recursive: true, force: true });
+});
 
 const EXEC_URL = new URL('../../src/util/exec.mjs', import.meta.url).href;
 
@@ -277,4 +290,76 @@ test('exec kills a child that writes past maxBufferBytes, keeps exactly the cap,
   assert.equal(result.stdout.length, 4096);
   assert.equal(result.timedOut, false);
   assert.equal(result.error, 'exec: maxBufferBytes exceeded');
+});
+
+// ── B0.1: stdin `input` and the pid registry ────────────────────────────────
+
+/** Child that reports fd 0's type, then every stdin byte as hex, then "|eof" once stdin ends. */
+const STDIN_ECHO = `
+  const fs = require('node:fs');
+  const st = fs.fstatSync(0);
+  const kind = st.isFIFO() ? 'fifo' : st.isCharacterDevice() ? 'chr' : st.isSocket() ? 'sock' : 'other';
+  const chunks = [];
+  process.stdin.on('data', (c) => chunks.push(c));
+  process.stdin.on('end', () => {
+    process.stdout.write(kind + '|' + Buffer.concat(chunks).toString('hex') + '|eof');
+  });
+`;
+
+test('exec input: the child receives the bytes verbatim on a pipe, then EOF', { timeout: 5000 }, async () => {
+  const bytes = Buffer.concat([Buffer.from([0x00, 0x01, 0xff, 0x0a]), Buffer.from('packet ☃ é\n', 'utf8')]);
+  const result = await exec([process.execPath, '-e', STDIN_ECHO], { input: bytes, timeoutMs: 4000 });
+
+  assert.equal(result.result, 'ok', result.stderr);
+  const [kind, hex, eof] = result.stdout.split('|');
+  assert.equal(kind === 'fifo' || kind === 'sock', true, `stdin was ${kind}, expected a pipe`);
+  assert.equal(hex, bytes.toString('hex'));
+  assert.equal(eof, 'eof');
+});
+
+test('exec input as a string reaches the child as its UTF-8 bytes', { timeout: 5000 }, async () => {
+  const result = await exec([process.execPath, '-e', STDIN_ECHO], { input: 'héllo', timeoutMs: 4000 });
+  assert.equal(result.stdout.split('|')[1], Buffer.from('héllo', 'utf8').toString('hex'));
+});
+
+test('exec without input: stdin is ignore (/dev/null, a character device) and reads as empty', { timeout: 5000 }, async () => {
+  const result = await exec([process.execPath, '-e', STDIN_ECHO], { timeoutMs: 4000 });
+  assert.equal(result.result, 'ok', result.stderr);
+  assert.equal(result.stdout, 'chr||eof');
+});
+
+test('exec refuses an input that is neither a string nor bytes', () => {
+  assert.throws(
+    // @ts-expect-error - deliberately passing a non-string, non-bytes input
+    () => exec([process.execPath, '-e', ''], { input: 42 }),
+    { name: 'TypeError', message: /input must be a string or a Uint8Array\/Buffer/ },
+  );
+});
+
+test('each spawn writes <run-root>/pids/<pid>.json while the child runs and removes it on exit', { timeout: 8000 }, async () => {
+  const runRootDir = await mkdtemp(path.join(PARENT, 'run-'));
+  setRunRoot(runRootDir);
+  const pids = path.join(runRootDir, 'pids');
+  try {
+    const pending = exec([process.execPath, '-e', 'setTimeout(() => {}, 800)'], { timeoutMs: 5000 });
+    /** @type {string[]} */
+    let names = [];
+    const deadline = Date.now() + 700;
+    while (names.length === 0 && Date.now() < deadline) {
+      names = readdirSync(pids).filter((n) => n.endsWith('.json'));
+      if (names.length === 0) await setTimeout(10);
+    }
+    assert.equal(names.length, 1);
+    const entry = JSON.parse(await readFile(path.join(pids, names[0]), 'utf8'));
+    assert.equal(names[0], `${entry.pid}.json`);
+    assert.deepEqual(Object.keys(entry).sort(), ['argv0', 'pid', 'start_time']);
+    assert.equal(entry.argv0, process.execPath);
+    assert.equal(entry.start_time, readStartTime(entry.pid));
+
+    const result = await pending;
+    assert.equal(result.result, 'ok');
+    assert.deepEqual(readdirSync(pids), []);
+  } finally {
+    setRunRoot(null);
+  }
 });

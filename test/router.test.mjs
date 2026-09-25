@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { readdirSync } from 'node:fs';
+import { existsSync, readdirSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -80,10 +80,14 @@ test('package.json declares exactly the specified runtime/optional/dev dependenc
 
   assert.deepEqual(Object.keys(pkg.dependencies).sort(), ['@clack/prompts', 'ajv', 'yaml']);
   assert.deepEqual(Object.keys(pkg.optionalDependencies).sort(), ['@napi-rs/keyring']);
-  assert.deepEqual(
-    Object.keys(pkg.devDependencies).sort(),
-    ['@stryker-mutator/core', '@types/node', 'typescript'],
-  );
+  // R14 (B0.1): no mutation tooling — dev deps are exactly typescript + @types/node.
+  assert.deepEqual(Object.keys(pkg.devDependencies).sort(), ['@types/node', 'typescript']);
+});
+
+test('R14: stryker.config.mjs does not exist and no npm script runs stryker', async () => {
+  const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.equal(existsSync(path.join(ROOT, 'stryker.config.mjs')), false);
+  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['test', 'typecheck']);
 });
 
 test('package.json declares no peer or bundled dependencies, under either npm spelling', async () => {
@@ -93,10 +97,15 @@ test('package.json declares no peer or bundled dependencies, under either npm sp
   assert.equal(pkg.bundledDependencies, undefined);
 });
 
-test('package.json requires Node >= 22 and runs tests with module mocks enabled', async () => {
+test('package.json requires Node >= 22 and runs tests under the isolate preload with module mocks enabled, between the no-leak snapshot and final steps', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.engines.node, '>=22');
-  assert.match(pkg.scripts.test, /--experimental-test-module-mocks/);
+  assert.equal(
+    pkg.scripts.test,
+    'CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs' +
+      " && node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test 'test/**/*.test.mjs'" +
+      ' && CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs',
+  );
 });
 
 test('every dependency version is an exact semver — no ^, ~, *, "latest", or partial form', async () => {
@@ -107,7 +116,7 @@ test('every dependency version is an exact semver — no ^, ~, *, "latest", or p
     ...Object.values(pkg.devDependencies ?? {}),
   ];
 
-  assert.equal(allVersions.length, 7);
+  assert.equal(allVersions.length, 6);
   for (const version of allVersions) {
     assert.match(version, EXACT_SEMVER, `"${version}" is not an exact semver`);
   }

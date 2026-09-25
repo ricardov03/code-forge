@@ -1,5 +1,8 @@
 import assert from 'node:assert/strict';
-import { mock, test } from 'node:test';
+import { chmod, mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { after, before, mock, test } from 'node:test';
 import * as git from '../../src/util/git.mjs';
 
 // The executing-helper tests below intercept `exec` with `mock.module`, which only exists when
@@ -332,5 +335,86 @@ test('isAncestor throws (never silently returns false) when git fails with exit 
       name: 'Error',
       message: /isAncestor\(nope, HEAD\) failed \(code 128\): fatal: Not a valid object name nope/,
     });
+  });
+});
+
+// ── B0.1: wrappers strip the repository-context GIT_* variables ─────────────
+
+/** The five variables acceptance (3) names — a git hook exports them. */
+const HOOK_VARS = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'GIT_OBJECT_DIRECTORY'];
+
+let FAKE_PARENT = '';
+let FAKE_BIN = '';
+before(async () => {
+  FAKE_PARENT = await mkdtemp(path.join(os.tmpdir(), 'code-forge-git-b01-'));
+  FAKE_BIN = path.join(FAKE_PARENT, 'bin');
+  await mkdir(FAKE_BIN);
+  // A fake `git` first on PATH that prints its own environment as JSON and exits 0.
+  const fakeGit = path.join(FAKE_BIN, 'git');
+  await writeFile(fakeGit, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.env));\n`);
+  await chmod(fakeGit, 0o755);
+});
+after(async () => {
+  if (FAKE_PARENT) await rm(FAKE_PARENT, { recursive: true, force: true });
+});
+
+/**
+ * Run `body` with the fake git first on PATH and the hook variables set in process.env,
+ * restoring process.env afterwards.
+ * @param {() => Promise<void>} body
+ */
+async function withHookEnv(body) {
+  const saved = { ...process.env };
+  process.env.PATH = `${FAKE_BIN}${path.delimiter}${process.env.PATH}`;
+  for (const name of HOOK_VARS) process.env[name] = `/fake/hook/${name}`;
+  process.env.GIT_SSH_COMMAND = 'ssh -o FakeOption=yes';
+  process.env.GIT_TERMINAL_PROMPT = '1';
+  try {
+    await body();
+  } finally {
+    for (const key of Object.keys(process.env)) {
+      if (!(key in saved)) delete process.env[key];
+    }
+    Object.assign(process.env, saved);
+  }
+}
+
+test('a fake git run through status, diffNameOnly, log and commit sees none of the 5 hook GIT_* variables', async () => {
+  await withHookEnv(async () => {
+    const cwd = FAKE_PARENT;
+    const runs = [
+      await git.status(cwd),
+      await git.diffNameOnly('HEAD', cwd),
+      await git.log(cwd),
+      await git.commit('a message', cwd),
+    ];
+    assert.equal(runs.length, 4);
+    for (const res of runs) {
+      assert.equal(res.result, 'ok', res.stderr);
+      const env = JSON.parse(res.stdout);
+      assert.deepEqual(HOOK_VARS.filter((name) => name in env), []);
+      // Not a repository-context variable: kept.
+      assert.equal(env.GIT_SSH_COMMAND, 'ssh -o FakeOption=yes');
+    }
+  });
+});
+
+test('fetch and push: the fake git sees GIT_TERMINAL_PROMPT=0 and none of the 5 hook variables', async () => {
+  await withHookEnv(async () => {
+    const fetched = await git.fetch(FAKE_PARENT);
+    const pushed = await git.push(FAKE_PARENT, { branch: 'feature/x' });
+    for (const res of [fetched, pushed]) {
+      assert.equal(res.result, 'ok', res.stderr);
+      const env = JSON.parse(res.stdout);
+      assert.equal(env.GIT_TERMINAL_PROMPT, '0');
+      assert.deepEqual(HOOK_VARS.filter((name) => name in env), []);
+    }
+  });
+});
+
+test('the wrappers leave process.env itself untouched', async () => {
+  await withHookEnv(async () => {
+    await git.status(FAKE_PARENT);
+    assert.deepEqual(HOOK_VARS.map((name) => process.env[name]), HOOK_VARS.map((name) => `/fake/hook/${name}`));
   });
 });
