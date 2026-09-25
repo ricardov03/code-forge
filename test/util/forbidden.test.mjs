@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import os from 'node:os';
 import { test } from 'node:test';
 import {
   FORBIDDEN,
@@ -7,10 +8,14 @@ import {
   renderForClaude,
   renderForCodex,
   renderForGrok,
+  scanTranscript,
 } from '../../src/util/forbidden.mjs';
 
-// The exact set of ids §8.4 requires — a dropped/renamed entry must fail this, not just a count.
-const REQUIRED_IDS = [
+/** The three ★ entries B8 adds (plan §8.4, C4/C18). */
+const STAR_IDS = ['code-forge-runs-access', 'code-forge-worker-from-coder', 'code-forge-reviews-write'];
+
+// B0's base ids (round 3) — every one must survive B8's extension, asserted by id.
+const BASE_IDS = [
   'gh-pr-ready',
   'gh-pr-merge',
   'gh-pr-close',
@@ -26,7 +31,10 @@ const REQUIRED_IDS = [
   'git-rm',
   'rm-rf',
   'production-marker',
-].sort();
+];
+
+// The exact set of ids §8.4 requires — a dropped/renamed entry must fail this, not just a count.
+const REQUIRED_IDS = [...BASE_IDS, ...STAR_IDS].sort();
 
 /**
  * The exact Claude/Grok rules each entry must render to — written out by hand (an independent
@@ -76,10 +84,37 @@ const EXPECTED_RULES = {
     'Bash(rm -Rr:*)',
   ],
   'production-marker': [],
+  'code-forge-runs-access': ['Read(~/.code-forge/runs/**)', 'Edit(~/.code-forge/runs/**)', 'Write(~/.code-forge/runs/**)'],
+  'code-forge-worker-from-coder': [
+    'Bash(code-forge worker:*)',
+    'Bash(npx code-forge worker:*)',
+    'Bash(npx @ricardov/code-forge worker:*)',
+    'Bash(forge worker:*)',
+    'Bash(code-forge run start:*)',
+    'Bash(npx code-forge run start:*)',
+    'Bash(npx @ricardov/code-forge run start:*)',
+    'Bash(forge run start:*)',
+  ],
+  'code-forge-reviews-write': [
+    'Edit(.code-forge/reviews/**)',
+    'Write(.code-forge/reviews/**)',
+    'Edit(.code-forge/queue/*.done)',
+    'Write(.code-forge/queue/*.done)',
+  ],
 };
 
-/** The ONLY ids no pinned CLI rule syntax can express (asserted exactly). */
-const UNEXPRESSIBLE_IDS = ['production-marker'];
+/** The ONLY ids each renderer cannot express (asserted exactly, in list order). */
+const UNEXPRESSIBLE_IDS = {
+  renderForClaude: ['production-marker'],
+  renderForGrok: ['production-marker'],
+  // execpolicy cannot express path rules, so for Codex these entries are prose-only:
+  // workspace-write limits writes to the workspace but stops neither reads of ~/.code-forge/runs
+  // nor writes to .code-forge/reviews (inside the workspace) — tamper-evident only, §8.6.
+  renderForCodex: ['production-marker', 'code-forge-runs-access', 'code-forge-reviews-write'],
+};
+
+/** @param {string} rule */
+const isBashRule = (rule) => rule.startsWith('Bash(');
 
 /** @param {string} rule e.g. `Bash(git push -f:*)` → `['git', 'push', '-f']` */
 function ruleToTokens(rule) {
@@ -99,6 +134,16 @@ test('the forbidden list is exactly the §8.4 id set', () => {
   assert.deepEqual(FORBIDDEN.map((e) => e.id).sort(), REQUIRED_IDS);
 });
 
+test('B8 grows the list by exactly the 3 ★ entries and every one of the 15 base ids remains', () => {
+  assert.equal(BASE_IDS.length, 15);
+  assert.equal(FORBIDDEN.length, 15 + 3);
+  const ids = FORBIDDEN.map((e) => e.id);
+  for (const id of BASE_IDS) {
+    assert.equal(ids.filter((x) => x === id).length, 1, `base id ${id}`);
+  }
+  assert.deepEqual(ids.slice(-3), STAR_IDS);
+});
+
 test('every entry has a well-shaped id and kind, and well-shaped fields for its kind', () => {
   const ids = new Set();
   for (const entry of FORBIDDEN) {
@@ -107,9 +152,20 @@ test('every entry has a well-shaped id and kind, and well-shaped fields for its 
     assert.equal(ids.has(entry.id), false, `duplicate id ${entry.id}`);
     ids.add(entry.id);
 
-    assert.ok(['prefix', 'contains', 'commandFlag'].includes(entry.kind), `entry ${entry.id} has an invalid kind`);
+    assert.ok(['prefix', 'contains', 'commandFlag', 'anyPrefix', 'path'].includes(entry.kind), `entry ${entry.id} has an invalid kind`);
 
-    if (entry.kind === 'prefix' || entry.kind === 'contains') {
+    if (entry.kind === 'anyPrefix') {
+      assert.ok(entry.prefixes.length > 0, `entry ${entry.id}.prefixes is empty`);
+      for (const p of entry.prefixes) {
+        assert.ok(Array.isArray(p) && p.length > 0 && p.every((t) => typeof t === 'string' && t.length > 0), `entry ${entry.id} has a malformed prefix`);
+      }
+    } else if (entry.kind === 'path') {
+      assert.ok(entry.paths.length > 0, `entry ${entry.id}.paths is empty`);
+      for (const p of entry.paths) {
+        assert.ok(typeof p === 'string' && p.length > 0, `entry ${entry.id} has a malformed path`);
+      }
+      assert.ok(['readwrite', 'write'].includes(entry.access), `entry ${entry.id}.access`);
+    } else if (entry.kind === 'prefix' || entry.kind === 'contains') {
       assert.ok(Array.isArray(entry.tokens), `entry ${entry.id}.tokens must be an array`);
       assert.ok(entry.tokens.length > 0, `entry ${entry.id} has no tokens`);
       for (const token of entry.tokens) {
@@ -131,10 +187,13 @@ test('the list, every entry, and every nested array are frozen', () => {
   assert.ok(Object.isFrozen(FORBIDDEN), 'FORBIDDEN itself is not frozen');
   for (const entry of FORBIDDEN) {
     assert.ok(Object.isFrozen(entry), `entry ${entry.id} is not frozen`);
-    for (const key of ['tokens', 'command', 'groups']) {
+    for (const key of ['tokens', 'command', 'groups', 'paths', 'prefixes']) {
       if (Array.isArray(entry[key])) {
         assert.ok(Object.isFrozen(entry[key]), `entry ${entry.id}.${key} is not frozen`);
       }
+    }
+    for (const prefix of entry.prefixes ?? []) {
+      assert.ok(Object.isFrozen(prefix), `entry ${entry.id} has an unfrozen prefix`);
     }
     for (const group of entry.groups ?? []) {
       assert.ok(Object.isFrozen(group), `entry ${entry.id} has an unfrozen group`);
@@ -223,6 +282,37 @@ const FORBIDDEN_CASES = [
   // contains: substring of any single token
   [['deploy', '--env=production'], 'production-marker'],
   [['deploy', '--target', 'x', '--env=production-eu'], 'production-marker'],
+  // ★ the signer's files and the worker (B8)
+  [['cat', '~/.code-forge/runs/r1.key'], 'code-forge-runs-access'],
+  [['cp', 'x', '$HOME/.code-forge/runs/r1.key'], 'code-forge-runs-access'],
+  [['cat', '${HOME}/.code-forge/runs'], 'code-forge-runs-access'],
+  [['cat', `${os.homedir()}/.code-forge/runs/r1.json`], 'code-forge-runs-access'],
+  [['xxd', '--file=~/.code-forge/runs/r1.key'], 'code-forge-runs-access'],
+  [['code-forge', 'worker', '--run', 'r1'], 'code-forge-worker-from-coder'],
+  [['/usr/local/bin/forge', 'worker'], 'code-forge-worker-from-coder'],
+  [['npx', '-y', '@ricardov/code-forge', 'run', 'start'], 'code-forge-worker-from-coder'],
+  [['node', 'bin/code-forge.mjs', 'worker'], 'code-forge-worker-from-coder'],
+  [['pnpm', 'exec', 'code-forge', 'run', 'start', '--reattach'], 'code-forge-worker-from-coder'],
+  [['tee', '.code-forge/reviews/r1/t.json'], 'code-forge-reviews-write'],
+  [['touch', '/abs/proj/.code-forge/queue/t1.done'], 'code-forge-reviews-write'],
+  [['dd', 'if=x', 'of=.code-forge/reviews/a.json'], 'code-forge-reviews-write'],
+  [['sed', '-i', 's/a/b/', '.code-forge/reviews/a.json'], 'code-forge-reviews-write'],
+  [['sed', '--in-place', 's/x/y/', '.code-forge/reviews/r.json'], 'code-forge-reviews-write'],
+  [['sed', '--in-place=.bak', 's/x/y/', '.code-forge/reviews/r.json'], 'code-forge-reviews-write'],
+  [['sed', '-i.bak', 's/x/y/', '.code-forge/reviews/r.json'], 'code-forge-reviews-write'],
+  [['sudo', 'cp', 'x', '.code-forge/reviews/a.json'], 'code-forge-reviews-write'],
+  [['env', 'A=1', 'cp', 'x', '.code-forge/reviews/a.json'], 'code-forge-reviews-write'],
+  [['timeout', '5', 'tee', '.code-forge/queue/t1.done'], 'code-forge-reviews-write'],
+  [['git', 'mv', '.code-forge/reviews/a.json', 'b.json'], 'code-forge-reviews-write'],
+  [['git', 'checkout', 'HEAD', '.code-forge/reviews/a.json'], 'code-forge-reviews-write'],
+  [['bash', '-c', 'cat ~/.code-forge/runs/r.key'], 'code-forge-runs-access'],
+  [['node', '-e', "require('fs').readFileSync('$HOME/.code-forge/runs/r.key')"], 'code-forge-runs-access'],
+  [['node', '--no-warnings', 'bin/code-forge.mjs', 'worker'], 'code-forge-worker-from-coder'],
+  [['npx', '-p', '@ricardov/code-forge', 'code-forge', 'worker'], 'code-forge-worker-from-coder'],
+  [['npx', '-p', 'some-wrapper', 'code-forge', 'worker'], 'code-forge-worker-from-coder'], // -p's value is consumed
+  [['code-forge', '--verbose', 'worker'], 'code-forge-worker-from-coder'],
+  [['bunx', 'code-forge', 'worker'], 'code-forge-worker-from-coder'],
+  [['yarn', 'dlx', '@ricardov/code-forge', 'run', 'start'], 'code-forge-worker-from-coder'],
 ];
 
 for (const [argv, expectedId] of FORBIDDEN_CASES) {
@@ -252,6 +342,17 @@ const ALLOWED_CASES = [
   ['gh', 'pr', 'edit', '123', '--title', 'x'],
   ['gh', 'pr', 'view', '12'],
   ['deploy', '--env', 'production'], // documented limit: contains never spans two tokens
+  ['cat', '.code-forge/reviews/r1/t.json'], // reading a review result is not a write
+  ['cat', '.code-forge/runs/r1.json'], // the workspace mirror is informational
+  ['cat', '~/.code-forge/runsX/a'], // segment boundary
+  ['sed', 's/a/b/', '.code-forge/reviews/a.json'], // no -i: prints, does not write
+  ['touch', '.code-forge/queue/t1.json'], // enqueuing a ticket is the coder's job
+  ['code-forge', 'review-file', 'src/a.mjs'],
+  ['code-forge', 'run', 'status'],
+  ['forge', 'block', 'open', 'B1'],
+  ['git', 'log', '--', '.code-forge/reviews/a.json'], // reading history is not a write
+  ['sudo', 'cat', '.code-forge/reviews/a.json'],
+  ['code-forge', 'review-file', '--wait', 't1'],
 ];
 
 for (const argv of ALLOWED_CASES) {
@@ -326,8 +427,64 @@ test('the Claude renderer emits one item per entry, in list order, with exactly 
 test('exactly the unexpressible ids render with enforced: false', () => {
   for (const render of [renderForClaude, renderForGrok, renderForCodex]) {
     const unenforced = render().filter((r) => !r.enforced).map((r) => r.id);
-    assert.deepEqual(unenforced, UNEXPRESSIBLE_IDS, `${render.name}`);
+    assert.deepEqual(unenforced, UNEXPRESSIBLE_IDS[render.name], `${render.name}`);
   }
+});
+
+test('renderForClaude emits the ★ path rules: 7 rules, on exactly the 2 path entries, of exactly the 3 tool kinds Read/Edit/Write', () => {
+  const pathRules = renderForClaude().flatMap((item) => item.rules.filter((r) => !isBashRule(r)).map((rule) => ({ id: item.id, rule })));
+  assert.equal(pathRules.length, 7);
+  assert.deepEqual([...new Set(pathRules.map((r) => r.id))], ['code-forge-runs-access', 'code-forge-reviews-write']);
+  assert.deepEqual([...new Set(pathRules.map((r) => /^(\w+)\(/.exec(r.rule)[1]))].sort(), ['Edit', 'Read', 'Write']);
+  assert.equal(pathRules.filter((r) => r.rule === 'Read(~/.code-forge/runs/**)').length, 1);
+});
+
+test('every path rule is refused by isForbidden for its own id (a read for Read, a write for Edit/Write)', () => {
+  let checked = 0;
+  for (const item of renderForClaude()) {
+    for (const rule of item.rules.filter((r) => !isBashRule(r))) {
+      const [, tool, glob] = /^(\w+)\((.*)\)$/.exec(rule);
+      const concrete = glob.replace('**', 'r1/x.json').replace('*', 't1');
+      const argv = tool === 'Read' ? ['cat', concrete] : ['cp', 'src.json', concrete];
+      assert.equal(isForbidden(argv)?.id, item.id, rule);
+      checked += 1;
+    }
+  }
+  assert.equal(checked, 7);
+});
+
+test('scanTranscript flags a key-path read — 1 of 1 — and each ★ entry once, and a clean transcript 0 times', () => {
+  assert.deepEqual(scanTranscript('$ cat ~/.code-forge/runs/x.key'), [{ id: 'code-forge-runs-access', line: 1 }]);
+  const transcript = [
+    'Reading the brief…',
+    '$ npx code-forge worker --run r1',
+    'Write(.code-forge/reviews/r1/t1.json)',
+    '{"name":"Read","input":{"file_path":"$HOME/.code-forge/runs/r1.json"}}',
+    'echo ok > .code-forge/queue/t1.done',
+  ].join('\n');
+  assert.deepEqual(scanTranscript(transcript), [
+    { id: 'code-forge-worker-from-coder', line: 2 },
+    { id: 'code-forge-reviews-write', line: 3 },
+    { id: 'code-forge-runs-access', line: 4 },
+    { id: 'code-forge-reviews-write', line: 5 },
+  ]);
+  const clean = 'code-forge review-file src/a.mjs --block B1\ncat .code-forge/reviews/r1/t1.json\n===BLOCK B1 COMPLETE===';
+  assert.deepEqual(scanTranscript(clean), []);
+});
+
+test('scanTranscript sees writes hidden in a script string and GNU in-place forms that isForbidden cannot', () => {
+  assert.deepEqual(scanTranscript('$ bash -c "cp x .code-forge/reviews/r1/t.json"'), [{ id: 'code-forge-reviews-write', line: 1 }]);
+  assert.deepEqual(scanTranscript('sed --in-place=.bak s/a/b/ .code-forge/reviews/r1/t.json'), [{ id: 'code-forge-reviews-write', line: 1 }]);
+  assert.deepEqual(scanTranscript('sed s/a/b/ .code-forge/reviews/r1/t.json'), []);
+});
+
+test('scanTranscript is linear: a 60 000-token line is scanned in well under a second and its trailing hit is found', () => {
+  const line = `${'word '.repeat(60000)}git push --force`;
+  const started = performance.now();
+  const hits = scanTranscript(line);
+  const elapsed = performance.now() - started;
+  assert.deepEqual(hits, [{ id: 'git-push-force', line: 1 }]);
+  assert.ok(elapsed < 1000, `took ${elapsed.toFixed(0)} ms`);
 });
 
 test('the Grok renderer emits exactly one item per entry, with the same rules as Claude', () => {
@@ -347,7 +504,7 @@ test('the Codex renderer emits one item per entry with token-array patterns and 
   assert.equal(rendered.length, FORBIDDEN.length);
   assert.deepEqual(rendered.map((r) => r.id), FORBIDDEN.map((e) => e.id));
   for (const item of rendered) {
-    const expectedPatterns = EXPECTED_RULES[item.id].map(ruleToTokens);
+    const expectedPatterns = EXPECTED_RULES[item.id].filter(isBashRule).map(ruleToTokens);
     assert.deepEqual(
       sorted(item.patterns.map((p) => JSON.stringify(p))),
       sorted(expectedPatterns.map((p) => JSON.stringify(p))),
@@ -360,11 +517,14 @@ test('the Codex renderer emits one item per entry with token-array patterns and 
 });
 
 test('every rendered rule is itself refused by isForbidden (the CLI layer never allows what the matcher forbids)', () => {
+  let checked = 0;
   for (const item of renderForClaude()) {
-    for (const rule of item.rules) {
+    for (const rule of item.rules.filter(isBashRule)) {
       assert.equal(isForbidden([...ruleToTokens(rule), 'x'])?.id, item.id, rule);
+      checked += 1;
     }
   }
+  assert.equal(checked, Object.values(EXPECTED_RULES).flat().filter(isBashRule).length);
 });
 
 test('a shorter list yields a matching renderer count (renderers are not hardcoded to the default length)', () => {

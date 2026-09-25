@@ -46,6 +46,24 @@
  *    branch --delete` AND `--force`).
  *  - `contains` — every member of `tokens` is a substring of some argv token (a configured
  *    `production.markers` / `production.names` value; `mergeForbidden()` adds the real ones).
+ *  - `anyPrefix` (B8, C18) — the normalized argv starts with ANY of `prefixes`, after launchers
+ *    are unwrapped (`npx`/`bunx` with their options, `-p/--package <pkg>` included; `pnpm
+ *    exec|dlx`; `yarn dlx`; `node [options] <file>`), a `code-forge.mjs` / `@ricardov/code-forge[@x]`
+ *    token read as `code-forge` (a repeated bin name after the package is dropped), and option
+ *    tokens between the words skipped (`code-forge --verbose worker`).
+ *  - `path` (B8, C18) — protects the signer's files (plan §8.6). `paths` are `~/…` (the user's
+ *    home, matched as `~`, `$HOME`, `${HOME}` or the real `os.homedir()` at call time) or
+ *    project-relative (matched at token start or after `/`, `=`, `:`, whitespace or a quote — so
+ *    a path inside a `bash -c "…"` / `node -e "…"` script token is seen too). `access:
+ *    'readwrite'` forbids ANY argv naming the path; `access: 'write'` forbids it only when the
+ *    command — after the wrappers `sudo`/`env [VAR=x…]`/`xargs`/`nice`/`timeout <n>`/`command`
+ *    — is a write verb (`WRITE_VERBS`; `sed`/`perl` with `-i…`, `--in-place[=…]`; `git
+ *    mv|rm|restore|checkout`). A `*` in a path matches within one segment.
+ *    Known limits: a relative spelling from inside `$HOME` (`cd ~; cat .code-forge/runs/x.key`),
+ *    a shell redirection (not argv), and a WRITE hidden inside a script string (`bash -c "cp x
+ *    .code-forge/reviews/y"` — the verb is `bash`) are not seen here; `scanTranscript()` and the
+ *    block gate are the detectors for those, and the signer is tamper EVIDENCE, not a same-user
+ *    boundary (§8.6).
  *
  * ## Renderers — what the CLIs can and cannot enforce
  *
@@ -57,10 +75,21 @@
  * a flag placed after other arguments (`git push origin main --force`), a global option before
  * the subcommand, or a `+refspec` escapes a prefix rule — those are caught by `isForbidden()`
  * (for argv the package runs) and by the gates (layer 3). An entry is `enforced: false` only when
- * the CLI syntax cannot express it at all: today that is the `contains` kind (no pinned CLI
- * documents a match-anywhere rule).
+ * the CLI syntax cannot express it at all: the `contains` kind everywhere (no pinned CLI
+ * documents a match-anywhere rule), and the `path` kind for Codex. For Codex the `path` entries
+ * are NOT ENFORCED AT ALL: execpolicy matches command prefixes, not file paths, and the
+ * `workspace-write` sandbox neither stops reads of `~/.code-forge/runs/` (it limits writes, not
+ * reads) nor writes to `.code-forge/reviews/` or `.code-forge/queue/*.done` (they are INSIDE the
+ * workspace). On Codex the prose list, `scanTranscript()` and the block gate are the only
+ * detectors. For Claude — and Grok, whose renderer IS `renderForClaude` (`--deny` is the
+ * documented alias of `--disallowedTools`) — a `path` entry renders as file-tool rules
+ * `Read(<glob>)` / `Edit(<glob>)` / `Write(<glob>)` (`Read` only for `readwrite`), `~/` kept as
+ * the home prefix and each directory widened to `<dir>/**`. Whether the pinned Claude or Grok
+ * honours path-scoped rules is unproven (plan [A22], §0.6.7: `doctor` probes it);
+ * `scanTranscript()` is the detector either way.
  */
 
+import os from 'node:os';
 import path from 'node:path';
 
 /**
@@ -73,10 +102,13 @@ import path from 'node:path';
 /**
  * @typedef {object} ForbiddenEntry
  * @property {string} id
- * @property {"prefix"|"contains"|"commandFlag"} kind
+ * @property {"prefix"|"contains"|"commandFlag"|"anyPrefix"|"path"} kind
  * @property {ReadonlyArray<string>} [tokens] - `prefix` and `contains` kinds.
  * @property {ReadonlyArray<string>} [command] - `commandFlag` kind: the required argv prefix.
  * @property {ReadonlyArray<FlagGroup>} [groups] - `commandFlag` kind: every group must match.
+ * @property {ReadonlyArray<ReadonlyArray<string>>} [prefixes] - `anyPrefix` kind.
+ * @property {ReadonlyArray<string>} [paths] - `path` kind: `~/…` or project-relative.
+ * @property {"readwrite"|"write"} [access] - `path` kind.
  * @property {string} description
  */
 
@@ -100,10 +132,13 @@ function freezeGroup(group) {
 function freezeEntry(entry) {
   /** @type {Record<string, unknown>} */
   const frozen = { ...entry };
-  for (const key of ['tokens', 'command']) {
+  for (const key of ['tokens', 'command', 'paths']) {
     if (Array.isArray(frozen[key])) {
       frozen[key] = Object.freeze([...frozen[key]]);
     }
+  }
+  if (Array.isArray(frozen.prefixes)) {
+    frozen.prefixes = Object.freeze(frozen.prefixes.map((p) => Object.freeze([...p])));
   }
   if (Array.isArray(frozen.groups)) {
     frozen.groups = Object.freeze(frozen.groups.map(freezeGroup));
@@ -202,6 +237,34 @@ export const FORBIDDEN = Object.freeze(
         'Any argv token CONTAINING a configured production.markers/production.names value (env flag, DB ' +
         'name, prod host, deploy tool) — this entry is a placeholder; mergeForbidden() adds the real, ' +
         'project-configured tokens',
+    },
+    // ★ B8 (C4, C18): the signer's files and the worker, plan §8.4 / §8.6.
+    {
+      id: 'code-forge-runs-access',
+      kind: 'path',
+      paths: ['~/.code-forge/runs'],
+      access: 'readwrite',
+      description:
+        'Any read or write of ~/.code-forge/runs/ (the run record pin and the per-run HMAC key) — ' +
+        'a coder never needs it; reading the key is a named rule-break, not a boundary (§8.6)',
+    },
+    {
+      id: 'code-forge-worker-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [
+        ['code-forge', 'worker'],
+        ['forge', 'worker'],
+        ['code-forge', 'run', 'start'],
+        ['forge', 'run', 'start'],
+      ],
+      description: 'Start a worker or a run (forge worker / code-forge worker / run start) from a coder — the orchestrator only',
+    },
+    {
+      id: 'code-forge-reviews-write',
+      kind: 'path',
+      paths: ['.code-forge/reviews', '.code-forge/queue/*.done'],
+      access: 'write',
+      description: 'Any write under .code-forge/reviews/ or to .code-forge/queue/*.done — only the worker writes review results',
     },
   ].map(freezeEntry),
 );
@@ -327,6 +390,102 @@ function normalizedReadings(argv) {
   return tails.length > 0 ? tails.map((tail) => ['git', ...tail]) : [['git']];
 }
 
+/**
+ * Unwrap a launcher so `npx -y @ricardov/code-forge worker` reads as `code-forge worker`.
+ * @param {ReadonlyArray<string>} reading
+ * @returns {ReadonlyArray<string>}
+ */
+function unwrapLauncher(reading) {
+  let rest = reading;
+  const skipOptions = () => {
+    while (rest.length > 0 && rest[0].startsWith('-')) {
+      const takesValue = rest[0] === '-p' || rest[0] === '--package' || rest[0] === '-r' || rest[0] === '--require';
+      rest = rest.slice(takesValue ? 2 : 1);
+    }
+  };
+  if (rest[0] === 'npx' || rest[0] === 'bunx') {
+    rest = rest.slice(1);
+    skipOptions();
+  } else if ((rest[0] === 'pnpm' || rest[0] === 'yarn') && (rest[1] === 'exec' || rest[1] === 'dlx')) {
+    rest = rest.slice(2);
+    skipOptions();
+  } else if (rest[0] === 'node') {
+    rest = rest.slice(1);
+    skipOptions();
+  }
+  if (rest.length === 0) return rest;
+  const isPackage = (/** @type {string} */ t) => /^@ricardov\/code-forge(@.*)?$/.test(t) || /^code-forge(\.mjs)?(@.*)?$/.test(path.basename(t));
+  const head = rest[0];
+  let tail = rest.slice(1);
+  if (isPackage(head) && tail.length > 0 && isPackage(tail[0])) tail = tail.slice(1);
+  return [isPackage(head) ? 'code-forge' : commandName(head), ...tail.filter((t) => !t.startsWith('-'))];
+}
+
+/** Commands that write the file they are given (`>`/`>>` and the Claude file tools come from transcripts). */
+const WRITE_VERBS = new Set([
+  'cp', 'mv', 'tee', 'touch', 'rm', 'ln', 'install', 'truncate', 'dd', 'rsync', 'chmod', 'chown',
+  'unlink', 'mkdir', 'rmdir', '>', '>>', 'Write', 'Edit', 'MultiEdit', 'NotebookEdit',
+]);
+
+/** git subcommands that write a path they name. */
+const GIT_WRITE_SUBCOMMANDS = new Set(['mv', 'rm', 'restore', 'checkout']);
+
+/** Wrappers skipped before the write verb is read. */
+const WRAPPERS = new Set(['sudo', 'env', 'xargs', 'nice', 'timeout', 'command', 'nohup']);
+
+/** @param {string} token @returns {boolean} `sed -i`, `-i.bak`, `perl -pi`, `--in-place[=…]` */
+const isInPlaceFlag = (token) => /^-[a-zA-Z]*i/.test(token) || /^--in-place(=|$)/.test(token);
+
+/**
+ * Does `argv` (a raw command, wrappers allowed) write the files it names?
+ * @param {ReadonlyArray<string>} argv
+ * @returns {boolean}
+ */
+function isWriteCommand(argv) {
+  let i = 0;
+  while (i < argv.length && WRAPPERS.has(commandName(argv[i]))) {
+    i += 1;
+    // wrapper options, `VAR=x` assignments (env) and a duration (timeout) are not the verb
+    while (i < argv.length && (argv[i].startsWith('-') || /^[A-Za-z_][A-Za-z0-9_]*=/.test(argv[i]) || /^\d+(\.\d+)?[smhd]?$/.test(argv[i]))) i += 1;
+  }
+  const verb = i < argv.length ? commandName(argv[i]) : '';
+  if (WRITE_VERBS.has(verb)) return true;
+  if ((verb === 'sed' || verb === 'perl') && argv.slice(i + 1).some(isInPlaceFlag)) return true;
+  if (verb === 'git') return normalizedReadings(argv.slice(i)).some((r) => GIT_WRITE_SUBCOMMANDS.has(r[1]));
+  return false;
+}
+
+/** @param {string} text */
+const escapeRegExp = (text) => text.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/** @type {Map<string, RegExp>} compiled path patterns, keyed by home dir + path */
+const pathPatternCache = new Map();
+
+/**
+ * A regex matching an argv token that names protected path `p` (see the `path` kind doc).
+ * @param {string} p
+ * @returns {RegExp}
+ */
+function pathPattern(p) {
+  const home = os.homedir();
+  const cacheKey = `${home}\u0000${p}`;
+  const cached = pathPatternCache.get(cacheKey);
+  if (cached) return cached;
+  const glob = (/** @type {string} */ s) => s.split('*').map(escapeRegExp).join('[^/\\s]*');
+  let pattern;
+  if (p.startsWith('~/')) {
+    const homes = ['~', '\\$HOME', '\\$\\{HOME\\}', escapeRegExp(home)];
+    pattern = new RegExp(`(?:^|[=:\\s'"])(?:${homes.join('|')})/${glob(p.slice(2))}(?:/|$|[\\s'";)])`);
+  } else {
+    pattern = new RegExp(`(?:^|[/=:\\s'"])${glob(p)}(?:/|$|[\\s'";)])`);
+  }
+  pathPatternCache.set(cacheKey, pattern);
+  return pattern;
+}
+
+/** @param {string} token @param {ForbiddenEntry} entry @returns {boolean} */
+const namesPath = (token, entry) => entry.paths.some((p) => pathPattern(p).test(token));
+
 // ── Matching ─────────────────────────────────────────────────────────────────
 
 /**
@@ -366,6 +525,15 @@ function matchesEntry(reading, rawArgv, entry) {
   }
   if (entry.kind === 'prefix') {
     return startsWithPrefix(reading, entry.tokens);
+  }
+  if (entry.kind === 'anyPrefix') {
+    const unwrapped = unwrapLauncher(reading);
+    return entry.prefixes.some((prefix) => startsWithPrefix(unwrapped, prefix));
+  }
+  if (entry.kind === 'path') {
+    const named = rawArgv.some((token) => namesPath(token, entry));
+    if (!named || entry.access === 'readwrite') return named;
+    return isWriteCommand(rawArgv);
   }
   if (!startsWithPrefix(reading, entry.command)) return false;
   const rest = reading.slice(entry.command.length);
@@ -460,19 +628,39 @@ function renderPatterns(entry) {
     }
     return patterns;
   }
+  if (entry.kind === 'anyPrefix') {
+    return entry.prefixes.flatMap((prefix) =>
+      prefix[0] === 'code-forge'
+        ? [[...prefix], ['npx', ...prefix], ['npx', '@ricardov/code-forge', ...prefix.slice(1)]]
+        : [[...prefix]],
+    );
+  }
   return [];
+}
+
+/**
+ * File-tool rules for a `path` entry: `Read`/`Edit`/`Write` (`Read` only for `readwrite`), a
+ * directory widened to `<dir>/**`.
+ * @param {ForbiddenEntry} entry
+ * @returns {string[]}
+ */
+function pathRules(entry) {
+  if (entry.kind !== 'path') return [];
+  const tools = entry.access === 'readwrite' ? ['Read', 'Edit', 'Write'] : ['Edit', 'Write'];
+  return entry.paths.flatMap((p) => tools.map((tool) => `${tool}(${p.includes('*') ? p : `${p}/**`})`));
 }
 
 /**
  * Render the list as Claude Code `--disallowedTools` values, e.g. `Bash(git reset --hard:*)`.
  * One item per entry; `rules` holds one prefix rule per flag spelling (see the module doc for
- * what prefix rules cannot reach). `enforced` is false only when no rule can be expressed.
+ * what prefix rules cannot reach), plus the file-tool rules of a `path` entry. `enforced` is
+ * false only when no rule can be expressed.
  * @param {ReadonlyArray<ForbiddenEntry>} [list]
  * @returns {{id: string, rules: string[], enforced: boolean}[]}
  */
 export function renderForClaude(list = FORBIDDEN) {
   return list.map((entry) => {
-    const rules = renderPatterns(entry).map((pattern) => `Bash(${pattern.join(' ')}:*)`);
+    const rules = [...renderPatterns(entry).map((pattern) => `Bash(${pattern.join(' ')}:*)`), ...pathRules(entry)];
     return { id: entry.id, rules, enforced: rules.length > 0 };
   });
 }
@@ -506,3 +694,65 @@ export function renderForCodex(list = FORBIDDEN) {
     };
   });
 }
+
+// ── Transcripts ──────────────────────────────────────────────────────────────
+
+/**
+ * Scan captured coder output (subprocess stdout, Solo `search_output` text, a harness log) for
+ * any entry of `list`, line by line: each line is split into shell-ish tokens (whitespace,
+ * quotes, `;|&(),{}[]`; `>`/`>>` kept as their own token), so a command anywhere in the line —
+ * `$ cat ~/.code-forge/runs/r.key`, `Write(.code-forge/reviews/x.json)`, a stream-json
+ * `"name":"Write"` followed by the path — is found. It is a grep: a line that merely MENTIONS a
+ * forbidden command is a hit too (fail closed; the block gate reports it as `rule_break`, B5).
+ *
+ * Linear in the line length: `contains` and `path` entries are evaluated ONCE per line over its
+ * tokens (a `write` path entry hits when a write command starts before a token naming the path);
+ * command entries run only at tokens that can start one (their first word, a launcher, a
+ * code-forge bin), each on a window of `TRANSCRIPT_WINDOW` tokens — a flag further than that
+ * from its command is not seen. One hit per (line, id), in list order.
+ * @param {string} text
+ * @param {ReadonlyArray<ForbiddenEntry>} [list]
+ * @returns {{id: string, line: number}[]}
+ */
+export function scanTranscript(text, list = FORBIDDEN) {
+  const commandEntries = list.filter((e) => e.kind === 'prefix' || e.kind === 'commandFlag' || e.kind === 'anyPrefix');
+  const firstWords = new Set(['npx', 'bunx', 'pnpm', 'yarn', 'node']);
+  for (const e of commandEntries) {
+    if (e.kind === 'prefix') firstWords.add(e.tokens[0]);
+    else if (e.kind === 'commandFlag') firstWords.add(e.command[0]);
+    else for (const p of e.prefixes) firstWords.add(p[0]);
+  }
+  const writeStarts = new Set([...WRITE_VERBS, ...WRAPPERS, 'sed', 'perl', 'git']);
+  /** @type {{id: string, line: number}[]} */
+  const hits = [];
+  String(text)
+    .split('\n')
+    .forEach((lineText, index) => {
+      const tokens = lineText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
+      const ids = new Set();
+      let firstWrite = -1;
+      for (let i = 0; i < tokens.length && firstWrite < 0; i += 1) {
+        if (writeStarts.has(commandName(tokens[i])) && isWriteCommand(tokens.slice(i, i + TRANSCRIPT_WINDOW))) firstWrite = i;
+      }
+      for (const entry of list) {
+        if (entry.kind === 'contains' && matchesEntry([], tokens, entry)) ids.add(entry.id);
+        if (entry.kind !== 'path') continue;
+        const named = tokens.findIndex((t, i) => (entry.access === 'readwrite' || (firstWrite >= 0 && i > firstWrite)) && namesPath(t, entry));
+        if (named >= 0) ids.add(entry.id);
+      }
+      for (let i = 0; i < tokens.length; i += 1) {
+        if (!firstWords.has(commandName(tokens[i])) && !tokens[i].includes('code-forge')) continue;
+        const window = tokens.slice(i, i + TRANSCRIPT_WINDOW);
+        for (const entry of commandEntries) {
+          if (!ids.has(entry.id) && isForbidden(window, [entry])) ids.add(entry.id);
+        }
+      }
+      for (const entry of list) {
+        if (ids.has(entry.id)) hits.push({ id: entry.id, line: index + 1 });
+      }
+    });
+  return hits;
+}
+
+/** How many tokens after a command start `scanTranscript` looks at. */
+const TRANSCRIPT_WINDOW = 64;
