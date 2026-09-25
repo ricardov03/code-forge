@@ -17,10 +17,14 @@
  *     (rule 2); the next rounds are coded at that level by a fresh session (`deps.fix`).
  *  5. Cap: `review.max_rounds_per_file` (4) reached with an open finding ⇒ the L3 patch rung
  *     (rule 6; once per block — shared with rule 5's ceiling), whose `patch_check` round is
- *     OUTSIDE the cap. A `patch_check` that still has an open finding ALWAYS stops — the block's
- *     one rung is spent, so the loop never goes back to `fix` (rule 5): `stopped: review_cap`
- *     when the cap is reached, `stopped: l3_patch_exhausted` when the rung was reached through
- *     the `stop_at` ceiling below the cap. Either way the ledger `review.cap` row lists the open
+ *     OUTSIDE the cap. The rung is also rule 5: rule 2/2b at the running ceiling (L2 — L3 is never
+ *     a coding level, R1) takes it, so for an L2 block the rung IS the +1 at round 2. After the
+ *     patch the block continues at L2 (§3.6, Fable ruling A): `l3_rung_used = true`,
+ *     `rounds_at_level = 0`, and the `patch_check` goes through `decideNext` like any recheck —
+ *     clean ⇒ complete; open set not smaller than before the patch ⇒ `stopped: l3_patch_exhausted`
+ *     (`trigger: review_stall`); round ≥ cap ⇒ `stopped: review_cap`; else `fix` at L2 with
+ *     `l3_patch: true` in the brief. A later stall ⇒ `l3_patch_exhausted`; round 4 still open ⇒
+ *     `review_cap` (the rung is spent). Either way the ledger `review.cap` row lists the open
  *     ids — the human decides (fix by hand, `block waive`, or re-decompose).
  *  6. Ledger per round: `review.round {file, round, level, kind, open_before, closed,
  *     new_in_hunks, late, open_after, tokens_in, tokens_out}`; a converged file gets
@@ -90,7 +94,7 @@ import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.
  * @property {import('./triage.mjs').JevAsk} [jev]
  * @property {import('./triage.mjs').RuleFn} [rule]
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow]
- * @property {(req: {file: string, round: number, level: string, open: Finding[]}) => Promise<unknown>} [fix] - a fresh coder session at `level`.
+ * @property {(req: {file: string, round: number, level: string, open: Finding[], l3_patch: boolean}) => Promise<unknown>} [fix] - a fresh coder session at `level`; `l3_patch` = the block's L3 patch is in the tree (§3.6).
  * @property {(req: {file: string, level: 'L3', open: Finding[]}) => Promise<unknown>} [patch] - the L3 patch rung (≤ 80 lines, owned files only).
  * @property {string | null} [base] - the block base (only for `recheck_scope: file`).
  * @property {string} [rulesDigest] @property {string} [factsExcerpt]
@@ -220,17 +224,25 @@ async function recheckSession(packet, deps) {
 /**
  * After a counted round with open findings: cap first (rule 6), else stall / ladder (2b, 2).
  * @param {FileState} state @param {number} openBefore @param {ReturnType<typeof settings>} s
+ * @param {'full' | 'recheck' | 'patch_check'} kind - a `patch_check` compares against the open
+ *   set before the patch (the rung's own shrink test), whatever the round number.
  * @returns {NextStep}
  */
-function decideNext(state, openBefore, s) {
+function decideNext(state, openBefore, s, kind) {
   if (state.open.length === 0) return { action: 'complete' };
+  if (kind === 'patch_check') {
+    // the block's one rung is spent: a patch that did not shrink the set stops FIRST — even when
+    // the rung was taken at the cap — then the cap; else the block continues at L2 below
+    if (reviewRoundStalled(openBefore, state.open.length)) return { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' };
+    if (state.round >= s.maxRounds) return { action: 'stop', reason: 'review_cap', trigger: 'review_cap' };
+  }
   if (state.round >= s.maxRounds) {
     const esc = escalationAfterAttempt({ currentLevel: state.level, roundsAtFile: state.round, maxRoundsPerFile: s.maxRounds, openFixNowFinding: true, l3RungAlreadyUsed: state.l3_rung_used });
     return esc.action === 'l3_rung' ? { action: 'patch', level: 'L3', trigger: 'review_cap' } : { action: 'stop', reason: 'review_cap', trigger: 'review_cap' };
   }
   const esc = escalationAfterAttempt({
     currentLevel: state.level,
-    reviewStall: state.round >= 2 && reviewRoundStalled(openBefore, state.open.length),
+    reviewStall: (kind === 'patch_check' || state.round >= 2) && reviewRoundStalled(openBefore, state.open.length),
     openFixNowFinding: true,
     reviewRoundsAtLevel: state.rounds_at_level,
     reviewRoundsPerLevel: s.perLevel,
@@ -378,6 +390,10 @@ export async function runRound(state, deps, opts = {}) {
   if (kind !== 'patch_check') {
     draft.round += 1;
     draft.rounds_at_level += 1;
+  } else {
+    // the block continues at L2 after the rung with a fresh round counter (§3.6) — also here, not
+    // only in `converge`, because the worker runs the patch_check from its own ticket
+    draft.rounds_at_level = 0;
   }
   draft.reviewed_content = current.content;
   draft.last_packet = packetInfo;
@@ -401,12 +417,9 @@ export async function runRound(state, deps, opts = {}) {
     draft.status = 'complete';
     draft.next = { action: 'complete' };
   } else {
-    if (kind === 'patch_check') {
-      // rule 5: the block's one L3 rung is spent — an open finding after the patch always stops
-      draft.next = draft.round >= s.maxRounds ? { action: 'stop', reason: 'review_cap', trigger: 'review_cap' } : { action: 'stop', reason: 'l3_patch_exhausted' };
-    } else {
-      draft.next = decideNext(draft, openBefore, s);
-    }
+    // after a patch_check the block continues at L2 (§3.6): the rung is spent, so a stall now
+    // stops (`l3_patch_exhausted`) and the cap stops (`review_cap`); a shrunk set is fixed at L2
+    draft.next = decideNext(draft, openBefore, s, kind);
     if (draft.next.action === 'stop') draft.status = 'stopped';
   }
   const rows = [...lateRows, roundRow];
@@ -442,11 +455,12 @@ export async function converge(state, deps) {
     if (!next || next.action === 'complete' || next.action === 'stop' || next.action === 'retry') return state;
     if (next.action === 'patch') {
       state.l3_rung_used = true;
+      state.rounds_at_level = 0;
       await deps.patch?.({ file: state.file, level: 'L3', open: [...state.open] });
       await runRound(state, deps, { kind: 'patch_check' });
       continue;
     }
-    await deps.fix?.({ file: state.file, round: state.round + 1, level: state.level, open: [...state.open] });
+    await deps.fix?.({ file: state.file, round: state.round + 1, level: state.level, open: [...state.open], l3_patch: state.l3_rung_used });
     await runRound(state, deps);
   }
   return state;

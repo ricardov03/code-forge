@@ -18,15 +18,19 @@
  *   4. S2 ruling — S1 `next = escalate` is never acted on directly; it goes to S2 as a check
  *      (`trigger: 's2_ruling'`, `action: 's2_check'`). S1 `next = stop` routes straight to the
  *      human (`action: 'stop'`).
- *   5. Never skip a level; `stop_at: L3` is fixed — when rule 1, 2b or 2 fires AND the block is
- *      already at the ceiling (`currentLevel === stopAt`), there IS no "+1 level" to go to. R1's
- *      L3 rung takes over instead: `escalation.l3_mode: 'patch'` (default) routes to a fresh L3
+ *   5. Never skip a level; `stop_at: L3` is fixed. L3 is never a RUNNING level (R1: "the L3 rung
+ *      is a patch, not bulk coding"; the block continues at L2): the running ceiling is
+ *      `MAX_RUNNING_LEVEL` (L2), or `stop_at` when lower. When rule 1, 2b or 2 fires AND the block
+ *      is already at the running ceiling, there IS no "+1 level" to go to. R1's L3 rung takes
+ *      over instead: `escalation.l3_mode: 'patch'` (default) routes to a fresh L3
  *      session that returns a PATCH, never a whole feature (`action: 'l3_rung', mode: 'patch'`).
  *      `l3_mode: 'code'` keeps D4 literal — the block keeps coding at L3 ONCE more
  *      (`action: 'escalate', level: 'L3'`), no patch machinery. Either way, a SECOND ceiling hit
  *      on the same block (`l3RungAlreadyUsed`) always `stop`s (fix round 1: `l3_mode: 'code'`
  *      used to have no end state at all — the caller resets its attempt counter, so rules 1/2
  *      would fire again every `retriesPerLevel` failures forever, never honouring `stop_at`).
+ *      A `stop_at` below L3 (schema-rejected; defensive) has no rung: at its ceiling ⇒ `stop`
+ *      (`reason: 'stop_at'`).
  *   6. Review cap (v1.3) — `review.max_rounds_per_file` (default 4) reached on a file with an
  *      open `fix_now` finding ⇒ the L3 patch rung for THAT FILE, once (`trigger: 'review_cap'`,
  *      `action: 'l3_rung', mode: 'patch'` — always `'patch'`, regardless of `l3Mode`: a round-cap
@@ -114,29 +118,51 @@ export function reviewRoundStalled(openBefore, openAfter) {
 }
 
 /**
+ * The highest level a block CODES at (R1, D4, §0.7: "the L3 rung is a patch, not bulk coding";
+ * §3.6: after the patch "the block continues at L2"). L3 is never a running level — it is only
+ * the one-shot rung that `finalizeEscalate` returns once the block is at this ceiling.
+ */
+export const MAX_RUNNING_LEVEL = 'L2';
+
+/**
+ * @param {string} stopAt - `escalation.stop_at`.
+ * @returns {string} the running ceiling: `MAX_RUNNING_LEVEL`, lowered to `stopAt` when that is
+ *   lower (defensive — B1's schema fixes `stop_at` to `'L3'`).
+ */
+export function runningCeiling(stopAt = 'L3') {
+  return LEVEL_ORDER[Math.min(levelIndex(MAX_RUNNING_LEVEL), levelIndex(stopAt))];
+}
+
+/**
+ * Rules 1, 2b and 2 share this: below the running ceiling ⇒ +1 level (never to L3); at the
+ * running ceiling ⇒ rule 5, the block's one L3 rung (R1), then `stop`.
  * @param {'retries'|'review_rounds'|'review_stall'} trigger
  * @param {string} currentLevel
  * @param {string} stopAt
  * @param {'patch'|'code'} l3Mode
- * @param {boolean} l3RungAlreadyUsed - the ceiling was already hit once before on THIS block,
- *   in EITHER mode. A second hit always stops (fix round 1: `l3_mode: 'code'` used to have no
- *   end state — `stop_at: L3` must mean something regardless of mode). Rule 6 (`review_cap`)
- *   shares this SAME flag rather than a flag of its own — the plan's L3 rung is one per block,
- *   not one per trigger.
+ * @param {boolean} l3RungAlreadyUsed - the L3 rung was already used once on THIS block, in
+ *   EITHER mode and from either rule 5 or rule 6 (one rung per block, not per trigger). A second
+ *   hit always stops.
  * @returns {EscalationResult}
  */
 function finalizeEscalate(trigger, currentLevel, stopAt, l3Mode, l3RungAlreadyUsed) {
-  if (currentLevel !== stopAt) {
-    return { trigger, action: 'escalate', level: nextLevelCapped(currentLevel, stopAt) };
+  const ceiling = runningCeiling(stopAt);
+  if (levelIndex(currentLevel) < levelIndex(ceiling)) {
+    return { trigger, action: 'escalate', level: nextLevelCapped(currentLevel, ceiling) };
   }
-  // At the ceiling: rule 5 — there is no level above `stopAt` to escalate to.
+  // At (or, after an `l3_mode: code` turn, above) the running ceiling: rule 5.
+  if (stopAt !== 'L3') {
+    // `stop_at` below L3 forbids any L3 session, so there is no rung to take (§3.6 fixes
+    // `stop_at: L3`; this only guards a hand-built ctx).
+    return { trigger, action: 'stop', reason: 'stop_at' };
+  }
   if (l3RungAlreadyUsed) {
     return { trigger, action: 'stop', reason: l3Mode === 'code' ? 'l3_code_exhausted' : 'l3_patch_exhausted' };
   }
   if (l3Mode === 'code') {
-    // D4 literal: the block keeps coding at L3 ONCE more (the caller resets its attempt counter)
-    // — a second ceiling hit falls into the `l3RungAlreadyUsed` branch above and stops.
-    return { trigger, action: 'escalate', level: stopAt };
+    // D4 literal: ONE coding turn at L3 (the caller resets its attempt counter); the next
+    // ceiling hit falls into the `l3RungAlreadyUsed` branch above and stops.
+    return { trigger, action: 'escalate', level: 'L3' };
   }
   return { trigger, action: 'l3_rung', mode: 'patch' };
 }

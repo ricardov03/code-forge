@@ -147,9 +147,9 @@ async function threeRounds(closeAtRound3) {
   return state;
 }
 
-test('an open set of 3 → 3 ⇒ review_stall (+1 now); 3 → 2 ⇒ no escalation', async () => {
+test('an open set of 3 → 3 ⇒ review_stall (at L2, the running ceiling, that is the L3 patch rung — R1); 3 → 2 ⇒ no escalation', async () => {
   const stalled = await threeRounds([]);
-  assert.deepEqual(stalled.next, { action: 'fix', level: 'L3', trigger: 'review_stall' });
+  assert.deepEqual(stalled.next, { action: 'patch', level: 'L3', trigger: 'review_stall' });
   const shrunk = await threeRounds(['F2']);
   assert.deepEqual(shrunk.next, { action: 'fix', level: 'L2', trigger: null });
 });
@@ -169,15 +169,16 @@ test('3 → 2 → 1 → 0 converges with exactly 4 review.round rows and one rev
       edit(100 + req.round, `r${req.round}`);
     },
   };
-  const state = await converge(newFileState({ file: FILE, level: 'L2' }), deps);
+  // L1, not L2: an L2 block's +1 at round 2 is the L3 patch rung (R1), never an L3 coding level
+  const state = await converge(newFileState({ file: FILE, level: 'L1' }), deps);
   assert.equal(state.status, 'complete');
   const roundRows = rows.filter((r) => r.event === 'review.round');
   assert.equal(roundRows.length, 4);
-  assert.deepEqual(roundRows.map((r) => [r.round, r.level, r.kind, r.open_after]), [[1, 'L2', 'full', 3], [2, 'L2', 'recheck', 2], [3, 'L3', 'recheck', 1], [4, 'L3', 'recheck', 0]]);
+  assert.deepEqual(roundRows.map((r) => [r.round, r.level, r.kind, r.open_after]), [[1, 'L1', 'full', 3], [2, 'L1', 'recheck', 2], [3, 'L2', 'recheck', 1], [4, 'L2', 'recheck', 0]]);
   assert.equal(rows.filter((r) => r.event === 'review.approved').length, 1);
 });
 
-test('round 3 open ⇒ no patch session yet; round 4 open ⇒ exactly one L3 patch session, then stopped: review_cap', async () => {
+test('round 3 open ⇒ no patch session yet; round 4 open ⇒ exactly one L3 patch session; a patch_check that does not shrink the set ⇒ stopped: l3_patch_exhausted (stall before cap)', async () => {
   const { edit, rows, base } = fixture();
   const { spawn } = stubSpawn();
   let closing = new Set();
@@ -193,7 +194,8 @@ test('round 3 open ⇒ no patch session yet; round 4 open ⇒ exactly one L3 pat
       edit(150, 'patch');
     },
   };
-  const state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+  // L1, not L2: rounds 3–4 run at L2; an L2 block would take the L3 rung at round 2 (R1)
+  const state = await runRound(newFileState({ file: FILE, level: 'L1' }), deps);
   for (const [n, close] of /** @type {Array<[number, string[]]>} */ ([[2, ['F1']], [3, ['F1', 'F2']]])) {
     closing = new Set(close);
     edit(100 + n, `r${n}`);
@@ -206,12 +208,12 @@ test('round 3 open ⇒ no patch session yet; round 4 open ⇒ exactly one L3 pat
   assert.equal(patches.length, 1);
   assert.deepEqual(patches[0].level, 'L3');
   assert.equal(state.status, 'stopped');
-  assert.deepEqual(state.next, { action: 'stop', reason: 'review_cap', trigger: 'review_cap' });
+  assert.deepEqual(state.next, { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' });
   assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.kind]), [[1, 'full'], [2, 'recheck'], [3, 'recheck'], [4, 'recheck'], [4, 'patch_check']]);
-  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.file, r.open]), [[FILE, ['F3']]]);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.file, r.reason, r.open]), [[FILE, 'l3_patch_exhausted', ['F3']]]);
 });
 
-test('fix 3 (rule 5): the rung reached through the stop_at ceiling at round 2 ⇒ one patch, then stopped: l3_patch_exhausted, never back to fix', async () => {
+test('fix 3 (rule 5): the rung reached through the running ceiling at round 2 ⇒ one patch that does not shrink the set ⇒ stopped: l3_patch_exhausted, never back to fix', async () => {
   const { edit, rows, base } = fixture();
   const { spawn } = stubSpawn();
   let fixes = 0;
@@ -231,14 +233,116 @@ test('fix 3 (rule 5): the rung reached through the stop_at ceiling at round 2 �
       edit(150, 'patch');
     },
   };
-  const state = await converge(newFileState({ file: FILE, level: 'L3' }), deps);
+  const state = await converge(newFileState({ file: FILE, level: 'L2' }), deps);
   assert.deepEqual([fixes, patches.length, patches[0]?.level, state.round, state.l3_rung_used], [1, 1, 'L3', 2, true]);
   assert.equal(state.status, 'stopped');
-  assert.deepEqual(state.next, { action: 'stop', reason: 'l3_patch_exhausted' });
+  assert.deepEqual(state.next, { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' });
   assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.kind, r.open_after]), [[1, 'full', 1], [2, 'recheck', 1], [2, 'patch_check', 1]]);
   assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.file, r.round, r.reason, r.open]), [[FILE, 2, 'l3_patch_exhausted', ['F1']]]);
   await converge(state, deps);
   assert.deepEqual([fixes, patches.length, state.status], [1, 1, 'stopped']);
+});
+
+/**
+ * An L2 block whose round 2 stalls (nothing closes) ⇒ the L3 rung; the patch closes F1, and each
+ * later fix closes the next id in `afterPatch` (§3.6, Fable ruling A: the block continues at L2).
+ * @param {string[]} ids @param {string[]} afterPatch
+ */
+async function rungThenL2(ids, afterPatch) {
+  const { edit, rows, base } = fixture();
+  const { spawn } = stubSpawn();
+  const closing = new Set();
+  /** @type {Array<Record<string, any>>} */
+  const fixes = [];
+  /** @type {Array<Record<string, any>>} */
+  const patches = [];
+  const deps = {
+    ...base,
+    spawn,
+    review: judgeReview(ids.map((id, i) => finding(id, 10 * (i + 1)))),
+    jev: jevResolving(() => closing),
+    fix: async (/** @type {{round: number, level: string, l3_patch: boolean}} */ req) => {
+      fixes.push({ round: req.round, level: req.level, l3_patch: req.l3_patch });
+      const next = req.l3_patch ? afterPatch.shift() : undefined;
+      if (next) closing.add(next);
+      edit(100 + req.round, `r${req.round}`);
+    },
+    patch: async (/** @type {Record<string, any>} */ req) => {
+      patches.push(req);
+      closing.add('F1');
+      edit(150, 'patch');
+    },
+  };
+  const state = await converge(newFileState({ file: FILE, level: 'L2' }), deps);
+  return { state, rows, fixes, patches };
+}
+
+test('rung at round 2, the patch closes 1 ⇒ fix at L2; round 3 closes the last ⇒ complete (§3.6: the block continues at L2)', async () => {
+  const { state, rows, fixes, patches } = await rungThenL2(['F1', 'F2'], ['F2']);
+  assert.equal(state.status, 'complete');
+  assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.level, r.kind, r.open_after]), [[1, 'L2', 'full', 2], [2, 'L2', 'recheck', 2], [2, 'L2', 'patch_check', 1], [3, 'L2', 'recheck', 0]]);
+  assert.equal(rows.filter((r) => r.event === 'review.approved').length, 1);
+  assert.deepEqual(fixes, [{ round: 2, level: 'L2', l3_patch: false }, { round: 3, level: 'L2', l3_patch: true }]);
+  assert.equal(patches.length, 1);
+});
+
+test('a second stall after the rung (round 3 closes nothing) ⇒ stopped: l3_patch_exhausted, exactly 1 patch, every fix at L2', async () => {
+  const { state, rows, fixes, patches } = await rungThenL2(['F1', 'F2', 'F3'], []);
+  assert.equal(patches.length, 1);
+  assert.equal(state.status, 'stopped');
+  assert.deepEqual(state.next, { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' });
+  assert.deepEqual(fixes, [{ round: 2, level: 'L2', l3_patch: false }, { round: 3, level: 'L2', l3_patch: true }]);
+  assert.deepEqual(fixes.map((f) => f.level), ['L2', 'L2']);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.level, r.kind, r.open_after]), [[1, 'L2', 'full', 3], [2, 'L2', 'recheck', 3], [2, 'L2', 'patch_check', 2], [3, 'L2', 'recheck', 2]]);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.round, r.reason, r.open]), [[3, 'l3_patch_exhausted', ['F2', 'F3']]]);
+});
+
+test('rung at round 4 (rule 6): the patch shrinks 2 → 1 but the cap is reached ⇒ stopped: review_cap, exactly 1 patch, no round-5 fix', async () => {
+  const { edit, rows, base } = fixture();
+  const { spawn } = stubSpawn();
+  const closing = new Set();
+  const order = ['F1', 'F2', 'F3'];
+  /** @type {Array<Record<string, any>>} */
+  const fixes = [];
+  /** @type {Array<Record<string, any>>} */
+  const patches = [];
+  const deps = {
+    ...base,
+    spawn,
+    review: judgeReview(['F1', 'F2', 'F3', 'F4', 'F5'].map((id, i) => finding(id, 10 * (i + 1)))),
+    jev: jevResolving(() => closing),
+    fix: async (/** @type {{round: number, level: string, l3_patch: boolean}} */ req) => {
+      fixes.push({ round: req.round, level: req.level, l3_patch: req.l3_patch });
+      closing.add(order[req.round - 2]); // rounds 2–4 close F1, F2, F3: 5 → 4 → 3 → 2
+      edit(100 + req.round, `r${req.round}`);
+    },
+    patch: async (/** @type {Record<string, any>} */ req) => {
+      patches.push(req);
+      closing.add('F4');
+      edit(150, 'patch');
+    },
+  };
+  // L1: round 2 exhausts L1 (rule 2 ⇒ L2); rounds 3–4 shrink at L2; round 4 open ⇒ the rung (rule 6)
+  const state = await converge(newFileState({ file: FILE, level: 'L1' }), deps);
+  assert.equal(state.status, 'stopped');
+  assert.deepEqual(state.next, { action: 'stop', reason: 'review_cap', trigger: 'review_cap' });
+  assert.equal(patches.length, 1);
+  assert.deepEqual([patches[0].level, patches[0].open.map((/** @type {{id: string}} */ f) => f.id)], ['L3', ['F4', 'F5']]);
+  assert.deepEqual(fixes.map((f) => f.round), [2, 3, 4]);
+  assert.deepEqual(fixes.map((f) => f.level), ['L1', 'L2', 'L2']);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.level, r.kind, r.open_after]), [[1, 'L1', 'full', 5], [2, 'L1', 'recheck', 4], [3, 'L2', 'recheck', 3], [4, 'L2', 'recheck', 2], [4, 'L2', 'patch_check', 1]]);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.round, r.reason, r.open]), [[4, 'review_cap', ['F5']]]);
+});
+
+test('rung at round 2, the patch closes 1 ⇒ fix at L2; rounds 3–4 shrink but stay open ⇒ stopped: review_cap with exactly 1 patch', async () => {
+  const { state, rows, fixes, patches } = await rungThenL2(['F1', 'F2', 'F3', 'F4'], ['F2', 'F3']);
+  assert.equal(state.status, 'stopped');
+  assert.deepEqual(state.next, { action: 'stop', reason: 'review_cap', trigger: 'review_cap' });
+  assert.equal(state.l3_rung_used, true);
+  assert.equal(patches.length, 1);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.level, r.kind, r.open_after]), [[1, 'L2', 'full', 4], [2, 'L2', 'recheck', 4], [2, 'L2', 'patch_check', 3], [3, 'L2', 'recheck', 2], [4, 'L2', 'recheck', 1]]);
+  assert.equal(fixes.length, 3);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.round, r.reason, r.open]), [[4, 'review_cap', ['F4']]]);
 });
 
 test('fix 2: a fix hunk too large for the budget (non-ok recheck packet) is terminal — exactly one review.cap row, no retry, no session', async () => {

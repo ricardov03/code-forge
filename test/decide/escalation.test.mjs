@@ -15,8 +15,10 @@ import {
   LEVEL_ORDER,
   levelIndex,
   mustRouteNextThroughEscalation,
+  MAX_RUNNING_LEVEL,
   nextLevelCapped,
   reviewRoundStalled,
+  runningCeiling,
   securityFloorLevel,
 } from '../../src/decide/escalation.mjs';
 
@@ -169,33 +171,52 @@ test('S1 next=stop routes straight to the human (action: stop), not through S2',
   assert.equal(r.action, 'stop');
 });
 
-// ── Rule 5: never skip a level; stop_at is fixed (the ceiling guard on rules 1/2) ──────────────────
+// ── Rule 5: never skip a level; L3 is never a RUNNING level (R1, B3.2) ───────────────────────────
 //
-// Fix round 1 finding: the original pair both hardcoded stopAt to its 'L3' default, so the "the
-// ceiling is stopAt, not always L3" claim was never actually exercised — a mutant that ignored
-// stopAt entirely (always capping at 'L3') would have survived. These now pass an EXPLICIT stopAt
-// below L3 so "L2 is the real ceiling here, not L3" is the thing under test.
+// The running ceiling is L2 (or stop_at when lower). Rules 1/2b/2 at that ceiling take the block's
+// one L3 rung — a patch (default) or one L3 coding turn (`l3_mode: code`) — never "+1 to L3".
 
-test('rule 5 FIRES: escalating past an explicit ceiling BELOW L3 (stopAt: L2) reaches the L3 rung, not level L3', () => {
-  const r = escalationAfterAttempt({
-    attemptsAtLevel: 2,
-    retriesPerLevel: 2,
-    gateGreen: false,
-    currentLevel: 'L2',
-    stopAt: 'L2',
-    l3Mode: 'patch',
-  });
-  assert.equal(r.trigger, 'retries');
-  assert.equal(r.action, 'l3_rung'); // 'L2' IS the ceiling here — 'L3' is never reached
-  assert.equal(r.mode, 'patch');
+test('runningCeiling: L2 by default, lowered to stop_at when stop_at is lower', () => {
+  assert.equal(MAX_RUNNING_LEVEL, 'L2');
+  assert.equal(runningCeiling('L3'), 'L2');
+  assert.equal(runningCeiling(), 'L2');
+  assert.equal(runningCeiling('L1'), 'L1');
 });
 
-test('rule 5 does NOT fire: an ordinary escalate below an explicit ceiling (stopAt: L2, currentLevel: L1) lands on L2, never L3', () => {
-  const r = escalationAfterAttempt({ attemptsAtLevel: 2, retriesPerLevel: 2, gateGreen: false, currentLevel: 'L1', stopAt: 'L2' });
-  assert.equal(r.action, 'escalate');
-  assert.equal(r.level, 'L2'); // proves stopAt is honoured, not a hardcoded 'L3'
-  assert.notEqual(r.level, 'L3');
-  assert.notEqual(r.action, 'l3_rung');
+test('rule 5 FIRES: L2 + rule-2 trigger ⇒ the L3 patch rung, NOT escalate to L3', () => {
+  const r = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    reviewRoundsAtLevel: 2,
+    reviewRoundsPerLevel: 2,
+    openFixNowFinding: true,
+    currentLevel: 'L2',
+  });
+  assert.deepEqual(r, { trigger: 'review_rounds', action: 'l3_rung', mode: 'patch' });
+});
+
+test('rule 5 FIRES for rules 1 and 2b too: L2 + retries / review_stall ⇒ the L3 patch rung', () => {
+  const retries = escalationAfterAttempt({ attemptsAtLevel: 2, retriesPerLevel: 2, gateGreen: false, currentLevel: 'L2' });
+  assert.deepEqual(retries, { trigger: 'retries', action: 'l3_rung', mode: 'patch' });
+  const stall = escalationAfterAttempt({ reviewStall: true, openFixNowFinding: true, currentLevel: 'L2' });
+  assert.deepEqual(stall, { trigger: 'review_stall', action: 'l3_rung', mode: 'patch' });
+});
+
+test('rule 5 does NOT fire: L1 + rule-2 trigger ⇒ escalate to L2 (below the running ceiling)', () => {
+  const r = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    reviewRoundsAtLevel: 2,
+    reviewRoundsPerLevel: 2,
+    openFixNowFinding: true,
+    currentLevel: 'L1',
+  });
+  assert.deepEqual(r, { trigger: 'review_rounds', action: 'escalate', level: 'L2' });
+});
+
+test('stop_at: L1 ⇒ the ceiling is L1 and there is no rung: L0 escalates to L1, L1 stops', () => {
+  const below = escalationAfterAttempt({ attemptsAtLevel: 2, retriesPerLevel: 2, gateGreen: false, currentLevel: 'L0', stopAt: 'L1' });
+  assert.deepEqual(below, { trigger: 'retries', action: 'escalate', level: 'L1' });
+  const at = escalationAfterAttempt({ attemptsAtLevel: 2, retriesPerLevel: 2, gateGreen: false, currentLevel: 'L1', stopAt: 'L1' });
+  assert.deepEqual(at, { trigger: 'retries', action: 'stop', reason: 'stop_at' });
 });
 
 test('nextLevelCapped never skips a level and never exceeds an explicit ceiling', () => {
@@ -203,41 +224,36 @@ test('nextLevelCapped never skips a level and never exceeds an explicit ceiling'
   assert.equal(nextLevelCapped('L1', 'L1'), 'L1'); // already at the ceiling: stays put
 });
 
-// ── l3_mode: patch round trip (O10/R1) — tested separately from the 10 rule cases above ────────
+// ── l3_mode: patch round trip (O10/R1) — tested separately from the rule cases above ───────────
 
-test('l3_mode: patch round trip — first rung patches, a second rung on the same block stops', () => {
+test('l3_mode: patch round trip at L2 — the first hit is the rung, a second hit after the rung stops', () => {
   const firstRung = escalationAfterAttempt({
     attemptsAtLevel: 2,
     retriesPerLevel: 2,
     gateGreen: false,
-    currentLevel: 'L3',
+    currentLevel: 'L2',
     l3Mode: 'patch',
     l3RungAlreadyUsed: false,
   });
-  assert.equal(firstRung.action, 'l3_rung');
-  assert.equal(firstRung.mode, 'patch');
+  assert.deepEqual(firstRung, { trigger: 'retries', action: 'l3_rung', mode: 'patch' });
 
   const secondRung = escalationAfterAttempt({
     attemptsAtLevel: 2,
     retriesPerLevel: 2,
     gateGreen: false,
-    currentLevel: 'L3',
+    currentLevel: 'L2', // the block continued at L2 after the patch (§3.6)
     l3Mode: 'patch',
     l3RungAlreadyUsed: true, // the patch from firstRung was applied and the block failed again
   });
-  assert.equal(secondRung.action, 'stop');
-  assert.equal(secondRung.reason, 'l3_patch_exhausted');
+  assert.deepEqual(secondRung, { trigger: 'retries', action: 'stop', reason: 'l3_patch_exhausted' });
 });
 
-// Fix round 1 finding: 'code' mode used to return {action:'escalate', level:'L3'} with NO bound —
-// the caller resets its attempt counter, so rules 1/2 would fire again every retriesPerLevel
-// failures forever, and 'stop_at: L3' would never actually stop anything. It now gets the SAME
-// one-more-try-then-stop shape as patch mode, just without the patch machinery.
-test('l3_mode: code keeps D4 literal for ONE more ceiling hit, then stops (fix round 1 — no more unbounded retries)', () => {
-  const firstHit = escalationAfterAttempt({ attemptsAtLevel: 2, retriesPerLevel: 2, gateGreen: false, currentLevel: 'L3', l3Mode: 'code' });
-  assert.equal(firstHit.action, 'escalate');
-  assert.equal(firstHit.level, 'L3');
-  assert.equal(firstHit.mode, undefined);
+// Fix round 1 finding: 'code' mode used to have no bound. It gets the SAME one-rung-then-stop shape
+// as patch mode: ONE L3 coding turn from the L2 ceiling, then a second hit stops.
+test('l3_mode: code — L2 + trigger ⇒ ONE L3 coding turn; a second hit after it stops', () => {
+  // `l3_mode: code` is the plan's explicit opt-in (§3.6 "keeps D4 literal"): the rung is ONE L3 turn, not a +1 running level.
+  const firstHit = escalationAfterAttempt({ attemptsAtLevel: 2, retriesPerLevel: 2, gateGreen: false, currentLevel: 'L2', l3Mode: 'code' });
+  assert.deepEqual(firstHit, { trigger: 'retries', action: 'escalate', level: 'L3' });
 
   const secondHit = escalationAfterAttempt({
     attemptsAtLevel: 2,
@@ -245,10 +261,9 @@ test('l3_mode: code keeps D4 literal for ONE more ceiling hit, then stops (fix r
     gateGreen: false,
     currentLevel: 'L3',
     l3Mode: 'code',
-    l3RungAlreadyUsed: true, // the block failed again after the one extra try firstHit granted
+    l3RungAlreadyUsed: true, // the block failed again during the one L3 turn firstHit granted
   });
-  assert.equal(secondHit.action, 'stop');
-  assert.equal(secondHit.reason, 'l3_code_exhausted');
+  assert.deepEqual(secondHit, { trigger: 'retries', action: 'stop', reason: 'l3_code_exhausted' });
 });
 
 // ── Rule 6: review cap (v1.3, §4.11) — the file's absolute round count, checked last ────────────

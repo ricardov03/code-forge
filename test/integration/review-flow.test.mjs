@@ -158,7 +158,7 @@ describe('review-file → fix loop → signed approval → block close (B12c)', 
     }
   });
 
-  test('3: 3 open findings that stay 3 after the fix ⇒ review_stall in the result (+1 level: fix at L3); no approval', async () => {
+  test('3: 3 open findings that stay 3 after the fix ⇒ review_stall in the result (at L2 the +1 is the L3 patch rung, R1); no approval', async () => {
     const f = await flow();
     try {
       f.script({ full: { findings: [finding('F1', 20), finding('F2', 60), finding('F3', 100)] }, recheck: { resolve: false, findings: [] } });
@@ -171,7 +171,7 @@ describe('review-file → fix loop → signed approval → block close (B12c)', 
         false,
         2,
         'review_stall',
-        { action: 'fix', level: 'L3', trigger: 'review_stall' },
+        { action: 'patch', level: 'L3', trigger: 'review_stall' },
         3,
       ]);
       assert.equal((await f.rows()).filter((r) => r.event === 'review.approved').length, 0);

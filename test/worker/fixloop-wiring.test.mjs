@@ -92,30 +92,28 @@ async function wired(firstFindings) {
 }
 
 describe('the worker drives the §4.11 fix loop one ticket per round (B12c)', () => {
-  test('4 → 3 → 2 → 1 open: review_rounds at round 2, the L3 patch at round 4, then stopped: review_cap; a later ticket runs 0 sessions', async () => {
+  test('4 → 3 open on an L2 block: review_rounds at round 2 is the L3 patch rung (R1: L3 is never a running level), then stopped: l3_patch_exhausted; a later ticket runs 0 sessions', async () => {
     const w = await wired(['F1', 'F2', 'F3', 'F4'].map(finding));
     const seen = [];
-    for (let i = 0; i < 4; i += 1) {
+    for (let i = 0; i < 2; i += 1) {
       const r = await w.round();
       seen.push([r.status, r.approved, r.round, r.kind, r.level, r.next.action, r.trigger, r.findings.length]);
     }
     assert.deepEqual(seen, [
       ['reviewed', false, 1, 'full', 'L2', 'fix', null, 4],
-      ['reviewed', false, 2, 'recheck', 'L3', 'fix', 'review_rounds', 3],
-      ['reviewed', false, 3, 'recheck', 'L3', 'fix', null, 2],
-      ['reviewed', false, 4, 'recheck', 'L3', 'patch', 'review_cap', 1],
+      ['reviewed', false, 2, 'recheck', 'L2', 'patch', 'review_rounds', 3],
     ]);
-    w.script.resolveOne = false; // the L3 patch did not fix F4
+    w.script.resolveOne = false; // the L3 patch did not fix F2, F3 or F4
     const check = await w.round();
-    assert.deepEqual([check.status, check.kind, check.stopped, check.approved, check.findings.map((/** @type {any} */ f) => f.id)], ['stopped', 'patch_check', 'review_cap', false, ['F4']]);
+    assert.deepEqual([check.status, check.kind, check.stopped, check.approved, check.findings.map((/** @type {any} */ f) => f.id)], ['stopped', 'patch_check', 'l3_patch_exhausted', false, ['F2', 'F3', 'F4']]);
     const lensesBefore = w.lenses.length;
     const after = await w.round();
-    assert.deepEqual([after.status, after.stopped, after.approved], ['stopped', 'review_cap', false]);
+    assert.deepEqual([after.status, after.stopped, after.approved], ['stopped', 'l3_patch_exhausted', false]);
     assert.equal(w.lenses.length, lensesBefore); // a stopped file is never reviewed again by the loop
-    assert.deepEqual(w.lenses, ['quick', 'recheck', 'recheck', 'recheck', 'recheck']);
+    assert.deepEqual(w.lenses, ['quick', 'recheck', 'recheck']);
     assert.equal(w.rows.filter((r) => r.event === 'review.approved').length, 0);
     const caps = w.rows.filter((r) => r.event === 'review.cap');
-    assert.deepEqual(caps.map((r) => [r.block, r.file, r.reason, r.open]), [['B11', FILE, 'review_cap', ['F4']]]);
+    assert.deepEqual(caps.map((r) => [r.block, r.file, r.reason, r.open]), [['B11', FILE, 'l3_patch_exhausted', ['F2', 'F3', 'F4']]]);
     assert.equal(verifyRow(caps[0], w.key).ok, true);
     assert.equal(w.asked.filter((q) => q === 'defect').length, 4); // the mocked Jev triaged round 1
 
@@ -126,6 +124,28 @@ describe('the worker drives the §4.11 fix loop one ticket per round (B12c)', ()
     assert.deepEqual(blockRungUsed({ ...anchors, rows: w.rows }), { status: 'ok', used: true });
     const forged = w.rows.map((r) => (r.event === 'review.state' ? { ...r, l3_rung_used: false } : r));
     assert.deepEqual(blockRungUsed({ ...anchors, rows: forged }), { status: 'tampered', used: true });
+  });
+
+  test('5 → 4 → 3 → 2 → 1 open on an L2 block: the rung at round 2 shrinks the set ⇒ fix at L2; rounds 3–4 shrink but stay open ⇒ stopped: review_cap', async () => {
+    const w = await wired(['F1', 'F2', 'F3', 'F4', 'F5'].map(finding));
+    const seen = [];
+    for (let i = 0; i < 5; i += 1) {
+      const r = await w.round();
+      seen.push([r.status, r.round, r.kind, r.level, r.next?.action ?? null, r.stopped ?? null, r.findings.length]);
+    }
+    assert.deepEqual(seen, [
+      ['reviewed', 1, 'full', 'L2', 'fix', null, 5],
+      ['reviewed', 2, 'recheck', 'L2', 'patch', null, 4],
+      ['reviewed', 2, 'patch_check', 'L2', 'fix', null, 3],
+      ['reviewed', 3, 'recheck', 'L2', 'fix', null, 2],
+      ['stopped', 4, 'recheck', 'L2', 'stop', 'review_cap', 1],
+    ]);
+    assert.deepEqual(w.lenses, ['quick', 'recheck', 'recheck', 'recheck', 'recheck']);
+    const rounds = w.rows.filter((r) => r.event === 'review.round');
+    assert.equal(rounds.filter((r) => r.kind === 'patch_check').length, 1); // exactly one patch session was checked
+    const caps = w.rows.filter((r) => r.event === 'review.cap');
+    assert.deepEqual(caps.map((r) => [r.file, r.round, r.reason, r.open]), [[FILE, 4, 'review_cap', ['F5']]]);
+    assert.equal(w.rows.filter((r) => r.event === 'review.approved').length, 0);
   });
 
   /**
