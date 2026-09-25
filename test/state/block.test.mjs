@@ -5,9 +5,10 @@ import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runBlock } from '../../src/cli/block.mjs';
-import { readAllRows } from '../../src/ledger/write.mjs';
+import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { briefPointer, checkScope, claimPath, closeBlock, openBlock, rebaseBlock } from '../../src/state/block.mjs';
-import { readRun, startRun } from '../../src/state/run.mjs';
+import { readRun, startRun, writeSigned } from '../../src/state/run.mjs';
+import { contentHash } from '../../src/worker/ticket.mjs';
 import { loadKey, signRow, verifyRow } from '../../src/state/signer.mjs';
 import { dirtyFiles, git } from '../fixtures/repos/two-blocks/build.mjs';
 
@@ -226,9 +227,15 @@ test('CLI `block open` prints the brief pointer and refuses an overlapping owned
     assert.deepEqual(dispatch.map((r) => [r.block, r.owned_files]), [['B8', ['a.txt', 'b.txt']]]);
 
     // `block close` reads the REAL ledger back (B6 added tokens_source/cost_source after signing).
+    // B12b: the changed owned file a.txt needs a signed review.approved row for its current hash
+    // (b.txt is unchanged); with no transcript the close WARNs and writes gate.transcript_missing.
+    const unreviewed = captureStream();
+    assert.equal(await runBlock(['close', 'B8', '--run', 'r-cli', '--worker-pid', '4242'], { stdout: unreviewed, stderr: unreviewed, probe: PROBE }), 1);
+    assert.equal(unreviewed.text.split('\n').at(-2), 'block B8 open: unreviewed a.txt');
+    await writeSigned('r-cli', (row) => appendRow(row, { slug: 'two-blocks' }), { event: 'review.approved', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
     const closed = captureStream();
     assert.equal(await runBlock(['close', 'B8', '--run', 'r-cli', '--worker-pid', '4242'], { stdout: closed, stderr: closed, probe: PROBE }), 0);
-    assert.equal(closed.text, 'block B8 closed\n');
-    assert.deepEqual((await readAllRows('two-blocks')).map((r) => r.event), ['dispatch', 'block.close']);
+    assert.equal(closed.text, 'WARN block B8: no coder transcript found (--transcript, run record, .code-forge/runs/r-cli/B8.log); the transcript grep did not run\nblock B8 closed\n');
+    assert.deepEqual((await readAllRows('two-blocks')).map((r) => r.event), ['dispatch', 'gate.transcript_missing', 'review.approved', 'gate.transcript_missing', 'block.close']);
   });
 });

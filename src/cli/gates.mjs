@@ -5,7 +5,9 @@
  * `2` usage error.
  *
  *   gates detect --cwd <dir>
- *   gates run --cwd <dir> [--slug <slug>] [--timeout-ms <n>]
+ *   gates run --cwd <dir> [--slug <slug>] [--timeout-ms <n>] [--run <r> --block <id>]
+ *     (with --run/--block the gates run behind the proof lock, `runGatesGuarded`: another block
+ *     holding the lock ⇒ `{"result":"proof.busy","holder":…}` and exit 1)
  *   gates secret-scan --cwd <dir> --file <path> [--file <path> ...]
  *   gates safe-edit --cwd <dir> --base <sha>
  *   gates scope --cwd <dir> --base <sha>
@@ -19,6 +21,7 @@ import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { detectGates } from '../gates/detect.mjs';
 import { runGates } from '../gates/run.mjs';
+import { runGatesGuarded } from '../proof/lock.mjs';
 import { scanFiles } from '../gates/secret-scan.mjs';
 import { checkSafeEdit } from '../gates/safe-edit.mjs';
 import { computeFileSet } from '../gates/scope.mjs';
@@ -155,8 +158,26 @@ export async function runGatesVerb(args, deps = {}) {
       }
       const slug = slugFlag.value;
 
+      const runFlag = readOptionalFlag(args, '--run');
+      const blockFlag = readOptionalFlag(args, '--block');
+      if (!runFlag.ok || !blockFlag.ok || (runFlag.value === undefined) !== (blockFlag.value === undefined)) {
+        err('gates run: --run <id> and --block <id> go together, each with a value\n');
+        return 2;
+      }
+
       const gates = await resolveGates(cwd);
-      const { results, allOk } = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+      let ran;
+      if (runFlag.value !== undefined && blockFlag.value !== undefined) {
+        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates, cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+        if (guarded.result === 'proof.busy') {
+          out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
+          return 1;
+        }
+        ran = /** @type {{value: {results: any[], allOk: boolean}}} */ (guarded).value;
+      } else {
+        ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+      }
+      const { results, allOk } = ran;
 
       if (slug) {
         for (const result of results) {

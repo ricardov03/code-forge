@@ -270,8 +270,37 @@ export const FORBIDDEN = Object.freeze(
 );
 
 /**
+ * Coder-only entries (B12b, plan §4.9): verbs only a human (through the orchestrator) may run.
+ * They are NOT part of `FORBIDDEN` (whose rendered count other blocks pin); `mergeForbidden()`
+ * always appends them, so every list built for a coder carries them.
+ *  - `code-forge block waive` — waiving a review finding is human-only;
+ *  - `--no-require-reviews` — the human's way out of `block close`'s per-file review check.
+ * @type {ReadonlyArray<ForbiddenEntry>}
+ */
+export const CODER_ONLY_FORBIDDEN = Object.freeze(
+  [
+    {
+      id: 'code-forge-block-waive-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [
+        ['code-forge', 'block', 'waive'],
+        ['forge', 'block', 'waive'],
+      ],
+      description: 'Waive a review finding (forge block waive) — human-only, run by the orchestrator after the human said so (§4.9)',
+    },
+    {
+      id: 'code-forge-no-require-reviews',
+      kind: 'contains',
+      tokens: ['--no-require-reviews'],
+      description: 'Close a block without the per-file review check (--no-require-reviews) — human-only',
+    },
+  ].map(freezeEntry),
+);
+
+/**
  * Merge project-specific tokens (from `production.markers` / `production.names`, schema owned by
- * B1) into the static list as additional `contains` entries. The static list never changes.
+ * B1) into the static list as additional `contains` entries, after the coder-only entries
+ * (`CODER_ONLY_FORBIDDEN`, always included). The static list never changes.
  * `contains` entries are never rendered into a CLI rule string (see the renderers), so a token
  * may hold any character — `db.prod:5432` and `postgres://prod-host` are both valid.
  *
@@ -298,7 +327,7 @@ export function mergeForbidden(extraTokens = []) {
       description: `Configured production marker: ${token}`,
     }),
   );
-  return [...FORBIDDEN, ...extras];
+  return [...FORBIDDEN, ...CODER_ONLY_FORBIDDEN, ...extras];
 }
 
 // ── Normalization ────────────────────────────────────────────────────────────
