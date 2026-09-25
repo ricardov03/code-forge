@@ -4,7 +4,7 @@
  *
  *  1. **Schema validation** (Ajv, draft 2020-12, `additionalProperties: false` almost everywhere)
  *     catches shape errors: unknown keys, wrong types, missing required fields.
- *  2. **Domain rules** (`DOMAIN_RULES` below, 14 of them) catch things no JSON Schema can express:
+ *  2. **Domain rules** (`DOMAIN_RULES` below, 15 of them as of B1.1/v1.3) catch things no JSON Schema can express:
  *     cross-field comparisons (two levels resolving to the same tuple), a value that needs a
  *     second config value to be reachable (`second_levels.L2.provider` vs. the effective L2
  *     provider) and rules that reach outside the config object entirely (is a CLI on PATH, is a
@@ -14,7 +14,7 @@
  *     instead of touching `process.env.PATH` themselves, so a unit test never needs a real CLI on
  *     PATH to prove either branch.
  *
- * The 14 rules, and how the plan's prose bullets map onto them (§1.3's "review.multimodel: true
+ * The 15 rules (B1's original 14 plus B1.1's `caps-coders-exceeds-cap`, v1.3), and how the plan's prose bullets map onto them (§1.3's "review.multimodel: true
  * with second_provider empty **or with** resolve(L2).provider == second_levels.L2.provider" is
  * two independently-firing conditions, so it is implemented — and tested — as two rules):
  *   1  level-missing                        ERROR
@@ -31,6 +31,7 @@
  *  12  engine-subprocess-no-cli              ERROR
  *  13  proof-tool-absent-for-high-tier       WARN
  *  14  shadow-rate-range                     ERROR  ("shadow_rate range")
+ *  15  caps-coders-exceeds-cap               WARN   (v1.3/R10/B1.1: caps.coders > 2)
  *
  * **No config value ever reaches a message (fix round 3, MAJOR).** The `validate` verb prints
  * every message, and a user can paste an API key into ANY string field — a model id, an effort,
@@ -619,11 +620,35 @@ function checkShadowRateRange(cfg) {
   return [];
 }
 
+// ── 15. caps-coders-exceeds-cap (WARN, v1.3/B1.1) ───────────────────────────
+
 /**
- * The 14 domain rules paired with the exact `rule` id string each one emits — the single source
+ * R10 caps concurrent coders at 2 for THIS build, but a consumer's config is free to set more —
+ * the schema itself only enforces `minimum: 1` (plan §1.3: "`caps.coders > 2` ⇒ warn (R10 binds
+ * this build; a consumer may run more with the warning on record)"). Guarded on a real finite
+ * number so a non-numeric value — already a schema-layer error on its own — never also fires this
+ * rule.
+ * @param {Record<string, any>} cfg
+ */
+function checkCapsCodersExceedsCap(cfg) {
+  const coders = cfg?.caps?.coders;
+  if (typeof coders === 'number' && Number.isFinite(coders) && coders > 2) {
+    return [
+      {
+        rule: 'caps-coders-exceeds-cap',
+        severity: 'warning',
+        message: 'caps.coders is above the R10 cap of 2 concurrent coders — allowed, but recorded as a deviation',
+      },
+    ];
+  }
+  return [];
+}
+
+/**
+ * The 15 domain rules paired with the exact `rule` id string each one emits — the single source
  * of truth both `DOMAIN_RULES` (below, what `validateConfig` runs) and the exported
  * `DOMAIN_RULE_IDS` are built from. `'schema'` (the ajv layer's own issues) is deliberately not
- * one of these 14.
+ * one of these 15.
  * @type {ReadonlyArray<{fn: (cfg: Record<string, any>, opts?: object) => ValidationIssue[], id: string}>}
  */
 const RULE_TABLE = Object.freeze([
@@ -641,12 +666,13 @@ const RULE_TABLE = Object.freeze([
   { fn: checkEngineSubprocessNoCli, id: 'engine-subprocess-no-cli' },
   { fn: checkProofToolAbsentForHighTier, id: 'proof-tool-absent-for-high-tier' },
   { fn: checkShadowRateRange, id: 'shadow-rate-range' },
+  { fn: checkCapsCodersExceedsCap, id: 'caps-coders-exceeds-cap' },
 ]);
 
-/** The 14 domain rules, in the order documented above. */
+/** The 15 domain rules, in the order documented above. */
 const DOMAIN_RULES = Object.freeze(RULE_TABLE.map((entry) => entry.fn));
 
-/** The 14 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
+/** The 15 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
 export const DOMAIN_RULE_IDS = Object.freeze(RULE_TABLE.map((entry) => entry.id));
 
 /**

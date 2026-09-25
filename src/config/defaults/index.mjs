@@ -6,7 +6,7 @@ import anthropic from './anthropic.mjs';
 import openai from './openai.mjs';
 import xai from './xai.mjs';
 
-/** @type {Record<"anthropic" | "openai" | "xai", {provider: string, levels: object}>} */
+/** @type {Record<"anthropic" | "openai" | "xai", {provider: string, levels: object, caps: {coders: number}}>} */
 export const PROVIDER_DEFAULTS = Object.freeze({ anthropic, openai, xai });
 
 /**
@@ -15,7 +15,7 @@ export const PROVIDER_DEFAULTS = Object.freeze({ anthropic, openai, xai });
  * (truthy, with no `.levels`) instead of `undefined` — a caller a few frames up the loader might
  * treat that as "found the defaults" and hand back a levels-less object.
  * @param {string} provider
- * @returns {{provider: string, levels: object} | undefined}
+ * @returns {{provider: string, levels: object, caps: {coders: number}} | undefined}
  */
 export function defaultsForProvider(provider) {
   return typeof provider === 'string' && Object.hasOwn(PROVIDER_DEFAULTS, provider)

@@ -9,7 +9,15 @@ import { resolveSchemaPath } from '../../src/config/schema-paths.mjs';
  * One representative dotted path per §1.3 table row (a compound row that bundles two genuinely
  * distinct top-level namespaces — "commit.trailers, wip.ready_prs" — contributes one path per
  * namespace; a handful of rows with several important children contribute a second path). 37
- * total, matching the acceptance clause's count.
+ * total at B1, matching that block's acceptance clause count.
+ *
+ * **B1.1 (v1.3) fact check (facts diff):** the plan's B1.1 row (§10.4) says this enumeration
+ * "grows by exactly 6 (`review.max_rounds_per_file`, `review.recheck_scope`, `review.late_findings`,
+ * `budget.block_cases`, `caps.coders` re-defaulted, `tmp.root`)". `caps.coders` was already one of
+ * the 37 paths above (B1) — re-defaulting its schema default from 3 to 2 changes no PATH, only a
+ * value, so it contributes 0 new entries here, not 1. The real growth is 5 new paths
+ * (`review.max_rounds_per_file`, `review.recheck_scope`, `review.late_findings`,
+ * `budget.block_cases`, `tmp.root`): 37 + 5 = **42**, asserted below as the reality-correct count.
  */
 const CONFIG_CONTRACT_PATHS = Object.freeze([
   'version',
@@ -28,6 +36,9 @@ const CONFIG_CONTRACT_PATHS = Object.freeze([
   'review.context.whole_file_max_lines',
   'review.block_budget_tokens',
   'review.session_timeout_s',
+  'review.max_rounds_per_file',
+  'review.recheck_scope',
+  'review.late_findings',
   'engine',
   'harnesses',
   'harness.claude.worktree',
@@ -41,6 +52,7 @@ const CONFIG_CONTRACT_PATHS = Object.freeze([
   'proof.isolation',
   'proof.export.copy_untracked',
   'budget.block_lines',
+  'budget.block_cases',
   'autonomy.coder_may_open_draft_pr',
   'commit.trailers',
   'wip.ready_prs',
@@ -48,11 +60,12 @@ const CONFIG_CONTRACT_PATHS = Object.freeze([
   'known_extra',
   'calibration.shadow_rate',
   'keys.jev',
+  'tmp.root',
   'telemetry',
 ]);
 
-test('the config contract enumerates exactly 37 paths', () => {
-  assert.equal(CONFIG_CONTRACT_PATHS.length, 37);
+test('the config contract enumerates exactly 42 paths (B1.1/v1.3: 37 + 5 new — see the facts-diff comment above CONFIG_CONTRACT_PATHS)', () => {
+  assert.equal(CONFIG_CONTRACT_PATHS.length, 42);
 });
 
 test('every one of the 37 config-contract paths resolves to a real schema node', () => {

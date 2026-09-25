@@ -34,6 +34,18 @@ test('resolveSchemaPath stops (returns undefined) one segment past where a fixed
   assert.equal(resolveSchemaPath(schema, 'caps.coders.nonexistent'), undefined);
 });
 
+// ── v1.3 (B1.1): the six-key amendment resolves through the SAME shapes above, unchanged ────
+
+test('resolveSchemaPath("review.max_rounds_per_file") resolves to the bounded-rounds integer added by B1.1 (§4.11)', () => {
+  const node = resolveSchemaPath(schema, 'review.max_rounds_per_file');
+  assert.deepEqual(node, { type: 'integer', minimum: 2, maximum: 6, default: 4 });
+});
+
+test('resolveSchemaPath("tmp.root") goes through a plain object THEN an anyOf[string, null] leaf (B1.1, §9.6/V12)', () => {
+  const node = resolveSchemaPath(schema, 'tmp.root');
+  assert.deepEqual(node, { anyOf: [{ type: 'string', minLength: 1 }, { type: 'null' }], default: null });
+});
+
 test('resolveSchemaPath on a completely empty root schema ({}) returns undefined for any non-empty path', () => {
   assert.equal(resolveSchemaPath({}, 'anything'), undefined);
 });

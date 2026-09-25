@@ -335,13 +335,21 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'proof.tiers.high.min_msi',
   'gates.extra.secret_scan',
   'telemetry',
+  // v1.3 (B1.1): the six new collector paths behind the 142 -> 148 re-pin.
+  'review.max_rounds_per_file',
+  'review.recheck_scope',
+  'review.late_findings',
+  'budget.block_cases',
+  'tmp',
+  'tmp.root',
 ]);
 
 /**
- * Exact collector output size for the current schema (measured 2026-09-24, round 3) — re-pin, and
+ * Exact collector output size for the current schema (measured 2026-09-24, round 3; B1.1 2026-09-25:
+ * +6 = review.{max_rounds_per_file,recheck_scope,late_findings}, budget.block_cases, tmp, tmp.root) — re-pin, and
  * say why in the commit, whenever the schema gains or loses a property.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 142;
+const EXPECTED_SCHEMA_PATH_COUNT = 148;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

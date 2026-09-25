@@ -1,11 +1,14 @@
 /**
- * A small, shared JSON-Schema navigator used by tests (schema-coverage, the 37-path enumeration)
- * and by `schema-compile.mjs`. Handles exactly what `schema/code-forge.schema.json` actually
- * uses between two dotted-path segments: a `properties` lookup, a typed `additionalProperties`
- * map (`thresholds.<question>`, `known_extra.<provider>`, `keys.<name>`), a `$ref` (`levels.L0`
- * points at `#/$defs/level`), and an `anyOf` branch (`review.second_levels` is `anyOf: [null,
- * {additionalProperties: level}]` — nullable-but-otherwise-a-map). Nothing richer than that (no
- * `oneOf`/`allOf`) appears anywhere in this schema.
+ * A small, shared JSON-Schema navigator used by tests (schema-coverage, the config-contract path
+ * enumeration) and by `schema-compile.mjs`. Handles exactly what `schema/code-forge.schema.json`
+ * actually uses between two dotted-path segments: a `properties` lookup, a typed
+ * `additionalProperties` map (`thresholds.<question>`, `known_extra.<provider>`, `keys.<name>`), a
+ * `$ref` (`levels.L0` points at `#/$defs/level`), and an `anyOf` branch (`review.second_levels` is
+ * `anyOf: [null, {additionalProperties: level}]` — nullable-but-otherwise-a-map). Nothing richer
+ * than that (no `oneOf`/`allOf`) appears anywhere in this schema. **B1.1 (v1.3)** added
+ * `review.max_rounds_per_file`, `review.recheck_scope`, `review.late_findings`, `budget.block_cases`
+ * and `tmp.root` — each is a plain `properties` lookup (`tmp.root` an `anyOf: [string, null]` leaf,
+ * the same shape `review.second_levels` already exercises below) — no new traversal shape needed.
  *
  * @typedef {Record<string, any>} SchemaNode - a raw JSON-Schema fragment. Left as an index-typed
  *   object rather than a precise union: a schema node's shape genuinely varies (bare `properties`,

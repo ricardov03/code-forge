@@ -24,5 +24,13 @@ gates:
   lint: null
   types: null
   format: null
+review:
+  max_rounds_per_file: 4
+  recheck_scope: fix_hunks
+  late_findings: sweep
+budget:
+  block_cases: 80
+tmp:
+  root: null
 calibration:
   shadow_rate: 0

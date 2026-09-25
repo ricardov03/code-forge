@@ -29,3 +29,12 @@ test('defaultsForProvider is defensive against a non-string argument (no throw, 
     assert.strictEqual(defaultsForProvider(/** @type {any} */ (bad)), undefined);
   }
 });
+
+// ── v1.3 (B1.1, R10): caps.coders defaults to 2 on every provider default ──
+
+test('caps.coders is exactly 2 on all three provider default matrices (R10: at most 2 coders at a time)', () => {
+  assert.deepEqual(Object.keys(PROVIDER_DEFAULTS).sort(), ['anthropic', 'openai', 'xai']);
+  for (const [provider, defaults] of Object.entries(PROVIDER_DEFAULTS)) {
+    assert.equal(defaults.caps?.coders, 2, `${provider} defaults.caps.coders must be 2, got ${JSON.stringify(defaults.caps)}`);
+  }
+});

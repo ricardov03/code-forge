@@ -653,11 +653,82 @@ test('rule 14 allows the boundary values 0 and 0.5 — 0 hits at either edge', (
   }
 });
 
-// ── All 14 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
+// ── v1.3 (B1.1): review.max_rounds_per_file / budget.block_cases range refusals (schema layer) ──
 
-test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 14 distinct ids', () => {
-  assert.equal(DOMAIN_RULE_IDS.length, 14);
-  assert.equal(new Set(DOMAIN_RULE_IDS).size, 14, 'no duplicate rule ids');
+test('review.max_rounds_per_file: 1 is refused (below the [2, 6] range) by the schema layer', () => {
+  const cfg = validCfg();
+  cfg.review = { max_rounds_per_file: 1 };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.deepEqual(
+    result.errors.map((e) => [e.rule, e.path, e.keyword]),
+    [['schema', '/review/max_rounds_per_file', 'minimum']],
+  );
+});
+
+test('review.max_rounds_per_file: 7 is refused (above the [2, 6] range) by the schema layer', () => {
+  const cfg = validCfg();
+  cfg.review = { max_rounds_per_file: 7 };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.deepEqual(
+    result.errors.map((e) => [e.rule, e.path, e.keyword]),
+    [['schema', '/review/max_rounds_per_file', 'maximum']],
+  );
+});
+
+test('review.max_rounds_per_file allows the boundary values 2 and 6 — valid with 0 errors at either edge', () => {
+  for (const rounds of [2, 6]) {
+    const cfg = validCfg();
+    cfg.review = { max_rounds_per_file: rounds };
+    const result = validateConfig(cfg);
+    assert.equal(result.valid, true, `max_rounds_per_file ${rounds} must be within range`);
+  }
+});
+
+test('budget.block_cases: 5 is refused (below the minimum of 10) by the schema layer', () => {
+  const cfg = validCfg();
+  cfg.budget = { block_cases: 5 };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.deepEqual(
+    result.errors.map((e) => [e.rule, e.path, e.keyword]),
+    [['schema', '/budget/block_cases', 'minimum']],
+  );
+});
+
+test('budget.block_cases: 10 (the boundary) is valid — 0 errors', () => {
+  const cfg = validCfg();
+  cfg.budget = { block_cases: 10 };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, true);
+});
+
+// ── 15. caps-coders-exceeds-cap (WARN, v1.3/R10/B1.1) ───────────────────────
+
+test('rule 15 caps-coders-exceeds-cap: caps.coders: 3 validates (0 errors) with EXACTLY 1 warning naming caps.coders', () => {
+  const cfg = validCfg();
+  cfg.caps = { coders: 3 };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, true);
+  const hits = issuesOf(result, 'caps-coders-exceeds-cap');
+  assert.equal(hits.length, 1);
+  assert.match(hits[0].message, /caps\.coders/);
+  assert.equal(result.warnings.length, 1, 'exactly this one warning, no other domain-rule noise');
+});
+
+test('rule 15 does not fire at the cap itself — caps.coders: 2 produces 0 warnings', () => {
+  const cfg = validCfg();
+  cfg.caps = { coders: 2 };
+  const result = validateConfig(cfg);
+  assert.equal(issuesOf(result, 'caps-coders-exceeds-cap').length, 0);
+});
+
+// ── All 15 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
+
+test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 15 distinct ids', () => {
+  assert.equal(DOMAIN_RULE_IDS.length, 15);
+  assert.equal(new Set(DOMAIN_RULE_IDS).size, 15, 'no duplicate rule ids');
 });
 
 test('every rule id exercised by THIS test file is a member of the real DOMAIN_RULE_IDS set (catches a renamed/dropped rule)', () => {
@@ -676,6 +747,7 @@ test('every rule id exercised by THIS test file is a member of the real DOMAIN_R
     'engine-subprocess-no-cli',
     'proof-tool-absent-for-high-tier',
     'shadow-rate-range',
+    'caps-coders-exceeds-cap',
   ];
   assert.deepEqual([...exercisedInThisFile].sort(), [...DOMAIN_RULE_IDS].sort());
 });
