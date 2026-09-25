@@ -1,9 +1,14 @@
 /**
- * Escalation precedence — deterministic (plan §3.6, O10, R1). "Evaluated in this order after
- * every attempt; the first rule that fires wins":
+ * Escalation precedence — deterministic (plan §3.6, O10, R1; v1.3 adds rule 2b `review_stall`
+ * and rule 6 `review_cap`, §4.11). "Evaluated in this order after every attempt; the first rule
+ * that fires wins":
  *
  *   1. Attempt counter — attempts at the current level == `retries_per_level` (2) and not green
  *      ⇒ +1 level, whatever S1 said (`trigger: 'retries'`).
+ *   2b. Review stall (v1.3) — a re-check round whose open `fix_now` set did NOT strictly shrink
+ *      (`reviewRoundStalled` below) ⇒ +1 level IMMEDIATELY (`trigger: 'review_stall'`), checked
+ *      BEFORE rule 2's own round-exhaustion counter — a block need not exhaust
+ *      `review_rounds_per_level` to escalate on a stalled round.
  *   2. Review rounds — `review_rounds_per_level` (2) exhausted with an open `fix_now` finding
  *      ⇒ +1 level (`trigger: 'review_rounds'`).
  *   3. Security floor (DISPATCH time only) — `security_sensitive == true` ⇒ first-attempt level
@@ -13,7 +18,7 @@
  *   4. S2 ruling — S1 `next = escalate` is never acted on directly; it goes to S2 as a check
  *      (`trigger: 's2_ruling'`, `action: 's2_check'`). S1 `next = stop` routes straight to the
  *      human (`action: 'stop'`).
- *   5. Never skip a level; `stop_at: L3` is fixed — when rule 1 or 2 fires AND the block is
+ *   5. Never skip a level; `stop_at: L3` is fixed — when rule 1, 2b or 2 fires AND the block is
  *      already at the ceiling (`currentLevel === stopAt`), there IS no "+1 level" to go to. R1's
  *      L3 rung takes over instead: `escalation.l3_mode: 'patch'` (default) routes to a fresh L3
  *      session that returns a PATCH, never a whole feature (`action: 'l3_rung', mode: 'patch'`).
@@ -22,6 +27,18 @@
  *      on the same block (`l3RungAlreadyUsed`) always `stop`s (fix round 1: `l3_mode: 'code'`
  *      used to have no end state at all — the caller resets its attempt counter, so rules 1/2
  *      would fire again every `retriesPerLevel` failures forever, never honouring `stop_at`).
+ *   6. Review cap (v1.3) — `review.max_rounds_per_file` (default 4) reached on a file with an
+ *      open `fix_now` finding ⇒ the L3 patch rung for THAT FILE, once (`trigger: 'review_cap'`,
+ *      `action: 'l3_rung', mode: 'patch'` — always `'patch'`, regardless of `l3Mode`: a round-cap
+ *      breach is a fix-scale problem, never a whole re-code). It shares the SAME
+ *      `l3RungAlreadyUsed` flag as rule 5 — the plan's L3 rung is one per block, not one per
+ *      trigger — so a second breach from EITHER rule 5 or rule 6 always `stop`s
+ *      (`reason: 'review_cap'`). Checked last: it only matters when rules 1/2b/2/4 did not
+ *      already return an action this attempt.
+ *
+ * Rules 1, 2b, 2, 4 and 6 are the six *triggered* rules of the precedence table (each carries its
+ * own `trigger` name); rule 5 is the ceiling guard folded into `finalizeEscalate` below, not a
+ * seventh trigger.
  */
 
 /** Level order, low to high. `escalation.stop_at` is schema-fixed to `'L3'` (B1's `checkStopAtNotL3`). */
@@ -86,13 +103,26 @@ export function mustRouteNextThroughEscalation(next) {
 }
 
 /**
- * @param {'retries'|'review_rounds'} trigger
+ * Rule 2b's shrink test (v1.3, §4.11): a re-check round's open `fix_now` count must be STRICTLY
+ * less than the previous round's. Equal or larger ⇒ the round stalled.
+ * @param {number} openBefore - open `fix_now` count entering this round.
+ * @param {number} openAfter - open `fix_now` count after this round's fixes + recheck.
+ * @returns {boolean} true when the round did NOT strictly shrink (a stall).
+ */
+export function reviewRoundStalled(openBefore, openAfter) {
+  return openAfter >= openBefore;
+}
+
+/**
+ * @param {'retries'|'review_rounds'|'review_stall'} trigger
  * @param {string} currentLevel
  * @param {string} stopAt
  * @param {'patch'|'code'} l3Mode
  * @param {boolean} l3RungAlreadyUsed - the ceiling was already hit once before on THIS block,
  *   in EITHER mode. A second hit always stops (fix round 1: `l3_mode: 'code'` used to have no
- *   end state — `stop_at: L3` must mean something regardless of mode).
+ *   end state — `stop_at: L3` must mean something regardless of mode). Rule 6 (`review_cap`)
+ *   shares this SAME flag rather than a flag of its own — the plan's L3 rung is one per block,
+ *   not one per trigger.
  * @returns {EscalationResult}
  */
 function finalizeEscalate(trigger, currentLevel, stopAt, l3Mode, l3RungAlreadyUsed) {
@@ -119,17 +149,26 @@ function finalizeEscalate(trigger, currentLevel, stopAt, l3Mode, l3RungAlreadyUs
  * @property {number} [reviewRoundsAtLevel]
  * @property {number} [reviewRoundsPerLevel] - `escalation.review_rounds_per_level`, default 2.
  * @property {boolean} [openFixNowFinding] - an unresolved `fix_now` finding remains open.
+ * @property {boolean} [reviewStall] - rule 2b (v1.3, §4.11): this round's open `fix_now` set did
+ *   NOT strictly shrink (see `reviewRoundStalled`). Checked, and fires, before rule 2's own
+ *   `reviewRoundsAtLevel` counter is exhausted.
  * @property {'complete'|'retry'|'escalate'|'stop'|undefined} [s1Next] - S1's `next` answer.
  * @property {string} [currentLevel] - REQUIRED at runtime (checked below, throws when absent);
  *   optional in this typedef only so a deliberately-invalid `{}` type-checks in a test that
  *   proves the runtime check fires.
  * @property {string} [stopAt] - `escalation.stop_at`, default `'L3'`.
  * @property {'patch'|'code'} [l3Mode] - `escalation.l3_mode`, default `'patch'` (R1).
- * @property {boolean} [l3RungAlreadyUsed] - the ceiling (`currentLevel === stopAt`) was already
- *   hit once before on THIS block, in either `l3_mode`. A second hit always `stop`s.
+ * @property {boolean} [l3RungAlreadyUsed] - the L3 rung (ceiling, rule 5, OR the file's review
+ *   cap, rule 6) was already used once before on THIS block, from either source. A second hit
+ *   always `stop`s — the plan's L3 rung is one per block, not one per trigger.
+ * @property {number} [roundsAtFile] - rule 6 (v1.3, §4.11): total review rounds run on this file
+ *   so far, counted across every level — unlike `reviewRoundsAtLevel`, this is never reset by a
+ *   level escalation.
+ * @property {number} [maxRoundsPerFile] - `review.max_rounds_per_file`, default 4 (schema
+ *   minimum 2, maximum 6; B1.1).
  *
  * @typedef {object} EscalationResult
- * @property {'retries'|'review_rounds'|'s2_ruling'|null} trigger
+ * @property {'retries'|'review_stall'|'review_rounds'|'s2_ruling'|'review_cap'|null} trigger
  * @property {'escalate'|'s2_check'|'stop'|'l3_rung'|'none'} action
  * @property {string} [level]
  * @property {string} [mode]
@@ -137,7 +176,7 @@ function finalizeEscalate(trigger, currentLevel, stopAt, l3Mode, l3RungAlreadyUs
  */
 
 /**
- * Rules 1, 2 and 4 (rule 3 is `dispatchLevel`; rule 5 is the ceiling guard inside
+ * Rules 1, 2b, 2, 4 and 6 (rule 3 is `dispatchLevel`; rule 5 is the ceiling guard inside
  * `finalizeEscalate`), evaluated in the documented order — the first rule that fires wins.
  * @param {EscalationCtx} ctx
  * @returns {EscalationResult}
@@ -150,11 +189,14 @@ export function escalationAfterAttempt(ctx) {
     reviewRoundsAtLevel = 0,
     reviewRoundsPerLevel = 2,
     openFixNowFinding = false,
+    reviewStall = false,
     s1Next,
     currentLevel,
     stopAt = 'L3',
     l3Mode = 'patch',
     l3RungAlreadyUsed = false,
+    roundsAtFile = 0,
+    maxRoundsPerFile = 4,
   } = ctx;
 
   if (typeof currentLevel !== 'string') {
@@ -164,6 +206,10 @@ export function escalationAfterAttempt(ctx) {
   // Rule 1: attempt counter.
   if (attemptsAtLevel >= retriesPerLevel && !gateGreen) {
     return finalizeEscalate('retries', currentLevel, stopAt, l3Mode, l3RungAlreadyUsed);
+  }
+  // Rule 2b: review stall — fires immediately, ahead of rule 2's own round-exhaustion counter.
+  if (reviewStall && openFixNowFinding) {
+    return finalizeEscalate('review_stall', currentLevel, stopAt, l3Mode, l3RungAlreadyUsed);
   }
   // Rule 2: review rounds.
   if (reviewRoundsAtLevel >= reviewRoundsPerLevel && openFixNowFinding) {
@@ -175,6 +221,15 @@ export function escalationAfterAttempt(ctx) {
   }
   if (s1Next === 'stop') {
     return { trigger: 's2_ruling', action: 'stop' };
+  }
+  // Rule 6: review cap — the file's absolute round count, independent of the escalation level.
+  // Always `patch` (never `l3Mode: 'code'`): a round-cap breach is a fix-scale problem. Shares
+  // `l3RungAlreadyUsed` with rule 5's ceiling guard (one L3 rung per block, not per trigger).
+  if (roundsAtFile >= maxRoundsPerFile && openFixNowFinding) {
+    if (l3RungAlreadyUsed) {
+      return { trigger: 'review_cap', action: 'stop', reason: 'review_cap' };
+    }
+    return { trigger: 'review_cap', action: 'l3_rung', mode: 'patch' };
   }
   // No rule fired this attempt.
   return { trigger: null, action: 'none' };

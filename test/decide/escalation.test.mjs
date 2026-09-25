@@ -1,7 +1,10 @@
 /**
- * Escalation precedence (plan §3.6, O10, R1) — "5 rules × 2 cases = 10 tests" (fires / falls
- * through, for each of the 5 documented rules), plus the `l3_mode: patch` round trip (O10/R1)
- * tested separately, as the plan's `decide/` test list itemizes it apart from the 10.
+ * Escalation precedence (plan §3.6, O10, R1; v1.3 adds rule 2b `review_stall` and rule 6
+ * `review_cap`, §4.11) — "6 rules × 2 cases = 12 tests" (fires / falls through, for each of the
+ * six *triggered* rules: retries, review_stall, review_rounds, security, s2_ruling, review_cap —
+ * rule 5, the ceiling guard, carries no trigger of its own and is exercised separately), plus the
+ * `l3_mode: patch` round trip (O10/R1) and the `review_cap` round trip (v1.3), each tested
+ * separately from the 12.
  */
 
 import assert from 'node:assert/strict';
@@ -13,6 +16,7 @@ import {
   levelIndex,
   mustRouteNextThroughEscalation,
   nextLevelCapped,
+  reviewRoundStalled,
   securityFloorLevel,
 } from '../../src/decide/escalation.mjs';
 
@@ -72,6 +76,54 @@ test('rule 2 does NOT fire: rounds exhausted but no open fix_now finding', () =>
     currentLevel: 'L1',
   });
   assert.notEqual(r.trigger, 'review_rounds');
+  assert.equal(r.action, 'none');
+});
+
+// ── Rule 2b: review stall (v1.3, §4.11) — checked BEFORE rule 2's own counter ───────────────────
+
+test('reviewRoundStalled: 3 → 3 stalls, 3 → 2 does not (§4.11 shrink test)', () => {
+  assert.equal(reviewRoundStalled(3, 3), true);
+  assert.equal(reviewRoundStalled(3, 2), false);
+});
+
+test('rule 2b FIRES: an open fix_now set that did not shrink escalates immediately, PRE-EMPTING rule 2 — reviewRoundsAtLevel is still below its own limit here', () => {
+  const r = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    reviewRoundsAtLevel: 1,
+    reviewRoundsPerLevel: 2, // rule 2's own counter is NOT exhausted (1 < 2) — proves precedence
+    reviewStall: true,
+    openFixNowFinding: true,
+    currentLevel: 'L1',
+  });
+  assert.equal(r.trigger, 'review_stall');
+  assert.equal(r.action, 'escalate');
+  assert.equal(r.level, 'L2');
+});
+
+test('rule 2b PRE-EMPTS rule 2 even when BOTH triggers hold: reviewRoundsAtLevel is also exhausted here, and review_stall still wins by precedence', () => {
+  const r = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    reviewRoundsAtLevel: 2,
+    reviewRoundsPerLevel: 2, // exhausted — rule 2 alone would also fire here
+    reviewStall: true,
+    openFixNowFinding: true,
+    currentLevel: 'L1',
+  });
+  assert.equal(r.trigger, 'review_stall'); // not 'review_rounds' — this is what actually proves order
+  assert.equal(r.action, 'escalate');
+  assert.equal(r.level, 'L2');
+});
+
+test('rule 2b does NOT fire: the open fix_now set strictly shrank this round', () => {
+  const r = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    reviewRoundsAtLevel: 1,
+    reviewRoundsPerLevel: 2,
+    reviewStall: reviewRoundStalled(3, 2), // false — shrank 3 → 2
+    openFixNowFinding: true,
+    currentLevel: 'L1',
+  });
+  assert.notEqual(r.trigger, 'review_stall');
   assert.equal(r.action, 'none');
 });
 
@@ -197,6 +249,68 @@ test('l3_mode: code keeps D4 literal for ONE more ceiling hit, then stops (fix r
   });
   assert.equal(secondHit.action, 'stop');
   assert.equal(secondHit.reason, 'l3_code_exhausted');
+});
+
+// ── Rule 6: review cap (v1.3, §4.11) — the file's absolute round count, checked last ────────────
+
+test('rule 6 FIRES: review.max_rounds_per_file default (4) reached on a file with an open fix_now ⇒ the L3 patch rung', () => {
+  const r = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    currentLevel: 'L1', // nowhere near the L3 ceiling — proves this is a separate trigger from rule 5
+    roundsAtFile: 4,
+    openFixNowFinding: true,
+  });
+  assert.equal(r.trigger, 'review_cap');
+  assert.equal(r.action, 'l3_rung');
+  assert.equal(r.mode, 'patch');
+});
+
+test('rule 6 does NOT fire: rounds below the cap, or the open fix_now set is already resolved', () => {
+  const belowCap = escalationAfterAttempt({ attemptsAtLevel: 0, currentLevel: 'L1', roundsAtFile: 3, openFixNowFinding: true });
+  assert.notEqual(belowCap.trigger, 'review_cap');
+  assert.equal(belowCap.action, 'none');
+
+  const resolved = escalationAfterAttempt({ attemptsAtLevel: 0, currentLevel: 'L1', roundsAtFile: 4, openFixNowFinding: false });
+  assert.notEqual(resolved.trigger, 'review_cap');
+  assert.equal(resolved.action, 'none');
+});
+
+test('rule 6 reads review.max_rounds_per_file rather than a hardcoded 4', () => {
+  const belowConfiguredCap = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    currentLevel: 'L1',
+    roundsAtFile: 4,
+    maxRoundsPerFile: 6, // 4 < 6 — a hardcoded-4 implementation would wrongly fire here
+    openFixNowFinding: true,
+  });
+  assert.equal(belowConfiguredCap.action, 'none');
+
+  const atConfiguredCap = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    currentLevel: 'L1',
+    roundsAtFile: 6,
+    maxRoundsPerFile: 6,
+    openFixNowFinding: true,
+  });
+  assert.equal(atConfiguredCap.trigger, 'review_cap');
+  assert.equal(atConfiguredCap.action, 'l3_rung');
+});
+
+test('review_cap round trip: first breach patches once, a second breach on the same block stops (l3RungAlreadyUsed is shared with rule 5)', () => {
+  const firstBreach = escalationAfterAttempt({ attemptsAtLevel: 0, currentLevel: 'L1', roundsAtFile: 4, openFixNowFinding: true, l3RungAlreadyUsed: false });
+  assert.equal(firstBreach.action, 'l3_rung');
+  assert.equal(firstBreach.mode, 'patch');
+
+  const secondBreach = escalationAfterAttempt({
+    attemptsAtLevel: 0,
+    currentLevel: 'L1',
+    roundsAtFile: 4,
+    openFixNowFinding: true,
+    l3RungAlreadyUsed: true, // the patch from firstBreach was applied and the file is still open
+  });
+  assert.equal(secondBreach.trigger, 'review_cap');
+  assert.equal(secondBreach.action, 'stop');
+  assert.equal(secondBreach.reason, 'review_cap');
 });
 
 test('escalationAfterAttempt requires currentLevel', () => {
