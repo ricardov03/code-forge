@@ -210,12 +210,100 @@ test('security-cli get: an item with an empty password reads as absent', async (
   assert.equal(await createSecurityCliBackend({ exec, platform: 'darwin' }).get('jev'), null);
 });
 
-test('security-cli is read/delete only: set refuses and spawns nothing, so the value never reaches argv', async () => {
-  const { exec, argvs } = fakeExec([]);
-  const sec = createSecurityCliBackend({ exec, platform: 'darwin' });
-  assert.equal(sec.writable, false);
-  await assert.rejects(sec.set('jev', FAKE_KEY), /not supported/);
-  assert.equal(argvs.length, 0);
+/**
+ * Writes a stateful fake `security` into a fresh temp dir, mimicking the real one's item store:
+ *  - `add-generic-password`: logs its argv and stdin (argv.log, stdin.log), then either exits
+ *    `addExit` (echoing stdin to stderr, so a leaky error would show) or stores the first stdin
+ *    line — cut to `cut` characters when given, like a truncating getpass — and exits 0;
+ *  - `find-generic-password`: prints the stored value, or exits 44 when there is none;
+ *  - `delete-generic-password`: removes it, or exits 44.
+ * Every call appends its argv to calls.log, followed by a `--` line.
+ * @param {{addExit?: number, cut?: number}} [opts]
+ */
+async function fakeSecurityBin({ addExit = 0, cut } = {}) {
+  const dir = path.join(await tempHome(), 'bin');
+  await mkdir(dir, { recursive: true });
+  const bin = path.join(dir, 'security');
+  const f = (/** @type {string} */ name) => `'${path.join(dir, name)}'`;
+  const store = cut === undefined ? `head -n 1 ${f('stdin.log')}` : `head -n 1 ${f('stdin.log')} | cut -c 1-${cut}`;
+  const script = [
+    '#!/bin/sh',
+    `printf '%s\\n' "$@" -- >> ${f('calls.log')}`,
+    'case "$1" in',
+    'add-generic-password)',
+    `  printf '%s\\n' "$@" > ${f('argv.log')}`,
+    `  cat > ${f('stdin.log')}`,
+    addExit === 0 ? `  ${store} > ${f('vault')}` : `  cat ${f('stdin.log')} >&2`,
+    `  exit ${addExit};;`,
+    'find-generic-password)',
+    `  [ -f ${f('vault')} ] || exit 44`,
+    `  cat ${f('vault')}; exit 0;;`,
+    'delete-generic-password)',
+    `  [ -f ${f('vault')} ] || exit 44`,
+    `  rm ${f('vault')}; exit 0;;`,
+    'esac',
+    'exit 1',
+    '',
+  ].join('\n');
+  await writeFile(bin, script, { mode: 0o755 });
+  const read = async (/** @type {string} */ name) => readFile(path.join(dir, name), 'utf8');
+  return { bin, argv: () => read('argv.log'), stdin: () => read('stdin.log'), calls: () => read('calls.log') };
+}
+
+test('security-cli set: the fake `security` gets the secret on stdin and never in argv; the write succeeds', async () => {
+  const fake = await fakeSecurityBin();
+  const sec = createSecurityCliBackend({ platform: 'darwin', bin: fake.bin });
+  assert.equal(sec.writable, true);
+  await sec.set('jev', FAKE_KEY);
+  assert.equal(await fake.stdin(), `${FAKE_KEY}\n${FAKE_KEY}\n`);
+  assert.equal(countOccurrences(await fake.calls(), FAKE_KEY), 0);
+  assert.equal(await fake.argv(), ['add-generic-password', '-U', '-s', 'code-forge', '-a', 'jev', '-w', ''].join('\n'));
+  assert.equal(await sec.get('jev'), FAKE_KEY);
+});
+
+test('security-cli set: a 200-character value round-trips through stdin', async () => {
+  const long = `FAKE-${'x'.repeat(195)}`;
+  assert.equal(long.length, 200);
+  const fake = await fakeSecurityBin();
+  const sec = createSecurityCliBackend({ platform: 'darwin', bin: fake.bin });
+  await sec.set('jev', long);
+  assert.equal(await sec.get('jev'), long);
+});
+
+test('security-cli set: a stored value cut short by the prompt fails the write once, holds no secret, and the item is removed', async () => {
+  const fake = await fakeSecurityBin({ cut: 128 });
+  const sec = createSecurityCliBackend({ platform: 'darwin', bin: fake.bin });
+  const long = `FAKE-${'y'.repeat(195)}`;
+  let rejections = 0;
+  await assert.rejects(sec.set('jev', long), (err) => {
+    rejections += 1;
+    assert.equal(countOccurrences(String(err), long.slice(0, 128)), 0);
+    assert.equal(String(err), 'Error: security-cli: add-generic-password stored value mismatch');
+    return true;
+  });
+  assert.equal(rejections, 1);
+  const subcommands = (await fake.calls()).split('\n').filter((l) => l.endsWith('-generic-password'));
+  assert.deepEqual(subcommands, ['add-generic-password', 'find-generic-password', 'delete-generic-password']);
+  assert.equal(await sec.get('jev'), null);
+});
+
+test('security-cli set: `security` exiting non-zero fails the write with an error that holds no secret', async () => {
+  const fake = await fakeSecurityBin({ addExit: 45 });
+  const sec = createSecurityCliBackend({ platform: 'darwin', bin: fake.bin });
+  await assert.rejects(sec.set('jev', FAKE_KEY), (err) => {
+    assert.equal(countOccurrences(String(err), FAKE_KEY), 0);
+    assert.equal(String(err), 'Error: security-cli: add-generic-password failed (exit 45)');
+    return true;
+  });
+});
+
+test('security-cli set: a value with a line break is refused before anything spawns', async () => {
+  const fake = await fakeSecurityBin();
+  const sec = createSecurityCliBackend({ platform: 'darwin', bin: fake.bin });
+  await assert.rejects(sec.set('jev', `${FAKE_KEY}\nFAKE-second-line`), TypeError);
+  await assert.rejects(fake.argv(), { code: 'ENOENT' });
+  await assert.rejects(fake.stdin(), { code: 'ENOENT' });
+  await assert.rejects(fake.calls(), { code: 'ENOENT' });
 });
 
 test('security-cli delete: exit 0 ⇒ true, exit 44 ⇒ false, other failure throws', async () => {
