@@ -1,0 +1,220 @@
+import { alive, cfgWith, fakeDeps, freshDir, readRecords, sink, waitFor, writeIn } from './helpers.mjs';
+import assert from 'node:assert/strict';
+import { copyFileSync, existsSync, readFileSync, readdirSync } from 'node:fs';
+import path from 'node:path';
+import { fileURLToPath } from 'node:url';
+import { test } from 'node:test';
+
+const { spawnSession, SessionError } = await import('../../src/session/spawn.mjs');
+const { runSpawn } = await import('../../src/cli/spawn.mjs');
+const { readAllRows } = await import('../../src/ledger/write.mjs');
+const { currentRunRoot, pidsDir } = await import('../../src/util/tmp.mjs');
+const { DEFAULT_ANSWER } = await import('../fixtures/bin/fake-common.mjs');
+const { S2_SCHEMA } = await import('../../src/session/s2.mjs');
+
+const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+const CLAUDE = { provider: 'anthropic', model: 'fake-opus', effort: 'high' };
+const PACKET_BYTES = Buffer.concat([Buffer.from('packet héllo ✓\n', 'utf8'), Buffer.from([0x00, 0xff, 0x0a]), Buffer.from('end')]);
+
+test('round trip: the fake CLI returns the schema object and the ledger row says tokens_source reported', async () => {
+  const { deps } = fakeDeps();
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide this');
+  const result = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA, slug: 'b9a-round', block: 'B1' }, deps);
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.answer, DEFAULT_ANSWER);
+  const rows = await readAllRows('b9a-round');
+  assert.equal(rows.length, 1);
+  assert.deepEqual(
+    [rows[0].event, rows[0].role, rows[0].block, rows[0].tokens_source, rows[0].tokens_in, rows[0].tokens_out],
+    ['session', 'reviewer', 'B1', 'reported', 3, 42],
+  );
+});
+
+test('an answer that does not match the schema is invalid-output, not ok', async () => {
+  const { deps } = fakeDeps({ FAKE_ANSWER: JSON.stringify({ decision: 'x' }) });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide this');
+  const result = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  assert.deepEqual([result.status, result.answer], ['invalid-output', null]);
+});
+
+test('stdinFile content reaches the fake CLI stdin byte-identical (Claude and Codex closed-book)', async () => {
+  const { deps, records } = fakeDeps();
+  const packet = writeIn(freshDir('pk'), 'packet.bin', PACKET_BYTES);
+  await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'judge', promptPath: packet }, deps);
+  await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'judge', promptPath: packet }, deps);
+  const got = readRecords(records).map((r) => [r.name, r.stdin_is_pipe, Buffer.from(r.stdin_b64, 'base64').equals(PACKET_BYTES), r.argv.includes(packet)]);
+  assert.deepEqual(got.sort(), [
+    ['claude', true, true, false],
+    ['codex', true, true, false],
+  ]);
+});
+
+const OUT_ANSWER = { ...DEFAULT_ANSWER, decision: 'only-in-the-o-file' };
+
+/** Run a Codex reviewer whose answer exists ONLY in the `-o` file; returns the result and the fake's record. */
+async function codexOutRun() {
+  const { deps, records } = fakeDeps({ FAKE_CODEX_QUIET: '1', FAKE_ANSWER: JSON.stringify(OUT_ANSWER) });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const result = await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  const [rec] = readRecords(records);
+  return { result, rec, outPath: rec.argv[rec.argv.indexOf('-o') + 1] };
+}
+
+test('Codex outPath is read: the answer that exists only in the -o file is the result', async () => {
+  const { result, rec } = await codexOutRun();
+  assert.equal(rec.argv.indexOf('-o') > 0, true);
+  assert.deepEqual([rec.wrote_out, result.status, result.answer], [true, 'ok', OUT_ANSWER]);
+});
+
+test('Codex outPath is deleted after it is read', async () => {
+  const { rec, outPath } = await codexOutRun();
+  assert.deepEqual([rec.wrote_out, path.isAbsolute(outPath), existsSync(outPath)], [true, true, false]);
+});
+
+test('Grok gets --prompt-file <packet> and nothing on stdin', async () => {
+  const { deps, records } = fakeDeps();
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const result = await spawnSession({ cfg: cfgWith({ provider: 'xai', model: 'fake-grok' }), level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  const [rec] = readRecords(records);
+  assert.deepEqual(
+    [result.status, rec.argv[rec.argv.indexOf('--prompt-file') + 1], rec.stdin_is_pipe, rec.stdin_b64],
+    ['ok', packet, false, ''],
+  );
+});
+
+test('a timeout kills the child and clears its pid-registry entry', async () => {
+  const { deps, records } = fakeDeps({ FAKE_SLEEP_MS: '60000' });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'slow');
+  const pending = spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: packet, timeoutMs: 1500 }, deps);
+  let pid = 0;
+  try {
+    assert.equal(await waitFor(() => readdirSync(records).length === 1), true);
+    pid = readRecords(records)[0].pid;
+    const entry = path.join(pidsDir(), `${pid}.json`);
+    assert.equal(existsSync(entry), true, 'registered while alive');
+    const result = await pending;
+    assert.equal(result.status, 'timeout');
+    assert.deepEqual([alive(pid), existsSync(entry)], [false, false]);
+  } finally {
+    if (pid && alive(pid)) process.kill(pid, 'SIGKILL');
+  }
+});
+
+test('--background writes a pid file under the run root and a log with the child output', async () => {
+  const { deps } = fakeDeps();
+  const brief = writeIn(freshDir('brief'), 'brief.md', 'code it');
+  const root = currentRunRoot();
+  const result = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'coder', promptPath: brief, cwd: freshDir('ws'), background: true, runRoot: root }, deps);
+  try {
+    const pidRecord = JSON.parse(readFileSync(result.pidFile, 'utf8'));
+    assert.deepEqual([result.status, result.pidFile.startsWith(`${root}${path.sep}`), pidRecord.pid], ['started', true, result.pid]);
+    assert.equal(await waitFor(() => !alive(result.pid)), true);
+    assert.equal(JSON.parse(readFileSync(result.logPath, 'utf8')).type, 'result');
+  } finally {
+    if (alive(result.pid)) process.kill(-result.pid, 'SIGKILL');
+  }
+});
+
+test('retry ladder: fallback[1] is spawned after fallback[0] reports 402', async () => {
+  const { deps, records, stderr } = fakeDeps({ FAKE_402_MODELS: 'fake-gpt,fake-grok' });
+  const cfg = cfgWith({
+    provider: 'openai',
+    model: 'fake-gpt',
+    fallback: [
+      { provider: 'xai', model: 'fake-grok' },
+      { provider: 'anthropic', model: 'fake-opus' },
+    ],
+  });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const result = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  assert.deepEqual(
+    [result.status, result.fallback_step, result.attempts.map((a) => `${a.model}:${a.status}:${a.reason}`), readRecords(records).length],
+    ['ok', 2, ['fake-gpt:unavailable:http-402', 'fake-grok:unavailable:http-402', 'fake-opus:ok:null'], 3],
+  );
+  assert.equal(stderr.text().split('\n').filter(Boolean).length, 3);
+});
+
+test('a $id-bearing schema validates in two sessions of one process, including a 402 fallback step', async () => {
+  const schema = { $id: 'https://code-forge.test/schemas/s2-answer.json', ...S2_SCHEMA };
+  const first = fakeDeps();
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const one = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: packet, schema }, first.deps);
+  const second = fakeDeps({ FAKE_402_MODELS: 'fake-gpt' });
+  const cfg = cfgWith({ provider: 'openai', model: 'fake-gpt', fallback: [{ provider: 'anthropic', model: 'fake-opus' }] });
+  const two = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema }, second.deps);
+  assert.deepEqual(
+    [one.status, one.answer, two.status, two.fallback_step, two.answer, readRecords(first.records).length, readRecords(second.records).length],
+    ['ok', DEFAULT_ANSWER, 'ok', 1, DEFAULT_ANSWER, 1, 2],
+  );
+});
+
+// A source schema with ONE optional field: OpenAI strict mode compiles it to required + nullable.
+const OPTIONAL_SCHEMA = { type: 'object', properties: { decision: { type: 'string' }, note: { type: 'string' } }, required: ['decision'], additionalProperties: false };
+
+test('a strict (Codex) answer with null for an optional field is ok with the field dropped; the same answer under the plain schema is invalid-output', async () => {
+  const nullNote = JSON.stringify({ decision: 'proceed', note: null });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const codex = fakeDeps({ FAKE_ANSWER: nullNote });
+  const strict = await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'reviewer', promptPath: packet, schema: OPTIONAL_SCHEMA }, codex.deps);
+  const claude = fakeDeps({ FAKE_ANSWER: nullNote });
+  const plain = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: packet, schema: OPTIONAL_SCHEMA }, claude.deps);
+  assert.deepEqual([strict.status, strict.answer, plain.status, plain.answer], ['ok', { decision: 'proceed' }, 'invalid-output', null]);
+});
+
+test('a failed run whose stdout mentions 402 in normal content is failed, not unavailable (1 attempt)', async () => {
+  const { deps, records } = fakeDeps({ FAKE_ANSWER: '"see line 402: rate limit notes, 401 and 429 too"', FAKE_EXIT: '1' });
+  const cfg = cfgWith({ provider: 'anthropic', model: 'fake-opus', fallback: [{ provider: 'xai', model: 'fake-grok' }] });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const result = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet }, deps);
+  assert.deepEqual([result.status, result.attempts.length, readRecords(records).length], ['failed', 1, 1]);
+});
+
+test('a failure that is not unavailability does not climb the ladder', async () => {
+  const { deps, records } = fakeDeps({ FAKE_ANSWER: '"not json object"' });
+  const cfg = cfgWith({ provider: 'anthropic', model: 'fake-opus', fallback: [{ provider: 'xai', model: 'fake-grok' }] });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const result = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  assert.deepEqual([result.status, readRecords(records).length], ['invalid-output', 1]);
+});
+
+test('a coder argv that isForbidden is refused before anything spawns', async () => {
+  const { deps, records } = fakeDeps();
+  const brief = writeIn(freshDir('brief'), 'brief.md', 'code it');
+  // Codex puts the coder's cwd in argv (`-C <dir>`): a cwd under ~/.code-forge/runs makes the BUILT argv forbidden.
+  const cwd = path.join(process.env.HOME ?? '', '.code-forge', 'runs', 'ws');
+  await assert.rejects(
+    spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'coder', promptPath: brief, cwd }, deps),
+    (err) => err instanceof SessionError && err.code === 'forbidden' && err.message === 'coder argv refused before spawn: forbidden entry code-forge-runs-access',
+  );
+  assert.equal(readdirSync(records).length, 0);
+});
+
+test('every spawn prints the level line on stderr', async () => {
+  const { deps, stderr } = fakeDeps();
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L1', role: 'reviewer', promptPath: packet }, deps);
+  assert.equal(stderr.text(), 'level=L1 provider=anthropic model=fake-opus effort=high fallback_step=0\n');
+});
+
+test('spawn verb: config from cwd, JSON result on stdout, exit 0; exit 3 when every step is unavailable', async () => {
+  const ws = freshDir('verb');
+  copyFileSync(path.join(REPO, 'test', 'fixtures', 'config', 'minimal-anthropic.yml'), path.join(ws, '.code-forge.yml'));
+  const packet = writeIn(ws, 'packet.md', 'decide');
+  const before = process.cwd();
+  process.chdir(ws);
+  try {
+    const { deps } = fakeDeps();
+    const stdout = sink();
+    const code = await runSpawn(['--level', 'L2', '--role', 'reviewer', '--brief', packet], { ...deps, stdout });
+    const shown = JSON.parse(stdout.text());
+    assert.deepEqual([code, shown.status, shown.model, shown.fallback_step], [0, 'ok', 'claude-opus-5-5', 0]);
+    const down = fakeDeps({ FAKE_402_MODELS: 'claude-opus-5-5' });
+    assert.equal(await runSpawn(['--level', 'L2', '--role', 'reviewer', '--brief', packet], { ...down.deps, stdout: sink() }), 3);
+    const bad = fakeDeps();
+    const missing = path.join(ws, 'no-such-schema.json');
+    assert.equal(await runSpawn(['--level', 'L2', '--role', 'reviewer', '--brief', packet, '--schema', missing], { ...bad.deps, stdout: sink() }), 2);
+    assert.equal(bad.stderr.text(), 'spawn: --schema cannot be read\n');
+  } finally {
+    process.chdir(before);
+  }
+});

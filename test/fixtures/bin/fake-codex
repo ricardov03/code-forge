@@ -1,0 +1,29 @@
+#!/usr/bin/env node
+// Fake `codex exec --json -o <outPath>`: JSONL events on stdout, the last message in `-o` ([A14] shape).
+import { writeFileSync } from 'node:fs';
+import { answer, flagValue, maybeSleep, pays402, readStdin, record, tokensFor } from './fake-common.mjs';
+
+const argv = process.argv.slice(2);
+const stdin = await readStdin();
+record('codex', stdin);
+await maybeSleep();
+
+const emit = (/** @type {unknown} */ event) => process.stdout.write(`${JSON.stringify(event)}\n`);
+const model = flagValue(argv, '-m', '--model');
+const outPath = flagValue(argv, '-o', '--output-last-message');
+emit({ type: 'thread.started', thread_id: 'fake-thread' });
+emit({ type: 'turn.started' });
+
+if (pays402(model)) {
+  emit({ type: 'error', message: 'unexpected status 402 Payment Required' });
+  emit({ type: 'turn.failed', error: { message: 'unexpected status 402 Payment Required' } });
+  process.exit(1);
+}
+const value = answer();
+const text = typeof value === 'string' ? value : JSON.stringify(value);
+if (!process.env.FAKE_CODEX_QUIET) emit({ type: 'item.completed', item: { id: 'item_0', type: 'agent_message', text } });
+emit({ type: 'turn.completed', usage: { input_tokens: tokensFor(stdin.bytes), cached_input_tokens: 0, output_tokens: 17 } });
+if (outPath) {
+  writeFileSync(outPath, text);
+  record('codex', stdin, { wrote_out: true });
+}

@@ -1,0 +1,30 @@
+#!/usr/bin/env node
+// Fake `claude -p --output-format json` (shape copied from a real result, no auth fields).
+import { answer, flagValue, maybeSleep, pays402, readStdin, record, tokensFor } from './fake-common.mjs';
+
+const argv = process.argv.slice(2);
+const stdin = await readStdin();
+record('claude', stdin);
+await maybeSleep();
+
+const model = flagValue(argv, '--model');
+const dashDash = argv.indexOf('--');
+const prompt = dashDash >= 0 ? argv[dashDash + 1] ?? '' : stdin.bytes;
+const base = { type: 'result', session_id: 'fake-session', duration_ms: 5, num_turns: 1, total_cost_usd: 0.001 };
+
+if (pays402(model)) {
+  process.stdout.write(`${JSON.stringify({ ...base, subtype: 'success', is_error: true, api_error_status: 402, result: 'API Error: 402 insufficient credits' })}\n`);
+  process.exit(1);
+}
+const value = answer();
+const out = {
+  ...base,
+  subtype: 'success',
+  is_error: false,
+  api_error_status: null,
+  result: typeof value === 'string' ? value : JSON.stringify(value),
+  ...(argv.includes('--json-schema') ? { structured_output: value } : {}),
+  usage: { input_tokens: tokensFor(prompt), cache_creation_input_tokens: 0, cache_read_input_tokens: 0, output_tokens: 42 },
+};
+process.stdout.write(`${JSON.stringify(out)}\n`);
+if (process.env.FAKE_EXIT) process.exitCode = Number(process.env.FAKE_EXIT);

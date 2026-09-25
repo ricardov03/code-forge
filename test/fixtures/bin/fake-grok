@@ -1,0 +1,25 @@
+#!/usr/bin/env node
+// Fake `grok --prompt-file <packet>`: reads the packet itself, prints one JSON result ([A14] shape).
+import { readFileSync } from 'node:fs';
+import { answer, flagValue, maybeSleep, pays402, readStdin, record, tokensFor } from './fake-common.mjs';
+
+const argv = process.argv.slice(2);
+const stdin = await readStdin();
+record('grok', stdin);
+await maybeSleep();
+
+const model = flagValue(argv, '-m', '--model');
+if (pays402(model)) {
+  process.stderr.write('Error: HTTP 402 Payment Required\n');
+  process.exit(1);
+}
+const promptFile = flagValue(argv, '--prompt-file');
+const prompt = promptFile ? readFileSync(promptFile) : Buffer.alloc(0);
+const value = answer();
+const out = {
+  type: 'result',
+  result: typeof value === 'string' ? value : JSON.stringify(value),
+  ...(argv.includes('--json-schema') ? { structured_output: value } : {}),
+  usage: { input_tokens: tokensFor(prompt), output_tokens: 9 },
+};
+process.stdout.write(`${JSON.stringify(out)}\n`);
