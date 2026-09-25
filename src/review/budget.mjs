@@ -224,12 +224,18 @@ export function budgetRows(result, { block, actual = null }) {
 }
 
 /**
- * Plan and write the rows (the ledger writer signs/stamps them).
- * @param {{files: BudgetFile[], cfg?: Record<string, any>, raised?: number, block: string, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
+ * Plan and write the rows (the ledger writer signs/stamps them). `blockOnly` writes the per-block
+ * rows only (`review.budget`, `review.over_budget`): the live path (B19, the worker's first ticket
+ * of a block) already gets one `review.plan` per reviewed file from the review engine, and a second
+ * set of forecast `review.plan` rows would double the report's planned-file count.
+ * @param {{files: BudgetFile[], cfg?: Record<string, any>, raised?: number, block: string, blockOnly?: boolean, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
  * @returns {Promise<BudgetPlan>}
  */
-export async function planAndRecord({ files, cfg, raised, block, writeRow }) {
+export async function planAndRecord({ files, cfg, raised, block, blockOnly = false, writeRow }) {
   const result = planBudget({ files, cfg, raised });
-  for (const row of budgetRows(result, { block })) await writeRow(row);
+  for (const row of budgetRows(result, { block })) {
+    if (blockOnly && row.event === 'review.plan') continue;
+    await writeRow(row);
+  }
   return result;
 }

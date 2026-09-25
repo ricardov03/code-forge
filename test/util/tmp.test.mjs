@@ -224,3 +224,155 @@ test('an owner.json that exists but is truncated JSON or has an invalid pid is `
   assert.equal(existsSync(path.join(truncated, 'owner.json')), true);
   assert.equal(existsSync(path.join(badPid, 'owner.json')), true);
 });
+
+// ---- B19: the lazy root honours `tmp.root` and is removed on a normal exit ----
+
+const REPO_ROOT = path.resolve(path.dirname(new URL(import.meta.url).pathname), '..', '..');
+const BIN = path.join(REPO_ROOT, 'bin', 'code-forge.mjs');
+const TMP_MODULE = path.join(REPO_ROOT, 'src', 'util', 'tmp.mjs');
+const REAPER_MODULE = path.join(REPO_ROOT, 'src', 'util', 'reaper.mjs');
+
+/** `process.env` minus every inherited `GIT_*`, no system/global git config, plus `extra`. */
+function childEnv(extra) {
+  /** @type {Record<string, string>} */
+  const env = { GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull };
+  for (const [k, v] of Object.entries(process.env)) if (!k.startsWith('GIT_') && k !== 'CODE_FORGE_TMP_ROOT' && v !== undefined) env[k] = v;
+  return { ...env, ...extra };
+}
+
+/** @param {string[]} argv @param {{cwd: string, env: Record<string, string>}} opts */
+async function runNode(argv, opts) {
+  const child = spawn(process.execPath, argv, { cwd: opts.cwd, env: opts.env, stdio: ['ignore', 'pipe', 'pipe'] });
+  let stdout = '';
+  let stderr = '';
+  child.stdout.on('data', (d) => (stdout += d));
+  child.stderr.on('data', (d) => (stderr += d));
+  const [code] = await once(child, 'exit');
+  return { code, stdout, stderr };
+}
+
+/** A fresh case dir with a git repo, its own HOME and TMPDIR. @param {string} name */
+async function cliCase(name) {
+  const dir = path.join(PARENT, name);
+  const repo = path.join(dir, 'repo');
+  const home = path.join(dir, 'home');
+  const tmpdir = path.join(dir, 'tmpdir');
+  for (const d of [repo, home, tmpdir]) mkdirSync(d, { recursive: true, mode: 0o700 });
+  const env = childEnv({ HOME: home, TMPDIR: tmpdir });
+  for (const args of [['init', '-q'], ['-c', 'user.name=Fake', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'base']]) {
+    const res = await runNode(['-e', `require('node:child_process').execFileSync('git', ${JSON.stringify(args)}, {stdio: 'ignore'})`], { cwd: repo, env });
+    assert.equal(res.code, 0, res.stderr);
+  }
+  return { dir, repo, env, defaultBase: path.join(tmpdir, 'code-forge') };
+}
+
+test('B19: a CLI verb run with a config whose tmp.root is a temp dir leaves 0 proc-* roots under <os.tmpdir()>/code-forge and 0 roots under tmp.root after exit', async () => {
+  const c = await cliCase('cli-tmp-root');
+  const configured = path.join(c.dir, 'configured-root');
+  writeFileSync(path.join(c.repo, '.code-forge.yml'), `tmp:\n  root: ${JSON.stringify(configured)}\n`);
+  const res = await runNode([BIN, 'gates', 'scope', '--cwd', c.repo, '--base', 'HEAD'], { cwd: c.repo, env: c.env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.deepEqual(JSON.parse(res.stdout).all, ['.code-forge.yml']); // the verb ran git through exec
+  assert.equal(existsSync(c.defaultBase), false); // nothing under <os.tmpdir()>/code-forge at all
+  assert.equal(existsSync(configured), true); // the lazy root was created under tmp.root …
+  assert.deepEqual(readdirSync(configured), []); // … and removed on exit
+});
+
+test('B19: without a tmp.root the same verb uses <os.tmpdir()>/code-forge and still leaves 0 proc-* roots there after exit', async () => {
+  const c = await cliCase('cli-default-root');
+  const res = await runNode([BIN, 'gates', 'scope', '--cwd', c.repo, '--base', 'HEAD'], { cwd: c.repo, env: c.env });
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(existsSync(c.defaultBase), true);
+  assert.deepEqual(readdirSync(c.defaultBase), []);
+});
+
+test('B19: tmpBase() honours an absolute CODE_FORGE_TMP_ROOT and ignores a relative one; an explicit root still wins', () => {
+  const before = process.env.CODE_FORGE_TMP_ROOT;
+  try {
+    process.env.CODE_FORGE_TMP_ROOT = path.join(PARENT, 'env-base');
+    assert.equal(tmpBase(), path.join(PARENT, 'env-base'));
+    assert.equal(tmpBase(path.join(PARENT, 'explicit')), path.join(PARENT, 'explicit'));
+    process.env.CODE_FORGE_TMP_ROOT = 'relative/base';
+    assert.equal(tmpBase(), path.join(os.tmpdir(), 'code-forge'));
+  } finally {
+    if (before === undefined) delete process.env.CODE_FORGE_TMP_ROOT;
+    else process.env.CODE_FORGE_TMP_ROOT = before;
+  }
+});
+
+test('B19: a lazy root whose pids/ holds a LIVE entry is kept on exit; one with only a dead entry is removed', async () => {
+  const base = path.join(PARENT, 'lazy-exit');
+  const dead = await deadPid();
+  const script = (pid) =>
+    `const t = await import(${JSON.stringify(TMP_MODULE)}); const r = await import(${JSON.stringify(REAPER_MODULE)});` +
+    ` const root = t.currentRunRoot(); r.registerPid(t.pidsDir(), ${pid}, 'fake'); console.log(root);`;
+  const env = childEnv({ CODE_FORGE_TMP_ROOT: base });
+  const live = await runNode(['--input-type=module', '-e', script(process.pid)], { cwd: PARENT, env });
+  const gone = await runNode(['--input-type=module', '-e', script(dead)], { cwd: PARENT, env });
+  assert.equal(live.code, 0, live.stderr);
+  assert.equal(gone.code, 0, gone.stderr);
+  const liveRoot = live.stdout.trim();
+  assert.equal(path.dirname(liveRoot), realpathSync(base));
+  assert.deepEqual(readdirSync(base), [path.basename(liveRoot)]);
+  assert.deepEqual(readdirSync(path.join(liveRoot, 'pids')), [`${process.pid}.json`]);
+});
+
+test('B19 R1: releaseLazyRoot never throws — an injected listEntries or rmSync failure returns false and keeps the root', async () => {
+  const { currentRunRoot, releaseLazyRoot, setRunRoot } = await import('../../src/util/tmp.mjs');
+  const before = process.env.CODE_FORGE_TMP_ROOT;
+  process.env.CODE_FORGE_TMP_ROOT = path.join(PARENT, 'lazy-inproc');
+  setRunRoot(null);
+  try {
+    const root = currentRunRoot();
+    assert.equal(path.dirname(root), realpathSync(path.join(PARENT, 'lazy-inproc')));
+    const boom = () => {
+      throw new Error('EACCES fake');
+    };
+    assert.equal(releaseLazyRoot({ listEntries: boom }), false);
+    assert.equal(releaseLazyRoot({ rmSync: boom }), false);
+    assert.equal(existsSync(root), true);
+    assert.equal(releaseLazyRoot(), true);
+    assert.equal(existsSync(root), false);
+    assert.equal(releaseLazyRoot(), false); // nothing lazy left
+  } finally {
+    setRunRoot(null);
+    if (before === undefined) delete process.env.CODE_FORGE_TMP_ROOT;
+    else process.env.CODE_FORGE_TMP_ROOT = before;
+  }
+});
+
+test('B19 R1: applyTmpRoot sets CODE_FORGE_TMP_ROOT exactly for 5 cases (absolute, env already set, relative, missing config, ok:false)', async () => {
+  const { applyTmpRoot } = await import('../../bin/code-forge.mjs');
+  const dirFor = (/** @type {string} */ name, /** @type {string | null} */ yml) => {
+    const dir = path.join(PARENT, 'apply', name);
+    mkdirSync(dir, { recursive: true });
+    if (yml !== null) writeFileSync(path.join(dir, '.code-forge.yml'), yml);
+    return dir;
+  };
+  const abs = path.join(PARENT, 'apply-abs-root');
+  const absDir = dirFor('absolute', `tmp:\n  root: ${JSON.stringify(abs)}\n`);
+  /** @type {Record<string, string>} */
+  const e1 = {};
+  assert.equal(await applyTmpRoot({ env: e1, cwd: absDir }), abs);
+  assert.deepEqual(e1, { CODE_FORGE_TMP_ROOT: abs });
+
+  const e2 = { CODE_FORGE_TMP_ROOT: '/already/set' };
+  assert.equal(await applyTmpRoot({ env: e2, cwd: absDir }), '/already/set');
+  assert.deepEqual(e2, { CODE_FORGE_TMP_ROOT: '/already/set' });
+
+  const relDir = dirFor('relative', 'tmp:\n  root: scratch/tmp\n');
+  /** @type {Record<string, string>} */
+  const e3 = {};
+  assert.equal(await applyTmpRoot({ env: e3, cwd: relDir }), path.join(relDir, 'scratch', 'tmp'));
+  assert.deepEqual(e3, { CODE_FORGE_TMP_ROOT: path.join(relDir, 'scratch', 'tmp') });
+
+  /** @type {Record<string, string>} */
+  const e4 = {};
+  assert.equal(await applyTmpRoot({ env: e4, cwd: dirFor('missing', null) }), undefined);
+  assert.deepEqual(e4, {});
+
+  /** @type {Record<string, string>} */
+  const e5 = {};
+  assert.equal(await applyTmpRoot({ env: e5, cwd: dirFor('broken', 'tmp: [unclosed\n') }), undefined);
+  assert.deepEqual(e5, {});
+});

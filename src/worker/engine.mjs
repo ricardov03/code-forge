@@ -21,6 +21,10 @@
  * else `findings` = the open fix list, `next` = what the orchestrator does (`fix` at `level`,
  * `trigger: review_stall | review_rounds`, `patch`), `stopped` = the stop reason.
  * Without `ctx.key` (a direct call) the hook is the engine alone and writes no approval row.
+ * The first keyed ticket of a block (no `review.budget` row for it in the run yet) records the
+ * block's review budget (§4.10, B19): the forecast over the block's changed owned files (tier from
+ * the path floors, before S1), one `review.budget` row per block; a failure there never fails the
+ * review.
  * The review NEVER approves an empty or failed session: that is `unavailable` (§4.2 stub guard).
  * A throw inside the round is `unavailable` too, with the state saved as `next: retry` (see
  * `fixLoopRound`): the next ticket re-runs that round, never a fresh round 1.
@@ -29,7 +33,9 @@
 import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { askJev } from '../decide/jev-client.mjs';
-import { reviewFile } from '../review/engine.mjs';
+import { planAndRecord, tierOf } from '../review/budget.mjs';
+import { reviewFile, rulesRisk } from '../review/engine.mjs';
+import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { newFileState, runRound } from '../review/fixloop.mjs';
 import { readRun } from '../state/run.mjs';
 import { redact } from '../util/redact.mjs';
@@ -78,14 +84,14 @@ import { assertTicketId } from './ticket.mjs';
  * `block-unknown`; a record that cannot be read or parsed throws `run-record-unreadable`, and a
  * block entry without a base `block-base-missing` — a guessed base could let a change escape review.
  * @param {string} runId @param {string} block
- * @returns {Promise<{base: string | null, level: string}>}
+ * @returns {Promise<{base: string | null, level: string, owned: string[]}>}
  */
 export async function blockEntryFor(runId, block) {
   let record;
   try {
     record = await readRun(runId);
   } catch (err) {
-    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2' };
+    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [] };
     throw new Error('run-record-unreadable');
   }
   if (!record || typeof record !== 'object' || !record.blocks || typeof record.blocks !== 'object') throw new Error('run-record-unreadable');
@@ -93,7 +99,8 @@ export async function blockEntryFor(runId, block) {
   const entry = record.blocks[block];
   const sha = entry?.base_sha;
   if (typeof sha !== 'string' || sha.length === 0) throw new Error('block-base-missing');
-  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2' };
+  const owned = Array.isArray(entry.owned_files) ? entry.owned_files.filter((f) => typeof f === 'string') : [];
+  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned };
 }
 
 /**
@@ -148,7 +155,7 @@ export async function reviewTicket(ticket, ctx) {
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, ctx, { ...entry, key: ctx.key, workDir });
+    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, key: ctx.key, workDir });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -157,16 +164,22 @@ export async function reviewTicket(ticket, ctx) {
 /**
  * One fix-loop round for the ticket (see the module doc).
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, level: string, key: Buffer, workDir: string}} opts
+ * @param {{base: string | null, level: string, owned: string[], key: Buffer, workDir: string}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function fixLoopRound(ticket, ctx, { base, level, key, workDir }) {
+async function fixLoopRound(ticket, ctx, { base, level, owned, key, workDir }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   let rows;
   try {
     rows = (await ctx.readRows()).filter((r) => r?.run === ctx.runId);
   } catch (err) {
     return { status: 'unavailable', reason: failureReason(err), approved: false, engine: 'adaptive', sessions: [] };
+  }
+  // Check-then-write is safe here: a run has exactly ONE worker, and it processes its tickets one
+  // at a time (`loop.mjs` awaits each `processTicket`), so no second ticket of this block can read
+  // the rows between this check and the budget row's write.
+  if (!rows.some((r) => r?.event === 'review.budget' && r.block === ticket.block)) {
+    await recordBlockBudget(ticket, ctx, { base, owned });
   }
   const where = { runRootDir: ctx.runRootDir, runId: ctx.runId, block: ticket.block, file: ticket.file, key, rows };
   const loaded = loadState(where);
@@ -265,6 +278,34 @@ async function fixLoopRound(ticket, ctx, { base, level, key, workDir }) {
   }
   if (status === 'stopped') return { ...head, status: 'stopped', stopped: next?.reason ?? 'stopped', approved: false, findings: state.open };
   return { ...head, status: 'reviewed', approved: false, reason: 'findings-open', findings: state.open };
+}
+
+/**
+ * The block's review budget (§4.10, B19): the forecast over the block's changed owned files (the
+ * ticket's file always included), each tiered by its path floor (`rulesRisk` with no diff — S1 has
+ * not run yet), written as ONE `review.budget` row (+ `review.over_budget` when over). Best effort:
+ * a git or ledger failure is swallowed, the review goes on.
+ * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
+ * @param {{base: string | null, owned: string[]}} opts
+ */
+async function recordBlockBudget(ticket, ctx, { base, owned }) {
+  try {
+    /** @type {string[]} */
+    let changed = [];
+    if (base !== null && owned.length > 0) {
+      try {
+        changed = (await computeFileSet({ cwd: ctx.repoRoot, base })).all.filter((f) => ownsFile(owned, f));
+      } catch {
+        // no row on a git failure: a ticket-only forecast would be permanent (the row is written
+        // once per block); the block's next keyed ticket retries
+        return;
+      }
+    }
+    const files = [...new Set([...changed, ticket.file])].sort().map((file) => ({ file, tier: tierOf({ risk: rulesRisk({ file, plusCount: 0, cfg: ctx.cfg }) }) }));
+    await planAndRecord({ files, cfg: ctx.cfg, block: ticket.block, blockOnly: true, writeRow: /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow) });
+  } catch {
+    // the budget row is a report dataset, never a reason to fail the review
+  }
 }
 
 /**

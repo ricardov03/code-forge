@@ -284,6 +284,6 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
     block.status = 'closed';
     /** @type {CloseResult} */
     const closed = { ok: true, status: 'closed' };
-    return { result: closed, rows: [{ event: 'block.close', block: id }] };
+    return { result: closed, rows: [{ event: 'block.close', block: id, status: 'complete' }] };
   });
 }

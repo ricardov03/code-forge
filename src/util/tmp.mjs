@@ -28,14 +28,18 @@
  * `runRoot` retries after the rename) or is found alive on the tombstone, which is put back.
  *
  * A process that never picked a run root gets a lazy one (`proc-<pid>-<ms>`) the first time
- * `currentRunRoot()` is called, so `exec` always has somewhere to register its children.
+ * `currentRunRoot()` is called, so `exec` always has somewhere to register its children. The lazy
+ * root lives under the base named by `CODE_FORGE_TMP_ROOT` when that is an absolute path (the CLI
+ * router sets it from the project's `tmp.root`, B19), else under `<os.tmpdir()>/code-forge`. On a
+ * normal process exit the lazy root is removed when its `pids/` holds no live entry
+ * (`releaseLazyRoot`); a root with a live child, or an entry it cannot read, is kept for the sweep.
  */
 
 import { randomBytes } from 'node:crypto';
 import { lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { isAlive, readStartTime, sweep, UNKNOWN_START_TIME } from './reaper.mjs';
+import { isAlive, listEntries, readStartTime, sweep, UNKNOWN_START_TIME } from './reaper.mjs';
 
 /** Name of the directory under `os.tmpdir()` used when no `tmp.root` is configured. */
 export const DEFAULT_BASE_NAME = 'code-forge';
@@ -52,8 +56,16 @@ const DEFAULT_OWNERLESS_GRACE_MS = 10 * 60 * 1000;
 /** Prefix of a root claimed by a sweep; starts with `.` so `RUN_ID` can never produce it. */
 const TOMBSTONE_PREFIX = '.reaping-';
 
+/** Environment variable naming the base directory when no `root` is passed (the CLI's `tmp.root`). */
+export const TMP_ROOT_ENV = 'CODE_FORGE_TMP_ROOT';
+
 /** @type {string | null} */
 let current = null;
+
+/** The lazy root this process created (`proc-<pid>-<ms>`), or null. */
+/** @type {string | null} */
+let lazy = null;
+let exitHooked = false;
 
 /**
  * Why `dir` is not a trusted directory, or null when it is: must exist, not be a symlink, be
@@ -106,7 +118,11 @@ function assertTrusted(dir, what) {
  * @returns {string}
  */
 export function tmpBase(root) {
-  if (root === undefined || root === null) return path.join(os.tmpdir(), DEFAULT_BASE_NAME);
+  if (root === undefined || root === null) {
+    const fromEnv = process.env[TMP_ROOT_ENV];
+    if (typeof fromEnv === 'string' && path.isAbsolute(fromEnv)) return fromEnv;
+    return path.join(os.tmpdir(), DEFAULT_BASE_NAME);
+  }
   if (typeof root !== 'string' || !path.isAbsolute(root)) {
     throw new TypeError('tmp: tmp.root must be an absolute path');
   }
@@ -164,8 +180,40 @@ export function setRunRoot(dir) {
 export function currentRunRoot() {
   if (current === null) {
     current = runRoot(`proc-${process.pid}-${Date.now()}`);
+    lazy = current;
+    if (!exitHooked) {
+      exitHooked = true;
+      process.once('exit', () => {
+        releaseLazyRoot();
+      });
+    }
   }
   return current;
+}
+
+/**
+ * Remove this process's lazy root when its pid registry holds no live entry: every file in
+ * `pids/` must be a well-formed entry whose pid is dead. Anything else (a live child, an entry
+ * that cannot be read) keeps the root for the next sweep. Called from the `exit` hook, so it NEVER
+ * throws: any error keeps the root and returns false.
+ * @param {{rmSync?: typeof rmSync, listEntries?: typeof listEntries}} [deps] - test seams.
+ * @returns {boolean} true when the lazy root was removed.
+ */
+export function releaseLazyRoot(deps = {}) {
+  try {
+    if (lazy === null) return false;
+    const dir = lazy;
+    const pids = path.join(dir, 'pids');
+    const names = safeReaddir(pids);
+    const entries = (deps.listEntries ?? listEntries)(pids);
+    if (entries.length !== names.length || entries.some((e) => isAlive(e.pid))) return false;
+    (deps.rmSync ?? rmSync)(dir, { recursive: true, force: true });
+    if (current === dir) current = null;
+    lazy = null;
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /**

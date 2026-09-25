@@ -6,12 +6,16 @@
  * answers are "never acted on" — must not move a single aggregate).
  *
  * Row conventions read here: `dispatch` {block,level,lane,lines}; `block.close`
- * {block,status,lines_actual}; `review.plan` {block,tier,depth_unconstrained,depth_chosen,
- * degrade_step}; `session` {block,role,cost_usd} — one row per coder/reviewer/judge/s2/author/facts
- * spend; `review.done` {block,file,context_mode,findings_by_severity,round}; `decision`
+ * {block,status,lines_actual} — ANY `block.close` row marks the block completed (a stop is
+ * `block.stop`; B19); `review.plan` {block,tier,depth_unconstrained,depth_chosen,
+ * degrade_step}; `session` {block,role,provider,level,tokens_in,tokens_out,cost_usd?} — one row per
+ * coder/reviewer/judge/s2/author/facts spend; its dollars are `cost_usd` when the row carries it,
+ * else ESTIMATED from its tokens × `./prices.mjs` (B19: live session rows carry tokens only); `review.done` {block,file,context_mode,findings_by_severity,round}; `decision`
  * {block,question,source}; `outcome` {block,missed_after_degrade}; `escalation` {block,trigger};
  * `review.unavailable` {block,reason}; `proof` {block,duration_ms}; `run.stop` {reason}.
  */
+
+import { estimateCostUsd } from './prices.mjs';
 
 const ROLE_BUCKET = Object.freeze({
   coder: 'coderUsd',
@@ -31,6 +35,23 @@ function countBy(rows, keyOf) {
     if (key !== undefined) out[key] = (out[key] ?? 0) + 1;
   }
   return out;
+}
+
+/**
+ * A session row's dollars: `cost_usd` when present, else tokens × the static price table; null when
+ * neither is known (no token count, or a provider/level the table does not price).
+ * @param {Record<string, any>} row @returns {number | null}
+ */
+export function sessionCostUsd(row) {
+  if (typeof row.cost_usd === 'number') return row.cost_usd;
+  const tokensIn = row.tokens_in ?? 0;
+  const tokensOut = row.tokens_out ?? 0;
+  if (row.tokens_in == null && row.tokens_out == null) return null;
+  try {
+    return estimateCostUsd({ provider: row.provider, level: row.level, tokensIn, tokensOut });
+  } catch {
+    return null;
+  }
 }
 
 /** Cost per SUCCESSFULLY COMPLETED block: review $ / coder $ / S1+S2 $ / facts $ / proof ms. */
@@ -59,14 +80,15 @@ function costPerBlock(rows) {
       e.level = row.level ?? e.level;
       e.lane = row.lane ?? e.lane;
     }
-    if (row.event === 'block.close' && row.status === 'complete') e.completed = true;
-    if (row.event === 'session' && typeof row.cost_usd === 'number') {
+    if (row.event === 'block.close') e.completed = true;
+    const cost = row.event === 'session' ? sessionCostUsd(row) : null;
+    if (cost !== null) {
       // An unrecognized role still spent real money — bucket it as `otherUsd` instead of
       // silently dropping it from every total (fix round 1: an unknown role must not make
       // totalUsd under-report actual spend).
       const bucket = ROLE_BUCKET[row.role] ?? 'otherUsd';
-      e[bucket] = (e[bucket] ?? 0) + row.cost_usd;
-      e.totalUsd += row.cost_usd;
+      e[bucket] = (e[bucket] ?? 0) + cost;
+      e.totalUsd += cost;
     }
     if (row.event === 'proof' && typeof row.duration_ms === 'number') e.proofTimeMs += row.duration_ms;
   }

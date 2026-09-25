@@ -237,5 +237,7 @@ test('CLI `block open` prints the brief pointer and refuses an overlapping owned
     assert.equal(await runBlock(['close', 'B8', '--run', 'r-cli', '--worker-pid', '4242'], { stdout: closed, stderr: closed, probe: PROBE }), 0);
     assert.equal(closed.text, 'WARN block B8: no coder transcript found (--transcript, run record, .code-forge/runs/r-cli/B8.log); the transcript grep did not run\nblock B8 closed\n');
     assert.deepEqual((await readAllRows('two-blocks')).map((r) => r.event), ['dispatch', 'gate.transcript_missing', 'review.approved', 'gate.transcript_missing', 'block.close']);
+    // B19: the live close row says the block completed (the report's cost_per_block reads it)
+    assert.deepEqual((await readAllRows('two-blocks')).filter((r) => r.event === 'block.close').map((r) => [r.block, r.status]), [['B8', 'complete']]);
   });
 });

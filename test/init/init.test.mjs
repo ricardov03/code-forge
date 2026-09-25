@@ -175,3 +175,20 @@ test('a key pasted at the hidden prompt goes to the store only: config holds "us
   const res = await resolveKey('jev', { store, env: r.env, ref: 'user' });
   assert.equal(res.value, FAKE_JEV_KEY);
 });
+
+test('B19 (§5.5): caps.coders is 1 when engine auto resolves to the harness (no Solo), 2 with Solo, and 1 for an explicit harness engine even with Solo', async () => {
+  const noSolo = await laravelRun();
+  assert.equal(noSolo.code, 0, noSolo.stderr);
+  const withSolo = await laravelRun(['--no-interaction'], { CLAUDECODE: '1', SOLO_MCP_PATH: '/fake/solo', CODE_FORGE_KEY_JEV: FAKE_JEV_KEY });
+  assert.equal(withSolo.code, 0, withSolo.stderr);
+  const harness = await laravelRun(['--no-interaction', '--engine', 'harness'], { CLAUDECODE: '1', SOLO_MCP_PATH: '/fake/solo', CODE_FORGE_KEY_JEV: FAKE_JEV_KEY });
+  assert.equal(harness.code, 0, harness.stderr);
+  // control: the with-Solo run minus SOLO_MCP_PATH
+  const control = await laravelRun(['--no-interaction'], { CLAUDECODE: '1', CODE_FORGE_KEY_JEV: FAKE_JEV_KEY });
+  assert.equal(control.code, 0, control.stderr);
+  const read = (/** @type {string} */ file) => parseYAML(readFileSync(file, 'utf8'));
+  assert.deepEqual(
+    [noSolo, withSolo, harness, control].map((r) => [read(r.file).engine, read(r.file).caps.coders]),
+    [['auto', 1], ['auto', 2], ['harness', 1], ['auto', 1]],
+  );
+});

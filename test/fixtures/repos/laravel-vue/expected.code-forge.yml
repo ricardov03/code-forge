@@ -1,5 +1,6 @@
 # The `.code-forge.yml` that `code-forge init --no-interaction` writes for this fixture
 # (block B13a), run under Claude Code (CLAUDECODE=1) with the Jev key in CODE_FORGE_KEY_JEV.
+# No Solo in that run: `engine: auto` resolves to the harness, so `caps.coders` is 1 (§5.5, B19).
 version: 1
 project:
   name: laravel-vue
@@ -15,7 +16,7 @@ levels:
   L3:
     model: claude-fable-5-1
 caps:
-  coders: 2
+  coders: 1
 review:
   multimodel: false
 engine: auto

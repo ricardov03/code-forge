@@ -10,8 +10,20 @@ import { stringify } from 'yaml';
 import { defaultsForProvider } from '../../config/defaults/index.mjs';
 
 /**
+ * The proposed `caps.coders` (plan §5.5, B19): without Solo there are no locks, so the engine that
+ * `auto` resolves to (harness or subprocess) runs ONE coder; with Solo (`engine: solo`, or `auto`
+ * with Solo present) the provider default (2). R10's two-coder lift is a rule of the package's own
+ * build, not the product default.
+ * @param {string} engine @param {boolean} solo @param {number} withSolo
+ * @returns {number}
+ */
+export function proposedCoders(engine, solo, withSolo) {
+  return engine === 'solo' || (engine === 'auto' && solo) ? withSolo : 1;
+}
+
+/**
  * @param {import('./answers.mjs').Answers} a
- * @param {{project: {name: string, slug: string}}} ctx
+ * @param {{project: {name: string, slug: string}, solo?: boolean}} ctx
  * @param {string|null} jevRef - the resolved `keys.jev` reference, or null for "no Jev key".
  * @returns {Record<string, any>} the wizard-managed part of the config, in documented key order.
  */
@@ -30,7 +42,7 @@ export function generatedConfig(a, ctx, jevRef) {
     project: { name: ctx.project.name, slug: ctx.project.slug },
     provider: a.provider,
     levels: a.levels,
-    caps: { coders: defaults.caps.coders },
+    caps: { coders: proposedCoders(a.engine, ctx.solo === true, defaults.caps.coders) },
     review,
     engine: a.engine,
     harnesses: [...a.harnesses],

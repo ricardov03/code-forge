@@ -48,6 +48,30 @@ function isValidExitCode(exitCode) {
 }
 
 /**
+ * Point this process's lazy temp root at the project's `tmp.root` (B19, plan §9.6 rule 2): when
+ * `cwd` holds a `.code-forge.yml` with a string `tmp.root` and `env` does not name a base already,
+ * set `env.CODE_FORGE_TMP_ROOT` so `util/tmp.mjs` (and every child) uses it. A relative `tmp.root`
+ * is resolved against the config's directory (`cwd`). A missing or unloadable config changes nothing.
+ * @param {{env?: NodeJS.ProcessEnv, cwd?: string}} [opts]
+ * @returns {Promise<string | undefined>} the value `env.CODE_FORGE_TMP_ROOT` holds afterwards.
+ */
+export async function applyTmpRoot({ env = process.env, cwd = process.cwd() } = {}) {
+  const name = 'CODE_FORGE_TMP_ROOT'; // `util/tmp.mjs` TMP_ROOT_ENV
+  if (typeof env[name] === 'string' && env[name].length > 0) return env[name];
+  let loaded;
+  try {
+    // imported here, not statically: the router must still start when the config loader is absent
+    const { loadProjectConfig } = await import('../src/config/load.mjs');
+    loaded = await loadProjectConfig(cwd);
+  } catch {
+    return env[name];
+  }
+  const root = loaded.ok ? loaded.config?.tmp?.root : undefined;
+  if (typeof root === 'string' && root.length > 0) env[name] = path.resolve(cwd, root);
+  return env[name];
+}
+
+/**
  * @param {string[]} argv - e.g. `process.argv.slice(2)`.
  * @returns {Promise<number>} the process exit code.
  */
@@ -115,6 +139,7 @@ function computeIsMain() {
 
 const isMain = computeIsMain();
 if (isMain) {
+  await applyTmpRoot();
   const code = await run(process.argv.slice(2));
   process.exitCode = code;
 }

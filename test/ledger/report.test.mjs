@@ -142,3 +142,30 @@ test('run_stop_counts counts DISTINCT blocks, not rows — the same logical stop
   const { sections } = buildReport(rows);
   assert.equal(sections.run_stop_counts.overspend, 2, 'b1 (2 rows) + b2 (1 row) = 2 distinct blocks, not 3 rows');
 });
+
+test('B19: live-shaped rows — 2 token-only session rows for B1 and a status-less block.close give ONE cost_per_block entry with the exact estimated USD', () => {
+  const rows = [
+    { event: 'dispatch', block: 'B1', level: 'L2', lane: 'L2', lines: 100 },
+    // anthropic L2: (1000 + 500) / 1000 × 0.015 = 0.0225
+    { event: 'session', block: 'B1', role: 'coder', provider: 'anthropic', level: 'L2', tokens_in: 1000, tokens_out: 500, tokens_source: 'reported', cost_source: null },
+    // openai L1: (3000 + 1000) / 1000 × 0.0025 = 0.01
+    { event: 'session', block: 'B1', role: 'reviewer', provider: 'openai', level: 'L1', tokens_in: 3000, tokens_out: 1000, tokens_source: 'reported', cost_source: null },
+    // no token count at all: no dollars, not a crash
+    { event: 'session', block: 'B1', role: 'facts', provider: 'anthropic', level: 'L0', tokens_in: null, tokens_out: null },
+    { event: 'block.close', block: 'B1' },
+    // B2 spent tokens but never closed: not listed
+    { event: 'session', block: 'B2', role: 'coder', provider: 'anthropic', level: 'L2', tokens_in: 1000, tokens_out: 0 },
+  ];
+  const { sections } = buildReport(rows);
+  assert.equal(sections.cost_per_block.length, 1);
+  const [b1] = sections.cost_per_block;
+  assert.deepEqual(
+    [b1.block, b1.level, b1.completed, b1.coderUsd, b1.reviewUsd, b1.factsUsd, b1.totalUsd],
+    ['B1', 'L2', true, 0.0225, 0.01, 0, 0.0325],
+  );
+});
+
+test('B19: a block with session rows but NO block.close row gives an empty cost_per_block', () => {
+  const rows = [{ event: 'session', block: 'B1', role: 'coder', provider: 'anthropic', level: 'L2', tokens_in: 1000, tokens_out: 500 }];
+  assert.deepEqual(buildReport(rows).sections.cost_per_block, []);
+});
