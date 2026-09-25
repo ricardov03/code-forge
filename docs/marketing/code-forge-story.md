@@ -2,7 +2,7 @@
 
 > Source material for marketing the `code-forge` skill: landing copy, posts, threads, talks.
 > Built from the 2026-09-24 design session. Every number here has a source line. Numbers marked **(claim)** come from third parties and are not verified by us.
-> Status of the product: **designed, not built.** Do not publish "available now" copy until `npx code-forge init` works end to end.
+> Status of the product: **in build.** Do not publish "available now" copy until `npx @ricardov/code-forge init` works end to end on a published release.
 
 ---
 
@@ -80,13 +80,13 @@ Built on the open Agent Skills standard (`SKILL.md`). The installer finds Claude
 - ends with `doctor`: one real Jev call and a ping to every model level, so you never discover a broken setup mid-run.
 
 ### 4.6 Keys: yours, local, never in the repo
-Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service). Setup asks for the key if it is missing. 1Password is optional: code-forge reads the `op://` reference once and caches the key in the keychain for a few hours. The config file stores **references**, never values.
+Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service). Setup asks for the key if it is missing. 1Password is optional: code-forge reads the `op://` reference once and caches the key in the keychain for 8 hours. The config file stores **references**, never values.
 
 ## 5. Proof points we can say today
 
 - **Jev, 8 of 8 correct** on realistic blocks (lane, next step, finding triage), **~0.5 s per call** (486–645 ms), **~600 input tokens per call**. Source: our probe, 2026-09-24, `jev-latest`.
 - System 2 hand-off observed in the wild: a medium block's risk came back at confidence 0.40, which routes to System 2 by design.
-- The rules come from a real 16-PR production run (private-project private-module): evidence re-measurement, wire truncation detection, facts sheet before dispatch, budget stops. Each rule names the incident that created it.
+- The rules come from a real 16-PR production run on a private client codebase: evidence re-measurement, wire truncation detection, facts sheet before dispatch, budget stops. Each rule names the incident that created it.
 
 **(claim)** from @sairahul1's article: Luna $0.10 / M input tokens, Sol $2.00 / M (20×), Jev $0.042 / M input; a hypothesised task split of 55% / 26% / 13% / 6% across the four lanes. Quote as his figures, never as ours.
 
@@ -98,7 +98,7 @@ Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manage
 4. **"Read the code before you plan it."** A cheap facts sheet (real signatures, validation rules, tests) before dispatch turned four mid-block stops into zero.
 5. **"The stop is the feature."** A coder that forecasts, overruns and stops did the right thing.
 6. **"Don't ask a model what a compiler knows."**
-7. **"Mutation testing: keep the proof, drop the upkeep."** Our hand-written mutant lists reached ~1,081 mutants and ~13,900 lines, and 30 of them stopped applying when code moved. The CPU was never the cost; the upkeep was. New rule: every test must fail first (red → green); only money, dates, tenancy and auth get tool-made mutants on changed lines; full runs at night. Backed by Google's diff-based mutation practice and Kent Beck / Simon Willison on agents and TDD.
+7. **"Prove the test can fail, not that a mutant can survive."** Our hand-written mutant lists reached ~1,081 mutants and ~13,900 lines, and 30 of them stopped applying the moment code moved — the CPU was never the cost, the upkeep was. Code Forge's proof is a red→green runner instead: a new test must fail before the fix and pass after, on every change; there is no mutation-testing tool in the product (a deliberate cut, not a gap).
 8. **"1Password is not a prerequisite."** Its CLI login lasts 10 minutes idle, 12 hours max, per terminal. Agents open many shells. So Code Forge keeps its own per-user key cache on the OS keychain and uses 1Password only as an optional source.
 
 ## 7. Ready-to-edit copy
@@ -123,9 +123,9 @@ Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manage
 
 ## 9. Do not claim (yet)
 
-- Any saving percentage from our own runs: the ledger is not built.
+- Any cost-saving number from our own runs: the ledger records data, but no calibrated baseline is published yet.
 - "Works with every harness": only after `doctor` passes on each one.
-- Mutation-testing policy: under review (see the design page).
+- Mutation-testing as a product feature: decided against (Q16 = cut, 2026-09-25) — do not promise it, ever.
 - Availability: not published until `@ricardov/code-forge` ships on npm (scope owner verified 2026-09-24).
 
 ## 10. Sources

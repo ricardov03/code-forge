@@ -1,0 +1,288 @@
+{
+  "$comment": "hand-maintained; checked against plan §10.4 + NIGHT-LOG by test/docs-blocks.test.mjs. Ids = every `| **Bxx** |` row in plans/code-forge-plan-v1.3.md §10.4 Waves 2-6 (19 ids), plus the blocks the root orchestrator added during the night run of 2026-09-25 that are not in that table (plans/NIGHT-LOG.md): B1.2, B4.1, B11.1, B12c (B3.1 was already in the v1.3 §10.4 table). Wave 0-1 blocks (B0-B8) are the pre-v1.3 baseline landed before this plan revision; they have no entry under blocks and are listed in baseline_ids so every depends_on id resolves; see plans/code-forge-plan-v1.3.md §10.2-§10.3 for their record. B10c is listed with deleted:true — the maintainer answered Q16 'cut' on 2026-09-25, so B10c (consumer-facing mutation-testing tools) never lands.",
+  "checked_against": [
+    "plans/code-forge-plan-v1.3.md §10.4",
+    "plans/NIGHT-LOG.md"
+  ],
+  "block_count": 23,
+  "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
+  "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
+  "blocks": {
+    "B0.1": {
+      "title": "B0 follow-up: exec stdin input + pid registry, git.mjs GIT_* strip, per-run temp root, orphan reaper, test preload, Stryker removal (R14)",
+      "wave": 2,
+      "level": "L2",
+      "status": "landed",
+      "commit": "cb54864",
+      "owned": [
+        "src/util/exec.mjs", "src/util/git.mjs", "src/util/tmp.mjs", "src/util/reaper.mjs",
+        "test/util/exec.test.mjs", "test/util/git.test.mjs", "test/util/tmp.test.mjs", "test/util/reaper.test.mjs",
+        "test/helpers/isolate.mjs", "test/harness-isolation.test.mjs", "test/no-leak.test.mjs", "test/router.test.mjs",
+        "package.json", "npm-shrinkwrap.json", ".gitignore", ".github/workflows/ci.yml", "stryker.config.mjs (deleted)"
+      ],
+      "depends_on": ["B0"]
+    },
+    "B1.1": {
+      "title": "Schema amendment: the six v1.3 keys, caps.coders 2, two refusals + one warning",
+      "wave": 2,
+      "level": "L1",
+      "status": "landed",
+      "commit": "1cc1de4",
+      "owned": [
+        "schema/code-forge.schema.json", "src/config/validate.mjs", "src/config/schema-paths.mjs",
+        "src/config/defaults/anthropic.mjs", "src/config/defaults/openai.mjs", "src/config/defaults/xai.mjs", "src/config/defaults/index.mjs",
+        "test/config/schema.test.mjs", "test/config/schema-paths.test.mjs", "test/config/validate.test.mjs", "test/config/defaults.test.mjs",
+        "test/fixtures/config/valid-full.code-forge.yml"
+      ],
+      "depends_on": ["B1"]
+    },
+    "B1.2": {
+      "title": "Schema cut (Q16 = cut): remove mutation-tool proof keys (proof.tiers.high.tool/min_msi, proof.js, proof.nightly)",
+      "wave": 2,
+      "level": "L1",
+      "status": "landed",
+      "commit": "1749768",
+      "owned": [
+        "schema/code-forge.schema.json", "src/config/validate.mjs",
+        "test/config/schema-coverage.test.mjs", "test/config/schema.test.mjs", "test/config/secret-leak-cases.mjs", "test/config/validate.test.mjs"
+      ],
+      "depends_on": ["B1.1"],
+      "note": "root-added (night run), not in the v1.3 §10.4 table; landed the Q16 = cut ruling in the schema"
+    },
+    "B10a": {
+      "title": "Proof: two tiers, measurement export (hardened, C5), proof lock, proof verb (baseline, restore, lock)",
+      "wave": 2,
+      "level": "L2",
+      "status": "landed",
+      "commit": "eb969fb",
+      "owned": [
+        "src/proof/tiers.mjs", "src/proof/export.mjs", "src/proof/lock.mjs", "src/cli/proof.mjs",
+        "test/proof/tiers.test.mjs", "test/proof/export.test.mjs", "test/proof/lock.test.mjs", "test/proof/helpers.mjs",
+        "test/fixtures/repos/export-ignore/**"
+      ],
+      "depends_on": ["B3", "B5", "B6", "B8"]
+    },
+    "B9a": {
+      "title": "Isolated sessions: spawn verb (stdin piping V3, outPath, background, pid file + registry, logs, usage, retry ladder V9), s2",
+      "wave": 2,
+      "level": "L2",
+      "status": "landed",
+      "commit": "fc75988",
+      "owned": [
+        "src/session/spawn.mjs", "src/session/s2.mjs", "src/cli/spawn.mjs", "src/cli/s2.mjs",
+        "test/session/spawn.test.mjs", "test/session/s2.test.mjs", "test/session/helpers.mjs", "test/fixtures/bin/**"
+      ],
+      "depends_on": ["B0.1", "B1", "B4", "B6", "B8"]
+    },
+    "B2.1": {
+      "title": "Keys follow-up: security backend writes through stdin",
+      "wave": 2,
+      "level": "L2",
+      "status": "landed",
+      "commit": "1e58b0b",
+      "owned": [
+        "src/keys/backends/security-cli.mjs", "test/keys/backends.test.mjs"
+      ],
+      "depends_on": ["B0.1", "B2"]
+    },
+    "B10b": {
+      "title": "Proof: journaled red->green runner, red-parse (O13)",
+      "wave": 2,
+      "level": "L2",
+      "status": "landed",
+      "commit": "9fd7907",
+      "owned": [
+        "src/proof/red-green.mjs", "src/proof/red-parse.mjs",
+        "test/proof/red-green.test.mjs", "test/proof/red-parse.test.mjs", "test/fixtures/repos/red-green/**"
+      ],
+      "depends_on": ["B10a"]
+    },
+    "B11": {
+      "title": "Worker: queue, tickets, loop, worker verb, review-file enqueue/--wait, key resolution inside the worker, root-relative rows (V4)",
+      "wave": 2,
+      "level": "L2",
+      "status": "landed",
+      "commit": "6b3a68c",
+      "owned": [
+        "src/worker/**", "src/cli/worker.mjs", "src/cli/review-file.mjs", "test/worker/**"
+      ],
+      "depends_on": ["B0.1", "B2", "B8", "B9a"]
+    },
+    "B9b": {
+      "title": "author + loop, facts + plan check (§3.8, C16; V6/R10 checks)",
+      "wave": 2,
+      "level": "L2",
+      "status": "landed",
+      "commit": "b301e94",
+      "owned": [
+        "src/session/author.mjs", "src/session/facts.mjs", "src/session/plan-check.mjs",
+        "src/cli/author.mjs", "src/cli/facts.mjs", "src/cli/plan.mjs", "schema/facts.schema.json",
+        "test/session/author.test.mjs", "test/session/facts.test.mjs", "test/session/plan-check.test.mjs",
+        "test/fixtures/briefs/**", "test/fixtures/plans/**"
+      ],
+      "depends_on": ["B9a", "B1", "B3"]
+    },
+    "B12a": {
+      "title": "Review engine: adaptive + consensus session plans, packet builder + context rule (C10), lenses (incl. recheck), finding schema + stub guard, engine hook into B11, root-relative refusal (V4)",
+      "wave": 3,
+      "level": "L2",
+      "status": "landed",
+      "commit": "5197141",
+      "owned": [
+        "src/review/engine.mjs", "src/review/packet.mjs", "src/review/context.mjs", "src/review/validate-review.mjs",
+        "src/review/lenses/**", "src/review/finding.schema.json",
+        "test/review/engine.test.mjs", "test/review/packet.test.mjs", "test/review/context.test.mjs",
+        "test/review/validate-review.test.mjs", "test/review/helpers.mjs", "test/fixtures/review/**"
+      ],
+      "depends_on": ["B5", "B9a", "B10b", "B11"]
+    },
+    "B13b": {
+      "title": "doctor (table, --quick, --json, live Jev, per-role pings incl. facts, isolation probe, path-deny probe, worker start/stop, signer line, tmp line, Codex rules probe)",
+      "wave": 3,
+      "level": "L2",
+      "status": "landed",
+      "commit": "51a325d",
+      "owned": [
+        "src/cli/doctor.mjs", "src/doctor/**", "test/doctor/**"
+      ],
+      "depends_on": ["B0.1", "B1", "B2", "B4", "B5", "B6", "B7", "B8", "B9a", "B11"]
+    },
+    "B12b": {
+      "title": "Triage (judge-final), fix loop = §4.11 convergence rule, budget (§4.10), block-gate review check, block waive (human-only, forbidden to coders via mergeForbidden)",
+      "wave": 3,
+      "level": "L2",
+      "status": "landed",
+      "commit": "4947f30",
+      "owned": [
+        "src/review/triage.mjs", "src/review/fixloop.mjs", "src/review/budget.mjs", "src/review/gate-check.mjs",
+        "test/review/triage.test.mjs", "test/review/fixloop.test.mjs", "test/review/budget.test.mjs", "test/review/gate-check.test.mjs"
+      ],
+      "depends_on": ["B12a", "B3", "B1.1"]
+    },
+    "B12c": {
+      "title": "Integration: wire worker -> triage -> fixloop so a real review-file call writes the signed review.approved row that block close now requires",
+      "wave": 4,
+      "level": "L2",
+      "status": "in_review",
+      "owned": [
+        "src/worker/**", "src/cli/review-file.mjs", "test/worker/**", "test/integration/**"
+      ],
+      "depends_on": ["B11", "B12a", "B12b"],
+      "note": "root-added (night run, started after B12b landed); not in the v1.3 §10.4 table"
+    },
+    "B13a": {
+      "title": "init wizard (9 steps, flags, --no-interaction, idempotent diff, no-subagent stop text)",
+      "wave": 3,
+      "level": "L2",
+      "status": "landed",
+      "commit": "a211098",
+      "owned": [
+        "src/cli/init.mjs", "src/install/wizard/**", "test/init/**", "test/fixtures/repos/laravel-vue/**"
+      ],
+      "depends_on": ["B13b", "B1", "B2", "B7"]
+    },
+    "B3.1": {
+      "title": "Escalation rules 2b (review_stall) and 6 (review_cap) in escalation.mjs (§3.6)",
+      "wave": 3,
+      "level": "L1",
+      "status": "landed",
+      "commit": "c70f1c5",
+      "owned": [
+        "src/decide/escalation.mjs", "test/decide/escalation.test.mjs"
+      ],
+      "depends_on": ["B3", "B1.1"]
+    },
+    "B4.1": {
+      "title": "Security follow-up: wire the rendered Codex execpolicy rules into the Codex coder invocation (per-run location, never ~/.codex); merge built.env into the child env so a real Codex spawn gets the rules",
+      "wave": 3,
+      "level": "L2",
+      "status": "in_review",
+      "owned": [
+        "src/engines/builders/codex.mjs", "src/engines/codex-home.mjs", "src/session/spawn.mjs",
+        "src/cli/block.mjs", "src/cli/gates.mjs", "src/doctor/probes.mjs", "src/util/forbidden.mjs",
+        "test/engines/builders/argv-snapshots.test.mjs", "test/engines/builders/forbidden-rendering.test.mjs",
+        "test/engines/codex-home.test.mjs", "test/doctor/codex-rules.test.mjs",
+        "test/session/spawn.test.mjs", "test/state/block.test.mjs", "test/util/forbidden.test.mjs", "test/cli/**"
+      ],
+      "depends_on": ["B4", "B8", "B9a", "B13b"],
+      "note": "root-added (night run), not in the v1.3 §10.4 table; closes the B13b follow-up 'codex: forbidden list is prose-only'"
+    },
+    "B11.1": {
+      "title": "No-follow file reads (symlink TOCTOU hardening): readRegularFileNoFollow used by contentHash and every packet content read",
+      "wave": 3,
+      "level": "L2",
+      "status": "landed",
+      "commit": "989efbc",
+      "owned": [
+        "src/review/packet.mjs", "src/worker/ticket.mjs", "test/review/packet.test.mjs", "test/worker/nofollow.test.mjs"
+      ],
+      "depends_on": ["B11", "B12a"],
+      "note": "root-added (night run), not in the v1.3 §10.4 table; the architect's follow-up to B12a"
+    },
+    "B14": {
+      "title": "The skill: SKILL.md, references/*, templates/*, rules-core.md (R1-R16), scripts/forge shim, adapters",
+      "wave": 4,
+      "level": "L3 (architect-authored)",
+      "status": "pending",
+      "owned": [
+        "skill/**", "test/skill/**"
+      ],
+      "depends_on": ["B12b", "B13a"]
+    },
+    "B16": {
+      "title": "Docs: README, CHANGELOG 0.1.0, config reference generated from the schema, docs/reference/blocks.json, marketing corrections (C14), no project name (R13)",
+      "wave": 4,
+      "level": "L0",
+      "status": "in_progress",
+      "owned": [
+        "README.md", "CHANGELOG.md", "docs/reference/config.md", "docs/reference/blocks.json",
+        "scripts/gen-config-doc.mjs", "docs/marketing/code-forge-story.md", "test/docs-marketing.test.mjs",
+        "test/docs-config.test.mjs", "test/docs-blocks.test.mjs"
+      ],
+      "depends_on": ["B13a"]
+    },
+    "B15": {
+      "title": "Evals (19 cases), plugin manifest, publish.yml, ci/outcome.yml template, evals/run.mjs, imports-order test, no-project-names test",
+      "wave": 4,
+      "level": "L1",
+      "status": "pending",
+      "owned": [
+        "evals/**", ".claude-plugin/**", ".github/workflows/publish.yml", "ci/**",
+        "test/evals-smoke.test.mjs", "test/imports-order.test.mjs", "test/no-project-names.test.mjs"
+      ],
+      "depends_on": ["B14", "B16"]
+    },
+    "B17": {
+      "title": "First real use on a neutral example repo shipped inside the package (examples/node-lib/, scripts/first-use.mjs)",
+      "wave": 5,
+      "level": "L1 (coder); orchestrated by the root",
+      "status": "pending",
+      "owned": [
+        "examples/**", "scripts/first-use.mjs", "test/first-use.test.mjs"
+      ],
+      "depends_on": ["B15", "B16"]
+    },
+    "B18": {
+      "title": "Retire the predecessor skill: 5-line alias for one release, then delete",
+      "wave": 5,
+      "level": "human",
+      "status": "pending",
+      "owned": [
+        "the predecessor skill directory (the maintainer only, outside this repo)"
+      ],
+      "depends_on": ["B17"]
+    },
+    "B10c": {
+      "title": "Proof tools for consumers (D14 half): Infection/Stryker wrappers, proof mutate, proof nightly, ci/nightly-proof.yml, proof baseline",
+      "wave": 6,
+      "level": "L1",
+      "status": "deleted",
+      "deleted": true,
+      "deleted_reason": "Q16 answered 'cut' (the maintainer, 2026-09-25): the product ships no tool-made mutation testing for users' code. B10c never lands; proof.tiers.high.tool / proof.js / proof.nightly left the schema in B1.2.",
+      "owned": [
+        "src/proof/tools/**", "src/proof/nightly.mjs", "ci/nightly-proof.yml", "test/proof/tools/**", "test/proof/nightly.test.mjs"
+      ],
+      "depends_on": ["B10a", "B10b"]
+    }
+  }
+}

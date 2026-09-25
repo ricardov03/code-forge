@@ -1,0 +1,64 @@
+# Changelog
+
+All notable changes to `@ricardov/code-forge` are recorded here. Format loosely follows
+[Keep a Changelog](https://keepachangelog.com/); versions follow semver ahead of a 1.0.0 that
+waits on a second real consumer (plan §10.4, Q17).
+
+## [0.1.0] — first release
+
+The `plan` → `harden` → `code` → `review` pipeline for cross-model, parallel, evidence-gated
+feature delivery, as one CLI (`code-forge`) plus one Agent Skill.
+
+### Added
+
+- **CLI verbs:** `init`, `doctor`, `run`, `block`, `worker`, `review-file`, `spawn`, `s2`,
+  `author`, `facts`, `plan check`, `proof`, `gates`, `jev`, `keys`, `ledger`, `report`, `resolve`,
+  `models`, `list`, `remove`, `upgrade`, `validate`, `help`, `version`. Verbs are discovered from
+  `src/cli/*.mjs`, so adding one never touches the router.
+- **Setup wizard** (`code-forge init`): nine steps (tools, harnesses, provider matrix, multimodel,
+  keys, engine, gates, proof, doctor), every question has a default, `--no-interaction` plus one
+  override flag per answer, an agent gets one JSON line, a second run changes nothing.
+- **Decision layer:** System 1 (Jev) answers typed questions in well under a second; System 2 is a
+  fresh top-level session woken only when System 1 is unsure; deterministic escalation precedence
+  (retry → escalate one level → System 2 hand-off → the top level patches once → stop for a human).
+- **Review engine:** a file-done trigger starts one or more fresh, isolated reviewer sessions
+  (adaptive by risk score, or two-provider consensus with a judge); a worker process runs review
+  outside the coder's own sandbox so review keeps moving even when the coder has no network; fix
+  rounds converge under a bounded rule (round ≥ 2 reviews only the fix hunks, the open finding
+  count must strictly shrink every round, four rounds is the cap).
+- **Two-tier proof policy:** `light` and `high` (by risk score, a configured path, or a
+  security-sensitive change); a red→green runner proves a new test actually fails before the fix
+  and passes after. **No tool-made mutation testing ships in 0.1.0** — see "Removed" below.
+- **Engine adapters** for Claude Code, Codex and Grok (subprocess argv snapshots, forbidden-list
+  rendering, closed-book sessions with the packet on stdin); Gemini/Cursor/Copilot get detection
+  and skill linking only.
+- **Ledger and report:** an append-only, signed, per-project ledger (`~/.code-forge/ledger/`) and
+  a `code-forge report` verb with a terminal view and a `--export` JSON snapshot.
+- **JSON Schema** for `.code-forge.yml` (`schema/code-forge.schema.json`) and a generated reference
+  at `docs/reference/config.md` (`node scripts/gen-config-doc.mjs [--check]`).
+
+### Security
+
+- **`signer: same-user boundary only`** — signed ledger rows detect tampering by a different user
+  or a rewritten history; they are not a defense against an attacker who already runs code as you.
+  `doctor` always prints this line so nobody mistakes the signature for more than that.
+- **Keys never reach a coder process.** Provider/Jev keys resolve only inside the worker or the
+  orchestrator's own CLI calls (chain: `env:<NAME>` → OS keychain → 1Password, cached briefly →
+  ask at setup only); `keys list` never prints a value; every output path is redacted.
+- A **forbidden-command list** blocks a coder from starting its own worker, waiving a review, or
+  running other orchestrator-only actions, rendered into each provider's own deny-list mechanism.
+
+### Changed / decided late in the build
+
+- **Q16 = cut (2026-09-25):** code-forge ships **no user-facing mutation-testing tool**. Proof for
+  both the product and this package's own tests is plain unit/feature tests plus the red→green
+  runner — exact assertions on the main behaviour, not "mutation-verified" coverage.
+- **R10:** at most 2 coders run at a time (down from 3) for the rest of the build.
+- **R13:** code-forge never runs against, installs into, or names any of Ricardo's own projects;
+  the first real, end-to-end use is a neutral example repository shipped inside the package.
+
+### Removed
+
+- `@stryker-mutator/core`, `stryker.config.mjs` and the CI mutation-baseline job — this package
+  builds itself with unit and feature tests only (R14); nothing in this repository's own history
+  ran mutation testing.
