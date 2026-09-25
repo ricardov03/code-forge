@@ -1,0 +1,19 @@
+{
+  "fetched_at": "2026-09-24T00:00:00Z",
+  "client_version": "0.155.1",
+  "models": [
+    {
+      "slug": "gpt-6-luna",
+      "display_name": "GPT-6-Luna",
+      "supported_reasoning_levels": [
+        { "effort": "low", "description": "Fast responses with lighter reasoning" },
+        { "effort": "high", "description": "Greater reasoning depth for complex problems" }
+      ]
+    },
+    {
+      "slug": "gpt-6-nova-preview",
+      "display_name": "GPT-6-Nova (preview)",
+      "supported_reasoning_levels": [{ "effort": "medium", "description": "Balanced" }]
+    }
+  ]
+}

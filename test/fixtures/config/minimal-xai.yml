@@ -1,0 +1,15 @@
+version: 1
+provider: xai
+levels:
+  L0:
+    model: grok-4.7
+    effort: low
+  L1:
+    model: grok-4.7
+    effort: medium
+  L2:
+    model: grok-4.7
+    effort: high
+  L3:
+    model: grok-4.7
+    effort: xhigh

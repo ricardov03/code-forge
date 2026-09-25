@@ -1,0 +1,332 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://code-forge.dev/schema/code-forge.schema.json",
+  "title": "code-forge project configuration (.code-forge.yml)",
+  "description": "Plan v1.2 §1.3 — every key any section of the plan reads must appear here. additionalProperties: false everywhere a key set is fixed; a typed additionalProperties schema (never bare true) marks the handful of genuinely open-ended maps (thresholds.<question>, system1.criteria_extra, known_extra, keys, review.second_levels — the last restricted to L0..L3 keys only via propertyNames).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "provider", "levels"],
+  "$comment": "version/provider/levels are REQUIRED with NO schema-level default (a config omitting them is refused here) — `migrate.mjs` fills a MISSING `version` to CURRENT_VERSION before this schema ever runs (so an on-disk file may omit `version`), but `provider` has no such auto-fill anywhere and must be present in the loaded document.",
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "slug": { "type": "string" },
+        "plans_dir": { "type": "string" },
+        "languages": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "chat": { "type": "string" },
+            "ui": { "type": "string" },
+            "pr": { "type": "string" }
+          }
+        }
+      }
+    },
+    "provider": { "$ref": "#/$defs/provider" },
+    "levels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["L0", "L1", "L2", "L3"],
+      "properties": {
+        "L0": { "$ref": "#/$defs/level" },
+        "L1": { "$ref": "#/$defs/level" },
+        "L2": { "$ref": "#/$defs/level" },
+        "L3": { "$ref": "#/$defs/level" }
+      }
+    },
+    "orchestrator": { "$ref": "#/$defs/levelName" },
+    "system1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "$ref": "#/$defs/provider" },
+        "model": { "type": "string" },
+        "key": { "type": "string" },
+        "fallback": { "type": "string", "enum": ["rules", "s2", "stop"], "default": "rules" },
+        "criteria_extra": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instructions": { "type": "string" },
+              "criteria": { "type": "object", "additionalProperties": { "type": "string" } }
+            }
+          }
+        },
+        "disable": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/thresholdBand" },
+      "properties": {
+        "default": { "$ref": "#/$defs/thresholdBand" },
+        "findings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fix": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
+            "nit": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.4 },
+            "resolved": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 }
+          }
+        }
+      }
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retries_per_level": { "type": "integer", "minimum": 0, "default": 2 },
+        "review_rounds_per_level": { "type": "integer", "minimum": 0, "default": 2 },
+        "stop_at": { "type": "string", "const": "L3", "default": "L3" },
+        "l3_mode": { "type": "string", "enum": ["patch", "code"], "default": "patch" }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "multimodel": { "type": "boolean", "default": false },
+        "second_provider": { "anyOf": [{ "$ref": "#/$defs/provider" }, { "type": "null" }], "default": null },
+        "second_levels": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "propertyNames": { "$ref": "#/$defs/levelName" },
+              "additionalProperties": { "$ref": "#/$defs/level" }
+            }
+          ],
+          "default": null
+        },
+        "closed_book": { "type": "boolean", "const": true, "default": true },
+        "judge_sees_diff": { "type": "boolean", "default": false },
+        "budgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quick_in": { "type": "integer", "minimum": 1, "default": 6000 },
+            "full_in": { "type": "integer", "minimum": 1, "default": 12000 },
+            "judge_in": { "type": "integer", "minimum": 1, "default": 8000 },
+            "out": { "type": "integer", "minimum": 1, "default": 1200 }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "whole_file_max_lines": { "type": "integer", "minimum": 0, "default": 400 },
+            "hunk_context_lines": { "type": "integer", "minimum": 0, "default": 40 },
+            "min_context_lines": { "type": "integer", "minimum": 0, "default": 10 }
+          }
+        },
+        "block_budget_tokens": { "type": "integer", "minimum": 1, "default": 150000 },
+        "block_budget_usd": {
+          "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+          "default": null
+        },
+        "min_tokens_out": { "type": "integer", "minimum": 1, "default": 120 },
+        "batch_small_files": { "type": "boolean", "default": true },
+        "session_timeout_s": { "type": "integer", "minimum": 1, "default": 600 }
+      }
+    },
+    "engine": { "type": "string", "enum": ["auto", "solo", "harness", "subprocess"], "default": "auto" },
+    "harnesses": { "type": "array", "items": { "type": "string" } },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claude": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "worktree": { "type": "boolean", "default": false } }
+        },
+        "solo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "interactive_harden": { "type": "boolean", "default": false } }
+        }
+      }
+    },
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "coders": { "type": "integer", "minimum": 1, "default": 3 } }
+    },
+    "gates": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "test": { "$ref": "#/$defs/argvOrNull" },
+        "lint": { "$ref": "#/$defs/argvOrNull" },
+        "types": { "$ref": "#/$defs/argvOrNull" },
+        "format": { "$ref": "#/$defs/argvOrNull" },
+        "extra": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secret_scan": { "type": "boolean", "default": true },
+            "safe_edit": { "type": "boolean", "default": true },
+            "invariants": { "type": "string" }
+          }
+        },
+        "full_suite_threshold_files": { "type": "integer", "minimum": 1, "default": 10 }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "high": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "paths": { "type": "array", "items": { "type": "string" } },
+                "tool": { "type": "string" },
+                "min_msi": { "type": "number", "minimum": 0, "maximum": 100 }
+              }
+            },
+            "light": { "type": "object", "additionalProperties": false, "properties": {} }
+          }
+        },
+        "js": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "tool": { "type": "string" },
+            "min_msi": { "type": "number", "minimum": 0, "maximum": 100 }
+          }
+        },
+        "nightly": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "enabled": { "type": "boolean" }, "report_only": { "type": "boolean" } }
+        },
+        "extra": { "type": "array", "items": { "type": "string" } },
+        "isolation": { "type": "string", "enum": ["export", "lock"], "default": "export" },
+        "export": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "link_dirs": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["vendor", "node_modules"]
+            },
+            "copy_untracked": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [".env", ".env.testing"]
+            }
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "block_lines": { "type": "integer", "minimum": 1, "default": 600 },
+        "block_tokens_soft": { "type": "integer", "minimum": 1 },
+        "block_tokens_hard": { "type": "integer", "minimum": 1 },
+        "run_usd_soft": { "type": "number", "minimum": 0 }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "coder_may_open_draft_pr": { "type": "boolean", "default": true },
+        "coder_may_push": { "type": "boolean", "default": true }
+      }
+    },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trailers": { "type": "string", "enum": ["none", "harness"], "default": "none" }
+      }
+    },
+    "wip": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "ready_prs": { "type": "integer", "minimum": 1, "default": 1 } }
+    },
+    "production": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "markers": { "type": "array", "items": { "type": "string" } },
+        "names": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "known_extra": {
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shadow_rate": { "type": "number", "minimum": 0, "maximum": 0.5, "default": 0 }
+      }
+    },
+    "keys": {
+      "type": "object",
+      "additionalProperties": { "type": "string" }
+    },
+    "telemetry": { "type": "string", "const": "off", "default": "off" }
+  },
+  "$defs": {
+    "provider": { "type": "string", "enum": ["anthropic", "openai", "xai"] },
+    "levelName": { "type": "string", "enum": ["L0", "L1", "L2", "L3"] },
+    "level": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "fallback": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["provider", "model"],
+            "properties": {
+              "provider": { "$ref": "#/$defs/provider" },
+              "model": { "type": "string", "minLength": 1 },
+              "effort": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "thresholdBand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "act": { "type": "number", "minimum": 0, "maximum": 1 },
+        "check": { "type": "number", "minimum": 0, "maximum": 1 },
+        "close_margin": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "argvOrNull": {
+      "anyOf": [
+        { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        { "type": "null" }
+      ]
+    }
+  }
+}

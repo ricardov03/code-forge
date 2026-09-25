@@ -1,0 +1,26 @@
+{
+  "fetched_at": "2026-09-24T00:00:00Z",
+  "grok_version": "1.0.34",
+  "models": {
+    "grok-4.7": {
+      "info": {
+        "id": "grok-4.7",
+        "model": "grok-4.7",
+        "model_family": "xai",
+        "name": "Grok 4.7",
+        "reasoning_efforts": [
+          { "id": "high", "value": "high", "label": "High", "default": true },
+          { "id": "low", "value": "low", "label": "Low", "default": false }
+        ]
+      }
+    },
+    "grok-5-preview": {
+      "info": {
+        "id": "grok-5-preview",
+        "model": "grok-5-preview",
+        "model_family": "xai",
+        "name": "Grok 5 (preview)"
+      }
+    }
+  }
+}

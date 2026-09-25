@@ -1,0 +1,15 @@
+version: 1
+provider: openai
+levels:
+  L0:
+    model: gpt-6-luna
+    effort: low
+  L1:
+    model: gpt-6-luna
+    effort: high
+  L2:
+    model: gpt-6-sol
+    effort: high
+  L3:
+    model: gpt-6-astra
+    effort: high
