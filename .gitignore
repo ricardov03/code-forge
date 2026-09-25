@@ -24,3 +24,4 @@ docs/design/
 
 # Maintainer-only planning notes (private; kept locally, not in the repo) - 2026-09-25
 plans/
+!examples/**/.env.example
