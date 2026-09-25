@@ -1,0 +1,54 @@
+# The `.code-forge.yml` that `code-forge init --no-interaction` writes for this fixture
+# (block B13a), run under Claude Code (CLAUDECODE=1) with the Jev key in CODE_FORGE_KEY_JEV.
+version: 1
+project:
+  name: laravel-vue
+  slug: laravel-vue
+provider: anthropic
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-1
+caps:
+  coders: 2
+review:
+  multimodel: false
+engine: auto
+harnesses:
+  - claude
+keys:
+  jev: env:CODE_FORGE_KEY_JEV
+gates:
+  test:
+    - php
+    - artisan
+    - test
+    - --compact
+  lint: null
+  types:
+    - vendor/bin/phpstan
+  format:
+    - vendor/bin/pint
+    - --test
+proof:
+  tiers:
+    high:
+      paths:
+        - database/migrations/**
+        - app/Policies/**
+        - app/Http/Middleware/**
+        - "**/*Money*"
+        - "**/*Webhook*"
+  isolation: export
+  export:
+    link_dirs:
+      - vendor
+      - node_modules
+    copy_untracked:
+      - .env
+      - .env.testing
