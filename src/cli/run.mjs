@@ -3,12 +3,15 @@
  * (`run start` is on the forbidden list, ★ `code-forge-worker-from-coder`).
  *
  *   run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
- *   run start --reattach --run <id> --worker-pid <pid>
+ *   run start --reattach --run <id> [--worker-pid <pid>]
  *   run status --run <id>
  *   run end --run <id>
  *
- * The worker verb ships with B11; until it is wired in, `run start` pins the worker the
- * orchestrator started (`--worker-pid`) or records none and says so.
+ * B11: from the CLI (the default export), `run start` without `--worker-pid` sweeps dead run
+ * roots, launches `code-forge worker --run <id>` detached, waits until it announces itself in the
+ * queue and pins it; `run start --reattach` without `--worker-pid` re-pins the live worker the
+ * queue announces (`repinWorker`). Called as `runRun(args, deps)` without `deps.startWorker` (the
+ * state tests), no worker is launched and none is pinned unless `--worker-pid` is given.
  */
 
 import path from 'node:path';
@@ -16,8 +19,11 @@ import { loadProjectConfig } from '../config/load.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
-import { endRun, readRun, reattachWorker, startRun } from '../state/run.mjs';
+import { endRun, processStartTime, readRun, reattachWorker, startRun, stopPinnedWorker } from '../state/run.mjs';
 import { writeSafe } from '../util/redact.mjs';
+import { sweepRoots, tmpBase } from '../util/tmp.mjs';
+import { launchWorker, repinWorker } from '../worker/loop.mjs';
+import { repoRootOf } from '../worker/ticket.mjs';
 
 /**
  * `project.slug` from config, else the workspace directory name as a ledger slug. The configured
@@ -37,18 +43,42 @@ export function slugFor(cfg, workspace) {
 /** @param {string} slug */
 const ledgerWriter = (slug) => (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
 
+/** @typedef {(pin: {pid: number, started_at: string}, opts: {probe?: import('../state/run.mjs').StartTimeProbe}) => Promise<{stopped: boolean, reason?: string}>} StopWorker */
+
+/**
+ * A worker that `run start` launched but could not pin must not outlive the command as an orphan:
+ * stop it through the pinned-worker stopper (pid > 1, start time re-checked right before the
+ * signal, so a recycled pid is never signalled) and name the pid on stderr. `startedAt` is the
+ * start time read right after the launch; null means the process was already gone.
+ * @param {{pid: number, startedAt: string | null}} launched
+ * @param {{stopWorker: StopWorker, probe?: import('../state/run.mjs').StartTimeProbe, err: (s: string) => void}} deps
+ */
+async function stopLaunched({ pid, startedAt }, { stopWorker, probe, err }) {
+  /** @type {{stopped: boolean, reason?: string}} */
+  let outcome;
+  try {
+    outcome = startedAt === null ? { stopped: false, reason: 'not running' } : await stopWorker({ pid, started_at: startedAt }, { ...(probe ? { probe } : {}) });
+  } catch (thrown) {
+    outcome = { stopped: false, reason: thrown?.message ?? String(thrown) };
+  }
+  err(`run start: launched worker pid ${pid} was not pinned; ${outcome.stopped ? 'stopped it' : `not stopped (${outcome.reason ?? 'unknown'})`}\n`);
+}
+
 /**
  * @param {string[]} args
  * @param {{
  *   stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown},
  *   probe?: import('../state/run.mjs').StartTimeProbe,
- *   stopWorker?: (pin: {pid: number, started_at: string}, opts: {probe?: import('../state/run.mjs').StartTimeProbe}) => Promise<{stopped: boolean}>,
- * }} [deps] - `stopWorker` defaults to the state layer's `stopPinnedWorker` (pid > 1 and a
- *   re-verified start time before any signal).
+ *   stopWorker?: StopWorker,
+ *   startWorker?: (opts: {runId: string, workspace: string}) => Promise<{pid: number, repoRoot: string}>,
+ * }} [deps] - `startWorker` (the CLI passes B11's `launchWorker`) launches the worker on a plain
+ *   `run start`; `stopWorker` defaults to the state layer's `stopPinnedWorker` (pid > 1 and a
+ *   re-verified start time before any signal) — `run end` uses it, and so does a `run start` whose
+ *   launched worker could not be pinned.
  * @returns {Promise<number>}
  */
 export async function runRun(args, deps = {}) {
-  const { stdout = process.stdout, stderr = process.stderr, probe, stopWorker } = deps;
+  const { stdout = process.stdout, stderr = process.stderr, probe, stopWorker, startWorker } = deps;
   const out = (/** @type {string} */ s) => writeSafe(stdout, s);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
   const [sub, ...rest] = args;
@@ -62,10 +92,15 @@ export async function runRun(args, deps = {}) {
     const workerPid = intFlag(flags['worker-pid'], 'worker-pid');
 
     if (sub === 'start' && flags.reattach) {
-      if (!runId || workerPid === undefined) throw new StateError('usage', 'run start --reattach needs --run and --worker-pid');
-      const { project } = await readRun(runId);
-      await reattachWorker({ runId, workerPid, writeRow: ledgerWriter(project), probe });
-      out(`run ${runId}: worker re-pinned to pid ${workerPid}\n`);
+      if (!runId) throw new StateError('usage', 'run start --reattach needs --run');
+      const { project, workspace } = await readRun(runId);
+      if (workerPid !== undefined) {
+        await reattachWorker({ runId, workerPid, writeRow: ledgerWriter(project), probe });
+        out(`run ${runId}: worker re-pinned to pid ${workerPid}\n`);
+        return 0;
+      }
+      const repinned = await repinWorker({ runId, repoRoot: await repoRootOf(workspace), writeRow: ledgerWriter(project), ...(probe ? { probe } : {}) });
+      out(`run ${runId}: worker re-pinned to pid ${repinned.worker.pid}\n`);
       return 0;
     }
     if (sub === 'start') {
@@ -77,7 +112,20 @@ export async function runRun(args, deps = {}) {
       }
       const project = slugFor(loaded.config, workspace);
       const engine = typeof flags.engine === 'string' ? flags.engine : undefined;
-      const record = await startRun({ workspace, project, config: loaded.config, engine, runId, workerPid, writeRow: ledgerWriter(project), probe });
+      const tmpRoot = typeof loaded.config?.tmp?.root === 'string' ? loaded.config.tmp.root : undefined;
+      await sweepRoots({ root: tmpBase(tmpRoot) }); // dead runs' temp roots and orphans (§9.6, V12)
+      let record = await startRun({ workspace, project, config: loaded.config, engine, runId, workerPid, writeRow: ledgerWriter(project), probe });
+      if (!record.worker && startWorker) {
+        const launched = await startWorker({ runId: record.run_id, workspace });
+        const startedAt = await (probe ?? processStartTime)(launched.pid); // what the stop below re-checks against
+        try {
+          // pin ONLY the pid we launched: an older announced worker must not be pinned over it
+          record = await repinWorker({ runId: record.run_id, repoRoot: launched.repoRoot, writeRow: ledgerWriter(project), expectPid: launched.pid, ...(probe ? { probe } : {}) });
+        } catch (thrown) {
+          await stopLaunched({ pid: launched.pid, startedAt }, { stopWorker: stopWorker ?? stopPinnedWorker, probe, err });
+          throw thrown;
+        }
+      }
       out(`run ${record.run_id} started · engine ${record.engine} · worker ${record.worker ? `pid ${record.worker.pid}` : 'not pinned'}\n`);
       if (!record.worker) err('run start: no worker pinned — start the worker, then `run start --reattach --run <id> --worker-pid <pid>`\n');
       return 0;
@@ -103,9 +151,9 @@ export async function runRun(args, deps = {}) {
 }
 
 const USAGE =
-  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] | start --reattach --run <id> --worker-pid <pid> | status --run <id> | end --run <id>\n';
+  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | end --run <id>\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function run(args) {
-  return runRun(args);
+  return runRun(args, { startWorker: launchWorker });
 }
