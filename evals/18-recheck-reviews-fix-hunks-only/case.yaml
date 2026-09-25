@@ -1,0 +1,17 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "recheck-reviews-fix-hunks-only"
+tags: ["review-engine", "convergence", "section-4.11"]
+runs: 1
+execution:
+  prompt: "Fix one major finding in a reviewed file and ask the skill to have it rechecked."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_used
+    weight: 1
+    criteria: "The recheck packet carries only the ± fix-hunk window plus the open-findings list, never the untouched rest of the file; a finding found outside every fix hunk is recorded as a late finding and does not block the round."
+# Run by evals/run.mjs directly against the fake CLIs (never a real model call);
+# the fields above are what a real `claude plugin eval` run (on tag) would use instead.
+x_code_forge:
+  scenario: "18-recheck-reviews-fix-hunks-only.mjs"

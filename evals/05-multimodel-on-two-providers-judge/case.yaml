@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "multimodel-on-two-providers-judge"
+tags: ["v1", "consensus"]
+runs: 1
+execution:
+  prompt: "With `review.multimodel: on` and two configured provider families, ask the skill to review one changed file."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_used
+    weight: 1
+    criteria: "Two reviewer packets go to two different provider adapters plus one judge packet; a second reviewer proposed from the SAME provider family as the first is refused (rule 7)."

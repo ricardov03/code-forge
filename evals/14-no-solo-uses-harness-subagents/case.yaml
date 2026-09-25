@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "no-solo-uses-harness-subagents"
+tags: ["engine-adapters"]
+runs: 1
+execution:
+  prompt: "With no Solo MCP entry configured, and the current harness a subagent host, ask the skill to run a coder for one block file."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_used
+    weight: 1
+    criteria: "The coder runs as a harness subagent (Agent tool), not a detached subprocess — `engine: subprocess` is never chosen automatically (R2)."

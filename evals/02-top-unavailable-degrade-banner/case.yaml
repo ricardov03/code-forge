@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "top-unavailable-degrade-banner"
+tags: ["v1", "escalation"]
+runs: 1
+execution:
+  prompt: "The project config names an L3 model id whose CLI ping fails (simulate: the provider CLI is missing from PATH). Ask the skill to run `forge author --job harden` for a small brief."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "The skill prints the L3-unavailable degrade banner and refuses to run `harden` on a fallback below L3's family rank; it never silently drafts the plan at L2 instead."

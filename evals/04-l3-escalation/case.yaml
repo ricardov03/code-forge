@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "l3-escalation (l3-patch-then-l2 + l3-fail-stop)"
+tags: ["l3-patch-then-l2", "l3-fail-stop", "escalation", "R1"]
+runs: 1
+execution:
+  prompt: "A block review stalls at its running ceiling (L2). Ask the skill to continue the block to completion. Then, in a second run, arrange for the L3 patch itself to fail `git apply --check`."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "Sub-case l3-patch-then-l2: the skill takes the L3 rung exactly once (`escalation.l3_mode: patch`), applies the patch, and continues reviewing at L2 — L3 is never used as a running review level (R1). Sub-case l3-fail-stop: when the patch does not apply, the skill stops and asks the human instead of retrying L3 a second time on the same block."

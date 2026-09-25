@@ -18,7 +18,11 @@
     "src",
     "schema",
     "skill",
+    "docs/reference",
+    "examples",
+    "scripts",
     "README.md",
+    "CHANGELOG.md",
     "LICENSE"
   ],
   "scripts": {

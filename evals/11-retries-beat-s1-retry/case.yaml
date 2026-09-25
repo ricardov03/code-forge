@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "retries-beat-s1-retry"
+tags: ["decision-layer", "fallback"]
+runs: 1
+execution:
+  prompt: "Simulate the first provider in the fallback ladder answering HTTP 402 for one S1 call."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "The next fallback entry is spawned as a fresh session after the 402, and the ledger records the retry step rather than treating the 402 as a final answer."

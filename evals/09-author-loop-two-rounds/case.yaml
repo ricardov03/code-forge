@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "author-loop-two-rounds"
+tags: ["author-loop"]
+runs: 1
+execution:
+  prompt: "Ask the skill to plan a small feature from a brief that will need one clarifying question before the plan is complete."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_used
+    weight: 1
+    criteria: "The author loop runs exactly 2 rounds: round 1 returns a blocking question, the human is shown it and answers, round 2 returns a draft with no more questions."

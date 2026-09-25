@@ -1,0 +1,17 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "plan-refuses-without-facts"
+tags: ["facts", "C16"]
+runs: 1
+execution:
+  prompt: "Ask the skill to plan a small tool from a brief that names a specific CLI flag, without first running `forge facts`."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_order
+    weight: 1
+    criteria: "The transcript shows `forge facts` running before `forge author --job plan`; a direct `author --job plan` call with no `--facts` sheet is refused (exit 2) rather than drafting on an unverified claim."
+# Run by evals/run.mjs directly against the fake CLIs (never a real model call);
+# the fields above are what a real `claude plugin eval` run (on tag) would use instead.
+x_code_forge:
+  scenario: "15-plan-refuses-without-facts.mjs"

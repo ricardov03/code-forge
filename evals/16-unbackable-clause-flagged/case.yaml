@@ -1,0 +1,17 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "unbackable-clause-flagged"
+tags: ["facts", "C16"]
+runs: 1
+execution:
+  prompt: "Ask the skill to plan a small tool from a brief whose acceptance criteria cite a CLI flag that the facts sheet marks NOT-FOUND, then run `forge plan check` on the resulting draft."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "The draft lists the NOT-FOUND-backed clause under an \"unbackable\" section naming the block; `forge plan check` refuses the plan by name until a tolerance row names the block, then accepts it."
+# Run by evals/run.mjs directly against the fake CLIs (never a real model call);
+# the fields above are what a real `claude plugin eval` run (on tag) would use instead.
+x_code_forge:
+  scenario: "16-unbackable-clause-flagged.mjs"

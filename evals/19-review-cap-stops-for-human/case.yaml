@@ -1,0 +1,17 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "review-cap-stops-for-human"
+tags: ["review-engine", "convergence", "section-4.11"]
+runs: 1
+execution:
+  prompt: "Keep a file's findings shrinking round after round but never fully resolved through 4 review rounds."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_used
+    weight: 1
+    criteria: "The review takes the one-time L3 patch rung on the first stall, keeps shrinking the open set at L2, and stops with `review_cap` at round 4 with the open findings still listed — it never retries on its own past the cap; the human decides next."
+# Run by evals/run.mjs directly against the fake CLIs (never a real model call);
+# the fields above are what a real `claude plugin eval` run (on tag) would use instead.
+x_code_forge:
+  scenario: "19-review-cap-stops-for-human.mjs"

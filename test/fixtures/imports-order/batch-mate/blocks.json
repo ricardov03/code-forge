@@ -1,0 +1,26 @@
+{
+  "$comment": "Fixture for test/imports-order.test.mjs (B15): FXA and FXB are dispatched in the same wave (batch-mates) and depend only on the baseline. FXA's src/block-x/mod.mjs imports FXB's src/block-y/thing.mjs, and FXA's cli verb src/cli/verb-x.mjs imports both FXB's module and FXB's cli verb src/cli/verb-y.mjs; the checker must refuse all of them.",
+  "baseline_ids": [
+    "FX0"
+  ],
+  "blocks": {
+    "FXA": {
+      "owned": [
+        "src/block-x/**",
+        "src/cli/verb-x.mjs"
+      ],
+      "depends_on": [
+        "FX0"
+      ]
+    },
+    "FXB": {
+      "owned": [
+        "src/block-y/**",
+        "src/cli/verb-y.mjs"
+      ],
+      "depends_on": [
+        "FX0"
+      ]
+    }
+  }
+}

@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "worker-down-is-not-approval"
+tags: ["worker"]
+runs: 1
+execution:
+  prompt: "With the worker process not running, ask the skill to close a block whose files were never reviewed."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_used
+    weight: 1
+    criteria: "The block close is refused (`unreviewed`, or `worker_down`) — a missing worker is never treated as an implicit approval."

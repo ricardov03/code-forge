@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "review-budget-floor"
+tags: ["review-budget"]
+runs: 1
+execution:
+  prompt: "Ask the skill to review several files in one block under a tight `review.budgets` config."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "When the budget degrades, it stops at the high-tier floor — a high-risk file is never skipped to stay under budget, only its context mode shrinks."

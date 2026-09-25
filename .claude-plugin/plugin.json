@@ -1,0 +1,16 @@
+{
+  "$schema": "https://anthropic.com/claude-code/plugin.schema.json",
+  "name": "code-forge",
+  "version": "0.1.0",
+  "description": "Plan/harden/code/review orchestration CLI and Agent Skill for cross-model, parallel, evidence-gated feature delivery.",
+  "author": {
+    "name": "Ricardo A. Vargas R.",
+    "email": "ricardov03@users.noreply.github.com"
+  },
+  "skills": [
+    "./skill"
+  ],
+  "experimental": {
+    "evals": "evals"
+  }
+}

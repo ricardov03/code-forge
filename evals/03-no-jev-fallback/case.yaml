@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "no-jev-fallback"
+tags: ["v1", "decision-layer"]
+runs: 1
+execution:
+  prompt: "With no Jev key configured, ask the skill to make a routine lane decision for a small, low-risk file change."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "The transcript (or a `forge jev`/preflight call) reports \"System 1: fallback (no key)\" and the lane decision comes from the rules fallback, checked against S2 where the rules say so — never a silent guess."

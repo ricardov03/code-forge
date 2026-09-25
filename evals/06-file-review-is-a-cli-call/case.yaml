@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "file-review-is-a-cli-call"
+tags: ["v1", "review-engine"]
+runs: 1
+execution:
+  prompt: "Ask the skill to finish coding one file of an open block and mark it done."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: tool_used
+    weight: 1
+    criteria: "The skill calls `forge review-file <path>` (a real CLI call, never a claim of review) after finishing the file, and the block gate refuses to close the block while that file is unreviewed."

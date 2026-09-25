@@ -1,0 +1,138 @@
+# code-forge ledger outcome — CI template (plan §6.3 caller 3, §9.3 "ci/outcome.yml").
+#
+# This is a TEMPLATE for a project that USES code-forge, not a workflow code-forge's own CI runs
+# (compare `.github/workflows/ci.yml`, which tests this package). Copy this file into that
+# project's `.github/workflows/outcome.yml` to report each pull request's CI result back into
+# code-forge's calibration ledger (`forge ledger outcome --pr <n> --ci red|green|reverted`) — one
+# of the ledger's four outcome sources (plan §6.3); the other three (the block gate, shadow
+# sampling, and `forge ledger outcome --scan-git`) need no CI wiring at all. This template never
+# runs a model, never reads a secret, and only appends one ledger row per pull request.
+#
+# Where the row lands: `src/ledger/paths.mjs` writes `~/.code-forge/ledger/<slug>.jsonl` off
+# `os.homedir()` — a plain file, never a database, never configurable per project beyond the slug.
+# GitHub-hosted runners are ephemeral (a fresh `$HOME` every run), so that file would otherwise be
+# lost the moment the job ends. The cache steps below carry it from run to run: restore the latest
+# saved copy, run the CLI, save it back under a fresh, run-scoped key (cache entries are immutable,
+# so a stable key can't be overwritten). This is BEST-EFFORT, not persistence: GitHub evicts a
+# cache entry not accessed for 7 days (and the oldest entries once the repo's cache size limit is
+# reached), so a quiet week starts a new, empty ledger. The restore step warns (`::warning::`)
+# whenever no earlier ledger was restored. For a real calibration history, keep the ledger in
+# durable storage instead: for example, commit `<slug>.jsonl` to a dedicated branch (check it out
+# into ~/.code-forge/ledger before the CLI step, push it after), or use a self-hosted runner with a
+# persistent `$HOME` or a mounted volume — then drop the cache steps.
+#
+# Before copying:
+#   1. Set CODE_FORGE_SLUG below to that project's `.code-forge.yml` -> `project.slug`, and put
+#      the same slug in `concurrency.group` (a top-level `concurrency` cannot read `env`).
+#   2. `workflows: ["CI"]` below names the project's OWN test workflow by its `name:` — change it
+#      if that project's CI workflow is named differently.
+#   3. `reverted` is not reported here — `forge ledger outcome --scan-git [--days 7]` (run by
+#      `run start`, and on demand) finds reverts from `git log` directly and needs no CI step.
+name: code-forge ledger outcome
+
+on:
+  workflow_run:
+    workflows: ['CI']
+    types: [completed]
+
+permissions:
+  contents: read
+  pull-requests: read
+
+# One ledger job at a time per slug: each run restores the newest saved ledger, appends a row and
+# saves a new copy, so two overlapping runs would both start from the same copy and the later save
+# would drop the earlier run's row. Queue instead of cancel — a cancelled run loses its row too.
+# GitHub keeps one running and ONE pending run per group: a third run arriving while one is
+# pending replaces it, so in a burst of 3+ CI completions the replaced run's row is not written
+# (re-run that workflow run from the Actions tab to record it).
+concurrency:
+  group: code-forge-ledger-your-project-slug # <- code-forge-ledger-<slug>: the same slug as CODE_FORGE_SLUG
+  cancel-in-progress: false
+
+env:
+  # <- fill in: the consuming project's `.code-forge.yml` -> `project.slug` (ledger.mjs has no
+  # config loader of its own, B6 depends only on B0, so every `ledger` call names it explicitly).
+  CODE_FORGE_SLUG: your-project-slug
+
+jobs:
+  record-outcome:
+    if: github.event.workflow_run.event == 'pull_request'
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # ~/.code-forge/ledger/<slug>.jsonl does not survive between jobs on a GitHub-hosted runner
+      # on its own (see the header comment) — restore the newest previously-saved copy, if any.
+      - name: Restore the ledger (~/.code-forge/ledger, best-effort cache)
+        id: restore
+        uses: actions/cache/restore@v4
+        with:
+          path: ~/.code-forge/ledger
+          key: code-forge-ledger-${{ env.CODE_FORGE_SLUG }}-${{ github.run_id }}-${{ github.run_attempt }}
+          restore-keys: |
+            code-forge-ledger-${{ env.CODE_FORGE_SLUG }}-
+
+      # A miss means this run starts from an empty ledger: the first run for this slug, or every
+      # earlier copy was evicted (7 days unused). Make that visible instead of silent.
+      - name: Warn when no earlier ledger was restored
+        if: steps.restore.outputs.cache-matched-key == ''
+        run: |
+          echo "::warning::no earlier code-forge ledger was restored for slug ${CODE_FORGE_SLUG} (first run, or the cache was evicted after 7 days unused); this run starts a new, empty ledger"
+
+      - name: Resolve the pull request number for this commit
+        id: pr
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const { data } = await github.rest.repos.listPullRequestsAssociatedWithCommit({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              commit_sha: context.payload.workflow_run.head_sha,
+            });
+            core.setOutput('number', data[0]?.number ?? '');
+
+      - name: forge ledger outcome --pr <n> --ci green|red (success -> green; failure/timed_out -> red; every other conclusion is skipped)
+        if: steps.pr.outputs.number != ''
+        run: |
+          conclusion="${{ github.event.workflow_run.conclusion }}"
+          case "$conclusion" in
+            success) ci_outcome="green" ;;
+            failure|timed_out) ci_outcome="red" ;;
+            *)
+              echo "skipping: workflow_run.conclusion '$conclusion' is neither success, failure, nor timed_out"
+              exit 0
+              ;;
+          esac
+          npx --yes @ricardov/code-forge ledger outcome \
+            --pr "${{ steps.pr.outputs.number }}" \
+            --ci "$ci_outcome" \
+            --slug "${CODE_FORGE_SLUG}"
+
+      # hashFiles() only matches files under $GITHUB_WORKSPACE, so it cannot see ~/.code-forge;
+      # this always-run step checks for the ledger directly and never fails on its own.
+      - name: Is there a ledger to save?
+        id: ledger
+        if: always()
+        run: |
+          if [ -n "$(find "${HOME}/.code-forge/ledger" -type f -name '*.jsonl' -print -quit 2>/dev/null)" ]; then
+            echo "present=true" >> "${GITHUB_OUTPUT}"
+          else
+            echo "present=false" >> "${GITHUB_OUTPUT}"
+            echo "no ledger file under ~/.code-forge/ledger: nothing to save"
+          fi
+
+      # Save whenever a ledger file exists, even if the CLI step failed after writing — a partially
+      # updated ledger is still better than losing today's row. With no ledger (no cache yet and
+      # the CLI step skipped: no PR, or a conclusion that is not reported) there is nothing to save
+      # and this step is skipped, so a normal skip never turns the job red. A fresh, run-scoped key
+      # every time is required: GitHub Actions cache entries are immutable once created.
+      - name: Save the ledger so this row survives to the next run
+        if: always() && steps.ledger.outputs.present == 'true'
+        uses: actions/cache/save@v4
+        with:
+          path: ~/.code-forge/ledger
+          key: code-forge-ledger-${{ env.CODE_FORGE_SLUG }}-${{ github.run_id }}-${{ github.run_attempt }}

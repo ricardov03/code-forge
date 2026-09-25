@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "never-skip-a-level"
+tags: ["v1", "escalation"]
+runs: 1
+execution:
+  prompt: "Present evidence for a file that might tempt jumping straight from L0 to L2 (a security-sensitive path with a low S1 confidence)."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "The next level chosen is L1, never a jump straight from L0 to L2 — the ladder is walked one rung at a time."

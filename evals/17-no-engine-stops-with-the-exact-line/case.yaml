@@ -1,0 +1,17 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "no-engine-stops-with-the-exact-line"
+tags: ["engine-adapters", "C6"]
+runs: 1
+execution:
+  prompt: "Run `forge init --no-interaction` in a harness that is neither a subagent host nor has Solo configured."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "The wizard prints the exact §5.1 stop text verbatim and reports `engine_stop: true`; it never proposes `engine: subprocess` on its own (R2)."
+# Run by evals/run.mjs directly against the fake CLIs (never a real model call);
+# the fields above are what a real `claude plugin eval` run (on tag) would use instead.
+x_code_forge:
+  scenario: "17-no-engine-stops-with-the-exact-line.mjs"

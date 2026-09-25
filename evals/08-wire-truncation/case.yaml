@@ -1,0 +1,13 @@
+# code-forge eval case (plan §9.3). No real project is named here (R13).
+schema_version: "1.0"
+name: "wire-truncation"
+tags: ["v1", "protocol"]
+runs: 1
+execution:
+  prompt: "Send the skill a message that is missing the closing `<<<EOM>>>` sentinel."
+  max_turns: 20
+  allowed_tools: [Read, Glob, Grep, Bash, Skill]
+graders:
+  - type: regex
+    weight: 1
+    criteria: "The skill asks for a resend and takes no action on the truncated content — it never guesses at what the rest of the message might have said."
