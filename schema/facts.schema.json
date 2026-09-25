@@ -1,0 +1,28 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://code-forge.dev/schema/facts.schema.json",
+  "title": "code-forge facts delegate answer",
+  "description": "Plan v1.3 §3.8 step 3: the L0 facts delegate's answer. One row per claim token: the read-only command it ran, the output line it quotes, and a tag. A VERIFIED row must quote a non-empty excerpt; `why` says why a claim is UNVERIFIABLE (null otherwise).",
+  "type": "object",
+  "properties": {
+    "facts": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "fact_id": { "type": "string", "pattern": "^F[0-9]+$" },
+          "claim": { "type": "string", "minLength": 1 },
+          "kind": { "type": "string", "enum": ["flag", "command", "path", "version", "endpoint", "package", "env"] },
+          "command": { "type": "string" },
+          "output_excerpt": { "type": "string", "maxLength": 200 },
+          "tag": { "type": "string", "enum": ["VERIFIED", "NOT-FOUND", "UNVERIFIABLE"] },
+          "why": { "type": ["string", "null"] }
+        },
+        "required": ["fact_id", "claim", "kind", "command", "output_excerpt", "tag", "why"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["facts"],
+  "additionalProperties": false
+}
