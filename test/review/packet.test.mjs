@@ -4,7 +4,7 @@ import { symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
-const { buildPacket, PacketError } = await import('../../src/review/packet.mjs');
+const { buildPacket, PacketError, readFileDiff } = await import('../../src/review/packet.mjs');
 
 /** @param {string} text @returns {string[]} the diff body lines that add a line. */
 function plusLines(text) {
@@ -71,6 +71,14 @@ describe('packet builder (§4.1)', () => {
     const control = /** @type {any} */ (await buildPacket({ ...common, file: 'src/real.mjs' }));
     assert.deepEqual([control.status, control.diff.plusCount], ['ok', 3]);
     assert.equal(control.text.includes(marker), false);
+  });
+
+  test('B11.1: the diff content of a regular new file (non-ASCII, CRLF) is byte-identical to the file on disk', async () => {
+    const repo = await makeRepo();
+    const text = 'export const s = "é ✓";\r\nexport const t = 2;\n';
+    writeFile(repo, 'src/u.mjs', text);
+    const diff = await readFileDiff({ repoRoot: repo, file: 'src/u.mjs', base: null });
+    assert.deepEqual([diff.kind, Buffer.compare(Buffer.from(/** @type {string} */ (diff.content)), Buffer.from(text))], ['new', 0]);
   });
 
   test('pathspec magic: `src/*` and a `:`-prefixed value are refused with bad-path; no other file is diffed', async () => {

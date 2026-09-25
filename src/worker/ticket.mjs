@@ -13,7 +13,7 @@
  */
 
 import { createHash } from 'node:crypto';
-import { lstatSync, readFileSync, realpathSync } from 'node:fs';
+import { closeSync, constants, fstatSync, lstatSync, openSync, readFileSync, realpathSync } from 'node:fs';
 import path from 'node:path';
 import { exec } from '../util/exec.mjs';
 
@@ -150,15 +150,40 @@ function realOrSelf(p) {
  * @returns {string}
  */
 export function contentHash(repoRoot, file) {
-  let bytes;
+  const bytes = readRegularFileNoFollow(repoRoot, file);
+  if (bytes === null) return DELETED_HASH;
+  return createHash('sha256').update(bytes).digest('hex');
+}
+
+/**
+ * Read a repo file's bytes without ever following a symlink, closing the lstat→read race (a
+ * regular file swapped for a symlink after `assertInsideRoot` checked it): the file is opened
+ * with `O_NOFOLLOW` (a symlink fails with ELOOP ⇒ `bad-path`) and `O_NONBLOCK` (a FIFO never
+ * blocks the open), the OPEN descriptor must be a regular file (`fstat`), and the bytes come from
+ * that descriptor. The realpath'd parent is checked inside the root before and after the open.
+ * @param {string} repoRoot - realpath'd. @param {string} file - repo-root-relative.
+ * @returns {Buffer | null} the bytes, or null when the file does not exist.
+ * @throws {WorkerError} `bad-path`
+ */
+export function readRegularFileNoFollow(repoRoot, file) {
   assertInsideRoot(repoRoot, file);
+  const full = path.join(repoRoot, file);
+  let fd;
   try {
-    bytes = readFileSync(path.join(repoRoot, file));
+    fd = openSync(full, constants.O_RDONLY | constants.O_NOFOLLOW | constants.O_NONBLOCK);
   } catch (err) {
-    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') return DELETED_HASH;
+    const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+    if (code === 'ENOENT') return null;
+    if (code === 'ELOOP' || code === 'EMLINK') throw new WorkerError('bad-path', 'the path is a symlink');
     throw err;
   }
-  return createHash('sha256').update(bytes).digest('hex');
+  try {
+    if (!fstatSync(fd).isFile()) throw new WorkerError('bad-path', 'not a regular file');
+    assertInsideRoot(repoRoot, file);
+    return readFileSync(fd);
+  } finally {
+    closeSync(fd);
+  }
 }
 
 /**

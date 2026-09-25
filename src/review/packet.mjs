@@ -32,7 +32,7 @@ import { existsSync, lstatSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exec } from '../util/exec.mjs';
-import { assertInsideRoot, assertRowPath, gitChildEnv, WorkerError } from '../worker/ticket.mjs';
+import { assertInsideRoot, assertRowPath, gitChildEnv, readRegularFileNoFollow, WorkerError } from '../worker/ticket.mjs';
 import { buildContext, parseDiff, splitLines } from './context.mjs';
 
 export const LENSES = Object.freeze(['quick', 'full', 'recheck', 'A', 'B', 'judge']);
@@ -162,7 +162,7 @@ export async function readFileDiff({ repoRoot, file, base }) {
       : ['git', 'diff', '--no-color', '--no-ext-diff', ref, '--', rel];
   const res = await exec(argv, { cwd: repoRoot, env, timeoutMs: GIT_TIMEOUT_MS, ...(kind === 'new' ? { okExitCodes: [0, 1] } : {}) });
   if (res.result !== 'ok') throw new PacketError('git', `git diff failed for ${rel} (exit ${res.code})`);
-  const content = onDisk ? readFileSync(full, 'utf8') : null;
+  const content = onDisk ? readRepoText(repoRoot, rel) : null;
   return { file: rel, kind, diffText: res.stdout, content, ...parseDiff(res.stdout) };
 }
 
@@ -269,6 +269,21 @@ export function assembleJudgePacket({ diff, reports, cfg }) {
 }
 
 /**
+ * A repo file's text, read through `readRegularFileNoFollow` (O_NOFOLLOW + fstat on the open fd:
+ * a file swapped for a symlink after the lstat checks is refused, never followed).
+ * @param {string} repoRoot @param {string} rel @returns {string | null} null when missing.
+ * @throws {PacketError} `bad-path`
+ */
+function readRepoText(repoRoot, rel) {
+  try {
+    return readRegularFileNoFollow(repoRoot, rel)?.toString('utf8') ?? null;
+  } catch (err) {
+    if (err instanceof WorkerError) throw new PacketError('bad-path', err.message);
+    throw err;
+  }
+}
+
+/**
  * Why `rel` may not be attached, or null.
  * @param {string} repoRoot @param {string} rel @returns {Promise<string | null>}
  */
@@ -312,7 +327,19 @@ export async function attachFiles({ repoRoot, paths, budgetTokens }) {
       out.push(`### ${rel} (${refusal})`);
       continue;
     }
-    const lines = splitLines(readFileSync(path.join(repoRoot, rel), 'utf8'));
+    let text;
+    try {
+      text = readRepoText(repoRoot, rel);
+    } catch (err) {
+      if (!(err instanceof PacketError)) throw err;
+      out.push(`### ${rel} (refused: ${err.message})`);
+      continue;
+    }
+    if (text === null) {
+      out.push(`### ${rel} (missing)`);
+      continue;
+    }
+    const lines = splitLines(text);
     out.push(`### ${rel}`);
     for (let i = 0; i < lines.length; i += 1) {
       const line = `${i + 1}| ${lines[i]}`;
