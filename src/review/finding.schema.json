@@ -1,0 +1,47 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://code-forge.local/schema/review/finding.schema.json",
+  "title": "code-forge review answer (plan §4.2 finding schema)",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["passed", "summary", "reviewed_hunks", "findings"],
+  "properties": {
+    "passed": { "type": "boolean" },
+    "summary": { "type": "string", "maxLength": 300 },
+    "reviewed_hunks": { "type": "array", "items": { "type": "string" } },
+    "findings": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "file", "line_start", "line_end", "severity", "category", "claim", "evidence", "fix"],
+        "properties": {
+          "id": { "type": "string", "minLength": 1, "maxLength": 64 },
+          "file": { "type": "string" },
+          "line_start": { "type": "integer", "minimum": 0 },
+          "line_end": { "type": "integer", "minimum": 0 },
+          "severity": { "type": "string", "enum": ["critical", "warning", "nit"] },
+          "category": { "type": "string", "maxLength": 64 },
+          "claim": { "type": "string", "maxLength": 300 },
+          "evidence": { "type": "string", "maxLength": 300 },
+          "fix": { "type": "string", "maxLength": 300 },
+          "agreement": { "type": "string", "enum": ["both", "A-only", "B-only"] }
+        }
+      }
+    },
+    "resolved": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "additionalProperties": false,
+        "required": ["id", "resolved", "why"],
+        "properties": {
+          "id": { "type": "string" },
+          "resolved": { "type": "boolean" },
+          "why": { "type": "string", "maxLength": 200 }
+        }
+      }
+    },
+    "needs_file": { "type": "array", "items": { "type": "string" } }
+  }
+}

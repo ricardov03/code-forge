@@ -39,6 +39,7 @@ export const FAKE_SNEAKY = 'FAKE-sneaky-token-b11-77aa31';
 const { exec } = await import('../../src/util/exec.mjs');
 const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 const { startRun } = await import('../../src/state/run.mjs');
+const { openBlock } = await import('../../src/state/block.mjs');
 const { liveWorker } = await import('../../src/worker/queue.mjs');
 const { sweep } = await import('../../src/util/reaper.mjs');
 
@@ -66,24 +67,45 @@ levels:
     model: claude-fable-5-1
 review:
   session_timeout_s: 60
+  min_tokens_out: 40
 `;
 
 /**
- * A git repo with `.code-forge.yml`, `src/a.mjs`, `src/b.mjs`, `src/c.mjs`, and (unless
- * `start: false`) a started run with no worker pinned.
+ * A review answer that passes B12a's stub guard for the fixture files (each a new one-line file,
+ * so its only hunk is `@@ -0,0 +1 @@`); the fake reports 42 output tokens (≥ min_tokens_out 40).
+ */
+export const VALID_REVIEW = JSON.stringify({ passed: true, summary: 'fake review', reviewed_hunks: ['@@ -0,0 +1 @@'], findings: [], resolved: [], needs_file: [] });
+
+/** The block the fixture tickets name; the run record lists it (open, base = the empty commit). */
+export const BLOCK = 'B11';
+
+/**
+ * A git repo with one empty base commit, `.code-forge.yml`, and the untracked new files
+ * `src/a.mjs`, `src/b.mjs`, `src/c.mjs`; unless `start: false`, a started run with no worker
+ * pinned and block `B11` open in it (the engine hook refuses a ticket for a block the run record
+ * does not list).
  * @param {{start?: boolean}} [opts]
  * @returns {Promise<{repo: string, runId: string}>}
  */
 export async function makeRepo({ start = true } = {}) {
   const repo = freshDir('repo');
-  const init = await exec(['git', 'init', '-q'], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 });
-  if (init.result !== 'ok') throw new Error(`git init failed: ${init.stderr}`);
+  for (const args of [
+    ['init', '-q'],
+    ['-c', 'user.name=Fake Tester', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'base'],
+  ]) {
+    const res = await exec(['git', ...args], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 });
+    if (res.result !== 'ok') throw new Error(`git ${args.at(-1)} failed: ${res.stderr}`);
+  }
   writeFileSync(path.join(repo, '.code-forge.yml'), CONFIG);
   mkdirSync(path.join(repo, 'src'));
   for (const name of ['a', 'b', 'c']) writeFileSync(path.join(repo, 'src', `${name}.mjs`), `export const ${name} = 1;\n`);
   seq += 1;
   const runId = `r-b11-${process.pid}-${seq}`;
-  if (start) await startRun({ workspace: repo, project: 'worker-test', runId, writeRow: async () => {} });
+  if (start) {
+    const writeRow = async () => {};
+    await startRun({ workspace: repo, project: 'worker-test', runId, writeRow });
+    await openBlock({ runId, id: BLOCK, level: 'L2', owned: ['src/**'], acceptance: [{ clause: 'fixture files are reviewed', tests: ['worker'] }], writeRow });
+  }
   return { repo, runId };
 }
 

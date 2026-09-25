@@ -1,4 +1,4 @@
-import { alive, cli, FAKE_JEV_KEY, FAKE_SNEAKY, freshDir, makeRepo, queued, records, runRootOf, startWorker, stopPid, stopPidAfter, stopWorker, waitFor } from './helpers.mjs';
+import { alive, cli, FAKE_JEV_KEY, VALID_REVIEW, FAKE_SNEAKY, freshDir, makeRepo, queued, records, runRootOf, startWorker, stopPid, stopPidAfter, stopWorker, waitFor } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, readFileSync, rmSync } from 'node:fs';
@@ -19,7 +19,7 @@ describe('a long review session (the fake sleeps 3 s; the coder waits 1 s at a t
     // timeout (review.session_timeout_s = 60 in the fixture) could end it.
     const { repo, runId } = await makeRepo();
     const recordDir = freshDir('records');
-    const w = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '3000' });
+    const w = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '3000', FAKE_ANSWER: VALID_REVIEW });
     try {
       const a = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
       const b = await cli(['review-file', 'src/b.mjs', '--block', 'B11'], repo);
@@ -152,6 +152,116 @@ describe('keys inside the worker (§8.1)', () => {
     assert.equal(rows.length, 2);
     assert.equal(rows.every((r) => verifyRow(r, key).ok), true);
     assert.equal(JSON.stringify(rows).includes(FAKE_JEV_KEY), false);
+  });
+});
+
+describe('the ctx the loop hands the engine hook (B12a seam)', () => {
+  /**
+   * An in-process worker on a stubbed engine hook and a stubbed session spawner: `spawned` collects
+   * the opts every `ctx.spawn` call reached the spawner with, `rows` the ledger rows written.
+   * @param {{repo: string, runId: string, cfg: Record<string, any>, review: (ticket: any, ctx: any) => Promise<any>}} opts
+   */
+  async function stubbedWorker({ repo, runId, cfg, review }) {
+    /** @type {Array<Record<string, any>>} */
+    const spawned = [];
+    /** @type {Array<Record<string, any>>} */
+    const rows = [];
+    const key = await loadKey(runId);
+    const worker = await createWorker(
+      { runId, repoRoot: repo, cfg, runRootDir: freshDir('runroot'), slug: 'worker-test', key },
+      {
+        store: await createKeyStore({ backends: [], dir: freshDir('store') }),
+        env: {},
+        writeRow: async (row) => void rows.push(row),
+        spawn: /** @type {any} */ (
+          async (/** @type {Record<string, any>} */ opts) => {
+            spawned.push(opts);
+            return { status: 'ok' };
+          }
+        ),
+        review,
+      },
+    );
+    return { worker, spawned, rows, key };
+  }
+
+  test('(a) a per-call `cfg` in the spawn options overrides the worker cfg; a call without it gets the worker cfg', async () => {
+    const { repo, runId } = await makeRepo();
+    const workerCfg = { review: { session_timeout_s: 7 }, marker: 'worker' };
+    const perCall = { marker: 'per-call', review: { session_timeout_s: 1 } };
+    const { worker, spawned } = await stubbedWorker({
+      repo,
+      runId,
+      cfg: workerCfg,
+      review: async (_ticket, ctx) => {
+        await ctx.spawn({ role: 'reviewer', cfg: perCall });
+        await ctx.spawn({ role: 'reviewer' });
+        return { status: 'reviewed', approved: true, engine: 'test', sessions: [] };
+      },
+    });
+    enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
+    assert.equal(await worker.drain(), 1);
+    assert.equal(spawned.length, 2);
+    assert.deepEqual(spawned.map((o) => o.cfg), [perCall, workerCfg]);
+    assert.equal(spawned[0].cfg.marker, 'per-call');
+    assert.equal(spawned[1].cfg.marker, 'worker');
+    // what the worker pins is pinned on both calls, per-call cfg or not
+    assert.deepEqual(
+      spawned.map((o) => [o.run, o.block, o.timeoutMs]),
+      [
+        [runId, 'B11', 7000],
+        [runId, 'B11', 7000],
+      ],
+    );
+  });
+
+  test('(b) a row written through ctx.writeRow carries block, file and content_hash from the ticket, even when the row supplies other values', async () => {
+    const { repo, runId } = await makeRepo();
+    const { worker, rows, key } = await stubbedWorker({
+      repo,
+      runId,
+      cfg: {},
+      review: async (_ticket, ctx) => {
+        await ctx.writeRow({ event: 'review.plan', block: 'OTHER', file: 'src/other.mjs', content_hash: 'deadbeef', lens: 'quick' });
+        return { status: 'reviewed', approved: true, engine: 'test', sessions: [] };
+      },
+    });
+    const a = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
+    assert.match(a.content_hash, /^[0-9a-f]{64}$/);
+    assert.equal(await worker.drain(), 1);
+    const plans = rows.filter((r) => r.event === 'review.plan');
+    assert.equal(plans.length, 1);
+    const [row] = plans;
+    assert.deepEqual([row.run, row.block, row.file, row.content_hash, row.lens], [runId, 'B11', 'src/a.mjs', a.content_hash, 'quick']);
+    assert.equal(verifyRow(row, key).ok, true);
+    assert.equal(rows.length, 2); // the plan row + the loop's own review.result row
+  });
+
+  test('(c) the result carries reason and findings (exact count) when the engine returns them, and neither key when it does not', async () => {
+    const { repo, runId } = await makeRepo();
+    const findings = [
+      { id: 'f1', severity: 'major' },
+      { id: 'f2', severity: 'minor' },
+      { id: 'f3', severity: 'nit' },
+    ];
+    const { worker } = await stubbedWorker({
+      repo,
+      runId,
+      cfg: {},
+      review: async (ticket) =>
+        ticket.file === 'src/a.mjs'
+          ? { status: 'reviewed', approved: false, engine: 'adaptive', sessions: [], reason: 'findings-open', findings }
+          : { status: 'reviewed', approved: true, engine: 'adaptive', sessions: [] },
+    });
+    const a = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
+    const b = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/b.mjs' });
+    assert.equal(await worker.drain(), 2);
+    const ra = /** @type {Record<string, any>} */ (readResult(repo, runId, a.ticket));
+    const rb = /** @type {Record<string, any>} */ (readResult(repo, runId, b.ticket));
+    assert.deepEqual([ra.status, ra.approved, ra.reason, ra.findings.length], ['reviewed', false, 'findings-open', 3]);
+    assert.deepEqual(ra.findings, findings);
+    assert.deepEqual([rb.status, rb.approved], ['reviewed', true]);
+    assert.deepEqual([Object.hasOwn(rb, 'reason'), Object.hasOwn(rb, 'findings')], [false, false]);
   });
 });
 

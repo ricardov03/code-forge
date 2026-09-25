@@ -164,15 +164,26 @@ export async function createWorker(opts, deps = {}) {
           runRootDir,
           cfg,
           jevKey,
+          // `sessionOpts.cfg` (a per-call config, e.g. the consensus second reviewer's level) wins
+          // over the worker's; everything else the worker pins.
           spawn: (sessionOpts) =>
             spawn(
-              /** @type {any} */ ({ ...sessionOpts, cfg, runRoot: runRootDir, run: runId, block: ticket.block, slug, timeoutMs: timeoutS * 1000 }),
+              /** @type {any} */ ({ cfg, ...sessionOpts, runRoot: runRootDir, run: runId, block: ticket.block, slug, timeoutMs: timeoutS * 1000 }),
               { env: childEnv, ...(deps.bins ? { bins: deps.bins } : {}), ...(deps.stderr ? { stderr: deps.stderr } : {}) },
             ),
+          writeRow: (row) => ledger({ ...row, block: ticket.block, file: ticket.file, content_hash: ticket.content_hash }),
         };
         try {
           const outcome = await review(ticket, ctx);
-          result = { ...base, status: outcome.status, approved: outcome.approved === true, engine: outcome.engine, sessions: outcome.sessions };
+          result = {
+            ...base,
+            status: outcome.status,
+            approved: outcome.approved === true,
+            engine: outcome.engine,
+            ...(typeof outcome.reason === 'string' ? { reason: outcome.reason } : {}),
+            ...(Array.isArray(outcome.findings) ? { findings: outcome.findings } : {}),
+            sessions: outcome.sessions,
+          };
         } catch {
           result = { ...base, status: 'unavailable', reason: 'engine-error', approved: false };
         }
