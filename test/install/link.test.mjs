@@ -510,7 +510,11 @@ test('a symlinked source still installs to a NORMAL target and removes cleanly �
 
 // ── removeRecords canonicalizes paths before comparing (case-insensitive FS, symlinked parents) ─
 
-test('removeRecords refuses a tampered target that is $HOME written in a DIFFERENT CASE — macOS APFS is case-insensitive (same on-disk entry, different string); $HOME survives and the record is kept', async () => {
+test('removeRecords refuses a tampered target that is $HOME written in a DIFFERENT CASE — macOS APFS is case-insensitive (same on-disk entry, different string); $HOME survives and the record is kept', async (t) => {
+  if (!(await tempFsIsCaseInsensitive())) {
+    t.skip('filesystem is case-sensitive (e.g. Linux CI): a differently-cased $HOME is a different, absent path');
+    return;
+  }
   const installsFile = await freshInstallsFile();
   const source = await tempDir('cf-src-');
   await writeMarker(source);

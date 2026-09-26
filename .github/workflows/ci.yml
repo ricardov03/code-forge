@@ -13,6 +13,8 @@ jobs:
     name: test (node ${{ matrix.node }})
     runs-on: ubuntu-latest
     strategy:
+      # one Node version failing must not cancel the other: see every failure in one run
+      fail-fast: false
       matrix:
         # Ruling R7 (2026-09-24): Node 22+ only.
         node: [22, 24]
