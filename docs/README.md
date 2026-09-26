@@ -13,10 +13,12 @@ disagree, the verb is right: each verb prints its own usage line when its argume
 | 3 | [how-it-works.md](how-it-works.md) | follow the full workflow from a brief to a closed block, and see who does what and where state lives |
 | 4 | [getting-started.md](getting-started.md) | install it, answer `init`, run `doctor`, and try the first commands |
 | 5 | [tutorial-first-test.md](tutorial-first-test.md) | run one real end-to-end test: build the code-forge marketing site in a new repo |
+| 5a | [review-only.md](review-only.md) | only review code you already wrote: a branch, uncommitted work or some files, with CI exit codes |
 | 6 | [examples/marketing-site/brief.md](examples/marketing-site/brief.md) | copy the brief the tutorial uses |
 | 7 | [marketing.md](marketing.md) | read the product story: the problem, the promise, the honest limits |
 
-New to the tool? Read 1 → 3 → 4, then do 5. Keep 2 open as a glossary.
+New to the tool? Read 1 → 3 → 4, then do 5. Keep 2 open as a glossary. Only want reviews? Read 4,
+then 5a.
 
 ## Reference pages (already in the repo)
 

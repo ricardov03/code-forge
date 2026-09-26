@@ -46,6 +46,13 @@ flowchart TD
 The coder's turn ends with `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===`.
 Nothing else counts as completion.
 
+### Review only
+
+`code-forge review` runs steps 5, 6 and 8 on changes you already have, then stops the block and ends
+the run: no facts, plan, coder or proof, and the block is never closed. The files are the ones
+changed since the merge base with the default branch (or `--files`). See
+[review-only.md](review-only.md).
+
 ### Review per file, in detail
 
 When a coder finishes a file it runs `review-file`. The **worker** (started by `run start`, never
@@ -65,6 +72,11 @@ by a coder) serves the ticket:
    L3 judge **from a third provider** rules on both reports.
 4. **Triage.** Findings from a single reviewer go to S1 `defect`: fix now, batch to an L3 ruling,
    or log as a nit. A judge's findings are final.
+
+Every reviewer packet carries the block's acceptance clauses (from `block open --acceptance`) under
+"Acceptance clauses", so the reviewer checks the change against what it must do. The clauses are
+redacted and cut to fit the packet budget; a block whose clauses cannot be read is still reviewed,
+with `(acceptance unavailable)` in their place.
 
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
 exactly, and the output is long enough. Anything else is `review.unavailable`, never approval.

@@ -40,3 +40,7 @@ Two L2 reviewers, one per effective provider (`resolve(L2)` and `review.second_l
 ## §7 The review budget per block
 
 `review.block_budget_tokens` (and optionally `review.block_budget_usd`) bounds every review, recheck, judge and S2 session made for the block. When the forecast exceeds it the worker degrades one step at a time, cheapest first: batch small files of one tier into one packet (`review.batch_small_files`) → one judge per block instead of per file → standard band `full` → `quick` → high tier `A + B + judge` → one `full` L2 + judge, the floor. Tools-only is never a review; a light `quick` stays `quick`. Still over ⇒ `review.over_budget`: raise the budget once per run (a config edit by the human, on record) or split the block — never silently, never below the floors. The ledger keeps `depth_unconstrained` and `depth_chosen` per file so `forge report` can show `missed_after_degrade`.
+
+## §8 Review only
+
+A human who wants a review and nothing else runs `forge review`: it reviews the changed files in one `R-<timestamp>` block at L2, prints the verdicts, then stops the block and ends the run — no plan, no coder, no proof, never a close. Inside a block the orchestrator keeps using `forge review-file`.

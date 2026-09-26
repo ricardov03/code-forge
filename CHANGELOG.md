@@ -4,6 +4,22 @@ All notable changes to `@codedology/code-forge` are recorded here. Format loosel
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver ahead of a 1.0.0 that
 waits on a second real consumer (plan §10.4, Q17).
 
+## [Unreleased]
+
+### Added
+
+- **`code-forge review`** — review only: runs the review engine on changes you already have (your
+  branch against the merge base with the default branch, your uncommitted work, or `--files`), with
+  no plan, coder or proof, and never closes a block. One verdict per file, a fix list, totals or one
+  JSON document (`--json`); exit 0 only when every file is approved. The run and its worker are
+  always ended, also on Ctrl-C, SIGTERM and timeouts. See `docs/review-only.md`.
+
+### Changed
+
+- **Reviewers see the acceptance clauses.** Every review packet now carries the block's acceptance
+  clauses (redacted, cut to fit the packet budget); a block without readable clauses is still
+  reviewed, with `(acceptance unavailable)`.
+
 ## [0.1.0] — first release
 
 The `plan` → `harden` → `code` → `review` pipeline for cross-model, parallel, evidence-gated

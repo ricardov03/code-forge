@@ -21,6 +21,10 @@
  * else `findings` = the open fix list, `next` = what the orchestrator does (`fix` at `level`,
  * `trigger: review_stall | review_rounds`, `patch`), `stopped` = the stop reason.
  * Without `ctx.key` (a direct call) the hook is the engine alone and writes no approval row.
+ * Every packet (round 1, recheck, patch check) carries the block's acceptance clauses from the run
+ * record in its facts slot, labelled `Acceptance clauses` (`acceptanceExcerpt`): redacted, capped
+ * at an eighth of `review.budgets.full_in` with a truncation marker, and `(acceptance unavailable)`
+ * when the record has none — a missing acceptance never fails the review.
  * The first keyed ticket of a block (no `review.budget` row for it in the run yet) records the
  * block's review budget (§4.10, B19): the forecast over the block's changed owned files (tier from
  * the path floors, before S1), one `review.budget` row per block; a failure there never fails the
@@ -34,6 +38,7 @@ import { rmSync } from 'node:fs';
 import path from 'node:path';
 import { askJev } from '../decide/jev-client.mjs';
 import { planAndRecord, tierOf } from '../review/budget.mjs';
+import { budgetFor } from '../review/packet.mjs';
 import { reviewFile, rulesRisk } from '../review/engine.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { newFileState, runRound } from '../review/fixloop.mjs';
@@ -84,14 +89,14 @@ import { assertTicketId } from './ticket.mjs';
  * `block-unknown`; a record that cannot be read or parsed throws `run-record-unreadable`, and a
  * block entry without a base `block-base-missing` — a guessed base could let a change escape review.
  * @param {string} runId @param {string} block
- * @returns {Promise<{base: string | null, level: string, owned: string[]}>}
+ * @returns {Promise<{base: string | null, level: string, owned: string[], acceptance?: unknown}>}
  */
 export async function blockEntryFor(runId, block) {
   let record;
   try {
     record = await readRun(runId);
   } catch (err) {
-    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [] };
+    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], acceptance: undefined };
     throw new Error('run-record-unreadable');
   }
   if (!record || typeof record !== 'object' || !record.blocks || typeof record.blocks !== 'object') throw new Error('run-record-unreadable');
@@ -100,7 +105,43 @@ export async function blockEntryFor(runId, block) {
   const sha = entry?.base_sha;
   if (typeof sha !== 'string' || sha.length === 0) throw new Error('block-base-missing');
   const owned = Array.isArray(entry.owned_files) ? entry.owned_files.filter((f) => typeof f === 'string') : [];
-  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned };
+  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, acceptance: entry.acceptance };
+}
+
+/** The acceptance line written when the block's clauses cannot be read. */
+export const ACCEPTANCE_UNAVAILABLE = '(acceptance unavailable)';
+const ACCEPTANCE_HEAD = 'Acceptance clauses (what the change must do):';
+
+/**
+ * The block's acceptance clauses as the packet's facts-slot text: one `- <clause>` line each
+ * (whitespace folded, so a clause can never open a packet section), redacted, cut at an eighth of
+ * the `full_in` budget (bytes = tokens × 4) with a marker naming how many clauses were left out.
+ * Not a list of `{clause}` objects with text ⇒ `(acceptance unavailable)`.
+ * @param {unknown} acceptance - the run record's `blocks.<id>.acceptance`
+ * @param {Record<string, any> | undefined} cfg
+ * @returns {string}
+ */
+export function acceptanceExcerpt(acceptance, cfg) {
+  const clauses = Array.isArray(acceptance)
+    ? acceptance.map((c) => (typeof c?.clause === 'string' ? /** @type {string} */ (redact(c.clause.replace(/\s+/g, ' ').trim())) : '')).filter((c) => c.length > 0)
+    : [];
+  if (clauses.length === 0) return `${ACCEPTANCE_HEAD}\n${ACCEPTANCE_UNAVAILABLE}`;
+  const maxBytes = Math.max(256, Math.floor((budgetFor(cfg, 'full_in') * 4) / 8));
+  const lines = [ACCEPTANCE_HEAD];
+  let used = Buffer.byteLength(ACCEPTANCE_HEAD) + 1;
+  for (let i = 0; i < clauses.length; i += 1) {
+    const line = `- ${clauses[i]}`;
+    const size = Buffer.byteLength(line) + 1;
+    if (used + size > maxBytes) {
+      if (lines.length === 1) lines.push(`${Buffer.from(line).subarray(0, Math.max(0, maxBytes - used - 4)).toString('utf8')} …`);
+      const left = clauses.length - (lines.length - 1);
+      if (left > 0) lines.push(`(acceptance truncated: ${left} more clause(s) over the packet budget)`);
+      break;
+    }
+    lines.push(line);
+    used += size;
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -151,11 +192,11 @@ export async function reviewTicket(ticket, ctx) {
   try {
     if (!ctx.key) {
       return await reviewFile(
-        { repoRoot: ctx.repoRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, workDir },
+        { repoRoot: ctx.repoRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) },
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, key: ctx.key, workDir });
+    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -164,10 +205,10 @@ export async function reviewTicket(ticket, ctx) {
 /**
  * One fix-loop round for the ticket (see the module doc).
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, level: string, owned: string[], key: Buffer, workDir: string}} opts
+ * @param {{base: string | null, level: string, owned: string[], key: Buffer, workDir: string, factsExcerpt: string}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function fixLoopRound(ticket, ctx, { base, level, owned, key, workDir }) {
+async function fixLoopRound(ticket, ctx, { base, level, owned, key, workDir, factsExcerpt }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   let rows;
   try {
@@ -232,9 +273,10 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, key, workDir }) {
         workDir,
         base,
         writeRow,
+        factsExcerpt,
         ...(jev ? { jev } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, workDir }, { spawn: ctx.spawn, writeRow });
+          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, workDir, factsExcerpt }, { spawn: ctx.spawn, writeRow });
           return engineOutcome;
         },
         spawn: async (opts) => {

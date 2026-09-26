@@ -48,6 +48,13 @@ export function blockIdsFromPlanSection10_4(planText) {
  */
 const NIGHT_LOG_ADDED_IDS = ['B1.2', 'B4.1', 'B11.1', 'B12c'];
 
+/**
+ * Blocks the root added AFTER the night run, also not rows in plan §10.4 (source: the root's
+ * ruling on B22's facts diff, 2026-09-26):
+ *   - B22 the review-only verb (`code-forge review`)
+ */
+const ROOT_ADDED_LATER_IDS = ['B22'];
+
 // The plan is maintainer-only (not tracked since 2026-09-25): the drift check runs where it exists.
 const HAS_PLAN = existsSync(PLAN_PATH);
 const planText = HAS_PLAN ? readFileSync(PLAN_PATH, 'utf8') : '';
@@ -57,11 +64,11 @@ const doc = JSON.parse(blocksText);
 test('blocks.json ids deep-equal §10.4\'s table rows plus the NIGHT-LOG additions — no drift either way', { skip: HAS_PLAN ? false : 'the maintainer plan is not in this checkout' }, () => {
   const fromPlan = blockIdsFromPlanSection10_4(planText);
   assert.equal(fromPlan.length, 19, `expected 19 §10.4 rows, parsed ${fromPlan.length}: ${fromPlan.join(', ')}`);
-  const expected = [...fromPlan, ...NIGHT_LOG_ADDED_IDS].sort();
+  const expected = [...fromPlan, ...NIGHT_LOG_ADDED_IDS, ...ROOT_ADDED_LATER_IDS].sort();
   const actual = Object.keys(doc.blocks).sort();
   assert.deepEqual(actual, expected);
-  assert.equal(actual.length, 23);
-  assert.equal(doc.block_count, 23);
+  assert.equal(actual.length, 24);
+  assert.equal(doc.block_count, 24);
 });
 
 test('B10c is marked deleted (Q16 = cut) — negative: no other block is', () => {
@@ -81,7 +88,7 @@ test('every depends_on id resolves to a blocks key or a baseline_ids entry (B0-B
   assert.deepEqual(doc.baseline_ids, ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8']);
   const known = new Set([...Object.keys(doc.blocks), ...doc.baseline_ids]);
   const allDeps = Object.values(doc.blocks).flatMap((b) => b.depends_on);
-  assert.equal(allDeps.length, 64);
+  assert.equal(allDeps.length, 67);
   const unresolved = Object.entries(doc.blocks).flatMap(([id, b]) =>
     b.depends_on.filter((dep) => !known.has(dep)).map((dep) => `${id} -> ${dep}`),
   );

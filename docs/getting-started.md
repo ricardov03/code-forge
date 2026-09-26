@@ -139,6 +139,13 @@ Lookup order: environment → OS keychain → 1Password (cached for 8 hours) →
 | `code-forge models --refresh --from-cli-caches` | refreshes the model catalog from the Codex and Grok CLI caches on this machine |
 | `code-forge remove [<harness>] [--scope project\|global]` | removes the skill links that `init` recorded |
 
+## Review only
+
+To review code you already wrote, without planning or coding through code-forge, run
+`code-forge review` in the repository. It reviews your branch against the default branch (or your
+uncommitted work, when you are on the default branch), prints a verdict and a fix list per file, and
+exits 0 only when every file is approved. See [review-only.md](review-only.md).
+
 ## Use it
 
 In a harness where the skill is installed, write a brief and ask for a job:

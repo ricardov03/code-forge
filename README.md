@@ -55,6 +55,20 @@ code-forge --help                    # every verb, one per line
 code-forge version
 ```
 
+## Review only
+
+To review code you already wrote — no plan, no coder, no proof — run this in the repository:
+
+```bash
+code-forge review                    # verdict + fix list per changed file; exit 0 only if all approved
+```
+
+It reviews your branch against the merge base with the default branch (on the default branch: your
+uncommitted work), with the same fresh, closed-book reviewer sessions a block gets. Narrow it with
+`--files <path…>`, state the change with `--intent "<text>"`, pick the base with `--base <ref>`, or
+get one JSON document with `--json`. Exit codes: `0` all approved or nothing to review, `1` any
+finding, stop or unavailable review, `2` usage. See [docs/review-only.md](docs/review-only.md).
+
 ## The verbs
 
 Verbs are discovered from `src/cli/*.mjs` — adding one never touches the router
@@ -70,6 +84,7 @@ usage line.
 | `run` | `code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]` · `run start --reattach --run <id>` · `run status --run <id>` · `run end --run <id>` |
 | `block` | `code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file>` · `block attempt\|rebase\|claim\|close\|stop\|waive …` (§4.9; `waive` is human-only) |
 | `worker` | `code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]` — started detached by `run start`, never by a coder |
+| `review` | `code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> \| --intent "<text>"] [--run <id>] [--max <seconds>] [--json] [--keep-run]` — review only: no coder, no proof, never closes a block |
 | `review-file` | `code-forge review-file <path> --block <id> [--run <id>]` (enqueue) · `review-file --wait <ticket> [--max <seconds>s]` (poll) |
 | `spawn` | `code-forge spawn --level L<n> --role <role> --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <s>] [--background]` |
 | `s2` | `code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <s>]` |

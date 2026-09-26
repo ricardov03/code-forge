@@ -151,13 +151,23 @@ const README_COMMANDS = [
       assert.match(r.stdout, /^@codedology\/code-forge \d+\.\d+\.\d+\n$/);
     },
   },
+  {
+    line: 'code-forge review',
+    check: (r) => {
+      // the temp repo's only changes are what `init` wrote: its config and the skill link, which
+      // `review` skips by name — so a real base/file discovery ends in a deterministic `nothing to review`
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.stdout, 'nothing to review\n');
+      assert.match(r.stderr, /^review: skipped \.code-forge\.yml \(code-forge config\)$/m);
+    },
+  },
 ];
 
 test('README_COMMANDS is exactly the fenced ```bash command set in README.md (count and members)', () => {
   const parsed = extractReadmeCommands(readme);
   const declared = README_COMMANDS.map((c) => c.line);
   assert.deepEqual([...parsed].sort(), [...declared].sort());
-  assert.equal(parsed.length, 10);
+  assert.equal(parsed.length, 11);
 });
 
 const PARENT = mkdtempSync(path.join(os.tmpdir(), 'cf-docs-readme-'));
