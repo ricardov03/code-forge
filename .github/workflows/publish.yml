@@ -118,7 +118,7 @@ jobs:
       - name: Post-publish smoke — npx <published version> doctor --json
         run: |
           version="$(node -p "require('./package.json').version")"
-          pkg="@ricardov/code-forge@${version}"
+          pkg="@codedology/code-forge@${version}"
           resolved=false
           for attempt in $(seq 1 20); do
             # `npm view` exits 0 with EMPTY output for a version that does not exist yet, so the

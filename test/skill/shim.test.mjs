@@ -1,7 +1,7 @@
 /**
  * `skill/scripts/forge` — the POSIX shim. Inside the package it runs `bin/code-forge.mjs` (the
  * symlinked-install path); copied out of the package it falls back to `code-forge` on PATH; with
- * neither it falls back to `npx @ricardov/code-forge@<pinned>`; with nothing at all it fails with
+ * neither it falls back to `npx @codedology/code-forge@<pinned>`; with nothing at all it fails with
  * an install hint. PATH is fully private in every case (`<fakeBin>:/usr/bin:/bin`, `node`
  * symlinked into fakeBin), so a real `code-forge` or `npx` on this machine can never be what
  * answers. All temp state lives under ONE `mkdtemp` parent removed in `after()` (coder rules §8).
@@ -79,7 +79,7 @@ test('the shim is an executable POSIX sh script whose npx pin equals package.jso
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const pin = /^PINNED_VERSION="([^"]+)"$/m.exec(text);
   assert.equal(pin?.[1], pkg.version);
-  assert.equal(/npx[^\n]*--yes[^\n]*@ricardov\/code-forge"?\s/.test(text), false, 'no unpinned npx spec');
+  assert.equal(/npx[^\n]*--yes[^\n]*@codedology\/code-forge"?\s/.test(text), false, 'no unpinned npx spec');
 });
 
 test('inside the package the shim runs bin/code-forge.mjs (version prints the package version) with no code-forge on PATH', async () => {
@@ -103,7 +103,7 @@ test('with neither the package nor `code-forge` on PATH, the shim falls back to 
   await fakeExecutable('npx', 'fake-npx');
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const { stdout } = await execFileP(copiedShim, ARGS, { env });
-  assert.equal(stdout, `fake-npx[--yes][@ricardov/code-forge@${pkg.version}][doctor][a b][*]\n`);
+  assert.equal(stdout, `fake-npx[--yes][@codedology/code-forge@${pkg.version}][doctor][a b][*]\n`);
 });
 
 test('with nothing available the shim exits 127 with an install hint and runs nothing', async () => {
@@ -112,7 +112,7 @@ test('with nothing available the shim exits 127 with an install hint and runs no
   await assert.rejects(execFileP(copiedShim, ARGS, { env }), (/** @type {any} */ err) => {
     assert.equal(err.code, 127);
     assert.equal(err.stdout, '');
-    assert.match(err.stderr, /^forge: no code-forge found\. Install it: npm install -g @ricardov\/code-forge@/);
+    assert.match(err.stderr, /^forge: no code-forge found\. Install it: npm install -g @codedology\/code-forge@/);
     return true;
   });
 });

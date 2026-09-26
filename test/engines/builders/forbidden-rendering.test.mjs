@@ -12,7 +12,7 @@ const CODER_LIST = mergeForbidden();
 const WAIVE_RULES = Object.freeze([
   'Bash(code-forge block waive:*)',
   'Bash(npx code-forge block waive:*)',
-  'Bash(npx @ricardov/code-forge block waive:*)',
+  'Bash(npx @codedology/code-forge block waive:*)',
   'Bash(forge block waive:*)',
 ]);
 import { idsMissingFromArgv, valuesAfterFlag, valuesAfterRepeatedFlag } from './argv-check.mjs';
@@ -123,7 +123,7 @@ test('Codex coder: the rules file deep-equals the Starlark built from mergeForbi
   assert.equal(content.includes('prefix_rule(pattern=["git", "reset", "--hard"], decision="forbidden", justification="code-forge: git-reset-hard")'), true);
   assert.equal(content.includes('prefix_rule(pattern=["gh", "pr", "merge"], decision="forbidden", justification="code-forge: gh-pr-merge")'), true);
   const ids = new Set(content.split('\n').map((l) => /justification="code-forge: ([^"]+)"/.exec(l)?.[1]).filter(Boolean));
-  assert.equal(content.includes('prefix_rule(pattern=["npx", "@ricardov/code-forge", "block", "waive"], decision="forbidden", justification="code-forge: code-forge-block-waive-from-coder")'), true);
+  assert.equal(content.includes('prefix_rule(pattern=["npx", "@codedology/code-forge", "block", "waive"], decision="forbidden", justification="code-forge: code-forge-block-waive-from-coder")'), true);
   // `contains` and `path` entries have 0 patterns (execpolicy cannot express them): 16 of 20 ids.
   assert.deepEqual([...ids].sort(), CODER_LIST.filter((e) => e.kind !== 'contains' && e.kind !== 'path').map((e) => e.id).sort());
   assert.equal(ids.size, 16);

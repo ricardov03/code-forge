@@ -1,6 +1,6 @@
 # Overview
 
-`@ricardov/code-forge` is two things that ship together:
+`@codedology/code-forge` is two things that ship together:
 
 1. **A CLI**, `code-forge`. It holds every fact: model ids, efforts, thresholds, paths, gates,
    keys, the ledger. It starts every model session that is not your own.

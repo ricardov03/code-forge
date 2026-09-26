@@ -13,7 +13,7 @@ Cheap models for easy work. Strong models for hard work. Tools for facts. A fast
 between.
 
 ```bash
-npm install -g @ricardov/code-forge
+npm install -g @codedology/code-forge
 code-forge init
 ```
 
@@ -81,7 +81,7 @@ with code-forge, one block at a time. The scoped name is only for the install li
 `code-forge`.
 
 ```bash
-npm install -g @ricardov/code-forge
+npm install -g @codedology/code-forge
 code-forge init
 ```
 

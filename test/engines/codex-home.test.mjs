@@ -80,7 +80,7 @@ test('coder build: env CODEX_HOME is a fresh dir under the run temp root; rules/
   for (const pattern of [
     '["code-forge", "block", "waive"]',
     '["npx", "code-forge", "block", "waive"]',
-    '["npx", "@ricardov/code-forge", "block", "waive"]',
+    '["npx", "@codedology/code-forge", "block", "waive"]',
     '["forge", "block", "waive"]',
   ]) {
     const line = `prefix_rule(pattern=${pattern}, decision="forbidden", justification="code-forge: code-forge-block-waive-from-coder")`;

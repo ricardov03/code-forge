@@ -34,7 +34,7 @@ Tone: plain, short sentences, active voice. No hype, no invented numbers.
    - Headline: "Your coding agents, organised like an engineering team."
    - Sub-line: "Cheap models for easy work. Strong models for hard work. Tools for facts. A fast
      decision model in between."
-   - The install commands, each in a `<code>` element: `npm install -g @ricardov/code-forge`, then
+   - The install commands, each in a `<code>` element: `npm install -g @codedology/code-forge`, then
      `code-forge init` in the project folder.
    - A link to the how-it-works page and to the GitHub repository.
 2. **The problem** (on `site/index.html`): the top model renames buttons; tests pass for the
@@ -62,7 +62,7 @@ Each clause names the test that proves it. Test names are exact.
 
 | # | Clause | Test |
 |---|---|---|
-| C1 | `site/index.html` contains the scoped install command `npm install -g @ricardov/code-forge` inside a `<code>` element, and `code-forge init` inside another `<code>` element | `test/hero.test.mjs::the hero shows the scoped install command` |
+| C1 | `site/index.html` contains the scoped install command `npm install -g @codedology/code-forge` inside a `<code>` element, and `code-forge init` inside another `<code>` element | `test/hero.test.mjs::the hero shows the scoped install command` |
 | C2 | The HTML pages under `site/` are exactly `how-it-works.html` and `index.html`, each with non-empty visible text, and no page contains an unscoped install: neither `npm install -g code-forge` nor `npx code-forge init` (the unscoped npm name is a different, unrelated package) | `test/links.test.mjs::no page shows the unscoped install command` |
 | C3 | The HTML pages under `site/` are exactly `how-it-works.html` and `index.html`, each with non-empty visible text, and every internal `href` and `src` in every page resolves to a file under `site/`, and every `#fragment` resolves to an `id` in the target page | `test/links.test.mjs::every internal link resolves` |
 | C4 | `site/how-it-works.html` has an `<ol id="steps">` with exactly five `<li>` items whose text starts, in order, with Facts, Plan and harden, Code, Review per file, Proof and close | `test/how-it-works.test.mjs::the five steps appear in order` |

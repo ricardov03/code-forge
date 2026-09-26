@@ -1,6 +1,6 @@
 # node-lib (example)
 
-A three-module ESM library with a `node:test` suite. It ships inside `@ricardov/code-forge` as the
+A three-module ESM library with a `node:test` suite. It ships inside `@codedology/code-forge` as the
 repository the **first real use** runs on (`scripts/first-use.mjs`): the script copies it to a temp
 directory, `git init`s it and runs one block — "add `clamp()` with tests" — end to end.
 

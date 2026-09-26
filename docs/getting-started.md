@@ -14,11 +14,11 @@
 Install the CLI once, globally:
 
 ```bash
-npm install -g @ricardov/code-forge
+npm install -g @codedology/code-forge
 code-forge version
 ```
 
-The scoped name `@ricardov/code-forge` is used **only in this install line**. The command it
+The scoped name `@codedology/code-forge` is used **only in this install line**. The command it
 installs is unscoped: `code-forge`. Every page runs it as `code-forge <verb>`, in any folder. Never
 install `code-forge` without the scope: the unscoped npm name `code-forge` is a different,
 unrelated package.
@@ -74,8 +74,8 @@ Prefer a per-project install when every contributor and every CI image must use 
 version, or when you cannot install global npm packages (for example in a CI image):
 
 ```bash
-npm install --save-dev @ricardov/code-forge
-npx @ricardov/code-forge init
+npm install --save-dev @codedology/code-forge
+npx @codedology/code-forge init
 npx code-forge validate
 ```
 

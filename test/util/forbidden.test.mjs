@@ -88,11 +88,11 @@ const EXPECTED_RULES = {
   'code-forge-worker-from-coder': [
     'Bash(code-forge worker:*)',
     'Bash(npx code-forge worker:*)',
-    'Bash(npx @ricardov/code-forge worker:*)',
+    'Bash(npx @codedology/code-forge worker:*)',
     'Bash(forge worker:*)',
     'Bash(code-forge run start:*)',
     'Bash(npx code-forge run start:*)',
-    'Bash(npx @ricardov/code-forge run start:*)',
+    'Bash(npx @codedology/code-forge run start:*)',
     'Bash(forge run start:*)',
   ],
   'code-forge-reviews-write': [
@@ -290,7 +290,7 @@ const FORBIDDEN_CASES = [
   [['xxd', '--file=~/.code-forge/runs/r1.key'], 'code-forge-runs-access'],
   [['code-forge', 'worker', '--run', 'r1'], 'code-forge-worker-from-coder'],
   [['/usr/local/bin/forge', 'worker'], 'code-forge-worker-from-coder'],
-  [['npx', '-y', '@ricardov/code-forge', 'run', 'start'], 'code-forge-worker-from-coder'],
+  [['npx', '-y', '@codedology/code-forge', 'run', 'start'], 'code-forge-worker-from-coder'],
   [['node', 'bin/code-forge.mjs', 'worker'], 'code-forge-worker-from-coder'],
   [['pnpm', 'exec', 'code-forge', 'run', 'start', '--reattach'], 'code-forge-worker-from-coder'],
   [['tee', '.code-forge/reviews/r1/t.json'], 'code-forge-reviews-write'],
@@ -308,11 +308,11 @@ const FORBIDDEN_CASES = [
   [['bash', '-c', 'cat ~/.code-forge/runs/r.key'], 'code-forge-runs-access'],
   [['node', '-e', "require('fs').readFileSync('$HOME/.code-forge/runs/r.key')"], 'code-forge-runs-access'],
   [['node', '--no-warnings', 'bin/code-forge.mjs', 'worker'], 'code-forge-worker-from-coder'],
-  [['npx', '-p', '@ricardov/code-forge', 'code-forge', 'worker'], 'code-forge-worker-from-coder'],
+  [['npx', '-p', '@codedology/code-forge', 'code-forge', 'worker'], 'code-forge-worker-from-coder'],
   [['npx', '-p', 'some-wrapper', 'code-forge', 'worker'], 'code-forge-worker-from-coder'], // -p's value is consumed
   [['code-forge', '--verbose', 'worker'], 'code-forge-worker-from-coder'],
   [['bunx', 'code-forge', 'worker'], 'code-forge-worker-from-coder'],
-  [['yarn', 'dlx', '@ricardov/code-forge', 'run', 'start'], 'code-forge-worker-from-coder'],
+  [['yarn', 'dlx', '@codedology/code-forge', 'run', 'start'], 'code-forge-worker-from-coder'],
 ];
 
 for (const [argv, expectedId] of FORBIDDEN_CASES) {

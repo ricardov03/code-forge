@@ -76,7 +76,7 @@ test('`block waive` argv is forbidden for a coder through mergeForbidden itself;
   const list = mergeForbidden([]);
   for (const argv of [
     ['code-forge', 'block', 'waive', 'B1', 'F1', '--reason', 'x'],
-    ['npx', '@ricardov/code-forge', 'block', 'waive', 'B1', 'F1'],
+    ['npx', '@codedology/code-forge', 'block', 'waive', 'B1', 'F1'],
     ['forge', 'block', 'waive', 'B1', 'F1'],
   ]) {
     assert.equal(isForbidden(argv, list)?.id, 'code-forge-block-waive-from-coder', argv.join(' '));

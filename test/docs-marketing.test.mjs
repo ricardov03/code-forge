@@ -1,6 +1,6 @@
 /**
  * B16 acceptance (plan §10.4 row B16, C14 "marketing corrections"):
- *   marketing file contains `npx @ricardov/code-forge init` (>= 1) and `npx code-forge init` (0),
+ *   marketing file contains `npx @codedology/code-forge init` (>= 1) and `npx code-forge init` (0),
  *   contains `8 hours` and not `a few hours`, and no `%` followed by `saving`/`cheaper` (4 asserts).
  *
  * Plus (same row): "README commands run (1)". `README.md` is B16's other owned file, and every
@@ -30,8 +30,8 @@ function occurrences(haystack, needle) {
   return haystack.split(needle).length - 1;
 }
 
-test('marketing file: `npx @ricardov/code-forge init` appears at least once', () => {
-  assert.ok(occurrences(marketing, 'npx @ricardov/code-forge init') >= 1);
+test('marketing file: `npx @codedology/code-forge init` appears at least once', () => {
+  assert.ok(occurrences(marketing, 'npx @codedology/code-forge init') >= 1);
 });
 
 test('marketing file: the unscoped `npx code-forge init` never appears', () => {
@@ -48,8 +48,8 @@ test('marketing file: no `%` savings/cheaper claim (no ledger-backed number exis
 });
 
 /** README uses the real package scope too, for the same reason as the marketing file. */
-test('README: uses the scoped `npx @ricardov/code-forge init`, never the unscoped form', () => {
-  assert.ok(occurrences(readme, 'npx @ricardov/code-forge init') >= 1);
+test('README: uses the scoped `npx @codedology/code-forge init`, never the unscoped form', () => {
+  assert.ok(occurrences(readme, 'npx @codedology/code-forge init') >= 1);
   assert.equal(occurrences(readme, 'npx code-forge init'), 0);
 });
 
@@ -59,7 +59,7 @@ test('README: uses the scoped `npx @ricardov/code-forge init`, never the unscope
  * Fix round 1: this used to be a hand-written list of commands that only LOOKED like it came
  * from the README. It now parses the file for real: every ```bash fenced block, split into
  * lines, a trailing ` # comment` stripped, kept only when the line is one of the two forms
- * README.md documents — `npx @ricardov/code-forge …` (the one-shot install form) or
+ * README.md documents — `npx @codedology/code-forge …` (the one-shot install form) or
  * `code-forge …` (the installed-binary form). A README edit that adds, removes or rewords one of
  * these lines changes what this function returns, and the exact-match test right below the
  * `README_COMMANDS` array below will fail until the test is updated to match.
@@ -71,12 +71,12 @@ export function extractReadmeCommands(readmeText) {
   return fencedBashBlocks
     .flatMap((block) => block.split('\n'))
     .map((line) => line.replace(/\s+#.*$/, '').trim())
-    .filter((line) => line.startsWith('npx @ricardov/code-forge') || line.startsWith('code-forge'));
+    .filter((line) => line.startsWith('npx @codedology/code-forge') || line.startsWith('code-forge'));
 }
 
-/** `npx @ricardov/code-forge init …` / `code-forge …` -> the argv the real CLI receives. */
+/** `npx @codedology/code-forge init …` / `code-forge …` -> the argv the real CLI receives. */
 function argvForReadmeCommand(line) {
-  const prefix = line.startsWith('npx @ricardov/code-forge') ? 'npx @ricardov/code-forge' : 'code-forge';
+  const prefix = line.startsWith('npx @codedology/code-forge') ? 'npx @codedology/code-forge' : 'code-forge';
   return line.slice(prefix.length).trim().split(/\s+/).filter(Boolean);
 }
 
@@ -88,7 +88,7 @@ function argvForReadmeCommand(line) {
  */
 const README_COMMANDS = [
   {
-    line: 'npx @ricardov/code-forge init',
+    line: 'npx @codedology/code-forge init',
     check: (r) => {
       // no --no-jev/--jev-ref/--jev-env and no TTY: a real, deterministic refusal, not a hang.
       assert.equal(r.code, 2, r.stderr);
@@ -96,7 +96,7 @@ const README_COMMANDS = [
     },
   },
   {
-    line: 'npx @ricardov/code-forge init --no-interaction --no-jev',
+    line: 'npx @codedology/code-forge init --no-interaction --no-jev',
     check: (r) => {
       assert.equal(r.code, 0, r.stderr);
       assert.equal(JSON.parse(r.stdout).ok, true);
@@ -147,7 +147,7 @@ const README_COMMANDS = [
     line: 'code-forge version',
     check: (r) => {
       assert.equal(r.code, 0, r.stderr);
-      assert.match(r.stdout, /^@ricardov\/code-forge \d+\.\d+\.\d+\n$/);
+      assert.match(r.stdout, /^@codedology\/code-forge \d+\.\d+\.\d+\n$/);
     },
   },
 ];

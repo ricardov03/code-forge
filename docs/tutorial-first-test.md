@@ -22,11 +22,11 @@ It takes one block, so you see every step once. The site's other blocks are your
 Install the CLI once, globally, or check that it is already there:
 
 ```bash
-npm install -g @ricardov/code-forge
+npm install -g @codedology/code-forge
 code-forge version
 ```
 
-`code-forge version` prints `@ricardov/code-forge <version>`. From here on every command is
+`code-forge version` prints `@codedology/code-forge <version>`. From here on every command is
 `code-forge <verb>`. The scoped name appears only in the install line; the unscoped npm name
 `code-forge` is a different, unrelated package.
 
@@ -193,7 +193,7 @@ code-forge run start --run site-1 --engine harness
 Write the B1 clauses from the plan to `plans/B1.acceptance.yml`:
 
 ```yaml
-- clause: site/index.html shows npm install -g @ricardov/code-forge and code-forge init, each inside a code element
+- clause: site/index.html shows npm install -g @codedology/code-forge and code-forge init, each inside a code element
   tests: [test/hero.test.mjs::the hero shows the scoped install command]
 ```
 
@@ -325,7 +325,7 @@ The first test passes when all of these hold:
 5. Every file B1 changed has a signed `review.approved` row in the ledger.
 6. `proof red-green` proved the hero test with `red_kind: assertion`.
 7. `block close B1` printed `block B1 closed`, with no `rule_break` or `ledger.tamper` row.
-8. `npm test` is green in the repository, and `site/index.html` shows `npm install -g @ricardov/code-forge`.
+8. `npm test` is green in the repository, and `site/index.html` shows `npm install -g @codedology/code-forge`.
 9. `report --slug code-forge-site` prints all 13 sections, with B1 in `cost_per_block`.
 
 Then run B2 and B3 the same way. B3 is where the link and unscoped-command checks land.

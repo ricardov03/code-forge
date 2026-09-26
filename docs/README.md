@@ -1,6 +1,6 @@
 # code-forge documentation
 
-These pages explain what `@ricardov/code-forge` is, how it works, and how to run it for the first
+These pages explain what `@codedology/code-forge` is, how it works, and how to run it for the first
 time. Every command they show exists in the CLI as built. When a page and a verb's own usage line
 disagree, the verb is right: each verb prints its own usage line when its arguments are wrong.
 
@@ -29,7 +29,7 @@ New to the tool? Read 1 → 3 → 4, then do 5. Keep 2 open as a glossary.
 
 ## Conventions in these pages
 
-- `code-forge <verb>` is the CLI installed globally with `npm install -g @ricardov/code-forge`
+- `code-forge <verb>` is the CLI installed globally with `npm install -g @codedology/code-forge`
   (see [getting-started.md](getting-started.md#install); a per-project pinned install is covered
   there too). Inside the skill the same CLI is called `forge` (a shim at `skill/scripts/forge`).
 - `<run>` is a run id, `<slug>` is the project slug (`project.slug` in `.code-forge.yml`, else the

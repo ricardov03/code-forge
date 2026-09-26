@@ -48,7 +48,7 @@
  *    `production.markers` / `production.names` value; `mergeForbidden()` adds the real ones).
  *  - `anyPrefix` (B8, C18) — the normalized argv starts with ANY of `prefixes`, after launchers
  *    are unwrapped (`npx`/`bunx` with their options, `-p/--package <pkg>` included; `pnpm
- *    exec|dlx`; `yarn dlx`; `node [options] <file>`), a `code-forge.mjs` / `@ricardov/code-forge[@x]`
+ *    exec|dlx`; `yarn dlx`; `node [options] <file>`), a `code-forge.mjs` / `@codedology/code-forge[@x]`
  *    token read as `code-forge` (a repeated bin name after the package is dropped), and option
  *    tokens between the words skipped (`code-forge --verbose worker`).
  *  - `path` (B8, C18) — protects the signer's files (plan §8.6). `paths` are `~/…` (the user's
@@ -420,7 +420,7 @@ function normalizedReadings(argv) {
 }
 
 /**
- * Unwrap a launcher so `npx -y @ricardov/code-forge worker` reads as `code-forge worker`.
+ * Unwrap a launcher so `npx -y @codedology/code-forge worker` reads as `code-forge worker`.
  * @param {ReadonlyArray<string>} reading
  * @returns {ReadonlyArray<string>}
  */
@@ -443,7 +443,7 @@ function unwrapLauncher(reading) {
     skipOptions();
   }
   if (rest.length === 0) return rest;
-  const isPackage = (/** @type {string} */ t) => /^@ricardov\/code-forge(@.*)?$/.test(t) || /^code-forge(\.mjs)?(@.*)?$/.test(path.basename(t));
+  const isPackage = (/** @type {string} */ t) => /^@codedology\/code-forge(@.*)?$/.test(t) || /^code-forge(\.mjs)?(@.*)?$/.test(path.basename(t));
   const head = rest[0];
   let tail = rest.slice(1);
   if (isPackage(head) && tail.length > 0 && isPackage(tail[0])) tail = tail.slice(1);
@@ -660,7 +660,7 @@ function renderPatterns(entry) {
   if (entry.kind === 'anyPrefix') {
     return entry.prefixes.flatMap((prefix) =>
       prefix[0] === 'code-forge'
-        ? [[...prefix], ['npx', ...prefix], ['npx', '@ricardov/code-forge', ...prefix.slice(1)]]
+        ? [[...prefix], ['npx', ...prefix], ['npx', '@codedology/code-forge', ...prefix.slice(1)]]
         : [[...prefix]],
     );
   }

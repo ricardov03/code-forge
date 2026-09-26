@@ -107,7 +107,7 @@ jobs:
               exit 0
               ;;
           esac
-          npx --yes @ricardov/code-forge ledger outcome \
+          npx --yes @codedology/code-forge ledger outcome \
             --pr "${{ steps.pr.outputs.number }}" \
             --ci "$ci_outcome" \
             --slug "${CODE_FORGE_SLUG}"

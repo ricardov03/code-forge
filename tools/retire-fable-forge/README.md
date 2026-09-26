@@ -1,11 +1,11 @@
-# @ricardov/retire-fable-forge
+# @codedology/retire-fable-forge
 
-Retires the old `/fable-forge` Agent Skill, which `/code-forge` replaces. This is a standalone package, separate from `@ricardov/code-forge`.
+Retires the old `/fable-forge` Agent Skill, which `/code-forge` replaces. This is a standalone package, separate from `@codedology/code-forge`.
 
 ```sh
-npx @ricardov/retire-fable-forge                   # list installs, print the plan, change nothing
-npx @ricardov/retire-fable-forge --alias --yes     # step 1: keep a 5-line alias that points to /code-forge
-npx @ricardov/retire-fable-forge --remove --yes    # step 2: delete the skill
+npx @codedology/retire-fable-forge                   # list installs, print the plan, change nothing
+npx @codedology/retire-fable-forge --alias --yes     # step 1: keep a 5-line alias that points to /code-forge
+npx @codedology/retire-fable-forge --remove --yes    # step 2: delete the skill
 ```
 
 Flags: `--alias` | `--remove`, `--yes`, `--dry-run`, `--home <dir>`, `--help`.

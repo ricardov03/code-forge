@@ -133,7 +133,7 @@ test('B4.2 Claude coder: --disallowedTools carries the 4 `block waive` deny rule
   assert.deepEqual(waive, [
     'Bash(code-forge block waive:*)',
     'Bash(npx code-forge block waive:*)',
-    'Bash(npx @ricardov/code-forge block waive:*)',
+    'Bash(npx @codedology/code-forge block waive:*)',
     'Bash(forge block waive:*)',
   ]);
   assert.equal(attached.filter((r) => r.includes('--no-require-reviews')).length, 0);

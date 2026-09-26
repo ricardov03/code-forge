@@ -1,6 +1,6 @@
 # Changelog
 
-All notable changes to `@ricardov/code-forge` are recorded here. Format loosely follows
+All notable changes to `@codedology/code-forge` are recorded here. Format loosely follows
 [Keep a Changelog](https://keepachangelog.com/); versions follow semver ahead of a 1.0.0 that
 waits on a second real consumer (plan §10.4, Q17).
 
