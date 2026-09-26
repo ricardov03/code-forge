@@ -1,6 +1,6 @@
 /**
  * B16 acceptance (plan §10.4 row B16, C14 "marketing corrections"):
- *   marketing file contains `npx @codedology/code-forge init` (>= 1) and `npx code-forge init` (0),
+ *   marketing file contains `npm install -g @codedology/code-forge` (>= 1) and `npx code-forge init` (0),
  *   contains `8 hours` and not `a few hours`, and no `%` followed by `saving`/`cheaper` (4 asserts).
  *
  * Plus (same row): "README commands run (1)". `README.md` is B16's other owned file, and every
@@ -30,8 +30,8 @@ function occurrences(haystack, needle) {
   return haystack.split(needle).length - 1;
 }
 
-test('marketing file: `npx @codedology/code-forge init` appears at least once', () => {
-  assert.ok(occurrences(marketing, 'npx @codedology/code-forge init') >= 1);
+test('marketing file: the global install `npm install -g @codedology/code-forge` appears at least once', () => {
+  assert.ok(occurrences(marketing, 'npm install -g @codedology/code-forge') >= 1);
 });
 
 test('marketing file: the unscoped `npx code-forge init` never appears', () => {
@@ -48,8 +48,9 @@ test('marketing file: no `%` savings/cheaper claim (no ledger-backed number exis
 });
 
 /** README uses the real package scope too, for the same reason as the marketing file. */
-test('README: uses the scoped `npx @codedology/code-forge init`, never the unscoped form', () => {
-  assert.ok(occurrences(readme, 'npx @codedology/code-forge init') >= 1);
+test('README: installs globally with the scoped name, never the unscoped form', () => {
+  assert.ok(occurrences(readme, 'npm install -g @codedology/code-forge') >= 1);
+  assert.equal(occurrences(readme, 'npm install -g code-forge'), 0);
   assert.equal(occurrences(readme, 'npx code-forge init'), 0);
 });
 
@@ -88,7 +89,7 @@ function argvForReadmeCommand(line) {
  */
 const README_COMMANDS = [
   {
-    line: 'npx @codedology/code-forge init',
+    line: 'code-forge init',
     check: (r) => {
       // no --no-jev/--jev-ref/--jev-env and no TTY: a real, deterministic refusal, not a hang.
       assert.equal(r.code, 2, r.stderr);
@@ -96,7 +97,7 @@ const README_COMMANDS = [
     },
   },
   {
-    line: 'npx @codedology/code-forge init --no-interaction --no-jev',
+    line: 'code-forge init --no-interaction --no-jev',
     check: (r) => {
       assert.equal(r.code, 0, r.stderr);
       assert.equal(JSON.parse(r.stdout).ok, true);

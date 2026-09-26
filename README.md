@@ -10,8 +10,8 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 ## What ships
 
-- A CLI (`code-forge`), installed globally via `npx @codedology/code-forge init` into every detected
-  harness (Claude Code, Codex, Grok, …).
+- A CLI (`code-forge`), installed globally with `npm install -g @codedology/code-forge`; `code-forge
+  init` then links the skill into every detected harness (Claude Code, Codex, Grok, …).
 - One Agent Skill (`skill/SKILL.md` + `references/`) that is prose only — every fact (model ids,
   efforts, commands, thresholds, paths) lives in config or in the CLI, never in the skill text.
 - A JSON Schema for `.code-forge.yml` (`schema/code-forge.schema.json`), documented in
@@ -23,14 +23,18 @@ policy and security model; `docs/reference/blocks.json` lists the build blocks.
 ## Install
 
 ```bash
-npx @codedology/code-forge init
+npm install -g @codedology/code-forge
+code-forge init
 ```
+
+The scoped name is used only to install; the command is `code-forge`. The unscoped npm package
+`code-forge` is a different, unrelated tool.
 
 The wizard asks nine short questions (tools, harnesses, provider matrix, multimodel, keys, engine,
 gates, proof, doctor), every one with a default on Enter. Non-interactively:
 
 ```bash
-npx @codedology/code-forge init --no-interaction --no-jev
+code-forge init --no-interaction --no-jev
 ```
 
 `--no-jev` skips the System-1 key for a first try; drop it and pass `--jev-ref op://vault/item/field`

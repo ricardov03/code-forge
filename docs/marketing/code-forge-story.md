@@ -2,7 +2,7 @@
 
 > Source material for marketing the `code-forge` skill: landing copy, posts, threads, talks.
 > Built from the 2026-09-24 design session. Every number here has a source line. Numbers marked **(claim)** come from third parties and are not verified by us.
-> Status of the product: **in build.** Do not publish "available now" copy until `npx @codedology/code-forge init` works end to end on a published release.
+> Status of the product: **in build.** Do not publish "available now" copy until `npm install -g @codedology/code-forge` then `code-forge init` works end to end on a published release.
 
 ---
 
@@ -72,7 +72,7 @@ Why: isolated sessions carry only a diff or two reports, so tokens stay small; t
 Built on the open Agent Skills standard (`SKILL.md`). The installer finds Claude Code, Codex, Grok, Gemini and Cursor and puts the skill where each already looks. With Solo, agents run as processes you can watch; without it, the harness's own subagents do the job.
 
 ### 4.5 Install once, ready on day 1
-`npx @codedology/code-forge init` — patterns borrowed from Vite+, the Laravel installer and `npx skills`:
+`npm install -g @codedology/code-forge` then `code-forge init` — patterns borrowed from Vite+, the Laravel installer and `npx skills`:
 - short wizard, every question has a default;
 - `--no-interaction` plus override flags for scripts;
 - one line of JSON when an agent runs it;
@@ -107,7 +107,7 @@ Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manage
 > Code Forge
 > Your agents, organised like an engineering team.
 > Cheap models for easy work. Strong models for hard work. Tools for facts. A fast decision model in between.
-> `npx @codedology/code-forge init`
+> `npm install -g @codedology/code-forge` then `code-forge init`
 
 **Thread opener**
 > We stopped paying a frontier model to rename buttons.
