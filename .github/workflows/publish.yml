@@ -152,3 +152,37 @@ jobs:
             cat stderr.log >&2
             exit 1
           }
+
+  # The GitHub release for the tag, created only after `publish` (npm publish + the post-publish
+  # smoke) succeeded. Its body is the tag's CHANGELOG.md section plus the npm and changelog links
+  # (`node scripts/release.mjs notes`, which needs only node:*, so no `npm ci`). It gets
+  # `contents: write` and nothing else: no id-token, no NPM_TOKEN. Re-running it is safe: an
+  # existing release is edited with the same notes instead of failing.
+  github-release:
+    name: github release (notes from CHANGELOG.md)
+    needs: publish
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      - name: Release notes from CHANGELOG.md
+        run: node scripts/release.mjs notes "$GITHUB_REF_NAME" --out notes.md
+
+      - name: Create the GitHub release (or update it when it already exists)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json tagName; then
+            gh release edit "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          fi

@@ -144,3 +144,5 @@ npm run typecheck     # tsc --checkJs --noEmit
 Node >= 22 required (ruling R7). No build step — the package ships plain ESM `.mjs`, run directly
 by Node. `docs/reference/blocks.json` maps each build block to the files it owns and what it
 depends on, kept in sync with the maintainer's design plan.
+
+Releasing: record changes with `npm run changelog -- <type> "<text>"`, then `npm run release -- <patch|minor|major|x.y.z> [--dry-run]` bumps, commits and tags (it never pushes or publishes). See [docs/releasing.md](docs/releasing.md).
