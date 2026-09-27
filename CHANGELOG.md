@@ -13,12 +13,22 @@ waits on a second real consumer (plan §10.4, Q17).
   no plan, coder or proof, and never closes a block. One verdict per file, a fix list, totals or one
   JSON document (`--json`); exit 0 only when every file is approved. The run and its worker are
   always ended, also on Ctrl-C, SIGTERM and timeouts. See `docs/review-only.md`.
+- **Release tools:** `npm run release -- <patch|minor|major|x.y.z>` bumps every version location,
+  moves the changelog, runs every check (with rollback), commits and tags; `npm run changelog --
+  <type> "text"` records changes as you go. See `docs/releasing.md`.
+- **GitHub Releases:** a tag push publishes to npm and then creates the GitHub Release from the
+  changelog, with links to the npm version and the changelog.
 
 ### Changed
 
 - **Reviewers see the acceptance clauses.** Every review packet now carries the block's acceptance
   clauses (redacted, cut to fit the packet budget); a block without readable clauses is still
   reviewed, with `(acceptance unavailable)`.
+
+### Fixed
+
+- CI is green on Linux: a macOS-only case-insensitivity test now skips on case-sensitive
+  filesystems, and the Node 22/24 matrix no longer cancels one job when the other fails.
 
 ## [0.1.0] — first release
 
