@@ -6,6 +6,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- **Two publish paths:** publish by hand with `npm publish` before pushing the tag (the tag run sees
+  the version on npm, skips its own publish and still creates the GitHub release), or push only and
+  let CI publish with provenance (needs `NPM_TOKEN`). See `docs/releasing.md`.
+
 ## [0.2.0] — 2026-09-26
 
 ### Added

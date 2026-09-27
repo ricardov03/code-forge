@@ -593,11 +593,13 @@ export function main(argv, root = process.cwd()) {
 
     const token = npmTokenState(root);
     process.stdout.write(`\n== 6. next steps (nothing was pushed or published) ==\n`);
-    process.stdout.write(`  git push origin ${branch} --follow-tags\n`);
-    process.stdout.write(`then publish, one of:\n`);
-    process.stdout.write(`  - automatic: the tag triggers .github/workflows/publish.yml if the NPM_TOKEN secret is set (NPM_TOKEN: ${token});\n`);
-    process.stdout.write(`    after the npm publish it also creates the GitHub release ${tag} from CHANGELOG.md\n`);
-    process.stdout.write(`  - manual: npm publish, then create the GitHub release (notes already written to ${notesFile}):\n`);
+    process.stdout.write(`pick one path:\n`);
+    process.stdout.write(`  A. publish by hand first, then push (the tag run sees ${tag.slice(1)} on npm, skips publishing, and creates the GitHub release):\n`);
+    process.stdout.write(`      npm publish\n`);
+    process.stdout.write(`      git push origin ${branch} --follow-tags\n`);
+    process.stdout.write(`  B. let CI publish: push only (needs the NPM_TOKEN secret; NPM_TOKEN: ${token}); it publishes with provenance and creates the GitHub release:\n`);
+    process.stdout.write(`      git push origin ${branch} --follow-tags\n`);
+    process.stdout.write(`  if the tag run cannot create the GitHub release, create it by hand (notes already written to ${notesFile}):\n`);
     process.stdout.write(`      gh release create ${tag} --title ${tag} --notes-file ${notesFile} --verify-tag\n`);
     return 0;
   } catch (e) {

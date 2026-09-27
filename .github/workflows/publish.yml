@@ -97,7 +97,24 @@ jobs:
       # `NPM_TOKEN` (an npm "Automation" token, repo secret) authenticates the publish itself;
       # `--provenance` uses this job's OIDC id-token (above) to attach the attestation. Ricardo
       # creates `NPM_TOKEN` once, outside this repo (npmjs.com → Access Tokens).
+      # Both publish paths are allowed: a maintainer may run `npm publish` by hand BEFORE pushing the
+      # tag. Then this version is already on npm, the publish step is skipped, and the smoke test and
+      # the github-release job still run for it.
+      - name: Already on npm? (a manual npm publish before the tag push)
+        id: npm_state
+        run: |
+          name="$(node -p "require('./package.json').name")"
+          version="$(node -p "require('./package.json').version")"
+          seen="$(npm view "${name}@${version}" version --prefer-online 2>/dev/null || true)"
+          if [ "${seen}" = "${version}" ]; then
+            echo "published=true" >> "$GITHUB_OUTPUT"
+            echo "::notice::${name}@${version} is already on npm (published by hand); skipping npm publish"
+          else
+            echo "published=false" >> "$GITHUB_OUTPUT"
+          fi
+
       - name: Publish to npm
+        if: steps.npm_state.outputs.published != 'true'
         run: npm publish --provenance --access public
         env:
           NODE_AUTH_TOKEN: ${{ secrets.NPM_TOKEN }}

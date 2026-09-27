@@ -181,8 +181,10 @@ describe('scripts/release.mjs (B23)', () => {
     const tagObject = git(work, ['cat-file', 'tag', 'v0.2.0']);
     assert.equal(tagObject.slice(tagObject.indexOf('\n\n') + 2), 'Release v0.2.0\n\n### Added\n\n- A new verb.\n');
 
-    assert.match(r.stdout, /^ {2}git push origin main --follow-tags$/m);
-    assert.match(r.stdout, /NPM_TOKEN: set\);\n {4}after the npm publish it also creates the GitHub release v0\.2\.0 from CHANGELOG\.md$/m);
+    // path A (publish by hand, then push) and path B (push only; CI publishes)
+    assert.match(r.stdout, /^ {2}A\. publish by hand first, then push .*skips publishing, and creates the GitHub release\):\n {6}npm publish\n {6}git push origin main --follow-tags$/m);
+    assert.match(r.stdout, /^ {2}B\. let CI publish: push only \(needs the NPM_TOKEN secret; NPM_TOKEN: set\).*\n {6}git push origin main --follow-tags$/m);
+    assert.ok(r.stdout.indexOf('npm publish\n') < r.stdout.indexOf('git push origin main --follow-tags'), 'path A publishes before it pushes');
     const cmd = /^ {6}(gh release create .*)$/m.exec(r.stdout)?.[1];
     const notes = /--notes-file (\S+)/.exec(cmd)?.[1];
     assert.equal(cmd, `gh release create v0.2.0 --title v0.2.0 --notes-file ${notes} --verify-tag`);
@@ -296,8 +298,18 @@ describe('scripts/release.mjs (B23)', () => {
     assert.match(runs[1], /gh release edit "\$GITHUB_REF_NAME"/);
     assert.equal(job.steps.find((st) => st.run === runs[1]).env.GH_TOKEN, '${{ github.token }}');
 
+    // both publish paths: a manual `npm publish` before the tag push makes CI skip its own publish
+    const pubSteps = wf.jobs.publish.steps;
+    const check = pubSteps.find((st) => st.id === 'npm_state');
+    assert.ok(check, 'the already-on-npm check step exists');
+    assert.match(check.run, /npm view "\$\{name\}@\$\{version\}" version/);
+    assert.match(check.run, /published=true/);
+    const publish = pubSteps.find((st) => st.name === 'Publish to npm');
+    assert.equal(publish.if, "steps.npm_state.outputs.published != 'true'");
+    assert.ok(pubSteps.indexOf(check) < pubSteps.indexOf(publish), 'the check runs before the publish');
+
     const all = Object.values(wf.jobs).flatMap((j) => j.steps.filter((st) => st.run).map((st) => st.run));
-    assert.equal(all.length, 12);
+    assert.equal(all.length, 13);
     for (const script of all) {
       const r = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
       assert.equal(r.status, 0, `${r.stderr}\n${script}`);
