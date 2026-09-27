@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.2.0] — 2026-09-26
+
 ### Added
 
 - **`code-forge review`** — review only: runs the review engine on changes you already have (your
