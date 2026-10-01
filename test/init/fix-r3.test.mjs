@@ -33,6 +33,9 @@ async function buildLaravelPhpunit(dir) {
   await mkdir(path.join(dir, 'vendor', 'bin'), { recursive: true });
   await writeFile(path.join(dir, 'vendor', 'bin', 'phpunit'), '#!/usr/bin/env php\n<?php\n// fixture phpunit binary\n');
   await writeFile(path.join(dir, 'package.json'), JSON.stringify({ private: true, scripts: { dev: 'vite', build: 'vite build' } }, null, 2));
+  // B24: env files are proposed only when present (link_dirs follows the manifests instead)
+  await writeFile(path.join(dir, '.env'), 'APP_KEY=FAKE\n');
+  await writeFile(path.join(dir, '.env.testing'), 'APP_KEY=FAKE\n');
 }
 
 /** @param {string[]} args @param {Record<string, string>} [extraEnv] @param {Record<string, any>} [opts] */
@@ -120,11 +123,11 @@ test('interactive: with L2 @openai the second-provider list excludes openai (not
   const second = ui.calls.filter((c) => c.message.startsWith('Second provider'));
   assert.equal(second.length, 1);
   assert.deepEqual(second[0].options.map((o) => o.value), ['anthropic', 'xai']);
-  assert.equal(second[0].message, 'Second provider (must differ from the effective L2 provider, openai)');
+  assert.equal(second[0].message.split('\n')[0], 'Second provider (must differ from the effective L2 provider, openai)');
   // reviewers are now openai (L2) and anthropic (second); the default L3 is anthropic ⇒ judge question, pre-filled with xai
   const judge = ui.calls.filter((c) => c.message.startsWith('L3 judge'));
   assert.equal(judge.length, 1);
-  assert.equal(judge[0].message, 'L3 judge — must come from a third provider (reviewers: openai, anthropic); model[:effort][@provider]');
+  assert.equal(judge[0].message.split('\n')[0], 'L3 judge — must come from a third provider (reviewers: openai, anthropic); model[:effort][@provider]');
   const written = parseYAML(readFileSync(r.file, 'utf8'));
   assert.deepEqual(written.levels.L2, { model: 'gpt-6-sol', effort: 'high', provider: 'openai' });
   assert.deepEqual(written.levels.L3, XAI_JUDGE);

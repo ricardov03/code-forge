@@ -84,13 +84,13 @@ export async function runWizard(args, { cwd, home, env, isTTY = false, ui, docto
  * @param {Record<string, unknown>} [replies]
  */
 export function scriptedUi(replies = {}) {
-  /** @type {Array<{kind: string, message: string, options?: any[]}>} */
+  /** @type {Array<{kind: string, message: string, options?: any[], initialValue?: unknown}>} */
   const calls = [];
   /** @param {string} message */
   const reply = (message) => Object.entries(replies).find(([prefix]) => message.startsWith(prefix));
   /** @param {string} kind @param {(o: any) => unknown} fallback */
   const q = (kind, fallback) => async (/** @type {any} */ o) => {
-    calls.push({ kind, message: o.message, options: o.options });
+    calls.push({ kind, message: o.message, options: o.options, initialValue: o.initialValue });
     const hit = reply(o.message);
     return hit ? hit[1] : fallback(o);
   };

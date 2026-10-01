@@ -1,7 +1,9 @@
 /**
  * `code-forge init` — the nine-step setup wizard (plan §2; block B13a).
  *
- * Order: answers (defaults ← existing config ← flags; then questions when interactive) → step 5
+ * Order: answers (defaults ← existing config ← flags; then questions when interactive) → the
+ * "Project settings (detected)" summary of gates and proof (B24; interactive: one "Use these /
+ * Customize now / Leave for later" choice, and the eight pre-filled questions on Customize) → step 5
  * key source → build + merge + validate the config (nothing is written when it is invalid or a
  * required answer is missing) → write `.code-forge.yml` only when it changes → tools (step 1),
  * model refresh (3), harness links (2), user config → the §5.1 stop line when the harness has no
@@ -9,7 +11,7 @@
  *
  * Output: an agent harness (`CLAUDECODE`, `CLAUDE_CODE`, `CURSOR_AGENT`, `CODEX_SANDBOX*`, `AI_AGENT`) or
  * a non-TTY stdin gets exactly ONE JSON line on stdout — `{ok, wrote, harnesses, engine_stop,
- * doctor, log, log_tail}` on success, `{ok: false, error, wrote, log, log_tail}` on any failure
+ * doctor, settings, blank, log, log_tail}` on success, `{ok: false, error, wrote, log, log_tail}` on any failure
  * after the flags parsed; a person gets the lines (and `init: <error>` on stderr). Either way the
  * lines go to `~/.code-forge/logs/init-<ts>.log`, on failure too. Every line passes through
  * `redact`; a key typed at the prompt goes to the key store and nowhere else — the config holds its
@@ -34,7 +36,8 @@ import { install, installsPath } from '../link.mjs';
 import { currentHarness, effectiveProvider, gatherContext, judgeCollision, proposeJudge, resolveAnswers, SUBAGENT_HARNESSES } from './answers.mjs';
 import { changedPaths, generatedConfig, mergeConfig, mergeInto, serializeConfig } from './project-file.mjs';
 import { parseInitArgs, UsageError } from './flags.mjs';
-import { askAnswers, askJevSource, CancelledError } from './steps.mjs';
+import { askAnswers, askJevSource, askProjectSettings, askSettingsChoice, CancelledError, HINTS, withHint } from './steps.mjs';
+import { summarizeSettings } from './summary.mjs';
 
 /** §5.1's stop text, printed at setup (not at the first run) when there is no engine to use. */
 export const NO_ENGINE_STOP_TEXT = [
@@ -164,6 +167,10 @@ export async function runInit(args, deps = {}) {
   let engineStop = false;
   /** @type {{ok: boolean, counts: Record<string, number>} | null} */
   let doctor = null;
+  /** @type {import('./summary.mjs').SettingsSummary | null} */
+  let summary = null;
+  // lines already on stdout (the settings summary): `finish` prints only the rest
+  let printed = 0;
 
   /**
    * The one exit: writes the log, then either the success shape or `{ok: false, error, wrote, …}`.
@@ -186,11 +193,12 @@ export async function runInit(args, deps = {}) {
     const tail = lines.slice(-10);
     if (jsonMode) {
       const body = error === null
-        ? { ok: code === 0, wrote, harnesses: linked, engine_stop: engineStop, doctor, log, log_tail: tail }
+        ? { ok: code === 0, wrote, harnesses: linked, engine_stop: engineStop, doctor, settings: summary?.settings ?? null, blank: summary?.blank ?? [], log, log_tail: tail }
         : { ok: false, error, wrote, log, log_tail: tail };
       writeAgentJson(JSON.parse(redact(JSON.stringify(body))), { stdout });
     } else if (error === null) {
-      stdout.write(`${lines.join('\n')}\nlog: ${log}\n`);
+      const rest = lines.slice(printed);
+      stdout.write(`${rest.length > 0 ? `${rest.join('\n')}\n` : ''}log: ${log}\n`);
     }
     return code;
   };
@@ -215,10 +223,32 @@ export async function runInit(args, deps = {}) {
     const userFile = path.join(cfDir, USER_CONFIG_FILE);
     const userCfg = await readUserConfig(userFile);
 
-    const { values, sources } = resolveAnswers(ctx, existing, userCfg, parsed.given);
+    const { values, sources, origins } = resolveAnswers(ctx, existing, userCfg, parsed.given);
     if (interactive) {
       ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
       await askAnswers(values, sources, ctx, ui);
+    }
+
+    // Gates and proof are never asked (B24): the summary says what was found and what is blank.
+    // A person sees it now, before anything is written; agent mode gets it in the JSON line.
+    summary = summarizeSettings(values, origins, ctx);
+    /** @param {string[]} shown - logged, and printed at once for a person */
+    const showNow = (shown) => {
+      for (const line of shown) say(line);
+      if (jsonMode) return;
+      stdout.write(`${lines.slice(printed).join('\n')}\n`);
+      printed = lines.length;
+    };
+    showNow(summary.lines);
+    if (interactive) {
+      const choice = await askSettingsChoice(ui);
+      if (choice === 'customize') {
+        const changedKeys = await askProjectSettings(values, origins, ui);
+        say(`settings: customized (${changedKeys.length > 0 ? changedKeys.join(', ') : 'no change'})`);
+      } else if (choice === 'later') {
+        const keys = summary.blank.length > 0 ? summary.blank : Object.keys(summary.settings);
+        showNow([`settings: edit .code-forge.yml later: ${keys.join(', ')} — then run \`code-forge validate\``]);
+      }
     }
 
     // Step 5 — where the Jev key comes from. Only a reference is ever kept: `env:NAME` when the
@@ -278,7 +308,7 @@ export async function runInit(args, deps = {}) {
       say(`${DEFAULT_CONFIG_FILENAME}: unchanged`);
     } else {
       if (existing) say(`${DEFAULT_CONFIG_FILENAME}: changes ${changed.join(', ')}`);
-      const go = existing && interactive ? await ui.confirm({ message: `Apply ${changed.length} change(s) to ${DEFAULT_CONFIG_FILENAME}?`, initialValue: true }) : true;
+      const go = existing && interactive ? await ui.confirm({ message: withHint(`Apply ${changed.length} change(s) to ${DEFAULT_CONFIG_FILENAME}?`, HINTS.apply), initialValue: true }) : true;
       if (ui?.isCancel(go) || go !== true) throw new CancelledError('cancelled — nothing written');
       await writeText(configFile, serializeConfig(merged));
       wrote.push(configFile);

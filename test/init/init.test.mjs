@@ -59,7 +59,11 @@ test('non-interactive run on the Laravel+Vue fixture writes the documented confi
   const text = readFileSync(path.join(cwd, '.code-forge.yml'), 'utf8');
   const written = parseYAML(text);
   assert.deepEqual(written, EXPECTED);
-  assert.deepEqual(written.proof.export.copy_untracked, ['.env', '.env.testing']);
+  // B24: no .env or .env.testing in the fixture, so none is copied; link_dirs follows the two
+  // manifests although node_modules is not installed; no high-risk paths
+  assert.deepEqual(written.proof.export.copy_untracked, []);
+  assert.deepEqual(written.proof.export.link_dirs, ['vendor', 'node_modules']);
+  assert.deepEqual(written.proof.tiers.high.paths, []);
   const checked = validateConfig(written);
   assert.equal(checked.errors.length, 0);
   assert.equal(readlinkSync(path.join(cwd, '.claude', 'skills', 'code-forge')), SKILL_SOURCE);
@@ -91,7 +95,7 @@ test('agent mode ⇒ exactly 1 JSON line on stdout, with a log path that exists'
   const lines = r.stdout.split('\n').filter((l) => l.length > 0);
   assert.equal(lines.length, 1);
   const json = JSON.parse(lines[0]);
-  assert.deepEqual(Object.keys(json), ['ok', 'wrote', 'harnesses', 'engine_stop', 'doctor', 'log', 'log_tail']);
+  assert.deepEqual(Object.keys(json), ['ok', 'wrote', 'harnesses', 'engine_stop', 'doctor', 'settings', 'blank', 'log', 'log_tail']);
   assert.equal(path.dirname(json.log), path.join(r.home, '.code-forge', 'logs'));
   assert.equal(existsSync(json.log), true);
   assert.deepEqual(json.harnesses, ['claude']);
@@ -127,7 +131,7 @@ test('subprocess is never proposed: the engine question offers auto/solo/harness
   const ui = scriptedUi();
   const r = await laravelRun([], { CODE_FORGE_KEY_JEV: FAKE_JEV_KEY }, { isTTY: true, ui });
   assert.equal(r.code, 0, r.stderr);
-  const engine = ui.calls.filter((c) => c.message === 'Engine');
+  const engine = ui.calls.filter((c) => c.message.split('\n')[0] === 'Engine');
   assert.equal(engine.length, 1);
   assert.deepEqual(engine[0].options.map((o) => o.value), ['auto', 'solo', 'harness']);
   assert.equal(ui.calls.flatMap((c) => c.options ?? []).filter((o) => o.value === 'subprocess').length, 0);
@@ -151,12 +155,19 @@ const STACKS = [
   ['Python', buildPython, ['.env']],
 ];
 for (const [stack, build, expected] of STACKS) {
-  test(`copy_untracked proposed for ${stack}: ${expected.join(', ')}`, async () => {
+  test(`copy_untracked proposed for ${stack} when present: ${expected.join(', ')}; [] when absent`, async () => {
     const home = freshDir('home');
     const cwd = await makeProject(build);
+    // the stack's candidates exist, plus one file no stack proposes
+    for (const f of [...expected, '.env.local']) writeFileSync(path.join(cwd, f), 'FAKE=1\n');
     const r = await runWizard(['--no-interaction', '--no-jev'], { cwd, home, env: baseEnv(home, { CLAUDECODE: '1' }) });
     assert.equal(r.code, 0, r.stderr);
     assert.deepEqual(parseYAML(readFileSync(path.join(cwd, '.code-forge.yml'), 'utf8')).proof.export.copy_untracked, expected);
+    // the same stack with none of them on disk proposes none
+    const bare = await makeProject(build);
+    const r2 = await runWizard(['--no-interaction', '--no-jev'], { cwd: bare, home, env: baseEnv(home, { CLAUDECODE: '1' }) });
+    assert.equal(r2.code, 0, r2.stderr);
+    assert.deepEqual(parseYAML(readFileSync(path.join(bare, '.code-forge.yml'), 'utf8')).proof.export.copy_untracked, []);
   });
 }
 
@@ -164,7 +175,7 @@ test('a key pasted at the hidden prompt goes to the store only: config holds "us
   const ui = scriptedUi({ 'Where is the Jev key?': 'paste', 'Jev key': FAKE_JEV_KEY });
   const r = await laravelRun([], {}, { isTTY: true, ui });
   assert.equal(r.code, 0, r.stderr);
-  assert.deepEqual(ui.calls.filter((c) => c.kind === 'password').map((c) => c.message), ['Jev key (input hidden)']);
+  assert.deepEqual(ui.calls.filter((c) => c.kind === 'password').map((c) => c.message.split('\n')[0]), ['Jev key (input hidden)']);
   const text = readFileSync(r.file, 'utf8');
   assert.equal(parseYAML(text).keys.jev, 'user');
   const logs = path.join(r.home, '.code-forge', 'logs');

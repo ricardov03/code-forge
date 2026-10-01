@@ -11,6 +11,13 @@ waits on a second real consumer (plan §10.4, Q17).
 - **Two publish paths:** publish by hand with `npm publish` before pushing the tag (the tag run sees
   the version on npm, skips its own publish and still creates the GitHub release), or push only and
   let CI publish with provenance (needs `NPM_TOKEN`). See `docs/releasing.md`.
+- `init` no longer asks for gates or proof settings one by one: it reads them from the project
+  (gates from `detect`, `link_dirs` from the project's manifests, `copy_untracked` only for files
+  that exist, high-risk paths blank, isolation `export`), prints a "Project settings (detected)" summary that marks every blank
+  and names the keys to edit, then asks one choice: Use these, Customize now (the eight questions,
+  pre-filled) or Leave for later. `--no-interaction` asks nothing; agent JSON gains `settings` and
+  `blank`. Every question has a one-line hint; a re-run fills a gate that was blank and keeps
+  hand-set ones.
 
 ## [0.2.0] — 2026-09-26
 

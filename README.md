@@ -30,8 +30,10 @@ code-forge init
 The scoped name is used only to install; the command is `code-forge`. The unscoped npm package
 `code-forge` is a different, unrelated tool.
 
-The wizard asks nine short questions (tools, harnesses, provider matrix, multimodel, keys, engine,
-gates, proof, doctor), every one with a default on Enter. Non-interactively:
+The wizard asks a few short questions (tools, harnesses, provider matrix, multimodel, keys,
+engine), every one with a default on Enter. Gates and proof settings come from the project:
+`init` prints what it found, marks what it left blank, and lets you use, customize or leave them
+for later. Non-interactively:
 
 ```bash
 code-forge init --no-interaction --no-jev

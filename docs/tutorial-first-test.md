@@ -93,7 +93,9 @@ code-forge init
 Pick Claude Code as the harness, choose **global** scope, and choose "skip" for the Jev key. Inside
 a git repository the default scope is **project**, which would put a skill link at
 `.claude/skills/code-forge` in this repo; with a global install, global scope keeps the link under
-your home folder and nothing extra in the repo. Or, without questions:
+your home folder and nothing extra in the repo. `init` then prints the settings it found: the
+`test` gate from `package.json`, and `lint`, `types` and `format` blank, since the site has no
+linter, type checker or formatter. Pick **Use these**. Or, without questions:
 
 ```bash
 code-forge init --no-interaction --no-jev --harness claude -g --engine harness

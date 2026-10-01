@@ -12,7 +12,7 @@ import { defaultsForProvider } from '../../config/defaults/index.mjs';
 import { detectGates } from '../../gates/detect.mjs';
 import { detectAgentEnv } from '../agent-env.mjs';
 import { detectAll } from '../detect.mjs';
-import { ANSWER_FLAGS, PROVIDERS } from './flags.mjs';
+import { ANSWER_FLAGS, GATE_NAMES, PROOF_KEYS, PROVIDERS } from './flags.mjs';
 
 /** Harnesses that expose a subagent tool (§5.1: Claude Code's `Agent`, [A13]). */
 export const SUBAGENT_HARNESSES = Object.freeze(['claude']);
@@ -29,27 +29,32 @@ export const COPY_UNTRACKED = Object.freeze({
   python: ['.env'],
 });
 
-/** `link_dirs` per stack: the dependency directories an export links instead of copying. */
-const LINK_DIRS = Object.freeze({
-  laravel: ['vendor', 'node_modules'],
-  php: ['vendor'],
-  node: ['node_modules'],
-  python: ['.venv'],
-  rust: ['target'],
-  go: [],
-  unknown: ['vendor', 'node_modules'],
+/** The proof profiles {@link proofProfile} can return. */
+const PROFILES = Object.freeze(['laravel', 'php', 'node', 'python', 'rust', 'go', 'unknown']);
+
+/**
+ * The one source of truth for `link_dirs` (B24): each dependency folder an export links instead of
+ * copying, with the manifests that make it right to propose. A folder is proposed when one of its
+ * manifests exists, whether or not the dependencies are installed yet.
+ */
+export const LINK_DIR_MANIFESTS = Object.freeze({
+  vendor: Object.freeze(['composer.json', 'go.mod']),
+  node_modules: Object.freeze(['package.json']),
+  '.venv': Object.freeze(['pyproject.toml', 'requirements.txt', 'setup.py', 'Pipfile']),
+  target: Object.freeze(['Cargo.toml']),
 });
 
-/** High-risk paths per stack (v1 §2 step 8: migrations, policies, money, auth/middleware, webhooks). */
-const HIGH_PATHS = Object.freeze({
-  laravel: ['database/migrations/**', 'app/Policies/**', 'app/Http/Middleware/**', '**/*Money*', '**/*Webhook*'],
-  php: ['**/*Money*', '**/*Webhook*', '**/Auth/**'],
-  node: ['**/migrations/**', '**/auth/**', '**/*money*', '**/*webhook*'],
-  python: ['**/migrations/**', '**/auth/**', '**/*money*', '**/*webhook*'],
-  rust: ['**/auth/**', '**/*money*'],
-  go: ['**/auth/**', '**/*money*'],
-  unknown: [],
-});
+/**
+ * The `link_dirs` entries whose manifest exists in `cwd`, in {@link LINK_DIR_MANIFESTS} order, each
+ * with the manifests found for it.
+ * @param {string} cwd
+ * @returns {Array<{dir: string, manifests: string[]}>}
+ */
+export function linkDirsFromManifests(cwd) {
+  return Object.entries(LINK_DIR_MANIFESTS)
+    .map(([dir, manifests]) => ({ dir, manifests: manifests.filter((m) => existsSync(path.join(cwd, m))) }))
+    .filter((e) => e.manifests.length > 0);
+}
 
 /**
  * The proof profile is decided from the project, not from the gate detector's stack name alone:
@@ -65,7 +70,7 @@ export function proofProfile(stack, cwd) {
   if (php && existsSync(path.join(cwd, 'artisan'))) return 'laravel';
   if (stack.startsWith('php')) return 'php';
   // a detected non-PHP stack keeps its word; only an undetected project falls back on composer.json
-  if (stack !== 'unknown' && Object.hasOwn(LINK_DIRS, stack)) return stack;
+  if (stack !== 'unknown' && PROFILES.includes(stack)) return stack;
   return composer ? 'php' : 'unknown';
 }
 
@@ -109,16 +114,33 @@ export function proposeJudge(provider) {
 }
 
 /**
- * Step 8's proposal for a stack.
+ * Step 8's `copy_untracked` candidates for a profile, before the project is looked at.
  * @param {string} profile
+ * @returns {string[]}
+ */
+export function copyCandidates(profile) {
+  return [...(COPY_UNTRACKED[profile] ?? [])];
+}
+
+/**
+ * Step 8's proposal (B24): nothing is asked. High-risk paths are a deliberate blank (the project
+ * never says which paths are high-risk) and isolation is `export`. `link_dirs` is every folder whose
+ * manifest ({@link LINK_DIR_MANIFESTS}) exists in `cwd`, installed or not, whatever the profile (a
+ * PHP app with a `package.json` links `node_modules` too); `copy_untracked` keeps the profile's
+ * candidates that exist in `cwd` themselves. Nothing kept gives `[]`. Without `cwd` nothing can be
+ * looked at: `link_dirs` is `[]` and `copy_untracked` the unfiltered candidates.
+ * @param {string} profile
+ * @param {string} [cwd]
  * @returns {{high: string[], isolation: 'export', link_dirs: string[], copy_untracked: string[]}}
  */
-export function proposeProof(profile) {
+export function proposeProof(profile, cwd) {
+  const candidates = copyCandidates(profile);
+  if (cwd === undefined) return { high: [], isolation: 'export', link_dirs: [], copy_untracked: candidates };
   return {
-    high: [...(HIGH_PATHS[profile] ?? [])],
+    high: [],
     isolation: 'export',
-    link_dirs: [...(LINK_DIRS[profile] ?? LINK_DIRS.unknown)],
-    copy_untracked: [...(COPY_UNTRACKED[profile] ?? [])],
+    link_dirs: linkDirsFromManifests(cwd).map((e) => e.dir),
+    copy_untracked: candidates.filter((rel) => existsSync(path.join(cwd, rel))),
   };
 }
 
@@ -272,6 +294,12 @@ function gateArgv(gate) {
  * @property {boolean} doctor
  */
 
+/**
+ * Where each gate and each proof value came from (B24): `flag`, `existing` (the current
+ * `.code-forge.yml`), `detected` (the project on disk) or `default`.
+ * @typedef {{gates: Record<string, 'flag'|'existing'|'detected'>, proof: Record<string, 'flag'|'existing'|'detected'|'default'>}} Origins
+ */
+
 /** The answer keys in step order. */
 export const ANSWER_KEYS = Object.freeze([
   'tools', 'yes_tools', 'harnesses', 'scope', 'method', 'provider', 'levels', 'refresh_models',
@@ -283,11 +311,13 @@ export const ANSWER_KEYS = Object.freeze([
  * @param {Record<string, any>|null} existing - the current `.code-forge.yml`, when there is one.
  * @param {Record<string, any>|null} user - the current user-level config (`~/.code-forge/`).
  * @param {Array<{flag: string, value: any}>} given - parsed answer flags.
- * @returns {{values: Answers, sources: Record<string, 'default'|'existing'|'flag'>}}
+ * @returns {{values: Answers, sources: Record<string, 'default'|'existing'|'flag'>, origins: Origins}}
  */
 export function resolveAnswers(ctx, existing, user, given) {
   /** @type {Record<string, 'default'|'existing'|'flag'>} */
   const sources = {};
+  /** @type {Origins} */
+  const origins = { gates: {}, proof: {} };
   const ex = existing ?? {};
   /** @type {any} */
   const v = {};
@@ -352,38 +382,64 @@ export function resolveAnswers(ctx, existing, user, given) {
   set('solo_project', user?.solo?.project_id, () => null);
   if (lastFlag('solo_project')) override('solo_project', lastFlag('solo_project').value);
 
+  // Gates and proof are never asked (B24): each value comes from a flag, else the existing
+  // config, else the project. `origins` records which, per gate and per proof key. A gate the
+  // existing config left blank is filled when the project now shows one; a set gate is kept.
   const detectedGates = {
     test: gateArgv(ctx.detected.test),
     lint: gateArgv(ctx.detected.lint),
     types: gateArgv(ctx.detected.types),
     format: gateArgv(ctx.detected.format),
   };
-  const exGates = ex.gates && typeof ex.gates === 'object' ? ex.gates : undefined;
-  set('gates', exGates ? { ...detectedGates, ...exGates } : undefined, () => detectedGates);
+  const exGates = ex.gates && typeof ex.gates === 'object' ? ex.gates : {};
+  // keys beyond the four gates (`extra`, `full_suite_threshold_files`, …) are kept as they are
+  const gates = /** @type {Record<string, any>} */ (clone(exGates));
+  for (const name of GATE_NAMES) {
+    const kept = exGates[name];
+    const keep = kept !== undefined && kept !== null;
+    gates[name] = keep ? clone(kept) : detectedGates[/** @type {keyof typeof detectedGates} */ (name)];
+    origins.gates[name] = keep ? 'existing' : 'detected';
+  }
+  set('gates', Object.keys(exGates).length > 0 ? gates : undefined, () => gates);
   if (flagsFor('gates').length > 0) {
-    const gates = clone(v.gates);
-    for (const g of flagsFor('gates')) gates[g.value.name] = g.value.argv;
-    override('gates', gates);
+    const flagged = clone(v.gates);
+    for (const g of flagsFor('gates')) {
+      flagged[g.value.name] = g.value.argv;
+      origins.gates[g.value.name] = 'flag';
+    }
+    override('gates', flagged);
   }
 
-  const proposal = proposeProof(ctx.profile);
-  const exProof = ex.proof && typeof ex.proof === 'object'
-    ? {
-        high: ex.proof.tiers?.high?.paths ?? proposal.high,
-        isolation: ex.proof.isolation ?? proposal.isolation,
-        link_dirs: ex.proof.export?.link_dirs ?? proposal.link_dirs,
-        copy_untracked: ex.proof.export?.copy_untracked ?? proposal.copy_untracked,
-      }
-    : undefined;
-  set('proof', exProof, () => proposal);
+  const proposal = proposeProof(ctx.profile, ctx.cwd);
+  const exProof = ex.proof && typeof ex.proof === 'object' ? ex.proof : {};
+  /** @type {Record<string, unknown>} */
+  const exProofValues = {
+    high: exProof.tiers?.high?.paths,
+    isolation: exProof.isolation,
+    link_dirs: exProof.export?.link_dirs,
+    copy_untracked: exProof.export?.copy_untracked,
+  };
+  const proof = /** @type {Record<string, any>} */ ({});
+  for (const key of PROOF_KEYS) {
+    const kept = exProofValues[key];
+    const keep = kept !== undefined && kept !== null;
+    proof[key] = keep ? clone(kept) : proposal[/** @type {keyof typeof proposal} */ (key)];
+    // without a cwd nothing was looked at, so the lists are defaults, not detections
+    const looked = ctx.cwd !== undefined && (key === 'link_dirs' || key === 'copy_untracked');
+    origins.proof[key] = keep ? 'existing' : looked ? 'detected' : 'default';
+  }
+  set('proof', ex.proof && typeof ex.proof === 'object' ? proof : undefined, () => proof);
   if (flagsFor('proof').length > 0) {
-    const proof = clone(v.proof);
-    for (const g of flagsFor('proof')) proof[g.value.key] = g.value.value;
-    override('proof', proof);
+    const flagged = clone(v.proof);
+    for (const g of flagsFor('proof')) {
+      flagged[g.value.key] = g.value.value;
+      origins.proof[g.value.key] = 'flag';
+    }
+    override('proof', flagged);
   }
 
   set('doctor', undefined, () => true);
   if (lastFlag('doctor')) override('doctor', false);
 
-  return { values: v, sources };
+  return { values: v, sources, origins };
 }

@@ -40,7 +40,7 @@ forces project scope; `--copy` copies instead of linking.
 
 ### What `init` asks
 
-Every question has a default: press Enter to keep it.
+Every question has a default: press Enter to keep it. Each question shows a one-line hint under it.
 
 | # | Question | Default / choices | Flag to answer it |
 |---|---|---|---|
@@ -48,11 +48,44 @@ Every question has a default: press Enter to keep it.
 | 2 | Install the skill into which harnesses? Scope? Method? | detected harnesses · `project` or `global` · `symlink` or `copy` | `--harness a,b`, `-p` / `-g`, `--copy` |
 | 3 | Default provider, and keep the level matrix? | `anthropic` · `openai` · `xai`; edit any level as `model[:effort][@provider]` | `--provider P`, `--level Ln=model[:effort][@provider]`, `--refresh-models` |
 | 4 | Multimodel review (consensus)? | off. On: pick a second provider; the L3 judge must come from a third provider | `--multimodel on\|off`, `--second-provider P` |
-| 5 | Where is the Jev key? (asked only when none is found) | 1Password reference · environment variable · paste now (hidden, goes to the key store) · skip | `--jev-ref op://…`, `--jev-env NAME`, `--no-jev` |
-| 6 | Engine | `auto` · `solo` · `harness` (`subprocess` is never offered; write it in the config yourself) | `--engine auto\|solo\|harness`, `--solo-project N` |
-| 7 | Gates: `test`, `lint`, `types`, `format` | detected from `package.json`, `composer.json`, `Cargo.toml`, `pyproject.toml`, `go.mod` | `--gate name=cmd` |
-| 8 | Proof: high-risk paths, isolation, export settings | per stack; isolation `export` | `--proof isolation=export\|lock`, `--proof high=a,b`, `--proof link_dirs=a,b`, `--proof copy_untracked=a,b` |
-| 9 | Doctor | runs `doctor --quick` at the end | `--skip-doctor` |
+| 5 | Engine | `auto` · `solo` · `harness` (`subprocess` is never offered; write it in the config yourself) | `--engine auto\|solo\|harness`, `--solo-project N` |
+| 6 | Gates and proof settings (after the summary below) | **Use these** (the default: Enter keeps it; keep the detected values, blanks stay blank) · **Customize now** (asks gates `test`, `lint`, `types`, `format`, then high-risk paths, proof isolation, export directories to link and untracked files to copy, each pre-filled; Enter keeps it) · **Leave for later** (keeps them and prints the keys to edit) | `--gate name=cmd`, `--proof key=value` (a value set by a flag is not asked) |
+| 7 | Where is the Jev key? (asked only when none is found) | 1Password reference · environment variable · paste now (hidden, goes to the key store) · skip. For the 1Password reference: in the 1Password app, right-click the key field → Copy Secret Reference (`op://vault/item/field`) | `--jev-ref op://…`, `--jev-env NAME`, `--no-jev` |
+
+At the end `init` runs `doctor --quick`; `--skip-doctor` skips it.
+
+### What `init` takes from the project
+
+`init` reads the gates and proof settings from the project and prints them before it writes
+anything; it asks about them only if you pick **Customize now**:
+
+| Setting | Where it comes from | When nothing is found | Flag to set it |
+|---|---|---|---|
+| `gates.test`, `gates.lint`, `gates.types`, `gates.format` | detected from `package.json`, `composer.json`, `Cargo.toml`, `pyproject.toml`, `go.mod` | blank (`null`) | `--gate name=cmd` |
+| `proof.tiers.high.paths` | never detected: the project does not say which paths are high-risk | blank (`[]`): no file is high tier because of its path (risk and security still can make it high) | `--proof high=a,b` |
+| `proof.isolation` | `export` | — | `--proof isolation=export\|lock` |
+| `proof.export.link_dirs` | each dependency folder whose manifest exists, installed or not: `composer.json` or `go.mod` ⇒ `vendor`; `package.json` ⇒ `node_modules`; `pyproject.toml`, `requirements.txt`, `setup.py` or `Pipfile` ⇒ `.venv`; `Cargo.toml` ⇒ `target` | blank (`[]`) | `--proof link_dirs=a,b` |
+| `proof.export.copy_untracked` | the stack's env files that exist: Laravel `.env`, `.env.testing`; Node `.env`, `.env.test`; other PHP and Python `.env`. A PHP project (`composer.json`) counts as Laravel when it has an `artisan` file in its root, whatever its test runner | blank (`[]`) | `--proof copy_untracked=a,b` |
+
+For a Node project with no type checker the summary reads:
+
+```text
+Project settings (detected)
+  test: npm test (from package.json)
+  lint: npm run lint (from package.json)
+  types: blank — no type checker found
+  format: npx prettier --check . (from package.json)
+  high-risk paths: blank — none set (all files light tier by path)
+  isolation: export (from default)
+  link dirs: node_modules (from package.json)
+  copy untracked: .env (found in the project)
+Set the blanks later: edit .code-forge.yml (gates.types, proof.tiers.high.paths), then run `code-forge validate`.
+```
+
+After the summary `init` asks question 6 once. With `--no-interaction` at a terminal nothing is
+asked and the summary is still printed. In agent mode or without a terminal no text summary is
+printed: the same facts appear only as `settings` and `blank` in the one JSON line. A re-run keeps
+every value you set by hand; a gate that was blank is filled when the project now shows one.
 
 For scripts and CI, take every default:
 
@@ -61,7 +94,8 @@ code-forge init --no-interaction --no-jev
 ```
 
 When an agent runs `init` (it detects `CLAUDECODE`, `AI_AGENT` and similar), or stdin is not a
-terminal, `init` prints exactly one JSON line: `{ok, wrote, harnesses, engine_stop, doctor, …}`.
+terminal, `init` prints exactly one JSON line: `{ok, wrote, harnesses, engine_stop, doctor, settings, blank, …}`.
+`settings` holds each gate and proof value with its source; `blank` lists the keys left blank.
 Without `--no-jev`, `--jev-ref` or `--jev-env` and without a terminal, it refuses with exit 2
 instead of hanging. The full log goes to `~/.code-forge/logs/init-<ts>.log`.
 

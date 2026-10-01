@@ -46,11 +46,12 @@ const CASES = [
     types: ['vendor/bin/phpstan'],
     format: ['vendor/bin/pint', '--test'],
   }],
+  // B24: high-risk paths start blank; link_dirs from the manifests; no env file in the fixture
   [['--proof', 'isolation=lock'], 'proof', {
-    high: ['database/migrations/**', 'app/Policies/**', 'app/Http/Middleware/**', '**/*Money*', '**/*Webhook*'],
+    high: [],
     isolation: 'lock',
     link_dirs: ['vendor', 'node_modules'],
-    copy_untracked: ['.env', '.env.testing'],
+    copy_untracked: [],
   }],
   [['--skip-doctor'], 'doctor', false],
 ];

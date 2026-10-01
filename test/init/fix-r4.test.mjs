@@ -1,10 +1,10 @@
 /**
  * B13a fix round 4: every failure after the flags parsed is one JSON line in agent mode with the
- * log written (also after the config is on disk), the Jev source is recorded as the store reports
- * it, and a comma list with a brace glob survives Enter.
+ * log written (also after the config is on disk), and the Jev source is recorded as the store
+ * reports it. (The brace-glob proof list test went with the proof questions in B24.)
  */
 
-import { FAKE_JEV_KEY, SKILL_SOURCE, baseEnv, freshDir, makeProject, scriptedUi, sink } from './helpers.mjs';
+import { FAKE_JEV_KEY, SKILL_SOURCE, baseEnv, freshDir, makeProject, sink } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
@@ -13,7 +13,6 @@ import { parse as parseYAML } from 'yaml';
 import { build as buildLaravelVue } from '../fixtures/repos/laravel-vue/build.mjs';
 
 const { runInit } = await import('../../src/install/wizard/run.mjs');
-const { askAnswers } = await import('../../src/install/wizard/steps.mjs');
 
 /**
  * `runInit` in agent mode on a fresh Laravel fixture, with extra deps (an installer, a store).
@@ -116,23 +115,4 @@ test('jev auto mode with a store that holds a 1Password-cached key: config keys.
   const fromEnv = await agentRun(['--no-interaction'], { CODE_FORGE_KEY_JEV: FAKE_JEV_KEY }, { getStore: async () => store });
   assert.equal(parseYAML(readFileSync(fromEnv.file, 'utf8')).keys.jev, 'env:CODE_FORGE_KEY_JEV');
   assert.equal(parseYAML(readFileSync(path.join(fromEnv.home, '.code-forge', 'config.yml'), 'utf8')).keys.jev.source, 'env');
-});
-
-// ── 4. brace globs in comma lists ───────────────────────────────────────────
-
-test('Enter on a pre-filled proof list with a brace glob leaves proof.high unchanged', async () => {
-  const proof = { high: ['app/**/*.{php,vue}', 'database/migrations/**', '**/{Money,Webhook}*'], isolation: 'export', link_dirs: ['vendor', 'node_modules'], copy_untracked: ['.env', '.env.testing'] };
-  const values = /** @type {any} */ ({ proof: structuredClone(proof) });
-  const sources = Object.fromEntries(
-    ['tools', 'harnesses', 'scope', 'method', 'provider', 'levels', 'refresh_models', 'multimodel', 'second_provider', 'engine', 'solo_project', 'gates'].map((k) => [k, 'flag']),
-  );
-  const ui = scriptedUi();
-  await askAnswers(values, sources, /** @type {any} */ ({ detectedHarnesses: [], solo: false }), ui);
-  assert.equal(ui.calls.filter((c) => c.message === 'High-risk paths (comma list of globs)').length, 1);
-  assert.deepEqual(values.proof, proof);
-  // a typed list with an unbalanced brace still splits at the top level, never inside the brace
-  const typed = /** @type {any} */ ({ proof: structuredClone(proof) });
-  const ui2 = scriptedUi({ 'High-risk paths': ' a/{x,y}/** , b , ' });
-  await askAnswers(typed, sources, /** @type {any} */ ({ detectedHarnesses: [], solo: false }), ui2);
-  assert.deepEqual(typed.proof.high, ['a/{x,y}/**', 'b']);
 });

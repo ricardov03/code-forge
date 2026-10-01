@@ -1,6 +1,9 @@
 # The `.code-forge.yml` that `code-forge init --no-interaction` writes for this fixture
 # (block B13a), run under Claude Code (CLAUDECODE=1) with the Jev key in CODE_FORGE_KEY_JEV.
 # No Solo in that run: `engine: auto` resolves to the harness, so `caps.coders` is 1 (§5.5, B19).
+# B24: proof settings are not asked. High-risk paths are a deliberate blank; `link_dirs` follows
+# the manifests (`composer.json` ⇒ vendor, `package.json` ⇒ node_modules, installed or not);
+# `copy_untracked` keeps only files that exist, and `.env`/`.env.testing` do not.
 version: 1
 project:
   name: laravel-vue
@@ -39,17 +42,10 @@ gates:
 proof:
   tiers:
     high:
-      paths:
-        - database/migrations/**
-        - app/Policies/**
-        - app/Http/Middleware/**
-        - "**/*Money*"
-        - "**/*Webhook*"
+      paths: []
   isolation: export
   export:
     link_dirs:
       - vendor
       - node_modules
-    copy_untracked:
-      - .env
-      - .env.testing
+    copy_untracked: []
