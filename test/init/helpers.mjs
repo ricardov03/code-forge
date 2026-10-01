@@ -68,19 +68,21 @@ export const okDoctor = async () => [{ status: 'OK', label: 'config', detail: 'v
  * @param {boolean} [opts.isTTY]
  * @param {any} [opts.ui]
  * @param {any} [opts.doctor]
+ * @param {any} [opts.opExec] - a fake `exec` for `op item get` (B25); `op` is never run.
  * @returns {Promise<{code: number, stdout: string, stderr: string}>}
  */
-export async function runWizard(args, { cwd, home, env, isTTY = false, ui, doctor = okDoctor }) {
+export async function runWizard(args, { cwd, home, env, isTTY = false, ui, doctor = okDoctor, opExec }) {
   const { runInit } = await import('../../src/install/wizard/run.mjs');
   const stdout = sink();
   const stderr = sink();
-  const code = await runInit(args, { cwd, home, env, isTTY, ui, doctor, stdout, stderr, skillSource: SKILL_SOURCE });
+  const code = await runInit(args, { cwd, home, env, isTTY, ui, doctor, stdout, stderr, skillSource: SKILL_SOURCE, ...(opExec ? { opExec } : {}) });
   return { code, stdout: stdout.text(), stderr: stderr.text() };
 }
 
 /**
  * A scripted `@clack/prompts` stand-in: every question takes its default (Enter) unless
- * `replies[message-prefix]` says otherwise. Every call is recorded.
+ * `replies[message-prefix]` says otherwise. An array reply is a script: each call takes the next
+ * value, and a call past its end throws (so a retry loop cannot spin forever). Every call is recorded.
  * @param {Record<string, unknown>} [replies]
  */
 export function scriptedUi(replies = {}) {
@@ -92,6 +94,10 @@ export function scriptedUi(replies = {}) {
   const q = (kind, fallback) => async (/** @type {any} */ o) => {
     calls.push({ kind, message: o.message, options: o.options, initialValue: o.initialValue });
     const hit = reply(o.message);
+    if (hit && Array.isArray(hit[1])) {
+      if (hit[1].length === 0) throw new Error(`scriptedUi: no reply left for "${o.message.split('\n')[0]}"`);
+      return hit[1].shift();
+    }
     return hit ? hit[1] : fallback(o);
   };
   return {

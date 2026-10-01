@@ -13,7 +13,7 @@
  * into any flag by mistake).
  */
 
-import { isOpRef } from '../../keys/onepassword.mjs';
+import { isOpInput } from '../../keys/onepassword.mjs';
 import { HARNESSES } from '../harnesses.mjs';
 
 export const PROVIDERS = Object.freeze(['anthropic', 'openai', 'xai']);
@@ -166,8 +166,9 @@ function convert(flag, value) {
       if (value !== 'on' && value !== 'off') throw new UsageError('--multimodel must be on or off');
       return value === 'on';
     case '--jev-ref':
-      if (!isOpRef(value)) throw new UsageError('--jev-ref must be an op://vault/item/field reference');
-      return value;
+      // shape only here (parsing is sync); an item ID or link is resolved to op:// in run.mjs (B25)
+      if (!isOpInput(value)) throw new UsageError('--jev-ref must be a 1Password item ID, item link or op://vault/item/field reference');
+      return value.trim();
     case '--jev-env':
       if (!ENV_NAME.test(value)) throw new UsageError('--jev-env must be an environment variable name');
       return value;

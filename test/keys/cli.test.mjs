@@ -13,7 +13,7 @@ const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 
 const NOW = 1_800_000_000_000;
 const HOUR = 3_600_000;
 const REF = 'op://Private/jev/credential';
-const USAGE = 'usage: code-forge keys list | set <name> [--op <ref>] | test <name> [--ref <ref>] | remove <name>\n';
+const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref>] | test <name> [--ref <ref>] | remove <name>\n';
 
 afterEach(() => clearSecrets());
 
@@ -103,7 +103,7 @@ test('keys set --op with a bad reference exits 2 without calling op', async () =
       return { value: FAKE_OP_KEY, attempts: 1 };
     },
   });
-  assert.deepEqual([code, called, h.stderr.text], [2, 0, 'jev: --op must be an op://vault/item/field reference\n']);
+  assert.deepEqual([code, called, h.stderr.text], [2, 0, 'jev: --op must be a 1Password item ID, item link or op://vault/item/field reference\n']);
 });
 
 test('keys set --op failure exits 1 and reports the error', async () => {
@@ -224,4 +224,89 @@ test('end to end through the router under a temp HOME (file backend): list and t
   assert.match(probe.stdout, /^jev: ok source=file expires=\d{4}-/);
   const all = list.stdout + list.stderr + probe.stdout + probe.stderr;
   assert.equal(countOccurrences(all, FAKE_KEY), 0);
+});
+
+// ---- B25: --op / --ref take a 1Password item ID or link, resolved to a full op:// ref first ----
+
+const ITEM_ID = 'abcdefghij0123456789klmnop';
+const VAULT_ID = 'zyxwvutsrq9876543210ponmlk';
+const RESOLVED = `op://${VAULT_ID}/${ITEM_ID}/credential`;
+const ITEM_STDOUT = JSON.stringify({
+  id: ITEM_ID,
+  title: 'Jev API key',
+  category: 'API_CREDENTIAL',
+  vault: { id: VAULT_ID, name: 'Dev Keys' },
+  fields: [{ id: 'credential', label: 'credential', type: 'CONCEALED', value: FAKE_OP_KEY, reference: 'op://Dev Keys/Jev API key/credential' }],
+});
+
+/** @param {Array<Record<string, unknown>>} script */
+function fakeOpExec(script) {
+  /** @type {string[][]} */
+  const calls = [];
+  const opExec = /** @type {any} */ (async (/** @type {string[]} */ argv) => {
+    calls.push(argv);
+    return { result: 'failed', code: null, signal: null, stdout: '', stderr: '', timedOut: false, ...(script[calls.length - 1] ?? {}) };
+  });
+  return { opExec, calls };
+}
+
+test('keys set --op <item-id> resolves the item, reads the resolved ref once and caches it', async () => {
+  const h = await harness();
+  const { opExec, calls } = fakeOpExec([{ result: 'ok', code: 0, stdout: ITEM_STDOUT }]);
+  /** @type {string[]} */
+  const refs = [];
+  const opRead = async (/** @type {string} */ ref) => (refs.push(ref), { value: FAKE_OP_KEY, attempts: 1 });
+  assert.equal(await h.run(['set', 'jev', '--op', ITEM_ID], { opRead, opExec }), 0);
+  assert.deepEqual(calls, [['op', 'item', 'get', ITEM_ID, '--format', 'json']]);
+  assert.deepEqual(refs, [RESOLVED]);
+  assert.deepEqual(JSON.parse(h.backend.store.get('jev')), { v: FAKE_OP_KEY, exp: NOW + 8 * HOUR });
+  assert.equal(h.stdout.text.split('\n')[0], `jev: 1Password item "Jev API key" (vault Dev Keys, field credential) -> ${RESOLVED}`);
+  assert.equal(countOccurrences(h.stdout.text + h.stderr.text, FAKE_OP_KEY), 0);
+});
+
+test('keys set --op <item-id> when 1Password is locked: exit 1, the classified message, nothing stored, op read never called', async () => {
+  const h = await harness();
+  const { opExec } = fakeOpExec([{ result: 'failed', code: 1, stderr: `not signed in ${FAKE_OP_KEY}` }]);
+  let reads = 0;
+  const opRead = async () => (reads += 1, { value: FAKE_OP_KEY, attempts: 1 });
+  const code = await h.run(['set', 'jev', '--op', ITEM_ID], { opRead, opExec });
+  assert.deepEqual([code, reads, h.stderr.text], [1, 0, 'jev: 1Password is locked or not signed in; unlock the app (or run `op signin`) and try again\n']);
+  assert.equal(h.backend.store.has('jev'), false);
+  assert.equal(countOccurrences(h.stdout.text + h.stderr.text, FAKE_OP_KEY), 0);
+});
+
+test('keys set --op: the op CLI missing gives the install hint, exit 1', async () => {
+  const h = await harness();
+  const { opExec } = fakeOpExec([{ result: 'failed', code: null, error: 'spawn op ENOENT' }]);
+  assert.equal(await h.run(['set', 'jev', '--op', ITEM_ID], { opExec }), 1);
+  assert.equal(h.stderr.text, 'jev: 1Password CLI not found; install it with: brew install 1password-cli\n');
+});
+
+test('keys test --ref <item-id> resolves first, then reads the resolved op:// ref', async () => {
+  const h = await harness();
+  const { opExec } = fakeOpExec([{ result: 'ok', code: 0, stdout: ITEM_STDOUT }]);
+  /** @type {string[]} */
+  const refs = [];
+  const opRead = async (/** @type {string} */ ref) => (refs.push(ref), { value: FAKE_OP_KEY, attempts: 1 });
+  assert.equal(await h.run(['test', 'jev', '--ref', ITEM_ID], { opRead, opExec }), 0);
+  assert.deepEqual(refs, [RESOLVED]);
+  assert.equal(countOccurrences(h.stdout.text + h.stderr.text, FAKE_OP_KEY), 0);
+});
+
+test('keys test: a timed-out op read reports the classified message and exits 1', async () => {
+  const h = await harness();
+  const opRead = async () => ({ value: null, attempts: 2, error: '1Password did not answer in time; unlock the app and try again', kind: 'op_timeout' });
+  assert.equal(await h.run(['test', 'jev', '--ref', REF], { opRead }), 1);
+  assert.equal(h.stderr.text, 'jev: 1Password did not answer in time; unlock the app and try again\njev: not found\n');
+});
+
+test('keys set --op <item-id>: an exec that throws gives the fixed op_failed message, exit 1, nothing stored, no thrown text', async () => {
+  const h = await harness();
+  const opExec = /** @type {any} */ (async () => {
+    throw new Error(`boom ${FAKE_OP_KEY}`);
+  });
+  assert.equal(await h.run(['set', 'jev', '--op', ITEM_ID], { opExec }), 1);
+  assert.equal(h.stderr.text, `jev: 1Password CLI failed (unexpected error); run \`op item get ${ITEM_ID}\` yourself to see why\n`);
+  assert.equal(h.backend.store.has('jev'), false);
+  assert.equal(countOccurrences(h.stdout.text + h.stderr.text, FAKE_OP_KEY), 0);
 });

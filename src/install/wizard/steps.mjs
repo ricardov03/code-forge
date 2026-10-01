@@ -8,7 +8,7 @@
  * because it is asked only when the chain resolves nothing.
  */
 
-import { isOpRef } from '../../keys/onepassword.mjs';
+import { isOpRef, OP_MESSAGES } from '../../keys/onepassword.mjs';
 import { HARNESSES } from '../harnesses.mjs';
 import { effectiveProvider, judgeCollision, proposeJudge } from './answers.mjs';
 import { ENGINE_CHOICES, GATE_NAMES, PROVIDERS, parseLevel, shellWords, UsageError } from './flags.mjs';
@@ -32,8 +32,20 @@ async function answer(ui, pending) {
   return value;
 }
 
-/** The 1Password option's hint: where to find the reference in the app. */
-export const OP_REF_HINT = 'In the 1Password app, right-click the key field → Copy Secret Reference (op://vault/item/field).';
+/** The 1Password option's hint: where to find the item ID, link or reference in the app. */
+export const OP_REF_HINT = "Paste the item ID (from `op item list`), the item's link, or its op:// secret reference.";
+
+/** The 1Password question (B25): an item ID or link is resolved to a full `op://` reference. */
+export const OP_REF_QUESTION = '1Password item ID, item link, or op:// reference';
+
+/** The question after "Enter a full op:// reference": op:// only, no lookup. */
+export const OP_FULL_REF_QUESTION = 'Full op://vault/item/field reference';
+
+/** The menu message when the resolver itself threw (its message is never shown). */
+export const OP_RESOLVE_FAILED = '1Password CLI failed (unexpected error); run `op item get <item-id>` yourself to see why';
+
+/** Printed when the Jev key is left unset, so the person knows how to set it later. */
+export const JEV_LATER_TEXT = 'keys: jev not set — set it later with: code-forge keys set jev --op <item-id>';
 
 /** The one-sentence hint line under each question (B24). */
 export const HINTS = Object.freeze({
@@ -263,39 +275,113 @@ export async function askProjectSettings(values, origins, ui) {
 }
 
 /**
+ * @typedef {(input: string) => Promise<{ref: string|null, error?: string, kind?: string, title?: string, vault?: string, field?: string}>} OpResolver
+ * @typedef {{ref: string|null, source: string, found?: {title?: string, vault?: string, field?: string}}} JevAnswer
+ */
+
+/**
+ * The 1Password branch: ask for an item ID, link or reference, resolve it, and on a failure offer
+ * Try again · Enter a full op:// reference · Choose another key source · Skip for now. Never throws
+ * on a 1Password failure. Returns null for "choose another key source".
+ * @param {Ui} ui
+ * @param {OpResolver} resolve
+ * @param {{input: string, error: string}|null} pending - start at the failure menu (a flag value that failed).
+ * @returns {Promise<JevAnswer|null>}
+ */
+async function askOpRef(ui, resolve, pending) {
+  let input = pending?.input ?? '';
+  let error = pending?.error ?? null;
+  let question = OP_REF_QUESTION;
+  for (;;) {
+    if (error === null) {
+      input = String(await answer(ui, ui.text({ message: withHint(question, OP_REF_HINT), ...(input ? { initialValue: input } : {}) }))).trim();
+      /** @type {Awaited<ReturnType<OpResolver>>} */
+      let res;
+      if (question !== OP_REF_QUESTION && !isOpRef(input)) {
+        // "full reference" mode takes op:// only; nothing is looked up
+        res = { ref: null, kind: 'op_bad_input', error: OP_MESSAGES.op_bad_input };
+      } else {
+        try {
+          const got = await resolve(input);
+          // a resolver that answers with anything but the documented shape counts as a failure
+          res = got && typeof got === 'object' && (got.ref === null || typeof got.ref === 'string')
+            ? got
+            : { ref: null, kind: 'op_failed', error: OP_RESOLVE_FAILED };
+        } catch {
+          // never the thrown message: it could carry op output
+          res = { ref: null, kind: 'op_failed', error: OP_RESOLVE_FAILED };
+        }
+      }
+      if (res.ref !== null) {
+        return { ref: res.ref, source: 'op', found: { title: res.title, vault: res.vault, field: res.field } };
+      }
+      error = res.error ?? OP_RESOLVE_FAILED;
+    }
+    const next = await answer(ui, ui.select({
+      message: withHint('1Password lookup failed. What next?', error),
+      options: [
+        { value: 'retry', label: 'Try again' },
+        { value: 'full', label: 'Enter a full op:// reference' },
+        { value: 'other', label: 'Choose another key source' },
+        { value: 'skip', label: 'Skip for now' },
+      ],
+      initialValue: 'retry',
+    }));
+    error = null;
+    if (next === 'other') return null;
+    if (next === 'skip') return { ref: null, source: 'none' };
+    if (next === 'full') {
+      question = OP_FULL_REF_QUESTION;
+      input = '';
+    } else {
+      question = OP_REF_QUESTION;
+    }
+  }
+}
+
+/**
  * Step 5 when the chain resolved nothing: where is the Jev key? A pasted key is read with hidden
- * input and handed straight to `store`; it is never returned, echoed or logged.
+ * input and handed straight to `store`; it is never returned, echoed or logged. A 1Password item ID
+ * or link is resolved to `op://<vaultId>/<itemId>/<fieldId>` through `opts.resolve` (B25).
  * @param {Ui} ui
  * @param {() => Promise<{put: (name: string, value: string, meta: {source: string, exp: number|null}) => Promise<void>}>} getStore
- * @returns {Promise<{ref: string|null, source: string}>}
+ * @param {{resolve?: OpResolver, pending?: {input: string, error: string}|null}} [opts]
+ * @returns {Promise<JevAnswer>}
  */
-export async function askJevSource(ui, getStore) {
-  const choice = await answer(ui, ui.select({
-    message: withHint('Where is the Jev key?', HINTS.jev),
-    options: [
-      { value: 'op', label: '1Password reference', hint: OP_REF_HINT },
-      { value: 'env', label: 'environment variable name' },
-      { value: 'paste', label: 'paste now (hidden)' },
-      { value: 'skip', label: 'skip (rules-only System 1)' },
-    ],
-    initialValue: 'skip',
-  }));
-  if (choice === 'op') {
-    const ref = String(await answer(ui, ui.text({ message: withHint('1Password reference (op://vault/item/field)', OP_REF_HINT) }))).trim();
-    if (!isOpRef(ref)) throw new UsageError('not an op://vault/item/field reference');
-    return { ref, source: 'op' };
+export async function askJevSource(ui, getStore, { resolve, pending = null } = {}) {
+  if (typeof resolve !== 'function') throw new TypeError('askJevSource: opts.resolve (the 1Password resolver) is required');
+  if (pending) {
+    const fromOp = await askOpRef(ui, resolve, pending);
+    if (fromOp) return fromOp;
   }
-  if (choice === 'env') {
-    const name = String(await answer(ui, ui.text({ message: withHint('Environment variable name', HINTS.env) }))).trim();
-    if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UsageError('not an environment variable name');
-    return { ref: `env:${name}`, source: 'env' };
+  for (;;) {
+    const choice = await answer(ui, ui.select({
+      message: withHint('Where is the Jev key?', HINTS.jev),
+      options: [
+        { value: 'op', label: '1Password item or reference', hint: OP_REF_HINT },
+        { value: 'env', label: 'environment variable name' },
+        { value: 'paste', label: 'paste now (hidden)' },
+        { value: 'skip', label: 'skip (rules-only System 1)' },
+      ],
+      initialValue: 'skip',
+    }));
+    if (choice === 'op') {
+      const fromOp = await askOpRef(ui, resolve, null);
+      if (fromOp) return fromOp;
+      continue;
+    }
+    if (choice === 'env') {
+      const name = String(await answer(ui, ui.text({ message: withHint('Environment variable name', HINTS.env) }))).trim();
+      if (!/^[A-Za-z_][A-Za-z0-9_]*$/.test(name)) throw new UsageError('not an environment variable name');
+      return { ref: `env:${name}`, source: 'env' };
+    }
+    if (choice === 'paste') {
+      const typed = await answer(ui, ui.password({ message: withHint('Jev key (input hidden)', HINTS.paste) }));
+      if (typeof typed !== 'string' || typed.length === 0) return { ref: null, source: 'none' };
+      const store = await getStore();
+      await store.put('jev', typed, { source: 'user', exp: null });
+      return { ref: 'user', source: 'keychain' };
+    }
+    return { ref: null, source: 'none' };
   }
-  if (choice === 'paste') {
-    const typed = await answer(ui, ui.password({ message: withHint('Jev key (input hidden)', HINTS.paste) }));
-    if (typeof typed !== 'string' || typed.length === 0) return { ref: null, source: 'none' };
-    const store = await getStore();
-    await store.put('jev', typed, { source: 'user', exp: null });
-    return { ref: 'user', source: 'keychain' };
-  }
-  return { ref: null, source: 'none' };
 }

@@ -5,18 +5,21 @@
  * message would be masked once the chain registered it.
  *
  *   keys list
- *   keys set <name> [--op <op://ref>]    hidden prompt, or read once from 1Password and cache 8 h
+ *   keys set <name> [--op <ref>]         hidden prompt, or read once from 1Password and cache 8 h
  *   keys test <name> [--ref <ref>]       resolve through the chain (no prompt)
  *   keys remove <name>
+ *
+ * An `--op`/`--ref` value may be a 1Password item ID or item link instead of `op://vault/item/field`:
+ * it is resolved to `op://<vaultId>/<itemId>/<fieldId>` first (`op item get`, B25).
  *
  * Every name is validated before any store call, on every subcommand.
  */
 
 import { writeSafe } from '../util/redact.mjs';
-import { isOpRef } from '../keys/onepassword.mjs';
+import { describeOpItem, isOpRef, OP_MESSAGES, opItemIdFromInput, toOpRef } from '../keys/onepassword.mjs';
 import { assertKeyName, createDefaultKeyStore, parseRef, readOpAndCache, resolveKey } from '../keys/store.mjs';
 
-const USAGE = 'usage: code-forge keys list | set <name> [--op <ref>] | test <name> [--ref <ref>] | remove <name>\n';
+const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref>] | test <name> [--ref <ref>] | remove <name>\n';
 
 /** The one flag each subcommand accepts (list and remove take none). */
 const FLAGS = /** @type {Record<string, string|null>} */ ({ list: null, set: '--op', test: '--ref', remove: null });
@@ -76,11 +79,12 @@ async function askHidden(name) {
  * @param {{write: (s: string) => unknown}} [deps.stderr]
  * @param {(name: string) => Promise<string|null>} [deps.ask]
  * @param {typeof import('../keys/onepassword.mjs').opRead} [deps.opRead]
+ * @param {typeof import('../util/exec.mjs').exec} [deps.opExec] - runs `op item get` for an item ID or link.
  * @param {NodeJS.ProcessEnv} [deps.env]
  * @param {number} [deps.now]
  * @returns {Promise<number>}
  */
-export async function runKeys(args, { store, stdout = process.stdout, stderr = process.stderr, ask = askHidden, opRead, env = process.env, now = Date.now() }) {
+export async function runKeys(args, { store, stdout = process.stdout, stderr = process.stderr, ask = askHidden, opRead, opExec, env = process.env, now = Date.now() }) {
   const out = (/** @type {string} */ s) => writeSafe(stdout, s);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
 
@@ -89,20 +93,46 @@ export async function runKeys(args, { store, stdout = process.stdout, stderr = p
     err(USAGE);
     return 2;
   }
-  const { sub, name, flagArg } = parsed;
+  const { sub, name } = parsed;
+  let { flagArg } = parsed;
   try {
     if (name !== undefined) {
       assertKeyName(name);
-    }
-    if (sub === 'test' && flagArg !== undefined) {
-      parseRef(name, flagArg);
     }
   } catch (e) {
     err(`keys: ${e.message}\n`);
     return 2;
   }
-  if (sub === 'set' && flagArg !== undefined && !isOpRef(flagArg)) {
-    err(`${name}: --op must be an op://vault/item/field reference\n`);
+  const fullRef = flagArg !== undefined && isOpRef(flagArg);
+  const itemId = flagArg !== undefined && !fullRef ? opItemIdFromInput(flagArg) : null;
+  if (sub === 'set' && flagArg !== undefined && !fullRef && itemId === null) {
+    err(`${name}: --op must be a 1Password item ID, item link or op://vault/item/field reference\n`);
+    return 2;
+  }
+  // A 1Password item ID or link becomes a full op:// reference before any store call (B25).
+  if (flagArg !== undefined && itemId !== null) {
+    /** @type {Awaited<ReturnType<typeof toOpRef>>} */
+    let res;
+    try {
+      res = await toOpRef(flagArg, opExec ? { exec: opExec } : {});
+    } catch {
+      // never the thrown message: it could carry op output
+      res = { ref: null, kind: 'op_failed', error: `${OP_MESSAGES.op_failed} (unexpected error); run \`op item get ${itemId}\` yourself to see why` };
+    }
+    if (res.ref === null) {
+      err(`${name}: ${res.error ?? OP_MESSAGES.op_failed}\n`);
+      return 1;
+    }
+    const found = describeOpItem(res);
+    out(`${name}: ${found ? `${found} -> ` : ''}${res.ref}\n`);
+    flagArg = res.ref;
+  }
+  try {
+    if (sub === 'test' && flagArg !== undefined) {
+      parseRef(name, flagArg);
+    }
+  } catch (e) {
+    err(`keys: ${e.message}\n`);
     return 2;
   }
 

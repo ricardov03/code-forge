@@ -6,6 +6,18 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- 1Password item ID or item link accepted for the Jev key (init question, --jev-ref, keys set --op, keys test --ref):
+  code-forge finds the vault and key field and saves a full op:// reference of IDs; 1Password failures (CLI missing,
+  locked, timeout, not found, bad output, no key field) get one clear message, a retry/skip menu in init, and never
+  write a partial config
+
+### Changed
+
+- Releases: CI no longer publishes to npm. Publish with `npm publish` from your machine, then push the tag; the tag push
+  only creates the GitHub release (`.github/workflows/release.yml`).
+
 ## [0.2.1] — 2026-10-01
 
 ### Changed

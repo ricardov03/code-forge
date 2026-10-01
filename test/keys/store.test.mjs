@@ -345,3 +345,45 @@ test('decodeEntry: our JSON shape, a raw value, and JSON that is not ours', () =
   assert.deepEqual(decodeEntry('{"x":1}'), { value: '{"x":1}', exp: null });
   assert.deepEqual(decodeEntry('{"v":"a","exp":"soon"}'), { value: 'a', exp: null });
 });
+
+// ---- B25: a 1Password failure at run time never crashes; the cache still wins ----
+
+const LOCKED = '1Password is locked or not signed in; unlock the app (or run `op signin`) and try again';
+
+test('run time: op locked, no cache -> value null with the classified message; a cached value is used without calling op', async () => {
+  const empty = await createKeyStore({ backends: [memoryBackend('keychain')], dir: await tempHome() });
+  const exec = /** @type {any} */ (async () => ({ result: 'failed', code: 1, signal: null, stdout: '', stderr: `not signed in ${FAKE_OP_KEY}`, timedOut: false }));
+  const { opRead } = await import('../../src/keys/onepassword.mjs');
+  const viaOp = (/** @type {string} */ ref) => opRead(ref, { exec });
+  const miss = await resolveKey('jev', { store: empty, ref: REF, env: {}, opRead: viaOp, now: NOW });
+  assert.deepEqual([miss.value, miss.source, miss.errors], [null, null, [LOCKED]]);
+
+  const cached = await createKeyStore({ backends: [memoryBackend('keychain', { data: { jev: encodeEntry(FAKE_KEY, NOW + HOUR) } })], dir: await tempHome() });
+  let opCalls = 0;
+  const hit = await resolveKey('jev', { store: cached, ref: REF, env: {}, opRead: async () => (opCalls += 1, { value: null, attempts: 1, error: LOCKED }), now: NOW });
+  assert.deepEqual([hit.value, hit.source, opCalls], [FAKE_KEY, 'keychain', 0]);
+});
+
+test('doctor keys row: a fake op failing as op_locked (sentinel in stdout/stderr) is exactly one WARN row, fixed text, no sentinel', async () => {
+  const { checkKeys } = await import('../../src/doctor/local.mjs');
+  const { opRead } = await import('../../src/keys/onepassword.mjs');
+  const SENTINEL = 'FAKE-sentinel-doctor-b25-0f0f0f';
+  const exec = /** @type {any} */ (async () => ({ result: 'failed', code: 1, signal: null, stdout: SENTINEL, stderr: `[ERROR] not signed in ${SENTINEL}`, timedOut: false }));
+  const store = await createKeyStore({ backends: [memoryBackend('keychain')], dir: await tempHome() });
+  const out = await checkKeys({ keys: { jev: REF } }, { env: {}, store, opRead: (/** @type {string} */ ref) => opRead(ref, { exec }) });
+  assert.equal(out.key, null);
+  assert.equal(out.rows.length, 1);
+  assert.equal(out.rows[0].status, 'WARN');
+  assert.equal(out.rows[0].detail, `jev key not resolved (${LOCKED}); System 1 falls back to rules`);
+  assert.equal(countOccurrences(JSON.stringify(out), SENTINEL), 0);
+});
+
+test('doctor keys row: an op_not_found reason shows the fixed text without the reference; other reasons are "key store error"', async () => {
+  const { checkKeys } = await import('../../src/doctor/local.mjs');
+  const store = await createKeyStore({ backends: [memoryBackend('keychain')], dir: await tempHome() });
+  const opRead = async () => ({ value: null, attempts: 1, kind: 'op_not_found', error: '1Password item or field not found, or no access; check the reference' });
+  const out = await checkKeys({ keys: { jev: REF } }, { env: {}, store, opRead });
+  assert.equal(out.rows[0].detail, 'jev key not resolved (1Password item or field not found, or no access); System 1 falls back to rules');
+  const odd = await checkKeys({ keys: { jev: REF } }, { env: {}, store, opRead: async () => ({ value: null, attempts: 1, error: `weird ${REF}` }) });
+  assert.equal(odd.rows[0].detail, 'jev key not resolved (key store error); System 1 falls back to rules');
+});

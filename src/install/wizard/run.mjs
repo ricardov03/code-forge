@@ -26,6 +26,7 @@ import { parse as parseYAML } from 'yaml';
 import { DEFAULT_CONFIG_FILENAME, loadConfigFile } from '../../config/load.mjs';
 import { refreshFromCliCaches } from '../../config/refresh.mjs';
 import { validateConfig } from '../../config/validate.mjs';
+import { describeOpItem, isOpRef, OP_MESSAGES, toOpRef } from '../../keys/onepassword.mjs';
 import { createDefaultKeyStore, resolveKey } from '../../keys/store.mjs';
 import { exec } from '../../util/exec.mjs';
 import { redact } from '../../util/redact.mjs';
@@ -36,7 +37,7 @@ import { install, installsPath } from '../link.mjs';
 import { currentHarness, effectiveProvider, gatherContext, judgeCollision, proposeJudge, resolveAnswers, SUBAGENT_HARNESSES } from './answers.mjs';
 import { changedPaths, generatedConfig, mergeConfig, mergeInto, serializeConfig } from './project-file.mjs';
 import { parseInitArgs, UsageError } from './flags.mjs';
-import { askAnswers, askJevSource, askProjectSettings, askSettingsChoice, CancelledError, HINTS, withHint } from './steps.mjs';
+import { askAnswers, askJevSource, askProjectSettings, askSettingsChoice, CancelledError, HINTS, JEV_LATER_TEXT, withHint } from './steps.mjs';
 import { summarizeSettings } from './summary.mjs';
 
 /** §5.1's stop text, printed at setup (not at the first run) when there is no engine to use. */
@@ -60,7 +61,7 @@ export const USAGE = [
   'usage: code-forge init [--no-interaction] [--tools recommended|current] [--yes-tool <tool>]…',
   '  [--harness a,b] [-g|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]…',
   '  [--refresh-models] [--multimodel on|off] [--second-provider P]',
-  '  [--jev-ref op://… | --jev-env NAME | --no-jev] [--engine auto|solo|harness] [--solo-project N]',
+  '  [--jev-ref <item-id|link|op://…> | --jev-env NAME | --no-jev] [--engine auto|solo|harness] [--solo-project N]',
   '  [--gate name=cmd]… [--proof isolation=export|lock | high=a,b | link_dirs=a,b | copy_untracked=a,b]… [--skip-doctor]',
 ].join('\n');
 
@@ -80,10 +81,11 @@ const JEV_ENV_NAME = 'CODE_FORGE_KEY_JEV';
 
 /** A failure after the flags parsed: carries the exit code; the message names key paths, never values. */
 class InitFailure extends Error {
-  /** @param {number} code @param {string} message */
-  constructor(code, message) {
+  /** @param {number} code @param {string} message @param {string|null} [kind] - a 1Password failure kind (B25) */
+  constructor(code, message, kind = null) {
     super(message);
     this.code = code;
+    this.kind = kind;
   }
 }
 
@@ -103,6 +105,7 @@ class InitFailure extends Error {
  * @property {(argv: string[]) => Promise<{result: string}>} [installTool]
  * @property {string} [skillSource]
  * @property {() => Date} [now]
+ * @property {typeof exec} [opExec] - runs `op` to resolve a 1Password item ID (default B0 `exec`).
  */
 
 /** @param {string} file @returns {Promise<Record<string, any>|null>} a missing or unreadable user config reads as null */
@@ -174,10 +177,10 @@ export async function runInit(args, deps = {}) {
 
   /**
    * The one exit: writes the log, then either the success shape or `{ok: false, error, wrote, …}`.
-   * @param {number} code @param {string|null} error
+   * @param {number} code @param {string|null} error @param {string|null} [kind] - a 1Password failure kind
    * @returns {Promise<number>}
    */
-  const finish = async (code, error) => {
+  const finish = async (code, error, kind = null) => {
     if (error !== null) {
       say(`error: ${error}`);
       stderr.write(redact(`init: ${error}\n`));
@@ -194,7 +197,7 @@ export async function runInit(args, deps = {}) {
     if (jsonMode) {
       const body = error === null
         ? { ok: code === 0, wrote, harnesses: linked, engine_stop: engineStop, doctor, settings: summary?.settings ?? null, blank: summary?.blank ?? [], log, log_tail: tail }
-        : { ok: false, error, wrote, log, log_tail: tail };
+        : { ok: false, error, ...(kind ? { kind } : {}), wrote, log, log_tail: tail };
       writeAgentJson(JSON.parse(redact(JSON.stringify(body))), { stdout });
     } else if (error === null) {
       const rest = lines.slice(printed);
@@ -259,16 +262,43 @@ export async function runInit(args, deps = {}) {
     const missing = [];
     let jevRef = null;
     let jevSource = 'none';
+    const resolveOp = (/** @type {string} */ input) => toOpRef(input, deps.opExec ? { exec: deps.opExec } : {});
+    /** @param {import('./steps.mjs').JevAnswer} a */
+    const takeAnswer = (a) => {
+      jevRef = a.ref;
+      jevSource = a.source;
+      const found = a.found ? describeOpItem(a.found) : null;
+      if (found) say(`keys: jev from ${found}`);
+      if (a.ref === null) say(JEV_LATER_TEXT);
+    };
     if (values.jev.mode === 'ref') {
       jevRef = values.jev.ref;
-      jevSource = jevRef.startsWith('env:') ? 'env' : jevRef.startsWith('op://') ? 'op' : 'keychain';
+      // B25: a --jev-ref item ID or link becomes a full op:// reference before anything is written
+      if (!jevRef.startsWith('env:') && !isOpRef(jevRef) && jevRef !== 'user' && !jevRef.startsWith('keychain:')) {
+        /** @type {Awaited<ReturnType<typeof toOpRef>>} */
+        let res;
+        try {
+          res = await resolveOp(jevRef);
+        } catch {
+          // never the thrown message: it could carry op output
+          res = { ref: null, kind: 'op_failed', error: `${OP_MESSAGES.op_failed} (unexpected error)` };
+        }
+        if (res.ref !== null) {
+          takeAnswer({ ref: res.ref, source: 'op', found: { title: res.title, vault: res.vault, field: res.field } });
+        } else {
+          const error = res.error ?? OP_MESSAGES.op_failed;
+          if (interactive) takeAnswer(await askJevSource(ui, getStore, { resolve: resolveOp, pending: { input: jevRef, error } }));
+          else throw new InitFailure(2, `--jev-ref: ${error}. Nothing written.`, res.kind ?? 'op_failed');
+        }
+      }
+      if (jevRef !== null) jevSource = jevRef.startsWith('env:') ? 'env' : jevRef.startsWith('op://') ? 'op' : 'keychain';
     } else if (values.jev.mode === 'auto') {
       const res = await resolveKey('jev', { store: await getStore(), env });
       if (res.value !== null && typeof res.source === 'string') {
         jevRef = res.source === 'env' ? `env:${JEV_ENV_NAME}` : 'user';
         jevSource = res.source;
       } else if (interactive) {
-        ({ ref: jevRef, source: jevSource } = await askJevSource(ui, getStore));
+        takeAnswer(await askJevSource(ui, getStore, { resolve: resolveOp }));
       } else {
         missing.push('keys.jev (pass --jev-ref, --jev-env or --no-jev)');
       }
@@ -385,7 +415,7 @@ export async function runInit(args, deps = {}) {
 
     return await finish(doctor === null || doctor.ok ? 0 : 1, null);
   } catch (err) {
-    if (err instanceof InitFailure) return finish(err.code, err.message);
+    if (err instanceof InitFailure) return finish(err.code, err.message, err.kind);
     if (err instanceof UsageError) return finish(2, err.message);
     if (err instanceof CancelledError) return finish(1, err.message);
     // an unexpected throw (an installer, a link, the doctor…): the log keeps the stack, redacted

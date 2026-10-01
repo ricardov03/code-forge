@@ -1,10 +1,10 @@
 {
-  "$comment": "hand-maintained; checked against plan §10.4 + NIGHT-LOG by test/docs-blocks.test.mjs. Ids = every `| **Bxx** |` row in plans/code-forge-plan-v1.3.md §10.4 Waves 2-6 (19 ids), plus the blocks the root orchestrator added during the night run of 2026-09-25 that are not in that table (plans/NIGHT-LOG.md): B1.2, B4.1, B11.1, B12c (B3.1 was already in the v1.3 §10.4 table); plus B22 (the review-only verb) and B23 (release tools), which the root added on 2026-09-26 after the night run, and B24 (init project settings), added on 2026-10-01. Wave 0-1 blocks (B0-B8) are the pre-v1.3 baseline landed before this plan revision; they have no entry under blocks and are listed in baseline_ids so every depends_on id resolves; see plans/code-forge-plan-v1.3.md §10.2-§10.3 for their record. B10c is listed with deleted:true — the maintainer answered Q16 'cut' on 2026-09-25, so B10c (consumer-facing mutation-testing tools) never lands.",
+  "$comment": "hand-maintained; checked against plan §10.4 + NIGHT-LOG by test/docs-blocks.test.mjs. Ids = every `| **Bxx** |` row in plans/code-forge-plan-v1.3.md §10.4 Waves 2-6 (19 ids), plus the blocks the root orchestrator added during the night run of 2026-09-25 that are not in that table (plans/NIGHT-LOG.md): B1.2, B4.1, B11.1, B12c (B3.1 was already in the v1.3 §10.4 table); plus B22 (the review-only verb) and B23 (release tools), which the root added on 2026-09-26 after the night run, and B24 (init project settings) and B25 (1Password item IDs), added on 2026-10-01. Wave 0-1 blocks (B0-B8) are the pre-v1.3 baseline landed before this plan revision; they have no entry under blocks and are listed in baseline_ids so every depends_on id resolves; see plans/code-forge-plan-v1.3.md §10.2-§10.3 for their record. B10c is listed with deleted:true — the maintainer answered Q16 'cut' on 2026-09-25, so B10c (consumer-facing mutation-testing tools) never lands.",
   "checked_against": [
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 26,
+  "block_count": 27,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -321,6 +321,18 @@
       ],
       "depends_on": ["B13a"],
       "note": "root-added 2026-10-01; not in the v1.3 §10.4 table. Released in 0.2.1"
+    },
+    "B25": {
+      "title": "1Password item ID or item link for the Jev key: resolve vault and key field with op item get, save an op:// reference of IDs; classified 1Password failures with a retry/skip menu",
+      "wave": 6,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/keys/onepassword.mjs", "src/cli/keys.mjs", "src/doctor/local.mjs",
+        "test/keys/onepassword.test.mjs", "test/init/onepassword.test.mjs"
+      ],
+      "depends_on": ["B24"],
+      "note": "root-added 2026-10-01; not in the v1.3 §10.4 table"
     }
   }
 }

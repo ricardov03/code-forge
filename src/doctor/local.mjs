@@ -13,6 +13,7 @@ import { askJev as realAskJev } from '../decide/jev-client.mjs';
 import { buildQuestionPayload } from '../decide/questions.mjs';
 import { commandOnPath } from '../install/detect.mjs';
 import { installsPath, readInstalls, targetResolves } from '../install/link.mjs';
+import { OP_MESSAGES } from '../keys/onepassword.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { ledgerDir } from '../ledger/paths.mjs';
 import { listEntries } from '../util/reaper.mjs';
@@ -71,7 +72,16 @@ export async function checkKeys(cfg, deps) {
     const store = deps.store ?? (await createDefaultKeyStore(deps.env));
     const ref = cfg?.system1?.key ?? cfg?.keys?.jev;
     const res = await resolveKey('jev', { store, env: deps.env, ref: typeof ref === 'string' ? ref : undefined, ...(deps.opRead ? { opRead: deps.opRead } : {}) });
-    if (res.value === null) return { rows: [row('keys', 'WARN', 'keys', 'jev key not resolved; System 1 falls back to rules')], key: null };
+    if (res.value === null) {
+      // only fixed texts are shown: a 1Password failure by its classified message (B25), any other
+      // reason as a fixed "key store error" — never a reference, a path or tool output
+      const known = Object.values(OP_MESSAGES);
+      const reasons = Array.isArray(res.errors)
+        ? [...new Set(res.errors.map((e) => known.find((m) => typeof e === 'string' && (e === m || e.startsWith(m))) ?? 'key store error'))]
+        : [];
+      const why = reasons.length > 0 ? ` (${reasons.join('; ')})` : '';
+      return { rows: [row('keys', 'WARN', 'keys', `jev key not resolved${why}; System 1 falls back to rules`)], key: null };
+    }
     const exp = res.exp === null ? 'no expiry' : `expires ${new Date(res.exp).toISOString()}`;
     return { rows: [row('keys', 'OK', 'keys', `jev key from ${res.source}, ${exp}`)], key: res.value };
   } catch (err) {

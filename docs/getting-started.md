@@ -50,7 +50,7 @@ Every question has a default: press Enter to keep it. Each question shows a one-
 | 4 | Multimodel review (consensus)? | off. On: pick a second provider; the L3 judge must come from a third provider | `--multimodel on\|off`, `--second-provider P` |
 | 5 | Engine | `auto` · `solo` · `harness` (`subprocess` is never offered; write it in the config yourself) | `--engine auto\|solo\|harness`, `--solo-project N` |
 | 6 | Gates and proof settings (after the summary below) | **Use these** (the default: Enter keeps it; keep the detected values, blanks stay blank) · **Customize now** (asks gates `test`, `lint`, `types`, `format`, then high-risk paths, proof isolation, export directories to link and untracked files to copy, each pre-filled; Enter keeps it) · **Leave for later** (keeps them and prints the keys to edit) | `--gate name=cmd`, `--proof key=value` (a value set by a flag is not asked) |
-| 7 | Where is the Jev key? (asked only when none is found) | 1Password reference · environment variable · paste now (hidden, goes to the key store) · skip. For the 1Password reference: in the 1Password app, right-click the key field → Copy Secret Reference (`op://vault/item/field`). The item ID also works in place of the name (see [Keys](#keys)) | `--jev-ref op://…`, `--jev-env NAME`, `--no-jev` |
+| 7 | Where is the Jev key? (asked only when none is found) | 1Password · environment variable · paste now (hidden, goes to the key store) · skip. For 1Password, paste only the item ID (or the item link, or an `op://vault/item/field` reference): code-forge finds the vault and the key field and saves a full reference. If 1Password is locked or not found, you can try again, type a full reference, pick another source or skip (see [Keys](#keys)) | `--jev-ref <item-id\|link\|op://…>`, `--jev-env NAME`, `--no-jev` |
 
 At the end `init` runs `doctor --quick`; `--skip-doctor` skips it.
 
@@ -158,18 +158,19 @@ All of these are safe to run in any project that has a `.code-forge.yml`:
 
 | Command | Does |
 |---|---|
-| `code-forge keys set <name> [--op <ref>]` | stores a key in the OS keychain from a hidden prompt, or reads it once from 1Password and caches it for 8 hours. The value never goes into argv |
+| `code-forge keys set <name> [--op <item-id\|link\|ref>]` | stores a key in the OS keychain from a hidden prompt, or reads it once from 1Password and caches it for 8 hours. The value never goes into argv |
 | `code-forge keys test <name> [--ref <ref>]` | resolves and checks one key |
 | `code-forge keys remove <name>` | deletes a stored key |
 
 Lookup order: environment → OS keychain → 1Password (cached for 8 hours) → ask at setup.
 `.code-forge.yml` only ever holds the reference.
 
-**1Password: names or IDs.** A reference is `op://vault/item/field`. The item part can be the
-item's name or its ID. The ID is safer: renaming the item does not break it, two items with the
-same name cannot be confused, and it has no spaces. `op item list --vault <vault>` prints each
-item's ID in the first column. For an API Credential item the field is `credential`, so the
-reference is `op://<vault>/<item-id>/credential`.
+**1Password: names or IDs.** You can paste only the item ID (`op item list` prints it in the
+first column) or the item's link. code-forge asks `op`
+for the vault and the key field (`credential` on an API Credential item) and saves
+`op://<vault-id>/<item-id>/<field-id>`. IDs are safer than names: renaming the item does not break
+them. A full `op://vault/item/field` reference still works as is. The same goes for
+`keys set <name> --op` and `keys test <name> --ref`.
 
 ## Keeping it up to date
 

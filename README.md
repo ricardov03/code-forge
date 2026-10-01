@@ -39,8 +39,9 @@ for later. Non-interactively:
 code-forge init --no-interaction --no-jev
 ```
 
-`--no-jev` skips the System-1 key for a first try; drop it and pass `--jev-ref op://vault/item/field`
-or `--jev-env MY_JEV_KEY` once you have one. A second run of `init` changes nothing it already wrote.
+`--no-jev` skips the System-1 key for a first try; drop it and pass `--jev-ref <1Password item ID>`
+(or the item link, or `op://vault/item/field`; code-forge finds the vault and the key field) or
+`--jev-env MY_JEV_KEY` once you have one. A second run of `init` changes nothing it already wrote.
 
 To upgrade: `npm install -g @codedology/code-forge@latest`, then `code-forge upgrade` (re-copies
 skill installs made with `--copy`). See [docs/getting-started.md](docs/getting-started.md#keeping-it-up-to-date).
@@ -82,7 +83,7 @@ usage line.
 
 | Verb | Usage |
 |---|---|
-| `init` | `code-forge init [--no-interaction] [--tools recommended\|current] [--yes-tool <tool>]… [--harness a,b] [-g\|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]… [--refresh-models] [--multimodel on\|off] [--second-provider P] [--jev-ref op://… \| --jev-env NAME \| --no-jev] [--engine auto\|solo\|harness] [--solo-project N] [--gate name=cmd]… [--proof isolation=export\|lock \| high=a,b \| link_dirs=a,b \| copy_untracked=a,b]… [--skip-doctor]` |
+| `init` | `code-forge init [--no-interaction] [--tools recommended\|current] [--yes-tool <tool>]… [--harness a,b] [-g\|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]… [--refresh-models] [--multimodel on\|off] [--second-provider P] [--jev-ref <item-id\|link\|op://…> \| --jev-env NAME \| --no-jev] [--engine auto\|solo\|harness] [--solo-project N] [--gate name=cmd]… [--proof isolation=export\|lock \| high=a,b \| link_dirs=a,b \| copy_untracked=a,b]… [--skip-doctor]` |
 | `doctor` | `code-forge doctor [--quick] [--json] [--cwd <dir>]` |
 | `validate` | `code-forge validate [--file <path>]` |
 | `resolve` | `code-forge resolve <L0\|L1\|L2\|L3>` |

@@ -277,17 +277,17 @@ test('re-run: a hand-edited gates.lint stays; a blank gate the project now shows
   assert.deepEqual(json.settings['gates.types'], { value: ['npx', 'tsc', '--noEmit'], source: 'detected', note: 'tsconfig.json' });
 });
 
-test('the 1Password option and its follow-up question carry the exact "Copy Secret Reference" hint', async () => {
-  const hint = 'In the 1Password app, right-click the key field → Copy Secret Reference (op://vault/item/field).';
-  const ui = scriptedUi({ 'Where is the Jev key?': 'op', '1Password reference': 'op://Dev/jev/credential' });
+test('the 1Password option and its follow-up question carry the exact item-ID hint', async () => {
+  const hint = "Paste the item ID (from `op item list`), the item's link, or its op:// secret reference.";
+  const ui = scriptedUi({ 'Where is the Jev key?': 'op', '1Password item ID': 'op://Dev/jev/credential' });
   const r = await run(buildNodeAllGates, [], { ui });
   assert.equal(r.code, 0, r.stderr);
   const where = ui.calls.filter((c) => firstLine(c) === 'Where is the Jev key?');
   assert.equal(where.length, 1);
   assert.deepEqual(where[0].options.filter((o) => o.value === 'op').map((o) => o.hint), [hint]);
-  const ref = ui.calls.filter((c) => firstLine(c) === '1Password reference (op://vault/item/field)');
+  const ref = ui.calls.filter((c) => firstLine(c) === '1Password item ID, item link, or op:// reference');
   assert.equal(ref.length, 1);
-  assert.equal(ref[0].message, `1Password reference (op://vault/item/field)\n${hint}`);
+  assert.equal(ref[0].message, `1Password item ID, item link, or op:// reference\n${hint}`);
   assert.equal(r.read().keys.jev, 'op://Dev/jev/credential');
 });
 
