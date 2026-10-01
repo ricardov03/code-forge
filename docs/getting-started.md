@@ -50,7 +50,7 @@ Every question has a default: press Enter to keep it. Each question shows a one-
 | 4 | Multimodel review (consensus)? | off. On: pick a second provider; the L3 judge must come from a third provider | `--multimodel on\|off`, `--second-provider P` |
 | 5 | Engine | `auto` · `solo` · `harness` (`subprocess` is never offered; write it in the config yourself) | `--engine auto\|solo\|harness`, `--solo-project N` |
 | 6 | Gates and proof settings (after the summary below) | **Use these** (the default: Enter keeps it; keep the detected values, blanks stay blank) · **Customize now** (asks gates `test`, `lint`, `types`, `format`, then high-risk paths, proof isolation, export directories to link and untracked files to copy, each pre-filled; Enter keeps it) · **Leave for later** (keeps them and prints the keys to edit) | `--gate name=cmd`, `--proof key=value` (a value set by a flag is not asked) |
-| 7 | Where is the Jev key? (asked only when none is found) | 1Password reference · environment variable · paste now (hidden, goes to the key store) · skip. For the 1Password reference: in the 1Password app, right-click the key field → Copy Secret Reference (`op://vault/item/field`) | `--jev-ref op://…`, `--jev-env NAME`, `--no-jev` |
+| 7 | Where is the Jev key? (asked only when none is found) | 1Password reference · environment variable · paste now (hidden, goes to the key store) · skip. For the 1Password reference: in the 1Password app, right-click the key field → Copy Secret Reference (`op://vault/item/field`). The item ID also works in place of the name (see [Keys](#keys)) | `--jev-ref op://…`, `--jev-env NAME`, `--no-jev` |
 
 At the end `init` runs `doctor --quick`; `--skip-doctor` skips it.
 
@@ -165,7 +165,27 @@ All of these are safe to run in any project that has a `.code-forge.yml`:
 Lookup order: environment → OS keychain → 1Password (cached for 8 hours) → ask at setup.
 `.code-forge.yml` only ever holds the reference.
 
+**1Password: names or IDs.** A reference is `op://vault/item/field`. The item part can be the
+item's name or its ID. The ID is safer: renaming the item does not break it, two items with the
+same name cannot be confused, and it has no spaces. `op item list --vault <vault>` prints each
+item's ID in the first column. For an API Credential item the field is `credential`, so the
+reference is `op://<vault>/<item-id>/credential`.
+
 ## Keeping it up to date
+
+To move to a new version:
+
+```bash
+npm install -g @codedology/code-forge@latest
+code-forge version
+code-forge upgrade
+```
+
+`upgrade` re-copies skill installs made with `--copy`; symlinked installs already point at the
+new package. With nvm, the global install belongs to one Node version: install again after you
+switch. Your `.code-forge.yml` files and `~/.code-forge` are not changed. To see the settings
+summary of a newer `init`, run `code-forge init` again in the project; it keeps the values you set
+by hand. What changed in each version is in [CHANGELOG.md](../CHANGELOG.md).
 
 | Command | Does |
 |---|---|

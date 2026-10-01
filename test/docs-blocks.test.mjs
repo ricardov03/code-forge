@@ -52,8 +52,10 @@ const NIGHT_LOG_ADDED_IDS = ['B1.2', 'B4.1', 'B11.1', 'B12c'];
  * Blocks the root added AFTER the night run, also not rows in plan §10.4 (source: the root's
  * ruling on B22's facts diff, 2026-09-26):
  *   - B22 the review-only verb (`code-forge review`)
+ *   - B23 the release and changelog tools (2026-09-26)
+ *   - B24 init project settings: detect, summarize blanks, one choice (2026-10-01)
  */
-const ROOT_ADDED_LATER_IDS = ['B22'];
+const ROOT_ADDED_LATER_IDS = ['B22', 'B23', 'B24'];
 
 // The plan is maintainer-only (not tracked since 2026-09-25): the drift check runs where it exists.
 const HAS_PLAN = existsSync(PLAN_PATH);
@@ -67,8 +69,8 @@ test('blocks.json ids deep-equal §10.4\'s table rows plus the NIGHT-LOG additio
   const expected = [...fromPlan, ...NIGHT_LOG_ADDED_IDS, ...ROOT_ADDED_LATER_IDS].sort();
   const actual = Object.keys(doc.blocks).sort();
   assert.deepEqual(actual, expected);
-  assert.equal(actual.length, 24);
-  assert.equal(doc.block_count, 24);
+  assert.equal(actual.length, 26);
+  assert.equal(doc.block_count, 26);
 });
 
 test('B10c is marked deleted (Q16 = cut) — negative: no other block is', () => {
@@ -88,7 +90,7 @@ test('every depends_on id resolves to a blocks key or a baseline_ids entry (B0-B
   assert.deepEqual(doc.baseline_ids, ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8']);
   const known = new Set([...Object.keys(doc.blocks), ...doc.baseline_ids]);
   const allDeps = Object.values(doc.blocks).flatMap((b) => b.depends_on);
-  assert.equal(allDeps.length, 67);
+  assert.equal(allDeps.length, 69);
   const unresolved = Object.entries(doc.blocks).flatMap(([id, b]) =>
     b.depends_on.filter((dep) => !known.has(dep)).map((dep) => `${id} -> ${dep}`),
   );

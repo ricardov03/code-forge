@@ -42,6 +42,9 @@ code-forge init --no-interaction --no-jev
 `--no-jev` skips the System-1 key for a first try; drop it and pass `--jev-ref op://vault/item/field`
 or `--jev-env MY_JEV_KEY` once you have one. A second run of `init` changes nothing it already wrote.
 
+To upgrade: `npm install -g @codedology/code-forge@latest`, then `code-forge upgrade` (re-copies
+skill installs made with `--copy`). See [docs/getting-started.md](docs/getting-started.md#keeping-it-up-to-date).
+
 ## Quickstart
 
 Once `init` has written `.code-forge.yml`, these all run for real:
