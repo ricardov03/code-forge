@@ -257,3 +257,14 @@ process.stdout.write(JSON.stringify({ type: 'item.completed', item: { id: 'i', t
   assert.equal(seen.rules, renderCodexRules(renderForCodex(mergeForbidden())).count); // B4.2: FORBIDDEN + the coder-only entries
   assert.equal(existsSync(seen.home), false);
 });
+
+test('readAnswer: a Grok envelope yields its structuredOutput, not the envelope', async () => {
+  const { readAnswer } = await import('../../src/session/spawn.mjs');
+  const answer = { passed: true, summary: 'ok', reviewed_hunks: [], findings: [] };
+  const stdout = JSON.stringify({ text: JSON.stringify(answer), stopReason: 'end_turn', usage: { input_tokens: 10, output_tokens: 2 }, structuredOutput: answer });
+  const read = readAnswer('grok', stdout, null);
+  assert.deepEqual(read.answer, answer);
+  assert.equal(read.text, JSON.stringify(answer));
+  const textOnly = readAnswer('grok', JSON.stringify({ text: JSON.stringify(answer), stopReason: 'end_turn' }), null);
+  assert.deepEqual(textOnly.answer, answer);
+});

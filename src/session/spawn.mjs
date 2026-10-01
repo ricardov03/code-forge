@@ -177,8 +177,9 @@ export function readAnswer(cli, stdout, outText) {
     return { parsed: errorEvent ?? null, text, answer: tryJSON(text), usage: parseUsage('codex', usageEvent ?? null) };
   }
   const parsed = tryJSON(stdout.trim());
-  const text = typeof parsed?.result === 'string' ? parsed.result : stdout;
-  const answer = parsed?.structured_output ?? tryJSON(text);
+  // Claude's envelope carries `result` + `structured_output`; Grok's carries `text` + `structuredOutput`.
+  const text = typeof parsed?.result === 'string' ? parsed.result : typeof parsed?.text === 'string' ? parsed.text : stdout;
+  const answer = parsed?.structured_output ?? parsed?.structuredOutput ?? tryJSON(text);
   return { parsed: parsed ?? null, text, answer, usage: parseUsage(/** @type {"claude"|"grok"} */ (cli), parsed ?? null) };
 }
 
