@@ -12,6 +12,9 @@ waits on a second real consumer (plan §10.4, Q17).
   code-forge finds the vault and key field and saves a full op:// reference of IDs; 1Password failures (CLI missing,
   locked, timeout, not found, bad output, no key field) get one clear message, a retry/skip menu in init, and never
   write a partial config
+- code-forge tools: lists the recommended tools (claude, codex, gemini, grok, op, solo) as installed with their version
+  or missing with the install command; code-forge tools install [<id>...] [--yes] [--dry-run] installs the missing ones
+  after one yes. init step 1 and doctor use the same tool table; doctor adds an INFO line naming the missing tools.
 
 ### Changed
 

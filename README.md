@@ -85,6 +85,7 @@ usage line.
 |---|---|
 | `init` | `code-forge init [--no-interaction] [--tools recommended\|current] [--yes-tool <tool>]… [--harness a,b] [-g\|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]… [--refresh-models] [--multimodel on\|off] [--second-provider P] [--jev-ref <item-id\|link\|op://…> \| --jev-env NAME \| --no-jev] [--engine auto\|solo\|harness] [--solo-project N] [--gate name=cmd]… [--proof isolation=export\|lock \| high=a,b \| link_dirs=a,b \| copy_untracked=a,b]… [--skip-doctor]` |
 | `doctor` | `code-forge doctor [--quick] [--json] [--cwd <dir>]` |
+| `tools` | `code-forge tools [--json]` · `code-forge tools install [<id>…] [--yes] [--dry-run]` — see and install the recommended tools (claude, codex, gemini, grok, op, solo) |
 | `validate` | `code-forge validate [--file <path>]` |
 | `resolve` | `code-forge resolve <L0\|L1\|L2\|L3>` |
 | `run` | `code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]` · `run start --reattach --run <id>` · `run status --run <id>` · `run end --run <id>` |

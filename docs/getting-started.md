@@ -44,7 +44,7 @@ Every question has a default: press Enter to keep it. Each question shows a one-
 
 | # | Question | Default / choices | Flag to answer it |
 |---|---|---|---|
-| 1 | Install the recommended tools, or use only the current harness? | `current harness` · `recommended tools` (Solo, Codex CLI, Grok CLI, Gemini CLI, 1Password CLI; each installed only after its own yes) | `--tools recommended\|current`, `--yes-tool <tool>` |
+| 1 | Install the recommended tools, or use only the current harness? | `current harness` · `recommended tools` (Claude Code, Codex CLI, Gemini CLI, Grok CLI, 1Password CLI, Solo; each installed only after its own yes — or later with `code-forge tools install`, see [Install the recommended tools](#install-the-recommended-tools)) | `--tools recommended\|current`, `--yes-tool <tool>` |
 | 2 | Install the skill into which harnesses? Scope? Method? | detected harnesses · `project` or `global` · `symlink` or `copy` | `--harness a,b`, `-p` / `-g`, `--copy` |
 | 3 | Default provider, and keep the level matrix? | `anthropic` · `openai` · `xai`; edit any level as `model[:effort][@provider]` | `--provider P`, `--level Ln=model[:effort][@provider]`, `--refresh-models` |
 | 4 | Multimodel review (consensus)? | off. On: pick a second provider; the L3 judge must come from a third provider | `--multimodel on\|off`, `--second-provider P` |
@@ -101,6 +101,25 @@ instead of hanging. The full log goes to `~/.code-forge/logs/init-<ts>.log`.
 
 If your harness has no subagent tool and there is no Solo, `init` prints the stop text now, so you
 do not discover it at the first run.
+
+## Install the recommended tools
+
+`code-forge tools` shows each recommended tool (Claude Code, Codex CLI, Gemini CLI, Grok CLI,
+1Password CLI, Solo): installed with its version, or missing with the command that installs it.
+`code-forge tools install` installs the missing ones:
+
+```bash
+code-forge tools
+code-forge tools install
+```
+
+It prints the plan first and asks one yes (default no; a no prints "cancelled — nothing installed"
+and exits 1, as in `init`); `--yes` skips the question, `--dry-run`
+only prints the plan, and `code-forge tools install codex gemini` installs just those. npm tools
+need `npm` on PATH; Grok CLI and 1Password CLI install with Homebrew on macOS (elsewhere you get
+the vendor link). Solo is a desktop app: you get its link, nothing opens on its own. Once the
+1Password CLI is installed, turn on 1Password app → Settings → Developer → "Integrate with
+1Password CLI". `doctor` lists the missing tools as an INFO line; it never fails for them.
 
 ## Teams and CI: pin per project
 

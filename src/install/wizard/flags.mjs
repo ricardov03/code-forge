@@ -15,14 +15,15 @@
 
 import { isOpInput } from '../../keys/onepassword.mjs';
 import { HARNESSES } from '../harnesses.mjs';
+import { TOOL_IDS } from '../tools.mjs';
 
 export const PROVIDERS = Object.freeze(['anthropic', 'openai', 'xai']);
 /** The engines the wizard offers. `subprocess` is never proposed (R2): a power user types it. */
 export const ENGINE_CHOICES = Object.freeze(['auto', 'solo', 'harness']);
 export const GATE_NAMES = Object.freeze(['test', 'lint', 'types', 'format']);
 export const PROOF_KEYS = Object.freeze(['isolation', 'high', 'link_dirs', 'copy_untracked']);
-/** Tools step 1 knows how to detect (and, for some, install after a per-tool yes). */
-export const TOOL_IDS = Object.freeze(['solo', 'codex', 'grok', 'gemini', 'op']);
+/** Tools step 1 knows how to detect (and, for some, install after a per-tool yes): the shared table's ids (B26). */
+export { TOOL_IDS };
 
 /** flag (as typed) -> the one answer key it overrides. */
 export const ANSWER_FLAGS = Object.freeze({

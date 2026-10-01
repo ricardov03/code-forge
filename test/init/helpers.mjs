@@ -56,6 +56,12 @@ export function sink() {
   return { write: (s) => (chunks.push(String(s)), true), text: () => chunks.join('') };
 }
 
+/**
+ * B26: init step 1's tool detection never looks at this machine — a fixed platform and no Solo
+ * app bundle. Every `runInit` call in `test/init/**` spreads these in.
+ */
+export const HERMETIC_TOOLS = Object.freeze({ platform: /** @type {NodeJS.Platform} */ ('darwin'), toolExists: () => false });
+
 /** A doctor stand-in: one OK row. */
 export const okDoctor = async () => [{ status: 'OK', label: 'config', detail: 'valid' }];
 
@@ -75,7 +81,7 @@ export async function runWizard(args, { cwd, home, env, isTTY = false, ui, docto
   const { runInit } = await import('../../src/install/wizard/run.mjs');
   const stdout = sink();
   const stderr = sink();
-  const code = await runInit(args, { cwd, home, env, isTTY, ui, doctor, stdout, stderr, skillSource: SKILL_SOURCE, ...(opExec ? { opExec } : {}) });
+  const code = await runInit(args, { cwd, home, env, isTTY, ui, doctor, stdout, stderr, skillSource: SKILL_SOURCE, ...HERMETIC_TOOLS, ...(opExec ? { opExec } : {}) });
   return { code, stdout: stdout.text(), stderr: stderr.text() };
 }
 

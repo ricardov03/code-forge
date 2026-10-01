@@ -4,7 +4,7 @@
  * proposed, the §5.1 stop text, `copy_untracked` per stack, and the hidden key paste.
  */
 
-import { FAKE_JEV_KEY, SKILL_SOURCE, baseEnv, freshDir, makeProject, runWizard, scriptedUi } from './helpers.mjs';
+import { FAKE_JEV_KEY, HERMETIC_TOOLS, SKILL_SOURCE, baseEnv, freshDir, makeProject, runWizard, scriptedUi } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, readlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -52,7 +52,7 @@ test('non-interactive run on the Laravel+Vue fixture writes the documented confi
   const out = [];
   const err = [];
   const code = await runInit(['--no-interaction'], {
-    cwd, home, env, isTTY: false, doctor: undefined, skillSource: SKILL_SOURCE,
+    cwd, home, env, isTTY: false, doctor: undefined, skillSource: SKILL_SOURCE, ...HERMETIC_TOOLS,
     stdout: { write: (s) => out.push(s) }, stderr: { write: (s) => err.push(s) },
   });
   assert.equal(code, 0, err.join(''));

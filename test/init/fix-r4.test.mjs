@@ -4,9 +4,9 @@
  * reports it. (The brace-glob proof list test went with the proof questions in B24.)
  */
 
-import { FAKE_JEV_KEY, SKILL_SOURCE, baseEnv, freshDir, makeProject, sink } from './helpers.mjs';
+import { FAKE_JEV_KEY, HERMETIC_TOOLS, SKILL_SOURCE, baseEnv, freshDir, makeProject, sink } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, readFileSync } from 'node:fs';
+import { chmodSync, existsSync, readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { parse as parseYAML } from 'yaml';
@@ -25,7 +25,7 @@ async function agentRun(args, extraEnv, deps = {}) {
   const stdout = sink();
   const stderr = sink();
   const doctor = async () => [{ status: 'OK', label: 'config', detail: 'valid' }];
-  const code = await runInit(args, { cwd, home, env, isTTY: false, doctor, stdout, stderr, skillSource: SKILL_SOURCE, ...deps });
+  const code = await runInit(args, { cwd, home, env, isTTY: false, doctor, stdout, stderr, skillSource: SKILL_SOURCE, ...HERMETIC_TOOLS, ...deps });
   return { code, stdout: stdout.text(), stderr: stderr.text(), home, cwd, env, file: path.join(cwd, '.code-forge.yml') };
 }
 
@@ -67,7 +67,7 @@ test('agent mode: an unloadable .code-forge.yml is 1 JSON line with ok:false nam
   const { writeFileSync } = await import('node:fs');
   writeFileSync(path.join(cwd, '.code-forge.yml'), 'version: [\n');
   const stdout = sink();
-  const code = await runInit(['--no-interaction'], { cwd, home, env: baseEnv(home, { CLAUDECODE: '1', CODE_FORGE_KEY_JEV: FAKE_JEV_KEY }), isTTY: false, stdout, stderr: sink(), skillSource: SKILL_SOURCE });
+  const code = await runInit(['--no-interaction'], { cwd, home, env: baseEnv(home, { CLAUDECODE: '1', CODE_FORGE_KEY_JEV: FAKE_JEV_KEY }), isTTY: false, stdout, stderr: sink(), skillSource: SKILL_SOURCE, ...HERMETIC_TOOLS });
   assert.equal(code, 1);
   const json = oneJsonLine(stdout.text());
   assert.equal(json.ok, false);
@@ -81,7 +81,11 @@ test('an installer that throws after the config is written: 1 JSON line, ok:fals
   const installTool = async () => {
     throw new Error('npm exploded');
   };
-  const r = await agentRun(['--no-interaction', '--tools', 'recommended', '--yes-tool', 'codex'], { CODE_FORGE_KEY_JEV: FAKE_JEV_KEY }, { installTool });
+  // B26: an npm install is offered only with `npm` on PATH — a fake, empty one (never run)
+  const bin = freshDir('npmbin');
+  writeFileSync(path.join(bin, 'npm'), '');
+  chmodSync(path.join(bin, 'npm'), 0o755);
+  const r = await agentRun(['--no-interaction', '--tools', 'recommended', '--yes-tool', 'codex'], { CODE_FORGE_KEY_JEV: FAKE_JEV_KEY, PATH: bin }, { installTool });
   assert.equal(r.code, 1);
   const json = oneJsonLine(r.stdout);
   assert.deepEqual(Object.keys(json), ['ok', 'error', 'wrote', 'log', 'log_tail']);

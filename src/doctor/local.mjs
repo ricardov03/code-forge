@@ -13,6 +13,7 @@ import { askJev as realAskJev } from '../decide/jev-client.mjs';
 import { buildQuestionPayload } from '../decide/questions.mjs';
 import { commandOnPath } from '../install/detect.mjs';
 import { installsPath, readInstalls, targetResolves } from '../install/link.mjs';
+import { missingTools } from '../install/tools.mjs';
 import { OP_MESSAGES } from '../keys/onepassword.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { ledgerDir } from '../ledger/paths.mjs';
@@ -109,6 +110,23 @@ export async function checkCommands(cfg, pathEnv) {
   }
   if (!any) rows.push(row('gates', 'WARN', 'gates', 'no gate command configured'));
   return rows;
+}
+
+/**
+ * The recommended tools of the shared table (B26): one INFO row naming the missing ones, none
+ * when all are there. A missing optional tool never WARNs or FAILs.
+ * @param {import('../install/tools.mjs').ToolEnv} opts
+ * @returns {Promise<Row[]>}
+ */
+export async function checkTools(opts) {
+  let missing;
+  try {
+    missing = await missingTools(opts);
+  } catch {
+    return [row('tools', 'INFO', 'tools', 'could not check recommended tools')];
+  }
+  if (missing.length === 0) return [];
+  return [row('tools', 'INFO', 'tools', `missing recommended tools: ${missing.join(', ')} — run code-forge tools install`)];
 }
 
 /**

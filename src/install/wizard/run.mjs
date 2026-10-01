@@ -31,7 +31,7 @@ import { createDefaultKeyStore, resolveKey } from '../../keys/store.mjs';
 import { exec } from '../../util/exec.mjs';
 import { redact } from '../../util/redact.mjs';
 import { writeAgentJson } from '../agent-env.mjs';
-import { commandOnPath } from '../detect.mjs';
+import { detectTool, failureReason, installPlan, TOOLS } from '../tools.mjs';
 import { getHarness, globalSkillPath, projectSkillPath } from '../harnesses.mjs';
 import { install, installsPath } from '../link.mjs';
 import { currentHarness, effectiveProvider, gatherContext, judgeCollision, proposeJudge, resolveAnswers, SUBAGENT_HARNESSES } from './answers.mjs';
@@ -48,14 +48,11 @@ export const NO_ENGINE_STOP_TEXT = [
   '  Then re-run. (R2: this engine is never selected automatically.)',
 ].join('\n');
 
-/** Step 1's recommended tools: detect, print the install command, install only after a per-tool yes. */
-export const TOOLS = Object.freeze([
-  { id: 'solo', command: null, install: null, hint: 'install the Solo app (https://soloterm.com) and add its MCP entry' },
-  { id: 'codex', command: 'codex', install: ['npm', 'install', '-g', '@openai/codex'], hint: null },
-  { id: 'grok', command: 'grok', install: null, hint: 'install the Grok CLI from its vendor page' },
-  { id: 'gemini', command: 'gemini', install: ['npm', 'install', '-g', '@google/gemini-cli'], hint: null },
-  { id: 'op', command: 'op', install: ['brew', 'install', '1password-cli'], hint: null },
-]);
+/**
+ * Step 1's recommended tools: the shared table (B26, `src/install/tools.mjs`) — detect, print the
+ * install command, install only after a per-tool yes.
+ */
+export { TOOLS };
 
 export const USAGE = [
   'usage: code-forge init [--no-interaction] [--tools recommended|current] [--yes-tool <tool>]…',
@@ -102,10 +99,12 @@ class InitFailure extends Error {
  * @property {import('./steps.mjs').Ui} [ui] - default `@clack/prompts`.
  * @property {() => Promise<any>} [getStore] - the B2 key store (default: the production chain).
  * @property {(opts: {cwd: string, env: NodeJS.ProcessEnv}) => Promise<Array<{status: string, label: string, detail: string}>>} [doctor]
- * @property {(argv: string[]) => Promise<{result: string}>} [installTool]
+ * @property {(argv: string[]) => Promise<{result: string, code?: number|null, signal?: string|null, timedOut?: boolean}>} [installTool]
  * @property {string} [skillSource]
  * @property {() => Date} [now]
  * @property {typeof exec} [opExec] - runs `op` to resolve a 1Password item ID (default B0 `exec`).
+ * @property {NodeJS.Platform} [platform] - step 1's install plan (brew on macOS only; default `process.platform`).
+ * @property {(p: string) => boolean} [toolExists] - step 1's Solo app check (tests: a fake).
  */
 
 /** @param {string} file @returns {Promise<Record<string, any>|null>} a missing or unreadable user config reads as null */
@@ -349,15 +348,19 @@ export async function runInit(args, deps = {}) {
 
     // Step 1 — tools.
     if (values.tools === 'recommended') {
+      const toolOpts = { pathEnv: env.PATH ?? '', platform: deps.platform ?? process.platform, home, ...(deps.toolExists ? { exists: deps.toolExists } : {}) };
       for (const tool of TOOLS) {
-        const present = tool.command === null ? ctx.solo : await commandOnPath(tool.command, { pathEnv: env.PATH ?? '' });
+        const present = (tool.id === 'solo' && ctx.solo) || (await detectTool(tool, toolOpts));
         if (present) {
           say(`tool ${tool.id}: present`);
-        } else if (tool.install && values.yes_tools.includes(tool.id)) {
-          const res = await (deps.installTool ?? ((argv) => exec(argv, { timeoutMs: 600_000, env })))(tool.install);
-          say(`tool ${tool.id}: ${res.result === 'ok' ? 'installed' : 'install failed'} (${tool.install.join(' ')})`);
+          continue;
+        }
+        const plan = await installPlan(tool, toolOpts);
+        if (plan.kind === 'run' && values.yes_tools.includes(tool.id)) {
+          const res = await (deps.installTool ?? ((argv) => exec(argv, { timeoutMs: 600_000, env })))(plan.argv);
+          say(`tool ${tool.id}: ${res.result === 'ok' ? 'installed' : `install failed (${failureReason(res)})`} (${plan.argv.join(' ')})`);
         } else {
-          say(`tool ${tool.id}: missing — ${tool.install ? `install with: ${tool.install.join(' ')}` : tool.hint} (doctor WARNs)`);
+          say(`tool ${tool.id}: missing — ${plan.kind === 'run' ? `install with: ${plan.argv.join(' ')}` : plan.hint} (or: code-forge tools install)`);
         }
       }
     }

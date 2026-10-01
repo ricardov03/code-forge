@@ -201,6 +201,9 @@ export function doctorDeps(opts = {}) {
     stdout,
     stderr,
     ...(opts.canary ? { canary: opts.canary } : {}),
+    // B26: the recommended-tools row never looks at this machine (no real /Applications/Solo.app)
+    platform: 'darwin',
+    toolExists: () => false,
     askJev: async (/** @type {any} */ args) => {
       jevCalls.push(args);
       return { ok: true, answers: { risk: { value: 0, confidence: 0.9 } }, attempts: 1, ms: 1 };

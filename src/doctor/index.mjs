@@ -13,7 +13,7 @@ import path from 'node:path';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { newRunId } from '../state/paths.mjs';
 import { runRoot } from '../util/tmp.mjs';
-import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkTmp } from './local.mjs';
+import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkTmp, checkTools } from './local.mjs';
 import { configuredProviders, pingRoles, probeCli, probeCodexRules, probeIsolation, probePathDeny } from './probes.mjs';
 import { row } from './rows.mjs';
 import { probeWorkerAndSigner, SIGNER_ROW } from './worker-probe.mjs';
@@ -28,6 +28,8 @@ import { probeWorkerAndSigner, SIGNER_ROW } from './worker-probe.mjs';
  * @property {any} [opRead]
  * @property {typeof import('../decide/jev-client.mjs').askJev} [askJev]
  * @property {string} [canary] - the path-deny canary (tests).
+ * @property {NodeJS.Platform} [platform] - the recommended-tools row (default `process.platform`).
+ * @property {(p: string) => boolean} [toolExists] - the recommended-tools row's Solo app check (tests).
  */
 
 /** @param {Record<string, any> | null} cfg @returns {string} a new, private run root for the probes. */
@@ -57,6 +59,13 @@ export async function runDoctor(opts = {}, deps = {}) {
     rows.push(...(await checkCommands(cfg, env.PATH ?? '')));
     rows.push(...(await checkJev(cfg, keys.key, { askJev: deps.askJev })));
   }
+  const toolOpts = {
+    pathEnv: env.PATH ?? '',
+    platform: deps.platform ?? process.platform,
+    home: env.HOME || os.homedir(),
+    ...(deps.toolExists ? { exists: deps.toolExists } : {}),
+  };
+  rows.push(...(await checkTools(toolOpts)));
   rows.push(...(await checkLedger()));
   rows.push(...checkTmp(cfg));
   if (!cfg) {
