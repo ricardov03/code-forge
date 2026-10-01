@@ -202,7 +202,7 @@ function buildClosedBookArgv(params) {
   argv.push('--no-session-persistence');
   if (systemPromptText !== undefined) argv.push('--system-prompt', systemPromptText);
   argv.push('--output-format', 'json');
-  if (schema !== undefined) argv.push('--json-schema', JSON.stringify(schema));
+  if (schema !== undefined) argv.push('--json-schema', JSON.stringify(stripSchemaMeta(schema)));
   if (maxBudgetUsd !== undefined) argv.push('--max-budget-usd', String(maxBudgetUsd));
   argv.push('--permission-mode', 'dontAsk');
   if (!isFacts) {
@@ -221,4 +221,17 @@ function buildClosedBookArgv(params) {
 export function buildClaudeArgv(params) {
   assertBaseParams('buildClaudeArgv', params);
   return params.role === 'coder' ? buildCoderArgv(params) : buildClosedBookArgv(params);
+}
+
+/**
+ * The Claude CLI's `--json-schema` validator does not know the draft 2020-12 meta-schema and exits
+ * 1 on a top-level `$schema` naming it ("no schema with key or ref …"). The local Ajv2020 check
+ * keeps the full schema; only the copy handed to the CLI drops the meta-schema pointer.
+ * @param {unknown} schema
+ * @returns {unknown}
+ */
+function stripSchemaMeta(schema) {
+  if (schema === null || typeof schema !== 'object' || Array.isArray(schema) || !('$schema' in schema)) return schema;
+  const { $schema: _meta, ...rest } = /** @type {Record<string, unknown>} */ (schema);
+  return rest;
 }

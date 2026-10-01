@@ -526,3 +526,19 @@ test('prompt delivery table: 18 rows (3 providers × 6 roles) — argv tail, std
     assert.equal(built.outPath, cli === 'codex' ? '/tmp/o.json' : undefined, label);
   }
 });
+
+test('Claude closed-book argv: a top-level $schema meta pointer is dropped from --json-schema', () => {
+  const schema = { $schema: 'https://json-schema.org/draft/2020-12/schema', ...SAMPLE_SCHEMA };
+  const built = buildClaudeArgv({
+    role: 'reviewer',
+    model: 'claude-opus-5-5',
+    promptPath: '/tmp/packet.json',
+    cwd: '/tmp/iso-1',
+    schema,
+    systemPromptText: 'You are the full lens.',
+  });
+  const schemaIndex = built.argv.indexOf('--json-schema');
+  assert.ok(schemaIndex >= 0);
+  assert.deepEqual(JSON.parse(built.argv[schemaIndex + 1]), SAMPLE_SCHEMA);
+  assert.equal(schema.$schema, 'https://json-schema.org/draft/2020-12/schema');
+});
