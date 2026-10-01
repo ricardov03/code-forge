@@ -23,8 +23,8 @@ function fakeExec(script) {
 const TIMEOUT = { result: 'failed', code: null, signal: 'SIGTERM', timedOut: true, stdout: FAKE_OP_KEY, stderr: FAKE_OP_KEY };
 const OK = { result: 'ok', code: 0, stdout: `${FAKE_OP_KEY}\n` };
 
-test('the op timeout is 20 s', () => {
-  assert.equal(OP_TIMEOUT_MS, 20_000);
+test('the op timeout is 60 s: long enough to approve the 1Password prompt', () => {
+  assert.equal(OP_TIMEOUT_MS, 60_000);
 });
 
 test('a first-call timeout is retried exactly once with the same argv and timeout: 2 invocations', async () => {

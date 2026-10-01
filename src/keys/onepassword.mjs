@@ -13,7 +13,11 @@
 
 import { exec as realExec } from '../util/exec.mjs';
 
-export const OP_TIMEOUT_MS = 20_000;
+// Long enough for a person to see and approve the 1Password prompt (Touch ID or password).
+export const OP_TIMEOUT_MS = 60_000;
+
+/** Shown just before a call that may make 1Password ask for approval. */
+export const OP_APPROVE_NOTE = '1Password may ask you to approve access: check the 1Password window (Touch ID or password).';
 
 /** The 1Password failure kinds; agent JSON carries the kind. */
 export const OP_ERROR_KINDS = Object.freeze(['op_missing', 'op_locked', 'op_timeout', 'op_not_found', 'op_bad_output', 'op_no_field', 'op_bad_input', 'op_failed']);

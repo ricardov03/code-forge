@@ -28,6 +28,9 @@ async function harness(data = {}, backendName = 'keychain') {
   return { store, backend, stdout, stderr, run };
 }
 
+// printed on stderr before any call that may make 1Password ask for approval
+const NOTE = '1Password may ask you to approve access: check the 1Password window (Touch ID or password).\n';
+
 test('keys list prints name, source, backend and expiry — the fake key 0 times', async () => {
   const h = await harness();
   await h.store.put('jev', FAKE_KEY, { source: 'op', exp: NOW + 8 * HOUR });
@@ -109,7 +112,7 @@ test('keys set --op with a bad reference exits 2 without calling op', async () =
 test('keys set --op failure exits 1 and reports the error', async () => {
   const h = await harness();
   const code = await h.run(['set', 'jev', '--op', REF], { opRead: async () => ({ value: null, attempts: 2, error: 'op read failed (timed out)' }) });
-  assert.deepEqual([code, h.stderr.text], [1, 'jev: op read failed (timed out)\n']);
+  assert.deepEqual([code, h.stderr.text], [1, NOTE + 'jev: op read failed (timed out)\n']);
 });
 
 test('keys test reports the backend that held it as the source, and the expiry — never the value', async () => {
@@ -270,7 +273,7 @@ test('keys set --op <item-id> when 1Password is locked: exit 1, the classified m
   let reads = 0;
   const opRead = async () => (reads += 1, { value: FAKE_OP_KEY, attempts: 1 });
   const code = await h.run(['set', 'jev', '--op', ITEM_ID], { opRead, opExec });
-  assert.deepEqual([code, reads, h.stderr.text], [1, 0, 'jev: 1Password is locked or not signed in; unlock the app (or run `op signin`) and try again\n']);
+  assert.deepEqual([code, reads, h.stderr.text], [1, 0, NOTE + 'jev: 1Password is locked or not signed in; unlock the app (or run `op signin`) and try again\n']);
   assert.equal(h.backend.store.has('jev'), false);
   assert.equal(countOccurrences(h.stdout.text + h.stderr.text, FAKE_OP_KEY), 0);
 });
@@ -279,7 +282,7 @@ test('keys set --op: the op CLI missing gives the install hint, exit 1', async (
   const h = await harness();
   const { opExec } = fakeOpExec([{ result: 'failed', code: null, error: 'spawn op ENOENT' }]);
   assert.equal(await h.run(['set', 'jev', '--op', ITEM_ID], { opExec }), 1);
-  assert.equal(h.stderr.text, 'jev: 1Password CLI not found; install it with: brew install 1password-cli\n');
+  assert.equal(h.stderr.text, NOTE + 'jev: 1Password CLI not found; install it with: brew install 1password-cli\n');
 });
 
 test('keys test --ref <item-id> resolves first, then reads the resolved op:// ref', async () => {
@@ -297,7 +300,7 @@ test('keys test: a timed-out op read reports the classified message and exits 1'
   const h = await harness();
   const opRead = async () => ({ value: null, attempts: 2, error: '1Password did not answer in time; unlock the app and try again', kind: 'op_timeout' });
   assert.equal(await h.run(['test', 'jev', '--ref', REF], { opRead }), 1);
-  assert.equal(h.stderr.text, 'jev: 1Password did not answer in time; unlock the app and try again\njev: not found\n');
+  assert.equal(h.stderr.text, NOTE + 'jev: 1Password did not answer in time; unlock the app and try again\njev: not found\n');
 });
 
 test('keys set --op <item-id>: an exec that throws gives the fixed op_failed message, exit 1, nothing stored, no thrown text', async () => {
@@ -306,7 +309,7 @@ test('keys set --op <item-id>: an exec that throws gives the fixed op_failed mes
     throw new Error(`boom ${FAKE_OP_KEY}`);
   });
   assert.equal(await h.run(['set', 'jev', '--op', ITEM_ID], { opExec }), 1);
-  assert.equal(h.stderr.text, `jev: 1Password CLI failed (unexpected error); run \`op item get ${ITEM_ID}\` yourself to see why\n`);
+  assert.equal(h.stderr.text, `${NOTE}jev: 1Password CLI failed (unexpected error); run \`op item get ${ITEM_ID}\` yourself to see why\n`);
   assert.equal(h.backend.store.has('jev'), false);
   assert.equal(countOccurrences(h.stdout.text + h.stderr.text, FAKE_OP_KEY), 0);
 });

@@ -191,6 +191,9 @@ for the vault and the key field (`credential` on an API Credential item) and sav
 them. A full `op://vault/item/field` reference still works as is. The same goes for
 `keys set <name> --op` and `keys test <name> --ref`.
 
+The first `op` call of a session can make 1Password ask you to approve (Touch ID or password).
+code-forge prints a line before that call and waits up to 60 seconds, then tries once more.
+
 ## Keeping it up to date
 
 To move to a new version:

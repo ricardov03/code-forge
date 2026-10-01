@@ -6,6 +6,11 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- 1Password: code-forge prints a line before each call that may make 1Password ask for approval, and waits 60 s instead
+  of 20 s, so a Touch ID or password prompt no longer times out while you look for it.
+
 ## [0.2.2] — 2026-10-01
 
 ### Added

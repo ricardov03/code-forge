@@ -152,6 +152,8 @@ test('--jev-ref <item link> in --no-interaction resolves the link\'s item and wr
   assert.deepEqual(calls, [ITEM_ARGV]);
   assert.equal(r.read().keys.jev, RESOLVED);
   assert.equal(count(r.stdout + r.stderr + readFileSync(r.file, 'utf8')), 0);
+  // the approval note goes to stderr once, before the op call (stdout stays the one JSON line)
+  assert.equal(r.stderr.split('1Password may ask you to approve access: check the 1Password window (Touch ID or password).\n').length - 1, 1);
 });
 
 test('--jev-ref <item-id> that fails in --no-interaction: exit 2, kind in the JSON line, nothing written', async () => {
@@ -203,6 +205,7 @@ test('--jev-ref op://… makes 0 op calls and keys.jev equals the input', async 
   assert.equal(r.code, 0, r.stderr);
   assert.equal(calls.length, 0);
   assert.equal(r.read().keys.jev, 'op://Dev Keys/Jev API key/credential');
+  assert.equal(r.stderr.includes('1Password may ask you to approve'), false);
 });
 
 test('--jev-ref parsing: exact values for an op:// ref, an ID, a link and padded input; exact error for garbage', () => {

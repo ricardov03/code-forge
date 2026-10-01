@@ -26,7 +26,7 @@ import { parse as parseYAML } from 'yaml';
 import { DEFAULT_CONFIG_FILENAME, loadConfigFile } from '../../config/load.mjs';
 import { refreshFromCliCaches } from '../../config/refresh.mjs';
 import { validateConfig } from '../../config/validate.mjs';
-import { describeOpItem, isOpRef, OP_MESSAGES, toOpRef } from '../../keys/onepassword.mjs';
+import { describeOpItem, isOpRef, OP_APPROVE_NOTE, OP_MESSAGES, opItemIdFromInput, toOpRef } from '../../keys/onepassword.mjs';
 import { createDefaultKeyStore, resolveKey } from '../../keys/store.mjs';
 import { exec } from '../../util/exec.mjs';
 import { redact } from '../../util/redact.mjs';
@@ -261,7 +261,12 @@ export async function runInit(args, deps = {}) {
     const missing = [];
     let jevRef = null;
     let jevSource = 'none';
-    const resolveOp = (/** @type {string} */ input) => toOpRef(input, deps.opExec ? { exec: deps.opExec } : {});
+    const resolveOp = (/** @type {string} */ input) => {
+      // printed at once (stderr), not buffered: the approval prompt appears while op waits
+      // only when op will really be called: an item ID or a 1Password link (an op:// ref is kept as is)
+      if (opItemIdFromInput(String(input ?? '')) !== null) stderr.write(`${OP_APPROVE_NOTE}\n`);
+      return toOpRef(input, deps.opExec ? { exec: deps.opExec } : {});
+    };
     /** @param {import('./steps.mjs').JevAnswer} a */
     const takeAnswer = (a) => {
       jevRef = a.ref;

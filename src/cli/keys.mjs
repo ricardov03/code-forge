@@ -16,7 +16,7 @@
  */
 
 import { writeSafe } from '../util/redact.mjs';
-import { describeOpItem, isOpRef, OP_MESSAGES, opItemIdFromInput, toOpRef } from '../keys/onepassword.mjs';
+import { describeOpItem, isOpRef, OP_APPROVE_NOTE, OP_MESSAGES, opItemIdFromInput, toOpRef } from '../keys/onepassword.mjs';
 import { assertKeyName, createDefaultKeyStore, parseRef, readOpAndCache, resolveKey } from '../keys/store.mjs';
 
 const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref>] | test <name> [--ref <ref>] | remove <name>\n';
@@ -109,6 +109,7 @@ export async function runKeys(args, { store, stdout = process.stdout, stderr = p
     err(`${name}: --op must be a 1Password item ID, item link or op://vault/item/field reference\n`);
     return 2;
   }
+  if (flagArg !== undefined && (itemId !== null || fullRef)) err(`${OP_APPROVE_NOTE}\n`);
   // A 1Password item ID or link becomes a full op:// reference before any store call (B25).
   if (flagArg !== undefined && itemId !== null) {
     /** @type {Awaited<ReturnType<typeof toOpRef>>} */
