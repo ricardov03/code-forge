@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.2.1] — 2026-10-01
+
 ### Changed
 
 - **Two publish paths:** publish by hand with `npm publish` before pushing the tag (the tag run sees
