@@ -303,11 +303,11 @@
       "status": "landed",
       "commit": "805dca8",
       "owned": [
-        "scripts/release.mjs", "scripts/changelog.mjs", ".github/workflows/publish.yml",
+        "scripts/release.mjs", "scripts/changelog.mjs", ".github/workflows/release.yml",
         "test/release.test.mjs", "docs/releasing.md"
       ],
       "depends_on": ["B16"],
-      "note": "root-added 2026-09-26; not in the v1.3 §10.4 table. Both publish paths (by hand or CI) added in d61623f"
+      "note": "root-added 2026-09-26; not in the v1.3 §10.4 table. Both publish paths (by hand or CI) added in d61623f; on 2026-10-01 CI publishing was removed (publish.yml became release.yml: GitHub release only, npm publish by hand)"
     },
     "B24": {
       "title": "init project settings: detect gates and proof settings, print a summary that marks every blank, one choice (Use these / Customize now / Leave for later)",

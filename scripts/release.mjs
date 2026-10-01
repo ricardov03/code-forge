@@ -406,19 +406,9 @@ function runChecks(root, name, version) {
     if (r.code !== 0) return failed('claude plugin validate .', r);
     ok('claude plugin validate .');
   } else {
-    warn('the claude CLI is not on PATH: "claude plugin validate ." was skipped (the publish workflow runs it)');
+    warn('the claude CLI is not on PATH: "claude plugin validate ." was skipped; install it and run "claude plugin validate ." before you publish');
   }
   return null;
-}
-
-// ── next steps ──────────────────────────────────────────────────────────────────────────────
-
-/** @param {string} root @returns {'set' | 'not set' | 'unknown'} */
-function npmTokenState(root) {
-  if (!onPath('gh')) return 'unknown';
-  const r = run('gh', ['secret', 'list'], { cwd: root, timeout: 30000 });
-  if (r.code !== 0) return 'unknown';
-  return r.stdout.split('\n').some((l) => l.split(/\s+/)[0] === 'NPM_TOKEN') ? 'set' : 'not set';
 }
 
 // ── release notes ─────────────────────────────────────────────────────────────────────────
@@ -591,13 +581,9 @@ export function main(argv, root = process.cwd()) {
     }
     ok(`annotated tag ${tag}`);
 
-    const token = npmTokenState(root);
     process.stdout.write(`\n== 6. next steps (nothing was pushed or published) ==\n`);
-    process.stdout.write(`pick one path:\n`);
-    process.stdout.write(`  A. publish by hand first, then push (the tag run sees ${tag.slice(1)} on npm, skips publishing, and creates the GitHub release):\n`);
+    process.stdout.write(`  publish to npm first, then push (the tag push only creates the GitHub release; CI never publishes):\n`);
     process.stdout.write(`      npm publish\n`);
-    process.stdout.write(`      git push origin ${branch} --follow-tags\n`);
-    process.stdout.write(`  B. let CI publish: push only (needs the NPM_TOKEN secret; NPM_TOKEN: ${token}); it publishes with provenance and creates the GitHub release:\n`);
     process.stdout.write(`      git push origin ${branch} --follow-tags\n`);
     process.stdout.write(`  if the tag run cannot create the GitHub release, create it by hand (notes already written to ${notesFile}):\n`);
     process.stdout.write(`      gh release create ${tag} --title ${tag} --notes-file ${notesFile} --verify-tag\n`);

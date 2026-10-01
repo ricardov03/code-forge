@@ -1,0 +1,52 @@
+name: Release
+
+# Runs on a `v*` tag only. It never publishes to npm: the maintainer publishes from their own
+# machine before pushing the tag (docs/releasing.md). This workflow only creates the GitHub release for the tag,
+# with that version's CHANGELOG.md section as its notes (`node scripts/release.mjs notes`, which
+# needs only node:*, so no `npm ci`). Re-running it is safe: an existing release is edited with the
+# same notes instead of failing.
+on:
+  push:
+    tags:
+      - 'v*'
+
+permissions:
+  contents: read
+
+jobs:
+  github-release:
+    name: github release (notes from CHANGELOG.md)
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ github.ref }}
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+
+      # Refuse a tag that does not name the exact version package.json carries.
+      - name: The tag must match package.json's version
+        run: |
+          version="$(node -p "require('./package.json').version")"
+          if [ "v${version}" != "${GITHUB_REF_NAME}" ]; then
+            echo "tag ${GITHUB_REF_NAME} does not match package.json version v${version}" >&2
+            exit 1
+          fi
+
+      - name: Release notes from CHANGELOG.md
+        run: node scripts/release.mjs notes "$GITHUB_REF_NAME" --out notes.md
+
+      - name: Create the GitHub release (or update it when it already exists)
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          if gh release view "$GITHUB_REF_NAME" --json tagName; then
+            gh release edit "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md
+          else
+            gh release create "$GITHUB_REF_NAME" --title "$GITHUB_REF_NAME" --notes-file notes.md --verify-tag
+          fi

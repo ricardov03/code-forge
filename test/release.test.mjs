@@ -6,7 +6,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -63,7 +63,6 @@ if (a[0] === 'ls') { process.stdout.write('{"name":"x","dependencies":{}}'); pro
 process.stderr.write('fake npm: unexpected ' + a.join(' ') + '\\n'); process.exit(9);
 `;
 const FAKE_GH = `#!/bin/sh
-if [ "$1" = secret ] && [ "$2" = list ]; then printf 'NPM_TOKEN\\t2026-09-01T00:00:00Z\\n'; exit 0; fi
 echo "fake gh: unexpected $*" >&2; exit 9
 `;
 const FAKE_CLAUDE = `#!/bin/sh
@@ -181,10 +180,10 @@ describe('scripts/release.mjs (B23)', () => {
     const tagObject = git(work, ['cat-file', 'tag', 'v0.2.0']);
     assert.equal(tagObject.slice(tagObject.indexOf('\n\n') + 2), 'Release v0.2.0\n\n### Added\n\n- A new verb.\n');
 
-    // path A (publish by hand, then push) and path B (push only; CI publishes)
-    assert.match(r.stdout, /^ {2}A\. publish by hand first, then push .*skips publishing, and creates the GitHub release\):\n {6}npm publish\n {6}git push origin main --follow-tags$/m);
-    assert.match(r.stdout, /^ {2}B\. let CI publish: push only \(needs the NPM_TOKEN secret; NPM_TOKEN: set\).*\n {6}git push origin main --follow-tags$/m);
-    assert.ok(r.stdout.indexOf('npm publish\n') < r.stdout.indexOf('git push origin main --follow-tags'), 'path A publishes before it pushes');
+    // one path: publish by hand, then push (CI never publishes; the tag push only makes the GitHub release)
+    assert.match(r.stdout, /^ {2}publish to npm first, then push \(the tag push only creates the GitHub release; CI never publishes\):\n {6}npm publish\n {6}git push origin main --follow-tags$/m);
+    assert.equal(r.stdout.split('git push origin main --follow-tags').length - 1, 1);
+    assert.equal(r.stdout.includes('NPM_TOKEN'), false);
     const cmd = /^ {6}(gh release create .*)$/m.exec(r.stdout)?.[1];
     const notes = /--notes-file (\S+)/.exec(cmd)?.[1];
     assert.equal(cmd, `gh release create v0.2.0 --title v0.2.0 --notes-file ${notes} --verify-tag`);
@@ -280,41 +279,24 @@ describe('scripts/release.mjs (B23)', () => {
     assert.equal(r.stderr, 'REFUSED: CHANGELOG.md has no "## [0.9.0]" section\n');
   });
 
-  test('publish.yml: github-release needs publish, has exactly {contents: write}, no id-token or NPM_TOKEN; every run block parses', () => {
-    const wf = parse(readFileSync(path.join(REPO, '.github', 'workflows', 'publish.yml'), 'utf8'));
-    assert.deepEqual(Object.keys(wf.jobs), ['validate', 'publish', 'github-release']);
-    assert.equal(wf.jobs.publish.needs, 'validate');
-    assert.deepEqual(wf.jobs.validate.permissions, { contents: 'read' });
+  test('release.yml: one github-release job with exactly {contents: write}; it never publishes to npm; every run block parses', () => {
+    const raw = readFileSync(path.join(REPO, '.github', 'workflows', 'release.yml'), 'utf8');
+    assert.equal(existsSync(path.join(REPO, '.github', 'workflows', 'publish.yml')), false);
+    const wf = parse(raw);
+    assert.deepEqual(wf.on, { push: { tags: ['v*'] } });
+    assert.deepEqual(Object.keys(wf.jobs), ['github-release']);
     const job = wf.jobs['github-release'];
-    assert.equal(job.needs, 'publish');
     assert.deepEqual(job.permissions, { contents: 'write' });
-    const text = JSON.stringify(job);
-    assert.equal(text.includes('id-token'), false);
-    assert.equal(text.includes('NPM_TOKEN'), false);
+    for (const word of ['npm publish', 'NPM_TOKEN', 'id-token', 'NODE_AUTH_TOKEN']) assert.equal(raw.includes(word), false, word);
     const runs = job.steps.filter((st) => st.run).map((st) => st.run);
-    assert.equal(runs.length, 2);
-    assert.equal(runs[0], 'node scripts/release.mjs notes "$GITHUB_REF_NAME" --out notes.md');
-    assert.match(runs[1], /gh release create "\$GITHUB_REF_NAME" --title "\$GITHUB_REF_NAME" --notes-file notes\.md --verify-tag/);
-    assert.match(runs[1], /gh release edit "\$GITHUB_REF_NAME"/);
-    assert.equal(job.steps.find((st) => st.run === runs[1]).env.GH_TOKEN, '${{ github.token }}');
-
-    // both publish paths: a manual `npm publish` before the tag push makes CI skip its own publish
-    const pubSteps = wf.jobs.publish.steps;
-    const check = pubSteps.find((st) => st.id === 'npm_state');
-    assert.ok(check, 'the already-on-npm check step exists');
-    assert.match(check.run, /npm view "\$\{name\}@\$\{version\}" version/);
-    assert.match(check.run, /published=true/);
-    const publish = pubSteps.find((st) => st.name === 'Publish to npm');
-    assert.equal(publish.if, "steps.npm_state.outputs.published != 'true'");
-    assert.ok(pubSteps.indexOf(check) < pubSteps.indexOf(publish), 'the check runs before the publish');
-
-    const all = Object.values(wf.jobs).flatMap((j) => j.steps.filter((st) => st.run).map((st) => st.run));
-    assert.equal(all.length, 13);
-    for (const script of all) {
-      const r = spawnSync('bash', ['-n'], { input: script, encoding: 'utf8' });
-      assert.equal(r.status, 0, `${r.stderr}\n${script}`);
-    }
+    assert.equal(runs.length, 3);
+    assert.match(runs[0], /if \[ "v\$\{version\}" != "\$\{GITHUB_REF_NAME\}" \]; then/);
+    assert.equal(runs[1], 'node scripts/release.mjs notes "$GITHUB_REF_NAME" --out notes.md');
+    assert.match(runs[2], /gh release create "\$GITHUB_REF_NAME" --title "\$GITHUB_REF_NAME" --notes-file notes\.md --verify-tag/);
+    assert.match(runs[2], /gh release edit "\$GITHUB_REF_NAME"/);
+    assert.equal(job.steps.find((st) => st.run === runs[2]).env.GH_TOKEN, '${{ github.token }}');
   });
+
   test('the shim bump is a line edit: every other byte is the same and exactly 1 PINNED_VERSION line remains', () => {
     const { work } = makeRepo();
     const r = release(work, ['patch', '--no-checks']);

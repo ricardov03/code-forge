@@ -55,6 +55,6 @@ jobs:
       # and echoes a message when absent would go green forever without ever validating anything
       # once B15 does add the plugin manifest (review finding, B0 fix round 1). ci.yml is B0-owned
       # forever (§10.1) and cannot be edited later, so it doesn't promise a check it can't keep;
-      # B15 (which owns `.claude-plugin/**` and `publish.yml`) adds real plugin-validation CI
-      # coverage there, with an explicit decision about installing/authenticating the CLI.
+      # `claude plugin validate .` runs locally in step 4 of `npm run release`, before every
+      # release (the release workflow only creates the GitHub release).
 

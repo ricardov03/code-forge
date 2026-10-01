@@ -25,12 +25,11 @@ subsection are refused.
 ```
 npm run release -- minor --dry-run      # see the plan and the diffs; writes nothing
 npm run release -- minor                # bump, CHANGELOG, checks, commit, tag
-npm publish                             # path A (usual): publish by hand first
-git push origin main --follow-tags      # then push; CI skips publishing and makes the GitHub release
+npm publish                             # publish to npm from your machine
+git push origin main --follow-tags      # then push; CI only creates the GitHub release
 ```
 
-Path B instead: skip `npm publish` and only push; CI publishes (with provenance) when the
-`NPM_TOKEN` secret is set. **Order matters for path A:** publish before you push the tag.
+CI never publishes to npm. Publish first, then push the tag.
 
 The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Options:
 
@@ -81,22 +80,9 @@ command to finish by hand.
 ## What stays manual
 
 - **Push:** `git push origin main --follow-tags` sends the commit and the tag together.
-- **Publish, one of:**
-  - **CI (recommended).** The pushed `v*` tag runs `.github/workflows/publish.yml`: plugin
-    validation, `npm ci`, tests, typecheck, `npm pack --dry-run`, `npm audit`, a check that the tag
-    equals `v` + the `package.json` version, `npm publish --provenance`, then a smoke test of the
-    published package. It needs the repository secret `NPM_TOKEN`. The tool tells you whether
-    `gh secret list` shows it (`set`, `not set`, or `unknown` when `gh` is missing or not logged in).
-  - **By hand (path A).** `npm publish` from the tagged commit, **before** `git push … --follow-tags`.
-    The tag run then finds the version already on npm, skips its own publish, still smoke-tests the
-    published package, and creates the GitHub release. If you push first, CI publishes (when
-    `NPM_TOKEN` is set) and your later `npm publish` fails with "cannot publish over the previously
-    published version" — harmless; nothing is published twice.
-- **`NPM_TOKEN` setup (once):** on npmjs.com create an automation (or granular, publish-only)
-  access token, then add it to the GitHub repository with `gh secret set NPM_TOKEN` or under
-  Settings → Secrets and variables → Actions.
-- **GitHub release:** automatic with the CI path; one printed command with the manual path. See
-  below.
+- **Publish:** `npm publish` from the tagged commit, before you push. Only you publish; CI never
+  does, so no npm token is stored in GitHub.
+- **GitHub release:** automatic when the tag is pushed. See below.
 
 ## GitHub Releases
 
@@ -104,15 +90,12 @@ Each version gets a GitHub release whose body is its CHANGELOG section plus two 
 version's npm page and the CHANGELOG at the tag. `node scripts/release.mjs notes vX.Y.Z [--out
 <file>]` prints that body (exit 1 when the CHANGELOG has no such version).
 
-- **Automatic (tag push, `NPM_TOKEN` set).** `publish.yml` has a `github-release` job that runs
-  only after the `publish` job (npm publish and the post-publish smoke test) succeeded. It has
-  `contents: write` and nothing else (no id-token, no `NPM_TOKEN`), writes the notes with the
-  command above, and runs `gh release create vX.Y.Z --verify-tag`. If the release already exists
-  (a re-run), it edits it with the same notes instead of failing.
-- **Manual publish (path A).** Publish by hand, then push the tag: the tag run skips publishing
-  and still creates the release, so no extra step is needed. Only if the tag run cannot create it
-  (for example GitHub Actions is off), run the command the release tool printed:
-  `gh release create vX.Y.Z --title vX.Y.Z --notes-file <path> --verify-tag`.
+- **Automatic (tag push).** `.github/workflows/release.yml` runs on every `v*` tag. It checks
+  that the tag equals `v` + the `package.json` version, writes the notes with the command above,
+  and runs `gh release create vX.Y.Z --verify-tag`. It has `contents: write` and nothing else (no
+  npm token, no id-token). If the release already exists (a re-run), it edits it with the same notes.
+- **By hand.** If the tag run fails (for example GitHub Actions is off), run the command the release
+  tool printed: `gh release create vX.Y.Z --title vX.Y.Z --notes-file <path> --verify-tag`.
 
 The other direction needs nothing: the npm page already links to the repository through the
 `repository` and `homepage` fields of `package.json`.
