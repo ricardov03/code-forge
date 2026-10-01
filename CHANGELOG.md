@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.2.2] — 2026-10-01
+
 ### Added
 
 - 1Password item ID or item link accepted for the Jev key (init question, --jev-ref, keys set --op, keys test --ref):
