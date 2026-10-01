@@ -6,6 +6,14 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- Claude sessions: the `--json-schema` passed to the Claude CLI no longer carries the top-level `$schema` pointer, which
+  the CLI rejected ("no schema with key or ref"), so every Claude reviewer session failed at once and each review came
+  back unavailable. Validation still uses the full schema.
+- Grok sessions: the answer is read from Grok's `structuredOutput`/`text` envelope, so Grok reviewer, author and System
+  2 calls no longer fail schema validation (`invalid-output`).
+
 ## [0.3.0] — 2026-10-01
 
 ### Added
