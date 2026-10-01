@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.2.3] — 2026-10-01
+
 ### Fixed
 
 - 1Password: code-forge prints a line before each call that may make 1Password ask for approval, and waits 60 s instead
