@@ -12,6 +12,12 @@ waits on a second real consumer (plan §10.4, Q17).
   `logs`, `logs summary`, `logs clear`, `logs path`, and `logs report` to share selected errors as a public GitHub issue
   after you see the full text and say yes (`gh` or a prefilled link; a last secret check stops it). Opt out with
   `CODE_FORGE_NO_ERROR_LOG=1`.
+- Better error reports (`code-forge logs report`): a second, AI cleaning pass (a closed-book L1 session that only lists
+  names, hosts, URLs, accounts, paths or secrets to hide; code-forge replaces them, and you see counts only),
+  fingerprints that group the same error in `logs`/`logs summary` and find an earlier issue (add a "happened again"
+  comment instead of a duplicate), a version check before reporting, Send · Edit in my editor · Cancel, a GitHub issue
+  form, and a one-line hint after a failure in a terminal; see docs/privacy.md. `--no-ai` skips the AI pass with an
+  extra yes.
 
 ## [0.2.3] — 2026-10-01
 

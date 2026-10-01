@@ -1,0 +1,38 @@
+name: Error report
+description: Report a code-forge error. `code-forge logs report` fills this in for you after cleaning it.
+title: "[error report] "
+labels: ["error-report"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        The easiest way to fill this in is `code-forge logs report`: it cleans the text, shows it to you, and lets you edit it before anything is sent.
+        Never paste keys, tokens, or private paths here. This issue is public.
+  - type: textarea
+    id: doing
+    attributes:
+      label: What you were doing
+      description: The command you ran and what you expected.
+    validations:
+      required: false
+  - type: textarea
+    id: versions
+    attributes:
+      label: Versions
+      description: code-forge, Node and OS versions (`code-forge --version`, `node --version`).
+    validations:
+      required: false
+  - type: textarea
+    id: details
+    attributes:
+      label: Error details
+      description: The cleaned report from `code-forge logs report` (error messages, kinds, exit codes).
+    validations:
+      required: true
+  - type: input
+    id: fingerprint
+    attributes:
+      label: Fingerprint
+      description: The 12-character fingerprint `code-forge logs` shows for this error.
+    validations:
+      required: false

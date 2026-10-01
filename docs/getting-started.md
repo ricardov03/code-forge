@@ -221,27 +221,63 @@ by hand. What changed in each version is in [CHANGELOG.md](../CHANGELOG.md).
 Every verb that fails (a non-zero exit or a crash) adds one line to
 `~/.code-forge/logs/errors.jsonl`: the time, the versions, the verb and its subcommand, the flag
 names (never their values), the exit code, a kind (`usage`, `crash`, a 1Password kind such as
-`op_timeout`, or `error`) and the last error text. Before it is written, your home folder becomes
-`~`, the project folder `<project>`, the project slug `<slug>`, and emails, `op://` references and
-1Password item IDs are replaced too. Nothing leaves your machine on its own. The file keeps its
-newest half when it grows over 1 MB.
+`op_timeout`, or `error`), the last error text and a fingerprint (12 characters that stay the same
+when the same error comes back with other numbers, names or paths). Before it is written, your home
+folder becomes `~`, the project folder `<project>`, the project slug `<slug>`, and emails, `op://`
+references and 1Password item IDs are replaced too. Nothing leaves your machine on its own. The file
+keeps its newest half when it grows over 1 MB.
+
+In a terminal, a failure (not a usage mistake) prints one more line: `code-forge: this error was
+saved to the local log. To send it to us: code-forge logs report` — at most once a day for the same
+error, and never when an agent runs code-forge.
 
 | Command | Does |
 |---|---|
-| `code-forge logs [--last N] [--json]` | the last errors, newest first (10 by default) |
-| `code-forge logs summary [--days N]` | how often each verb failed and how, over the last 30 days |
-| `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--dry-run]` | shares the selected errors (5 by default) with us as a GitHub issue |
+| `code-forge logs [--last N] [--json]` | the last errors, newest first (10 by default), with their fingerprints |
+| `code-forge logs summary [--days N]` | each distinct error over the last 30 days and how many times it was seen |
+| `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--no-ai] [--allow-old] [--dry-run]` | shares the selected errors (5 by default) with us as a GitHub issue |
 | `code-forge logs clear [--yes]` | deletes the log |
 | `code-forge logs path` | prints where the log is |
 
-`logs report` first says what is shared and what is not, how many things it cleaned, and prints
-the whole issue: versions, your note, a table of the errors and each message (and crash stack).
-The issue is **public**. It asks one yes (default no); `--dry-run` only prints. A last check stops
-the report if anything still looks like a key or token. With the GitHub CLI (`gh`) signed in it
-files the issue; without it you get a link to open (a long report is cut, and saved in full under
-`~/.code-forge/logs/`).
+What `logs report` does, in order:
 
-To turn the log off, set `CODE_FORGE_NO_ERROR_LOG=1`.
+1. It asks npm for the newest code-forge. If yours is older it says so (many errors are fixed in
+   newer versions) and asks "Report anyway?" — the default is no. Without a terminal it stops
+   unless you pass `--allow-old`.
+2. It builds the issue and cleans it twice. First the built-in cleaning (the same rules as the log).
+   Then an AI check: a short model session (level L1 of your setup, with no tools and no files)
+   reads the already-cleaned text and lists anything that could still identify a person, a company,
+   a private project, a host, an internal URL, an account, a path or a secret. The AI never rewrites
+   the text: code-forge replaces each listed piece with a label such as `<host>`, then runs the
+   built-in cleaning once more. The AI only sees up to 16 KB; a longer report is cut first. Before
+   the AI sees anything, a check stops the report if something still looks like a key or token.
+3. That check runs again after the AI pass; it never prints what it found.
+4. It says what is shared and what is never shared, how many things each pass cleaned (counts only),
+   and prints the whole issue.
+5. You choose: Send, Edit in my editor, or Cancel. Edit opens the text in `$VISUAL`, or `$EDITOR`
+   when `$VISUAL` is not usable (each must be a plain command such as `vim`, or an absolute path,
+   with no spaces or flags); what you save is
+   cleaned and checked again and shown before you choose once more.
+6. If the AI check could not run (no model CLI, not logged in, a timeout, an answer that is not
+   JSON) it says so, Cancel is the default, and sending needs one more yes ("Send without the AI
+   check?", default no). `--no-ai` skips the AI check on purpose, with the same extra yes.
+7. With the GitHub CLI (`gh`) signed in, it first searches for an issue with the same fingerprint.
+   When there is one, you can add a "happened again" comment with your versions and the count
+   (the default), create a new issue anyway, or cancel. Without `gh` you get two links: a search for
+   the fingerprint and a prefilled issue form (a long report is cut, and saved in full under
+   `~/.code-forge/logs/`).
+
+What is shared: code-forge, Node and OS versions, the newest version on npm, command names and flag
+names, exit codes, error kinds, fingerprints, and error messages and crash stacks after both
+cleaning passes, plus your note. What is never shared: flag values, file contents, your code, keys
+or tokens, your home folder, project folder or project name. You always see the full text, you can
+edit it, and nothing is sent without your yes. The issue is **public**. `--dry-run` only prints;
+`--yes` answers the questions for scripts, but not "Send without the AI check?": when the AI check
+was unavailable it is still asked in a terminal, and without one nothing is sent. `--no-ai --yes`
+is the explicit choice to send with only the built-in cleaning.
+
+To turn the log off, set `CODE_FORGE_NO_ERROR_LOG=1`. Every field and cleaning rule is listed in
+[privacy.md](privacy.md).
 
 The error log and the `gh` path are tested on macOS and Linux.
 

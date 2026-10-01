@@ -1,35 +1,42 @@
 /**
- * `code-forge logs` (block B27): read, summarize, clear and share the local error log
+ * `code-forge logs` (blocks B27, B28): read, summarize, clear and share the local error log
  * (`~/.code-forge/logs/errors.jsonl`, written by `bin/code-forge.mjs` through `util/error-log.mjs`).
  *
- *   logs [--last N] [--json]          newest first (default 10)
- *   logs summary [--days N] [--json]  counts by verb + kind over the last N days (default 30)
+ *   logs [--last N] [--json]          newest first (default 10), with each error's fingerprint
+ *   logs summary [--days N] [--json]  one row per fingerprint over the last N days (default 30): "seen N times"
  *   logs clear [--yes]                delete the log after one yes
  *   logs path                         print the log path
- *   logs report [--last N] [--kind K] [--verb V] [--note "text"] [--dry-run] [--yes]
+ *   logs report [--last N] [--kind K] [--verb V] [--note "text"] [--no-ai] [--allow-old] [--dry-run] [--yes]
  *
- * `report` builds a GitHub issue (title + Markdown body) from the selected errors, scrubs it again,
- * runs a last secret check (a hit stops it; the matched text is never printed), then ALWAYS prints
- * what is shared, a cleaning summary and the full title and body before one yes (default no). It
- * sends with `gh issue create` (argv only) when `gh` is on PATH and signed in, else prints a
- * prefilled issue link. It never opens a browser. The repository comes from package.json.
+ * `report` (B28 order): a version check (`npm view`; an old version is warned and asked about,
+ * default no, `--yes` included; without a terminal it stops unless `--allow-old`) → the
+ * deterministic scrub → a 16 KB cap → a secret check before the AI sees anything → the AI cleaning pass (a closed-book session
+ * that only LISTS private substrings; this tool replaces them, `session/scrub.mjs`) → the
+ * deterministic scrub again → a final secret check (a hit stops it; the matched text is never
+ * printed) → what is shared, a cleaning summary and the full text → Send · Edit in my editor ·
+ * Cancel (an edit is scrubbed and checked again) → an extra default-no yes when the AI pass did not
+ * run → `gh` after a search for the same fingerprint (comment "happened again" · new issue · cancel),
+ * or a prefilled issue-form link plus a search link. It never opens a browser. The repository
+ * comes from package.json.
  */
 
+import { spawn } from 'node:child_process';
 import { accessSync, constants as fsConstants, readFileSync, statSync } from 'node:fs';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exec as realExec } from '../util/exec.mjs';
-import { createScrubber, describeCounts, errorLogPath, mergeCounts, packageVersion, readErrorLog, readProjectSlug } from '../util/error-log.mjs';
+import { capBytes, createScrubber, describeCounts, errorLogPath, fingerprintOf, mergeCounts, packageVersion, readErrorLog, readProjectSlug } from '../util/error-log.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
 import { SECRET_LOOKING_PATTERNS } from '../config/secret-patterns.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
+import { AI_REPORT_MAX_BYTES, applyItems, describeAiCounts, runAiScrub } from '../session/scrub.mjs';
 
 const USAGE =
   'usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n' +
-  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--dry-run] [--yes]\n';
+  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--no-ai] [--allow-old] [--dry-run] [--yes]\n';
 
 const PACKAGE_JSON = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
 
@@ -44,6 +51,10 @@ export const DISCLOSURE =
 export const CONFIRM_MESSAGE = 'This will be public on GitHub. Send it?';
 
 const GH_TIMEOUT_MS = 60_000;
+const NPM_TIMEOUT_MS = 10_000;
+
+/** The npm package a version check looks up. */
+export const PACKAGE_NAME = '@codedology/code-forge';
 
 /** @typedef {import('../util/error-log.mjs').ErrorEntry} ErrorEntry */
 /** @typedef {{write: (s: string) => unknown}} Out */
@@ -55,12 +66,14 @@ const GH_TIMEOUT_MS = 60_000;
  * @property {Out} [stdout]
  * @property {Out} [stderr]
  * @property {boolean} [isTTY]
- * @property {{confirm: (o: {message: string, initialValue?: boolean}) => Promise<any>, isCancel: (v: unknown) => boolean}} [ui]
+ * @property {{confirm: (o: {message: string, initialValue?: boolean}) => Promise<any>, select: (o: {message: string, options: Array<{value: string, label: string}>, initialValue?: string}) => Promise<any>, isCancel: (v: unknown) => boolean}} [ui]
  * @property {typeof realExec} [exec]
  * @property {(cmd: string) => boolean} [onPath] - whether `cmd` is an executable on PATH.
  * @property {() => Date} [now]
  * @property {any} [pkg] - the package.json object the issue repository is read from (default: this package's).
  * @property {{version: string, node: string, os: string}} [system] - the versions a report names.
+ * @property {(argv: string[], env: NodeJS.ProcessEnv) => Promise<{code: number|null, error?: string}>} [runEditor] - runs
+ *   the editor on the terminal (default: argv only, stdio inherited, never a shell).
  */
 
 /**
@@ -181,27 +194,38 @@ function fenced(text) {
 }
 
 /**
- * The issue title and Markdown body for `entries` (newest first).
+ * The issue title and Markdown body for `entries` (newest first), with the sections of the issue
+ * form (`.github/ISSUE_TEMPLATE/error-report.yml`): what you were doing, versions, error details.
+ * The fingerprint section is {@link reportFooter}, added after cleaning.
  * @param {ErrorEntry[]} entries
- * @param {{version: string, node: string, os: string}} system
+ * @param {{version: string, node: string, os: string, latest?: string|null}} system
  * @param {string|null} note
- * @returns {{title: string, body: string}}
+ * @returns {{title: string, body: string, fps: string[]}} `fps`: distinct fingerprints, newest first.
  */
 export function buildReport(entries, system, note) {
   const pairs = new Set(entries.map((e) => `${e.verb}\u0000${e.kind}`));
   const title = pairs.size === 1 ? `[error report] ${entries[0].verb} ${entries[0].kind}` : `[error report] ${entries.length} errors`;
+  const fps = entries.map(fingerprintOf);
   const out = [
     '## code-forge error report',
     '',
+    '### What you were doing',
+    '',
+    note ? note : '(not given)',
+    '',
+    '### Versions',
+    '',
     `- code-forge: ${system.version}`,
+    `- latest on npm: ${system.latest ?? 'unknown'}`,
     `- Node: ${system.node}`,
     `- OS: ${system.os}`,
     '',
+    '### Error details',
+    '',
+    '| # | when | command | exit | kind | fingerprint |',
+    '|---|---|---|---|---|---|',
   ];
-  if (note) out.push('### Note', '', note, '');
-  out.push('### Summary', '', '| # | when | command | exit | kind |', '|---|---|---|---|---|');
-  entries.forEach((e, i) => out.push(`| ${i + 1} | ${cell(e.ts)} | ${cell(command(e))} | ${cell(e.exit)} | ${cell(e.kind)} |`));
-  out.push('', '### Errors');
+  entries.forEach((e, i) => out.push(`| ${i + 1} | ${cell(e.ts)} | ${cell(command(e))} | ${cell(e.exit)} | ${cell(e.kind)} | ${fps[i]} |`));
   entries.forEach((e, i) => {
     out.push(
       '',
@@ -211,6 +235,7 @@ export function buildReport(entries, system, note) {
       `- flags: ${Array.isArray(e.flags) && e.flags.length > 0 ? e.flags.map((f) => `\`${f}\``).join(' ') : 'none'}`,
       `- exit: ${e.exit}`,
       `- kind: ${e.kind}`,
+      `- fingerprint: ${fps[i]}`,
       `- code-forge ${e.version}, Node ${e.node}, ${e.platform} ${e.arch}`,
       '',
       'message:',
@@ -219,7 +244,72 @@ export function buildReport(entries, system, note) {
     );
     if (e.stack) out.push('', 'stack:', '', fenced(e.stack));
   });
-  return { title, body: `${out.join('\n')}\n` };
+  return { title, body: `${out.join('\n')}\n`, fps: [...new Set(fps)] };
+}
+
+/**
+ * The last section of every report: `Fingerprint: <fp>` (the newest error's) and one hidden
+ * `<!-- code-forge-fp: <fp> -->` line per distinct fingerprint, so a later report finds it.
+ * @param {string[]} fps - distinct, newest first.
+ * @returns {string}
+ */
+export function reportFooter(fps) {
+  const lines = ['', '### Fingerprint', '', `Fingerprint: ${fps[0]}`];
+  if (fps.length > 1) lines.push('', `Other fingerprints: ${fps.slice(1).join(', ')}`);
+  lines.push('', ...fps.map((fp) => `<!-- code-forge-fp: ${fp} -->`));
+  return `${lines.join('\n')}\n`;
+}
+
+/** A body's footer (see {@link reportFooter}), when it ends with one. */
+const FOOTER_RE = /\n### Fingerprint\n\nFingerprint: [0-9a-f]{12}\n(?:\nOther fingerprints: [0-9a-f, ]+\n)?\n(?:<!-- code-forge-fp: [0-9a-f]{12} -->[ \t]*(?:\r?\n|$))+\s*$/;
+
+/**
+ * Cut `body` so `title` + `body` stay within `maxBytes` (the AI cost guard), never inside a
+ * character; a cut body ends with a note naming that size.
+ * @param {string} title @param {string} body @param {number} maxBytes
+ * @returns {{body: string, cut: boolean}}
+ */
+export function capReport(title, body, maxBytes) {
+  if (Buffer.byteLength(`${title}\n\n${body}`) <= maxBytes) return { body, cut: false };
+  const note = `\n\n(report cut to ${maxBytes} bytes)\n`;
+  const room = maxBytes - Buffer.byteLength(`${title}\n\n`) - Buffer.byteLength(note);
+  return { body: `${capBytes(body, Math.max(0, room))}${note}`, cut: true };
+}
+
+/**
+ * Compare two semver versions: `x.y.z`, then a pre-release is older than its release
+ * (`1.2.0-beta.1` < `1.2.0`) and pre-releases compare part by part (numbers as numbers, numbers
+ * before words). Build metadata (`+…`) is ignored.
+ * @param {string} a @param {string} b
+ * @returns {number|null} >0 when a is newer, <0 when older, 0 when equal; null when unreadable.
+ */
+export function compareVersions(a, b) {
+  const re = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
+  const pa = re.exec(a.trim());
+  const pb = re.exec(b.trim());
+  if (!pa || !pb) return null;
+  for (let i = 1; i <= 3; i += 1) {
+    const d = Number(pa[i]) - Number(pb[i]);
+    if (d !== 0) return d;
+  }
+  if (pa[4] === undefined || pb[4] === undefined) return pa[4] === pb[4] ? 0 : pa[4] === undefined ? 1 : -1;
+  const xa = pa[4].split('.');
+  const xb = pb[4].split('.');
+  for (let i = 0; i < Math.max(xa.length, xb.length); i += 1) {
+    if (xa[i] === undefined) return -1;
+    if (xb[i] === undefined) return 1;
+    const na = /^\d+$/.test(xa[i]);
+    const nb = /^\d+$/.test(xb[i]);
+    if (na && nb) {
+      const d = Number(xa[i]) - Number(xb[i]);
+      if (d !== 0) return d;
+    } else if (na !== nb) {
+      return na ? -1 : 1;
+    } else if (xa[i] !== xb[i]) {
+      return xa[i] < xb[i] ? -1 : 1;
+    }
+  }
+  return 0;
 }
 
 /** @returns {{version: string, node: string, os: string}} */
@@ -246,7 +336,7 @@ export async function runLogs(args, deps = {}) {
     summary: { values: ['days'], booleans: ['json'] },
     clear: { booleans: ['yes'] },
     path: {},
-    report: { values: ['last', 'kind', 'verb', 'note'], booleans: ['dry-run', 'yes'] },
+    report: { values: ['last', 'kind', 'verb', 'note'], booleans: ['dry-run', 'yes', 'no-ai', 'allow-old'] },
   });
   const name = sub ?? 'list';
   if (!Object.hasOwn(specs, name) || (name === 'list' && sub !== null)) {
@@ -285,31 +375,31 @@ export async function runLogs(args, deps = {}) {
   if (name === 'list') {
     const shown = newest.slice(0, n ?? 10);
     if (flags.json) out(`${JSON.stringify({ errors: shown })}\n`);
-    else for (const e of shown) out(`${e.ts}  ${command(e)}  ${e.exit}  ${e.kind}  ${firstLine(e.message)}\n`);
+    else for (const e of shown) out(`${e.ts}  ${command(e)}  ${e.exit}  ${e.kind}  ${fingerprintOf(e)}  ${firstLine(e.message)}\n`);
     return 0;
   }
 
   if (name === 'summary') {
     const days = n ?? 30;
     const since = (deps.now ?? (() => new Date()))().getTime() - days * 86_400_000;
-    /** @type {Map<string, {verb: string, kind: string, count: number}>} */
+    /** @type {Map<string, {fp: string, verb: string, sub: string|null, kind: string, count: number}>} */
     const counts = new Map();
     for (const e of newest) {
       const t = Date.parse(e.ts);
       if (!(t >= since)) continue;
-      const key = `${e.verb}\u0000${e.kind}`;
-      const c = counts.get(key) ?? { verb: e.verb, kind: e.kind, count: 0 };
+      const fp = fingerprintOf(e);
+      const c = counts.get(fp) ?? { fp, verb: e.verb, sub: e.sub ?? null, kind: e.kind, count: 0 };
       c.count += 1;
-      counts.set(key, c);
+      counts.set(fp, c);
     }
-    const rows = [...counts.values()].sort((a, b) => b.count - a.count || a.verb.localeCompare(b.verb) || a.kind.localeCompare(b.kind));
+    const rows = [...counts.values()].sort((a, b) => b.count - a.count || a.verb.localeCompare(b.verb) || a.kind.localeCompare(b.kind) || a.fp.localeCompare(b.fp));
     if (flags.json) {
       out(`${JSON.stringify({ days, counts: rows })}\n`);
     } else if (rows.length === 0) {
       out(`no errors in the last ${days} days\n`);
     } else {
       out(`errors in the last ${days} days:\n`);
-      for (const r of rows) out(`${String(r.count).padStart(5)}  ${r.verb}  ${r.kind}\n`);
+      for (const r of rows) out(`${r.fp}  ${r.sub ? `${r.verb} ${r.sub}` : r.verb}  ${r.kind}  seen ${r.count} ${r.count === 1 ? 'time' : 'times'}\n`);
     }
     return 0;
   }
@@ -345,6 +435,73 @@ async function clear(file, entries, flags, deps, out, err) {
 }
 
 /**
+ * The latest version on npm, or why it is unknown (never npm's own output).
+ * @param {typeof realExec} exec @param {NodeJS.ProcessEnv} env
+ * @returns {Promise<{latest: string} | {why: string}>}
+ */
+async function latestOnNpm(exec, env) {
+  let res;
+  try {
+    res = await exec(['npm', 'view', PACKAGE_NAME, 'version'], { env, timeoutMs: NPM_TIMEOUT_MS });
+  } catch {
+    return { why: 'npm did not run' };
+  }
+  if (res.result !== 'ok') return { why: res.timedOut ? 'timed out' : res.code !== null ? `npm exit ${res.code}` : 'npm did not run' };
+  const v = res.stdout.trim();
+  return /^\d+\.\d+\.\d+(?:[-+][0-9A-Za-z.-]+)?$/.test(v) ? { latest: v } : { why: 'npm gave no version' };
+}
+
+/**
+ * Ask a yes/no question on the terminal.
+ * @param {LogsDeps} deps @param {string} message @param {boolean} initialValue
+ * @returns {Promise<boolean>}
+ */
+async function askYes(deps, message, initialValue) {
+  const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
+  const go = await ui.confirm({ message, initialValue });
+  return !ui.isCancel(go) && go === true;
+}
+
+/**
+ * Pick one option on the terminal; a cancelled prompt is `cancel`.
+ * @param {LogsDeps} deps @param {string} message
+ * @param {Array<{value: string, label: string}>} options @param {string} initialValue
+ * @returns {Promise<string>}
+ */
+async function choose(deps, message, options, initialValue) {
+  const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
+  const v = await ui.select({ message, options, initialValue });
+  return ui.isCancel(v) || typeof v !== 'string' ? 'cancel' : v;
+}
+
+/**
+ * The editor command: `$VISUAL` when it is usable, else `$EDITOR`. Usable means a plain command
+ * name or an absolute path, with no spaces or flags (it runs as argv[0], never through a shell).
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {string|null} null when neither is usable.
+ */
+export function editorCommand(env) {
+  for (const raw of [env.VISUAL, env.EDITOR]) {
+    if (typeof raw !== 'string' || raw.length === 0 || /\s/.test(raw)) continue;
+    if (path.isAbsolute(raw) || /^[A-Za-z0-9._+-]+$/.test(raw)) return raw;
+  }
+  return null;
+}
+
+/**
+ * Run the editor on the terminal: argv only, never a shell.
+ * @param {string[]} argv @param {NodeJS.ProcessEnv} env
+ * @returns {Promise<{code: number|null, error?: string}>}
+ */
+function runEditorOnTerminal(argv, env) {
+  return new Promise((resolve) => {
+    const child = spawn(argv[0], argv.slice(1), { env, stdio: 'inherit', shell: false });
+    child.on('error', (e) => resolve({ code: null, error: /** @type {NodeJS.ErrnoException} */ (e).code ?? 'error' }));
+    child.on('exit', (code) => resolve({ code }));
+  });
+}
+
+/**
  * @param {ErrorEntry[]} newest @param {number} last
  * @param {Record<string, string|string[]|true>} flags @param {LogsDeps} deps
  * @param {(s: string) => void} out @param {(s: string) => void} err
@@ -364,40 +521,133 @@ async function report(newest, last, flags, deps, out, err) {
     err('logs: package.json names no GitHub repository to report to\n');
     return 1;
   }
+  const exec = deps.exec ?? realExec;
+  const tty = deps.isTTY ?? process.stdin.isTTY === true;
+  const dryRun = flags['dry-run'] === true;
+  const yes = flags.yes === true;
+  const system = deps.system ?? currentSystem();
+
+  // 1. version check: an old version gets a warning and a default-no question
+  const npm = await latestOnNpm(exec, env);
+  const latest = 'latest' in npm ? npm.latest : null;
+  if ('why' in npm) {
+    out(`Could not check npm for a newer code-forge (${npm.why}); going on.\n`);
+  } else if ((compareVersions(npm.latest, system.version) ?? 0) > 0) {
+    out(`You use ${system.version}. ${npm.latest} is out. Many errors are fixed in newer versions: upgrade with npm install -g ${PACKAGE_NAME}@latest and try again first.\n`);
+    // never go on silently: a terminal is asked (--yes too, default no); without one, only an
+    // explicit --allow-old goes on (a dry run sends nothing and only warns)
+    if (!dryRun && flags['allow-old'] !== true) {
+      if (!tty) {
+        err('logs: an older code-forge than the one on npm; not sent — upgrade first, or pass --allow-old to report from this version\n');
+        return 2;
+      }
+      if (!(await askYes(deps, 'Report anyway?', false))) {
+        out('not sent\n');
+        return 1;
+      }
+    }
+  }
+
+  // 2. deterministic scrub, the 16 KB cap, the AI pass, the deterministic scrub again
   const cwd = deps.cwd ?? process.cwd();
   const scrubber = createScrubber({ home, cwd, slug: await readProjectSlug(cwd) });
   const note = typeof flags.note === 'string' ? flags.note : null;
-  const built = buildReport(selected, deps.system ?? currentSystem(), note);
-  const title = scrubber.scrub(built.title);
-  const body = scrubber.scrub(built.body);
+  const built = buildReport(selected, { ...system, latest }, note);
+  let title = scrubber.scrub(built.title);
+  let body = capReport(title, scrubber.scrub(built.body), AI_REPORT_MAX_BYTES).body;
+  const blocked = () => {
+    const hit = findSecret(`${title}\n${body}`);
+    if (hit === null) return false;
+    out(DISCLOSURE);
+    err(`Possible secret found in the report (${hit.rule}, report line ${hit.line}; the title is line 1); not sent. Find it with code-forge logs --json and remove it with code-forge logs clear.\n`);
+    return true;
+  };
+  // a secret the built-in cleaning left is never shown to the AI either
+  if (blocked()) return 1;
+  /** @type {{status: 'ok', counts: Array<{kind: string, count: number}>} | {status: 'skipped'} | {status: 'unavailable', reason: string}} */
+  let ai;
+  if (flags['no-ai'] === true) {
+    ai = { status: 'skipped' };
+  } else {
+    const res = await runAiScrub({ report: `${title}\n\n${body}`, cwd }, { ...(deps.exec ? { exec: deps.exec } : {}), env, stderr: { write: () => true } });
+    if (res.ok === true) {
+      const applied = applyItems([title, body], res.items);
+      [title, body] = applied.texts.map((t) => scrubber.scrub(t));
+      ai = { status: 'ok', counts: applied.counts };
+    } else {
+      ai = { status: 'unavailable', reason: /** @type {{reason: string}} */ (res).reason };
+    }
+  }
+  body += reportFooter(built.fps);
   const cleaned = mergeCounts([...selected.map((e) => e.cleaned), scrubber.counts()]);
 
+  // 3. the final secret check, then what is shared and the full text
+  if (blocked()) return 1;
   out(DISCLOSURE);
-  const hit = findSecret(`${title}\n${body}`);
-  if (hit !== null) {
-    err(`Possible secret found in the report (${hit.rule}, report line ${hit.line}; the title is line 1); not sent. Find it with code-forge logs --json and remove it with code-forge logs clear.\n`);
-    return 1;
-  }
-  out(`${describeCounts(cleaned)}\n\nTitle: ${title}\n\n${body}\n`);
-
-  if (flags['dry-run']) {
+  const aiLine =
+    ai.status === 'ok'
+      ? describeAiCounts(ai.counts)
+      : ai.status === 'skipped'
+        ? 'AI cleaning was skipped (--no-ai); only the built-in cleaning ran.'
+        : `AI cleaning was not available (${ai.reason}); only the built-in cleaning ran.`;
+  out(`${describeCounts(cleaned)}\n${aiLine}\n\nTitle: ${title}\n\n${body}\n`);
+  if (dryRun) {
     out('dry run: not sent\n');
     return 0;
   }
-  if (!flags.yes) {
-    if (!(deps.isTTY ?? process.stdin.isTTY === true)) {
+
+  // 4. send, edit or cancel
+  const aiRan = ai.status === 'ok';
+  if (yes) {
+    // `--no-ai --yes` is the explicit extra yes; otherwise the AI check that did not run is asked
+    // about in a terminal (default no) and refused without one
+    if (!aiRan && flags['no-ai'] !== true) {
+      if (!tty) {
+        err('logs: the AI check did not run and there is no terminal to confirm; not sent — pass --no-ai with --yes to send with only the built-in cleaning\n');
+        return 1;
+      }
+      if (!(await askYes(deps, 'Send without the AI check?', false))) {
+        out('not sent\n');
+        return 1;
+      }
+    }
+  } else {
+    if (!tty) {
       err('logs: no terminal to confirm; not sent — pass --yes to send the report above\n');
       return 2;
     }
-    const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
-    const go = await ui.confirm({ message: CONFIRM_MESSAGE, initialValue: false });
-    if (ui.isCancel(go) || go !== true) {
-      out('not sent\n');
-      return 1;
+    let edited = false;
+    for (;;) {
+      const options = [{ value: 'send', label: 'Send' }, ...(edited ? [] : [{ value: 'edit', label: 'Edit in my editor' }]), { value: 'cancel', label: 'Cancel' }];
+      const pick = await choose(deps, CONFIRM_MESSAGE, options, aiRan ? 'send' : 'cancel');
+      if (pick === 'edit') {
+        edited = true;
+        const next = await editBody(body, env, deps, out);
+        if (next === null) continue;
+        const cleanedNext = scrubber.scrub(next);
+        const again = findSecret(`${title}\n${cleanedNext}`);
+        if (again !== null) {
+          err(`Possible secret found in the edited report (${again.rule}, report line ${again.line}; the title is line 1); not sent.\n`);
+          return 1;
+        }
+        body = cleanedNext;
+        if (!body.includes(`<!-- code-forge-fp: ${built.fps[0]} -->`)) {
+          body = `${body.trimEnd()}\n${reportFooter(built.fps)}`;
+          out('the fingerprint section was added back\n');
+        }
+        out(`Title: ${title}\n\n${body}\n`);
+        continue;
+      }
+      if (pick !== 'send' || (!aiRan && !(await askYes(deps, 'Send without the AI check?', false)))) {
+        out('not sent\n');
+        return 1;
+      }
+      break;
     }
   }
 
-  const exec = deps.exec ?? realExec;
+  // 5. gh (after a search for the same fingerprint) or a link
+  const fp = built.fps[0];
   const onPath = deps.onPath ?? pathLookup(env.PATH ?? '');
   let ghReady = false;
   if (onPath('gh')) {
@@ -408,21 +658,137 @@ async function report(newest, last, flags, deps, out, err) {
     }
   }
   if (ghReady) {
-    const sent = await sendWithGh(exec, env, repo, title, body, out);
-    if (sent === null) return 0;
-    out(`gh failed (${sent}); here is a link instead\n`);
-    return printLink(repo, title, body, home, deps, out, true);
+    const search = await findReported(exec, env, repo, fp);
+    if ('why' in search) out(`could not search for an existing report (${search.why}); creating a new one\n`);
+    const dup = 'hit' in search ? search.hit : null;
+    if (dup !== null) {
+      out(`This error was already reported: ${dup.url} (${dup.state})\n`);
+      const pick = yes
+        ? 'comment'
+        : await choose(deps, 'What now?', [
+            { value: 'comment', label: 'Add a comment "happened again"' },
+            { value: 'new', label: 'Create a new issue anyway' },
+            { value: 'cancel', label: 'Cancel' },
+          ], 'comment');
+      if (pick === 'cancel') {
+        out('not sent\n');
+        return 1;
+      }
+      if (pick === 'comment') {
+        const times = newest.filter((e) => fingerprintOf(e) === fp).length;
+        const comment = againComment(system, latest, times, fp);
+        const why = await ghWithBodyFile(exec, env, comment, (file) => [['gh', 'issue', 'comment', String(dup.number), '--repo', repo, '--body-file', file]]);
+        if (why === null) {
+          out(`commented: ${dup.url}\n`);
+          return 0;
+        }
+        err(`gh failed (${why}); nothing was sent. Add the comment by hand: ${dup.url}\n`);
+        return 1;
+      }
+    }
+    // one kind label per distinct kind in the report, newest first, at most 3
+    const kinds = [...new Set(selected.map((e) => e.kind))].slice(0, 3);
+    const labels = ['--label', 'error-report', ...kinds.flatMap((k) => ['--label', `kind:${k}`])];
+    /** @type {string|null} */
+    let url = null;
+    const why = await ghWithBodyFile(exec, env, body, (file) => {
+      const base = ['gh', 'issue', 'create', '--repo', repo, '--title', title, '--body-file', file];
+      return [[...base, ...labels], base];
+    }, (stdout) => {
+      url = stdout.split('\n').map((l) => l.trim()).filter((l) => /^https:\/\//.test(l)).pop() ?? null;
+    });
+    if (why === null) {
+      out(`sent: ${url ?? '(gh printed no issue URL)'}\n`);
+      return 0;
+    }
+    out(`gh failed (${why}); here is a link instead\n`);
+    return printLink(repo, title, body, fp, home, deps, out, true);
   }
-  return printLink(repo, title, body, home, deps, out, false);
+  return printLink(repo, title, body, fp, home, deps, out, false);
 }
 
 /**
- * @param {typeof realExec} exec @param {NodeJS.ProcessEnv} env
- * @param {string} repo @param {string} title @param {string} body
- * @param {(s: string) => void} out
- * @returns {Promise<string|null>} null when sent; else why gh failed (`exit n`, never its output).
+ * The comment for an issue that already has this fingerprint.
+ * @param {{version: string, node: string, os: string}} system @param {string|null} latest
+ * @param {number} times @param {string} fp
  */
-async function sendWithGh(exec, env, repo, title, body, out) {
+export function againComment(system, latest, times, fp) {
+  return [
+    'This error happened again.',
+    '',
+    `- code-forge: ${system.version}`,
+    `- latest on npm: ${latest ?? 'unknown'}`,
+    `- Node: ${system.node}`,
+    `- OS: ${system.os}`,
+    `- times in the local log: ${times}`,
+    '',
+    `<!-- code-forge-fp: ${fp} -->`,
+    '',
+  ].join('\n');
+}
+
+/**
+ * Edit `body` in the user's editor; null when it could not run (the reason is printed).
+ * @param {string} body @param {NodeJS.ProcessEnv} env @param {LogsDeps} deps @param {(s: string) => void} out
+ * @returns {Promise<string|null>}
+ */
+async function editBody(body, env, deps, out) {
+  const editor = editorCommand(env);
+  if (editor === null) {
+    out('Cannot open an editor: set VISUAL or EDITOR to a plain command (a name such as vim, or an absolute path, with no spaces or flags).\n');
+    return null;
+  }
+  /** @type {string|null} */
+  let dir = null;
+  try {
+    const root = currentRunRoot();
+    await mkdir(root, { recursive: true });
+    dir = await mkdtemp(path.join(root, 'report-edit-'));
+    const file = path.join(dir, 'report.md');
+    await writeFile(file, body, { encoding: 'utf8', mode: 0o600 });
+    const res = await (deps.runEditor ?? runEditorOnTerminal)([editor, file], env);
+    if (res.code !== 0) {
+      out(`The editor did not finish (${res.error ?? `exit ${res.code}`}); the text is unchanged.\n`);
+      return null;
+    }
+    return await readFile(file, 'utf8');
+  } catch {
+    out('Could not edit the report; the text is unchanged.\n');
+    return null;
+  } finally {
+    if (dir !== null) await rm(dir, { recursive: true, force: true }).catch(() => {});
+  }
+}
+
+/**
+ * An earlier issue holding `fp` in its body (open or closed): `{hit}` (null when there is none),
+ * or `{why}` when the search failed (`gh exit n`; never gh's output).
+ * @param {typeof realExec} exec @param {NodeJS.ProcessEnv} env @param {string} repo @param {string} fp
+ * @returns {Promise<{hit: {number: number, url: string, state: string}|null} | {why: string}>}
+ */
+async function findReported(exec, env, repo, fp) {
+  const res = await ghRun(exec, ['gh', 'issue', 'list', '--repo', repo, '--state', 'all', '--search', `${fp} in:body`, '--json', 'number,url,state', '--limit', '5'], env);
+  if (res.result !== 'ok') return { why: res.code !== null ? `gh exit ${res.code}` : res.timedOut ? 'gh timed out' : 'gh did not finish' };
+  let list;
+  try {
+    list = JSON.parse(res.stdout);
+  } catch {
+    return { why: 'gh gave no list' };
+  }
+  if (!Array.isArray(list)) return { why: 'gh gave no list' };
+  const hit = list.find((i) => Number.isSafeInteger(i?.number) && typeof i?.url === 'string' && /^https:\/\//.test(i.url));
+  return { hit: hit ? { number: hit.number, url: hit.url, state: typeof hit.state === 'string' ? hit.state.toLowerCase() : 'unknown' } : null };
+}
+
+/**
+ * Write `text` to a private temp file and run the first argv of `argvsFor(file)`; when it fails
+ * over a label, run the next one (once).
+ * @param {typeof realExec} exec @param {NodeJS.ProcessEnv} env @param {string} text
+ * @param {(file: string) => string[][]} argvsFor
+ * @param {(stdout: string) => void} [onOk]
+ * @returns {Promise<string|null>} null when gh succeeded; else why (`exit n`, never its output).
+ */
+async function ghWithBodyFile(exec, env, text, argvsFor, onOk) {
   /** @type {string|null} */
   let dir = null;
   try {
@@ -432,17 +798,16 @@ async function sendWithGh(exec, env, repo, title, body, out) {
       await mkdir(root, { recursive: true });
       dir = await mkdtemp(path.join(root, 'report-'));
       const bodyFile = path.join(dir, 'body.md');
-      await writeFile(bodyFile, body, { encoding: 'utf8', mode: 0o600 });
-      const base = ['gh', 'issue', 'create', '--repo', repo, '--title', title, '--body-file', bodyFile];
-      res = await ghRun(exec, [...base, '--label', 'bug'], env);
+      await writeFile(bodyFile, text, { encoding: 'utf8', mode: 0o600 });
+      const [first, retry] = argvsFor(bodyFile);
+      res = await ghRun(exec, first, env);
       // gh's stderr is matched to decide the retry, never printed
-      if (res.result !== 'ok' && /label/i.test(res.stderr)) res = await ghRun(exec, base, env);
+      if (res.result !== 'ok' && retry && /label/i.test(res.stderr)) res = await ghRun(exec, retry, env);
     } catch {
       return 'could not write the report file';
     }
     if (res.result !== 'ok') return res.code !== null ? `exit ${res.code}` : res.timedOut ? 'timed out' : 'did not finish';
-    const url = res.stdout.split('\n').map((l) => l.trim()).filter((l) => /^https:\/\//.test(l)).pop();
-    out(`sent: ${url ?? '(gh printed no issue URL)'}\n`);
+    onOk?.(res.stdout);
     return null;
   } finally {
     if (dir !== null) await rm(dir, { recursive: true, force: true }).catch(() => {});
@@ -461,9 +826,18 @@ async function ghRun(exec, argv, env) {
   }
 }
 
-/** @param {string} repo @param {string} title @param {string} body */
-export function issueUrl(repo, title, body) {
-  return `https://github.com/${repo}/issues/new?title=${encodeURIComponent(title)}&body=${encodeURIComponent(body)}&labels=bug`;
+/**
+ * The prefilled issue-form link: the form's `details` field holds the whole body (GitHub fills an
+ * issue form's fields from query parameters named by field id).
+ * @param {string} repo @param {string} title @param {string} body @param {string} fp
+ */
+export function issueUrl(repo, title, body, fp) {
+  return `https://github.com/${repo}/issues/new?template=error-report.yml&title=${encodeURIComponent(title)}&labels=error-report&fingerprint=${fp}&details=${encodeURIComponent(body)}`;
+}
+
+/** @param {string} repo @param {string} fp @returns {string} the issue search for one fingerprint */
+export function searchUrl(repo, fp) {
+  return `https://github.com/${repo}/issues?q=${fp}`;
 }
 
 /**
@@ -486,30 +860,35 @@ async function saveReport(body, home, deps) {
 }
 
 /**
- * Print a prefilled issue link; a body too long for a link is cut and saved in full.
- * @param {string} repo @param {string} title @param {string} body @param {string} home
+ * Print the search link for the fingerprint and a prefilled issue link; a body too long for a
+ * link is cut (its fingerprint section kept) and saved in full.
+ * @param {string} repo @param {string} title @param {string} body @param {string} fp @param {string} home
  * @param {LogsDeps} deps @param {(s: string) => void} out
  * @param {boolean} alwaysSave - save the full body even when it fits (the gh fallback).
  */
-async function printLink(repo, title, body, home, deps, out, alwaysSave) {
-  let url = issueUrl(repo, title, body);
+async function printLink(repo, title, body, fp, home, deps, out, alwaysSave) {
+  let url = issueUrl(repo, title, body, fp);
   if (url.length > MAX_URL_LENGTH) {
     const file = await saveReport(body, home, deps);
-    const tail = file ? `\n\n(report cut; full report saved at ~/.code-forge/logs/${file.name})\n` : '\n\n(report cut)\n';
-    const chars = Array.from(body);
+    const found = FOOTER_RE.exec(body);
+    const footer = found ? `${found[0].slice(1).trimEnd()}\n` : '';
+    const main = found ? body.slice(0, found.index) : body;
+    const tail = (file ? `\n\n(report cut; full report saved at ~/.code-forge/logs/${file.name})\n` : '\n\n(report cut)\n') + (footer ? `\n${footer}` : '');
+    const chars = Array.from(main);
     let lo = 0;
     let hi = chars.length;
     while (lo < hi) {
       const mid = Math.ceil((lo + hi) / 2);
-      if (issueUrl(repo, title, chars.slice(0, mid).join('') + tail).length <= MAX_URL_LENGTH) lo = mid;
+      if (issueUrl(repo, title, chars.slice(0, mid).join('') + tail, fp).length <= MAX_URL_LENGTH) lo = mid;
       else hi = mid - 1;
     }
-    url = issueUrl(repo, title, chars.slice(0, lo).join('') + tail);
+    url = issueUrl(repo, title, chars.slice(0, lo).join('') + tail, fp);
     out(file ? `The report is too long for a link: it was cut. Full report saved at ${file.saved}\n` : 'The report is too long for a link: it was cut.\n');
   } else if (alwaysSave) {
     const file = await saveReport(body, home, deps);
     if (file) out(`Full report saved at ${file.saved}\n`);
   }
+  out(`Already reported? Search first:\n${searchUrl(repo, fp)}\n`);
   out(`Open this link to file the issue:\n${url}\n`);
   return 0;
 }

@@ -14,7 +14,8 @@ process.env.HOME = path.join(PARENT, 'home');
 mkdirSync(process.env.HOME, { recursive: true });
 after(() => rmSync(PARENT, { recursive: true, force: true }));
 
-const { appendLine, capBytes, createScrubber, describeCounts, flagNames, logVerbFailure, subcommandOf } = await import('../../src/util/error-log.mjs');
+const { appendLine, capBytes, createScrubber, describeCounts, fingerprint, fingerprintOf, flagNames, logVerbFailure, normalizeMessage, subcommandOf } = await import('../../src/util/error-log.mjs');
+const { HINT_LINE, maybeHint } = await import('../../src/util/error-hint.mjs');
 const { clearErrorKind, reportErrorKind, takeErrorKind } = await import('../../src/util/error-kind.mjs');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -79,7 +80,7 @@ describe('the router logs failed verbs', () => {
     assert.equal(got[0].split(FAKE_KEY).length - 1, 0);
     assert.equal(got[0].split('positional-word').length - 1, 0);
     const e = JSON.parse(got[0]);
-    assert.deepEqual(Object.keys(e), ['ts', 'version', 'node', 'platform', 'arch', 'verb', 'sub', 'flags', 'exit', 'kind', 'message', 'stack', 'cleaned']);
+    assert.deepEqual(Object.keys(e), ['ts', 'version', 'node', 'platform', 'arch', 'verb', 'sub', 'flags', 'exit', 'kind', 'message', 'stack', 'cleaned', 'fp']);
     assert.match(e.ts, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     assert.deepEqual(
       { ...e, ts: 'T' },
@@ -88,8 +89,13 @@ describe('the router logs failed verbs', () => {
         verb: 'fail', sub: null, flags: ['-q', '--key', '--yes'], exit: 1, kind: 'error',
         message: 'fail: boom in ~/notes and <project>/src', stack: null,
         cleaned: [{ rule: 'home', count: 1 }, { rule: 'project_path', count: 1 }],
+        // sha256("fail\n\nerror\nfail: boom in and"), first 12 hex (checked with shasum)
+        fp: '47df05de5817',
       },
     );
+    // non-TTY (spawnSync pipes stderr): no hint line, no hint state
+    assert.equal(r.stderr.includes('code-forge logs report'), false);
+    assert.equal(existsSync(path.join(w.home, '.code-forge', 'logs', 'hints.json')), false);
   });
 
   test('exit 0 appends 0 lines; exit 2 logs kind usage', () => {
@@ -281,6 +287,81 @@ describe('scrub', () => {
     assert.equal(subcommandOf('keys', ['--json', 'list']), 'list');
     assert.equal(subcommandOf('review-file', ['test']), null);
     assert.equal(subcommandOf('keys', ['my-secret']), null);
+  });
+});
+
+describe('fingerprint (B28)', () => {
+  test('the same error with other ids, times, quoted names and paths gives the same fp; another kind, verb or status does not', () => {
+    const a = { verb: 'keys', sub: 'set', kind: 'op_timeout', message: 'keys: 1Password did not answer after 20000 ms for "Jev key" at ~/a/b.yml (<item-id>) pid 4242 at 2026-10-01T12:00:00Z id 9f8e7d6c5b' };
+    const b = { ...a, message: "keys: 1Password did not answer after 60000 ms for 'Other' at <project>/x/y.yml  (<item-id>) pid 9191 at 2026-09-30T08:01:02.123Z id 0a1b2c3d4e5f" };
+    assert.equal(normalizeMessage(a.message), 'keys: 1Password did not answer after ms for at ( ) pid at id');
+    assert.equal(fingerprint(a), fingerprint(b));
+    assert.match(fingerprint(a), /^[0-9a-f]{12}$/);
+    assert.notEqual(fingerprint({ ...a, kind: 'op_locked' }), fingerprint(a));
+    assert.notEqual(fingerprint({ ...a, verb: 'init' }), fingerprint(a));
+    assert.notEqual(fingerprint({ ...a, message: 'keys: the vault is locked' }), fingerprint(a));
+    const http = (/** @type {string} */ m) => fingerprint({ verb: 'jev', sub: 'ask', kind: 'error', message: m });
+    assert.notEqual(http('jev: HTTP 404 from the API'), http('jev: HTTP 500 from the API'));
+    assert.equal(normalizeMessage('E404 at 12:30:01 after 1234.5 ms, 3 tries'), 'E404 at after ms, 3 tries');
+  });
+
+  test('fingerprintOf keeps a stored fp and computes one for an entry written before B28', () => {
+    const old = { verb: 'fail', sub: null, kind: 'error', message: 'fail: boom in ~/notes and <project>/src' };
+    assert.equal(fingerprintOf(/** @type {any} */ (old)), '47df05de5817');
+    assert.equal(fingerprintOf(/** @type {any} */ ({ ...old, fp: 'abcdefabcdef' })), 'abcdefabcdef');
+  });
+});
+
+describe('the hint after a failure (B28)', () => {
+  /** @param {string} home */
+  function hint(home, over = {}) {
+    const chunks = [];
+    const stderr = { write: (s) => chunks.push(s) };
+    return maybeHint({ entry: { fp: 'abcdefabcdef' }, exit: 1, isTTY: true, env: { HOME: home }, now: new Date('2026-10-01T12:00:00.000Z'), stderr, ...over }).then((shown) => ({ shown, text: chunks.join('') }));
+  }
+
+  test('TTY + exit 1: exactly 1 line; the same fp again within 24 h: 0 more; after 24 h: 1 more', async () => {
+    const w = fresh();
+    const first = await hint(w.home);
+    assert.deepEqual(first, { shown: true, text: 'code-forge: this error was saved to the local log. To send it to us: code-forge logs report\n' });
+    assert.equal(HINT_LINE.split('\n').length - 1, 1);
+    const again = await hint(w.home, { now: new Date('2026-10-02T11:59:59.000Z') });
+    assert.deepEqual(again, { shown: false, text: '' });
+    const other = await hint(w.home, { entry: { fp: '111111111111' } });
+    assert.equal(other.shown, true);
+    const later = await hint(w.home, { now: new Date('2026-10-02T12:00:01.000Z') });
+    assert.equal(later.shown, true);
+    const state = JSON.parse(readFileSync(path.join(w.home, '.code-forge', 'logs', 'hints.json'), 'utf8'));
+    assert.deepEqual(state, { abcdefabcdef: '2026-10-02T12:00:01.000Z' });
+  });
+
+  test('a malformed fp gives no hint and saves nothing; a non-string state value counts as never shown; a failed save leaves no temp file', async () => {
+    const w = fresh();
+    assert.deepEqual(await hint(w.home, { entry: { fp: 'NOT-A-FP' } }), { shown: false, text: '' });
+    assert.equal(existsSync(path.join(w.home, '.code-forge', 'logs')), false);
+    mkdirSync(path.join(w.home, '.code-forge', 'logs'), { recursive: true });
+    writeFileSync(path.join(w.home, '.code-forge', 'logs', 'hints.json'), JSON.stringify({ abcdefabcdef: 12345, bad: '2026-10-01T11:00:00.000Z' }));
+    assert.equal((await hint(w.home)).shown, true);
+    assert.deepEqual(JSON.parse(readFileSync(path.join(w.home, '.code-forge', 'logs', 'hints.json'), 'utf8')), { abcdefabcdef: '2026-10-01T12:00:00.000Z' });
+    const v = fresh();
+    mkdirSync(path.join(v.home, '.code-forge', 'logs', 'hints.json'), { recursive: true }); // a directory: the rename fails
+    assert.equal((await hint(v.home)).shown, true);
+    assert.deepEqual(readdirSync(path.join(v.home, '.code-forge', 'logs')), ['hints.json']);
+  });
+
+  test('exit 2, non-TTY, agent mode, logging off (no entry): 0 lines', async () => {
+    const w = fresh();
+    assert.deepEqual(await hint(w.home, { exit: 2 }), { shown: false, text: '' });
+    assert.deepEqual(await hint(w.home, { isTTY: false }), { shown: false, text: '' });
+    assert.deepEqual(await hint(w.home, { env: { HOME: w.home, CLAUDECODE: '1' } }), { shown: false, text: '' });
+    assert.deepEqual(await hint(w.home, { entry: null }), { shown: false, text: '' });
+    assert.equal(existsSync(path.join(w.home, '.code-forge', 'logs', 'hints.json')), false);
+  });
+
+  test('the agent variables are the ones install/agent-env.mjs checks', async () => {
+    const { AGENT_ENV_VARS } = await import('../../src/util/error-hint.mjs');
+    const install = await import('../../src/install/agent-env.mjs');
+    assert.deepEqual(AGENT_ENV_VARS, install.AGENT_ENV_VARS);
   });
 });
 

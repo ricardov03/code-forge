@@ -13,7 +13,8 @@ import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { clearErrorKind, reportErrorKind, takeErrorKind } from '../src/util/error-kind.mjs';
-import { captureStderr, logVerbFailure } from '../src/util/error-log.mjs';
+import { maybeHint } from '../src/util/error-hint.mjs';
+import { captureStderr, writeVerbFailure } from '../src/util/error-log.mjs';
 import { redact } from '../src/util/redact.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -153,9 +154,12 @@ export async function run(argv) {
   }
   if (code !== 0) {
     try {
-      await logVerbFailure({ verb, args: rest, exit: code, kind, stderrText, threw, thrown });
+      const entry = await writeVerbFailure({ verb, args: rest, exit: code, kind, stderrText, threw, thrown });
+      // B28: one line on a terminal saying how to send it (not for usage errors, agents, or the
+      // same error twice within 24 h); maybeHint never throws either
+      await maybeHint({ entry, exit: code, isTTY: process.stderr.isTTY === true });
     } catch {
-      // logging never changes the exit code (logVerbFailure does not throw; belt and braces)
+      // logging never changes the exit code (writeVerbFailure does not throw; belt and braces)
     }
   }
   return code;

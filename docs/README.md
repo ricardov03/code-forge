@@ -27,6 +27,7 @@ then 5a.
 | [reference/config.md](reference/config.md) | every `.code-forge.yml` key, its type and default. Generated from `schema/code-forge.schema.json` |
 | [reference/blocks.json](reference/blocks.json) | the build blocks of this package and what each one owns |
 | [marketing/code-forge-story.md](marketing/code-forge-story.md) | the marketing content bank (copy, lessons, what not to claim) |
+| [privacy.md](privacy.md) | what the local error log holds, every cleaning rule, the AI check, and how to turn the log off or delete it |
 | [releasing.md](releasing.md) | for maintainers: record changes (`npm run changelog`), cut a release with one command (`npm run release`), GitHub Releases, what stays manual |
 | [`skill/SKILL.md`](../skill/SKILL.md) and [`skill/references/`](../skill/references/) | the Agent Skill the orchestrator follows. The deepest and most exact description of the rules |
 

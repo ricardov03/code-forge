@@ -6,12 +6,15 @@
  * exit code, a kind, the last stderr text the verb wrote and (for a crash) the stack — redacted
  * with `redact` and then scrubbed: the home dir, the working dir, the project slug, emails, op://
  * references and 1Password item IDs are replaced by placeholders. Each entry records how many
- * replacements each rule made (`cleaned`), so `logs report` can say what was cleaned.
+ * replacements each rule made (`cleaned`), so `logs report` can say what was cleaned, and (B28) a
+ * fingerprint `fp` ({@link fingerprint}) that groups the same error in `logs summary` and finds an
+ * earlier issue for it.
  *
  * Logging never throws and never changes the verb's exit code. `CODE_FORGE_NO_ERROR_LOG=1` turns
  * it off; no HOME means no log. The file is cut to its newest half when it grows over 1 MB.
  */
 
+import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -56,6 +59,12 @@ export const SCRUB_RULES = Object.freeze([
   { rule: 'item_id', one: '1Password item ID', many: '1Password item IDs' },
 ]);
 
+/**
+ * Every placeholder text this module (and `redact`) puts into a message: the AI pass of a report
+ * (`session/scrub.mjs`) must never replace part of one. `~` (the home dir) is no `<…>` token.
+ */
+export const SCRUB_PLACEHOLDERS = Object.freeze(['<project>', '<slug>', '<email>', '<ref>', '<item-id>', '<unprintable error>', '[REDACTED]']);
+
 /** @typedef {{rule: string, count: number}} CleanCount */
 /** @typedef {{home?: string|null, cwd?: string|null, slug?: string|null}} ScrubContext */
 
@@ -74,6 +83,7 @@ export const SCRUB_RULES = Object.freeze([
  * @property {string|null} message
  * @property {string|null} stack
  * @property {CleanCount[]} cleaned
+ * @property {string} [fp] - the fingerprint (B28); entries written before B28 have none.
  */
 
 /** @param {string} s */
@@ -360,6 +370,49 @@ function safeString(get) {
 }
 
 /**
+ * The message as a fingerprint sees it (B28). Dropped: quoted strings, `<…>` placeholders,
+ * path-like words (anything holding a `/`), ISO dates and clock times, hex runs of 7+ characters
+ * holding a digit (hashes, ids), and standalone numbers of 4+ digits (pids, ports, sizes, ms).
+ * Kept: shorter numbers (an HTTP status such as 404, a count) and digits inside a word (`E404`,
+ * `1Password`, `v22`). Whitespace runs become one space. So the same error with other ids, times
+ * or paths gives the same text, while `HTTP 404` and `HTTP 500` stay apart.
+ * @param {string|null|undefined} message
+ * @returns {string}
+ */
+export function normalizeMessage(message) {
+  if (typeof message !== 'string') return '';
+  return message
+    .replace(/"[^"\n]*"|(?<![A-Za-z0-9])'[^'\n]*'|`[^`\n]*`/g, ' ')
+    .replace(/<[^<>\n]*>/g, ' ')
+    .replace(/\S*\/\S*/g, ' ')
+    .replace(/\b\d{4}-\d{2}-\d{2}(?:[T ]\d{2}:\d{2}(?::\d{2}(?:\.\d+)?)?(?:Z|[+-]\d{2}:?\d{2})?)?\b/g, ' ')
+    .replace(/\b\d{1,2}:\d{2}(?::\d{2}(?:\.\d+)?)?\b/g, ' ')
+    .replace(/\b(?=[0-9a-f]*\d)[0-9a-f]{7,}\b/gi, ' ')
+    .replace(/(?<![A-Za-z0-9_.])\d{4,}(?:\.\d+)?(?![A-Za-z0-9_])/g, ' ')
+    .replace(/\s+/g, ' ')
+    .trim();
+}
+
+/**
+ * The first 12 hex characters of sha256(verb, sub, kind, normalized message) (B28).
+ * @param {{verb: string, sub?: string|null, kind: string, message?: string|null}} e
+ * @returns {string}
+ */
+export function fingerprint(e) {
+  const text = [e.verb, e.sub ?? '', e.kind, normalizeMessage(e.message)].join('\n');
+  return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12);
+}
+
+/**
+ * An entry's stored fingerprint, or one computed now (an entry written before B28 has none).
+ * @param {ErrorEntry} e
+ * @returns {string}
+ */
+export function fingerprintOf(e) {
+  return typeof e.fp === 'string' && /^[0-9a-f]{12}$/.test(e.fp) ? e.fp : fingerprint(e);
+}
+
+/**
  * Build the scrubbed entry (no I/O except reading the project slug).
  * @param {FailureInput} input
  * @returns {Promise<ErrorEntry>}
@@ -386,13 +439,14 @@ export async function buildEntry(input) {
   const stack = rawStack === null ? null : capBytes(clean(rawStack), STACK_MAX_BYTES);
   const flags = flagNames(input.args).map(clean);
   const sub = subcommandOf(input.verb, input.args);
+  const verbName = clean(input.verb);
   return {
     ts: (input.now ?? new Date()).toISOString(),
     version: packageVersion(),
     node: process.version,
     platform: process.platform,
     arch: process.arch,
-    verb: clean(input.verb),
+    verb: verbName,
     sub,
     flags,
     exit: input.exit,
@@ -400,7 +454,38 @@ export async function buildEntry(input) {
     message,
     stack,
     cleaned: scrubber.counts(),
+    fp: fingerprint({ verb: verbName, sub, kind, message }),
   };
+}
+
+/**
+ * Log one failed verb. Never throws; returns the entry written, or null when nothing was written
+ * (exit 0, logging off, no HOME, or a write error).
+ * @param {FailureInput} input
+ * @returns {Promise<ErrorEntry|null>}
+ */
+export async function writeVerbFailure(input) {
+  try {
+    if (input.exit === 0 && input.threw !== true) return null;
+    const env = input.env ?? process.env;
+    if (loggingOff(env)) return null;
+    const file = errorLogPath(env.HOME);
+    if (file === null) return null;
+    const entry = await buildEntry(input);
+    await appendLine(file, JSON.stringify(entry));
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * @param {NodeJS.ProcessEnv} env
+ * @returns {boolean} whether `CODE_FORGE_NO_ERROR_LOG` turns logging off.
+ */
+export function loggingOff(env) {
+  const flag = env[NO_ERROR_LOG_ENV];
+  return typeof flag === 'string' && flag !== '' && flag !== '0';
 }
 
 /**
@@ -409,19 +494,7 @@ export async function buildEntry(input) {
  * @returns {Promise<boolean>}
  */
 export async function logVerbFailure(input) {
-  try {
-    if (input.exit === 0 && input.threw !== true) return false;
-    const env = input.env ?? process.env;
-    const flag = env[NO_ERROR_LOG_ENV];
-    if (typeof flag === 'string' && flag !== '' && flag !== '0') return false;
-    const file = errorLogPath(env.HOME);
-    if (file === null) return false;
-    const entry = await buildEntry(input);
-    await appendLine(file, JSON.stringify(entry));
-    return true;
-  } catch {
-    return false;
-  }
+  return (await writeVerbFailure(input)) !== null;
 }
 
 /**
