@@ -216,6 +216,35 @@ by hand. What changed in each version is in [CHANGELOG.md](../CHANGELOG.md).
 | `code-forge models --refresh --from-cli-caches` | refreshes the model catalog from the Codex and Grok CLI caches on this machine |
 | `code-forge remove [<harness>] [--scope project\|global]` | removes the skill links that `init` recorded |
 
+## When something fails
+
+Every verb that fails (a non-zero exit or a crash) adds one line to
+`~/.code-forge/logs/errors.jsonl`: the time, the versions, the verb and its subcommand, the flag
+names (never their values), the exit code, a kind (`usage`, `crash`, a 1Password kind such as
+`op_timeout`, or `error`) and the last error text. Before it is written, your home folder becomes
+`~`, the project folder `<project>`, the project slug `<slug>`, and emails, `op://` references and
+1Password item IDs are replaced too. Nothing leaves your machine on its own. The file keeps its
+newest half when it grows over 1 MB.
+
+| Command | Does |
+|---|---|
+| `code-forge logs [--last N] [--json]` | the last errors, newest first (10 by default) |
+| `code-forge logs summary [--days N]` | how often each verb failed and how, over the last 30 days |
+| `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--dry-run]` | shares the selected errors (5 by default) with us as a GitHub issue |
+| `code-forge logs clear [--yes]` | deletes the log |
+| `code-forge logs path` | prints where the log is |
+
+`logs report` first says what is shared and what is not, how many things it cleaned, and prints
+the whole issue: versions, your note, a table of the errors and each message (and crash stack).
+The issue is **public**. It asks one yes (default no); `--dry-run` only prints. A last check stops
+the report if anything still looks like a key or token. With the GitHub CLI (`gh`) signed in it
+files the issue; without it you get a link to open (a long report is cut, and saved in full under
+`~/.code-forge/logs/`).
+
+To turn the log off, set `CODE_FORGE_NO_ERROR_LOG=1`.
+
+The error log and the `gh` path are tested on macOS and Linux.
+
 ## Review only
 
 To review code you already wrote, without planning or coding through code-forge, run

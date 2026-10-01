@@ -6,6 +6,13 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `code-forge logs`: every failed verb is logged (scrubbed, flag names only) to `~/.code-forge/logs/errors.jsonl`;
+  `logs`, `logs summary`, `logs clear`, `logs path`, and `logs report` to share selected errors as a public GitHub issue
+  after you see the full text and say yes (`gh` or a prefilled link; a last secret check stops it). Opt out with
+  `CODE_FORGE_NO_ERROR_LOG=1`.
+
 ## [0.2.3] — 2026-10-01
 
 ### Fixed

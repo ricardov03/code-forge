@@ -108,6 +108,8 @@ usage line.
 | `list` | `code-forge list` |
 | `remove` | `code-forge remove [<harness>] [--scope project\|global]` |
 | `upgrade` | `code-forge upgrade [--source <path>]` |
+| `logs` | `code-forge logs [--last N] [--json]` · `logs summary [--days N] [--json]` · `logs clear [--yes]` · `logs path` — the local error log (`~/.code-forge/logs/errors.jsonl`) |
+| `logs report` | `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--dry-run] [--yes]` — share selected errors as a public GitHub issue; you see the full text first and say yes once |
 | `help` / `version` | `code-forge --help` (or no verb) · `code-forge --version` |
 
 `run`, `block`, `worker`, `spawn`, `s2`, `author`, `facts` and `review-file` are what the Agent

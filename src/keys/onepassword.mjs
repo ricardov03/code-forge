@@ -11,6 +11,7 @@
  * reference is built.
  */
 
+import { reportErrorKind } from '../util/error-kind.mjs';
 import { exec as realExec } from '../util/exec.mjs';
 
 // Long enough for a person to see and approve the 1Password prompt (Touch ID or password).
@@ -188,10 +189,13 @@ export async function opRead(ref, { exec = realExec, timeoutMs = OP_TIMEOUT_MS }
   const { res, attempts } = await runOp(['op', 'read', ref], exec, timeoutMs);
   if (res.result !== 'ok') {
     const kind = classifyOpFailure(res);
+    reportErrorKind(kind); // the error log's kind if the verb then fails (B27)
     return { value: null, attempts, error: failureMessage(kind, res, `op read ${ref}`, '; check the reference'), kind };
   }
   const value = res.stdout.replace(/\r?\n$/, '');
-  return value.length > 0 ? { value, attempts } : { value: null, attempts, error: OP_MESSAGES.op_bad_output, kind: 'op_bad_output' };
+  if (value.length > 0) return { value, attempts };
+  reportErrorKind('op_bad_output');
+  return { value: null, attempts, error: OP_MESSAGES.op_bad_output, kind: 'op_bad_output' };
 }
 
 /**
@@ -276,8 +280,10 @@ export async function toOpRef(input, opts = {}) {
   const text = typeof input === 'string' ? input.trim() : input;
   if (isOpRef(text)) return { ref: /** @type {string} */ (text) };
   const id = opItemIdFromInput(text);
-  if (id !== null) return resolveOpItemRef(id, opts);
-  return { ref: null, error: OP_MESSAGES.op_bad_input, kind: 'op_bad_input' };
+  /** @type {OpRefResult} */
+  const res = id !== null ? await resolveOpItemRef(id, opts) : { ref: null, error: OP_MESSAGES.op_bad_input, kind: 'op_bad_input' };
+  if (res.ref === null) reportErrorKind(res.kind); // the error log's kind if the verb then fails (B27)
+  return res;
 }
 
 /**

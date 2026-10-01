@@ -12,6 +12,8 @@ import { realpathSync } from 'node:fs';
 import { readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { clearErrorKind, reportErrorKind, takeErrorKind } from '../src/util/error-kind.mjs';
+import { captureStderr, logVerbFailure } from '../src/util/error-log.mjs';
 import { redact } from '../src/util/redact.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -95,26 +97,68 @@ export async function run(argv) {
 
   const modulePath = path.join(CLI_DIR, `${verb}.mjs`);
 
-  let exitCode;
+  // B27: a verb that exits non-zero or throws is logged to `~/.code-forge/logs/errors.jsonl`
+  // (scrubbed; never throws; never changes the exit code). The kind a verb reports is cleared
+  // first, and stderr is recorded only while the verb runs (the message is its last text).
+  // Every logging step is guarded on its own: none of them can change the verb's outcome.
+  /** @type {{stop: () => string|null} | null} */
+  let capture = null;
+  try {
+    clearErrorKind();
+    capture = captureStderr(process.stderr);
+  } catch {
+    // no recording: the entry has no message
+  }
+  /** @type {number} */
+  let code;
+  /** @type {unknown} */
+  let thrown;
+  let threw = false;
+  /** @type {string|null} */
+  let stderrText = null;
   try {
     const mod = await import(pathToFileURL(modulePath).href);
     const handler = mod.default;
     if (typeof handler !== 'function') {
       process.stderr.write(redact(`code-forge: verb "${verb}" has no default export function\n`));
-      return 1;
+      code = 1;
+    } else {
+      const exitCode = await handler(rest, { verbs, verb, reportErrorKind });
+      code = exitCode === undefined || exitCode === null ? 0 : isValidExitCode(exitCode) ? exitCode : 1;
     }
-    exitCode = await handler(rest, { verbs, verb });
   } catch (err) {
+    thrown = err;
+    threw = true;
+    code = 1;
     // A verb's error can carry an argv/env token (a fake key in a test, a real one in
     // production); every stderr path here is redacted, this one included.
-    process.stderr.write(redact(`code-forge: verb "${verb}" failed: ${err?.stack ?? String(err)}\n`));
-    return 1;
+    try {
+      process.stderr.write(redact(`code-forge: verb "${verb}" failed: ${/** @type {any} */ (err)?.stack ?? String(err)}\n`));
+    } catch {
+      // a broken stderr never changes the exit code
+    }
+  } finally {
+    try {
+      stderrText = capture ? capture.stop() : null;
+    } catch {
+      stderrText = null;
+    }
   }
-
-  if (exitCode === undefined || exitCode === null) {
-    return 0;
+  /** @type {string|null} */
+  let kind = null;
+  try {
+    kind = takeErrorKind();
+  } catch {
+    kind = null;
   }
-  return isValidExitCode(exitCode) ? exitCode : 1;
+  if (code !== 0) {
+    try {
+      await logVerbFailure({ verb, args: rest, exit: code, kind, stderrText, threw, thrown });
+    } catch {
+      // logging never changes the exit code (logVerbFailure does not throw; belt and braces)
+    }
+  }
+  return code;
 }
 
 /**
