@@ -233,3 +233,24 @@ test('a MALFORMED config with a secret near the bad line exits 1, names the loca
   assert.match(stderr, /^\[code-forge:error\] parse-error: [A-Z_]+: .+ \(line 3, column 1\)$/m);
   assert.equal(occurrences(stdout + stderr, fakeSecret), 0, `leaked:\n${stdout}\n${stderr}`);
 });
+
+// ── B29 (issue #2): a bad effort is refused at config time, not at spawn time ──
+
+test('validate verb: an openai L2 with effort "xhigh" exits 1 with EXACTLY 1 effort line carrying the exact message', () => {
+  const file = writeConfig('b29-effort.code-forge.yml', {
+    version: 1,
+    provider: 'anthropic',
+    levels: {
+      L0: { model: 'claude-haiku-4-5-20251001' },
+      L1: { model: 'claude-sonnet-5' },
+      L2: { model: 'gpt-6-sol', provider: 'openai', effort: 'xhigh' },
+      L3: { model: 'claude-fable-5-1' },
+    },
+  });
+  const { status, stderr } = runCli(['validate', '--file', file]);
+  assert.equal(status, 1);
+  const lines = stderr.split('\n').filter((l) => l.includes('[effort-not-valid-for-provider]'));
+  assert.deepEqual(lines, [
+    '[code-forge:error] [effort-not-valid-for-provider] levels.L2.effort "xhigh" is not valid for provider openai; use one of: minimal, low, medium, high',
+  ]);
+});

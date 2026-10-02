@@ -42,6 +42,7 @@
 
 import { FORBIDDEN, mergeForbidden, renderForClaude } from '../../util/forbidden.mjs';
 import { flattenRuleStrings, hasAnyRenderedRule } from '../render-rules.mjs';
+import { assertEffortForProvider } from '../efforts.mjs';
 import { assertBaseParams } from './validate-params.mjs';
 
 export const CLI = 'claude';
@@ -58,7 +59,7 @@ export const CLI = 'claude';
  * @typedef {object} ClaudeBuildParams
  * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"} role
  * @property {string} model - the resolved model id (already picked by `resolveLevel`, B1).
- * @property {string} [effort]
+ * @property {string} [effort] - one of `PROVIDER_EFFORTS.anthropic` (`../efforts.mjs`) when given.
  * @property {string} promptPath - the brief file (coder: passed as a pointer) or the packet file
  *   (closed-book: returned as `stdinFile`, its content is piped to stdin by the spawner).
  * @property {string} cwd - the project tree (coder) or an empty isolated temp dir (closed-book).
@@ -220,6 +221,8 @@ function buildClosedBookArgv(params) {
  */
 export function buildClaudeArgv(params) {
   assertBaseParams('buildClaudeArgv', params);
+  // B29: `--effort` takes the closed list `claude --help` prints (shared with `validateConfig`).
+  assertEffortForProvider('buildClaudeArgv', 'anthropic', params.effort);
   return params.role === 'coder' ? buildCoderArgv(params) : buildClosedBookArgv(params);
 }
 

@@ -58,6 +58,7 @@ import { randomBytes } from 'node:crypto';
 import { mergeForbidden, renderForCodex } from '../../util/forbidden.mjs';
 import { CODEX_RULES_FILE_NAME, defaultCodexHome, isInside, prepareCodexHome } from '../codex-home.mjs';
 import { hasAnyRenderedRule } from '../render-rules.mjs';
+import { assertEffortForProvider, PROVIDER_EFFORTS } from '../efforts.mjs';
 import { assertBaseParams } from './validate-params.mjs';
 
 export const CLI = 'codex';
@@ -85,8 +86,11 @@ export const SANDBOX_TMP_EXCLUSIONS = Object.freeze([
  */
 export const CODER_APPROVAL_POLICY = Object.freeze(['-c', 'approval_policy="never"']);
 
-/** The `model_reasoning_effort` values Codex's TOML config is willing to receive from this builder. */
-export const VALID_EFFORTS = Object.freeze(['minimal', 'low', 'medium', 'high']);
+/**
+ * The `model_reasoning_effort` values Codex's TOML config is willing to receive from this builder —
+ * re-exported from the shared per-provider table (B29), which `validateConfig` also reads.
+ */
+export const VALID_EFFORTS = PROVIDER_EFFORTS.openai;
 
 /**
  * @typedef {{id: string, patterns: string[][], decision: "forbidden", enforced: boolean, description: string}} RenderedCodexEntry
@@ -140,9 +144,7 @@ function effectiveOutPath(outPath, role) {
  * @throws {TypeError} unless `effort` is `undefined` or one of {@link VALID_EFFORTS}.
  */
 function assertValidEffort(effort) {
-  if (effort !== undefined && !VALID_EFFORTS.includes(effort)) {
-    throw new TypeError(`buildCodexArgv: effort must be one of ${VALID_EFFORTS.join(', ')} when given, got ${JSON.stringify(effort)}`);
-  }
+  assertEffortForProvider('buildCodexArgv', 'openai', effort);
 }
 
 /**

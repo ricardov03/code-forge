@@ -754,12 +754,111 @@ test('rule 14 does not fire at the cap itself — caps.coders: 2 produces 0 warn
   assert.equal(issuesOf(result, 'caps-coders-exceeds-cap').length, 0);
 });
 
-// ── All 14 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
-// (B1.2/v1.3, Q16 cut: 15 -> 14 — `proof-tool-absent-for-high-tier` removed, its key gone from schema.)
+// ── 15. effort-not-valid-for-provider (ERROR, B29, issue #2) ────────────────
 
-test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 14 distinct ids', () => {
-  assert.equal(DOMAIN_RULE_IDS.length, 14);
-  assert.equal(new Set(DOMAIN_RULE_IDS).size, 14, 'no duplicate rule ids');
+/** @param {ReturnType<typeof validateConfig>} result */
+const effortMessages = (result) => issuesOf(result, 'effort-not-valid-for-provider').map((i) => i.message);
+
+test('rule 15: levels.L2 on openai with effort "xhigh" is EXACTLY 1 error with the exact message, and the config is invalid', () => {
+  const cfg = validCfg();
+  cfg.levels.L2 = { model: 'gpt-6-sol', provider: 'openai', effort: 'xhigh' };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, false);
+  assert.deepEqual(effortMessages(result), ['levels.L2.effort "xhigh" is not valid for provider openai; use one of: minimal, low, medium, high']);
+  assert.equal(issuesOf(result, 'effort-not-valid-for-provider')[0].severity, 'error');
+});
+
+test('rule 15: levels.L1 on anthropic with effort "minimal" is EXACTLY 1 error naming the anthropic list', () => {
+  const cfg = validCfg();
+  cfg.levels.L1.effort = 'minimal';
+  assert.deepEqual(effortMessages(validateConfig(cfg)), ['levels.L1.effort "minimal" is not valid for provider anthropic; use one of: low, medium, high, xhigh, max']);
+});
+
+test('rule 15: the effective provider comes from the top-level provider when the level has none (openai config, L3 effort "max")', () => {
+  /** @type {Record<string, any>} */
+  const cfg = { version: 1, provider: 'openai', levels: structuredClone(PROVIDER_DEFAULTS.openai.levels) };
+  cfg.levels.L3.effort = 'max';
+  assert.deepEqual(effortMessages(validateConfig(cfg)), ['levels.L3.effort "max" is not valid for provider openai; use one of: minimal, low, medium, high']);
+});
+
+test('rule 15: a fallback entry is checked against ITS OWN provider — 1 error at levels.L2.fallback[1].effort, the valid fallback[0] passes', () => {
+  const cfg = validCfg();
+  cfg.levels.L2.fallback = [
+    { provider: 'anthropic', model: 'claude-sonnet-5', effort: 'xhigh' },
+    { provider: 'openai', model: 'gpt-6-sol', effort: 'xhigh' },
+  ];
+  assert.deepEqual(effortMessages(validateConfig(cfg, { hasCliOnPath: () => true })), [
+    'levels.L2.fallback[1].effort "xhigh" is not valid for provider openai; use one of: minimal, low, medium, high',
+  ]);
+});
+
+test('rule 15: an effort word outside every provider\'s list is printed as (unrecognised value), never verbatim', () => {
+  const cfg = validCfg();
+  cfg.levels.L0.effort = 'turbo-fake-value';
+  const messages = effortMessages(validateConfig(cfg));
+  assert.deepEqual(messages, ['levels.L0.effort (unrecognised value) is not valid for provider anthropic; use one of: low, medium, high, xhigh, max']);
+  assert.equal(JSON.stringify(validateConfig(cfg)).split('turbo-fake-value').length - 1, 0);
+});
+
+test('rule 15: xai takes any non-empty effort ("xhigh" passes); an EMPTY xai effort is 1 error', () => {
+  const ok = validCfg();
+  ok.levels.L3 = { model: 'grok-4.7', provider: 'xai', effort: 'xhigh' };
+  assert.deepEqual(effortMessages(validateConfig(ok)), []);
+  const bad = validCfg();
+  bad.levels.L3 = { model: 'grok-4.7', provider: 'xai', effort: '' };
+  assert.deepEqual(effortMessages(validateConfig(bad)), ['levels.L3.effort is empty; provider xai needs a non-empty effort or none at all']);
+});
+
+test('rule 15: every valid effort passes for each provider (0 issues)', () => {
+  const cases = [
+    ['anthropic', 'claude-opus-5-5', ['low', 'medium', 'high', 'xhigh', 'max']],
+    ['openai', 'gpt-6-sol', ['minimal', 'low', 'medium', 'high']],
+  ];
+  let checked = 0;
+  for (const [provider, model, efforts] of cases) {
+    for (const effort of efforts) {
+      const cfg = validCfg();
+      cfg.levels.L2 = { model, provider, effort };
+      assert.deepEqual(effortMessages(validateConfig(cfg)), [], `${provider}/${effort}`);
+      checked += 1;
+    }
+  }
+  assert.equal(checked, 9);
+});
+
+test('rule 15: an unknown provider is skipped (the schema layer reports it) — on a fallback entry AND on a level, 0 rule-15 issues', () => {
+  const cfg = validCfg();
+  cfg.levels.L2.fallback = [{ provider: 'mistral', model: 'm-1', effort: 'xhigh' }];
+  cfg.levels.L1 = { model: 'm-2', provider: 'mistral', effort: 'nope' };
+  const result = validateConfig(cfg, { hasCliOnPath: () => true });
+  assert.deepEqual(effortMessages(result), []);
+  assert.deepEqual(result.errors.filter((e) => e.rule === 'schema' && e.keyword === 'enum').map((e) => e.path).sort(), [
+    '/levels/L1/provider',
+    '/levels/L2/fallback/0/provider',
+  ]);
+});
+
+test('rule 15: an empty effort on a closed-list provider is "not valid", never "empty"', () => {
+  const cfg = validCfg();
+  cfg.levels.L2.effort = '';
+  assert.deepEqual(effortMessages(validateConfig(cfg)), ['levels.L2.effort (unrecognised value) is not valid for provider anthropic; use one of: low, medium, high, xhigh, max']);
+});
+
+test('rule 15: a non-string effort is left to the schema layer (0 rule-15 issues, 1 schema type error)', () => {
+  const cfg = validCfg();
+  cfg.levels.L2.effort = 7;
+  const result = validateConfig(cfg);
+  assert.deepEqual(effortMessages(result), []);
+  assert.deepEqual(result.errors.filter((e) => e.rule === 'schema').map((e) => e.path), ['/levels/L2/effort']);
+});
+
+// ── All 15 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
+// (B1.2/v1.3, Q16 cut: 15 -> 14 — `proof-tool-absent-for-high-tier` removed, its key gone from schema.)
+// (B29: 14 -> 15 — `effort-not-valid-for-provider` added.)
+
+test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 15 distinct ids', () => {
+  assert.equal(DOMAIN_RULE_IDS.length, 15);
+  assert.equal(new Set(DOMAIN_RULE_IDS).size, 15, 'no duplicate rule ids');
 });
 
 test('every rule id exercised by THIS test file is a member of the real DOMAIN_RULE_IDS set (catches a renamed/dropped rule)', () => {
@@ -778,6 +877,7 @@ test('every rule id exercised by THIS test file is a member of the real DOMAIN_R
     'engine-subprocess-no-cli',
     'shadow-rate-range',
     'caps-coders-exceeds-cap',
+    'effort-not-valid-for-provider',
   ];
   assert.deepEqual([...exercisedInThisFile].sort(), [...DOMAIN_RULE_IDS].sort());
 });

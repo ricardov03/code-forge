@@ -245,6 +245,18 @@ export const SECRET_LEAK_CASES = [
     },
   },
   {
+    name: 'effort-not-valid-for-provider',
+    rule: 'effort-not-valid-for-provider',
+    count: 1,
+    secretHits: 1,
+    secret: fake('sk-', 'V', 40),
+    build: (s) => {
+      const c = baseConfig();
+      c.levels.L2 = { model: 'gpt-6-sol', provider: 'openai', effort: s };
+      return c;
+    },
+  },
+  {
     name: 'schema (unknown key holding a secret value)',
     rule: 'schema',
     count: 1,

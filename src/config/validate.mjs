@@ -4,7 +4,7 @@
  *
  *  1. **Schema validation** (Ajv, draft 2020-12, `additionalProperties: false` almost everywhere)
  *     catches shape errors: unknown keys, wrong types, missing required fields.
- *  2. **Domain rules** (`DOMAIN_RULES` below, 14 of them as of B1.2/v1.3) catch things no JSON Schema can express:
+ *  2. **Domain rules** (`DOMAIN_RULES` below, 15 of them as of B29) catch things no JSON Schema can express:
  *     cross-field comparisons (two levels resolving to the same tuple), a value that needs a
  *     second config value to be reachable (`second_levels.L2.provider` vs. the effective L2
  *     provider) and rules that reach outside the config object entirely (is a CLI on PATH, is a
@@ -14,7 +14,7 @@
  *     instead of touching `process.env.PATH` themselves, so a unit test never needs a real CLI on
  *     PATH to prove either branch.
  *
- * The 14 rules (B1's original 14 plus B1.1's `caps-coders-exceeds-cap`, minus B1.2's removal of
+ * The 15 rules (B29 added `effort-not-valid-for-provider`; before it: B1's original 14 plus B1.1's `caps-coders-exceeds-cap`, minus B1.2's removal of
  * `proof-tool-absent-for-high-tier` — Q16 answered "cut", so `proof.tiers.high.tool` no longer
  * exists to be absent, plan §10.4 Wave 6), and how the plan's prose bullets map onto them (§1.3's
  * "review.multimodel: true with second_provider empty **or with**
@@ -34,6 +34,7 @@
  *  12  engine-subprocess-no-cli              ERROR
  *  13  shadow-rate-range                     ERROR  ("shadow_rate range")
  *  14  caps-coders-exceeds-cap               WARN   (v1.3/R10/B1.1: caps.coders > 2)
+ *  15  effort-not-valid-for-provider         ERROR  (B29: a level's / fallback's effort vs. its provider)
  *
  * **B1.2 (v1.3, Q16 cut) removed rule:** `proof-tool-absent-for-high-tier` (formerly #13) — the
  * key it warned about (`proof.tiers.high.tool`) left the schema in the same amendment, along with
@@ -60,6 +61,7 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../schema/code-forge.schema.json' with { type: 'json' };
 import { redact } from '../util/redact.mjs';
+import { checkEffort, displayEffort } from '../engines/efforts.mjs';
 import { isKnownId } from './known-ids.mjs';
 import { looksLikeSecret, maskSecretTokens, SECRET_MASK, secretTokensIn } from './secret-patterns.mjs';
 
@@ -637,11 +639,85 @@ function checkCapsCodersExceedsCap(cfg) {
   return [];
 }
 
+// ── 15. effort-not-valid-for-provider (ERROR, B29) ──────────────────────────
+
 /**
- * The 14 domain rules paired with the exact `rule` id string each one emits — the single source
+ * A provider name for an effort message: bare (`openai`) only when it is one of the schema's
+ * closed provider words, `(unknown provider)` otherwise — never an unchecked config string.
+ * @param {unknown} provider
+ * @returns {string}
+ */
+function effortProvider(provider) {
+  return typeof provider === 'string' && PROVIDER_NAMES.includes(provider) ? provider : '(unknown provider)';
+}
+
+/**
+ * One effort issue for the effort at `keyPath` on `provider`, or `null` when it is fine. The
+ * builders throw for exactly the efforts `checkEffort` refuses, so this rule moves that spawn-time
+ * failure to config time. The effort is shown only through `displayEffort` (a closed-list word,
+ * else `(unrecognised value)`), the provider only through `effortProvider`. A non-string effort is
+ * left to the schema layer; an unknown provider is skipped (the schema layer reports it).
+ * @param {string} keyPath
+ * @param {unknown} provider
+ * @param {unknown} effort
+ * @returns {ValidationIssue | null}
+ */
+function effortIssue(keyPath, provider, effort) {
+  if (typeof effort !== 'string') return null;
+  const result = checkEffort(provider, effort);
+  const who = effortProvider(provider);
+  /** @type {string} */
+  let message;
+  switch (result.kind) {
+    case 'invalid':
+      message = `${keyPath} ${displayEffort(effort)} is not valid for provider ${who}; use one of: ${result.allowed.join(', ')}`;
+      break;
+    case 'unsupported':
+      message = `${keyPath} is set but provider ${who} takes no effort; remove it`;
+      break;
+    case 'empty':
+      message = `${keyPath} is empty; provider ${who} needs a non-empty effort or none at all`;
+      break;
+    default: // 'ok', 'unknown-provider'
+      return null;
+  }
+  return { rule: 'effort-not-valid-for-provider', severity: 'error', message };
+}
+
+/**
+ * Checks each level's effort against its effective provider, and each fallback entry's effort
+ * against that entry's own provider (the spawner hands a fallback step's effort to that provider's
+ * builder). Both efforts are read from the SAME raw source the spawner uses — `cfg.levels.<Lx>` as
+ * written (`resolveLevel` in `known-ids.mjs` copies `level.effort` and `level.fallback` verbatim,
+ * and no loader merges provider defaults into a config, see `load.mjs`), so every value checked
+ * here was set in `levels.<Lx>` itself and the message names exactly that key.
+ * @param {Record<string, any>} cfg
+ */
+function checkEffortNotValidForProvider(cfg) {
+  /** @type {ValidationIssue[]} */
+  const issues = [];
+  for (const name of LEVEL_NAMES) {
+    const level = effectiveLevel(cfg, name);
+    if (level) {
+      const issue = effortIssue(`levels.${name}.effort`, level.provider, level.effort);
+      if (issue) issues.push(issue);
+    }
+    const rawFallback = cfg?.levels?.[name]?.fallback;
+    const fallbackList = Array.isArray(rawFallback) ? rawFallback : [];
+    for (const [i, fb] of fallbackList.entries()) {
+      if (fb === null || typeof fb !== 'object') continue;
+      const issue = effortIssue(`levels.${name}.fallback[${i}].effort`, fb.provider, fb.effort);
+      if (issue) issues.push(issue);
+    }
+  }
+  return issues;
+}
+
+/**
+ * The 15 domain rules paired with the exact `rule` id string each one emits — the single source
  * of truth both `DOMAIN_RULES` (below, what `validateConfig` runs) and the exported
  * `DOMAIN_RULE_IDS` are built from. `'schema'` (the ajv layer's own issues) is deliberately not
- * one of these 14. (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
+ * one of these 15 (B29 added rule 15). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
  * @type {ReadonlyArray<{fn: (cfg: Record<string, any>, opts?: object) => ValidationIssue[], id: string}>}
  */
 const RULE_TABLE = Object.freeze([
@@ -659,12 +735,13 @@ const RULE_TABLE = Object.freeze([
   { fn: checkEngineSubprocessNoCli, id: 'engine-subprocess-no-cli' },
   { fn: checkShadowRateRange, id: 'shadow-rate-range' },
   { fn: checkCapsCodersExceedsCap, id: 'caps-coders-exceeds-cap' },
+  { fn: checkEffortNotValidForProvider, id: 'effort-not-valid-for-provider' },
 ]);
 
-/** The 14 domain rules, in the order documented above. */
+/** The 15 domain rules, in the order documented above. */
 const DOMAIN_RULES = Object.freeze(RULE_TABLE.map((entry) => entry.fn));
 
-/** The 14 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
+/** The 15 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
 export const DOMAIN_RULE_IDS = Object.freeze(RULE_TABLE.map((entry) => entry.id));
 
 /**

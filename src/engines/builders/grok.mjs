@@ -36,6 +36,7 @@
 
 import { mergeForbidden, renderForGrok } from '../../util/forbidden.mjs';
 import { flattenRuleStrings, hasAnyRenderedRule } from '../render-rules.mjs';
+import { assertEffortForProvider } from '../efforts.mjs';
 import { assertBaseParams } from './validate-params.mjs';
 
 export const CLI = 'grok';
@@ -71,9 +72,8 @@ export const GROK_ALL_BUILTIN_TOOLS = Object.freeze(['Bash', 'Read', 'Write', 'E
  * @throws {TypeError} unless `effort` is `undefined` or a non-empty string.
  */
 function assertValidEffort(effort) {
-  if (effort !== undefined && (typeof effort !== 'string' || effort.length === 0)) {
-    throw new TypeError(`buildGrokArgv: effort must be a non-empty string when given, got ${JSON.stringify(effort)}`);
-  }
+  // xai has no closed effort list (`PROVIDER_EFFORTS.xai === null`): any non-empty string (B29).
+  assertEffortForProvider('buildGrokArgv', 'xai', effort);
 }
 
 /**
