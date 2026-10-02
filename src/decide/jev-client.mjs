@@ -91,7 +91,7 @@ async function requestIdOf(response) {
  * @typedef {object} JevQuestionSpec
  * @property {'choice'|'score'|'noul'} type
  * @property {string} instructions
- * @property {Record<string, string>} criteria
+ * @property {Record<string, string> | string[]} criteria - a list (index = score) for `score`
  *
  * @typedef {object} JevSuccess
  * @property {true} ok

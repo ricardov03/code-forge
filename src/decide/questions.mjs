@@ -146,16 +146,29 @@ export function renderQuestion(id, cfg = {}) {
  * `askJev`'s `questions` argument takes.
  * @param {string[]} ids
  * @param {Record<string, any>} [cfg]
- * @returns {Record<string, {type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string>}>}
+ * @returns {Record<string, {type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string> | string[]}>}
  */
 export function buildQuestionPayload(ids, cfg = {}) {
   if (!Array.isArray(ids) || ids.length === 0) {
     throw new TypeError('buildQuestionPayload: ids must be a non-empty array');
   }
-  /** @type {Record<string, {type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string>}>} */
+  /** @type {Record<string, {type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string> | string[]}>} */
   const out = {};
   for (const id of ids) {
-    out[id] = renderQuestion(id, cfg);
+    out[id] = toWire(renderQuestion(id, cfg));
   }
   return out;
+}
+
+/**
+ * Jev's wire shape: a `score` question takes `criteria` as a LIST whose index is the score (an
+ * object keyed `0..n` is refused with 422 "Input should be a valid list"); `choice` and `noul`
+ * keep the keyed object. The answer's `legend`/`probabilities` come back keyed `"0".."n"`.
+ * @param {{type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string>}} q
+ * @returns {{type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string> | string[]}}
+ */
+function toWire(q) {
+  if (q.type !== 'score') return q;
+  const keys = Object.keys(q.criteria).sort((a, b) => Number(a) - Number(b));
+  return { ...q, criteria: keys.map((k) => q.criteria[k]) };
 }
