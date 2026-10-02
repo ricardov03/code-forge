@@ -18,6 +18,15 @@ export const UNAVAILABLE_REASONS = Object.freeze(['exit', 'schema', 'hunks_misma
 
 export const DEFAULT_MIN_TOKENS_OUT = 120;
 
+/**
+ * A clean pass (`passed: true`, no findings, every hunk acknowledged) on a SMALL diff legitimately
+ * needs few words: a 3-line placeholder reviewed by GPT-6 Astra produced 108 tokens and was refused
+ * as `too_short`. For such answers the floor drops to this value; any finding keeps the full floor.
+ */
+export const CLEAN_PASS_MIN_TOKENS_OUT = 40;
+/** A diff with at most this many added lines is "small" for the clean-pass floor. */
+export const SMALL_DIFF_ADDED_LINES = 20;
+
 /** The source answer schema (compiled per provider by the spawner). */
 export const FINDING_SCHEMA = Object.freeze(JSON.parse(readFileSync(new URL('./finding.schema.json', import.meta.url), 'utf8')));
 
@@ -45,10 +54,10 @@ export function minTokensOut(cfg) {
 
 /**
  * @param {Record<string, any> | null | undefined} session - a `spawnSession` result.
- * @param {{hunkHeaders: ReadonlyArray<string>, minTokensOut?: number}} expect
+ * @param {{hunkHeaders: ReadonlyArray<string>, minTokensOut?: number, smallDiff?: boolean}} expect - `smallDiff` lowers the floor to `CLEAN_PASS_MIN_TOKENS_OUT` for a clean pass only
  * @returns {Verdict}
  */
-export function validateReview(session, { hunkHeaders, minTokensOut: min = DEFAULT_MIN_TOKENS_OUT }) {
+export function validateReview(session, { hunkHeaders, minTokensOut: min = DEFAULT_MIN_TOKENS_OUT, smallDiff = false }) {
   if (!session || typeof session !== 'object') return { ok: false, reason: 'exit', detail: 'no session result' };
   if (session.status === 'timeout') return { ok: false, reason: 'timeout', detail: 'killed at the session timeout' };
   const exitCode = session.exit_code;
@@ -65,6 +74,9 @@ export function validateReview(session, { hunkHeaders, minTokensOut: min = DEFAU
     return { ok: false, reason: 'hunks_mismatch', detail: `reviewed_hunks has ${got.length} entries; the packet has ${hunkHeaders.length} hunks` };
   }
   const tokensOut = Number(session.usage?.tokens_out ?? session.row?.tokens_out ?? 0);
-  if (!(tokensOut >= min)) return { ok: false, reason: 'too_short', detail: `tokens_out ${tokensOut} < ${min}` };
+  const review = /** @type {{passed: boolean, findings: unknown[]}} */ (session.answer);
+  const cleanPass = review.passed === true && Array.isArray(review.findings) && review.findings.length === 0;
+  const floor = smallDiff && cleanPass ? Math.min(min, CLEAN_PASS_MIN_TOKENS_OUT) : min;
+  if (!(tokensOut >= floor)) return { ok: false, reason: 'too_short', detail: `tokens_out ${tokensOut} < ${floor}` };
   return { ok: true, review: session.answer, tokens_out: tokensOut };
 }

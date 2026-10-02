@@ -28,7 +28,7 @@ import { resolveLevel } from '../config/known-ids.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, readFileDiff } from './packet.mjs';
-import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
+import { FINDING_SCHEMA, minTokensOut, SMALL_DIFF_ADDED_LINES, validateReview } from './validate-review.mjs';
 import { assertRowPath } from '../worker/ticket.mjs';
 
 /**
@@ -167,11 +167,12 @@ export async function reviewFile(input, deps) {
   if (diff.diffText.trim().length === 0) return { status: 'no_change', approved: false, ...head, sessions: [] };
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
   const min = minTokensOut(cfg);
+  const smallDiff = diff.plusCount <= SMALL_DIFF_ADDED_LINES;
 
   /** @param {SessionSpec} spec @param {{text: string, hunkHeaders: string[], tokensIn: number, contextMode: string | null}} packet */
   const run = async (spec, packet) => {
     /** @type {Record<string, any>} */
-    let summary = await runOne(spec, packet.text, packet, { deps, workDir, min, cfg });
+    let summary = await runOne(spec, packet.text, packet, { deps, workDir, min, smallDiff, cfg });
     const needs = summary.review?.needs_file;
     if (spec.role === 'reviewer' && summary.status === 'ok' && Array.isArray(needs) && needs.length > 0) {
       const paths = safeNeeds(needs);
@@ -182,7 +183,7 @@ export async function reviewFile(input, deps) {
         extra = null;
       }
       if (extra === null) return { ...summary, status: 'unavailable', reason: 'needs_file-refused', review: null };
-      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, cfg })), needs_file_round: true };
+      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, smallDiff, cfg })), needs_file_round: true };
     }
     return summary;
   };
@@ -206,7 +207,7 @@ export async function reviewFile(input, deps) {
   if (judgeSpec) {
     const bySlot = Object.fromEntries(done.map((s) => [s.slot, s.review]));
     const packet = assembleJudgePacket({ diff, reports: { A: bySlot.A, B: bySlot.B }, cfg });
-    final = await runOne(judgeSpec, packet.text, packet, { deps, workDir, min, cfg });
+    final = await runOne(judgeSpec, packet.text, packet, { deps, workDir, min, smallDiff, cfg });
     sessions.push(publicSummary(final));
     if (final.status !== 'ok') {
       await note(deps, { event: 'review.unavailable', reason: final.reason, lens: 'judge' });
@@ -222,9 +223,9 @@ export async function reviewFile(input, deps) {
  * One session: packet file (0600, removed after), spawn, stub guard.
  * @param {SessionSpec} spec @param {string} text
  * @param {{hunkHeaders: string[], tokensIn: number, contextMode: string | null}} packet
- * @param {{deps: ReviewDeps, workDir: string, min: number, cfg: Record<string, any>}} env
+ * @param {{deps: ReviewDeps, workDir: string, min: number, smallDiff?: boolean, cfg: Record<string, any>}} env
  */
-async function runOne(spec, text, packet, { deps, workDir, min }) {
+async function runOne(spec, text, packet, { deps, workDir, min, smallDiff = false }) {
   const promptPath = path.join(workDir, `${spec.lens}-${randomBytes(6).toString('hex')}.md`);
   const base = { lens: spec.lens, role: spec.role, level: spec.level, slot: spec.slot, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn };
   writeFileSync(promptPath, text, { mode: 0o600 });
@@ -244,7 +245,7 @@ async function runOne(spec, text, packet, { deps, workDir, min }) {
   } finally {
     rmSync(promptPath, { force: true });
   }
-  const verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+  const verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min, smallDiff });
   const meta = {
     ...base,
     provider: res?.provider ?? null,
