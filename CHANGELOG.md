@@ -6,6 +6,18 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- `validate` rejects an effort the level's provider cannot take (for example `xhigh` on an openai level), for levels and
+  fallback entries, instead of failing when the session starts. The builders share one list of allowed efforts, and
+  messages never repeat an unknown value.
+- Stuck review sessions: a session that times out is retried once before the review is reported unavailable;
+  `review.session_timeout_s` now defaults to 300; the ledger note keeps a cleaned stderr tail and the stdout event types
+  (never stdout text) so a hang can be diagnosed; a live worker with a fresh heartbeat is never reported as
+  `worker_down`.
+- `ledger tail -n <count>` limits the output (only `--n` worked). Jev score criteria keys must be exactly 0..n, with a
+  clear error otherwise.
+
 ## [0.3.2] — 2026-10-01
 
 ### Fixed

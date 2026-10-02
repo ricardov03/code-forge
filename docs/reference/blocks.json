@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 30,
+  "block_count": 33,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -371,6 +371,50 @@
       ],
       "depends_on": ["B27"],
       "note": "root-added 2026-10-01; not in the v1.3 §10.4 table"
+    },
+    "B29": {
+      "title": "Effort checked per provider: one shared PROVIDER_EFFORTS list for builders and validate (rule 15); messages never echo an unknown value",
+      "wave": 7,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/engines/efforts.mjs",
+        "test/engines/efforts.test.mjs"
+      ],
+      "depends_on": [
+        "B4.1"
+      ],
+      "note": "root-added 2026-10-02 from issue #2 field notes"
+    },
+    "B30": {
+      "title": "Review session hangs: one automatic retry on timeout, default timeout 300 s, cleaned stderr tail and stdout event types in a ledger note, worker heartbeat so --wait never reports worker_down for a live worker",
+      "wave": 7,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/review/session-retry.mjs",
+        "test/review/session-retry.test.mjs",
+        "test/worker/heartbeat.test.mjs"
+      ],
+      "depends_on": [
+        "B12c"
+      ],
+      "note": "root-added 2026-10-02 from issue #2 field notes; review cap reached, rulings in the local plan"
+    },
+    "B31": {
+      "title": "ledger tail -n, Jev score criteria keys must be 0..n, test hardening for PRs #3 and #4",
+      "wave": 7,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/decide/questions.mjs",
+        "test/decide/questions.test.mjs",
+        "test/review/validate-review.test.mjs"
+      ],
+      "depends_on": [
+        "B12a"
+      ],
+      "note": "root-added 2026-10-02"
     }
   }
 }
