@@ -80,6 +80,11 @@ A path is only replaced at a path boundary: `/Users/bob` never changes `/Users/b
 
 ## What `logs report` does, in order
 
+0. **Known fixes.** The selected errors' fingerprints are looked up in the list of known fixes
+   that ships inside code-forge (`src/util/known-fixes.json`; a local file, no network). An error
+   fixed in a newer version than yours is not reported (`--force` reports it anyway, with a note);
+   one your version already has the fix for gets a "may be a regression" note. If nothing is left
+   to report, it stops here and nothing else below runs.
 1. **Version check.** It runs `npm view @codedology/code-forge version` (10 s at most). This asks
    npm for the newest version; it sends only the package name. If yours is older, it says so and
    asks "Report anyway?" (default no). Without a terminal it stops (exit 2) unless you pass

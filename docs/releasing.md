@@ -20,6 +20,48 @@ in Keep-a-Changelog order (Added, Changed, Deprecated, Removed, Fixed, Security)
 Nothing else in the file changes. Empty text, an unknown type and an exact duplicate in the same
 subsection are refused.
 
+## Record a known fix
+
+When a release fixes an error users report through `code-forge logs report`, record its
+fingerprint (the 12 characters `code-forge logs` shows, and the `<!-- code-forge-fp: … -->` line of
+the issue) before you release:
+
+```
+npm run known-fix -- add 0123456789ab 0.4.0 "review no longer hangs on an empty diff." --issue 42
+npm run known-fix -- check               # validate the whole table
+```
+
+The version is the release that carries the fix (usually the one you are about to make). This
+appends one entry to `src/util/known-fixes.json`, which ships in the package:
+
+```json
+[
+  {
+    "fp": "0123456789ab",
+    "fixed_in": "0.4.0",
+    "summary": "review no longer hangs on an empty diff.",
+    "issue": 42
+  }
+]
+```
+
+(The fingerprint above is an example, not a real one.) The fingerprint must be 12 lowercase hex
+characters, the version `x.y.z`, the summary one plain line of at most 200 characters, and
+`--issue` a positive issue number (left out, it is `null`). A fingerprint already in the table, and
+a table that does not validate, are refused, and the file is not changed. The script is not in the
+npm package.
+
+What it does for users: `code-forge logs` marks the error `[fixed in X.Y.Z]`; on an older version
+`logs report` prints the upgrade command and does not file it (unless `--force`); on that version
+or newer it files it with a "may be a regression" note.
+
+On GitHub, `.github/workflows/error-triage.yml` reads the same file from the default branch: when an
+issue labelled `error-report` is opened or edited, it adds an `fp:<first 7 hex>` label per
+fingerprint in the body and, when a fingerprint is in the table, comments once "Known issue: fixed
+in X.Y.Z…" (a second run finds its own marker and does nothing). Every Monday a scheduled run counts
+the open `error-report` issues by `kind:` label and by fingerprint label and writes the tables to
+that run's job summary; it never changes an issue.
+
 ## The one-command flow
 
 ```

@@ -241,11 +241,23 @@ error, and never when an agent runs code-forge.
 
 | Command | Does |
 |---|---|
-| `code-forge logs [--last N] [--json]` | the last errors and warnings, newest first (10 by default), with their fingerprints; a warning is marked `[warning]` |
+| `code-forge logs [--last N] [--json]` | the last errors and warnings, newest first (10 by default), with their fingerprints; a warning is marked `[warning]`, an error with a known fix `[fixed in X.Y.Z]` |
 | `code-forge logs summary [--days N]` | each distinct error over the last 30 days and how many times it was seen; warnings are counted in their own list |
-| `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run]` | shares the selected errors (5 by default) with us as a GitHub issue; `--include-warnings` adds warnings, `--with-doctor` adds a setup check |
+| `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run]` | shares the selected errors (5 by default) with us as a GitHub issue; `--include-warnings` adds warnings, `--with-doctor` adds a setup check, `--force` reports an error that a newer version already fixes |
 | `code-forge logs clear [--yes]` | deletes the log |
 | `code-forge logs path` | prints where the log is |
+
+**Known fixes.** code-forge ships a small list of errors already fixed, by fingerprint, with the
+version that fixed each one. `code-forge logs` marks such an error `[fixed in X.Y.Z]`. Before
+anything else, `logs report` checks the selected errors against that list (on your machine; nothing
+is asked over the network for this):
+
+- If the fix is in a newer version than yours, it prints `This error is fixed in X.Y.Z: <what was
+  fixed>. Upgrade with: npm install -g @codedology/code-forge@latest` and does not report that
+  error. When no other error is left, it stops there (exit 0). `--force` reports it anyway, with a
+  note that the report comes from an older version.
+- If your version already has the fix, the error is reported as usual, with the note "a fix for
+  this shipped in X.Y.Z; it may be a regression."
 
 What `logs report` does, in order:
 

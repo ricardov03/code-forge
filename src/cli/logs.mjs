@@ -6,7 +6,13 @@
  *   logs summary [--days N] [--json]  one row per fingerprint over the last N days (default 30): "seen N times"
  *   logs clear [--yes]                delete the log after one yes
  *   logs path                         print the log path
- *   logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run] [--yes]
+ *   logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]
+ *
+ * B38: known fixes (`util/known-fixes.mjs`, the shipped `known-fixes.json`). `logs` marks a
+ * known-fixed line `[fixed in x.y.z]`. `report`, before anything else (no npm, no AI, nothing
+ * built): a selected error whose fix shipped in a newer version than the one running is printed
+ * with the upgrade command and left out of the report — none left is exit 0 — unless `--force`;
+ * when the running version already has the fix, the report notes a possible regression.
  *
  * B37: warnings (`kind: 'warning'`, recoverable problems) are listed marked `[warning]`, counted
  * apart in `summary`, and reported only with `--include-warnings`. Each reported error names the
@@ -34,6 +40,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exec as realExec } from '../util/exec.mjs';
 import { NO_ERROR_LOG_ENV, capBytes, createScrubber, describeCounts, errorLogPath, fingerprintOf, isWarning, mergeCounts, packageVersion, readErrorLog, readProjectSlug } from '../util/error-log.mjs';
+import { compareVersions, fixStatus, loadKnownFixes } from '../util/known-fixes.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
 import { SECRET_LOOKING_PATTERNS } from '../config/secret-patterns.mjs';
@@ -42,7 +49,7 @@ import { AI_REPORT_MAX_BYTES, applyItems, describeAiCounts, runAiScrub } from '.
 
 const USAGE =
   'usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n' +
-  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run] [--yes]\n';
+  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n';
 
 const PACKAGE_JSON = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
 
@@ -104,6 +111,8 @@ export const PACKAGE_NAME = '@codedology/code-forge';
  * @property {() => Date} [now]
  * @property {any} [pkg] - the package.json object the issue repository is read from (default: this package's).
  * @property {{version: string, node: string, os: string}} [system] - the versions a report names.
+ * @property {Map<string, import('../util/known-fixes.mjs').KnownFix>} [knownFixes] - the known-fix table
+ *   by fingerprint (default: the shipped `util/known-fixes.json`).
  * @property {(argv: string[], env: NodeJS.ProcessEnv) => Promise<{code: number|null, error?: string}>} [runEditor] - runs
  *   the editor on the terminal (default: argv only, stdio inherited, never a shell).
  */
@@ -234,9 +243,11 @@ function fenced(text) {
  * @param {{version: string, node: string, os: string, latest?: string|null}} system
  * @param {string|null} note
  * @param {SetupCheck|null} [setup]
+ * @param {Map<string, string>} [fixNotes] - by fingerprint: a line added to that error's section
+ *   (B38: a known fix; see {@link fixNote}).
  * @returns {{title: string, body: string, fps: string[]}} `fps`: distinct fingerprints, newest first.
  */
-export function buildReport(entries, system, note, setup = null) {
+export function buildReport(entries, system, note, setup = null, fixNotes = new Map()) {
   const pairs = new Set(entries.map((e) => `${e.verb}\u0000${e.kind}`));
   const title = pairs.size === 1 ? `[error report] ${entries[0].verb} ${entries[0].kind}` : `[error report] ${entries.length} errors`;
   const fps = entries.map(fingerprintOf);
@@ -273,6 +284,7 @@ export function buildReport(entries, system, note, setup = null) {
       ...(isWarning(e) && typeof e.warning === 'string' ? [`- warning: ${e.warning}`] : []),
       `- fingerprint: ${fps[i]}`,
       `- code-forge ${e.version}, Node ${e.node}, ${e.platform} ${e.arch}`,
+      ...(fixNotes.has(fps[i]) ? ['', /** @type {string} */ (fixNotes.get(fps[i]))] : []),
       '',
       'message:',
       '',
@@ -361,41 +373,8 @@ export function capReport(title, body, maxBytes) {
   return { body: `${capBytes(body, Math.max(0, room))}${note}`, cut: true };
 }
 
-/**
- * Compare two semver versions: `x.y.z`, then a pre-release is older than its release
- * (`1.2.0-beta.1` < `1.2.0`) and pre-releases compare part by part (numbers as numbers, numbers
- * before words). Build metadata (`+…`) is ignored.
- * @param {string} a @param {string} b
- * @returns {number|null} >0 when a is newer, <0 when older, 0 when equal; null when unreadable.
- */
-export function compareVersions(a, b) {
-  const re = /^v?(\d+)\.(\d+)\.(\d+)(?:-([0-9A-Za-z.-]+))?(?:\+[0-9A-Za-z.-]+)?$/;
-  const pa = re.exec(a.trim());
-  const pb = re.exec(b.trim());
-  if (!pa || !pb) return null;
-  for (let i = 1; i <= 3; i += 1) {
-    const d = Number(pa[i]) - Number(pb[i]);
-    if (d !== 0) return d;
-  }
-  if (pa[4] === undefined || pb[4] === undefined) return pa[4] === pb[4] ? 0 : pa[4] === undefined ? 1 : -1;
-  const xa = pa[4].split('.');
-  const xb = pb[4].split('.');
-  for (let i = 0; i < Math.max(xa.length, xb.length); i += 1) {
-    if (xa[i] === undefined) return -1;
-    if (xb[i] === undefined) return 1;
-    const na = /^\d+$/.test(xa[i]);
-    const nb = /^\d+$/.test(xb[i]);
-    if (na && nb) {
-      const d = Number(xa[i]) - Number(xb[i]);
-      if (d !== 0) return d;
-    } else if (na !== nb) {
-      return na ? -1 : 1;
-    } else if (xa[i] !== xb[i]) {
-      return xa[i] < xb[i] ? -1 : 1;
-    }
-  }
-  return 0;
-}
+/** Re-exported: the version comparison lives in `util/known-fixes.mjs` (B38). */
+export { compareVersions };
 
 /** @returns {{version: string, node: string, os: string}} */
 function currentSystem() {
@@ -421,7 +400,7 @@ export async function runLogs(args, deps = {}) {
     summary: { values: ['days'], booleans: ['json'] },
     clear: { booleans: ['yes'] },
     path: {},
-    report: { values: ['last', 'kind', 'verb', 'note'], booleans: ['dry-run', 'yes', 'no-ai', 'allow-old', 'include-warnings', 'with-doctor'] },
+    report: { values: ['last', 'kind', 'verb', 'note'], booleans: ['dry-run', 'yes', 'no-ai', 'allow-old', 'include-warnings', 'with-doctor', 'force'] },
   });
   const name = sub ?? 'list';
   if (!Object.hasOwn(specs, name) || (name === 'list' && sub !== null)) {
@@ -461,11 +440,15 @@ export async function runLogs(args, deps = {}) {
     const shown = newest.slice(0, n ?? 10);
     if (flags.json) out(`${JSON.stringify({ errors: shown })}\n`);
     else {
+      const fixes = deps.knownFixes ?? loadKnownFixes();
       for (const e of shown) {
+        const fp = fingerprintOf(e);
+        const fix = fixes.get(fp);
+        const fpCell = fix ? `${fp} [fixed in ${fix.fixed_in}]` : fp;
         out(
           isWarning(e)
-            ? `${e.ts}  [warning] ${command(e)}  ${typeof e.warning === 'string' ? e.warning : 'warning'}  ${fingerprintOf(e)}  ${firstLine(e.message)}\n`
-            : `${e.ts}  ${command(e)}  ${e.exit}  ${e.kind}  ${fingerprintOf(e)}  ${firstLine(e.message)}\n`,
+            ? `${e.ts}  [warning] ${command(e)}  ${typeof e.warning === 'string' ? e.warning : 'warning'}  ${fpCell}  ${firstLine(e.message)}\n`
+            : `${e.ts}  ${command(e)}  ${e.exit}  ${e.kind}  ${fpCell}  ${firstLine(e.message)}\n`,
         );
       }
     }
@@ -622,11 +605,43 @@ async function report(newest, last, flags, deps, out, err) {
   const verb = typeof flags.verb === 'string' ? flags.verb : null;
   // warnings only with --include-warnings (B37)
   const withWarnings = flags['include-warnings'] === true;
-  const selected = newest.filter((e) => (withWarnings || !isWarning(e)) && (kind === null || e.kind === kind) && (verb === null || e.verb === verb)).slice(0, last);
-  if (selected.length === 0) {
+  const picked = newest.filter((e) => (withWarnings || !isWarning(e)) && (kind === null || e.kind === kind) && (verb === null || e.verb === verb)).slice(0, last);
+  if (picked.length === 0) {
     out('no matching errors to report\n');
     return 0;
   }
+  const system = deps.system ?? currentSystem();
+
+  // 0. known fixes (B38), before anything is asked or built: an error fixed in a newer version
+  // than the one running is left out (unless --force); one the running version already has the
+  // fix for gets a "may be a regression" note
+  const fixes = deps.knownFixes ?? loadKnownFixes();
+  /** @type {Map<string, string>} */
+  const fixNotes = new Map();
+  /** @type {Set<string>} */
+  const fixedAway = new Set();
+  for (const fp of new Set(picked.map(fingerprintOf))) {
+    const fix = fixes.get(fp);
+    if (!fix) continue;
+    const status = fixStatus(fix, system.version);
+    if (status === 'older') {
+      out(`This error is fixed in ${fix.fixed_in}: ${fix.summary.replace(/\.$/, '')}. Upgrade with: npm install -g ${PACKAGE_NAME}@latest\n`);
+      if (flags.force === true) {
+        out(`--force: reporting ${fp} anyway.\n`);
+        fixNotes.set(fp, `Note: a fix for this shipped in ${fix.fixed_in}; this report is from an older version (sent with --force).`);
+      } else {
+        fixedAway.add(fp);
+      }
+    } else if (status === 'has-fix') {
+      fixNotes.set(fp, `Note: a fix for this shipped in ${fix.fixed_in}; it may be a regression.`);
+    }
+  }
+  const selected = picked.filter((e) => !fixedAway.has(fingerprintOf(e)));
+  if (selected.length === 0) {
+    out('not filed: upgrade first (pass --force to report it anyway)\n');
+    return 0;
+  }
+  if (fixedAway.size > 0) out(`left out of the report (fixed in a newer version): ${[...fixedAway].join(', ')}\n`);
   const repo = issueRepo(deps.pkg);
   if (repo === null) {
     err('logs: package.json names no GitHub repository to report to\n');
@@ -636,7 +651,6 @@ async function report(newest, last, flags, deps, out, err) {
   const tty = deps.isTTY ?? process.stdin.isTTY === true;
   const dryRun = flags['dry-run'] === true;
   const yes = flags.yes === true;
-  const system = deps.system ?? currentSystem();
 
   // 1. version check: an old version gets a warning and a default-no question
   const npm = await latestOnNpm(exec, env);
@@ -673,7 +687,7 @@ async function report(newest, last, flags, deps, out, err) {
 
   // 2. deterministic scrub, the 16 KB cap, the AI pass, the deterministic scrub again
   const note = typeof flags.note === 'string' ? flags.note : null;
-  const built = buildReport(selected, { ...system, latest }, note, setup);
+  const built = buildReport(selected, { ...system, latest }, note, setup, fixNotes);
   let title = scrubber.scrub(built.title);
   let body = capReport(title, scrubber.scrub(built.body), AI_REPORT_MAX_BYTES).body;
   const blocked = () => {

@@ -31,6 +31,7 @@
     "scripts",
     "!scripts/release.mjs",
     "!scripts/changelog.mjs",
+    "!scripts/known-fix.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -39,7 +40,8 @@
     "test": "CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test 'test/**/*.test.mjs' && CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs",
     "typecheck": "tsc --checkJs --noEmit",
     "release": "node scripts/release.mjs",
-    "changelog": "node scripts/changelog.mjs"
+    "changelog": "node scripts/changelog.mjs",
+    "known-fix": "node scripts/known-fix.mjs"
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",

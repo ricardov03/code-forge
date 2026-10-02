@@ -15,6 +15,7 @@ mkdirSync(process.env.HOME, { recursive: true });
 after(() => rmSync(PARENT, { recursive: true, force: true }));
 
 const { compareVersions, editorCommand, findSecret, issueRepo, runLogs } = await import('../../src/cli/logs.mjs');
+const { knownFixMap } = await import('../../src/util/known-fixes.mjs');
 const { AI_MAX_BYTES, AI_REPORT_MAX_BYTES, applyItems, readItems, runAiScrub } = await import('../../src/session/scrub.mjs');
 const YAML = (await import('yaml')).default;
 
@@ -69,7 +70,7 @@ function sink() {
 
 /**
  * @param {string[]} args @param {string} h
- * @param {{gh?: any, npm?: any, doctor?: any, ai?: any, aiResult?: any, onPath?: any, isTTY?: boolean, confirms?: boolean[], selects?: string[], cwd?: string, pkg?: any, env?: object, runEditor?: any}} [o]
+ * @param {{gh?: any, npm?: any, doctor?: any, ai?: any, aiResult?: any, onPath?: any, isTTY?: boolean, confirms?: boolean[], selects?: string[], cwd?: string, pkg?: any, env?: object, runEditor?: any, knownFixes?: any, system?: any}} [o]
  *   `gh(argv)`: the answer for every gh call (default ok, `[]` for a search); `npm`: the npm answer
  *   (default 0.2.3); `ai`: the claude stdout (default no items); `confirms`/`selects`: answers in order.
  */
@@ -109,7 +110,7 @@ async function logs(args, h, o = {}) {
   };
   const code = await runLogs(args, {
     env: { HOME: h, PATH: '', ...(o.env ?? {}) }, cwd: o.cwd ?? h, stdout, stderr, isTTY: o.isTTY ?? false, ui, exec,
-    onPath: o.onPath ?? (() => false), now: NOW, system: SYSTEM, ...(o.pkg ? { pkg: o.pkg } : {}), ...(o.runEditor ? { runEditor: o.runEditor } : {}),
+    onPath: o.onPath ?? (() => false), now: NOW, system: o.system ?? SYSTEM, ...(o.knownFixes ? { knownFixes: o.knownFixes } : {}), ...(o.pkg ? { pkg: o.pkg } : {}), ...(o.runEditor ? { runEditor: o.runEditor } : {}),
   });
   return { code, out: stdout.text(), err: stderr.text(), calls, sessions, prompts, npmOpts, doctorOpts };
 }
@@ -180,7 +181,7 @@ describe('logs, summary, clear, path', () => {
 
 const USAGE =
   'usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n' +
-  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run] [--yes]\n';
+  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n';
 
 const DISCLOSURE =
   'What you will share (public on GitHub): code-forge, Node and OS versions; command names and flag NAMES; the names of the last commands you ran (no flags or values); exit codes; error types; error messages and crash reports after cleaning.\n' +
@@ -851,5 +852,73 @@ describe('the issue form', () => {
     assert.deepEqual(form.body.filter((f) => f.id).map((f) => [f.type, f.id]), [['textarea', 'doing'], ['textarea', 'versions'], ['textarea', 'details'], ['input', 'fingerprint']]);
     const config = YAML.parse(readFileSync(path.join(ROOT, '.github', 'ISSUE_TEMPLATE', 'config.yml'), 'utf8'));
     assert.equal(config.blank_issues_enabled, true);
+  });
+});
+
+describe('known fixes (B38)', () => {
+  /** @param {string} fixedIn @returns {Map<string, any>} a table holding the newest fixture error */
+  const table = (fixedIn) => knownFixMap([{ fp: 'f00000000003', fixed_in: fixedIn, summary: 'keys set no longer times out on a locked vault.', issue: 12 }]);
+  const FIXED_LINE = 'This error is fixed in 0.3.0: keys set no longer times out on a locked vault. Upgrade with: npm install -g @codedology/code-forge@latest\n';
+
+  test('report: fixed in a newer version than the one running → the upgrade line, not filed, exit 0, 0 calls', async () => {
+    const h = home(FIXTURE);
+    const r = await logs(['report', '--last', '1', '--no-ai', '--yes'], h, { knownFixes: table('0.3.0') });
+    assert.deepEqual([r.code, r.err, r.calls.length], [0, '', 0]);
+    assert.equal(r.out, `${FIXED_LINE}not filed: upgrade first (pass --force to report it anyway)\n`);
+  });
+
+  test('report: a fixed error is left out and the others are still reported', async () => {
+    const h = home(FIXTURE);
+    const r = await logs(['report', '--last', '2', '--no-ai', '--dry-run'], h, { knownFixes: table('0.3.0') });
+    assert.equal(r.code, 0);
+    assert.equal(r.out.startsWith(`${FIXED_LINE}left out of the report (fixed in a newer version): f00000000003\n`), true);
+    assert.equal(count(r.out, '\nTitle: [error report] init usage\n'), 1);
+    assert.equal(count(r.out, '<!-- code-forge-fp: f00000000003 -->'), 0);
+    assert.equal(count(r.out, '<!-- code-forge-fp: f00000000002 -->'), 1);
+  });
+
+  test('report --force: files the fixed error anyway, with an older-version note', async () => {
+    const h = home(FIXTURE);
+    const r = await logs(['report', '--last', '1', '--no-ai', '--dry-run', '--force'], h, { knownFixes: table('0.3.0') });
+    assert.equal(r.code, 0);
+    assert.equal(r.out.startsWith(`${FIXED_LINE}--force: reporting f00000000003 anyway.\n`), true);
+    assert.equal(count(r.out, '\nNote: a fix for this shipped in 0.3.0; this report is from an older version (sent with --force).\n'), 1);
+    assert.equal(count(r.out, '<!-- code-forge-fp: f00000000003 -->'), 1);
+    const sent = await logs(['report', '--last', '1', '--no-ai', '--yes', '--force'], h, { knownFixes: table('0.3.0') });
+    assert.deepEqual([sent.code, count(sent.out, 'Open this link to file the issue:')], [0, 1]);
+  });
+
+  for (const [what, fixedIn] of [['equal to', '0.2.3'], ['newer than', '0.2.0']]) {
+    test(`report: running version ${what} fixed_in → filed as usual with the regression note`, async () => {
+      const h = home(FIXTURE);
+      const r = await logs(['report', '--last', '1', '--no-ai', '--dry-run'], h, { knownFixes: table(fixedIn) });
+      assert.equal(r.code, 0);
+      assert.equal(count(r.out, 'This error is fixed in'), 0);
+      assert.equal(count(r.out, `\n- code-forge 0.2.3, Node v22.20.0, darwin arm64\n\nNote: a fix for this shipped in ${fixedIn}; it may be a regression.\n\nmessage:\n`), 1);
+      const sent = await logs(['report', '--last', '1', '--no-ai', '--yes'], h, { knownFixes: table(fixedIn) });
+      assert.deepEqual([sent.code, count(sent.out, 'Open this link to file the issue:')], [0, 1]);
+      assert.equal(count(sent.out, encodeURIComponent(`Note: a fix for this shipped in ${fixedIn}; it may be a regression.`)), 1);
+    });
+  }
+
+  test('report: an unreadable running version is neither suppressed nor noted', async () => {
+    const h = home(FIXTURE);
+    const r = await logs(['report', '--last', '1', '--no-ai', '--dry-run'], h, { knownFixes: table('0.3.0'), system: { ...SYSTEM, version: 'unknown' } });
+    assert.equal(r.code, 0);
+    assert.deepEqual([count(r.out, 'This error is fixed in'), count(r.out, 'Note: a fix'), count(r.out, '<!-- code-forge-fp: f00000000003 -->')], [0, 0, 1]);
+  });
+
+  test('logs marks a known-fixed line [fixed in x.y.z]; the other lines are unchanged', async () => {
+    const h = home(FIXTURE);
+    const r = await logs([], h, { knownFixes: table('0.3.0') });
+    assert.equal(r.code, 0);
+    assert.equal(
+      r.out,
+      '2026-10-01T10:00:00.000Z  keys set  1  op_timeout  f00000000003 [fixed in 0.3.0]  keys: 1Password did not answer in time; unlock the app and try again\n' +
+        '2026-09-30T08:00:00.000Z  init  2  usage  f00000000002  init: unknown flag "--x"\n' +
+        '2026-08-01T09:00:00.000Z  tools install  1  error  f00000000001  old one\n',
+    );
+    const json = await logs(['--json', '--last', '1'], h, { knownFixes: table('0.3.0') });
+    assert.deepEqual(JSON.parse(json.out), { errors: [FIXTURE[2]] });
   });
 });

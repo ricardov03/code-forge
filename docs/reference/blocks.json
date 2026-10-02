@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 39,
+  "block_count": 40,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -502,6 +502,25 @@
       ],
       "depends_on": [
         "B28"
+      ],
+      "note": "root-added 2026-10-02"
+    },
+    "B38": {
+      "title": "Known fixes table (logs report says upgrade instead of filing; regression note), known-fix maintainer script, error-triage GitHub Action (fp labels, one known-fix comment, weekly counts)",
+      "wave": 9,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/util/known-fixes.mjs",
+        "src/util/known-fixes.json",
+        "scripts/known-fix.mjs",
+        ".github/workflows/error-triage.yml",
+        "test/util/known-fixes.test.mjs",
+        "test/known-fix.test.mjs",
+        "test/error-triage.test.mjs"
+      ],
+      "depends_on": [
+        "B37"
       ],
       "note": "root-added 2026-10-02"
     }

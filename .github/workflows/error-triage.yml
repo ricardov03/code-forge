@@ -1,0 +1,148 @@
+name: Error triage
+
+# B38. Two jobs, both on actions/github-script; neither runs any text from an issue as code.
+# - triage (an `error-report` issue opened or edited): reads the `<!-- code-forge-fp: … -->`
+#   markers of the body (12 lowercase hex characters each, at most 3, the body capped at 64 KB) and
+#   the `kind:` labels already set, adds one `fp:<first 7 hex>` label per fingerprint, and — when a
+#   fingerprint is in src/util/known-fixes.json of the default branch — comments once with the
+#   version that fixed it (its own marker `<!-- code-forge-triage: known-fix -->` makes a second
+#   run a no-op). The issue body is data: it is read from the event payload inside the script, never
+#   pasted into the workflow with an expression.
+# - weekly (schedule): counts open `error-report` issues by kind label and by fingerprint label and
+#   writes both tables to the job summary. It reads issues only; it never writes to one.
+on:
+  issues:
+    types: [opened, edited]
+  schedule:
+    - cron: '0 7 * * 1'
+
+permissions: {}
+
+jobs:
+  triage:
+    name: triage (fingerprint label, known-fix comment)
+    if: github.event_name == 'issues' && contains(github.event.issue.labels.*.name, 'error-report')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write
+    concurrency:
+      group: error-triage-${{ github.event.issue.number }}
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          persist-credentials: false
+          sparse-checkout: src/util/known-fixes.json
+          sparse-checkout-cone-mode: false
+
+      - name: Label the fingerprints; comment on a known fix once
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const MARKER = '<!-- code-forge-triage: known-fix -->';
+            const MAX_BODY_CHARS = 65536;
+            const MAX_FPS = 3;
+            const BOT = 'github-actions[bot]';
+            const issue = context.payload.issue;
+            // the body is untrusted data: only matched against fixed patterns, never evaluated
+            const text = typeof issue.body === 'string' ? issue.body.slice(0, MAX_BODY_CHARS) : '';
+            const fps = [];
+            for (const m of text.matchAll(/<!-- code-forge-fp: ([0-9a-f]{12}) -->/g)) {
+              if (!fps.includes(m[1])) fps.push(m[1]);
+              if (fps.length >= MAX_FPS) break;
+            }
+            const labels = (issue.labels || []).map((l) => (typeof l === 'string' ? l : l && l.name)).filter((n) => typeof n === 'string');
+            const kinds = labels.filter((n) => /^kind:[a-z][a-z0-9_]{0,39}$/.test(n));
+            core.info(`fingerprints: ${fps.length}; kind labels: ${kinds.length} (${kinds.join(', ')})`);
+            if (fps.length === 0) return;
+
+            const { owner, repo } = context.repo;
+            const issue_number = issue.number;
+            const want = fps.map((fp) => `fp:${fp.slice(0, 7)}`).filter((name) => !labels.includes(name));
+            for (const name of want) {
+              try {
+                await github.rest.issues.getLabel({ owner, repo, name });
+              } catch (e) {
+                if (e.status !== 404) throw e;
+                try {
+                  await github.rest.issues.createLabel({ owner, repo, name, color: 'ededed', description: 'code-forge error fingerprint' });
+                } catch (e2) {
+                  if (e2.status !== 422) throw e2; // created meanwhile
+                }
+              }
+            }
+            if (want.length > 0) await github.rest.issues.addLabels({ owner, repo, issue_number, labels: want });
+
+            let table = [];
+            try {
+              table = JSON.parse(require('fs').readFileSync('src/util/known-fixes.json', 'utf8'));
+            } catch {
+              core.warning('src/util/known-fixes.json could not be read; no known-fix check');
+            }
+            if (!Array.isArray(table)) table = [];
+            const fixes = [];
+            for (const fp of fps) {
+              const fix = table.find((e) => e && e.fp === fp && typeof e.fixed_in === 'string' && /^\d+\.\d+\.\d+$/.test(e.fixed_in) && typeof e.summary === 'string');
+              if (fix) fixes.push(fix);
+            }
+            if (fixes.length === 0) return;
+
+            const comments = await github.paginate(github.rest.issues.listComments, { owner, repo, issue_number, per_page: 100 });
+            if (comments.some((c) => c.user && c.user.login === BOT && typeof c.body === 'string' && c.body.includes(MARKER))) {
+              core.info('the known-fix comment is already there');
+              return;
+            }
+            const lines = fixes.map((f) => {
+              const summary = f.summary.replace(/[\r\n]+/g, ' ').slice(0, 200).replace(/\.$/, '');
+              const ref = Number.isSafeInteger(f.issue) && f.issue > 0 ? ` (#${f.issue})` : '';
+              return `Known issue: fixed in ${f.fixed_in}${ref}: ${summary}.`;
+            });
+            const body = [
+              MARKER,
+              ...lines,
+              '',
+              'Upgrade with: `npm install -g @codedology/code-forge@latest`',
+              '',
+              'If this still happens on that version or newer, say so here: it may be a regression.',
+            ].join('\n');
+            await github.rest.issues.createComment({ owner, repo, issue_number, body });
+
+  weekly:
+    name: weekly count of open error reports
+    if: github.event_name == 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      issues: read
+    steps:
+      - name: Count open error-report issues by kind and fingerprint (job summary only)
+        uses: actions/github-script@v7
+        with:
+          script: |
+            const MAX_ISSUES = 1000;
+            const { owner, repo } = context.repo;
+            const issues = [];
+            for await (const page of github.paginate.iterator(github.rest.issues.listForRepo, { owner, repo, state: 'open', labels: 'error-report', per_page: 100 })) {
+              for (const i of page.data) if (!i.pull_request) issues.push(i);
+              if (issues.length >= MAX_ISSUES) break;
+            }
+            const counted = issues.slice(0, MAX_ISSUES);
+            const byKind = new Map();
+            const byFp = new Map();
+            const bump = (map, key) => map.set(key, (map.get(key) || 0) + 1);
+            for (const i of counted) {
+              const names = (i.labels || []).map((l) => (typeof l === 'string' ? l : l && l.name)).filter((n) => typeof n === 'string');
+              const kinds = names.filter((n) => /^kind:[a-z][a-z0-9_]{0,39}$/.test(n));
+              const fps = names.filter((n) => /^fp:[0-9a-f]{7}$/.test(n));
+              for (const k of kinds.length > 0 ? kinds : ['(no kind label)']) bump(byKind, k);
+              for (const f of fps.length > 0 ? fps : ['(no fingerprint label)']) bump(byFp, f);
+            }
+            const rows = (map) => [...map].sort((a, b) => b[1] - a[1] || a[0].localeCompare(b[0])).map(([k, n]) => [k, String(n)]);
+            await core.summary
+              .addHeading('Open error reports', 2)
+              .addRaw(`${counted.length} open issue(s) labelled error-report${issues.length > MAX_ISSUES ? ` (the first ${MAX_ISSUES} counted)` : ''}.`, true)
+              .addHeading('By kind', 3)
+              .addTable([[{ data: 'kind label', header: true }, { data: 'open issues', header: true }], ...rows(byKind)])
+              .addHeading('By fingerprint', 3)
+              .addTable([[{ data: 'fingerprint label', header: true }, { data: 'open issues', header: true }], ...rows(byFp)])
+              .write();

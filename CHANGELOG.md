@@ -20,6 +20,10 @@ waits on a second real consumer (plan §10.4, Q17).
   commands (no flags or values); recovered problems are logged as warnings (1Password retry, review retry, System 1
   fallback, budget at 80%), shown by `logs` and `logs summary`, and included in a report only with `--include-warnings`.
   `CODE_FORGE_NO_ERROR_LOG=1` turns all of it off.
+- Known fixes: `logs report` checks a shipped table of fixed errors and, on an older version, tells you to upgrade
+  instead of filing (`--force` files anyway). An `error-triage` GitHub Action labels error reports by fingerprint,
+  comments once when the error is already fixed, and writes a weekly count. Maintainers record fixes with `npm run
+  known-fix -- add`.
 
 ### Changed
 
