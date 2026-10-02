@@ -6,6 +6,14 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- Jev: `score` questions (such as `risk`) send their criteria as a list indexed by score. Jev refused the keyed object
+  with 422, so `doctor`'s Jev check failed and every `risk` call silently fell back to rules.
+- Review: on a small diff (20 added lines or fewer), a clean pass (passed, no findings, every hunk acknowledged) needs
+  only 40 output tokens instead of `review.min_tokens_out`, so a correct short review of a tiny file is no longer
+  refused as `too_short`. Any finding, or a larger diff, keeps the full floor.
+
 ## [0.3.1] — 2026-10-01
 
 ### Fixed
