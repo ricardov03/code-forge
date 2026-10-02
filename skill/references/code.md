@@ -10,7 +10,7 @@ The coder then forecasts **cases** (tests) and **lines**. Compute the floor your
 
 ## §3 Dispatch — what the brief contains
 
-`forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> --brief <file> [--attempt <n>] [--base <sha>] --lines <n>` records the base sha, the owned files (overlap with another active block ⇒ refused), the level, the clauses with their test ids and the forecast, writes the ledger `dispatch` row and prints the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>` (≤ 200 B). Call it before every spawn, in every engine. The brief file carries, in this order:
+`forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> --brief <file> [--attempt <n>] [--base <sha>] [--kind code|docs|contract] --lines <n>` records the base sha, the owned files (overlap with another active block ⇒ refused), the block kind (declared, else detected — `decisions.md` §5), the level (a docs/contract block below `levels.coder_floor_docs`, default L1, is raised to it and the CLI prints the floor), the clauses with their test ids and the forecast, writes the ledger `dispatch` row and prints the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>` (≤ 200 B). Call it before every spawn, in every engine. A docs block that owns a glob (`docs/**`) must declare `--kind docs`: a glob is judged by its literal ending, so undeclared it counts as `code`. The brief file carries, in this order:
 
 1. `id`, `title`, the level, `owned_files` ("edit ONLY these"), the acceptance clauses with test ids, `test_command`.
 2. The reply contract: `ACK <sha8> lines=<n>` before any tool call; the facts diff; the forecast.

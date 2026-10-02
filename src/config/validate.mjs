@@ -4,7 +4,7 @@
  *
  *  1. **Schema validation** (Ajv, draft 2020-12, `additionalProperties: false` almost everywhere)
  *     catches shape errors: unknown keys, wrong types, missing required fields.
- *  2. **Domain rules** (`DOMAIN_RULES` below, 15 of them as of B29) catch things no JSON Schema can express:
+ *  2. **Domain rules** (`DOMAIN_RULES` below, 16 of them as of B32) catch things no JSON Schema can express:
  *     cross-field comparisons (two levels resolving to the same tuple), a value that needs a
  *     second config value to be reachable (`second_levels.L2.provider` vs. the effective L2
  *     provider) and rules that reach outside the config object entirely (is a CLI on PATH, is a
@@ -14,7 +14,7 @@
  *     instead of touching `process.env.PATH` themselves, so a unit test never needs a real CLI on
  *     PATH to prove either branch.
  *
- * The 15 rules (B29 added `effort-not-valid-for-provider`; before it: B1's original 14 plus B1.1's `caps-coders-exceeds-cap`, minus B1.2's removal of
+ * The 16 rules (B32 added `closed-book-on-openai`, B29 `effort-not-valid-for-provider`; before them: B1's original 14 plus B1.1's `caps-coders-exceeds-cap`, minus B1.2's removal of
  * `proof-tool-absent-for-high-tier` — Q16 answered "cut", so `proof.tiers.high.tool` no longer
  * exists to be absent, plan §10.4 Wave 6), and how the plan's prose bullets map onto them (§1.3's
  * "review.multimodel: true with second_provider empty **or with**
@@ -35,6 +35,7 @@
  *  13  shadow-rate-range                     ERROR  ("shadow_rate range")
  *  14  caps-coders-exceeds-cap               WARN   (v1.3/R10/B1.1: caps.coders > 2)
  *  15  effort-not-valid-for-provider         ERROR  (B29: a level's / fallback's effort vs. its provider)
+ *  16  closed-book-on-openai                 WARN   (B32: Codex has no no-tools mode)
  *
  * **B1.2 (v1.3, Q16 cut) removed rule:** `proof-tool-absent-for-high-tier` (formerly #13) — the
  * key it warned about (`proof.tiers.high.tool`) left the schema in the same amendment, along with
@@ -62,7 +63,8 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../schema/code-forge.schema.json' with { type: 'json' };
 import { redact } from '../util/redact.mjs';
 import { checkEffort, displayEffort } from '../engines/efforts.mjs';
-import { isKnownId } from './known-ids.mjs';
+import { CLOSED_BOOK_LEVELS, CODEX_CLOSED_BOOK_REFUSAL, isNoClosedBookProvider, OPEN_BOOK_CODEX_WARNING, openBookCodexAllowed } from './closed-book.mjs';
+import { isKnownId, resolveLevel } from './known-ids.mjs';
 import { looksLikeSecret, maskSecretTokens, SECRET_MASK, secretTokensIn } from './secret-patterns.mjs';
 
 /**
@@ -713,11 +715,52 @@ function checkEffortNotValidForProvider(cfg) {
   return issues;
 }
 
+// ── 16. closed-book-on-openai (WARN, B32) ──────────────────────────────────
+
 /**
- * The 15 domain rules paired with the exact `rule` id string each one emits — the single source
+ * L2 (reviewers) and L3 (judge, S2, author) run closed-book, and Codex has no no-tools mode
+ * (`closed-book.mjs`): the spawner refuses an openai level there and skips an openai fallback.
+ * One warning per place that resolves to openai — the level itself, each of its fallbacks, and
+ * the second reviewer's effective L2 provider when multimodel is on. WARN, not ERROR: the
+ * `provider: openai` default writes openai on every level, and the coders still run on Codex.
+ * With `review.allow_open_book_codex: true` the warnings name the opt-in's cost instead.
+ * @param {Record<string, any>} cfg
+ */
+function checkClosedBookOnOpenai(cfg) {
+  /** @type {string[]} */
+  const where = [];
+  for (const name of CLOSED_BOOK_LEVELS) {
+    // The level and its fallbacks exactly as the spawner's ladder sees them (fix round 1):
+    // `resolveLevel` is what `spawnSession` and `resolve` call. A level it cannot resolve is
+    // `level-missing`'s to report; the spawner cannot run it either.
+    let resolved;
+    try {
+      resolved = resolveLevel(cfg, /** @type {"L2"|"L3"} */ (name));
+    } catch {
+      continue;
+    }
+    if (isNoClosedBookProvider(resolved.provider)) where.push(`levels.${name}`);
+    resolved.fallback.forEach((fb, i) => {
+      if (isNoClosedBookProvider(fb?.provider)) where.push(`levels.${name}.fallback[${i}]`);
+    });
+  }
+  if (cfg?.review?.multimodel === true && isNoClosedBookProvider(effectiveSecondL2Provider(cfg))) {
+    where.push('review.second_levels.L2 (else review.second_provider)');
+  }
+  // B32 opt-in: the same places, but the text says what the opt-in costs instead of "refused".
+  const text = openBookCodexAllowed(cfg) ? OPEN_BOOK_CODEX_WARNING : CODEX_CLOSED_BOOK_REFUSAL;
+  return where.map((key) => ({
+    rule: 'closed-book-on-openai',
+    severity: /** @type {const} */ ('warning'),
+    message: `${key} resolves to openai — ${text}`,
+  }));
+}
+
+/**
+ * The 16 domain rules paired with the exact `rule` id string each one emits — the single source
  * of truth both `DOMAIN_RULES` (below, what `validateConfig` runs) and the exported
  * `DOMAIN_RULE_IDS` are built from. `'schema'` (the ajv layer's own issues) is deliberately not
- * one of these 15 (B29 added rule 15). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
+ * one of these 16 (B29 added rule 15, B32 rule 16). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
  * @type {ReadonlyArray<{fn: (cfg: Record<string, any>, opts?: object) => ValidationIssue[], id: string}>}
  */
 const RULE_TABLE = Object.freeze([
@@ -736,12 +779,13 @@ const RULE_TABLE = Object.freeze([
   { fn: checkShadowRateRange, id: 'shadow-rate-range' },
   { fn: checkCapsCodersExceedsCap, id: 'caps-coders-exceeds-cap' },
   { fn: checkEffortNotValidForProvider, id: 'effort-not-valid-for-provider' },
+  { fn: checkClosedBookOnOpenai, id: 'closed-book-on-openai' },
 ]);
 
-/** The 15 domain rules, in the order documented above. */
+/** The 16 domain rules, in the order documented above. */
 const DOMAIN_RULES = Object.freeze(RULE_TABLE.map((entry) => entry.fn));
 
-/** The 15 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
+/** The 16 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
 export const DOMAIN_RULE_IDS = Object.freeze(RULE_TABLE.map((entry) => entry.id));
 
 /**

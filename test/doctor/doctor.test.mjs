@@ -9,7 +9,7 @@
 import { CLAUDE_HELP, CLAUDE_MD_LINE, CLI_NAMES, CLI_VERSION, doctorDeps, FAKE_JEV_KEY, freshDir, goneCode, isolationRuns, makeProject, NODE_DIR, plantStaleRoot, readRecords, rowById, wrapperCalls } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync, readFileSync } from 'node:fs';
+import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
@@ -89,6 +89,94 @@ describe('doctor full run', () => {
     assert.equal(iso.detail, "the reviewer saw the project's CLAUDE.md");
     assert.equal(code, 1);
     assert.deepEqual(isolationRuns(d.records).map((r) => r.cwd), [proj]);
+  });
+
+  test('B32: an openai L2 and L3 FAIL the isolation row and the reviewer/s2 pings with the refusal, and no closed-book Codex run happens', async () => {
+    const { proj } = makeProject();
+    const file = path.join(proj, '.code-forge.yml');
+    const yml = readFileSync(file, 'utf8')
+      .replace('  L2:\n    model: claude-opus-5-5\n', '  L2:\n    provider: openai\n    model: gpt-6-sol\n')
+      .replace('  L3:\n    model: claude-fable-5-1\n', '  L3:\n    provider: openai\n    model: gpt-6-astra\n');
+    assert.equal(yml.split('provider: openai').length - 1, 2);
+    writeFileSync(file, yml);
+    const d = doctorDeps();
+    const { code, doc } = await runJSON(['--cwd', proj], d);
+    const refusal = 'codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author';
+    assert.deepEqual([rowById(doc.rows, 'isolation').status, rowById(doc.rows, 'isolation').detail], ['FAIL', refusal]);
+    assert.deepEqual(
+      doc.rows.filter((/** @type {any} */ r) => r.id.startsWith('ping.')).map((/** @type {any} */ r) => `${r.id}=${r.status}:${r.status === 'FAIL' ? r.detail : ''}`),
+      ['ping.facts=OK:', 'ping.coder=OK:', `ping.reviewer=FAIL:${refusal}`, `ping.s2=FAIL:${refusal}`],
+    );
+    assert.equal(isolationRuns(d.records).length, 0);
+    assert.equal(code, 1);
+  });
+
+  test('B32 opt-in: review.allow_open_book_codex: true runs the isolation probe on codex (WARN, not FAIL) and the reviewer/s2 pings', async () => {
+    const { proj } = makeProject();
+    const file = path.join(proj, '.code-forge.yml');
+    const yml = readFileSync(file, 'utf8')
+      .replace('  L2:\n    model: claude-opus-5-5\n', '  L2:\n    provider: openai\n    model: gpt-6-sol\n')
+      .replace('  L3:\n    model: claude-fable-5-1\n', '  L3:\n    provider: openai\n    model: gpt-6-astra\n')
+      .replace('gates:\n', 'review:\n  allow_open_book_codex: true\ngates:\n');
+    assert.equal(yml.split('allow_open_book_codex: true').length - 1, 1);
+    writeFileSync(file, yml);
+    const d = doctorDeps();
+    const { doc } = await runJSON(['--cwd', proj], d);
+    const iso = rowById(doc.rows, 'isolation');
+    assert.deepEqual([iso.status, iso.detail], ['WARN', 'codex reviewer is not closed-book: it can read files on this machine (review.allow_open_book_codex); no project doc visible to the reviewer']);
+    const runs = isolationRuns(d.records);
+    assert.deepEqual(runs.map((r) => [r.name, r.cwd]), [['codex', proj]]);
+    assert.deepEqual(
+      doc.rows.filter((/** @type {any} */ r) => r.id.startsWith('ping.')).map((/** @type {any} */ r) => `${r.id}=${r.status}`),
+      ['ping.facts=OK', 'ping.coder=OK', 'ping.reviewer=OK', 'ping.s2=OK'],
+    );
+  });
+
+  test('B32 fix 1: L2 gives only a model and the TOP-LEVEL provider is openai — isolation and the reviewer ping FAIL with the refusal (resolveLevel), s2 on anthropic runs', async () => {
+    const { proj } = makeProject();
+    const file = path.join(proj, '.code-forge.yml');
+    const yml = readFileSync(file, 'utf8')
+      .replace('provider: anthropic\n', 'provider: openai\n')
+      .replace('  L0:\n    model: claude-haiku-4-5-20251001\n', '  L0:\n    provider: anthropic\n    model: claude-haiku-4-5-20251001\n')
+      .replace('  L1:\n    model: claude-sonnet-5\n', '  L1:\n    provider: anthropic\n    model: claude-sonnet-5\n')
+      .replace('  L2:\n    model: claude-opus-5-5\n', '  L2:\n    model: gpt-6-sol\n')
+      .replace('  L3:\n    model: claude-fable-5-1\n', '  L3:\n    provider: anthropic\n    model: claude-fable-5-1\n');
+    assert.equal(yml.split('provider: anthropic').length - 1, 3);
+    writeFileSync(file, yml);
+    const d = doctorDeps();
+    const { doc } = await runJSON(['--cwd', proj], d);
+    const refusal = 'codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author';
+    assert.deepEqual([rowById(doc.rows, 'isolation').status, rowById(doc.rows, 'isolation').detail], ['FAIL', refusal]);
+    assert.deepEqual(
+      doc.rows.filter((/** @type {any} */ r) => r.id.startsWith('ping.')).map((/** @type {any} */ r) => `${r.id}=${r.status}`),
+      ['ping.facts=OK', 'ping.coder=OK', 'ping.reviewer=FAIL', 'ping.s2=OK'],
+    );
+    assert.equal(isolationRuns(d.records).length, 0);
+  });
+
+  test('B32 fix 1 opt-in: a codex reviewer that SAW the project doc is WARN with the open-book text and the saw-doc detail; with no doc to leak the row stays INFO', async () => {
+    const OPEN = 'codex reviewer is not closed-book: it can read files on this machine (review.allow_open_book_codex)';
+    /** @param {string} proj */
+    const openBook = (proj) => {
+      const file = path.join(proj, '.code-forge.yml');
+      writeFileSync(file, readFileSync(file, 'utf8')
+        .replace('  L2:\n    model: claude-opus-5-5\n', '  L2:\n    provider: openai\n    model: gpt-6-sol\n')
+        .replace('gates:\n', 'review:\n  allow_open_book_codex: true\ngates:\n'));
+    };
+    const saw = makeProject();
+    openBook(saw.proj);
+    const d1 = doctorDeps({ env: { FAKE_ANSWER: JSON.stringify(CLAUDE_MD_LINE) } });
+    const one = await runJSON(['--cwd', saw.proj], d1);
+    const iso = rowById(one.doc.rows, 'isolation');
+    assert.deepEqual([iso.status, iso.detail], ['WARN', `${OPEN}; the reviewer saw the project's CLAUDE.md`]);
+    assert.equal(isolationRuns(d1.records).length, 1);
+
+    const none = makeProject();
+    openBook(none.proj);
+    rmSync(path.join(none.proj, 'CLAUDE.md'));
+    const two = await runJSON(['--cwd', none.proj], doctorDeps());
+    const info = rowById(two.doc.rows, 'isolation');
+    assert.deepEqual([info.status, info.detail], ['INFO', 'skipped (the project has no CLAUDE.md or AGENTS.md to leak)']);
   });
 
   test('the path-deny probe WARNs when the coder prints the denied file', async () => {

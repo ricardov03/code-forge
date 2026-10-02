@@ -88,7 +88,7 @@ usage line.
 | `tools` | `code-forge tools [--json]` · `code-forge tools install [<id>…] [--yes] [--dry-run]` — see and install the recommended tools (claude, codex, gemini, grok, op, solo) |
 | `validate` | `code-forge validate [--file <path>]` |
 | `resolve` | `code-forge resolve <L0\|L1\|L2\|L3>` |
-| `run` | `code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]` · `run start --reattach --run <id>` · `run status --run <id>` · `run end --run <id>` |
+| `run` | `code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]` · `run start --reattach --run <id>` · `run status --run <id>` · `run reload --run <id>` · `run end --run <id>` |
 | `block` | `code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file>` · `block attempt\|rebase\|claim\|close\|stop\|waive …` (§4.9; `waive` is human-only) |
 | `worker` | `code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]` — started detached by `run start`, never by a coder |
 | `review` | `code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> \| --intent "<text>"] [--run <id>] [--max <seconds>] [--json] [--keep-run]` — review only: no coder, no proof, never closes a block |

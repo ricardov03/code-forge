@@ -94,6 +94,10 @@ const EXPECTED_RULES = {
     'Bash(npx code-forge run start:*)',
     'Bash(npx @codedology/code-forge run start:*)',
     'Bash(forge run start:*)',
+    'Bash(code-forge run reload:*)',
+    'Bash(npx code-forge run reload:*)',
+    'Bash(npx @codedology/code-forge run reload:*)',
+    'Bash(forge run reload:*)',
   ],
   'code-forge-reviews-write': [
     'Edit(.code-forge/reviews/**)',
@@ -313,6 +317,8 @@ const FORBIDDEN_CASES = [
   [['code-forge', '--verbose', 'worker'], 'code-forge-worker-from-coder'],
   [['bunx', 'code-forge', 'worker'], 'code-forge-worker-from-coder'],
   [['yarn', 'dlx', '@codedology/code-forge', 'run', 'start'], 'code-forge-worker-from-coder'],
+  [['npx', '-y', '@codedology/code-forge', 'run', 'reload', '--run', 'r1'], 'code-forge-worker-from-coder'],
+  [['forge', 'run', 'reload', '--run', 'r1'], 'code-forge-worker-from-coder'],
 ];
 
 for (const [argv, expectedId] of FORBIDDEN_CASES) {

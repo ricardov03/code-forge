@@ -29,3 +29,7 @@ Symptoms: a PR flips to conflicting, or its diff suddenly shows the whole stack;
 - **Duplicate-append is the common conflict** in append-only files: read every hunk anyway — one in four is a genuinely different block.
 - **Prove with a tree comparison:** `git diff <pre> <post>` empty when the merge reconciles history only; `git merge-base --is-ancestor`; the line count back to block size. Merged ≠ in the default branch: check both.
 - **Re-run classifiers and forecasts after any base change**: a size or hot-file figure taken across a stale base is not a number.
+
+## §4 A config change mid-run
+
+Edit `.code-forge.yml`, then `forge run reload --run <id>`. It validates the file (an invalid one is refused, nothing changes), prints the changed key paths — never values — and writes a signed `run.reload` row with the old and new snapshot hashes; no change prints `no config change` and writes nothing. Open blocks stay open at their attempt numbers; review tickets already queued finish on the config they were enqueued with, new tickets use the new one, and the worker picks it up without a restart. `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key` and `version` are fixed for the run: a change to one is refused by name — put it back, or end the run and start a new one. Never `block stop` + `run end` + `run start` + `block open --attempt n+1` for a config change.

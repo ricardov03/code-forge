@@ -21,10 +21,10 @@ after(() => {
   rmSync(PARENT, { recursive: true, force: true });
 });
 
-// The expected rule count comes from the renderer itself (fix round 3), pinned to 46 separately.
+// The expected rule count comes from the renderer itself (fix round 3), pinned to 50 separately (B35: + 4 `run reload` spellings).
 const EXPECTED_RULES = renderCodexRules(renderForCodex(FORBIDDEN)).count;
-test('the default forbidden list renders exactly 46 Codex rules (pin)', () => {
-  assert.equal(EXPECTED_RULES, 46);
+test('the default forbidden list renders exactly 50 Codex rules (pin)', () => {
+  assert.equal(EXPECTED_RULES, 50);
 });
 
 // B4.2: the coder build renders mergeForbidden() — FORBIDDEN plus the coder-only entries, whose
@@ -268,8 +268,8 @@ test('renderCodexRules: exact Starlark per pattern; a render with 0 patterns is 
   assert.throws(() => prepareCodexHome(sessionPath('d'), [{ id: 'y', patterns: [], enforced: false }]), /0 rules/);
 });
 
-test('closed-book roles carry no CODEX_HOME and write no rules (they keep --ignore-rules)', () => {
-  const built = /** @type {any} */ (buildCodexArgv({ role: 'reviewer', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', outPath: '/o/x.json' }));
+test('the facts role (the one closed-book Codex role left, B32) carries no CODEX_HOME and writes no rules (it keeps --ignore-rules)', () => {
+  const built = /** @type {any} */ (buildCodexArgv({ role: 'facts', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', outPath: '/o/x.json' }));
   assert.equal('env' in built, false);
   assert.equal('rulesFile' in built, false);
   assert.equal(built.argv.filter((/** @type {string} */ t) => t === '--ignore-rules').length, 1);

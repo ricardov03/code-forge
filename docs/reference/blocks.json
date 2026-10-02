@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 33,
+  "block_count": 37,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -415,6 +415,65 @@
         "B12a"
       ],
       "note": "root-added 2026-10-02"
+    },
+    "B32": {
+      "title": "Codex is refused for closed-book roles (reviewer, judge, S2, plan author): no proven no-tools mode; opt-in review.allow_open_book_codex with warnings",
+      "wave": 8,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/config/closed-book.mjs",
+        "test/config/closed-book.test.mjs"
+      ],
+      "depends_on": [
+        "B4.1"
+      ],
+      "note": "root-added 2026-10-02 from issue #2"
+    },
+    "B33": {
+      "title": "Session USD on every row, report running totals, budget.usd stop per run (80% warning, fail closed), ledger add coder --usd, run status spend",
+      "wave": 8,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/ledger/spend.mjs",
+        "test/ledger/spend.test.mjs",
+        "test/session/budget.test.mjs",
+        "test/state/budget.test.mjs"
+      ],
+      "depends_on": [
+        "B6"
+      ],
+      "note": "root-added 2026-10-02 from issue #2"
+    },
+    "B34": {
+      "title": "Escalation after a heavy review round, docs/contract coder floor L1, single reviewer for low risk, no multimodel for docs",
+      "wave": 8,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/decide/escalation.mjs",
+        "test/decide/escalation.test.mjs"
+      ],
+      "depends_on": [
+        "B12c"
+      ],
+      "note": "root-added 2026-10-02 from the owner rules in issue #2"
+    },
+    "B35": {
+      "title": "run reload: re-read config mid-run, pin queued tickets to the old snapshot, refuse fixed keys, signed run.reload row",
+      "wave": 8,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/state/config-snapshot.mjs",
+        "test/state/reload.test.mjs",
+        "test/worker/config-reload.test.mjs"
+      ],
+      "depends_on": [
+        "B11"
+      ],
+      "note": "root-added 2026-10-02 from issue #2"
     }
   }
 }

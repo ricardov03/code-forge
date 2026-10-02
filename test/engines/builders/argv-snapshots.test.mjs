@@ -7,6 +7,7 @@ import { test } from 'node:test';
 import { CODER_ONLY_FORBIDDEN, FORBIDDEN, mergeForbidden, renderForClaude, renderForCodex, renderForGrok } from '../../../src/util/forbidden.mjs';
 import { buildClaudeArgv } from '../../../src/engines/builders/claude.mjs';
 import { buildCodexArgv, VALID_EFFORTS as CODEX_VALID_EFFORTS } from '../../../src/engines/builders/codex.mjs';
+import { CODEX_CLOSED_BOOK_REFUSAL } from '../../../src/config/closed-book.mjs';
 import { renderCodexRules } from '../../../src/engines/codex-home.mjs';
 import { buildGrokArgv } from '../../../src/engines/builders/grok.mjs';
 import { VALID_ROLES } from '../../../src/engines/builders/validate-params.mjs';
@@ -310,32 +311,58 @@ test('Codex rejects an effort outside VALID_EFFORTS', () => {
   assert.doesNotThrow(() => buildCodexArgv({ role: 'coder', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', effort: 'high' }));
 });
 
-// ── 5. Codex — closed-book ───────────────────────────────────────────────────
+// ── 5. Codex — no-tools roles are refused (B32, issue #2) ──────────────────────
+// Codex 0.155.1 has no mode without a shell (`-s read-only` still reads any absolute path), so
+// reviewer/judge/s2/author are never built; facts (read-only tools by design) keeps its argv.
 
-test('Codex closed-book argv: read-only + ephemeral + ignore-rules + ignore-user-config + skip-git-repo-check, -o outside cwd', () => {
-  const built = buildCodexArgv({ role: 'judge', model: 'gpt-6-astra', promptPath: '/tmp/packet.json', cwd: '/tmp/iso-3', schemaPath: '/tmp/iso-3/schema.json' });
-  assert.equal(built.role, 'judge');
-  for (const flag of ['-s', 'read-only', '--ephemeral', '--ignore-rules', '--ignore-user-config', '--skip-git-repo-check', '--json']) {
-    assert.equal(built.argv.includes(flag), true, `missing ${flag}`);
+const CODEX_REFUSAL = 'codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author';
+
+test('B32 Codex refuses each of the 4 no-tools roles with the exact refusal (code closed-book); facts and coder still build', () => {
+  assert.equal(CODEX_CLOSED_BOOK_REFUSAL, CODEX_REFUSAL);
+  const refused = [];
+  for (const role of VALID_ROLES) {
+    try {
+      buildCodexArgv({ role, model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', outPath: '/tmp/o.json' });
+    } catch (err) {
+      assert.equal(/** @type {any} */ (err).message, CODEX_REFUSAL, role);
+      assert.equal(/** @type {any} */ (err).code, 'closed-book', role);
+      refused.push(role);
+    }
   }
-  assert.equal(built.argv.includes('workspace-write'), false);
-  assert.equal(built.argv.includes('--approve-for-me'), false);
-  const schemaIndex = built.argv.indexOf('--output-schema');
-  assert.equal(built.argv[schemaIndex + 1], '/tmp/iso-3/schema.json');
-  // Fix round 3 (root ruling): prompt argument `-` = read from stdin (pinned help); the packet
-  // file is returned as stdinFile and never appears in argv.
-  assert.equal(built.argv.at(-1), '-');
-  assert.equal(built.argv.filter((t) => t === '-').length, 1);
-  assert.equal(built.stdinFile, '/tmp/packet.json');
-  assert.equal(built.argv.includes('/tmp/packet.json'), false);
-  const outIndex = built.argv.indexOf('-o');
-  assert.ok(outIndex >= 0, '-o must be present');
-  assert.equal(built.argv[outIndex + 1].startsWith('/tmp/iso-3'), false, `-o path must not be inside the isolation dir: ${built.argv[outIndex + 1]}`);
-  assert.equal(built.outPath, built.argv[outIndex + 1]);
+  assert.deepEqual(refused, ['reviewer', 'judge', 's2', 'author']);
 });
 
-test('Codex: a caller-given outPath is used verbatim in argv AND returned (both shapes); an empty/non-string one is refused', () => {
-  for (const role of /** @type {const} */ (['coder', 'reviewer'])) {
+test('Codex facts argv: the exact closed-book token list (read-only, ephemeral, ignore-rules, ignore-user-config, schema, -o, stdin)', () => {
+  const built = buildCodexArgv({ role: 'facts', model: 'gpt-6-astra', effort: 'high', promptPath: '/tmp/packet.json', cwd: '/tmp/iso-3', outPath: '/tmp/out-3.json', schemaPath: '/tmp/schema-3.json' });
+  assert.equal(built.role, 'facts');
+  assert.deepEqual(built.argv, [
+    'codex', 'exec', '-m', 'gpt-6-astra', '-c', 'model_reasoning_effort=high',
+    '-s', 'read-only', '--ephemeral', '--ignore-rules', '--ignore-user-config',
+    '-C', '/tmp/iso-3', '--skip-git-repo-check', '--output-schema', '/tmp/schema-3.json',
+    '-o', '/tmp/out-3.json', '--json', '-',
+  ]);
+  assert.equal(built.stdinFile, '/tmp/packet.json');
+  assert.equal(built.outPath, '/tmp/out-3.json');
+});
+
+test('B32 opt-in: allowOpenBook: true builds each of the 4 no-tools roles with the exact read-only argv (the facts shape); false still refuses', () => {
+  for (const role of /** @type {const} */ (['reviewer', 'judge', 's2', 'author'])) {
+    const built = buildCodexArgv({ role, model: 'gpt-6-sol', promptPath: '/tmp/packet.json', cwd: '/tmp/iso-5', outPath: '/tmp/out-5.json', allowOpenBook: true });
+    assert.equal(built.role, role);
+    assert.deepEqual(built.argv, [
+      'codex', 'exec', '-m', 'gpt-6-sol', '-s', 'read-only', '--ephemeral', '--ignore-rules', '--ignore-user-config',
+      '-C', '/tmp/iso-5', '--skip-git-repo-check', '-o', '/tmp/out-5.json', '--json', '-',
+    ], role);
+    assert.equal(built.stdinFile, '/tmp/packet.json', role);
+    assert.throws(() => buildCodexArgv({ role, model: 'gpt-6-sol', promptPath: '/p', cwd: '/c', allowOpenBook: false }), { message: CODEX_REFUSAL });
+  }
+});
+
+test('Codex facts: the default -o lands outside cwd; a caller-given outPath is used verbatim (coder too); an empty/non-string one is refused', () => {
+  const dflt = buildCodexArgv({ role: 'facts', model: 'gpt-6-astra', promptPath: '/p', cwd: '/tmp/iso-4' });
+  assert.equal(dflt.argv[dflt.argv.indexOf('-o') + 1].startsWith('/tmp/iso-4'), false);
+  assert.equal(dflt.outPath, dflt.argv[dflt.argv.indexOf('-o') + 1]);
+  for (const role of /** @type {const} */ (['coder', 'facts'])) {
     const built = buildCodexArgv({ role, model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', outPath: '/tmp/caller-out.json' });
     assert.equal(built.outPath, '/tmp/caller-out.json', role);
     assert.equal(built.argv[built.argv.indexOf('-o') + 1], '/tmp/caller-out.json', role);
@@ -346,25 +373,6 @@ test('Codex: a caller-given outPath is used verbatim in argv AND returned (both 
       );
     }
   }
-});
-
-// ── 6. Codex — facts (same shape as closed-book, pinned to the CLOSED-BOOK markers) ─────────
-
-test('Codex facts argv carries the CLOSED-BOOK markers (read-only, no --approve-for-me) — not just "equal to reviewer"', () => {
-  const built = buildCodexArgv({ role: 'facts', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c' });
-  assert.equal(built.role, 'facts');
-  assert.equal(built.argv.includes('read-only'), true);
-  assert.equal(built.argv.includes('workspace-write'), false);
-  assert.equal(built.argv.includes('--approve-for-me'), false);
-  assert.equal(built.argv.includes('--ephemeral'), true);
-  assert.equal(built.argv.includes('--ignore-rules'), true);
-});
-
-test('Codex facts argv is the same closed-book shape as reviewer/judge/s2/author byte-for-byte (given identical inputs incl. outPath)', () => {
-  const shared = { model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', outPath: '/tmp/out.json' };
-  const reviewer = buildCodexArgv({ role: 'reviewer', ...shared });
-  const facts = buildCodexArgv({ role: 'facts', ...shared });
-  assert.deepEqual(facts.argv, reviewer.argv);
 });
 
 // ── 7. Grok — coder ───────────────────────────────────────────────────────────
@@ -477,7 +485,8 @@ test('every builder throws (never silently falls back to closed-book) for an UNK
 test('every valid role is actually accepted (the guard is not accidentally over-strict)', () => {
   for (const role of VALID_ROLES) {
     assert.doesNotThrow(() => buildClaudeArgv({ role, model: 'claude-opus-5-5', promptPath: '/p', cwd: '/c' }), `claude role ${role}`);
-    assert.doesNotThrow(() => buildCodexArgv({ role, model: 'gpt-6-astra', promptPath: '/p', cwd: '/c' }), `codex role ${role}`);
+    // B32: Codex accepts coder and facts; the 4 no-tools roles are refused (see section 5).
+    if (role === 'coder' || role === 'facts') assert.doesNotThrow(() => buildCodexArgv({ role, model: 'gpt-6-astra', promptPath: '/p', cwd: '/c' }), `codex role ${role}`);
     assert.doesNotThrow(() => buildGrokArgv({ role, model: 'grok-4.7', promptPath: '/p', cwd: '/c' }), `grok role ${role}`);
   }
 });
@@ -495,10 +504,6 @@ const DELIVERY_TABLE = [
   ['claude', 'author', { tail: ['--permission-mode', 'dontAsk'], stdinFile: '/packet.md', promptPathInArgv: 0 }],
   ['claude', 'facts', { tail: ['Bash(cp*)', '--restricted'], stdinFile: '/packet.md', promptPathInArgv: 0 }],
   ['codex', 'coder', { tail: ['/tmp/o.json', '/packet.md'], stdinFile: undefined, promptPathInArgv: 1 }],
-  ['codex', 'reviewer', { tail: ['--json', '-'], stdinFile: '/packet.md', promptPathInArgv: 0 }],
-  ['codex', 'judge', { tail: ['--json', '-'], stdinFile: '/packet.md', promptPathInArgv: 0 }],
-  ['codex', 's2', { tail: ['--json', '-'], stdinFile: '/packet.md', promptPathInArgv: 0 }],
-  ['codex', 'author', { tail: ['--json', '-'], stdinFile: '/packet.md', promptPathInArgv: 0 }],
   ['codex', 'facts', { tail: ['--json', '-'], stdinFile: '/packet.md', promptPathInArgv: 0 }],
   ['grok', 'coder', { tail: [], stdinFile: undefined, promptPathInArgv: 1 }],
   ['grok', 'reviewer', { tail: [], stdinFile: undefined, promptPathInArgv: 1 }],
@@ -508,8 +513,8 @@ const DELIVERY_TABLE = [
   ['grok', 'facts', { tail: [], stdinFile: undefined, promptPathInArgv: 1 }],
 ];
 
-test('prompt delivery table: 18 rows (3 providers × 6 roles) — argv tail, stdinFile, and how many times the packet path appears in argv', () => {
-  assert.equal(DELIVERY_TABLE.length, 3 * VALID_ROLES.length);
+test('prompt delivery table: 14 rows (3 providers × 6 roles, minus the 4 Codex no-tools roles B32 refuses) — argv tail, stdinFile, and how many times the packet path appears in argv', () => {
+  assert.equal(DELIVERY_TABLE.length, 14);
   const builders = { claude: buildClaudeArgv, codex: buildCodexArgv, grok: buildGrokArgv };
   const models = { claude: 'claude-opus-5-5', codex: 'gpt-6-astra', grok: 'grok-4.7' };
   for (const [cli, role, expected] of DELIVERY_TABLE) {

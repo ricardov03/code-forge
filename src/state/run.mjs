@@ -16,6 +16,7 @@ import { mkdir, readFile, rename, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from '../util/exec.mjs';
 import { StateError, assertRunId, assertWorkspaceOutsideRuns, mirrorPath, newRunId, runRecordPath, runsDir } from './paths.mjs';
+import { changedKeyPaths, configHash, IMMUTABLE_KEYS, immutableChanges, initialConfigState } from './config-snapshot.mjs';
 import { generateKey, loadKey, signRow } from './signer.mjs';
 
 /** @typedef {(row: Record<string, any>) => Promise<unknown>} WriteRow */
@@ -165,6 +166,9 @@ export async function startRun(opts) {
     status: 'active',
     blocks: {},
     orphans: [],
+    // B35: the config snapshot the worker reviews with (`run reload` replaces it). Only when the
+    // caller passed the loaded config: a record without it keeps the worker on its boot config.
+    ...(opts.config !== undefined ? { config: initialConfigState(config) } : {}),
   };
   return withRunLock(runId, async () => {
     const exists = await readRun(runId).then(
@@ -176,6 +180,88 @@ export async function startRun(opts) {
     await saveRun(record);
     await writeSigned(runId, writeRow, { event: 'run.start', engine: record.engine, worker_pinned: worker !== null });
     return record;
+  });
+}
+
+/**
+ * `run reload` (B35): replace the run's config snapshot with `config` (already loaded and
+ * validated by the caller), entirely under the run lock. Open blocks, their attempts and the
+ * worker pin are untouched.
+ *
+ * `readPending()` (the queue's tickets without a done marker) is called UNDER the lock, right
+ * before the record is saved, so the window in which a ticket could be enqueued unpinned is as
+ * short as it can be (enqueueing itself does not take the run lock). Each pending ticket keeps a
+ * pin whose snapshot is still stored; any other pending ticket — new, or pinned to a snapshot that
+ * has gone missing (never left dangling) — is pinned to the snapshot in force until now. Pins of
+ * tickets no longer pending are dropped, and so are snapshots no pin or the current hash names.
+ *
+ * Fixed keys ({@link IMMUTABLE_KEYS}): every one that changed is refused at once
+ * (`immutable-key`, nothing written). A record from before snapshots (no `config`) is checked
+ * against what it does store: `engine` and the ledger slug (`effectiveSlug`, computed by the
+ * caller the same way `run start` did); it then gets its first snapshot, `changed_keys: null`,
+ * `old_hash: null`.
+ *
+ * No change (same hash) ⇒ nothing written, no row. Otherwise the record is saved FIRST (it is the
+ * source of truth), then one signed `run.reload` row: the changed key PATHS (never values) and
+ * the old/new snapshot hashes. A row that cannot be written leaves the reload in place and is
+ * reported as `rowError`.
+ * @param {{
+ *   runId: string, config: Record<string, any>, readPending?: () => string[], effectiveSlug?: string,
+ *   writeRow: WriteRow, now?: Date,
+ * }} opts
+ * @returns {Promise<{changed: string[] | null, oldHash: string | null, newHash: string, pinned: number, rowError: string | null}>}
+ *   `changed` is `[]` when nothing changed.
+ */
+export async function reloadRun({ runId, config, readPending = () => [], effectiveSlug, writeRow, now = new Date() }) {
+  return withRunLock(runId, async () => {
+    const current = await readRun(runId);
+    if (current.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
+    const state = current.config && typeof current.config === 'object' && typeof current.config.hash === 'string' ? current.config : null;
+    const stored = state && state.snapshots && typeof state.snapshots === 'object' ? state.snapshots : {};
+    const newHash = configHash(config);
+    const oldHash = state ? state.hash : null;
+    if (oldHash === newHash) return { changed: [], oldHash, newHash, pinned: 0, rowError: null };
+    const before = state && Object.hasOwn(stored, state.hash) ? stored[state.hash] : undefined;
+    if (state && (before === null || typeof before !== 'object')) throw new StateError('config-snapshot', `run ${runId}: the current config snapshot is missing from the run record`);
+    /** @type {string[]} */
+    let frozen;
+    if (state) {
+      frozen = immutableChanges(before, config);
+    } else {
+      // no snapshot: compare what the record stores (`run start` wrote engine and the slug)
+      frozen = [];
+      if (effectiveSlug !== undefined && effectiveSlug !== current.project) frozen.push('project.slug');
+      if (typeof current.engine === 'string' && (config.engine ?? 'auto') !== current.engine) frozen.push('engine');
+    }
+    if (frozen.length > 0) {
+      const why = frozen.map((key) => `${key} cannot change mid-run (${IMMUTABLE_KEYS[/** @type {keyof typeof IMMUTABLE_KEYS} */ (key)]})`);
+      throw new StateError('immutable-key', `${why.join('; ')} — put ${frozen.length === 1 ? 'it' : 'them'} back, or end the run and start a new one`);
+    }
+    const changed = state ? changedKeyPaths(before, config) : null;
+    /** @type {Record<string, string>} */
+    const pins = {};
+    const oldPins = state?.pins && typeof state.pins === 'object' ? state.pins : {};
+    for (const ticket of new Set(readPending())) {
+      const hash = Object.hasOwn(oldPins, ticket) ? oldPins[ticket] : undefined;
+      if (typeof hash === 'string' && Object.hasOwn(stored, hash)) pins[ticket] = hash;
+      else if (oldHash !== null) pins[ticket] = oldHash;
+    }
+    /** @type {Record<string, any>} */
+    const snapshots = { [newHash]: config };
+    for (const hash of new Set(Object.values(pins))) snapshots[hash] = stored[hash];
+    current.config = { hash: newHash, snapshots, pins, reloaded_at: now.toISOString() };
+    current.provider = config.provider ?? null;
+    current.levels = config.levels ?? null;
+    current.fallback_mode = config.system1?.fallback ?? 'rules';
+    await saveRun(current);
+    const pinned = Object.keys(pins).length;
+    let rowError = null;
+    try {
+      await writeSigned(runId, writeRow, { event: 'run.reload', changed_keys: changed, old_hash: oldHash, new_hash: newHash, pinned_tickets: pinned });
+    } catch (err) {
+      rowError = err?.code ?? err?.name ?? 'error';
+    }
+    return { changed, oldHash, newHash, pinned, rowError };
   });
 }
 

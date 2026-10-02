@@ -6,7 +6,7 @@
 
 ## §2 The forbidden list — one list, rendered per CLI at spawn, grepped from every transcript
 
-`gh pr ready|merge|close` and base retargets · `git push --force*` · `git reset --hard` · `git checkout --` · `git restore` · `git clean` · `git stash` · `git branch -D` · `git rm` · `rm -rf` outside `.code-forge/` · any argv containing a `production.markers` token or a `production.names` name · any read or write of `~/.code-forge/runs/` · `forge worker`, `run start` and `block waive` from a coder (also via `npx`) · any write under `.code-forge/reviews/` or `.code-forge/queue/*.done`.
+`gh pr ready|merge|close` and base retargets · `git push --force*` · `git reset --hard` · `git checkout --` · `git restore` · `git clean` · `git stash` · `git branch -D` · `git rm` · `rm -rf` outside `.code-forge/` · any argv containing a `production.markers` token or a `production.names` name · any read or write of `~/.code-forge/runs/` · `forge worker`, `run start`, `run reload` and `block waive` from a coder (also via `npx`) · any write under `.code-forge/reviews/` or `.code-forge/queue/*.done`.
 
 Rendered into every coder spawn as the CLI's own deny rules (path rules widen a directory to `<dir>/**`; a read-write path denies read, edit and write); carried verbatim in the brief; refused by the package's own process spawner; and at block close the transcript (captured stdout, the harness log, or the Solo output) is grepped for the forbidden verbs **and paths** — a hit is a `rule_break` row that fails the gate. Where a CLI cannot load a rules file, `doctor` says so and the transcript grep remains the detector.
 
@@ -23,6 +23,8 @@ Rendered into every coder spawn as the CLI's own deny rules (path rules widen a 
 ## §4 Isolation of closed-book sessions
 
 Reviewer, recheck, judge, S2, author and facts sessions run in print mode with the provider's own isolation flags, cwd = an empty temp dir under the run's temp root, and the packet on stdin; `doctor` proves that no project document is visible (it asks the reviewer builder to echo the first line of the project's rules file and expects nothing) and that the coder builder cannot read a known file outside the workspace (`claude: path deny rules not honoured` when it can). The facts delegate gets read-only shell tools with every write verb denied.
+
+Codex has no mode without a shell: `-s read-only` still lets it read any absolute path. So openai is refused for reviewer, judge, S2 and author. `validate` warns, `resolve` prints `closed_book: "refused"`, the spawner refuses the session (an openai fallback is skipped), and `doctor` FAILs the isolation row with `codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author`. Coders and the facts delegate still run on Codex. The opt-in `review.allow_open_book_codex: true` (default off) lets Codex run those roles with its read-only argv; `validate` then warns `codex reviewer is not closed-book: it can read files on this machine (review.allow_open_book_codex)`, `resolve` prints `closed_book: "open-book (allowed)"`, and `doctor` runs the isolation probe and reports WARN.
 
 ## §5 What the package itself never does
 

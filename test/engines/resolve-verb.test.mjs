@@ -52,22 +52,24 @@ function runCli(args, opts = {}) {
   return spawnSync(process.execPath, [BIN, ...args], { encoding: 'utf8', cwd: opts.cwd ?? projectDir, env: { HOME: tmpHome, USERPROFILE: tmpHome } });
 }
 
-test('resolve L2 prints exactly {provider, model, effort, fallback, cli} on stdout, RAW (no log prefix), honouring the per-level provider override (R5), and matches B1\'s resolveLevel exactly', () => {
+test('resolve L2 prints {provider, model, effort, fallback, cli} + B32 closed_book on stdout, RAW (no log prefix), honouring the per-level provider override (R5), and matches B1\'s resolveLevel exactly', () => {
   const { status, stdout, stderr } = runCli(['resolve', 'L2']);
   assert.equal(status, 0, stderr);
   // fix round 1 (MINOR): the output is now written via redact.writeSafe, not log.info — no
   // "[code-forge:info] " prefix, so this is EXACTLY one clean JSON line.
   assert.equal(stdout.startsWith('[code-forge:info]'), false, 'stdout must be RAW JSON, not log-prefixed');
-  assert.equal(stderr, '');
+  // B32: L2 is closed-book and resolves to openai — one warning line with the refusal text.
+  assert.equal(stderr, '[code-forge:warn] codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author\n');
   const lines = stdout.trimEnd().split('\n');
   assert.equal(lines.length, 1, `expected exactly 1 output line, got:\n${stdout}`);
   const printed = JSON.parse(lines[0]);
-  assert.deepEqual(Object.keys(printed).sort(), ['cli', 'effort', 'fallback', 'model', 'provider'].sort());
+  assert.deepEqual(Object.keys(printed).sort(), ['cli', 'closed_book', 'effort', 'fallback', 'model', 'provider'].sort());
   assert.equal(printed.provider, 'openai');
   assert.equal(printed.model, 'gpt-6-astra');
   assert.equal(printed.effort, 'high');
-  assert.deepEqual(printed.fallback, [{ provider: 'openai', model: 'gpt-6-sol' }]);
+  assert.deepEqual(printed.fallback, [{ provider: 'openai', model: 'gpt-6-sol', closed_book: 'refused' }]);
   assert.equal(printed.cli, 'codex');
+  assert.equal(printed.closed_book, 'refused');
 
   // Cross-check against B1's OWN resolveLevel, called independently here on the SAME migrated
   // config, so a separate resolver hidden inside the verb (rather than actually using B1's) would
@@ -76,7 +78,29 @@ test('resolve L2 prints exactly {provider, model, effort, fallback, cli} on stdo
   assert.equal(printed.provider, resolved.provider);
   assert.equal(printed.model, resolved.model);
   assert.equal(printed.effort, resolved.effort ?? null);
-  assert.deepEqual(printed.fallback, resolved.fallback);
+  assert.deepEqual(printed.fallback.map((/** @type {any} */ { closed_book, ...f }) => f), resolved.fallback);
+});
+
+test('B32 opt-in: with review.allow_open_book_codex: true, resolve L2 marks closed_book "open-book (allowed)" and warns with the open-book text', () => {
+  const dir = mkdtempSync(path.join(projectDir, 'open-'));
+  writeFileSync(path.join(dir, '.code-forge.yml'), toYAML({ ...CONFIG, review: { allow_open_book_codex: true } }), 'utf8');
+  const { status, stdout, stderr } = runCli(['resolve', 'L2'], { cwd: dir });
+  assert.equal(status, 0, stderr);
+  assert.equal(stderr, '[code-forge:warn] codex reviewer is not closed-book: it can read files on this machine (review.allow_open_book_codex)\n');
+  const printed = JSON.parse(stdout.trimEnd());
+  assert.equal(printed.closed_book, 'open-book (allowed)');
+  assert.deepEqual(printed.fallback, [{ provider: 'openai', model: 'gpt-6-sol', closed_book: 'open-book (allowed)' }]);
+});
+
+test('B32: resolve L3 on anthropic with an openai fallback marks only that fallback entry, not the level', () => {
+  const dir = mkdtempSync(path.join(projectDir, 'l3-'));
+  writeFileSync(path.join(dir, '.code-forge.yml'), toYAML({ ...CONFIG, levels: { ...CONFIG.levels, L3: { model: 'claude-fable-5-1', fallback: [{ provider: 'openai', model: 'gpt-6-sol' }, { provider: 'xai', model: 'grok-4.7' }] } } }), 'utf8');
+  const { status, stdout, stderr } = runCli(['resolve', 'L3'], { cwd: dir });
+  assert.equal(status, 0, stderr);
+  assert.equal(stderr, '[code-forge:warn] codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author\n');
+  const printed = JSON.parse(stdout.trimEnd());
+  assert.deepEqual(Object.keys(printed).sort(), ['cli', 'effort', 'fallback', 'model', 'provider']);
+  assert.deepEqual(printed.fallback, [{ provider: 'openai', model: 'gpt-6-sol', closed_book: 'refused' }, { provider: 'xai', model: 'grok-4.7' }]);
 });
 
 test('resolve L1 (no per-level provider, no effort, no fallback): top-level provider wins, effort null, fallback [], and the exact 5-key contract still holds', () => {

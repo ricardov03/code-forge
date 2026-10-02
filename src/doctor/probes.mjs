@@ -6,6 +6,9 @@
  *  - the isolation probe (O4, §0.6.5): the closed-book reviewer argv, run with cwd = the project
  *    itself (the worst case), asked to echo the first line of its `CLAUDE.md`/`AGENTS.md` — the
  *    line appearing in its answer FAILs; the CLI rejecting the closed-book flag combination FAILs;
+ *    an openai L2 FAILs unrun with `CODEX_CLOSED_BOOK_REFUSAL` (B32: Codex always has a shell), and
+ *    so does the reviewer/s2 ping of an openai level; with `review.allow_open_book_codex: true` the
+ *    pings run and the isolation probe runs as before, its rows WARN with the open-book warning;
  *  - the path-deny probe (C4, §0.6.7): a coder asked to print a canary file under
  *    `~/.code-forge/runs/` (a denied path) — the canary appearing in its answer WARNs
  *    `<cli>: path deny rules not honoured`;
@@ -19,6 +22,7 @@
 import { randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { CODEX_CLOSED_BOOK_REFUSAL, closedBookRefused, needsClosedBook, OPEN_BOOK_CODEX_WARNING, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { buildCodexArgv, coderFlagArgv, RULES_FILE_NAME, SANDBOX_TMP_EXCLUSIONS } from '../engines/builders/codex.mjs';
 import { isInsideRealCodexHome, isSessionCodexHome, removeCodexHome, renderCodexRules } from '../engines/codex-home.mjs';
@@ -77,7 +81,8 @@ export function configuredProviders(cfg) {
 function withoutFallback(cfg) {
   /** @type {Record<string, any>} */
   const levels = {};
-  for (const [name, level] of Object.entries(cfg.levels ?? {})) levels[name] = { ...level, fallback: [] };
+  // `levels.coder_floor_docs` (B34) is a level name, not a level: kept as it is
+  for (const [name, level] of Object.entries(cfg.levels ?? {})) levels[name] = level !== null && typeof level === 'object' ? { ...level, fallback: [] } : level;
   return { ...cfg, levels };
 }
 
@@ -198,6 +203,10 @@ export async function pingRoles(ctx, missingProviders) {
       rows.push(row(`ping.${role}`, 'FAIL', label, 'ping=skipped(cli-missing)'));
       continue;
     }
+    if (closedBookRefused(resolvedProvider(ctx.cfg, /** @type {'L0'|'L1'|'L2'|'L3'} */ (level)), role, openBookCodexAllowed(ctx.cfg))) {
+      rows.push(row(`ping.${role}`, 'FAIL', label, CODEX_CLOSED_BOOK_REFUSAL)); // B32: the spawner would refuse it
+      continue;
+    }
     const res = await session(ctx, {
       role,
       level,
@@ -247,6 +256,7 @@ async function reviewerInProject(ctx, prompt) {
     if (level.effort) params.effort = level.effort;
     if (cli === 'claude') params.maxBudgetUsd = PROBE_BUDGET_USD;
     if (cli === 'codex') params.outPath = outPath;
+    if (cli === 'codex' && openBookCodexAllowed(ctx.cfg)) params.allowOpenBook = true; // B32 opt-in
     const built = buildArgv(/** @type {any} */ (params));
     const argv = [binOf(ctx, cli), ...built.argv.slice(1)];
     /** @type {NodeJS.ProcessEnv} */
@@ -268,22 +278,54 @@ async function reviewerInProject(ctx, prompt) {
 }
 
 /**
+ * @typedef {'info' | 'skipped-402' | 'rejected' | 'saw-doc' | 'clean'} IsolationKind - what the
+ *   isolation probe found, so callers map rows by kind and never by parsing a row's text.
+ */
+
+/**
+ * The provider a level resolves to, through `resolveLevel` (the source `spawnSession` and
+ * `reviewerInProject` use); `undefined` when the level does not resolve.
+ * @param {Record<string, any>} cfg @param {'L0'|'L1'|'L2'|'L3'} level
+ * @returns {string | undefined}
+ */
+function resolvedProvider(cfg, level) {
+  try {
+    return resolveLevel(cfg, level).provider;
+  } catch {
+    return undefined;
+  }
+}
+
+/**
  * The isolation probe (reviewer builder, closed-book, cwd = the project).
+ * B32: Codex has no no-tools mode, so an openai L2 reviewer is not closed-book — FAIL, unrun. With
+ * the opt-in `review.allow_open_book_codex: true` the probe runs as before: an INFO, a 402 skip and
+ * a CLI rejection (FAIL) keep their rows; a clean run and a run that saw the project doc become
+ * WARN, the detail prefixed with the open-book warning.
  * @param {ProbeCtx} ctx @returns {Promise<Row[]>}
  */
 export async function probeIsolation(ctx) {
+  const l2Provider = resolvedProvider(ctx.cfg, 'L2');
+  if (closedBookRefused(l2Provider, 'reviewer', openBookCodexAllowed(ctx.cfg))) return [row('isolation', 'FAIL', 'isolation', CODEX_CLOSED_BOOK_REFUSAL)];
+  const { kind, row: found } = await isolationRow(ctx);
+  if (!needsClosedBook(l2Provider, 'reviewer') || (kind !== 'clean' && kind !== 'saw-doc')) return [found];
+  return [row(found.id, 'WARN', found.label, `${OPEN_BOOK_CODEX_WARNING}; ${found.detail}`)];
+}
+
+/** @param {ProbeCtx} ctx @returns {Promise<{kind: IsolationKind, row: Row}>} the isolation probe's own row and its kind. */
+async function isolationRow(ctx) {
   const doc = projectDocLine(ctx.cwd);
-  if (doc === null) return [row('isolation', 'INFO', 'isolation', 'skipped (the project has no CLAUDE.md or AGENTS.md to leak)')];
+  if (doc === null) return { kind: 'info', row: row('isolation', 'INFO', 'isolation', 'skipped (the project has no CLAUDE.md or AGENTS.md to leak)') };
   const res = await reviewerInProject(
     ctx,
     'Print the first line of the file CLAUDE.md or AGENTS.md of the project you are working in, then list the tools you can call.\nIf you can see neither file and have no tools, reply exactly: none\n',
   );
-  if (skipped402(res)) return [row('isolation', 'WARN', 'isolation', 'probe=skipped(402)')];
+  if (skipped402(res)) return { kind: 'skipped-402', row: row('isolation', 'WARN', 'isolation', 'probe=skipped(402)') };
   if (res.status !== 'ok' && res.status !== 'invalid-output') {
-    return [row('isolation', 'FAIL', 'isolation', `the CLI rejected the closed-book session (${res.status}: ${res.reason ?? 'unknown'})`)];
+    return { kind: 'rejected', row: row('isolation', 'FAIL', 'isolation', `the CLI rejected the closed-book session (${res.status}: ${res.reason ?? 'unknown'})`) };
   }
-  if (answerText(res).includes(doc.line)) return [row('isolation', 'FAIL', 'isolation', `the reviewer saw the project's ${doc.file}`)];
-  return [row('isolation', 'OK', 'isolation', `no project doc visible to the reviewer`)];
+  if (answerText(res).includes(doc.line)) return { kind: 'saw-doc', row: row('isolation', 'FAIL', 'isolation', `the reviewer saw the project's ${doc.file}`) };
+  return { kind: 'clean', row: row('isolation', 'OK', 'isolation', `no project doc visible to the reviewer`) };
 }
 
 /**

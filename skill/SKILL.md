@@ -18,7 +18,7 @@ You are the **orchestrator**: the session that invoked this skill. You dispatch,
 
 `/code-forge plan|harden|code|full [brief file | plan file]`. No job given ⇒ infer it: a brief ⇒ `plan`; a plan whose header says `status: planned` ⇒ `harden`; `status: hardened` ⇒ `code`. `full` runs the three in order with one human checkpoint after `harden`.
 
-State lives in the plan file's header — `facts → planned → hardened → coding → done` — and in the run record: `forge run status --run <id>` prints the active blocks, `forge ledger tail --slug <slug>` the last rows. Takeover after a lost session: `references/continuity.md`.
+State lives in the plan file's header — `facts → planned → hardened → coding → done` — and in the run record: `forge run status --run <id>` prints the active blocks, `forge ledger tail --slug <slug>` the last rows. Takeover after a lost session: `references/continuity.md`. A config change mid-run (a model swap, the review topology) is `forge run reload --run <id>` — never `block stop` + `run end` + `run start` (`references/continuity.md` §4).
 
 ## §2 Roles by level (never by model name)
 

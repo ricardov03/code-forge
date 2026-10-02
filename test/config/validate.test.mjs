@@ -852,13 +852,60 @@ test('rule 15: a non-string effort is left to the schema layer (0 rule-15 issues
   assert.deepEqual(result.errors.filter((e) => e.rule === 'schema').map((e) => e.path), ['/levels/L2/effort']);
 });
 
-// ── All 15 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
-// (B1.2/v1.3, Q16 cut: 15 -> 14 — `proof-tool-absent-for-high-tier` removed, its key gone from schema.)
-// (B29: 14 -> 15 — `effort-not-valid-for-provider` added.)
+// ── 16. closed-book-on-openai (WARN, B32) ───────────────────────────────────
 
-test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 15 distinct ids', () => {
-  assert.equal(DOMAIN_RULE_IDS.length, 15);
-  assert.equal(new Set(DOMAIN_RULE_IDS).size, 15, 'no duplicate rule ids');
+const CLOSED_BOOK_TAIL = ' resolves to openai — codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author';
+
+test('rule 16 closed-book-on-openai: L2 on openai, an L3 openai fallback and an openai second reviewer give EXACTLY 3 warnings, 0 errors', () => {
+  const cfg = validCfg();
+  cfg.levels.L2 = { model: 'gpt-6-sol', provider: 'openai' };
+  cfg.levels.L3 = { model: 'claude-fable-5-1', fallback: [{ provider: 'xai', model: 'grok-4.7' }, { provider: 'openai', model: 'gpt-6-astra' }] };
+  cfg.review = { multimodel: true, second_provider: 'openai' };
+  const result = validateConfig(cfg);
+  const hits = issuesOf(result, 'closed-book-on-openai');
+  assert.deepEqual(hits.map((h) => [h.severity, h.message]), [
+    ['warning', `levels.L2${CLOSED_BOOK_TAIL}`],
+    ['warning', `levels.L3.fallback[1]${CLOSED_BOOK_TAIL}`],
+    ['warning', `review.second_levels.L2 (else review.second_provider)${CLOSED_BOOK_TAIL}`],
+  ]);
+  assert.equal(result.errors.filter((e) => e.rule === 'closed-book-on-openai').length, 0);
+});
+
+test('rule 16 does not fire for coder/facts levels: openai on L0 and L1 only gives 0 closed-book warnings', () => {
+  const cfg = validCfg();
+  cfg.levels.L0 = { model: 'gpt-6-luna', provider: 'openai' };
+  cfg.levels.L1 = { model: 'gpt-6-sol', provider: 'openai', fallback: [{ provider: 'openai', model: 'gpt-6-luna' }] };
+  const result = validateConfig(cfg);
+  assert.equal(issuesOf(result, 'closed-book-on-openai').length, 0);
+});
+
+test('rule 16: the openai provider default stays valid (0 errors) with EXACTLY 2 closed-book warnings (L2, L3)', () => {
+  const result = validateConfig({ version: 1, provider: 'openai', levels: PROVIDER_DEFAULTS.openai.levels });
+  assert.equal(result.valid, true);
+  assert.deepEqual(issuesOf(result, 'closed-book-on-openai').map((h) => h.message), [`levels.L2${CLOSED_BOOK_TAIL}`, `levels.L3${CLOSED_BOOK_TAIL}`]);
+});
+
+test('rule 16 with review.allow_open_book_codex: true: the same 2 places warn with the open-book text instead', () => {
+  const cfg = validCfg();
+  cfg.levels.L2 = { model: 'gpt-6-sol', provider: 'openai' };
+  cfg.levels.L3 = { model: 'claude-fable-5-1', fallback: [{ provider: 'openai', model: 'gpt-6-astra' }] };
+  cfg.review = { allow_open_book_codex: true };
+  const result = validateConfig(cfg);
+  assert.equal(result.valid, true);
+  const tail = ' resolves to openai — codex reviewer is not closed-book: it can read files on this machine (review.allow_open_book_codex)';
+  assert.deepEqual(issuesOf(result, 'closed-book-on-openai').map((h) => [h.severity, h.message]), [
+    ['warning', `levels.L2${tail}`],
+    ['warning', `levels.L3.fallback[0]${tail}`],
+  ]);
+});
+
+// ── All 16 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
+// (B1.2/v1.3, Q16 cut: 15 -> 14 — `proof-tool-absent-for-high-tier` removed, its key gone from schema.)
+// (B29: 14 -> 15 — `effort-not-valid-for-provider` added. B32: 15 -> 16 — `closed-book-on-openai` added.)
+
+test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 16 distinct ids', () => {
+  assert.equal(DOMAIN_RULE_IDS.length, 16);
+  assert.equal(new Set(DOMAIN_RULE_IDS).size, 16, 'no duplicate rule ids');
 });
 
 test('every rule id exercised by THIS test file is a member of the real DOMAIN_RULE_IDS set (catches a renamed/dropped rule)', () => {
@@ -878,6 +925,7 @@ test('every rule id exercised by THIS test file is a member of the real DOMAIN_R
     'shadow-rate-range',
     'caps-coders-exceeds-cap',
     'effort-not-valid-for-provider',
+    'closed-book-on-openai',
   ];
   assert.deepEqual([...exercisedInThisFile].sort(), [...DOMAIN_RULE_IDS].sort());
 });
@@ -920,4 +968,19 @@ test('control: review.second_levels with a VALID key ("L2") passes the schema �
   cfg.review = { multimodel: true, second_provider: 'openai', second_levels: { L2: { model: 'gpt-6-astra', provider: 'openai' } } };
   const result = validateConfig(cfg);
   assert.deepEqual(issuesOf(result, 'schema'), []);
+});
+
+test('B34: review.single_reviewer_max_risk accepts 0–3 (1.5 ok); 4 and -1 are schema errors, never a silent fallback', () => {
+  for (const ok of [0, 1, 1.5, 3]) {
+    const cfg = validCfg();
+    cfg.review = { single_reviewer_max_risk: ok };
+    assert.equal(validateConfig(cfg).valid, true, String(ok));
+  }
+  for (const [bad, keyword] of /** @type {Array<[number, string]>} */ ([[4, 'maximum'], [-1, 'minimum']])) {
+    const cfg = validCfg();
+    cfg.review = { single_reviewer_max_risk: bad };
+    const result = validateConfig(cfg);
+    assert.equal(result.valid, false);
+    assert.deepEqual(issuesOf(result, 'schema').map((e) => [e.path, e.keyword]), [['/review/single_reviewer_max_risk', keyword]]);
+  }
 });

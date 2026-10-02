@@ -3,6 +3,10 @@
  * (plan §5.2, §10.3 B4 acceptance): `{provider, model, effort, fallback, cli}`, via B1's
  * `resolveLevel` (the per-level `provider` override wins over the top-level `provider`, R5) plus
  * this block's own `cliNameForProvider` (the CLI binary `engine: subprocess` would spawn).
+ * B32: for L2/L3 (closed-book) an openai level gains `closed_book: "refused"` (and each openai
+ * fallback entry the same key), with the refusal text on stderr; the exit code stays 0. With the
+ * opt-in `review.allow_open_book_codex: true` the mark is `"open-book (allowed)"` and stderr carries
+ * the open-book warning instead.
  *
  * **Fix round 1 (isolated per-file review, all MINOR):**
  *  - The result is now written with `redact.writeSafe(process.stdout, ...)` — B0's documented
@@ -19,6 +23,7 @@
  */
 
 import { loadProjectConfig } from '../config/load.mjs';
+import { CLOSED_BOOK_LEVELS, CODEX_CLOSED_BOOK_REFUSAL, isNoClosedBookProvider, OPEN_BOOK_CODEX_WARNING, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { maskSecretTokens } from '../config/secret-patterns.mjs';
@@ -73,7 +78,17 @@ export default async function resolve(args) {
     return 1;
   }
 
-  const output = { provider: resolved.provider, model: resolved.model, effort: resolved.effort ?? null, fallback: resolved.fallback, cli };
+  // B32: L2/L3 run closed-book; an openai level there is marked (and the spawner refuses it), an
+  // openai fallback entry is marked (and the spawner skips it). Other levels print as before.
+  // With `review.allow_open_book_codex: true` the mark is `open-book (allowed)` and the warning
+  // names what that costs.
+  const closedBook = CLOSED_BOOK_LEVELS.includes(parsed.level);
+  const openBook = openBookCodexAllowed(loaded.config);
+  const mark = openBook ? 'open-book (allowed)' : 'refused';
+  const marked = closedBook && isNoClosedBookProvider(resolved.provider);
+  const fallback = closedBook ? resolved.fallback.map((f) => (isNoClosedBookProvider(f.provider) ? { ...f, closed_book: mark } : f)) : resolved.fallback;
+  if (marked || fallback.some((f) => 'closed_book' in f)) log.warn(openBook ? OPEN_BOOK_CODEX_WARNING : CODEX_CLOSED_BOOK_REFUSAL);
+  const output = { provider: resolved.provider, model: resolved.model, effort: resolved.effort ?? null, fallback, cli, ...(marked ? { closed_book: mark } : {}) };
   writeSafe(process.stdout, `${JSON.stringify(output)}\n`);
   return 0;
 }

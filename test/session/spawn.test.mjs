@@ -39,11 +39,11 @@ test('an answer that does not match the schema is invalid-output, not ok', async
   assert.deepEqual([result.status, result.answer], ['invalid-output', null]);
 });
 
-test('stdinFile content reaches the fake CLI stdin byte-identical (Claude and Codex closed-book)', async () => {
+test('stdinFile content reaches the fake CLI stdin byte-identical (Claude judge, Codex facts — B32: the Codex stdin role)', async () => {
   const { deps, records } = fakeDeps();
   const packet = writeIn(freshDir('pk'), 'packet.bin', PACKET_BYTES);
   await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'judge', promptPath: packet }, deps);
-  await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'judge', promptPath: packet }, deps);
+  await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'facts', promptPath: packet }, deps);
   const got = readRecords(records).map((r) => [r.name, r.stdin_is_pipe, Buffer.from(r.stdin_b64, 'base64').equals(PACKET_BYTES), r.argv.includes(packet)]);
   assert.deepEqual(got.sort(), [
     ['claude', true, true, false],
@@ -53,11 +53,11 @@ test('stdinFile content reaches the fake CLI stdin byte-identical (Claude and Co
 
 const OUT_ANSWER = { ...DEFAULT_ANSWER, decision: 'only-in-the-o-file' };
 
-/** Run a Codex reviewer whose answer exists ONLY in the `-o` file; returns the result and the fake's record. */
+/** Run a Codex facts session (B32: no Codex reviewer) whose answer exists ONLY in the `-o` file; returns the result and the fake's record. */
 async function codexOutRun() {
   const { deps, records } = fakeDeps({ FAKE_CODEX_QUIET: '1', FAKE_ANSWER: JSON.stringify(OUT_ANSWER) });
   const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
-  const result = await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  const result = await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'facts', promptPath: packet, schema: S2_SCHEMA }, deps);
   const [rec] = readRecords(records);
   return { result, rec, outPath: rec.argv[rec.argv.indexOf('-o') + 1] };
 }
@@ -128,7 +128,8 @@ test('retry ladder: fallback[1] is spawned after fallback[0] reports 402', async
     ],
   });
   const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
-  const result = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  // B32: role facts, the one closed-book role Codex may still run
+  const result = await spawnSession({ cfg, level: 'L2', role: 'facts', promptPath: packet, schema: S2_SCHEMA }, deps);
   assert.deepEqual(
     [result.status, result.fallback_step, result.attempts.map((a) => `${a.model}:${a.status}:${a.reason}`), readRecords(records).length],
     ['ok', 2, ['fake-gpt:unavailable:http-402', 'fake-grok:unavailable:http-402', 'fake-opus:ok:null'], 3],
@@ -143,7 +144,7 @@ test('a $id-bearing schema validates in two sessions of one process, including a
   const one = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: packet, schema }, first.deps);
   const second = fakeDeps({ FAKE_402_MODELS: 'fake-gpt' });
   const cfg = cfgWith({ provider: 'openai', model: 'fake-gpt', fallback: [{ provider: 'anthropic', model: 'fake-opus' }] });
-  const two = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema }, second.deps);
+  const two = await spawnSession({ cfg, level: 'L2', role: 'facts', promptPath: packet, schema }, second.deps);
   assert.deepEqual(
     [one.status, one.answer, two.status, two.fallback_step, two.answer, readRecords(first.records).length, readRecords(second.records).length],
     ['ok', DEFAULT_ANSWER, 'ok', 1, DEFAULT_ANSWER, 1, 2],
@@ -157,10 +158,93 @@ test('a strict (Codex) answer with null for an optional field is ok with the fie
   const nullNote = JSON.stringify({ decision: 'proceed', note: null });
   const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
   const codex = fakeDeps({ FAKE_ANSWER: nullNote });
-  const strict = await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'reviewer', promptPath: packet, schema: OPTIONAL_SCHEMA }, codex.deps);
+  const strict = await spawnSession({ cfg: cfgWith({ provider: 'openai', model: 'fake-gpt' }), level: 'L2', role: 'facts', promptPath: packet, schema: OPTIONAL_SCHEMA }, codex.deps);
   const claude = fakeDeps({ FAKE_ANSWER: nullNote });
   const plain = await spawnSession({ cfg: cfgWith(CLAUDE), level: 'L2', role: 'reviewer', promptPath: packet, schema: OPTIONAL_SCHEMA }, claude.deps);
   assert.deepEqual([strict.status, strict.answer, plain.status, plain.answer], ['ok', { decision: 'proceed' }, 'invalid-output', null]);
+});
+
+const CODEX_REFUSAL = 'codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author';
+
+test('B32: an openai level is refused for each of reviewer/judge/s2/author with the exact SessionError, and nothing spawns', async () => {
+  const { deps, records, stderr } = fakeDeps();
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const cfg = cfgWith({ provider: 'openai', model: 'fake-gpt' });
+  for (const role of /** @type {const} */ (['reviewer', 'judge', 's2', 'author'])) {
+    await assert.rejects(spawnSession({ cfg, level: 'L2', role, promptPath: packet }, deps), (err) => {
+      assert.ok(err instanceof SessionError, role);
+      assert.deepEqual([err.code, err.message], ['closed-book', CODEX_REFUSAL], role);
+      return true;
+    });
+  }
+  assert.deepEqual([readRecords(records).length, stderr.text()], [0, '']);
+});
+
+test('B32: an openai fallback of a reviewer is skipped (1 stderr line); the ladder goes anthropic (402) -> xai, 2 spawns', async () => {
+  const { deps, records, stderr } = fakeDeps({ FAKE_402_MODELS: 'fake-opus' });
+  const cfg = cfgWith({ provider: 'anthropic', model: 'fake-opus', fallback: [{ provider: 'openai', model: 'fake-gpt' }, { provider: 'xai', model: 'fake-grok' }] });
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const result = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  assert.deepEqual(
+    [result.status, result.fallback_step, result.attempts.map((a) => `${a.provider}:${a.status}`), readRecords(records).map((r) => r.name)],
+    ['ok', 2, ['anthropic:unavailable', 'xai:ok'], ['claude', 'grok']],
+  );
+  const lines = stderr.text().split('\n').filter(Boolean);
+  assert.equal(lines.filter((l) => l === `fallback skipped: 1 openai step(s) — ${CODEX_REFUSAL}`).length, 1);
+  assert.equal(lines.length, 3);
+});
+
+test('B32 opt-in: review.allow_open_book_codex lets an openai reviewer run with -s read-only, and an openai fallback is NOT skipped', async () => {
+  const { deps, records, stderr } = fakeDeps({ FAKE_402_MODELS: 'fake-opus' });
+  const cfg = { ...cfgWith({ provider: 'anthropic', model: 'fake-opus', fallback: [{ provider: 'openai', model: 'fake-gpt' }] }), review: { allow_open_book_codex: true } };
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  const result = await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA }, deps);
+  const recs = readRecords(records);
+  assert.deepEqual([result.status, result.fallback_step, recs.map((r) => r.name)], ['ok', 1, ['claude', 'codex']]);
+  const codex = recs[1].argv;
+  assert.equal(codex[codex.indexOf('-s') + 1], 'read-only');
+  assert.equal(stderr.text().includes('fallback skipped'), false);
+  const direct = await spawnSession({ cfg: { ...cfgWith({ provider: 'openai', model: 'fake-gpt' }), review: { allow_open_book_codex: true } }, level: 'L3', role: 'judge', promptPath: packet }, fakeDeps().deps);
+  assert.equal(direct.status, 'ok');
+});
+
+test('B32 fix 1: with the opt-in on, a Codex coder and a Codex facts argv are token-for-token the same as with it off (only -C/-o session paths differ)', async () => {
+  /** @param {string[]} argv */
+  const norm = (argv) => argv.map((t, i) => (argv[i - 1] === '-o' || argv[i - 1] === '-C' ? '<path>' : t));
+  const brief = writeIn(freshDir('brief'), 'brief.md', 'code it');
+  const cwd = freshDir('coder-cwd');
+  /** @type {Record<string, string[][]>} */
+  const seen = { coder: [], facts: [] };
+  for (const open of [false, true]) {
+    const cfg = { ...cfgWith({ provider: 'openai', model: 'fake-gpt' }), review: { allow_open_book_codex: open } };
+    for (const role of /** @type {const} */ (['coder', 'facts'])) {
+      const { deps, records } = fakeDeps();
+      const result = await spawnSession({ cfg, level: 'L1', role, promptPath: brief, ...(role === 'coder' ? { cwd } : {}) }, deps);
+      assert.equal(result.status, 'ok', `${role} open=${open}`);
+      const recs = readRecords(records);
+      assert.equal(recs.length, 1);
+      seen[role].push(norm(recs[0].argv.slice(1)));
+    }
+  }
+  assert.deepEqual(seen.coder[1], seen.coder[0]);
+  assert.deepEqual(seen.facts[1], seen.facts[0]);
+  assert.equal(seen.facts[0].includes('read-only'), true);
+  assert.equal(seen.coder[0].includes('workspace-write'), true);
+});
+
+test('B32 fix 1: validate, resolve and the spawner agree on openai fallbacks — validate names fallback[1] and [2], the spawner skips exactly 2 steps', async () => {
+  const { validateConfig } = await import('../../src/config/validate.mjs');
+  const { resolveLevel } = await import('../../src/config/known-ids.mjs');
+  const level = { provider: 'anthropic', model: 'fake-opus', fallback: [{ provider: 'xai', model: 'fake-grok' }, { provider: 'openai', model: 'fake-gpt' }, { provider: 'openai', model: 'fake-gpt-2' }] };
+  const cfg = cfgWith(level);
+  const keys = validateConfig(cfg).warnings.filter((w) => w.rule === 'closed-book-on-openai').map((w) => w.message.split(' ')[0]);
+  const fromResolve = resolveLevel(cfg, 'L2').fallback.flatMap((f, i) => (f.provider === 'openai' ? [`levels.L2.fallback[${i}]`] : []));
+  assert.deepEqual(keys.filter((k) => k.startsWith('levels.L2')), ['levels.L2.fallback[1]', 'levels.L2.fallback[2]']);
+  assert.deepEqual(fromResolve, ['levels.L2.fallback[1]', 'levels.L2.fallback[2]']);
+  const { deps, stderr } = fakeDeps();
+  const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
+  await spawnSession({ cfg, level: 'L2', role: 'reviewer', promptPath: packet }, deps);
+  assert.equal(stderr.text().split('\n').filter((l) => l.startsWith('fallback skipped: 2 openai step(s) — ')).length, 1);
 });
 
 test('a failed run whose stdout mentions 402 in normal content is failed, not unavailable (1 attempt)', async () => {

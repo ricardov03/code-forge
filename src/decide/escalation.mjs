@@ -9,6 +9,11 @@
  *      (`reviewRoundStalled` below) ⇒ +1 level IMMEDIATELY (`trigger: 'review_stall'`), checked
  *      BEFORE rule 2's own round-exhaustion counter — a block need not exhaust
  *      `review_rounds_per_level` to escalate on a stalled round.
+ *   2c. Heavy rounds (B34, issue #2) — `escalation.after_rounds_with_warnings` (1) rounds at the
+ *      current level whose open `fix_now` set held ≥ `escalation.warning_threshold` (2) warnings
+ *      or any `critical` ⇒ +1 level (`trigger: 'review_warnings'`), checked after 2b and before 2.
+ *      Below the running ceiling only: at L2 it does not fire (the L3 rung keeps its own
+ *      triggers), so it never spends the rung on round 1.
  *   2. Review rounds — `review_rounds_per_level` (2) exhausted with an open `fix_now` finding
  *      ⇒ +1 level (`trigger: 'review_rounds'`).
  *   3. Security floor (DISPATCH time only) — `security_sensitive == true` ⇒ first-attempt level
@@ -84,15 +89,95 @@ export function securityFloorLevel(lane) {
 }
 
 /**
- * Rule 3, at dispatch time only — call this once per block, before the first attempt.
- * @param {{lane: string, securitySensitive: boolean}} ctx
- * @returns {{level: string, trigger: 'security'|null}}
+ * Block kinds (B34, issue #2). A `docs` or `contract` block is coded at `levels.coder_floor_docs`
+ * (default L1) or above — never by L0 — and its review never runs the multimodel consensus unless
+ * `review.multimodel_for_docs` is true.
  */
-export function dispatchLevel({ lane, securitySensitive }) {
-  if (securitySensitive) {
-    return { level: securityFloorLevel(lane), trigger: 'security' };
-  }
-  return { level: lane, trigger: null };
+export const BLOCK_KINDS = Object.freeze(['code', 'docs', 'contract']);
+
+/** Owned paths with one of these endings are docs (`.txt` is not: `requirements.txt`, `CMakeLists.txt`, `robots.txt` are code or config). */
+export const DOCS_EXTENSIONS = Object.freeze(['.md', '.mdx', '.markdown', '.rst', '.adoc']);
+
+/** Owned paths with one of these endings are contracts (schemas, IDLs, API descriptions). */
+export const CONTRACT_SUFFIXES = Object.freeze(['.schema.json', '.schema.yaml', '.schema.yml', '.proto', '.graphql', '.gql', '.avsc', '.openapi.json', '.openapi.yaml', '.openapi.yml']);
+
+/** A `.json`/`.yaml`/`.yml` path with one of these directory names is a contract too. */
+const CONTRACT_DIRS = Object.freeze(['schema', 'schemas', 'contract', 'contracts']);
+
+/**
+ * The kind of ONE owned path (a glob is judged by its literal ending: `docs/**` is `code`, a
+ * block that owns it declares its kind).
+ * @param {string} file
+ * @returns {'code'|'docs'|'contract'}
+ */
+export function fileKind(file) {
+  const lower = String(file).toLowerCase();
+  if (CONTRACT_SUFFIXES.some((s) => lower.endsWith(s))) return 'contract';
+  if (/\.(json|ya?ml)$/.test(lower) && lower.split('/').slice(0, -1).some((d) => CONTRACT_DIRS.includes(d))) return 'contract';
+  if (DOCS_EXTENSIONS.some((e) => lower.endsWith(e))) return 'docs';
+  return 'code';
+}
+
+/**
+ * A block's kind: the declared `kind` when it is one of `BLOCK_KINDS` (a declaration wins, so a
+ * block can also declare `code`); else `docs` when every owned path is docs, `contract` when every
+ * owned path is docs or contract and at least one is a contract, else `code` (no owned path ⇒ `code`).
+ * @param {{owned?: ReadonlyArray<string>, declared?: unknown}} opts
+ * @returns {'code'|'docs'|'contract'}
+ */
+export function blockKind({ owned = [], declared } = {}) {
+  if (typeof declared === 'string' && BLOCK_KINDS.includes(declared)) return /** @type {'code'|'docs'|'contract'} */ (declared);
+  if (owned.length === 0) return 'code';
+  const kinds = owned.map(fileKind);
+  if (kinds.every((k) => k === 'docs')) return 'docs';
+  if (kinds.every((k) => k !== 'code')) return 'contract';
+  return 'code';
+}
+
+/** @param {unknown} kind @returns {boolean} true for a `docs` or `contract` block (both get the coder floor and no multimodel review by default). */
+export function isDocsKind(kind) {
+  return kind === 'docs' || kind === 'contract';
+}
+
+/**
+ * The lowest level a block of `kind` may be coded at: `levels.coder_floor_docs` (default L1) for
+ * a docs/contract block, else L0.
+ * @param {unknown} kind @param {Record<string, any> | undefined} [cfg]
+ * @returns {string}
+ */
+export function coderFloor(kind, cfg) {
+  if (!isDocsKind(kind)) return 'L0';
+  const floor = cfg?.levels?.coder_floor_docs;
+  return typeof floor === 'string' && ['L0', 'L1', 'L2'].includes(floor) ? floor : 'L1';
+}
+
+/**
+ * Rule 3 (and the B34 docs floor), at dispatch time only — call this once per block, before the
+ * first attempt. Both floors apply: the level is `max(security floor, docs floor)` (the lane when
+ * neither raises it). The trigger names the floor that set the level — `security` when the
+ * security floor reaches it, else `docs_floor`.
+ * @param {{lane: string, securitySensitive?: boolean, kind?: unknown, cfg?: Record<string, any>}} ctx
+ * @returns {{level: string, trigger: 'security'|'docs_floor'|null}}
+ */
+export function dispatchLevel({ lane, securitySensitive = false, kind = 'code', cfg }) {
+  const security = securitySensitive ? securityFloorLevel(lane) : lane;
+  const docs = coderFloor(kind, cfg);
+  if (levelIndex(docs) > levelIndex(security)) return { level: docs, trigger: 'docs_floor' };
+  return { level: security, trigger: securitySensitive ? 'security' : null };
+}
+
+/**
+ * B34: a review round is "heavy" when its open `fix_now` set holds at least `threshold` warnings
+ * or any `critical` finding. A threshold that is not an integer ≥ 1 is the default 2; findings
+ * that are not an array are not heavy.
+ * @param {unknown} findings @param {unknown} [threshold] - `escalation.warning_threshold`, default 2.
+ * @returns {boolean}
+ */
+export function heavyRound(findings, threshold = 2) {
+  if (!Array.isArray(findings)) return false;
+  const min = Number.isInteger(threshold) && /** @type {number} */ (threshold) >= 1 ? /** @type {number} */ (threshold) : 2;
+  if (findings.some((f) => f?.severity === 'critical')) return true;
+  return findings.filter((f) => f?.severity === 'warning').length >= min;
 }
 
 /**
@@ -136,7 +221,7 @@ export function runningCeiling(stopAt = 'L3') {
 /**
  * Rules 1, 2b and 2 share this: below the running ceiling ⇒ +1 level (never to L3); at the
  * running ceiling ⇒ rule 5, the block's one L3 rung (R1), then `stop`.
- * @param {'retries'|'review_rounds'|'review_stall'} trigger
+ * @param {'retries'|'review_rounds'|'review_stall'|'review_warnings'} trigger
  * @param {string} currentLevel
  * @param {string} stopAt
  * @param {'patch'|'code'} l3Mode
@@ -192,9 +277,13 @@ function finalizeEscalate(trigger, currentLevel, stopAt, l3Mode, l3RungAlreadyUs
  *   level escalation.
  * @property {number} [maxRoundsPerFile] - `review.max_rounds_per_file`, default 4 (schema
  *   minimum 2, maximum 6; B1.1).
+ * @property {number} [warningRoundsAtLevel] - rule 2c (B34): heavy rounds (`heavyRound`) at the
+ *   current level, this one included.
+ * @property {number} [afterRoundsWithWarnings] - `escalation.after_rounds_with_warnings`, default
+ *   1; 0 turns rule 2c off.
  *
  * @typedef {object} EscalationResult
- * @property {'retries'|'review_stall'|'review_rounds'|'s2_ruling'|'review_cap'|null} trigger
+ * @property {'retries'|'review_stall'|'review_warnings'|'review_rounds'|'s2_ruling'|'review_cap'|null} trigger
  * @property {'escalate'|'s2_check'|'stop'|'l3_rung'|'none'} action
  * @property {string} [level]
  * @property {string} [mode]
@@ -202,7 +291,7 @@ function finalizeEscalate(trigger, currentLevel, stopAt, l3Mode, l3RungAlreadyUs
  */
 
 /**
- * Rules 1, 2b, 2, 4 and 6 (rule 3 is `dispatchLevel`; rule 5 is the ceiling guard inside
+ * Rules 1, 2b, 2c, 2, 4 and 6 (rule 3 is `dispatchLevel`; rule 5 is the ceiling guard inside
  * `finalizeEscalate`), evaluated in the documented order — the first rule that fires wins.
  * @param {EscalationCtx} ctx
  * @returns {EscalationResult}
@@ -223,6 +312,8 @@ export function escalationAfterAttempt(ctx) {
     l3RungAlreadyUsed = false,
     roundsAtFile = 0,
     maxRoundsPerFile = 4,
+    warningRoundsAtLevel = 0,
+    afterRoundsWithWarnings = 1,
   } = ctx;
 
   if (typeof currentLevel !== 'string') {
@@ -236,6 +327,16 @@ export function escalationAfterAttempt(ctx) {
   // Rule 2b: review stall — fires immediately, ahead of rule 2's own round-exhaustion counter.
   if (reviewStall && openFixNowFinding) {
     return finalizeEscalate('review_stall', currentLevel, stopAt, l3Mode, l3RungAlreadyUsed);
+  }
+  // Rule 2c (B34): heavy review rounds — below the running ceiling only (a cheap coder climbs at
+  // once; at L2 the L3 rung keeps its own triggers, rules 2b/2/6).
+  if (
+    afterRoundsWithWarnings > 0 &&
+    warningRoundsAtLevel >= afterRoundsWithWarnings &&
+    openFixNowFinding &&
+    levelIndex(currentLevel) < levelIndex(runningCeiling(stopAt))
+  ) {
+    return finalizeEscalate('review_warnings', currentLevel, stopAt, l3Mode, l3RungAlreadyUsed);
   }
   // Rule 2: review rounds.
   if (reviewRoundsAtLevel >= reviewRoundsPerLevel && openFixNowFinding) {

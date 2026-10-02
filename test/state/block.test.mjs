@@ -38,7 +38,7 @@ test('`block open` records base = HEAD, level, attempt, acceptance, forecast, an
     await start(ws, 'r-rec', writeRow);
     const { block } = await openBlock({ runId: 'r-rec', id: 'B8', level: 'L2', owned: ['a.txt', 'b.txt'], acceptance: ACCEPTANCE, lines: 640, writeRow });
     assert.deepEqual({ ...block, opened_at: 'x' }, {
-      block: 'B8', base_sha: headSha, owned_files: ['a.txt', 'b.txt'], level: 'L2', attempt: 1, opened_at: 'x', acceptance: ACCEPTANCE, lines_forecast: 640, status: 'open',
+      block: 'B8', base_sha: headSha, owned_files: ['a.txt', 'b.txt'], level: 'L2', kind: 'code', attempt: 1, opened_at: 'x', acceptance: ACCEPTANCE, lines_forecast: 640, status: 'open',
     });
     const dispatch = rows.filter((r) => r.event === 'dispatch');
     assert.equal(dispatch.length, 1);
@@ -239,5 +239,28 @@ test('CLI `block open` prints the brief pointer and refuses an overlapping owned
     assert.deepEqual((await readAllRows('two-blocks')).map((r) => r.event), ['dispatch', 'gate.transcript_missing', 'review.approved', 'gate.transcript_missing', 'block.close']);
     // B19: the live close row says the block completed (the report's cost_per_block reads it)
     assert.deepEqual((await readAllRows('two-blocks')).filter((r) => r.event === 'block.close').map((r) => [r.block, r.status]), [['B8', 'complete']]);
+  });
+});
+
+test('B34 docs floor: a docs block asked at L0 opens at L1 (dispatch row says so); a code block keeps L0; --kind contract raises a code path; a bad kind is refused', async () => {
+  await withFixture(async ({ ws }) => {
+    const { rows, writeRow } = rowSink();
+    await start(ws, 'r-kind', writeRow);
+    const { block: docs } = await openBlock({ runId: 'r-kind', id: 'D', level: 'L0', owned: ['README.md', 'docs/guide.md'], acceptance: ACCEPTANCE, writeRow });
+    assert.deepEqual([docs.level, docs.kind], ['L1', 'docs']);
+    const { block: code } = await openBlock({ runId: 'r-kind', id: 'C', level: 'L0', owned: ['src/x.mjs'], acceptance: ACCEPTANCE, writeRow });
+    assert.deepEqual([code.level, code.kind], ['L0', 'code']);
+    const dispatch = rows.filter((r) => r.event === 'dispatch');
+    assert.deepEqual(dispatch.map((r) => [r.block, r.level, r.kind, r.requested_level ?? null, r.trigger ?? null]), [['D', 'L1', 'docs', 'L0', 'docs_floor'], ['C', 'L0', 'code', null, null]]);
+    await assert.rejects(() => openBlock({ runId: 'r-kind', id: 'K', level: 'L1', owned: ['k.txt'], acceptance: ACCEPTANCE, kind: 'essay', writeRow }), { code: 'bad-kind' });
+
+    await writeFile(path.join(ws, 'acc.yml'), '- clause: c\n  tests: [t]\n');
+    const stdout = captureStream();
+    const stderr = captureStream();
+    const args = ['open', 'S', '--run', 'r-kind', '--level', 'L0', '--owned', 'src/schema.mjs', '--kind', 'contract', '--acceptance', path.join(ws, 'acc.yml')];
+    assert.equal(await runBlock(args, { stdout, stderr }), 0, stderr.text);
+    assert.match(stdout.text.split('\n')[0], /^block S open · L1 \(contract floor, asked L0\) · contract · attempt 1 · base [0-9a-f]{12}$/);
+    const entry = (await readRun('r-kind')).blocks.S;
+    assert.deepEqual([entry.level, entry.kind], ['L1', 'contract']);
   });
 });

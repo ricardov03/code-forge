@@ -10,8 +10,12 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import {
+  blockKind,
+  coderFloor,
   dispatchLevel,
+  isDocsKind,
   escalationAfterAttempt,
+  heavyRound,
   LEVEL_ORDER,
   levelIndex,
   mustRouteNextThroughEscalation,
@@ -330,4 +334,82 @@ test('review_cap round trip: first breach patches once, a second breach on the s
 
 test('escalationAfterAttempt requires currentLevel', () => {
   assert.throws(() => escalationAfterAttempt({}), TypeError);
+});
+
+// ── B34 (issue #2): block kind, the docs coder floor, rule 2c (heavy rounds) ───────────────────
+
+test('blockKind: all-docs ⇒ docs, docs + schema ⇒ contract, any code path ⇒ code, a declared kind wins', () => {
+  assert.equal(blockKind({ owned: ['README.md', 'docs/guide.mdx', 'skill/references/code.md'] }), 'docs');
+  assert.equal(blockKind({ owned: ['docs/api.md', 'schema/code-forge.schema.json', 'api/user.proto'] }), 'contract');
+  assert.equal(blockKind({ owned: ['contracts/order.yaml'] }), 'contract');
+  assert.equal(blockKind({ owned: ['docs/api.md', 'src/api.mjs'] }), 'code');
+  assert.equal(blockKind({ owned: ['config/app.json'] }), 'code'); // a JSON outside a schema/contract dir is code
+  assert.equal(blockKind({ owned: ['docs/**'] }), 'code'); // a glob is judged by its literal ending
+  assert.equal(blockKind({ owned: ['docs/**'], declared: 'docs' }), 'docs');
+  assert.equal(blockKind({ owned: ['README.md'], declared: 'code' }), 'code');
+  assert.equal(blockKind({ owned: ['README.md'], declared: 'essay' }), 'docs'); // an unknown declaration is ignored
+  assert.equal(blockKind({ owned: [] }), 'code');
+});
+
+test('docs floor: a docs/contract block is never dispatched below L1; a code block keeps L0; the floor is configurable', () => {
+  assert.deepEqual(dispatchLevel({ lane: 'L0', kind: 'docs' }), { level: 'L1', trigger: 'docs_floor' });
+  assert.deepEqual(dispatchLevel({ lane: 'L0', kind: 'contract' }), { level: 'L1', trigger: 'docs_floor' });
+  assert.deepEqual(dispatchLevel({ lane: 'L1', kind: 'docs' }), { level: 'L1', trigger: null });
+  assert.deepEqual(dispatchLevel({ lane: 'L0', kind: 'code' }), { level: 'L0', trigger: null });
+  assert.deepEqual(dispatchLevel({ lane: 'L1', kind: 'docs', cfg: { levels: { coder_floor_docs: 'L2' } } }), { level: 'L2', trigger: 'docs_floor' });
+  assert.deepEqual(dispatchLevel({ lane: 'L0', kind: 'docs', securitySensitive: true }), { level: 'L2', trigger: 'security' });
+  assert.equal(coderFloor('docs', { levels: { coder_floor_docs: 'L3' } }), 'L1'); // not a running level ⇒ the default
+});
+
+test('heavyRound: 2 warnings or any critical is heavy; 1 warning, or nits only, is not', () => {
+  const w = { severity: 'warning' };
+  assert.equal(heavyRound([w, w]), true);
+  assert.equal(heavyRound([w]), false);
+  assert.equal(heavyRound([{ severity: 'critical' }]), true);
+  assert.equal(heavyRound([{ severity: 'nit' }, { severity: 'nit' }, w]), false);
+  assert.equal(heavyRound([w, w], 3), false);
+});
+
+test('rule 2c FIRES: one heavy round at L0/L1 ⇒ +1 level at once (review_warnings); it does NOT fire at L2, when off, or before the count', () => {
+  const at = (/** @type {string} */ currentLevel, /** @type {Record<string, any>} */ extra = {}) =>
+    escalationAfterAttempt({ currentLevel, reviewRoundsAtLevel: 1, reviewRoundsPerLevel: 2, openFixNowFinding: true, warningRoundsAtLevel: 1, ...extra });
+  assert.deepEqual(at('L0'), { trigger: 'review_warnings', action: 'escalate', level: 'L1' });
+  assert.deepEqual(at('L1'), { trigger: 'review_warnings', action: 'escalate', level: 'L2' });
+  assert.deepEqual(at('L2'), { trigger: null, action: 'none' }); // the L3 rung keeps its own triggers
+  assert.deepEqual(at('L1', { afterRoundsWithWarnings: 0 }), { trigger: null, action: 'none' });
+  assert.deepEqual(at('L1', { afterRoundsWithWarnings: 2 }), { trigger: null, action: 'none' });
+  assert.deepEqual(at('L1', { warningRoundsAtLevel: 0 }), { trigger: null, action: 'none' });
+});
+
+// ── B34 fix round 1 ─────────────────────────────────────────────────────────────────────────────
+
+test('.txt is not docs: requirements.txt, CMakeLists.txt, robots.txt ⇒ code; .rst/.adoc stay docs', () => {
+  assert.equal(blockKind({ owned: ['requirements.txt'] }), 'code');
+  assert.equal(blockKind({ owned: ['CMakeLists.txt', 'robots.txt'] }), 'code');
+  assert.equal(blockKind({ owned: ['README.md', 'notes.txt'] }), 'code');
+  assert.equal(blockKind({ owned: ['guide.rst', 'manual.adoc'] }), 'docs');
+});
+
+test('isDocsKind: docs and contract count, code and unknown do not; coderFloor: code L0, contract L1, docs L1', () => {
+  assert.deepEqual(['docs', 'contract', 'code', 'essay', undefined].map(isDocsKind), [true, true, false, false, false]);
+  assert.deepEqual([coderFloor('code'), coderFloor('contract'), coderFloor('docs')], ['L0', 'L1', 'L1']);
+  assert.equal(coderFloor('code', { levels: { coder_floor_docs: 'L2' } }), 'L0');
+});
+
+test('dispatchLevel applies BOTH floors: max(security, docs)', () => {
+  const l2 = { levels: { coder_floor_docs: 'L2' } };
+  assert.deepEqual(dispatchLevel({ lane: 'L0', kind: 'docs', securitySensitive: true, cfg: l2 }), { level: 'L2', trigger: 'security' });
+  assert.deepEqual(dispatchLevel({ lane: 'L0', kind: 'docs', securitySensitive: false, cfg: l2 }), { level: 'L2', trigger: 'docs_floor' });
+  assert.deepEqual(dispatchLevel({ lane: 'L1', kind: 'contract', securitySensitive: true }), { level: 'L2', trigger: 'security' });
+  assert.deepEqual(dispatchLevel({ lane: 'L0', kind: 'code', securitySensitive: false, cfg: l2 }), { level: 'L0', trigger: null });
+});
+
+test('heavyRound guards: a bad threshold is the default 2; non-array findings are not heavy; a critical is heavy even at threshold 5', () => {
+  const w = { severity: 'warning' };
+  for (const bad of [0, -1, 1.5, '3', null, Number.NaN]) assert.equal(heavyRound([w, w], bad), true, String(bad));
+  for (const bad of [0, 1.5, '1']) assert.equal(heavyRound([w], bad), false, String(bad));
+  assert.equal(heavyRound([w], 1), true);
+  for (const notArray of [undefined, null, 'warning', { severity: 'critical' }]) assert.equal(heavyRound(notArray), false);
+  assert.equal(heavyRound([{ severity: 'critical' }], 5), true);
+  assert.equal(heavyRound([w, w, w, w], 5), false);
 });

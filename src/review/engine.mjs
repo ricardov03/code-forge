@@ -5,7 +5,8 @@
  *  1. plans the sessions (`planSessions`):
  *       adaptive (default) — `risk < 1` ⇒ one L2 `quick`; `1 ≤ risk < 2` ⇒ one L2 `full`;
  *       `risk ≥ 2` ⇒ two blind L2 sessions (lens `A`, lens `B`) + one L3 `judge`;
- *       consensus (`review.multimodel: true`) — one L2 `full` per EFFECTIVE provider
+ *       consensus (`review.multimodel: true`, risk above `review.single_reviewer_max_risk` (1),
+ *       and not a docs/contract block unless `review.multimodel_for_docs`; B34) — one L2 `full` per EFFECTIVE provider
  *       (`resolve(L2)` and `review.second_levels.L2` / `review.second_provider`) + one L3 judge;
  *       the same effective provider twice is refused (`consensus-same-provider`);
  *  2. reads the diff once and assembles one packet per lens (`packet.mjs`);
@@ -28,6 +29,7 @@ import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { resolveLevel } from '../config/known-ids.mjs';
+import { blockKind, isDocsKind } from '../decide/escalation.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, readFileDiff } from './packet.mjs';
@@ -64,13 +66,31 @@ export function secondLevel(cfg) {
 }
 
 /**
- * @param {{risk: number, cfg: Record<string, any>}} opts
+ * `review.single_reviewer_max_risk` (B34, default 1): at or below it ONE reviewer runs, no judge.
+ * @param {Record<string, any> | undefined} cfg @returns {number}
+ */
+export function singleReviewerMaxRisk(cfg) {
+  const v = cfg?.review?.single_reviewer_max_risk;
+  // `validate` rejects anything outside 0–3 (schema); this guard only covers an unvalidated config
+  return typeof v === 'number' && Number.isFinite(v) && v >= 0 && v <= 3 ? v : 1;
+}
+
+/**
+ * The review topology — the ONE place it is decided (B34):
+ *  - consensus runs only when `review.multimodel` is true, the block is not a docs/contract block
+ *    (unless `review.multimodel_for_docs` is true), and `risk > review.single_reviewer_max_risk`;
+ *  - otherwise adaptive: `risk ≤ single_reviewer_max_risk` or `risk < 2` ⇒ one L2 session
+ *    (`quick` below risk 1, else `full`); else two blind lenses + an L3 judge.
+ * @param {{risk: number, cfg: Record<string, any>, kind?: unknown}} opts - `kind`: the block kind
+ *   (`blockKind`), default `code`.
  * @returns {SessionPlan}
  */
-export function planSessions({ risk, cfg }) {
+export function planSessions({ risk, cfg, kind = 'code' }) {
   if (typeof risk !== 'number' || !Number.isFinite(risk) || risk < 0 || risk > 3) throw new TypeError('planSessions: risk must be a number from 0 to 3');
   const judge = /** @type {SessionSpec} */ ({ lens: 'judge', role: 'judge', level: 'L3', slot: null });
-  if (cfg?.review?.multimodel === true) {
+  const single = risk <= singleReviewerMaxRisk(cfg);
+  const docsOff = isDocsKind(kind) && cfg?.review?.multimodel_for_docs !== true;
+  if (cfg?.review?.multimodel === true && !single && !docsOff) {
     const second = secondLevel(cfg);
     if (!second.ok) return { mode: 'consensus', depth: null, sessions: [], refused: second.reason };
     return {
@@ -84,7 +104,7 @@ export function planSessions({ risk, cfg }) {
     };
   }
   if (risk < 1) return { mode: 'adaptive', depth: 'quick', sessions: [{ lens: 'quick', role: 'reviewer', level: 'L2', slot: null }] };
-  if (risk < 2) return { mode: 'adaptive', depth: 'full', sessions: [{ lens: 'full', role: 'reviewer', level: 'L2', slot: null }] };
+  if (risk < 2 || single) return { mode: 'adaptive', depth: 'full', sessions: [{ lens: 'full', role: 'reviewer', level: 'L2', slot: null }] };
   return {
     mode: 'adaptive',
     depth: 'dual',
@@ -121,6 +141,7 @@ export function rulesRisk({ file, plusCount, cfg }) {
  * @property {string | null} [base] - the block's base SHA (null ⇒ HEAD).
  * @property {Record<string, any>} cfg
  * @property {number} [risk] - the S1 risk (0–3); absent ⇒ the rules risk.
+ * @property {string} [kind] - the block kind (`code`, `docs`, `contract`; B34); absent ⇒ `blockKind` of the reviewed file.
  * @property {string} [rulesDigest] @property {string} [factsExcerpt]
  * @property {string} workDir - where packet files are written (under the run's temp root).
  */
@@ -165,7 +186,9 @@ export async function reviewFile(input, deps) {
   const { repoRoot, cfg, workDir } = input;
   const diff = await readFileDiff({ repoRoot, file: input.file, base: input.base ?? null });
   const risk = input.risk ?? rulesRisk({ file: diff.file, plusCount: diff.plusCount, cfg });
-  const plan = planSessions({ risk, cfg });
+  // no recorded kind ⇒ the reviewed file's own kind (a lone `.md` is a docs review), never a blind `code`
+  const kind = typeof input.kind === 'string' ? input.kind : blockKind({ owned: [diff.file] });
+  const plan = planSessions({ risk, cfg, kind });
   const head = { engine: plan.mode, depth: plan.depth, risk, file: diff.file };
   if (plan.refused) return { status: 'refused', reason: plan.refused, approved: false, ...head, sessions: [] };
   if (diff.diffText.trim().length === 0) return { status: 'no_change', approved: false, ...head, sessions: [] };

@@ -22,7 +22,10 @@
  * and every attempt writes one ledger row (`event: session`) with `tokens_source` `reported` when
  * the CLI's JSON carried usage, else `estimated` (bytes / 4).
  *
- * A coder argv that `isForbidden` matches is refused before anything spawns (§8.4).
+ * A coder argv that `isForbidden` matches is refused before anything spawns (§8.4). A
+ * reviewer/judge/S2/author level on openai is refused too (`closed-book`, B32: Codex always has a
+ * shell); an openai fallback step of such a session is skipped with one stderr line. The opt-in
+ * `review.allow_open_book_codex: true` lifts both and builds Codex's read-only argv.
  *
  * `background: true` (coders, §5.2): the child is started detached with stdout/stderr going to
  * `<run-root>/sessions/<id>/session.log`, its pid written to `<run-root>/sessions/<id>/pid.json`
@@ -36,6 +39,7 @@ import { createHash, randomBytes } from 'node:crypto';
 import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
+import { CODEX_CLOSED_BOOK_REFUSAL, closedBookRefused, isNoToolRole, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { compileSchema } from '../config/schema-compile.mjs';
 import { buildArgv } from '../engines/builders/index.mjs';
@@ -43,7 +47,8 @@ import { removeCodexHome } from '../engines/codex-home.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { parseSentinel } from '../engines/sentinel.mjs';
 import { parseUsage } from '../engines/usage-parse.mjs';
-import { appendRow } from '../ledger/write.mjs';
+import { budgetUsdOf, checkBudget, priceSession, SPEND_UNREADABLE_MESSAGE } from '../ledger/spend.mjs';
+import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { exec } from '../util/exec.mjs';
 import { isForbidden, mergeForbidden } from '../util/forbidden.mjs';
 import { readStartTime, registerPid, UNKNOWN_START_TIME } from '../util/reaper.mjs';
@@ -59,7 +64,7 @@ export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 /** Unavailability reasons that move the ladder to the next step (§5.6). */
 export const UNAVAILABLE_REASONS = Object.freeze(['cli-missing', 'login-expired', 'http-402', 'rate-limited']);
 
-/** An error the spawner raises before anything runs (`code`: `usage`, `forbidden`). */
+/** An error the spawner raises before anything runs (`code`: `usage`, `forbidden`, `closed-book`). */
 export class SessionError extends Error {
   /** @param {string} code @param {string} message */
   constructor(code, message) {
@@ -436,6 +441,8 @@ function childEnv(/** @type {NodeJS.ProcessEnv} */ env) {
  * @property {Partial<Record<"claude"|"codex"|"grok", string>>} [bins] - replaces argv[0] (tests: the fakes).
  * @property {typeof exec} [exec]
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow]
+ * @property {() => Promise<Array<Record<string, any>>>} [readRows] - the ledger rows the
+ *   `budget.usd` check reads (default: `readAllRows(opts.slug)`).
  * @property {{write: (s: string) => unknown}} [stderr]
  * @property {NodeJS.ProcessEnv} [env]
  */
@@ -551,18 +558,27 @@ export async function spawnSession(opts, deps = {}) {
   const runRootDir = opts.runRoot ?? currentRunRoot();
   if (role === 'facts' && opts.cwd !== undefined) assertFactsCwd(opts.cwd, runRootDir);
   const writeRow = deps.writeRow ?? (opts.slug ? (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: /** @type {string} */ (opts.slug) }) : null);
-  const steps = ladderFor(resolveLevel(cfg, level), role);
+  const ladder = ladderFor(resolveLevel(cfg, level), role);
+  // B32: Codex has no no-tools mode, so it runs no reviewer/judge/S2/author session unless the
+  // config opts in (`review.allow_open_book_codex: true`). Without it, step 0 on openai refuses the
+  // session and an openai fallback step is dropped from the ladder.
+  const openBook = openBookCodexAllowed(cfg); // read ONCE: the refusal and every build use it
+  if (closedBookRefused(ladder[0].provider, role, openBook)) throw new SessionError('closed-book', CODEX_CLOSED_BOOK_REFUSAL);
+  const steps = ladder.filter((step) => !closedBookRefused(step.provider, role, openBook));
+  if (steps.length < ladder.length) writeSafe(stderr, `fallback skipped: ${ladder.length - steps.length} openai step(s) — ${CODEX_CLOSED_BOOK_REFUSAL}\n`);
   if (opts.background) steps.length = 1;
 
   const attempts = [];
   let rateLimitedOnce = false;
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
+    const refused = await budgetGate(opts, deps, writeRow, stderr);
+    if (refused) return { ...refused, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts };
     const sessionDir = path.join(runRootDir, 'sessions', `${role}-${Date.now()}-${randomBytes(4).toString('hex')}`);
     mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
     let keep = false;
     try {
-      const built = buildStep(opts, step, sessionDir);
+      const built = buildStep(opts, step, sessionDir, openBook);
       const cli = built.cli;
       built.argv[0] = deps.bins?.[cli] ?? built.argv[0];
       if (role === 'coder') {
@@ -577,7 +593,8 @@ export async function spawnSession(opts, deps = {}) {
         // B4.1: the builder's env (the Codex coder's CODEX_HOME) wins over the caller's; a
         // background session's home stays until the run root is swept.
         const bg = startBackground(built, sessionDir, runRootDir, { ...childEnv(deps.env ?? process.env), ...(built.env ?? {}) });
-        if (writeRow) await writeRow({ event: 'session.background', ...base, pid: bg.pid, status: 'started' });
+        // a detached child's tokens are never read back: its price is unknown (use `ledger add coder`)
+        if (writeRow) await writeRow({ event: 'session.background', ...base, pid: bg.pid, status: 'started', usd: null, usd_unknown: true });
         return { status: 'started', ...bg, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts };
       }
 
@@ -590,6 +607,7 @@ export async function spawnSession(opts, deps = {}) {
         tokens_in: attempt.usage.tokens_in,
         tokens_out: attempt.usage.tokens_out,
         tokens_source: attempt.usage.tokens_source,
+        ...sessionUsd(step.provider, level, attempt.usage),
         duration_ms: attempt.duration_ms,
         ...(level === 'L3' && step.fallback_step > 0 ? { l3_fallback: true } : {}),
       };
@@ -611,14 +629,69 @@ export async function spawnSession(opts, deps = {}) {
 }
 
 /**
+ * B33: a session row's dollars from its tokens and the static price table — `{usd, cost_source:
+ * 'estimated'}`, or `{usd: null, usd_unknown: true}` when the provider/level has no price.
+ * @param {string} provider @param {string} level @param {{tokens_in: number, tokens_out: number}} usage
+ */
+function sessionUsd(provider, level, usage) {
+  const priced = priceSession({ provider, level, tokens_in: usage.tokens_in, tokens_out: usage.tokens_out });
+  return priced.usd_unknown ? { usd: null, usd_unknown: true } : { usd: priced.usd, cost_source: 'estimated' };
+}
+
+/**
+ * B33, R6 — the single budget choke point: before every spawn attempt of every role, a run with
+ * `budget.usd` set reads its spend from the ledger (`deps.readRows`, else the `slug` ledger).
+ * ≥ 80 % prints and records one warning per run; ≥ 100 % refuses with a plain message and a
+ * `budget.refused` row, and nothing is spawned. No `budget.usd` or no `run` ⇒ no check. Fail
+ * closed: with a budget and a run but no way to read the spend (no `readRows`, no `slug`, or the
+ * read throws) the session is refused too. It sits at the top of the ladder loop, so every attempt
+ * — each fallback step, the rate-limit retry of a step, and every `spawnSession` call a caller
+ * makes again (B30's timeout retry) — passes it.
+ * @param {SessionOpts} opts @param {SessionDeps} deps
+ * @param {((row: Record<string, any>) => Promise<unknown>) | null} writeRow
+ * @param {{write: (s: string) => unknown}} stderr
+ * @returns {Promise<SessionResult | null>} the refusal result, or null to go on.
+ */
+async function budgetGate(opts, deps, writeRow, stderr) {
+  const budget = budgetUsdOf(opts.cfg);
+  if (budget === null || typeof opts.run !== 'string' || opts.run.length === 0) return null;
+  /** @type {Array<Record<string, any>> | null} */
+  let rows = null;
+  try {
+    const slug = opts.slug;
+    const read = deps.readRows ?? (slug ? () => readAllRows(slug) : null);
+    const got = read ? await read() : null;
+    rows = Array.isArray(got) ? got : null;
+  } catch {
+    rows = null;
+  }
+  if (rows === null) {
+    // fail closed: a budget we cannot check is never treated as "not reached"
+    writeSafe(stderr, `code-forge: ${SPEND_UNREADABLE_MESSAGE}\n`);
+    if (writeRow) {
+      try {
+        await writeRow({ event: 'budget.refused', run: opts.run, block: opts.block ?? null, role: opts.role, budget_usd: budget, spent_usd: null, reason: 'spend-unreadable' });
+      } catch {
+        // the refusal stands without its row
+      }
+    }
+    return { status: 'unavailable', reason: 'budget', message: SPEND_UNREADABLE_MESSAGE, answer: null, spent_usd: null, budget_usd: budget };
+  }
+  const verdict = await checkBudget({ budget, run: opts.run, rows, block: opts.block ?? null, role: opts.role, writeRow, stderr });
+  if (!verdict.refuse) return null;
+  return { status: 'unavailable', reason: 'budget', message: verdict.message, answer: null, spent_usd: verdict.spent, budget_usd: budget };
+}
+
+/**
  * Build one step's argv; closed-book roles get a fresh empty cwd inside the session dir (the facts
  * role: the caller's snapshot when `opts.cwd` names one), and Codex
  * its `-o` file and schema file next to it (never inside the cwd).
  * @param {SessionOpts} opts
  * @param {{provider: string, model: string, effort?: string, flagFallback?: {provider: string, model: string}}} step
  * @param {string} sessionDir
+ * @param {boolean} openBook - B32: `review.allow_open_book_codex`, read once by `spawnSession`.
  */
-function buildStep(opts, step, sessionDir) {
+function buildStep(opts, step, sessionDir, openBook) {
   const closedBook = opts.role !== 'coder';
   // B9b.1: the facts delegate may run in the caller's read-only project snapshot; nobody else may
   const snapshot = opts.role === 'facts' && opts.cwd !== undefined ? realpathSync(path.resolve(opts.cwd)) : null; // validated by assertFactsCwd
@@ -633,6 +706,8 @@ function buildStep(opts, step, sessionDir) {
   if (cli === 'claude' && opts.maxBudgetUsd !== undefined) params.maxBudgetUsd = opts.maxBudgetUsd;
   if (closedBook && opts.systemPromptText !== undefined && cli !== 'codex') params.systemPromptText = opts.systemPromptText;
   if (cli === 'codex') params.outPath = path.join(sessionDir, 'out.json');
+  // B32 opt-in: only a no-tools role needs it; coder and facts build exactly as without it
+  if (cli === 'codex' && openBook && isNoToolRole(opts.role)) params.allowOpenBook = true;
   /** @type {Record<string, any> | null} */
   let compiled = null;
   const strict = variantFor(step.provider) === 'strict';

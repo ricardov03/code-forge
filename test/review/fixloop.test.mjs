@@ -8,6 +8,9 @@ const { buildRecheckPacket, converge, fixHunkDiff, newFileState, runRound } = aw
 
 const FILE = 'src/a.mjs';
 
+/** Rule 2c (B34, heavy rounds) off: these tests pin the rule-2 ladder on an L1 block with critical findings. */
+const ladderOnly = () => ({ ...cfgFor(), escalation: { after_rounds_with_warnings: 0 } });
+
 /** @param {string} id @param {number} line @param {'critical' | 'warning' | 'nit'} [severity] */
 const finding = (id, line, severity = 'critical') => ({ id, file: FILE, line_start: line, line_end: line, severity, category: 'correctness', claim: `claim ${id}`, evidence: 'e', fix: 'f' });
 
@@ -136,7 +139,7 @@ async function threeRounds(closeAtRound3) {
   const { edit, base } = fixture();
   const { spawn } = stubSpawn();
   let closing = new Set(['F1']);
-  const deps = { ...base, spawn, review: judgeReview([finding('F1', 10), finding('F2', 20), finding('F3', 30), finding('F4', 40)]), jev: jevResolving(() => closing) };
+  const deps = { ...base, cfg: ladderOnly(), spawn, review: judgeReview([finding('F1', 10), finding('F2', 20), finding('F3', 30), finding('F4', 40)]), jev: jevResolving(() => closing) };
   const state = await runRound(newFileState({ file: FILE, level: 'L1' }), deps);
   edit(100, 'r2');
   await runRound(state, deps);
@@ -161,6 +164,7 @@ test('3 → 2 → 1 → 0 converges with exactly 4 review.round rows and one rev
   const order = ['F1', 'F2', 'F3'];
   const deps = {
     ...base,
+    cfg: ladderOnly(),
     spawn,
     review: judgeReview([finding('F1', 10), finding('F2', 20), finding('F3', 30)]),
     jev: jevResolving(() => new Set(order.slice(0, round - 1))),
@@ -186,6 +190,7 @@ test('round 3 open ⇒ no patch session yet; round 4 open ⇒ exactly one L3 pat
   const patches = [];
   const deps = {
     ...base,
+    cfg: ladderOnly(),
     spawn,
     review: judgeReview([finding('F1', 10), finding('F2', 20), finding('F3', 30)]),
     jev: jevResolving(() => closing),
@@ -308,6 +313,7 @@ test('rung at round 4 (rule 6): the patch shrinks 2 → 1 but the cap is reached
   const patches = [];
   const deps = {
     ...base,
+    cfg: ladderOnly(),
     spawn,
     review: judgeReview(['F1', 'F2', 'F3', 'F4', 'F5'].map((id, i) => finding(id, 10 * (i + 1)))),
     jev: jevResolving(() => closing),
@@ -422,4 +428,110 @@ test('a failing ledger write of review.late_finding never lets the round close a
   await converge(state, deps);
   assert.equal(state.status, 'complete');
   assert.deepEqual(rows.filter((r) => ['review.round', 'review.approved', 'review.late_finding'].includes(r.event)).map((r) => r.event), ['review.round', 'review.late_finding', 'review.round', 'review.approved']);
+});
+
+// ── B34 rule 2c: a cheap coder whose round fails with several warnings climbs at once ─────────
+
+/**
+ * Round 1 on a block at `level` whose review leaves `findings` open (nothing closes).
+ * @param {string} level @param {Array<Record<string, any>>} findings @param {Record<string, any>} [cfg]
+ */
+async function roundOne(level, findings, cfg = cfgFor()) {
+  const { rows, base } = fixture();
+  const { spawn } = stubSpawn();
+  const deps = { ...base, cfg, spawn, review: judgeReview(findings), jev: jevResolving(() => new Set()) };
+  const state = await runRound(newFileState({ file: FILE, level }), deps);
+  return { state, rows };
+}
+
+test('rule 2c: L1, round 1 leaves 2 warnings open ⇒ the next fix is at L2 (review_warnings), counters reset', async () => {
+  const { state, rows } = await roundOne('L1', [finding('W1', 10, 'warning'), finding('W2', 20, 'warning')]);
+  assert.deepEqual(state.next, { action: 'fix', level: 'L2', trigger: 'review_warnings' });
+  assert.deepEqual([state.level, state.round, state.rounds_at_level, state.warn_rounds_at_level], ['L2', 1, 0, 0]);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.level, r.open_after]), [[1, 'L1', 2]]);
+});
+
+test('rule 2c: L0, round 1 leaves 1 critical ⇒ L1; L1 with 1 warning ⇒ no climb (fix at L1, no trigger)', async () => {
+  const critical = await roundOne('L0', [finding('C1', 10, 'critical')]);
+  assert.deepEqual(critical.state.next, { action: 'fix', level: 'L1', trigger: 'review_warnings' });
+  const one = await roundOne('L1', [finding('W1', 10, 'warning')]);
+  assert.deepEqual(one.state.next, { action: 'fix', level: 'L1', trigger: null });
+  assert.deepEqual([one.state.level, one.state.warn_rounds_at_level], ['L1', 0]);
+});
+
+test('rule 2c: L2, round 1 with 2 warnings ⇒ fix at L2 — the L3 rung is not spent on round 1; threshold 3 keeps L1 at L1', async () => {
+  const l2 = await roundOne('L2', [finding('W1', 10, 'warning'), finding('W2', 20, 'warning')]);
+  assert.deepEqual(l2.state.next, { action: 'fix', level: 'L2', trigger: null });
+  assert.equal(l2.state.warn_rounds_at_level, 1);
+  const cfg = { ...cfgFor(), escalation: { warning_threshold: 3 } };
+  const l1 = await roundOne('L1', [finding('W1', 10, 'warning'), finding('W2', 20, 'warning')], cfg);
+  assert.deepEqual(l1.state.next, { action: 'fix', level: 'L1', trigger: null });
+});
+
+// ── B34 fix round 1: rule 2c counters, the cap, after_rounds_with_warnings 2 ─────────────────
+
+const warnings = (/** @type {string[]} */ ids) => ids.map((id, i) => finding(id, 10 * (i + 1), 'warning'));
+
+test('rule 2c: a state saved before B34 (no warn_rounds_at_level) counts from 0 and climbs on its first heavy round', async () => {
+  const { base } = fixture();
+  const { spawn } = stubSpawn();
+  const old = /** @type {Record<string, any>} */ (newFileState({ file: FILE, level: 'L1' }));
+  delete old.warn_rounds_at_level;
+  const deps = { ...base, spawn, review: judgeReview(warnings(['W1', 'W2'])), jev: jevResolving(() => new Set()) };
+  const state = await runRound(/** @type {any} */ (old), deps);
+  assert.deepEqual(state.next, { action: 'fix', level: 'L2', trigger: 'review_warnings' });
+  assert.equal(state.warn_rounds_at_level, 0);
+});
+
+test('rule 2c: after_rounds_with_warnings 2 ⇒ round 1 heavy stays at L1, round 2 (still heavy, shrinking 3 → 2) climbs to L2', async () => {
+  const { edit, base } = fixture();
+  const { spawn } = stubSpawn();
+  let closing = new Set();
+  const cfg = { ...cfgFor(), escalation: { after_rounds_with_warnings: 2, review_rounds_per_level: 5 } };
+  const deps = { ...base, cfg, spawn, review: judgeReview(warnings(['W1', 'W2', 'W3'])), jev: jevResolving(() => closing) };
+  const state = await runRound(newFileState({ file: FILE, level: 'L1' }), deps);
+  assert.deepEqual([state.next, state.warn_rounds_at_level], [{ action: 'fix', level: 'L1', trigger: null }, 1]);
+  closing = new Set(['W1']);
+  edit(100, 'r2');
+  await runRound(state, deps);
+  assert.deepEqual([state.open.length, state.next, state.level, state.warn_rounds_at_level], [2, { action: 'fix', level: 'L2', trigger: 'review_warnings' }, 'L2', 0]);
+});
+
+test('the per-file cap wins over rule 2c: a heavy round AT the cap ⇒ the L3 patch rung (review_cap), not review_warnings', async () => {
+  const { edit, base } = fixture();
+  const { spawn } = stubSpawn();
+  let closing = new Set();
+  const cfg = { ...cfgFor({ max_rounds_per_file: 2 }), escalation: { after_rounds_with_warnings: 2, review_rounds_per_level: 5 } };
+  const deps = { ...base, cfg, spawn, review: judgeReview(warnings(['W1', 'W2', 'W3'])), jev: jevResolving(() => closing) };
+  const state = await runRound(newFileState({ file: FILE, level: 'L1' }), deps);
+  closing = new Set(['W1']);
+  edit(100, 'r2');
+  await runRound(state, deps);
+  assert.deepEqual([state.round, state.open.length, state.level], [2, 2, 'L1']);
+  assert.deepEqual(state.next, { action: 'patch', level: 'L3', trigger: 'review_cap' });
+});
+
+test('rule 2c counter resets after the L3 patch: a patch_check round sets warn_rounds_at_level to 0 (no trigger at L2 either)', async () => {
+  const { edit, base } = fixture();
+  const { spawn } = stubSpawn();
+  const deps = { ...base, spawn, review: judgeReview(warnings(['W1', 'W2', 'W3'])), jev: jevResolving(() => new Set(['W1'])) };
+  const state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+  assert.deepEqual([state.next, state.warn_rounds_at_level], [{ action: 'fix', level: 'L2', trigger: null }, 1]);
+  state.l3_rung_used = true;
+  edit(150, 'patch');
+  await runRound(state, deps, { kind: 'patch_check' });
+  assert.deepEqual([state.warn_rounds_at_level, state.rounds_at_level, state.open.length, state.level], [0, 0, 2, 'L2']);
+});
+
+test('rule 2c counts only what stays open after triage: 2 warnings that S1 closes in the recheck do not make the round heavy', async () => {
+  const { edit, base } = fixture();
+  const { spawn } = stubSpawn();
+  let closing = new Set();
+  const cfg = { ...cfgFor(), escalation: { after_rounds_with_warnings: 2, review_rounds_per_level: 5 } };
+  const deps = { ...base, cfg, spawn, review: judgeReview(warnings(['W1', 'W2', 'W3'])), jev: jevResolving(() => closing) };
+  const state = await runRound(newFileState({ file: FILE, level: 'L1' }), deps);
+  closing = new Set(['W1', 'W2']);
+  edit(100, 'r2');
+  await runRound(state, deps);
+  assert.deepEqual([state.open.length, state.warn_rounds_at_level, state.next], [1, 1, { action: 'fix', level: 'L1', trigger: null }]);
 });

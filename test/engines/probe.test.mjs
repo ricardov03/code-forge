@@ -104,7 +104,8 @@ test('every argv token each builder actually emits that looks like a flag name i
   const unions = {};
   for (const provider of /** @type {const} */ (['claude', 'codex', 'grok'])) {
     const union = new Set();
-    for (const role of VALID_ROLES) {
+    // B32: Codex builds coder and facts only; the 4 no-tools roles throw the closed-book refusal.
+    for (const role of provider === 'codex' ? /** @type {const} */ (['coder', 'facts']) : VALID_ROLES) {
       const built = builders[provider]({ role, promptPath: '/p', cwd: '/c', ...optional[provider] });
       for (const token of built.argv.slice(1)) if (isFlag(token)) union.add(token);
     }

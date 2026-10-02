@@ -8,14 +8,15 @@
  * Row conventions read here: `dispatch` {block,level,lane,lines}; `block.close`
  * {block,status,lines_actual} — ANY `block.close` row marks the block completed (a stop is
  * `block.stop`; B19); `review.plan` {block,tier,depth_unconstrained,depth_chosen,
- * degrade_step}; `session` {block,role,provider,level,tokens_in,tokens_out,cost_usd?} — one row per
- * coder/reviewer/judge/s2/author/facts spend; its dollars are `cost_usd` when the row carries it,
- * else ESTIMATED from its tokens × `./prices.mjs` (B19: live session rows carry tokens only); `review.done` {block,file,context_mode,findings_by_severity,round}; `decision`
+ * degrade_step}; `session` {block,role,provider,level,tokens_in,tokens_out,usd,usd_unknown?} — one row per
+ * coder/reviewer/judge/s2/author/facts spend (plus `ledger add coder` manual rows and
+ * `session.background` rows, whose price is unknown); its dollars come from `./spend.mjs`
+ * (`usd`, else `cost_usd`, else ESTIMATED from its tokens × `./prices.mjs`); `review.done` {block,file,context_mode,findings_by_severity,round}; `decision`
  * {block,question,source}; `outcome` {block,missed_after_degrade}; `escalation` {block,trigger};
  * `review.unavailable` {block,reason}; `proof` {block,duration_ms}; `run.stop` {reason}.
  */
 
-import { estimateCostUsd } from './prices.mjs';
+import { isSpendRow, rowUsd, spendByRun, sumSpend } from './spend.mjs';
 
 const ROLE_BUCKET = Object.freeze({
   coder: 'coderUsd',
@@ -38,30 +39,60 @@ function countBy(rows, keyOf) {
 }
 
 /**
- * A session row's dollars: `cost_usd` when present, else tokens × the static price table; null when
- * neither is known (no token count, or a provider/level the table does not price).
+ * A session row's dollars (B33: its `usd`; null when `usd_unknown`; older rows: `cost_usd`, else
+ * tokens × the static price table); null when the price is unknown.
  * @param {Record<string, any>} row @returns {number | null}
  */
 export function sessionCostUsd(row) {
-  if (typeof row.cost_usd === 'number') return row.cost_usd;
-  const tokensIn = row.tokens_in ?? 0;
-  const tokensOut = row.tokens_out ?? 0;
-  if (row.tokens_in == null && row.tokens_out == null) return null;
-  try {
-    return estimateCostUsd({ provider: row.provider, level: row.level, tokensIn, tokensOut });
-  } catch {
-    return null;
-  }
+  return rowUsd(row);
 }
 
-/** Cost per SUCCESSFULLY COMPLETED block: review $ / coder $ / S1+S2 $ / facts $ / proof ms. */
+/**
+ * B33: spend per run (running totals, open blocks included) and over the whole ledger — kept
+ * beside the 13 sections, not as a 14th (`SECTION_NAMES` stays pinned at 13).
+ * @param {Array<Record<string, any>>} rows
+ * @returns {{runs: Array<{run: string | null, usd: number, unknown: number, sessions: number}>, total: {usd: number, unknown: number, sessions: number}}}
+ */
+export function buildSpend(rows) {
+  const acted = rows.filter((r) => r.source !== 'shadow');
+  return { runs: spendByRun(acted), total: sumSpend(acted) };
+}
+
+/**
+ * Cost per block — completed AND still open (B33: a running total while the block is open):
+ * review $ / coder $ / S1+S2 $ / facts $ / proof ms, `completed` (any `block.close` row) and
+ * `unknownUsdSessions` (spend rows whose price is unknown, counted 0 in the totals). Grouped by
+ * run + block, so a block id reused in a second run is its own entry; a row without a run joins
+ * the entry of its block when that block id appears in exactly one run (else a `run: null` entry); shadow rows are dropped here too, exactly as `buildSpend` does. An entry is listed
+ * once it has a spend row or a `block.close` row.
+ */
 function costPerBlock(rows) {
   /** @type {Map<string, any>} */
   const byBlock = new Map();
+  /** @type {Set<string>} run+block keys with at least one spend row */
+  const spent = new Set();
+  // never split one block: a row without a run joins its block's entry when that block id appears
+  // in exactly one run; only a block seen in several runs leaves such a row in a `run: null` entry
+  /** @type {Map<string, Set<string>>} */
+  const runsOfBlock = new Map();
   for (const row of rows) {
-    if (!row.block) continue;
-    if (!byBlock.has(row.block)) {
-      byBlock.set(row.block, {
+    if (!row.block || row.source === 'shadow' || typeof row.run !== 'string') continue;
+    if (!runsOfBlock.has(row.block)) runsOfBlock.set(row.block, new Set());
+    /** @type {Set<string>} */ (runsOfBlock.get(row.block)).add(row.run);
+  }
+  /** @param {Record<string, any>} row @returns {string | null} */
+  const runOf = (row) => {
+    if (typeof row.run === 'string') return row.run;
+    const runs = runsOfBlock.get(row.block);
+    return runs && runs.size === 1 ? [...runs][0] : null;
+  };
+  for (const row of rows) {
+    if (!row.block || row.source === 'shadow') continue;
+    const run = runOf(row);
+    const key = `${run ?? ''}\u0000${row.block}`;
+    if (!byBlock.has(key)) {
+      byBlock.set(key, {
+        run,
         block: row.block,
         level: null,
         lane: null,
@@ -73,26 +104,32 @@ function costPerBlock(rows) {
         otherUsd: 0,
         proofTimeMs: 0,
         totalUsd: 0,
+        unknownUsdSessions: 0,
       });
     }
-    const e = byBlock.get(row.block);
+    const e = byBlock.get(key);
     if (row.event === 'dispatch') {
       e.level = row.level ?? e.level;
       e.lane = row.lane ?? e.lane;
     }
     if (row.event === 'block.close') e.completed = true;
-    const cost = row.event === 'session' ? sessionCostUsd(row) : null;
-    if (cost !== null) {
-      // An unrecognized role still spent real money — bucket it as `otherUsd` instead of
-      // silently dropping it from every total (fix round 1: an unknown role must not make
-      // totalUsd under-report actual spend).
-      const bucket = ROLE_BUCKET[row.role] ?? 'otherUsd';
-      e[bucket] = (e[bucket] ?? 0) + cost;
-      e.totalUsd += cost;
+    if (isSpendRow(row)) {
+      spent.add(key);
+      const cost = sessionCostUsd(row);
+      if (cost === null) {
+        e.unknownUsdSessions += 1;
+      } else {
+        // An unrecognized role still spent real money — bucket it as `otherUsd` instead of
+        // silently dropping it from every total (fix round 1: an unknown role must not make
+        // totalUsd under-report actual spend).
+        const bucket = ROLE_BUCKET[row.role] ?? 'otherUsd';
+        e[bucket] = (e[bucket] ?? 0) + cost;
+        e.totalUsd += cost;
+      }
     }
     if (row.event === 'proof' && typeof row.duration_ms === 'number') e.proofTimeMs += row.duration_ms;
   }
-  const out = [...byBlock.values()].filter((e) => e.completed);
+  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || spent.has(key)).map(([, e]) => e);
   for (const e of out) {
     for (const k of ['reviewUsd', 'coderUsd', 's1s2Usd', 'factsUsd', 'otherUsd', 'totalUsd']) e[k] = Math.round(e[k] * 10000) / 10000;
   }

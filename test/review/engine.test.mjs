@@ -4,7 +4,7 @@ import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
-const { reviewFile } = await import('../../src/review/engine.mjs');
+const { planSessions, reviewFile } = await import('../../src/review/engine.mjs');
 const { PacketError } = await import('../../src/review/packet.mjs');
 const { reviewTicket } = await import('../../src/worker/engine.mjs');
 const { runRecordPath } = await import('../../src/state/paths.mjs');
@@ -120,37 +120,39 @@ describe('needs_file (§4.2): one more round, only with safe, tracked files', ()
 });
 
 describe('consensus (§4.4), with fake CLIs', () => {
-  test('two effective providers (anthropic + openai) + one L3 judge', async () => {
-    const cfg = cfgFor({ multimodel: true, second_provider: 'openai', second_levels: { L2: { provider: 'openai', model: 'gpt-6-sol' } }, min_tokens_out: 10 });
-    const { outcome, recs } = await review({ risk: 0, cfg });
+  // B32: openai (Codex) cannot run a reviewer closed-book, so the second provider here is xai.
+  test('two effective providers (anthropic + xai) + one L3 judge', async () => {
+    const cfg = cfgFor({ multimodel: true, second_provider: 'xai', second_levels: { L2: { provider: 'xai', model: 'grok-4.7' } }, min_tokens_out: 5 }); // the fake grok reports 9 tokens out
+    const { outcome, recs } = await review({ risk: 2, cfg });
     assert.equal(recs.length, 3);
     assert.deepEqual(outcome.sessions.map((s) => [s.lens, s.provider, s.model]), [
       ['full', 'anthropic', 'claude-opus-5-5'],
-      ['full', 'openai', 'gpt-6-sol'],
+      ['full', 'xai', 'grok-4.7'],
       ['judge', 'anthropic', 'claude-fable-5-1'],
     ]);
-    assert.deepEqual(recs.map((r) => r.name).sort(), ['claude', 'claude', 'codex']);
+    assert.deepEqual(recs.map((r) => r.name).sort(), ['claude', 'claude', 'grok']);
     assert.equal(cfg.levels.L2.model, 'claude-opus-5-5'); // the pinned config is restored after the swap
     assert.deepEqual([outcome.status, outcome.approved, outcome.engine], ['reviewed', true, 'consensus']);
   });
 
-  test('the second reviewer falls back on its own ladder, never onto the first reviewer\'s provider', async () => {
-    const second = { provider: 'openai', model: 'gpt-6-sol', fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5' }, { provider: 'xai', model: 'grok-4.7' }] };
-    const cfg = cfgFor({ multimodel: true, second_provider: 'openai', second_levels: { L2: second }, min_tokens_out: 5 });
-    const { outcome, recs } = await review({ risk: 0, cfg, env: { FAKE_402_MODELS: 'gpt-6-sol' } });
+  test('the second reviewer falls back on its own ladder, never onto the first reviewer\'s provider (nor onto openai, B32)', async () => {
+    const second = { provider: 'xai', model: 'grok-4.7', fallback: [{ provider: 'anthropic', model: 'claude-sonnet-5' }, { provider: 'openai', model: 'gpt-6-sol' }, { provider: 'xai', model: 'grok-4.6' }] };
+    const cfg = cfgFor({ multimodel: true, second_provider: 'xai', second_levels: { L2: second }, min_tokens_out: 5 });
+    const { outcome, recs } = await review({ risk: 2, cfg, env: { FAKE_402_MODELS: 'grok-4.7' } });
     assert.deepEqual(recs.map((r) => [r.name, flag(r.argv, '--model') ?? flag(r.argv, '-m')]).sort(), [
       ['claude', 'claude-fable-5-1'],
       ['claude', 'claude-opus-5-5'],
-      ['codex', 'gpt-6-sol'],
+      ['grok', 'grok-4.6'],
       ['grok', 'grok-4.7'],
     ]);
-    assert.deepEqual([outcome.sessions[1].provider, outcome.sessions[1].model, outcome.sessions[1].fallback_step], ['xai', 'grok-4.7', 1]);
+    // the engine drops the anthropic entry; the spawner skips the openai one (still step 1 of the ladder)
+    assert.deepEqual([outcome.sessions[1].provider, outcome.sessions[1].model, outcome.sessions[1].fallback_step], ['xai', 'grok-4.6', 2]);
     assert.deepEqual([outcome.status, outcome.approved], ['reviewed', true]);
   });
 
   test('the same effective provider twice is refused before any session', async () => {
     const cfg = cfgFor({ multimodel: true, second_provider: 'anthropic', second_levels: { L2: { model: 'claude-sonnet-5' } } });
-    const { outcome, recs } = await review({ risk: 0, cfg });
+    const { outcome, recs } = await review({ risk: 2, cfg });
     assert.equal(recs.length, 0);
     assert.deepEqual([outcome.status, outcome.reason, outcome.approved], ['refused', 'consensus-same-provider', false]);
   });
@@ -237,5 +239,78 @@ describe('the B11 hook', () => {
     const outcome = await reviewTicket(ticket, /** @type {any} */ (h.ctx));
     assert.equal(readRecords(h.records).length, 0);
     assert.deepEqual([outcome.status, outcome.reason, outcome.approved], ['unavailable', 'run-record-unreadable', false]);
+  });
+});
+
+describe('B34 review topology: single reviewer at low risk, no multimodel for docs blocks', () => {
+  const multi = (/** @type {Record<string, any>} */ extra = {}) =>
+    cfgFor({ multimodel: true, second_provider: 'xai', second_levels: { L2: { provider: 'xai', model: 'grok-4.7' } }, min_tokens_out: 5, ...extra }); // B32: codex cannot review closed-book
+
+  test('multimodel on, risk 1 ⇒ exactly 1 reviewer session, no judge (fake CLIs)', async () => {
+    const { outcome, recs } = await review({ risk: 1, cfg: multi() });
+    assert.equal(recs.length, 1);
+    assert.deepEqual(outcome.sessions.map((s) => [s.role, s.lens, s.provider]), [['reviewer', 'full', 'anthropic']]);
+    assert.deepEqual([outcome.engine, outcome.depth, outcome.approved], ['adaptive', 'full', true]);
+  });
+
+  test('multimodel on, risk 2 ⇒ 2 reviewers (2 providers) + 1 judge; single_reviewer_max_risk 2 ⇒ 1 session', async () => {
+    assert.deepEqual(planSessions({ risk: 2, cfg: multi() }).sessions.map((s) => [s.role, s.slot]), [['reviewer', 'A'], ['reviewer', 'B'], ['judge', null]]);
+    assert.equal(planSessions({ risk: 2, cfg: multi() }).mode, 'consensus');
+    assert.deepEqual(planSessions({ risk: 2, cfg: multi({ single_reviewer_max_risk: 2 }) }).sessions.map((s) => s.lens), ['full']);
+    assert.deepEqual(planSessions({ risk: 0, cfg: multi({ single_reviewer_max_risk: 0 }) }).sessions.map((s) => s.lens), ['quick']);
+  });
+
+  test('a docs block: multimodel off by default (risk 2 ⇒ adaptive A + B + judge, one provider, fake CLIs); multimodel_for_docs ⇒ consensus', async () => {
+    const repo = await fixture();
+    const cfg = multi();
+    const h = harness({ repoRoot: repo, cfg, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)) } });
+    const outcome = await reviewFile({ repoRoot: repo, file: FILE, base: null, cfg, risk: 2, kind: 'docs', workDir: h.workDir }, { spawn: h.spawn, writeRow: h.writeRow });
+    const recs = readRecords(h.records);
+    assert.equal(recs.length, 3);
+    assert.deepEqual(recs.map((r) => r.name), ['claude', 'claude', 'claude']);
+    assert.deepEqual([outcome.engine, outcome.depth], ['adaptive', 'dual']);
+    assert.equal(planSessions({ risk: 2, cfg, kind: 'contract' }).mode, 'adaptive');
+    assert.equal(planSessions({ risk: 2, cfg: multi({ multimodel_for_docs: true }), kind: 'docs' }).mode, 'consensus');
+  });
+});
+
+describe('B34 fix round 1: kind derived from the file, contract blocks, fractional max risk', () => {
+  const multi = (/** @type {Record<string, any>} */ extra = {}) =>
+    cfgFor({ multimodel: true, second_provider: 'xai', second_levels: { L2: { provider: 'xai', model: 'grok-4.7' } }, min_tokens_out: 5, ...extra }); // B32: codex cannot review closed-book
+
+  test('reviewFile with no kind on a .md file ⇒ docs ⇒ adaptive (1 provider, 3 sessions), not consensus', async () => {
+    const repo = await makeRepo();
+    writeFile(repo, 'docs/guide.md', lines(12));
+    const cfg = multi();
+    const h = harness({ repoRoot: repo, cfg, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)) } });
+    const outcome = await reviewFile({ repoRoot: repo, file: 'docs/guide.md', base: null, cfg, risk: 2, workDir: h.workDir }, { spawn: h.spawn, writeRow: h.writeRow });
+    assert.deepEqual(readRecords(h.records).map((r) => r.name), ['claude', 'claude', 'claude']);
+    assert.deepEqual([outcome.engine, outcome.depth], ['adaptive', 'dual']);
+  });
+
+  test('reviewFile with no kind on a code file ⇒ consensus at risk 2 (2 providers + judge)', async () => {
+    const { outcome, recs } = await review({ risk: 2, cfg: multi() });
+    assert.equal(recs.length, 3);
+    assert.deepEqual(recs.map((r) => r.name).sort(), ['claude', 'claude', 'grok']);
+    assert.equal(outcome.engine, 'consensus');
+  });
+
+  test('a contract block is multimodel-off too; single_reviewer_max_risk 1.5 ⇒ risk 1.5 single, risk 1.6 consensus', () => {
+    assert.deepEqual(planSessions({ risk: 3, cfg: multi(), kind: 'contract' }).sessions.map((s) => s.lens), ['A', 'B', 'judge']);
+    assert.equal(planSessions({ risk: 3, cfg: multi(), kind: 'contract' }).mode, 'adaptive');
+    assert.deepEqual(planSessions({ risk: 1.5, cfg: multi({ single_reviewer_max_risk: 1.5 }) }).sessions.map((s) => s.lens), ['full']);
+    assert.equal(planSessions({ risk: 1.6, cfg: multi({ single_reviewer_max_risk: 1.5 }) }).mode, 'consensus');
+  });
+
+  test('the worker hook with no run record takes the ticket file\'s kind: a .md ticket ⇒ adaptive, never consensus', async () => {
+    const repo = await makeRepo();
+    writeFile(repo, 'README.md', lines(12));
+    // a high-tier path floor makes the rules risk 3, so the topology (not the risk) decides consensus
+    const cfg = { ...multi(), proof: { tiers: { high: { paths: ['README.md'] } } } };
+    const h = harness({ repoRoot: repo, cfg, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)) } });
+    const ticket = { ticket: '0123456789abcdef0123456b', run: 'r-b34-norun', block: 'B34', file: 'README.md', content_hash: 'x', enqueued_at: '' };
+    const outcome = /** @type {Record<string, any>} */ (await reviewTicket(ticket, /** @type {any} */ (h.ctx)));
+    assert.deepEqual([outcome.engine, outcome.depth, outcome.risk], ['adaptive', 'dual', 3]);
+    assert.deepEqual(readRecords(h.records).map((r) => r.name), ['claude', 'claude', 'claude']);
   });
 });

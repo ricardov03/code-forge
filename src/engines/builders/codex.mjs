@@ -8,7 +8,12 @@
  *    caller reads Codex's last message from it and deletes it afterwards (the builder never
  *    creates the file; Codex does).
  *  - `coder`: the brief is a POINTER (the last argv token is `promptPath`); the coder has tools.
- *  - closed-book (`reviewer`/`judge`/`s2`/`author`/`facts`): the last argv token is the literal
+ *  - `reviewer`/`judge`/`s2`/`author` are REFUSED (B32, issue #2): Codex 0.155.1 has no no-tools
+ *    mode (`-s read-only` still gives the model a shell that reads any absolute path), so the
+ *    build throws {@link CODEX_CLOSED_BOOK_REFUSAL} (`code: 'closed-book'`) unless the caller passes
+ *    `allowOpenBook: true` (opt-in `review.allow_open_book_codex`), which builds the read-only
+ *    argv below. See `../../config/closed-book.mjs`.
+ *  - `facts` (read-only tools by design): the last argv token is the literal
  *    `-`, which the pinned help (`codex exec [OPTIONS] [PROMPT]`: "If not provided as an argument
  *    (or if `-` is used), instructions are read from stdin") defines as "read the prompt from
  *    stdin". `stdinFile === promptPath` names the packet file whose CONTENT the spawner (B9)
@@ -17,14 +22,14 @@
  *    it is documented and does not depend on stdin-is-piped detection.
  *
  * **Doctor probe item for B13 (no network in B4's tests):** `codex: closed-book stdin delivery` —
- * run this module's `reviewer` argv with `stdinFile` piped in, the packet carrying a unique canary
+ * run this module's `facts` argv (B32: the only stdin-fed Codex role left) with `stdinFile` piped in, the packet carrying a unique canary
  * and "reply with the canary"; PASS when the file at `outPath` contains the canary, FAIL
  * (`codex: closed-book packet not delivered`) otherwise.
  *
  * Unlike Claude, the flag table gives Codex only TWO command shapes: coder, and "reviewer / judge
  * / S2 / author / facts" — there is no Codex-specific "facts role only" carve-out anywhere in the
- * plan's flag table, so `facts` here is simply routed through the same closed-book branch as the
- * other four roles.
+ * plan's flag table, so `facts` here is simply routed through the same closed-book branch the
+ * other four roles used before B32 refused them.
  *
  * **Execpolicy rules (B4.1, §0.6.3, [A19]).** Codex 0.155.1 `exec` has no flag and no `-c` key
  * naming a rules file; it loads the "user" rules from `$CODEX_HOME/rules/*.rules` (`--ignore-rules`
@@ -60,6 +65,7 @@ import { CODEX_RULES_FILE_NAME, defaultCodexHome, isInside, prepareCodexHome } f
 import { hasAnyRenderedRule } from '../render-rules.mjs';
 import { assertEffortForProvider, PROVIDER_EFFORTS } from '../efforts.mjs';
 import { assertBaseParams } from './validate-params.mjs';
+import { CODEX_CLOSED_BOOK_REFUSAL, isNoToolRole } from '../../config/closed-book.mjs';
 
 export const CLI = 'codex';
 
@@ -112,6 +118,8 @@ export const VALID_EFFORTS = PROVIDER_EFFORTS.openai;
  * @property {ReadonlyArray<RenderedCodexEntry>} [renderedForbidden] - coder role only; defaults to
  *   `renderForCodex(mergeForbidden())` (B4.2: the coder-only entries too; a `contains` entry
  *   renders 0 patterns, so it is left to the pre-spawn check and the transcript grep).
+ * @property {boolean} [allowOpenBook] - B32 opt-in: `true` builds reviewer/judge/s2/author with the
+ *   read-only argv instead of throwing {@link CODEX_CLOSED_BOOK_REFUSAL} (that session can read files).
  * @property {string} [codexHome] - coder role only: the per-session Codex home to create (absolute,
  *   must not exist as the real `~/.codex` or inside it); defaults to `defaultCodexHome()` under the
  *   run temp root.
@@ -214,8 +222,8 @@ function buildCoderArgv(params) {
 function buildClosedBookArgv(params) {
   const { model, effort, promptPath, cwd, schemaPath } = params;
   assertValidEffort(effort);
-  // See `builders/claude.mjs`'s identical cast: the dispatch below never reaches this branch
-  // with role 'coder', but that is a runtime invariant, not provable from the parameter type.
+  // See `builders/claude.mjs`'s identical cast: the dispatch below never reaches this branch with
+  // role 'coder'; a no-tools role reaches it only with `allowOpenBook: true` (B32).
   const role = /** @type {"reviewer"|"judge"|"s2"|"author"|"facts"} */ (params.role);
   const outPath = effectiveOutPath(params.outPath, role);
   const argv = ['codex', 'exec', '-m', model];
@@ -240,5 +248,10 @@ function buildClosedBookArgv(params) {
  */
 export function buildCodexArgv(params) {
   assertBaseParams('buildCodexArgv', params);
+  if (isNoToolRole(params.role) && params.allowOpenBook !== true) {
+    // B32: no Codex flag removes the shell, so a no-tools role is built only when the caller
+    // passes `allowOpenBook: true` (the config's `review.allow_open_book_codex` opt-in).
+    throw Object.assign(new Error(CODEX_CLOSED_BOOK_REFUSAL), { code: 'closed-book' });
+  }
   return params.role === 'coder' ? buildCoderArgv(params) : buildClosedBookArgv(params);
 }

@@ -13,6 +13,7 @@
 
 import { createHash } from 'node:crypto';
 import os from 'node:os';
+import { BLOCK_KINDS, blockKind, dispatchLevel } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
 import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
@@ -125,11 +126,15 @@ function activeBlocks(record) {
 
 /**
  * `block open` — refuses a second open of the same id and any owned set that overlaps another
- * ACTIVE block's; records base, owned files, level, attempt, acceptance, line forecast.
+ * ACTIVE block's; records base, owned files, level, attempt, acceptance, line forecast and the
+ * block kind (B34: the declared `kind`, else `blockKind` of the owned files). A docs/contract
+ * block asked for below `levels.coder_floor_docs` (default L1) is opened AT the floor: the entry
+ * and the dispatch row carry the floor level, and the row adds `requested_level` and
+ * `trigger: 'docs_floor'`.
  * @param {{
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
- *   writeRow: WriteRow, now?: Date,
+ *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date,
  * }} opts
  * @returns {Promise<{block: Record<string, any>, pointer: string | null}>}
  */
@@ -139,8 +144,11 @@ export async function openBlock(opts) {
   if (typeof level !== 'string' || !LEVEL.test(level)) throw new StateError('bad-level', 'level must be L0..L3');
   if (!Number.isInteger(attempt) || attempt < 1) throw new StateError('bad-attempt', 'attempt must be an integer >= 1');
   if (lines !== null && !(Number.isInteger(lines) && lines > 0)) throw new StateError('bad-lines', 'lines forecast must be a positive integer');
+  if (opts.kind !== undefined && !BLOCK_KINDS.includes(opts.kind)) throw new StateError('bad-kind', `kind must be one of ${BLOCK_KINDS.join(', ')}`);
   const owned = assertOwned(opts.owned);
   const acceptance = assertAcceptance(opts.acceptance);
+  const kind = blockKind({ owned, declared: opts.kind });
+  const dispatched = dispatchLevel({ lane: level, kind, cfg: opts.cfg });
   const pointer = opts.brief ? briefPointer(opts.brief.path, opts.brief.content) : null;
 
   const block = await mutateRun(runId, null, writeRow, async (record) => {
@@ -150,11 +158,12 @@ export async function openBlock(opts) {
       if (pair) throw new StateError('overlap', `block ${id} owns ${pair[0]}, which overlaps ${pair[1]} owned by open block ${otherId}`);
     }
     const baseSha = await resolveCommit(opts.base ?? 'HEAD', record.workspace);
-    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], level, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open' };
+    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open' };
     record.blocks[id] = entry;
+    const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
     return {
       result: entry,
-      rows: [{ event: 'dispatch', block: id, level, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines }],
+      rows: [{ event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines }],
     };
   });
   return { block, pointer };

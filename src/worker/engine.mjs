@@ -36,6 +36,7 @@
 
 import { rmSync } from 'node:fs';
 import path from 'node:path';
+import { blockKind } from '../decide/escalation.mjs';
 import { askJev } from '../decide/jev-client.mjs';
 import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
@@ -89,14 +90,17 @@ import { assertTicketId } from './ticket.mjs';
  * `block-unknown`; a record that cannot be read or parsed throws `run-record-unreadable`, and a
  * block entry without a base `block-base-missing` — a guessed base could let a change escape review.
  * @param {string} runId @param {string} block
- * @returns {Promise<{base: string | null, level: string, owned: string[], acceptance?: unknown}>}
+ * The block's kind (B34) is the recorded `kind` when `block open` stored one, else `blockKind`
+ * of its owned files.
+ *   With no run record the kind is null: `reviewTicket` takes the ticket file's kind.
+ * @returns {Promise<{base: string | null, level: string, owned: string[], acceptance?: unknown, kind: string | null}>}
  */
 export async function blockEntryFor(runId, block) {
   let record;
   try {
     record = await readRun(runId);
   } catch (err) {
-    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], acceptance: undefined };
+    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], acceptance: undefined, kind: null };
     throw new Error('run-record-unreadable');
   }
   if (!record || typeof record !== 'object' || !record.blocks || typeof record.blocks !== 'object') throw new Error('run-record-unreadable');
@@ -105,7 +109,7 @@ export async function blockEntryFor(runId, block) {
   const sha = entry?.base_sha;
   if (typeof sha !== 'string' || sha.length === 0) throw new Error('block-base-missing');
   const owned = Array.isArray(entry.owned_files) ? entry.owned_files.filter((f) => typeof f === 'string') : [];
-  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, acceptance: entry.acceptance };
+  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }) };
 }
 
 /** The acceptance line written when the block's clauses cannot be read. */
@@ -189,14 +193,15 @@ export async function reviewTicket(ticket, ctx) {
   } catch (err) {
     return { status: 'unavailable', reason: err instanceof Error ? err.message : 'run-record-unreadable', approved: false, engine: 'adaptive', sessions: [] };
   }
+  if (entry.kind === null) entry = { ...entry, kind: blockKind({ owned: [ticket.file] }) };
   try {
     if (!ctx.key) {
       return await reviewFile(
-        { repoRoot: ctx.repoRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) },
+        { repoRoot: ctx.repoRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) },
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) });
+    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -205,10 +210,10 @@ export async function reviewTicket(ticket, ctx) {
 /**
  * One fix-loop round for the ticket (see the module doc).
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, level: string, owned: string[], key: Buffer, workDir: string, factsExcerpt: string}} opts
+ * @param {{base: string | null, level: string, owned: string[], blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function fixLoopRound(ticket, ctx, { base, level, owned, key, workDir, factsExcerpt }) {
+async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key, workDir, factsExcerpt }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   let rows;
   try {
@@ -276,7 +281,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, key, workDir, fac
         factsExcerpt,
         ...(jev ? { jev } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, workDir, factsExcerpt }, { spawn: ctx.spawn, writeRow });
+          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt }, { spawn: ctx.spawn, writeRow });
           return engineOutcome;
         },
         spawn: async (opts) => {

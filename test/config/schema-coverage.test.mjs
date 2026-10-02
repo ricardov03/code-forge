@@ -352,9 +352,11 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * mutation-tool-only keys leave the schema per plan §10.4 Wave 6. 148 - 8 = 140. The depth-3
  * KNOWN_SCHEMA_PATHS sample under `proof.tiers.high` is re-pointed from the now-gone `.min_msi` to
  * the surviving `.paths`) — re-pin, and say why in the commit, whenever the schema gains or loses
- * a property.
+ * a property. B34 2026-10-01: +5 = levels.coder_floor_docs, escalation.{after_rounds_with_warnings,
+ * warning_threshold}, review.{multimodel_for_docs,single_reviewer_max_risk} ⇒ 145. B33: +1 = budget.usd ⇒ 146.
+ * B32: +1 = review.allow_open_book_codex ⇒ 147.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 140;
+const EXPECTED_SCHEMA_PATH_COUNT = 147;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

@@ -6,6 +6,22 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `budget.usd` per run: every session row carries an estimated `usd`; at 80% one warning, at 100% no new session starts
+  (fail closed if the spend cannot be read). `report` shows running totals for open blocks and per run; `run status`
+  shows spent and budget; `ledger add coder --usd` records cloud or manual coder spend.
+- `code-forge run reload --run <r>`: re-read `.code-forge.yml` mid-run without stopping blocks. Queued reviews keep the
+  old config, new ones use the new one; keys fixed for the run are refused by name; a signed `run.reload` row lists the
+  changed key paths (never values). Coders may not run it.
+
+### Changed
+
+- Escalation and review cost rules from the first real run: after one review round that leaves 2+ warnings (or any
+  critical), the next fix climbs one level (`escalation.*`); docs and contract blocks code at L1 or higher
+  (`levels.coder_floor_docs`); risk 0–1 gets a single reviewer (`review.single_reviewer_max_risk`); docs blocks skip
+  multimodel review unless `review.multimodel_for_docs` is set.
+
 ### Fixed
 
 - `validate` rejects an effort the level's provider cannot take (for example `xhigh` on an openai level), for levels and
@@ -17,6 +33,12 @@ waits on a second real consumer (plan §10.4, Q17).
   `worker_down`.
 - `ledger tail -n <count>` limits the output (only `--n` worked). Jev score criteria keys must be exactly 0..n, with a
   clear error otherwise.
+
+### Security
+
+- Codex (openai) is refused for closed-book roles — reviewer, judge, S2 and plan author — because it always has a shell
+  that can read files. `validate`, `resolve` and `doctor` say so. Set `review.allow_open_book_codex: true` to accept
+  that risk and keep using it (with warnings). Codex coders are unchanged.
 
 ## [0.3.2] — 2026-10-01
 

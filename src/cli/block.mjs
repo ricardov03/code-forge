@@ -3,7 +3,7 @@
  * `block open` before every spawn in every engine; it prints the brief pointer (≤ 200 bytes).
  *
  *   block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file>
- *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>]
+ *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract]
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
@@ -51,12 +51,12 @@ import { exec } from '../util/exec.mjs';
 import { gitChildEnv } from '../worker/ticket.mjs';
 
 const USAGE =
-  'usage: code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>]\n' +
+  'usage: code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract]\n' +
   '       code-forge block attempt|rebase|close <id> --run <r> · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n';
 
 const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'];
-const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript'];
+const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind'];
 
 /**
  * @param {string[]} args
@@ -106,9 +106,12 @@ export async function runBlock(args, deps = {}) {
         base: typeof flags.base === 'string' ? flags.base : undefined,
         lines: intFlag(flags.lines, 'lines') ?? null,
         brief,
+        ...(typeof flags.kind === 'string' ? { kind: flags.kind } : {}),
+        cfg: await openConfig(record.workspace),
         writeRow,
       });
-      out(`block ${id} open · ${block.level} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}\n`);
+      const raised = block.level !== flags.level ? ` (${block.kind} floor, asked ${flags.level})` : '';
+      out(`block ${id} open · ${block.level}${raised} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}\n`);
       out(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
       return 0;
     }
@@ -174,6 +177,21 @@ export async function runBlock(args, deps = {}) {
   }
   err(USAGE);
   return 2;
+}
+
+/**
+ * The project config for `block open`'s coder floor (B34): the loaded `.code-forge.yml`, or
+ * undefined when there is none or it does not load — the floor then takes its default (L1), the
+ * safe side.
+ * @param {string} workspace @returns {Promise<Record<string, any> | undefined>}
+ */
+async function openConfig(workspace) {
+  try {
+    const loaded = await loadProjectConfig(workspace);
+    return loaded.ok && loaded.config ? loaded.config : undefined;
+  } catch {
+    return undefined;
+  }
 }
 
 /**

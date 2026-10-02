@@ -53,6 +53,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `levels.L3.fallback[].provider` | enum: `anthropic`, `openai`, `xai` | yes | — |  |
 | `levels.L3.fallback[].model` | string | yes | — | minLength 1 |
 | `levels.L3.fallback[].effort` | string |  | — |  |
+| `levels.coder_floor_docs` | enum: `L0`, `L1`, `L2` |  | `"L1"` |  |
 | `orchestrator` | enum: `L0`, `L1`, `L2`, `L3` |  | — |  |
 | `system1` | object |  | — |  |
 | `system1.provider` | enum: `anthropic`, `openai`, `xai` |  | — |  |
@@ -83,8 +84,12 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `escalation.review_rounds_per_level` | integer |  | `2` | min 0 |
 | `escalation.stop_at` | const `"L3"` |  | `"L3"` |  |
 | `escalation.l3_mode` | enum: `patch`, `code` |  | `"patch"` |  |
+| `escalation.after_rounds_with_warnings` | integer |  | `1` | min 0 |
+| `escalation.warning_threshold` | integer |  | `2` | min 1 |
 | `review` | object |  | — |  |
 | `review.multimodel` | boolean |  | `false` |  |
+| `review.multimodel_for_docs` | boolean |  | `false` |  |
+| `review.single_reviewer_max_risk` | number |  | `1` | min 0; max 3 |
 | `review.second_provider` | enum: `anthropic`, `openai`, `xai` \| null |  | `null` |  |
 | `review.second_levels` | null \| object |  | `null` |  |
 | `review.closed_book` | const `true` |  | `true` |  |
@@ -106,6 +111,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.max_rounds_per_file` | integer |  | `4` | min 2; max 6 |
 | `review.recheck_scope` | enum: `fix_hunks`, `file` |  | `"fix_hunks"` |  |
 | `review.late_findings` | enum: `sweep`, `block` |  | `"sweep"` |  |
+| `review.allow_open_book_codex` | boolean |  | `false` | B32: let openai (Codex) run reviewer/judge/S2/author with its read-only sandbox, which can read files on this machine. Off: those sessions are refused. |
 | `engine` | enum: `auto`, `solo`, `harness`, `subprocess` |  | `"auto"` |  |
 | `harnesses` | array<string> |  | — |  |
 | `harness` | object |  | — |  |
@@ -140,6 +146,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `budget.block_tokens_soft` | integer |  | — | min 1 |
 | `budget.block_tokens_hard` | integer |  | — | min 1 |
 | `budget.run_usd_soft` | number |  | — | min 0 |
+| `budget.usd` | number |  | — | > 0; Per-run spend stop in USD (R6). Before every session spawn the run's estimated spend is checked: one warning at 80%, new sessions refused at 100%. |
 | `budget.block_cases` | integer |  | `80` | min 10 |
 | `autonomy` | object |  | — |  |
 | `autonomy.coder_may_open_draft_pr` | boolean |  | `true` |  |

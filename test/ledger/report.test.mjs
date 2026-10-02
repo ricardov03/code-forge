@@ -16,19 +16,23 @@ function threeBlockLedger() {
     { event: 'session', block: 'b2', role: 'judge', cost_usd: 0.75 },
     { event: 'session', block: 'b2', role: 'facts', cost_usd: 0.1 },
     { event: 'block.close', block: 'b2', status: 'complete' },
-    // b3: spend exists but the block was never closed — must be excluded entirely
+    // b3: spend exists but the block was never closed — listed OPEN with its running total (B33)
     { event: 'session', block: 'b3', role: 'coder', cost_usd: 0.3 },
   ];
   return rows;
 }
 
-test('cost per completed block matches the hand-computed total for each of 3 blocks, and only 2 blocks are reported (3 asserts + a length check)', () => {
+test('B33: cost per block matches the hand-computed total for each of 3 blocks — 2 completed, the open b3 with its running total', () => {
   const { sections } = buildReport(threeBlockLedger());
-  assert.equal(sections.cost_per_block.length, 2, 'b3 was never closed — it must not appear at all, not even as a zero entry');
-  const byBlock = Object.fromEntries(sections.cost_per_block.map((e) => [e.block, e]));
-  assert.equal(byBlock.b1.totalUsd, 1.5);
-  assert.equal(byBlock.b2.totalUsd, 2.85);
-  assert.equal(byBlock.b3, undefined);
+  assert.equal(sections.cost_per_block.length, 3);
+  assert.deepEqual(
+    sections.cost_per_block.map((e) => [e.block, e.completed, e.totalUsd, e.unknownUsdSessions]),
+    [
+      ['b1', true, 1.5, 0],
+      ['b2', true, 2.85, 0],
+      ['b3', false, 0.3, 0],
+    ],
+  );
 });
 
 test('an unrecognized session role still spends real money: it lands in otherUsd, and totalUsd is NOT under-reported', () => {
@@ -153,19 +157,23 @@ test('B19: live-shaped rows — 2 token-only session rows for B1 and a status-le
     // no token count at all: no dollars, not a crash
     { event: 'session', block: 'B1', role: 'facts', provider: 'anthropic', level: 'L0', tokens_in: null, tokens_out: null },
     { event: 'block.close', block: 'B1' },
-    // B2 spent tokens but never closed: not listed
+    // B2 spent tokens but never closed: listed open (B33) — anthropic L2: 1000 / 1000 × 0.015 = 0.015
     { event: 'session', block: 'B2', role: 'coder', provider: 'anthropic', level: 'L2', tokens_in: 1000, tokens_out: 0 },
   ];
   const { sections } = buildReport(rows);
-  assert.equal(sections.cost_per_block.length, 1);
-  const [b1] = sections.cost_per_block;
+  assert.equal(sections.cost_per_block.length, 2);
+  const [b1, b2] = sections.cost_per_block;
   assert.deepEqual(
-    [b1.block, b1.level, b1.completed, b1.coderUsd, b1.reviewUsd, b1.factsUsd, b1.totalUsd],
-    ['B1', 'L2', true, 0.0225, 0.01, 0, 0.0325],
+    [b1.block, b1.level, b1.completed, b1.coderUsd, b1.reviewUsd, b1.factsUsd, b1.totalUsd, b1.unknownUsdSessions],
+    ['B1', 'L2', true, 0.0225, 0.01, 0, 0.0325, 1],
   );
+  assert.deepEqual([b2.block, b2.completed, b2.totalUsd, b2.unknownUsdSessions], ['B2', false, 0.015, 0]);
 });
 
-test('B19: a block with session rows but NO block.close row gives an empty cost_per_block', () => {
+test('B33: a block with session rows but NO block.close row is listed open with its running total', () => {
   const rows = [{ event: 'session', block: 'B1', role: 'coder', provider: 'anthropic', level: 'L2', tokens_in: 1000, tokens_out: 500 }];
-  assert.deepEqual(buildReport(rows).sections.cost_per_block, []);
+  assert.deepEqual(
+    buildReport(rows).sections.cost_per_block.map((e) => [e.block, e.completed, e.coderUsd, e.totalUsd]),
+    [['B1', false, 0.0225, 0.0225]],
+  );
 });

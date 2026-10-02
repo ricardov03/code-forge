@@ -46,6 +46,22 @@ flowchart TD
 The coder's turn ends with `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===`.
 Nothing else counts as completion.
 
+### Changing the config mid-run
+
+`run start` takes a snapshot of `.code-forge.yml` into the run record, and the worker reviews with
+that snapshot. To change the config while blocks are open (a model swap, the review topology),
+edit the file and run `code-forge run reload --run <run>`:
+
+- the file is validated first; an invalid file is refused and nothing changes;
+- it prints the changed key paths (never the values) and writes a signed `run.reload` ledger row
+  with those paths and the old and new snapshot hashes; no change prints `no config change` and
+  writes no row;
+- open blocks stay open with their attempt numbers; review tickets already queued finish on the
+  config they were enqueued with, new tickets use the new one, and the worker picks it up without
+  a restart;
+- `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key` and `version` are fixed for the run:
+  a change to one is refused with the key's name. End the run and start a new one to change them.
+
 ### Review only
 
 `code-forge review` runs steps 5, 6 and 8 on changes you already have, then stops the block and ends
@@ -200,7 +216,7 @@ the plan file. See `skill/references/continuity.md`.
   orchestrator's own CLI calls.
 - **Coders get no keys.** A coder process receives neither the Jev key nor the signing key.
 - **One forbidden list, rendered per harness.** Force pushes, `git reset --hard`, `git stash`,
-  `rm -rf` outside `.code-forge/`, reading `~/.code-forge/runs/`, starting a worker, `run start`,
+  `rm -rf` outside `.code-forge/`, reading `~/.code-forge/runs/`, starting a worker, `run start`, `run reload`,
   `block waive`, writing review results, and more. It becomes each CLI's own deny rules
   (`--disallowedTools` for Claude, an execpolicy rules file plus prose for Codex), is copied into
   every brief, and is grepped from every transcript at `block close`. A hit is a `rule_break`.

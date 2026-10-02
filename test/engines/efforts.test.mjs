@@ -61,14 +61,15 @@ test('codex builder: "xhigh" throws the same message as before B29; every listed
   });
   let built = 0;
   for (const effort of PROVIDER_EFFORTS.openai ?? []) {
-    assert.doesNotThrow(() => buildCodexArgv({ ...base, role: 'judge', model: 'gpt-6-sol', effort }));
+    // B32: Codex refuses role judge (no no-tools mode); facts takes the same closed-book branch
+    assert.doesNotThrow(() => buildCodexArgv({ ...base, role: 'facts', model: 'gpt-6-sol', effort }));
     built += 1;
   }
   assert.equal(built, 4);
 });
 
 test('codex builder: a fake secret as effort throws with 0 occurrences of it in the message', () => {
-  assert.throws(() => buildCodexArgv({ ...base, role: 'judge', model: 'gpt-6-sol', effort: FAKE_SECRET }), (err) => {
+  assert.throws(() => buildCodexArgv({ ...base, role: 'facts', model: 'gpt-6-sol', effort: FAKE_SECRET }), (err) => {
     assert.equal(/** @type {Error} */ (err).message, 'buildCodexArgv: effort must be one of minimal, low, medium, high when given, got (unrecognised value)');
     assert.equal(/** @type {Error} */ (err).message.split(FAKE_SECRET).length - 1, 0);
     return true;

@@ -14,7 +14,10 @@
  *     round (`review.late_findings: sweep`, default; `block` makes it an open finding instead).
  *  3. Strictly shrinking: open(n) ≥ open(n−1) ⇒ `trigger: review_stall` ⇒ +1 level now (rule 2b).
  *  4. Ladder: `escalation.review_rounds_per_level` (2) exhausted with an open finding ⇒ +1 level
- *     (rule 2); the next rounds are coded at that level by a fresh session (`deps.fix`).
+ *     (rule 2); the next rounds are coded at that level by a fresh session (`deps.fix`). Below L2,
+ *     `escalation.after_rounds_with_warnings` (1) heavy rounds at the level — an open set with
+ *     ≥ `escalation.warning_threshold` (2) warnings or any `critical` — climb at once (rule 2c,
+ *     B34: `trigger: review_warnings`); `warn_rounds_at_level` counts them and resets on a climb.
  *  5. Cap: `review.max_rounds_per_file` (4) reached with an open finding ⇒ the L3 patch rung
  *     (rule 6; once per block — shared with rule 5's ceiling), whose `patch_check` round is
  *     OUTSIDE the cap. The rung is also rule 5: rule 2/2b at the running ceiling (L2 — L3 is never
@@ -49,7 +52,7 @@
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
-import { escalationAfterAttempt, reviewRoundStalled } from '../decide/escalation.mjs';
+import { escalationAfterAttempt, heavyRound, reviewRoundStalled } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { parseDiff } from './context.mjs';
@@ -75,6 +78,7 @@ import { spawnWithTimeoutRetry } from './session-retry.mjs';
  * @property {string} level - the level the file's fixes are coded at now.
  * @property {number} round - rounds counted so far (patch_check rounds excluded).
  * @property {number} rounds_at_level
+ * @property {number} [warn_rounds_at_level] - heavy rounds at the current level (rule 2c, B34); absent in a state saved before B34 ⇒ 0.
  * @property {Finding[]} open - the open `fix_now` set.
  * @property {Finding[]} late
  * @property {string | null} reviewed_content - the content the last counted round reviewed.
@@ -120,6 +124,8 @@ function settings(cfg) {
     scope: r.recheck_scope === 'file' ? 'file' : 'fix_hunks',
     late: r.late_findings === 'block' ? 'block' : 'sweep',
     perLevel: int(e.review_rounds_per_level, 2),
+    warnAfter: int(e.after_rounds_with_warnings, 1),
+    warnThreshold: e.warning_threshold, // heavyRound falls back to 2 for anything but an integer ≥ 1
     stopAt: typeof e.stop_at === 'string' ? e.stop_at : 'L3',
     l3Mode: e.l3_mode === 'code' ? 'code' : 'patch',
   };
@@ -130,7 +136,7 @@ function settings(cfg) {
  * @returns {FileState}
  */
 export function newFileState({ file, level, l3RungUsed = false }) {
-  return { file, level, round: 0, rounds_at_level: 0, open: [], late: [], reviewed_content: null, l3_rung_used: l3RungUsed, status: 'open', next: null, last_packet: null, pending_kind: null };
+  return { file, level, round: 0, rounds_at_level: 0, warn_rounds_at_level: 0, open: [], late: [], reviewed_content: null, l3_rung_used: l3RungUsed, status: 'open', next: null, last_packet: null, pending_kind: null };
 }
 
 /** @param {string} repoRoot @param {string} file @returns {{rel: string, content: string, hash: string}} */
@@ -254,12 +260,17 @@ function decideNext(state, openBefore, s, kind) {
     openFixNowFinding: true,
     reviewRoundsAtLevel: state.rounds_at_level,
     reviewRoundsPerLevel: s.perLevel,
+    warningRoundsAtLevel: state.warn_rounds_at_level ?? 0,
+    afterRoundsWithWarnings: s.warnAfter,
     stopAt: s.stopAt,
     l3Mode: /** @type {'patch' | 'code'} */ (s.l3Mode),
     l3RungAlreadyUsed: state.l3_rung_used,
   });
   if (esc.action === 'escalate' && esc.level) {
-    if (esc.level !== state.level) state.rounds_at_level = 0;
+    if (esc.level !== state.level) {
+      state.rounds_at_level = 0;
+      state.warn_rounds_at_level = 0;
+    }
     state.level = esc.level;
     return { action: 'fix', level: state.level, trigger: esc.trigger };
   }
@@ -398,10 +409,13 @@ export async function runRound(state, deps, opts = {}) {
   if (kind !== 'patch_check') {
     draft.round += 1;
     draft.rounds_at_level += 1;
+    // THIS round's open set, after triage: only the warnings still open count
+    if (heavyRound(draft.open, s.warnThreshold)) draft.warn_rounds_at_level = (draft.warn_rounds_at_level ?? 0) + 1;
   } else {
     // the block continues at L2 after the rung with a fresh round counter (§3.6) — also here, not
     // only in `converge`, because the worker runs the patch_check from its own ticket
     draft.rounds_at_level = 0;
+    draft.warn_rounds_at_level = 0;
   }
   draft.reviewed_content = current.content;
   draft.last_packet = packetInfo;
@@ -464,6 +478,7 @@ export async function converge(state, deps) {
     if (next.action === 'patch') {
       state.l3_rung_used = true;
       state.rounds_at_level = 0;
+      state.warn_rounds_at_level = 0;
       await deps.patch?.({ file: state.file, level: 'L3', open: [...state.open] });
       await runRound(state, deps, { kind: 'patch_check' });
       continue;

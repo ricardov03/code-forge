@@ -256,8 +256,10 @@ export const FORBIDDEN = Object.freeze(
         ['forge', 'worker'],
         ['code-forge', 'run', 'start'],
         ['forge', 'run', 'start'],
+        ['code-forge', 'run', 'reload'],
+        ['forge', 'run', 'reload'],
       ],
-      description: 'Start a worker or a run (forge worker / code-forge worker / run start) from a coder — the orchestrator only',
+      description: 'Start a worker or a run, or reload its config (forge worker / code-forge worker / run start / run reload) from a coder — the orchestrator only',
     },
     {
       id: 'code-forge-reviews-write',

@@ -4,7 +4,7 @@
  */
 
 import { writeSafe } from '../util/redact.mjs';
-import { buildReport } from '../ledger/report.mjs';
+import { buildReport, buildSpend } from '../ledger/report.mjs';
 import { exportReportSections } from '../ledger/export.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 
@@ -60,11 +60,25 @@ export async function runReport(args, deps = {}) {
     for (const [name, data] of Object.entries(sections)) {
       out(`== ${name} ==\n${JSON.stringify(data, null, 2)}\n`);
     }
+    out(spendLines(buildSpend(rows)));
     return 0;
   } catch (err_) {
     err(`report: ${err_?.message ?? String(err_)}\n`);
     return 1;
   }
+}
+
+/**
+ * B33: the running spend per run (open blocks included), after the 13 sections. Unknown-price
+ * sessions are named, never priced.
+ * @param {ReturnType<typeof buildSpend>} spend @returns {string}
+ */
+export function spendLines({ runs, total }) {
+  const unknown = (/** @type {number} */ n) => (n > 0 ? ` · ${n} with unknown price (not counted)` : '');
+  const lines = ['spend per run (estimated USD, open blocks included):'];
+  for (const r of runs) lines.push(`  run ${r.run ?? '(none)'}: $${r.usd.toFixed(4)} · ${r.sessions} session(s)${unknown(r.unknown)}`);
+  lines.push(`  total: $${total.usd.toFixed(4)} · ${total.sessions} session(s)${unknown(total.unknown)}`);
+  return `${lines.join('\n')}\n`;
 }
 
 /** @param {string[]} args @returns {Promise<number>} */

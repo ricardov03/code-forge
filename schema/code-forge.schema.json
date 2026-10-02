@@ -36,7 +36,8 @@
         "L0": { "$ref": "#/$defs/level" },
         "L1": { "$ref": "#/$defs/level" },
         "L2": { "$ref": "#/$defs/level" },
-        "L3": { "$ref": "#/$defs/level" }
+        "L3": { "$ref": "#/$defs/level" },
+        "coder_floor_docs": { "type": "string", "enum": ["L0", "L1", "L2"], "default": "L1" }
       }
     },
     "orchestrator": { "$ref": "#/$defs/levelName" },
@@ -85,7 +86,9 @@
         "retries_per_level": { "type": "integer", "minimum": 0, "default": 2 },
         "review_rounds_per_level": { "type": "integer", "minimum": 0, "default": 2 },
         "stop_at": { "type": "string", "const": "L3", "default": "L3" },
-        "l3_mode": { "type": "string", "enum": ["patch", "code"], "default": "patch" }
+        "l3_mode": { "type": "string", "enum": ["patch", "code"], "default": "patch" },
+        "after_rounds_with_warnings": { "type": "integer", "minimum": 0, "default": 1 },
+        "warning_threshold": { "type": "integer", "minimum": 1, "default": 2 }
       }
     },
     "review": {
@@ -93,6 +96,8 @@
       "additionalProperties": false,
       "properties": {
         "multimodel": { "type": "boolean", "default": false },
+        "multimodel_for_docs": { "type": "boolean", "default": false },
+        "single_reviewer_max_risk": { "type": "number", "minimum": 0, "maximum": 3, "default": 1 },
         "second_provider": { "anyOf": [{ "$ref": "#/$defs/provider" }, { "type": "null" }], "default": null },
         "second_levels": {
           "anyOf": [
@@ -136,7 +141,8 @@
         "session_timeout_s": { "type": "integer", "minimum": 1, "default": 300 },
         "max_rounds_per_file": { "type": "integer", "minimum": 2, "maximum": 6, "default": 4 },
         "recheck_scope": { "type": "string", "enum": ["fix_hunks", "file"], "default": "fix_hunks" },
-        "late_findings": { "type": "string", "enum": ["sweep", "block"], "default": "sweep" }
+        "late_findings": { "type": "string", "enum": ["sweep", "block"], "default": "sweep" },
+        "allow_open_book_codex": { "type": "boolean", "default": false, "description": "B32: let openai (Codex) run reviewer/judge/S2/author with its read-only sandbox, which can read files on this machine. Off: those sessions are refused." }
       }
     },
     "engine": { "type": "string", "enum": ["auto", "solo", "harness", "subprocess"], "default": "auto" },
@@ -228,6 +234,11 @@
         "block_tokens_soft": { "type": "integer", "minimum": 1 },
         "block_tokens_hard": { "type": "integer", "minimum": 1 },
         "run_usd_soft": { "type": "number", "minimum": 0 },
+        "usd": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Per-run spend stop in USD (R6). Before every session spawn the run's estimated spend is checked: one warning at 80%, new sessions refused at 100%."
+        },
         "block_cases": { "type": "integer", "minimum": 10, "default": 80 }
       }
     },

@@ -7,12 +7,19 @@
  *   ledger outcome --scan-git --slug <slug> [--cwd <dir>] [--days <n>]
  *   ledger outcome --pr <n> --ci red|green|reverted --slug <slug>
  *   ledger tail --slug <slug> [--n <count> | -n <count>]
+ *   ledger add coder --run <r> --block <b> --usd <n> [--note "..."]
+ *
+ * B33: `ledger add coder` records manual/cloud coder spend (a session code-forge never saw) as a
+ * signed `session` row (`role: coder, manual: true, usd, cost_source: manual`) in the run's
+ * ledger, so `report` and the `budget.usd` check count it. The slug is the run record's project.
  */
 
 import { writeSafe } from '../util/redact.mjs';
 import { buildCalibration } from '../ledger/calibration.mjs';
 import { recordCiOutcome, reviewedEntriesFromRows, scanGitAndRecord } from '../ledger/outcome.mjs';
-import { readAllRows } from '../ledger/write.mjs';
+import { roundUsd, runSpend } from '../ledger/spend.mjs';
+import { appendRow, readAllRows } from '../ledger/write.mjs';
+import { readRun, writeSigned } from '../state/run.mjs';
 
 /**
  * @param {string[]} args @param {string} flag
@@ -56,9 +63,10 @@ export async function runLedger(args, deps = {}) {
   const { stdout = process.stdout, stderr = process.stderr } = deps;
   const out = (/** @type {string} */ s) => writeSafe(stdout, s);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
-  const usage = () => err('usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>])\n');
+  const usage = () => err('usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."]\n');
 
   const [sub] = args;
+  if (sub === 'add') return addSpend(args.slice(1), { out, err });
   const slug = flagValue(args, '--slug');
   if (!slug) {
     usage();
@@ -159,6 +167,82 @@ export async function runLedger(args, deps = {}) {
 
   usage();
   return 2;
+}
+
+const ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/;
+const MAX_NOTE_CHARS = 500;
+
+/**
+ * `ledger add coder --run <r> --block <b> --usd <n> [--note "..."]` (B33).
+ * @param {string[]} args - after `add`.
+ * @param {{out: (s: string) => void, err: (s: string) => void}} io
+ * @returns {Promise<number>}
+ */
+async function addSpend(args, { out, err }) {
+  const usage = () => err('usage: code-forge ledger add coder --run <r> --block <b> --usd <n> [--note "..."]\n');
+  const [role] = args;
+  const run = flagValue(args, '--run');
+  const block = flagValue(args, '--block');
+  const usdArg = flagValue(args, '--usd');
+  if (role !== 'coder' || !run || !block || usdArg === undefined) {
+    usage();
+    return 2;
+  }
+  const note = readOptionalFlag(args, '--note');
+  if (!note.ok) {
+    err('ledger add: --note requires a value\n');
+    return 2;
+  }
+  if (!ID.test(run)) {
+    err('ledger add: --run must be a run id (letters, digits, ".", "_", "-")\n');
+    return 2;
+  }
+  if (!ID.test(block)) {
+    err('ledger add: --block must be a block id (letters, digits, ".", "_", "-")\n');
+    return 2;
+  }
+  // rounded to the ledger's 4 decimals FIRST, then checked: 0.00001 rounds to 0 and is refused
+  const usd = /^\d+(\.\d+)?$/.test(usdArg) ? roundUsd(Number(usdArg)) : Number.NaN;
+  if (!Number.isFinite(usd) || usd <= 0) {
+    err(`ledger add: --usd must be a number > 0 (at 4 decimals), got "${usdArg}"\n`);
+    return 2;
+  }
+  if (note.value !== undefined && note.value.length > MAX_NOTE_CHARS) {
+    err(`ledger add: --note is longer than ${MAX_NOTE_CHARS} characters\n`);
+    return 2;
+  }
+  try {
+    const { project } = await readRun(run);
+    const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: project });
+    const row = {
+      event: 'session',
+      role: 'coder',
+      manual: true,
+      block,
+      provider: null,
+      level: null,
+      tokens_in: null,
+      tokens_out: null,
+      usd,
+      cost_source: 'manual',
+      ...(note.value !== undefined ? { note: note.value } : {}),
+    };
+    await writeSigned(run, writeRow, row);
+    // the row is written: from here on nothing may throw or change the exit code
+    /** @type {number | null} */
+    let total = null;
+    try {
+      const spent = runSpend(await readAllRows(project), run).usd;
+      total = Number.isFinite(spent) ? spent : null;
+    } catch {
+      total = null;
+    }
+    out(`recorded coder spend $${usd.toFixed(4)} for run ${run} block ${block} · run total ${total === null ? 'unknown' : `$${total.toFixed(4)}`}\n`);
+    return 0;
+  } catch (thrown) {
+    err(`ledger add: ${thrown?.message ?? String(thrown)}\n`);
+    return 1;
+  }
 }
 
 /** @param {string[]} args @returns {Promise<number>} */

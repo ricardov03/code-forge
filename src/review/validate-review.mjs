@@ -7,14 +7,15 @@
  *  3. `reviewed_hunks` equals the packet's hunk headers EXACTLY and IN ORDER;
  *  4. `tokens_out ≥ review.min_tokens_out` (120).
  * Anything else is `unavailable` with one reason — `timeout`, `exit`, `schema`,
- * `hunks_mismatch`, `too_short` — and is never approval. There is no "approve on missing output":
+ * `hunks_mismatch`, `too_short`, or `budget` (B33: the spawner refused at `budget.usd`) — and is
+ * never approval. There is no "approve on missing output":
  * no answer is a `schema` failure, no session is an `exit` failure.
  */
 
 import { readFileSync } from 'node:fs';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 
-export const UNAVAILABLE_REASONS = Object.freeze(['exit', 'schema', 'hunks_mismatch', 'too_short', 'timeout']);
+export const UNAVAILABLE_REASONS = Object.freeze(['exit', 'schema', 'hunks_mismatch', 'too_short', 'timeout', 'budget']);
 
 export const DEFAULT_MIN_TOKENS_OUT = 120;
 
@@ -48,7 +49,7 @@ export function minTokensOut(cfg) {
  * @property {boolean} ok
  * @property {Record<string, any>} [review]
  * @property {number} [tokens_out]
- * @property {'exit' | 'schema' | 'hunks_mismatch' | 'too_short' | 'timeout'} [reason]
+ * @property {'exit' | 'schema' | 'hunks_mismatch' | 'too_short' | 'timeout' | 'budget'} [reason]
  * @property {string} [detail]
  */
 
@@ -60,6 +61,8 @@ export function minTokensOut(cfg) {
 export function validateReview(session, { hunkHeaders, minTokensOut: min = DEFAULT_MIN_TOKENS_OUT, smallDiff = false }) {
   if (!session || typeof session !== 'object') return { ok: false, reason: 'exit', detail: 'no session result' };
   if (session.status === 'timeout') return { ok: false, reason: 'timeout', detail: 'killed at the session timeout' };
+  // B33: the spawner refused the session because the run reached `budget.usd` — nothing ran
+  if (session.status === 'unavailable' && session.reason === 'budget') return { ok: false, reason: 'budget', detail: String(session.message ?? 'budget.usd reached') };
   const exitCode = session.exit_code;
   if (session.status === 'failed' || session.status === 'unavailable' || (exitCode !== undefined && exitCode !== 0)) {
     return { ok: false, reason: 'exit', detail: `session ${session.status}${exitCode === undefined ? '' : ` (exit ${exitCode})`}` };

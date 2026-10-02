@@ -8,11 +8,17 @@ Events you will read most: `run.start`, `run.stop {reason}`, `run.end`, `dispatc
 
 ## §2 `forge report --slug <slug> [--json] [--export <dir>]`
 
-Terminal output in this version. Sections: cost per completed block (per level and lane, split review / coder / S1+S2 / facts / proof time) · lane distribution · escalations per block with `trigger` · S1 calls per block · S2 rate and overrule rate per question · the review budget table with `missed_after_degrade` per degrade step · review depth and context-mode distribution, findings by category and severity · fix rounds per file, rounds that stalled, files stopped at `review_cap` · `review.unavailable` by reason · proof time per block · forecast vs actual lines and cases with the measured lines-per-case · blocks stopped at L3 · `overspend` and `l3_fallback` counts · runs stopped for `no_engine`. `--export <dir>` writes one JSON file per section — the durable dataset a future UI reads.
+Terminal output in this version. Sections: cost per block — completed and still open, with `completed` and the count of unknown-price sessions (per level and lane, split review / coder / S1+S2 / facts / proof time) · lane distribution · escalations per block with `trigger` · S1 calls per block · S2 rate and overrule rate per question · the review budget table with `missed_after_degrade` per degrade step · review depth and context-mode distribution, findings by category and severity · fix rounds per file, rounds that stalled, files stopped at `review_cap` · `review.unavailable` by reason · proof time per block · forecast vs actual lines and cases with the measured lines-per-case · blocks stopped at L3 · `overspend` and `l3_fallback` counts · runs stopped for `no_engine`. `--export <dir>` writes one JSON file per section — the durable dataset a future UI reads. After the sections the terminal output prints the spend per run (open blocks included) and the total.
 
 ## §3 Live views
 
-`forge ledger tail --slug <slug> [--n <count>]` prints the last rows — the orchestrator's live view when no Solo process list exists. `forge run status --run <id>` prints the run record: active blocks, orphans, whether the worker is pinned.
+`forge ledger tail --slug <slug> [--n <count>]` prints the last rows — the orchestrator's live view when no Solo process list exists. `forge run status --run <id>` prints the run record: active blocks, orphans, whether the worker is pinned, and `spent_usd` / `budget_usd` / `unknown_usd_sessions`.
+
+## §3.1 Spend and `budget.usd`
+
+Every `session` row carries `usd` (tokens × the static price table) or `usd: null, usd_unknown: true` when the provider/level has no price — never a guess; a `session.background` coder's price is always unknown. Spend code-forge never saw (a cloud or hand-run coder) goes in with `forge ledger add coder --run <r> --block <b> --usd <n> [--note "..."]`, a signed `session` row with `manual: true`. With `budget.usd` set, every session spawn first sums the run's spend: at 80 % one `budget.warning` row and one stderr line per run; at 100 % the session is refused (`budget.usd 20.00 reached (spent 20.13); raise budget.usd or end the run`), a `budget.refused` row is written, nothing is spawned, and a review reports `review.unavailable {reason: budget}`. A budget whose spend cannot be read refuses too (fail closed).
+
+Known limits, accepted: unknown-price sessions and `session.background` coders add **0** to the spent total — record their real cost with `forge ledger add coder --usd <n>`; `forge run status` shows `unknown_usd_sessions` and prints `N sessions have no known price; the budget does not count them` when N > 0. Two sessions spawned at the same moment can each write a `budget.warning` row (a rare duplicate; the warning still means the same thing).
 
 ## §4 Calibration — `forge ledger calibration --slug <slug> [--question <id>]`
 

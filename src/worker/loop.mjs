@@ -14,6 +14,12 @@
  * Then it polls the queue, hands each ticket to the engine hook (`./engine.mjs`, B12a), signs the
  * outcome with the run key and writes it with its done marker and a signed ledger row.
  *
+ * Config (B35): the worker reviews each ticket with the run's config snapshot, read from the run
+ * record per ticket — the ticket's pin when `run reload` pinned it (it was queued before the
+ * reload), else the snapshot in force. So `run reload` reaches the worker without a restart, and a
+ * restarted worker boots on the snapshot, not on whatever the file says now. A record from before
+ * snapshots (or none) keeps the config the worker booted with.
+ *
  * Restart: tickets live on disk and are idempotent by content hash, so a new worker simply re-reads
  * every ticket without a done marker. A worker that is stopping abandons its in-flight ticket (no
  * done marker) instead of recording the killed session as a failure. The new worker's pid is
@@ -27,6 +33,7 @@ import { loadProjectConfig } from '../config/load.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { spawnSession } from '../session/spawn.mjs';
+import { snapshotFor } from '../state/config-snapshot.mjs';
 import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
@@ -39,6 +46,9 @@ export const JEV_KEY_NAME = 'jev';
 
 export const DEFAULT_POLL_MS = 250;
 export const DEFAULT_SESSION_TIMEOUT_S = 300;
+
+/** B35: how long `configFor` waits before its one retry of a failed run-record read. */
+export const CONFIG_RETRY_MS = 200;
 
 /** The shortest heartbeat interval a worker accepts; anything else falls back to `HEARTBEAT_MS`. */
 export const MIN_HEARTBEAT_MS = 100;
@@ -140,7 +150,6 @@ export async function createWorker(opts, deps = {}) {
   const store = deps.store ?? (await createDefaultKeyStore(env));
   const jevKey = await resolveJevKey(cfg, { store, env, opRead: deps.opRead });
   const childEnv = sessionEnv(env, [jevKey, key.toString('hex')]);
-  const timeoutS = Number.isInteger(cfg?.review?.session_timeout_s) && cfg.review.session_timeout_s > 0 ? cfg.review.session_timeout_s : DEFAULT_SESSION_TIMEOUT_S;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
   const heartbeatMs = Number.isInteger(opts.heartbeatMs) && /** @type {number} */ (opts.heartbeatMs) >= MIN_HEARTBEAT_MS ? /** @type {number} */ (opts.heartbeatMs) : HEARTBEAT_MS;
   let stopping = false;
@@ -151,6 +160,75 @@ export async function createWorker(opts, deps = {}) {
 
   /** @param {Record<string, any>} row */
   const ledger = (row) => writeRow(signRow({ run: runId, ...row }, key));
+
+  /**
+   * The config ticket `id` is reviewed with (B35): its snapshot from the run record, re-read per
+   * ticket; the boot `cfg` when the run has no record or the record has no snapshot.
+   * @param {string} id
+   * @returns {Promise<Record<string, any>>}
+   * @throws {Error} `config-snapshot` — a record that cannot be read, or a missing/altered snapshot.
+   */
+  async function configFor(id) {
+    // The Jev key and the run root were settled at boot from `cfg`; a reload can never change
+    // them, because `keys`, `system1.key` and `tmp.root` are fixed keys `run reload` refuses.
+    let record;
+    for (let attempt = 1; ; attempt += 1) {
+      try {
+        record = await readRun(runId);
+        break;
+      } catch (err) {
+        if (/** @type {any} */ (err)?.code === 'no-run') return cfg;
+        // a transient read error (e.g. the record caught mid-replace) gets ONE retry
+        if (attempt >= 2) throw new Error('config-snapshot');
+        await new Promise((resolve) => setTimeout(resolve, CONFIG_RETRY_MS));
+      }
+    }
+    return snapshotFor(record, id)?.config ?? cfg;
+  }
+
+  /**
+   * One ticket through the engine hook with `tcfg` (the ticket's config snapshot): the unsigned result.
+   * @param {import('./queue.mjs').Ticket} ticket @param {Record<string, any>} base
+   * @param {Record<string, any>} tcfg
+   * @returns {Promise<Record<string, any>>}
+   */
+  async function reviewWith(ticket, base, tcfg) {
+    const timeoutS = Number.isInteger(tcfg?.review?.session_timeout_s) && tcfg.review.session_timeout_s > 0 ? tcfg.review.session_timeout_s : DEFAULT_SESSION_TIMEOUT_S;
+    /** @type {import('./engine.mjs').ReviewContext} */
+    const ctx = {
+      repoRoot,
+      runId,
+      runRootDir,
+      cfg: tcfg,
+      jevKey,
+      key, // signs the fix-loop state (B12c); the sessions never see it (`childEnv`)
+      readRows,
+      ...(deps.jev ? { jev: deps.jev } : {}),
+      // `sessionOpts.cfg` (a per-call config, e.g. the consensus second reviewer's level) wins
+      // over the ticket's; everything else the worker pins.
+      spawn: (sessionOpts) =>
+        spawn(
+          /** @type {any} */ ({ cfg: tcfg, ...sessionOpts, runRoot: runRootDir, run: runId, block: ticket.block, slug, timeoutMs: timeoutS * 1000 }),
+          { env: childEnv, ...(deps.bins ? { bins: deps.bins } : {}), ...(deps.stderr ? { stderr: deps.stderr } : {}) },
+        ),
+      writeRow: (row) => ledger({ ...row, block: ticket.block, file: ticket.file, content_hash: ticket.content_hash }),
+    };
+    try {
+      const outcome = await review(ticket, ctx);
+      return {
+        ...base,
+        status: outcome.status,
+        approved: outcome.approved === true,
+        engine: outcome.engine,
+        ...(typeof outcome.reason === 'string' ? { reason: outcome.reason } : {}),
+        ...(Array.isArray(outcome.findings) ? { findings: outcome.findings } : {}),
+        ...loopResult(outcome),
+        sessions: outcome.sessions,
+      };
+    } catch {
+      return { ...base, status: 'unavailable', reason: 'engine-error', approved: false };
+    }
+  }
 
   /**
    * @param {string} id
@@ -183,40 +261,14 @@ export async function createWorker(opts, deps = {}) {
       } else if (current !== ticket.content_hash) {
         result = { ...base, status: 'stale', approved: false };
       } else {
-        /** @type {import('./engine.mjs').ReviewContext} */
-        const ctx = {
-          repoRoot,
-          runId,
-          runRootDir,
-          cfg,
-          jevKey,
-          key, // signs the fix-loop state (B12c); the sessions never see it (`childEnv`)
-          readRows,
-          ...(deps.jev ? { jev: deps.jev } : {}),
-          // `sessionOpts.cfg` (a per-call config, e.g. the consensus second reviewer's level) wins
-          // over the worker's; everything else the worker pins.
-          spawn: (sessionOpts) =>
-            spawn(
-              /** @type {any} */ ({ cfg, ...sessionOpts, runRoot: runRootDir, run: runId, block: ticket.block, slug, timeoutMs: timeoutS * 1000 }),
-              { env: childEnv, ...(deps.bins ? { bins: deps.bins } : {}), ...(deps.stderr ? { stderr: deps.stderr } : {}) },
-            ),
-          writeRow: (row) => ledger({ ...row, block: ticket.block, file: ticket.file, content_hash: ticket.content_hash }),
-        };
+        /** @type {Record<string, any> | null} */
+        let ticketCfg = null;
         try {
-          const outcome = await review(ticket, ctx);
-          result = {
-            ...base,
-            status: outcome.status,
-            approved: outcome.approved === true,
-            engine: outcome.engine,
-            ...(typeof outcome.reason === 'string' ? { reason: outcome.reason } : {}),
-            ...(Array.isArray(outcome.findings) ? { findings: outcome.findings } : {}),
-            ...loopResult(outcome),
-            sessions: outcome.sessions,
-          };
+          ticketCfg = await configFor(id);
         } catch {
-          result = { ...base, status: 'unavailable', reason: 'engine-error', approved: false };
+          result = { ...base, status: 'unavailable', reason: 'config-snapshot', approved: false };
         }
+        if (ticketCfg) result = await reviewWith(ticket, base, ticketCfg);
       }
     }
     if (stopping) return null; // the session was killed by our own stop: leave the ticket queued
@@ -359,11 +411,21 @@ export async function bootWorker(opts, deps = {}) {
   const record = await readRun(opts.runId);
   if (record.status !== 'active') throw new WorkerError('run-ended', `run ${opts.runId} has ended`);
   const repoRoot = await repoRootOf(path.resolve(opts.cwd ?? record.workspace));
-  const loaded = await loadProjectConfig(repoRoot);
-  if (!loaded.ok) throw new WorkerError('config', loaded.message ?? 'the project config cannot be loaded');
+  // B35: a run with a config snapshot boots on it (the snapshot in force, not on whatever the file
+  // says now); a run from before snapshots boots on the file, as before.
+  let cfg;
+  try {
+    cfg = snapshotFor(record, '')?.config;
+  } catch {
+    throw new WorkerError('config', `run ${opts.runId}: the config snapshot in the run record is missing or altered`);
+  }
+  if (!cfg) {
+    const loaded = await loadProjectConfig(repoRoot);
+    if (!loaded.ok) throw new WorkerError('config', loaded.message ?? 'the project config cannot be loaded');
+    cfg = loaded.config;
+  }
   const other = liveWorker(repoRoot);
   if (other && other.pid !== process.pid) throw new WorkerError('worker-running', `worker pid ${other.pid} already serves this queue`);
-  const cfg = loaded.config;
   const tmpRoot = typeof cfg?.tmp?.root === 'string' ? cfg.tmp.root : undefined;
   const runRootDir = runRoot(opts.runId, { root: tmpRoot });
   setRunRoot(runRootDir);
