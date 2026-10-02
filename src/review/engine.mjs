@@ -15,7 +15,10 @@
  *     is `unavailable` with its reason and is NEVER approval; a failed lens means no judge;
  *  5. a valid answer with `needs_file` gets ONE more round with those files attached (git-tracked
  *     files only, never secret-like paths — `attachFiles`); a second `needs_file` is ignored; a
- *     request with a non-repo-relative path is refused (`needs_file-refused`, never approval).
+ *     request with a non-repo-relative path is refused (`needs_file-refused`, never approval);
+ *  6. a session that ends in `timeout` is spawned ONCE more on the same packet and level
+ *     (`session-retry.mjs`, B30); a second timeout is `unavailable: timeout`. The summary's
+ *     `attempts` says how many ran.
  * Approval (until B12b's triage lands) = the final answer (the judge's in dual/consensus mode, else
  * the single reviewer's) passed the guard, says `passed: true`, and carries no `critical` or
  * `warning` finding.
@@ -29,6 +32,7 @@ import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, readFileDiff } from './packet.mjs';
 import { FINDING_SCHEMA, minTokensOut, SMALL_DIFF_ADDED_LINES, validateReview } from './validate-review.mjs';
+import { spawnWithTimeoutRetry } from './session-retry.mjs';
 import { assertRowPath } from '../worker/ticket.mjs';
 
 /**
@@ -231,17 +235,30 @@ async function runOne(spec, text, packet, { deps, workDir, min, smallDiff = fals
   writeFileSync(promptPath, text, { mode: 0o600 });
   /** @type {Record<string, any> | null} */
   let res = null;
+  let attempts = 0;
   try {
-    res = await deps.spawn({
-      level: spec.level,
-      role: spec.role,
-      promptPath,
-      schema: FINDING_SCHEMA,
-      rowExtra: { lens: spec.lens, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn },
-      ...(spec.cfg ? { cfg: spec.cfg } : {}),
-    });
+    // a `timeout` is spawned once more on the same packet and level (B30); a spawn that throws
+    // (bad config, refused argv) is an `exit` failure, never approval
+    ({ res, attempts } = await spawnWithTimeoutRetry(
+      deps.spawn,
+      {
+        level: spec.level,
+        role: spec.role,
+        promptPath,
+        schema: FINDING_SCHEMA,
+        rowExtra: { lens: spec.lens, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn },
+        ...(spec.cfg ? { cfg: spec.cfg } : {}),
+      },
+      (row) => note(deps, row),
+      (n) => {
+        attempts = n;
+      },
+    ));
   } catch {
-    res = null; // a spawn that throws (bad config, refused argv) is an `exit` failure, never approval
+    // defensive only: the helper never throws. If it ever did, it is still an `exit` failure,
+    // never approval, with the attempts it had reported so far (at least 1).
+    res = null;
+    attempts = Math.max(attempts, 1);
   } finally {
     rmSync(promptPath, { force: true });
   }
@@ -251,6 +268,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, smallDiff = fals
     provider: res?.provider ?? null,
     model: res?.model ?? null,
     fallback_step: res?.fallback_step ?? 0,
+    attempts,
     tokens_in: res?.usage?.tokens_in ?? null,
     tokens_out: res?.usage?.tokens_out ?? null,
   };

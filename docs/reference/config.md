@@ -102,7 +102,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.block_budget_usd` | number \| null |  | `null` |  |
 | `review.min_tokens_out` | integer |  | `120` | min 1 |
 | `review.batch_small_files` | boolean |  | `true` |  |
-| `review.session_timeout_s` | integer |  | `600` | min 1 |
+| `review.session_timeout_s` | integer |  | `300` | min 1 |
 | `review.max_rounds_per_file` | integer |  | `4` | min 2; max 6 |
 | `review.recheck_scope` | enum: `fix_hunks`, `file` |  | `"fix_hunks"` |  |
 | `review.late_findings` | enum: `sweep`, `block` |  | `"sweep"` |  |

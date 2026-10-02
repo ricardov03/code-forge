@@ -3,7 +3,8 @@
  *
  *   review-file <path> --block <id> [--run <id>]   enqueue; prints {ticket, status: queued|done, file}
  *   review-file --wait <ticket> [--max <90s>]      poll; prints {ticket, status: done, result} or
- *                                                  {ticket, status: pending} when --max elapses
+ *                                                  {ticket, status: pending, reason: wait_timeout}
+ *                                                  when --max elapses (the review is still running)
  *
  * The same content enqueued again after an `unavailable` result is a fresh attempt (`retry: true`),
  * not the old result.
@@ -16,7 +17,9 @@
  * path is given relative to the current directory and stored relative to the REPOSITORY ROOT
  * (V4); an absolute path or a `..` segment is refused with `bad-path`. With no live worker the
  * answer is `worker_down` — never approval — and nothing is enqueued; the coder must then print
- * `===BLOCK <id> FAILED: worker down===`. Output is one JSON line on stdout.
+ * `===BLOCK <id> FAILED: worker down===`. While waiting, `worker_down` needs the worker to look
+ * down on two polls in a row, and a worker whose pid is alive with a fresh heartbeat is never down
+ * (`liveWorker`, B30). Output is one JSON line on stdout.
  * Exit codes: 0 queued/done/pending, 1 bad-path or another refusal, 2 usage, 3 worker_down.
  */
 
@@ -99,18 +102,20 @@ export async function runReviewFile(args, deps = {}) {
       const ticket = assertTicketId(flags.wait);
       const maxMs = flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max);
       const deadline = Date.now() + maxMs;
+      let downPolls = 0;
       for (;;) {
         if (isDone(repoRoot, ticket)) {
           const result = doneResult(repoRoot, ticket);
           say({ ticket, status: 'done', result, ...fixList(result) });
           return 0;
         }
-        if (!liveWorker(repoRoot)) {
+        downPolls = liveWorker(repoRoot) ? 0 : downPolls + 1;
+        if (downPolls >= 2 && !isDone(repoRoot, ticket)) {
           say({ ticket, status: 'worker_down' });
           return 3;
         }
-        if (Date.now() >= deadline) {
-          say({ ticket, status: 'pending' });
+        if (Date.now() >= deadline && downPolls === 0) {
+          say({ ticket, status: 'pending', reason: 'wait_timeout' });
           return 0;
         }
         await new Promise((resolve) => setTimeout(resolve, deps.pollMs ?? POLL_MS));

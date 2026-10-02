@@ -56,6 +56,7 @@ import { parseDiff } from './context.mjs';
 import { assemblePacket, assertPacketPath, readFileDiff } from './packet.mjs';
 import { cameFromJudge, resolvedBand, triageFindings } from './triage.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
+import { spawnWithTimeoutRetry } from './session-retry.mjs';
 
 /** @typedef {import('./triage.mjs').Finding} Finding */
 /** @typedef {import('./context.mjs').Hunk} Hunk */
@@ -209,11 +210,18 @@ async function recheckSession(packet, deps) {
   /** @type {Record<string, any> | null} */
   let res = null;
   try {
+    // a `timeout` is spawned once more on the same packet and level (B30)
     res = deps.spawn
-      ? await deps.spawn({ level: 'L2', role: 'reviewer', promptPath, schema: FINDING_SCHEMA, rowExtra: { lens: 'recheck', context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn } })
+      ? (
+          await spawnWithTimeoutRetry(
+            deps.spawn,
+            { level: 'L2', role: 'reviewer', promptPath, schema: FINDING_SCHEMA, rowExtra: { lens: 'recheck', context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn } },
+            (row) => note(deps, row),
+          )
+        ).res
       : null;
   } catch {
-    res = null;
+    res = null; // the helper never throws; if it ever did, it is still an `exit` failure
   } finally {
     rmSync(promptPath, { force: true });
   }

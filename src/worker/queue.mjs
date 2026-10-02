@@ -4,7 +4,7 @@
  *
  *   <repo>/.code-forge/queue/<ticket>.json   the ticket (written by `review-file`, idempotent)
  *   <repo>/.code-forge/queue/<ticket>.done   the worker's done marker `{ticket, status, result}`
- *   <repo>/.code-forge/queue/worker.json     the worker's announcement `{pid, start_time, run, started_at}`
+ *   <repo>/.code-forge/queue/worker.json     the worker's announcement `{pid, start_time, run, started_at, heartbeat_at}`
  *   <repo>/.code-forge/reviews/<run>/<ticket>.json   the SIGNED result (run key HMAC, §8.6)
  *
  * The forbidden list (§8.4 ★) denies a coder any write under `reviews/` and to `queue/*.done`;
@@ -19,6 +19,12 @@ import { isAlive, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
 import { assertRowPath, assertTicketId, contentHash, ticketId, WorkerError } from './ticket.mjs';
 
 export const WORKER_FILE = 'worker.json';
+
+/** How often a serving worker refreshes `heartbeat_at` (B30). */
+export const HEARTBEAT_MS = 5000;
+
+/** A heartbeat older than this is not fresh (twelve missed beats). */
+export const HEARTBEAT_STALE_MS = 60_000;
 
 /** @param {string} repoRoot */
 export const queueDir = (repoRoot) => path.join(repoRoot, '.code-forge', 'queue');
@@ -156,12 +162,60 @@ export async function verifyResult(repoRoot, runId, ticket) {
  * @param {string} repoRoot @param {{pid: number, run: string}} who
  */
 export function announceWorker(repoRoot, { pid, run }) {
-  const body = { pid, start_time: readStartTime(pid) ?? UNKNOWN_START_TIME, run, started_at: new Date().toISOString() };
+  const now = new Date().toISOString();
+  const body = { pid, start_time: readStartTime(pid) ?? UNKNOWN_START_TIME, run, started_at: now, heartbeat_at: now };
   writeAtomic(path.join(queueDir(repoRoot), WORKER_FILE), `${JSON.stringify(body)}\n`);
   return body;
 }
 
-/** @param {string} repoRoot @returns {{pid: number, start_time: string, run: string} | null} */
+/**
+ * Refresh the announcement's `heartbeat_at` (B30) while it is still THIS worker's: the file is
+ * re-read right before the write and must name the same `pid` AND `start_time` the worker
+ * announced. Another worker's announcement is never overwritten (the caller stops beating).
+ * The beat is written to a temp file, the announcement re-read and compared once more, and only
+ * then renamed over it. The worker calls this from a timer of its own, so it keeps beating while
+ * a long review session is awaited.
+ * @param {string} repoRoot @param {{pid: number, start_time: string}} self - what `announceWorker` returned.
+ * @param {Date} [now]
+ * @returns {boolean} whether a beat was written.
+ */
+export function beatWorker(repoRoot, self, now = new Date()) {
+  const mine = (/** @type {Record<string, any> | null} */ w) => w?.pid === self.pid && w.start_time === self.start_time;
+  const w = readWorker(repoRoot);
+  if (!mine(w)) return false;
+  const file = path.join(queueDir(repoRoot), WORKER_FILE);
+  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify({ ...w, heartbeat_at: now.toISOString() })}\n`, { mode: 0o644 });
+    // re-read right before the rename: an announcement that changed meanwhile is never replaced
+    if (!mine(readWorker(repoRoot))) {
+      rmSync(tmp, { force: true });
+      return false;
+    }
+    renameSync(tmp, file);
+    return true;
+  } catch (err) {
+    rmSync(tmp, { force: true });
+    throw err;
+  }
+}
+
+/** A heartbeat further than this in the future is not fresh (clock skew tolerance). */
+export const HEARTBEAT_FUTURE_MS = 5000;
+
+/**
+ * Whether the announcement's heartbeat is fresh: at most `HEARTBEAT_STALE_MS` old and at most
+ * `HEARTBEAT_FUTURE_MS` ahead of our clock (a heartbeat far in the future is forged or skewed).
+ * @param {{heartbeat_at?: unknown}} w @param {number} [nowMs]
+ */
+export function heartbeatFresh(w, nowMs = Date.now()) {
+  const at = typeof w?.heartbeat_at === 'string' ? Date.parse(w.heartbeat_at) : NaN;
+  if (!Number.isFinite(at)) return false;
+  const age = nowMs - at;
+  return age <= HEARTBEAT_STALE_MS && age >= -HEARTBEAT_FUTURE_MS;
+}
+
+/** @param {string} repoRoot @returns {{pid: number, start_time: string, run: string, heartbeat_at?: string} | null} */
 export function readWorker(repoRoot) {
   const w = readJSON(path.join(queueDir(repoRoot), WORKER_FILE));
   return w && Number.isInteger(w.pid) && w.pid > 1 && typeof w.run === 'string' ? w : null;
@@ -173,13 +227,20 @@ export function retractWorker(repoRoot, pid) {
 }
 
 /**
- * The live worker serving this queue, or null (`worker_down`): the announced pid must be alive
- * AND still have the announced start time (a recycled pid is not our worker).
- * @param {string} repoRoot
+ * The live worker serving this queue, or null (`worker_down`): the announced pid must be alive,
+ * AND either its heartbeat is fresh (B30: the worker itself wrote it within `HEARTBEAT_STALE_MS`)
+ * or it still has the announced start time (a recycled pid is not our worker). A fresh heartbeat
+ * wins over the start-time check: `ps` can fail or print another time zone's `lstart` inside a
+ * coder's sandbox, which made a live worker look down mid-review (issue #2).
+ * Accepted trade-off: a worker that is SIGKILLed (no retraction) leaves a heartbeat that stays
+ * fresh for up to `HEARTBEAT_STALE_MS` (60 s); if the OS reuses its pid inside that window, the
+ * queue reads as served until the heartbeat goes stale. A clean stop retracts the file at once.
+ * @param {string} repoRoot @param {{nowMs?: number}} [opts]
  */
-export function liveWorker(repoRoot) {
+export function liveWorker(repoRoot, opts = {}) {
   const w = readWorker(repoRoot);
   if (!w || !isAlive(w.pid)) return null;
+  if (heartbeatFresh(w, opts.nowMs)) return w;
   if (w.start_time !== UNKNOWN_START_TIME && readStartTime(w.pid) !== w.start_time) return null;
   return w;
 }

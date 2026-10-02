@@ -133,7 +133,7 @@
         },
         "min_tokens_out": { "type": "integer", "minimum": 1, "default": 120 },
         "batch_small_files": { "type": "boolean", "default": true },
-        "session_timeout_s": { "type": "integer", "minimum": 1, "default": 600 },
+        "session_timeout_s": { "type": "integer", "minimum": 1, "default": 300 },
         "max_rounds_per_file": { "type": "integer", "minimum": 2, "maximum": 6, "default": 4 },
         "recheck_scope": { "type": "string", "enum": ["fix_hunks", "file"], "default": "fix_hunks" },
         "late_findings": { "type": "string", "enum": ["sweep", "block"], "default": "sweep" }

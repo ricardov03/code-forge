@@ -84,6 +84,125 @@ export function runRootFor(runId, root) {
   return runRoot(runId, { root });
 }
 
+/** How much of a timed-out session's stderr is kept (B30). */
+export const DIAGNOSTIC_TAIL_BYTES = 4096;
+
+/** A timed-out session's stderr over this size keeps no text at all (bounds the redact cost). */
+export const STDERR_MAX_BYTES = 1024 * 1024;
+
+/** How many stdout event types a timed-out session keeps. */
+export const STDOUT_EVENTS_MAX = 20;
+
+/** The longest event type kept. */
+const EVENT_TYPE_MAX = 40;
+
+/**
+ * Packet lines shorter than this are too common to tell apart from ordinary output, so they are
+ * NOT filtered. Accepted risk (B30): a packet line under 16 characters (a brace, `return x;`) can
+ * appear in a stderr tail; such a line carries no meaningful packet content on its own.
+ */
+const PACKET_LINE_MIN = 16;
+
+/** The tail note when the packet cannot be read: no stderr text is kept at all (fail closed). */
+export const TAIL_WITHHELD_PACKET = 'withheld: packet unreadable';
+/** The tail note when stderr is over `STDERR_MAX_BYTES`. */
+export const TAIL_WITHHELD_LARGE = 'stderr too large, withheld';
+/** The tail note when the last 4 KB of stderr is one partial line. */
+export const TAIL_WITHHELD_LONG_LINE = 'one long line, withheld';
+
+/** @param {Buffer} buf @param {number} at @returns {number} the first character start at or after `at`. */
+function charStart(buf, at) {
+  let i = at;
+  while (i < buf.length && (buf[i] & 0xc0) === 0x80) i += 1;
+  return i;
+}
+
+/** @param {unknown} text @returns {string} */
+function asText(text) {
+  return Buffer.isBuffer(text) ? text.toString('utf8') : typeof text === 'string' ? text : '';
+}
+
+const PEM_BEGIN = /-----BEGIN [A-Z0-9 ]*-----/;
+const PEM_END = /-----END [A-Z0-9 ]*-----/;
+
+/**
+ * The stderr tail of a timed-out session (B30), never packet content:
+ *  1. no packet text (unreadable) ⇒ no text: `{tail: null, note: 'withheld: packet unreadable'}`;
+ *     stderr over `STDERR_MAX_BYTES` ⇒ `{tail: null, note: 'stderr too large, withheld'}`;
+ *  2. on the FULL raw text: every PEM block (`-----BEGIN` … `-----END` lines, an unterminated one
+ *     to the end) and every line repeating a packet line (≥ 16 chars) is dropped;
+ *  3. the FULL remaining text goes through B0 `redact`;
+ *  4. over `maxBytes`, the last `maxBytes` bytes are kept, starting on a character, with the first
+ *     (partial) line dropped; when that piece has no line break the tail is withheld.
+ * @param {string | Buffer | null | undefined} text @param {string | null} packetText @param {number} [maxBytes]
+ * @returns {{tail: string | null, note?: string}}
+ */
+export function stderrTail(text, packetText, maxBytes = DIAGNOSTIC_TAIL_BYTES) {
+  if (typeof packetText !== 'string') return { tail: null, note: TAIL_WITHHELD_PACKET };
+  const raw = asText(text);
+  if (raw.length === 0) return { tail: '' };
+  if (Buffer.byteLength(raw) > STDERR_MAX_BYTES) return { tail: null, note: TAIL_WITHHELD_LARGE };
+  const packetLines = [
+    ...new Set(
+      packetText
+        .split('\n')
+        .map((l) => l.trim())
+        .filter((l) => l.length >= PACKET_LINE_MIN),
+    ),
+  ];
+  let inPem = false;
+  /** @type {string[]} */
+  const kept = [];
+  for (const line of raw.split('\n')) {
+    const t = line.trim();
+    if (inPem) {
+      if (PEM_END.test(t)) inPem = false;
+      continue;
+    }
+    if (PEM_BEGIN.test(t)) {
+      inPem = !PEM_END.test(t);
+      continue;
+    }
+    if (t.length >= PACKET_LINE_MIN && packetLines.some((p) => t.includes(p))) continue;
+    kept.push(line);
+  }
+  const safe = /** @type {string} */ (redact(kept.join('\n')));
+  const buf = Buffer.from(safe, 'utf8');
+  if (buf.length <= maxBytes) return { tail: safe };
+  const from = charStart(buf, buf.length - maxBytes);
+  const piece = buf.subarray(from).toString('utf8');
+  if (buf[from - 1] === 0x0a) return { tail: piece }; // the cut fell exactly on a line start
+  const nl = piece.indexOf('\n');
+  if (nl === -1) return { tail: '', note: TAIL_WITHHELD_LONG_LINE };
+  return { tail: piece.slice(nl + 1) };
+}
+
+/**
+ * What a timed-out session's stdout says without any of its text (B30): the last
+ * `STDOUT_EVENTS_MAX` event types (JSON lines with a string `type`, each cut to 40 characters and
+ * kept only when it is all `[a-z0-9_.-]`) and the total byte length. Non-JSON stdout gives only
+ * `stdout_bytes`. Event payloads, which can echo the packet, are never kept.
+ * @param {string | Buffer | null | undefined} text
+ * @returns {{stdout_bytes: number, stdout_events?: string[]}}
+ */
+export function stdoutEvents(text) {
+  const raw = asText(text);
+  const bytes = Buffer.byteLength(raw);
+  /** @type {string[]} */
+  const types = [];
+  const lines = raw.split('\n');
+  // scan from the end: stop once enough events are kept, or after a bounded number of lines
+  for (let i = lines.length - 1, scanned = 0; i >= 0 && types.length < STDOUT_EVENTS_MAX && scanned < 5000; i -= 1, scanned += 1) {
+    const line = lines[i].trim();
+    if (!line.startsWith('{')) continue;
+    const event = tryJSON(line);
+    if (!event || typeof event !== 'object' || typeof event.type !== 'string') continue;
+    const type = event.type.slice(0, EVENT_TYPE_MAX);
+    if (/^[a-z0-9_.-]+$/.test(type)) types.unshift(type);
+  }
+  return types.length > 0 ? { stdout_bytes: bytes, stdout_events: types } : { stdout_bytes: bytes };
+}
+
 /** @param {number} bytes */
 export const estimateTokens = (bytes) => Math.ceil(bytes / 4);
 
@@ -570,7 +689,22 @@ async function runForeground(built, opts, deps) {
 
   const unavailable = classifyUnavailable(res, read.parsed);
   if (unavailable) return { status: 'unavailable', reason: unavailable, answer: null, ...common };
-  if (res.timedOut) return { status: 'timeout', reason: `killed after ${opts.timeoutMs ?? DEFAULT_TIMEOUT_MS} ms`, answer: null, ...common };
+  if (res.timedOut) {
+    // B30: what the CLI printed last, so a hang's cause can be seen — stderr redacted, capped and
+    // packet-free; stdout only as event types and a byte count, never its text
+    /** @type {string | null} */
+    let packetText = input !== undefined ? Buffer.from(input).toString('utf8') : null;
+    if (packetText === null) {
+      try {
+        packetText = readFileSync(opts.promptPath, 'utf8');
+      } catch {
+        packetText = null; // fail closed: no tails without the packet to filter against
+      }
+    }
+    const err = stderrTail(res.stderr, packetText);
+    const tails = { stderr_tail: err.tail, ...(err.note ? { tail_note: err.note } : {}), ...stdoutEvents(res.stdout) };
+    return { status: 'timeout', reason: `killed after ${opts.timeoutMs ?? DEFAULT_TIMEOUT_MS} ms`, answer: null, ...common, ...tails };
+  }
   if (res.result !== 'ok' || read.parsed?.is_error === true) return { status: 'failed', reason: `exit ${res.code}`, answer: null, ...common };
   if (built.compiled) {
     // validate against the schema the provider was actually given (the cached variant, stable across attempts)

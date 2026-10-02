@@ -31,14 +31,17 @@ import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { reviewTicket } from './engine.mjs';
-import { announceWorker, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
+import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
 import { contentHash, DELETED_HASH, repoRootOf, WorkerError } from './ticket.mjs';
 
 /** Name of the key the worker resolves for System 1 (`keys.jev` / `system1.key` reference). */
 export const JEV_KEY_NAME = 'jev';
 
 export const DEFAULT_POLL_MS = 250;
-export const DEFAULT_SESSION_TIMEOUT_S = 600;
+export const DEFAULT_SESSION_TIMEOUT_S = 300;
+
+/** The shortest heartbeat interval a worker accepts; anything else falls back to `HEARTBEAT_MS`. */
+export const MIN_HEARTBEAT_MS = 100;
 
 /**
  * Provider-CLI auth variables a reviewer CLI may legitimately need (the reviewer runs on the
@@ -104,6 +107,8 @@ export function loopResult(outcome) {
  * @property {string} slug - ledger project slug (the run record's `project`).
  * @property {Buffer} key - the run's HMAC key.
  * @property {number} [pollMs]
+ * @property {number} [heartbeatMs] - how often `heartbeat_at` is refreshed: an integer ≥ `MIN_HEARTBEAT_MS`,
+ *   else `HEARTBEAT_MS`.
  */
 
 /**
@@ -137,7 +142,10 @@ export async function createWorker(opts, deps = {}) {
   const childEnv = sessionEnv(env, [jevKey, key.toString('hex')]);
   const timeoutS = Number.isInteger(cfg?.review?.session_timeout_s) && cfg.review.session_timeout_s > 0 ? cfg.review.session_timeout_s : DEFAULT_SESSION_TIMEOUT_S;
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
+  const heartbeatMs = Number.isInteger(opts.heartbeatMs) && /** @type {number} */ (opts.heartbeatMs) >= MIN_HEARTBEAT_MS ? /** @type {number} */ (opts.heartbeatMs) : HEARTBEAT_MS;
   let stopping = false;
+  /** @type {ReturnType<typeof setInterval> | null} */
+  let heartbeat = null;
   /** @type {(() => void) | null} */
   let wake = null;
 
@@ -267,9 +275,34 @@ export async function createWorker(opts, deps = {}) {
     return done;
   }
 
+  /**
+   * Announce this worker and keep its heartbeat beating on a timer of its own (B30), independent
+   * of the ticket being processed: a review session can run for minutes, and `review-file --wait`
+   * must still see the worker as live the whole time.
+   */
+  function announce() {
+    const self = announceWorker(repoRoot, { pid: process.pid, run: runId });
+    stopBeating();
+    const timer = setInterval(() => {
+      try {
+        // another worker announced itself over us: stop beating, never overwrite its file
+        if (!beatWorker(repoRoot, self)) stopBeating();
+      } catch {
+        // a missed beat (an fs error) is retried on the next tick; the poll loop goes on
+      }
+    }, heartbeatMs);
+    timer.unref();
+    heartbeat = timer;
+  }
+
+  function stopBeating() {
+    if (heartbeat !== null) clearInterval(heartbeat);
+    heartbeat = null;
+  }
+
   /** Serve the queue until `stop()`. */
   async function run() {
-    announceWorker(repoRoot, { pid: process.pid, run: runId });
+    announce();
     try {
       while (!stopping) {
         try {
@@ -294,7 +327,7 @@ export async function createWorker(opts, deps = {}) {
 
   /** Drain the queue once while announced, then release (`worker --once`). */
   async function once() {
-    announceWorker(repoRoot, { pid: process.pid, run: runId });
+    announce();
     try {
       return await drain();
     } finally {
@@ -310,6 +343,7 @@ export async function createWorker(opts, deps = {}) {
 
   /** Withdraw this process's announcement (`worker.json`) if it is still ours. */
   function release() {
+    stopBeating();
     retractWorker(repoRoot, process.pid);
   }
 
