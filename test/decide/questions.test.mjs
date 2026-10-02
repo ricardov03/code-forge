@@ -89,6 +89,13 @@ test('buildQuestionPayload: renders exactly the requested ids, in the shape askJ
   assert.equal(payload.risk.type, 'score');
 });
 
+test('buildQuestionPayload: a score question sends criteria as a list indexed by score (Jev 422s on an object)', () => {
+  const payload = buildQuestionPayload(['risk', 'lane'], {});
+  assert.ok(Array.isArray(payload.risk.criteria));
+  assert.deepEqual(payload.risk.criteria, [0, 1, 2, 3].map((k) => QUESTIONS.risk.criteria[k]));
+  assert.equal(Array.isArray(payload.lane.criteria), false); // choice keeps its keyed object
+});
+
 test('buildQuestionPayload: rejects an empty id list', () => {
   assert.throws(() => buildQuestionPayload([], {}), TypeError);
 });
