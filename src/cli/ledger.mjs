@@ -6,7 +6,7 @@
  *   ledger calibration --slug <slug> [--question <id>]
  *   ledger outcome --scan-git --slug <slug> [--cwd <dir>] [--days <n>]
  *   ledger outcome --pr <n> --ci red|green|reverted --slug <slug>
- *   ledger tail --slug <slug> [--n <count>]
+ *   ledger tail --slug <slug> [--n <count> | -n <count>]
  */
 
 import { writeSafe } from '../util/redact.mjs';
@@ -56,7 +56,7 @@ export async function runLedger(args, deps = {}) {
   const { stdout = process.stdout, stderr = process.stderr } = deps;
   const out = (/** @type {string} */ s) => writeSafe(stdout, s);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
-  const usage = () => err('usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]\n');
+  const usage = () => err('usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>])\n');
 
   const [sub] = args;
   const slug = flagValue(args, '--slug');
@@ -126,15 +126,22 @@ export async function runLedger(args, deps = {}) {
     }
 
     if (sub === 'tail') {
-      const nFlag = readOptionalFlag(args, '--n');
-      if (!nFlag.ok) {
-        err('ledger tail: --n requires a value\n');
+      // `-n` is the spelling everyone types from `tail(1)`; before B31 it was not recognised, so
+      // `ledger tail -n 3` silently printed the default 20 rows (issue #2, field note 8).
+      const longN = readOptionalFlag(args, '--n');
+      const shortN = readOptionalFlag(args, '-n');
+      if (!longN.ok || !shortN.ok) {
+        err(`ledger tail: ${longN.ok ? '-n' : '--n'} requires a value\n`);
         return 2;
       }
-      const nArg = nFlag.value ?? '20';
+      if (longN.value !== undefined && shortN.value !== undefined) {
+        err('ledger tail: give the count once, as --n <count> or -n <count>\n');
+        return 2;
+      }
+      const nArg = longN.value ?? shortN.value ?? '20';
       const n = parseNonNegativeInt(nArg);
       if (n === null) {
-        err(`ledger tail: --n must be a non-negative integer, got "${nArg}"\n`);
+        err(`ledger tail: --n/-n must be a non-negative integer, got "${nArg}"\n`);
         return 2;
       }
       const rows = await readAllRows(slug);

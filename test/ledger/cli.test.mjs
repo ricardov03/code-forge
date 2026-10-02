@@ -32,6 +32,55 @@ test('ledger tail --n 0 prints nothing (not the whole ledger)', async () => {
   });
 });
 
+test('B31: ledger tail limits the rows with --n and with -n: n=1 -> 1, n=3 -> 3, n=50 on a 25-row ledger -> 25', async () => {
+  await withTempHome(async () => {
+    for (let i = 0; i < 25; i += 1) await appendRow({ event: 'dispatch', block: `b${i}` }, { slug: 'cli-limit' });
+    /** @type {Array<[string, string[]]>} */
+    const cases = [
+      ['1', ['b24']],
+      ['3', ['b22', 'b23', 'b24']],
+      ['50', Array.from({ length: 25 }, (_, i) => `b${i}`)],
+    ];
+    for (const flag of ['--n', '-n']) {
+      for (const [n, expected] of cases) {
+        const stdout = captureStream();
+        const code = await runLedger(['tail', '--slug', 'cli-limit', flag, n], { stdout });
+        assert.equal(code, 0, `${flag} ${n}`);
+        const lines = stdout.text.split('\n');
+        assert.equal(lines.pop(), '', `${flag} ${n}: output ends with a newline`);
+        assert.equal(lines.length, expected.length, `${flag} ${n}: row count`);
+        assert.deepEqual(lines.map((l) => JSON.parse(l).block), expected, `${flag} ${n}: rows`);
+      }
+    }
+    // No flag keeps the default of 20 rows.
+    const stdout = captureStream();
+    assert.equal(await runLedger(['tail', '--slug', 'cli-limit'], { stdout }), 0);
+    assert.equal(stdout.text.trim().split('\n').length, 20);
+  });
+});
+
+test('B31: ledger tail with a bad -n (non-integer, negative, missing, or given twice) prints a usage error and exits 2 with no rows', async () => {
+  await withTempHome(async () => {
+    await appendRow({ event: 'run.start' }, { slug: 'cli-bad-short' });
+    /** @type {Array<[string[], string]>} */
+    const cases = [
+      [['tail', '--slug', 'cli-bad-short', '-n', 'foo'], 'ledger tail: --n/-n must be a non-negative integer, got "foo"\n'],
+      [['tail', '--slug', 'cli-bad-short', '-n', '-1'], 'ledger tail: --n/-n must be a non-negative integer, got "-1"\n'],
+      [['tail', '--slug', 'cli-bad-short', '-n', '2.5'], 'ledger tail: --n/-n must be a non-negative integer, got "2.5"\n'],
+      [['tail', '--slug', 'cli-bad-short', '-n'], 'ledger tail: -n requires a value\n'],
+      [['tail', '--slug', 'cli-bad-short', '-n', '--slug'], 'ledger tail: -n requires a value\n'],
+      [['tail', '--slug', 'cli-bad-short', '--n', '1', '-n', '2'], 'ledger tail: give the count once, as --n <count> or -n <count>\n'],
+    ];
+    for (const [args, message] of cases) {
+      const stdout = captureStream();
+      const stderr = captureStream();
+      assert.equal(await runLedger(args, { stdout, stderr }), 2, args.join(' '));
+      assert.equal(stderr.text, message, args.join(' '));
+      assert.equal(stdout.text, '', args.join(' '));
+    }
+  });
+});
+
 test('ledger tail rejects a non-integer (including a fraction like "1.5"), or a negative, --n with usage and exit 2', async () => {
   await withTempHome(async () => {
     for (const bad of ['foo', '-1', '1.5']) {

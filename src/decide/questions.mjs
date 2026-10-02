@@ -155,7 +155,7 @@ export function buildQuestionPayload(ids, cfg = {}) {
   /** @type {Record<string, {type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string> | string[]}>} */
   const out = {};
   for (const id of ids) {
-    out[id] = toWire(renderQuestion(id, cfg));
+    out[id] = toWire(id, renderQuestion(id, cfg));
   }
   return out;
 }
@@ -164,11 +164,34 @@ export function buildQuestionPayload(ids, cfg = {}) {
  * Jev's wire shape: a `score` question takes `criteria` as a LIST whose index is the score (an
  * object keyed `0..n` is refused with 422 "Input should be a valid list"); `choice` and `noul`
  * keep the keyed object. The answer's `legend`/`probabilities` come back keyed `"0".."n"`.
+ *
+ * The list index IS the score, so the (merged) keys must be exactly the integers `0..n`. A gap, a
+ * start at 1 or a non-integer key would otherwise shift every label onto the wrong score without a
+ * word — so this throws instead, naming the question id and the keys (never the label text).
+ * @param {string} id
  * @param {{type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string>}} q
  * @returns {{type: 'choice'|'score'|'noul', instructions: string, criteria: Record<string, string> | string[]}}
+ * @throws {TypeError} for a score question whose criteria keys are not exactly `0..n`.
  */
-function toWire(q) {
+export function toWire(id, q) {
   if (q.type !== 'score') return q;
-  const keys = Object.keys(q.criteria).sort((a, b) => Number(a) - Number(b));
-  return { ...q, criteria: keys.map((k) => q.criteria[k]) };
+  const keys = Object.keys(q.criteria);
+  const notIntegers = keys.filter((k) => !/^(0|[1-9]\d*)$/.test(k));
+  const present = new Set(keys);
+  const missing = [];
+  // n integer keys are exactly 0..n-1 iff none of 0..n-1 is missing.
+  for (let i = 0; i < keys.length - notIntegers.length; i += 1) {
+    if (!present.has(String(i))) missing.push(String(i));
+  }
+  if (notIntegers.length > 0 || missing.length > 0) {
+    const problems = [
+      ...(missing.length > 0 ? [`missing ${missing.join(', ')}`] : []),
+      ...(notIntegers.length > 0 ? [`not an integer: ${notIntegers.map((k) => JSON.stringify(k)).join(', ')}`] : []),
+    ];
+    throw new TypeError(
+      `score question ${JSON.stringify(id)}: criteria keys must be exactly the integers 0..n ` +
+        `(check system1.criteria_extra.${id}.criteria); got keys ${keys.map((k) => JSON.stringify(k)).join(', ')}: ${problems.join('; ')}`,
+    );
+  }
+  return { ...q, criteria: keys.map((_, i) => q.criteria[String(i)]) };
 }
