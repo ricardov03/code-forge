@@ -2,7 +2,7 @@
 
 > Source material for marketing the `code-forge` skill: landing copy, posts, threads, talks.
 > Built from the 2026-09-24 design session. Every number here has a source line. Numbers marked **(claim)** come from third parties and are not verified by us.
-> Status of the product: **in build.** Do not publish "available now" copy until `npm install -g @codedology/code-forge` then `code-forge init` works end to end on a published release.
+> Status of the product: **published on npm** as `@codedology/code-forge` (install with `npm install -g @codedology/code-forge`, then `code-forge init`). Where this bank and [../how-it-works.md](../how-it-works.md) differ on a mechanism, the built behaviour wins.
 
 ---
 
@@ -46,7 +46,8 @@ Anthropic, OpenAI and xAI, each on four levels ranked by intelligence. Default: 
 | L3 | plan, harden, rulings, System 2 | Fable 5.1 | GPT-6 Astra (high) | Grok 4.7 (xhigh) |
 
 Why: skills name **levels**, never models. When a model changes, you edit one line of config, not your workflow.
-Escalation: start at the level Jev picks, go up one level after two failed tries, a security change, or a System 2 ruling. Never skip a level. If L3 fails, stop and ask the human.
+Escalation: start at the level Jev picks, go up one level after two failed tries, a review round that leaves two or more warnings, a security change, or a System 2 ruling. Never skip a level. Coders stop at L2; a stuck block gets one L3 patch of at most 80 lines, then the human decides.
+Note on OpenAI: Codex always has a shell, so it cannot run the closed-book roles (reviewer, judge, System 2, plan author). With the OpenAI matrix, use Claude or Grok for L2 and L3 reviews and plans; Codex still codes.
 
 ### 4.2 System 1 / System 2 decisions
 - **System 1 = Jev** (TypeSafe): typed answers (choice / yes-no / score) with a probability, in about half a second.
@@ -61,26 +62,34 @@ The coder says "file done". A new, blind reviewer session checks only that file'
 1. Tools on the file first.
 2. Jev scores the file's risk (0–3). Low: one quick L2 review. Medium: one full L2 review. High: two blind L2 sessions with different lenses (correctness vs contracts/security) plus an L3 judge.
 3. Jev triages every finding: real defect ⇒ fix now; unclear ⇒ L3 judge; preference ⇒ logged as a nit.
-4. After each fix, Jev asks "resolved?". Two failed rounds ⇒ the coder moves up one level.
+4. After each fix, Jev asks "resolved?". One round that leaves two or more warnings ⇒ the next fix runs one level up. A file gets at most four rounds.
 5. The ledger tracks Jev's answers against outcomes, so thresholds are tuned from data.
 
-**Consensus review (multimodel on):** two L2 reviewers from two different providers, blind to each other, then a new L3 session reads both reports and rules.
+**Consensus review (multimodel on):** for a file above risk 1, two L2 reviewers from two different providers, blind to each other, then a new L3 session from a third provider reads both reports and rules. Low-risk files and docs blocks keep one reviewer: a consensus review of a docs block costs a lot and finds little.
 
 Why: isolated sessions carry only a diff or two reports, so tokens stay small; two different lenses find different bugs; nobody reviews their own work.
 
 ### 4.4 Works in any harness
-Built on the open Agent Skills standard (`SKILL.md`). The installer finds Claude Code, Codex, Grok, Gemini and Cursor and puts the skill where each already looks. With Solo, agents run as processes you can watch; without it, the harness's own subagents do the job.
+Built on the open Agent Skills standard (`SKILL.md`). The installer finds Claude Code, Codex, Grok, Gemini and Cursor and puts the skill where each already looks. With Solo, agents run as processes you can watch; without it, Claude Code's own subagents do the job (other harnesses need Solo or `engine: subprocess`).
 
 ### 4.5 Install once, ready on day 1
 `npm install -g @codedology/code-forge` then `code-forge init` — patterns borrowed from Vite+, the Laravel installer and `npx skills`:
 - short wizard, every question has a default;
 - `--no-interaction` plus override flags for scripts;
 - one line of JSON when an agent runs it;
-- detects your test/lint/type/format commands from the lockfiles;
-- ends with `doctor`: one real Jev call and a ping to every model level, so you never discover a broken setup mid-run.
+- detects your test/lint/type/format commands from the project's manifest (`package.json`, `composer.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`);
+- ends with `doctor --quick` (config, links, keys); the full `doctor` makes one real Jev call and pings every model level, so you never discover a broken setup mid-run.
 
 ### 4.6 Keys: yours, local, never in the repo
-Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service). Setup asks for the key if it is missing. 1Password is optional: code-forge reads the `op://` reference once and caches the key in the keychain for 8 hours. The config file stores **references**, never values.
+Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manager, Linux Secret Service). Setup asks for the key if it is missing. 1Password is optional: paste the item ID or link (or an `op://` reference); code-forge reads it once and caches the key in the keychain for 8 hours. The config file stores **references**, never values.
+
+### 4.7 Cost you can see, and a stop you set
+Every session row in the ledger carries an estimated cost. `code-forge report` shows the cost per block (open blocks too) and the spend per run. `budget.usd` caps a run: one warning at 80% of it, no new session at 100%.
+
+Why: "the budget stop is the feature". A run that stops at a known number is better than a bill you discover later.
+
+### 4.8 Errors you can report in one step
+Failed commands go to a local, cleaned log. `code-forge logs report` cleans the text twice, shows the whole issue, and files it only after a yes. An error that a newer version already fixes gets "upgrade" instead of a new issue.
 
 ## 5. Proof points we can say today
 
@@ -126,7 +135,8 @@ Per-user key store on the OS keychain (macOS Keychain, Windows Credential Manage
 - Any cost-saving number from our own runs: the ledger records data, but no calibrated baseline is published yet.
 - "Works with every harness": only after `doctor` passes on each one.
 - Mutation-testing as a product feature: decided against (Q16 = cut, 2026-09-25) — do not promise it, ever.
-- Availability: not published until `@codedology/code-forge` ships on npm (scope owner verified 2026-09-24).
+- Codex as a reviewer, judge or plan author: it is refused for those roles until it has a mode without a shell.
+- "Sends nothing": true for telemetry (there is none), but `code-forge logs report` can file a public GitHub issue after the user reads it and says yes. Say "nothing leaves your machine without your yes".
 
 ## 10. Sources
 

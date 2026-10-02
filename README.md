@@ -3,10 +3,38 @@
 A CLI (`code-forge`) plus one Agent Skill that runs the **plan → harden → code → review** pipeline
 for cross-model, parallel, evidence-gated feature delivery — on Claude Code, Codex, Grok, and Solo.
 
-> **Status:** built block by block from a maintainer-only design plan. The CLI, decision layer,
-> review engine, worker, proof policy and installer are landed; the Agent Skill under `skill/` and
-> the shipped example repo under `examples/` land in later blocks (see
-> `docs/reference/blocks.json` for what has landed and what is still pending).
+> **Status:** published on npm. The CLI, the decision layer, the review engine, the worker, the
+> proof policy, the installer, the Agent Skill under `skill/` and the example repo under
+> `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
+> in each version is in [CHANGELOG.md](CHANGELOG.md).
+
+## What's new in 0.4
+
+- **Cost control.** Set `budget.usd` per run: one warning at 80%, no new session at 100%. Every
+  session row carries an estimated `usd`; `report` and `run status` show the spend, and
+  `ledger add coder --usd` records spend code-forge did not see.
+- **Cheaper, faster fixes.** One review round that leaves 2 or more warnings climbs the coder one
+  level (`escalation.*`). Docs and contract blocks code at L1 or higher and skip multimodel review;
+  a file with risk 0–1 gets one reviewer (`review.single_reviewer_max_risk`).
+- **Change the config mid-run.** `code-forge run reload --run <id>` re-reads `.code-forge.yml`
+  without stopping open blocks.
+- **Stricter plans.** `plan check` refuses a block whose level is not the lane recorded with
+  `jev ask lane --block <id>` (or `--rules` without Jev), and prints the lane of every block.
+  `block close --report <file>` fails a coder report that does not name a review ticket per file.
+- **Codex is refused for closed-book roles** (reviewer, judge, System 2, plan author): it always
+  has a shell. See [Security model](#security-model).
+- **Steadier reviews.** A timed-out review session is retried once; `review.session_timeout_s`
+  defaults to 300; a live worker with a fresh heartbeat is never reported down.
+- **Better error reports.** `logs report --with-doctor` adds a cleaned setup check; errors list the
+  last 5 command names; recovered problems are logged as warnings; an error that a newer version
+  fixes tells you to upgrade instead of filing it.
+- **Earlier checks.** `validate` refuses an effort the level's provider cannot take (for example
+  `xhigh` on an openai level), so nothing fails when the session starts.
+
+Fixed in 0.3.1 and 0.3.2: Claude reviewer sessions no longer fail at once on the `--json-schema`
+flag; Grok answers are read from Grok's own answer envelope; Jev `score` questions (such as `risk`)
+no longer fall back to rules; and a clean review of a tiny diff (20 added lines or fewer) needs only
+40 output tokens, so it is no longer refused as `too_short`.
 
 ## What ships
 
@@ -88,28 +116,28 @@ usage line.
 | `tools` | `code-forge tools [--json]` · `code-forge tools install [<id>…] [--yes] [--dry-run]` — see and install the recommended tools (claude, codex, gemini, grok, op, solo) |
 | `validate` | `code-forge validate [--file <path>]` |
 | `resolve` | `code-forge resolve <L0\|L1\|L2\|L3>` |
-| `run` | `code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]` · `run start --reattach --run <id>` · `run status --run <id>` · `run reload --run <id>` · `run end --run <id>` |
-| `block` | `code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file>` · `block attempt\|rebase\|claim\|close\|stop\|waive …` (§4.9; `waive` is human-only) |
+| `run` | `code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]` · `run start --reattach --run <id> [--worker-pid <pid>]` · `run status --run <id>` (with spent and budget USD) · `run reload --run <id>` (re-read `.code-forge.yml` mid-run) · `run end --run <id>` |
+| `block` | `code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code\|docs\|contract]` · `block attempt\|rebase <id> --run <r>` · `block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews]` · `block claim <id> <path> --run <r>` · `block stop <id> --run <r> --reason <text>` · `block waive <id> <finding-id> --run <r> --file <path> --reason <text>` (human-only) |
 | `worker` | `code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]` — started detached by `run start`, never by a coder |
 | `review` | `code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> \| --intent "<text>"] [--run <id>] [--max <seconds>] [--json] [--keep-run]` — review only: no coder, no proof, never closes a block |
-| `review-file` | `code-forge review-file <path> --block <id> [--run <id>]` (enqueue) · `review-file --wait <ticket> [--max <seconds>s]` (poll) |
-| `spawn` | `code-forge spawn --level L<n> --role <role> --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <s>] [--background]` |
-| `s2` | `code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <s>]` |
-| `author` | `code-forge author --job plan\|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <s>]` |
-| `facts` | `code-forge facts --brief <file> [--sources <path>…] [--out <file>] [--run <id>] [--timeout <s>]` |
-| `plan` | `code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]` — every block's level must be the lane recorded by `jev ask lane --block <id>` |
-| `proof` | `code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]` · `proof export\|lock\|unlock\|restore <block> --run <r>` |
+| `review-file` | `code-forge review-file <path> --block <id> [--run <id>]` (enqueue) · `review-file --wait <ticket> [--max <seconds>s]` (poll, default 90s; still running at `--max` prints `status: pending, reason: wait_timeout`) |
+| `spawn` | `code-forge spawn --level L0\|L1\|L2\|L3 --role <role> --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <seconds>] [--background]` |
+| `s2` | `code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]` |
+| `author` | `code-forge author --job plan\|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]` |
+| `facts` | `code-forge facts --brief <file> [--sources <path>…] [--out <file>] [--run <id>] [--timeout <seconds>]` |
+| `plan` | `code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]` — every block's level must be the lane recorded by `jev ask lane --block <id>`; prints `lanes: B1 L1 (rules) · …` |
+| `proof` | `code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]` · `proof export <block> --run <r> [--remove]` · `proof lock\|unlock\|restore <block> --run <r>` · `proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert\|assertion-deletion]` |
 | `gates` | `code-forge gates detect\|run\|secret-scan\|safe-edit\|scope\|acceptance\|transcript-grep --cwd <dir> …` |
-| `jev` | `code-forge jev ask <question-id> --state <file.json> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]` |
-| `keys` | `code-forge keys list \| set <name> [--op <ref>] \| test <name> [--ref <ref>] \| remove <name>` |
-| `ledger` | `code-forge ledger calibration\|outcome\|tail --slug <slug> …` |
-| `report` | `code-forge report --slug <slug> [--json] [--export <dir>]` |
+| `jev` | `code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]` — `--rules` answers `lane`, `risk` or `security_sensitive` without Jev; writes to the project's ledger slug |
+| `keys` | `code-forge keys list \| set <name> [--op <item-id\|link\|op://ref>] \| test <name> [--ref <ref>] \| remove <name>` |
+| `ledger` | `code-forge ledger tail --slug <slug> [--n\|-n <count>]` · `ledger calibration --slug <slug> [--question <id>]` · `ledger outcome --slug <slug> --pr <n> --ci red\|green\|reverted` · `ledger outcome --slug <slug> --scan-git [--cwd <dir>] [--days <n>]` · `ledger add coder --run <r> --block <b> --usd <n> [--note "..."]` |
+| `report` | `code-forge report --slug <slug> [--json] [--export <dir>]` — 13 sections, then the spend per run (open blocks included) and the total |
 | `models` | `code-forge models [--refresh --from-cli-caches]` |
 | `list` | `code-forge list` |
 | `remove` | `code-forge remove [<harness>] [--scope project\|global]` |
 | `upgrade` | `code-forge upgrade [--source <path>]` |
-| `logs` | `code-forge logs [--last N] [--json]` · `logs summary [--days N] [--json]` · `logs clear [--yes]` · `logs path` — the local error log (`~/.code-forge/logs/errors.jsonl`) |
-| `logs report` | `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--dry-run] [--yes]` — share selected errors as a public GitHub issue; you see the full text first and say yes once |
+| `logs` | `code-forge logs [--last N] [--json]` · `logs summary [--days N] [--json]` · `logs clear [--yes]` · `logs path` — the local error log (`~/.code-forge/logs/errors.jsonl`): errors, warnings, and `[fixed in X.Y.Z]` marks |
+| `logs report` | `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]` — share selected errors as a public GitHub issue; you see the full text first and say yes once. An error a newer version fixes is not filed unless `--force` |
 | `help` / `version` | `code-forge --help` (or no verb) · `code-forge --version` |
 
 `run`, `block`, `worker`, `spawn`, `s2`, `author`, `facts` and `review-file` are what the Agent
@@ -128,6 +156,18 @@ CLI verbs like any other and every one of them is exercised by this package's ow
 - **A forbidden-command list** stops a coder from starting its own worker, waiving a review, or
   running other orchestrator-only actions — rendered into each provider's own deny-list mechanism
   (`--disallowedTools` for Claude, an execpolicy rules file plus prose for Codex).
+- **Closed-book reviews.** Reviewers, judges, System 2 and the plan author see the packet and
+  nothing else: Claude runs them with no tools, Grok with every tool denied. Codex (provider
+  `openai`) has no mode without a shell, so code-forge refuses it for those roles: `validate`
+  warns, `resolve` marks the level `closed_book: "refused"`, `doctor` fails its isolation row, and
+  the session is never started. Codex coders are unchanged. `review.allow_open_book_codex: true`
+  accepts the risk and keeps Codex in those roles, with a warning on every surface.
+- **The error log stays on your machine.** A failed verb is logged to
+  `~/.code-forge/logs/errors.jsonl` with flag names but never flag values, and with home folder,
+  project, emails, `op://` references and 1Password item IDs replaced. `logs report` cleans the
+  text twice (built-in rules, then an AI check), stops on anything that looks like a key, shows
+  you the full issue and sends nothing without your yes. `CODE_FORGE_NO_ERROR_LOG=1` turns the log,
+  the warnings and the command list off. Every field is listed in [docs/privacy.md](docs/privacy.md).
 - **No mutation testing.** Neither this package's own tests nor the product it ships run mutation
   testing (Ricardo's ruling R14/Q16, 2026-09-25). Proof is plain unit and feature tests with exact
   assertions, plus a red→green runner that proves a new test fails before the fix and passes after.
@@ -135,7 +175,22 @@ CLI verbs like any other and every one of them is exercised by this package's ow
 ## Configuration reference
 
 `schema/code-forge.schema.json` is the source of truth for `.code-forge.yml`.
-`docs/reference/config.md` is generated from it:
+[docs/reference/config.md](docs/reference/config.md) lists every key with its type and default.
+Keys added for 0.4:
+
+| Key | Default | What it does |
+|---|---|---|
+| `budget.usd` | none | per-run spend stop in USD: one warning at 80%, no new session at 100% |
+| `escalation.after_rounds_with_warnings` | `1` | rounds with many warnings at one level before the coder climbs (`0` turns it off) |
+| `escalation.warning_threshold` | `2` | how many open warnings make a round "heavy" (any critical counts too) |
+| `levels.coder_floor_docs` | `L1` | the lowest level that codes a docs or contract block |
+| `review.single_reviewer_max_risk` | `1` | at or below this risk a file gets one reviewer and no judge |
+| `review.multimodel_for_docs` | `false` | let docs and contract blocks use multimodel review too |
+| `review.allow_open_book_codex` | `false` | let Codex run reviewer, judge, System 2 and plan author anyway |
+| `review.session_timeout_s` | `300` | a review session that runs longer is killed and retried once |
+
+`code-forge block open … --kind code|docs|contract` sets a block's kind when its file endings do
+not say it. The reference page is generated:
 
 ```bash
 node scripts/gen-config-doc.mjs          # regenerate docs/reference/config.md
@@ -154,4 +209,7 @@ Node >= 22 required (ruling R7). No build step — the package ships plain ESM `
 by Node. `docs/reference/blocks.json` maps each build block to the files it owns and what it
 depends on, kept in sync with the maintainer's design plan.
 
-Releasing: record changes with `npm run changelog -- <type> "<text>"`, then `npm run release -- <patch|minor|major|x.y.z> [--dry-run]` bumps, commits and tags (it never pushes or publishes). See [docs/releasing.md](docs/releasing.md).
+Releasing: record changes with `npm run changelog -- <type> "<text>"` and fixed error reports with
+`npm run known-fix -- add <fp> <version> "<summary>"`, then `npm run release -- <patch|minor|major|x.y.z> [--dry-run]`
+bumps, commits and tags (it never pushes or publishes). Publish with `npm publish` from your
+machine, then push the tag: CI only creates the GitHub release. See [docs/releasing.md](docs/releasing.md).

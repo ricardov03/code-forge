@@ -65,6 +65,7 @@ that run's job summary; it never changes an issue.
 ## The one-command flow
 
 ```
+npm run known-fix -- check              # if this release fixes reported errors: table is valid
 npm run release -- minor --dry-run      # see the plan and the diffs; writes nothing
 npm run release -- minor                # bump, CHANGELOG, checks, commit, tag
 npm publish                             # publish to npm from your machine
@@ -106,9 +107,9 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
    `claude plugin validate .` when the `claude` CLI is installed (otherwise a warning).
 5. **Commit and tag.** One commit `Release vX.Y.Z` with only the changed files, then the annotated
    tag `vX.Y.Z`, whose message is that version's CHANGELOG section.
-6. **Next steps.** It prints the push command, the two ways to publish, and the exact
-   `gh release create … --verify-tag` command, with the release notes already written to a temp
-   file.
+6. **Next steps.** It prints `npm publish` and then the push command (publish first; the tag push
+   only creates the GitHub release), and the exact `gh release create … --verify-tag` command, with
+   the release notes already written to a temp file.
 
 The tool never pushes, never publishes and never creates a GitHub release.
 

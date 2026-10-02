@@ -35,7 +35,10 @@ Coding agents are good at writing code. The workflow around them is where things
   answer facts. A fast decision model (System 1: Jev, a small fast classifier model from TypeSafe) answers small typed questions with a
   probability. A strong model (System 2) is asked only when System 1 is not sure.
 - **Review each file when it is done.** A fresh, isolated L2 session reviews each finished file
-  while the coder moves on. Fix rounds are bounded: at most 4 per file.
+  while the coder moves on. Fix rounds are bounded: at most 4 per file. A round that leaves several
+  warnings moves the next fix one level up at once, instead of three more cheap tries.
+- **A spend limit you set.** Each session's estimated cost is in the ledger. `budget.usd` stops new
+  sessions when a run reaches it.
 - **The coder's report is a claim sheet.** `block close` re-measures everything itself: files
   touched, reviews signed, gates green, clauses covered, line forecast, and red→green proof for
   high-tier files.
@@ -64,7 +67,10 @@ checkpoint after `harden`.
 | Gemini CLI, Cursor, Copilot | yes (detect and link) | same as Codex/Grok: Solo, or `engine: subprocess` |
 
 Reviewers, judges, System 2, the plan author and the facts delegate are always isolated CLI
-sessions started by code-forge, built for the `claude`, `codex` or `grok` CLI. The *engine* only
+sessions started by code-forge. Reviewers, judges, System 2 and the plan author are closed book (no
+tools), so they run on the `claude` or `grok` CLI: Codex always has a shell and is refused for those
+roles unless you set `review.allow_open_book_codex: true`. The facts delegate and coders can use
+`claude`, `codex` or `grok`. The *engine* only
 decides how the coder runs:
 
 | Engine | Chosen when | Coders run as |
@@ -90,7 +96,8 @@ Providers in the level matrix: `anthropic` (default), `openai`, `xai`.
 ## What it is NOT
 
 - **Not a model or a coding agent.** It orchestrates the agents and CLIs you already have.
-- **Not a hosted service.** Everything runs on your machine. There is no telemetry.
+- **Not a hosted service.** Everything runs on your machine. There is no telemetry: errors go to
+  a local log, and an error report is sent only when you run `code-forge logs report` and say yes.
 - **Not a sandbox.** Signed ledger rows stop accidents and make tampering visible, but the
   boundary is the same OS user only. See the security section of
   [how-it-works.md](how-it-works.md#security-in-short).
@@ -98,7 +105,7 @@ Providers in the level matrix: `anthropic` (default), `openai`, `xai`.
   considered and cut.
 - **Not a CI system or merge bot.** A coder may open a draft PR when the rules allow it. Marking
   it ready is the orchestrator's job; merging is the human's.
-- **Not a promise of a cost saving.** The ledger records real tokens per block. No calibrated
-  saving number is published yet.
+- **Not a promise of a cost saving.** The ledger records real tokens and an estimated cost per
+  session, and `budget.usd` caps a run. No calibrated saving number is published yet.
 
 Next: [how-it-works.md](how-it-works.md).

@@ -10,7 +10,8 @@ flowchart TD
   brief[/"Brief (plans/name.md)"/] --> facts["facts<br/>L0 delegate checks every claim<br/>on a read-only HEAD snapshot"]
   facts --> author["author --job plan<br/>L3 drafts the plan and the blocks"]
   author --> harden["author --job harden<br/>L3 asks, the human answers"]
-  harden --> check{"plan check<br/>green?"}
+  harden --> lanes["jev ask lane --block<br/>one lane per block"]
+  lanes --> check{"plan check<br/>green?"}
   check -- no --> harden
   check -- yes --> start["run start<br/>launches the worker"]
   start --> open["block open<br/>base sha, owned files, level, clauses"]
@@ -34,17 +35,39 @@ flowchart TD
 | 1 | Facts | `code-forge facts --brief plans/<name>.md` | `plans/<name>.facts.md`: every claim tagged VERIFIED, NOT-FOUND or UNVERIFIABLE, each with the command and its output line |
 | 2 | Plan | `code-forge author --job plan --brief plans/<name>.md --facts plans/<name>.facts.md` | `plans/<name>.plan.md` plus a list of questions. Refuses without a facts sheet (exit 2) or with a sheet older than the brief |
 | 3 | Harden | `code-forge author --job harden --brief … --facts … --draft plans/<name>.plan.md --answers <file> --out plans/<name>.plan.md` | a new draft; repeat until no blocking question is left |
-| 4 | Plan check | `code-forge plan check plans/<name>.plan.md` | `plan check: ok (<n> blocks)` or one line per failing rule, exit 1 |
-| 5 | Run start | `code-forge run start --run <run>` | `run <run> started · engine <e> · worker pid <n>`, a per-run signing key, the review worker |
-| 6 | Block open | `code-forge block open B1 --run <run> --level L1 --owned <paths…> --acceptance <file> --brief <file> --lines <n>` | a `dispatch` ledger row and the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>` for the coder |
-| 7 | Code | the engine starts the coder with the pointer | the coder replies `ACK <sha8> lines=<n>`, then its facts diff and forecast, then code, file by file |
-| 8 | Review per file | `code-forge review-file <path> --block B1 --run <run>`, then `review-file --wait <ticket>` | a verdict packet; a signed `review.approved` row when the file converges |
-| 9 | Proof | `code-forge proof export B1 --run <run>`, `code-forge gates run --cwd <export dir>`, `code-forge proof red-green B1 --run <run> --test <file::case>` | gates measured in a clean export; one signed `proof` row per proven test |
-| 10 | Close | `code-forge block close B1 --run <run>` | `block B1 closed`, or the reason it stays open |
-| 11 | Report | `code-forge run end --run <run>` then `code-forge report --slug <slug>` | the worker stops; 13 report sections, from `cost_per_block` to `run_stop_counts` |
+| 4 | Lanes | `code-forge jev ask lane --block B1 --plan plans/<name>.plan.md --state <file>` per block (add `--rules` without Jev) | a `decision` row with the block's lane. The plan's level for the block must match it |
+| 5 | Plan check | `code-forge plan check plans/<name>.plan.md` | `plan check: ok (<n> blocks)` or one line per failing rule, exit 1; then `lanes: B1 L1 (jev) · B2 L0 (rules)` |
+| 6 | Run start | `code-forge run start --run <run>` | `run <run> started · engine <e> · worker pid <n>`, a per-run signing key, the review worker |
+| 7 | Block open | `code-forge block open B1 --run <run> --level L1 --owned <paths…> --acceptance <file> --brief <file> --lines <n>` (`--kind docs` for a docs block) | a `dispatch` ledger row and the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>` for the coder |
+| 8 | Code | the engine starts the coder with the pointer | the coder replies `ACK <sha8> lines=<n>`, then its facts diff and forecast, then code, file by file |
+| 9 | Review per file | `code-forge review-file <path> --block B1 --run <run>`, then `review-file --wait <ticket>` | a verdict packet (or `status: pending` when `--max`, default 90s, passes first: wait again); a signed `review.approved` row when the file converges |
+| 10 | Proof | `code-forge proof export B1 --run <run>`, `code-forge gates run --cwd <export dir>`, `code-forge proof red-green B1 --run <run> --test <file::case>` | gates measured in a clean export; one signed `proof` row per proven test |
+| 11 | Close | `code-forge block close B1 --run <run> --report <coder report>` | `block B1 closed`, or the reason it stays open |
+| 12 | Report | `code-forge run end --run <run>` then `code-forge report --slug <slug>` | the worker stops; 13 report sections, from `cost_per_block` to `run_stop_counts`, then the spend per run and the total |
 
 The coder's turn ends with `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===`.
-Nothing else counts as completion.
+Nothing else counts as completion. Its report also lists one `reviewed <path> ticket <id>` line per
+changed file. With `--report`, `block close` treats a report that misses one as FAILED, whatever its
+sentinel says (`coder report FAILED: no review-file ticket id for <files>`).
+
+### Lanes and the plan check
+
+The plan author writes a level for each block, but the level is not its choice. For each block the
+orchestrator asks System 1 for the lane (`jev ask lane --block <id> --plan <plan>`) and the answer
+is written to the ledger. Without a Jev key, `--rules` answers from facts in the state file (files
+changed, lines added, migration, policy or middleware paths, a high-risk path, keywords). `plan
+check` then refuses a block with no recorded lane, or a level that differs from it:
+`block B2: level L2 differs from the recorded lane L1 (jev)`.
+
+The plan must also use the template's exact section headings. A heading that is close but not exact,
+at the right place, passes with a `WARN` that names the exact heading.
+
+### Cost and the budget
+
+Every session row in the ledger carries an estimated `usd`. With `budget.usd` set, each new session
+first adds up the run's spend: at 80% one warning, at 100% the session is refused. `run status`
+and `report` show the spend; `ledger add coder --usd <n>` adds spend code-forge did not see. See
+[getting-started.md](getting-started.md#set-a-budget).
 
 ### Changing the config mid-run
 
@@ -64,7 +87,7 @@ edit the file and run `code-forge run reload --run <run>`:
 
 ### Review only
 
-`code-forge review` runs steps 5, 6 and 8 on changes you already have, then stops the block and ends
+`code-forge review` runs steps 6, 7 and 9 on changes you already have, then stops the block and ends
 the run: no facts, plan, coder or proof, and the block is never closed. The files are the ones
 changed since the merge base with the default branch (or `--files`). See
 [review-only.md](review-only.md).
@@ -76,7 +99,8 @@ by a coder) serves the ticket:
 
 1. **Tools first.** The project's gates on that file. Red ⇒ `tools_red` back to the coder, no model review.
 2. **S1 scores risk** 0–3 (path rules first). Low confidence ⇒ S2 picks the depth.
-3. **Depth by risk** (multimodel off, the default):
+3. **Depth by risk** (multimodel off, the default; at or below `review.single_reviewer_max_risk`,
+   default 1, it is always one reviewer):
 
    | Risk | Review |
    |---|---|
@@ -84,8 +108,10 @@ by a coder) serves the ticket:
    | 1 to < 2 | one fresh L2 session, `full` lens |
    | ≥ 2 | two blind L2 sessions (correctness lens, contracts-and-security lens) plus an L3 judge |
 
-   With `review.multimodel: true`, two L2 reviewers from two providers read the file blind, and an
-   L3 judge **from a third provider** rules on both reports.
+   With `review.multimodel: true`, a file whose risk is above `review.single_reviewer_max_risk`
+   gets two L2 reviewers from two providers, blind to each other, and an L3 judge **from a third
+   provider** rules on both reports. Lower-risk files keep the table above. Docs and contract
+   blocks never use multimodel review unless `review.multimodel_for_docs` is on.
 4. **Triage.** Findings from a single reviewer go to S1 `defect`: fix now, batch to an L3 ruling,
    or log as a nit. A judge's findings are final.
 
@@ -95,7 +121,13 @@ redacted and cut to fit the packet budget; a block whose clauses cannot be read 
 with `(acceptance unavailable)` in their place.
 
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
-exactly, and the output is long enough. Anything else is `review.unavailable`, never approval.
+exactly, and the output is long enough (`review.min_tokens_out`; a clean pass on a diff of 20 added
+lines or fewer needs only 40 tokens). Anything else is `review.unavailable`, never approval.
+
+A session that runs past `review.session_timeout_s` (default 300 seconds) is killed and started once
+more on the same packet. Only a second timeout is `unavailable: timeout`. The ledger keeps a cleaned
+tail of its stderr to explain the hang. While a long session runs, the worker keeps writing a
+heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
 
 ### Fix rounds and the escalation ladder
 
@@ -126,6 +158,9 @@ flowchart TD
   (`review.max_rounds_per_file`, default 4):
   - round 4 still open and the block has **not** used its L3 rung ⇒ the rung fires;
   - round 4 still open and the rung is **already used** ⇒ `stopped: review_cap`.
+- **A heavy round climbs at once.** Below L2, a round that leaves 2 or more open warnings (or any
+  critical) moves the next fix one level up (`escalation.after_rounds_with_warnings`, default 1;
+  `escalation.warning_threshold`, default 2).
 - Below the cap, the open `fix_now` set must shrink every round. If it does not, that is a
   `review_stall` and the coder climbs at once; two rounds at one level
   (`escalation.review_rounds_per_level`) also climb.
@@ -142,7 +177,9 @@ flowchart TD
 Other escalation triggers, first rule wins: attempts at a level used up
 (`escalation.retries_per_level`, default 2), review rounds at a level used up
 (`escalation.review_rounds_per_level`, default 2), a security-sensitive block (starts one level
-higher, at most L2), and an S2 ruling.
+higher, at most L2), and an S2 ruling. A docs or contract block is never coded below
+`levels.coder_floor_docs` (default L1): `block open` raises the level and the `dispatch` row says
+`trigger: docs_floor`.
 
 ### What `block close` re-measures
 
@@ -174,6 +211,10 @@ security-sensitive. Everything else is **light tier**.
 | L3 rung | L3 | a patch ≤ 80 lines, once per block | `code-forge spawn --level L3 --role coder` |
 | System 1 | Jev, a small fast classifier model from TypeSafe (outside the ladder) | an API call, typed answer + probability | the worker or the orchestrator's own CLI call, never a coder |
 
+Closed book means an empty folder, the packet on stdin and no tools. Codex (provider `openai`) always
+has a shell, so it is refused for the reviewer, judge, System 2 and plan author unless
+`review.allow_open_book_codex: true`. Codex coders and the facts delegate are unchanged.
+
 **The levels:**
 
 | Level | Typical work |
@@ -202,7 +243,7 @@ what they can and S2 answers the rest (`system1.fallback: rules`, the default).
 | `~/.code-forge/runs/<run>.json` | the **authoritative** run record: active blocks, base sha, owned files, the pinned worker | no |
 | `~/.code-forge/runs/<run>.key` | the per-run signing key, mode 0600 | no |
 | `~/.code-forge/ledger/<slug>.jsonl` | the ledger: append-only, one JSON row per event | no |
-| `~/.code-forge/logs/`, `installs.json`, `cache/` | init logs, where the skill is installed, model catalog cache | no |
+| `~/.code-forge/logs/`, `installs.json`, `cache/` | init logs, the error log (`errors.jsonl`) and the last command names (`breadcrumbs.json`), where the skill is installed, model catalog cache | no |
 | run temp root | `<tmp.root>/<run>/`, default `<os tmpdir>/code-forge/<run>/`. Empty cwds for closed-book sessions, the facts snapshot, pid registry. Swept by the next `run start` | no |
 
 A new session takes over from the run record, then `code-forge ledger tail --slug <slug>`, then
@@ -222,6 +263,12 @@ the plan file. See `skill/references/continuity.md`.
   every brief, and is grepped from every transcript at `block close`. A hit is a `rule_break`.
 - **Signed rows.** Every gate-relevant ledger row carries an HMAC made with the per-run key. A
   forged, edited or stale approval is refused, and a replaced worker stops the block.
+- **Closed-book reviews.** Reviewers, judges, System 2 and the plan author get no tools. Codex
+  cannot run that way, so it is refused for those roles (`validate` warns, `doctor` fails its
+  isolation row) unless you set `review.allow_open_book_codex: true`.
+- **A local, cleaned error log.** Failed verbs are logged on your machine with flag names only,
+  never values, and with paths, project names and 1Password references replaced. Nothing is sent
+  unless you run `logs report` and say yes. See [privacy.md](privacy.md).
 - **Same-user boundary only.** A process running as your OS user can read the key file. The
   signature makes tampering deliberate and visible; it does not make it impossible. `doctor`
   prints `signer: same-user boundary only` on every full run. For a real boundary, run coders as

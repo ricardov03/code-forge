@@ -25,7 +25,9 @@ too. See [how-it-works.md](how-it-works.md).
 1. `code-forge init` in the repository, so `.code-forge.yml` exists at its root. `review` refuses
    to start without it (exit 2).
 2. `code-forge doctor --quick` passes. The reviewer sessions use the providers and keys the config
-   names, the same as a normal run.
+   names, the same as a normal run. L2 (the reviewers) and L3 (the judge) need an anthropic or xai
+   model: Codex always has a shell, so an openai L2 or L3 is refused and every file comes back
+   `unavailable` (see [getting-started.md](getting-started.md#codex-and-closed-book-roles)).
 3. Add `.code-forge/` to `.gitignore`. `review` writes its review queue, review results and a run
    mirror there (see [What it writes](#what-it-writes)).
 
@@ -181,10 +183,15 @@ Review depth follows risk, per file, the same as in a block:
 | below 1 | one L2 `quick` review |
 | 1 to below 2 | one L2 `full` review |
 | 2 or more | two blind L2 reviews plus an L3 judge |
-| `review.multimodel: true` | one L2 review per provider plus an L3 judge, for every file |
+| `review.multimodel: true` | for a file above `review.single_reviewer_max_risk` (default 1): one L2 review per provider plus an L3 judge from a third provider. Files at or below it keep the rows above. When every reviewed file is docs (`.md` and similar), there is no multimodel review unless `review.multimodel_for_docs` is on |
 
 Without a Jev key the risk comes from rules: a `proof.tiers.high.paths` match is 3, a path with
 `migration`, `policy` or `middleware` in it is 2, more than 200 added lines is 1, anything else is
 0. So most small files cost one L2 session each, and a file on a high path costs three sessions.
 To keep a run cheap, pass `--files` with the files that matter. `code-forge report --slug <slug>`
-shows the cost afterwards.
+shows the cost afterwards, and `budget.usd` in `.code-forge.yml` caps it: once the run reaches it,
+no new session starts and the files left are reported `unavailable: budget`.
+
+A reviewer session that hangs is killed after `review.session_timeout_s` (default 300 seconds) and
+started once more; only a second timeout makes the file `unavailable: timeout`. `--max` is the
+outer limit per file.

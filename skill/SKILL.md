@@ -27,7 +27,7 @@ State lives in the plan file's header — `facts → planned → hardened → co
 | facts delegate | L0 | read-only tools, empty cwd | `forge facts` |
 | coder | the lane S1 picks (L0–L2); climbs one rung per escalation | the project tree | the engine adapter |
 | reviewer, recheck | L2 | closed-book, empty cwd, packet on stdin | the worker |
-| judge, S2, author | L3 | closed-book, one turn | the worker, `forge s2`, `forge author` |
+| judge, S2, author | L3 | closed-book, one turn (never Codex: `references/security.md` §4) | the worker, `forge s2`, `forge author` |
 | L3 rung | L3 | a patch ≤ 80 lines, once per block | `forge spawn --level L3 --role coder` |
 
 `forge resolve L<n>` prints what a level resolves to (provider, model, effort, fallback); `forge models` lists the catalog. With `review.multimodel` on, the second reviewer is another provider's L2 and the judge comes from a third provider.
@@ -36,12 +36,12 @@ State lives in the plan file's header — `facts → planned → hardened → co
 
 1. `forge facts --brief <brief> --out <plans_dir>/<slug>.facts.md` — an L0 delegate checks every claim with a read-only command. You read the sheet; you never read the sources yourself (`references/plan.md` §0).
 2. `forge author --job plan --brief <brief> --facts <sheet> --out <plan>` — refuses without `--facts` (exit 2) and refuses a sheet older than the brief. The draft's §0 is the sheet, verbatim.
-3. Harden: `forge author --job harden --brief <brief> --facts <sheet> --draft <plan> --answers <file>` until `questions[]` is empty. The human answers; you relay, never answer for them (`references/harden.md`). Exit gate: `forge plan check <plan>` green.
-4. Per block, in dispatch order, never more than `caps.coders` alive: `forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> --brief <file> --lines <n>` prints the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>`. Send the pointer per the engine's adapter — `solo` → `references/adapters/solo.md`, `harness` → `references/adapters/claude-code.md`, `subprocess` → `references/adapters/subprocess.md` — and wait for `ACK <sha8> lines=<n>`.
+3. Harden: `forge author --job harden --brief <brief> --facts <sheet> --draft <plan> --answers <file>` until `questions[]` is empty. The human answers; you relay, never answer for them (`references/harden.md`). Before the exit gate, record each block's lane: `forge jev ask lane --block <id> --plan <plan> --state <file>` (`--rules` without Jev); the plan's level must equal it. Exit gate: `forge plan check <plan>` green, with a lane for every block on its `lanes:` line (`references/plan.md`).
+4. Per block, in dispatch order, never more than `caps.coders` alive: `forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> --brief <file> --lines <n> [--kind code|docs|contract]` prints the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>`. Send the pointer per the engine's adapter — `solo` → `references/adapters/solo.md`, `harness` → `references/adapters/claude-code.md`, `subprocess` → `references/adapters/subprocess.md` — and wait for `ACK <sha8> lines=<n>`.
 5. The coder's first message is its **facts diff**, then its forecast (cases and lines, `templates/block-record.md`), then code, file by file: after each file `forge review-file <path> --block <id> --run <r>`, then `forge review-file --wait <ticket>` before the next file. Rounds ≥ 2 re-check only the fix hunks (`references/review.md`).
 6. `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===` ends the coder's turn. Its report is a claim sheet: re-measure it (`references/code.md` §5).
-7. `forge block close <id> --run <r>` is the gate: a signed `review.approved` row per changed file, gates green, every clause covered, forecast vs actual, no `rule_break`. Red ⇒ `references/decisions.md` (S1 `next`, escalation). Green ⇒ one commit for the block in the project's house style; `forge block rebase <id> --run <r>` first when HEAD moved.
-8. `forge run end --run <r>` when every block is `done`; `forge report --slug <slug>` prints cost per block, escalations and review rounds.
+7. `forge block close <id> --run <r> --report <coder report>` is the gate: a report without a `reviewed <path> ticket <id>` line per changed file is FAILED; a signed `review.approved` row per changed file, gates green, every clause covered, forecast vs actual, no `rule_break`. Red ⇒ `references/decisions.md` (S1 `next`, escalation). Green ⇒ one commit for the block in the project's house style; `forge block rebase <id> --run <r>` first when HEAD moved.
+8. `forge run end --run <r>` when every block is `done`; `forge report --slug <slug>` prints cost per block, escalations, review rounds and the spend per run (`budget.usd`, `references/ledger.md` §3.1).
 
 ## §4 Hard rules (the headings of `references/rules-core.md`)
 

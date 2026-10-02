@@ -12,7 +12,7 @@ Terminal output in this version. Sections: cost per block — completed and stil
 
 ## §3 Live views
 
-`forge ledger tail --slug <slug> [--n <count>]` prints the last rows — the orchestrator's live view when no Solo process list exists. `forge run status --run <id>` prints the run record: active blocks, orphans, whether the worker is pinned, and `spent_usd` / `budget_usd` / `unknown_usd_sessions`.
+`forge ledger tail --slug <slug> [--n <count> | -n <count>]` prints the last rows — the orchestrator's live view when no Solo process list exists. `forge run status --run <id>` prints the run record: active blocks, orphans, whether the worker is pinned, and `spent_usd` / `budget_usd` / `unknown_usd_sessions`.
 
 ## §3.1 Spend and `budget.usd`
 

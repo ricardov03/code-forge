@@ -39,11 +39,13 @@ is written, and closes a block only when the evidence is re-measured, not quoted
 2. **Plan and harden.** A strong model splits the work into blocks with owned files and testable
    clauses, then asks the hard questions. You answer them. A deterministic `plan check` must pass.
 3. **Code.** One coder per block, at the level a fast decision model picks. It climbs one level
-   only on evidence: failed attempts, a stalled review, a security change.
+   only on evidence: failed attempts, a stalled review, a review round with several warnings, a
+   security change.
 4. **Review per file.** Each finished file gets a fresh, isolated reviewer that sees only its diff.
    Fix rounds re-check only the fix, must shrink every round, and stop at four.
 5. **Proof and close.** The gate re-runs the tests in a clean export, checks a signed approval for
-   every changed file, and requires red→green proof for high-risk files. Then one commit.
+   every changed file, checks that the coder's report names a review for each one, and requires
+   red→green proof for high-risk files. Then one commit.
 
 ## What makes it different
 
@@ -58,8 +60,10 @@ is written, and closes a block only when the evidence is re-measured, not quoted
 | Harness | one tool | Claude Code, Codex CLI, Grok CLI; the skill also installs into Gemini CLI, Cursor, Copilot |
 
 **Cost control is built in, not promised.** Coders never run above L2. The top level plans, judges
-and writes at most one 80-line patch per stuck block. Reviews see diffs, not whole runs. The
-ledger records real tokens per block, and `code-forge report` shows cost per completed block.
+and writes at most one 80-line patch per stuck block. Reviews see diffs, not whole runs, and a
+low-risk file gets one reviewer. The ledger records real tokens and an estimated cost per session;
+`code-forge report` shows the cost per block, open blocks included, and the spend per run. Set
+`budget.usd` and a run stops starting sessions when it reaches it.
 
 ## Honest limits
 
@@ -68,6 +72,9 @@ ledger records real tokens per block, and `code-forge report` shows cost per com
 - **Signed rows are not a sandbox.** They stop accidents and make tampering visible. A process
   running as your own OS user can still forge them. For a hard boundary, run coders as a second
   user or in a container.
+- **Codex does not review yet.** Reviews, rulings and plans run closed book, with no tools. Codex
+  always has a shell, so code-forge refuses it for those roles; use Claude or Grok there. Codex
+  still codes.
 - **Coders run in Claude Code (subagents), Solo, or as Claude, Codex or Grok CLI processes.** Gemini
   CLI, Cursor and Copilot get the skill, not coder runs, in this version.
 - **Verified stacks.** The measurement export is proven on a Node library with `node:test`. Other

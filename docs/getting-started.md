@@ -5,7 +5,10 @@
 - Node.js 22 or newer.
 - `git`. code-forge works inside a git repository: blocks record a base sha.
 - At least one provider CLI for the sessions it starts: `claude`, `codex` or `grok`.
-  `code-forge resolve L<n>` shows which CLI each level uses.
+  `code-forge resolve L<n>` shows which CLI each level uses. Reviews, System 2 and the plan
+  author run at L2 and L3 and need `claude` or `grok`: Codex always has a shell, so code-forge
+  refuses it for those closed-book roles (see [Codex and closed-book roles](#codex-and-closed-book-roles)).
+  Codex is fine for coders.
 - Optional: Solo (engine `solo`), the 1Password CLI `op` (a key source), a key for Jev (System 1: a small fast classifier model from TypeSafe).
   Without a Jev key, deterministic rules plus System 2 answer instead.
 
@@ -47,12 +50,31 @@ Every question has a default: press Enter to keep it. Each question shows a one-
 | 1 | Install the recommended tools, or use only the current harness? | `current harness` · `recommended tools` (Claude Code, Codex CLI, Gemini CLI, Grok CLI, 1Password CLI, Solo; each installed only after its own yes — or later with `code-forge tools install`, see [Install the recommended tools](#install-the-recommended-tools)) | `--tools recommended\|current`, `--yes-tool <tool>` |
 | 2 | Install the skill into which harnesses? Scope? Method? | detected harnesses · `project` or `global` · `symlink` or `copy` | `--harness a,b`, `-p` / `-g`, `--copy` |
 | 3 | Default provider, and keep the level matrix? | `anthropic` · `openai` · `xai`; edit any level as `model[:effort][@provider]` | `--provider P`, `--level Ln=model[:effort][@provider]`, `--refresh-models` |
-| 4 | Multimodel review (consensus)? | off. On: pick a second provider; the L3 judge must come from a third provider | `--multimodel on\|off`, `--second-provider P` |
+| 4 | Multimodel review (consensus)? | off. On: pick a second provider; the L3 judge must come from a third provider. It is used only for files above `review.single_reviewer_max_risk` (default 1), and not for docs blocks | `--multimodel on\|off`, `--second-provider P` |
 | 5 | Engine | `auto` · `solo` · `harness` (`subprocess` is never offered; write it in the config yourself) | `--engine auto\|solo\|harness`, `--solo-project N` |
 | 6 | Gates and proof settings (after the summary below) | **Use these** (the default: Enter keeps it; keep the detected values, blanks stay blank) · **Customize now** (asks gates `test`, `lint`, `types`, `format`, then high-risk paths, proof isolation, export directories to link and untracked files to copy, each pre-filled; Enter keeps it) · **Leave for later** (keeps them and prints the keys to edit) | `--gate name=cmd`, `--proof key=value` (a value set by a flag is not asked) |
 | 7 | Where is the Jev key? (asked only when none is found) | 1Password · environment variable · paste now (hidden, goes to the key store) · skip. For 1Password, paste only the item ID (or the item link, or an `op://vault/item/field` reference): code-forge finds the vault and the key field and saves a full reference. If 1Password is locked or not found, you can try again, type a full reference, pick another source or skip (see [Keys](#keys)) | `--jev-ref <item-id\|link\|op://…>`, `--jev-env NAME`, `--no-jev` |
 
 At the end `init` runs `doctor --quick`; `--skip-doctor` skips it.
+
+### Codex and closed-book roles
+
+Reviewers, the judge, System 2 and the plan author are *closed book*: they see the packet on stdin
+and nothing else. Claude and Grok can run with no tools. Codex (provider `openai`) cannot: even its
+read-only mode has a shell that can read any file on your machine. So with `--provider openai`, or
+an openai L2 or L3:
+
+- `code-forge validate` warns `levels.L2 resolves to openai — codex cannot run closed-book yet: it
+  always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author`;
+- `code-forge resolve L2` adds `closed_book: "refused"`;
+- the full `doctor` fails its isolation row;
+- a review, judge, System 2 or plan-author session on that level is refused (an openai fallback is
+  skipped).
+
+Give L2 and L3 an anthropic or xai model (`--level L2=<model>@anthropic`), or keep openai only for
+L0 and L1, where coders run. To keep Codex in those roles anyway, set
+`review.allow_open_book_codex: true`: every surface then warns that the reviewer can read files on
+this machine.
 
 ### What `init` takes from the project
 
@@ -154,6 +176,7 @@ Read these rows of the full `doctor`:
 | `solo` | whether Solo is present; with `engine: auto` that decides between `solo` and `harness` |
 | provider probes | each CLI exists, its flags work, one tiny call per role succeeds, closed-book sessions see no project file |
 | `ping=skipped(402)` | a provider with no balance. A warning, not a failure |
+| isolation | the closed-book reviewer saw no project file. An openai L2 fails it without running (see [above](#codex-and-closed-book-roles)) |
 | `signer: same-user boundary only` | always printed. Signed rows are not a sandbox |
 
 `doctor --json` prints the same rows as JSON. `doctor --cwd <dir>` checks another project.
@@ -172,6 +195,31 @@ All of these are safe to run in any project that has a `.code-forge.yml`:
 | `code-forge keys list` | `NAME / SOURCE / BACKEND / EXPIRES` for each key. Never a value |
 | `code-forge keys test jev` | resolves the Jev key and tests it |
 | `code-forge gates detect --cwd .` | the gate commands detected for this stack |
+| `code-forge ledger tail --slug <slug> -n 20` | the last 20 ledger rows (`--n 20` works too) |
+| `code-forge logs` | the last errors and warnings in the local log |
+
+## Set a budget
+
+Each session code-forge starts writes a ledger row with an estimated cost in US dollars (`usd`),
+from a price table in the package. A model with no known price gets `usd: null` and is named as
+unknown, never guessed. To cap a run, add this to `.code-forge.yml`:
+
+```yaml
+budget:
+  usd: 20
+```
+
+At 80% of it you get one warning. At 100% no new session starts: the message names the budget
+and the spend, and a review in flight is reported `unavailable: budget`. If the spend cannot be
+read, no session starts either. Raise `budget.usd` (then `code-forge run reload --run <run>`) or
+end the run.
+
+| Command | Shows |
+|---|---|
+| `code-forge run status --run <run>` | `spent_usd`, `budget_usd` and how many sessions have no known price |
+| `code-forge report --slug <slug>` | cost per block, open blocks included, then the spend per run and the total |
+| `code-forge ledger add coder --run <run> --block <id> --usd <n> [--note "..."]` | records spend code-forge did not see, such as a coder you ran in the cloud or by hand |
+
 
 ## Keys
 

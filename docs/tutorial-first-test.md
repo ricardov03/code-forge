@@ -14,7 +14,8 @@ It takes one block, so you see every step once. The site's other blocks are your
 
 - Node 22+, `git`, and Claude Code (the `harness` engine) or Solo.
 - A provider CLI that `code-forge resolve L0` … `L3` can use (`claude` for the default
-  `anthropic` matrix).
+  `anthropic` matrix). Keep the default: with `openai` on L2 or L3 the reviews, the plan author
+  and System 2 are refused, because Codex cannot run closed book.
 - A key for Jev, a small fast classifier model from TypeSafe (System 1), is optional. This tutorial uses `--no-jev`, so rules and System 2 answer instead.
 
 ## 1. Install code-forge and make a new, separate repository
@@ -115,6 +116,7 @@ code-forge resolve L1
 |---|---|
 | `.code-forge.yml` | `project.slug: code-forge-site`, `gates.test: [npm, test]`, `engine: harness` (or `auto`), `review.multimodel` off |
 | `doctor --quick` | no FAIL rows. The Jev key row reflects the skip (rules-only System 1) |
+| `code-forge validate` | `valid (0 warnings)`. A `closed-book-on-openai` warning means L2 or L3 runs on Codex: change it before you go on |
 | `code-forge list` | the skill linked for `claude`, `RESOLVES` yes |
 
 Commit the config (never `.code-forge/`, which `.gitignore` already covers):
@@ -163,19 +165,44 @@ code-forge author --job plan --brief plans/site.md --facts plans/site.facts.md
 Without `--facts` the command refuses with exit 2 (`facts sheet required`). That refusal is the
 rule "no design before facts".
 
-## 5. Harden and `plan check`
+## 5. Harden, lanes and `plan check`
 
 Answer the questions in a file (plain text, one answer per question id), then:
 
 ```bash
 code-forge author --job harden --brief plans/site.md --facts plans/site.facts.md --draft plans/site.plan.md --answers plans/site.answers.md --out plans/site.plan.md
-code-forge plan check plans/site.plan.md --facts plans/site.facts.md
 ```
 
 Repeat the harden round until no blocking question is left.
 
-**Look for:** `plan check: ok (3 blocks)` and exit 0. Anything else prints one line per failing
-rule, for example `unbackable clause without tolerance: B1 …`. Fix the plan and run it again.
+**Record a lane for every block.** `plan check` accepts a block's level only when it matches the
+lane recorded for that block. With a Jev key, System 1 answers. This tutorial has none, so the rules
+answer from a few facts about the block. Write them for B1 to `plans/B1.lane.json`, from the plan's
+B1 row (three files, the line forecast):
+
+```json
+{"filesChanged": 3, "linesAdded": 1200, "touchesMigration": false, "touchesPolicyOrMiddleware": false, "pathFloorHit": false, "keywordsFound": []}
+```
+
+```bash
+code-forge jev ask lane --block B1 --plan plans/site.plan.md --rules --state plans/B1.lane.json
+```
+
+It prints `"answer": "L1"` and `"source": "rules"` and writes a `decision` row to the project's
+ledger. Do the same for B2 and B3 with their own numbers. Over 200 added lines or over 4 files is
+`L1`; a migration, policy or middleware path, or a path in `proof.tiers.high.paths`, is `L2`;
+anything else is `L0`. If an answer differs from the level in the plan, change the plan's level to
+the lane. Then:
+
+```bash
+code-forge plan check plans/site.plan.md --facts plans/site.facts.md
+```
+
+**Look for:** `plan check: ok (3 blocks)` and exit 0, then `lanes: B1 L1 (rules) · B2 … · B3 …`.
+Anything else prints one line per failing rule, for example `unbackable clause without
+tolerance: B1 …` or `block B2: level L1 has no recorded lane decision — …`. Fix the plan (or record
+the lane) and run it again. A `WARN` line about a heading means a section heading is close to the
+template's but not exact; it does not fail the check, but use the exact heading it names.
 
 ## 6. Start the run
 
@@ -203,7 +230,7 @@ Commit every plan artifact now, so the block's base is clean and none of them ca
 orphan at close:
 
 ```bash
-git add plans/site.facts.md plans/site.plan.md plans/site.answers.md plans/B1.acceptance.yml
+git add plans/site.facts.md plans/site.plan.md plans/site.answers.md plans/*.lane.json plans/B1.acceptance.yml
 git commit -m "plan: marketing site (facts, plan, answers, B1 acceptance)"
 git status --short
 ```
@@ -233,9 +260,12 @@ By hand, open a second Claude Code session in the repo and give it the pointer l
 3. A forecast of cases and lines.
 4. Code, one file at a time. After each file:
    `code-forge review-file <file> --block B1 --run site-1`, then
-   `code-forge review-file --wait <ticket>`.
+   `code-forge review-file --wait <ticket>`. If the review is still running after 90 seconds, the
+   wait prints `"status": "pending", "reason": "wait_timeout"`; the coder waits again.
 5. A progress line per file in `.code-forge/runs/site-1/B1.log`.
-6. The last line: `===BLOCK B1 COMPLETE===`, the test summary and `git diff --stat`.
+6. The final report: `===BLOCK B1 COMPLETE===`, the test summary, `git diff --stat`, and one
+   `reviewed <path> ticket <id>` line per changed file. Save it as `.code-forge/runs/site-1/B1.report.md`
+   (the skill does this for you).
 
 ## 9. Review per file
 
@@ -281,7 +311,7 @@ optional here. Run it anyway: it is the step that proves the test can fail.
 ## 11. Close the block
 
 ```bash
-code-forge block close B1 --run site-1
+code-forge block close B1 --run site-1 --report .code-forge/runs/site-1/B1.report.md
 ```
 
 **Look for:** `block B1 closed` and exit 0, plus a `block.close` ledger row. Then commit the block
@@ -300,6 +330,7 @@ If the close is refused, the message names the reason. Common ones:
 | `orphans: <paths>` | a changed or untracked (not ignored) file that no open block owns | `code-forge block claim B1 <path> --run site-1`, or delete it |
 | `unproven <file>` | a high-tier file has no red→green row | run `proof red-green` for its test |
 | `WARN … no coder transcript found` | the transcript grep could not run | pass `--transcript <file>` |
+| `coder report FAILED: no review-file ticket id for <files>` | the report does not name a review ticket for those files | review them, add the `reviewed <path> ticket <id>` lines, and close again |
 
 ## 12. End the run and read the report
 
@@ -314,7 +345,8 @@ code-forge report --slug code-forge-site
 `proof_time`, `forecast_vs_actual_lines`, `blocks_stopped_at_l3`, `run_stop_counts`.
 `cost_per_block` shows B1 with its split between coder, review, S1+S2 and facts. Tokens are
 facts; dollars are estimates. `report --json` and `report --export <dir>` give the same data as
-JSON.
+JSON. After the sections it prints the spend per run, in estimated US dollars, and the total.
+`code-forge run status --run site-1` showed the same spend while the run was open.
 
 ## Pass criteria: "the workflow works"
 
@@ -322,7 +354,8 @@ The first test passes when all of these hold:
 
 1. `code-forge validate` exits 0 and `code-forge doctor --quick` shows no FAIL.
 2. `plans/site.facts.md` exists and every VERIFIED claim has a command and an output line.
-3. `plans/site.plan.md` exists, starts with the facts sheet, and `plan check` prints `ok`.
+3. `plans/site.plan.md` exists, starts with the facts sheet, and `plan check` prints `ok` and a
+   lane for every block.
 4. `run start` pinned a worker, and `run end` stopped it (no leftover worker process).
 5. Every file B1 changed has a signed `review.approved` row in the ledger.
 6. `proof red-green` proved the hero test with `red_kind: assertion`.

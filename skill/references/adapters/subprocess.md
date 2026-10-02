@@ -8,7 +8,7 @@ Never selected automatically (`degraded.md` §1). Coders are detached CLI proces
 
 ## §2 Completion and evidence
 
-The coder's stdout is captured; completion is the **last** `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===` line in it (a quoted sentinel inside a sentence never matches). Process exit without a sentinel is a failed block. Then the re-measurement of `code.md` §5 and `forge block close <id> --run <r> --transcript <captured stdout>` — the transcript grep runs on the capture. A coder that hangs is killed at `--timeout` together with its process group; the pid entry is cleared.
+The coder's stdout is captured; completion is the **last** `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===` line in it (a quoted sentinel inside a sentence never matches). Process exit without a sentinel is a failed block. Then the re-measurement of `code.md` §5 and `forge block close <id> --run <r> --transcript <captured stdout> --report <captured stdout>` — the transcript grep runs on the capture. A coder that hangs is killed at `--timeout` together with its process group; the pid entry is cleared.
 
 ## §3 What the coder's sandbox looks like per provider
 
