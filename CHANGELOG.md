@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.3.2] — 2026-10-01
+
 ### Fixed
 
 - Jev: `score` questions (such as `risk`) send their criteria as a list indexed by score. Jev refused the keyed object
