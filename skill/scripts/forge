@@ -10,7 +10,7 @@
 #      copied install with no package next to it); `test/skill/shim.test.mjs` asserts the pin
 #      equals package.json's version.
 # The shim holds no logic of its own: every verb, flag and message is the CLI's.
-PINNED_VERSION="0.3.2"
+PINNED_VERSION="0.4.0"
 set -eu
 
 self="$0"

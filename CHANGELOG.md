@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.4.0] — 2026-10-02
+
 ### Added
 
 - `budget.usd` per run: every session row carries an estimated `usd`; at 80% one warning, at 100% no new session starts
