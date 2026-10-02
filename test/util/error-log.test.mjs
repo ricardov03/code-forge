@@ -80,7 +80,7 @@ describe('the router logs failed verbs', () => {
     assert.equal(got[0].split(FAKE_KEY).length - 1, 0);
     assert.equal(got[0].split('positional-word').length - 1, 0);
     const e = JSON.parse(got[0]);
-    assert.deepEqual(Object.keys(e), ['ts', 'version', 'node', 'platform', 'arch', 'verb', 'sub', 'flags', 'exit', 'kind', 'message', 'stack', 'cleaned', 'fp']);
+    assert.deepEqual(Object.keys(e), ['ts', 'version', 'node', 'platform', 'arch', 'verb', 'sub', 'flags', 'exit', 'kind', 'message', 'stack', 'cleaned', 'fp', 'before']);
     assert.match(e.ts, /^\d{4}-\d\d-\d\dT\d\d:\d\d:\d\d\.\d{3}Z$/);
     assert.deepEqual(
       { ...e, ts: 'T' },
@@ -91,6 +91,7 @@ describe('the router logs failed verbs', () => {
         cleaned: [{ rule: 'home', count: 1 }, { rule: 'project_path', count: 1 }],
         // sha256("fail\n\nerror\nfail: boom in and"), first 12 hex (checked with shasum)
         fp: '47df05de5817',
+        before: [],
       },
     );
     // non-TTY (spawnSync pipes stderr): no hint line, no hint state
@@ -166,12 +167,13 @@ describe('the router logs failed verbs', () => {
     assert.deepEqual([e.kind, e.message, e.stack], ['crash', 'undefined', null]);
   });
 
-  test('the op_timeout kind of a 1Password failure is carried into the entry', () => {
+  test('the op_timeout kind of a 1Password failure is carried into the entry (after the op_retry warning, B37)', () => {
     const w = fresh();
     assert.equal(cli(['optime'], w).status, 1);
     const got = lines(w.log).map((l) => JSON.parse(l));
-    assert.equal(got.length, 1);
-    assert.deepEqual([got[0].kind, got[0].message], ['op_timeout', 'keys: 1Password did not answer in time; unlock the app and try again']);
+    assert.equal(got.length, 2);
+    assert.deepEqual([got[0].kind, got[0].warning, got[0].verb, got[0].exit], ['warning', 'op_retry', 'optime', 0]);
+    assert.deepEqual([got[1].kind, got[1].message], ['op_timeout', 'keys: 1Password did not answer in time; unlock the app and try again']);
   });
 
   test('a logging failure (the log dir is a file) leaves the exit code and stderr unchanged', () => {

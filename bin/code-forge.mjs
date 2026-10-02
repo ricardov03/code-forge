@@ -14,7 +14,7 @@ import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { clearErrorKind, reportErrorKind, takeErrorKind } from '../src/util/error-kind.mjs';
 import { maybeHint } from '../src/util/error-hint.mjs';
-import { captureStderr, writeVerbFailure } from '../src/util/error-log.mjs';
+import { captureStderr, noteVerb, writeVerbFailure } from '../src/util/error-log.mjs';
 import { redact } from '../src/util/redact.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -97,6 +97,11 @@ export async function run(argv) {
   }
 
   const modulePath = path.join(CLI_DIR, `${verb}.mjs`);
+
+  // B37: the verb and its known subcommand word (never a flag or a value) join the last-5 list in
+  // `~/.code-forge/logs/breadcrumbs.json`; an error logged below names the commands before it.
+  // Best effort, never throws (CODE_FORGE_NO_ERROR_LOG=1 turns it off).
+  await noteVerb(verb, rest).catch(() => false);
 
   // B27: a verb that exits non-zero or throws is logged to `~/.code-forge/logs/errors.jsonl`
   // (scrubbed; never throws; never changes the exit code). The kind a verb reports is cleared

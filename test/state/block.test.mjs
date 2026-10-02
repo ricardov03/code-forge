@@ -242,7 +242,32 @@ test('CLI `block open` prints the brief pointer and refuses an overlapping owned
   });
 });
 
-test('B34 docs floor: a docs block asked at L0 opens at L1 (dispatch row says so); a code block keeps L0; --kind contract raises a code path; a bad kind is refused', async () => {
+test('B36 `block close --report`: a report with no review-file ticket id for a changed file is FAILED; naming the ticket closes', async () => {
+  await withFixture(async ({ ws }) => {
+    await start(ws, 'r-rep', async () => {});
+    await writeFile(path.join(ws, 'acc.yml'), '- clause: the thing works\n  tests: [test/a.test.mjs]\n');
+    const open = ['open', 'B8', '--run', 'r-rep', '--level', 'L1', '--owned', 'a.txt', 'b.txt', '--acceptance', path.join(ws, 'acc.yml')];
+    assert.equal(await runBlock(open, { stdout: captureStream(), stderr: captureStream() }), 0);
+    await writeSigned('r-rep', (row) => appendRow(row, { slug: 'two-blocks' }), { event: 'review.approved', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
+    await writeFile(path.join(ws, 'transcript.log'), 'nothing forbidden\n');
+    const close = (/** @type {string} */ report) => ['close', 'B8', '--run', 'r-rep', '--worker-pid', '4242', '--transcript', path.join(ws, 'transcript.log'), '--report', report];
+
+    await writeFile(path.join(ws, 'report-bad.md'), '===BLOCK B8 COMPLETE===\nall findings addressed\n');
+    const failed = captureStream();
+    assert.equal(await runBlock(close(path.join(ws, 'report-bad.md')), { stdout: failed, stderr: failed, probe: PROBE }), 1);
+    assert.equal(failed.text, 'block B8 open: coder report FAILED: no review-file ticket id for a.txt\n');
+    const unreadable = captureStream();
+    assert.equal(await runBlock(close(path.join(ws, 'no-such-report.md')), { stdout: unreadable, stderr: unreadable, probe: PROBE }), 1);
+    assert.equal(unreadable.text, 'block B8 open: coder report FAILED: --report cannot be read\n');
+
+    await writeFile(path.join(ws, 'report-ok.md'), '===BLOCK B8 COMPLETE===\nreviewed a.txt ticket 0123456789abcdef01234567\n');
+    const closed = captureStream();
+    assert.equal(await runBlock(close(path.join(ws, 'report-ok.md')), { stdout: closed, stderr: closed, probe: PROBE }), 0);
+    assert.equal(closed.text, 'block B8 closed\n');
+  });
+});
+
+test('B34 docs floor:a docs block asked at L0 opens at L1 (dispatch row says so); a code block keeps L0; --kind contract raises a code path; a bad kind is refused', async () => {
   await withFixture(async ({ ws }) => {
     const { rows, writeRow } = rowSink();
     await start(ws, 'r-kind', writeRow);

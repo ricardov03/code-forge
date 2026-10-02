@@ -68,7 +68,7 @@ State lives in the plan file's header — `facts → planned → hardened → co
 |---|---|
 | decomposing, forecasting, `plan check` | `references/plan.md`, `templates/plan.md`, `templates/facts-sheet.md` |
 | the author loop and the tranche gate | `references/harden.md` |
-| briefing a coder, the block gate, the PR contract, Definition of Done | `references/code.md`, `templates/block-record.md` |
+| briefing a coder, the block gate, the PR contract, Definition of Done | `references/code.md`, `templates/coder-brief.md`, `templates/block-record.md` |
 | review depth, packets, the convergence rule, `block waive` | `references/review.md` |
 | System 1 / System 2, thresholds, escalation, the L3 rung | `references/decisions.md` |
 | proof tiers, red→green, the measurement export | `references/proof.md` |

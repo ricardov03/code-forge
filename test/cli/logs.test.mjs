@@ -69,7 +69,7 @@ function sink() {
 
 /**
  * @param {string[]} args @param {string} h
- * @param {{gh?: any, npm?: any, ai?: any, aiResult?: any, onPath?: any, isTTY?: boolean, confirms?: boolean[], selects?: string[], cwd?: string, pkg?: any, env?: object, runEditor?: any}} [o]
+ * @param {{gh?: any, npm?: any, doctor?: any, ai?: any, aiResult?: any, onPath?: any, isTTY?: boolean, confirms?: boolean[], selects?: string[], cwd?: string, pkg?: any, env?: object, runEditor?: any}} [o]
  *   `gh(argv)`: the answer for every gh call (default ok, `[]` for a search); `npm`: the npm answer
  *   (default 0.2.3); `ai`: the claude stdout (default no items); `confirms`/`selects`: answers in order.
  */
@@ -79,6 +79,7 @@ async function logs(args, h, o = {}) {
   const calls = [];
   const sessions = [];
   const npmOpts = [];
+  const doctorOpts = [];
   const prompts = [];
   const confirms = [...(o.confirms ?? [])];
   const selects = [...(o.selects ?? [])];
@@ -99,6 +100,10 @@ async function logs(args, h, o = {}) {
       sessions.push({ argv, input: Buffer.from(opts.input ?? '').toString('utf8'), cwd, cwdAtCall });
       return o.aiResult ?? OK(o.ai ?? claudeAnswer({ items: [] }));
     }
+    if (argv[2] === 'doctor') {
+      doctorOpts.push(opts);
+      return o.doctor ? o.doctor(argv, opts) : FAIL(1);
+    }
     if (o.gh) return o.gh(argv);
     return argv[2] === 'list' ? OK('[]') : OK('');
   };
@@ -106,7 +111,7 @@ async function logs(args, h, o = {}) {
     env: { HOME: h, PATH: '', ...(o.env ?? {}) }, cwd: o.cwd ?? h, stdout, stderr, isTTY: o.isTTY ?? false, ui, exec,
     onPath: o.onPath ?? (() => false), now: NOW, system: SYSTEM, ...(o.pkg ? { pkg: o.pkg } : {}), ...(o.runEditor ? { runEditor: o.runEditor } : {}),
   });
-  return { code, out: stdout.text(), err: stderr.text(), calls, sessions, prompts, npmOpts };
+  return { code, out: stdout.text(), err: stderr.text(), calls, sessions, prompts, npmOpts, doctorOpts };
 }
 
 describe('logs, summary, clear, path', () => {
@@ -149,6 +154,7 @@ describe('logs, summary, clear, path', () => {
         { fp: 'f00000000002', verb: 'init', sub: null, kind: 'usage', count: 1 },
         { fp: 'f00000000001', verb: 'tools', sub: 'install', kind: 'error', count: 1 },
       ],
+      warnings: [],
     });
   });
 
@@ -174,10 +180,10 @@ describe('logs, summary, clear, path', () => {
 
 const USAGE =
   'usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n' +
-  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--no-ai] [--allow-old] [--dry-run] [--yes]\n';
+  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run] [--yes]\n';
 
 const DISCLOSURE =
-  'What you will share (public on GitHub): code-forge, Node and OS versions; command names and flag NAMES; exit codes; error types; error messages and crash reports after cleaning.\n' +
+  'What you will share (public on GitHub): code-forge, Node and OS versions; command names and flag NAMES; the names of the last commands you ran (no flags or values); exit codes; error types; error messages and crash reports after cleaning.\n' +
   'Never shared: flag values, file contents, your code, keys or tokens, your home folder, project folder or project name.\n';
 
 const TWO_TITLE = '[error report] 2 errors';
@@ -746,6 +752,95 @@ describe('logs report: duplicates, version check, edit (B28)', () => {
       [editorCommand({ EDITOR: 'nano' }), editorCommand({ EDITOR: 'subl -w' }), editorCommand({ EDITOR: 'a;b' }), editorCommand({}), editorCommand({ VISUAL: 'code --wait', EDITOR: 'vi' }), editorCommand({ VISUAL: '/opt/ed/bin/edit', EDITOR: 'vi' })],
       ['nano', null, null, null, 'vi', '/opt/ed/bin/edit'],
     );
+  });
+});
+
+describe('B37: warnings, commands before, the setup check', () => {
+  const WARN = entry({ ts: '2026-10-01T11:00:00.000Z', verb: 'review', sub: null, flags: [], exit: 0, kind: 'warning', warning: 'review_retry', message: 'a review session timed out; it was retried once', cleaned: [], fp: 'a00000000001', before: ['init'] });
+  const ERR = entry({ ts: '2026-10-01T10:30:00.000Z', fp: 'e00000000001', before: ['init', 'keys list'] });
+
+  test('logs marks a warning line; an error line is unchanged; a non-string warning word prints as "warning"', async () => {
+    const odd = await logs([], home([{ ...WARN, warning: { x: 1 } }]));
+    assert.equal(odd.out, '2026-10-01T11:00:00.000Z  [warning] review  warning  a00000000001  a review session timed out; it was retried once\n');
+    const r = await logs([], home([ERR, WARN]));
+    assert.equal(r.code, 0);
+    assert.equal(
+      r.out,
+      '2026-10-01T11:00:00.000Z  [warning] review  review_retry  a00000000001  a review session timed out; it was retried once\n' +
+        '2026-10-01T10:30:00.000Z  keys set  1  op_timeout  e00000000001  keys: 1Password did not answer in time; unlock the app and try again\n',
+    );
+  });
+
+  test('summary counts warnings apart from errors (text and JSON)', async () => {
+    const h = home([ERR, WARN, { ...WARN, ts: '2026-10-01T11:30:00.000Z' }]);
+    const r = await logs(['summary'], h);
+    assert.equal(r.out, 'errors in the last 30 days:\ne00000000001  keys set  op_timeout  seen 1 time\nwarnings in the last 30 days:\na00000000001  review  review_retry  seen 2 times\n');
+    const j = await logs(['summary', '--json'], h);
+    assert.deepEqual(JSON.parse(j.out), {
+      days: 30,
+      counts: [{ fp: 'e00000000001', verb: 'keys', sub: 'set', kind: 'op_timeout', count: 1 }],
+      warnings: [{ fp: 'a00000000001', verb: 'review', sub: null, warning: 'review_retry', count: 2 }],
+    });
+    const only = await logs(['summary'], home([WARN]));
+    assert.equal(only.out, 'no errors in the last 30 days\nwarnings in the last 30 days:\na00000000001  review  review_retry  seen 1 time\n');
+  });
+
+  test('report leaves warnings out by default; --include-warnings adds them and says so', async () => {
+    const h = home([ERR, WARN]);
+    const r = await logs(['report', '--no-ai', '--dry-run'], h);
+    assert.equal(r.code, 0);
+    assert.equal(count(r.out, 'review_retry'), 0);
+    assert.equal(count(r.out, '\nTitle: [error report] keys op_timeout\n'), 1);
+    assert.equal(r.out.startsWith(DISCLOSURE), true);
+    assert.equal(count(r.out, '- commands before (oldest first): `init`, `keys list`\n'), 1);
+    const w = await logs(['report', '--no-ai', '--dry-run', '--include-warnings'], h);
+    assert.equal(count(w.out, '\nTitle: [error report] 2 errors\n'), 1);
+    assert.equal(count(w.out, '#### 1. review: warning\n'), 1);
+    assert.equal(count(w.out, '- warning: review_retry\n'), 1);
+    assert.equal(count(w.out, '- commands before (oldest first): `init`\n'), 1);
+    assert.equal(count(w.out, '; warnings (problems code-forge recovered from) after cleaning.\n'), 1);
+    const none = await logs(['report', '--dry-run'], home([WARN]));
+    assert.deepEqual([none.code, none.out, none.calls.length], [0, 'no matching errors to report\n', 0]);
+  });
+
+  test('--with-doctor: one doctor child (argv, 60 s, logging off); id, status and a cleaned short detail only', async () => {
+    const h = home([ERR]);
+    const rows = [
+      { id: 'node', status: 'OK', label: 'LABEL-NEVER-SHARED', detail: 'v22.20.0' },
+      { id: 'config', status: 'FAIL', label: 'LABEL-NEVER-SHARED', detail: `${h}/proj/.code-forge.yml: bad key; mail jane@example.com\nsecond line` },
+      { id: 'long', status: 'WARN', label: 'x', detail: 'z'.repeat(300) },
+      { id: 'bad id!', status: 'OK', label: 'x', detail: 'dropped' },
+      { id: 'odd', status: 'MAYBE', label: 'x', detail: 'dropped' },
+    ];
+    const doctor = () => ({ ...FAIL(1), stdout: `${JSON.stringify({ ok: false, counts: {}, rows })}\n` });
+    const r = await logs(['report', '--no-ai', '--dry-run', '--with-doctor'], h, { doctor });
+    assert.equal(r.code, 0);
+    const doctorCalls = r.calls.filter((c) => c[2] === 'doctor');
+    assert.deepEqual(doctorCalls, [[process.execPath, path.join(ROOT, 'bin', 'code-forge.mjs'), 'doctor', '--json']]);
+    assert.deepEqual([r.doctorOpts[0].timeoutMs, r.doctorOpts[0].env.CODE_FORGE_NO_ERROR_LOG, r.doctorOpts[0].cwd], [60_000, '1', h]);
+    assert.equal(
+      count(r.out, `### Setup check\n\n| check | status | detail |\n|---|---|---|\n| node | OK | v22.20.0 |\n| config | FAIL | ~/proj/.code-forge.yml: bad key; mail <email> |\n| long | WARN | ${'z'.repeat(120)} |\n`),
+      1,
+    );
+    assert.equal(count(r.out, h), 0);
+    assert.equal(count(r.out, 'LABEL-NEVER-SHARED'), 0);
+    assert.equal(count(r.out, 'jane@example.com'), 0);
+    assert.equal(count(r.out, 'second line'), 0);
+    assert.equal(count(r.out, 'dropped'), 0);
+    assert.equal(count(r.out, "; the setup check results (each check's name, status and a short detail, after cleaning).\n"), 1);
+  });
+
+  test('without --with-doctor: 0 doctor calls and no section; a doctor that times out is a note and the report goes on', async () => {
+    const h = home([ERR]);
+    const plain = await logs(['report', '--no-ai', '--dry-run'], h);
+    assert.deepEqual([plain.calls.filter((c) => c[2] === 'doctor').length, count(plain.out, 'Setup check'), count(plain.out, 'setup check')], [0, 0, 0]);
+    const slow = await logs(['report', '--no-ai', '--dry-run', '--with-doctor'], h, { doctor: () => ({ ...FAIL(null), timedOut: true }) });
+    assert.equal(slow.code, 0);
+    assert.equal(slow.out.startsWith(`Could not run the setup check (timed out); the report goes on without it.\n${DISCLOSURE}`), true);
+    assert.equal(count(slow.out, '### Setup check\n\n(the setup check could not run: timed out)\n'), 1);
+    assert.equal(slow.out.endsWith('dry run: not sent\n'), true);
+    const junk = await logs(['report', '--no-ai', '--dry-run', '--with-doctor'], h, { doctor: () => FAIL(1, 'boom') });
+    assert.equal(count(junk.out, '(the setup check could not run: doctor exit 1)'), 1);
   });
 });
 

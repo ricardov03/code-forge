@@ -29,6 +29,8 @@ Chosen approach and why · rejected alternatives (one line each) · the project 
 |---|---|---|---|---|---|---|---|---|---|
 | B1 | … | L1 | — | `src/x.mjs`, `test/x.test.mjs` | 12 | 1 200 | (1) … (`test/x.test.mjs`, F3) · (2) … | `node --test 'test/x/**/*.test.mjs'` | … |
 
+`level` is the lane recorded for the block by `forge jev ask lane --block <id>` (or `--rules`), never a category; `forge plan check` refuses any other.
+
 Split rule: `cases = 2 × clauses`, `lines = 26 × cases` (floor 1 200 greenfield, 500 amendment); above `budget.block_cases` or `budget.block_lines` the block is split here. A glob in `owned_files` never contains `[ ] ( ) ! + @`.
 
 ## §3 Caller map

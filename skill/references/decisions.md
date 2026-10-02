@@ -6,7 +6,7 @@ Deterministic tools answer facts (gates, diffs, counts). **System 1 (S1)** answe
 
 | id | type | fires | answers |
 |---|---|---|---|
-| `lane` | choice | plan, per block; code, on re-decomposition | `L0` trivial · `L1` a plain feature following an existing pattern · `L2` money, dates, tenancy, migrations, concurrency, unknown failure · `split` too large or two concerns. **L3 is not a lane** |
+| `lane` | choice | plan, per block (`--block <id>`: `plan check` reads it); code, on re-decomposition | `L0` trivial · `L1` a plain feature following an existing pattern · `L2` money, dates, tenancy, migrations, concurrency, unknown failure · `split` too large or two concerns. **L3 is not a lane** |
 | `risk` | score 0–3 | plan, per block; code, per finished file | `0` cosmetic · `1` wrong behaviour, easy to notice and revert · `2` silent wrong data for some users · `3` silent wrong money or a cross-tenant leak |
 | `security_sensitive` | yes/no | plan, per block; code, per file unless path floors already forced `high` | touches authentication, authorization, tenancy, secrets, money movement or webhook verification |
 | `next` | choice | code, after each attempt's tool gate | `complete` all green, tests added or `no_new_tests_reason` given · `retry` a contained failure the same coder fixes in one more attempt · `escalate` repeated or spreading failures, or a risky area · `stop` the evidence contradicts the brief — the human decides |

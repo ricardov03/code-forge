@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { parseAck, parseSentinel, verifyAck } from '../../src/engines/sentinel.mjs';
+import { missingReviewTickets, parseAck, parseSentinel, verifyAck } from '../../src/engines/sentinel.mjs';
 
 // ── parseSentinel: last-occurrence rule ──────────────────────────────────────
 
@@ -186,4 +186,34 @@ test('verifyAck throws a TypeError for an expectedLines that is not a non-negati
     );
   }
   assert.deepEqual(verifyAck('ACK deadbeef lines=0\n', 'deadbeef', 0), { status: 'ok', ack: { sha8: 'deadbeef', lines: 0 } });
+});
+
+// ── B36: the report names a review-file ticket per changed file, or it is FAILED ──
+
+const T1 = '0123456789abcdef01234567';
+const T2 = 'fedcba9876543210fedcba98';
+
+test('missingReviewTickets: a report that names every file with its ticket misses none', () => {
+  const report = `===BLOCK B1 COMPLETE===\nreviewed src/a.mjs ticket ${T1}\nreviewed \`src/b.mjs\` ticket ${T2}.\n`;
+  assert.deepEqual(missingReviewTickets(report, ['src/a.mjs', 'src/b.mjs']), []);
+});
+
+test('missingReviewTickets: "all findings addressed" with no ticket ids misses every changed file', () => {
+  assert.deepEqual(missingReviewTickets('===BLOCK B1 COMPLETE===\nall findings addressed in src/a.mjs and src/b.mjs\n', ['src/a.mjs', 'src/b.mjs']), ['src/a.mjs', 'src/b.mjs']);
+});
+
+test('missingReviewTickets: a line listing two changed paths counts for neither, even with a ticket', () => {
+  const report = `reviewed src/a.mjs and src/b.mjs ticket ${T1}\nreviewed src/b.mjs ticket ${T2}\n`;
+  assert.deepEqual(missingReviewTickets(report, ['src/a.mjs', 'src/b.mjs']), ['src/a.mjs']);
+});
+
+test('missingReviewTickets: a hex run inside the path itself is not the ticket', () => {
+  const file = `fixtures/${T1}.json`;
+  assert.deepEqual(missingReviewTickets(`reviewed ${file}\nreviewed build/${T2}.log src/x.mjs\n`, [file, 'src/x.mjs']), [file, 'src/x.mjs']);
+  assert.deepEqual(missingReviewTickets(`reviewed ${file} ticket ${T2}\n`, [file]), []);
+});
+
+test('missingReviewTickets: a 40-hex commit sha is not a ticket, and a longer path does not stand for a shorter one', () => {
+  const report = `src/a.mjs fixed in ${'a'.repeat(40)}\nreviewed src/b.mjs.bak ticket ${T1}\nreviewed src/c.mjs ticket ${T2}\n`;
+  assert.deepEqual(missingReviewTickets(report, ['src/a.mjs', 'src/b.mjs', 'src/c.mjs']), ['src/a.mjs', 'src/b.mjs']);
 });

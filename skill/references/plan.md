@@ -13,7 +13,7 @@ Run `forge facts --brief <brief> [--sources <path>...] --out <plans_dir>/<slug>.
 
 ## §1 The author job
 
-`forge author --job plan --brief <brief> --facts <sheet> --out <plan>` runs a fresh L3 closed-book session (empty cwd, the packet on stdin) and returns `{draft, questions[], cost}`. It refuses without `--facts` (exit 2, `facts sheet required: run forge facts first`) and refuses a sheet older than the brief. The draft follows `templates/plan.md`; its §0 **is** the facts sheet, verbatim, and it must contain the section "Acceptance clauses the facts sheet cannot back" — `none` when empty, never absent.
+`forge author --job plan --brief <brief> --facts <sheet> --out <plan>` runs a fresh L3 closed-book session (empty cwd, the packet on stdin) and returns `{draft, questions[], cost}`. It refuses without `--facts` (exit 2, `facts sheet required: run forge facts first`) and refuses a sheet older than the brief. The draft follows `templates/plan.md`; its §0 **is** the facts sheet, verbatim, and it must contain the section "Acceptance clauses the facts sheet cannot back" — `none` when empty, never absent. The author's packet carries the exact required headings from the same list `plan check` reads (`src/session/plan-sections.mjs`).
 
 ## §2 Decomposition — what every block carries
 
@@ -22,7 +22,7 @@ Run `forge facts --brief <brief> [--sources <path>...] --out <plans_dir>/<slug>.
 | `id`, `title` | one deliverable per block |
 | `owned_files` | exact paths or disjoint globs; a glob never contains `[ ] ( ) ! + @` (an exact path may); pairwise disjoint across blocks that can run together |
 | `depends_on` | acyclic; a block imports only modules of blocks it depends on — a batch-mate's module is a `next = stop` |
-| `level` | the S1 `lane` answer (`L0` trivial · `L1` a plain feature following a pattern · `L2` money, dates, tenancy, migrations, concurrency · `split` too large or two concerns); **L3 is not a lane** |
+| `level` | the S1 `lane` answer recorded for the block — `forge jev ask lane --block <id> --plan <plan> --state <file>`, or `--rules` (the deterministic fallback) when Jev is unavailable; never a block category (`L0` trivial · `L1` a plain feature following a pattern · `L2` money, dates, tenancy, migrations, concurrency · `split` too large or two concerns); **L3 is not a lane** |
 | `acceptance` | clauses that each name ≥ 1 test id; a clause citing a flag, path, version or API cites a VERIFIED fact id or sits in the unbackable list with a tolerance naming this block |
 | `cases`, `lines` | forecasts: `cases = 2 × counted clauses`, `lines = 26 × cases` with a floor of 1 200 for a greenfield block and 500 for an amendment; above `budget.block_cases` or `budget.block_lines` the block is split in the plan, never "split-ready" |
 | `test_command` | a quoted glob or an explicit file list, never a bare directory |
@@ -36,7 +36,7 @@ Every clause of the parent's acceptance maps to exactly one block; an unmapped c
 
 ## §4 The deterministic exit — `forge plan check <plan> [--facts <sheet>]`
 
-Prints every failing row by name and exits 1 on any of: an acceptance clause with a claim token that resolves to no VERIFIED fact and no tolerance row (`unbackable clause without tolerance: <block> <clause>`); a missing caller map or a block absent from it; a block without `cases` and `lines`; a forecast above `budget.block_cases` / `budget.block_lines` without a named split; overlapping `owned_files` in one wave; a cyclic `depends_on` or an import of a batch-mate; a glob with `[ ] ( ) ! + @`; more than `caps.coders` concurrent blocks in a slot; `questions[]` still open; the facts sheet's sha absent from the draft. Green ⇒ set `status: hardened` after the harden job (`harden.md`), never before.
+Prints every failing row by name and exits 1 on any of: an acceptance clause with a claim token that resolves to no VERIFIED fact and no tolerance row (`unbackable clause without tolerance: <block> <clause>`); a missing caller map or a block absent from it; a block without `cases` and `lines`; a forecast above `budget.block_cases` / `budget.block_lines` without a named split; overlapping `owned_files` in one wave; a cyclic `depends_on` or an import of a batch-mate; a glob with `[ ] ( ) ! + @`; more than `caps.coders` concurrent blocks in a slot; `questions[]` still open; the facts sheet's sha absent from the draft; a block whose level has no recorded lane, or differs from it (`block <id>: level L2 differs from the recorded lane L1 (jev)`). A required section under a near-miss heading at its template position (§0.x, §3) passes with a `WARN` naming the exact heading. stdout ends with the lane recorded per block (`lanes: B1 L1 (jev) · B2 L0 (rules)`). Green ⇒ set `status: hardened` after the harden job (`harden.md`), never before.
 
 ## §5 Cost
 

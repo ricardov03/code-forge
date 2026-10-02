@@ -11,6 +11,7 @@
  * coder: its tokens are never seen, so its price is unknown). Shadow rows never count.
  */
 
+import { logWarning } from '../util/error-log.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { estimateCostUsd } from './prices.mjs';
 
@@ -159,6 +160,8 @@ export async function checkBudget({ budget, run, rows, block = null, role, write
     if (recorded || !warnedRuns.has(run)) {
       writeSafe(stderr, `code-forge: ${budgetWarningMessage(budget, spent)}\n`);
       warnedRuns.add(run); // after the write attempt, never before
+      // B37: a warning line in the local error log — never the amounts (config values)
+      await logWarning({ warning: 'budget_warning', message: 'budget.usd: 80% of the run budget is spent; new sessions stop at 100%' }).catch(() => null);
     }
   }
   return { refuse: false, spent };

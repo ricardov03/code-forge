@@ -8,8 +8,8 @@
 /** A kind is a short snake_case word; anything else is ignored. */
 const KIND = /^[a-z][a-z0-9_]{0,39}$/;
 
-/** Kinds the router sets itself; a verb reporting one of these is ignored. */
-const RESERVED = new Set(['crash', 'usage', 'error']);
+/** Kinds the router (and `logWarning`, B37) set themselves; a verb reporting one of these is ignored. */
+const RESERVED = new Set(['crash', 'usage', 'error', 'warning']);
 
 /** @type {string|null} */
 let current = null;

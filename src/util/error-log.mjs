@@ -12,6 +12,12 @@
  *
  * Logging never throws and never changes the verb's exit code. `CODE_FORGE_NO_ERROR_LOG=1` turns
  * it off; no HOME means no log. The file is cut to its newest half when it grows over 1 MB.
+ *
+ * B37: every entry carries `before`, the names of up to 5 commands run before this one (oldest
+ * first; `util/breadcrumbs.mjs`, noted by the router through {@link noteVerb}), and
+ * {@link logWarning} writes a `kind: 'warning'` line for a recoverable problem (a 1Password call
+ * retried, a review session retried, System 1 falling back to rules, a budget warning) — the same
+ * scrub, cap and fingerprint, `warning` naming what happened, once per fingerprint per process.
  */
 
 import { createHash } from 'node:crypto';
@@ -19,6 +25,7 @@ import { readFileSync, realpathSync } from 'node:fs';
 import { appendFile, mkdir, readFile, rename, rm, stat, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { SUBCOMMANDS, cleanList, currentCommand, noteCommand, previousCommands } from './breadcrumbs.mjs';
 import { redact } from './redact.mjs';
 
 export const ERROR_LOG_MAX_BYTES = 1024 * 1024;
@@ -29,22 +36,10 @@ export const NO_ERROR_LOG_ENV = 'CODE_FORGE_NO_ERROR_LOG';
 const PACKAGE_JSON = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
 
 /**
- * The subcommand words each verb knows; the first positional is logged as `sub` only when it is
- * one of these (anything else could be a user value: a path, an id, a name).
- * @type {Readonly<Record<string, readonly string[]>>}
+ * The subcommand words each verb knows (kept in `breadcrumbs.mjs`, which needs the same table); the
+ * first positional is logged as `sub` only when it is one of these.
  */
-export const SUBCOMMANDS = Object.freeze({
-  block: ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'],
-  gates: ['detect', 'run', 'secret-scan', 'safe-edit', 'scope', 'acceptance', 'transcript-grep'],
-  jev: ['ask'],
-  keys: ['list', 'set', 'test', 'remove'],
-  ledger: ['calibration', 'outcome', 'tail'],
-  logs: ['summary', 'clear', 'path', 'report'],
-  plan: ['check'],
-  proof: ['tier', 'export', 'lock', 'unlock', 'restore', 'red-green'],
-  run: ['start', 'status', 'end'],
-  tools: ['install'],
-});
+export { SUBCOMMANDS };
 
 /**
  * The scrub rules, in the order a summary lists them. `label` is singular and plural.
@@ -84,6 +79,8 @@ export const SCRUB_PLACEHOLDERS = Object.freeze(['<project>', '<slug>', '<email>
  * @property {string|null} stack
  * @property {CleanCount[]} cleaned
  * @property {string} [fp] - the fingerprint (B28); entries written before B28 have none.
+ * @property {string[]} [before] - the commands run before this one, oldest first (B37).
+ * @property {string} [warning] - for `kind: 'warning'`: what happened (`op_retry`…) (B37).
  */
 
 /** @param {string} s */
@@ -353,6 +350,7 @@ export async function appendLine(file, line, maxBytes = ERROR_LOG_MAX_BYTES) {
  * @property {NodeJS.ProcessEnv} [env]
  * @property {string} [cwd]
  * @property {Date} [now]
+ * @property {string[]} [before] - the commands run before (default: the ones the router noted).
  */
 
 const KIND_WORD = /^[a-z][a-z0-9_]{0,39}$/;
@@ -394,12 +392,15 @@ export function normalizeMessage(message) {
 }
 
 /**
- * The first 12 hex characters of sha256(verb, sub, kind, normalized message) (B28).
- * @param {{verb: string, sub?: string|null, kind: string, message?: string|null}} e
+ * The first 12 hex characters of sha256(verb, sub, kind, normalized message) (B28); a warning
+ * (B37) adds what happened, so two warnings with the same text stay apart.
+ * @param {{verb: string, sub?: string|null, kind: string, message?: string|null, warning?: string}} e
  * @returns {string}
  */
 export function fingerprint(e) {
-  const text = [e.verb, e.sub ?? '', e.kind, normalizeMessage(e.message)].join('\n');
+  const parts = [e.verb, e.sub ?? '', e.kind, normalizeMessage(e.message)];
+  if (typeof e.warning === 'string') parts.push(e.warning);
+  const text = parts.join('\n');
   return createHash('sha256').update(text, 'utf8').digest('hex').slice(0, 12);
 }
 
@@ -455,7 +456,97 @@ export async function buildEntry(input) {
     stack,
     cleaned: scrubber.counts(),
     fp: fingerprint({ verb: verbName, sub, kind, message }),
+    before: cleanList(input.before ?? previousCommands()),
   };
+}
+
+/**
+ * Note the command this process runs (the router, once, before the verb): its name and known
+ * subcommand word go to the breadcrumb file — never a flag or a value. Async: always a Promise,
+ * which never rejects.
+ * @param {string} verb @param {string[]} args @param {NodeJS.ProcessEnv} [env]
+ * @returns {Promise<boolean>} whether the breadcrumb file was written.
+ */
+export async function noteVerb(verb, args, env = process.env) {
+  try {
+    return await noteCommand({ verb, sub: subcommandOf(verb, args), env });
+  } catch {
+    return false;
+  }
+}
+
+/** Fingerprints of the warnings this process already logged (one line each per process). */
+const warned = new Set();
+
+/** Forget which warnings were logged (tests). */
+export function resetWarnings() {
+  warned.clear();
+}
+
+/**
+ * @typedef {object} WarningInput
+ * @property {string} [verb] - default: the command the router noted, else `unknown`.
+ * @property {string} warning - what happened: a short snake_case word (`op_retry`); else `warning`.
+ * @property {string} message - plain text; never a value (it is cleaned and capped anyway).
+ * @property {NodeJS.ProcessEnv} [env]
+ * @property {string} [cwd]
+ * @property {Date} [now]
+ */
+
+/**
+ * Log one recoverable problem as a `kind: 'warning'` line (B37): the same cleaning, 2 KB cap and
+ * fingerprint as an error, `exit: 0`, no flags, no stack, `warning` naming what happened. The same
+ * warning (fingerprint) is written once per process (remembered only after the line was
+ * appended). Never throws or rejects; never shows a hint.
+ * @param {WarningInput} input
+ * @returns {Promise<ErrorEntry|null>} the entry written, or null (logging off, no HOME, a repeat, an error).
+ */
+export async function logWarning(input) {
+  try {
+    const env = input?.env ?? process.env;
+    if (loggingOff(env)) return null;
+    const file = errorLogPath(env.HOME);
+    if (file === null) return null;
+    const cwd = input.cwd ?? process.cwd();
+    const scrubber = createScrubber({ home: env.HOME ?? null, cwd, slug: await readProjectSlug(cwd) });
+    const clean = (/** @type {string} */ s) => scrubber.scrub(redact(s));
+    const noted = currentCommand();
+    const verbName = typeof input.verb === 'string' && input.verb.length > 0 ? clean(input.verb) : noted?.verb ?? 'unknown';
+    const sub = typeof input.verb === 'string' && input.verb.length > 0 && input.verb !== noted?.verb ? null : noted?.sub ?? null;
+    const warning = typeof input?.warning === 'string' && KIND_WORD.test(input.warning) ? input.warning : 'warning';
+    const message = capBytes(clean(safeString(() => input.message).trim()), MESSAGE_MAX_BYTES);
+    const fp = fingerprint({ verb: verbName, sub, kind: 'warning', message, warning });
+    if (warned.has(fp)) return null;
+    /** @type {ErrorEntry} */
+    const entry = {
+      ts: (input.now ?? new Date()).toISOString(),
+      version: packageVersion(),
+      node: process.version,
+      platform: process.platform,
+      arch: process.arch,
+      verb: verbName,
+      sub,
+      flags: [],
+      exit: 0,
+      kind: 'warning',
+      warning,
+      message,
+      stack: null,
+      cleaned: scrubber.counts(),
+      fp,
+      before: cleanList(previousCommands()),
+    };
+    await appendLine(file, JSON.stringify(entry));
+    warned.add(fp); // only after the line is written: a failed write may be retried later
+    return entry;
+  } catch {
+    return null;
+  }
+}
+
+/** @param {{kind?: unknown}|null|undefined} e @returns {boolean} whether a log entry is a warning (B37). */
+export function isWarning(e) {
+  return e?.kind === 'warning';
 }
 
 /**

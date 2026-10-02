@@ -6,7 +6,13 @@
  *   logs summary [--days N] [--json]  one row per fingerprint over the last N days (default 30): "seen N times"
  *   logs clear [--yes]                delete the log after one yes
  *   logs path                         print the log path
- *   logs report [--last N] [--kind K] [--verb V] [--note "text"] [--no-ai] [--allow-old] [--dry-run] [--yes]
+ *   logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run] [--yes]
+ *
+ * B37: warnings (`kind: 'warning'`, recoverable problems) are listed marked `[warning]`, counted
+ * apart in `summary`, and reported only with `--include-warnings`. Each reported error names the
+ * commands run before it (`before`, names only). `--with-doctor` adds a "Setup check" section:
+ * `code-forge doctor --json` run as a child (60 s at most, error logging off), each row's id,
+ * status and a short detail only, cleaned like the rest; a doctor that cannot run is a note.
  *
  * `report` (B28 order): a version check (`npm view`; an old version is warned and asked about,
  * default no, `--yes` included; without a terminal it stops unless `--allow-old`) → the
@@ -27,8 +33,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exec as realExec } from '../util/exec.mjs';
-import { capBytes, createScrubber, describeCounts, errorLogPath, fingerprintOf, mergeCounts, packageVersion, readErrorLog, readProjectSlug } from '../util/error-log.mjs';
-import { writeSafe } from '../util/redact.mjs';
+import { NO_ERROR_LOG_ENV, capBytes, createScrubber, describeCounts, errorLogPath, fingerprintOf, isWarning, mergeCounts, packageVersion, readErrorLog, readProjectSlug } from '../util/error-log.mjs';
+import { redact, writeSafe } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
 import { SECRET_LOOKING_PATTERNS } from '../config/secret-patterns.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
@@ -36,22 +42,48 @@ import { AI_REPORT_MAX_BYTES, applyItems, describeAiCounts, runAiScrub } from '.
 
 const USAGE =
   'usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n' +
-  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--no-ai] [--allow-old] [--dry-run] [--yes]\n';
+  '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run] [--yes]\n';
 
 const PACKAGE_JSON = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'package.json');
 
 /** A prefilled issue link longer than this is cut (browsers and GitHub refuse very long URLs). */
 export const MAX_URL_LENGTH = 7500;
 
-/** Printed before every report preview. */
-export const DISCLOSURE =
-  'What you will share (public on GitHub): code-forge, Node and OS versions; command names and flag NAMES; exit codes; error types; error messages and crash reports after cleaning.\n' +
-  'Never shared: flag values, file contents, your code, keys or tokens, your home folder, project folder or project name.\n';
+/**
+ * Printed before every report preview: every kind of data the report holds.
+ * @param {{warnings?: boolean, doctor?: boolean}} [o] - whether the report holds warnings / setup check results.
+ * @returns {string}
+ */
+export function disclosure({ warnings = false, doctor = false } = {}) {
+  const shared = [
+    'code-forge, Node and OS versions',
+    'command names and flag NAMES',
+    'the names of the last commands you ran (no flags or values)',
+    'exit codes',
+    'error types',
+    'error messages and crash reports after cleaning',
+    ...(warnings ? ['warnings (problems code-forge recovered from) after cleaning'] : []),
+    ...(doctor ? ["the setup check results (each check's name, status and a short detail, after cleaning)"] : []),
+  ];
+  return (
+    `What you will share (public on GitHub): ${shared.join('; ')}.\n` +
+    'Never shared: flag values, file contents, your code, keys or tokens, your home folder, project folder or project name.\n'
+  );
+}
+
+/** The disclosure of a report with errors only. */
+export const DISCLOSURE = disclosure();
 
 export const CONFIRM_MESSAGE = 'This will be public on GitHub. Send it?';
 
 const GH_TIMEOUT_MS = 60_000;
 const NPM_TIMEOUT_MS = 10_000;
+/** `code-forge doctor --json` for `--with-doctor` gets at most this long. */
+export const DOCTOR_TIMEOUT_MS = 60_000;
+/** A setup check row's detail is cut to this many bytes. */
+export const DOCTOR_DETAIL_MAX_BYTES = 120;
+
+const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'code-forge.mjs');
 
 /** The npm package a version check looks up. */
 export const PACKAGE_NAME = '@codedology/code-forge';
@@ -196,13 +228,15 @@ function fenced(text) {
 /**
  * The issue title and Markdown body for `entries` (newest first), with the sections of the issue
  * form (`.github/ISSUE_TEMPLATE/error-report.yml`): what you were doing, versions, error details.
- * The fingerprint section is {@link reportFooter}, added after cleaning.
+ * The fingerprint section is {@link reportFooter}, added after cleaning. With `setup` (B37) a
+ * "Setup check" section follows the error details: the rows, or why the check could not run.
  * @param {ErrorEntry[]} entries
  * @param {{version: string, node: string, os: string, latest?: string|null}} system
  * @param {string|null} note
+ * @param {SetupCheck|null} [setup]
  * @returns {{title: string, body: string, fps: string[]}} `fps`: distinct fingerprints, newest first.
  */
-export function buildReport(entries, system, note) {
+export function buildReport(entries, system, note, setup = null) {
   const pairs = new Set(entries.map((e) => `${e.verb}\u0000${e.kind}`));
   const title = pairs.size === 1 ? `[error report] ${entries[0].verb} ${entries[0].kind}` : `[error report] ${entries.length} errors`;
   const fps = entries.map(fingerprintOf);
@@ -233,8 +267,10 @@ export function buildReport(entries, system, note) {
       '',
       `- when: ${e.ts}`,
       `- flags: ${Array.isArray(e.flags) && e.flags.length > 0 ? e.flags.map((f) => `\`${f}\``).join(' ') : 'none'}`,
+      ...(Array.isArray(e.before) ? [`- commands before (oldest first): ${e.before.length > 0 ? e.before.map((c) => `\`${c}\``).join(', ') : 'none'}`] : []),
       `- exit: ${e.exit}`,
       `- kind: ${e.kind}`,
+      ...(isWarning(e) && typeof e.warning === 'string' ? [`- warning: ${e.warning}`] : []),
       `- fingerprint: ${fps[i]}`,
       `- code-forge ${e.version}, Node ${e.node}, ${e.platform} ${e.arch}`,
       '',
@@ -244,7 +280,56 @@ export function buildReport(entries, system, note) {
     );
     if (e.stack) out.push('', 'stack:', '', fenced(e.stack));
   });
+  if (setup !== null) {
+    out.push('', '### Setup check', '');
+    if ('why' in setup) {
+      out.push(`(the setup check could not run: ${setup.why})`);
+    } else {
+      out.push('| check | status | detail |', '|---|---|---|');
+      for (const r of setup.rows) out.push(`| ${cell(r.id)} | ${cell(r.status)} | ${cell(r.detail)} |`);
+    }
+  }
   return { title, body: `${out.join('\n')}\n`, fps: [...new Set(fps)] };
+}
+
+/** @typedef {{rows: Array<{id: string, status: string, detail: string}>} | {why: string}} SetupCheck */
+
+/** The statuses a doctor row may have. */
+const DOCTOR_STATUSES = new Set(['OK', 'WARN', 'FAIL', 'INFO']);
+
+/**
+ * Run `code-forge doctor --json` as a child (argv only, 60 s at most, with error logging off so
+ * the check adds no log line or breadcrumb) and keep only each row's `id`, `status` and the first
+ * line of its `detail`, redacted, cleaned by `scrub` and then cut to {@link DOCTOR_DETAIL_MAX_BYTES}
+ * — never its label or anything else. A doctor that finds a FAIL exits 1 and still prints its rows; no rows at all is
+ * `{why}` (`timed out`, `doctor exit n`, `doctor gave no result`, `doctor did not run`).
+ * @param {typeof realExec} exec @param {NodeJS.ProcessEnv} env @param {string} cwd
+ * @param {(text: string) => string} scrub - the report's deterministic scrub.
+ * @returns {Promise<SetupCheck>}
+ */
+export async function runSetupCheck(exec, env, cwd, scrub) {
+  let res;
+  try {
+    res = await exec([process.execPath, BIN, 'doctor', '--json'], { cwd, env: { ...env, [NO_ERROR_LOG_ENV]: '1' }, timeoutMs: DOCTOR_TIMEOUT_MS });
+  } catch {
+    return { why: 'doctor did not run' };
+  }
+  if (res.timedOut) return { why: 'timed out' };
+  let doc;
+  try {
+    doc = JSON.parse(res.stdout);
+  } catch {
+    doc = null;
+  }
+  if (!doc || typeof doc !== 'object' || !Array.isArray(doc.rows)) {
+    return { why: res.code === null ? 'doctor did not run' : res.code === 0 ? 'doctor gave no result' : `doctor exit ${res.code}` };
+  }
+  const rows = [];
+  for (const r of doc.rows) {
+    if (typeof r?.id !== 'string' || !/^[A-Za-z0-9_.:-]{1,64}$/.test(r.id) || !DOCTOR_STATUSES.has(r.status)) continue;
+    rows.push({ id: r.id, status: r.status, detail: capBytes(scrub(redact(firstLine(typeof r.detail === 'string' ? r.detail : ''))), DOCTOR_DETAIL_MAX_BYTES) });
+  }
+  return { rows };
 }
 
 /**
@@ -336,7 +421,7 @@ export async function runLogs(args, deps = {}) {
     summary: { values: ['days'], booleans: ['json'] },
     clear: { booleans: ['yes'] },
     path: {},
-    report: { values: ['last', 'kind', 'verb', 'note'], booleans: ['dry-run', 'yes', 'no-ai', 'allow-old'] },
+    report: { values: ['last', 'kind', 'verb', 'note'], booleans: ['dry-run', 'yes', 'no-ai', 'allow-old', 'include-warnings', 'with-doctor'] },
   });
   const name = sub ?? 'list';
   if (!Object.hasOwn(specs, name) || (name === 'list' && sub !== null)) {
@@ -367,7 +452,7 @@ export async function runLogs(args, deps = {}) {
   const entries = await readErrorLog(file);
   if (name === 'clear') return clear(file, entries, flags, deps, out, err);
   if (entries === null || entries.length === 0) {
-    out(flags.json ? `${JSON.stringify(name === 'summary' ? { days: n ?? 30, counts: [] } : { errors: [] })}\n` : 'no errors logged\n');
+    out(flags.json ? `${JSON.stringify(name === 'summary' ? { days: n ?? 30, counts: [], warnings: [] } : { errors: [] })}\n` : 'no errors logged\n');
     return 0;
   }
   const newest = [...entries].reverse();
@@ -375,7 +460,15 @@ export async function runLogs(args, deps = {}) {
   if (name === 'list') {
     const shown = newest.slice(0, n ?? 10);
     if (flags.json) out(`${JSON.stringify({ errors: shown })}\n`);
-    else for (const e of shown) out(`${e.ts}  ${command(e)}  ${e.exit}  ${e.kind}  ${fingerprintOf(e)}  ${firstLine(e.message)}\n`);
+    else {
+      for (const e of shown) {
+        out(
+          isWarning(e)
+            ? `${e.ts}  [warning] ${command(e)}  ${typeof e.warning === 'string' ? e.warning : 'warning'}  ${fingerprintOf(e)}  ${firstLine(e.message)}\n`
+            : `${e.ts}  ${command(e)}  ${e.exit}  ${e.kind}  ${fingerprintOf(e)}  ${firstLine(e.message)}\n`,
+        );
+      }
+    }
     return 0;
   }
 
@@ -384,22 +477,38 @@ export async function runLogs(args, deps = {}) {
     const since = (deps.now ?? (() => new Date()))().getTime() - days * 86_400_000;
     /** @type {Map<string, {fp: string, verb: string, sub: string|null, kind: string, count: number}>} */
     const counts = new Map();
+    /** @type {Map<string, {fp: string, verb: string, sub: string|null, warning: string, count: number}>} */
+    const warns = new Map();
     for (const e of newest) {
       const t = Date.parse(e.ts);
       if (!(t >= since)) continue;
       const fp = fingerprintOf(e);
+      if (isWarning(e)) {
+        const w = warns.get(fp) ?? { fp, verb: e.verb, sub: e.sub ?? null, warning: typeof e.warning === 'string' ? e.warning : 'warning', count: 0 };
+        w.count += 1;
+        warns.set(fp, w);
+        continue;
+      }
       const c = counts.get(fp) ?? { fp, verb: e.verb, sub: e.sub ?? null, kind: e.kind, count: 0 };
       c.count += 1;
       counts.set(fp, c);
     }
     const rows = [...counts.values()].sort((a, b) => b.count - a.count || a.verb.localeCompare(b.verb) || a.kind.localeCompare(b.kind) || a.fp.localeCompare(b.fp));
+    const warnRows = [...warns.values()].sort((a, b) => b.count - a.count || a.verb.localeCompare(b.verb) || a.warning.localeCompare(b.warning) || a.fp.localeCompare(b.fp));
+    const times = (/** @type {number} */ c) => `seen ${c} ${c === 1 ? 'time' : 'times'}`;
     if (flags.json) {
-      out(`${JSON.stringify({ days, counts: rows })}\n`);
-    } else if (rows.length === 0) {
+      out(`${JSON.stringify({ days, counts: rows, warnings: warnRows })}\n`);
+      return 0;
+    }
+    if (rows.length === 0) {
       out(`no errors in the last ${days} days\n`);
     } else {
       out(`errors in the last ${days} days:\n`);
-      for (const r of rows) out(`${r.fp}  ${r.sub ? `${r.verb} ${r.sub}` : r.verb}  ${r.kind}  seen ${r.count} ${r.count === 1 ? 'time' : 'times'}\n`);
+      for (const r of rows) out(`${r.fp}  ${r.sub ? `${r.verb} ${r.sub}` : r.verb}  ${r.kind}  ${times(r.count)}\n`);
+    }
+    if (warnRows.length > 0) {
+      out(`warnings in the last ${days} days:\n`);
+      for (const r of warnRows) out(`${r.fp}  ${r.sub ? `${r.verb} ${r.sub}` : r.verb}  ${r.warning}  ${times(r.count)}\n`);
     }
     return 0;
   }
@@ -511,7 +620,9 @@ async function report(newest, last, flags, deps, out, err) {
   const home = env.HOME ?? '';
   const kind = typeof flags.kind === 'string' ? flags.kind : null;
   const verb = typeof flags.verb === 'string' ? flags.verb : null;
-  const selected = newest.filter((e) => (kind === null || e.kind === kind) && (verb === null || e.verb === verb)).slice(0, last);
+  // warnings only with --include-warnings (B37)
+  const withWarnings = flags['include-warnings'] === true;
+  const selected = newest.filter((e) => (withWarnings || !isWarning(e)) && (kind === null || e.kind === kind) && (verb === null || e.verb === verb)).slice(0, last);
   if (selected.length === 0) {
     out('no matching errors to report\n');
     return 0;
@@ -548,17 +659,27 @@ async function report(newest, last, flags, deps, out, err) {
     }
   }
 
-  // 2. deterministic scrub, the 16 KB cap, the AI pass, the deterministic scrub again
   const cwd = deps.cwd ?? process.cwd();
   const scrubber = createScrubber({ home, cwd, slug: await readProjectSlug(cwd) });
+
+  // 1b. the setup check (--with-doctor, B37): a doctor that cannot run is a note, never a stop
+  /** @type {SetupCheck|null} */
+  let setup = null;
+  if (flags['with-doctor'] === true) {
+    setup = await runSetupCheck(exec, env, cwd, (t) => scrubber.scrub(t));
+    if ('why' in setup) out(`Could not run the setup check (${setup.why}); the report goes on without it.\n`);
+  }
+  const shared = disclosure({ warnings: selected.some(isWarning), doctor: setup !== null && 'rows' in setup });
+
+  // 2. deterministic scrub, the 16 KB cap, the AI pass, the deterministic scrub again
   const note = typeof flags.note === 'string' ? flags.note : null;
-  const built = buildReport(selected, { ...system, latest }, note);
+  const built = buildReport(selected, { ...system, latest }, note, setup);
   let title = scrubber.scrub(built.title);
   let body = capReport(title, scrubber.scrub(built.body), AI_REPORT_MAX_BYTES).body;
   const blocked = () => {
     const hit = findSecret(`${title}\n${body}`);
     if (hit === null) return false;
-    out(DISCLOSURE);
+    out(shared);
     err(`Possible secret found in the report (${hit.rule}, report line ${hit.line}; the title is line 1); not sent. Find it with code-forge logs --json and remove it with code-forge logs clear.\n`);
     return true;
   };
@@ -583,7 +704,7 @@ async function report(newest, last, flags, deps, out, err) {
 
   // 3. the final secret check, then what is shared and the full text
   if (blocked()) return 1;
-  out(DISCLOSURE);
+  out(shared);
   const aiLine =
     ai.status === 'ok'
       ? describeAiCounts(ai.counts)

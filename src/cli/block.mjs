@@ -11,7 +11,7 @@
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text>   (human-only, §4.9)
  *
- * `block close [--transcript <file>] [--no-require-reviews]` also runs B12b's review rows
+ * `block close [--transcript <file>] [--report <file>] [--no-require-reviews]` also runs B12b's review rows
  * (`review/gate-check.mjs`): a signed `review.approved` row for the current content hash of every
  * changed owned file (deletions included) — `--no-require-reviews` is the human's way out, is
  * forbidden to coders (`mergeForbidden`), and leaves a signed `gate.reviews_waived {by: human}`
@@ -26,6 +26,12 @@
  * `.code-forge.yml` at the block's base and the current one (`highPathsAt`); either that exists
  * but does not load or validate refuses the close (a typo must never drop a high path), and a
  * base that is missing or not a commit of the workspace refuses it too (`git-failed`).
+ *
+ * B36: `--report <file>` is the coder's final report. The check is enforced when `--report` is
+ * given (the orchestrator always passes it, `skill/references/code.md` §3): a changed owned file
+ * whose `review-file` ticket id the report does not name refuses the close with `coder report
+ * FAILED: no review-file ticket id for <files>` (skipped under `--no-require-reviews`, the human's
+ * way out). It runs after the review rows and reuses their file set (listed once).
  *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
@@ -49,14 +55,15 @@ import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
 import { gitChildEnv } from '../worker/ticket.mjs';
+import { missingReviewTickets } from '../engines/sentinel.mjs';
 
 const USAGE =
   'usage: code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract]\n' +
-  '       code-forge block attempt|rebase|close <id> --run <r> · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
+  '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n';
 
 const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'];
-const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind'];
+const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report'];
 
 /**
  * @param {string[]} args
@@ -144,6 +151,11 @@ export async function runBlock(args, deps = {}) {
       if (!entry) throw new StateError('unknown_block', `block ${id} is not in run ${runId}`);
       const rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
       const reviewsWaived = flags['no-require-reviews'] === true;
+      // the block's file set is listed once and shared by the review and report checks; a failure
+      // there is the usual `git-failed` refusal
+      /** @type {ReturnType<typeof blockFileSet> | undefined} */
+      let fileSetOnce;
+      const blockFiles = () => (fileSetOnce ??= blockFileSet({ repoRoot: record.workspace, base: entry.base_sha, owned: entry.owned_files, matchOwned: (f) => findOverlap(entry.owned_files, [f]) !== null }));
       const reviews = reviewGateCheck(async () => {
         const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
         if (transcript === null) {
@@ -154,7 +166,7 @@ export async function runBlock(args, deps = {}) {
         if (reviewsWaived) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
         // B20: the high paths come first — a base the workspace does not know refuses the close here
         const highPaths = await highPathsAt(record.workspace, entry.base_sha);
-        const fileSet = await blockFileSet({ repoRoot: record.workspace, base: entry.base_sha, owned: entry.owned_files, matchOwned: (f) => findOverlap(entry.owned_files, [f]) !== null });
+        const fileSet = await blockFiles();
         return {
           block: id,
           runId,
@@ -167,7 +179,20 @@ export async function runBlock(args, deps = {}) {
           highPaths,
         };
       });
-      const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews] });
+      // B36: the coder's report names a review-file ticket for every changed file, or it is FAILED
+      const report = async () => {
+        if (typeof flags.report !== 'string' || reviewsWaived) return { ok: true };
+        let text;
+        try {
+          text = await readFile(flags.report, 'utf8');
+        } catch {
+          return { ok: false, reason: 'coder report FAILED: --report cannot be read' };
+        }
+        const files = await blockFiles();
+        const missing = missingReviewTickets(text, files.map((f) => f.file));
+        return missing.length === 0 ? { ok: true } : { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
+      };
+      const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews, report] });
       (result.ok ? out : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
       return result.ok ? 0 : 1;
     }

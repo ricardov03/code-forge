@@ -227,15 +227,23 @@ folder becomes `~`, the project folder `<project>`, the project slug `<slug>`, a
 references and 1Password item IDs are replaced too. Nothing leaves your machine on its own. The file
 keeps its newest half when it grows over 1 MB.
 
+Each line also names the commands you ran just before it (`before`, up to 5, oldest first): only the
+command name and its own subcommand word, such as `keys test` or `init` — never a flag, a flag value
+or anything else you typed. code-forge keeps that short list in `~/.code-forge/logs/breadcrumbs.json`.
+
+Problems code-forge recovers from on its own are logged too, as **warnings** (`kind: warning`): a
+1Password call that needed its retry, a review session retried after a timeout, System 1 (Jev)
+falling back to the rules, and the 80% budget warning. A warning never prints the hint below.
+
 In a terminal, a failure (not a usage mistake) prints one more line: `code-forge: this error was
 saved to the local log. To send it to us: code-forge logs report` — at most once a day for the same
 error, and never when an agent runs code-forge.
 
 | Command | Does |
 |---|---|
-| `code-forge logs [--last N] [--json]` | the last errors, newest first (10 by default), with their fingerprints |
-| `code-forge logs summary [--days N]` | each distinct error over the last 30 days and how many times it was seen |
-| `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--no-ai] [--allow-old] [--dry-run]` | shares the selected errors (5 by default) with us as a GitHub issue |
+| `code-forge logs [--last N] [--json]` | the last errors and warnings, newest first (10 by default), with their fingerprints; a warning is marked `[warning]` |
+| `code-forge logs summary [--days N]` | each distinct error over the last 30 days and how many times it was seen; warnings are counted in their own list |
+| `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--dry-run]` | shares the selected errors (5 by default) with us as a GitHub issue; `--include-warnings` adds warnings, `--with-doctor` adds a setup check |
 | `code-forge logs clear [--yes]` | deletes the log |
 | `code-forge logs path` | prints where the log is |
 
@@ -244,6 +252,9 @@ What `logs report` does, in order:
 1. It asks npm for the newest code-forge. If yours is older it says so (many errors are fixed in
    newer versions) and asks "Report anyway?" — the default is no. Without a terminal it stops
    unless you pass `--allow-old`.
+   With `--with-doctor` it then runs `code-forge doctor --json` (60 seconds at most) and adds a
+   "Setup check" section: each check's name, its status and a short detail, cleaned like the rest.
+   If the doctor cannot run, it says so and the report goes on without it.
 2. It builds the issue and cleans it twice. First the built-in cleaning (the same rules as the log).
    Then an AI check: a short model session (level L1 of your setup, with no tools and no files)
    reads the already-cleaned text and lists anything that could still identify a person, a company,
@@ -268,15 +279,17 @@ What `logs report` does, in order:
    `~/.code-forge/logs/`).
 
 What is shared: code-forge, Node and OS versions, the newest version on npm, command names and flag
-names, exit codes, error kinds, fingerprints, and error messages and crash stacks after both
-cleaning passes, plus your note. What is never shared: flag values, file contents, your code, keys
+names, the names of the last commands you ran (no flags or values), exit codes, error kinds,
+fingerprints, and error messages and crash stacks after both cleaning passes, plus your note; with
+`--include-warnings` also the warnings, and with `--with-doctor` the setup check results. What is never shared: flag values, file contents, your code, keys
 or tokens, your home folder, project folder or project name. You always see the full text, you can
 edit it, and nothing is sent without your yes. The issue is **public**. `--dry-run` only prints;
 `--yes` answers the questions for scripts, but not "Send without the AI check?": when the AI check
 was unavailable it is still asked in a terminal, and without one nothing is sent. `--no-ai --yes`
 is the explicit choice to send with only the built-in cleaning.
 
-To turn the log off, set `CODE_FORGE_NO_ERROR_LOG=1`. Every field and cleaning rule is listed in
+To turn it all off, set `CODE_FORGE_NO_ERROR_LOG=1`: this one switch turns off the error log, the
+warnings and the command list (breadcrumbs) together. Every field and cleaning rule is listed in
 [privacy.md](privacy.md).
 
 The error log and the `gh` path are tested on macOS and Linux.

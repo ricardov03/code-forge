@@ -6,7 +6,8 @@ it only sends anything when you run `code-forge logs report`, read the full text
 ## The local error log
 
 File: `~/.code-forge/logs/errors.jsonl` (folder mode 0700, file mode 0600). One JSON line per
-failed verb (a non-zero exit or a crash). When it grows over 1 MB it keeps its newest half.
+failed verb (a non-zero exit or a crash), and one per warning (see below). When it grows over 1 MB
+it keeps its newest half.
 
 | Field | What it holds |
 |---|---|
@@ -22,7 +23,34 @@ failed verb (a non-zero exit or a crash). When it grows over 1 MB it keeps its n
 | `message` | the last text the verb wrote to stderr (a crash: its message), cleaned, at most 2 KB |
 | `stack` | a crash's stack trace, cleaned, at most 4 KB; otherwise empty |
 | `cleaned` | how many replacements each cleaning rule made (counts only) |
-| `fp` | the fingerprint: 12 hex characters of a SHA-256 of the verb, subcommand, kind and the message with quoted text, `<…>` placeholders, paths, dates and times, long hex ids and numbers of 4+ digits removed (short numbers such as an HTTP status stay). The same error gives the same fingerprint, so reports can be grouped and duplicates found |
+| `fp` | the fingerprint: 12 hex characters of a SHA-256 of the verb, subcommand, kind and the message with quoted text, `<…>` placeholders, paths, dates and times, long hex ids and numbers of 4+ digits removed (short numbers such as an HTTP status stay); for a warning also its `warning` word. The same error gives the same fingerprint, so reports can be grouped and duplicates found |
+| `before` | the names of up to 5 commands you ran before this one, oldest first (`["init", "keys test"]`): a verb name plus its subcommand word only when it is one of the verb's own words — never a flag, a flag value or any other word you typed |
+| `warning` | only on a warning: what happened (`op_retry`, `review_retry`, `s1_fallback`, `budget_warning`) |
+
+## Warnings
+
+A warning is a problem code-forge recovered from by itself. It is one line in the same file with
+`kind: "warning"`, `exit: 0`, no flags and no stack, written with the same cleaning, the same 2 KB
+cap and a fingerprint. code-forge writes one for:
+
+| `warning` | When | `message` |
+|---|---|---|
+| `op_retry` | a 1Password call did not answer in time and was retried once | `1Password did not answer in time; the call was retried once` |
+| `review_retry` | a review session timed out and was started once more | `a review session timed out; it was retried once` |
+| `s1_fallback` | System 1 (Jev) was asked but gave no usable answer, so the rules decided | `System 1 (Jev) gave no answer (<reason>); fell back to the rules`, where the reason is a fixed word such as `timeout` |
+| `budget_warning` | a run spent 80% of `budget.usd` | `budget.usd: 80% of the run budget is spent; new sessions stop at 100%` (never the amounts) |
+
+The same warning is written at most once per command run. `code-forge logs` marks warnings
+`[warning]`, `logs summary` counts them in their own list, and `logs report` includes them only
+with `--include-warnings`. A warning never prints the hint below.
+
+## The command list
+
+`~/.code-forge/logs/breadcrumbs.json` (file mode 0600, replaced in one step each time) holds the
+names of your last 5 commands, oldest first, in the same form as `before`: `["init", "keys test"]`.
+Every command code-forge knows adds its name before it runs; an unknown command adds nothing.
+Nothing else is in the file: no flags, no flag values, no paths, no times.
+`CODE_FORGE_NO_ERROR_LOG=1` turns it off together with the error log and the warnings.
 
 ## The hint after a failure
 
@@ -31,7 +59,7 @@ saved to the local log. To send it to us: code-forge logs report`. It is shown o
 a terminal; never for a usage error (exit 2), never when an agent runs code-forge (`CLAUDECODE`,
 `CLAUDE_CODE`, `CURSOR_AGENT` or `AI_AGENT` set), never when logging is off, and at most once per
 24 hours for the same fingerprint. `hints.json`, next to the log, remembers when it was last shown
-for each fingerprint (fingerprints and times only).
+for each fingerprint (fingerprints and times only). A warning never shows the hint.
 
 ## The built-in cleaning rules
 
@@ -58,6 +86,12 @@ A path is only replaced at a path boundary: `/Users/bob` never changes `/Users/b
    `--allow-old`; `--yes` does not skip this question in a terminal. If npm cannot be asked (no
    npm, a timeout, an error, an answer that is not a version) it prints a note and goes on; the
    report then says "latest on npm: unknown".
+   **Setup check** (only with `--with-doctor`). It runs `code-forge doctor --json` on your machine
+   (60 s at most, with error logging off for that run) and keeps only each check's id (`node`,
+   `config`…), its status (`OK`, `WARN`, `FAIL`, `INFO`) and the first line of its detail, cleaned
+   with the built-in rules and cut to 120 bytes — never the check's label or anything else. They
+   become a "Setup check" section. If the doctor cannot run (a timeout, no result) it prints a note,
+   the section says why, and the report goes on. Without `--with-doctor` the doctor never runs.
 2. **Built-in cleaning** of the whole report (the rules above).
 3. **Size cap.** The report is cut so the text sent to the AI check stays within 16 KB; the cut
    text is also exactly what you would send.
@@ -112,13 +146,19 @@ an internal URL, an account, a path, or anything that looks like a secret.
 ## What a report shares
 
 The issue is public on GitHub. It holds the versions (code-forge, Node, OS, the newest code-forge
-on npm), and for each selected error the time, command, flag names, exit code, kind, fingerprint,
-message and stack after cleaning, plus your note. Labels: `error-report` and one `kind:<kind>` per
+on npm), and for each selected error the time, command, flag names, the names of the commands run
+before it (no flags or values), exit code, kind, fingerprint, message and stack after cleaning, plus
+your note. With `--include-warnings` it also holds the selected warnings (the same fields, plus
+what happened); with `--with-doctor` the setup check results (each check's id, status and a short
+detail, after cleaning). The disclosure printed before the text names each of these when it is in
+the report. Labels: `error-report` and one `kind:<kind>` per
 kind in the report (at most 3).
 
 ## Turn the log off
 
-Set `CODE_FORGE_NO_ERROR_LOG=1` in your environment. Nothing is written and no hint is shown.
+Set `CODE_FORGE_NO_ERROR_LOG=1` in your environment. This one switch turns off all three: the
+error log, the warnings and the command list (breadcrumbs). Nothing is written to
+`~/.code-forge/logs/` and no hint is shown.
 
 ## Delete the log
 

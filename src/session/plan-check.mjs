@@ -9,6 +9,10 @@
  *    VERIFIED is listed in the "… the facts sheet cannot back" section by a line that names the
  *    token, the block, and a tolerance — else `unbackable clause without tolerance: <block> <clause>`;
  *  - a caller map section exists and names every block (C9);
+ *  - the required sections are found by their exact headings (`plan-sections.mjs`); a near miss at
+ *    the expected position is accepted with a WARN naming the exact heading (B36);
+ *  - every block's level is the lane recorded for it in the ledger by `jev ask lane --block <id>`
+ *    (Jev, or `--rules`, the deterministic fallback) — none, or a different one, is refused (B36);
  *  - every block has a lane, owned files that pass B8's `assertOwned` (no `[ ] ( ) ! + @` in a
  *    glob, V6) and are disjoint from the other blocks of its wave (O26);
  *  - `depends_on` is acyclic and every path a block imports (`imports` column) that another block
@@ -24,6 +28,7 @@ import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { assertOwned, findOverlap, ownsFile } from '../state/registry.mjs';
 import { extractClaims, parseSheet, sha256 } from './facts.mjs';
+import { findSection, nearMissWarning, REQUIRED_SECTIONS } from './plan-sections.mjs';
 
 /** Limits used when the config does not set them (plan v1.3 §10.7, R10). */
 export const DEFAULT_LIMITS = Object.freeze({ coders: 2, blockCases: 80, blockLines: 2000 });
@@ -185,17 +190,57 @@ const listItems = (body) =>
     .filter((l) => /^\s*(?:[-*]|\d+\.)\s+/.test(l))
     .map((l) => l.trim());
 
+/** Where a lane may come from: Jev's `lane` answer, or the deterministic fallback rule (`--rules`). */
+export const LANE_SOURCES = Object.freeze(['jev', 'rules']);
+
+/**
+ * @typedef {{lane: string, source: string, decision_id: string | null}} RecordedLane
+ */
+
+/**
+ * A recorded lane answer, normalised: trimmed, upper-cased, the first `L0`–`L3` token (`" l1 "` ⇒
+ * `L1`); an answer with no such token stays as written, trimmed (`split`).
+ * @param {string} answer @returns {string}
+ */
+export function normaliseLane(answer) {
+  const token = /\bL[0-3]\b/.exec(answer.trim().toUpperCase());
+  return token ? token[0] : answer.trim();
+}
+
+/**
+ * The lane recorded per block by `forge jev ask lane --block <id>` (or `--rules`): the latest
+ * `decision` row for `lane` whose `block` is set and whose `source` is Jev or the fallback rules.
+ * A row that names a plan (`--plan`) counts only for the plan with that base name (both sides are
+ * compared as `path.basename`); with no plan name given, only untagged rows count.
+ * @param {Array<Record<string, any>>} rows - ledger rows, oldest first.
+ * @param {string} [planName] - the plan file's base name.
+ * @returns {Map<string, RecordedLane>}
+ */
+export function recordedLanes(rows, planName) {
+  /** @type {Map<string, RecordedLane>} */
+  const out = new Map();
+  for (const row of rows) {
+    if (row?.event !== 'decision' || row.question !== 'lane' || typeof row.block !== 'string') continue;
+    if (!LANE_SOURCES.includes(row.source) || typeof row.answer !== 'string') continue;
+    if (row.plan !== undefined && (planName === undefined || typeof row.plan !== 'string' || path.basename(row.plan) !== path.basename(planName))) continue;
+    out.set(row.block, { lane: normaliseLane(row.answer), source: row.source, decision_id: typeof row.decision_id === 'string' ? row.decision_id : null });
+  }
+  return out;
+}
+
 /**
  * @typedef {object} CheckOpts
  * @property {string} [planPath] - where the plan lives (resolves the sheet's brief reference).
  * @property {string} [factsText] @property {string} [factsPath] - a separate sheet (else the plan's own §0).
  * @property {Record<string, any>} [cfg] - `caps.coders`, `budget.block_cases`, `budget.block_lines`.
+ * @property {Array<Record<string, any>>} [decisions] - the project's ledger rows (the recorded lanes);
+ *   none given ⇒ no block has a recorded lane.
  */
 
 /**
  * @param {string} text - the plan.
  * @param {CheckOpts} [opts]
- * @returns {{ok: boolean, errors: string[], blocks: number}}
+ * @returns {{ok: boolean, errors: string[], warnings: string[], blocks: number, lanes: Array<{block: string, level: string | null, lane: string | null, source: string | null}>}}
  */
 export function checkPlan(text, opts = {}) {
   const limits = {
@@ -206,7 +251,7 @@ export function checkPlan(text, opts = {}) {
   const { blocks, sections, dispatch } = parsePlan(text);
   /** @type {string[]} */
   const errors = [];
-  if (blocks.length === 0) return { ok: false, errors: ['no block table found (a table with id, owned_files and acceptance columns)'], blocks: 0 };
+  if (blocks.length === 0) return { ok: false, errors: ['no block table found (a table with id, owned_files and acceptance columns)'], warnings: [], blocks: 0, lanes: [] };
 
   // facts sheet: present, fresh, and (when separate) pasted into the plan
   const sheetText = opts.factsText ?? text;
@@ -224,8 +269,18 @@ export function checkPlan(text, opts = {}) {
   }
   const verified = new Set((sheet?.facts ?? []).filter((f) => f.tag === 'VERIFIED').map((f) => f.claim));
 
+  // the required sections, by their exact headings (B36: a near miss at the expected position is a WARN)
+  /** @type {string[]} */
+  const warnings = [];
+  /** @param {import('./plan-sections.mjs').RequiredSection} spec */
+  const required = (spec) => {
+    const hit = findSection(sections, spec);
+    if (hit && !hit.exact) warnings.push(nearMissWarning(hit.section.title, spec));
+    return hit?.section;
+  };
+
   // unbackable clauses
-  const unbackable = sections.find((s) => /cannot back/i.test(s.title));
+  const unbackable = required(REQUIRED_SECTIONS.unbackable);
   if (!unbackable) errors.push('unbackable-clauses section missing (write "none" when there is none)');
   const tolerances = unbackable ? listItems(unbackable.body).filter((l) => /\btolerance\b/i.test(l)) : [];
   for (const b of blocks) {
@@ -237,13 +292,17 @@ export function checkPlan(text, opts = {}) {
   }
 
   // caller map
-  const callerMap = sections.find((s) => /caller map/i.test(s.title));
+  const callerMap = required(REQUIRED_SECTIONS.callerMap);
   if (!callerMap) errors.push('caller map missing');
   else for (const b of blocks) if (!idRe(b.id).test(callerMap.body)) errors.push(`caller map: block ${b.id} is absent`);
 
-  // lane, owned files, forecasts
+  // lane (B36: the level is the lane recorded for the block), owned files, forecasts
+  const lanes = recordedLanes(opts.decisions ?? [], opts.planPath === undefined ? undefined : path.basename(opts.planPath));
   for (const b of blocks) {
+    const recorded = lanes.get(b.id);
     if (b.level === null) errors.push(`block ${b.id}: no lane (level L0–L3)`);
+    else if (!recorded) errors.push(`block ${b.id}: level ${b.level} has no recorded lane decision — run forge jev ask lane --block ${b.id} --state <file> (or --rules when Jev is unavailable)`);
+    else if (recorded.lane !== b.level) errors.push(`block ${b.id}: level ${b.level} differs from the recorded lane ${recorded.lane} (${recorded.source})`);
     try {
       assertOwned(b.owned);
     } catch (err) {
@@ -290,5 +349,11 @@ export function checkPlan(text, opts = {}) {
     });
   }
 
-  return { ok: errors.length === 0, errors, blocks: blocks.length };
+  return {
+    ok: errors.length === 0,
+    errors,
+    warnings,
+    blocks: blocks.length,
+    lanes: blocks.map((b) => ({ block: b.id, level: b.level, lane: lanes.get(b.id)?.lane ?? null, source: lanes.get(b.id)?.source ?? null })),
+  };
 }

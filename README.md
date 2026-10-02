@@ -97,10 +97,10 @@ usage line.
 | `s2` | `code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <s>]` |
 | `author` | `code-forge author --job plan\|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <s>]` |
 | `facts` | `code-forge facts --brief <file> [--sources <path>…] [--out <file>] [--run <id>] [--timeout <s>]` |
-| `plan` | `code-forge plan check <plan-file> [--facts <sheet>]` |
+| `plan` | `code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]` — every block's level must be the lane recorded by `jev ask lane --block <id>` |
 | `proof` | `code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]` · `proof export\|lock\|unlock\|restore <block> --run <r>` |
 | `gates` | `code-forge gates detect\|run\|secret-scan\|safe-edit\|scope\|acceptance\|transcript-grep --cwd <dir> …` |
-| `jev` | `code-forge jev ask <question-id> --state <file.json> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>]` |
+| `jev` | `code-forge jev ask <question-id> --state <file.json> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]` |
 | `keys` | `code-forge keys list \| set <name> [--op <ref>] \| test <name> [--ref <ref>] \| remove <name>` |
 | `ledger` | `code-forge ledger calibration\|outcome\|tail --slug <slug> …` |
 | `report` | `code-forge report --slug <slug> [--json] [--export <dir>]` |

@@ -129,6 +129,73 @@ test('jev ask: a Jev request failure (e.g. rate limited) ⇒ exit 1, no ledger r
   assert.equal(all.includes(FAKE_KEY), false);
 });
 
+test('B36 jev ask lane --block --plan: the Jev decision row records the block and the plan file name', async () => {
+  const dir = await tempDir();
+  const statePath = await writeTempFile(dir, 'state.json', JSON.stringify({ block: { task: 'x' } }));
+  const h = harness({ askJev: async () => ({ ok: true, answers: { lane: { type: 'choice', probabilities: { L0: 0, L1: 1 } } }, usage: { input_tokens: 1, output_tokens: 1 } }) });
+  const code = await h.run(['ask', 'lane', '--state', statePath, '--cwd', dir, '--slug', 'demo', '--block', 'B7', '--plan', 'plans/feature.plan.md']);
+  assert.equal(code, 0, h.stderr.text);
+  assert.equal(h.writtenRows.length, 1);
+  const { row } = h.writtenRows[0];
+  assert.deepEqual([row.question, row.answer, row.source, row.block, row.plan], ['lane', 'L1', 'jev', 'B7', 'feature.plan.md']);
+});
+
+test('B36 jev ask lane --rules: the fallback rule answers with no key and no request, and the row says source rules', async () => {
+  const dir = await tempDir();
+  const facts = { filesChanged: 2, linesAdded: 40, touchesMigration: true, touchesPolicyOrMiddleware: false, pathFloorHit: false, keywordsFound: [] };
+  const statePath = await writeTempFile(dir, 'state.json', JSON.stringify(facts));
+  const h = harness({ store: memoryStore({}) }); // no key, and askJev throws if reached
+  const code = await h.run(['ask', 'lane', '--state', statePath, '--cwd', dir, '--slug', 'demo', '--block', 'B2', '--rules']);
+  assert.equal(code, 0, h.stderr.text);
+  assert.deepEqual(h.writtenRows.map((w) => w.row), [{ event: 'decision', decision_id: 'decision-1', question: 'lane', answer: 'L2', source: 'rules', block: 'B2' }]);
+  assert.deepEqual(JSON.parse(h.stdout.text), { decision_id: 'decision-1', question: 'lane', answer: 'L2', source: 'rules', block: 'B2' });
+});
+
+test('B36 jev ask: --rules on a question no rule answers, and a bad --block, are usage errors with no row', async () => {
+  const dir = await tempDir();
+  const statePath = await writeTempFile(dir, 'state.json', '{}');
+  const h = harness({ store: memoryStore({}) });
+  assert.equal(await h.run(['ask', 'next', '--state', statePath, '--cwd', dir, '--rules']), 2);
+  assert.equal(h.stderr.text, 'jev ask: no rule answers "next" (--rules covers lane, risk, security_sensitive)\n');
+  const h2 = harness({ store: memoryStore({}) });
+  assert.equal(await h2.run(['ask', 'lane', '--state', statePath, '--cwd', dir, '--block', '../B1', '--rules']), 2);
+  assert.equal(h2.stderr.text, 'jev ask: --block must be a block id (letters, digits, . _ -; at most 32 characters)\n');
+  assert.equal(h.writtenRows.length + h2.writtenRows.length, 0);
+  const h3 = harness({ store: memoryStore({}) });
+  assert.equal(await h3.run(['ask', 'lane', '--state', statePath, '--cwd', dir, '--rules', '--rulez']), 2);
+  assert.match(h3.stderr.text, /^usage: code-forge jev ask/);
+});
+
+test('B36 jev ask --rules: missing or mistyped fallback facts are a usage error naming them, nothing recorded', async () => {
+  const dir = await tempDir();
+  const partial = await writeTempFile(dir, 'partial.json', JSON.stringify({ filesChanged: '3', linesAdded: 10, touchesMigration: false, pathFloorHit: false, keywordsFound: ['Auth', 1] }));
+  const list = await writeTempFile(dir, 'list.json', '[]');
+  const h = harness({ store: memoryStore({}) });
+  assert.equal(await h.run(['ask', 'lane', '--state', partial, '--cwd', dir, '--rules']), 2);
+  assert.equal(h.stderr.text, 'jev ask: --rules needs the fallback facts in the --state object; missing or wrong type: filesChanged, touchesPolicyOrMiddleware, keywordsFound\n');
+  const h2 = harness({ store: memoryStore({}) });
+  assert.equal(await h2.run(['ask', 'risk', '--state', list, '--cwd', dir, '--rules']), 2);
+  assert.equal(h2.stderr.text, 'jev ask: --rules needs the fallback facts in the --state object; missing or wrong type: filesChanged, linesAdded, touchesMigration, touchesPolicyOrMiddleware, pathFloorHit, keywordsFound\n');
+  assert.equal(h.writtenRows.length + h2.writtenRows.length, 0);
+});
+
+test('B36 jev ask --rules respects system1.disable, and with no --slug the row goes to the directory-name slug', async () => {
+  const facts = JSON.stringify({ filesChanged: 0, linesAdded: 0, touchesMigration: false, touchesPolicyOrMiddleware: false, pathFloorHit: false, keywordsFound: [] });
+  const dir = await tempDir();
+  await writeTempFile(
+    dir,
+    '.code-forge.yml',
+    'version: 1\nprovider: anthropic\nlevels:\n  L0: {model: m}\n  L1: {model: m}\n  L2: {model: m}\n  L3: {model: m}\nsystem1:\n  disable: [risk]\n',
+  );
+  const statePath = await writeTempFile(dir, 'state.json', facts);
+  const h = harness({ store: memoryStore({}) });
+  assert.equal(await h.run(['ask', 'risk', '--state', statePath, '--cwd', dir, '--rules']), 1);
+  assert.equal(h.stderr.text, 'jev ask: question "risk" is disabled by system1.disable\n');
+  assert.equal(h.writtenRows.length, 0);
+  assert.equal(await h.run(['ask', 'lane', '--state', statePath, '--cwd', dir, '--rules']), 0, h.stderr.text);
+  assert.deepEqual(h.writtenRows.map((w) => [w.row.answer, w.opts.slug]), [['L0', path.basename(dir).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '')]]);
+});
+
 test('jev ask: system1.disable blocks the question before any network call', async () => {
   const dir = await tempDir();
   await writeTempFile(

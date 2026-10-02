@@ -14,6 +14,12 @@ waits on a second real consumer (plan §10.4, Q17).
 - `code-forge run reload --run <r>`: re-read `.code-forge.yml` mid-run without stopping blocks. Queued reviews keep the
   old config, new ones use the new one; keys fixed for the run are refused by name; a signed `run.reload` row lists the
   changed key paths (never values). Coders may not run it.
+- `block close --report <file>`: a coder report without a `reviewed <path> ticket <id>` line for every changed file
+  counts as FAILED (new `skill/templates/coder-brief.md`).
+- Error reports: `logs report --with-doctor` adds a cleaned setup check; each logged error lists the names of the last 5
+  commands (no flags or values); recovered problems are logged as warnings (1Password retry, review retry, System 1
+  fallback, budget at 80%), shown by `logs` and `logs summary`, and included in a report only with `--include-warnings`.
+  `CODE_FORGE_NO_ERROR_LOG=1` turns all of it off.
 
 ### Changed
 
@@ -21,6 +27,10 @@ waits on a second real consumer (plan §10.4, Q17).
   critical), the next fix climbs one level (`escalation.*`); docs and contract blocks code at L1 or higher
   (`levels.coder_floor_docs`); risk 0–1 gets a single reviewer (`review.single_reviewer_max_risk`); docs blocks skip
   multimodel review unless `review.multimodel_for_docs` is set.
+- `plan check` refuses a block whose level does not match its recorded lane (`jev ask lane --block <id> [--plan
+  <file>]`, or `--rules` without Jev) and prints the lane per block. The plan author gets the exact required headings
+  from one shared list; a close heading at the right position is accepted with a WARN. `jev ask` now writes to the
+  project's ledger slug (it used to default to `code-forge`).
 
 ### Fixed
 

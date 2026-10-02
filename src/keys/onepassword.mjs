@@ -12,6 +12,7 @@
  */
 
 import { reportErrorKind } from '../util/error-kind.mjs';
+import { logWarning } from '../util/error-log.mjs';
 import { exec as realExec } from '../util/exec.mjs';
 
 // Long enough for a person to see and approve the 1Password prompt (Touch ID or password).
@@ -172,6 +173,8 @@ async function runOp(argv, exec, timeoutMs) {
     attempts += 1;
     res = await exec(argv, { timeoutMs });
   } while (res.result !== 'ok' && res.timedOut && attempts === 1);
+  // B37: a call that needed its retry is a recoverable problem worth a warning line
+  if (attempts > 1) await logWarning({ warning: 'op_retry', message: '1Password did not answer in time; the call was retried once' }).catch(() => null);
   return { res, attempts };
 }
 

@@ -15,7 +15,8 @@ The coder then forecasts **cases** (tests) and **lines**. Compute the floor your
 1. `id`, `title`, the level, `owned_files` ("edit ONLY these"), the acceptance clauses with test ids, `test_command`.
 2. The reply contract: `ACK <sha8> lines=<n>` before any tool call; the facts diff; the forecast.
 3. The file loop: *after you finish each file in `owned_files` (tests written and green) run `forge review-file <path> --block <id> --run <r>`; before the next file run `forge review-file --wait <ticket> [--max 90s]` and act on the packet.* A `worker_down` answer ⇒ print `===BLOCK <id> FAILED: worker down===` (never approval).
-4. The project's own rules digest (`CLAUDE.md`/`AGENTS.md`, ≤ 60 lines), the forbidden list verbatim (`security.md` §2), and the sentinel contract: `===BLOCK <id> COMPLETE===` followed by the test summary and `git diff --stat`, or `===BLOCK <id> FAILED: <reason>===`.
+4. The project's own rules digest (`CLAUDE.md`/`AGENTS.md`, ≤ 60 lines), the forbidden list verbatim (`security.md` §2), and the sentinel contract: `===BLOCK <id> COMPLETE===` followed by the test summary, `git diff --stat` and one `reviewed <path> ticket <ticket-id>` line per changed file, or `===BLOCK <id> FAILED: <reason>===`.
+5. **FAILED unless** (`templates/coder-brief.md`): a final report — first attempt or fix round — that does not list the `review-file` ticket id of every changed file counts as FAILED whatever its sentinel says. Pass the report to the gate with `forge block close <id> --run <r> --report <file>`; it refuses `coder report FAILED: no review-file ticket id for <files>`.
 
 The brief never mentions `block waive`, keys, or `~/.code-forge/runs/`. The coder process gets no Jev key (the System 1 model's key, `keys.jev`) and no signer key.
 
@@ -30,7 +31,7 @@ The coder's report is a claim sheet. The gate reproduces each number in the meas
 | claim | re-measured by |
 |---|---|
 | only owned paths touched | file set = tracked changes ∪ untracked, minus other active blocks' owned sets ⊆ `owned_files`; anything else is an orphan that stops every gate until `forge block claim <id> <path> --run <r>` or the human deletes it |
-| every file reviewed | a **signed** `review.approved` row for the current content hash of every changed or new file, or an architect-ruled disposition to a named successor block |
+| every file reviewed | the report names a `review-file` ticket id per changed file (`--report`, which the orchestrator always passes) and a **signed** `review.approved` row for the current content hash of every changed or new file, or an architect-ruled disposition to a named successor block |
 | tests green | every gate command run once in the export, each exit status read |
 | clauses covered | every clause names ≥ 1 test id; each test exists and passed in this run; S1 `scope` on the hunks outside the named tests says `false` |
 | test count | the filtered run's delta equals the new tests' own count |

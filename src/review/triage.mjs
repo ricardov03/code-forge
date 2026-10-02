@@ -18,6 +18,7 @@
 import { buildQuestionPayload, isQuestionDisabled } from '../decide/questions.mjs';
 import { bandFinding, bandResolved } from '../decide/thresholds.mjs';
 import { alwaysResidue } from '../decide/fallback-rules.mjs';
+import { logWarning } from '../util/error-log.mjs';
 
 /**
  * @typedef {{id: string, file?: string, line_start: number, line_end: number, severity: 'critical' | 'warning' | 'nit', category?: string, claim?: string, evidence?: string, fix?: string}} Finding
@@ -37,6 +38,27 @@ async function note(writeRow, row) {
   }
 }
 
+/**
+ * The reasons a fallback warning may name: Jev client failure kinds (`jev-client.mjs`) plus
+ * `error` (the call threw) and `invalid_answer` (ok, but no probability). Anything else is `other`.
+ */
+const FALLBACK_REASONS = new Set(['unauthorized', 'invalid_request', 'rate_limited', 'unavailable', 'network', 'timeout', 'unexpected_status', 'invalid_response', 'error', 'invalid_answer']);
+
+/**
+ * B37: Jev was asked and gave no usable answer, so §3.5's fallback decides: one warning line in the
+ * local error log (once per reason per process). The reason is a word from a fixed list, never
+ * Jev's text. Never throws: a logging failure cannot change the fallback.
+ * @param {unknown} reason
+ */
+async function fellBack(reason) {
+  const word = typeof reason === 'string' && FALLBACK_REASONS.has(reason) ? reason : 'other';
+  try {
+    await logWarning({ warning: 's1_fallback', message: `System 1 (Jev) gave no answer (${word}); fell back to the rules` }).catch(() => null);
+  } catch {
+    // the fallback stands without its warning line
+  }
+}
+
 /** @param {Finding} f @returns {'fix_now' | 'nit'} the verdict a judge's severity means. */
 export const severityVerdict = (f) => (f.severity === 'nit' ? 'nit' : 'fix_now');
 
@@ -53,10 +75,13 @@ export async function askNoul(id, state, { jev, cfg = {} }) {
   try {
     res = await jev({ state, questions: buildQuestionPayload([id], cfg) });
   } catch {
+    await fellBack('error');
     return null;
   }
   const p = res?.ok === true ? res.answers?.[id]?.noul : undefined;
-  return typeof p === 'number' && Number.isFinite(p) && p >= 0 && p <= 1 ? p : null;
+  if (typeof p === 'number' && Number.isFinite(p) && p >= 0 && p <= 1) return p;
+  await fellBack(res?.ok === true ? 'invalid_answer' : res?.kind);
+  return null;
 }
 
 /**

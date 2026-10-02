@@ -38,6 +38,7 @@ const OWNED = [
   'templates/facts-sheet.md',
   'templates/plan.md',
   'templates/block-record.md',
+  'templates/coder-brief.md',
 ];
 
 /** @param {string} text @returns {number} */
@@ -71,7 +72,7 @@ function referencedPaths(text) {
   return [...out];
 }
 
-test('skill/ holds exactly the 19 owned files', async () => {
+test('skill/ holds exactly the 20 owned files', async () => {
   const files = (await listSkillFiles()).map((f) => path.relative(SKILL_DIR, f));
   assert.deepEqual(files.sort(), [...OWNED].sort());
 });

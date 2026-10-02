@@ -20,6 +20,7 @@ import { estimateCostUsd } from '../ledger/prices.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
 import { checkSheetFresh } from './facts.mjs';
+import { authorHeadingRules } from './plan-sections.mjs';
 import { spawnSession } from './spawn.mjs';
 
 export const JOBS = Object.freeze(['plan', 'harden']);
@@ -58,8 +59,11 @@ export const AUTHOR_LENS =
 const JOB_RULES = {
   plan: [
     'Write the plan draft in markdown. Its §0 is the facts sheet below, VERBATIM (header lines included).',
-    'Include a section titled "Acceptance clauses the facts sheet cannot back": every clause that cites a claim the sheet',
-    'marks NOT-FOUND or UNVERIFIABLE, each with a tolerance naming the block; write `none` when there is none.',
+    ...authorHeadingRules(),
+    'The level column of the block table is the lane recorded for each block by `forge jev ask lane --block <id> --plan <plan>`',
+    '(or `--rules`, the deterministic fallback, when Jev is unavailable): L0 trivial · L1 a plain feature following a pattern ·',
+    'L2 money, dates, tenancy, migrations, concurrency. It is never a block category. Leave it as `L?` when no lane is given in',
+    'the message; plan check refuses a level that differs from the recorded lane.',
   ],
   harden: [
     'Harden the draft: close every gap you can from the material given; for each decision only the human can make,',

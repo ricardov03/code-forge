@@ -5,7 +5,7 @@
  *    {@link AGENT_ENV_VARS}, the same names `src/install/agent-env.mjs` checks — copied here
  *    because the router may only load `src/util`; a test keeps the two lists equal);
  *  - the entry has a well-formed fingerprint (12 hex characters);
- *  - the exit is not 2 (a usage error says what to fix already);
+ *  - the exit is not 2 (a usage error says what to fix already) and the entry is no warning (B37);
  *  - the same fingerprint got no hint in the last 24 hours. The time of each hint is kept in
  *    `~/.code-forge/logs/hints.json` (`{"<fp>": "<ISO time>"}`, 0600, older ones dropped).
  * Never throws; a broken state file only means the hint may show again.
@@ -40,7 +40,7 @@ function agentMode(env) {
 
 /**
  * @param {object} o
- * @param {{fp?: string}|null} o.entry - the entry the log just took (null: nothing was logged).
+ * @param {{fp?: string, kind?: string}|null} o.entry - the entry the log just took (null: nothing was logged).
  * @param {number} o.exit
  * @param {boolean} o.isTTY - whether stderr is a terminal.
  * @param {NodeJS.ProcessEnv} [o.env]
@@ -52,6 +52,7 @@ export async function maybeHint(o) {
   try {
     const env = o.env ?? process.env;
     const fp = o.entry?.fp;
+    if (o.entry?.kind === 'warning') return false;
     if (typeof fp !== 'string' || !FP.test(fp) || o.exit === 2 || o.isTTY !== true || agentMode(env)) return false;
     const file = hintStatePath(env.HOME);
     if (file === null) return false;

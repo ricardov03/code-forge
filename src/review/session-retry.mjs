@@ -16,6 +16,8 @@
  * `res: null` and a failed note is ignored. `onAttempt(n)` is told each attempt as it starts.
  */
 
+import { logWarning } from '../util/error-log.mjs';
+
 /** How many times a timed-out session is spawned again. */
 export const TIMEOUT_RETRIES = 1;
 
@@ -61,5 +63,7 @@ export async function spawnWithTimeoutRetry(spawn, opts, note, onAttempt = () =>
       // a failed note never stops the retry or the result
     }
     if (!retried) return { res, attempts };
+    // B37: the retry is a recoverable problem: one warning line in the local error log
+    await logWarning({ warning: 'review_retry', message: 'a review session timed out; it was retried once' }).catch(() => null);
   }
 }

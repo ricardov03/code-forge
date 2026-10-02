@@ -6,6 +6,23 @@ import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const { runPlanVerb } = await import('../../src/cli/plan.mjs');
+const { appendRow } = await import('../../src/ledger/write.mjs');
+const { checkPlan } = await import('../../src/session/plan-check.mjs');
+
+/**
+ * B36: the lanes `jev ask lane --block <id>` records, in the ledger `plan check --slug lanes` reads
+ * (HOME is the per-file temp dir).
+ * @param {string} slug @param {Array<Record<string, any>>} rows
+ */
+async function seedLanes(slug, rows) {
+  for (const row of rows) await appendRow({ event: 'decision', question: 'lane', ...row }, { slug });
+}
+await seedLanes('lanes', [
+  { block: 'B1', answer: 'L1', source: 'jev', decision_id: 'd-1' },
+  { block: 'B2', answer: 'L2', source: 'rules', decision_id: 'd-2' },
+  { block: 'B3', answer: 'L1', source: 'jev', decision_id: 'd-3' },
+]);
+const LANES_LINE = 'lanes: B1 L1 (jev) · B2 L2 (rules) · B3 L1 (jev)\n';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const GOOD = path.join(REPO, 'test', 'fixtures', 'plans', 'good.plan.md');
@@ -16,7 +33,7 @@ const GOOD_TEXT = readFileSync(GOOD, 'utf8');
  * copy of the brief its facts sheet names, and run `plan check` on it.
  * @param {string} from @param {string} to
  */
-async function checkVariant(from, to) {
+async function checkVariant(from, to, extra = ['--slug', 'lanes']) {
   assert.equal(GOOD_TEXT.split(from).length, 2, `fixture text must occur once: ${from}`);
   const dir = freshDir('variant');
   mkdirSync(path.join(dir, 'plans'));
@@ -25,7 +42,7 @@ async function checkVariant(from, to) {
   writeFileSync(path.join(dir, 'plans', 'x.plan.md'), GOOD_TEXT.replace(from, to));
   const stdout = sink();
   const stderr = sink();
-  const code = await runPlanVerb(['check', 'plans/x.plan.md'], { stdout, stderr, cwd: dir });
+  const code = await runPlanVerb(['check', 'plans/x.plan.md', ...extra], { stdout, stderr, cwd: dir });
   return { code, errors: stderr.text().split('\n').filter(Boolean), out: stdout.text() };
 }
 
@@ -34,8 +51,8 @@ const TOLERANCE_ROW = '1. `--max-turns` is NOT-FOUND — B2 cites it only to pro
 test('plan check: the fixture plan with the tolerance row exits 0', async () => {
   const stdout = sink();
   const stderr = sink();
-  assert.equal(await runPlanVerb(['check', GOOD], { stdout, stderr, cwd: freshDir('good') }), 0);
-  assert.deepEqual([stdout.text(), stderr.text()], ['plan check: ok (3 blocks)\n', '']);
+  assert.equal(await runPlanVerb(['check', GOOD, '--slug', 'lanes'], { stdout, stderr, cwd: freshDir('good') }), 0);
+  assert.deepEqual([stdout.text(), stderr.text()], [`plan check: ok (3 blocks)\n${LANES_LINE}`, '']);
 });
 
 test('plan check: an unbackable clause without a tolerance exits 1 naming the block and the clause', async () => {
@@ -69,4 +86,86 @@ test('plan check: a dispatch step with 3 concurrent blocks exits 1', async () =>
 test('plan check: a block without a cases forecast exits 1', async () => {
   const r = await checkVariant('3 → 6 → **1 200**', '3 → — → **1 200**');
   assert.deepEqual([r.code, r.errors], [1, ['block B2: no cases forecast']]);
+});
+
+test('B36 plan check: a level that differs from the recorded lane exits 1 naming the block and the lane', async () => {
+  const r = await checkVariant('| **B3** | Status report | L1 |', '| **B3** | Status report | L2 |');
+  assert.deepEqual([r.code, r.errors, r.out], [1, ['block B3: level L2 differs from the recorded lane L1 (jev)'], LANES_LINE]);
+});
+
+test('B36 plan check: levels with no recorded lane (an empty ledger) are refused block by block', async () => {
+  const r = await checkVariant('B3 report → the human.', 'B3 report → the human.', ['--slug', 'no-lanes']);
+  assert.equal(r.code, 1);
+  assert.deepEqual(r.errors, [
+    'block B1: level L1 has no recorded lane decision — run forge jev ask lane --block B1 --state <file> (or --rules when Jev is unavailable)',
+    'block B2: level L2 has no recorded lane decision — run forge jev ask lane --block B2 --state <file> (or --rules when Jev is unavailable)',
+    'block B3: level L1 has no recorded lane decision — run forge jev ask lane --block B3 --state <file> (or --rules when Jev is unavailable)',
+  ]);
+  assert.equal(r.out, 'lanes: B1 none · B2 none · B3 none\n');
+});
+
+test('B36 plan check: only Jev or rules lane rows for this plan (by base name) count, the latest wins, and the answer is normalised', async () => {
+  await seedLanes('scoped', [
+    { block: 'B1', answer: 'L2', source: 'jev' },
+    { block: 'B1', answer: ' l1 (plain feature) ', source: 'jev', plan: 'elsewhere/x.plan.md' },
+    { block: 'B2', answer: 'L2', source: 'jev', plan: 'other.plan.md' },
+    { block: 'B2', answer: 'L2', source: 's2' },
+    { block: 'B3', answer: 'L1', source: 'rules' },
+  ]);
+  const r = await checkVariant('B3 report → the human.', 'B3 report → the human.', ['--slug', 'scoped']);
+  assert.deepEqual(
+    [r.code, r.errors, r.out],
+    [1, ['block B2: level L2 has no recorded lane decision — run forge jev ask lane --block B2 --state <file> (or --rules when Jev is unavailable)'], 'lanes: B1 L1 (jev) · B2 none · B3 L1 (rules)\n'],
+  );
+});
+
+test('B36 plan check: a near-miss heading at §0.x is read as the unbackable section with one WARN', async () => {
+  const r = await checkVariant('## 0.6 Acceptance clauses the facts sheet cannot back', '## 0.6 Unbackable-clause tolerances');
+  assert.deepEqual(
+    [r.code, r.errors, r.out],
+    [0, ['WARN section "0.6 Unbackable-clause tolerances" at §0.x read as "Acceptance clauses the facts sheet cannot back" — use the exact heading "Acceptance clauses the facts sheet cannot back"'], `plan check: ok (3 blocks)\n${LANES_LINE}`],
+  );
+});
+
+test('B36 plan check: a near-miss caller map heading at §3 passes with one WARN', async () => {
+  const r = await checkVariant('## Caller map', '## §3 Callers');
+  assert.deepEqual([r.code, r.errors], [0, ['WARN section "§3 Callers" at §3 read as "Caller map" — use the exact heading "Caller map"']]);
+});
+
+test('B36 plan check: the same near-miss heading away from its position is a missing section', async () => {
+  const r = await checkVariant('## 0.6 Acceptance clauses the facts sheet cannot back', '## Unbackable-clause tolerances');
+  assert.deepEqual([r.code, r.errors], [
+    1,
+    [
+      'unbackable-clauses section missing (write "none" when there is none)',
+      'unbackable clause without tolerance: B1 rows land under `~/.code-forge/ledger` (1)',
+      'unbackable clause without tolerance: B2 the reviewer argv never carries `--max-turns` (1)',
+    ],
+  ]);
+});
+
+test('B36 plan check: no ledger at all is no rows — every block reads none, never a crash', async () => {
+  const before = process.env.HOME;
+  process.env.HOME = freshDir('empty-home');
+  try {
+    const r = await checkVariant('B3 report → the human.', 'B3 report → the human.');
+    assert.deepEqual([r.code, r.errors.length, r.out], [1, 3, 'lanes: B1 none · B2 none · B3 none\n']);
+  } finally {
+    process.env.HOME = before;
+  }
+});
+
+test('B36 plan check: a bad --slug is a usage error (exit 2)', async () => {
+  const r = await checkVariant('B3 report → the human.', 'B3 report → the human.', ['--slug', '../x']);
+  assert.deepEqual([r.code, r.errors], [2, ['plan: --slug must be lowercase letters, digits and hyphens']]);
+});
+
+test('B36 checkPlan with no plan path counts only untagged lane rows', () => {
+  const rows = [
+    { event: 'decision', question: 'lane', block: 'B1', answer: 'L1', source: 'jev', plan: 'good.plan.md' },
+    { event: 'decision', question: 'lane', block: 'B2', answer: 'L2', source: 'rules' },
+    { event: 'decision', question: 'lane', block: 'B3', answer: 'L1', source: 'jev' },
+  ];
+  const result = checkPlan(GOOD_TEXT, { decisions: rows });
+  assert.deepEqual(result.lanes.map((l) => [l.block, l.lane]), [['B1', null], ['B2', 'L2'], ['B3', 'L1']]);
 });

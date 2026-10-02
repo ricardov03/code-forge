@@ -131,3 +131,37 @@ export function verifyAck(output, expectedSha8, expectedLines, opts = {}) {
   }
   return { status: 'ok', ack };
 }
+
+/**
+ * A `review-file` ticket id: 24 lowercase hex characters standing alone — not part of a longer hex
+ * run (a commit sha) and not inside a path or file name (no word, `.`, `/` or `-` touching it).
+ */
+const TICKET_IN_LINE = /(?<![\w./-])[0-9a-f]{24}(?![\w/-]|\.\w)/;
+
+/** @param {string} s */
+const escapeRe = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+
+/**
+ * The coder's final report must name the `review-file` ticket of every changed file (B36): a line
+ * that names the path and a ticket id, e.g. `reviewed src/a.mjs ticket 0123456789abcdef01234567`.
+ * A line counts for a file only when it names exactly ONE of the changed files (a line listing two
+ * paths counts for neither) and carries a ticket id outside that path (the path is blanked before
+ * the ticket is looked for). Fail closed: a file with no such line is missing, and the
+ * orchestrator treats the report as FAILED whatever its sentinel says
+ * (`skill/templates/coder-brief.md`).
+ * @param {string} report - the coder's final report (or its whole transcript).
+ * @param {string[]} files - the block's changed files, repo-root-relative.
+ * @returns {string[]} the files with no ticket id in the report, in the order given.
+ */
+export function missingReviewTickets(report, files) {
+  if (typeof report !== 'string') throw new TypeError('missingReviewTickets: report must be a string');
+  const named = files.map((file) => ({ file, re: new RegExp(`(?<![\\w./-])${escapeRe(file)}(?![\\w/-]|\\.\\w)`, 'g') }));
+  /** @type {Set<string>} */
+  const ticketed = new Set();
+  for (const line of report.split('\n')) {
+    const hits = named.filter((n) => line.search(n.re) >= 0);
+    if (hits.length !== 1) continue;
+    if (TICKET_IN_LINE.test(line.replace(hits[0].re, ' '))) ticketed.add(hits[0].file);
+  }
+  return files.filter((file) => !ticketed.has(file));
+}
