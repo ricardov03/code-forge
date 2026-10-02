@@ -61,3 +61,26 @@ describe('stub guard (O12): one case per unavailable reason, and the passing cas
     assert.deepEqual([none.ok, none.reason, empty.ok, empty.reason], [false, 'exit', false, 'schema']);
   });
 });
+
+describe('clean-pass floor on a small diff (a 3-line placeholder reviewed in 108 tokens)', () => {
+  const finding = { id: 'F1', severity: 'warning', line_start: 1, line_end: 1, category: 'correctness', claim: 'c', evidence: 'e', fix: 'f' };
+  /** @param {number} out @param {Record<string, any>} [extra] */
+  const session = (out, extra = {}) => ({ status: 'ok', exit_code: 0, answer: answerFor(HUNKS, extra), usage: { tokens_out: out } });
+
+  test('a clean pass on a small diff is accepted at 108 tokens', () => {
+    const v = validateReview(session(108), { hunkHeaders: HUNKS, minTokensOut: 120, smallDiff: true });
+    assert.equal(v.ok, true);
+  });
+  test('the same answer on a large diff keeps the full floor', () => {
+    const v = validateReview(session(108), { hunkHeaders: HUNKS, minTokensOut: 120, smallDiff: false });
+    assert.deepEqual([v.ok, v.reason, v.detail], [false, 'too_short', 'tokens_out 108 < 120']);
+  });
+  test('an answer with a finding keeps the full floor even on a small diff', () => {
+    const v = validateReview(session(108, { passed: false, findings: [finding] }), { hunkHeaders: HUNKS, minTokensOut: 120, smallDiff: true });
+    assert.equal(v.ok === true, false);
+  });
+  test('a clean pass still needs the clean-pass minimum', () => {
+    const v = validateReview(session(30), { hunkHeaders: HUNKS, minTokensOut: 120, smallDiff: true });
+    assert.deepEqual([v.ok, v.reason, v.detail], [false, 'too_short', 'tokens_out 30 < 40']);
+  });
+});
