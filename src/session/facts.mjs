@@ -15,10 +15,13 @@
  * private B0.1 root in `os.tmpdir()` (`factsTmpRoot`) — and is removed when the verb ends;
  * `spawnSession` refuses a facts cwd below any `.git`. {@link pathViolation} still refuses
  * `~`, `..` and absolute paths outside the tool roots, so the delegate cannot leave it.
- * Step 3 (deterministic): the answer is validated against `schema/facts.schema.json`; a row whose
- * `command` is not an allowed read-only form ({@link readOnlyViolation}'s allow-list; env claims only
- * `printenv NAME >/dev/null`, their excerpt always blanked) or a VERIFIED row with an empty excerpt
- * refuses the whole sheet; every claim, command, excerpt and reason passes through B0 `redact`. The
+ * Step 3 (deterministic): the answer is validated against `schema/facts.schema.json` (only a
+ * schema-invalid answer refuses the sheet); rows match claims by their echoed claim
+ * ({@link echoedClaim}). A row whose `command` is not an allowed read-only form
+ * ({@link readOnlyViolation}'s allow-list; env claims only `printenv NAME >/dev/null`, their excerpt
+ * always blanked), or a VERIFIED row with an empty excerpt or from a silent `test`, is downgraded
+ * to UNVERIFIABLE on its own (B39) and never counted; every claim, command, excerpt and reason
+ * passes through B0 `redact`. The
  * sheet records the brief's sha256 and mtime in its header, both taken from the ONE read of the
  * brief that also feeds the extractor; {@link checkSheetFresh} is what `author` and `plan check` use
  * to refuse a stale one.
@@ -220,14 +223,20 @@ const GLOB_CHARS = new Set(['*', '?', '[', ']', '{', '}']);
  * secret-path check and could name what the check never saw): the allow-list never needs one
  * (fail closed).
  * @param {string} command
- * @returns {{segments: string[][], refused: string | null}}
+ * @returns {{segments: string[][], separators: string[], pipedOut?: boolean[], refused: string | null}}
+ *   `separators`: every separator met, in order (`|`, `||`, `&&`, `;`, `&`, newline, CR);
+ *   `pipedOut[i]`: segment i feeds a single `|` (its output is not the command's output).
  */
 function splitCommand(command) {
-  if (/[`]/.test(command)) return { segments: [], refused: 'backticks are not allowed' };
-  if (/\$/.test(command)) return { segments: [], refused: '$ expansion is not allowed' };
-  if (/[<>]/.test(command)) return { segments: [], refused: 'redirection is not allowed' };
+  if (/[`]/.test(command)) return { segments: [], separators: [], refused: 'backticks are not allowed' };
+  if (/\$/.test(command)) return { segments: [], separators: [], refused: '$ expansion is not allowed' };
+  if (/[<>]/.test(command)) return { segments: [], separators: [], refused: 'redirection is not allowed' };
   /** @type {string[][]} */
   const segments = [[]];
+  /** @type {string[]} */
+  const separators = [];
+  /** @type {boolean[]} */
+  const piped = [false];
   let word = '';
   let inWord = false;
   const flush = () => {
@@ -239,29 +248,37 @@ function splitCommand(command) {
     const c = command[i];
     if (c === "'" || c === '"') {
       const end = command.indexOf(c, i + 1);
-      if (end < 0) return { segments: [], refused: 'unbalanced quote' };
+      if (end < 0) return { segments: [], separators: [], refused: 'unbalanced quote' };
       word += command.slice(i + 1, end);
       inWord = true;
       i = end;
     } else if (c === '\\') {
-      if (i + 1 >= command.length || command[i + 1] === '\n' || command[i + 1] === '\r') return { segments: [], refused: 'line continuation is not allowed' };
+      if (i + 1 >= command.length || command[i + 1] === '\n' || command[i + 1] === '\r') return { segments: [], separators: [], refused: 'line continuation is not allowed' };
       word += command[i + 1];
       inWord = true;
       i += 1;
     } else if (SEPARATORS.has(c)) {
       flush();
-      if ((c === '&' || c === '|') && command[i + 1] === c) i += 1;
+      if ((c === '&' || c === '|') && command[i + 1] === c) {
+        separators.push(c + c);
+        i += 1;
+      } else {
+        separators.push(c);
+        if (c === '|') piped[piped.length - 1] = true;
+      }
       segments.push([]);
+      piped.push(false);
     } else if (c === ' ' || c === '\t') {
       flush();
     } else {
-      if (GLOB_CHARS.has(c)) return { segments: [], refused: 'unquoted glob characters (* ? [ ] { }) are not allowed' };
+      if (GLOB_CHARS.has(c)) return { segments: [], separators: [], refused: 'unquoted glob characters (* ? [ ] { }) are not allowed' };
       word += c;
       inWord = true;
     }
   }
   flush();
-  return { segments: segments.filter((s) => s.length > 0), refused: null };
+  const kept = segments.map((s, i) => /** @type {[string[], boolean]} */ ([s, piped[i]])).filter(([s]) => s.length > 0);
+  return { segments: kept.map(([s]) => s), separators, pipedOut: kept.map(([, p]) => p), refused: null };
 }
 
 /** A token that names a secret-looking file (read refused, whatever the command). */
@@ -414,17 +431,67 @@ function segmentViolation(argv) {
   }
 }
 
+/** A bare CLI name (never a path) for the `<cli> … --help` forms. */
+const BARE_CLI = /^[a-z0-9][a-z0-9._-]*$/;
+/** A subcommand word of the `<cli> <subcommand> --help | grep -c -- <flag>` form. */
+const SUBCOMMAND_WORD = /^[a-z][a-z0-9-]*$/;
+/** The flag a help page is searched for (`grep -c -- <flag>`). */
+const HELP_FLAG = /^--?[A-Za-z0-9][A-Za-z0-9-]*$/;
+
+/**
+ * Never a `<cli>` of the subcommand-help form, even when the brief names it: interpreters and shells
+ * run a project file (`node scripts --help`), and BSD file tools take `--help` as an operand after
+ * one (`rm foo --help`). git keeps its own read list.
+ */
+export const SUBCOMMAND_HELP_DENY = Object.freeze([
+  'node', 'deno', 'bun', 'sh', 'bash', 'zsh', 'fish', 'dash', 'python', 'python3', 'ruby', 'perl', 'php',
+  'rm', 'mv', 'cp', 'kill', 'pkill', 'chmod', 'chown', 'ln', 'dd', 'tee', 'git',
+  // launchers that run their subcommand as a program
+  'npx', 'pnpx', 'bunx', 'uvx', 'pipx', 'npm', 'pnpm', 'yarn', 'env', 'sudo', 'doas', 'xargs', 'exec', 'nice', 'nohup', 'timeout', 'time', 'watch', 'command', 'builtin', 'eval', 'source',
+]);
+const SUBCOMMAND_HELP_DENIED = new Set(SUBCOMMAND_HELP_DENY);
+
+/**
+ * The CLIs the subcommand-help form may name: the first word of every `command` claim of the brief.
+ * @param {ReadonlyArray<Claim>} claims
+ * @returns {Set<string>}
+ */
+export function claimClis(claims) {
+  return new Set(claims.filter((c) => c.kind === 'command').map((c) => c.token.split(' ')[0]));
+}
+
+/**
+ * Is `segments` (split at `separators`) exactly `<cli> <subcommand> --help | grep -c -- <flag>`?
+ * One pipe and nothing else; `<cli>` a bare name that a `command` claim of the brief starts with
+ * (`clis`), never a build runner nor one of {@link SUBCOMMAND_HELP_DENY}; a plain lowercase
+ * subcommand word; a flag-shaped pattern. The two-token `<cli> --help` form stays a segment of its
+ * own ({@link segmentViolation}).
+ * @param {string[][]} segments @param {string[]} separators @param {ReadonlySet<string>} clis
+ * @returns {boolean}
+ */
+function isSubcommandHelpGrep(segments, separators, clis) {
+  if (segments.length !== 2 || separators.length !== 1 || separators[0] !== '|') return false;
+  const [help, grep] = segments;
+  const cli = help[0];
+  if (help.length !== 3 || help[2] !== '--help' || !BARE_CLI.test(cli) || !clis.has(cli) || BUILD_RUNNERS.has(cli) || SUBCOMMAND_HELP_DENIED.has(cli) || !SUBCOMMAND_WORD.test(help[1])) return false;
+  return grep.length === 4 && grep[0] === 'grep' && grep[1] === '-c' && grep[2] === '--' && HELP_FLAG.test(grep[3]);
+}
+
 /**
  * Why a delegate's `command` is not an allowed read-only command, or null when it is. An
  * ALLOW-LIST (fail closed): every segment between `;`, `&&`, `||`, `|`, `&`, newline or CR must
- * be one of the forms in {@link segmentViolation}; `$`, backticks and redirections are refused.
+ * be one of the forms in {@link segmentViolation}, or the whole command is exactly
+ * `<cli> <subcommand> --help | grep -c -- <flag>` for a `<cli>` in `opts.clis`
+ * ({@link isSubcommandHelpGrep}); `$`, backticks and redirections are refused.
  * @param {string} command
+ * @param {{clis?: ReadonlySet<string>}} [opts] - `clis`: {@link claimClis} of the brief (none ⇒ the subcommand form is never admitted).
  * @returns {string | null}
  */
-export function readOnlyViolation(command) {
-  const { segments, refused } = splitCommand(command);
+export function readOnlyViolation(command, opts = {}) {
+  const { segments, separators, refused } = splitCommand(command);
   if (refused) return refused;
   if (segments.length === 0) return 'empty command';
+  if (isSubcommandHelpGrep(segments, separators, opts.clis ?? new Set()) && !segments.flat().some((t) => SECRET_PATH.some((re) => re.test(t)))) return null;
   for (const argv of segments) {
     const why = segmentViolation(argv);
     if (why) return why;
@@ -435,12 +502,90 @@ export function readOnlyViolation(command) {
 /** The one form an env claim may be checked with: existence only, the value never printed. */
 const ENV_CHECK = /^printenv ([A-Z][A-Z0-9_]*) >\/dev\/null$/;
 
+/** @param {string} text @returns {string} `text` trimmed, without one pair of surrounding backtick runs. */
+function unquoteBackticks(text) {
+  const t = text.trim();
+  const m = /^(`+)([\s\S]*?)(`+)$/.exec(t);
+  return m && t.length > 1 ? m[2].trim() : t;
+}
+
 /**
- * Validate the delegate's answer (step 3). Claims the delegate left out are kept as UNVERIFIABLE
- * rows ("no answer") — a missing answer is never read as a fact.
+ * The claim token a delegate echoed back: the packet lists claims as `- F<n> <kind>: <token>`, so
+ * the delegate may copy `<kind>: <token>`, with or without backticks. Only a leading `<kind>: ` and
+ * surrounding backticks are stripped; anything else stays (and then does not match).
+ * @param {string} claim @param {string} kind
+ * @returns {string}
+ */
+export function echoedClaim(claim, kind) {
+  let t = unquoteBackticks(String(claim));
+  if (t.startsWith(`${kind}: `)) t = t.slice(kind.length + 2);
+  return unquoteBackticks(t);
+}
+
+/**
+ * Does this allow-listed segment print nothing on success? From {@link segmentViolation}'s list:
+ * `test …`; `grep`/`rg` with `-q`/`--quiet`/`--silent` (a short cluster holding `q` counts, operands
+ * after `--` do not); `which -s` (a short cluster holding `s`). `[ … ]` is never allowed.
+ * @param {string[]} argv
+ * @returns {boolean}
+ */
+function isSilentSegment(argv) {
+  const [verb, ...rest] = argv;
+  if (verb === 'test') return true;
+  const end = rest.indexOf('--');
+  const opts = end < 0 ? rest : rest.slice(0, end);
+  if (verb === 'grep' || verb === 'rg') return opts.some((t) => /^-[a-zA-Z]*q/.test(t) || t === '--quiet' || t === '--silent');
+  if (verb === 'which') return opts.some((t) => /^-[a-zA-Z]*s/.test(t));
+  return false;
+}
+
+/**
+ * Does the command print nothing on success? Only a segment not piped into another one prints to
+ * the command's output; the command is silent when every such segment is silent.
+ * @param {string} command
+ * @returns {boolean}
+ */
+export function isSilentCommand(command) {
+  const { segments, pipedOut = [] } = splitCommand(command);
+  return segments.length > 0 && segments.every((argv, i) => pipedOut[i] || isSilentSegment(argv));
+}
+
+/** @typedef {{fact_id: string, reason: string}} Downgrade */
+
+/**
+ * Which check rule a counted row (VERIFIED or NOT-FOUND) breaks, or null. A row the delegate
+ * already tagged UNVERIFIABLE is never counted, so it keeps its own `why`.
+ * @param {Fact} row @param {Claim} claim @param {ReadonlySet<string>} clis - {@link claimClis}.
+ * @returns {string | null}
+ */
+function ruleBroken(row, claim, clis) {
+  if (row.tag === 'UNVERIFIABLE') return null;
+  if (row.command.trim().length === 0) return `${row.tag} without a check command; not counted`;
+  if (claim.kind === 'env') {
+    const env = ENV_CHECK.exec(row.command);
+    if (!env || env[1] !== claim.token) return `an env claim may only be checked with printenv ${claim.token} >/dev/null; not counted`;
+  } else {
+    const why = readOnlyViolation(row.command, { clis });
+    if (why) return `check command not allowed: ${why}; not counted`;
+    if (row.tag === 'VERIFIED' && isSilentCommand(row.command)) return 'silent command; excerpt cannot be its output; not counted';
+  }
+  if (row.tag === 'VERIFIED' && row.output_excerpt.trim().length === 0) return 'VERIFIED with an empty output excerpt; not counted';
+  return null;
+}
+
+/**
+ * Validate the delegate's answer (step 3). Only a schema-invalid answer is refused. A row answers
+ * claim `F<n>` when its fact_id is `F<n>` and its kind is the claim's kind (the id is the anchor,
+ * the claim text may be reworded); failing that, when its echoed claim ({@link echoedClaim})
+ * equals the claim token and its fact_id is `F<n>` or its kind is the claim's kind. Claims the
+ * delegate left out are kept as UNVERIFIABLE rows ("no answer") — a missing answer is never read
+ * as a fact. A VERIFIED or NOT-FOUND row that breaks a check rule (a command off the read-only
+ * allow-list, an env claim not checked with `printenv NAME >/dev/null`, a VERIFIED row with an
+ * empty excerpt or from a silent `test`) becomes UNVERIFIABLE with `why` = the rule and is listed
+ * in `downgraded`. Every row shows the CANONICAL claim token and kind.
  * @param {unknown} answer @param {ReadonlyArray<Claim>} claims
- * @returns {Fact[]} the rows, in claim order.
- * @throws {FactsError} `refused` naming each fact id and reason (never the output excerpt).
+ * @returns {{facts: Fact[], downgraded: Downgrade[]}} the rows in claim order, and the downgrades.
+ * @throws {FactsError} `refused` when the answer does not match the schema.
  */
 export function validateFacts(answer, claims) {
   if (!validateFile(answer)) {
@@ -448,33 +593,46 @@ export function validateFacts(answer, claims) {
     throw new FactsError('refused', `facts answer does not match facts.schema.json: ${where.join('; ')}`);
   }
   const rows = /** @type {{facts: Fact[]}} */ (answer).facts;
-  const problems = [];
-  for (const row of rows) {
-    if (row.tag === 'VERIFIED' && row.output_excerpt.trim().length === 0) problems.push(`${row.fact_id}: VERIFIED with an empty output excerpt`);
-    if (row.command.trim().length === 0) {
-      if (row.tag !== 'UNVERIFIABLE') problems.push(`${row.fact_id}: ${row.tag} without a command`);
-      continue;
-    }
-    if (row.kind === 'env') {
-      const env = ENV_CHECK.exec(row.command);
-      if (!env || env[1] !== row.claim) problems.push(`${row.fact_id}: an env claim may only be checked with printenv ${row.claim} >/dev/null`);
-      continue;
-    }
-    const why = readOnlyViolation(row.command);
-    if (why) problems.push(`${row.fact_id}: command is not read-only: ${why}`);
-  }
-  if (problems.length > 0) throw new FactsError('refused', `facts sheet refused: ${problems.join('; ')}`);
   /** @type {Fact[]} */
-  const out = [];
-  claims.forEach((claim, i) => {
-    const row = rows.find((r) => r.claim === claim.token && r.kind === claim.kind);
-    out.push(
-      row
-        ? { ...row, fact_id: `F${i + 1}`, claim: redact(row.claim), command: redact(row.command), output_excerpt: row.kind === 'env' ? '' : redact(row.output_excerpt), why: row.why === null ? null : redact(row.why) }
-        : { fact_id: `F${i + 1}`, claim: redact(claim.token), kind: claim.kind, command: '', output_excerpt: '', tag: 'UNVERIFIABLE', why: 'no answer from the delegate' },
-    );
+  const facts = [];
+  /** @type {Downgrade[]} */
+  const downgraded = [];
+  const clis = claimClis(claims);
+  // each row answers at most ONE claim: pass 1 anchors rows by fact_id (with the kind, else with the
+  // echoed claim); pass 2 gives the rows left over to claims still open, by kind + echoed claim
+  /** @type {Set<Fact>} */
+  const taken = new Set();
+  /** @type {Array<Fact | undefined>} */
+  const chosen = claims.map((claim, i) => {
+    const id = `F${i + 1}`;
+    const row = rows.find((r) => !taken.has(r) && r.fact_id === id && r.kind === claim.kind) ?? rows.find((r) => !taken.has(r) && r.fact_id === id && echoedClaim(r.claim, claim.kind) === claim.token);
+    if (row) taken.add(row);
+    return row;
   });
-  return out;
+  claims.forEach((claim, i) => {
+    if (chosen[i]) return;
+    const row = rows.find((r) => !taken.has(r) && r.kind === claim.kind && echoedClaim(r.claim, claim.kind) === claim.token);
+    if (row) taken.add(row);
+    chosen[i] = row;
+  });
+  claims.forEach((claim, i) => {
+    const id = `F${i + 1}`;
+    const row = chosen[i];
+    if (!row) {
+      facts.push({ fact_id: id, claim: redact(claim.token), kind: claim.kind, command: '', output_excerpt: '', tag: 'UNVERIFIABLE', why: 'no answer from the delegate' });
+      return;
+    }
+    const base = { fact_id: id, claim: redact(claim.token), kind: claim.kind, command: redact(row.command), output_excerpt: claim.kind === 'env' ? '' : redact(row.output_excerpt) };
+    const broken = ruleBroken(row, claim, clis);
+    if (broken) {
+      const reason = redact(broken);
+      downgraded.push({ fact_id: id, reason });
+      facts.push({ ...base, tag: 'UNVERIFIABLE', why: reason });
+    } else {
+      facts.push({ ...base, tag: row.tag, why: row.why === null ? null : redact(row.why) });
+    }
+  });
+  return { facts, downgraded };
 }
 
 // ---------------------------------------------------------------------------------------------
@@ -560,20 +718,27 @@ export function checkSheetFresh(sheetText, briefPath) {
 const RULE = [
   '# Facts delegate',
   '',
-  'For each claim below, run the cheapest READ-ONLY check (`<cli> --help | grep -c <flag>`, `which <cli>`, `ls <path>`,',
-  '`<cli> --version`, `npm view <name> version`). Quote the exact command and the output line it printed (at most 200',
+  'For each claim below, run the cheapest READ-ONLY check (`<cli> --help | grep -c -- <flag>`,',
+  '`<cli> <subcommand> --help | grep -c -- <flag>`, `which <cli>`, `ls <path>`, `<cli> --version`,',
+  '`npm view <name> version`). Quote the exact command and the output line it printed (at most 200',
   'characters). Tag each claim VERIFIED (the output shows it), NOT-FOUND (the check ran and it is absent) or',
-  'UNVERIFIABLE (no read-only check can decide it — say why in `why`). Never infer, never guess. Only these forms are',
-  'accepted, joined by `|` if needed: which, command -v, ls, cat, head, tail, wc, grep (no -r), rg,',
+  'UNVERIFIABLE (no read-only check can decide it — say why in `why`). Never infer, never guess: the excerpt is the',
+  "command's literal output, never your reading of it. For a path use `ls <path>` (it prints the path); `test` prints",
+  'nothing, so a `test` check can never be VERIFIED. Only these forms are accepted, joined by `|` if needed: which,',
+  'command -v, ls, cat, head, tail, wc, grep (no -r), rg,',
   'find (only -name -iname -path -ipath -type -maxdepth -mindepth -print -print0 -newer -size -empty -mtime -mmin',
   '-not ! -a -o -and -or, plus paths), stat, file, uname, sw_vers, jq, `<cli> --help|-h|--version` (a bare CLI name, no path, no build runner), git',
-  'log|show|status|rev-parse|ls-files|cat-file, npm view|ls, node --version, test -e|-f|-d|-n, `curl -sI <one URL>`.',
+  'log|show|status|rev-parse|ls-files|cat-file, npm view|ls, node --version, test -e|-f|-d|-n, `curl -sI <one URL>`;',
+  'and, as a whole command only, `<cli> <subcommand> --help | grep -c -- <flag>` (`<cli>` the first word of a',
+  'command claim below, never an interpreter, shell or file tool; a lowercase subcommand word; no other pipe or',
+  'argument). A check that breaks these rules is not counted.',
   'No `$`, no backticks, no redirection, no unquoted glob, no `~`, no absolute path outside /usr, /opt/homebrew or',
   '/bin, no secret files.',
   'An env claim is checked ONLY with `printenv NAME >/dev/null` (quote its exit status; the value is never shown).',
   '',
   'Reply with ONE JSON object: {"facts": [{"fact_id", "claim", "kind", "command", "output_excerpt", "tag", "why"}]} —',
-  'one row per claim, `fact_id`, `claim` and `kind` copied from the list, `why` null unless UNVERIFIABLE.',
+  'one row per claim: `fact_id` (F<n>) and `kind` copied from the list, `claim` = the token alone (the text after',
+  '`<kind>: `), `why` null unless UNVERIFIABLE.',
   '',
   '## Claims',
   '',
@@ -797,7 +962,7 @@ export async function buildSnapshot(projectDir, sources, snapDir, workDir, run =
  * Build the facts sheet (steps 1–3) and write it to `outPath`.
  * @param {BuildFactsOpts} opts
  * @param {import('./spawn.mjs').SessionDeps} [deps]
- * @returns {Promise<{status: string, reason?: string | null, outPath?: string, claims: Claim[], facts?: Fact[]}>}
+ * @returns {Promise<{status: string, reason?: string | null, outPath?: string, claims: Claim[], facts?: Fact[], downgraded?: Downgrade[]}>}
  */
 export async function buildFacts(opts, deps = {}) {
   const brief = readBriefOnce(opts.briefPath);
@@ -831,7 +996,7 @@ export async function buildFacts(opts, deps = {}) {
       deps,
     );
     if (result.status !== 'ok') return { status: result.status, reason: result.reason ?? null, claims };
-    const facts = validateFacts(result.answer, claims);
+    const { facts, downgraded } = validateFacts(result.answer, claims);
     const now = (opts.now ?? (() => new Date()))();
     const rel = path.relative(path.dirname(opts.outPath), opts.briefPath).split(path.sep).join('/');
     const text = renderSheet({
@@ -847,7 +1012,7 @@ export async function buildFacts(opts, deps = {}) {
     if (writeRow) {
       await writeRow({ event: 'facts.built', role: 'facts', run: opts.run ?? null, claims: claims.length, verified: facts.filter((f) => f.tag === 'VERIFIED').length, tokens_in: result.row?.tokens_in ?? null, tokens_out: result.row?.tokens_out ?? null });
     }
-    return { status: 'ok', outPath: opts.outPath, claims, facts };
+    return { status: 'ok', outPath: opts.outPath, claims, facts, downgraded };
   } finally {
     removeSnapshot(snapDir);
     rmSync(dir, { recursive: true, force: true });

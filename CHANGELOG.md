@@ -11,6 +11,14 @@ waits on a second real consumer (plan §10.4, Q17).
 - Skill: a plan that passed `plan check` is shown to the owner for approval in the harness's plan mode (Claude Code:
   EnterPlanMode → plan file → ExitPlanMode); no block is dispatched before that approval.
 
+### Fixed
+
+- `code-forge facts` verified nothing: delegates echo claims as `<kind>: <token>` and every answer was dropped as "no
+  answer". Answers now match by that form or by fact id (one answer per claim); a check that breaks the read-only rules,
+  or a silent command (`test`, `grep -q`), marks only that claim unverifiable with the reason instead of refusing the
+  whole sheet; the `<cli> <subcommand> --help | grep -c -- <flag>` check is allowed only for CLIs the brief names, never
+  interpreters or launchers.
+
 ## [0.4.0] — 2026-10-02
 
 ### Added

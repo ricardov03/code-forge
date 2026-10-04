@@ -8,8 +8,8 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-const { extractClaims, readOnlyViolation, validateFacts, buildFacts, buildSnapshot, removeSnapshot, parseSheet, FactsError } = await import('../../src/session/facts.mjs');
-const { runFactsVerb } = await import('../../src/cli/facts.mjs');
+const { extractClaims, echoedClaim, readOnlyViolation, validateFacts, buildFacts, buildFactsPacket, SUBCOMMAND_HELP_DENY, isSilentCommand, buildSnapshot, removeSnapshot, parseSheet, FactsError } = await import('../../src/session/facts.mjs');
+const { runFactsVerb, downgradeLine } = await import('../../src/cli/facts.mjs');
 const { SessionError, spawnSession } = await import('../../src/session/spawn.mjs');
 const { exec: realExec } = await import('../../src/util/exec.mjs');
 const { registerSecret, clearSecrets } = await import('../../src/util/redact.mjs');
@@ -58,15 +58,16 @@ test('facts verb: one L0 facts session, the sheet is written and its header carr
   assert.equal(Buffer.from(spawned[0].stdin_b64, 'base64').toString('utf8').includes('- F7 env: DO_NOT_TRACK\n'), true);
 });
 
-test('a delegate answer with a write verb in command is refused and no sheet is written', async () => {
+test('a delegate answer with a write verb in command: that row alone is UNVERIFIABLE (not counted), the sheet is written, 1 downgrade', async () => {
   const ws = freshDir('facts-write');
   const out = path.join(ws, 'brief.facts.md');
   const { deps } = fakeDeps({ FAKE_ANSWER: JSON.stringify(answerWith(1, { command: 'claude --help | touch notes.txt' })) });
-  await assert.rejects(
-    buildFacts({ cfg: CFG, briefPath: BRIEF, outPath: out }, deps),
-    (err) => err instanceof FactsError && err.code === 'refused' && err.message === 'facts sheet refused: F2: command is not read-only: not an allowed read-only form: "touch"',
-  );
-  assert.equal(existsSync(out), false);
+  const result = await buildFacts({ cfg: CFG, briefPath: BRIEF, outPath: out }, deps);
+  const why = 'check command not allowed: not an allowed read-only form: "touch"; not counted';
+  assert.deepEqual(result.downgraded, [{ fact_id: 'F2', reason: why }]);
+  assert.deepEqual([result.facts?.[1].tag, result.facts?.[1].why, result.facts?.filter((f) => f.tag === 'VERIFIED').length], ['UNVERIFIABLE', why, 2]);
+  const sheet = readFileSync(out, 'utf8');
+  assert.equal(sheet.split('\n').filter((l) => l === '- claims: 7 (VERIFIED 2 · NOT-FOUND 2 · UNVERIFIABLE 3)').length, 1);
 });
 
 test('readOnlyViolation is an allow-list: 7 escapes are refused, plain reads pass', () => {
@@ -86,12 +87,11 @@ test('readOnlyViolation is an allow-list: 7 escapes are refused, plain reads pas
 
 test('an env claim: only printenv NAME >/dev/null is accepted, and its excerpt is always blanked', () => {
   const claims = extractClaims(readFileSync(BRIEF, 'utf8'));
-  const set = validateFacts(answerWith(6, { tag: 'VERIFIED', output_excerpt: 'exit 0' }), claims);
+  const set = validateFacts(answerWith(6, { tag: 'VERIFIED', output_excerpt: 'exit 0' }), claims).facts;
   assert.deepEqual([set[6].tag, set[6].output_excerpt], ['VERIFIED', '']);
-  assert.throws(
-    () => validateFacts(answerWith(6, { command: 'printenv DO_NOT_TRACK', output_excerpt: '1' }), claims),
-    (err) => err instanceof FactsError && err.message === 'facts sheet refused: F7: an env claim may only be checked with printenv DO_NOT_TRACK >/dev/null',
-  );
+  const bad = validateFacts(answerWith(6, { command: 'printenv DO_NOT_TRACK', output_excerpt: '1', tag: 'VERIFIED' }), claims);
+  const why = 'an env claim may only be checked with printenv DO_NOT_TRACK >/dev/null; not counted';
+  assert.deepEqual([bad.facts[6].tag, bad.facts[6].why, bad.facts[6].output_excerpt, bad.downgraded], ['UNVERIFIABLE', why, '', [{ fact_id: 'F7', reason: why }]]);
 });
 
 test('facts verb: an unreadable --brief is a usage error (exit 2) and spawns nothing', async () => {
@@ -110,13 +110,237 @@ test('facts verb: a directory as --brief is a usage error (exit 2) and spawns no
   assert.deepEqual([stderr.text(), readRecords(records).length], ['facts: --brief cannot be read\n', 0]);
 });
 
-test('a VERIFIED row with an empty excerpt is refused', () => {
+test('a VERIFIED row with an empty excerpt, or with no command, is downgraded to UNVERIFIABLE (2 reasons); the fixture answer has 0 downgrades', () => {
   const claims = extractClaims(readFileSync(BRIEF, 'utf8'));
-  assert.throws(
-    () => validateFacts(answerWith(0, { output_excerpt: '' }), claims),
-    (err) => err instanceof FactsError && err.message === 'facts sheet refused: F1: VERIFIED with an empty output excerpt',
+  const empty = validateFacts(answerWith(0, { output_excerpt: '' }), claims);
+  assert.deepEqual([empty.facts[0].tag, empty.facts[0].why, empty.downgraded], ['UNVERIFIABLE', 'VERIFIED with an empty output excerpt; not counted', [{ fact_id: 'F1', reason: 'VERIFIED with an empty output excerpt; not counted' }]]);
+  const none = validateFacts(answerWith(2, { command: '' }), claims);
+  assert.deepEqual(none.downgraded, [{ fact_id: 'F3', reason: 'NOT-FOUND without a check command; not counted' }]);
+  const ok = validateFacts(ANSWER, claims);
+  assert.deepEqual([ok.facts.length, ok.downgraded], [7, []]);
+});
+
+test('echoedClaim strips only a leading "<kind>: " and surrounding backticks (8 cases)', () => {
+  const cases = [
+    ['path: ./src/x.mjs', 'path', './src/x.mjs'],
+    ['`./src/x.mjs`', 'path', './src/x.mjs'],
+    ['path: `./src/x.mjs`', 'path', './src/x.mjs'],
+    ['`path: ./src/x.mjs`', 'path', './src/x.mjs'],
+    ['command: code-forge review', 'command', 'code-forge review'],
+    ['./src/x.mjs', 'path', './src/x.mjs'],
+    ['flag: --max', 'path', 'flag: --max'],
+    ['path: path: ./x', 'path', 'path: ./x'],
+  ];
+  assert.deepEqual(cases.map(([claim, kind]) => [claim, kind, echoedClaim(claim, kind)]), cases);
+});
+
+test('rows match by echoed claim + kind or by fact_id + echoed claim; the canonical token and kind are shown; a row matching neither is "no answer"', () => {
+  const claims = /** @type {Array<{token: string, kind: 'path'|'command'|'flag'}>} */ ([{ token: './src/worker/loop.mjs', kind: 'path' }, { token: 'code-forge review', kind: 'command' }, { token: '--max', kind: 'flag' }]);
+  const row = (/** @type {Record<string, unknown>} */ r) => ({ command: 'ls ./src/worker/loop.mjs', output_excerpt: './src/worker/loop.mjs', tag: 'VERIFIED', why: null, ...r });
+  const { facts, downgraded } = validateFacts({
+    facts: [
+      row({ fact_id: 'F9', claim: 'path: `./src/worker/loop.mjs`', kind: 'path' }),
+      row({ fact_id: 'F2', claim: '`code-forge review`', kind: 'path', command: 'which code-forge', output_excerpt: '/usr/local/bin/code-forge' }),
+      row({ fact_id: 'F7', claim: '--max', kind: 'path', command: 'claude --help | grep -c -- --max', output_excerpt: '1' }),
+    ],
+  }, claims);
+  assert.deepEqual(facts.map((f) => [f.fact_id, f.claim, f.kind, f.tag, f.command]), [
+    ['F1', './src/worker/loop.mjs', 'path', 'VERIFIED', 'ls ./src/worker/loop.mjs'],
+    ['F2', 'code-forge review', 'command', 'VERIFIED', 'which code-forge'],
+    ['F3', '--max', 'flag', 'UNVERIFIABLE', ''],
+  ]);
+  assert.deepEqual([facts[2].why, downgraded], ['no answer from the delegate', []]);
+});
+
+test('facts verb on the real answer shape ("<kind>: <token>" echoes): exact sheet rows, header counts, 2 downgrades on stderr, exit 0', async () => {
+  const ws = freshDir('facts-real-shape');
+  copyFileSync(path.join(REPO, 'test', 'fixtures', 'config', 'minimal-anthropic.yml'), path.join(ws, '.code-forge.yml'));
+  writeIn(ws, 'brief.md', 'The loop lives in ./src/worker/loop.mjs. Run `code-forge review` with --max-rounds or --max. Notes: ./docs/a.md.\n');
+  const r = (/** @type {string} */ id, /** @type {string} */ claim, /** @type {string} */ kind, /** @type {string} */ command, /** @type {string} */ excerpt) => ({ fact_id: id, claim, kind, command, output_excerpt: excerpt, tag: 'VERIFIED', why: null });
+  const answer = {
+    facts: [
+      r('F1', 'path: ./src/worker/loop.mjs', 'path', 'ls ./src/worker/loop.mjs', './src/worker/loop.mjs'),
+      r('F2', 'command: code-forge review', 'command', 'which code-forge', '/usr/local/bin/code-forge'),
+      r('F3', 'flag: `--max-rounds`', 'flag', 'code-forge review --help | grep -c -- --max-rounds', '1'),
+      r('F4', 'flag: --max', 'flag', 'code-forge review --help | grep -c --max', '2'),
+      r('F5', 'path: ./docs/a.md', 'path', 'test -e ./docs/a.md', 'exists'),
+    ],
+  };
+  const { deps, stderr } = fakeDeps({ FAKE_ANSWER: JSON.stringify(answer) });
+  const stdout = sink();
+  const code = await runFactsVerb(['--brief', 'brief.md', '--out', 'brief.facts.md'], { ...deps, stdout, cwd: ws });
+  assert.equal(code, 0);
+  const out = path.join(ws, 'brief.facts.md');
+  assert.deepEqual(JSON.parse(stdout.text()), { out, claims: 5, verified: 3 });
+  const notAllowed = 'check command not allowed: not an allowed read-only form: "code-forge"; not counted';
+  const silent = 'silent command; excerpt cannot be its output; not counted';
+  assert.deepEqual(stderr.text().split('\n').filter((l) => l.startsWith('facts:')), [`facts: F4 not counted — ${notAllowed}`, `facts: F5 not counted — ${silent}`]);
+  const sheet = readFileSync(out, 'utf8');
+  assert.deepEqual(sheet.split('\n').filter((l) => l.startsWith('| F') || l.startsWith('- claims:')), [
+    '- claims: 5 (VERIFIED 3 · NOT-FOUND 0 · UNVERIFIABLE 2)',
+    '| F1 | VERIFIED | path | `./src/worker/loop.mjs` | `ls ./src/worker/loop.mjs` | ./src/worker/loop.mjs | — |',
+    '| F2 | VERIFIED | command | `code-forge review` | `which code-forge` | /usr/local/bin/code-forge | — |',
+    '| F3 | VERIFIED | flag | `--max-rounds` | `code-forge review --help \\| grep -c -- --max-rounds` | 1 | — |',
+    `| F4 | UNVERIFIABLE | flag | \`--max\` | \`code-forge review --help \\| grep -c --max\` | 2 | ${notAllowed} |`,
+    `| F5 | UNVERIFIABLE | path | \`./docs/a.md\` | \`test -e ./docs/a.md\` | exists | ${silent} |`,
+  ]);
+  assert.deepEqual(parseSheet(sheet)?.facts.map((f) => f.claim), ['./src/worker/loop.mjs', 'code-forge review', '--max-rounds', '--max', './docs/a.md']);
+});
+
+test('the <cli> <subcommand> --help | grep -c -- <flag> form: 3 forms pass, 13 near misses are refused (the CLI must start a command claim, never a denied tool)', () => {
+  const clis = new Set(['code-forge', 'claude', 'node', 'sh', 'rm', 'python3', 'git']);
+  const cli = (/** @type {string} */ name) => `not an allowed read-only form: "${name}"`;
+  const cases = [
+    ['code-forge review --help | grep -c -- --max-rounds', null],
+    ['claude plugin --help | grep -c -- -h', null],
+    ['claude --help | grep -c -- --json-schema', null],
+    ['code-forge review --help | grep -c -- --max | wc -l', cli('code-forge')],
+    ['code-forge review --help | head', cli('code-forge')],
+    ['code-forge review extra --help | grep -c -- --max', cli('code-forge')],
+    ['code-forge review --help ; grep -c -- --max', cli('code-forge')],
+    ['code-forge review --help | grep -c --max', cli('code-forge')],
+    ['code-forge Review --help | grep -c -- --max', cli('code-forge')],
+    ['./bin/cf review --help | grep -c -- --max', 'a verb may not be a path'],
+    ['make build --help | grep -c -- --max', 'make: build and task runners are not allowed'],
+    ['node scripts --help | grep -c -- --max', 'node: only --version'],
+    ['sh setup --help | grep -c -- --max', cli('sh')],
+    ['rm foo --help | grep -c -- --max', cli('rm')],
+    ['python3 x --help | grep -c -- --max', cli('python3')],
+    ['git commit --help | grep -c -- --amend', 'git: only log, show, status, rev-parse, ls-files, cat-file or --version, with no global option'],
+  ];
+  assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd, { clis })]), cases);
+  assert.deepEqual(['node', 'sh', 'rm', 'python3', 'git'].map((t) => SUBCOMMAND_HELP_DENY.includes(t)), [true, true, true, true, true]);
+  // the same form with no command claim starting with code-forge: refused
+  assert.deepEqual(
+    [readOnlyViolation('code-forge review --help | grep -c -- --max', { clis: new Set(['claude']) }), readOnlyViolation('code-forge review --help | grep -c -- --max')],
+    [cli('code-forge'), cli('code-forge')],
   );
-  assert.equal(validateFacts(ANSWER, claims).length, 7);
+});
+
+test('validateFacts admits the subcommand form only for a CLI of a command claim of the brief (VERIFIED with it, downgraded without it)', () => {
+  const flag = { token: '--max', kind: /** @type {'flag'} */ ('flag') };
+  const answer = { facts: [{ fact_id: 'F1', claim: '--max', kind: 'flag', command: 'code-forge review --help | grep -c -- --max', output_excerpt: '1', tag: 'VERIFIED', why: null }] };
+  const without = validateFacts(answer, [flag]);
+  assert.deepEqual(without.downgraded, [{ fact_id: 'F1', reason: 'check command not allowed: not an allowed read-only form: "code-forge"; not counted' }]);
+  const withClaim = validateFacts(answer, [flag, { token: 'code-forge review', kind: 'command' }]);
+  assert.deepEqual([withClaim.facts[0].tag, withClaim.downgraded], ['VERIFIED', []]);
+});
+
+test('a row the delegate already tagged UNVERIFIABLE keeps its own why and is not listed as downgraded, whatever its command', () => {
+  const claims = extractClaims(readFileSync(BRIEF, 'utf8'));
+  const { facts, downgraded } = validateFacts(answerWith(1, { command: 'rm notes.txt', tag: 'UNVERIFIABLE', why: 'the help page is ambiguous' }), claims);
+  assert.deepEqual([facts[1].tag, facts[1].why, downgraded], ['UNVERIFIABLE', 'the help page is ambiguous', []]);
+});
+
+test('the packet suggests only forms the allow-list admits (6), lists the literal-output rule, and asks for the token alone', () => {
+  const claims = [{ token: 'code-forge review', kind: /** @type {'command'} */ ('command') }];
+  const packet = buildFactsPacket(claims).replace(/\n/g, ' ');
+  const list = /run the cheapest READ-ONLY check \((.*?)\)\. Quote/.exec(packet);
+  const forms = [...(list?.[1] ?? '').matchAll(/`([^`]+)`/g)].map((m) => m[1]);
+  const concrete = forms.map((f) => f.replace('<cli>', 'code-forge').replace('<subcommand>', 'review').replace('<flag>', '--max').replace('<path>', './src/x.mjs').replace('<name>', '@types/node'));
+  assert.deepEqual(concrete, [
+    'code-forge --help | grep -c -- --max',
+    'code-forge review --help | grep -c -- --max',
+    'which code-forge',
+    'ls ./src/x.mjs',
+    'code-forge --version',
+    'npm view @types/node version',
+  ]);
+  assert.deepEqual(concrete.map((c) => readOnlyViolation(c, { clis: new Set(['code-forge']) })), [null, null, null, null, null, null]);
+  assert.equal(packet.includes("Never infer, never guess: the excerpt is the command's literal output, never your reading of it."), true);
+  assert.equal(packet.includes('For a path use `ls <path>` (it prints the path); `test` prints nothing, so a `test` check can never be VERIFIED.'), true);
+});
+
+test('a reworded claim with the right fact_id and kind matches its claim; the sheet shows the canonical token', () => {
+  const claims = /** @type {Array<{token: string, kind: 'path'|'flag'}>} */ ([{ token: './src/worker/loop.mjs', kind: 'path' }, { token: '--max', kind: 'flag' }]);
+  const { facts } = validateFacts({
+    facts: [
+      { fact_id: 'F1', claim: 'the worker loop file', kind: 'path', command: 'ls ./src/worker/loop.mjs', output_excerpt: './src/worker/loop.mjs', tag: 'VERIFIED', why: null },
+      { fact_id: 'F2', claim: 'max flag', kind: 'path', command: 'ls x', output_excerpt: 'x', tag: 'VERIFIED', why: null },
+    ],
+  }, claims);
+  assert.deepEqual(facts.map((f) => [f.fact_id, f.claim, f.kind, f.tag, f.why]), [
+    ['F1', './src/worker/loop.mjs', 'path', 'VERIFIED', null],
+    ['F2', '--max', 'flag', 'UNVERIFIABLE', 'no answer from the delegate'],
+  ]);
+});
+
+test('the sheet claim token is redacted: a registered secret inside a claim shows 0 times (answered and unanswered rows)', () => {
+  const secret = 'sk-ant-FAKE0123456789abcdef';
+  registerSecret(secret);
+  try {
+    const claims = /** @type {Array<{token: string, kind: 'path'}>} */ ([{ token: `./${secret}/a.md`, kind: 'path' }, { token: `./${secret}/b.md`, kind: 'path' }]);
+    const { facts } = validateFacts({ facts: [{ fact_id: 'F1', claim: `path: ./${secret}/a.md`, kind: 'path', command: 'ls ./docs', output_excerpt: 'a.md', tag: 'VERIFIED', why: null }] }, claims);
+    assert.deepEqual(facts.map((f) => [f.claim, f.tag]), [['./[REDACTED]/a.md', 'VERIFIED'], ['./[REDACTED]/b.md', 'UNVERIFIABLE']]);
+    assert.equal(JSON.stringify(facts).split(secret).length - 1, 0);
+  } finally {
+    clearSecrets();
+  }
+});
+
+test('downgradeLine: the reason is redacted and stripped of control characters, a bad fact_id prints as F?', () => {
+  const secret = 'sk-ant-FAKE0123456789abcdef';
+  registerSecret(secret);
+  try {
+    assert.deepEqual(
+      [downgradeLine({ fact_id: 'F1\nfacts: F2', reason: `bad\ncheck ${secret}\r` }), downgradeLine({ fact_id: 'F12', reason: 'silent\u0007 command' })],
+      ['facts: F? not counted — bad check [REDACTED] \n', 'facts: F12 not counted — silent  command\n'],
+    );
+  } finally {
+    clearSecrets();
+  }
+});
+
+test('each answer row answers at most one claim: row F1 echoing F2\'s claim stays with F1 (by id); F2 is "no answer"', () => {
+  const claims = /** @type {Array<{token: string, kind: 'path'}>} */ ([{ token: './a.md', kind: 'path' }, { token: './b.md', kind: 'path' }]);
+  const { facts } = validateFacts({ facts: [{ fact_id: 'F1', claim: 'path: ./b.md', kind: 'path', command: 'ls ./b.md', output_excerpt: './b.md', tag: 'VERIFIED', why: null }] }, claims);
+  assert.deepEqual(facts.map((f) => [f.fact_id, f.claim, f.tag, f.command, f.why]), [
+    ['F1', './a.md', 'VERIFIED', 'ls ./b.md', null],
+    ['F2', './b.md', 'UNVERIFIABLE', '', 'no answer from the delegate'],
+  ]);
+});
+
+test('launchers in the subcommand-help form are refused even when a command claim names them (npx, env, sudo, xargs), all 4 in the deny list', () => {
+  const clis = new Set(['npx', 'env', 'sudo', 'xargs']);
+  const cases = [
+    ['npx tsc --help | grep -c -- --noEmit', 'npx: build and task runners are not allowed'],
+    ['env foo --help | grep -c -- --max', 'not an allowed read-only form: "env"'],
+    ['sudo rm --help | grep -c -- --max', 'not an allowed read-only form: "sudo"'],
+    ['xargs rm --help | grep -c -- --max', 'not an allowed read-only form: "xargs"'],
+  ];
+  assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd, { clis })]), cases);
+  assert.deepEqual(['npx', 'env', 'sudo', 'xargs'].map((t) => SUBCOMMAND_HELP_DENY.includes(t)), [true, true, true, true]);
+});
+
+test('the two-token help form with -- passes as the packet suggests it', () => {
+  assert.equal(readOnlyViolation('code-forge --help | grep -c -- --max'), null);
+});
+
+test('silent commands: 9 allow-listed forms that print nothing on success are silent, 5 that print are not', () => {
+  const cases = [
+    ['test -f x', true],
+    ['grep -q x f', true],
+    ['grep -cq x f', true],
+    ['grep --quiet x f', true],
+    ['grep --silent x f', true],
+    ['rg -q x', true],
+    ['rg --quiet x', true],
+    ['which -s code-forge', true],
+    ['ls x | grep -q x', true],
+    ['ls x', false],
+    ['grep -c -- -q f', false],
+    ['grep -s x f', false],
+    ['test -e x | wc -l', false],
+    ['ls x; test -e x', false],
+  ];
+  assert.deepEqual(cases.map(([cmd]) => [cmd, isSilentCommand(String(cmd))]), cases);
+});
+
+test('a VERIFIED grep -q row is downgraded as silent (exact reason, 1 downgrade)', () => {
+  const claims = /** @type {Array<{token: string, kind: 'path'}>} */ ([{ token: './a.md', kind: 'path' }]);
+  const { facts, downgraded } = validateFacts({ facts: [{ fact_id: 'F1', claim: './a.md', kind: 'path', command: 'grep -q title ./a.md', output_excerpt: 'found', tag: 'VERIFIED', why: null }] }, claims);
+  const why = 'silent command; excerpt cannot be its output; not counted';
+  assert.deepEqual([facts[0].tag, facts[0].why, downgraded], ['UNVERIFIABLE', why, [{ fact_id: 'F1', reason: why }]]);
 });
 
 test('an answer over the 200-character excerpt cap fails the schema', () => {

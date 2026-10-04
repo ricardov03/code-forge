@@ -16,7 +16,7 @@ import { buildFacts, FactsError } from '../session/facts.mjs';
 import { runRootFor, SessionError } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
-import { writeSafe } from '../util/redact.mjs';
+import { redact, writeSafe } from '../util/redact.mjs';
 import { slugFor } from './run.mjs';
 import { exitCodeFor } from './spawn.mjs';
 
@@ -32,6 +32,19 @@ function readable(file, { fileOnly = false } = {}) {
   } catch {
     return false;
   }
+}
+
+/**
+ * One stderr line for a downgraded row: the id must be `F<n>` (else `F?`), the reason is redacted
+ * and every control character (newlines included) becomes a space, so a row is always one line.
+ * @param {{fact_id: string, reason: string}} d
+ * @returns {string}
+ */
+export function downgradeLine(d) {
+  const id = /^F\d+$/.test(String(d.fact_id)) ? d.fact_id : 'F?';
+  // eslint-disable-next-line no-control-regex
+  const reason = redact(String(d.reason).replace(/[\u0000-\u001f\u007f-\u009f]/g, ' '));
+  return `facts: ${id} not counted — ${reason}\n`;
 }
 
 const USAGE = 'usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]\n';
@@ -107,6 +120,8 @@ export async function runFactsVerb(args, deps = {}) {
       return exitCodeFor(result);
     }
     const facts = result.facts ?? [];
+    // B39: a row whose check broke a rule is kept as UNVERIFIABLE (not counted); say so, exit 0
+    for (const d of result.downgraded ?? []) writeSafe(stderr, downgradeLine(d));
     writeSafe(stdout, `${JSON.stringify({ out: outPath, claims: result.claims.length, verified: facts.filter((f) => f.tag === 'VERIFIED').length })}\n`);
     return 0;
   } catch (err) {
