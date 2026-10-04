@@ -23,6 +23,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - `budget.usd` holds when sessions start together: each session reserves its estimated cost under one lock (after taking
   its provider slot) and releases it when its row is written or it fails. A refusal caused by running sessions says how
   much they hold and this session's estimate; a session whose estimate alone is above the budget says so.
+- `code-forge review` enqueues every file first, then waits on all of them together under ONE deadline for the whole run
+  (`--max`, default 900 s, now a run deadline, not per file), prints each result on stderr as it finishes, and keeps the
+  final table in file order. At most 8 wait children run at once.
 
 ### Fixed
 

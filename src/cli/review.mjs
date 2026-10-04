@@ -16,7 +16,9 @@
  *    default clause. A generated file lives in this command's temp root, never in the tree.
  * 4. Flow, every step a `code-forge` child with a `GIT_*`-free env: `run start` (launches the
  *    worker) → `block open R-<stamp> --level L2 --base <sha> --owned <files…>` → `review-file`
- *    per file → `review-file --wait` per ticket (`--max`, default 900 s per file) → summary →
+ *    per file (all enqueued first) → one `review-file --wait` per ticket, all together under ONE run
+ *    deadline (`--max`, default 900 s for the whole review; a ticket pending at the deadline is
+ *    reported `stopped: timeout`, exit 1), results announced on stderr as they finish → summary in file order →
  *    `block stop` (a review never closes a block) → `run end` unless `--keep-run`. The cleanup runs
  *    in a `finally`, on SIGINT/SIGTERM and after a timeout, and no worker outlives the command.
  *    Each cleanup step is independent (a failed or throwing step is reported on stderr and the
@@ -42,6 +44,7 @@ import { parseFlags } from '../state/cli-args.mjs';
 import { assertRunId, newRunId, StateError } from '../state/paths.mjs';
 import { processStartTime, readRun } from '../state/run.mjs';
 import { exec } from '../util/exec.mjs';
+import { semaphore } from '../util/locks.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { isAlive, listEntries, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
 import { pidsDir, runRoot, setRunRoot, tmpBase } from '../util/tmp.mjs';
@@ -54,6 +57,8 @@ export const USAGE =
   'usage: code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> | --intent "<text>"] [--run <id>] [--max <seconds>] [--json] [--keep-run]\n';
 
 export const DEFAULT_MAX_S = 900;
+/** The most `review-file --wait` children that run at once. */
+export const MAX_WAITERS = 8;
 export const DEFAULT_CLAUSE = 'Review for correctness, security and test quality; no intent was stated.';
 const GIT_TIMEOUT_MS = 30_000;
 const STEP_TIMEOUT_MS = 120_000;
@@ -511,14 +516,40 @@ export async function runReview(args, deps = {}) {
       const answer = lastJSON(res.stdout);
       queued.push({ file, ticket: typeof answer?.ticket === 'string' ? answer.ticket : null, answer });
     }
-    for (const q of queued) {
-      if (q.ticket === null) {
-        outcomes.push(classify(q.file, { status: q.answer?.status ?? 'refused', reason: q.answer?.reason ?? q.answer?.status ?? 'not queued' }));
-        continue;
-      }
-      const res = await cf(['review-file', '--wait', q.ticket, '--max', `${maxS}s`], maxS * 1000 + 60_000);
-      outcomes.push(classify(q.file, lastJSON(res.stdout)));
-    }
+    // Every file is enqueued above before any wait starts. One run deadline (`--max`, measured from
+    // here) covers all the waits, which run together: each `review-file --wait` gets the time still
+    // left, and a ticket still pending at the deadline is reported `stopped: timeout`. A result is
+    // announced on stderr as its file finishes; the table below keeps the file order.
+    // At most MAX_WAITERS `review-file --wait` children at once (a review of many files must not
+    // start one Node process per file); a wait that starts late still counts down to the same
+    // deadline, and one that starts after it is reported pending without a child.
+    const deadline = Date.now() + maxS * 1000;
+    const waiters = semaphore(MAX_WAITERS);
+    /** @type {Array<FileOutcome | undefined>} */
+    const byIndex = new Array(queued.length);
+    const finish = (/** @type {number} */ i, /** @type {FileOutcome} */ o) => {
+      byIndex[i] = o;
+      note(`${o.file}  ${label(o)}`);
+    };
+    const settled = await Promise.allSettled(
+      queued.map(async (q, i) => {
+        if (q.ticket === null) {
+          finish(i, classify(q.file, { status: q.answer?.status ?? 'refused', reason: q.answer?.reason ?? q.answer?.status ?? 'not queued' }));
+          return;
+        }
+        await waiters.run(async () => {
+          const left = deadline - Date.now();
+          if (left <= 0) {
+            finish(i, classify(q.file, { status: 'pending' }));
+            return;
+          }
+          const res = await cf(['review-file', '--wait', q.ticket, '--max', `${Math.ceil(left / 1000)}s`], left + 60_000);
+          finish(i, classify(q.file, lastJSON(res.stdout)));
+        });
+      }),
+    );
+    for (const s of settled) if (s.status === 'rejected') throw s.reason;
+    for (const o of byIndex) outcomes.push(/** @type {FileOutcome} */ (o));
     const allOk = outcomes.every((o) => o.result === 'approved' || o.result === 'unchanged');
     code = allOk ? 0 : 1;
     if (json) out(`${JSON.stringify({ ok: allOk, base: base.sha, base_from: base.from, run: runId, block: blockId, files: outcomes, skipped, totals: totals(outcomes) })}\n`);
