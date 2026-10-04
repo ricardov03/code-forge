@@ -129,6 +129,36 @@ more on the same packet. Only a second timeout is `unavailable: timeout`. The le
 tail of its stderr to explain the hang. While a long session runs, the worker keeps writing a
 heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
 
+### Several files at once
+
+The worker keeps a **pool** of review tickets. `review.parallel_tickets` (1 to 16, default 3) is
+its size. Tickets start oldest first. When one ends, the next pending one starts at once. There
+is no batch to wait for.
+
+- **Same-file rule.** The same file (in the same block) is never reviewed twice at once. If the
+  coder edits a file while its review runs, the new ticket waits. A ticket for another file takes
+  the free slot.
+- **Block lock.** Two shared steps run one at a time per block: the budget row and the block's
+  one L3 rung. So two files of one block can never both take the rung.
+- **Provider limits.** Every provider has a session limit, `review.provider_concurrency`
+  (defaults: anthropic 4, openai 2, xai 2). A session waits for a free slot of its provider. A
+  big pool never opens more sessions than the provider allows.
+- **Backoff.** A rate-limited session waits about 2 seconds, then about 6 (give or take 30%),
+  then tries the same step again. It does not retry at once.
+- **Budget reservation.** With `budget.usd` set, each session reserves its estimated cost under
+  one lock after it takes its provider slot. It gives the reservation back when its row is written
+  or it fails. Sessions that start together cannot spend past the budget. A refusal says how much
+  running sessions hold and what this session's estimate is.
+- **A crash stays small.** A ticket that throws is that ticket's `unavailable` result. The others
+  keep going.
+- **Stop.** On `run end` or a stop, no new ticket starts. Tickets that are running finish. Tickets
+  still queued stay on disk for the next worker.
+- **Change the size mid-run.** `code-forge run reload --run <run>` changes the pool size. Queued
+  tickets keep the config they were queued with.
+
+With `review.parallel_tickets: 1` the worker reviews one file at a time, as before.
+`code-forge doctor` shows the effective numbers in its `review concurrency` row.
+
 ### Fix rounds and the escalation ladder
 
 ```mermaid

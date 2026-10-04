@@ -8,6 +8,13 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
+## What's new
+
+- **Parallel review.** The worker reviews `review.parallel_tickets` files at once (default 3), with
+  a session limit per provider (`review.provider_concurrency`), backoff on rate limits, and
+  `budget.usd` still holding. `code-forge review` now waits on all files under one `--max`
+  deadline and prints each result as it finishes. `code-forge doctor` shows the numbers.
+
 ## What's new in 0.4
 
 - **Cost control.** Set `budget.usd` per run: one warning at 80%, no new session at 100%. Every
@@ -188,6 +195,8 @@ Keys added for 0.4:
 | `review.multimodel_for_docs` | `false` | let docs and contract blocks use multimodel review too |
 | `review.allow_open_book_codex` | `false` | let Codex run reviewer, judge, System 2 and plan author anyway |
 | `review.session_timeout_s` | `300` | a review session that runs longer is killed and retried once |
+| `review.parallel_tickets` | `3` | review tickets the worker runs at once (1 to 16); `1` reviews one file at a time |
+| `review.provider_concurrency` | anthropic `4`, openai `2`, xai `2` | review sessions at once per provider |
 
 `code-forge block open … --kind code|docs|contract` sets a block's kind when its file endings do
 not say it. The reference page is generated:

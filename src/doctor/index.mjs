@@ -13,7 +13,7 @@ import path from 'node:path';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { newRunId } from '../state/paths.mjs';
 import { runRoot } from '../util/tmp.mjs';
-import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkTmp, checkTools } from './local.mjs';
+import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkReviewConcurrency, checkTmp, checkTools } from './local.mjs';
 import { configuredProviders, pingRoles, probeCli, probeCodexRules, probeIsolation, probePathDeny } from './probes.mjs';
 import { row } from './rows.mjs';
 import { probeWorkerAndSigner, SIGNER_ROW } from './worker-probe.mjs';
@@ -68,6 +68,7 @@ export async function runDoctor(opts = {}, deps = {}) {
   rows.push(...(await checkTools(toolOpts)));
   rows.push(...(await checkLedger()));
   rows.push(...checkTmp(cfg));
+  rows.push(checkReviewConcurrency(cfg));
   if (!cfg) {
     rows.push(row('probes', 'FAIL', 'probes', 'skipped: no valid config'));
     rows.push(SIGNER_ROW);

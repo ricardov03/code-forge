@@ -45,7 +45,7 @@ code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> | --in
 | `--intent "<text>"` | none | what the change is meant to do. It becomes the review's one acceptance clause, which every reviewer reads |
 | `--acceptance <file>` | none | a YAML or JSON list of `{clause, tests}`, the same format `block open` takes. Used as given |
 | `--run <id>` | a new run id | the run to use. An active run with that id is reused and left running; otherwise a new run starts with that id |
-| `--max <seconds>` | `900` | how long to wait for each file's verdict. A file that is not done in time is reported as `stopped: timeout` |
+| `--max <seconds>` | `900` | ONE deadline for the whole run, not per file. Files that are not done when it passes are reported as `stopped: timeout` |
 | `--json` | off | print one JSON document instead of the text summary |
 | `--keep-run` | off | do not end the run (and its worker) afterwards. Reuse it with `--run <id>`; end it with `code-forge run end --run <id>` |
 
@@ -148,8 +148,8 @@ A file line is one of:
 1. Starts a run (`run start`), which launches the review worker.
 2. Opens one block, `R-<timestamp>`, at level `L2`, with the base sha, the file list as its owned
    files, and the acceptance clause.
-3. Queues every file (`review-file`) and waits for each verdict (`review-file --wait`).
-4. Prints the summary.
+3. Queues every file (`review-file`), then waits for all of them together under one deadline (`--max`). Each result is printed on stderr as soon as it finishes.
+4. Prints the summary, in file order.
 5. Stops the block (`block stop`) and ends the run (`run end`), which stops the worker.
 
 Step 5 always runs: after an error, after a timeout, and on Ctrl-C or SIGTERM. No worker is left
@@ -194,4 +194,20 @@ no new session starts and the files left are reported `unavailable: budget`.
 
 A reviewer session that hangs is killed after `review.session_timeout_s` (default 300 seconds) and
 started once more; only a second timeout makes the file `unavailable: timeout`. `--max` is the
-outer limit per file.
+outer limit for the whole run.
+
+## Speed
+
+The worker reviews several files at once. `review.parallel_tickets` (1 to 16, default 3) sets how
+many. Each result prints on stderr when it finishes, so you see progress while the rest run. The
+final table stays in file order.
+
+- The same file is never reviewed twice at once.
+- Each provider has a session limit, `review.provider_concurrency` (defaults: anthropic 4,
+  openai 2, xai 2). A session waits for a free slot.
+- A rate-limited session waits about 2 seconds, then about 6, and tries again.
+- `budget.usd` still holds when sessions run together: each one reserves its estimated cost
+  before it starts.
+
+Set `review.parallel_tickets: 1` to review one file at a time. `code-forge doctor` shows the
+effective numbers in its `review concurrency` row.

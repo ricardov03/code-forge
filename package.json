@@ -32,6 +32,7 @@
     "!scripts/release.mjs",
     "!scripts/changelog.mjs",
     "!scripts/known-fix.mjs",
+    "!scripts/bench-review.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
@@ -41,7 +42,8 @@
     "typecheck": "tsc --checkJs --noEmit",
     "release": "node scripts/release.mjs",
     "changelog": "node scripts/changelog.mjs",
-    "known-fix": "node scripts/known-fix.mjs"
+    "known-fix": "node scripts/known-fix.mjs",
+    "bench:review": "node scripts/bench-review.mjs"
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",

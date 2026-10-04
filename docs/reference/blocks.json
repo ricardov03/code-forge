@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 41,
+  "block_count": 46,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -538,6 +538,74 @@
         "B12c"
       ],
       "note": "root-added 2026-10-03; found by running code-forge facts on its own repo"
+    },
+    "B40": {
+      "title": "Keyed locks, per-provider session limit (review.provider_concurrency), rate-limit backoff",
+      "wave": 10,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/util/locks.mjs",
+        "test/util/locks.test.mjs",
+        "test/session/provider-limit.test.mjs"
+      ],
+      "depends_on": [
+        "B39"
+      ],
+      "note": "root-added 2026-10-03; plan plans/parallel-review (approved in plan mode)"
+    },
+    "B41": {
+      "title": "Budget reservation under concurrency: slot first, then check + reserve estimated cost under one lock",
+      "wave": 10,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "test/ledger/spend-concurrency.test.mjs"
+      ],
+      "depends_on": [
+        "B40"
+      ],
+      "note": "root-added 2026-10-03; plan plans/parallel-review (approved in plan mode)"
+    },
+    "B42": {
+      "title": "Worker ticket pool: review.parallel_tickets, same-file rule, block lock for budget row and L3 rung, sibling patch counts as rung used",
+      "wave": 10,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "test/worker/pool.test.mjs"
+      ],
+      "depends_on": [
+        "B41"
+      ],
+      "note": "root-added 2026-10-03; plan plans/parallel-review (approved in plan mode)"
+    },
+    "B43": {
+      "title": "code-forge review enqueues all files, waits together under one deadline, at most 8 waiters",
+      "wave": 10,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "test/cli/review-parallel.test.mjs"
+      ],
+      "depends_on": [
+        "B42"
+      ],
+      "note": "root-added 2026-10-03; plan plans/parallel-review (approved in plan mode)"
+    },
+    "B44": {
+      "title": "Parallel review docs, doctor review-concurrency row, bench:review (N=1 vs N=3)",
+      "wave": 10,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "scripts/bench-review.mjs",
+        "test/bench-review.test.mjs"
+      ],
+      "depends_on": [
+        "B43"
+      ],
+      "note": "root-added 2026-10-03; plan plans/parallel-review (approved in plan mode)"
     }
   }
 }

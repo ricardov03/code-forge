@@ -354,6 +354,23 @@ warnings and the command list (breadcrumbs) together. Every field and cleaning r
 
 The error log and the `gh` path are tested on macOS and Linux.
 
+## Review speed
+
+Reviews run several files at once. Three keys in `.code-forge.yml` tune it:
+
+```yaml
+review:
+  parallel_tickets: 3          # files reviewed at once (1 to 16)
+  provider_concurrency:        # sessions at once per provider
+    anthropic: 4
+    openai: 2
+    xai: 2
+```
+
+The defaults are the values above. Set `parallel_tickets: 1` to review one file at a time. Run
+`code-forge doctor` to see the effective numbers. With `code-forge review`, `--max` is one deadline
+for the whole run. See [review-only.md](review-only.md#speed).
+
 ## Review only
 
 To review code you already wrote, without planning or coding through code-forge, run

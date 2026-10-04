@@ -17,8 +17,10 @@ import { missingTools } from '../install/tools.mjs';
 import { OP_MESSAGES } from '../keys/onepassword.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { ledgerDir } from '../ledger/paths.mjs';
+import { DEFAULT_PROVIDER_CONCURRENCY, providerLimit } from '../session/spawn.mjs';
 import { listEntries } from '../util/reaper.mjs';
 import { ownerState, tmpBase } from '../util/tmp.mjs';
+import { parallelTickets } from '../worker/loop.mjs';
 import { row } from './rows.mjs';
 
 /** @typedef {import('./rows.mjs').Row} Row */
@@ -187,4 +189,17 @@ export function checkTmp(cfg) {
   }
   const detail = `${roots} stale roots, ${pids} stale pids`;
   return [row('tmp', roots + pids > 0 ? 'WARN' : 'OK', 'tmp', roots + pids > 0 ? `${detail} (the next code-forge run start removes them)` : detail)];
+}
+
+/**
+ * B44: the `review concurrency` INFO row — how many review tickets run at once and each provider's
+ * session slots, from the effective config (defaults when a key is unset). Never throws.
+ * @param {Record<string, any> | null} cfg @returns {import('./rows.mjs').Row}
+ */
+export function checkReviewConcurrency(cfg) {
+  const c = cfg ?? {};
+  const n = parallelTickets(c);
+  const extra = Object.keys(c.review?.provider_concurrency ?? {}).filter((p) => !Object.hasOwn(DEFAULT_PROVIDER_CONCURRENCY, p));
+  const slots = [...Object.keys(DEFAULT_PROVIDER_CONCURRENCY), ...extra].map((p) => `${p} ${providerLimit(c, p)}`).join(' · ');
+  return row('review-concurrency', 'INFO', 'review concurrency', `${n} ${n === 1 ? 'ticket' : 'tickets'} at once; provider slots ${slots}`);
 }

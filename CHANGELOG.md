@@ -15,6 +15,8 @@ waits on a second real consumer (plan §10.4, Q17).
   The same file is never reviewed twice at once; a block's budget row and its one L3 rung are taken under a block lock;
   a crashed ticket never stops the others; on stop, running tickets finish. `run reload` can change the pool size. `1`
   keeps the serial behaviour.
+- `code-forge doctor` shows a `review concurrency` row (tickets at once and provider slots); maintainers can measure the
+  pool with `npm run bench:review` (6 fake 2 s reviews: about 12 s at 1, about 4 s at 3).
 
 ### Changed
 

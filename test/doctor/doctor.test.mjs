@@ -69,6 +69,21 @@ describe('doctor full run', () => {
     assert.deepEqual(readdirSync(tmpRoot), ['r-stale-fake']); // the doctor's own roots are gone
   });
 
+  test('B44: one INFO `review concurrency` row: the defaults when unset, the configured values when set', async () => {
+    const { proj } = makeProject();
+    const def = await runJSON(['--cwd', proj], doctorDeps());
+    const rows = def.doc.rows.filter((/** @type {any} */ r) => r.id === 'review-concurrency');
+    assert.deepEqual(rows, [{ id: 'review-concurrency', status: 'INFO', label: 'review concurrency', detail: '3 tickets at once; provider slots anthropic 4 · openai 2 · xai 2' }]);
+
+    const file = path.join(proj, '.code-forge.yml');
+    writeFileSync(file, `${readFileSync(file, 'utf8')}review:\n  parallel_tickets: 1\n  provider_concurrency:\n    anthropic: 6\n`);
+    const set = await runJSON(['--cwd', proj], doctorDeps());
+    assert.deepEqual(
+      set.doc.rows.filter((/** @type {any} */ r) => r.id === 'review-concurrency').map((/** @type {any} */ r) => [r.status, r.detail]),
+      [['INFO', '1 ticket at once; provider slots anthropic 6 · openai 2 · xai 2']],
+    );
+  });
+
   test('a --help that lacks a builder flag FAILs the flags row and the run (exit 1)', async () => {
     const { proj } = makeProject();
     const help = CLAUDE_HELP.split('\n').filter((l) => !l.includes('--safe-mode')).join('\n');
