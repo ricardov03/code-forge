@@ -258,6 +258,10 @@ switch. Your `.code-forge.yml` files and `~/.code-forge` are not changed. To see
 summary of a newer `init`, run `code-forge init` again in the project; it keeps the values you set
 by hand. What changed in each version is in [CHANGELOG.md](../CHANGELOG.md).
 
+Tagged but not on npm yet? A maintainer can install the exact release from the repository:
+`git checkout vX.Y.Z && npm pack && npm install -g ./codedology-code-forge-X.Y.Z.tgz`, then
+`code-forge upgrade`. Switch back to the npm package with the first command above once it is published.
+
 | Command | Does |
 |---|---|
 | `code-forge upgrade [--source <path>]` | re-points every recorded skill install at this package's `skill/` folder (or at `--source`): symlinks are re-made, copies re-copied |

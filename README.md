@@ -8,12 +8,19 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new
+## What's new in 0.5
 
 - **Parallel review.** The worker reviews `review.parallel_tickets` files at once (default 3), with
   a session limit per provider (`review.provider_concurrency`), backoff on rate limits, and
   `budget.usd` still holding. `code-forge review` now waits on all files under one `--max`
-  deadline and prints each result as it finishes. `code-forge doctor` shows the numbers.
+  deadline and prints each result as it finishes. `code-forge doctor` shows the numbers;
+  `npm run bench:review` measured 6 reviews in 12 s at 1 and 4 s at 3.
+- **`code-forge facts` verifies again.** It dropped every answer in 0.4.0; now answers match, and a check
+  that breaks the read-only rules marks only its own claim as not counted, with the reason.
+- **Clearer budget refusals.** A session refused because other running sessions hold the budget says
+  how much they hold and what this session would cost.
+- **Plan approval in plan mode.** The skill shows a checked plan to you in the harness's plan mode
+  (Claude Code: EnterPlanMode → ExitPlanMode) before any block starts.
 
 ## What's new in 0.4
 
@@ -183,7 +190,7 @@ CLI verbs like any other and every one of them is exercised by this package's ow
 
 `schema/code-forge.schema.json` is the source of truth for `.code-forge.yml`.
 [docs/reference/config.md](docs/reference/config.md) lists every key with its type and default.
-Keys added for 0.4:
+Keys added in 0.4 and 0.5 (the last two rows are new in 0.5):
 
 | Key | Default | What it does |
 |---|---|---|

@@ -126,6 +126,9 @@ command to finish by hand.
 - **Publish:** `npm publish` from the tagged commit, before you push. Only you publish; CI never
   does, so no npm token is stored in GitHub.
 - **GitHub release:** automatic when the tag is pushed. See below.
+- **Your own install:** after `npm publish`, run `npm install -g @codedology/code-forge@latest` and
+  `code-forge upgrade`. To try the release before it is on npm, `npm pack` at the tag and
+  `npm install -g ./codedology-code-forge-X.Y.Z.tgz`.
 
 ## GitHub Releases
 
