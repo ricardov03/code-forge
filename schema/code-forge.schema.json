@@ -142,7 +142,17 @@
         "max_rounds_per_file": { "type": "integer", "minimum": 2, "maximum": 6, "default": 4 },
         "recheck_scope": { "type": "string", "enum": ["fix_hunks", "file"], "default": "fix_hunks" },
         "late_findings": { "type": "string", "enum": ["sweep", "block"], "default": "sweep" },
-        "allow_open_book_codex": { "type": "boolean", "default": false, "description": "B32: let openai (Codex) run reviewer/judge/S2/author with its read-only sandbox, which can read files on this machine. Off: those sessions are refused." }
+        "allow_open_book_codex": { "type": "boolean", "default": false, "description": "B32: let openai (Codex) run reviewer/judge/S2/author with its read-only sandbox, which can read files on this machine. Off: those sessions are refused." },
+        "provider_concurrency": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "B40: how many sessions of each provider may run at once in this process; a rate-limited session waits 2 s, then 6 s (±30 %) before it retries.",
+          "properties": {
+            "anthropic": { "type": "integer", "minimum": 1, "default": 4 },
+            "openai": { "type": "integer", "minimum": 1, "default": 2 },
+            "xai": { "type": "integer", "minimum": 1, "default": 2 }
+          }
+        }
       }
     },
     "engine": { "type": "string", "enum": ["auto", "solo", "harness", "subprocess"], "default": "auto" },

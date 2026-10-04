@@ -6,6 +6,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Per-provider session limit `review.provider_concurrency` (defaults anthropic 4, openai 2, xai 2) and rate-limit
+  backoff: a rate-limited session waits about 2 s, then about 6 s (±30 %), before retrying the same step, instead of
+  retrying at once. New in-process keyed locks and semaphores (`src/util/locks.mjs`) prepare parallel review.
+
 ### Changed
 
 - Skill: a plan that passed `plan check` is shown to the owner for approval in the harness's plan mode (Claude Code:

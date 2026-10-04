@@ -16,7 +16,14 @@
  * Retry ladder (§5.6, V9): step 0 is the level's own model; step `k + 1` is `fallback[k]`. For a
  * Claude coder, `fallback[0]` (same provider) rides on `--fallback-model` inside step 0 and is not
  * spawned again. A step that reports unavailability (CLI missing, login expired, HTTP 402, or
- * rate-limited twice in a row) hands over to the next step; any other failure is final.
+ * rate-limited three times in a row) hands over to the next step; any other failure is final.
+ *
+ * Provider slots and backoff (B40): every attempt holds one slot of the module-level semaphore of
+ * its step's provider (`review.provider_concurrency[provider]`, defaults anthropic 4, openai 2,
+ * xai 2) for as long as the attempt runs, and frees it on every exit path. The budget gate runs
+ * first, so a refused session never holds a slot. A rate-limited attempt frees its slot, waits
+ * `RATE_LIMIT_BACKOFF_MS` (2 s, then 6 s, each ±30 % jitter) and tries the same step again; after
+ * the second wait a third rate limit moves the ladder to the next step.
  *
  * Every spawn prints `level=<Lx> provider=<p> model=<id> effort=<e> fallback_step=<n>` on stderr,
  * and every attempt writes one ledger row (`event: session`) with `tokens_source` `reported` when
@@ -51,6 +58,7 @@ import { budgetUsdOf, checkBudget, priceSession, SPEND_UNREADABLE_MESSAGE } from
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { exec } from '../util/exec.mjs';
 import { isForbidden, mergeForbidden } from '../util/forbidden.mjs';
+import { semaphore } from '../util/locks.mjs';
 import { readStartTime, registerPid, UNKNOWN_START_TIME } from '../util/reaper.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { currentRunRoot, pidsDir, runRoot, tmpBase, untrustedReason } from '../util/tmp.mjs';
@@ -63,6 +71,57 @@ export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** Unavailability reasons that move the ladder to the next step (§5.6). */
 export const UNAVAILABLE_REASONS = Object.freeze(['cli-missing', 'login-expired', 'http-402', 'rate-limited']);
+
+/** B40: concurrent sessions per provider when `review.provider_concurrency` does not say. */
+export const DEFAULT_PROVIDER_CONCURRENCY = Object.freeze({ anthropic: 4, openai: 2, xai: 2 });
+
+/** B40: the waits before each retry of a rate-limited step (ms, before jitter); its length is the retry count. */
+export const RATE_LIMIT_BACKOFF_MS = Object.freeze([2000, 6000]);
+
+/** B40: each backoff wait is its base ±30 %. */
+export const RATE_LIMIT_JITTER = 0.3;
+
+/**
+ * B40: the session limit of `provider` — `review.provider_concurrency[provider]` when it is an
+ * integer ≥ 1, else the default (1 for a provider with no default).
+ * @param {Record<string, any>} cfg @param {string} provider @returns {number}
+ */
+export function providerLimit(cfg, provider) {
+  const set = /** @type {any} */ (cfg)?.review?.provider_concurrency?.[provider];
+  if (Number.isInteger(set) && set >= 1) return set;
+  return Object.hasOwn(DEFAULT_PROVIDER_CONCURRENCY, provider) ? DEFAULT_PROVIDER_CONCURRENCY[/** @type {"anthropic"|"openai"|"xai"} */ (provider)] : 1;
+}
+
+/** @type {Map<string, import('../util/locks.mjs').Semaphore>} one semaphore per (provider, limit), created on first use. */
+const providerSemaphores = new Map();
+
+/**
+ * B40: the in-process semaphore holding `provider`'s session slots at `limit`.
+ * @param {string} provider @param {number} limit
+ * @returns {import('../util/locks.mjs').Semaphore}
+ */
+export function providerSemaphore(provider, limit) {
+  const key = `${provider}:${limit}`;
+  let sem = providerSemaphores.get(key);
+  if (sem === undefined) {
+    sem = semaphore(limit);
+    providerSemaphores.set(key, sem);
+  }
+  return sem;
+}
+
+/**
+ * B40: the wait before retry number `n` (0-based) of a rate-limited step: the base ±30 %, from
+ * `random` in [0, 1) (0.5 gives the base exactly).
+ * @param {number} n @param {() => number} random @returns {number}
+ */
+export function backoffMs(n, random) {
+  const base = RATE_LIMIT_BACKOFF_MS[n];
+  return Math.round(base * (1 + RATE_LIMIT_JITTER * (2 * random() - 1)));
+}
+
+/** @param {number} ms @returns {Promise<void>} */
+const realSleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** An error the spawner raises before anything runs (`code`: `usage`, `forbidden`, `closed-book`). */
 export class SessionError extends Error {
@@ -445,6 +504,8 @@ function childEnv(/** @type {NodeJS.ProcessEnv} */ env) {
  *   `budget.usd` check reads (default: `readAllRows(opts.slug)`).
  * @property {{write: (s: string) => unknown}} [stderr]
  * @property {NodeJS.ProcessEnv} [env]
+ * @property {(ms: number) => Promise<unknown>} [sleep] - B40: the rate-limit backoff wait (tests: a recorder).
+ * @property {() => number} [random] - B40: the backoff jitter source, in [0, 1) (default `Math.random`).
  */
 
 /**
@@ -569,11 +630,42 @@ export async function spawnSession(opts, deps = {}) {
   if (opts.background) steps.length = 1;
 
   const attempts = [];
-  let rateLimitedOnce = false;
+  const sleep = deps.sleep ?? realSleep;
+  const random = deps.random ?? Math.random;
+  let rateLimitWaits = 0; // backoff waits taken on the current step
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
     const refused = await budgetGate(opts, deps, writeRow, stderr);
     if (refused) return { ...refused, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts };
+    // B40: the slot is taken AFTER the budget gate and freed in the `finally` below on every exit path
+    const releaseSlot = await providerSemaphore(step.provider, providerLimit(cfg, step.provider)).acquire();
+    /** @type {number | null} */
+    let waitMs = null;
+    try {
+      const outcome = await runAttempt(step, i + 1 === steps.length);
+      if (outcome.result) return outcome.result;
+      waitMs = outcome.waitMs;
+    } finally {
+      releaseSlot();
+    }
+    if (waitMs !== null) {
+      // B40: the slot is free while we wait; the same step is tried again (through the budget gate)
+      writeSafe(stderr, `rate-limited: provider=${step.provider} model=${step.model} retry in ${(waitMs / 1000).toFixed(1)} s\n`);
+      await sleep(waitMs);
+      i -= 1;
+      continue;
+    }
+    rateLimitWaits = 0;
+  }
+  throw new Error('spawnSession: unreachable — the ladder always has a step');
+
+  /**
+   * One attempt of `step` (the caller holds its provider slot).
+   * @param {ReturnType<typeof ladderFor>[number]} step @param {boolean} isLast - no step after this one.
+   * @returns {Promise<{result: SessionResult | null, waitMs: number | null}>} a `result` ends the
+   *   session; otherwise `waitMs` = back off and retry the step, null = go to the next step.
+   */
+  async function runAttempt(step, isLast) {
     const sessionDir = path.join(runRootDir, 'sessions', `${role}-${Date.now()}-${randomBytes(4).toString('hex')}`);
     mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
     let keep = false;
@@ -595,7 +687,7 @@ export async function spawnSession(opts, deps = {}) {
         const bg = startBackground(built, sessionDir, runRootDir, { ...childEnv(deps.env ?? process.env), ...(built.env ?? {}) });
         // a detached child's tokens are never read back: its price is unknown (use `ledger add coder`)
         if (writeRow) await writeRow({ event: 'session.background', ...base, pid: bg.pid, status: 'started', usd: null, usd_unknown: true });
-        return { status: 'started', ...bg, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts };
+        return { waitMs: null, result: { status: 'started', ...bg, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts } };
       }
 
       const attempt = await runForeground(built, opts, deps);
@@ -613,19 +705,18 @@ export async function spawnSession(opts, deps = {}) {
       };
       if (writeRow) await writeRow(row);
       attempts.push({ fallback_step: step.fallback_step, provider: step.provider, model: step.model, status: attempt.status, reason: attempt.reason ?? null });
-      if (attempt.status === 'unavailable' && attempt.reason === 'rate-limited' && !rateLimitedOnce) {
-        rateLimitedOnce = true; // rate-limited once: the same step gets one more try (§5.6 "twice in a row")
-        i -= 1;
-        continue;
+      if (attempt.status === 'unavailable' && attempt.reason === 'rate-limited' && rateLimitWaits < RATE_LIMIT_BACKOFF_MS.length) {
+        // B40: back off (2 s, then 6 s, ±30 %) and try the same step again — never at once
+        const waitMs = backoffMs(rateLimitWaits, random);
+        rateLimitWaits += 1;
+        return { waitMs, result: null };
       }
-      rateLimitedOnce = false;
-      if (attempt.status === 'unavailable' && i + 1 < steps.length) continue;
-      return { ...attempt, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, row, attempts };
+      if (attempt.status === 'unavailable' && !isLast) return { waitMs: null, result: null };
+      return { waitMs: null, result: { ...attempt, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, row, attempts } };
     } finally {
       if (!keep) rmSync(sessionDir, { recursive: true, force: true });
     }
   }
-  throw new Error('spawnSession: unreachable — the ladder always has a step');
 }
 
 /**

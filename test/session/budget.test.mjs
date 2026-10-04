@@ -149,7 +149,7 @@ test('per run: a second run spending 500 does not touch this run; only the 5 of 
   assert.deepEqual(ledger.written.map((r) => r.event), ['session']);
 });
 
-test('rate-limit retry inside one ladder step passes the budget gate again: attempt 2 is refused, 1 exec call', async () => {
+test('rate-limit retry inside one ladder step backs off 2000 ms, then passes the budget gate again: attempt 2 is refused, 1 exec call', async () => {
   const { deps } = fakeDeps();
   let execCalls = 0;
   const rateLimited = async () => {
@@ -163,10 +163,12 @@ test('rate-limit retry inside one ladder step passes the budget gate again: atte
   const readRows = async () => (reads++ === 0 ? [] : [{ event: 'session', run: 'r-429', usd: 25 }]);
   const packet = writeIn(freshDir('pk'), 'packet.md', 'decide');
   const cfg = { ...cfgWith(CLAUDE), budget: { usd: 20 } };
+  /** @type {number[]} */
+  const waits = [];
   const result = await spawnSession(
     { cfg, level: 'L2', role: 'reviewer', promptPath: packet, schema: S2_SCHEMA, run: 'r-429' },
-    { ...deps, exec: /** @type {any} */ (rateLimited), readRows, writeRow: async (row) => void written.push(row) },
+    { ...deps, exec: /** @type {any} */ (rateLimited), readRows, writeRow: async (row) => void written.push(row), sleep: async (ms) => void waits.push(ms), random: () => 0.5 },
   );
-  assert.deepEqual([result.status, result.reason, execCalls, reads], ['unavailable', 'budget', 1, 2]);
+  assert.deepEqual([result.status, result.reason, execCalls, reads, waits], ['unavailable', 'budget', 1, 2, [2000]]);
   assert.deepEqual(written.map((r) => [r.event, r.reason ?? null]), [['session', 'rate-limited'], ['budget.refused', null]]);
 });

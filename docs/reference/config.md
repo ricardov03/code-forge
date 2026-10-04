@@ -112,6 +112,10 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.recheck_scope` | enum: `fix_hunks`, `file` |  | `"fix_hunks"` |  |
 | `review.late_findings` | enum: `sweep`, `block` |  | `"sweep"` |  |
 | `review.allow_open_book_codex` | boolean |  | `false` | B32: let openai (Codex) run reviewer/judge/S2/author with its read-only sandbox, which can read files on this machine. Off: those sessions are refused. |
+| `review.provider_concurrency` | object |  | — |  |
+| `review.provider_concurrency.anthropic` | integer |  | `4` | min 1 |
+| `review.provider_concurrency.openai` | integer |  | `2` | min 1 |
+| `review.provider_concurrency.xai` | integer |  | `2` | min 1 |
 | `engine` | enum: `auto`, `solo`, `harness`, `subprocess` |  | `"auto"` |  |
 | `harnesses` | array<string> |  | — |  |
 | `harness` | object |  | — |  |
