@@ -6,6 +6,11 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- Docs: README "What's new in 0.5" (with the bench numbers), the 0.5 config keys marked, how to install a tagged release
+  before it is on npm (getting-started), and how maintainers update their own install after a release (releasing).
+
 ## [0.5.0] — 2026-10-04
 
 ### Added
