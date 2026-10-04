@@ -183,3 +183,15 @@ test('no real project name under skill/** (0 hits), and the control line is caug
   const control = `the ${names[0].toUpperCase()} run, 16 PRs`;
   assert.equal((control.match(new RegExp(names.join('|'), 'gi')) ?? []).length, 1);
 });
+
+test('the plan-approval rule: SKILL.md, plan.md §4.1 and the Claude Code adapter all route the owner\'s approval through plan mode', async () => {
+  const skill = await readSkillFile('SKILL.md');
+  assert.equal(skill.split('in the harness\'s plan mode').length - 1, 1);
+  assert.match(skill, /EnterPlanMode, write the plan, ExitPlanMode/);
+  const plan = await readSkillFile('references/plan.md');
+  assert.match(plan, /^### §4\.1 Owner approval in plan mode$/m);
+  assert.match(plan, /never start `forge block open` before it/);
+  const adapter = await readSkillFile('references/adapters/claude-code.md');
+  assert.match(adapter, /^## §2\.1 Plan approval$/m);
+  assert.match(adapter, /`EnterPlanMode` → write the plan file → `ExitPlanMode`/);
+});

@@ -38,6 +38,15 @@ Every clause of the parent's acceptance maps to exactly one block; an unmapped c
 
 Prints every failing row by name and exits 1 on any of: an acceptance clause with a claim token that resolves to no VERIFIED fact and no tolerance row (`unbackable clause without tolerance: <block> <clause>`); a missing caller map or a block absent from it; a block without `cases` and `lines`; a forecast above `budget.block_cases` / `budget.block_lines` without a named split; overlapping `owned_files` in one wave; a cyclic `depends_on` or an import of a batch-mate; a glob with `[ ] ( ) ! + @`; more than `caps.coders` concurrent blocks in a slot; `questions[]` still open; the facts sheet's sha absent from the draft; a block whose level has no recorded lane, or differs from it (`block <id>: level L2 differs from the recorded lane L1 (jev)`). A required section under a near-miss heading at its template position (§0.x, §3) passes with a `WARN` naming the exact heading. stdout ends with the lane recorded per block (`lanes: B1 L1 (jev) · B2 L0 (rules)`). Green ⇒ set `status: hardened` after the harden job (`harden.md`), never before.
 
+### §4.1 Owner approval in plan mode
+
+A plan that passed `forge plan check` still needs the owner's yes before any block is dispatched. Show it in the harness's plan mode so the owner reviews the whole plan in one place and approves or edits it there:
+
+- **Claude Code:** call `EnterPlanMode`, write the plan (context, blocks with their levels and lanes, dispatch order, risks, verification) to the plan file, then call `ExitPlanMode`. Its approval is the go signal; a rejection or an edit sends you back to `harden`.
+- **A harness without a plan mode:** print the plan's §1–§4 and §6 and wait for an explicit yes. Silence is not approval.
+
+Never treat a chat summary of the plan as the approval step, and never start `forge block open` before it.
+
 ## §5 Cost
 
 One L0 session per plan for the facts (typically a claim list of 40–80 items) and one L3 session per author round; `forge report --slug <slug>` shows both as `facts $` and coder/review splits.

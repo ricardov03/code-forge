@@ -14,6 +14,10 @@ The tool return is the completion signal; the report must begin with `ACK <sha8>
 
 **Between completion and close come the review rounds.** The subagent ran `forge review-file <path> --block <id> --run <r>` per file and `--wait`ed on each ticket inside its turn, so most rounds happen before the sentinel; when the tool returns, first drain every `pending` ticket with `forge review-file --wait <ticket>` yourself — a pending ticket is a review in flight, not an open finding, and waiting on it costs no round. Then only an open `fix_now` finding, or a file the coder never submitted, starts a fix round (each one counts toward the file's cap): dispatch a new `Agent` call at the level the ladder says (`review.md` §5 — the coder is gone with its tool return, so the fix brief carries the open findings and the fix history) and it runs `review-file` again on the fixed file. Rounds are bounded: four rounds per file, then the L3 rung once, then `stopped: review_cap` for the human. Only when every changed file has a signed `review.approved` row do you run the re-measurement of `code.md` §5 and `forge block close <id> --run <r> --report <file>` (the subagent's final report, saved to a file) — the transcript grep reads `.code-forge/runs/<run>/<block>.log`; pass `--transcript <file>` when the harness saved the subagent's transcript elsewhere. Closing with a file still unreviewed is a human decision: `forge block waive <id> <finding> --run <r> --file <path> --reason "<why>"` per finding, or `forge block close … --no-require-reviews`, both audited as their own rows.
 
+## §2.1 Plan approval
+
+The plan goes to the owner through plan mode (`plan.md` §4.1): `EnterPlanMode` → write the plan file → `ExitPlanMode`. The approval returned by `ExitPlanMode` is the go signal for the first `forge block open`.
+
 ## §3 What is lost and what is not
 
 Lost: live observation of the coder (only the progress log and the final report), a resumable transcript (a lost subagent is re-dispatched with the fix history in a new brief — `continuity.md` §2). Not lost: session isolation, signed rows, the gate, the ladder, the facts rule, the convergence rule (`degraded.md` §2).

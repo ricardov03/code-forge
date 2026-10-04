@@ -6,6 +6,11 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- Skill: a plan that passed `plan check` is shown to the owner for approval in the harness's plan mode (Claude Code:
+  EnterPlanMode → plan file → ExitPlanMode); no block is dispatched before that approval.
+
 ## [0.4.0] — 2026-10-02
 
 ### Added
