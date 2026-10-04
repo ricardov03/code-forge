@@ -45,7 +45,8 @@ import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { newFileState, runRound } from '../review/fixloop.mjs';
 import { readRun } from '../state/run.mjs';
 import { redact } from '../util/redact.mjs';
-import { blockRungUsed, loadState, saveState } from './review-state.mjs';
+import { keyedLock } from '../util/locks.mjs';
+import { blockAnchors, blockRungUsed, loadState, saveState } from './review-state.mjs';
 import { assertTicketId } from './ticket.mjs';
 
 /**
@@ -208,46 +209,122 @@ export async function reviewTicket(ticket, ctx) {
 }
 
 /**
+ * The key of a block's lock (B42): the block's budget row and its L3 rung are taken under it.
+ * It carries the run, so two runs in one process never share a lock.
+ * @param {string} runId @param {string} block @returns {string}
+ */
+export const blockLockKey = (runId, block) => `block:${runId}\0${block}`;
+
+/**
+ * Whether the block's one L3 rung is taken: a verified anchor says so (`blockRungUsed`), OR another
+ * file of the block has a saved state whose round decided `next: patch` — that round took the rung,
+ * but its anchor records `l3_rung_used` only once the patch_check ticket saves. A sibling state that
+ * does not load is counted as taken (fail closed; its own ticket refuses it).
+ * @param {import('./review-state.mjs').Where} where
+ * @returns {{status: 'ok' | 'tampered', used: boolean}}
+ */
+export function rungTaken(where) {
+  const rung = blockRungUsed(where);
+  if (rung.status === 'tampered' || rung.used) return rung;
+  const anchors = blockAnchors(where) ?? [];
+  const siblings = new Set(anchors.map((a) => a.file).filter((f) => typeof f === 'string' && f !== where.file));
+  for (const file of siblings) {
+    let other;
+    try {
+      other = loadState({ ...where, file });
+    } catch {
+      return { status: 'ok', used: true };
+    }
+    if (other.status !== 'ok' || other.state?.next?.action === 'patch') return { status: 'ok', used: true };
+  }
+  return rung;
+}
+
+/**
+ * Whether this round could take the block's L3 rung (so it must run under the block lock): never
+ * when the rung is taken or the round is the patch_check (the rung is already this file's); never
+ * for a file's first full round while the cap and the per-level ladder are both above 1 (round 1
+ * cannot stall, reach the cap or exhaust the ladder); else conservatively yes.
+ * @param {import('../review/fixloop.mjs').FileState} state @param {'full' | 'recheck' | 'patch_check'} kind
+ * @param {Record<string, any>} cfg @param {boolean} rungUsed
+ * @returns {boolean}
+ */
+export function mayTakeRung(state, kind, cfg, rungUsed) {
+  if (rungUsed || kind === 'patch_check') return false;
+  const int = (/** @type {unknown} */ v, /** @type {number} */ d) => (Number.isInteger(v) && /** @type {number} */ (v) >= 0 ? /** @type {number} */ (v) : d);
+  const maxRounds = int(cfg?.review?.max_rounds_per_file, 4);
+  const perLevel = int(cfg?.escalation?.review_rounds_per_level, 2);
+  if (kind === 'full' && state.round === 0 && state.rounds_at_level === 0 && maxRounds > 1 && perLevel > 1) return false;
+  return true;
+}
+
+/**
  * One fix-loop round for the ticket (see the module doc).
+ *
+ * Concurrency (B42): the worker runs several tickets at once but never two for the same
+ * (block, file) (its file lock, `loop.mjs`), so this file's state `seq` is read and saved by one
+ * ticket at a time. What the files of a BLOCK share is taken under the block lock
+ * (`blockLockKey`): the budget row's check-then-write (written once per block) and the L3 rung —
+ * the rung read and, for a round that could take the rung (`mayTakeRung`), the whole round and its
+ * state save, so two files of one block never both take it. A round that cannot take the rung (a
+ * first full round, or any round once the rung is gone) runs outside the block lock, in parallel
+ * with the block's other files.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
  * @param {{base: string | null, level: string, owned: string[], blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string}} opts
  * @returns {Promise<ReviewOutcome>}
  */
 async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key, workDir, factsExcerpt }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
-  let rows;
-  try {
-    rows = (await ctx.readRows()).filter((r) => r?.run === ctx.runId);
-  } catch (err) {
-    return { status: 'unavailable', reason: failureReason(err), approved: false, engine: 'adaptive', sessions: [] };
-  }
-  // Check-then-write is safe here: a run has exactly ONE worker, and it processes its tickets one
-  // at a time (`loop.mjs` awaits each `processTicket`), so no second ticket of this block can read
-  // the rows between this check and the budget row's write.
-  if (!rows.some((r) => r?.event === 'review.budget' && r.block === ticket.block)) {
-    await recordBlockBudget(ticket, ctx, { base, owned });
-  }
-  const where = { runRootDir: ctx.runRootDir, runId: ctx.runId, block: ticket.block, file: ticket.file, key, rows };
-  const loaded = loadState(where);
-  const rung = blockRungUsed(where);
-  if (loaded.status === 'tampered' || rung.status === 'tampered') return { status: 'refused', reason: 'review-state-tampered', approved: false, engine: 'adaptive', sessions: [] };
-  const rungUsed = rung.used;
-  let state = loaded.state;
-  if (state === null || state.status === 'complete') state = newFileState({ file: ticket.file, level, l3RungUsed: rungUsed });
-  state.l3_rung_used = state.l3_rung_used || rungUsed;
+  const readRows = ctx.readRows;
+  /** @type {{outcome: ReviewOutcome} | {round: () => Promise<ReviewOutcome>}} */
+  const prepared = await keyedLock(blockLockKey(ctx.runId, ticket.block), async () => {
+    let rows;
+    try {
+      rows = (await readRows()).filter((r) => r?.run === ctx.runId);
+    } catch (err) {
+      return { outcome: /** @type {ReviewOutcome} */ ({ status: 'unavailable', reason: failureReason(err), approved: false, engine: 'adaptive', sessions: [] }) };
+    }
+    // Check-then-write under the block lock: no other ticket of this block reads the rows between
+    // this check and the budget row's write, so the row is written once per block.
+    if (!rows.some((r) => r?.event === 'review.budget' && r.block === ticket.block)) {
+      await recordBlockBudget(ticket, ctx, { base, owned });
+    }
+    const where = { runRootDir: ctx.runRootDir, runId: ctx.runId, block: ticket.block, file: ticket.file, key, rows };
+    const loaded = loadState(where);
+    const rung = rungTaken(where);
+    if (loaded.status === 'tampered' || rung.status === 'tampered') return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-tampered', approved: false, engine: 'adaptive', sessions: [] }) };
+    const rungUsed = rung.used;
+    let state = loaded.state;
+    if (state === null || state.status === 'complete') state = newFileState({ file: ticket.file, level, l3RungUsed: rungUsed });
+    state.l3_rung_used = state.l3_rung_used || rungUsed;
 
-  if (state.status === 'stopped') {
-    return { ...loopFields(state, null), status: 'stopped', stopped: state.next?.reason ?? 'stopped', approved: false, engine: 'adaptive', sessions: [], findings: state.open };
-  }
+    if (state.status === 'stopped') {
+      return { outcome: /** @type {ReviewOutcome} */ ({ ...loopFields(state, null), status: 'stopped', stopped: state.next?.reason ?? 'stopped', approved: false, engine: 'adaptive', sessions: [], findings: state.open }) };
+    }
 
-  /** @type {'full' | 'recheck' | 'patch_check'} */
-  let kind = state.round === 0 ? 'full' : 'recheck';
-  if (state.next?.action === 'retry') kind = state.pending_kind ?? kind;
-  else if (state.next?.action === 'patch') {
-    kind = 'patch_check';
-    state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
-  }
+    /** @type {'full' | 'recheck' | 'patch_check'} */
+    let kind = state.round === 0 ? 'full' : 'recheck';
+    if (state.next?.action === 'retry') kind = state.pending_kind ?? kind;
+    else if (state.next?.action === 'patch') {
+      kind = 'patch_check';
+      state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
+    }
+    const fixed = state;
+    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt });
+    // a round that could take the rung keeps the block lock until its state is saved
+    if (mayTakeRung(fixed, kind, ctx.cfg, rungUsed)) return { outcome: await round() };
+    return { round };
+  });
+  return 'outcome' in prepared ? prepared.outcome : prepared.round();
+}
 
+/**
+ * Run the prepared round and save the file's state: the ticket's outcome.
+ * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
+ * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string}} opts
+ * @returns {Promise<ReviewOutcome>}
+ */
+async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt }) {
   /** @type {Record<string, any> | null} */
   let engineOutcome = null;
   let approvalWritten = false;
@@ -307,7 +384,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
       state.pending_kind = kind;
     }
   }
-  await saveState({ ...where, state, seq: loaded.seq, writeRow: /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow) });
+  await saveState({ ...where, state, seq, writeRow: /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow) });
 
   const eng = /** @type {Record<string, any> | null} */ (engineOutcome);
   const head = { ...loopFields(state, kind), engine: eng?.engine ?? 'adaptive', sessions: eng?.sessions ?? rechecks };

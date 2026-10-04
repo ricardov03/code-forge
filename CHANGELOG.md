@@ -11,6 +11,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - Per-provider session limit `review.provider_concurrency` (defaults anthropic 4, openai 2, xai 2) and rate-limit
   backoff: a rate-limited session waits about 2 s, then about 6 s (±30 %), before retrying the same step, instead of
   retrying at once. New in-process keyed locks and semaphores (`src/util/locks.mjs`) prepare parallel review.
+- Parallel review in the worker: `review.parallel_tickets` (1–16, default 3) review tickets run at once, oldest first.
+  The same file is never reviewed twice at once; a block's budget row and its one L3 rung are taken under a block lock;
+  a crashed ticket never stops the others; on stop, running tickets finish. `run reload` can change the pool size. `1`
+  keeps the serial behaviour.
 
 ### Changed
 
@@ -27,6 +31,8 @@ waits on a second real consumer (plan §10.4, Q17).
   or a silent command (`test`, `grep -q`), marks only that claim unverifiable with the reason instead of refusing the
   whole sheet; the `<cli> <subcommand> --help | grep -c -- <flag>` check is allowed only for CLIs the brief names, never
   interpreters or launchers.
+- Two files of one block could both take the block's single L3 patch rung (the rung was recorded only when the patch
+  check saved); a pending `next: patch` on a sibling file now counts as used.
 
 ## [0.4.0] — 2026-10-02
 

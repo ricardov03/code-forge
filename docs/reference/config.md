@@ -116,6 +116,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.provider_concurrency.anthropic` | integer |  | `4` | min 1 |
 | `review.provider_concurrency.openai` | integer |  | `2` | min 1 |
 | `review.provider_concurrency.xai` | integer |  | `2` | min 1 |
+| `review.parallel_tickets` | integer |  | `3` | min 1; max 16; B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap. |
 | `engine` | enum: `auto`, `solo`, `harness`, `subprocess` |  | `"auto"` |  |
 | `harnesses` | array<string> |  | — |  |
 | `harness` | object |  | — |  |

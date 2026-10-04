@@ -152,7 +152,8 @@
             "openai": { "type": "integer", "minimum": 1, "default": 2 },
             "xai": { "type": "integer", "minimum": 1, "default": 2 }
           }
-        }
+        },
+        "parallel_tickets": { "type": "integer", "minimum": 1, "maximum": 16, "default": 3, "description": "B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap." }
       }
     },
     "engine": { "type": "string", "enum": ["auto", "solo", "harness", "subprocess"], "default": "auto" },

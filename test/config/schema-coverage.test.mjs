@@ -355,8 +355,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * a property. B34 2026-10-01: +5 = levels.coder_floor_docs, escalation.{after_rounds_with_warnings,
  * warning_threshold}, review.{multimodel_for_docs,single_reviewer_max_risk} ⇒ 145. B33: +1 = budget.usd ⇒ 146.
  * B32: +1 = review.allow_open_book_codex ⇒ 147. B40: +4 = review.provider_concurrency{,.anthropic,.openai,.xai} ⇒ 151.
+ * B42: +1 = review.parallel_tickets ⇒ 152.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 151;
+const EXPECTED_SCHEMA_PATH_COUNT = 152;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

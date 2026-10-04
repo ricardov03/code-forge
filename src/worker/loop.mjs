@@ -20,9 +20,17 @@
  * restarted worker boots on the snapshot, not on whatever the file says now. A record from before
  * snapshots (or none) keeps the config the worker booted with.
  *
+ * Ticket pool (B42): the worker runs up to `review.parallel_tickets` (default 3, 1–16) tickets at
+ * once, oldest first; when one ends the next pending one starts. Two tickets for the same
+ * (block, file) never overlap (a file lock; the later one stays pending without taking a slot),
+ * and the engine takes the block's budget row and L3 rung under a block lock (`engine.mjs`). A
+ * throw in one ticket is that ticket's `unavailable` result and never stops the others. `stop()`
+ * starts no new ticket and waits for the running ones. With 1 the worker runs exactly as before.
+ *
  * Restart: tickets live on disk and are idempotent by content hash, so a new worker simply re-reads
- * every ticket without a done marker. A worker that is stopping abandons its in-flight ticket (no
- * done marker) instead of recording the killed session as a failure. The new worker's pid is
+ * every ticket without a done marker. A worker that is stopping waits for its in-flight tickets: one
+ * whose session the stop killed (an `unavailable` outcome) is abandoned (no done marker) instead of
+ * recorded as a failure; one that reached a real outcome is recorded. The new worker's pid is
  * re-pinned in the run record by the orchestrator (`repinWorker`, = `run start --reattach`).
  */
 
@@ -36,6 +44,7 @@ import { spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
 import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
+import { keyedLock } from '../util/locks.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { reviewTicket } from './engine.mjs';
 import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
@@ -46,6 +55,26 @@ export const JEV_KEY_NAME = 'jev';
 
 export const DEFAULT_POLL_MS = 250;
 export const DEFAULT_SESSION_TIMEOUT_S = 300;
+
+/** B42: `review.parallel_tickets` when the config does not set a valid one. */
+export const DEFAULT_PARALLEL_TICKETS = 3;
+export const MAX_PARALLEL_TICKETS = 16;
+
+/**
+ * How many tickets the worker runs at once: `review.parallel_tickets` when it is an integer
+ * 1–16, else `DEFAULT_PARALLEL_TICKETS`.
+ * @param {Record<string, any> | null | undefined} cfg @returns {number}
+ */
+export function parallelTickets(cfg) {
+  const n = cfg?.review?.parallel_tickets;
+  return Number.isInteger(n) && n >= 1 && n <= MAX_PARALLEL_TICKETS ? n : DEFAULT_PARALLEL_TICKETS;
+}
+
+/**
+ * The key of the file lock a ticket takes (B42): one ticket per (block, file) at a time.
+ * @param {string} block @param {string} file @returns {string}
+ */
+export const fileLockKey = (block, file) => `${block}\0${file}`;
 
 /** B35: how long `configFor` waits before its one retry of a failed run-record read. */
 export const CONFIG_RETRY_MS = 200;
@@ -125,6 +154,8 @@ export function loopResult(outcome) {
  * @typedef {object} WorkerDeps
  * @property {typeof reviewTicket} [review] - the engine hook (default `./engine.mjs`).
  * @property {typeof spawnSession} [spawn]
+ * @property {typeof readRun} [readRun] - the run-record read behind the per-ticket config (a test seam).
+ * @property {typeof readTicket} [readTicket] - the ticket read (a test seam).
  * @property {import('../keys/store.mjs').KeyStore} [store] - default: B2's production store.
  * @property {any} [opRead]
  * @property {NodeJS.ProcessEnv} [env]
@@ -145,6 +176,8 @@ export async function createWorker(opts, deps = {}) {
   const env = deps.env ?? process.env;
   const review = deps.review ?? reviewTicket;
   const spawn = deps.spawn ?? spawnSession;
+  const loadRun = deps.readRun ?? readRun;
+  const loadTicket = deps.readTicket ?? readTicket;
   const writeRow = deps.writeRow ?? ((/** @type {Record<string, any>} */ row) => appendRow(row, { slug }));
   const readRows = deps.readRows ?? (() => readAllRows(slug));
   const store = deps.store ?? (await createDefaultKeyStore(env));
@@ -157,6 +190,8 @@ export async function createWorker(opts, deps = {}) {
   let heartbeat = null;
   /** @type {(() => void) | null} */
   let wake = null;
+  /** @type {(() => void) | null} wakes the pool's wait in `drain` (stop) */
+  let poolWake = null;
 
   /** @param {Record<string, any>} row */
   const ledger = (row) => writeRow(signRow({ run: runId, ...row }, key));
@@ -174,7 +209,7 @@ export async function createWorker(opts, deps = {}) {
     let record;
     for (let attempt = 1; ; attempt += 1) {
       try {
-        record = await readRun(runId);
+        record = await loadRun(runId);
         break;
       } catch (err) {
         if (/** @type {any} */ (err)?.code === 'no-run') return cfg;
@@ -239,40 +274,49 @@ export async function createWorker(opts, deps = {}) {
     let result;
     let ticket = null;
     try {
-      ticket = readTicket(repoRoot, id);
+      ticket = loadTicket(repoRoot, id);
     } catch (err) {
       result = { event: 'review.result', status: 'refused', reason: err instanceof WorkerError ? err.code : 'bad-ticket', approved: false };
     }
     if (ticket) {
-      const base = { event: 'review.result', block: ticket.block, file: ticket.file, content_hash: ticket.content_hash };
-      /** @type {string | null} */
-      let current = null;
-      try {
-        current = ticket.run === runId ? contentHash(repoRoot, ticket.file) : null;
-      } catch (err) {
-        result = { ...base, status: 'refused', reason: err instanceof WorkerError ? err.code : 'unreadable', approved: false };
-      }
-      if (result) {
-        // refused above: the path no longer passes the on-disk check, or the file cannot be read
-      } else if (ticket.run !== runId) {
-        result = { ...base, status: 'refused', reason: 'other-run', approved: false };
-      } else if (current === DELETED_HASH && ticket.content_hash !== DELETED_HASH) {
-        result = { ...base, status: 'stale', reason: 'missing-file', approved: false };
-      } else if (current !== ticket.content_hash) {
-        result = { ...base, status: 'stale', approved: false };
-      } else {
-        /** @type {Record<string, any> | null} */
-        let ticketCfg = null;
-        try {
-          ticketCfg = await configFor(id);
-        } catch {
-          result = { ...base, status: 'unavailable', reason: 'config-snapshot', approved: false };
-        }
-        if (ticketCfg) result = await reviewWith(ticket, base, ticketCfg);
-      }
+      // B42: never two tickets for the same (block, file) at once — its fix-loop state (`seq`) is
+      // read, advanced and saved by one ticket at a time; the later one waits here. The key
+      // carries the run so two workers in one process (tests) never share a lock.
+      const t = ticket;
+      result = await keyedLock(`${runId}\0${fileLockKey(t.block, t.file)}`, () => reviewOne(id, t));
     }
-    if (stopping) return null; // the session was killed by our own stop: leave the ticket queued
+    // Stopping: a ticket whose session our own stop killed ends `unavailable` — leave it queued
+    // (no done marker) for the next worker instead of recording the kill as a failure. A ticket
+    // that reached a real outcome while the pool drained is recorded as usual.
+    if (stopping && result.status === 'unavailable') return null;
     return complete(id, result);
+  }
+
+  /**
+   * The unsigned result for a ticket that was read: refused / stale checks, then the review.
+   * @param {string} id @param {import('./queue.mjs').Ticket} ticket
+   * @returns {Promise<Record<string, any>>}
+   */
+  async function reviewOne(id, ticket) {
+    const base = { event: 'review.result', block: ticket.block, file: ticket.file, content_hash: ticket.content_hash };
+    /** @type {string | null} */
+    let current;
+    try {
+      current = ticket.run === runId ? contentHash(repoRoot, ticket.file) : null;
+    } catch (err) {
+      // the path no longer passes the on-disk check, or the file cannot be read
+      return { ...base, status: 'refused', reason: err instanceof WorkerError ? err.code : 'unreadable', approved: false };
+    }
+    if (ticket.run !== runId) return { ...base, status: 'refused', reason: 'other-run', approved: false };
+    if (current === DELETED_HASH && ticket.content_hash !== DELETED_HASH) return { ...base, status: 'stale', reason: 'missing-file', approved: false };
+    if (current !== ticket.content_hash) return { ...base, status: 'stale', approved: false };
+    let ticketCfg;
+    try {
+      ticketCfg = await configFor(id);
+    } catch {
+      return { ...base, status: 'unavailable', reason: 'config-snapshot', approved: false };
+    }
+    return reviewWith(ticket, base, ticketCfg);
   }
 
   /**
@@ -303,28 +347,134 @@ export async function createWorker(opts, deps = {}) {
   const poisoned = new Set();
 
   /**
-   * Process every pending ticket once. An unexpected throw on one ticket becomes a signed
-   * `unavailable` result (reason `worker-error`) when that can still be written, and never stops
-   * the loop; a ticket whose failure cannot be written either is skipped for this worker's life.
+   * One ticket in a pool slot: never rejects. An unexpected throw becomes a signed `unavailable`
+   * result (reason `worker-error`) when that can still be written; a ticket whose failure cannot
+   * be written either is poisoned (skipped for this worker's life).
+   * @param {string} id @returns {Promise<number>} 1 when completed, else 0.
+   */
+  async function runOne(id) {
+    try {
+      return (await processTicket(id)) !== null ? 1 : 0;
+    } catch {
+      try {
+        await complete(id, { event: 'review.result', status: 'unavailable', reason: 'worker-error', approved: false });
+        return 1;
+      } catch {
+        poisoned.add(id);
+        return 0;
+      }
+    }
+  }
+
+  /**
+   * B42: how many tickets run at once — `review.parallel_tickets` of the snapshot in force (so a
+   * `run reload` resizes the pool at the next drain), else of the boot config; anything but an
+   * integer 1–16 is the default.
+   * @returns {Promise<number>}
+   */
+  async function poolSize() {
+    let current = cfg;
+    try {
+      current = await configFor('');
+    } catch {
+      // an unreadable record: the boot config's size (each ticket still fails closed on its own)
+    }
+    return parallelTickets(current);
+  }
+
+  /**
+   * The (block, file) key of each ticket read so far, by id: a written ticket never changes (its
+   * id is its content's hash), so it is read once for scheduling, however many wake-ups it waits.
+   * Dropped once the ticket is done.
+   * @type {Map<string, string>}
+   */
+  const fileKeys = new Map();
+
+  /**
+   * The (block, file) a pending ticket names, or null when it cannot be read (it is started
+   * anyway and refused by `processTicket`; a null is not cached). Only a scheduling hint:
+   * `processTicket` takes the file lock on the ticket it actually read.
+   * @param {string} id @returns {string | null}
+   */
+  function fileKeyOf(id) {
+    const known = fileKeys.get(id);
+    if (known !== undefined) return known;
+    try {
+      const t = loadTicket(repoRoot, id);
+      const key = fileLockKey(t.block, t.file);
+      fileKeys.set(id, key);
+      return key;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * Serve every pending ticket (B42): up to `review.parallel_tickets` at once, oldest first; when
+   * one finishes, the queue is re-read and the next pending ticket starts (no batch barrier; the
+   * queue is also re-read every `pollMs` while tickets run, so a new ticket fills a free slot).
+   * A ticket whose (block, file) is already running is left pending (it does not take a slot)
+   * and starts once that one ends. Each ticket starts at most once per drain. On `stop()` no new
+   * ticket starts; the running ones are awaited before `drain` returns. The pool size (a run-record
+   * read) is read only when there is a pending ticket: an idle drain reads nothing but the queue.
    * @returns {Promise<number>} how many were completed.
    */
   async function drain() {
+    /** @type {number | null} */
+    let limit = null;
     let done = 0;
-    for (const id of pendingTickets(repoRoot)) {
-      if (stopping) break;
-      if (poisoned.has(id)) continue;
-      try {
-        if ((await processTicket(id)) !== null) done += 1;
-      } catch {
-        try {
-          await complete(id, { event: 'review.result', status: 'unavailable', reason: 'worker-error', approved: false });
-          done += 1;
-        } catch {
-          poisoned.add(id);
+    /** @type {Map<string, Promise<void>>} */
+    const running = new Map();
+    /** @type {Set<string>} the (block, file) keys of the running tickets */
+    const busy = new Set();
+    /** @type {Set<string>} */
+    const started = new Set();
+    for (;;) {
+      if (!stopping) {
+        for (const id of pendingTickets(repoRoot)) {
+          if (poisoned.has(id) || started.has(id)) continue;
+          if (limit === null) limit = await poolSize();
+          if (running.size >= limit || stopping) break;
+          const fileKey = fileKeyOf(id);
+          if (fileKey !== null && busy.has(fileKey)) continue; // waits without a slot
+          started.add(id);
+          if (fileKey !== null) busy.add(fileKey);
+          const slot = runOne(id)
+            .then((n) => {
+              done += n;
+            })
+            .finally(() => {
+              // the slot is freed on every exit path (`runOne` never rejects)
+              running.delete(id);
+              fileKeys.delete(id);
+              if (fileKey !== null) busy.delete(fileKey);
+            });
+          running.set(id, slot);
         }
       }
+      if (running.size === 0) break;
+      await nextEvent([...running.values()]);
     }
     return done;
+  }
+
+  /**
+   * Resolve when one of `slots` settles, `pollMs` passes, or `stop()` is called.
+   * @param {Array<Promise<void>>} slots
+   */
+  async function nextEvent(slots) {
+    /** @type {ReturnType<typeof setTimeout> | undefined} */
+    let timer;
+    const tick = new Promise((resolve) => {
+      timer = setTimeout(resolve, pollMs);
+      poolWake = () => resolve(undefined);
+    });
+    try {
+      await Promise.race([...slots, tick]);
+    } finally {
+      clearTimeout(timer);
+      poolWake = null;
+    }
   }
 
   /**
@@ -388,9 +538,11 @@ export async function createWorker(opts, deps = {}) {
     }
   }
 
+  /** Stop taking tickets; the running ones are awaited (a killed one is abandoned, see `processTicket`). */
   function stop() {
     stopping = true;
     wake?.();
+    poolWake?.();
   }
 
   /** Withdraw this process's announcement (`worker.json`) if it is still ours. */
