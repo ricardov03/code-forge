@@ -133,12 +133,13 @@ test('a slot is held during the attempt and freed on each exit path: ok, unavail
   ]);
 });
 
-test('budget refusal takes no slot: with all 2 slots held elsewhere, a refused session still returns at once, 0 exec calls, slots stay 2', async () => {
+test('B41 order: slot first, then the budget gate — with all 2 slots held a refused session waits (0 reads), then is refused when a slot frees and gives it back at once', async () => {
   const sem = providerSemaphore('anthropic', 2);
   const releases = [await sem.acquire(), await sem.acquire()];
   try {
     const { deps } = fakeDeps();
     let execCalls = 0;
+    let reads = 0;
     const cfg = { ...cfgLimited(CLAUDE, { anthropic: 2 }), budget: { usd: 20 } };
     const refused = spawnSession(judge(cfg, { run: 'r-full-slots' }), {
       ...deps,
@@ -148,20 +149,18 @@ test('budget refusal takes no slot: with all 2 slots held elsewhere, a refused s
           return CLAUDE_OK;
         }
       ),
-      readRows: async () => [{ event: 'session', run: 'r-full-slots', usd: 25 }],
+      readRows: async () => {
+        reads += 1;
+        return [{ event: 'session', run: 'r-full-slots', usd: 25 }];
+      },
       writeRow: async () => {},
     });
-    /** @type {NodeJS.Timeout | undefined} */
-    let timer;
-    const hung = new Promise((_, reject) => {
-      timer = setTimeout(() => reject(new Error('refused session waited for a slot')), 2000);
-    });
-    try {
-      const result = await Promise.race([refused, hung]);
-      assert.deepEqual([result.status, result.reason, execCalls, sem.active, sem.pending], ['unavailable', 'budget', 0, 2, 0]);
-    } finally {
-      clearTimeout(timer);
-    }
+    await new Promise((r) => setImmediate(r));
+    // queued for a slot: the budget gate has not run yet
+    assert.deepEqual([sem.active, sem.pending, reads], [2, 1, 0]);
+    /** @type {() => void} */ (releases.shift())();
+    const result = await refused;
+    assert.deepEqual([result.status, result.reason, execCalls, reads, sem.active, sem.pending], ['unavailable', 'budget', 0, 1, 1, 0]);
   } finally {
     for (const release of releases) release();
   }

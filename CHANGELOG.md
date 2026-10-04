@@ -16,6 +16,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Skill: a plan that passed `plan check` is shown to the owner for approval in the harness's plan mode (Claude Code:
   EnterPlanMode → plan file → ExitPlanMode); no block is dispatched before that approval.
+- `budget.usd` holds when sessions start together: each session reserves its estimated cost under one lock (after taking
+  its provider slot) and releases it when its row is written or it fails. A refusal caused by running sessions says how
+  much they hold and this session's estimate; a session whose estimate alone is above the budget says so.
 
 ### Fixed
 

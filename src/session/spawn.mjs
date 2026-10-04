@@ -20,8 +20,9 @@
  *
  * Provider slots and backoff (B40): every attempt holds one slot of the module-level semaphore of
  * its step's provider (`review.provider_concurrency[provider]`, defaults anthropic 4, openai 2,
- * xai 2) for as long as the attempt runs, and frees it on every exit path. The budget gate runs
- * first, so a refused session never holds a slot. A rate-limited attempt frees its slot, waits
+ * xai 2) for as long as the attempt runs, and frees it on every exit path. B41: the slot is taken
+ * FIRST, then the budget gate (check + reservation under the run's lock) runs; a refused session
+ * frees its slot at once, and a session waiting for a slot holds no reservation. A rate-limited attempt frees its slot, waits
  * `RATE_LIMIT_BACKOFF_MS` (2 s, then 6 s, each ±30 % jitter) and tries the same step again; after
  * the second wait a third rate limit moves the ladder to the next step.
  *
@@ -54,7 +55,7 @@ import { removeCodexHome } from '../engines/codex-home.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { parseSentinel } from '../engines/sentinel.mjs';
 import { parseUsage } from '../engines/usage-parse.mjs';
-import { budgetUsdOf, checkBudget, priceSession, SPEND_UNREADABLE_MESSAGE } from '../ledger/spend.mjs';
+import { budgetUsdOf, checkBudget, estimateSessionUsd, priceSession, reservedUsd, reserveBudget, SPEND_UNREADABLE_MESSAGE, withBudgetLock } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { exec } from '../util/exec.mjs';
 import { isForbidden, mergeForbidden } from '../util/forbidden.mjs';
@@ -635,16 +636,24 @@ export async function spawnSession(opts, deps = {}) {
   let rateLimitWaits = 0; // backoff waits taken on the current step
   for (let i = 0; i < steps.length; i += 1) {
     const step = steps[i];
-    const refused = await budgetGate(opts, deps, writeRow, stderr);
-    if (refused) return { ...refused, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts };
-    // B40: the slot is taken AFTER the budget gate and freed in the `finally` below on every exit path
+    // B40/B41: the provider slot first, then the budget gate — a session queued for a slot never
+    // holds a reservation; a refusal frees the slot at once (the `finally` below)
     const releaseSlot = await providerSemaphore(step.provider, providerLimit(cfg, step.provider)).acquire();
     /** @type {number | null} */
     let waitMs = null;
     try {
-      const outcome = await runAttempt(step, i + 1 === steps.length);
-      if (outcome.result) return outcome.result;
-      waitMs = outcome.waitMs;
+      const gate = await budgetGate(opts, deps, writeRow, stderr, step);
+      if (gate.refused) return { ...gate.refused, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts };
+      // B41: the reservation is released once the row is written (inside runAttempt) and, as a net,
+      // in the `finally` below on every other exit path (a throw, a background start)
+      const releaseReservation = gate.release;
+      try {
+        const outcome = await runAttempt(step, i + 1 === steps.length, releaseReservation);
+        if (outcome.result) return outcome.result;
+        waitMs = outcome.waitMs;
+      } finally {
+        releaseReservation();
+      }
     } finally {
       releaseSlot();
     }
@@ -662,10 +671,11 @@ export async function spawnSession(opts, deps = {}) {
   /**
    * One attempt of `step` (the caller holds its provider slot).
    * @param {ReturnType<typeof ladderFor>[number]} step @param {boolean} isLast - no step after this one.
+   * @param {() => void} releaseReservation - B41: called as soon as the session row is written.
    * @returns {Promise<{result: SessionResult | null, waitMs: number | null}>} a `result` ends the
    *   session; otherwise `waitMs` = back off and retry the step, null = go to the next step.
    */
-  async function runAttempt(step, isLast) {
+  async function runAttempt(step, isLast, releaseReservation) {
     const sessionDir = path.join(runRootDir, 'sessions', `${role}-${Date.now()}-${randomBytes(4).toString('hex')}`);
     mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
     let keep = false;
@@ -686,7 +696,11 @@ export async function spawnSession(opts, deps = {}) {
         // background session's home stays until the run root is swept.
         const bg = startBackground(built, sessionDir, runRootDir, { ...childEnv(deps.env ?? process.env), ...(built.env ?? {}) });
         // a detached child's tokens are never read back: its price is unknown (use `ledger add coder`)
-        if (writeRow) await writeRow({ event: 'session.background', ...base, pid: bg.pid, status: 'started', usd: null, usd_unknown: true });
+        try {
+          if (writeRow) await writeRow({ event: 'session.background', ...base, pid: bg.pid, status: 'started', usd: null, usd_unknown: true });
+        } finally {
+          releaseReservation();
+        }
         return { waitMs: null, result: { status: 'started', ...bg, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, attempts } };
       }
 
@@ -703,7 +717,11 @@ export async function spawnSession(opts, deps = {}) {
         duration_ms: attempt.duration_ms,
         ...(level === 'L3' && step.fallback_step > 0 ? { l3_fallback: true } : {}),
       };
-      if (writeRow) await writeRow(row);
+      try {
+        if (writeRow) await writeRow(row);
+      } finally {
+        releaseReservation(); // B41: the row now carries the spend (or the write failed)
+      }
       attempts.push({ fallback_step: step.fallback_step, provider: step.provider, model: step.model, status: attempt.status, reason: attempt.reason ?? null });
       if (attempt.status === 'unavailable' && attempt.reason === 'rate-limited' && rateLimitWaits < RATE_LIMIT_BACKOFF_MS.length) {
         // B40: back off (2 s, then 6 s, ±30 %) and try the same step again — never at once
@@ -738,14 +756,49 @@ function sessionUsd(provider, level, usage) {
  * read throws) the session is refused too. It sits at the top of the ladder loop, so every attempt
  * — each fallback step, the rate-limit retry of a step, and every `spawnSession` call a caller
  * makes again (B30's timeout retry) — passes it.
+ *
+ * B41: with a budget, the ledger read, the check and the reservation of this attempt's estimated
+ * cost (`estimateSessionUsd`: the packet's bytes / 4 in, a fixed tokens_out per role and level)
+ * run under the run's budget lock, so concurrent sessions of one run see each other's holds. No
+ * budget (or no run) ⇒ no lock, no reservation.
  * @param {SessionOpts} opts @param {SessionDeps} deps
  * @param {((row: Record<string, any>) => Promise<unknown>) | null} writeRow
  * @param {{write: (s: string) => unknown}} stderr
+ * @param {{provider: string}} step - the ladder step about to run (its provider prices the estimate).
+ * @returns {Promise<{refused: SessionResult, release?: undefined} | {refused: null, release: () => void}>}
+ *   the refusal result, or the (idempotent) release of this attempt's reservation.
+ */
+async function budgetGate(opts, deps, writeRow, stderr, step) {
+  const budget = budgetUsdOf(opts.cfg);
+  if (budget === null || typeof opts.run !== 'string' || opts.run.length === 0) return { refused: null, release: () => {} };
+  const run = opts.run;
+  const estimate = estimateSessionUsd({ provider: step.provider, level: opts.level, role: opts.role, tokensIn: packetTokens(opts) });
+  return withBudgetLock(run, async () => {
+    const refused = await checkGate(opts, deps, writeRow, stderr, budget, estimate);
+    if (refused) return { refused };
+    return { refused: null, release: reserveBudget(run, estimate) };
+  });
+}
+
+/**
+ * The packet's (or brief's) tokens plus the system prompt's, by the ledger's bytes / 4 rule (an
+ * unreadable packet counts 0 bytes; tokens_out is still reserved).
+ * @param {SessionOpts} opts @returns {number}
+ */
+function packetTokens(opts) {
+  return estimateTokens(fileSize(opts.promptPath) + (typeof opts.systemPromptText === 'string' ? Buffer.byteLength(opts.systemPromptText) : 0));
+}
+
+/**
+ * The B33 check proper (called under the budget lock): read the run's spend, fail closed, refuse
+ * when spent + reserved + `estimate` passes the budget.
+ * @param {SessionOpts} opts - `opts.run` is a non-empty string (checked by `budgetGate`).
+ * @param {SessionDeps} deps
+ * @param {((row: Record<string, any>) => Promise<unknown>) | null} writeRow
+ * @param {{write: (s: string) => unknown}} stderr @param {number} budget @param {number} estimate
  * @returns {Promise<SessionResult | null>} the refusal result, or null to go on.
  */
-async function budgetGate(opts, deps, writeRow, stderr) {
-  const budget = budgetUsdOf(opts.cfg);
-  if (budget === null || typeof opts.run !== 'string' || opts.run.length === 0) return null;
+async function checkGate(opts, deps, writeRow, stderr, budget, estimate) {
   /** @type {Array<Record<string, any>> | null} */
   let rows = null;
   try {
@@ -768,7 +821,7 @@ async function budgetGate(opts, deps, writeRow, stderr) {
     }
     return { status: 'unavailable', reason: 'budget', message: SPEND_UNREADABLE_MESSAGE, answer: null, spent_usd: null, budget_usd: budget };
   }
-  const verdict = await checkBudget({ budget, run: opts.run, rows, block: opts.block ?? null, role: opts.role, writeRow, stderr });
+  const verdict = await checkBudget({ budget, run: /** @type {string} */ (opts.run), rows, block: opts.block ?? null, role: opts.role, writeRow, stderr, reserved: reservedUsd(/** @type {string} */ (opts.run)), estimate });
   if (!verdict.refuse) return null;
   return { status: 'unavailable', reason: 'budget', message: verdict.message, answer: null, spent_usd: verdict.spent, budget_usd: budget };
 }
