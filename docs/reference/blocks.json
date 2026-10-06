@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 49,
+  "block_count": 50,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -654,6 +654,24 @@
         "B46"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/delegate.mjs, src/cli/autopilot.mjs, src/cli/block.mjs, src/cli/logs.mjs, src/review/fixloop.mjs, src/worker/engine.mjs"
+    },
+    "B48": {
+      "title": "Autopilot budget stop per category (review/coding caps at --stop-at, refused at the spawn budget gate under the B41 lock, one signed autopilot.pause row per category per grant, grantFor paused, status spend) and expiring owner approvals (autopilot approve: terminal only, no --yes, fixed keys and __proto__/constructor/prototype refused, applied through the run reload path, signed approve/restore/restore_skipped rows, crash-safe lazy restore at autopilot, block and worker drain); run reload refuses limit keys while a grant is active",
+      "wave": 11,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/autopilot/limits.mjs",
+        "src/session/spawn.mjs",
+        "src/worker/loop.mjs",
+        "src/cli/block.mjs",
+        "src/cli/run.mjs",
+        "test/autopilot/expiry.test.mjs"
+      ],
+      "depends_on": [
+        "B47"
+      ],
+      "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/grant.mjs, src/autopilot/scopes.mjs, src/cli/autopilot.mjs, src/state/run.mjs (reloadRun guard), src/config/load.mjs (slugFor moved from cli/run.mjs), src/cli/{author,facts,jev,plan,s2,spawn}.mjs (slugFor import), test/cli/autopilot.test.mjs"
     }
   }
 }

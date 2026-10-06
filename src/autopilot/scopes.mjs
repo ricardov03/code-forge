@@ -78,6 +78,13 @@ export const ALL_SCOPES = Object.freeze([...ALLOWABLE_SCOPES, ...FIXED_DENY_SCOP
 /** Budget categories `--budget` accepts. */
 export const BUDGET_CATEGORIES = Object.freeze(['coding', 'review']);
 
+/**
+ * B48: the budget category each allowable scope spends from. A waiver ends a review question
+ * (review); an extra fix round and the coder level start coder sessions (coding). While a
+ * category is paused, `grantFor` answers `paused` for its scopes.
+ */
+export const SCOPE_CATEGORY = Object.freeze({ 'waive:warning': 'review', 'waive:nit': 'review', 'round:extra': 'coding', 'model:choose': 'coding' });
+
 /** The delegate levels `--delegate` accepts. */
 export const DELEGATE_LEVELS = Object.freeze(['L2', 'L3']);
 

@@ -11,13 +11,12 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadProjectConfig } from '../config/load.mjs';
+import { loadProjectConfig, slugFor } from '../config/load.mjs';
 import { AuthorError, runAuthor } from '../session/author.mjs';
 import { runRootFor, SessionError } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { writeSafe } from '../util/redact.mjs';
-import { slugFor } from './run.mjs';
 import { exitCodeFor } from './spawn.mjs';
 
 const USAGE = 'usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]\n';

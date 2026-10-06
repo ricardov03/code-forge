@@ -22,37 +22,18 @@
  * run record per ticket — no restart).
  */
 
-import { readdirSync } from 'node:fs';
 import path from 'node:path';
-import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
-import { loadSeenInCache } from '../config/refresh.mjs';
-import { validateConfig } from '../config/validate.mjs';
+import { reloadFailureText, reloadWorkspace } from '../autopilot/limits.mjs';
+import { DEFAULT_CONFIG_FILENAME, loadProjectConfig, slugFor } from '../config/load.mjs';
 import { budgetUsdOf, runSpend } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
-import { endRun, processStartTime, readRun, reattachWorker, reloadRun, startRun, stopPinnedWorker } from '../state/run.mjs';
+import { endRun, processStartTime, readRun, reattachWorker, startRun, stopPinnedWorker } from '../state/run.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { sweepRoots, tmpBase } from '../util/tmp.mjs';
 import { launchWorker, repinWorker } from '../worker/loop.mjs';
-import { pendingTickets, queueDir } from '../worker/queue.mjs';
-import { repoRootOf, WorkerError } from '../worker/ticket.mjs';
-import { hasCliOnPath } from './validate.mjs';
-
-/**
- * `project.slug` from config, else the workspace directory name as a ledger slug. The configured
- * value is NOT trusted here: `startRun` refuses any slug outside `/^[a-z0-9][a-z0-9-]*$/`
- * (`bad-project`) before anything is written, so `../x` never reaches the ledger path. Run ids
- * are checked the same way by the state layer (`assertRunId`, `bad-run-id`).
- * @param {Record<string, any>} cfg @param {string} workspace
- * @returns {string}
- */
-export function slugFor(cfg, workspace) {
-  const configured = cfg?.project?.slug;
-  if (typeof configured === 'string' && configured.length > 0) return configured;
-  const derived = path.basename(workspace).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
-  return derived || 'project';
-}
+import { repoRootOf } from '../worker/ticket.mjs';
 
 /**
  * B33: the run's spend so far (estimated USD from its ledger rows, open blocks included) and its
@@ -190,52 +171,29 @@ export async function runRun(args, deps = {}) {
 
 /**
  * `run reload --run <id>`: load + validate the workspace config, pin the queue's pending tickets
- * to the old snapshot and store the new one (`reloadRun`). Exit 0 on a reload or no change, 1 on a
- * config that does not load or validate, or on a refused key.
+ * to the old snapshot and store the new one (`reloadWorkspace` → `reloadRun`). Exit 0 on a reload
+ * or no change, 1 on a config that does not load or validate, or on a refused key. B48: while an
+ * autopilot grant is active, a change to a limit key is refused (`autopilot-limit`): only the
+ * owner changes one, with `code-forge autopilot approve` (the verb never passes its internal allow).
  * @param {string} runId
  * @param {{out: (s: string) => void, err: (s: string) => void}} io
  * @returns {Promise<number>}
  */
 async function reloadVerb(runId, { out, err }) {
-  const { project, workspace, status } = await readRun(runId);
-  if (status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
-  const loaded = await loadProjectConfig(workspace);
-  if (!loaded.ok || !loaded.config) {
-    // never the parser's message: it can quote a line of the file
-    if (loaded.error === 'not-found') err(`run reload: no ${DEFAULT_CONFIG_FILENAME} in the workspace — nothing changed\n`);
+  const { project } = await readRun(runId);
+  const reloaded = await reloadWorkspace({ runId, writeRow: ledgerWriter(project) });
+  if (!reloaded.ok) {
+    if (reloaded.error === 'not-found') err(`run reload: no ${DEFAULT_CONFIG_FILENAME} in the workspace — nothing changed\n`);
+    else if (reloaded.error === 'parse-error') err(`run reload: the config could not be parsed (${DEFAULT_CONFIG_FILENAME}${reloaded.line ? `:${reloaded.line}` : ''}) — nothing changed\n`);
+    else if (reloaded.error !== 'invalid') err(`run reload: ${reloadFailureText(reloaded)} — nothing changed\n`);
     else {
-      const line = loaded.error === 'parse-error' ? /\(line (\d+), column \d+\)$/.exec(loaded.message ?? '')?.[1] : undefined;
-      err(`run reload: the config could not be parsed (${DEFAULT_CONFIG_FILENAME}${line ? `:${line}` : ''}) — nothing changed\n`);
+      // rule ids and key paths only: a validator message may quote a value
+      const errors = reloaded.errors ?? [];
+      const lines = errors.map((e) => `  [${e.rule}]${e.path ? ` ${e.path}` : ''}\n`);
+      err(`run reload: ${DEFAULT_CONFIG_FILENAME} is invalid (${errors.length} error${errors.length === 1 ? '' : 's'}) — nothing changed; run code-forge validate\n${lines.join('')}`);
     }
     return 1;
   }
-  const result = validateConfig(loaded.config, { seenInCache: await loadSeenInCache(), hasCliOnPath });
-  if (!result.valid) {
-    // rule ids and key paths only: a validator message may quote a value
-    const lines = result.errors.map((e) => `  [${e.rule}]${typeof e.path === 'string' && e.path.length > 0 ? ` ${e.path}` : ''}\n`);
-    err(`run reload: ${DEFAULT_CONFIG_FILENAME} is invalid (${result.errors.length} error${result.errors.length === 1 ? '' : 's'}) — nothing changed; run code-forge validate\n${lines.join('')}`);
-    return 1;
-  }
-  /** @type {string | null} */
-  let repoRoot = null;
-  try {
-    repoRoot = await repoRootOf(workspace);
-  } catch (thrown) {
-    if (!(thrown instanceof WorkerError && thrown.code === 'no-repo')) throw thrown;
-    // no repository: there is no review queue to pin
-  }
-  const queueRoot = repoRoot;
-  const readPending = () => {
-    if (queueRoot === null) return [];
-    try {
-      readdirSync(queueDir(queueRoot));
-    } catch (thrown) {
-      if (thrown?.code === 'ENOENT') return [];
-      throw new StateError('queue-unreadable', 'cannot read the review queue; nothing changed');
-    }
-    return pendingTickets(queueRoot);
-  };
-  const reloaded = await reloadRun({ runId, config: loaded.config, readPending, effectiveSlug: slugFor(loaded.config, workspace), writeRow: ledgerWriter(project) });
   if (reloaded.changed !== null && reloaded.changed.length === 0) {
     out(`run ${runId}: no config change\n`);
     return 0;

@@ -26,7 +26,7 @@ const UNTIL = '2026-10-07T00:00:00+02:00'; // T0 + 2 h
 const UNTIL_UTC = '2026-10-06T22:00:00.000Z';
 const FIXED = 'waive:critical, waive:proof, reviews:skip, limits:change, plan:approve, design:approve, pr:merge, destructive, budget:raise';
 const USAGE =
-  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id>\n';
+  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset>\n';
 
 /** A run whose ledger slug is its own id (so each test reads only its rows). @param {string} runId */
 async function newRun(runId) {
@@ -99,6 +99,7 @@ test('start with every flag stores the grant and writes one signed autopilot.gra
       '  allow     waive:nit, waive:warning\n' +
       `  deny      round:extra, ${FIXED}\n` +
       '  budget    coding 20.00 USD, review 5.00 USD · stop at 75%\n' +
+      '  spend     coding 0.00 of 20.00 USD, review 0.00 of 5.00 USD · paused none\n' +
       '  link      none\n',
   );
   const json = await cli(['status', '--run', 'c-full', '--json'], { now: at(40) });
@@ -115,6 +116,8 @@ test('start with every flag stores the grant and writes one signed autopilot.gra
     fixed_deny: FIXED.split(', '),
     caps: { review: 5, coding: 20 },
     stop_at: 0.75,
+    spend: { coding: 0, review: 0 },
+    paused: [],
     link: null,
     started_at: T0.toISOString(),
     stopped_at: null,

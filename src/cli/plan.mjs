@@ -12,14 +12,13 @@
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadProjectConfig } from '../config/load.mjs';
+import { loadProjectConfig, slugFor } from '../config/load.mjs';
 import { ledgerPath } from '../ledger/paths.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { checkPlan } from '../session/plan-check.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { writeSafe } from '../util/redact.mjs';
-import { slugFor } from './run.mjs';
 
 const USAGE = 'usage: code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]\n';
 

@@ -46,6 +46,7 @@
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
+import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
@@ -72,7 +73,8 @@ const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', '
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, probe?: import('../state/run.mjs').StartTimeProbe}} [deps]
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, probe?: import('../state/run.mjs').StartTimeProbe, now?: () => Date}} [deps] -
+ *   `now` (B48): the clock of the autopilot expiry checks.
  * @returns {Promise<number>}
  */
 export async function runBlock(args, deps = {}) {
@@ -98,6 +100,13 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     const record = await readRun(runId);
     const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
+    // B48: every block command runs the lazy autopilot checks (grant expiry, expired approvals);
+    // a failed check is a warning, never a reason to stop the block command
+    try {
+      err(approvalCheckText(await expiryChecks(runId, (deps.now ?? (() => new Date()))(), { writeRow })));
+    } catch (thrown) {
+      err(`autopilot: WARN the expiry check failed (${thrown?.message ?? String(thrown)})\n`);
+    }
 
     if (sub === 'open') {
       // B47: no --level ⇒ the level autopilot chose for the block (a signed autopilot.level row)

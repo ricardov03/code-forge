@@ -205,14 +205,20 @@ export async function startRun(opts) {
  * source of truth), then one signed `run.reload` row: the changed key PATHS (never values) and
  * the old/new snapshot hashes. A row that cannot be written leaves the reload in place and is
  * reported as `rowError`.
+ *
+ * B48 `guard`: called under the lock after the fixed-key check, with the record, the snapshot in
+ * force (undefined for a record from before snapshots), the new config and the changed key paths
+ * (null without a snapshot); it throws to refuse the reload (nothing written). The autopilot limit
+ * guard (`src/autopilot/limits.mjs`) uses it.
  * @param {{
  *   runId: string, config: Record<string, any>, readPending?: () => string[], effectiveSlug?: string,
  *   writeRow: WriteRow, now?: Date,
+ *   guard?: (record: Record<string, any>, before: Record<string, any> | undefined, config: Record<string, any>, changed: string[] | null) => void | Promise<void>,
  * }} opts
  * @returns {Promise<{changed: string[] | null, oldHash: string | null, newHash: string, pinned: number, rowError: string | null}>}
  *   `changed` is `[]` when nothing changed.
  */
-export async function reloadRun({ runId, config, readPending = () => [], effectiveSlug, writeRow, now = new Date() }) {
+export async function reloadRun({ runId, config, readPending = () => [], effectiveSlug, writeRow, now = new Date(), guard }) {
   return withRunLock(runId, async () => {
     const current = await readRun(runId);
     if (current.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
@@ -238,6 +244,7 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
       throw new StateError('immutable-key', `${why.join('; ')} — put ${frozen.length === 1 ? 'it' : 'them'} back, or end the run and start a new one`);
     }
     const changed = state ? changedKeyPaths(before, config) : null;
+    if (guard) await guard(current, state ? before : undefined, config, changed);
     /** @type {Record<string, string>} */
     const pins = {};
     const oldPins = state?.pins && typeof state.pins === 'object' ? state.pins : {};

@@ -58,6 +58,8 @@ import { parseSentinel } from '../engines/sentinel.mjs';
 import { parseUsage } from '../engines/usage-parse.mjs';
 import { budgetUsdOf, checkBudget, estimateSessionUsd, priceSession, reservedUsd, reserveBudget, SPEND_UNREADABLE_MESSAGE, withBudgetLock } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
+import { categoryGate, categoryPlan, RECORD_UNKNOWN_MESSAGE } from '../autopilot/limits.mjs';
+import { StateError } from '../state/paths.mjs';
 import { exec } from '../util/exec.mjs';
 import { isForbidden, mergeForbidden } from '../util/forbidden.mjs';
 import { semaphore } from '../util/locks.mjs';
@@ -508,6 +510,7 @@ function childEnv(/** @type {NodeJS.ProcessEnv} */ env) {
  * @property {NodeJS.ProcessEnv} [env]
  * @property {(ms: number) => Promise<unknown>} [sleep] - B40: the rate-limit backoff wait (tests: a recorder).
  * @property {() => number} [random] - B40: the backoff jitter source, in [0, 1) (default `Math.random`).
+ * @property {() => Date} [now] - B48: the clock the autopilot grant is checked against (default: now).
  */
 
 /**
@@ -762,6 +765,14 @@ function sessionUsd(provider, level, usage) {
  * cost (`estimateSessionUsd`: the packet's bytes / 4 in, a fixed tokens_out per role and level)
  * run under the run's budget lock, so concurrent sessions of one run see each other's holds. No
  * budget (or no run) ⇒ no lock, no reservation.
+ *
+ * B48: with an active autopilot grant that caps the session's category (coder → coding, every
+ * other role → review), the same lock also runs the category check (`categoryGate`, after the
+ * `budget.usd` check): at `stop_at` × cap the session is refused, the grant pauses for the
+ * category and one signed `autopilot.pause` row is written; otherwise the estimate is reserved in
+ * the category too. The plan is re-read UNDER the lock, so the next session sees the pause the
+ * previous one wrote. A run record that cannot be read refuses with reason `autopilot-unknown`.
+ * No grant ⇒ exactly the B41 behaviour.
  * @param {SessionOpts} opts @param {SessionDeps} deps
  * @param {((row: Record<string, any>) => Promise<unknown>) | null} writeRow
  * @param {{write: (s: string) => unknown}} stderr
@@ -770,15 +781,63 @@ function sessionUsd(provider, level, usage) {
  *   the refusal result, or the (idempotent) release of this attempt's reservation.
  */
 async function budgetGate(opts, deps, writeRow, stderr, step) {
-  const budget = budgetUsdOf(opts.cfg);
-  if (budget === null || typeof opts.run !== 'string' || opts.run.length === 0) return { refused: null, release: () => {} };
+  const none = { refused: null, release: () => {} };
+  if (typeof opts.run !== 'string' || opts.run.length === 0) return none;
   const run = opts.run;
+  const budget = budgetUsdOf(opts.cfg);
+  // B48: an active autopilot grant that caps this role's category (null: nothing to meter). Read
+  // once here only to decide whether to lock at all, and again under the lock (below).
+  const now = (deps.now ?? (() => new Date()))();
+  const outside = await readCategoryPlan(run, opts.role, now);
+  if (budget === null && outside.plan === null && !outside.unknown) return none;
   const estimate = estimateSessionUsd({ provider: step.provider, level: opts.level, role: opts.role, tokensIn: packetTokens(opts) });
   return withBudgetLock(run, async () => {
-    const refused = await checkGate(opts, deps, writeRow, stderr, budget, estimate);
-    if (refused) return { refused };
-    return { refused: null, release: reserveBudget(run, estimate) };
+    // under the lock: a fresh clock (the lock may have waited) and a fresh plan, so a pause the
+    // previous session wrote is seen here
+    const lockedNow = (deps.now ?? (() => new Date()))();
+    const { plan, unknown } = await readCategoryPlan(run, opts.role, lockedNow);
+    if (unknown) {
+      writeSafe(stderr, `code-forge: ${RECORD_UNKNOWN_MESSAGE}\n`);
+      return { refused: { status: 'unavailable', reason: 'autopilot-unknown', message: RECORD_UNKNOWN_MESSAGE, answer: null } };
+    }
+    if (budget !== null) {
+      const refused = await checkGate(opts, deps, writeRow, stderr, budget, estimate);
+      if (refused) return { refused };
+    }
+    let releaseCategory = () => {};
+    if (plan !== null) {
+      const slug = opts.slug ?? plan.project;
+      const readRows = deps.readRows ?? (() => readAllRows(slug));
+      const gate = await categoryGate({ plan, run, role: opts.role, block: opts.block ?? null, readRows, writeRow, stderr, now: lockedNow, estimate });
+      if (gate.refused) return { refused: /** @type {SessionResult} */ (gate.refused) };
+      releaseCategory = gate.release;
+    }
+    const releaseRun = budget !== null ? reserveBudget(run, estimate) : () => {};
+    return {
+      refused: null,
+      release: () => {
+        releaseRun();
+        releaseCategory();
+      },
+    };
   });
+}
+
+/**
+ * B48: the category plan, with a known record-read failure turned into `unknown` (fail closed:
+ * a grant we cannot read is never "no grant"); any other error propagates. Accepted on purpose:
+ * an unreadable run record refuses the session even for a run without a grant — the record is
+ * what says whether a grant exists.
+ * @param {string} run @param {string} role @param {Date} now
+ * @returns {Promise<{plan: import('../autopilot/limits.mjs').CategoryPlan | null, unknown: boolean}>}
+ */
+async function readCategoryPlan(run, role, now) {
+  try {
+    return { plan: await categoryPlan(run, role, now), unknown: false };
+  } catch (thrown) {
+    if (thrown instanceof StateError && thrown.code === 'record-unknown') return { plan: null, unknown: true };
+    throw thrown;
+  }
 }
 
 /**

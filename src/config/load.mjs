@@ -133,3 +133,18 @@ export async function loadConfigFile(filePath) {
 export async function loadProjectConfig(cwd = process.cwd()) {
   return loadConfigFile(path.join(cwd, DEFAULT_CONFIG_FILENAME));
 }
+
+/**
+ * `project.slug` from config, else the workspace directory name as a ledger slug. The configured
+ * value is NOT trusted here: `startRun` refuses any slug outside `/^[a-z0-9][a-z0-9-]*$/`
+ * (`bad-project`) before anything is written, so `../x` never reaches the ledger path. Run ids
+ * are checked the same way by the state layer (`assertRunId`, `bad-run-id`).
+ * @param {Record<string, any>} cfg @param {string} workspace
+ * @returns {string}
+ */
+export function slugFor(cfg, workspace) {
+  const configured = cfg?.project?.slug;
+  if (typeof configured === 'string' && configured.length > 0) return configured;
+  const derived = path.basename(workspace).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  return derived || 'project';
+}

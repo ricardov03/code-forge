@@ -10,12 +10,11 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { loadProjectConfig } from '../config/load.mjs';
+import { loadProjectConfig, slugFor } from '../config/load.mjs';
 import { ROLES, runRootFor, SessionError, spawnSession } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { writeSafe } from '../util/redact.mjs';
-import { slugFor } from './run.mjs';
 
 /**
  * @param {string} file @param {string} flag

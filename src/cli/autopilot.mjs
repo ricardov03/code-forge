@@ -1,5 +1,5 @@
 /**
- * `code-forge autopilot start|status|stop|ask|waive|round|level` (issue #5, blocks B45, B46, B47). The OWNER (and the
+ * `code-forge autopilot start|status|stop|ask|waive|round|level|approve` (issue #5, blocks B45–B48). The OWNER (and the
  * orchestrator on the owner's behalf) runs these — a coder never may: `autopilot` is on the
  * coder-only forbidden list.
  *
@@ -12,7 +12,17 @@
  *   autopilot waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id>
  *   autopilot round --run <id> --block <id> --file <path> --decision <id>
  *   autopilot level --run <id> --block <id> --plan <file> --decision <id>
+ *   autopilot approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset>
  *
+ * B48 (`src/autopilot/limits.mjs`): `approve` is the OWNER's temporary config change: it writes
+ * the workspace `.code-forge.yml`, reloads the run the way `run reload` does, and the old value
+ * comes back at `--until` (lazily: at the next autopilot or block command or worker drain), with a
+ * signed `autopilot.approve` and `autopilot.restore` row. It runs only at a terminal, after the
+ * owner confirms; there is deliberately NO `--yes`: a flag can be passed by any process — the
+ * orchestrator, a script, the delegate's own tooling — and `approve` is the one way to relax a
+ * limit while autopilot runs, so an unattended caller must never be able to approve. Fixed keys
+ * (`IMMUTABLE_KEYS`) are refused. Every subcommand first restores expired approvals. `status`
+ * shows the spend per budget category since the grant started and the paused categories.
  * B47 (`src/autopilot/actions.mjs`): `waive`, `round` and `level` are delegated actions — each is
  * refused (exit 1, nothing written) unless the grant allows its scope (`waive:<severity>`,
  * `round:extra`, `model:choose`) AND `--decision` names the delegate's acted decision for it (an
@@ -38,7 +48,10 @@
 import { activeGrantMessage, checkExpiry, expiredMessage, grantState, startGrant, stopGrant, validateGrantInput } from '../autopilot/grant.mjs';
 import { askDelegate } from '../autopilot/delegate.mjs';
 import { chooseCoderLevel, grantExtraRound, waiveForOwner } from '../autopilot/actions.mjs';
-import { FIXED_DENY_SCOPES } from '../autopilot/scopes.mjs';
+import { approvalCheckText, approveChange, checkApprovals, spendByCategory, validateApproval } from '../autopilot/limits.mjs';
+import { BUDGET_CATEGORIES, FIXED_DENY_SCOPES } from '../autopilot/scopes.mjs';
+import { appendRow, readAllRows } from '../ledger/write.mjs';
+import { redact } from '../util/redact.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadProjectConfig } from '../config/load.mjs';
@@ -60,7 +73,7 @@ import { writeSafe } from '../util/redact.mjs';
  *   `actions`: the B47 seams (`exec`, `env`, `onPath` for gh; `readRows`).
  */
 
-const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop', 'ask', 'waive', 'round', 'level']);
+const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop', 'ask', 'waive', 'round', 'level', 'approve']);
 
 const FLAG_SPECS = Object.freeze({
   start: { values: ['run', 'until', 'delegate', 'allow', 'deny', 'budget', 'stop-at'], booleans: ['yes'] },
@@ -70,7 +83,15 @@ const FLAG_SPECS = Object.freeze({
   waive: { values: ['run', 'block', 'file', 'finding', 'severity', 'reason', 'decision'] },
   round: { values: ['run', 'block', 'file', 'decision'] },
   level: { values: ['run', 'block', 'plan', 'decision'] },
+  approve: { values: ['run', 'key', 'value', 'until'] },
 });
+
+/** Why `approve` takes no `--yes` (the refusal text). */
+export const APPROVE_NO_YES =
+  'autopilot approve: --yes is not accepted — only the owner approves a limit change, at a terminal; a flag could be passed by the orchestrator or a script, so approve always asks';
+
+/** The refusal without a terminal. */
+export const APPROVE_NO_TTY = 'autopilot approve: no terminal to confirm; only the owner approves a change, in a terminal (approve has no --yes)';
 
 /** @param {object} res - a refused action result. @returns {string} its message. */
 const refusal = (res) => /** @type {{message: string}} */ (res).message;
@@ -118,6 +139,37 @@ async function runAction(sub, runId, flags, deps, out, err) {
     return 1;
   }
   out(`autopilot level run ${runId}: block ${res.row.block} codes at ${res.row.level} (lane ${res.row.lane}, plan ${res.row.plan_level}, grant ${res.row.grant_id}); block open without --level uses it\n`);
+  return 0;
+}
+
+/**
+ * `autopilot approve` (B48): validate, ask the owner at a terminal (never without one, never
+ * `--yes`), then apply the change through the `run reload` path.
+ * @param {string} runId @param {Record<string, any>} flags @param {AutopilotDeps} deps
+ * @param {(s: string) => void} out @param {(s: string) => void} err
+ * @returns {Promise<number>} 0 approved, 1 refused or cancelled, 2 usage or no terminal
+ */
+async function runApprove(runId, flags, deps, out, err) {
+  const clock = deps.now ?? (() => new Date());
+  const valid = await validateApproval({ runId, key: flags.key, value: flags.value, until: flags.until, now: clock() });
+  if (!(deps.isTTY ?? process.stdin.isTTY === true)) {
+    err(`${APPROVE_NO_TTY}\n`);
+    return 2;
+  }
+  const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
+  const go = await ui.confirm({
+    message: `Approve ${valid.key} = ${JSON.stringify(redact(valid.value))} for run ${runId} until ${valid.until}? The old value comes back then.`,
+    initialValue: false,
+  });
+  if (ui.isCancel(go) || go !== true) {
+    out('cancelled — nothing changed\n');
+    return 1;
+  }
+  // the prompt may have waited: --until is checked again against now
+  const now = clock();
+  const again = await validateApproval({ runId, key: flags.key, value: flags.value, until: flags.until, now });
+  const approval = await approveChange({ runId, key: again.key, segs: again.segs, value: again.value, until: again.until, now, writeRow: deps.writeRow });
+  out(`autopilot approve run ${runId}: ${approval.key} changed until ${approval.until} (approval ${approval.approval_id}); the old value comes back then\n`);
   return 0;
 }
 
@@ -208,13 +260,24 @@ const capsText = (caps) => {
 };
 
 /**
+ * B48: spend per category against its cap, e.g. `coding 4.50 of 20.00 USD, review 0.00 USD (no cap)`.
+ * @param {Record<string, number>} spend @param {Record<string, number>} caps @returns {string}
+ */
+const spendText = (spend, caps) =>
+  BUDGET_CATEGORIES.map((c) => {
+    const spent = (spend[c] ?? 0).toFixed(2);
+    return typeof caps[c] === 'number' ? `${c} ${spent} of ${caps[c].toFixed(2)} USD` : `${c} ${spent} USD (no cap)`;
+  }).join(', ');
+
+/**
  * @param {string} runId @param {import('../autopilot/grant.mjs').Grant | null} grant @param {Date} now
  * @param {string} [checked] - the state `checkExpiry` answered (`run-ended` overrides the grant's own)
+ * @param {Record<string, number>} [spend] - B48: USD per budget category since the grant started.
  * @returns {Record<string, any>}
  */
-function statusData(runId, grant, now, checked) {
+function statusData(runId, grant, now, checked, spend = {}) {
   if (grant === null) {
-    return { run: runId, state: 'none', grant_id: null, delegate: null, until: null, time_left_s: null, scopes: [], deny: [], fixed_deny: [...FIXED_DENY_SCOPES], caps: {}, stop_at: null, link: null, started_at: null, stopped_at: null, expired_at: null };
+    return { run: runId, state: 'none', grant_id: null, delegate: null, until: null, time_left_s: null, scopes: [], deny: [], fixed_deny: [...FIXED_DENY_SCOPES], caps: {}, stop_at: null, spend: {}, paused: [], link: null, started_at: null, stopped_at: null, expired_at: null };
   }
   const state = checked === 'run-ended' ? 'run-ended' : grantState(grant, now);
   const left = state === 'active' ? Math.floor((Date.parse(grant.until) - now.getTime()) / 1000) : 0;
@@ -230,6 +293,8 @@ function statusData(runId, grant, now, checked) {
     fixed_deny: [...FIXED_DENY_SCOPES],
     caps: grant.caps,
     stop_at: grant.stop_at,
+    spend,
+    paused: Object.keys(grant.paused ?? {}).sort(),
     link: grant.link ?? null,
     started_at: grant.started_at,
     stopped_at: grant.stopped_at,
@@ -255,6 +320,7 @@ function statusText(d) {
     `  allow     ${d.scopes.join(', ')}\n` +
     `  deny      ${[...d.deny, ...d.fixed_deny].join(', ')}\n` +
     `  budget    ${capsText(d.caps)} · stop at ${Math.round(d.stop_at * 100)}%\n` +
+    `  spend     ${spendText(d.spend, d.caps)} · paused ${d.paused.length === 0 ? 'none' : d.paused.join(', ')}\n` +
     `  link      ${d.link ?? 'none'}\n`
   );
 }
@@ -272,26 +338,37 @@ export async function runAutopilot(args, deps = {}) {
     err(USAGE);
     return 2;
   }
+  if (sub === 'approve' && rest.some((a) => a === '--yes' || a.startsWith('--yes='))) {
+    err(`${APPROVE_NO_YES}\n`);
+    return 2;
+  }
   try {
     const { flags, positionals } = parseFlags(rest, FLAG_SPECS[/** @type {keyof typeof FLAG_SPECS} */ (sub)]);
     if (positionals.length > 0) throw new StateError('usage', `unexpected argument ${JSON.stringify(positionals[0])}`);
     if (typeof flags.run !== 'string') throw new StateError('usage', `autopilot ${sub} needs --run <id>`);
     const runId = flags.run;
+    // B48: ONE writer for every grant / approval / restore / expiry row of this command (signed by
+    // the state layer); the run's own ledger unless the caller passed one
+    const writer = writeRow ?? (async (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: (await readRun(runId)).project }));
+    // B48: every subcommand first restores the approvals whose window is over
+    err(approvalCheckText(await checkApprovals(runId, clock, { writeRow: writer })));
+    if (sub === 'approve') return await runApprove(runId, flags, { ...deps, writeRow: writer }, out, err);
     if (sub === 'ask') return await runAsk(runId, flags, deps, out);
     if (sub === 'waive' || sub === 'round' || sub === 'level') return await runAction(sub, runId, flags, deps, out, err);
     const now = clock();
 
     if (sub === 'status') {
-      const { grant, state } = await checkExpiry(runId, now, { writeRow });
-      const data = statusData(runId, grant, now, state);
+      const { grant, state } = await checkExpiry(runId, now, { writeRow: writer });
+      const spend = grant === null ? {} : spendByCategory(await readAllRows((await readRun(runId)).project), runId, grant);
+      const data = statusData(runId, grant, now, state, spend);
       out(flags.json ? `${JSON.stringify(data, null, 2)}\n` : statusText(data));
       return 0;
     }
     if (sub === 'stop') {
       // the expiry check first: an expired grant gets its one expire row and no stop row
-      const checked = await checkExpiry(runId, now, { writeRow });
+      const checked = await checkExpiry(runId, now, { writeRow: writer });
       if (checked.state === 'expired') throw new StateError('grant-expired', expiredMessage(runId, checked.grant.until));
-      const grant = await stopGrant({ runId, now, writeRow });
+      const grant = await stopGrant({ runId, now, writeRow: writer });
       out(`autopilot run ${runId}: grant ${grant.grant_id} stopped\n`);
       return 0;
     }
@@ -299,7 +376,7 @@ export async function runAutopilot(args, deps = {}) {
     const input = { until: flags.until, delegate: flags.delegate, allow: flags.allow, deny: flags.deny, budget: flags.budget, stopAt: flags['stop-at'] };
     const valid = validateGrantInput(input, now); // refuse bad input before asking anyone
     if ((await readRun(runId)).status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
-    const before = await checkExpiry(runId, now, { writeRow });
+    const before = await checkExpiry(runId, now, { writeRow: writer });
     if (before.state === 'active') {
       throw new StateError('grant-active', activeGrantMessage(runId, before.grant.until));
     }
@@ -317,7 +394,7 @@ export async function runAutopilot(args, deps = {}) {
     }
     // the prompt may have waited: `--until` is checked again (future, at most 24 h) against now
     const startedAt = flags.yes ? now : clock();
-    const grant = await startGrant({ runId, input, now: startedAt, writeRow });
+    const grant = await startGrant({ runId, input, now: startedAt, writeRow: writer });
     out(
       `autopilot run ${runId}: grant ${grant.grant_id} active until ${grant.until} (${formatLeft(Date.parse(grant.until) - startedAt.getTime())})\n` +
         `  delegate ${grant.delegate} · allow ${grant.scopes.join(', ')} · budget ${capsText(grant.caps)} · stop at ${Math.round(grant.stop_at * 100)}%\n`,
@@ -333,7 +410,7 @@ export async function runAutopilot(args, deps = {}) {
 }
 
 const USAGE =
-  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id>\n';
+  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset>\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function autopilot(args) {

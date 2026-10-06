@@ -37,6 +37,7 @@
 import { spawn as nodeSpawn } from 'node:child_process';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { expiryChecks } from '../autopilot/limits.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
@@ -44,7 +45,9 @@ import { spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
 import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
+import { logWarning } from '../util/error-log.mjs';
 import { keyedLock } from '../util/locks.mjs';
+import { writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { reviewTicket } from './engine.mjs';
 import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
@@ -58,6 +61,24 @@ export const DEFAULT_SESSION_TIMEOUT_S = 300;
 
 /** B42: `review.parallel_tickets` when the config does not set a valid one. */
 export const DEFAULT_PARALLEL_TICKETS = 3;
+
+/** B48: the fixed text of a failed autopilot expiry check in a drain (stderr and the warning log). */
+export const EXPIRY_CHECK_FAILED = 'the autopilot expiry check failed in a worker drain; it runs again at the next drain';
+
+/**
+ * B48: what kind of error an expiry check threw — its code or class only, NEVER its message (a
+ * message can carry a path or a value): `EACCES`, `StateError:record-unknown`, `TypeError`.
+ * Anything that does not look like a plain identifier is `Error`.
+ * @param {unknown} thrown @returns {string}
+ */
+export function errorKind(thrown) {
+  if (!(thrown instanceof Error)) return 'Error';
+  const err = /** @type {any} */ (thrown);
+  const name = typeof err.name === 'string' ? err.name : 'Error';
+  const code = typeof err?.code === 'string' ? err.code : null;
+  const kind = code === null ? name : /^E[A-Z]+$/.test(code) ? code : `${name}:${code}`;
+  return /^[A-Za-z0-9_:.-]{1,64}$/.test(kind) ? kind : 'Error';
+}
 export const MAX_PARALLEL_TICKETS = 16;
 
 /**
@@ -166,6 +187,10 @@ export function loopResult(outcome) {
  * @property {{write: (s: string) => unknown}} [stderr]
  * @property {import('../review/triage.mjs').JevAsk} [jev] - S1 for triage and the recheck (tests
  *   inject a mock); default: `askJev` with the resolved Jev key, none without one.
+ * @property {() => Promise<unknown>} [expiryCheck] - B48: the lazy autopilot checks, run once at the
+ *   start of every drain, before any ticket; default: `expiryChecks(opts.runId, <now>, {writeRow})`
+ *   (grant expiry, expired approvals). A failure is never silent: one stderr line and one
+ *   `autopilot_expiry_check_failed` warning per streak of failures; the next drain tries again.
  */
 
 /**
@@ -180,6 +205,10 @@ export async function createWorker(opts, deps = {}) {
   const loadTicket = deps.readTicket ?? readTicket;
   const writeRow = deps.writeRow ?? ((/** @type {Record<string, any>} */ row) => appendRow(row, { slug }));
   const readRows = deps.readRows ?? (() => readAllRows(slug));
+  // B48: the run's own writer (unsigned base; the checks sign their rows with the run key)
+  const expiryCheck = deps.expiryCheck ?? (() => expiryChecks(runId, new Date(), { writeRow }));
+  const warnStream = deps.stderr ?? process.stderr;
+  let expiryFailing = false; // inside a streak of failed checks: warn once per streak
   const store = deps.store ?? (await createDefaultKeyStore(env));
   const jevKey = await resolveJevKey(cfg, { store, env, opRead: deps.opRead });
   const childEnv = sessionEnv(env, [jevKey, key.toString('hex')]);
@@ -420,6 +449,19 @@ export async function createWorker(opts, deps = {}) {
    * @returns {Promise<number>} how many were completed.
    */
   async function drain() {
+    // B48: the lazy autopilot checks (grant expiry, expired approvals) before any ticket starts;
+    // a failed check never stops the drain (the next drain tries again) and is never silent
+    try {
+      await expiryCheck();
+      expiryFailing = false;
+    } catch (thrown) {
+      if (!expiryFailing) {
+        expiryFailing = true;
+        const text = `${EXPIRY_CHECK_FAILED} (${errorKind(thrown)})`;
+        writeSafe(warnStream, `worker: WARN ${text}\n`);
+        await logWarning({ warning: 'autopilot_expiry_check_failed', message: text }).catch(() => null);
+      }
+    }
     /** @type {number | null} */
     let limit = null;
     let done = 0;

@@ -22,7 +22,7 @@ import { randomBytes } from 'node:crypto';
 import { appendRow } from '../ledger/write.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, saveRun, withRunLock, writeSigned } from '../state/run.mjs';
-import { ALL_SCOPES, ALLOWABLE_SCOPES, BUDGET_CATEGORIES, DELEGATE_LEVELS, FIXED_DENY, isAllowable, isFixedDeny } from './scopes.mjs';
+import { ALL_SCOPES, ALLOWABLE_SCOPES, BUDGET_CATEGORIES, DELEGATE_LEVELS, FIXED_DENY, isAllowable, isFixedDeny, SCOPE_CATEGORY } from './scopes.mjs';
 
 /** @typedef {(row: Record<string, any>) => Promise<unknown>} WriteRow */
 /**
@@ -30,9 +30,10 @@ import { ALL_SCOPES, ALLOWABLE_SCOPES, BUDGET_CATEGORIES, DELEGATE_LEVELS, FIXED
  *   grant_id: string, status: 'active' | 'stopped' | 'expired', scopes: string[], deny: string[],
  *   delegate: string, until: string, caps: Record<string, number>, stop_at: number,
  *   started_at: string, stopped_at: string | null, expired_at: string | null, link: string | null,
- * }} Grant
+ *   paused?: Record<string, {at: string, spent_usd: number, reserved_usd: number, cap_usd: number}>,
+ * }} Grant - `paused` (B48): the budget categories that reached `stop_at` of their cap.
  */
-/** @typedef {'no-grant' | 'run-ended' | 'expired' | 'stopped' | 'denied' | 'not-allowed'} RefusalReason */
+/** @typedef {'no-grant' | 'run-ended' | 'expired' | 'stopped' | 'denied' | 'not-allowed' | 'paused'} RefusalReason */
 /**
  * A further check run on an active grant after the scope checks; it returns a refusal reason
  * string, or null to let the action through. B48 adds the per-category budget / stop-at check here.
@@ -257,7 +258,8 @@ export async function checkExpiry(runId, now = new Date(), deps = {}) {
 /**
  * The one gate every delegated action asks. Order: no grant → run ended → stopped → expired (writes the
  * expire row the first time) → denied (fixed deny list or the grant's `--deny`) → not allowed →
- * each `deps.checks` hook (B48: the per-category budget at `stop_at`; its reason is passed through).
+ * paused (B48: the scope's budget category reached `stop_at` of its cap; `SCOPE_CATEGORY`) →
+ * each `deps.checks` hook (its reason is passed through).
  * @param {string} runId @param {string} scope @param {Date} [now] @param {GrantDeps} [deps]
  * @returns {Promise<{ok: true, grant: Grant, reason?: undefined} | {ok: false, reason: RefusalReason | string, grant: Grant | null}>}
  * @throws {StateError} `unknown-scope` for a scope outside the vocabulary (a caller bug, not a refusal)
@@ -271,6 +273,8 @@ export async function grantFor(runId, scope, now = new Date(), deps = {}) {
   if (state === 'expired') return { ok: false, reason: 'expired', grant };
   if (isFixedDeny(scope) || grant.deny.includes(scope)) return { ok: false, reason: 'denied', grant };
   if (!grant.scopes.includes(scope)) return { ok: false, reason: 'not-allowed', grant };
+  const category = /** @type {Record<string, string>} */ (SCOPE_CATEGORY)[scope];
+  if (category !== undefined && grant.paused && Object.hasOwn(grant.paused, category)) return { ok: false, reason: 'paused', grant };
   for (const check of deps.checks ?? []) {
     const reason = await check(grant, scope, now);
     if (reason !== null) return { ok: false, reason, grant };

@@ -31,7 +31,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { loadConfigFile, DEFAULT_CONFIG_FILENAME } from '../config/load.mjs';
+import { loadConfigFile, DEFAULT_CONFIG_FILENAME, slugFor } from '../config/load.mjs';
 import path from 'node:path';
 import { buildQuestionPayload, isKnownQuestion, isQuestionDisabled } from '../decide/questions.mjs';
 import { askJev as realAskJev } from '../decide/jev-client.mjs';
@@ -40,7 +40,6 @@ import { resolveDispatchQuestionsByRules } from '../decide/fallback-rules.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { appendRow as realAppendRow } from '../ledger/write.mjs';
 import { writeSafe } from '../util/redact.mjs';
-import { slugFor } from './run.mjs';
 
 const USAGE = 'usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]\n';
 

@@ -23,6 +23,12 @@ waits on a second real consumer (plan §10.4, Q17).
   opens one tracked GitHub issue in the project's repo. The block gate accepts an autopilot waiver only under a grant
   and decision that covered it. One extra fix round per file per grant; the coder level comes from the Jev lane, capped
   at the plan level + 1 and L2.
+- Autopilot budget stop per category: with `--budget review=<usd>,coding=<usd>`, new sessions in a category are refused
+  once its spend since the grant started plus running reservations reaches `--stop-at` x cap ("autopilot paused: ...
+  waiting for the owner"), with one signed `autopilot.pause` row; `autopilot status` shows spend per category.
+  `code-forge autopilot approve --key --value --until` (owner only, in a terminal, no `--yes`) changes one setting until
+  a time and restores it automatically, crash-safe, with signed rows; a value changed by hand meanwhile is left alone.
+  While a grant is active, `run reload` refuses any limit key.
 
 ## [0.5.1] — 2026-10-04
 
