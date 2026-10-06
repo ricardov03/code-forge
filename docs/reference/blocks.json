@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 47,
+  "block_count": 48,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -623,6 +623,21 @@
         "B44"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5), approved in plan mode"
+    },
+    "B46": {
+      "title": "Autopilot delegate: closed-book delegate role (never Codex, opt-in or not), askDelegate (grant first, one session, one signed autopilot.decision row; acts only with options, in scope, no escalation, confidence >= autopilot.min_confidence), autopilot ask, doctor delegate pings; autopilot.* is a limit key",
+      "wave": 11,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/autopilot/delegate.mjs",
+        "src/doctor/probes.mjs",
+        "test/autopilot/delegate.test.mjs"
+      ],
+      "depends_on": [
+        "B45"
+      ],
+      "note": "root-added 2026-10-06; plan plans/autopilot (issue #5)"
     }
   }
 }

@@ -56,7 +56,7 @@ export const GROK_ALL_BUILTIN_TOOLS = Object.freeze(['Bash', 'Read', 'Write', 'E
 
 /**
  * @typedef {object} GrokBuildParams
- * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"} role
+ * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} role
  * @property {string} model
  * @property {string} [effort] - a non-empty string when given.
  * @property {string} promptPath - `--prompt-file` value (brief for coder, packet for closed-book).
@@ -100,14 +100,14 @@ function buildCoderArgv(params) {
 
 /**
  * @param {GrokBuildParams} params
- * @returns {{cli: "grok", role: "reviewer"|"judge"|"s2"|"author"|"facts", argv: string[], cwd: string}}
+ * @returns {{cli: "grok", role: "reviewer"|"judge"|"s2"|"author"|"facts"|"delegate", argv: string[], cwd: string}}
  */
 function buildClosedBookArgv(params) {
   const { model, effort, promptPath, cwd, schema, systemPromptText } = params;
   assertValidEffort(effort);
   // See `builders/claude.mjs`'s identical cast: the dispatch below never reaches this branch
   // with role 'coder', but that is a runtime invariant, not provable from the parameter type.
-  const role = /** @type {"reviewer"|"judge"|"s2"|"author"|"facts"} */ (params.role);
+  const role = /** @type {"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} */ (params.role);
   const argv = ['grok', '--prompt-file', promptPath, '-m', model];
   if (effort) argv.push('--reasoning-effort', effort);
   if (schema !== undefined) argv.push('--json-schema', JSON.stringify(schema));

@@ -24,6 +24,8 @@ const ROLE_BUCKET = Object.freeze({
   reviewer: 'reviewUsd',
   judge: 'reviewUsd',
   s2: 's1s2Usd',
+  // B46: the autopilot delegate answers one owner-level question per session, like S2
+  delegate: 's1s2Usd',
   facts: 'factsUsd',
 });
 

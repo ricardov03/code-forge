@@ -2,7 +2,9 @@
  * Doctor rows that run the provider CLIs (plan §2.3, §0.6; block B13b):
  *  - per CLI: present + version + `--help` flag probe (B4 `probeHelpText`; a missing flag FAILs);
  *  - one real call per role builder (coder, reviewer, s2 with the compiled S2 schema, facts) through
- *    B9a `spawnSession` — an HTTP 402 is `ping=skipped(402)` WARN, never FAIL (§0.6.1);
+ *    B9a `spawnSession` — an HTTP 402 is `ping=skipped(402)` WARN, never FAIL (§0.6.1); when the
+ *    config has an `autopilot` section (B46), one `delegate` ping per delegate level (L2, L3) with
+ *    the delegate schema — an openai level FAILs unrun whatever `review.allow_open_book_codex` says;
  *  - the isolation probe (O4, §0.6.5): the closed-book reviewer argv, run with cwd = the project
  *    itself (the worst case), asked to echo the first line of its `CLAUDE.md`/`AGENTS.md` — the
  *    line appearing in its answer FAILs; the CLI rejecting the closed-book flag combination FAILs;
@@ -33,6 +35,8 @@ import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { commandOnPath } from '../install/detect.mjs';
 import { classifyUnavailable, readAnswer, spawnSession } from '../session/spawn.mjs';
 import { S2_SCHEMA } from '../session/s2.mjs';
+import { DELEGATE_SCHEMA } from '../autopilot/delegate.mjs';
+import { DELEGATE_LEVELS } from '../autopilot/scopes.mjs';
 import { runsDir } from '../state/paths.mjs';
 import { exec } from '../util/exec.mjs';
 import { gitChildEnv } from '../worker/ticket.mjs';
@@ -47,6 +51,23 @@ export const PING_ROLES = Object.freeze([
   { role: 'reviewer', level: 'L2' },
   { role: 's2', level: 'L3' },
 ]);
+
+/**
+ * B46: the delegate pings, one per level a grant may name — run only when the config has an
+ * `autopilot` section (a project that never uses autopilot pays for no extra call).
+ * @param {Record<string, any>} cfg @returns {Array<{role: string, level: string, id: string}>}
+ */
+export function delegatePings(cfg) {
+  const on = cfg?.autopilot !== null && typeof cfg?.autopilot === 'object';
+  return on ? DELEGATE_LEVELS.map((level) => ({ role: 'delegate', level, id: `ping.delegate.${level}` })) : [];
+}
+
+/** What each schema'd ping is told to answer, so a working CLI matches the schema. */
+const PING_ANSWER = Object.freeze({
+  s2: 'Answer with decision "proceed", confidence 1, reason "ping", overrule false, ask_human false, human_question null.\n',
+  delegate: 'Answer with decision "proceed", within_scope true, confidence 1, reason "ping", escalate false.\n',
+});
+const PING_SCHEMA = Object.freeze({ s2: S2_SCHEMA, delegate: DELEGATE_SCHEMA });
 
 const LEVELS = Object.freeze(['L0', 'L1', 'L2', 'L3']);
 const PROBE_TIMEOUT_MS = 180000;
@@ -196,28 +217,30 @@ function levelName(cfg, level) {
  */
 export async function pingRoles(ctx, missingProviders) {
   const rows = [];
-  for (const { role, level } of PING_ROLES) {
-    const label = `ping ${role} (${levelName(ctx.cfg, level)})`;
+  const pings = [...PING_ROLES.map((p) => ({ ...p, id: `ping.${p.role}` })), ...delegatePings(ctx.cfg)];
+  for (const { role, level, id } of pings) {
+    const label = role === 'delegate' ? `ping delegate ${level} (${levelName(ctx.cfg, level)})` : `ping ${role} (${levelName(ctx.cfg, level)})`;
     const provider = ctx.cfg.levels?.[level]?.provider ?? ctx.cfg.provider;
     if (missingProviders.has(provider)) {
-      rows.push(row(`ping.${role}`, 'FAIL', label, 'ping=skipped(cli-missing)'));
+      rows.push(row(id, 'FAIL', label, 'ping=skipped(cli-missing)'));
       continue;
     }
     if (closedBookRefused(resolvedProvider(ctx.cfg, /** @type {'L0'|'L1'|'L2'|'L3'} */ (level)), role, openBookCodexAllowed(ctx.cfg))) {
-      rows.push(row(`ping.${role}`, 'FAIL', label, CODEX_CLOSED_BOOK_REFUSAL)); // B32: the spawner would refuse it
+      rows.push(row(id, 'FAIL', label, CODEX_CLOSED_BOOK_REFUSAL)); // B32/B46: the spawner would refuse it
       continue;
     }
+    const schemaRole = /** @type {'s2' | 'delegate' | null} */ (role === 's2' || role === 'delegate' ? role : null);
     const res = await session(ctx, {
       role,
       level,
-      prompt: role === 's2' ? `${PING_TEXT}Answer with decision "proceed", confidence 1, reason "ping", overrule false, ask_human false, human_question null.\n` : PING_TEXT,
-      ...(role === 's2' ? { schema: S2_SCHEMA } : {}),
+      prompt: schemaRole ? `${PING_TEXT}${PING_ANSWER[schemaRole]}` : PING_TEXT,
+      ...(schemaRole ? { schema: PING_SCHEMA[schemaRole] } : {}),
       ...(role === 'coder' ? { cwd: await tempRepo(ctx) } : {}),
     });
-    if (skipped402(res)) rows.push(row(`ping.${role}`, 'WARN', label, 'ping=skipped(402)'));
-    else if (res.status === 'ok') rows.push(row(`ping.${role}`, 'OK', label, 'ping=ok'));
-    else if (res.status === 'invalid-output') rows.push(row(`ping.${role}`, 'WARN', label, 'ping=answered (schema mismatch)'));
-    else rows.push(row(`ping.${role}`, 'FAIL', label, `ping=${res.status}(${res.reason ?? 'unknown'})`));
+    if (skipped402(res)) rows.push(row(id, 'WARN', label, 'ping=skipped(402)'));
+    else if (res.status === 'ok') rows.push(row(id, 'OK', label, 'ping=ok'));
+    else if (res.status === 'invalid-output') rows.push(row(id, 'WARN', label, 'ping=answered (schema mismatch)'));
+    else rows.push(row(id, 'FAIL', label, `ping=${res.status}(${res.reason ?? 'unknown'})`));
   }
   return rows;
 }

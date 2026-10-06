@@ -57,7 +57,7 @@ export const CLI = 'claude';
 
 /**
  * @typedef {object} ClaudeBuildParams
- * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"} role
+ * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} role
  * @property {string} model - the resolved model id (already picked by `resolveLevel`, B1).
  * @property {string} [effort] - one of `PROVIDER_EFFORTS.anthropic` (`../efforts.mjs`) when given.
  * @property {string} promptPath - the brief file (coder: passed as a pointer) or the packet file
@@ -86,7 +86,7 @@ export const CLI = 'claude';
 /**
  * @typedef {object} BuiltClosedBook
  * @property {"claude"} cli
- * @property {"reviewer"|"judge"|"s2"|"author"|"facts"} role
+ * @property {"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} role
  * @property {string[]} argv - no prompt positional.
  * @property {string} cwd
  * @property {string} stdinFile - the packet file the spawner pipes to stdin.
@@ -190,7 +190,7 @@ function buildClosedBookArgv(params) {
   assertValidBudget(maxBudgetUsd, 'buildClaudeArgv');
   // The dispatch in `buildClaudeArgv` never reaches this branch with role 'coder' — a runtime
   // invariant the parameter type alone cannot prove, so the narrowing is explicit.
-  const role = /** @type {"reviewer"|"judge"|"s2"|"author"|"facts"} */ (params.role);
+  const role = /** @type {"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} */ (params.role);
   const isFacts = role === 'facts';
   if (isFacts && !hasAnyRenderedRule(renderedForbidden)) {
     throw new Error('buildClaudeArgv: facts role requires a non-empty forbidden-list render (got 0 usable rules)');

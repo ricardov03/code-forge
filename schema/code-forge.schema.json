@@ -306,6 +306,13 @@
         }
       }
     },
+    "autopilot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7, "description": "B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner." }
+      }
+    },
     "telemetry": { "type": "string", "const": "off", "default": "off" }
   },
   "$defs": {

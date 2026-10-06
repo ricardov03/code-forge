@@ -65,7 +65,7 @@ import { CODEX_RULES_FILE_NAME, defaultCodexHome, isInside, prepareCodexHome } f
 import { hasAnyRenderedRule } from '../render-rules.mjs';
 import { assertEffortForProvider, PROVIDER_EFFORTS } from '../efforts.mjs';
 import { assertBaseParams } from './validate-params.mjs';
-import { CODEX_CLOSED_BOOK_REFUSAL, isNoToolRole } from '../../config/closed-book.mjs';
+import { CODEX_CLOSED_BOOK_REFUSAL, isNeverOpenBookRole, isNoToolRole } from '../../config/closed-book.mjs';
 
 export const CLI = 'codex';
 
@@ -104,7 +104,7 @@ export const VALID_EFFORTS = PROVIDER_EFFORTS.openai;
 
 /**
  * @typedef {object} CodexBuildParams
- * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"} role
+ * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} role
  * @property {string} model
  * @property {string} [effort] - one of {@link VALID_EFFORTS} when given.
  * @property {string} promptPath - the brief file (coder: passed as a pointer) or the packet file
@@ -217,14 +217,14 @@ function buildCoderArgv(params) {
 
 /**
  * @param {CodexBuildParams} params
- * @returns {{cli: "codex", role: "reviewer"|"judge"|"s2"|"author"|"facts", argv: string[], cwd: string, outPath: string, stdinFile: string}}
+ * @returns {{cli: "codex", role: "reviewer"|"judge"|"s2"|"author"|"facts"|"delegate", argv: string[], cwd: string, outPath: string, stdinFile: string}}
  */
 function buildClosedBookArgv(params) {
   const { model, effort, promptPath, cwd, schemaPath } = params;
   assertValidEffort(effort);
   // See `builders/claude.mjs`'s identical cast: the dispatch below never reaches this branch with
   // role 'coder'; a no-tools role reaches it only with `allowOpenBook: true` (B32).
-  const role = /** @type {"reviewer"|"judge"|"s2"|"author"|"facts"} */ (params.role);
+  const role = /** @type {"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} */ (params.role);
   const outPath = effectiveOutPath(params.outPath, role);
   const argv = ['codex', 'exec', '-m', model];
   if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
@@ -248,9 +248,10 @@ function buildClosedBookArgv(params) {
  */
 export function buildCodexArgv(params) {
   assertBaseParams('buildCodexArgv', params);
-  if (isNoToolRole(params.role) && params.allowOpenBook !== true) {
+  if (isNoToolRole(params.role) && (params.allowOpenBook !== true || isNeverOpenBookRole(params.role))) {
     // B32: no Codex flag removes the shell, so a no-tools role is built only when the caller
     // passes `allowOpenBook: true` (the config's `review.allow_open_book_codex` opt-in).
+    // B46: the autopilot delegate is never built on Codex, opt-in or not.
     throw Object.assign(new Error(CODEX_CLOSED_BOOK_REFUSAL), { code: 'closed-book' });
   }
   return params.role === 'coder' ? buildCoderArgv(params) : buildClosedBookArgv(params);

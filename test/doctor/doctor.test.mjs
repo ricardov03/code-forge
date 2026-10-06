@@ -147,6 +147,36 @@ describe('doctor full run', () => {
     );
   });
 
+  test('B46: an `autopilot` config section adds one delegate ping per level (L2, L3) with the delegate schema; none without it', async () => {
+    const { proj } = makeProject();
+    const file = path.join(proj, '.code-forge.yml');
+    writeFileSync(file, `${readFileSync(file, 'utf8')}autopilot:\n  min_confidence: 0.8\n`);
+    const answer = { decision: 'proceed', within_scope: true, confidence: 1, reason: 'ping', escalate: false };
+    const d = doctorDeps({ env: { FAKE_ANSWER: JSON.stringify(answer) } });
+    const { doc } = await runJSON(['--cwd', proj], d);
+    assert.deepEqual(
+      doc.rows.filter((/** @type {any} */ r) => r.id.startsWith('ping.')).map((/** @type {any} */ r) => `${r.id}=${r.status}:${r.detail}`),
+      // the s2 ping gets the delegate answer here, so it answers off its schema (WARN)
+      ['ping.facts=OK:ping=ok', 'ping.coder=OK:ping=ok', 'ping.reviewer=OK:ping=ok', 'ping.s2=WARN:ping=answered (schema mismatch)', 'ping.delegate.L2=OK:ping=ok', 'ping.delegate.L3=OK:ping=ok'],
+    );
+    assert.equal(rowById(doc.rows, 'ping.delegate.L2').label, 'ping delegate L2 (anthropic/claude-opus-5-5)');
+  });
+
+  test('B46: an openai L2 FAILs the delegate ping with the refusal even with review.allow_open_book_codex (the reviewer ping runs)', async () => {
+    const { proj } = makeProject();
+    const file = path.join(proj, '.code-forge.yml');
+    const yml = readFileSync(file, 'utf8')
+      .replace('  L2:\n    model: claude-opus-5-5\n', '  L2:\n    provider: openai\n    model: gpt-6-sol\n')
+      .replace('gates:\n', 'review:\n  allow_open_book_codex: true\ngates:\n');
+    writeFileSync(file, `${yml}autopilot: {}\n`);
+    const { doc } = await runJSON(['--cwd', proj], doctorDeps());
+    const refusal = 'codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author';
+    assert.deepEqual(
+      ['ping.reviewer', 'ping.delegate.L2'].map((id) => [rowById(doc.rows, id).status, rowById(doc.rows, id).detail]),
+      [['OK', 'ping=ok'], ['FAIL', refusal]],
+    );
+  });
+
   test('B32 fix 1: L2 gives only a model and the TOP-LEVEL provider is openai — isolation and the reviewer ping FAIL with the refusal (resolveLevel), s2 on anthropic runs', async () => {
     const { proj } = makeProject();
     const file = path.join(proj, '.code-forge.yml');

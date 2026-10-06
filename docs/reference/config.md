@@ -171,4 +171,6 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `keys.<key>` | string |  | — | user-defined key |
 | `tmp` | object |  | — |  |
 | `tmp.root` | string \| null |  | `null` |  |
+| `autopilot` | object |  | — |  |
+| `autopilot.min_confidence` | number |  | `0.7` | min 0; max 1; B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner. |
 | `telemetry` | const `"off"` |  | `"off"` |  |

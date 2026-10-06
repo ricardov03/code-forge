@@ -13,6 +13,10 @@ waits on a second real consumer (plan §10.4, Q17).
   waivers, skipping reviews, any limit or rule change incl. parent keys, plan/design approval, merges, destructive
   actions, budget raises). Signed grant, stop and expire rows; expiry is checked at every command. Coders may not run
   it.
+- `code-forge autopilot ask`: a closed-book delegate (never Codex) answers one owner question inside the grant; every
+  answer is one signed `autopilot.decision` row. It acts only when the question offers at least 2 options, the answer is
+  one of them, it is within scope, does not ask to escalate, and its confidence is at least `autopilot.min_confidence`
+  (default 0.7); otherwise the question goes to the owner (exit 3). `autopilot.*` counts as a limit key.
 
 ## [0.5.1] — 2026-10-04
 

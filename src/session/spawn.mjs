@@ -33,7 +33,8 @@
  * A coder argv that `isForbidden` matches is refused before anything spawns (§8.4). A
  * reviewer/judge/S2/author level on openai is refused too (`closed-book`, B32: Codex always has a
  * shell); an openai fallback step of such a session is skipped with one stderr line. The opt-in
- * `review.allow_open_book_codex: true` lifts both and builds Codex's read-only argv.
+ * `review.allow_open_book_codex: true` lifts both and builds Codex's read-only argv — except for
+ * the autopilot `delegate` (B46), which the opt-in never opens.
  *
  * `background: true` (coders, §5.2): the child is started detached with stdout/stderr going to
  * `<run-root>/sessions/<id>/session.log`, its pid written to `<run-root>/sessions/<id>/pid.json`
@@ -64,7 +65,7 @@ import { readStartTime, registerPid, UNKNOWN_START_TIME } from '../util/reaper.m
 import { redact, writeSafe } from '../util/redact.mjs';
 import { currentRunRoot, pidsDir, runRoot, tmpBase, untrustedReason } from '../util/tmp.mjs';
 
-export const ROLES = Object.freeze(['coder', 'reviewer', 'judge', 's2', 'author', 'facts']);
+export const ROLES = Object.freeze(['coder', 'reviewer', 'judge', 's2', 'author', 'facts', 'delegate']);
 export const LEVELS = Object.freeze(['L0', 'L1', 'L2', 'L3']);
 
 /** Default wall-clock cap of one foreground session. */
@@ -476,7 +477,7 @@ function childEnv(/** @type {NodeJS.ProcessEnv} */ env) {
  * @typedef {object} SessionOpts
  * @property {Record<string, any>} cfg - the loaded project config (levels, provider).
  * @property {"L0"|"L1"|"L2"|"L3"} level
- * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"} role
+ * @property {"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate"} role
  * @property {string} promptPath - the brief (coder) or the packet (closed-book).
  * @property {string} [cwd] - coder: the project tree (default `process.cwd()`); facts (B9b.1): an
  *   existing read-only snapshot of the project to run in, inside `<runRoot>/facts/` or the

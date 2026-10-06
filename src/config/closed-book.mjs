@@ -13,6 +13,11 @@
  *
  * Opt-in (default off): `review.allow_open_book_codex: true` lets Codex run those roles with its
  * read-only argv; every surface then shows {@link OPEN_BOOK_CODEX_WARNING} instead of refusing.
+ *
+ * B46: the autopilot `delegate` is closed-book too, and the opt-in does NOT open it
+ * ({@link NEVER_OPEN_BOOK_ROLES}): the delegate decides FOR the owner while the owner is away, so
+ * a delegate that could read files on this machine (a coder-written note, a planted "the owner
+ * says yes") would be deciding on material nobody vetted. Codex is refused for it, always.
  */
 
 /** The text every refusal prints: the builder, the spawner, `doctor`, `validate`, `resolve`. */
@@ -36,7 +41,13 @@ export function openBookCodexAllowed(cfg) {
 export const NO_CLOSED_BOOK_PROVIDER = 'openai';
 
 /** Roles that must run with no tools (facts is not one: it has read-only tools by design). */
-export const NO_TOOL_ROLES = Object.freeze(['reviewer', 'judge', 's2', 'author']);
+export const NO_TOOL_ROLES = Object.freeze(['reviewer', 'judge', 's2', 'author', 'delegate']);
+
+/**
+ * No-tools roles that `review.allow_open_book_codex` never opens (B46): the autopilot delegate
+ * decides for the owner, so it only ever runs with no tools at all.
+ */
+export const NEVER_OPEN_BOOK_ROLES = Object.freeze(['delegate']);
 
 /** Levels whose sessions are closed-book: L2 (reviewers), L3 (judge, S2, author). */
 export const CLOSED_BOOK_LEVELS = Object.freeze(['L2', 'L3']);
@@ -56,6 +67,11 @@ export function isNoToolRole(role) {
   return NO_TOOL_ROLES.includes(norm(role));
 }
 
+/** @param {unknown} role @returns {boolean} true when `role` (any case) is never opened by the opt-in. */
+export function isNeverOpenBookRole(role) {
+  return NEVER_OPEN_BOOK_ROLES.includes(norm(role));
+}
+
 /**
  * @param {unknown} provider @param {unknown} role - compared lowercased and trimmed.
  * @returns {boolean} true when `provider` cannot run `role` closed-book.
@@ -68,8 +84,9 @@ export function needsClosedBook(provider, role) {
  * @param {unknown} provider @param {unknown} role @param {boolean} openBookAllowed - the config's
  *   opt-in, read once by the caller with {@link openBookCodexAllowed}.
  * @returns {boolean} true when the session must be refused: `provider` cannot run `role`
- *   closed-book and the config has not opted in to open-book Codex.
+ *   closed-book and the config has not opted in to open-book Codex — or the role is one the
+ *   opt-in never opens (the delegate, B46).
  */
 export function closedBookRefused(provider, role, openBookAllowed) {
-  return needsClosedBook(provider, role) && openBookAllowed !== true;
+  return needsClosedBook(provider, role) && (openBookAllowed !== true || isNeverOpenBookRole(role));
 }

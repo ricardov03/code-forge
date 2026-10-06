@@ -45,14 +45,14 @@ test('the vocabulary: 4 allowable scopes, 9 fixed-deny scopes, no overlap', () =
   assert.deepEqual([...FIXED_DENY_SCOPES], ['waive:critical', 'waive:proof', 'reviews:skip', 'limits:change', 'plan:approve', 'design:approve', 'pr:merge', 'destructive', 'budget:raise']);
   assert.equal(ALLOWABLE_SCOPES.filter((s) => FIXED_DENY_SCOPES.includes(s)).length, 0);
   // a limit key, a key under one, and a PARENT of one (replacing `review` replaces its limits) are all covered
-  const keys = ['', 'review', 'budget', 'thresholds', 'review.max_rounds_per_file', 'budget.usd', 'review.allow_open_book_codex', 'thresholds.x', 'production', 'project.slug', 'review.session_timeout_s', 'budgetx', 'levels.L2.model', 'levels'];
+  const keys = ['', 'review', 'budget', 'thresholds', 'review.max_rounds_per_file', 'budget.usd', 'review.allow_open_book_codex', 'thresholds.x', 'production', 'project.slug', 'review.session_timeout_s', 'budgetx', 'levels.L2.model', 'levels', 'autopilot.min_confidence', 'autopilotx'];
   assert.deepEqual(
     keys.filter((k) => isLimitKey(k)),
-    ['', 'review', 'budget', 'thresholds', 'review.max_rounds_per_file', 'budget.usd', 'review.allow_open_book_codex', 'thresholds.x', 'production'],
+    ['', 'review', 'budget', 'thresholds', 'review.max_rounds_per_file', 'budget.usd', 'review.allow_open_book_codex', 'thresholds.x', 'production', 'autopilot.min_confidence'],
   );
   assert.equal(
     FIXED_DENY['limits:change'],
-    'change a limit or rule key (budget.*, review.budgets, review.block_budget_tokens, review.block_budget_usd, review.max_rounds_per_file, review.single_reviewer_max_risk, review.multimodel, review.closed_book, review.allow_open_book_codex, thresholds.*, escalation.*, proof.*, system1.*, production.*)',
+    'change a limit or rule key (budget.*, review.budgets, review.block_budget_tokens, review.block_budget_usd, review.max_rounds_per_file, review.single_reviewer_max_risk, review.multimodel, review.closed_book, review.allow_open_book_codex, thresholds.*, escalation.*, proof.*, system1.*, production.*, autopilot.*)',
   );
 });
 
@@ -61,7 +61,7 @@ test('every fixed-deny scope in --allow is refused at start, naming the scope (9
     'waive:critical': 'waive a critical finding',
     'waive:proof': 'waive a proof finding',
     'reviews:skip': 'close a block without its reviews (--no-require-reviews)',
-    'limits:change': 'change a limit or rule key (budget.*, review.budgets, review.block_budget_tokens, review.block_budget_usd, review.max_rounds_per_file, review.single_reviewer_max_risk, review.multimodel, review.closed_book, review.allow_open_book_codex, thresholds.*, escalation.*, proof.*, system1.*, production.*)',
+    'limits:change': 'change a limit or rule key (budget.*, review.budgets, review.block_budget_tokens, review.block_budget_usd, review.max_rounds_per_file, review.single_reviewer_max_risk, review.multimodel, review.closed_book, review.allow_open_book_codex, thresholds.*, escalation.*, proof.*, system1.*, production.*, autopilot.*)',
     'plan:approve': 'approve a plan',
     'design:approve': 'approve a design',
     'pr:merge': 'merge a pull request',

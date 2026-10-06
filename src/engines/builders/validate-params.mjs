@@ -7,10 +7,10 @@
  */
 
 /**
- * The six roles the plan's engine adapters section (§5.2) declares.
- * @type {ReadonlyArray<"coder"|"reviewer"|"judge"|"s2"|"author"|"facts">}
+ * The six roles the plan's engine adapters section (§5.2) declares, plus the autopilot `delegate` (B46, closed-book).
+ * @type {ReadonlyArray<"coder"|"reviewer"|"judge"|"s2"|"author"|"facts"|"delegate">}
  */
-export const VALID_ROLES = Object.freeze(/** @type {const} */ (['coder', 'reviewer', 'judge', 's2', 'author', 'facts']));
+export const VALID_ROLES = Object.freeze(/** @type {const} */ (['coder', 'reviewer', 'judge', 's2', 'author', 'facts', 'delegate']));
 
 /**
  * @param {string} builderName - for the thrown message, e.g. `"buildClaudeArgv"`.

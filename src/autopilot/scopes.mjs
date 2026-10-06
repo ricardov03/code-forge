@@ -43,6 +43,8 @@ export const LIMIT_KEYS = Object.freeze([
   'proof',
   'system1',
   'production',
+  // B46: lowering `autopilot.min_confidence` lets the delegate act on weaker answers
+  'autopilot',
 ]);
 
 /** @param {string} keyPath @returns {boolean} whether changing `keyPath` is a `limits:change`. */

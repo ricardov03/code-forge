@@ -1,12 +1,18 @@
 /**
- * `code-forge autopilot start|status|stop` (issue #5, block B45). The OWNER runs these (a coder
- * never may: `autopilot` is on the coder-only forbidden list).
+ * `code-forge autopilot start|status|stop|ask` (issue #5, blocks B45, B46). The OWNER (and the
+ * orchestrator on the owner's behalf) runs these — a coder never may: `autopilot` is on the
+ * coder-only forbidden list.
  *
  *   autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…>
  *                   [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]
  *   autopilot status --run <id> [--json]
  *   autopilot stop --run <id>
+ *   autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--json]
  *
+ * `ask` (B46) puts one question to the delegate (`src/autopilot/delegate.mjs`): exit 0 when the
+ * answer is acted on, 3 when the question goes to the owner (answered but not acted, or the
+ * session failed — one signed `autopilot.decision` row either way), 1 when the grant refuses
+ * (no grant, expired, stopped, denied, not allowed: no session, no row), 2 for usage.
  * `start` grants a delegate the listed scopes until `--until` (at most 24 h ahead). It asks for
  * confirmation on a terminal; without one it is refused unless `--yes` is given. Scopes outside
  * the vocabulary, or on the fixed deny list, are refused by name (`src/autopilot/scopes.mjs`).
@@ -15,7 +21,12 @@
  */
 
 import { activeGrantMessage, checkExpiry, expiredMessage, grantState, startGrant, stopGrant, validateGrantInput } from '../autopilot/grant.mjs';
+import { askDelegate } from '../autopilot/delegate.mjs';
 import { FIXED_DENY_SCOPES } from '../autopilot/scopes.mjs';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
+import { loadProjectConfig } from '../config/load.mjs';
+import { SessionError } from '../session/spawn.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
@@ -26,16 +37,86 @@ import { writeSafe } from '../util/redact.mjs';
  *   stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown},
  *   now?: () => Date, isTTY?: boolean, ui?: any,
  *   writeRow?: (row: Record<string, any>) => Promise<unknown>,
- * }} AutopilotDeps
+ *   cwd?: string, session?: import('../session/spawn.mjs').SessionDeps,
+ * }} AutopilotDeps - `cwd`: where `ask` loads the project config when the run has no snapshot;
+ *   `session`: the spawner seams (`bins`, `env`, `exec`, …) for `ask` (tests: the fake CLIs).
  */
 
-const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop']);
+const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop', 'ask']);
 
 const FLAG_SPECS = Object.freeze({
   start: { values: ['run', 'until', 'delegate', 'allow', 'deny', 'budget', 'stop-at'], booleans: ['yes'] },
   status: { values: ['run'], booleans: ['json'] },
   stop: { values: ['run'] },
+  ask: { values: ['run', 'scope', 'question', 'options', 'context-file'], booleans: ['json'] },
 });
+
+/** `--options a,b,…` → the trimmed, non-empty items. @param {unknown} text @returns {string[] | undefined} */
+const optionList = (text) => (typeof text === 'string' ? text.split(',').map((s) => s.trim()).filter((s) => s.length > 0) : undefined);
+
+/**
+ * `autopilot ask`: one delegate question.
+ * @param {string} runId @param {Record<string, any>} flags @param {AutopilotDeps} deps
+ * @param {(s: string) => void} out
+ * @returns {Promise<number>} 0 acted, 3 to the owner, 1 refused
+ */
+async function runAsk(runId, flags, deps, out) {
+  if (typeof flags.scope !== 'string' || flags.scope.trim().length === 0) throw new StateError('usage', 'autopilot ask needs --scope <scope>');
+  if (typeof flags.question !== 'string' || flags.question.trim().length === 0) throw new StateError('usage', 'autopilot ask needs --question <text>');
+  const options = optionList(flags.options);
+  // `--options ","` parses to nothing: refused here, never sent on as an open (no-options) question
+  if (options !== undefined && options.length === 0) throw new StateError('usage', '--options needs at least 2 distinct options, e.g. --options waive,fix');
+  /** @type {string | undefined} */
+  let context;
+  if (typeof flags['context-file'] === 'string') {
+    try {
+      context = await readFile(path.resolve(deps.cwd ?? process.cwd(), flags['context-file']), 'utf8');
+    } catch {
+      throw new StateError('usage', `--context-file ${flags['context-file']} cannot be read`); // the path only, never content
+    }
+  }
+  /** @type {Record<string, any> | undefined} */
+  let cfg;
+  try {
+    const loaded = await loadProjectConfig(deps.cwd ?? process.cwd());
+    cfg = loaded.ok ? loaded.config : undefined; // only used when the run has no config snapshot
+  } catch {
+    cfg = undefined;
+  }
+  const res = await askDelegate(
+    { runId, scope: flags.scope.trim(), question: flags.question, options, context, cfg },
+    { ...(deps.session ?? {}), stderr: deps.stderr ?? deps.session?.stderr, writeRow: deps.writeRow, ...(deps.now ? { now: deps.now } : {}) },
+  );
+  const code = res.acted ? 0 : res.row === null ? 1 : 3;
+  const answer = res.answer;
+  if (flags.json) {
+    out(
+      `${JSON.stringify({
+        run: runId,
+        scope: flags.scope,
+        grant_id: res.grant_id,
+        answered: res.answered,
+        acted: res.acted,
+        to_owner: res.to_owner,
+        reason: res.reason,
+        decision: answer?.decision ?? null,
+        confidence: answer?.confidence ?? null,
+        within_scope: answer?.within_scope ?? null,
+        escalate: answer?.escalate ?? null,
+        answer_reason: answer?.reason ?? null,
+      })}\n`,
+    );
+    return code;
+  }
+  if (code === 1) {
+    out(`autopilot ask run ${runId}: refused (${res.reason}) — no session; the question goes to the owner\n`);
+    return code;
+  }
+  const head = res.acted ? 'acted' : `to the owner (${res.reason})`;
+  out(`autopilot ask run ${runId}: ${head}\n`);
+  if (answer) out(`  decision  ${answer.decision} · confidence ${answer.confidence} · within scope ${answer.within_scope} · escalate ${answer.escalate}\n  reason    ${answer.reason}\n`);
+  return code;
+}
 
 /**
  * Time left as `<h>h <m>m` (whole minutes, rounded down).
@@ -122,6 +203,7 @@ export async function runAutopilot(args, deps = {}) {
     if (positionals.length > 0) throw new StateError('usage', `unexpected argument ${JSON.stringify(positionals[0])}`);
     if (typeof flags.run !== 'string') throw new StateError('usage', `autopilot ${sub} needs --run <id>`);
     const runId = flags.run;
+    if (sub === 'ask') return await runAsk(runId, flags, deps, out);
     const now = clock();
 
     if (sub === 'status') {
@@ -168,12 +250,15 @@ export async function runAutopilot(args, deps = {}) {
     return 0;
   } catch (thrown) {
     err(`autopilot ${sub}: ${thrown?.message ?? String(thrown)}\n`);
-    return thrown instanceof StateError && thrown.code === 'usage' ? 2 : 1;
+    // `ask` only: an unknown --scope and a malformed question/options are usage; start/status/stop keep B45's codes
+    const askUsage = sub === 'ask' && ((thrown instanceof StateError && thrown.code === 'unknown-scope') || (thrown instanceof SessionError && thrown.code === 'usage'));
+    const usageError = (thrown instanceof StateError && thrown.code === 'usage') || askUsage;
+    return usageError ? 2 : 1;
   }
 }
 
 const USAGE =
-  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id>\n';
+  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--json]\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function autopilot(args) {

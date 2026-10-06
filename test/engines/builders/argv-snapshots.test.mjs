@@ -317,7 +317,7 @@ test('Codex rejects an effort outside VALID_EFFORTS', () => {
 
 const CODEX_REFUSAL = 'codex cannot run closed-book yet: it always has a shell; use anthropic or xai for reviewer, judge, S2 and plan author';
 
-test('B32 Codex refuses each of the 4 no-tools roles with the exact refusal (code closed-book); facts and coder still build', () => {
+test('B32 Codex refuses each of the 5 no-tools roles (B46: + delegate) with the exact refusal (code closed-book); facts and coder still build', () => {
   assert.equal(CODEX_CLOSED_BOOK_REFUSAL, CODEX_REFUSAL);
   const refused = [];
   for (const role of VALID_ROLES) {
@@ -329,7 +329,15 @@ test('B32 Codex refuses each of the 4 no-tools roles with the exact refusal (cod
       refused.push(role);
     }
   }
-  assert.deepEqual(refused, ['reviewer', 'judge', 's2', 'author']);
+  assert.deepEqual(refused, ['reviewer', 'judge', 's2', 'author', 'delegate']);
+});
+
+test('B46 the delegate is refused on Codex even with allowOpenBook (the opt-in never opens it); reviewer builds with it', () => {
+  assert.throws(
+    () => buildCodexArgv({ role: 'delegate', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', outPath: '/tmp/o.json', allowOpenBook: true }),
+    { message: CODEX_REFUSAL, code: 'closed-book' },
+  );
+  assert.equal(buildCodexArgv({ role: 'reviewer', model: 'gpt-6-astra', promptPath: '/p', cwd: '/c', outPath: '/tmp/o.json', allowOpenBook: true }).role, 'reviewer');
 });
 
 test('Codex facts argv: the exact closed-book token list (read-only, ephemeral, ignore-rules, ignore-user-config, schema, -o, stdin)', () => {
@@ -470,7 +478,7 @@ test('every builder refuses a missing role, model, promptPath or cwd', () => {
 });
 
 test('every builder throws (never silently falls back to closed-book) for an UNKNOWN role — a typo, a level name, a number', () => {
-  assert.deepEqual([...VALID_ROLES], ['coder', 'reviewer', 'judge', 's2', 'author', 'facts']);
+  assert.deepEqual([...VALID_ROLES], ['coder', 'reviewer', 'judge', 's2', 'author', 'facts', 'delegate']);
   for (const build of [buildClaudeArgv, buildCodexArgv, buildGrokArgv]) {
     for (const badRole of ['reviwer', 'L2', 'Coder', '', 42, null, undefined]) {
       assert.throws(
