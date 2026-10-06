@@ -39,6 +39,11 @@ Coding agents are good at writing code. The workflow around them is where things
   warnings moves the next fix one level up at once, instead of three more cheap tries.
 - **A spend limit you set.** Each session's estimated cost is in the ledger. `budget.usd` stops new
   sessions when a run reaches it.
+- **You keep the rules.** The orchestrator never relaxes a limit, a threshold, a gate or a review
+  requirement on its own. A checked plan waits for your approval in the harness's plan mode.
+- **Step away safely.** An autopilot grant lets a delegate make a few of your decisions for a set
+  time, inside a fixed deny list, and a live log records each one
+  ([autopilot.md](autopilot.md)).
 - **The coder's report is a claim sheet.** `block close` re-measures everything itself: files
   touched, reviews signed, gates green, clauses covered, line forecast, and red→green proof for
   high-tier files.
@@ -50,7 +55,7 @@ Coding agents are good at writing code. The workflow around them is where things
 | Job | What happens | Output |
 |---|---|---|
 | **Plan** | An L0 delegate checks every claim in the brief against the repository (the *facts sheet*). The plan author, always an L3 session (`code-forge author --job plan`), drafts a plan split into blocks. | `plans/<name>.facts.md`, `plans/<name>.plan.md` |
-| **Harden** | The same L3 author (`--job harden`) asks the hard questions. You answer. `code-forge plan check` must be green. | a hardened plan |
+| **Harden** | The same L3 author (`--job harden`) asks the hard questions. You answer. `code-forge plan check` must be green, then you approve the plan in the harness's plan mode. | a hardened, approved plan |
 | **Code** | One coder per block at the level System 1 picks (L0–L2). Each finished file gets its own review. `block close` is the gate. | one commit per block, ledger rows, a report |
 
 In the skill: `/code-forge plan|harden|code|full <file>`. `full` runs all three with one human

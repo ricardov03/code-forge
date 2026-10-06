@@ -13,7 +13,8 @@ flowchart TD
   harden --> lanes["jev ask lane --block<br/>one lane per block"]
   lanes --> check{"plan check<br/>green?"}
   check -- no --> harden
-  check -- yes --> start["run start<br/>launches the worker"]
+  check -- yes --> approve["owner approves the plan<br/>in the harness's plan mode"]
+  approve --> start["run start<br/>launches the worker"]
   start --> open["block open<br/>base sha, owned files, level, clauses"]
   open --> coder["coder writes one file<br/>at the level S1 picked"]
   coder --> rf["review-file (queued)<br/>worker: tools → S1 risk → fresh L2 review"]
@@ -37,6 +38,7 @@ flowchart TD
 | 3 | Harden | `code-forge author --job harden --brief … --facts … --draft plans/<name>.plan.md --answers <file> --out plans/<name>.plan.md` | a new draft; repeat until no blocking question is left |
 | 4 | Lanes | `code-forge jev ask lane --block B1 --plan plans/<name>.plan.md --state <file>` per block (add `--rules` without Jev) | a `decision` row with the block's lane. The plan's level for the block must match it |
 | 5 | Plan check | `code-forge plan check plans/<name>.plan.md` | `plan check: ok (<n> blocks)` or one line per failing rule, exit 1; then `lanes: B1 L1 (jev) · B2 L0 (rules)` |
+| 5a | Approval | under the skill: the orchestrator shows the checked plan in the harness's plan mode (Claude Code: EnterPlanMode → ExitPlanMode) | your yes. No block starts before it. A harness without a plan mode shows the plan and waits for an explicit yes |
 | 6 | Run start | `code-forge run start --run <run>` | `run <run> started · engine <e> · worker pid <n>`, a per-run signing key, the review worker |
 | 7 | Block open | `code-forge block open B1 --run <run> --level L1 --owned <paths…> --acceptance <file> --brief <file> --lines <n>` (`--kind docs` for a docs block) | a `dispatch` ledger row and the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>` for the coder |
 | 8 | Code | the engine starts the coder with the pointer | the coder replies `ACK <sha8> lines=<n>`, then its facts diff and forecast, then code, file by file |
@@ -66,8 +68,14 @@ at the right place, passes with a `WARN` that names the exact heading.
 
 Every session row in the ledger carries an estimated `usd`. With `budget.usd` set, each new session
 first adds up the run's spend: at 80% one warning, at 100% the session is refused. `run status`
-and `report` show the spend; `ledger add coder --usd <n>` adds spend code-forge did not see. See
-[getting-started.md](getting-started.md#set-a-budget).
+and `report` show the spend; `ledger add coder --usd <n>` adds spend code-forge did not see.
+Sessions that run together each reserve their estimated cost first, so they cannot spend past the
+budget together (see [Several files at once](#several-files-at-once)).
+
+The orchestrator watches the spend during the whole run, not only at the end: it reads `run
+status` after every block close and records cloud or hand-run coder spend at once. When the
+budget stops work, it shows you the numbers and waits. Only you raise `budget.usd`, at most once
+per run. See [getting-started.md](getting-started.md#set-a-budget).
 
 ### Changing the config mid-run
 
@@ -83,7 +91,18 @@ edit the file and run `code-forge run reload --run <run>`:
   config they were enqueued with, new tickets use the new one, and the worker picks it up without
   a restart;
 - `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key` and `version` are fixed for the run:
-  a change to one is refused with the key's name. End the run and start a new one to change them.
+  a change to one is refused with the key's name. End the run and start a new one to change them;
+- while an autopilot grant is active, a change to any limit key (budgets, thresholds, review caps,
+  escalation, proof, System 1, `autopilot.*`) is refused. Only you change one, with
+  `code-forge autopilot approve`.
+
+### When you step away: autopilot
+
+You can let a run go on while you are away. `code-forge autopilot start` grants a delegate (a
+fresh closed-book L2 or L3 session) a few of your decisions for a set time: waive a warning or a
+nit, one extra fix round, the coder level. Every other question that would reach you waits for
+you. One live log (a Claude Docs page in Claude Code, or two Markdown files elsewhere) records
+every decision for your return. See [autopilot.md](autopilot.md).
 
 ### Review only
 
@@ -169,7 +188,7 @@ flowchart TD
   done -- no --> cap{"round ≥ 4<br/>(review cap)?"}
   cap -- "yes, rung unused" --> rung["L3 rung, once per block<br/>patch ≤ 80 lines, owned files"]
   cap -- "yes, rung already used" --> stopcap["stopped: review_cap<br/>the human decides"]
-  cap -- no --> trig{"stall, or 2 rounds<br/>at this level?"}
+  cap -- no --> trig{"heavy round, stall,<br/>or 2 rounds at this level?"}
   trig -- no --> rn
   trig -- "yes, below L2" --> up["fresh coder one level up<br/>(L0→L1→L2)"]
   up --> rn
@@ -226,6 +245,25 @@ higher, at most L2), and an S2 ruling. A docs or contract block is never coded b
 
 A file is **high tier** when S1 risk ≥ 2, when it matches `proof.tiers.high.paths`, or when it is
 security-sensitive. Everything else is **light tier**.
+
+### Rules the orchestrator keeps
+
+These come from real runs. The skill states each one (`skill/references/`):
+
+- **Never relax a rule alone.** The orchestrator, and the autopilot delegate, never change, relax
+  or remove a limit, threshold, budget, gate, forbidden command or review requirement, and never
+  patch a check to make it pass. When a limit blocks work, it stops, shows you the data, proposes
+  options and waits (rule R17).
+- **Plan approval in plan mode.** A checked plan is shown to you in the harness's plan mode before
+  any block starts.
+- **Levels come from the lane.** A block's level is the lane recorded with `jev ask lane`, never a
+  category the plan author picks.
+- **Climb early.** A heavy round climbs the coder at once; a coder never spends three rounds at one
+  level.
+- **L0 never codes docs or contracts.** Those blocks start at `levels.coder_floor_docs` (L1).
+- **Review cost is bounded.** One reviewer for risk 0–1; no multimodel review for docs blocks.
+- **Coder reports fail closed.** A report with no review ticket id for a changed file is FAILED.
+- **Cost is watched all the time.** `budget.usd` per run, spend read after every block.
 
 ## Who does what
 
@@ -288,7 +326,7 @@ the plan file. See `skill/references/continuity.md`.
 - **Coders get no keys.** A coder process receives neither the Jev key nor the signing key.
 - **One forbidden list, rendered per harness.** Force pushes, `git reset --hard`, `git stash`,
   `rm -rf` outside `.code-forge/`, reading `~/.code-forge/runs/`, starting a worker, `run start`, `run reload`,
-  `block waive`, writing review results, and more. It becomes each CLI's own deny rules
+  `block waive`, `autopilot`, writing review results, and more. It becomes each CLI's own deny rules
   (`--disallowedTools` for Claude, an execpolicy rules file plus prose for Codex), is copied into
   every brief, and is grepped from every transcript at `block close`. A hit is a `rule_break`.
 - **Signed rows.** Every gate-relevant ledger row carries an HMAC made with the per-run key. A

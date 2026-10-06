@@ -8,17 +8,35 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new (next release)
+## What's new in 0.6
+
+Next release (0.6.1):
+
+- **Never relax a rule alone.** A new skill rule (R17): the orchestrator and the delegate never
+  change, relax or remove a limit, threshold, budget, gate or review requirement. When a limit
+  blocks work they stop, show the data, propose options and wait for you.
+
+In 0.6.0:
 
 - **Autopilot.** Step away for up to 24 hours. `code-forge autopilot start` grants a delegate (a
-  fresh L2 or L3 session) a few of your decisions: waive a warning or a nit, one extra fix round,
-  the coder level. A fixed deny list keeps the rest yours: critical waivers, plan and design
-  approval, limits, budget raises, merges, destructive actions. Each category can pause at a
-  budget stop, and every answer is a signed ledger row.
+  fresh closed-book L2 or L3 session, never Codex) a few of your decisions: waive a warning or a
+  nit, one extra fix round past the review cap, the coder level. The orchestrator asks the
+  delegate first (`autopilot ask`) and acts only on an answer it acted on. A fixed deny list in
+  the code keeps the rest yours: critical and proof waivers, skipping reviews, plan and design
+  approval, any limit or rule change, budget raises, merges, destructive actions. Every answer is
+  a signed ledger row; each waiver opens a GitHub issue. See [docs/autopilot.md](docs/autopilot.md).
+- **Budget per category.** `--budget review=<usd>,coding=<usd>` pauses a category at `--stop-at`
+  (default 0.9) of its cap until you return. `autopilot approve` (only you, at a terminal) changes
+  one setting until a time and puts it back by itself. While a grant is active, `run reload`
+  refuses any limit key.
 - **A live log for your return.** In Claude Code the orchestrator keeps one Claude Docs page per
-  run with two tabs: Binnacle (the summary) and Full log (every event, newest first).
-  `autopilot status` and `autopilot stop` print its link; without the connector they print the two
-  Markdown files. See [docs/autopilot.md](docs/autopilot.md).
+  run with two tabs: Binnacle (status at a glance, decisions, blocks, open questions, actions only
+  you can take, incidents, timeline) and Full log (every event, newest first). `autopilot status`
+  and `autopilot stop` print its link; without the connector they print two Markdown files in the
+  run dir (`autopilot binnacle`, `autopilot log`).
+- **From 0.5.x, not listed before:** two files of one block can no longer both take the block's one
+  L3 patch rung (0.5.0), and a maintainer can install a tagged release before it is on npm
+  ([getting-started](docs/getting-started.md#keeping-it-up-to-date), 0.5.1).
 
 ## What's new in 0.5
 
@@ -143,7 +161,7 @@ usage line.
 | `validate` | `code-forge validate [--file <path>]` |
 | `resolve` | `code-forge resolve <L0\|L1\|L2\|L3>` |
 | `run` | `code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]` · `run start --reattach --run <id> [--worker-pid <pid>]` · `run status --run <id>` (with spent and budget USD) · `run reload --run <id>` (re-read `.code-forge.yml` mid-run) · `run end --run <id>` |
-| `block` | `code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code\|docs\|contract]` · `block attempt\|rebase <id> --run <r>` · `block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews]` · `block claim <id> <path> --run <r>` · `block stop <id> --run <r> --reason <text>` · `block waive <id> <finding-id> --run <r> --file <path> --reason <text>` (human-only) |
+| `block` | `code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code\|docs\|contract]` · `block attempt\|rebase <id> --run <r>` · `block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews]` · `block claim <id> <path> --run <r>` · `block stop <id> --run <r> --reason <text>` · `block waive <id> <finding-id> --run <r> --file <path> --reason <text>` (human-only) |
 | `worker` | `code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]` — started detached by `run start`, never by a coder |
 | `review` | `code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> \| --intent "<text>"] [--run <id>] [--max <seconds>] [--json] [--keep-run]` — review only: no coder, no proof, never closes a block |
 | `review-file` | `code-forge review-file <path> --block <id> [--run <id>]` (enqueue) · `review-file --wait <ticket> [--max <seconds>s]` (poll, default 90s; still running at `--max` prints `status: pending, reason: wait_timeout`) |
@@ -164,7 +182,7 @@ usage line.
 | `upgrade` | `code-forge upgrade [--source <path>]` |
 | `logs` | `code-forge logs [--last N] [--json]` · `logs summary [--days N] [--json]` · `logs clear [--yes]` · `logs path` — the local error log (`~/.code-forge/logs/errors.jsonl`): errors, warnings, and `[fixed in X.Y.Z]` marks |
 | `logs report` | `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]` — share selected errors as a public GitHub issue; you see the full text first and say yes once. An error a newer version fixes is not filed unless `--force` |
-| `autopilot` | `code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2\|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]` · `autopilot status\|stop --run <id>` (print the live log's link, or the two Markdown files) · `autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--block <id>] [--file <path>] [--finding <id>] [--json]` · `autopilot waive\|round\|level … --decision <id>` · `autopilot approve --run <id> --key <dot.path> --value <json> --until <time>` (owner only, at a terminal) · `autopilot binnacle --run <id> [--json\|--markdown] [--link <https url>]` · `autopilot log --run <id> [--json\|--markdown]` — the owner's time-boxed grant to a delegate; see [docs/autopilot.md](docs/autopilot.md) |
+| `autopilot` | `code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2\|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]` · `autopilot status --run <id> [--json]` · `autopilot stop --run <id>` (both print the live log's link, or the two Markdown files) · `autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json]` · `autopilot waive\|round\|level … --decision <id>` · `autopilot approve --run <id> --key <dot.path> --value <json> --until <time>` (owner only, at a terminal) · `autopilot binnacle --run <id> [--json\|--markdown] [--link <https url>]` · `autopilot log --run <id> [--json\|--markdown]` — the owner's time-boxed grant to a delegate; see [docs/autopilot.md](docs/autopilot.md) |
 | `help` / `version` | `code-forge --help` (or no verb) · `code-forge --version` |
 
 `run`, `block`, `worker`, `spawn`, `s2`, `author`, `facts` and `review-file` are what the Agent
@@ -203,7 +221,8 @@ CLI verbs like any other and every one of them is exercised by this package's ow
 
 `schema/code-forge.schema.json` is the source of truth for `.code-forge.yml`.
 [docs/reference/config.md](docs/reference/config.md) lists every key with its type and default.
-Keys added in 0.4 and 0.5 (the last two rows are new in 0.5):
+Keys added in 0.4, 0.5 and 0.6 (`review.parallel_tickets` and `review.provider_concurrency` are
+new in 0.5, `autopilot.min_confidence` in 0.6):
 
 | Key | Default | What it does |
 |---|---|---|
@@ -217,6 +236,7 @@ Keys added in 0.4 and 0.5 (the last two rows are new in 0.5):
 | `review.session_timeout_s` | `300` | a review session that runs longer is killed and retried once |
 | `review.parallel_tickets` | `3` | review tickets the worker runs at once (1 to 16); `1` reviews one file at a time |
 | `review.provider_concurrency` | anthropic `4`, openai `2`, xai `2` | review sessions at once per provider |
+| `autopilot.min_confidence` | `0.7` | the lowest delegate confidence that is acted on; below it the question goes to you |
 
 `code-forge block open … --kind code|docs|contract` sets a block's kind when its file endings do
 not say it. The reference page is generated:

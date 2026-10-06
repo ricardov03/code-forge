@@ -14,7 +14,7 @@ import { REFERENCES_DIR, ROOT, SKILL_DIR, listSkillFiles, readSkillFile, section
 
 const SKILL_MAX_LINES = 120;
 const SKILL_PLUS_CORE_MAX_LINES = 200;
-const RULE_COUNT = 16;
+const RULE_COUNT = 17;
 const SURVIVOR_ROWS = 14;
 
 /** The files the B14 row owns under `skill/` — exactly these, no more (a stray file is a finding). */
@@ -136,7 +136,7 @@ test(`SKILL.md §4 lists ${RULE_COUNT} rules and they equal rules-core.md's head
   assert.equal(headings.length, RULE_COUNT);
   assert.deepEqual(listed, headings);
   assert.equal(listed[0].startsWith('R1 —'), true);
-  assert.equal(listed[RULE_COUNT - 1].startsWith('R16 —'), true);
+  assert.equal(listed[RULE_COUNT - 1].startsWith('R17 —'), true);
 });
 
 test('SKILL.md §3 names `forge facts` at a lower index than `forge author` (facts before design)', async () => {
@@ -271,4 +271,18 @@ test('B49b: every owner stop in the skill carries its Autopilot note (5 files, o
   }
   assert.deepEqual(counts, { 'references/decisions.md': 1, 'references/review.md': 2, 'references/harden.md': 1, 'references/plan.md': 1, 'references/code.md': 1 });
   assert.match(await readSkillFile('references/decisions.md'), /\*\*Autopilot:\*\* while a grant is active, a warning or nit waiver, one extra round at `review_cap` and a coder level go first to the delegate/);
+});
+
+test('B51: R17 "Never relax a rule alone" is in rules-core.md, SKILL.md §4, autopilot.md §5 and decisions.md §7', async () => {
+  const core = await readSkillFile('references/rules-core.md');
+  assert.match(core, /^# Core rules — seventeen, each with its why$/m);
+  assert.equal(core.split('### R17 — Never relax a rule alone').length - 1, 1);
+  assert.match(core, /When a limit blocks work: stop, show the data, propose options, wait\./);
+  assert.match(core, /only the owner's own `forge autopilot approve`/);
+  const skill = await readSkillFile('SKILL.md');
+  assert.equal(section(skill, 4).split('- **R17** Never relax a rule alone').length - 1, 1);
+  const autopilot = section(await readSkillFile('references/autopilot.md'), 5);
+  assert.equal(autopilot.split('`rules-core.md` R17').length - 1, 1);
+  const decisions = section(await readSkillFile('references/decisions.md'), 7);
+  assert.equal(decisions.split('`rules-core.md` R17').length - 1, 1);
 });

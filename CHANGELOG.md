@@ -6,6 +6,13 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Skill rule R17 "Never relax a rule alone": the orchestrator and any delegate never change, relax or remove a limit,
+  threshold, budget, forbidden entry, gate or review requirement without the owner; when a limit blocks work they stop,
+  show the data, propose options and wait. The skill also asks to supervise cost continuously (budget.usd, spend after
+  every block close).
+
 ## [0.6.0] — 2026-10-06
 
 ### Added

@@ -169,3 +169,10 @@ error log, the warnings and the command list (breadcrumbs). Nothing is written t
 
 Run `code-forge logs clear` (it asks first; `--yes` skips the question), or delete the folder
 `~/.code-forge/logs/`. `code-forge logs path` prints where the log is.
+
+## The autopilot log
+
+An autopilot run keeps its own record: a Claude Docs page (private to you until you share it) or
+two Markdown files in the run dir (mode 0600). It is written from the ledger and cleaned with the
+same rules as the error log. It is not part of an error report. See
+[autopilot.md](autopilot.md#privacy).

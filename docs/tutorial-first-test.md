@@ -204,6 +204,10 @@ tolerance: B1 …` or `block B2: level L1 has no recorded lane decision — …`
 the lane) and run it again. A `WARN` line about a heading means a section heading is close to the
 template's but not exact; it does not fail the check, but use the exact heading it names.
 
+**Approve the plan.** Under the skill, the orchestrator now shows you the checked plan in the
+harness's plan mode and starts no block before your yes. By hand, you are the owner: read
+`plans/site.plan.md` and approve it yourself before you start the run.
+
 ## 6. Start the run
 
 ```bash

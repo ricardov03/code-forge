@@ -54,7 +54,8 @@ The **deny list** is fixed in the code. You cannot allow these, whatever you pas
 | `budget:raise` | raise a budget |
 
 When one of these comes up while you are away, the work on it waits for you. It shows under
-"Actions only you can take" in the log.
+"Actions only you can take" in the log. Neither the orchestrator nor the delegate relaxes a rule
+or a limit to keep work moving: when a limit blocks work, they stop, record the data and wait.
 
 ## The delegate and its options
 

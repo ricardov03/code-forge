@@ -45,4 +45,4 @@ These never go to the delegate, whatever the grant says (the CLI's fixed deny li
 - a critical waiver, a proof waiver, or closing a block without its reviews;
 - merges and destructive actions.
 
-When one of these comes up during the window: stop that line of work, add it to Actions only you can take, and wait.
+When one of these comes up during the window: stop that line of work, add it to Actions only you can take, and wait. The delegate never relaxes a rule or a limit to keep work moving (`rules-core.md` R17).

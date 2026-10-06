@@ -9,9 +9,9 @@ disagree, the verb is right: each verb prints its own usage line when its argume
 | # | Page | Read it when you want to… |
 |---|---|---|
 | 1 | [overview.md](overview.md) | know what code-forge is, the problem it solves, who it is for, and what it is not |
-| 2 | [concepts.md](concepts.md) | look up a word: block, level, lane, tier, S1/S2, waiver, ledger, budget, block kind, closed book, known fix… |
-| 3 | [how-it-works.md](how-it-works.md) | follow the full workflow from a brief to a closed block, and see who does what and where state lives |
-| 4 | [getting-started.md](getting-started.md) | install it, answer `init`, run `doctor`, try the first commands, and read or report errors (`code-forge logs`) |
+| 2 | [concepts.md](concepts.md) | look up a word: block, level, lane, tier, S1/S2, waiver, ledger, budget, block kind, closed book, plan approval, owner rule, autopilot grant, known fix… |
+| 3 | [how-it-works.md](how-it-works.md) | follow the full workflow from a brief to a closed block (plan approval, parallel review, the escalation ladder, the rules the orchestrator keeps), and see who does what and where state lives |
+| 4 | [getting-started.md](getting-started.md) | install it, answer `init`, install the recommended tools (`code-forge tools`), run `doctor`, set a budget, upgrade, and read or report errors (`code-forge logs`) |
 | 5 | [tutorial-first-test.md](tutorial-first-test.md) | run one real end-to-end test: build the code-forge marketing site in a new repo |
 | 5a | [review-only.md](review-only.md) | only review code you already wrote: a branch, uncommitted work or some files, with CI exit codes |
 | 5b | [autopilot.md](autopilot.md) | step away while a run goes on: grant a delegate a few decisions for a set time, and review the live log (Binnacle and Full log) when you return |
@@ -19,7 +19,7 @@ disagree, the verb is right: each verb prints its own usage line when its argume
 | 7 | [marketing.md](marketing.md) | read the product story: the problem, the promise, the honest limits |
 
 New to the tool? Read 1 → 3 → 4, then do 5. Keep 2 open as a glossary. Only want reviews? Read 4,
-then 5a.
+then 5a. Going away while a run goes on? Read 5b.
 
 ## Reference pages (already in the repo)
 

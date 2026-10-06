@@ -212,7 +212,10 @@ budget:
 At 80% of it you get one warning. At 100% no new session starts: the message names the budget
 and the spend, and a review in flight is reported `unavailable: budget`. If the spend cannot be
 read, no session starts either. Raise `budget.usd` (then `code-forge run reload --run <run>`) or
-end the run.
+end the run. That choice is yours: the orchestrator never raises a budget or any other limit on
+its own. It stops, shows you the spend and the options, and waits. While an autopilot grant is
+active, `run reload` refuses limit keys; use `code-forge autopilot approve` (see
+[autopilot.md](autopilot.md#approve-a-change-for-a-while)).
 
 | Command | Shows |
 |---|---|
@@ -393,6 +396,10 @@ In a harness where the skill is installed, write a brief and ask for a job:
 ```
 
 or `/code-forge full plans/my-feature.md` for all three with one checkpoint after harden.
+
+Before any block starts, the orchestrator shows you the checked plan in the harness's plan mode
+(Claude Code: EnterPlanMode, then ExitPlanMode). Approve it there. A harness without a plan mode
+shows the plan and waits for your explicit yes.
 
 Going away while it runs? Ask for autopilot: a delegate makes a few of your decisions for a set
 time, and a live log shows you everything when you return. See [autopilot.md](autopilot.md).
