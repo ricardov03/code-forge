@@ -42,7 +42,7 @@ import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { reviewFile, rulesRisk } from '../review/engine.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
-import { newFileState, runRound } from '../review/fixloop.mjs';
+import { extraRoundsFor, newFileState, reopenForExtraRound, runRound } from '../review/fixloop.mjs';
 import { readRun } from '../state/run.mjs';
 import { redact } from '../util/redact.mjs';
 import { keyedLock } from '../util/locks.mjs';
@@ -297,6 +297,9 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
     let state = loaded.state;
     if (state === null || state.status === 'complete') state = newFileState({ file: ticket.file, level, l3RungUsed: rungUsed });
     state.l3_rung_used = state.l3_rung_used || rungUsed;
+    // B47: an autopilot extra round raises the file's cap; a file stopped at the old cap reopens
+    const extraRounds = extraRoundsFor(rows, { runId: ctx.runId, block: ticket.block, file: ticket.file, key });
+    reopenForExtraRound(state, extraRounds, ctx.cfg);
 
     if (state.status === 'stopped') {
       return { outcome: /** @type {ReviewOutcome} */ ({ ...loopFields(state, null), status: 'stopped', stopped: state.next?.reason ?? 'stopped', approved: false, engine: 'adaptive', sessions: [], findings: state.open }) };
@@ -310,7 +313,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
       state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
     }
     const fixed = state;
-    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt });
+    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt, extraRounds });
     // a round that could take the rung keeps the block lock until its state is saved
     if (mayTakeRung(fixed, kind, ctx.cfg, rungUsed)) return { outcome: await round() };
     return { round };
@@ -321,10 +324,10 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
 /**
  * Run the prepared round and save the file's state: the ticket's outcome.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string}} opts
+ * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string, extraRounds?: number}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt }) {
+async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, extraRounds = 0 }) {
   /** @type {Record<string, any> | null} */
   let engineOutcome = null;
   let approvalWritten = false;
@@ -356,6 +359,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         base,
         writeRow,
         factsExcerpt,
+        extraRounds,
         ...(jev ? { jev } : {}),
         review: async () => {
           engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt }, { spawn: ctx.spawn, writeRow });

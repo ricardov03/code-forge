@@ -33,6 +33,12 @@
  *     new_in_hunks, late, open_after, tokens_in, tokens_out}`; a converged file gets
  *     `review.approved {file, content_hash, round}` (the worker signs every row it writes).
  *
+ * Autopilot extra round (B47): `deps.extraRounds` (from {@link extraRoundsFor}: one per signed
+ * `autopilot.extra_round` row for the file, one per grant) raises the file's cap by that many
+ * rounds — the cap checks here and rule 6 in `escalationAfterAttempt` both use the raised cap. A
+ * file already stopped at `review_cap` is reopened for its extra round by
+ * {@link reopenForExtraRound} (the worker calls it before the round).
+ *
  * Over budget (B12a follow-up, decided here): a recheck packet over `review.budgets.full_in`
  * falls to `contextMode: 'minimal'` (± `min_context_lines` around the SAME fix hunks) exactly as
  * `assemblePacket` does for any packet. The budget is a hard ceiling on what one session reads;
@@ -54,6 +60,8 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { escalationAfterAttempt, heavyRound, reviewRoundStalled } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
+import { verifyRow } from '../state/signer.mjs';
+import { decisionProblem, grantCoverProblem } from './gate-check.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { parseDiff } from './context.mjs';
 import { assemblePacket, assertPacketPath, readFileDiff } from './packet.mjs';
@@ -103,6 +111,7 @@ import { spawnWithTimeoutRetry } from './session-retry.mjs';
  * @property {(req: {file: string, level: 'L3', open: Finding[]}) => Promise<unknown>} [patch] - the L3 patch rung (≤ 80 lines, owned files only).
  * @property {string | null} [base] - the block base (only for `recheck_scope: file`).
  * @property {string} [rulesDigest] @property {string} [factsExcerpt]
+ * @property {number} [extraRounds] - B47: rounds past `review.max_rounds_per_file` granted by autopilot (`extraRoundsFor`).
  */
 
 /** @param {LoopDeps} deps @param {Record<string, any>} row */
@@ -114,13 +123,68 @@ async function note(deps, row) {
   }
 }
 
-/** @param {Record<string, any> | undefined} cfg */
-function settings(cfg) {
+/** @param {unknown} v @param {number} d @returns {number} `v` when a non-negative integer, else `d`. */
+const int = (v, d) => (Number.isInteger(v) && /** @type {number} */ (v) >= 0 ? /** @type {number} */ (v) : d);
+
+/**
+ * The file's round cap: `review.max_rounds_per_file` (default 4) plus the autopilot extra rounds.
+ * @param {Record<string, any> | undefined} cfg @param {number} [extraRounds]
+ * @returns {number}
+ */
+export function roundCap(cfg, extraRounds = 0) {
+  return int(cfg?.review?.max_rounds_per_file, 4) + int(extraRounds, 0);
+}
+
+/**
+ * B47: the extra rounds autopilot granted the file — the number of distinct grants with an
+ * `autopilot.extra_round` row of this run for this block and file that holds up as the gate's
+ * waiver check does: its MAC verifies, its grant covered `round:extra` at its `ts`
+ * (`grantCoverProblem`) and its `decision_id` names the delegate's acted decision for that block
+ * and file (`decisionProblem`). A row that fails any check, or whose check throws, counts for nothing.
+ * @param {Array<Record<string, any>>} rows @param {{runId: string, block: string, file: string, key: Buffer}} where
+ * @returns {number}
+ */
+export function extraRoundsFor(rows, { runId, block, file, key }) {
+  const runRows = rows.filter((r) => r?.run === runId);
+  const grants = new Set();
+  for (const r of runRows) {
+    if (r?.event !== 'autopilot.extra_round' || r.block !== block || r.file !== file || typeof r.grant_id !== 'string') continue;
+    try {
+      if (!verifyRow(r, key).ok) continue;
+      const at = typeof r.ts === 'string' ? Date.parse(r.ts) : Number.NaN;
+      if (!Number.isFinite(at)) continue;
+      if (grantCoverProblem(runRows, { grantId: r.grant_id, scope: 'round:extra', at, key, endRows: rows }) !== null) continue;
+      if (decisionProblem(runRows, { decisionId: r.decision_id, grantId: r.grant_id, scope: 'round:extra', subject: { block, file }, decision: 'allow', at, key }) !== null) continue;
+      grants.add(r.grant_id);
+    } catch {
+      // a row the checks cannot read gives no round (fail closed)
+    }
+  }
+  return grants.size;
+}
+
+/**
+ * B47: reopen a file stopped at `review_cap` when its raised cap leaves a round: the state goes
+ * back to `open` with `next: fix` at its level (`trigger: autopilot_extra_round`); the next round
+ * is a recheck. Any other state is left as it is.
+ * @param {FileState} state @param {number} extraRounds @param {Record<string, any> | undefined} cfg
+ * @returns {boolean} whether the state was reopened.
+ */
+export function reopenForExtraRound(state, extraRounds, cfg) {
+  if (state.status !== 'stopped' || state.next?.reason !== 'review_cap') return false;
+  if (state.round >= roundCap(cfg, extraRounds)) return false;
+  state.status = 'open';
+  state.next = { action: 'fix', level: state.level, trigger: 'autopilot_extra_round' };
+  state.pending_kind = null;
+  return true;
+}
+
+/** @param {Record<string, any> | undefined} cfg @param {number} [extraRounds] */
+function settings(cfg, extraRounds = 0) {
   const r = cfg?.review ?? {};
   const e = cfg?.escalation ?? {};
-  const int = (/** @type {unknown} */ v, /** @type {number} */ d) => (Number.isInteger(v) && /** @type {number} */ (v) >= 0 ? /** @type {number} */ (v) : d);
   return {
-    maxRounds: int(r.max_rounds_per_file, 4),
+    maxRounds: roundCap(cfg, extraRounds),
     scope: r.recheck_scope === 'file' ? 'file' : 'fix_hunks',
     late: r.late_findings === 'block' ? 'block' : 'sweep',
     perLevel: int(e.review_rounds_per_level, 2),
@@ -332,7 +396,7 @@ async function stopBeforeRound(state, deps, kind, file, reason) {
  * @returns {Promise<FileState>}
  */
 export async function runRound(state, deps, opts = {}) {
-  const s = settings(deps.cfg);
+  const s = settings(deps.cfg, deps.extraRounds);
   const kind = opts.kind ?? (state.round === 0 ? 'full' : 'recheck');
   const current = readCurrent(deps.repoRoot, state.file);
   const openBefore = state.open.length;

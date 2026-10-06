@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 48,
+  "block_count": 49,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -638,6 +638,22 @@
         "B45"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5)"
+    },
+    "B47": {
+      "title": "Autopilot delegated actions, each on the delegate's acted decision with the matching word (waive / allow / the level): autopilot waive (warning or nit read from signed review rows, never critical or proof; tracked gh issue in the project repo, exact-marker dedupe; no gh => waiver stands + autopilot.issue_failed), gate accepts by:autopilot waivers only under a covering grant and decision, autopilot round (one extra fix round per file per grant), autopilot level (lane capped at plan + 1, max L2; block open uses it); re-checked under the run lock before writing",
+      "wave": 11,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/autopilot/actions.mjs",
+        "src/review/gate-check.mjs",
+        "src/util/gh.mjs",
+        "test/autopilot/actions.test.mjs"
+      ],
+      "depends_on": [
+        "B46"
+      ],
+      "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/delegate.mjs, src/cli/autopilot.mjs, src/cli/block.mjs, src/cli/logs.mjs, src/review/fixloop.mjs, src/worker/engine.mjs"
     }
   }
 }

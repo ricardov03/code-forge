@@ -17,6 +17,12 @@ waits on a second real consumer (plan §10.4, Q17).
   answer is one signed `autopilot.decision` row. It acts only when the question offers at least 2 options, the answer is
   one of them, it is within scope, does not ask to escalate, and its confidence is at least `autopilot.min_confidence`
   (default 0.7); otherwise the question goes to the owner (exit 3). `autopilot.*` counts as a limit key.
+- `code-forge autopilot waive|round|level`: actions that need the delegate's acted decision (`--decision <id>`, same
+  grant, scope and block/file/finding, at most 30 minutes old, with the matching word: `waive`, `allow` or the level).
+  Waivers cover warnings and nits only (severity read from the signed review rows) and are written `by: autopilot`; each
+  opens one tracked GitHub issue in the project's repo. The block gate accepts an autopilot waiver only under a grant
+  and decision that covered it. One extra fix round per file per grant; the coder level comes from the Jev lane, capped
+  at the plan level + 1 and L2.
 
 ## [0.5.1] — 2026-10-04
 

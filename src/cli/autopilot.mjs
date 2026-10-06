@@ -1,5 +1,5 @@
 /**
- * `code-forge autopilot start|status|stop|ask` (issue #5, blocks B45, B46). The OWNER (and the
+ * `code-forge autopilot start|status|stop|ask|waive|round|level` (issue #5, blocks B45, B46, B47). The OWNER (and the
  * orchestrator on the owner's behalf) runs these — a coder never may: `autopilot` is on the
  * coder-only forbidden list.
  *
@@ -7,8 +7,23 @@
  *                   [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]
  *   autopilot status --run <id> [--json]
  *   autopilot stop --run <id>
- *   autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--json]
+ *   autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>]
+ *                 [--block <id>] [--file <path>] [--finding <id>] [--json]
+ *   autopilot waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id>
+ *   autopilot round --run <id> --block <id> --file <path> --decision <id>
+ *   autopilot level --run <id> --block <id> --plan <file> --decision <id>
  *
+ * B47 (`src/autopilot/actions.mjs`): `waive`, `round` and `level` are delegated actions — each is
+ * refused (exit 1, nothing written) unless the grant allows its scope (`waive:<severity>`,
+ * `round:extra`, `model:choose`) AND `--decision` names the delegate's acted decision for it (an
+ * `autopilot ask` with `--block` [`--file` `--finding`] under the same grant and scope, at most
+ * 30 min old) whose answer is the action's fixed option word: ask a waive with `--options
+ * waive,fix` (it needs `waive`), a round with `--options allow,deny` (needs `allow`), a level with
+ * the candidate levels, e.g. `--options L1,L2` (needs the level `autopilot level` sets). Any other
+ * answer, even acted, authorises nothing. `waive` reads the finding's severity from the signed review
+ * rows (critical or unknown ⇒ refused; `proof` never) and opens or comments on one tracked issue
+ * in the project's repo; without `gh` the waiver still stands (`issue: none`). `level` prints the
+ * chosen coder level; `block open` without `--level` uses it.
  * `ask` (B46) puts one question to the delegate (`src/autopilot/delegate.mjs`): exit 0 when the
  * answer is acted on, 3 when the question goes to the owner (answered but not acted, or the
  * session failed — one signed `autopilot.decision` row either way), 1 when the grant refuses
@@ -22,6 +37,7 @@
 
 import { activeGrantMessage, checkExpiry, expiredMessage, grantState, startGrant, stopGrant, validateGrantInput } from '../autopilot/grant.mjs';
 import { askDelegate } from '../autopilot/delegate.mjs';
+import { chooseCoderLevel, grantExtraRound, waiveForOwner } from '../autopilot/actions.mjs';
 import { FIXED_DENY_SCOPES } from '../autopilot/scopes.mjs';
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
@@ -38,18 +54,72 @@ import { writeSafe } from '../util/redact.mjs';
  *   now?: () => Date, isTTY?: boolean, ui?: any,
  *   writeRow?: (row: Record<string, any>) => Promise<unknown>,
  *   cwd?: string, session?: import('../session/spawn.mjs').SessionDeps,
+ *   actions?: import('../autopilot/actions.mjs').ActionDeps,
  * }} AutopilotDeps - `cwd`: where `ask` loads the project config when the run has no snapshot;
- *   `session`: the spawner seams (`bins`, `env`, `exec`, …) for `ask` (tests: the fake CLIs).
+ *   `session`: the spawner seams (`bins`, `env`, `exec`, …) for `ask` (tests: the fake CLIs);
+ *   `actions`: the B47 seams (`exec`, `env`, `onPath` for gh; `readRows`).
  */
 
-const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop', 'ask']);
+const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop', 'ask', 'waive', 'round', 'level']);
 
 const FLAG_SPECS = Object.freeze({
   start: { values: ['run', 'until', 'delegate', 'allow', 'deny', 'budget', 'stop-at'], booleans: ['yes'] },
   status: { values: ['run'], booleans: ['json'] },
   stop: { values: ['run'] },
-  ask: { values: ['run', 'scope', 'question', 'options', 'context-file'], booleans: ['json'] },
+  ask: { values: ['run', 'scope', 'question', 'options', 'context-file', 'block', 'file', 'finding'], booleans: ['json'] },
+  waive: { values: ['run', 'block', 'file', 'finding', 'severity', 'reason', 'decision'] },
+  round: { values: ['run', 'block', 'file', 'decision'] },
+  level: { values: ['run', 'block', 'plan', 'decision'] },
 });
+
+/** @param {object} res - a refused action result. @returns {string} its message. */
+const refusal = (res) => /** @type {{message: string}} */ (res).message;
+
+/**
+ * `autopilot waive|round|level` (B47): one delegated action.
+ * @param {'waive' | 'round' | 'level'} sub @param {string} runId @param {Record<string, any>} flags
+ * @param {AutopilotDeps} deps @param {(s: string) => void} out @param {(s: string) => void} err
+ * @returns {Promise<number>} 0 done, 1 refused
+ */
+async function runAction(sub, runId, flags, deps, out, err) {
+  /** @param {string} name */
+  const need = (name) => {
+    if (typeof flags[name] !== 'string' || flags[name].trim().length === 0) throw new StateError('usage', `autopilot ${sub} needs --${name}`);
+    return /** @type {string} */ (flags[name]);
+  };
+  const actionDeps = { ...(deps.actions ?? {}), writeRow: deps.writeRow, ...(deps.now ? { now: deps.now } : {}) };
+  if (sub === 'waive') {
+    const req = { runId, block: need('block'), file: need('file'), finding: need('finding'), severity: need('severity'), reason: need('reason'), decisionId: need('decision') };
+    const res = await waiveForOwner(req, actionDeps);
+    if (!res.ok) {
+      err(`autopilot waive: refused — ${refusal(res)}\n`);
+      return 1;
+    }
+    const issue =
+      res.issue !== null
+        ? `issue ${res.issue} (${res.issueAction})`
+        : `issue none (${res.issueFailure}; the waiver still stands${res.issueRowWritten ? '' : '; the autopilot.issue_failed row could not be written'})`;
+    out(`autopilot waive run ${runId}: waived ${req.finding} (${res.row.severity}) in ${res.row.file}, block ${req.block} (by: autopilot, grant ${res.row.grant_id}) · ${issue}\n`);
+    return 0;
+  }
+  if (sub === 'round') {
+    const res = await grantExtraRound({ runId, block: need('block'), file: need('file'), decisionId: need('decision') }, actionDeps);
+    if (!res.ok) {
+      err(`autopilot round: refused — ${refusal(res)}\n`);
+      return 1;
+    }
+    out(`autopilot round run ${runId}: one extra fix round for ${res.row.file} in block ${res.row.block} (grant ${res.row.grant_id})\n`);
+    return 0;
+  }
+  const plan = path.resolve(deps.cwd ?? process.cwd(), need('plan'));
+  const res = await chooseCoderLevel({ runId, block: need('block'), plan, decisionId: need('decision') }, actionDeps);
+  if (!res.ok) {
+    err(`autopilot level: refused — ${refusal(res)}\n`);
+    return 1;
+  }
+  out(`autopilot level run ${runId}: block ${res.row.block} codes at ${res.row.level} (lane ${res.row.lane}, plan ${res.row.plan_level}, grant ${res.row.grant_id}); block open without --level uses it\n`);
+  return 0;
+}
 
 /** `--options a,b,…` → the trimmed, non-empty items. @param {unknown} text @returns {string[] | undefined} */
 const optionList = (text) => (typeof text === 'string' ? text.split(',').map((s) => s.trim()).filter((s) => s.length > 0) : undefined);
@@ -83,8 +153,11 @@ async function runAsk(runId, flags, deps, out) {
   } catch {
     cfg = undefined;
   }
+  /** @type {Record<string, string>} */
+  const subject = {};
+  for (const name of ['block', 'file', 'finding']) if (typeof flags[name] === 'string') subject[name] = flags[name];
   const res = await askDelegate(
-    { runId, scope: flags.scope.trim(), question: flags.question, options, context, cfg },
+    { runId, scope: flags.scope.trim(), question: flags.question, options, context, cfg, ...(Object.keys(subject).length > 0 ? { subject } : {}) },
     { ...(deps.session ?? {}), stderr: deps.stderr ?? deps.session?.stderr, writeRow: deps.writeRow, ...(deps.now ? { now: deps.now } : {}) },
   );
   const code = res.acted ? 0 : res.row === null ? 1 : 3;
@@ -95,6 +168,7 @@ async function runAsk(runId, flags, deps, out) {
         run: runId,
         scope: flags.scope,
         grant_id: res.grant_id,
+        decision_id: res.row?.decision_id ?? null,
         answered: res.answered,
         acted: res.acted,
         to_owner: res.to_owner,
@@ -112,7 +186,7 @@ async function runAsk(runId, flags, deps, out) {
     out(`autopilot ask run ${runId}: refused (${res.reason}) — no session; the question goes to the owner\n`);
     return code;
   }
-  const head = res.acted ? 'acted' : `to the owner (${res.reason})`;
+  const head = res.acted ? `acted · decision ${res.row?.decision_id}` : `to the owner (${res.reason})`;
   out(`autopilot ask run ${runId}: ${head}\n`);
   if (answer) out(`  decision  ${answer.decision} · confidence ${answer.confidence} · within scope ${answer.within_scope} · escalate ${answer.escalate}\n  reason    ${answer.reason}\n`);
   return code;
@@ -204,6 +278,7 @@ export async function runAutopilot(args, deps = {}) {
     if (typeof flags.run !== 'string') throw new StateError('usage', `autopilot ${sub} needs --run <id>`);
     const runId = flags.run;
     if (sub === 'ask') return await runAsk(runId, flags, deps, out);
+    if (sub === 'waive' || sub === 'round' || sub === 'level') return await runAction(sub, runId, flags, deps, out, err);
     const now = clock();
 
     if (sub === 'status') {
@@ -258,7 +333,7 @@ export async function runAutopilot(args, deps = {}) {
 }
 
 const USAGE =
-  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--json]\n';
+  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id>\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function autopilot(args) {

@@ -2,7 +2,7 @@
  * `code-forge block open|attempt|rebase|claim|close|stop` (plan §4.9). The skill calls
  * `block open` before every spawn in every engine; it prints the brief pointer (≤ 200 bytes).
  *
- *   block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file>
+ *   block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file>
  *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract]
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
@@ -33,6 +33,11 @@
  * FAILED: no review-file ticket id for <files>` (skipped under `--no-require-reviews`, the human's
  * way out). It runs after the review rows and reuses their file set (listed once).
  *
+ * B47: `block open` without `--level` takes the level `autopilot level` chose for the block (the
+ * latest `autopilot.level` row of the run for it whose MAC verifies, `autopilotLevel`); with
+ * neither it is a usage error (`no --level given and no autopilot level recorded for <id>`). An
+ * explicit `--level` always wins; a repeated or valueless `--level` is a usage error as before.
+ *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
  * through `closeBlock`'s `extraChecks`.
@@ -47,7 +52,7 @@ import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { findOverlap } from '../state/registry.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
-import { loadKey } from '../state/signer.mjs';
+import { loadKey, verifyRow } from '../state/signer.mjs';
 import { blockFileSet, reviewGateCheck, waiveFinding } from '../review/gate-check.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
@@ -58,7 +63,7 @@ import { gitChildEnv } from '../worker/ticket.mjs';
 import { missingReviewTickets } from '../engines/sentinel.mjs';
 
 const USAGE =
-  'usage: code-forge block open <id> --run <r> --level L<n> --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract]\n' +
+  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n';
 
@@ -84,7 +89,7 @@ export async function runBlock(args, deps = {}) {
     const [id, extra] = positionals;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
-    if (sub === 'open' && (typeof flags.acceptance !== 'string' || !Array.isArray(flags.owned) || typeof flags.level !== 'string')) {
+    if (sub === 'open' && (typeof flags.acceptance !== 'string' || !Array.isArray(flags.owned) || (flags.level !== undefined && typeof flags.level !== 'string'))) {
       throw new StateError('usage', 'block open needs --level, --owned and --acceptance');
     }
     if (sub === 'claim' && (!extra || positionals.length !== 2)) throw new StateError('usage', 'block claim needs exactly one path');
@@ -95,6 +100,9 @@ export async function runBlock(args, deps = {}) {
     const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
 
     if (sub === 'open') {
+      // B47: no --level ⇒ the level autopilot chose for the block (a signed autopilot.level row)
+      const level = typeof flags.level === 'string' ? flags.level : await autopilotLevel(runId, id, record);
+      if (level === null) throw new StateError('usage', `no --level given and no autopilot level recorded for ${id}`);
       const acceptance = parseYAML(await readFile(/** @type {string} */ (flags.acceptance), 'utf8'), { prettyErrors: false });
       let brief;
       if (typeof flags.brief === 'string') {
@@ -106,7 +114,7 @@ export async function runBlock(args, deps = {}) {
       const { block, pointer } = await openBlock({
         runId,
         id,
-        level: /** @type {string} */ (flags.level),
+        level,
         owned: /** @type {string[]} */ (flags.owned),
         acceptance,
         attempt: intFlag(flags.attempt, 'attempt'),
@@ -117,8 +125,9 @@ export async function runBlock(args, deps = {}) {
         cfg: await openConfig(record.workspace),
         writeRow,
       });
-      const raised = block.level !== flags.level ? ` (${block.kind} floor, asked ${flags.level})` : '';
-      out(`block ${id} open · ${block.level}${raised} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}\n`);
+      const raised = block.level !== level ? ` (${block.kind} floor, asked ${level})` : '';
+      const chosen = typeof flags.level === 'string' ? '' : ' (autopilot level)';
+      out(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}\n`);
       out(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
       return 0;
     }
@@ -202,6 +211,20 @@ export async function runBlock(args, deps = {}) {
   }
   err(USAGE);
   return 2;
+}
+
+/**
+ * B47: the level `autopilot level` chose for the block — the latest `autopilot.level` row of this
+ * run for it whose MAC verifies — or null when there is none.
+ * @param {string} runId @param {string} id @param {Record<string, any>} record
+ * @returns {Promise<string | null>}
+ */
+async function autopilotLevel(runId, id, record) {
+  const rows = (await readAllRows(record.project)).filter((r) => r?.event === 'autopilot.level' && r.run === runId && r.block === id && typeof r.level === 'string');
+  if (rows.length === 0) return null;
+  const key = await loadKey(runId);
+  const valid = rows.filter((r) => verifyRow(r, key).ok);
+  return valid.length === 0 ? null : valid[valid.length - 1].level;
 }
 
 /**

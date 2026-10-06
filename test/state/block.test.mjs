@@ -194,7 +194,7 @@ test('CLI `block`: unknown subcommand ⇒ usage + exit 2 without touching the ru
     await writeFile(path.join(ws, 'acc.yml'), '- clause: c\n  tests: [t]\n');
     const noLevel = captureStream();
     assert.equal(await runBlock(['open', 'B1', '--run', 'r-cli2', '--owned', 'a.txt', '--acceptance', path.join(ws, 'acc.yml')], { stdout: captureStream(), stderr: noLevel }), 2);
-    assert.equal(noLevel.text, 'block open: block open needs --level, --owned and --acceptance\n');
+    assert.equal(noLevel.text, 'block open: no --level given and no autopilot level recorded for B1\n');
     await writeFile(path.join(home, 'outside.md'), 'x\n');
     const outside = captureStream();
     const openArgs = ['open', 'B1', '--run', 'r-cli2', '--level', 'L1', '--owned', 'a.txt', '--acceptance', path.join(ws, 'acc.yml')];

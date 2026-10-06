@@ -117,12 +117,14 @@ test('an in-scope confident answer acts: one L2 delegate session (closed-book, e
   assert.deepEqual(sessions.map((r) => [r.role, r.level, r.provider, r.model, r.status, r.grant_id]), [['delegate', 'L2', 'anthropic', 'claude-opus-5-5', 'ok', 'ap-d-ok']]);
   const [row] = decisions(rows);
   assert.equal(decisions(rows).length, 1);
-  const { mac, ...fields } = row;
+  const { mac, decision_id, ...fields } = row;
+  assert.match(decision_id, /^ad-[0-9a-f]{12}$/); // B47: a stable id the delegated action names
   assert.deepEqual(fields, {
     run: 'd-ok',
     event: 'autopilot.decision',
     grant_id: 'ap-d-ok',
     scope: 'waive:nit',
+    subject: null,
     question: ASK.question,
     options: ['waive', 'fix'],
     decision: 'waive',
@@ -345,7 +347,9 @@ test('autopilot ask: exit 0 acted, 3 to the owner (1 session, 1 row each), 1 ref
   const a = await newRun('c-act');
   const acted = await cli(['--run', 'c-act', '--scope', 'waive:nit', '--question', 'Waive it?', '--options', 'waive, fix', '--json'], { FAKE_ANSWER: JSON.stringify(ANSWER) }, a.writeRow);
   assert.deepEqual([acted.code, acted.sessions, decisions(a.rows).length], [0, 1, 1]);
-  assert.deepEqual(JSON.parse(acted.out), { run: 'c-act', scope: 'waive:nit', grant_id: 'ap-c-act', answered: true, acted: true, to_owner: false, reason: null, decision: 'waive', confidence: 0.82, within_scope: true, escalate: false, answer_reason: 'style only; no behaviour change' });
+  const { decision_id: actedId, ...actedJson } = JSON.parse(acted.out);
+  assert.equal(actedId, decisions(a.rows)[0].decision_id);
+  assert.deepEqual(actedJson, { run: 'c-act', scope: 'waive:nit', grant_id: 'ap-c-act', answered: true, acted: true, to_owner: false, reason: null, decision: 'waive', confidence: 0.82, within_scope: true, escalate: false, answer_reason: 'style only; no behaviour change' });
 
   const o = await newRun('c-own');
   const ctx = path.join(process.cwd(), 'ctx.txt');

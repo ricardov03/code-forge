@@ -20,6 +20,11 @@
  *      be written). The row is written BEFORE the answer is returned; only a row that cannot be
  *      written throws, so nothing acts unrecorded (fail closed).
  *
+ * B47: every decision row carries a stable `decision_id` (`ad-<12 hex>`) and the `subject` the
+ * question is about (`{block, file, finding}`, each optional; null when none was given) — a
+ * delegated action (`autopilot waive|round|level`) names the decision that allowed it, and the
+ * action and the gate check that decision's grant, scope and subject (`review/gate-check.mjs`).
+ *
  * Options: each is trimmed and scrubbed, THEN deduplicated; a list given with fewer than 2
  * distinct options is a usage error. An ask WITHOUT options never acts: the delegate can only
  * pick between choices the caller named, so an open question is answered for the owner's
@@ -114,6 +119,7 @@ const HEADER = [
  * @property {string} question
  * @property {string} [context]
  * @property {string[]} [options]
+ * @property {{block?: string, file?: string, finding?: string}} [subject] - what the question is about (B47).
  * @property {Record<string, any>} [cfg] - used only when the run record holds no config snapshot.
  * @property {number} [timeoutMs]
  */
@@ -162,9 +168,41 @@ export function cleanOptions(options) {
   return out;
 }
 
+const SUBJECT_BLOCK = /^[A-Za-z0-9._-]{1,32}$/;
+const SUBJECT_FINDING = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+
+/**
+ * Validate the ask's subject (B47): a block id, a repo-relative POSIX file (normalized; no `..`,
+ * no absolute path, no backslash or NUL) and a finding id, each optional.
+ * @param {unknown} subject
+ * @returns {{block?: string, file?: string, finding?: string} | null}
+ * @throws {SessionError} `usage`
+ */
+export function cleanSubject(subject) {
+  if (subject === undefined || subject === null) return null;
+  if (typeof subject !== 'object' || Array.isArray(subject)) throw new SessionError('usage', 'delegate: the subject must be {block, file, finding}');
+  const { block, file, finding } = /** @type {Record<string, unknown>} */ (subject);
+  /** @type {{block?: string, file?: string, finding?: string}} */
+  const out = {};
+  if (block !== undefined) {
+    if (typeof block !== 'string' || !SUBJECT_BLOCK.test(block)) throw new SessionError('usage', 'delegate: --block must be a block id (letters, digits, . _ -; at most 32 characters)');
+    out.block = block;
+  }
+  if (file !== undefined) {
+    const normalized = typeof file === 'string' && file.length > 0 && file.length <= 512 && !file.includes('\\') && !file.includes('\0') && !path.posix.isAbsolute(file) ? path.posix.normalize(file) : '';
+    if (normalized === '' || normalized === '.' || normalized === '..' || normalized.startsWith('../')) throw new SessionError('usage', 'delegate: --file must be a repo-relative path');
+    out.file = normalized;
+  }
+  if (finding !== undefined) {
+    if (typeof finding !== 'string' || !SUBJECT_FINDING.test(finding)) throw new SessionError('usage', 'delegate: --finding must be a finding id (letters, digits, . _ : -)');
+    out.finding = finding;
+  }
+  return Object.keys(out).length === 0 ? null : out;
+}
+
 /**
  * The delegate packet. Texts must already be scrubbed.
- * @param {{scope: string, grantScopes: string[], question: string, options?: string[], context?: string}} packet
+ * @param {{scope: string, grantScopes: string[], question: string, options?: string[], context?: string, subject?: {block?: string, file?: string, finding?: string} | null}} packet
  * @param {{maxTokens?: number}} [opts]
  * @returns {string} at most `maxTokens` estimated tokens.
  * @throws {SessionError} `usage` without a question; `delegate-too-large` when the fixed part
@@ -181,6 +219,10 @@ export function buildDelegatePrompt(packet, opts = {}) {
     `\n## Scopes the owner granted\n${allowed}\n` +
     `\n## Never allowed (fixed deny list, enforced in code; escalate anything that touches these)\n${deny}\n` +
     `\n## Question\n${packet.question.trim()}\n`;
+  if (packet.subject) {
+    const parts = [['block', packet.subject.block], ['file', packet.subject.file], ['finding', packet.subject.finding]].filter(([, v]) => v !== undefined);
+    fixed += `\n## Subject\n${parts.map(([k, v]) => `${k} ${v}`).join(' · ')}\n`;
+  }
   if (Array.isArray(packet.options) && packet.options.length > 0) fixed += `\n## Options\n${packet.options.map((o) => `- ${o}`).join('\n')}\n`;
   const maxBytes = maxTokens * 4;
   const fixedBytes = Buffer.byteLength(fixed);
@@ -255,6 +297,7 @@ export async function askDelegate(ask, deps = {}) {
   if (typeof ask.question !== 'string' || ask.question.trim().length === 0) throw new SessionError('usage', 'delegate: the question must be non-empty');
   if (ask.context !== undefined && typeof ask.context !== 'string') throw new SessionError('usage', 'delegate: the context must be text');
   const options = cleanOptions(ask.options); // scrubbed, then deduplicated
+  const subject = cleanSubject(ask.subject);
 
   const gate = await grantFor(runId, scope, clock(), { writeRow: deps.writeRow, checks: deps.checks });
   if (!gate.ok) return { answered: false, acted: false, to_owner: true, reason: gate.reason, grant_id: gate.grant?.grant_id ?? null, answer: null, row: null };
@@ -277,7 +320,7 @@ export async function askDelegate(ask, deps = {}) {
   /** @type {string | null} */
   let dir = null;
   try {
-    const prompt = buildDelegatePrompt({ scope, grantScopes: grant.scopes, question, options, context });
+    const prompt = buildDelegatePrompt({ scope, grantScopes: grant.scopes, question, options, context, subject });
     const root = runRootFor(runId, cfg?.tmp?.root);
     dir = path.join(root, 'delegate', `${Date.now()}-${randomBytes(4).toString('hex')}`);
     mkdirSync(dir, { recursive: true, mode: 0o700 });
@@ -332,8 +375,10 @@ export async function askDelegate(ask, deps = {}) {
   const acted = toOwnerWhy === null;
   const row = {
     event: 'autopilot.decision',
+    decision_id: `ad-${randomBytes(6).toString('hex')}`,
     grant_id: grant.grant_id,
     scope,
+    subject,
     question: cutBytes(question, DECISION_QUESTION_MAX_BYTES),
     options,
     decision: answer === null ? null : scrub(answer.decision),

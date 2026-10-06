@@ -33,7 +33,7 @@
  */
 
 import { spawn } from 'node:child_process';
-import { accessSync, constants as fsConstants, readFileSync, statSync } from 'node:fs';
+import { readFileSync } from 'node:fs';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -43,7 +43,7 @@ import { NO_ERROR_LOG_ENV, capBytes, createScrubber, describeCounts, errorLogPat
 import { compareVersions, fixStatus, loadKnownFixes } from '../util/known-fixes.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
-import { SECRET_LOOKING_PATTERNS } from '../config/secret-patterns.mjs';
+import { GH_TIMEOUT_MS, findReported, findSecret, ghWithBodyFile, pathLookup } from '../util/gh.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { AI_REPORT_MAX_BYTES, applyItems, describeAiCounts, runAiScrub } from '../session/scrub.mjs';
 
@@ -83,7 +83,8 @@ export const DISCLOSURE = disclosure();
 
 export const CONFIRM_MESSAGE = 'This will be public on GitHub. Send it?';
 
-const GH_TIMEOUT_MS = 60_000;
+// the secret check and the gh helpers live in `util/gh.mjs` (shared with B47's waiver issues)
+export { REPORT_SECRET_RULES, entropy, findSecret } from '../util/gh.mjs';
 const NPM_TIMEOUT_MS = 10_000;
 /** `code-forge doctor --json` for `--with-doctor` gets at most this long. */
 export const DOCTOR_TIMEOUT_MS = 60_000;
@@ -118,64 +119,6 @@ export const PACKAGE_NAME = '@codedology/code-forge';
  */
 
 /**
- * Secret shapes the final report is checked for, after scrubbing. A hit stops the report.
- * @type {ReadonlyArray<{name: string, re: RegExp}>}
- */
-export const REPORT_SECRET_RULES = Object.freeze([
-  { name: 'API key (sk-)', re: /(?<![A-Za-z0-9_-])sk-[A-Za-z0-9_-]{10,}/ },
-  { name: 'GitHub token', re: /(?<![A-Za-z0-9_])(?:gh[opsur]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,})/ },
-  { name: 'Slack token', re: /(?<![A-Za-z0-9_-])xox[abprs]-[A-Za-z0-9-]{10,}/ },
-  { name: 'AWS access key', re: /(?<![A-Za-z0-9])AKIA[0-9A-Z]{16}(?![0-9A-Z])/ },
-  { name: 'private key', re: /-----BEGIN [A-Z0-9 ]*PRIVATE KEY-----/ },
-  { name: 'JWT', re: /(?<![A-Za-z0-9_-])eyJ[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}\.[A-Za-z0-9_-]{5,}/ },
-  // copied without g/y: `.test()` must carry no `lastIndex` state between checks
-  ...SECRET_LOOKING_PATTERNS.map((re) => ({ name: 'secret-shaped token', re: new RegExp(re.source, re.flags.replace(/[gy]/g, '')) })),
-]);
-
-/** @param {string} s @returns {number} Shannon entropy in bits per character */
-export function entropy(s) {
-  /** @type {Map<string, number>} */
-  const freq = new Map();
-  for (const ch of s) freq.set(ch, (freq.get(ch) ?? 0) + 1);
-  let bits = 0;
-  for (const n of freq.values()) {
-    const p = n / s.length;
-    bits -= p * Math.log2(p);
-  }
-  return bits;
-}
-
-/**
- * A 32+ character run of `[A-Za-z0-9+/_=-]` with at least two of upper/lower/digit and entropy of
- * at least 4 bits per character (a hex hash tops out at 4 and is not flagged; a random token is).
- * @param {string} line
- * @returns {boolean}
- */
-function hasHighEntropyRun(line) {
-  for (const m of line.matchAll(/[A-Za-z0-9+/_=-]{32,}/g)) {
-    const run = m[0];
-    const classes = [/[A-Z]/, /[a-z]/, /[0-9]/].filter((re) => re.test(run)).length;
-    if (classes >= 2 && entropy(run) >= 4) return true;
-  }
-  return false;
-}
-
-/**
- * The first secret-shaped text in `text` (rule name and 1-based line), or null. The matched text
- * itself is never returned.
- * @param {string} text
- * @returns {{rule: string, line: number}|null}
- */
-export function findSecret(text) {
-  const lines = text.split('\n');
-  for (let i = 0; i < lines.length; i += 1) {
-    for (const r of REPORT_SECRET_RULES) if (r.re.test(lines[i])) return { rule: r.name, line: i + 1 };
-    if (hasHighEntropyRun(lines[i])) return { rule: 'high-entropy string', line: i + 1 };
-  }
-  return null;
-}
-
-/**
  * `owner/repo` from package.json `bugs.url`, else `repository` (string or `{url}`).
  * @param {any} [pkg]
  * @returns {string|null}
@@ -195,21 +138,6 @@ export function issueRepo(pkg) {
     if (m) return `${m[1]}/${m[2]}`;
   }
   return null;
-}
-
-/** @param {string} pathEnv @returns {(cmd: string) => boolean} */
-function pathLookup(pathEnv) {
-  return (cmd) =>
-    pathEnv.split(path.delimiter).some((dir) => {
-      if (!dir) return false;
-      try {
-        const f = path.join(dir, cmd);
-        accessSync(f, fsConstants.X_OK);
-        return statSync(f).isFile();
-      } catch {
-        return false;
-      }
-    });
 }
 
 /** @param {ErrorEntry} e */
@@ -892,72 +820,6 @@ async function editBody(body, env, deps, out) {
     return null;
   } finally {
     if (dir !== null) await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-/**
- * An earlier issue holding `fp` in its body (open or closed): `{hit}` (null when there is none),
- * or `{why}` when the search failed (`gh exit n`; never gh's output).
- * @param {typeof realExec} exec @param {NodeJS.ProcessEnv} env @param {string} repo @param {string} fp
- * @returns {Promise<{hit: {number: number, url: string, state: string}|null} | {why: string}>}
- */
-async function findReported(exec, env, repo, fp) {
-  const res = await ghRun(exec, ['gh', 'issue', 'list', '--repo', repo, '--state', 'all', '--search', `${fp} in:body`, '--json', 'number,url,state', '--limit', '5'], env);
-  if (res.result !== 'ok') return { why: res.code !== null ? `gh exit ${res.code}` : res.timedOut ? 'gh timed out' : 'gh did not finish' };
-  let list;
-  try {
-    list = JSON.parse(res.stdout);
-  } catch {
-    return { why: 'gh gave no list' };
-  }
-  if (!Array.isArray(list)) return { why: 'gh gave no list' };
-  const hit = list.find((i) => Number.isSafeInteger(i?.number) && typeof i?.url === 'string' && /^https:\/\//.test(i.url));
-  return { hit: hit ? { number: hit.number, url: hit.url, state: typeof hit.state === 'string' ? hit.state.toLowerCase() : 'unknown' } : null };
-}
-
-/**
- * Write `text` to a private temp file and run the first argv of `argvsFor(file)`; when it fails
- * over a label, run the next one (once).
- * @param {typeof realExec} exec @param {NodeJS.ProcessEnv} env @param {string} text
- * @param {(file: string) => string[][]} argvsFor
- * @param {(stdout: string) => void} [onOk]
- * @returns {Promise<string|null>} null when gh succeeded; else why (`exit n`, never its output).
- */
-async function ghWithBodyFile(exec, env, text, argvsFor, onOk) {
-  /** @type {string|null} */
-  let dir = null;
-  try {
-    let res;
-    try {
-      const root = currentRunRoot();
-      await mkdir(root, { recursive: true });
-      dir = await mkdtemp(path.join(root, 'report-'));
-      const bodyFile = path.join(dir, 'body.md');
-      await writeFile(bodyFile, text, { encoding: 'utf8', mode: 0o600 });
-      const [first, retry] = argvsFor(bodyFile);
-      res = await ghRun(exec, first, env);
-      // gh's stderr is matched to decide the retry, never printed
-      if (res.result !== 'ok' && retry && /label/i.test(res.stderr)) res = await ghRun(exec, retry, env);
-    } catch {
-      return 'could not write the report file';
-    }
-    if (res.result !== 'ok') return res.code !== null ? `exit ${res.code}` : res.timedOut ? 'timed out' : 'did not finish';
-    onOk?.(res.stdout);
-    return null;
-  } finally {
-    if (dir !== null) await rm(dir, { recursive: true, force: true }).catch(() => {});
-  }
-}
-
-/**
- * @param {typeof realExec} exec @param {string[]} argv @param {NodeJS.ProcessEnv} env
- * @returns {Promise<{result: string, code: number|null, timedOut: boolean, stdout: string, stderr: string}>}
- */
-async function ghRun(exec, argv, env) {
-  try {
-    return await exec(argv, { env, timeoutMs: GH_TIMEOUT_MS });
-  } catch {
-    return { result: 'failed', code: null, timedOut: false, stdout: '', stderr: '' };
   }
 }
 

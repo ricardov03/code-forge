@@ -26,7 +26,7 @@ const UNTIL = '2026-10-07T00:00:00+02:00'; // T0 + 2 h
 const UNTIL_UTC = '2026-10-06T22:00:00.000Z';
 const FIXED = 'waive:critical, waive:proof, reviews:skip, limits:change, plan:approve, design:approve, pr:merge, destructive, budget:raise';
 const USAGE =
-  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--json]\n';
+  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id>\n';
 
 /** A run whose ledger slug is its own id (so each test reads only its rows). @param {string} runId */
 async function newRun(runId) {
