@@ -116,10 +116,10 @@ test('Claude coder refuses a malformed fallback list with a clear TypeError nami
 
 test('Claude coder: EVERY forbidden entry is represented in --disallowedTools, exact rule-string count and set (not just "renderer length")', () => {
   const built = buildClaudeArgv({ role: 'coder', model: 'claude-opus-5-5', promptPath: '/p', cwd: '/c' });
-  // B4.2: the coder's list is mergeForbidden() — FORBIDDEN + the 2 coder-only entries.
+  // B4.2: the coder's list is mergeForbidden() — FORBIDDEN + the 3 coder-only entries (B45: + autopilot).
   const fresh = renderForClaude(mergeForbidden());
   assert.equal(fresh.length, FORBIDDEN.length + CODER_ONLY_FORBIDDEN.length); // "count = list length"
-  assert.equal(CODER_ONLY_FORBIDDEN.length, 2);
+  assert.equal(CODER_ONLY_FORBIDDEN.length, 3);
   const attached = valuesAfterFlag(built.argv, '--disallowedTools');
   const expectedRuleStrings = fresh.flatMap((e) => e.rules);
   assert.equal(attached.length, expectedRuleStrings.length); // exact count IN ARGV, not just the renderer's own output
@@ -285,9 +285,9 @@ test('Codex coder argv: exec + workspace-write + approval_policy="never" (no --a
   assert.equal(readFileSync(coder.rulesFile.path, 'utf8'), coder.rulesFile.content);
   const expected = renderForCodex(mergeForbidden()).flatMap((e) => e.patterns.map((p) => `prefix_rule(pattern=${JSON.stringify(p).replaceAll(',', ', ')}, decision="forbidden", justification="code-forge: ${e.id}")`));
   const ruleLines = coder.rulesFile.content.split('\n').filter((l) => l.startsWith('prefix_rule('));
-  // B4.2: FORBIDDEN's rules + the 4 `block waive` patterns (the `contains` entry renders none).
+  // B4.2: FORBIDDEN's rules + the 4 `block waive` and (B45) 4 `autopilot` patterns (the `contains` entry renders none).
   const expectedCount = renderCodexRules(renderForCodex(FORBIDDEN)).count + renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count;
-  assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 4);
+  assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 8);
   assert.equal(ruleLines.length, expectedCount);
   assert.equal(coder.rulesFile.count, expectedCount);
   assert.deepEqual(ruleLines, expected);

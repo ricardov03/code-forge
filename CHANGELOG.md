@@ -6,6 +6,14 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `code-forge autopilot start|status|stop` (issue #5): a time-boxed grant (at most 24 h) of owner decisions — allow
+  `waive:warning`, `waive:nit`, `round:extra`, `model:choose` — with a fixed deny list in code (critical or proof
+  waivers, skipping reviews, any limit or rule change incl. parent keys, plan/design approval, merges, destructive
+  actions, budget raises). Signed grant, stop and expire rows; expiry is checked at every command. Coders may not run
+  it.
+
 ## [0.5.1] — 2026-10-04
 
 ### Changed

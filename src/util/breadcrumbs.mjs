@@ -25,6 +25,7 @@ import path from 'node:path';
  * @type {Readonly<Record<string, readonly string[]>>}
  */
 export const SUBCOMMANDS = Object.freeze({
+  autopilot: ['start', 'status', 'stop'],
   block: ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'],
   gates: ['detect', 'run', 'secret-scan', 'safe-edit', 'scope', 'acceptance', 'transcript-grep'],
   jev: ['ask'],

@@ -32,7 +32,7 @@ test('the default forbidden list renders exactly 50 Codex rules (pin)', () => {
 const CODER_EXPECTED_RULES = renderCodexRules(renderForCodex(mergeForbidden())).count;
 test('the coder list renders FORBIDDEN\'s rules plus the coder-only rules', () => {
   const coderOnly = renderForCodex(CODER_ONLY_FORBIDDEN);
-  assert.deepEqual(coderOnly.map((e) => [e.id, e.patterns.length]), [['code-forge-block-waive-from-coder', 4], ['code-forge-no-require-reviews', 0]]);
+  assert.deepEqual(coderOnly.map((e) => [e.id, e.patterns.length]), [['code-forge-block-waive-from-coder', 4], ['code-forge-autopilot-from-coder', 4], ['code-forge-no-require-reviews', 0]]);
   assert.equal(CODER_EXPECTED_RULES, EXPECTED_RULES + renderCodexRules(coderOnly).count);
 });
 

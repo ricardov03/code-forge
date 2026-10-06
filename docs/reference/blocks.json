@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 46,
+  "block_count": 47,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -606,6 +606,23 @@
         "B43"
       ],
       "note": "root-added 2026-10-03; plan plans/parallel-review (approved in plan mode)"
+    },
+    "B45": {
+      "title": "Autopilot grants: autopilot start/status/stop, scopes with a fixed deny list (incl. parents of limit keys), lazy expiry with signed grant/stop/expire rows; coders may not run autopilot",
+      "wave": 11,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/autopilot/scopes.mjs",
+        "src/autopilot/grant.mjs",
+        "src/cli/autopilot.mjs",
+        "test/cli/autopilot.test.mjs",
+        "test/autopilot/grant.test.mjs"
+      ],
+      "depends_on": [
+        "B44"
+      ],
+      "note": "root-added 2026-10-06; plan plans/autopilot (issue #5), approved in plan mode"
     }
   }
 }
