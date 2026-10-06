@@ -47,6 +47,8 @@ A plan that passed `forge plan check` still needs the owner's yes before any blo
 
 Never treat a chat summary of the plan as the approval step, and never start `forge block open` before it.
 
+**Autopilot:** plan approval is never delegated. Under a grant the plan waits for the owner (`autopilot.md` §5).
+
 ## §5 Cost
 
 One L0 session per plan for the facts (typically a claim list of 40–80 items) and one L3 session per author round; `forge report --slug <slug>` shows both as `facts $` and coder/review splits.

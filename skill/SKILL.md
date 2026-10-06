@@ -77,4 +77,5 @@ State lives in the plan file's header — `facts → planned → hardened → co
 | takeover, base moves | `references/continuity.md` |
 | no Solo, no subagent tool, a level unavailable | `references/degraded.md` |
 | keys, the forbidden list, signed rows and their limit | `references/security.md` |
+| the owner is away: an autopilot grant, the delegate, the live log doc | `references/autopilot.md` |
 | spawning coders per engine | `references/adapters/solo.md`, `references/adapters/claude-code.md`, `references/adapters/subprocess.md` |

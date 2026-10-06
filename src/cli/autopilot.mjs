@@ -7,6 +7,8 @@
  *                   [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]
  *   autopilot status --run <id> [--json]
  *   autopilot stop --run <id>
+ *     (B49b: both print the live doc's link stored in the grant, or — without one — rewrite and print the two
+ *     Markdown files `autopilot-binnacle.md` and `autopilot-log.md`, which are then the record)
  *   autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>]
  *                 [--block <id>] [--file <path>] [--finding <id>] [--json]
  *   autopilot waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id>
@@ -54,7 +56,7 @@
 
 import { activeGrantMessage, checkExpiry, expiredMessage, grantState, startGrant, stopGrant, validateGrantInput } from '../autopilot/grant.mjs';
 import { askDelegate } from '../autopilot/delegate.mjs';
-import { buildBinnacle, gitOwner, scrubCtxOf, buildFullLog, renderBinnacleMarkdown, renderLogMarkdown, storeLink, writeAutopilotFiles } from '../autopilot/binnacle.mjs';
+import { buildBinnacle, gitOwner, scrubCtxOf, buildFullLog, refreshAutopilotFiles, renderBinnacleMarkdown, renderLogMarkdown, storeLink, writeAutopilotFiles } from '../autopilot/binnacle.mjs';
 import { chooseCoderLevel, grantExtraRound, waiveForOwner } from '../autopilot/actions.mjs';
 import { approvalCheckText, approveChange, checkApprovals, spendByCategory, validateApproval } from '../autopilot/limits.mjs';
 import { BUDGET_CATEGORIES, FIXED_DENY_SCOPES } from '../autopilot/scopes.mjs';
@@ -321,11 +323,12 @@ const spendText = (spend, caps) =>
  * @param {string} runId @param {import('../autopilot/grant.mjs').Grant | null} grant @param {Date} now
  * @param {string} [checked] - the state `checkExpiry` answered (`run-ended` overrides the grant's own)
  * @param {Record<string, number>} [spend] - B48: USD per budget category since the grant started.
+ * @param {{binnacle: string, log: string} | null} [files] - B49b: the two Markdown files, when the grant has no link.
  * @returns {Record<string, any>}
  */
-function statusData(runId, grant, now, checked, spend = {}) {
+function statusData(runId, grant, now, checked, spend = {}, files = null) {
   if (grant === null) {
-    return { run: runId, state: 'none', grant_id: null, delegate: null, until: null, time_left_s: null, scopes: [], deny: [], fixed_deny: [...FIXED_DENY_SCOPES], caps: {}, stop_at: null, spend: {}, paused: [], link: null, started_at: null, stopped_at: null, expired_at: null };
+    return { run: runId, state: 'none', grant_id: null, delegate: null, until: null, time_left_s: null, scopes: [], deny: [], fixed_deny: [...FIXED_DENY_SCOPES], caps: {}, stop_at: null, spend: {}, paused: [], link: null, files: null, started_at: null, stopped_at: null, expired_at: null };
   }
   const state = checked === 'run-ended' ? 'run-ended' : grantState(grant, now);
   const left = state === 'active' ? Math.floor((Date.parse(grant.until) - now.getTime()) / 1000) : 0;
@@ -344,6 +347,7 @@ function statusData(runId, grant, now, checked, spend = {}) {
     spend,
     paused: Object.keys(grant.paused ?? {}).sort(),
     link: grant.link ?? null,
+    files: grant.link ? null : files,
     started_at: grant.started_at,
     stopped_at: grant.stopped_at,
     expired_at: grant.expired_at,
@@ -369,8 +373,35 @@ function statusText(d) {
     `  deny      ${[...d.deny, ...d.fixed_deny].join(', ')}\n` +
     `  budget    ${capsText(d.caps)} · stop at ${Math.round(d.stop_at * 100)}%\n` +
     `  spend     ${spendText(d.spend, d.caps)} · paused ${d.paused.length === 0 ? 'none' : d.paused.join(', ')}\n` +
-    `  link      ${d.link ?? 'none'}\n`
+    recordText(d.link, d.files)
   );
+}
+
+/**
+ * B49b: where the owner reads the run — the live doc's link, else the two Markdown files.
+ * @param {string | null} link @param {{binnacle: string, log: string} | null} files @returns {string}
+ */
+function recordText(link, files) {
+  if (link) return `  link      ${link}\n`;
+  if (files) return `  link      none\n  binnacle  ${files.binnacle}\n  full log  ${files.log}\n`;
+  return '  link      none\n';
+}
+
+/**
+ * B49b: without a stored link the Markdown files are the record — rewrite them from the ledger now
+ * so the printed paths are current. A failed write is reported on stderr and gives null (no paths).
+ * @param {string} runId @param {{link?: string | null} | null} grant @param {Date} now
+ * @param {(s: string) => void} err
+ * @returns {Promise<{binnacle: string, log: string} | null>}
+ */
+async function recordFiles(runId, grant, now, err) {
+  if (grant === null || grant.link) return null;
+  try {
+    return await refreshAutopilotFiles(runId, { now });
+  } catch (thrown) {
+    err(`autopilot: the binnacle files could not be written (${thrown?.message ?? String(thrown)})\n`);
+    return null;
+  }
 }
 
 /**
@@ -409,7 +440,8 @@ export async function runAutopilot(args, deps = {}) {
     if (sub === 'status') {
       const { grant, state } = await checkExpiry(runId, now, { writeRow: writer });
       const spend = grant === null ? {} : spendByCategory(await readAllRows((await readRun(runId)).project), runId, grant);
-      const data = statusData(runId, grant, now, state, spend);
+      const files = await recordFiles(runId, grant, now, err);
+      const data = statusData(runId, grant, now, state, spend, files);
       out(flags.json ? `${JSON.stringify(data, null, 2)}\n` : statusText(data));
       return 0;
     }
@@ -418,7 +450,8 @@ export async function runAutopilot(args, deps = {}) {
       const checked = await checkExpiry(runId, now, { writeRow: writer });
       if (checked.state === 'expired') throw new StateError('grant-expired', expiredMessage(runId, checked.grant.until));
       const grant = await stopGrant({ runId, now, writeRow: writer });
-      out(`autopilot run ${runId}: grant ${grant.grant_id} stopped\n`);
+      // B49b: the stop row is in; the record the owner reads is the doc's link or the rewritten files
+      out(`autopilot run ${runId}: grant ${grant.grant_id} stopped\n${recordText(grant.link ?? null, await recordFiles(runId, grant, now, err))}`);
       return 0;
     }
     // start
@@ -459,7 +492,7 @@ export async function runAutopilot(args, deps = {}) {
 }
 
 const USAGE =
-  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset>\n';
+  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function autopilot(args) {

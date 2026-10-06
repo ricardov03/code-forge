@@ -45,7 +45,7 @@ The coder's report is a claim sheet. The gate reproduces each number in the meas
 
 ## §6 Budget — the stop is the feature (R6)
 
-`budget.block_lines` and `budget.block_cases` bind the plan; the gate's 1.25 × stop binds the block. A coder that overruns and stops before expanding did the right thing: never compress or defer coverage to fit. One raise per run, by the human, logged; a second overrun in the same run re-decomposes at the architect level. A post-acceptance ruling that adds required lines re-baselines the cap at ruling time, priced from the assertions it orders; a STOP defined mid-turn binds from the coder's next reported boundary. A coder never trims to fit; landing exactly on a cap is a tell that is checked. Review tokens count toward `budget.block_tokens_soft` / `budget.block_tokens_hard` (`review.md` §7).
+`budget.block_lines` and `budget.block_cases` bind the plan; the gate's 1.25 × stop binds the block. A coder that overruns and stops before expanding did the right thing: never compress or defer coverage to fit. One raise per run, by the human, logged; a second overrun in the same run re-decomposes at the architect level. **Autopilot:** a budget raise is never delegated, and neither is `--no-require-reviews` or a merge (`autopilot.md` §5). A post-acceptance ruling that adds required lines re-baselines the cap at ruling time, priced from the assertions it orders; a STOP defined mid-turn binds from the coder's next reported boundary. A coder never trims to fit; landing exactly on a cap is a tell that is checked. Review tokens count toward `budget.block_tokens_soft` / `budget.block_tokens_hard` (`review.md` §7).
 
 ## §7 The PR contract — a draft PR only after independent review
 

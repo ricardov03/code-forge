@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 51,
+  "block_count": 52,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -686,6 +686,21 @@
         "B48"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/delegate.mjs (refresh hook), src/cli/autopilot.mjs"
+    },
+    "B49b": {
+      "title": "Autopilot live log artifact and skill text: skill/references/autopilot.md (one Claude Docs doc per run with a Binnacle tab - title and byline, then 7 sections - and a Full log tab; link stored first; only changed sections updated; stop adds the final rows and asks the owner to review), Autopilot notes at every owner stop, the never-delegated list, autopilot status/stop print the link or the Markdown paths, docs/autopilot.md, README, concepts",
+      "wave": 11,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "skill/references/autopilot.md",
+        "docs/autopilot.md",
+        "test/skill/structure.test.mjs"
+      ],
+      "depends_on": [
+        "B49a"
+      ],
+      "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/cli/autopilot.mjs, skill/SKILL.md, skill/references/{decisions,review,harden,plan,code}.md, skill/references/adapters/claude-code.md, README.md, docs/README.md, docs/concepts.md, docs/getting-started.md"
     }
   }
 }

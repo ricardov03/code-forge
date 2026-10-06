@@ -21,3 +21,17 @@ The plan goes to the owner through plan mode (`plan.md` §4.1): `EnterPlanMode` 
 ## §3 What is lost and what is not
 
 Lost: live observation of the coder (only the progress log and the final report), a resumable transcript (a lost subagent is re-dispatched with the fix history in a new brief — `continuity.md` §2). Not lost: session isolation, signed rows, the gate, the ladder, the facts rule, the convergence rule (`degraded.md` §2).
+
+## §4 Autopilot — the live log doc (Claude Docs connector)
+
+At `forge autopilot start` (`autopilot.md` §1) the run gets ONE doc through the Claude Docs connector. Follow the connector's own guide (`guide` → `topic.index`, `topic.tabs`). The steps:
+
+0. **One doc per run:** `forge autopilot status --run <r>` first. A link there ⇒ the doc exists (a lost session left it): continue in it from step 5, never birth a second one.
+1. **Birth, one `batch`:** a new doc named `<project> autopilot run — <date>`. The main tab **Binnacle** follows `forge autopilot binnacle --run <r> --json`: the title and byline, then 7 sections: Status at a glance, Decisions, Blocks, Open questions, Actions only you can take, Incidents, Timeline — one `pending` block per section. A second tab **Full log** is born in the same batch with one `pending` block for its table. The last member places both: Binnacle `order "a0"`, Full log `order "a1"`.
+2. **Store the link at once,** from the birth ack: `forge autopilot binnacle --run <r> --link <url>`.
+3. **Open it** with the Artifact tool's `open` action and that link (no `open` action: give the link in your next message, once).
+4. **Fill one section per `update`**, in reading order: replace each Binnacle pending block with `## <heading>` and its table or list from the JSON; then the Full log tab's pending block with one pipe table from `forge autopilot log --run <r> --json`, newest first.
+5. **During the window:** after each decision, block close or incident, one `update` per changed section — insert the new Decisions row, insert the new Timeline row at the top, replace only the Status cells that changed — and insert the new rows at the top of the Full log table. Never resend the whole doc. A refused edit (`guard_mismatch`, `find_none`) means the owner edited it: re-read that section, keep their edit, apply only the new row(s); never `force`.
+6. **At stop:** after `forge autopilot stop --run <r>`, insert the stop event as the newest Timeline row and the newest Full log row, then replace the Status at a glance section with the final values. The doc stays as the run's record. Tell the owner in chat: the link, and "review Open questions and Actions only you can take before work resumes".
+
+No Claude Docs connector: skip the doc. The Markdown files in the run dir are the record, and `status` and `stop` print their paths (`autopilot.md` §4).

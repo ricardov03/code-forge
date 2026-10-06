@@ -394,4 +394,7 @@ In a harness where the skill is installed, write a brief and ask for a job:
 
 or `/code-forge full plans/my-feature.md` for all three with one checkpoint after harden.
 
+Going away while it runs? Ask for autopilot: a delegate makes a few of your decisions for a set
+time, and a live log shows you everything when you return. See [autopilot.md](autopilot.md).
+
 Next: the [first end-to-end test](tutorial-first-test.md).

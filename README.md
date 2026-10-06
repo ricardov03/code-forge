@@ -8,6 +8,18 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
+## What's new (next release)
+
+- **Autopilot.** Step away for up to 24 hours. `code-forge autopilot start` grants a delegate (a
+  fresh L2 or L3 session) a few of your decisions: waive a warning or a nit, one extra fix round,
+  the coder level. A fixed deny list keeps the rest yours: critical waivers, plan and design
+  approval, limits, budget raises, merges, destructive actions. Each category can pause at a
+  budget stop, and every answer is a signed ledger row.
+- **A live log for your return.** In Claude Code the orchestrator keeps one Claude Docs page per
+  run with two tabs: Binnacle (the summary) and Full log (every event, newest first).
+  `autopilot status` and `autopilot stop` print its link; without the connector they print the two
+  Markdown files. See [docs/autopilot.md](docs/autopilot.md).
+
 ## What's new in 0.5
 
 - **Parallel review.** The worker reviews `review.parallel_tickets` files at once (default 3), with
@@ -152,6 +164,7 @@ usage line.
 | `upgrade` | `code-forge upgrade [--source <path>]` |
 | `logs` | `code-forge logs [--last N] [--json]` · `logs summary [--days N] [--json]` · `logs clear [--yes]` · `logs path` — the local error log (`~/.code-forge/logs/errors.jsonl`): errors, warnings, and `[fixed in X.Y.Z]` marks |
 | `logs report` | `code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]` — share selected errors as a public GitHub issue; you see the full text first and say yes once. An error a newer version fixes is not filed unless `--force` |
+| `autopilot` | `code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2\|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]` · `autopilot status\|stop --run <id>` (print the live log's link, or the two Markdown files) · `autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--block <id>] [--file <path>] [--finding <id>] [--json]` · `autopilot waive\|round\|level … --decision <id>` · `autopilot approve --run <id> --key <dot.path> --value <json> --until <time>` (owner only, at a terminal) · `autopilot binnacle --run <id> [--json\|--markdown] [--link <https url>]` · `autopilot log --run <id> [--json\|--markdown]` — the owner's time-boxed grant to a delegate; see [docs/autopilot.md](docs/autopilot.md) |
 | `help` / `version` | `code-forge --help` (or no verb) · `code-forge --version` |
 
 `run`, `block`, `worker`, `spawn`, `s2`, `author`, `facts` and `review-file` are what the Agent

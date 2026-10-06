@@ -3,7 +3,7 @@
 // real ledger writer into a temp HOME. One per-file temp parent, removed in `after()`; HOME points
 // into it before any `src` module loads.
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, rmSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -18,6 +18,10 @@ const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { endRun, readRun, startRun } = await import('../../src/state/run.mjs');
 const { isForbidden, mergeForbidden, scanTranscript } = await import('../../src/util/forbidden.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
+const { runFilesDir } = await import('../../src/autopilot/binnacle.mjs');
+
+/** B49b: the two Markdown files of a run (the record when no link is stored). @param {string} runId */
+const filesOf = (runId) => ({ binnacle: path.join(runFilesDir(runId), 'autopilot-binnacle.md'), log: path.join(runFilesDir(runId), 'autopilot-log.md') });
 
 const T0 = new Date('2026-10-06T20:00:00.000Z');
 /** @param {number} minutes */
@@ -26,7 +30,7 @@ const UNTIL = '2026-10-07T00:00:00+02:00'; // T0 + 2 h
 const UNTIL_UTC = '2026-10-06T22:00:00.000Z';
 const FIXED = 'waive:critical, waive:proof, reviews:skip, limits:change, plan:approve, design:approve, pr:merge, destructive, budget:raise';
 const USAGE =
-  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset>\n';
+  'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]\n';
 
 /** A run whose ledger slug is its own id (so each test reads only its rows). @param {string} runId */
 async function newRun(runId) {
@@ -100,8 +104,12 @@ test('start with every flag stores the grant and writes one signed autopilot.gra
       `  deny      round:extra, ${FIXED}\n` +
       '  budget    coding 20.00 USD, review 5.00 USD · stop at 75%\n' +
       '  spend     coding 0.00 of 20.00 USD, review 0.00 of 5.00 USD · paused none\n' +
-      '  link      none\n',
+      '  link      none\n' +
+      `  binnacle  ${filesOf('c-full').binnacle}\n` +
+      `  full log  ${filesOf('c-full').log}\n`,
   );
+  assert.equal(readFileSync(filesOf('c-full').binnacle, 'utf8').split('\n')[0], '# Autopilot run c-full');
+  assert.equal(readFileSync(filesOf('c-full').log, 'utf8').split('\n')[0], '# Autopilot full log c-full');
   const json = await cli(['status', '--run', 'c-full', '--json'], { now: at(40) });
   assert.equal(json.code, 0);
   assert.deepEqual(JSON.parse(json.out), {
@@ -119,6 +127,7 @@ test('start with every flag stores the grant and writes one signed autopilot.gra
     spend: { coding: 0, review: 0 },
     paused: [],
     link: null,
+    files: filesOf('c-full'),
     started_at: T0.toISOString(),
     stopped_at: null,
     expired_at: null,
@@ -199,7 +208,13 @@ test('stop ends the grant now with one signed autopilot.stop row; status then sa
   await newRun('c-stop');
   await cli(['start', '--run', 'c-stop', '--until', UNTIL, '--delegate', 'L2', '--allow', 'waive:nit', '--yes']);
   const id = (await readRun('c-stop')).autopilot.grant_id;
-  assert.deepEqual(await cli(['stop', '--run', 'c-stop'], { now: at(15) }), { code: 0, out: `autopilot run c-stop: grant ${id} stopped\n`, err: '' });
+  assert.deepEqual(await cli(['stop', '--run', 'c-stop'], { now: at(15) }), {
+    code: 0,
+    out: `autopilot run c-stop: grant ${id} stopped\n  link      none\n  binnacle  ${filesOf('c-stop').binnacle}\n  full log  ${filesOf('c-stop').log}\n`,
+    err: '',
+  });
+  // the files were rewritten after the stop row: the full log's newest entry is the stop
+  assert.equal(readFileSync(filesOf('c-stop').log, 'utf8').split('\n').filter((l) => l.startsWith('| 20'))[0].split(' | ')[1], 'Grant stopped');
   const rows = await readAllRows('c-stop');
   assert.deepEqual(rows.map((r) => r.event), ['run.start', 'autopilot.grant', 'autopilot.stop']);
   assert.deepEqual([rows[2].grant_id, rows[2].ts], [id, at(15).toISOString()]);
@@ -210,6 +225,28 @@ test('stop ends the grant now with one signed autopilot.stop row; status then sa
   assert.equal(JSON.parse((await cli(['status', '--run', 'c-stop', '--json'], { now: at(16) })).out).state, 'stopped');
   assert.deepEqual(await cli(['stop', '--run', 'c-stop'], { now: at(17) }), { code: 1, out: '', err: `autopilot stop: run c-stop's autopilot grant was already stopped at ${at(15).toISOString()}\n` });
   assert.deepEqual(await events('c-stop'), ['run.start', 'autopilot.grant', 'autopilot.stop']);
+});
+
+test('B49b: with a stored link, status and stop print the link and no file paths (text and --json); no grant prints neither', async () => {
+  await newRun('c-linked');
+  await cli(['start', '--run', 'c-linked', '--until', UNTIL, '--delegate', 'L2', '--allow', 'waive:nit', '--yes']);
+  const LINK = 'https://claude.ai/code/artifact/0123abcd';
+  const stored = await cli(['binnacle', '--run', 'c-linked', '--link', LINK, '--json'], { now: at(5) });
+  assert.equal(stored.code, 0, stored.err);
+  const status = await cli(['status', '--run', 'c-linked'], { now: at(10) });
+  assert.equal(status.code, 0);
+  const tail = status.out.split('\n').slice(-2);
+  assert.deepEqual(tail, [`  link      ${LINK}`, '']);
+  assert.equal(status.out.includes('binnacle  '), false);
+  const json = JSON.parse((await cli(['status', '--run', 'c-linked', '--json'], { now: at(10) })).out);
+  assert.deepEqual([json.link, json.files], [LINK, null]);
+  const id = (await readRun('c-linked')).autopilot.grant_id;
+  assert.deepEqual(await cli(['stop', '--run', 'c-linked'], { now: at(20) }), { code: 0, out: `autopilot run c-linked: grant ${id} stopped\n  link      ${LINK}\n`, err: '' });
+  assert.deepEqual(await events('c-linked'), ['run.start', 'autopilot.grant', 'autopilot.link', 'autopilot.stop']);
+
+  await newRun('c-nolink');
+  const none = JSON.parse((await cli(['status', '--run', 'c-nolink', '--json'])).out);
+  assert.deepEqual([none.state, none.link, none.files], ['none', null, null]);
 });
 
 test('status after the window: expired, one autopilot.expire row however many times it is asked; no grant; unknown run', async () => {

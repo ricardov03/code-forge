@@ -34,6 +34,12 @@ waits on a second real consumer (plan §10.4, Q17).
   take, incidents, timeline newest first) plus a full log of every autopilot event. As JSON or as
   `autopilot-binnacle.md` / `autopilot-log.md` in the run dir, rewritten after each delegate decision and scrubbed.
   `--link <https url>` stores the live page's link.
+- Autopilot log page for your return: the skill (`skill/references/autopilot.md`) creates one Claude Docs doc per run
+  with a Binnacle tab (the title and byline, then 7 sections) and a Full log tab, stores its link first, updates only
+  the changed sections after each decision, block close or incident, and at stop adds the final rows and asks you to
+  review the open questions and your actions. `autopilot status` and `stop` print the link (or the Markdown file paths
+  without the Docs connector). Every owner stop in the skill says what autopilot may do there or that it is never
+  delegated. New `docs/autopilot.md`.
 
 ## [0.5.1] — 2026-10-04
 

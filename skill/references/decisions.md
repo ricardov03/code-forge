@@ -51,3 +51,5 @@ A fresh L3 session receives the failure evidence — the last attempt's diff, th
 ## §7 What reaches the human
 
 `next = stop`, `review.over_budget`, an orphan file, `worker_down`, `review_cap`, `redecompose`, `ask_human`, a security question, consensus unavailable, and one budget raise per run. Everything else is decided by S1, S2 or the rules above and recorded.
+
+**Autopilot:** while a grant is active, a warning or nit waiver, one extra round at `review_cap` and a coder level go first to the delegate (`forge autopilot ask`, then `forge autopilot waive|round|level --decision <id>` only when it acted, `autopilot.md` §2). Never delegated: `next = stop`, `ask_human`, a security question, a critical finding, a budget raise, `redecompose` — they wait for the owner (`autopilot.md` §5).
