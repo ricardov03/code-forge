@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 50,
+  "block_count": 51,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -672,6 +672,20 @@
         "B47"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/grant.mjs, src/autopilot/scopes.mjs, src/cli/autopilot.mjs, src/state/run.mjs (reloadRun guard), src/config/load.mjs (slugFor moved from cli/run.mjs), src/cli/{author,facts,jev,plan,s2,spawn}.mjs (slugFor import), test/cli/autopilot.test.mjs"
+    },
+    "B49a": {
+      "title": "Autopilot binnacle and full log: autopilot binnacle builds the owner's 8-section logbook (status at a glance, decisions with why and reversal, blocks, open questions, actions only the owner can take, incidents, timeline) and autopilot log lists every autopilot row, as JSON or Markdown files in the run dir (rewritten after each decision, scrubbed with the workspace as <project>); --link stores the live page link with a signed row",
+      "wave": 11,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/autopilot/binnacle.mjs",
+        "test/autopilot/binnacle.test.mjs"
+      ],
+      "depends_on": [
+        "B48"
+      ],
+      "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/delegate.mjs (refresh hook), src/cli/autopilot.mjs"
     }
   }
 }

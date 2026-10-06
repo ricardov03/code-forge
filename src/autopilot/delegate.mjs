@@ -54,6 +54,7 @@ import { snapshotFor } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { redact } from '../util/redact.mjs';
+import { refreshAutopilotFiles } from './binnacle.mjs';
 import { grantFor } from './grant.mjs';
 import { ALLOWABLE_WHAT, FIXED_DENY } from './scopes.mjs';
 
@@ -110,7 +111,10 @@ const HEADER = [
 /**
  * @typedef {import('../session/spawn.mjs').SessionDeps & {
  *   writeRow?: WriteRow, checks?: import('./grant.mjs').GrantCheck[], now?: () => Date,
- * }} DelegateDeps - `writeRow` receives the session rows and the decision row; `now` is the clock.
+ *   afterDecision?: (runId: string) => Promise<unknown>,
+ * }} DelegateDeps - `writeRow` receives the session rows and the decision row; `now` is the clock;
+ *   `afterDecision` (B49a) runs after the decision row is written (default: rewrite the run's
+ *   binnacle and log files from the ledger, only when the rows go to the real ledger).
  */
 /**
  * @typedef {object} DelegateAsk
@@ -399,6 +403,13 @@ export async function askDelegate(ask, deps = {}) {
     await writeRow(r);
     return r;
   }, row));
+  // B49a: the owner's files follow the decision; best effort, never a reason to fail it
+  try {
+    if (deps.afterDecision) await deps.afterDecision(runId);
+    else if (!deps.writeRow) await refreshAutopilotFiles(runId, { now: clock() });
+  } catch {
+    // the decision row stands; the files are rewritten by the next decision or `autopilot binnacle`
+  }
   return {
     answered: answer !== null,
     acted,

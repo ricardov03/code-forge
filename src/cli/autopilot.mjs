@@ -13,6 +13,13 @@
  *   autopilot round --run <id> --block <id> --file <path> --decision <id>
  *   autopilot level --run <id> --block <id> --plan <file> --decision <id>
  *   autopilot approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset>
+ *   autopilot binnacle --run <id> [--json|--markdown] [--link <https url>]
+ *   autopilot log --run <id> [--json|--markdown]
+ *
+ * B49a (`src/autopilot/binnacle.mjs`): `binnacle` is the owner's summary of the run (status, decisions, blocks,
+ * open questions, owner actions, incidents, timeline) and `log` lists every autopilot ledger row, newest first;
+ * Markdown to stdout by default, `--json` prints data, `--markdown` writes the files in the run dir (0600) and
+ * prints the path. `--link` stores the https link of the live doc in the active grant (signed `autopilot.link`).
  *
  * B48 (`src/autopilot/limits.mjs`): `approve` is the OWNER's temporary config change: it writes
  * the workspace `.code-forge.yml`, reloads the run the way `run reload` does, and the old value
@@ -47,6 +54,7 @@
 
 import { activeGrantMessage, checkExpiry, expiredMessage, grantState, startGrant, stopGrant, validateGrantInput } from '../autopilot/grant.mjs';
 import { askDelegate } from '../autopilot/delegate.mjs';
+import { buildBinnacle, gitOwner, scrubCtxOf, buildFullLog, renderBinnacleMarkdown, renderLogMarkdown, storeLink, writeAutopilotFiles } from '../autopilot/binnacle.mjs';
 import { chooseCoderLevel, grantExtraRound, waiveForOwner } from '../autopilot/actions.mjs';
 import { approvalCheckText, approveChange, checkApprovals, spendByCategory, validateApproval } from '../autopilot/limits.mjs';
 import { BUDGET_CATEGORIES, FIXED_DENY_SCOPES } from '../autopilot/scopes.mjs';
@@ -73,7 +81,7 @@ import { writeSafe } from '../util/redact.mjs';
  *   `actions`: the B47 seams (`exec`, `env`, `onPath` for gh; `readRows`).
  */
 
-const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop', 'ask', 'waive', 'round', 'level', 'approve']);
+const SUBCOMMANDS = Object.freeze(['start', 'status', 'stop', 'ask', 'waive', 'round', 'level', 'approve', 'binnacle', 'log']);
 
 const FLAG_SPECS = Object.freeze({
   start: { values: ['run', 'until', 'delegate', 'allow', 'deny', 'budget', 'stop-at'], booleans: ['yes'] },
@@ -84,6 +92,8 @@ const FLAG_SPECS = Object.freeze({
   round: { values: ['run', 'block', 'file', 'decision'] },
   level: { values: ['run', 'block', 'plan', 'decision'] },
   approve: { values: ['run', 'key', 'value', 'until'] },
+  binnacle: { values: ['run', 'link'], booleans: ['json', 'markdown'] },
+  log: { values: ['run'], booleans: ['json', 'markdown'] },
 });
 
 /** Why `approve` takes no `--yes` (the refusal text). */
@@ -170,6 +180,44 @@ async function runApprove(runId, flags, deps, out, err) {
   const again = await validateApproval({ runId, key: flags.key, value: flags.value, until: flags.until, now });
   const approval = await approveChange({ runId, key: again.key, segs: again.segs, value: again.value, until: again.until, now, writeRow: deps.writeRow });
   out(`autopilot approve run ${runId}: ${approval.key} changed until ${approval.until} (approval ${approval.approval_id}); the old value comes back then\n`);
+  return 0;
+}
+
+/**
+ * `autopilot binnacle` / `autopilot log` (B49a): the owner's summary and the full log of a run.
+ * Default Markdown to stdout; `--json` prints the data; `--markdown` writes `autopilot-binnacle.md`
+ * and `autopilot-log.md` in the run dir (both, so they never disagree) and prints the path.
+ * `--link <url>` (binnacle only) first stores the https link in the active grant.
+ * @param {'binnacle' | 'log'} sub @param {string} runId @param {Record<string, any>} flags
+ * @param {AutopilotDeps} deps @param {(s: string) => void} out
+ * @param {import('../state/run.mjs').WriteRow} writer
+ * @returns {Promise<number>}
+ */
+async function runBinnacle(sub, runId, flags, deps, out, writer) {
+  if (flags.json && flags.markdown) throw new StateError('usage', 'give --json or --markdown, not both');
+  const clock = deps.now ?? (() => new Date());
+  if (sub === 'binnacle' && flags.link !== undefined) {
+    // the window is checked first: an expired grant gets its one expire row and no link row
+    const checked = await checkExpiry(runId, clock(), { writeRow: writer });
+    if (checked.state === 'expired') throw new StateError('grant-expired', expiredMessage(runId, checked.grant.until));
+    await storeLink({ runId, link: flags.link, now: clock(), writeRow: writer });
+  }
+  const now = clock();
+  await checkExpiry(runId, now, { writeRow: writer }); // an expired window gets its one row before the read
+  const record = await readRun(runId);
+  const rows = await readAllRows(record.project);
+  const owner = await gitOwner(record.workspace);
+  if (flags.json) {
+    const data = sub === 'binnacle' ? buildBinnacle({ runId, rows, record, now, owner }) : buildFullLog({ runId, rows, scrubCtx: scrubCtxOf(record) });
+    out(`${JSON.stringify(data, null, 2)}\n`);
+    return 0;
+  }
+  if (flags.markdown) {
+    const files = writeAutopilotFiles({ runId, rows, record, now, owner });
+    out(`${sub === 'binnacle' ? files.binnacle : files.log}\n`);
+    return 0;
+  }
+  out(sub === 'binnacle' ? renderBinnacleMarkdown(buildBinnacle({ runId, rows, record, now, owner }), scrubCtxOf(record)) : renderLogMarkdown({ runId, entries: buildFullLog({ runId, rows, scrubCtx: scrubCtxOf(record) }) }));
   return 0;
 }
 
@@ -353,6 +401,7 @@ export async function runAutopilot(args, deps = {}) {
     // B48: every subcommand first restores the approvals whose window is over
     err(approvalCheckText(await checkApprovals(runId, clock, { writeRow: writer })));
     if (sub === 'approve') return await runApprove(runId, flags, { ...deps, writeRow: writer }, out, err);
+    if (sub === 'binnacle' || sub === 'log') return await runBinnacle(sub, runId, flags, deps, out, writer);
     if (sub === 'ask') return await runAsk(runId, flags, deps, out);
     if (sub === 'waive' || sub === 'round' || sub === 'level') return await runAction(sub, runId, flags, deps, out, err);
     const now = clock();

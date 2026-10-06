@@ -29,6 +29,11 @@ waits on a second real consumer (plan §10.4, Q17).
   `code-forge autopilot approve --key --value --until` (owner only, in a terminal, no `--yes`) changes one setting until
   a time and restores it automatically, crash-safe, with signed rows; a value changed by hand meanwhile is left alone.
   While a grant is active, `run reload` refuses any limit key.
+- `code-forge autopilot binnacle` and `autopilot log`: the logbook of an autopilot run, in the shape of an overnight-run
+  page (status at a glance, decisions with why and what would reverse them, blocks, open questions, actions only you can
+  take, incidents, timeline newest first) plus a full log of every autopilot event. As JSON or as
+  `autopilot-binnacle.md` / `autopilot-log.md` in the run dir, rewritten after each delegate decision and scrubbed.
+  `--link <https url>` stores the live page's link.
 
 ## [0.5.1] — 2026-10-04
 
