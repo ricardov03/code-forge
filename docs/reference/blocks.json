@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 52,
+  "block_count": 54,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -701,6 +701,37 @@
         "B49a"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/cli/autopilot.mjs, skill/SKILL.md, skill/references/{decisions,review,harden,plan,code}.md, skill/references/adapters/claude-code.md, README.md, docs/README.md, docs/concepts.md, docs/getting-started.md"
+    },
+    "B50": {
+      "title": "Dogfood tool fixes: the project root (git root, or the nearest regular .code-forge.yml below it; outside git never above HOME) sets the config and ledger slug for every verb run from a subfolder; plan check reads the list form and the old table form of the cannot-back section and splits clauses on ';' and ' · (n)'; the facts delegate proves a flag only with grep -rn -- <flag> <source folder> (exact option allow-list, no --help, no pipes, no rg, hits only in source files under the path); a command claim without its CLI gets the project bin only when the brief names it",
+      "wave": 11,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/config/load.mjs",
+        "src/session/plan-check.mjs",
+        "src/session/facts.mjs",
+        "test/session/plan-check.test.mjs",
+        "test/session/facts.test.mjs"
+      ],
+      "depends_on": [
+        "B49b"
+      ],
+      "note": "root-added 2026-10-06; dogfood findings from plans/parallel-review §6.1 and plans/autopilot; no Claude allow rules (rejected: an allow-list of commands is unsafe); also amends src/cli/{author,facts,jev,plan,run,s2,spawn}.mjs, src/autopilot/limits.mjs, skill/references/plan.md, skill/templates/plan.md, docs/how-it-works.md, docs/tutorial-first-test.md"
+    },
+    "B51": {
+      "title": "Skill rule R17 'Never relax a rule alone' and cost supervision; owner rules and docs gaps filled",
+      "wave": 11,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "skill/references/rules-core.md",
+        "test/skill/structure.test.mjs"
+      ],
+      "depends_on": [
+        "B49b"
+      ],
+      "note": "root-added 2026-10-06; also amends skill/SKILL.md, skill/references/{autopilot,decisions,ledger}.md, README.md, docs/*"
     }
   }
 }

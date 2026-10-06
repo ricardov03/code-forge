@@ -15,6 +15,10 @@ Next release (0.6.1):
 - **Never relax a rule alone.** A new skill rule (R17): the orchestrator and the delegate never
   change, relax or remove a limit, threshold, budget, gate or review requirement. When a limit
   blocks work they stop, show the data, propose options and wait for you.
+- **Fixes from using code-forge on itself.** A verb run from a subfolder now uses the project's
+  ledger and config. `plan check` reads the list form the template shows. `facts` checks a flag
+  with `grep -rn -- <flag> <source folder>` instead of `--help`, so the check runs in the
+  delegate's sandbox.
 
 In 0.6.0:
 

@@ -11,7 +11,7 @@
 
 import { accessSync, constants, statSync } from 'node:fs';
 import path from 'node:path';
-import { loadProjectConfig, slugFor } from '../config/load.mjs';
+import { loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
 import { buildFacts, FactsError } from '../session/facts.mjs';
 import { runRootFor, SessionError } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
@@ -63,14 +63,16 @@ export async function runFactsVerb(args, deps = {}) {
       writeSafe(stderr, USAGE);
       return 2;
     }
-    const loaded = await loadProjectConfig(cwd);
+    // B50: the project root's config, slug, plans dir and snapshot, also from a subfolder (flag paths stay cwd-relative)
+    const root = projectRootFor(cwd);
+    const loaded = await loadProjectConfig(root);
     if (!loaded.ok) {
       writeSafe(stderr, `facts: ${loaded.message}\n`);
       return 2;
     }
     const cfg = /** @type {Record<string, any>} */ (loaded.config);
     const briefPath = path.resolve(cwd, flags.brief);
-    const plansDir = path.resolve(cwd, cfg.project?.plans_dir ?? 'plans');
+    const plansDir = path.resolve(root, cfg.project?.plans_dir ?? 'plans');
     const outPath = typeof flags.out === 'string' ? path.resolve(cwd, flags.out) : path.join(plansDir, `${path.basename(briefPath, path.extname(briefPath))}.facts.md`);
     const sources = Array.isArray(flags.sources) ? flags.sources.map((s) => path.resolve(cwd, s)) : [];
     // --brief must be a regular file; a --sources path may be a file or a directory
@@ -88,11 +90,11 @@ export async function runFactsVerb(args, deps = {}) {
     const run = typeof flags.run === 'string' ? flags.run : undefined;
     // pre-run argument checks: a bad --run id or an unusable project state is usage (exit 2)
     const runRoot = run ? runRootFor(run, cfg?.tmp?.root) : undefined;
-    const slug = slugFor(cfg, cwd);
+    const slug = slugFor(cfg, root);
     let result;
     try {
       result = await buildFacts(
-        { cfg, briefPath, sources, outPath, run, runRoot, slug, projectDir: cwd, timeoutMs: timeout === undefined ? undefined : timeout * 1000 },
+        { cfg, briefPath, sources, outPath, run, runRoot, slug, projectDir: root, timeoutMs: timeout === undefined ? undefined : timeout * 1000 },
         { ...deps, stderr },
       );
     } catch (err) {

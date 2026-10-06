@@ -8,7 +8,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
-const { extractClaims, echoedClaim, readOnlyViolation, validateFacts, buildFacts, buildFactsPacket, SUBCOMMAND_HELP_DENY, isSilentCommand, buildSnapshot, removeSnapshot, parseSheet, FactsError } = await import('../../src/session/facts.mjs');
+const { extractClaims, echoedClaim, readOnlyViolation, validateFacts, buildFacts, buildFactsPacket, isSilentCommand, buildSnapshot, removeSnapshot, parseSheet, FactsError, readProjectBins } = await import('../../src/session/facts.mjs');
 const { runFactsVerb, downgradeLine } = await import('../../src/cli/facts.mjs');
 const { SessionError, spawnSession } = await import('../../src/session/spawn.mjs');
 const { exec: realExec } = await import('../../src/util/exec.mjs');
@@ -18,6 +18,25 @@ const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '.
 const BRIEF = path.join(REPO, 'test', 'fixtures', 'briefs', 'tool-brief.md');
 const ANSWER = JSON.parse(readFileSync(path.join(REPO, 'test', 'fixtures', 'briefs', 'tool-brief.answer.json'), 'utf8'));
 const CFG = { provider: 'anthropic', levels: Object.fromEntries(['L0', 'L1', 'L2', 'L3'].map((l) => [l, { model: `fake-${l}` }])) };
+
+const ONE = 'one command per row: no pipe or list (| ; && || & or a newline)';
+
+/** The delegate's snapshot as the fixture answer expects it: a `src` folder (its flag rows grep it). */
+const SNAP = freshDir('fixture-snap');
+mkdirSync(path.join(SNAP, 'src'));
+const IN_SNAP = { cwd: SNAP };
+
+/**
+ * A project whose `src` folder is passed as a source, so the facts snapshot holds it (the fixture
+ * answer's flag rows grep `src`).
+ * @param {string} name
+ */
+function srcProject(name) {
+  const projectDir = freshDir(name);
+  mkdirSync(path.join(projectDir, 'src'));
+  writeFileSync(path.join(projectDir, 'src', 'reviewer.mjs'), "argv.push('--json-schema', schema);\n");
+  return { projectDir, sources: [path.join(projectDir, 'src')], runRoot: freshDir(`${name}-root`) };
+}
 
 /** @param {Record<string, unknown>} patch - fields merged into row `index` of the fixture answer. */
 const answerWith = (index, patch) => ({ facts: ANSWER.facts.map((f, i) => (i === index ? { ...f, ...patch } : f)) });
@@ -39,9 +58,11 @@ test('facts verb: one L0 facts session, the sheet is written and its header carr
   copyFileSync(path.join(REPO, 'test', 'fixtures', 'config', 'minimal-anthropic.yml'), path.join(ws, '.code-forge.yml'));
   const brief = path.join(ws, 'brief.md');
   copyFileSync(BRIEF, brief);
+  mkdirSync(path.join(ws, 'src'));
+  writeFileSync(path.join(ws, 'src', 'reviewer.mjs'), "argv.push('--json-schema', schema);\n");
   const { deps, records } = fakeDeps({ FAKE_ANSWER: JSON.stringify(ANSWER) });
   const stdout = sink();
-  const code = await runFactsVerb(['--brief', 'brief.md', '--out', 'plans/brief.facts.md'], { ...deps, stdout, cwd: ws });
+  const code = await runFactsVerb(['--brief', 'brief.md', '--out', 'plans/brief.facts.md', '--sources', 'src'], { ...deps, stdout, cwd: ws });
   assert.equal(code, 0);
   const out = path.join(ws, 'plans', 'brief.facts.md');
   assert.deepEqual(JSON.parse(stdout.text()), { out, claims: 7, verified: 3 });
@@ -55,14 +76,185 @@ test('facts verb: one L0 facts session, the sheet is written and its header carr
   assert.equal(spawned.length, 1);
   const argv = spawned[0].argv;
   assert.deepEqual([argv[argv.indexOf('--model') + 1], argv[argv.indexOf('--tools') + 1], argv.includes('--restricted')], ['claude-haiku-4-5-20251001', 'Bash', true]);
+  // B50: nothing is pre-approved for the delegate
+  assert.equal(argv.filter((/** @type {string} */ t) => t === '--allowedTools' || t === '--allowed-tools').length, 0);
   assert.equal(Buffer.from(spawned[0].stdin_b64, 'base64').toString('utf8').includes('- F7 env: DO_NOT_TRACK\n'), true);
+});
+
+test('B50 grep options are an exact allow-list (-n -c -i -w -F -rn -nr before --): 3 source-grep forms and 2 plain greps pass, 30 variants are refused', () => {
+  const opts = 'grep: options only -n -c -i -w -F before --, or the source grep grep -rn -- <flag> <path>';
+  const only = 'grep -rn: only grep -rn -- <--long-flag> <path> (one relative subdirectory or file, never . or the root)';
+  const secret = 'reads a secret-looking file';
+  const cases = [
+    ['grep -rn -- --max src', null],
+    ['grep -nr -- --max-rounds ./src/cli', null],
+    ['grep -rn -- --max src/cli/review.mjs', null],
+    ['grep -c -- -r file.txt', null], // the pattern after -- is no option
+    ['grep -n -i -w -F plugin README.md', null],
+    ['grep -h foo a.txt', opts], // -h is not in the list; never a help check
+    ['grep -2r -- --max src', opts],
+    ['grep -i2r -- --max src', opts],
+    ['grep --recur -- --max src', opts],
+    ['grep --dir=recurse -- --max src', opts],
+    ['grep -r -n -- --max src', opts],
+    ['grep -d recurse -- --max src', opts],
+    ['grep -Rn -- --max src', opts],
+    ['grep -rln -- --max src', opts],
+    ['grep -l -- --max src', opts],
+    ['grep -L -- --max src', opts],
+    ['grep -rn -e --max src', opts],
+    ['grep -q plugin README.md', opts],
+    ['grep foo src -rn', only],
+    ['grep -rn -- -a src', only],
+    ['grep -rn -- -e src', only],
+    ['grep -rn -- --ab src', only],
+    ['grep -rn -- --max .', only],
+    ['grep -rn -- --max ./', only],
+    ["grep -rn -- --max ''", only],
+    ['grep -rn -- --max src bin', only],
+    ['grep -rn -- --max', only],
+    ['grep -rn -i -- --max src', only],
+    ['grep -rn -- --max src/..', 'paths with a .. segment are not allowed'],
+    ['grep -rn -- --token .env', secret],
+    ['grep -rn -- --token config/.npmrc', secret],
+    ['grep -rn -- --max ~', 'paths under ~ are not allowed'],
+    ['grep -rn -- --max /', 'absolute paths outside /usr, /opt/homebrew and /bin are not allowed'],
+    ['grep -rn -- --max src | head', ONE],
+    ['ls ; grep -rn -- --max src', ONE],
+  ];
+  assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd)]), cases);
+});
+
+test('B50 a flag claim is proved only by grep -rn -- <flag> <existing source dir>: VERIFIED needs a file:line: hit under it in a source file (never docs, plans, tests, node_modules, text or the brief); NOT-FOUND needs a whole top-level folder; a plain grep never counts (3 counted, 20 downgraded)', () => {
+  const cwd = freshDir('grep-snapshot');
+  for (const d of ['src/cli', 'lib', 'dist', '.hidden', 'docs', 'notes']) mkdirSync(path.join(cwd, d), { recursive: true });
+  writeFileSync(path.join(cwd, 'package.json'), '{}');
+  const tokens = ['--max', '--force', '--until', 'code-forge review', '--wait', '--deny', '--plan', '--brief', '--tests', '--scope', '--lane', '--line', '--pkg', '--dist', '--hid', '--other', '--vend', '--doc', '--ok', '--tst', '--brf', '--mds', '--nest'];
+  const claims = /** @type {Array<{token: string, kind: any}>} */ (tokens.map((t) => ({ token: t, kind: t.startsWith('--') ? 'flag' : 'command' })));
+  const row = (/** @type {number} */ i, /** @type {string} */ command, /** @type {string} */ excerpt, tag = 'VERIFIED') => ({ fact_id: `F${i}`, claim: claims[i - 1].token, kind: claims[i - 1].kind, command, output_excerpt: excerpt, tag, why: null });
+  const { facts, downgraded } = validateFacts({
+    facts: [
+      row(1, 'grep -rn -- --max src', "docs/a.md:1: --max\nsrc/cli/review.mjs:12:  '--max': { value: true },"),
+      row(2, 'grep -rn -- --force src', "src/cli/git.mjs:3:  '--force-push': true,"),
+      row(3, 'grep -rn -- --stop-at src', 'src/cli/autopilot.mjs:9: --until --stop-at'),
+      row(4, 'grep -rn -- --review src', 'src/cli/code-forge review --review'),
+      row(5, 'grep -rn -- --wait src', '', 'NOT-FOUND'),
+      row(6, 'grep -rn -- --denied src', '', 'NOT-FOUND'),
+      row(7, 'grep -rn -- --plan plans', 'plans/x.plan.md:3: run with --plan\ndocs/guide.mjs:2: --plan'),
+      row(8, 'grep -rn -- --brief notes', 'notes/spec.rst:1: pass --brief'),
+      row(9, 'grep -rn -- --tests src', "src/test/x.test.mjs:4: '--tests'"),
+      row(10, 'grep -rn -- --scope src/cli', '', 'NOT-FOUND'),
+      row(11, 'grep -rn -- --lane docs', '', 'NOT-FOUND'),
+      row(12, 'grep -rn -- --line src/cli/review.mjs', "12:  '--line': true,"),
+      row(13, 'grep -rn -- --pkg package.json', '', 'NOT-FOUND'),
+      row(14, 'grep -rn -- --dist dist', '', 'NOT-FOUND'),
+      row(15, 'grep -rn -- --hid .hidden', '', 'NOT-FOUND'),
+      row(16, 'grep -rn -- --other src', 'lib/x.mjs:1: --other'),
+      row(17, 'grep -rn -- --vend src', 'src/node_modules/a/index.js:1: --vend'),
+      row(18, 'grep -n -- --doc README.md', '3: --doc'),
+      row(19, 'grep -n -- --ok src/a.mjs', "3:  '--ok': true,"),
+      row(20, 'grep -n -- --tst test/a.test.mjs', '', 'NOT-FOUND'),
+      row(21, 'grep -c -- --brf notes/spec.rst', '0', 'NOT-FOUND'),
+      row(22, 'grep -n -- --mds src/a.mjs docs/a.md', 'src/a.mjs:1: --mds'),
+      row(23, 'grep -rn -- --nest src/cli', 'src/cli/x.mjs:1: --nest'),
+    ],
+  }, claims, { briefRel: 'notes/spec.rst', cwd });
+  const hit = 'VERIFIED source grep without a file:line: hit in a source file naming the claimed flag (docs, plans, tests, fixtures, text files and the brief do not count); not counted';
+  const scope = 'NOT-FOUND source grep must search one whole top-level source folder (not docs, plans, test, tests, fixtures or node_modules); not counted';
+  const own = 'a source grep counts only for a flag claim, with that flag as its pattern; not counted';
+  const proof = 'a flag claim is proved only by grep -rn -- <flag> <source folder>; not counted';
+  assert.deepEqual(facts.filter((f) => f.tag !== 'UNVERIFIABLE').map((f) => [f.fact_id, f.tag]), [['F1', 'VERIFIED'], ['F5', 'NOT-FOUND'], ['F23', 'VERIFIED']]);
+  assert.deepEqual(downgraded.map((d) => [d.fact_id, d.reason]), [
+    ['F2', hit], ['F3', own], ['F4', own], ['F6', own], ['F7', proof], ['F8', hit], ['F9', hit], ['F10', scope], ['F11', proof], ['F12', proof],
+    ['F13', proof], ['F14', proof], ['F15', proof], ['F16', hit], ['F17', hit], ['F18', proof], ['F19', proof], ['F20', proof], ['F21', proof], ['F22', proof],
+  ]);
+  // with no known cwd (no snapshot), no source grep counts — VERIFIED or NOT-FOUND
+  const noCwd = validateFacts({ facts: [row(1, 'grep -rn -- --max src', "src/cli/review.mjs:12:  '--max': { value: true },"), row(5, 'grep -rn -- --wait src', '', 'NOT-FOUND')] }, claims.slice(0, 5));
+  assert.deepEqual(noCwd.downgraded, [{ fact_id: 'F1', reason: proof }, { fact_id: 'F5', reason: proof }]);
+});
+
+test('B50 a command claim written without its CLI: `run reload` becomes `code-forge run reload` from the brief and package.json alone (never PATH); 4 cases keep it as written', () => {
+  const text = 'Autopilot extends `code-forge`.\n- `run reload` swaps config but has no revert.\n- `hub issue` lists issues.\n';
+  const kept = (/** @type {string} */ t, /** @type {any} */ opts) => extractClaims(t, opts).filter((c) => c.kind === 'command').map((c) => c.token);
+  const bins = { projectBins: ['code-forge'] };
+  const savedPath = process.env.PATH;
+  /** @type {string[][]} */
+  const underPaths = [];
+  try {
+    for (const p of ['', savedPath ?? '']) {
+      process.env.PATH = p;
+      underPaths.push(kept(text, bins));
+    }
+  } finally {
+    process.env.PATH = savedPath;
+  }
+  assert.deepEqual(underPaths, [['code-forge run reload', 'code-forge hub issue'], ['code-forge run reload', 'code-forge hub issue']]);
+  assert.deepEqual(
+    [
+      kept(`${text}Install \`hub\` first.\n`, bins)[1], // the brief uses hub as a CLI of its own
+      kept(`${text}Run \`hub --repo x\`.\n`, bins)[1], // hub followed by an option
+      kept('- `run reload` swaps config.\n', bins)[0], // the brief never names the project CLI
+      kept(text, {})[0], // no project bins
+    ],
+    ['hub issue', 'hub issue', 'run reload', 'run reload'],
+  );
+  // a well-known CLI is never prefixed
+  assert.deepEqual(kept('Built on `code-forge`: `git status`, `npm view`, `ls src`, `gh issue`, `run reload`.\n', bins), ['git status', 'npm view', 'ls src', 'gh issue', 'code-forge run reload']);
+  // only the BRIEF can name the project CLI, and only as a whole word — never a source, a path or a file name
+  const claim = '- `run reload` swaps config.\n';
+  const opts = (/** @type {string} */ brief) => ({ projectBins: ['code-forge'], briefText: brief });
+  assert.deepEqual(
+    [
+      kept(`${claim}Uses code-forge.\n`, opts(claim))[0], // named in a source only
+      kept(`${claim}Edit .code-forge.yml first.\n`, opts(`${claim}Edit .code-forge.yml first.\n`))[0],
+      kept(`${claim}See code-forge.config and ./bin/code-forge.\n`, opts(`${claim}See code-forge.config and ./bin/code-forge.\n`))[0],
+      kept(`${claim}Built on code-forge.\n`, opts(`${claim}Built on code-forge.\n`))[0], // a sentence's full stop is fine
+    ],
+    ['run reload', 'run reload', 'run reload', 'code-forge run reload'],
+  );
+});
+
+test('B50 facts verb on a project whose package.json bin has code-forge: the packet asks about `code-forge run reload`, the argv has no --allowedTools, the sheet shows the full claim', async () => {
+  const repo = freshDir('facts-bin');
+  writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ name: '@codedology/code-forge', bin: { 'code-forge': 'bin/code-forge.mjs' } }));
+  const brief = writeIn(repo, 'brief.md', 'Autopilot builds on `code-forge`.\n- `run reload` (`./src/state/config-snapshot.mjs`) swaps config but has no revert or expiry.\n');
+  const row = { fact_id: 'F1', claim: 'code-forge run reload', kind: 'command', command: 'which code-forge', output_excerpt: '/usr/local/bin/code-forge', tag: 'VERIFIED', why: null };
+  const { deps, records } = fakeDeps({ FAKE_ANSWER: JSON.stringify({ facts: [row] }) });
+  const root = freshDir('facts-bin-root');
+  const result = await buildFacts({ cfg: CFG, briefPath: brief, outPath: path.join(root, 'b.facts.md'), runRoot: root, projectDir: repo }, deps);
+  assert.equal(result.status, 'ok');
+  assert.deepEqual(result.claims, [{ token: 'code-forge run reload', kind: 'command' }, { token: './src/state/config-snapshot.mjs', kind: 'path' }]);
+  const spawned = readRecords(records);
+  const packet = Buffer.from(spawned[0].stdin_b64, 'base64').toString('utf8');
+  assert.equal(packet.split('\n').filter((l) => l === '- F1 command: code-forge run reload').length, 1);
+  assert.equal(packet.includes('command: run reload'), false);
+  assert.equal(spawned[0].argv.filter((t) => t === '--allowedTools' || t === '--allowed-tools').length, 0);
+  assert.deepEqual(result.facts?.map((f) => [f.fact_id, f.claim, f.tag]), [['F1', 'code-forge run reload', 'VERIFIED'], ['F2', './src/state/config-snapshot.mjs', 'UNVERIFIABLE']]);
+  assert.deepEqual(readProjectBins(repo), ['code-forge']);
+});
+
+test('B50 facts verb from a subfolder: the root config\'s project.slug gets the row, the sheet lands in the root plans dir', async () => {
+  const ws = freshDir('facts-sub');
+  mkdirSync(path.join(ws, '.git'));
+  writeFileSync(path.join(ws, '.code-forge.yml'), `${readFileSync(path.join(REPO, 'test', 'fixtures', 'config', 'minimal-anthropic.yml'), 'utf8')}project:\n  slug: root-slug\n`);
+  copyFileSync(BRIEF, path.join(ws, 'brief.md'));
+  const sub = path.join(ws, 'docs', 'notes');
+  mkdirSync(sub, { recursive: true });
+  mkdirSync(path.join(ws, 'src'));
+  writeFileSync(path.join(ws, 'src', 'reviewer.mjs'), "argv.push('--json-schema', schema);\n");
+  const { deps } = fakeDeps({ FAKE_ANSWER: JSON.stringify(ANSWER) });
+  const stdout = sink();
+  assert.equal(await runFactsVerb(['--brief', '../../brief.md', '--sources', '../../src'], { ...deps, stdout, cwd: sub }), 0);
+  assert.deepEqual(JSON.parse(stdout.text()), { out: path.join(ws, 'plans', 'brief.facts.md'), claims: 7, verified: 3 });
+  const { readAllRows } = await import('../../src/ledger/write.mjs');
+  assert.deepEqual([(await readAllRows('root-slug')).map((r) => r.event), (await readAllRows('notes')).length], [['session', 'facts.built'], 0]);
 });
 
 test('a delegate answer with a write verb in command: that row alone is UNVERIFIABLE (not counted), the sheet is written, 1 downgrade', async () => {
   const ws = freshDir('facts-write');
   const out = path.join(ws, 'brief.facts.md');
-  const { deps } = fakeDeps({ FAKE_ANSWER: JSON.stringify(answerWith(1, { command: 'claude --help | touch notes.txt' })) });
-  const result = await buildFacts({ cfg: CFG, briefPath: BRIEF, outPath: out }, deps);
+  const { deps } = fakeDeps({ FAKE_ANSWER: JSON.stringify(answerWith(1, { command: 'touch notes.txt' })) });
+  const result = await buildFacts({ cfg: CFG, briefPath: BRIEF, outPath: out, ...srcProject('facts-write-project') }, deps);
   const why = 'check command not allowed: not an allowed read-only form: "touch"; not counted';
   assert.deepEqual(result.downgraded, [{ fact_id: 'F2', reason: why }]);
   assert.deepEqual([result.facts?.[1].tag, result.facts?.[1].why, result.facts?.filter((f) => f.tag === 'VERIFIED').length], ['UNVERIFIABLE', why, 2]);
@@ -72,10 +264,11 @@ test('a delegate answer with a write verb in command: that row alone is UNVERIFI
 
 test('readOnlyViolation is an allow-list: 7 escapes are refused, plain reads pass', () => {
   const cases = [
-    ['ls\nrm -rf x', 'not an allowed read-only form: "rm"'],
-    ['git -C . commit -m x', 'git: only log, show, status, rev-parse, ls-files, cat-file or --version, with no global option'],
-    ['npm --prefix . install', 'npm: only view, ls or --version'],
-    ['node -p 1', 'node: only --version'],
+    ['ls\nrm -rf x', ONE],
+    ['rm -rf x', 'not an allowed read-only form: "rm"'],
+    ['git -C . commit -m x', 'git: only log, show, status, rev-parse, ls-files or cat-file, with no global option'],
+    ['npm --prefix . install', 'npm: only view or ls'],
+    ['node -p 1', 'not an allowed read-only form: "node"'],
     ['command rm x', 'command: only command -v <name>'],
     ['cat .env', 'reads a secret-looking file'],
     ['echo $HOME', '$ expansion is not allowed'],
@@ -87,9 +280,9 @@ test('readOnlyViolation is an allow-list: 7 escapes are refused, plain reads pas
 
 test('an env claim: only printenv NAME >/dev/null is accepted, and its excerpt is always blanked', () => {
   const claims = extractClaims(readFileSync(BRIEF, 'utf8'));
-  const set = validateFacts(answerWith(6, { tag: 'VERIFIED', output_excerpt: 'exit 0' }), claims).facts;
+  const set = validateFacts(answerWith(6, { tag: 'VERIFIED', output_excerpt: 'exit 0' }), claims, IN_SNAP).facts;
   assert.deepEqual([set[6].tag, set[6].output_excerpt], ['VERIFIED', '']);
-  const bad = validateFacts(answerWith(6, { command: 'printenv DO_NOT_TRACK', output_excerpt: '1', tag: 'VERIFIED' }), claims);
+  const bad = validateFacts(answerWith(6, { command: 'printenv DO_NOT_TRACK', output_excerpt: '1', tag: 'VERIFIED' }), claims, IN_SNAP);
   const why = 'an env claim may only be checked with printenv DO_NOT_TRACK >/dev/null; not counted';
   assert.deepEqual([bad.facts[6].tag, bad.facts[6].why, bad.facts[6].output_excerpt, bad.downgraded], ['UNVERIFIABLE', why, '', [{ fact_id: 'F7', reason: why }]]);
 });
@@ -112,11 +305,11 @@ test('facts verb: a directory as --brief is a usage error (exit 2) and spawns no
 
 test('a VERIFIED row with an empty excerpt, or with no command, is downgraded to UNVERIFIABLE (2 reasons); the fixture answer has 0 downgrades', () => {
   const claims = extractClaims(readFileSync(BRIEF, 'utf8'));
-  const empty = validateFacts(answerWith(0, { output_excerpt: '' }), claims);
+  const empty = validateFacts(answerWith(0, { output_excerpt: '' }), claims, IN_SNAP);
   assert.deepEqual([empty.facts[0].tag, empty.facts[0].why, empty.downgraded], ['UNVERIFIABLE', 'VERIFIED with an empty output excerpt; not counted', [{ fact_id: 'F1', reason: 'VERIFIED with an empty output excerpt; not counted' }]]);
-  const none = validateFacts(answerWith(2, { command: '' }), claims);
+  const none = validateFacts(answerWith(2, { command: '' }), claims, IN_SNAP);
   assert.deepEqual(none.downgraded, [{ fact_id: 'F3', reason: 'NOT-FOUND without a check command; not counted' }]);
-  const ok = validateFacts(ANSWER, claims);
+  const ok = validateFacts(ANSWER, claims, IN_SNAP);
   assert.deepEqual([ok.facts.length, ok.downgraded], [7, []]);
 });
 
@@ -161,18 +354,21 @@ test('facts verb on the real answer shape ("<kind>: <token>" echoes): exact shee
     facts: [
       r('F1', 'path: ./src/worker/loop.mjs', 'path', 'ls ./src/worker/loop.mjs', './src/worker/loop.mjs'),
       r('F2', 'command: code-forge review', 'command', 'which code-forge', '/usr/local/bin/code-forge'),
-      r('F3', 'flag: `--max-rounds`', 'flag', 'code-forge review --help | grep -c -- --max-rounds', '1'),
-      r('F4', 'flag: --max', 'flag', 'code-forge review --help | grep -c --max', '2'),
+      r('F3', 'flag: `--max-rounds`', 'flag', 'grep -rn -- --max-rounds src', "src/cli/review.mjs:40:  '--max-rounds': { value: true },"),
+      r('F4', 'flag: --max', 'flag', 'grep -rn -- --max src', "src/cli/review.mjs:40:  '--max-rounds': { value: true },"),
       r('F5', 'path: ./docs/a.md', 'path', 'test -e ./docs/a.md', 'exists'),
     ],
   };
+  mkdirSync(path.join(ws, 'src', 'cli'), { recursive: true });
+  writeFileSync(path.join(ws, 'src', 'cli', 'review.mjs'), "'--max-rounds': { value: true },\n");
   const { deps, stderr } = fakeDeps({ FAKE_ANSWER: JSON.stringify(answer) });
   const stdout = sink();
-  const code = await runFactsVerb(['--brief', 'brief.md', '--out', 'brief.facts.md'], { ...deps, stdout, cwd: ws });
+  const code = await runFactsVerb(['--brief', 'brief.md', '--out', 'brief.facts.md', '--sources', 'src'], { ...deps, stdout, cwd: ws });
   assert.equal(code, 0);
   const out = path.join(ws, 'brief.facts.md');
   assert.deepEqual(JSON.parse(stdout.text()), { out, claims: 5, verified: 3 });
-  const notAllowed = 'check command not allowed: not an allowed read-only form: "code-forge"; not counted';
+  // F4: the hit line holds `--max-rounds`, not `--max` as a whole token
+  const notAllowed = 'VERIFIED source grep without a file:line: hit in a source file naming the claimed flag (docs, plans, tests, fixtures, text files and the brief do not count); not counted';
   const silent = 'silent command; excerpt cannot be its output; not counted';
   assert.deepEqual(stderr.text().split('\n').filter((l) => l.startsWith('facts:')), [`facts: F4 not counted — ${notAllowed}`, `facts: F5 not counted — ${silent}`]);
   const sheet = readFileSync(out, 'utf8');
@@ -180,73 +376,56 @@ test('facts verb on the real answer shape ("<kind>: <token>" echoes): exact shee
     '- claims: 5 (VERIFIED 3 · NOT-FOUND 0 · UNVERIFIABLE 2)',
     '| F1 | VERIFIED | path | `./src/worker/loop.mjs` | `ls ./src/worker/loop.mjs` | ./src/worker/loop.mjs | — |',
     '| F2 | VERIFIED | command | `code-forge review` | `which code-forge` | /usr/local/bin/code-forge | — |',
-    '| F3 | VERIFIED | flag | `--max-rounds` | `code-forge review --help \\| grep -c -- --max-rounds` | 1 | — |',
-    `| F4 | UNVERIFIABLE | flag | \`--max\` | \`code-forge review --help \\| grep -c --max\` | 2 | ${notAllowed} |`,
+    "| F3 | VERIFIED | flag | `--max-rounds` | `grep -rn -- --max-rounds src` | src/cli/review.mjs:40:  '--max-rounds': { value: true }, | — |",
+    `| F4 | UNVERIFIABLE | flag | \`--max\` | \`grep -rn -- --max src\` | src/cli/review.mjs:40:  '--max-rounds': { value: true }, | ${notAllowed} |`,
     `| F5 | UNVERIFIABLE | path | \`./docs/a.md\` | \`test -e ./docs/a.md\` | exists | ${silent} |`,
   ]);
   assert.deepEqual(parseSheet(sheet)?.facts.map((f) => f.claim), ['./src/worker/loop.mjs', 'code-forge review', '--max-rounds', '--max', './docs/a.md']);
 });
 
-test('the <cli> <subcommand> --help | grep -c -- <flag> form: 3 forms pass, 13 near misses are refused (the CLI must start a command claim, never a denied tool)', () => {
-  const clis = new Set(['code-forge', 'claude', 'node', 'sh', 'rm', 'python3', 'git']);
-  const cli = (/** @type {string} */ name) => `not an allowed read-only form: "${name}"`;
+test('B50 no --help, -h or --version form anywhere and one command per row: 14 forms are refused (pipes and lists included, ls | wc too)', () => {
+  const no = (/** @type {string} */ cli) => `not an allowed read-only form: "${cli}"`;
   const cases = [
-    ['code-forge review --help | grep -c -- --max-rounds', null],
-    ['claude plugin --help | grep -c -- -h', null],
-    ['claude --help | grep -c -- --json-schema', null],
-    ['code-forge review --help | grep -c -- --max | wc -l', cli('code-forge')],
-    ['code-forge review --help | head', cli('code-forge')],
-    ['code-forge review extra --help | grep -c -- --max', cli('code-forge')],
-    ['code-forge review --help ; grep -c -- --max', cli('code-forge')],
-    ['code-forge review --help | grep -c --max', cli('code-forge')],
-    ['code-forge Review --help | grep -c -- --max', cli('code-forge')],
-    ['./bin/cf review --help | grep -c -- --max', 'a verb may not be a path'],
-    ['make build --help | grep -c -- --max', 'make: build and task runners are not allowed'],
-    ['node scripts --help | grep -c -- --max', 'node: only --version'],
-    ['sh setup --help | grep -c -- --max', cli('sh')],
-    ['rm foo --help | grep -c -- --max', cli('rm')],
-    ['python3 x --help | grep -c -- --max', cli('python3')],
-    ['git commit --help | grep -c -- --amend', 'git: only log, show, status, rev-parse, ls-files, cat-file or --version, with no global option'],
+    ['claude --help', no('claude')],
+    ['code-forge -h', no('code-forge')],
+    ['gh --version', no('gh')],
+    ['rm foo --help', no('rm')],
+    ['node --version', no('node')],
+    ['node -v', no('node')],
+    ['npm --version', 'npm: only view or ls'],
+    ['git --version', 'git: only log, show, status, rev-parse, ls-files or cat-file, with no global option'],
+    ['make --help', 'make: build and task runners are not allowed'],
+    ['code-forge review --help | grep -c -- --max-rounds', ONE],
+    ['claude --help | grep -c plugin', ONE],
+    ['gh -h && ls', ONE],
+    ['ls src | wc -l', ONE],
+    ['ls src || ls lib', ONE],
+    ['ls src & ls lib', ONE],
   ];
-  assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd, { clis })]), cases);
-  assert.deepEqual(['node', 'sh', 'rm', 'python3', 'git'].map((t) => SUBCOMMAND_HELP_DENY.includes(t)), [true, true, true, true, true]);
-  // the same form with no command claim starting with code-forge: refused
-  assert.deepEqual(
-    [readOnlyViolation('code-forge review --help | grep -c -- --max', { clis: new Set(['claude']) }), readOnlyViolation('code-forge review --help | grep -c -- --max')],
-    [cli('code-forge'), cli('code-forge')],
-  );
-});
-
-test('validateFacts admits the subcommand form only for a CLI of a command claim of the brief (VERIFIED with it, downgraded without it)', () => {
-  const flag = { token: '--max', kind: /** @type {'flag'} */ ('flag') };
+  assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd)]), cases);
   const answer = { facts: [{ fact_id: 'F1', claim: '--max', kind: 'flag', command: 'code-forge review --help | grep -c -- --max', output_excerpt: '1', tag: 'VERIFIED', why: null }] };
-  const without = validateFacts(answer, [flag]);
-  assert.deepEqual(without.downgraded, [{ fact_id: 'F1', reason: 'check command not allowed: not an allowed read-only form: "code-forge"; not counted' }]);
-  const withClaim = validateFacts(answer, [flag, { token: 'code-forge review', kind: 'command' }]);
-  assert.deepEqual([withClaim.facts[0].tag, withClaim.downgraded], ['VERIFIED', []]);
+  assert.deepEqual(validateFacts(answer, [{ token: '--max', kind: 'flag' }]).downgraded, [{ fact_id: 'F1', reason: `check command not allowed: ${ONE}; not counted` }]);
 });
 
 test('a row the delegate already tagged UNVERIFIABLE keeps its own why and is not listed as downgraded, whatever its command', () => {
   const claims = extractClaims(readFileSync(BRIEF, 'utf8'));
-  const { facts, downgraded } = validateFacts(answerWith(1, { command: 'rm notes.txt', tag: 'UNVERIFIABLE', why: 'the help page is ambiguous' }), claims);
+  const { facts, downgraded } = validateFacts(answerWith(1, { command: 'rm notes.txt', tag: 'UNVERIFIABLE', why: 'the help page is ambiguous' }), claims, IN_SNAP);
   assert.deepEqual([facts[1].tag, facts[1].why, downgraded], ['UNVERIFIABLE', 'the help page is ambiguous', []]);
 });
 
-test('the packet suggests only forms the allow-list admits (6), lists the literal-output rule, and asks for the token alone', () => {
+test('the packet suggests only forms the allow-list admits (4), lists the literal-output rule, and asks for the token alone', () => {
   const claims = [{ token: 'code-forge review', kind: /** @type {'command'} */ ('command') }];
   const packet = buildFactsPacket(claims).replace(/\n/g, ' ');
   const list = /run the cheapest READ-ONLY check \((.*?)\)\. Quote/.exec(packet);
   const forms = [...(list?.[1] ?? '').matchAll(/`([^`]+)`/g)].map((m) => m[1]);
   const concrete = forms.map((f) => f.replace('<cli>', 'code-forge').replace('<subcommand>', 'review').replace('<flag>', '--max').replace('<path>', './src/x.mjs').replace('<name>', '@types/node'));
-  assert.deepEqual(concrete, [
-    'code-forge --help | grep -c -- --max',
-    'code-forge review --help | grep -c -- --max',
-    'which code-forge',
-    'ls ./src/x.mjs',
-    'code-forge --version',
-    'npm view @types/node version',
-  ]);
-  assert.deepEqual(concrete.map((c) => readOnlyViolation(c, { clis: new Set(['code-forge']) })), [null, null, null, null, null, null]);
+  assert.deepEqual(concrete, ['grep -rn -- --max ./src/x.mjs', 'which code-forge', 'ls ./src/x.mjs', 'npm view @types/node version']);
+  assert.deepEqual(concrete.map((c) => readOnlyViolation(c)), [null, null, null, null]);
+  // B50: no `--help` form is suggested, no pipe anywhere in the packet; flags are checked in the source text
+  assert.deepEqual([packet.split('--help').length - 1, packet.includes('| grep'), packet.includes('-h|'), packet.includes('node --version')], [1, false, false, false]);
+  assert.equal(packet.includes('Never run a program with `--help`, `-h` or `--version`: a version is checked with `npm view <name> version`, `which` or `ls`.'), true);
+  assert.equal(packet.includes('A flag is checked in the source text of the project, never by running a program: `grep -rn -- <flag> <path>`'), true);
+  assert.equal(packet.includes('VERIFIED only with a hit line (`file:line:text`) from a source file (not Markdown or text, not docs, plans, tests or fixtures) that contains the flag, as the excerpt.'), true);
   assert.equal(packet.includes("Never infer, never guess: the excerpt is the command's literal output, never your reading of it."), true);
   assert.equal(packet.includes('For a path use `ls <path>` (it prints the path); `test` prints nothing, so a `test` check can never be VERIFIED.'), true);
 });
@@ -300,20 +479,14 @@ test('each answer row answers at most one claim: row F1 echoing F2\'s claim stay
   ]);
 });
 
-test('launchers in the subcommand-help form are refused even when a command claim names them (npx, env, sudo, xargs), all 4 in the deny list', () => {
-  const clis = new Set(['npx', 'env', 'sudo', 'xargs']);
+test('launchers with a subcommand and --help are refused alone too (npx, env, sudo, xargs: 4)', () => {
   const cases = [
-    ['npx tsc --help | grep -c -- --noEmit', 'npx: build and task runners are not allowed'],
-    ['env foo --help | grep -c -- --max', 'not an allowed read-only form: "env"'],
-    ['sudo rm --help | grep -c -- --max', 'not an allowed read-only form: "sudo"'],
-    ['xargs rm --help | grep -c -- --max', 'not an allowed read-only form: "xargs"'],
+    ['npx tsc --help', 'npx: build and task runners are not allowed'],
+    ['env foo --help', 'not an allowed read-only form: "env"'],
+    ['sudo rm --help', 'not an allowed read-only form: "sudo"'],
+    ['xargs rm --help', 'not an allowed read-only form: "xargs"'],
   ];
-  assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd, { clis })]), cases);
-  assert.deepEqual(['npx', 'env', 'sudo', 'xargs'].map((t) => SUBCOMMAND_HELP_DENY.includes(t)), [true, true, true, true]);
-});
-
-test('the two-token help form with -- passes as the packet suggests it', () => {
-  assert.equal(readOnlyViolation('code-forge --help | grep -c -- --max'), null);
+  assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd)]), cases);
 });
 
 test('silent commands: 9 allow-listed forms that print nothing on success are silent, 5 that print are not', () => {
@@ -336,9 +509,9 @@ test('silent commands: 9 allow-listed forms that print nothing on success are si
   assert.deepEqual(cases.map(([cmd]) => [cmd, isSilentCommand(String(cmd))]), cases);
 });
 
-test('a VERIFIED grep -q row is downgraded as silent (exact reason, 1 downgrade)', () => {
+test('a VERIFIED test -e row is downgraded as silent (exact reason, 1 downgrade)', () => {
   const claims = /** @type {Array<{token: string, kind: 'path'}>} */ ([{ token: './a.md', kind: 'path' }]);
-  const { facts, downgraded } = validateFacts({ facts: [{ fact_id: 'F1', claim: './a.md', kind: 'path', command: 'grep -q title ./a.md', output_excerpt: 'found', tag: 'VERIFIED', why: null }] }, claims);
+  const { facts, downgraded } = validateFacts({ facts: [{ fact_id: 'F1', claim: './a.md', kind: 'path', command: 'test -e ./a.md', output_excerpt: 'found', tag: 'VERIFIED', why: null }] }, claims);
   const why = 'silent command; excerpt cannot be its output; not counted';
   assert.deepEqual([facts[0].tag, facts[0].why, downgraded], ['UNVERIFIABLE', why, [{ fact_id: 'F1', reason: why }]]);
 });
@@ -379,7 +552,7 @@ test('secret paths: 3 glob bypasses, 5 recursive or out-of-cwd readers and 6 mor
     ['rg . ~', tilde],
     ['find ~ -type f', tilde],
     ['find / -type f', outside],
-    ['grep -rn secret src', 'grep: -r, -R and --recursive are not allowed'],
+    ['grep -rn secret src', 'grep -rn: only grep -rn -- <--long-flag> <path> (one relative subdirectory or file, never . or the root)'],
     ['cat .git-credentials', 'reads a secret-looking file'],
     ['cat .docker/config.json', 'reads a secret-looking file'],
     ['cat .kube/config', 'reads a secret-looking file'],
@@ -393,7 +566,7 @@ test('secret paths: 3 glob bypasses, 5 recursive or out-of-cwd readers and 6 mor
   assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd)]), cases);
 });
 
-test('the <cli> --help case: path verbs, the help subcommand and build runners are refused (6), 3 forms pass', () => {
+test('the <cli> --help case is gone: path verbs, the help subcommand, build runners and every bare <cli> --help|-h|--version are refused (9)', () => {
   const cases = [
     ['./x --help', 'a verb may not be a path'],
     ['/tmp/x --version', 'a verb may not be a path'],
@@ -401,9 +574,9 @@ test('the <cli> --help case: path verbs, the help subcommand and build runners a
     ['make help', 'make: build and task runners are not allowed'],
     ['just --help', 'just: build and task runners are not allowed'],
     ['rake --version', 'rake: build and task runners are not allowed'],
-    ['claude --help', null],
-    ['codex -h', null],
-    ['grok --version', null],
+    ['claude --help', 'not an allowed read-only form: "claude"'],
+    ['codex -h', 'not an allowed read-only form: "codex"'],
+    ['grok --version', 'not an allowed read-only form: "grok"'],
   ];
   assert.deepEqual(cases.map(([cmd]) => [cmd, readOnlyViolation(cmd)]), cases);
 });

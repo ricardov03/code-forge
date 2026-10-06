@@ -11,7 +11,7 @@
 
 import { mkdirSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadProjectConfig, slugFor } from '../config/load.mjs';
+import { loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
 import { AuthorError, runAuthor } from '../session/author.mjs';
 import { runRootFor, SessionError } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
@@ -39,7 +39,10 @@ export async function runAuthorVerb(args, deps = {}) {
     /** @param {string | string[] | true | undefined} v */
     const abs = (v) => (typeof v === 'string' ? path.resolve(cwd, v) : undefined);
     const briefPath = /** @type {string} */ (abs(flags.brief));
-    const loaded = await loadProjectConfig(cwd);
+    // B50: the project root's config and ledger slug, also from a subfolder; flag paths stay
+    // cwd-relative, and the default output goes to <root>/<plans_dir>
+    const root = projectRootFor(cwd);
+    const loaded = await loadProjectConfig(root);
     if (!loaded.ok) {
       writeSafe(stderr, `author: ${loaded.message}\n`);
       return 2;
@@ -57,7 +60,7 @@ export async function runAuthorVerb(args, deps = {}) {
         answersPath: abs(flags.answers),
         run,
         runRoot: run ? runRootFor(run, cfg?.tmp?.root) : undefined,
-        slug: slugFor(cfg, cwd),
+        slug: slugFor(cfg, root),
         timeoutMs: timeout === undefined ? undefined : timeout * 1000,
       },
       { ...deps, stderr },
@@ -66,7 +69,7 @@ export async function runAuthorVerb(args, deps = {}) {
       writeSafe(stderr, `author: ${result.status}${result.reason ? ` (${result.reason})` : ''}\n`);
       return exitCodeFor(result);
     }
-    const out = abs(flags.out) ?? path.join(path.resolve(cwd, cfg.project?.plans_dir ?? 'plans'), `${path.basename(briefPath, path.extname(briefPath))}.${flags.job}.md`);
+    const out = abs(flags.out) ?? path.join(path.resolve(root, cfg.project?.plans_dir ?? 'plans'), `${path.basename(briefPath, path.extname(briefPath))}.${flags.job}.md`);
     mkdirSync(path.dirname(out), { recursive: true });
     writeFileSync(out, /** @type {string} */ (result.draft));
     writeSafe(stdout, `${JSON.stringify({ draft: out, questions: result.questions, cost: result.cost })}\n`);

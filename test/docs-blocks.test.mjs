@@ -64,8 +64,9 @@ const NIGHT_LOG_ADDED_IDS = ['B1.2', 'B4.1', 'B11.1', 'B12c'];
  *   - B39 facts delegate fixes (2026-10-03)
  *   - B40-B44 parallel code review (2026-10-03, plan approved in plan mode)
  *   - B45-B49b autopilot (2026-10-06, issue #5, plan approved in plan mode)
+ *   - B50 dogfood tool fixes, B51 skill rule R17 (2026-10-06)
  */
-const ROOT_ADDED_LATER_IDS = ['B22', 'B23', 'B24', 'B25', 'B26', 'B27', 'B28', 'B29', 'B30', 'B31', 'B32', 'B33', 'B34', 'B35', 'B36', 'B37', 'B38', 'B39', 'B40', 'B41', 'B42', 'B43', 'B44', 'B45', 'B46', 'B47', 'B48', 'B49a', 'B49b'];
+const ROOT_ADDED_LATER_IDS = ['B22', 'B23', 'B24', 'B25', 'B26', 'B27', 'B28', 'B29', 'B30', 'B31', 'B32', 'B33', 'B34', 'B35', 'B36', 'B37', 'B38', 'B39', 'B40', 'B41', 'B42', 'B43', 'B44', 'B45', 'B46', 'B47', 'B48', 'B49a', 'B49b', 'B50', 'B51'];
 
 // The plan is maintainer-only (not tracked since 2026-09-25): the drift check runs where it exists.
 const HAS_PLAN = existsSync(PLAN_PATH);
@@ -79,8 +80,8 @@ test('blocks.json ids deep-equal §10.4\'s table rows plus the NIGHT-LOG additio
   const expected = [...fromPlan, ...NIGHT_LOG_ADDED_IDS, ...ROOT_ADDED_LATER_IDS].sort();
   const actual = Object.keys(doc.blocks).sort();
   assert.deepEqual(actual, expected);
-  assert.equal(actual.length, 52);
-  assert.equal(doc.block_count, 52);
+  assert.equal(actual.length, 54);
+  assert.equal(doc.block_count, 54);
 });
 
 test('B10c is marked deleted (Q16 = cut) — negative: no other block is', () => {
@@ -100,7 +101,7 @@ test('every depends_on id resolves to a blocks key or a baseline_ids entry (B0-B
   assert.deepEqual(doc.baseline_ids, ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8']);
   const known = new Set([...Object.keys(doc.blocks), ...doc.baseline_ids]);
   const allDeps = Object.values(doc.blocks).flatMap((b) => b.depends_on);
-  assert.equal(allDeps.length, 95);
+  assert.equal(allDeps.length, 97);
   const unresolved = Object.entries(doc.blocks).flatMap(([id, b]) =>
     b.depends_on.filter((dep) => !known.has(dep)).map((dep) => `${id} -> ${dep}`),
   );

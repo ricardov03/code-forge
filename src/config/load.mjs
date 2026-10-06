@@ -15,7 +15,9 @@
  * (`err.pos`) and the source string — never from anything the `yaml` package formats for display.
  */
 
+import { existsSync, realpathSync, statSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { migrateConfig } from './migrate.mjs';
@@ -131,20 +133,115 @@ export async function loadConfigFile(filePath) {
  * @returns {Promise<LoadResult>}
  */
 export async function loadProjectConfig(cwd = process.cwd()) {
-  return loadConfigFile(path.join(cwd, DEFAULT_CONFIG_FILENAME));
+  // B50: always the PROJECT ROOT's config ({@link projectRootFor}; idempotent when `cwd` is the
+  // root). A symlinked `.code-forge.yml` (dotfiles) loads like a file; a directory there is a `read-error`.
+  return loadConfigFile(path.join(projectRootFor(cwd), DEFAULT_CONFIG_FILENAME));
 }
 
 /**
- * `project.slug` from config, else the workspace directory name as a ledger slug. The configured
+ * The nearest ancestor of `start` (itself included) that holds `marker`, or null.
+ * @param {string} start @param {string} marker
+ * @returns {string | null}
+ */
+function nearestWith(start, marker) {
+  for (let dir = start; ; dir = path.dirname(dir)) {
+    if (existsSync(path.join(dir, marker))) return dir;
+    if (path.dirname(dir) === dir) return null;
+  }
+}
+
+/** @param {string} p @returns {boolean} true when `p` is (or links to) a regular file — a symlinked config (dotfiles) counts, a directory never. */
+function isRegularFile(p) {
+  try {
+    return statSync(p).isFile();
+  } catch {
+    return false;
+  }
+}
+
+/** @param {string} p @returns {string} `p` realpath'd, or resolved as given when it cannot be. */
+function realOrResolved(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
+}
+
+/**
+ * The project root a verb run from `start` belongs to (B50). The git top level is found first
+ * (the nearest ancestor holding a `.git` directory or worktree file — a filesystem walk, no child
+ * `git`); the root is then the nearest folder from `start` up to AND INCLUDING that top level whose
+ * `.code-forge.yml` is a regular file (a symlink to one counts; a directory never), else the top
+ * level itself — a config above the repository never counts. Outside git, the same search runs
+ * from `start` up to the home directory (never past it) when `start` is under it, and looks at
+ * `start` alone when it is not (`/tmp/x`, `/opt/ci`: a stray config higher up never counts); found
+ * nothing ⇒ the root is `start`. Every walk runs on realpaths; the root comes back in the caller's
+ * spelling when an ancestor of the start as given resolves to it ({@link inCallerSpelling}). A verb
+ * run from a subfolder thus finds the project's config and ledger slug. Synchronous (no child process).
+ * @param {string} [start] - defaults to `process.cwd()`.
+ * @returns {string} absolute.
+ */
+export function projectRootFor(start = process.cwd()) {
+  return inCallerSpelling(start, resolvedRootFor(realOrResolved(start)));
+}
+
+/**
+ * The root on realpaths: the git walk, the config walk and the HOME check all run on the resolved
+ * start, so a symlink into a repository finds its `.git`.
+ * @param {string} from - the realpath of the start.
+ * @returns {string} a realpath.
+ */
+function resolvedRootFor(from) {
+  const home = realOrResolved(os.homedir());
+  // a `.git` at HOME itself (a dotfiles repository) never makes HOME the project: outside git
+  const gitRoot = nearestWith(from, '.git');
+  if (gitRoot !== null && gitRoot !== home) return nearestConfigUpTo(from, gitRoot) ?? gitRoot;
+  const underHome = from === home || from.startsWith(`${home}${path.sep}`);
+  if (!underHome) return from; // the start alone: its own config (if any) or not, the root is the start
+  return nearestConfigUpTo(from, home) ?? from;
+}
+
+/**
+ * The root in the caller's spelling when it can be: the ancestor of `path.resolve(start)` (itself
+ * included) whose realpath IS the resolved root (`~/work/app` → `/data/app-v2` keeps `app`, and its
+ * slug); none ⇒ the realpath itself.
+ * @param {string} start @param {string} realRoot
+ * @returns {string}
+ */
+function inCallerSpelling(start, realRoot) {
+  for (let dir = path.resolve(start); ; dir = path.dirname(dir)) {
+    if (realOrResolved(dir) === realRoot) return dir;
+    if (path.dirname(dir) === dir) return realRoot;
+  }
+}
+
+/**
+ * The nearest folder from `from` up to and including `stop` whose `.code-forge.yml` is a regular file.
+ * @param {string} from @param {string} stop - an ancestor of `from` (or `from` itself).
+ * @returns {string | null}
+ */
+function nearestConfigUpTo(from, stop) {
+  for (let dir = from; ; dir = path.dirname(dir)) {
+    if (isRegularFile(path.join(dir, DEFAULT_CONFIG_FILENAME))) return dir;
+    if (dir === stop || path.dirname(dir) === dir) return null;
+  }
+}
+
+/**
+ * `project.slug` from config, else the PROJECT ROOT's directory name ({@link projectRootFor} of
+ * `workspace`, B50: a subfolder never names the ledger) as a ledger slug. The configured
  * value is NOT trusted here: `startRun` refuses any slug outside `/^[a-z0-9][a-z0-9-]*$/`
  * (`bad-project`) before anything is written, so `../x` never reaches the ledger path. Run ids
  * are checked the same way by the state layer (`assertRunId`, `bad-run-id`).
+ * `cfg` MUST be the config loaded from `projectRootFor(workspace)` (never the cwd's), or a
+ * configured `project.slug` is lost from a subfolder and the ledger splits.
  * @param {Record<string, any>} cfg @param {string} workspace
  * @returns {string}
  */
 export function slugFor(cfg, workspace) {
   const configured = cfg?.project?.slug;
   if (typeof configured === 'string' && configured.length > 0) return configured;
-  const derived = path.basename(workspace).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
+  const derived = path.basename(projectRootFor(workspace)).toLowerCase().replace(/[^a-z0-9-]+/g, '-').replace(/^-+|-+$/g, '');
   return derived || 'project';
 }

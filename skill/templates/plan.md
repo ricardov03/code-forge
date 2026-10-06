@@ -14,10 +14,9 @@
 
 ### §0.x Acceptance clauses the facts sheet cannot back
 
-`none` — or one row per clause:
+`none` — or one list item per unbacked claim, naming the block, the claim token, its fact id and tag, and the word `tolerance` (`forge plan check` reads these lines):
 
-| block | clause | claim | tag | tolerance (how the block's acceptance survives it) |
-|---|---|---|---|---|
+- B3 `--flag` (F4, UNVERIFIABLE) — tolerance: <how the block's acceptance survives it>
 
 ## §1 Architecture decision
 
@@ -28,6 +27,8 @@ Chosen approach and why · rejected alternatives (one line each) · the project 
 | id | title | level | depends_on | owned_files | cases | lines | acceptance (clauses, each naming its test ids and fact ids) | test_command | commit_message |
 |---|---|---|---|---|---|---|---|---|---|
 | B1 | … | L1 | — | `src/x.mjs`, `test/x.test.mjs` | 12 | 1 200 | (1) … (`test/x.test.mjs`, F3) · (2) … | `node --test 'test/x/**/*.test.mjs'` | … |
+
+Acceptance clauses are numbered `(1) … · (2) …` (or separated by `;`); `forge plan check` splits the cell on both and checks each clause on its own.
 
 `level` is the lane recorded for the block by `forge jev ask lane --block <id>` (or `--rules`), never a category; `forge plan check` refuses any other.
 

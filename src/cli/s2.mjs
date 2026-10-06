@@ -8,7 +8,7 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { loadProjectConfig, slugFor } from '../config/load.mjs';
+import { loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
 import { runS2 } from '../session/s2.mjs';
 import { runRootFor, SessionError } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
@@ -51,7 +51,9 @@ export async function runS2Verb(args, deps = {}) {
       writeSafe(stderr, USAGE);
       return 2;
     }
-    const loaded = await loadProjectConfig(process.cwd());
+    // B50: the project root's config and ledger slug, also from a subfolder
+    const root = projectRootFor(process.cwd());
+    const loaded = await loadProjectConfig(root);
     if (!loaded.ok) {
       writeSafe(stderr, `s2: ${loaded.message}\n`);
       return 2;
@@ -66,7 +68,7 @@ export async function runS2Verb(args, deps = {}) {
         run: typeof flags.run === 'string' ? flags.run : undefined,
         block: typeof flags.block === 'string' ? flags.block : undefined,
         runRoot: typeof flags.run === 'string' ? runRootFor(flags.run, cfg?.tmp?.root) : undefined,
-        slug: slugFor(cfg, process.cwd()),
+        slug: slugFor(cfg, root),
         timeoutMs: timeout === undefined ? undefined : timeout * 1000,
       },
       { ...deps, stderr },

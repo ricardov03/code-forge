@@ -1,6 +1,6 @@
 import { fakeDeps, freshDir, readRecords, sink } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { appendFileSync, copyFileSync, existsSync, readFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, existsSync, mkdirSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
@@ -72,6 +72,20 @@ test('author --job plan without --facts exits 2 and spawns nothing; with --facts
   assert.deepEqual([printed.draft, printed.questions], [path.join(ws, 'plans', 'tool-brief.plan.md'), []]);
   assert.equal(readFileSync(printed.draft, 'utf8'), '# Draft 2\n');
   assert.equal(readRecords(withFacts.records).length, 1);
+});
+
+test('B50 author from a subfolder: the draft lands in <root>/plans and the session row goes to the root config\'s project.slug', async () => {
+  const ws = workspace('author-sub');
+  mkdirSync(path.join(ws, '.git'));
+  appendFileSync(path.join(ws, '.code-forge.yml'), 'project:\n  slug: author-root\n');
+  const sub = path.join(ws, 'docs', 'deep');
+  mkdirSync(sub, { recursive: true });
+  const { deps } = fakeDeps({ FAKE_ANSWER: JSON.stringify(NO_QUESTIONS) });
+  const stdout = sink();
+  assert.equal(await runAuthorVerb(['--job', 'plan', '--brief', '../../tool-brief.md', '--facts', '../../tool-brief.facts.md'], { ...deps, stdout, cwd: sub }), 0);
+  assert.equal(JSON.parse(stdout.text()).draft, path.join(ws, 'plans', 'tool-brief.plan.md'));
+  const { readAllRows } = await import('../../src/ledger/write.mjs');
+  assert.deepEqual([(await readAllRows('author-root')).map((r) => r.event), (await readAllRows('deep')).length], [['session'], 0]);
 });
 
 test('a stale facts sheet is refused before any session runs', async () => {

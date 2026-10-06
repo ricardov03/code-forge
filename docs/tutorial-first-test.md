@@ -159,7 +159,8 @@ code-forge author --job plan --brief plans/site.md --facts plans/site.facts.md
 - A block table close to the brief's suggestion: B1 hero, B2 how-it-works, B3 links. Each block
   has `owned_files`, `cases`, `lines`, `depends_on` and clauses with test ids.
 - A caller map, and a section "Acceptance clauses the facts sheet cannot back". The new `site/`
-  files belong there with a tolerance naming their block.
+  files belong there, one list item each naming the block, the path and a tolerance:
+  ``- B1 `./site/index.html` (F2, NOT-FOUND) — tolerance: B1 creates it``.
 - stdout lists `questions` and the round's cost.
 
 Without `--facts` the command refuses with exit 2 (`facts sheet required`). That refusal is the

@@ -13,6 +13,19 @@ waits on a second real consumer (plan §10.4, Q17).
   show the data, propose options and wait. The skill also asks to supervise cost continuously (budget.usd, spend after
   every block close).
 
+### Fixed
+
+- A verb run from a subfolder uses the project root (the git root, or the nearest regular `.code-forge.yml` below it;
+  outside git never above HOME) for its config and ledger slug: `jev`, `plan`, `author`, `facts`, `spawn`, `s2` and
+  `run start`. A `.git` at HOME (a dotfiles repo) does not make HOME a project.
+- `plan check` reads the list form of the "cannot back" section that the template shows, still reads the old table
+  form, and splits clauses on `;` and on ` · (n)`.
+- `facts`: a flag claim is proved only by `grep -rn -- <flag> <source folder>` (hits in source files under that
+  folder; docs, plans, tests, fixtures and the brief never count). The delegate never runs `--help`, `-h`, `--version`,
+  a pipe, a list or `rg`; grep options come from a fixed allow-list. No Claude allow rules are added.
+- A command claim written without its CLI (`run reload`) gets the project's own bin only when the brief names that bin
+  and the first word is not a well-known CLI.
+
 ## [0.6.0] — 2026-10-06
 
 ### Added

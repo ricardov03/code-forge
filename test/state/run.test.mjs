@@ -3,7 +3,7 @@ import { captureStream, countOccurrences, fakeProbe, rowSink, withFixture } from
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { readdir, readFile, stat } from 'node:fs/promises';
+import { mkdir, readdir, readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runRun } from '../../src/cli/run.mjs';
@@ -42,6 +42,18 @@ test('`run start` writes the record and the 0600 key under the temp $HOME, and t
     const rows = await readAllRows('two-blocks');
     assert.deepEqual(rows.map((r) => r.event), ['run.start']);
     assert.deepEqual(verifyRow(rows[0], await loadKey('r-cli')), { ok: true });
+  });
+});
+
+test('B50 `run start --cwd <subfolder>` records the project root as the workspace and the root config\'s slug', async () => {
+  await withFixture(async ({ ws }) => {
+    const sub = path.join(ws, 'notes', 'deep');
+    await mkdir(sub, { recursive: true });
+    const stderr = captureStream();
+    assert.equal(await runRun(['start', '--cwd', sub, '--run', 'r-sub'], { stdout: captureStream(), stderr }), 0, stderr.text);
+    const record = await readRun('r-sub');
+    assert.deepEqual([record.workspace, record.project], [ws, 'two-blocks']);
+    assert.deepEqual([(await readAllRows('two-blocks')).map((r) => r.event), (await readAllRows('deep')).length], [['run.start'], 0]);
   });
 });
 

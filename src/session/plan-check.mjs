@@ -5,9 +5,11 @@
  * `acceptance` columns; the wave is the nearest heading that says `Wave <n>`) and checks:
  *  - a facts sheet is present (pasted in the plan's §0 or given as `--facts`) and was built from
  *    the brief as it is now; a separate sheet's `brief_sha256` line must also appear in the plan;
- *  - every acceptance clause (the cell split on `;`) whose claim tokens the sheet does not mark
- *    VERIFIED is listed in the "… the facts sheet cannot back" section by a line that names the
- *    token, the block, and a tolerance — else `unbackable clause without tolerance: <block> <clause>`;
+ *  - every acceptance clause (the cell split on `;` and on ` · (n) ` clause markers, B50) whose
+ *    claim tokens the sheet does not mark VERIFIED is listed in the "… the facts sheet cannot
+ *    back" section by a line that names the token, the block, and a tolerance (a list item saying
+ *    `tolerance`, or a row of an older-template table with a non-empty tolerance column) — else
+ *    `unbackable clause without tolerance: <block> <clause>`;
  *  - a caller map section exists and names every block (C9);
  *  - the required sections are found by their exact headings (`plan-sections.mjs`); a near miss at
  *    the expected position is accepted with a WARN naming the exact heading (B36);
@@ -190,6 +192,65 @@ const listItems = (body) =>
     .filter((l) => /^\s*(?:[-*]|\d+\.)\s+/.test(l))
     .map((l) => l.trim());
 
+/**
+ * The tolerance lines of the unbackable-clauses section (B50): every list item that says
+ * `tolerance` (the form `templates/plan.md` shows), plus — so plans written from the older table
+ * template keep passing — every data row of a table in the section whose HEADER (its first row,
+ * never a later one) has a `tolerance` cell, when that row's tolerance cell is filled: empty and
+ * the placeholders in {@link EMPTY_CELLS} do not count.
+ * @param {string} body @returns {string[]}
+ */
+export function toleranceLines(body) {
+  const out = listItems(body).filter((l) => /\btolerance\b/i.test(l));
+  /** @type {number | null} null: not in a table; -1: in a table without a tolerance column. */
+  let col = null;
+  for (const raw of body.split('\n')) {
+    const line = raw.trim();
+    if (!line.startsWith('|')) {
+      col = null;
+      continue;
+    }
+    const row = cells(line);
+    if (col === null) {
+      col = row.findIndex((c) => /\btolerance\b/i.test(plain(c)));
+      continue;
+    }
+    if (col < 0 || row.every((c) => /^:?-+:?$/.test(c))) continue; // no tolerance column, or the separator row
+    if (!EMPTY_CELLS.has(plain(row[col] ?? '').toLowerCase())) out.push(line);
+  }
+  return out;
+}
+
+/** Tolerance cells that say nothing (compared lower-cased, after trimming). */
+const EMPTY_CELLS = new Set(['', '—', '–', '-', '--', '…', '...', 'n/a']);
+
+/**
+ * Is a clause's claim backed by a VERIFIED fact? Its token is, or (B50) a command claim written
+ * without its CLI (`run reload`) matches the sheet's token that `forge facts` prefixed with the
+ * project's CLI (`code-forge run reload`: exactly one more leading word, and that word one of the
+ * project's own CLIs — `projectBins`).
+ * @param {{token: string, kind: string}} claim @param {ReadonlySet<string>} verified
+ * @param {() => ReadonlyArray<string>} projectBins - called only when a command claim needs it.
+ * @returns {boolean}
+ */
+function isVerified(claim, verified, projectBins) {
+  if (verified.has(claim.token)) return true;
+  if (claim.kind !== 'command') return false;
+  return projectBins().some((bin) => verified.has(`${bin} ${claim.token}`));
+}
+
+/**
+ * The clauses of an acceptance cell (B50): split on `;` and on a ` · (n) ` clause marker (the
+ * template numbers clauses `(1) … · (2) …`); a `·` not followed by `(n)` stays inside its clause.
+ * @param {string} acceptance @returns {string[]}
+ */
+export function splitClauses(acceptance) {
+  return acceptance
+    .split(/;|\s·\s+(?=\(\d+\))/)
+    .map((c) => plain(c))
+    .filter((c) => c.length > 0);
+}
+
 /** Where a lane may come from: Jev's `lane` answer, or the deterministic fallback rule (`--rules`). */
 export const LANE_SOURCES = Object.freeze(['jev', 'rules']);
 
@@ -233,6 +294,10 @@ export function recordedLanes(rows, planName) {
  * @property {string} [planPath] - where the plan lives (resolves the sheet's brief reference).
  * @property {string} [factsText] @property {string} [factsPath] - a separate sheet (else the plan's own §0).
  * @property {Record<string, any>} [cfg] - `caps.coders`, `budget.block_cases`, `budget.block_lines`.
+ * @property {ReadonlyArray<string> | (() => ReadonlyArray<string>)} [projectBins] - B50: the
+ *   project's own CLI names (`readProjectBins` of the project root), or a function giving them —
+ *   called at most once, and only when a command claim is not VERIFIED as written; a clause's
+ *   `run reload` is then backed by a VERIFIED `<bin> run reload`.
  * @property {Array<Record<string, any>>} [decisions] - the project's ledger rows (the recorded lanes);
  *   none given ⇒ no block has a recorded lane.
  */
@@ -282,10 +347,14 @@ export function checkPlan(text, opts = {}) {
   // unbackable clauses
   const unbackable = required(REQUIRED_SECTIONS.unbackable);
   if (!unbackable) errors.push('unbackable-clauses section missing (write "none" when there is none)');
-  const tolerances = unbackable ? listItems(unbackable.body).filter((l) => /\btolerance\b/i.test(l)) : [];
+  const tolerances = unbackable ? toleranceLines(unbackable.body) : [];
+  /** @type {ReadonlyArray<string> | undefined} */
+  let binsCache;
+  const given = opts.projectBins;
+  const projectBins = () => (binsCache ??= typeof given === 'function' ? given() : given ?? []);
   for (const b of blocks) {
-    for (const clause of b.acceptance.split(';').map((c) => plain(c)).filter((c) => c.length > 0)) {
-      const unbacked = extractClaims(clause).filter((c) => !verified.has(c.token));
+    for (const clause of splitClauses(b.acceptance)) {
+      const unbacked = extractClaims(clause).filter((c) => !isVerified(c, verified, projectBins));
       if (unbacked.every((c) => tolerances.some((t) => t.includes(c.token) && idRe(b.id).test(t)))) continue;
       errors.push(`unbackable clause without tolerance: ${b.id} ${clause}`);
     }

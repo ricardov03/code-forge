@@ -5,16 +5,17 @@
  * WARN lines (a required section found by its position under a near-miss heading) go to stderr and
  * never fail the check. Either way stdout ends with the lane recorded per block (B36):
  * `lanes: B1 L1 (jev) · B2 none` — read from the project's ledger (`--slug`, else `project.slug`,
- * else the directory-name slug `run`, `author` and `jev ask` use).
- * Limits come from `.code-forge.yml` when there is one (`caps.coders`, `budget.block_cases`,
+ * else the directory-name slug `run`, `author` and `jev ask` use — the project root's, B50).
+ * Limits come from the project root's `.code-forge.yml` when there is one (`caps.coders`, `budget.block_cases`,
  * `budget.block_lines`), else the plan defaults.
  */
 
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { loadProjectConfig, slugFor } from '../config/load.mjs';
+import { loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
 import { ledgerPath } from '../ledger/paths.mjs';
 import { readAllRows } from '../ledger/write.mjs';
+import { FactsError, readProjectBins } from '../session/facts.mjs';
 import { checkPlan } from '../session/plan-check.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -49,14 +50,16 @@ export async function runPlanVerb(args, deps = {}) {
     };
     const text = read(planPath, 'the plan file');
     const factsText = factsPath ? read(factsPath, '--facts') : undefined;
-    const loaded = await loadProjectConfig(cwd);
+    // B50: the project's config and ledger, also from a subfolder of the project
+    const root = projectRootFor(cwd);
+    const loaded = await loadProjectConfig(root);
     if (!loaded.ok && loaded.error !== 'not-found') {
       writeSafe(stderr, `plan: ${loaded.message}\n`);
       return 2;
     }
     const cfg = loaded.ok ? loaded.config : undefined;
     // the same ledger as the rest of the tool (and `jev ask`): --slug, else project.slug, else the directory name
-    const slug = typeof flags.slug === 'string' ? flags.slug : slugFor(cfg, cwd);
+    const slug = typeof flags.slug === 'string' ? flags.slug : slugFor(cfg, root);
     try {
       ledgerPath(slug);
     } catch {
@@ -64,7 +67,16 @@ export async function runPlanVerb(args, deps = {}) {
     }
     // a missing ledger is no rows (every block `none`); any other read error propagates as itself
     const decisions = await readAllRows(slug);
-    const result = checkPlan(text, { planPath, factsPath, factsText, cfg, decisions });
+    // package.json is read lazily: only a command claim that needs the bin prefix reads it, so a bad
+    // package.json fails only the plans that depend on it
+    let result;
+    try {
+      result = checkPlan(text, { planPath, factsPath, factsText, cfg, decisions, projectBins: () => readProjectBins(root) });
+    } catch (err) {
+      if (!(err instanceof FactsError)) throw err;
+      writeSafe(stderr, `plan: ${err.message}\n`);
+      return 2;
+    }
     for (const line of result.warnings) writeSafe(stderr, `${line}\n`);
     for (const line of result.errors) writeSafe(stderr, `${line}\n`);
     if (result.ok) writeSafe(stdout, `plan check: ok (${result.blocks} blocks)\n`);

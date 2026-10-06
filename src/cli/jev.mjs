@@ -16,8 +16,11 @@
  * or mistyped one is a usage error naming it, with nothing recorded. `system1.disable` still
  * applies. No key is resolved, no request is sent, and the row says `source: 'rules'`.
  * The ledger slug is `--slug`, else `project.slug`, else the directory-name slug `run` and
- * `author` use (`slugFor`; B36 — it used to fall back to `code-forge`). An unknown flag is a usage
- * error.
+ * `author` use (`slugFor`; B36 — it used to fall back to `code-forge`). B50: the config and the
+ * directory name are the PROJECT ROOT's (`projectRootFor`): inside git, the nearest regular-file
+ * `.code-forge.yml` from the cwd up to the git top level, else the git top level; outside git, the
+ * nearest one up to the home directory when the cwd is under it, else the cwd alone. A run from a
+ * subfolder thus writes to the project's ledger. An unknown flag is a usage error.
  *
  * Resolves the Jev key through B2's chain (`resolveKey`, earlier batch — the seam rule allows a
  * Wave 1 module to import a block in an earlier batch statically), asks Jev, runs the answer
@@ -31,7 +34,7 @@
 
 import { randomUUID } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { loadConfigFile, DEFAULT_CONFIG_FILENAME, slugFor } from '../config/load.mjs';
+import { loadConfigFile, DEFAULT_CONFIG_FILENAME, projectRootFor, slugFor } from '../config/load.mjs';
 import path from 'node:path';
 import { buildQuestionPayload, isKnownQuestion, isQuestionDisabled } from '../decide/questions.mjs';
 import { askJev as realAskJev } from '../decide/jev-client.mjs';
@@ -179,7 +182,9 @@ export async function runJev(args, deps = {}) {
     return 1;
   }
 
-  const configPath = path.join(cwd, DEFAULT_CONFIG_FILENAME);
+  // B50: the project's config and ledger, also from a subfolder of the project
+  const root = projectRootFor(cwd);
+  const configPath = path.join(root, DEFAULT_CONFIG_FILENAME);
   const loaded = await loadConfig(configPath);
   let cfg = {};
   if (loaded.ok) {
@@ -190,7 +195,7 @@ export async function runJev(args, deps = {}) {
   }
 
   // the same ledger as the rest of the tool: --slug, else project.slug, else the directory name
-  const slug = slugFlag.value ?? slugFor(cfg, cwd);
+  const slug = slugFlag.value ?? slugFor(cfg, root);
 
   if (isQuestionDisabled(id, cfg)) {
     err(`jev ask: question "${id}" is disabled by system1.disable\n`);

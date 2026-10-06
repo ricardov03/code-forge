@@ -1,8 +1,8 @@
 {
   "facts": [
-    { "fact_id": "F1", "claim": "claude plugin", "kind": "command", "command": "claude --help | grep -c plugin", "output_excerpt": "3", "tag": "VERIFIED", "why": null },
-    { "fact_id": "F2", "claim": "--json-schema", "kind": "flag", "command": "claude --help | grep -c -- --json-schema", "output_excerpt": "1", "tag": "VERIFIED", "why": null },
-    { "fact_id": "F3", "claim": "--max-turns", "kind": "flag", "command": "claude --help | grep -c -- --max-turns", "output_excerpt": "0", "tag": "NOT-FOUND", "why": null },
+    { "fact_id": "F1", "claim": "claude plugin", "kind": "command", "command": "which claude", "output_excerpt": "/usr/local/bin/claude", "tag": "VERIFIED", "why": null },
+    { "fact_id": "F2", "claim": "--json-schema", "kind": "flag", "command": "grep -rn -- --json-schema src", "output_excerpt": "src/reviewer.mjs:12:  argv.push('--json-schema', schema);", "tag": "VERIFIED", "why": null },
+    { "fact_id": "F3", "claim": "--max-turns", "kind": "flag", "command": "grep -rn -- --max-turns src", "output_excerpt": "", "tag": "NOT-FOUND", "why": null },
     { "fact_id": "F4", "claim": "~/.code-forge/ledger", "kind": "path", "command": "", "output_excerpt": "", "tag": "UNVERIFIABLE", "why": "the delegate may not read .code-forge paths" },
     { "fact_id": "F5", "claim": "@types/node", "kind": "package", "command": "npm view @types/node version", "output_excerpt": "22.20.4", "tag": "VERIFIED", "why": null },
     { "fact_id": "F6", "claim": "https://api.typesafe.ai/v1/systemone", "kind": "endpoint", "command": "", "output_excerpt": "", "tag": "UNVERIFIABLE", "why": "a POST endpoint; no read-only check reaches it" },

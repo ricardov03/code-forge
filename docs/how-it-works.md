@@ -59,7 +59,15 @@ orchestrator asks System 1 for the lane (`jev ask lane --block <id> --plan <plan
 is written to the ledger. Without a Jev key, `--rules` answers from facts in the state file (files
 changed, lines added, migration, policy or middleware paths, a high-risk path, keywords). `plan
 check` then refuses a block with no recorded lane, or a level that differs from it:
-`block B2: level L2 differs from the recorded lane L1 (jev)`.
+`block B2: level L2 differs from the recorded lane L1 (jev)`. Both `jev ask` and `plan check` use
+the project root's config and ledger (the nearest `.code-forge.yml` up to the git top level, else
+the git top level), so they can run from any folder of the project.
+
+Acceptance clauses in a block row are numbered `(1) … · (2) …` (or separated by `;`); `plan check`
+checks each one. A clause citing a claim the facts sheet does not mark VERIFIED needs a line in the
+section "Acceptance clauses the facts sheet cannot back": a list item that names the block, the
+claim and the word `tolerance`, for example
+``- B3 `--flag` (F4, UNVERIFIABLE) — tolerance: the test reads the help fixture``.
 
 The plan must also use the template's exact section headings. A heading that is close but not exact,
 at the right place, passes with a `WARN` that names the exact heading.

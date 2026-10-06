@@ -360,6 +360,7 @@ export function limitGuard(allow, now) {
 export async function reloadWorkspace({ runId, allow = null, writeRow, now = new Date() }) {
   const { project, workspace, status } = await readRun(runId);
   if (status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
+  // the run record's workspace IS the project root (`run start` records `projectRootFor`, B50)
   const loaded = await loadProjectConfig(workspace);
   if (!loaded.ok || !loaded.config) {
     if (loaded.error === 'not-found') return { ok: false, error: 'not-found' };

@@ -10,7 +10,7 @@
 
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
-import { loadProjectConfig, slugFor } from '../config/load.mjs';
+import { loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
 import { ROLES, runRootFor, SessionError, spawnSession } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -60,7 +60,9 @@ export async function runSpawn(args, deps = {}) {
       writeSafe(stderr, USAGE);
       return 2;
     }
-    const loaded = await loadProjectConfig(process.cwd());
+    // B50: the project root's config and ledger slug, also from a subfolder
+    const root = projectRootFor(process.cwd());
+    const loaded = await loadProjectConfig(root);
     if (!loaded.ok) {
       writeSafe(stderr, `spawn: ${loaded.message}\n`);
       return 2;
@@ -81,7 +83,7 @@ export async function runSpawn(args, deps = {}) {
         runRoot: typeof flags.run === 'string' ? runRootFor(flags.run, cfg?.tmp?.root) : undefined,
         run: typeof flags.run === 'string' ? flags.run : undefined,
         block: typeof flags.block === 'string' ? flags.block : undefined,
-        slug: slugFor(cfg, process.cwd()),
+        slug: slugFor(cfg, root),
       },
       { ...deps, stderr },
     );

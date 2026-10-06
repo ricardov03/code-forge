@@ -24,7 +24,7 @@
 
 import path from 'node:path';
 import { reloadFailureText, reloadWorkspace } from '../autopilot/limits.mjs';
-import { DEFAULT_CONFIG_FILENAME, loadProjectConfig, slugFor } from '../config/load.mjs';
+import { DEFAULT_CONFIG_FILENAME, loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
 import { budgetUsdOf, runSpend } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
@@ -118,7 +118,8 @@ export async function runRun(args, deps = {}) {
       return 0;
     }
     if (sub === 'start') {
-      const workspace = path.resolve(typeof flags.cwd === 'string' ? flags.cwd : process.cwd());
+      // B50: the run's workspace is the project root (its config and ledger slug), also from a subfolder
+      const workspace = projectRootFor(path.resolve(typeof flags.cwd === 'string' ? flags.cwd : process.cwd()));
       const loaded = await loadProjectConfig(workspace);
       if (!loaded.ok) {
         err(`run start: ${loaded.message}\n`);
