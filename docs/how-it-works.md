@@ -141,7 +141,8 @@ by a coder) serves the ticket:
    provider** rules on both reports. Lower-risk files keep the table above. Docs and contract
    blocks never use multimodel review unless `review.multimodel_for_docs` is on.
 4. **Triage.** Findings from a single reviewer go to S1 `defect`: fix now, batch to an L3 ruling,
-   or log as a nit. A judge's findings are final.
+   or log as a nit. A critical finding is always fix now: neither S1 nor the ruling makes it a nit.
+   A judge's findings are final.
 
 Every reviewer packet carries the block's acceptance clauses (from `block open --acceptance`) under
 "Acceptance clauses", so the reviewer checks the change against what it must do. The clauses are
@@ -243,14 +244,18 @@ higher, at most L2), and an S2 ruling. A docs or contract block is never coded b
 
 | Claim | Checked by |
 |---|---|
-| only owned files touched | the file set against `owned_files`; anything else is an orphan (`block claim` or delete it) |
-| every file reviewed | a **signed** `review.approved` row for the current content hash of every changed or new file |
+| only owned files touched | every changed or new file since the block's base must be in its `owned_files`, unchanged since `block open` recorded the tree, owned by another block of the run that is still open, or still exactly what a closed block's gate approved; anything else refuses `unowned_change <file>` (`block claim` it, or put it back). Only files under the repository top-level `.code-forge/` are not changes (for a workspace in a subdirectory, its own `.code-forge/` counts as source tree except this run's record mirror and the block's default transcript), so keep transcripts and reports there. A file a closed block of the run owns is accounted for while it is exactly the content that block's gate approved. A file an open sibling block owns is left to that block's gate: the close cannot tell which coder wrote it, so it prints a `WARN` line naming each such file |
+| every file reviewed | the files are every owned file changed since the base plus every owned file with any review row for this block (so work committed before `block open` or done in another worktree is still checked, with a WARN naming the likely cause); an owned entry with no glob owns the paths below it; a block with no such file refuses `no_changes`, which only the owner's `--no-require-reviews` (confirmed at a terminal) lifts. Each needs a **signed** `review.approved` row for its current content hash, and no later review of that same content that did not approve it. A later review that left findings open refuses `not_approved <file> <finding>` per finding until it is fixed and approved again or waived; a critical finding only by the human's `block waive` |
 | tests green | the gates, run again |
 | clauses covered | every clause names a test that exists and passed; S1 `scope` on the other hunks |
 | size | net lines against `--lines`: over 1.25 × stops the block and asks for a split |
 | no rule break | a grep of the coder's transcript for forbidden commands and paths |
 | high tier proven | every changed **high-tier** file has a signed red→green row with `red_kind: assertion`. Light-tier files: optional |
 | rows genuine | every gate-relevant row's MAC verifies; the live worker matches the pinned pid |
+
+`--no-require-reviews` lifts the per-file review rows and `no_changes` (never `unowned_change` or `unproven`). Only
+the owner may use it: it asks for a yes at a terminal (stdin and stdout must both be terminals), has no `--yes`, and is refused while an
+autopilot grant is active. It leaves a signed `gate.reviews_waived {by: human}` row.
 
 A file is **high tier** when S1 risk ≥ 2, when it matches `proof.tiers.high.paths`, or when it is
 security-sensitive. Everything else is **light tier**.

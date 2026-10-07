@@ -12,7 +12,9 @@
  */
 
 import { createHash } from 'node:crypto';
+import { createReadStream, existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import os from 'node:os';
+import path from 'node:path';
 import { BLOCK_KINDS, blockKind, dispatchLevel } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
 import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
@@ -46,6 +48,133 @@ async function git(argv, cwd, okExitCodes) {
   const res = await exec(argv, { cwd, env: gitEnv(), okExitCodes, timeoutMs: 30000 });
   if (res.result !== 'ok') throw new StateError('git-failed', `${argv.slice(0, 2).join(' ')} failed (exit ${res.code})`);
   return res;
+}
+
+/** B52: the stamp of a path whose state could not be read; never equal to anything (see {@link sameStamp}). */
+export const UNREADABLE = 'unreadable';
+
+/**
+ * B52: a stamp of one path's current state, never following a symlink and never throwing:
+ *  - `deleted` — nothing at the path;
+ *  - `file:<x|->:<sha256 of the bytes>` — a regular file, with its executable bit (hash streamed);
+ *  - `link:<sha256 of the target text>` — a symlink, by where it points;
+ *  - `repo:<HEAD commit>:<sha256 of its changes>` — a directory holding a git repository (a
+ *    checked-out submodule, a nested repo): its checked-out commit, and the status, the binary
+ *    diff against HEAD and every untracked file's content (`repoStamp`) — so a repo already dirty
+ *    at open and edited again later stamps differently;
+ *  - `gitlink:<commit>` — a directory with no `.git` that the index records as a gitlink (an
+ *    uninitialised submodule);
+ *  - {@link UNREADABLE} — anything else (a plain directory, a FIFO, a read or git failure).
+ * Two stamps are the same only when the path did not change between them, and an `unreadable`
+ * stamp never matches — a read failure must never make a file look unchanged.
+ * @param {string} top - the repository top level (`repoTop`). @param {string} file - top-relative.
+ * @returns {Promise<string>}
+ */
+export async function treeStamp(top, file) {
+  const full = path.join(top, file);
+  let stat;
+  try {
+    stat = lstatSync(full);
+  } catch (err) {
+    return /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT' ? 'deleted' : UNREADABLE;
+  }
+  try {
+    if (stat.isSymbolicLink()) return `link:${sha256(readlinkSync(full))}`;
+    if (stat.isFile()) return `file:${(stat.mode & 0o111) !== 0 ? 'x' : '-'}:${await fileSha256(full)}`;
+    if (stat.isDirectory() && existsSync(path.join(full, '.git'))) return await repoStamp(full);
+    if (stat.isDirectory()) return await gitlinkStamp(top, file);
+  } catch {
+    return UNREADABLE;
+  }
+  return UNREADABLE;
+}
+
+/** @param {Buffer | string} data @returns {string} */
+const sha256 = (data) => createHash('sha256').update(data).digest('hex');
+
+/**
+ * B52: a file's sha256, streamed (a large file is never read whole into memory).
+ * @param {string} full @returns {Promise<string>}
+ */
+async function fileSha256(full) {
+  const hash = createHash('sha256');
+  for await (const chunk of createReadStream(full)) hash.update(/** @type {Buffer} */ (chunk));
+  return hash.digest('hex');
+}
+
+/**
+ * B52: a nested repository's stamp — its HEAD, and a sha256 over its own changes: `git status
+ * --porcelain=v1 -z`, `git diff HEAD --binary` (the content of every tracked change) and each
+ * untracked file's path and sha256. Any git failure is {@link UNREADABLE}.
+ * @param {string} dir @returns {Promise<string>}
+ */
+async function repoStamp(dir) {
+  const run = (/** @type {string[]} */ argv) => exec(argv, { cwd: dir, env: gitEnv(), timeoutMs: 30000 });
+  const head = await run(['git', 'rev-parse', '--verify', 'HEAD']);
+  const status = await run(['git', 'status', '--porcelain=v1', '-z', '--untracked-files=all']);
+  const diff = await run(['git', 'diff', 'HEAD', '--binary']);
+  const untracked = await run(['git', 'ls-files', '-z', '--others', '--exclude-standard']);
+  if (head.result !== 'ok' || status.result !== 'ok' || diff.result !== 'ok' || untracked.result !== 'ok') return UNREADABLE;
+  const hash = createHash('sha256').update(status.stdout).update('\0diff\0').update(diff.stdout);
+  for (const rel of untracked.stdout.split('\0').filter((f) => f.length > 0).sort()) {
+    const inner = path.join(dir, rel);
+    const st = lstatSync(inner);
+    hash.update(`\0${rel}\0`).update(st.isFile() ? await fileSha256(inner) : st.isSymbolicLink() ? `link:${sha256(readlinkSync(inner))}` : 'other');
+  }
+  return `repo:${head.stdout.trim()}:${hash.digest('hex')}`;
+}
+
+/**
+ * B52: a directory with no `.git` of its own that the index records as a gitlink (an uninitialised
+ * submodule): `gitlink:<commit>` from `git ls-files -s`; anything else is {@link UNREADABLE}.
+ * @param {string} top @param {string} file @returns {Promise<string>}
+ */
+async function gitlinkStamp(top, file) {
+  const res = await exec(['git', 'ls-files', '-s', '-z', '--', file], { cwd: top, env: gitEnv(), timeoutMs: 30000 });
+  if (res.result !== 'ok') return UNREADABLE;
+  const entry = res.stdout.split('\0').find((e) => e.endsWith(`\t${file}`));
+  const m = entry ? /^160000 ([0-9a-f]{40,64}) \d+\t/.exec(entry) : null;
+  return m ? `gitlink:${m[1]}` : UNREADABLE;
+}
+
+/**
+ * B52: whether two stamps say the path did not change: equal, and neither {@link UNREADABLE}.
+ * @param {unknown} a @param {unknown} b @returns {boolean}
+ */
+export const sameStamp = (a, b) => typeof a === 'string' && a === b && a !== UNREADABLE;
+
+/**
+ * B52: the repository's top level (`git rev-parse --show-toplevel`, realpath'd) — the root both
+ * git listings run from and every stamp is taken against, so a workspace in a subdirectory of
+ * the repository lines up with the repo-root-relative paths git prints.
+ * @param {string} cwd @returns {Promise<string>}
+ * @throws {StateError} `git-failed`
+ */
+export async function repoTop(cwd) {
+  const res = await git(['git', 'rev-parse', '--show-toplevel'], cwd);
+  return realpathSync(res.stdout.trim());
+}
+
+/**
+ * B52: the tree's changes when a block opens — every file changed since `base` (deletions
+ * included) and every untracked, not ignored file, listed from the repository top level, each
+ * with its {@link treeStamp}. Recorded in the block's entry (`tree_at_open`, top-relative paths):
+ * at `block close`, a file outside the block's `owned_files` whose stamp is still the same
+ * ({@link sameStamp}) is not the coder's change (plan files, `init`'s config, a skill link…); one
+ * that changed since, or could not be read either time, is `unowned_change` (`review/gate-check.mjs`).
+ * @param {string} cwd @param {string} base - a full commit sha.
+ * @returns {Promise<Record<string, string>>}
+ * @throws {StateError} `git-failed`
+ */
+export async function treeAtOpen(cwd, base) {
+  const top = await repoTop(cwd);
+  const changed = await git(['git', 'diff', '--name-only', '-z', '--no-renames', base, '--'], top);
+  const untracked = await git(['git', 'ls-files', '-z', '--others', '--exclude-standard'], top);
+  const files = [...new Set([...changed.stdout.split('\0'), ...untracked.stdout.split('\0')].filter((f) => f.length > 0))].sort();
+  /** @type {Record<string, string>} */
+  const out = {};
+  for (const file of files) out[file] = await treeStamp(top, file);
+  return out;
 }
 
 /** @param {string} ref @param {string} cwd @returns {Promise<string>} the full commit sha */
@@ -130,7 +259,8 @@ function activeBlocks(record) {
  * block kind (B34: the declared `kind`, else `blockKind` of the owned files). A docs/contract
  * block asked for below `levels.coder_floor_docs` (default L1) is opened AT the floor: the entry
  * and the dispatch row carry the floor level, and the row adds `requested_level` and
- * `trigger: 'docs_floor'`.
+ * `trigger: 'docs_floor'`. B52: the entry also records `tree_at_open` ({@link treeAtOpen}), the
+ * tree's changes at open, which `block close` reads to tell the coder's changes from earlier ones.
  * @param {{
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
@@ -151,6 +281,12 @@ export async function openBlock(opts) {
   const dispatched = dispatchLevel({ lane: level, kind, cfg: opts.cfg });
   const pointer = opts.brief ? briefPointer(opts.brief.path, opts.brief.content) : null;
 
+  // B52: the tree is stamped BEFORE the run lock (hashing can be slow; other block commands must
+  // not wait on it); under the lock the base is resolved again and must be the one stamped against
+  const { workspace } = await readRun(runId);
+  const stampedBase = await resolveCommit(opts.base ?? 'HEAD', workspace);
+  const treeOpen = await treeAtOpen(workspace, stampedBase);
+
   const block = await mutateRun(runId, null, writeRow, async (record) => {
     if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
     for (const [otherId, other] of Object.entries(activeBlocks(record))) {
@@ -158,7 +294,8 @@ export async function openBlock(opts) {
       if (pair) throw new StateError('overlap', `block ${id} owns ${pair[0]}, which overlaps ${pair[1]} owned by open block ${otherId}`);
     }
     const baseSha = await resolveCommit(opts.base ?? 'HEAD', record.workspace);
-    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open' };
+    if (baseSha !== stampedBase || record.workspace !== workspace) throw new StateError('base-moved', `the base moved while block ${id} was being opened; run block open again`);
+    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen };
     record.blocks[id] = entry;
     const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
     return {

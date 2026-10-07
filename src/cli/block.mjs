@@ -13,9 +13,26 @@
  *
  * `block close [--transcript <file>] [--report <file>] [--no-require-reviews]` also runs B12b's review rows
  * (`review/gate-check.mjs`): a signed `review.approved` row for the current content hash of every
- * changed owned file (deletions included) — `--no-require-reviews` is the human's way out, is
- * forbidden to coders (`mergeForbidden`), and leaves a signed `gate.reviews_waived {by: human}`
- * row before the close (never a silent skip); late findings ruled; `review_cap` findings waived; no
+ * changed owned file (deletions included) that no later review of the same content made stale
+ * (B52: `not_approved <file> <finding>` per open finding of that later review, unless waived — a
+ * critical only by the human's `block waive`) — `--no-require-reviews` is the human's way out, is
+ * forbidden to coders (`mergeForbidden`), needs the human to confirm at a terminal (B52: stdin
+ * or stdout not a TTY ⇒ exit 2, an active autopilot grant ⇒ refused, there is no `--yes`; a block
+ * that is not open is refused first, exactly as without the flag), lifts `no_changes`, and leaves a signed
+ * `gate.reviews_waived {by: human}` row before the close (never a silent skip; a declined prompt
+ * prints `block <id> close: cancelled …`). B52: a changed or new file no block of the run
+ * accounts for is `unowned_change <file>` (`unownedChanges`, listed from the repository top
+ * level; not lifted by `--no-require-reviews`; only the repository top-level `.code-forge/` is
+ * exempt — plus, for a workspace in a subdirectory, this run's record mirror and this block's
+ * default transcript there — never a `--transcript` or `--report` path in the source tree; a
+ * closed block's file still exactly at the content its gate approved is accounted for); a file another OPEN block of the run owns
+ * is left to that block's gate with one `WARN` line per file (the close cannot tell which coder
+ * wrote it); an old ledger's `review.result` rows are judged by their signed result files
+ * (`resultFilesFor`). B52 (field run): the file set is the diff since base ∪ every owned file
+ * with review rows of the block (`reviewedFiles`; an owned entry with no glob owns the paths below
+ * it, `ownsAt`), so work committed before `block open` or done in another worktree is still
+ * checked (with a WARN naming the likely cause when the diff shows none of it); an empty set is
+ * `no_changes`; late findings ruled; `review_cap` findings waived; no
  * `rule_break`, plus the transcript grep. The transcript is `--transcript`, else the block's
  * `transcript` in the run record, else `.code-forge/runs/<run>/<block>.log`; none ⇒ a signed
  * `gate.transcript_missing` row and a WARN line (never a silent pass, never a refusal). An id the
@@ -48,13 +65,13 @@ import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
-import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, stopBlock } from '../state/block.mjs';
+import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
-import { findOverlap } from '../state/registry.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
-import { blockFileSet, reviewGateCheck, waiveFinding } from '../review/gate-check.mjs';
+import { blockFileSet, changedFiles, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
+import { checkExpiry } from '../autopilot/grant.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { validateConfig } from '../config/validate.mjs';
@@ -73,8 +90,13 @@ const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', '
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, probe?: import('../state/run.mjs').StartTimeProbe, now?: () => Date}} [deps] -
- *   `now` (B48): the clock of the autopilot expiry checks.
+ * @param {{
+ *   stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, probe?: import('../state/run.mjs').StartTimeProbe, now?: () => Date,
+ *   isTTY?: boolean, stdinIsTTY?: boolean, stdoutIsTTY?: boolean,
+ *   ui?: {confirm: (o: {message: string, initialValue?: boolean}) => Promise<unknown>, isCancel: (v: unknown) => boolean},
+ * }} [deps] - `now` (B48): the clock of the autopilot expiry checks. `stdinIsTTY` / `stdoutIsTTY`
+ *   (default `process.stdin.isTTY` / `process.stdout.isTTY`; `isTTY` sets both) and `ui` (default
+ *   `@clack/prompts`): B52's confirmation of `--no-require-reviews`, which needs both to be TTYs.
  * @returns {Promise<number>}
  */
 export async function runBlock(args, deps = {}) {
@@ -167,13 +189,44 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'close') {
       const entry = record.blocks?.[id];
       if (!entry) throw new StateError('unknown_block', `block ${id} is not in run ${runId}`);
-      const rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
+      // B52: a block that is not open is refused here, with or without --no-require-reviews, by
+      // the same check and message as `closeBlock` — and the owner is never asked about it
+      if (entry.status !== 'open') throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
       const reviewsWaived = flags['no-require-reviews'] === true;
-      // the block's file set is listed once and shared by the review and report checks; a failure
-      // there is the usual `git-failed` refusal
-      /** @type {ReturnType<typeof blockFileSet> | undefined} */
-      let fileSetOnce;
-      const blockFiles = () => (fileSetOnce ??= blockFileSet({ repoRoot: record.workspace, base: entry.base_sha, owned: entry.owned_files, matchOwned: (f) => findOverlap(entry.owned_files, [f]) !== null }));
+      // B52: the human's way out is confirmed by the human, at a terminal, before anything is written
+      if (reviewsWaived) {
+        const asked = await confirmNoReviews(runId, id, deps);
+        if (asked === 'cancelled') {
+          err(`block ${id} close: cancelled — the review checks stay on\n`);
+          return 1;
+        }
+      }
+      const rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
+      // B52: ONE path base and ONE listing, memoised as a promise and shared by every check. The
+      // base is the repository top level: the worker signs every review row with a repo-root-
+      // relative `file` and keeps its queue and signed result files under `<top>/.code-forge/`
+      // (`repoRootOf`), and `tree_at_open` is stamped there too. An owned entry matches a path
+      // as given or, for a workspace in a subdirectory, relative to the workspace (`ownsAt`).
+      // A failure here is the usual `git-failed` refusal.
+      /** @type {Promise<{top: string, wsPrefix: string, owns: (owned: ReadonlyArray<string>, file: string) => boolean, changed: string[], fileSet: Array<{file: string, content_hash: string}>, reviewed: string[]}> | undefined} */
+      let treeOnce;
+      const tree = () =>
+        (treeOnce ??= (async () => {
+          const top = await repoTop(record.workspace);
+          // both sides as realpaths: git prints the top resolved (/private/var on macOS) while the
+          // run record may keep a symlinked spelling (/var)
+          const real = async (/** @type {string} */ p) => realpath(p).catch(() => path.resolve(p));
+          const wsPrefix = path.relative(await real(top), await real(record.workspace)).split(path.sep).join('/');
+          const owns = ownsAt(wsPrefix);
+          const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f);
+          const changed = await changedFiles({ repoRoot: top, base: entry.base_sha });
+          // the file set is the diff since base ∪ every owned file with review rows of this block —
+          // work the diff cannot see (committed before `block open`, done in another worktree) is
+          // still checked, at its content in the workspace
+          const reviewed = reviewedFiles(rows, id).filter(isMine);
+          const fileSet = await blockFileSet({ repoRoot: top, base: entry.base_sha, owned: entry.owned_files, matchOwned: isMine, changed: [...new Set([...changed, ...reviewed])].sort() });
+          return { top, wsPrefix, owns, changed, fileSet, reviewed };
+        })());
       const reviews = reviewGateCheck(async () => {
         const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
         if (transcript === null) {
@@ -184,14 +237,37 @@ export async function runBlock(args, deps = {}) {
         if (reviewsWaived) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
         // B20: the high paths come first — a base the workspace does not know refuses the close here
         const highPaths = await highPathsAt(record.workspace, entry.base_sha);
-        const fileSet = await blockFiles();
+        const { top, wsPrefix, owns, changed, fileSet, reviewed } = await tree();
+        const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f);
+        const key = await loadKey(runId);
+        // B52: an empty diff with review rows is never silent — name the likely cause
+        if (reviewed.length > 0 && !changed.some(isMine)) {
+          err(`WARN block ${id}: no owned file differs from the block base in the workspace, but ${reviewed.length} owned file(s) have review rows — the work was likely committed before block open or done in another worktree; they are checked at their content in the workspace\n`);
+        }
+        // B52: only code-forge's own state is exempt — `<top>/.code-forge/`, where the worker keeps
+        // its queue and signed results — never a `--transcript` or `--report` path in the source
+        // tree. For a workspace in a subdirectory, `<workspace>/.code-forge/` is source tree like any
+        // other path, except the two files code-forge itself keeps there at fixed names: this run's
+        // record mirror and this block's default transcript (`.code-forge/runs/<run>.json`,
+        // `.code-forge/runs/<run>/<id>.log`)
+        const wsRel = (/** @type {string} */ p) => path.posix.join(wsPrefix, p);
+        const ownState = new Set([wsRel(`.code-forge/runs/${runId}.json`), wsRel(`.code-forge/runs/${runId}/${id}.log`)]);
+        const scope = await unownedChanges({ top, changed: changed.filter((f) => !ownState.has(f)), id, blocks: record.blocks, rows, key, isMine, owns, stateDir: '.code-forge' });
+        if (scope === null) err(`WARN block ${id}: opened before code-forge recorded the tree at block open; unowned changes were not checked\n`);
+        for (const { file, block: other } of scope?.siblings ?? []) err(`WARN block ${id}: ${file} changed and is owned by open block ${other}; not checked here (its own gate reviews it)\n`);
         return {
           block: id,
           runId,
           rows,
-          key: await loadKey(runId),
+          key,
           transcript,
+          // B52: a change no block of the run owns is refused — `--no-require-reviews` does not lift it
+          unowned: scope?.unowned ?? [],
+          // B52: an old ledger's review.result rows are judged by their signed result files
+          resultFiles: await resultFilesFor({ repoRoot: top, runId, block: id, rows }),
           files: reviewsWaived ? [] : fileSet,
+          // B52: nothing changed and nothing reviewed is never a pass (the owner's way out is --no-require-reviews)
+          noChanges: !reviewsWaived && fileSet.length === 0,
           // B20: high-tier files need a proven red→green row; `--no-require-reviews` does not lift it
           proofFiles: fileSet,
           highPaths,
@@ -206,8 +282,8 @@ export async function runBlock(args, deps = {}) {
         } catch {
           return { ok: false, reason: 'coder report FAILED: --report cannot be read' };
         }
-        const files = await blockFiles();
-        const missing = missingReviewTickets(text, files.map((f) => f.file));
+        const { fileSet } = await tree();
+        const missing = missingReviewTickets(text, fileSet.map((f) => f.file));
         return missing.length === 0 ? { ok: true } : { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
       };
       const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews, report] });
@@ -220,6 +296,35 @@ export async function runBlock(args, deps = {}) {
   }
   err(USAGE);
   return 2;
+}
+
+/** B52: the refusal when `--no-require-reviews` has no terminal to ask the human at. */
+export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)';
+
+/**
+ * B52: `--no-require-reviews` lifts every per-file review check, so it is the human's alone — the
+ * same rule as `autopilot approve`: a flag can be passed by any process (the orchestrator, a
+ * script, the delegate's tooling), so the human confirms at a terminal and there is NO `--yes`.
+ * No terminal — stdin AND stdout must both be TTYs (a piped stdout means nobody may see the
+ * question) — ⇒ `usage` (exit 2); an active autopilot grant on the run ⇒ `autopilot-active`
+ * (exit 1; the owner stops the grant first) — nothing is written either way. `deps.stdinIsTTY` /
+ * `deps.stdoutIsTTY` inject each side; `deps.isTTY` injects both at once.
+ * @param {string} runId @param {string} id
+ * @param {{isTTY?: boolean, stdinIsTTY?: boolean, stdoutIsTTY?: boolean, ui?: {confirm: (o: {message: string, initialValue?: boolean}) => Promise<unknown>, isCancel: (v: unknown) => boolean}, now?: () => Date}} deps
+ * @returns {Promise<'confirmed' | 'cancelled'>}
+ * @throws {StateError} `usage`, `autopilot-active`
+ */
+async function confirmNoReviews(runId, id, deps) {
+  const stdinTTY = deps.stdinIsTTY ?? deps.isTTY ?? process.stdin.isTTY === true;
+  const stdoutTTY = deps.stdoutIsTTY ?? deps.isTTY ?? process.stdout.isTTY === true;
+  if (!(stdinTTY && stdoutTTY)) throw new StateError('usage', NO_REVIEWS_NO_TTY);
+  const grant = await checkExpiry(runId, (deps.now ?? (() => new Date()))());
+  if (grant.state === 'active') {
+    throw new StateError('autopilot-active', `--no-require-reviews is refused while an autopilot grant is active on run ${runId} (stop it first: code-forge autopilot stop --run ${runId})`);
+  }
+  const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
+  const go = await ui.confirm({ message: `Close block ${id} of run ${runId} WITHOUT the per-file review checks? Only the owner may say yes.`, initialValue: false });
+  return ui.isCancel(go) || go !== true ? 'cancelled' : 'confirmed';
 }
 
 /**

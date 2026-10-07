@@ -40,7 +40,7 @@ test('the gate refuses a transcript that reads the signer key path', () => {
 });
 
 test('the gate refuses an unruled late finding; a signed ruling or a human waiver clears it', () => {
-  const late = signed({ event: 'review.late_finding', file: 'src/a.mjs', finding: 'L1' });
+  const late = signed({ event: 'review.late_finding', file: 'src/a.mjs', finding: 'L1', severity: 'warning' });
   assert.deepEqual(check([APPROVED, late]), [['late_unruled', 'src/a.mjs', 'L1']]);
   assert.deepEqual(check([APPROVED, late, signed({ event: 'review.late_ruling', file: 'src/a.mjs', finding: 'L1', ruling: 'nit' })]), []);
   assert.deepEqual(check([APPROVED, late, signed({ event: 'review.waived', file: 'src/a.mjs', finding: 'L1', by: 'human', reason: 'r' })]), []);
@@ -111,7 +111,11 @@ function capture() {
   };
 }
 
+/** B52: the owner at a terminal says yes to `--no-require-reviews`. */
+const OWNER_SAYS_YES = { confirm: async () => true, isCancel: () => false };
+
 const WARN = 'WARN block B1: no coder transcript found (--transcript, run record, .code-forge/runs/r-gate/B1.log); the transcript grep did not run\n';
+const NO_DIFF = (/** @type {number} */ n) => `WARN block B1: no owned file differs from the block base in the workspace, but ${n} owned file(s) have review rows — the work was likely committed before block open or done in another worktree; they are checked at their content in the workspace\n`;
 
 test('CLI: close refuses an unknown block, an unruled late finding and an unreviewed hash; `block waive` writes a signed by: human row; a missing transcript is a signed row + WARN', async () => {
   const repo = await makeRepo();
@@ -129,7 +133,8 @@ test('CLI: close refuses an unknown block, an unruled late finding and an unrevi
   };
 
   assert.deepEqual(await close([], 'B9'), [1, 'block close: block B9 is not in run r-gate\n']);
-  assert.deepEqual(await close(), [1, `${WARN}block B1 open: late_unruled src/a.mjs L1\n`]);
+  // B52: nothing changed yet, but the late finding is a review row: src/a.mjs is checked (and the empty diff WARNs)
+  assert.deepEqual(await close(), [1, `${WARN}${NO_DIFF(1)}block B1 open: unreviewed src/a.mjs; late_unruled src/a.mjs L1\n`]);
 
   const noFile = capture();
   assert.equal(await runBlock(['waive', 'B1', 'L1', '--run', 'r-gate', '--reason', 'Ricardo: accepted in chat'], { stdout: noFile, stderr: noFile }), 2);
@@ -148,8 +153,8 @@ test('CLI: close refuses an unknown block, an unruled late finding and an unrevi
 
   // the default: a changed owned file needs a signed approval for its current hash
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
-  const transcript = `${repo}/coder.log`;
-  writeFile(repo, 'coder.log', '$ node --test\n');
+  const transcript = `${repo}/.code-forge/coder.log`;
+  writeFile(repo, '.code-forge/coder.log', '$ node --test\n');
   assert.deepEqual(await close(['--transcript', transcript]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
   await writeSigned('r-gate', writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(repo, 'src/a.mjs') });
   assert.deepEqual(await close(['--transcript', transcript]), [0, 'block B1 closed\n']);
@@ -165,10 +170,10 @@ test('fix 1: CLI `block close --no-require-reviews` closes an unreviewed file bu
   await startRun({ workspace: repo, project: 'gate-waive', runId: 'r-nrr', workerPid: 4242, writeRow, probe });
   await openBlock({ runId: 'r-nrr', id: 'B1', level: 'L2', owned: ['src/a.mjs'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
-  writeFile(repo, 'coder.log', '$ node --test\n');
+  writeFile(repo, '.code-forge/coder.log', '$ node --test\n');
   const close = async (/** @type {string[]} */ extra) => {
     const stream = capture();
-    const code = await runBlock(['close', 'B1', '--run', 'r-nrr', '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...extra], { stdout: stream, stderr: stream, probe });
+    const code = await runBlock(['close', 'B1', '--run', 'r-nrr', '--worker-pid', '4242', '--transcript', `${repo}/.code-forge/coder.log`, ...extra], { stdout: stream, stderr: stream, probe, isTTY: true, ui: OWNER_SAYS_YES });
     return [code, stream.text];
   };
   assert.deepEqual(await close([]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
@@ -357,7 +362,7 @@ test('fix 4 CLI: `block close --no-require-reviews` lifts the review rows but st
   await openBlock({ runId: 'r-nrr-high', id: 'B1', level: 'L2', owned: ['src/auth/a.mjs'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
   writeFile(repo, 'src/auth/a.mjs', 'export const a = 2;\n');
   const stream = capture();
-  const code = await runBlock(['close', 'B1', '--run', 'r-nrr-high', '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, '--no-require-reviews'], { stdout: stream, stderr: stream, probe });
+  const code = await runBlock(['close', 'B1', '--run', 'r-nrr-high', '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, '--no-require-reviews'], { stdout: stream, stderr: stream, probe, isTTY: true, ui: OWNER_SAYS_YES });
   assert.deepEqual([code, stream.text], [1, 'block B1 open: unproven src/auth/a.mjs\n']);
   const rows = await readAllRows('gate-nrr-high');
   assert.deepEqual([rows.filter((r) => r.event === 'gate.reviews_waived').length, rows.filter((r) => r.event === 'block.close').length], [1, 0]);
@@ -399,6 +404,10 @@ test('fix 1 CLI: a run record whose block lost its base, or names a base the wor
   await setBase('0'.repeat(40));
   assert.deepEqual(await close(), [1, 'block close: the block base is not a commit of the workspace — the close cannot read the base config\n']);
   await setBase(good);
+  // B52: a block that changed nothing is `no_changes`; with its one change approved it closes
+  assert.deepEqual(await close(), [1, 'block B1 open: no_changes\n']);
+  writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
+  await writeSigned('r-base', writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(repo, 'src/a.mjs') });
   assert.deepEqual(await close(), [0, 'block B1 closed\n']);
 });
 

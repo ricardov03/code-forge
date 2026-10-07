@@ -6,6 +6,30 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- block close checked no file at all when the block's owned_files were directories, or when the coder's work was
+  committed before block open or done in another worktree, and then closed with findings open. The gate's file set is
+  now the owned diff plus every owned file with review rows for the block, an owned entry with no glob owns the paths
+  below it, an empty diff with review rows prints a WARN naming the likely cause, and a block with no such file refuses
+  no_changes.
+- block close no longer passes a file whose approval a later review of the same content overrode: it refuses
+  not_approved <file> <finding> per open finding until the file is fixed and approved again or the finding is waived (a
+  critical only by the human's block waive; the severity the review recorded decides). The ledger review.result row now
+  carries approved and every open finding with its worst severity (a finding without a valid id as X<n>); an
+  "approved" result that lists a critical is recorded as not approved. An old ledger's review.result row is judged by
+  the ticket's signed result file, and refuses when that file is missing or fails its MAC. Triage never turns a
+  critical finding into a nit, a late-finding ruling clears only a warning or nit ruled nit, and review_cap stands
+  unless an approval of the current content comes after it.
+
+### Security
+
+- block close refuses unowned_change <file> for a file outside the block's owned files that changed after block open
+  (block open now records the tree) and that no other block of the run accounts for; it used to drop such a file from
+  the gate silently. Only .code-forge/ is exempt, and a file an open sibling block owns gets a WARN line naming it.
+  --no-require-reviews now needs the owner to confirm at a terminal: it has no --yes, exits 2 without
+  a terminal and is refused while an autopilot grant is active.
+
 ## [0.6.2] — 2026-10-07
 
 ### Changed

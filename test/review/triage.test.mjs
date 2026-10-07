@@ -43,8 +43,9 @@ test('single-session findings are banded by S1; the mid band goes to ONE L3 ruli
   };
   const findings = [finding('S1', 'nit'), finding('S2', 'critical'), finding('S3', 'critical'), finding('S4', 'warning')];
   const out = await triageFindings({ file: 'src/a.mjs', findings, fromJudge: false, jev, rule });
-  assert.deepEqual(out.fix_now.map((f) => f.id), ['S1', 'S4']);
-  assert.deepEqual(out.nit.map((f) => f.id), ['S2', 'S3']);
+  // B52: S2 (critical, S1 says nit) and S3 (critical, ruled nit) stay fix_now — a critical is never demoted
+  assert.deepEqual(out.fix_now.map((f) => f.id), ['S1', 'S2', 'S3', 'S4']);
+  assert.deepEqual(out.nit.map((f) => f.id), []);
   assert.equal(ruled.length, 1);
   assert.deepEqual(ruled[0].findings.map((f) => f.id), ['S3', 'S4']);
 

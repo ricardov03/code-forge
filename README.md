@@ -10,6 +10,14 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 ## What's new in 0.6
 
+Next release:
+
+- **The close gate now checks every file.** `block close` could close a block with critical
+  findings still open: files inside an owned folder were skipped, and so was work committed
+  before `block open` or done in another worktree. Now every reviewed file is checked, a newer
+  failed review beats an older approval, a critical needs your waiver, a change outside the
+  block's files is refused, and `--no-require-reviews` asks you at a terminal.
+
 In 0.6.1:
 
 - **Never relax a rule alone.** A new skill rule (R17): the orchestrator and the delegate never

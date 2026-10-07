@@ -112,6 +112,18 @@ describe('the worker drives the §4.11 fix loop one ticket per round (B12c)', ()
     assert.equal(w.lenses.length, lensesBefore); // a stopped file is never reviewed again by the loop
     assert.deepEqual(w.lenses, ['quick', 'recheck', 'recheck']);
     assert.equal(w.rows.filter((r) => r.event === 'review.approved').length, 0);
+    // B52: the ledger's review.result row carries the verdict and the open findings (the gate reads them)
+    const results = w.rows.filter((r) => r.event === 'review.result');
+    assert.deepEqual(
+      results.map((r) => [r.status, r.approved, r.open.map((/** @type {any} */ o) => `${o.id}:${o.severity}`).join(',')]),
+      [
+        ['reviewed', false, 'F1:warning,F2:warning,F3:warning,F4:warning'],
+        ['reviewed', false, 'F2:warning,F3:warning,F4:warning'],
+        ['stopped', false, 'F2:warning,F3:warning,F4:warning'],
+        ['stopped', false, 'F2:warning,F3:warning,F4:warning'],
+      ],
+    );
+    assert.equal(results.every((r) => verifyRow(r, w.key).ok), true);
     const caps = w.rows.filter((r) => r.event === 'review.cap');
     assert.deepEqual(caps.map((r) => [r.block, r.file, r.reason, r.open]), [['B11', FILE, 'l3_patch_exhausted', ['F2', 'F3', 'F4']]]);
     assert.equal(verifyRow(caps[0], w.key).ok, true);
@@ -229,5 +241,16 @@ describe('the worker drives the §4.11 fix loop one ticket per round (B12c)', ()
     assert.deepEqual(w.rows.filter((row) => row.event === 'review.state').map((row) => row.seq), [1, 2, 3]);
     assert.deepEqual(w.lenses, ['quick', 'recheck']);
     assert.equal(w.rows.filter((row) => row.event === 'review.approved').length, 0);
+
+    // B52: the last open finding is fixed ⇒ approved; each ledger review.result row says so itself
+    const done = await w.round();
+    assert.deepEqual([done.status, done.approved], ['reviewed', true]);
+    const ids = (/** @type {Record<string, any>} */ row) => (Object.hasOwn(row, 'open') ? row.open.map((/** @type {any} */ o) => o.id).join(',') : 'no open field');
+    assert.deepEqual(w.rows.filter((row) => row.event === 'review.result').map((row) => [row.status, row.approved, ids(row)]), [
+      ['reviewed', false, 'F1,F2'],
+      ['unavailable', false, ''],
+      ['reviewed', false, 'F2'],
+      ['reviewed', true, ''],
+    ]);
   });
 });

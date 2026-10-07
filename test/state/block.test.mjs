@@ -1,6 +1,7 @@
 // helpers FIRST: its import-time guard moves $HOME and cwd to a temp dir before any src module loads.
 import { captureStream, countOccurrences, fakeProbe, rowSink, withFixture } from './helpers.mjs';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { mkdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -14,6 +15,7 @@ import { dirtyFiles, git } from '../fixtures/repos/two-blocks/build.mjs';
 
 const ACCEPTANCE = [{ clause: 'the thing works', tests: ['test/a.test.mjs'] }];
 const PROBE = fakeProbe({ 4242: 'start-A' });
+const sha256 = (/** @type {string} */ text) => createHash('sha256').update(text).digest('hex');
 
 /** @param {string} ws @param {string} runId @param {(row: Record<string, any>) => Promise<unknown>} writeRow */
 const start = (ws, runId, writeRow) => startRun({ workspace: ws, project: 'two-blocks', runId, workerPid: 4242, writeRow, probe: PROBE });
@@ -39,6 +41,8 @@ test('`block open` records base = HEAD, level, attempt, acceptance, forecast, an
     const { block } = await openBlock({ runId: 'r-rec', id: 'B8', level: 'L2', owned: ['a.txt', 'b.txt'], acceptance: ACCEPTANCE, lines: 640, writeRow });
     assert.deepEqual({ ...block, opened_at: 'x' }, {
       block: 'B8', base_sha: headSha, owned_files: ['a.txt', 'b.txt'], level: 'L2', kind: 'code', attempt: 1, opened_at: 'x', acceptance: ACCEPTANCE, lines_forecast: 640, status: 'open',
+      // B52: the fixture's dirty set {a.txt, c.txt, d.txt}, each stamped with its mode (not executable) and its bytes' sha256
+      tree_at_open: { 'a.txt': `file:-:${sha256('a.txt dirty\n')}`, 'c.txt': `file:-:${sha256('c.txt dirty\n')}`, 'd.txt': `file:-:${sha256('d.txt untracked\n')}` },
     });
     const dispatch = rows.filter((r) => r.event === 'dispatch');
     assert.equal(dispatch.length, 1);
@@ -249,20 +253,21 @@ test('B36 `block close --report`: a report with no review-file ticket id for a c
     const open = ['open', 'B8', '--run', 'r-rep', '--level', 'L1', '--owned', 'a.txt', 'b.txt', '--acceptance', path.join(ws, 'acc.yml')];
     assert.equal(await runBlock(open, { stdout: captureStream(), stderr: captureStream() }), 0);
     await writeSigned('r-rep', (row) => appendRow(row, { slug: 'two-blocks' }), { event: 'review.approved', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
-    await writeFile(path.join(ws, 'transcript.log'), 'nothing forbidden\n');
-    const close = (/** @type {string} */ report) => ['close', 'B8', '--run', 'r-rep', '--worker-pid', '4242', '--transcript', path.join(ws, 'transcript.log'), '--report', report];
+    await writeFile(path.join(ws, '.code-forge', 'transcript.log'), 'nothing forbidden\n');
+    const close = (/** @type {string} */ report) => ['close', 'B8', '--run', 'r-rep', '--worker-pid', '4242', '--transcript', path.join(ws, '.code-forge', 'transcript.log'), '--report', report];
 
-    await writeFile(path.join(ws, 'report-bad.md'), '===BLOCK B8 COMPLETE===\nall findings addressed\n');
+    // B52: the transcript and reports live under .code-forge/ — a file the close reads elsewhere in the tree is still an unowned change
+    await writeFile(path.join(ws, '.code-forge', 'report-bad.md'), '===BLOCK B8 COMPLETE===\nall findings addressed\n');
     const failed = captureStream();
-    assert.equal(await runBlock(close(path.join(ws, 'report-bad.md')), { stdout: failed, stderr: failed, probe: PROBE }), 1);
+    assert.equal(await runBlock(close(path.join(ws, '.code-forge', 'report-bad.md')), { stdout: failed, stderr: failed, probe: PROBE }), 1);
     assert.equal(failed.text, 'block B8 open: coder report FAILED: no review-file ticket id for a.txt\n');
     const unreadable = captureStream();
     assert.equal(await runBlock(close(path.join(ws, 'no-such-report.md')), { stdout: unreadable, stderr: unreadable, probe: PROBE }), 1);
     assert.equal(unreadable.text, 'block B8 open: coder report FAILED: --report cannot be read\n');
 
-    await writeFile(path.join(ws, 'report-ok.md'), '===BLOCK B8 COMPLETE===\nreviewed a.txt ticket 0123456789abcdef01234567\n');
+    await writeFile(path.join(ws, '.code-forge', 'report-ok.md'), '===BLOCK B8 COMPLETE===\nreviewed a.txt ticket 0123456789abcdef01234567\n');
     const closed = captureStream();
-    assert.equal(await runBlock(close(path.join(ws, 'report-ok.md')), { stdout: closed, stderr: closed, probe: PROBE }), 0);
+    assert.equal(await runBlock(close(path.join(ws, '.code-forge', 'report-ok.md')), { stdout: closed, stderr: closed, probe: PROBE }), 0);
     assert.equal(closed.text, 'block B8 closed\n');
   });
 });

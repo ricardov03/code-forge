@@ -137,7 +137,8 @@ describe('review-file → fix loop → signed approval → block close (B12c)', 
       assert.deepEqual([first.result.status, first.result.approved, first.result.findings.length, first.result.next.action], ['reviewed', false, 1, 'fix']);
       assert.deepEqual(first.fix_list, [{ id: 'F1', severity: 'warning', lines: '60-60', claim: 'claim F1', fix: 'f' }]);
       const refused = await f.close();
-      assert.deepEqual([refused.code, refused.stderr.split('\n').at(-2)], [1, `block B1 open: unreviewed ${FILE}`]);
+      // B52: the never-approved file also names the finding its latest review left open
+      assert.deepEqual([refused.code, refused.stderr.split('\n').at(-2)], [1, `block B1 open: unreviewed ${FILE}; not_approved ${FILE} F1`]);
 
       f.edit(60, 'fixed');
       const second = await f.review();

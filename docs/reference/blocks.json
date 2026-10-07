@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 54,
+  "block_count": 55,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -732,6 +732,22 @@
         "B49b"
       ],
       "note": "root-added 2026-10-06; also amends skill/SKILL.md, skill/references/{autopilot,decisions,ledger}.md, README.md, docs/*"
+    },
+    "B52": {
+      "title": "Block close gate hardening (issue #2 field note: a block closed with open criticals): the file set is the diff since base plus every file with a review row of the block, matched against owned paths including directories; an approval is stale after a later non-approved review of the same content; not_approved per open finding (a critical needs a human waiver); old-ledger rows judged by the signed result file; no_changes for an empty set; unowned_change for files changed after open outside owned paths (tree_at_open stamps); triage never demotes a critical; --no-require-reviews needs the owner at a terminal",
+      "wave": 12,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/review/gate-check.mjs",
+        "src/cli/block.mjs",
+        "test/review/close-gate.test.mjs",
+        "test/review/close-gate-field.test.mjs"
+      ],
+      "depends_on": [
+        "B50"
+      ],
+      "note": "root-added 2026-10-07; GitHub issue #2 field note 2026-10-07; also amends src/state/block.mjs, src/review/triage.mjs, src/worker/loop.mjs, skill/SKILL.md, skill/references/{code,review,decisions}.md, skill/references/adapters/{claude-code,solo}.md, docs/how-it-works.md, docs/tutorial-first-test.md, docs/concepts.md"
     }
   }
 }

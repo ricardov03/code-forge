@@ -49,6 +49,7 @@ import { logWarning } from '../util/error-log.mjs';
 import { keyedLock } from '../util/locks.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
+import { openFindings } from '../review/gate-check.mjs';
 import { reviewTicket } from './engine.mjs';
 import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
 import { contentHash, DELETED_HASH, repoRootOf, WorkerError } from './ticket.mjs';
@@ -156,6 +157,21 @@ export function loopResult(outcome) {
   const out = {};
   for (const name of LOOP_FIELDS) if (outcome[name] !== undefined) out[name] = outcome[name];
   return out;
+}
+
+/**
+ * B52: the verdict a result is recorded with (its signed file and its ledger row), always with
+ * `approved` and `open`: `approved: true, open: []` only when the outcome said so AND it lists no
+ * critical finding. Otherwise `approved: false` and `open` = ALL its findings (`openFindings`:
+ * criticals, warnings and nits; a missing or malformed id as `X<n>` by position; the worst
+ * severity per id; `[]` when it names none, which the gate refuses until a fresh approval) — so
+ * an "approved" result that names a critical is downgraded with every one of its findings open.
+ * @param {Record<string, any>} result @returns {Record<string, any>}
+ */
+export function recordedVerdict(result) {
+  const listed = openFindings(result.findings);
+  if (result.approved === true && !listed.some((f) => f.severity === 'critical')) return { ...result, approved: true, open: [] };
+  return { ...result, approved: false, open: listed };
 }
 
 /**
@@ -351,9 +367,10 @@ export async function createWorker(opts, deps = {}) {
   /**
    * Sign and write the result + done marker, then the signed ledger row. A ledger failure does not
    * undo the result: the done marker is what the queue reads.
-   * @param {string} id @param {Record<string, any>} result
+   * @param {string} id @param {Record<string, any>} outcome - recorded through {@link recordedVerdict}.
    */
-  async function complete(id, result) {
+  async function complete(id, outcome) {
+    const result = recordedVerdict(outcome);
     const signed = writeResult({ repoRoot, runId, ticket: id, result, key });
     try {
       await ledger({
@@ -363,6 +380,11 @@ export async function createWorker(opts, deps = {}) {
         file: result.file ?? null,
         content_hash: result.content_hash ?? null,
         status: result.status,
+        // B52: the gate reads the verdict from the ledger, never from the result file
+        approved: result.approved,
+        open: result.open,
+        // the gate tells `refused: other-run` (never reviewed) from other refusals by it
+        ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
         ...(typeof result.trigger === 'string' ? { trigger: result.trigger } : {}),
         ...(typeof result.stopped === 'string' ? { stopped: result.stopped } : {}),
       });

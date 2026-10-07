@@ -11,7 +11,11 @@
  *    to ONE L3 ruling per file (`deps.rule`). Jev unavailable or `defect` disabled ⇒ §3.5 fallback:
  *    `defect` has no rule (`alwaysResidue`), so every finding is residue for the L3 ruling;
  *  - fail closed: a mid-band finding with no ruling available (no `deps.rule`, or it failed or
- *    left the id out) is `fix_now` unless its severity is `nit`.
+ *    left the id out) is `fix_now` unless its severity is `nit`;
+ *  - B52: a `critical` finding is ALWAYS `fix_now` — neither S1's band nor the L3 ruling makes it
+ *    a nit (both are still asked and logged in the row's `p` / `band`). Only a fix (the recheck)
+ *    or the human's `block waive` ends a critical; otherwise the loop would write
+ *    `review.approved` with the reviewer's critical still standing.
  * One `review.triage` row per finding: `{file, finding, severity, source, p, band, verdict}`.
  */
 
@@ -110,6 +114,8 @@ export async function triageFindings({ file, findings, fromJudge, diffText = '',
   /** @type {Array<{finding: Finding, p: number | null}>} */
   const mid = [];
   const put = (/** @type {Finding} */ f, /** @type {'fix_now' | 'nit'} */ verdict) => (verdict === 'fix_now' ? fixNow : nits).push(f);
+  /** B52: a critical is never demoted. @param {Finding} f @param {'fix_now' | 'nit'} verdict @returns {'fix_now' | 'nit'} */
+  const keepCritical = (f, verdict) => (f.severity === 'critical' ? 'fix_now' : verdict);
 
   for (const finding of findings) {
     const p = await askNoul('defect', { file_diff_hunk: diffText, finding }, { jev, cfg });
@@ -129,8 +135,9 @@ export async function triageFindings({ file, findings, fromJudge, diffText = '',
       mid.push({ finding, p });
       continue;
     }
-    put(finding, band);
-    await note(writeRow, { event: 'review.triage', file, finding: finding.id, severity: finding.severity, source: 'jev', p, band, verdict: band });
+    const verdict = keepCritical(finding, band);
+    put(finding, verdict);
+    await note(writeRow, { event: 'review.triage', file, finding: finding.id, severity: finding.severity, source: 'jev', p, band, verdict });
   }
 
   let rulings = 0;
@@ -147,7 +154,7 @@ export async function triageFindings({ file, findings, fromJudge, diffText = '',
     }
     for (const { finding, p } of mid) {
       const given = ruled?.[finding.id];
-      const verdict = given === 'fix_now' || given === 'nit' ? given : severityVerdict(finding);
+      const verdict = keepCritical(finding, given === 'fix_now' || given === 'nit' ? given : severityVerdict(finding));
       put(finding, verdict);
       await note(writeRow, {
         event: 'review.triage',

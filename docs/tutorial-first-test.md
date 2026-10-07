@@ -80,10 +80,11 @@ git commit -m "base: empty site and brief"
 facts delegate reads a read-only snapshot of **HEAD**, so anything it should see must be
 committed.
 
-**Why a clean tree matters.** `block close` refuses with `orphans: <paths>` when any file that
+**Why a clean tree matters.** `block close` refuses with `unowned_change <file>` when any file that
 changed since the block's base sha, or any untracked file not covered by `.gitignore`, belongs to
-no open block's `owned_files`. So everything that is not the block's own work must be committed
-(or ignored) **before** `block open` records the base.
+no open block's `owned_files` and changed after `block open` recorded the tree. So everything that
+is not the block's own work should be committed (or ignored) **before** `block open` records the
+base, and left alone until the close.
 
 ## 2. Run `init`
 
@@ -331,7 +332,10 @@ If the close is refused, the message names the reason. Common ones:
 
 | Refusal | Meaning | What to do |
 |---|---|---|
+| `no_changes` | the block changed no owned file and nothing was reviewed for it | check the coder worked in this workspace on the owned paths; if the block really has nothing to change, close it with `--no-require-reviews` at your terminal |
 | `unreviewed <file>` | a changed file has no signed approval for its current content | run `review-file` for it and wait |
+| `not_approved <file> <finding>` | the file was approved, but a later review of the same content left that finding open | fix it and run `review-file` again; or, if you accept the finding, `code-forge block waive B1 <finding> --run site-1 --file <file> --reason <text>` (only you can waive a critical) |
+| `unowned_change <file>` | a file outside the block's owned files changed after `block open`, and no other block of the run accounts for it | `code-forge block claim B1 <path> --run site-1`, or put it back |
 | `orphans: <paths>` | a changed or untracked (not ignored) file that no open block owns | `code-forge block claim B1 <path> --run site-1`, or delete it |
 | `unproven <file>` | a high-tier file has no red→green row | run `proof red-green` for its test |
 | `WARN … no coder transcript found` | the transcript grep could not run | pass `--transcript <file>` |
