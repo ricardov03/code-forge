@@ -1,6 +1,6 @@
 {
   "name": "@codedology/code-forge",
-  "version": "0.6.1",
+  "version": "0.6.2",
   "description": "Plan/harden/code/review orchestration CLI and Agent Skill for cross-model, parallel, evidence-gated feature delivery.",
   "repository": {
     "type": "git",
