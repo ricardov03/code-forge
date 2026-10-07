@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 55,
+  "block_count": 56,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -748,6 +748,20 @@
         "B50"
       ],
       "note": "root-added 2026-10-07; GitHub issue #2 field note 2026-10-07; also amends src/state/block.mjs, src/review/triage.mjs, src/worker/loop.mjs, skill/SKILL.md, skill/references/{code,review,decisions}.md, skill/references/adapters/{claude-code,solo}.md, docs/how-it-works.md, docs/tutorial-first-test.md, docs/concepts.md"
+    },
+    "B53": {
+      "title": "Clean-pass token floor for any diff size (issue #6): a structured clean pass (passed: true, no findings, hunks acknowledged in order, a non-blank summary) needs min(review.min_tokens_out, 40) output tokens; any finding, passed: false or a blank summary keeps the full floor",
+      "wave": 12,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/review/validate-review.mjs",
+        "test/review/validate-review.test.mjs"
+      ],
+      "depends_on": [
+        "B52"
+      ],
+      "note": "root-added 2026-10-07; GitHub issue #6; also amends src/review/engine.mjs (smallDiff removed), schema/code-forge.schema.json, docs/reference/config.md, docs/how-it-works.md, skill/references/review.md"
     }
   }
 }

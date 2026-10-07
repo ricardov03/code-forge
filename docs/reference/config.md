@@ -105,7 +105,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.context.min_context_lines` | integer |  | `10` | min 0 |
 | `review.block_budget_tokens` | integer |  | `150000` | min 1 |
 | `review.block_budget_usd` | number \| null |  | `null` |  |
-| `review.min_tokens_out` | integer |  | `120` | min 1 |
+| `review.min_tokens_out` | integer |  | `120` | min 1; The stub guard: a review answer with fewer output tokens is unavailable (too_short). A clean pass (passed: true, no findings, a non-blank summary) needs only min(this, 40), whatever the diff size (B53). |
 | `review.batch_small_files` | boolean |  | `true` |  |
 | `review.session_timeout_s` | integer |  | `300` | min 1 |
 | `review.max_rounds_per_file` | integer |  | `4` | min 2; max 6 |

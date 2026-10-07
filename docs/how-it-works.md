@@ -150,8 +150,8 @@ redacted and cut to fit the packet budget; a block whose clauses cannot be read 
 with `(acceptance unavailable)` in their place.
 
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
-exactly, and the output is long enough (`review.min_tokens_out`; a clean pass on a diff of 20 added
-lines or fewer needs only 40 tokens). Anything else is `review.unavailable`, never approval.
+exactly, and the output is long enough (`review.min_tokens_out`, default 120). A clean pass
+(`passed: true`, no findings, a summary) needs only 40 tokens, whatever the diff size. Anything else is `review.unavailable`, never approval.
 
 A session that runs past `review.session_timeout_s` (default 300 seconds) is killed and started once
 more on the same packet. Only a second timeout is `unavailable: timeout`. The ledger keeps a cleaned

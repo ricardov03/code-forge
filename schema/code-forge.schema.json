@@ -136,7 +136,7 @@
           "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
           "default": null
         },
-        "min_tokens_out": { "type": "integer", "minimum": 1, "default": 120 },
+        "min_tokens_out": { "type": "integer", "minimum": 1, "default": 120, "description": "The stub guard: a review answer with fewer output tokens is unavailable (too_short). A clean pass (passed: true, no findings, a non-blank summary) needs only min(this, 40), whatever the diff size (B53)." },
         "batch_small_files": { "type": "boolean", "default": true },
         "session_timeout_s": { "type": "integer", "minimum": 1, "default": 300 },
         "max_rounds_per_file": { "type": "integer", "minimum": 2, "maximum": 6, "default": 4 },

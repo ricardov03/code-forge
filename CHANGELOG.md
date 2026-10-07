@@ -6,6 +6,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- A structured clean pass (passed: true, no findings, every hunk acknowledged, a non-blank summary) is no longer refused
+  as too_short on a larger diff: it needs 40 output tokens whatever the diff size (clean passes measured 108-121 tokens;
+  issue #6). An answer with any finding, or a blank summary, keeps review.min_tokens_out.
+
 ## [0.7.0] — 2026-10-07
 
 ### Fixed

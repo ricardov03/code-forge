@@ -8,15 +8,23 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new in 0.6
+## What's new in 0.7
 
 Next release:
+
+- **Short clean reviews count.** A clean pass (no findings, every hunk acknowledged, a summary)
+  needs only 40 output tokens on any diff size, so a correct short "no defect" review is no
+  longer refused as `too_short`.
+
+In 0.7.0:
 
 - **The close gate now checks every file.** `block close` could close a block with critical
   findings still open: files inside an owned folder were skipped, and so was work committed
   before `block open` or done in another worktree. Now every reviewed file is checked, a newer
   failed review beats an older approval, a critical needs your waiver, a change outside the
   block's files is refused, and `--no-require-reviews` asks you at a terminal.
+
+## What's new in 0.6
 
 In 0.6.1:
 
