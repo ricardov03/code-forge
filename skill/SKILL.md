@@ -34,7 +34,7 @@ State lives in the plan file's header — `facts → planned → hardened → co
 
 ## §3 The loop
 
-1. `forge facts --brief <brief> --out <plans_dir>/<slug>.facts.md` — an L0 delegate checks every claim with a read-only command. You read the sheet; you never read the sources yourself (`references/plan.md` §0).
+1. `forge facts --brief <brief> --out <plans_dir>/<slug>.facts.md` — an L0 delegate checks every claim with one read-only command (a flag only with `grep -rn -- <flag> <source folder>`, never `--help`). You read the sheet; you never read the sources yourself (`references/plan.md` §0).
 2. `forge author --job plan --brief <brief> --facts <sheet> --out <plan>` — refuses without `--facts` (exit 2) and refuses a sheet older than the brief. The draft's §0 is the sheet, verbatim.
 3. Harden: `forge author --job harden --brief <brief> --facts <sheet> --draft <plan> --answers <file>` until `questions[]` is empty. The human answers; you relay, never answer for them (`references/harden.md`). Before the exit gate, record each block's lane: `forge jev ask lane --block <id> --plan <plan> --state <file>` (`--rules` without Jev); the plan's level must equal it. Exit gate: `forge plan check <plan>` green, with a lane for every block on its `lanes:` line (`references/plan.md`).
    Then show the plan to the owner for approval in the harness's plan mode, never as chat text (Claude Code: EnterPlanMode, write the plan, ExitPlanMode); a harness without a plan mode shows it and waits for an explicit yes. No block is dispatched before that approval (`references/plan.md` §4.1).

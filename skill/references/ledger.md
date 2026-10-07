@@ -30,4 +30,4 @@ Per question id and `source`: reliability buckets × outcome, the count of `≥ 
 
 ## §5 Durability
 
-Rotated at 10 MB; rows are signed only where the gate relies on them; `report --export` snapshots are what anything downstream reads. The ledger is per project slug, so a run from a sub-directory still lands in the same file.
+Rotated at 10 MB; rows are signed only where the gate relies on them; `report --export` snapshots are what anything downstream reads. The ledger is per project slug, and every verb takes the config and the slug from the **project root** (the nearest regular `.code-forge.yml` up to the git top level, else the git top level; outside git never above HOME, and a `.git` at HOME does not count), so a run from a sub-directory still lands in the same file.

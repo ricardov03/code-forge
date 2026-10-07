@@ -27,6 +27,9 @@ waits on a second real consumer (plan §10.4, Q17).
   a pipe, a list or `rg`; grep options come from a fixed allow-list. No Claude allow rules are added.
 - A command claim written without its CLI (`run reload`) gets the project's own bin only when the brief names that bin
   and the first word is not a well-known CLI.
+- Two CI tests no longer fail on a slow Node 22 runner: the worker-restart test waits for at least one review session
+  (the worker runs up to `review.parallel_tickets` at once), and the README test waits for the worker to exit after
+  `run end`.
 
 ## [0.6.0] — 2026-10-06
 

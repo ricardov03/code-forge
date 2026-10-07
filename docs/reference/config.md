@@ -13,7 +13,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `version` | const `1` | yes | — |  |
 | `project` | object |  | — |  |
 | `project.name` | string |  | — |  |
-| `project.slug` | string |  | — |  |
+| `project.slug` | string |  | — | B50: the ledger name. Default: the project root's folder name (the nearest .code-forge.yml up to the git top level, else the git top level), so every verb run from a subfolder writes to the same ledger. |
 | `project.plans_dir` | string |  | — |  |
 | `project.languages` | object |  | — |  |
 | `project.languages.chat` | string |  | — |  |
