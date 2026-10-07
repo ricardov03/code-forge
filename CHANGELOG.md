@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.6.1] — 2026-10-07
+
 ### Added
 
 - Skill rule R17 "Never relax a rule alone": the orchestrator and any delegate never change, relax or remove a limit,
