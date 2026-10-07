@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.7.0] — 2026-10-07
+
 ### Fixed
 
 - block close checked no file at all when the block's owned_files were directories, or when the coder's work was
