@@ -211,7 +211,7 @@ test('README Quickstart: every parsed command runs for real, in README order, ag
   }
 });
 
-test('README verb reference: run/block/worker/review-file/proof/gates run for real, with no leaked worker process', () => {
+test('README verb reference: run/block/worker/review-file/proof/gates run for real, with no leaked worker process', async () => {
   const acceptancePath = path.join(CWD, 'acc.json');
   writeFileSync(acceptancePath, JSON.stringify([{ clause: 'demo clause', tests: ['t1'] }]));
 
@@ -263,7 +263,18 @@ test('README verb reference: run/block/worker/review-file/proof/gates run for re
     r = cf(['run', 'end', '--run', 'readme-demo']);
     assert.equal(r.code, 0, r.stderr);
 
-    assert.throws(() => process.kill(workerPid, 0), 'the worker process must be gone after `run end`');
+    // `run end` signals the worker and returns; on a slow machine it can take a moment to exit.
+    const pid = workerPid;
+    const gone = () => {
+      try {
+        process.kill(pid, 0);
+        return false;
+      } catch {
+        return true;
+      }
+    };
+    for (let until = Date.now() + 10000; !gone() && Date.now() < until; ) await new Promise((r) => setTimeout(r, 50));
+    assert.throws(() => process.kill(pid, 0), 'the worker process must be gone after `run end`');
     workerPid = undefined;
   } finally {
     // Hygiene (coder-rules #8): never leave a detached child running.

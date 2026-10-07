@@ -87,10 +87,12 @@ describe('worker restart', () => {
     assert.equal((await readRun(runId)).worker.pid, first.pid);
     const tickets = [];
     for (const f of ['a', 'b', 'c']) tickets.push((await cli(['review-file', `src/${f}.mjs`, '--block', 'B11'], repo)).json.ticket);
-    assert.ok(await waitFor(() => records(recordDir).length === 1)); // ticket 1 is in flight
-    const inFlight = records(recordDir)[0].pid;
+    // At least one session is in flight. The worker runs up to review.parallel_tickets (default 3) at
+    // once, so on a slow machine all 3 tickets can start together: wait for >= 1, never exactly 1.
+    assert.ok(await waitFor(() => records(recordDir).length >= 1));
     await stopWorker(first, runId);
-    assert.equal(alive(inFlight), false);
+    const inFlight = records(recordDir).map((r) => r.pid);
+    for (const pid of inFlight) assert.equal(alive(pid), false);
     assert.deepEqual(queued(repo, 'done'), []); // the killed session was abandoned, not recorded
 
     const second = await startWorker(repo, runId, { FAKE_RECORD: recordDir });
