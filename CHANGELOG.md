@@ -6,6 +6,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- Docs and skill: the project root rule in `docs/how-it-works.md`, `docs/concepts.md` (new "Project root" row),
+  `skill/references/ledger.md` and the `project.slug` note in `docs/reference/config.md`; `skill/SKILL.md` and
+  `skill/references/plan.md` say a flag is checked only with `grep -rn -- <flag> <source folder>`.
+
 ## [0.6.1] — 2026-10-07
 
 ### Added

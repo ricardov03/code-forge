@@ -10,7 +10,7 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 ## What's new in 0.6
 
-Next release (0.6.1):
+In 0.6.1:
 
 - **Never relax a rule alone.** A new skill rule (R17): the orchestrator and the delegate never
   change, relax or remove a limit, threshold, budget, gate or review requirement. When a limit
