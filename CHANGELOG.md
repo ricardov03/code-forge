@@ -6,6 +6,17 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- An owned entry with no glob character now owns every path below it everywhere, not only at `block close`: `block open`
+  and the plan check refuse a directory that overlaps a file or directory of another block (parent or child, either way
+  round; `src/feature` vs `src/featureX` stay disjoint), and `block claim`, `block rebase`, the scope gate, proof and
+  the worker's file set and budget count the files inside an owned directory (B57, issue #2). An entry that is a regular
+  file at `block open` or `block claim` owns only itself (recorded as `owned_kinds`); one not there yet stays
+  directory-like; a brace entry stays a glob. A refused `block claim` names the entry it overlaps
+  (`<path> overlaps <entry> owned by open block <id>`), and `proof export` never copies or removes an owned directory
+  itself, only the files in it.
+
 ## [0.7.4] — 2026-10-08
 
 ### Added

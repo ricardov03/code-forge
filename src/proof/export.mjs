@@ -28,7 +28,7 @@ import { copyFile, lstat, mkdir, mkdtemp, readlink, realpath, rm, stat, symlink 
 import path from 'node:path';
 import { runGates } from '../gates/run.mjs';
 import { StateError } from '../state/paths.mjs';
-import { ownsFile } from '../state/registry.mjs';
+import { isExactEntry, ownsFile } from '../state/registry.mjs';
 import { writeSigned } from '../state/run.mjs';
 import { exec } from '../util/exec.mjs';
 import { revParse } from '../util/git.mjs';
@@ -148,8 +148,16 @@ async function exportIgnoredBlobs(entries, base, cwd) {
 
 /**
  * Build (or rebuild) the export of one block.
+ *
+ * Owned paths follow the registry's one rule (B57): `ownedKinds` is the block's `owned_kinds` from
+ * the run record — every caller passes it; left out it is `{}`, so every exact entry is
+ * directory-like (fail closed: it owns the paths below it). A path's kind may differ between base
+ * and the tree: a base FILE where the tree has a directory leaves the export before the files below
+ * it are copied, and a base DIRECTORY where the tree has a file leaves with every base blob in it;
+ * each base blob that leaves is listed in `removed`. A directory is never removed whole because
+ * it is owned or missing: only the blobs below it, one by one.
  * @param {{
- *   cwd: string, blockId: string, baseSha: string, owned: ReadonlyArray<string>,
+ *   cwd: string, blockId: string, baseSha: string, owned: ReadonlyArray<string>, ownedKinds?: Readonly<Record<string, string>>,
  *   linkDirs?: ReadonlyArray<string>, copyUntracked?: ReadonlyArray<string>, exportRoot?: string,
  * }} opts
  * @returns {Promise<{dir: string, base: string, restored: string[], untracked: string[], owned: string[], removed: string[], linked: string[]}>}
@@ -206,21 +214,54 @@ export async function buildExport(opts) {
 
     // (d) owned files at current content; owned base files deleted in the tree leave the export.
     const listed = (await git(['ls-files', '-z', '--cached', '--others', '--exclude-standard'], cwd)).split('\0').filter(Boolean);
-    const exact = owned.filter((o) => !/[*?{]/.test(o));
-    const candidates = [...new Set([...listed, ...exact, ...baseBlobs])].filter((f) => ownsFile(owned, f)).sort();
+    const exact = owned.filter((o) => isExactEntry(o));
+    const ownedKinds = opts.ownedKinds ?? {};
+    const candidates = [...new Set([...listed, ...exact, ...baseBlobs])].filter((f) => ownsFile(owned, f, ownedKinds)).sort();
+    const candidateSet = new Set(candidates);
     const ownedCopied = [];
-    const removed = [];
+    /** @type {Set<string>} */
+    const removedSet = new Set();
+    /** A base blob that is not in the tree at its path any more leaves the export: listed. */
+    const markRemoved = (/** @type {string} */ rel) => {
+      if (baseBlobs.has(rel)) removedSet.add(rel);
+    };
+    /** B57: an export entry above `rel` that is not a directory (a base file the tree turned into a directory) leaves. */
+    const clearParents = async (/** @type {string} */ rel) => {
+      const segments = rel.split('/');
+      for (let n = 1; n < segments.length; n += 1) {
+        const parent = segments.slice(0, n).join('/');
+        const at = await lstatOrNull(path.join(dir, parent));
+        if (at === null) return;
+        if (!at.isDirectory()) {
+          await rm(path.join(dir, parent), { force: true });
+          markRemoved(parent);
+          return;
+        }
+      }
+    };
     for (const rel of candidates) {
       assertRelPath(rel, 'owned files');
       const src = path.join(cwd, rel);
       const dest = path.join(dir, rel);
       const st = await lstatOrNull(src);
-      await rm(dest, { recursive: true, force: true });
-      if (st === null) {
-        if (baseBlobs.has(rel)) removed.push(rel);
+      const at = await lstatOrNull(dest);
+      // B57: nothing to copy — a path missing from the tree, or a directory (an exact owned entry may
+      // name one; its files are candidates of their own). A stale non-directory export entry there
+      // leaves; an export directory is never removed whole — its owned blobs leave one by one.
+      if (st === null || st.isDirectory()) {
+        if (at !== null && !at.isDirectory()) await rm(dest, { force: true });
+        markRemoved(rel);
         continue;
       }
+      if (at?.isDirectory()) {
+        // a base directory the tree turned into a file: every base blob in it is gone from the tree
+        for (const blob of baseBlobs) if (blob.startsWith(`${rel}/`) && !candidateSet.has(blob)) markRemoved(blob);
+        await rm(dest, { recursive: true, force: true });
+      } else if (at !== null) {
+        await rm(dest, { force: true });
+      }
       if (!st.isFile() && !st.isSymbolicLink()) continue;
+      await clearParents(rel);
       await mkdir(path.dirname(dest), { recursive: true });
       if (st.isSymbolicLink()) await symlink(await readlink(src), dest);
       else await copyFile(src, dest);
@@ -240,7 +281,7 @@ export async function buildExport(opts) {
       linked.push(rel);
     }
 
-    return { dir, base, restored: [...restored].sort(), untracked: untracked.sort(), owned: ownedCopied, removed, linked: linked.sort() };
+    return { dir, base, restored: [...restored].sort(), untracked: untracked.sort(), owned: ownedCopied, removed: [...removedSet].sort(), linked: linked.sort() };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

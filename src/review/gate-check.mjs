@@ -68,7 +68,7 @@ import { mergeForbidden, scanTranscript } from '../util/forbidden.mjs';
 import { exec } from '../util/exec.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { StateError } from '../state/paths.mjs';
-import { findOverlap } from '../state/registry.mjs';
+import { ownsFile } from '../state/registry.mjs';
 import { sameStamp, treeStamp } from '../state/block.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { tierFor } from '../proof/tiers.mjs';
@@ -565,15 +565,15 @@ export function repoRelativePath(raw) {
 
 /**
  * The block's file set (§4.1): changed tracked files since `base` (deletions included, hashed
- * `DELETED_HASH`) ∪ untracked files, filtered to `owned` (exact paths; a glob owned entry matches through `matchOwned`), each with its content hash.
+ * `DELETED_HASH`) ∪ untracked files, filtered to `owned` (`matchOwned`, default the registry's `ownsFile` with `ownedKinds`: an exact entry owns its path and the paths below it unless recorded as a regular file, B57), each with its content hash.
  * Every path goes through `repoRelativePath`.
- * @param {{repoRoot: string, base: string, owned: string[], matchOwned?: (file: string) => boolean, changed?: string[]}} opts
+ * @param {{repoRoot: string, base: string, owned: string[], ownedKinds?: Record<string, string>, matchOwned?: (file: string) => boolean, changed?: string[]}} opts
  *   `changed`: the tree's changed files when the caller already listed them ({@link changedFiles}).
  * @returns {Promise<Array<{file: string, content_hash: string}>>}
  */
-export async function blockFileSet({ repoRoot, base, owned, matchOwned, changed }) {
+export async function blockFileSet({ repoRoot, base, owned, ownedKinds, matchOwned, changed }) {
   const all = changed ?? (await changedFiles({ repoRoot, base }));
-  const isOwned = matchOwned ?? ((/** @type {string} */ f) => owned.includes(f));
+  const isOwned = matchOwned ?? ((/** @type {string} */ f) => ownsFile(owned, f, ownedKinds));
   return all.filter((f) => isOwned(f)).map((file) => ({ file, content_hash: currentHash(repoRoot, file) }));
 }
 
@@ -597,15 +597,16 @@ export async function changedFiles({ repoRoot, base }) {
 }
 
 /**
- * B52: whether `owned` (a block's `owned_files`) covers `file` at the gate: the `findOverlap`
- * match `block open` uses (exact paths and globs), and — what the field run needed — an entry with
- * no glob character also covers every path below it as a directory (`src/feature` owns
- * `src/feature/Fan.swift`). A wider match only ever puts more files under the gate's checks.
- * @param {ReadonlyArray<string>} owned @param {string} file @returns {boolean}
+ * B52: whether `owned` (a block's `owned_files`) covers `file` at the gate. B57: the registry's one
+ * ownership rule (`ownsFile`) — the rule `block open`, the scope gate and the worker use: an entry
+ * with no glob character covers its path and every path below it as a directory (`src/feature`
+ * owns `src/feature/Fan.swift`, never `src/featureX/B.swift`) unless `kinds` (the block's
+ * `owned_kinds`) recorded it as a regular file, a glob what it matches.
+ * @param {ReadonlyArray<string>} owned @param {string} file @param {Readonly<Record<string, string>>} [kinds]
+ * @returns {boolean}
  */
-export function ownsPath(owned, file) {
-  if (findOverlap(owned, [file]) !== null) return true;
-  return owned.some((o) => typeof o === 'string' && o.length > 0 && !/[*?[\]{}]/.test(o) && file.startsWith(`${o.replace(/\/+$/, '')}/`));
+export function ownsPath(owned, file, kinds) {
+  return ownsFile(owned, file, kinds);
 }
 
 /**
@@ -614,11 +615,11 @@ export function ownsPath(owned, file) {
  * given, or — for a workspace in a subdirectory (`wsPrefix`, the workspace relative to the top;
  * `''` when they are the same) — relative to the workspace. A file outside the workspace is
  * matched as given only.
- * @param {string} wsPrefix @returns {(owned: ReadonlyArray<string>, file: string) => boolean}
+ * @param {string} wsPrefix @returns {(owned: ReadonlyArray<string>, file: string, kinds?: Readonly<Record<string, string>>) => boolean}
  */
 export function ownsAt(wsPrefix) {
   const prefix = wsPrefix.replace(/\/+$/, '');
-  return (owned, file) => ownsPath(owned, file) || (prefix !== '' && prefix !== '.' && file.startsWith(`${prefix}/`) && ownsPath(owned, file.slice(prefix.length + 1)));
+  return (owned, file, kinds) => ownsPath(owned, file, kinds) || (prefix !== '' && prefix !== '.' && file.startsWith(`${prefix}/`) && ownsPath(owned, file.slice(prefix.length + 1), kinds));
 }
 
 /** B52: the review rows that name a file the block's worker reviewed. */
@@ -673,8 +674,8 @@ const currentHash = (repoRoot, file) => (isOnDisk(repoRoot, file) ? contentHash(
  * warns that the check did not run (never a silent pass).
  * @param {{
  *   top: string, changed: ReadonlyArray<string>, id: string, blocks: Record<string, any>,
- *   rows: Array<Record<string, any>>, key: Buffer, isMine: (file: string) => boolean, owns?: (owned: ReadonlyArray<string>, file: string) => boolean, stateDir?: string,
- * }} opts `blocks`: the run record's `blocks`; `rows`: the run's ledger rows; `owns` (default {@link ownsPath}): how another block's `owned_files` match a path.
+ *   rows: Array<Record<string, any>>, key: Buffer, isMine: (file: string) => boolean, owns?: (owned: ReadonlyArray<string>, file: string, kinds?: Readonly<Record<string, string>>) => boolean, stateDir?: string,
+ * }} opts `blocks`: the run record's `blocks`; `rows`: the run's ledger rows; `owns` (default {@link ownsPath}): how another block's `owned_files` (with its `owned_kinds`) match a path.
  * @returns {Promise<{unowned: string[], siblings: Array<{file: string, block: string}>} | null>}
  */
 export async function unownedChanges({ top, changed, id, blocks, rows, key, isMine, owns = ownsPath, stateDir = '.code-forge' }) {
@@ -692,7 +693,7 @@ export async function unownedChanges({ top, changed, id, blocks, rows, key, isMi
     return others.some(
       ([other, b]) =>
         b.status === 'closed' &&
-        owns(b.owned_files, file) &&
+        owns(b.owned_files, file, b.owned_kinds) &&
         rows.some((r) => r?.event === 'review.approved' && r.block === other && r.file === file && r.content_hash === hash && verified(r, key)),
     );
   };
@@ -712,7 +713,7 @@ export async function unownedChanges({ top, changed, id, blocks, rows, key, isMi
   const siblings = [];
   for (const file of changed) {
     if (state(file) || isMine(file) || (await unchangedSinceOpen(file))) continue;
-    const sibling = others.find(([, b]) => b.status === 'open' && owns(b.owned_files, file));
+    const sibling = others.find(([, b]) => b.status === 'open' && owns(b.owned_files, file, b.owned_kinds));
     if (sibling) siblings.push({ file, block: sibling[0] });
     else if (!approvedClosed(file)) unowned.push(file);
   }

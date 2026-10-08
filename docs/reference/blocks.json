@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 59,
+  "block_count": 60,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -810,6 +810,19 @@
         "B55"
       ],
       "note": "root-added 2026-10-08; GitHub issue #2 note of 2026-10-06 (stale critical from a cross-file move); also amends src/review/{packet,engine,fixloop,sections}.mjs, src/worker/engine.mjs, docs/how-it-works.md, skill/references/review.md"
+    },
+    "B57": {
+      "title": "One ownership rule (issue #2): an owned entry with no glob character owns its path and every path below it (src/feature owns src/feature/a.swift, never src/featureX/a.swift) unless block open or block claim saw a regular file there (owned_kinds: then it owns only itself); globs, brace entries included, own what they match; findOverlap reports file/dir and dir/dir parent-child overlaps either way and a directory-like entry against a glob matching it or any path below it; the rule lives in src/state/registry.mjs and every caller uses it (block open, claim, rebase, scope gate, close gate, proof, worker file set and budget, plan check)",
+      "wave": 12,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/state/owned-kinds.mjs"
+      ],
+      "depends_on": [
+        "B56"
+      ],
+      "note": "root-added 2026-10-08; found while fixing GitHub issue #2 (B52); also amends src/state/{registry,block}.mjs, src/review/gate-check.mjs, src/cli/{block,proof,plan}.mjs, src/proof/{export,tiers}.mjs, src/worker/engine.mjs, src/session/plan-check.mjs, tests, docs/how-it-works.md, skill/references/code.md"
     }
   }
 }

@@ -107,16 +107,17 @@ import { assertTicketId } from './ticket.mjs';
  * block entry without a base `block-base-missing` — a guessed base could let a change escape review.
  * @param {string} runId @param {string} block
  * The block's kind (B34) is the recorded `kind` when `block open` stored one, else `blockKind`
- * of its owned files.
+ * of its owned files. `ownedKinds` is the recorded `owned_kinds` (B57: which exact entries were
+ * regular files at `block open`/`claim`), `{}` when there is none (every exact entry directory-like).
  *   With no run record the kind is null: `reviewTicket` takes the ticket file's kind.
- * @returns {Promise<{base: string | null, level: string, owned: string[], acceptance?: unknown, kind: string | null}>}
+ * @returns {Promise<{base: string | null, level: string, owned: string[], ownedKinds: Record<string, string>, acceptance?: unknown, kind: string | null}>}
  */
 export async function blockEntryFor(runId, block) {
   let record;
   try {
     record = await readRun(runId);
   } catch (err) {
-    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], acceptance: undefined, kind: null };
+    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], ownedKinds: {}, acceptance: undefined, kind: null };
     throw new Error('run-record-unreadable');
   }
   if (!record || typeof record !== 'object' || !record.blocks || typeof record.blocks !== 'object') throw new Error('run-record-unreadable');
@@ -125,7 +126,9 @@ export async function blockEntryFor(runId, block) {
   const sha = entry?.base_sha;
   if (typeof sha !== 'string' || sha.length === 0) throw new Error('block-base-missing');
   const owned = Array.isArray(entry.owned_files) ? entry.owned_files.filter((f) => typeof f === 'string') : [];
-  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }) };
+  const kinds = entry.owned_kinds;
+  const ownedKinds = kinds && typeof kinds === 'object' && !Array.isArray(kinds) ? kinds : {};
+  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }) };
 }
 
 /** The acceptance line written when the block's clauses cannot be read. */
@@ -210,7 +213,7 @@ export async function reviewTicket(ticket, ctx) {
     return { status: 'unavailable', reason: err instanceof Error ? err.message : 'run-record-unreadable', approved: false, engine: 'adaptive', sessions: [] };
   }
   if (entry.kind === null) entry = { ...entry, kind: blockKind({ owned: [ticket.file] }) };
-  const peerDiffs = blockPeerDiffs(ctx.repoRoot, { base: entry.base, owned: entry.owned, file: ticket.file });
+  const peerDiffs = blockPeerDiffs(ctx.repoRoot, { base: entry.base, owned: entry.owned, ownedKinds: entry.ownedKinds, file: ticket.file });
   try {
     if (!ctx.key) {
       return await reviewFile(
@@ -218,7 +221,7 @@ export async function reviewTicket(ticket, ctx) {
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg), peerDiffs });
+    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg), peerDiffs });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -229,13 +232,13 @@ export async function reviewTicket(ticket, ctx) {
  * untracked), filtered to the block's owned files (`ownsFile`, as the budget row does), minus the
  * ticket's file. The review names code moved between them (`## moved code`). No base, no owned
  * list, or a git failure ⇒ [] (no hint; the review itself goes on unchanged).
- * @param {string} repoRoot @param {{base: string | null, owned: string[], file: string}} opts
+ * @param {string} repoRoot @param {{base: string | null, owned: string[], ownedKinds?: Record<string, string>, file: string}} opts
  * @returns {Promise<string[]>}
  */
-export async function blockPeers(repoRoot, { base, owned, file }) {
+export async function blockPeers(repoRoot, { base, owned, ownedKinds, file }) {
   if (base === null || !Array.isArray(owned) || owned.length === 0) return [];
   try {
-    return (await computeFileSet({ cwd: repoRoot, base })).all.filter((f) => f !== file && ownsFile(owned, f));
+    return (await computeFileSet({ cwd: repoRoot, base })).all.filter((f) => f !== file && ownsFile(owned, f, ownedKinds));
   } catch {
     return [];
   }
@@ -246,16 +249,16 @@ export async function blockPeers(repoRoot, { base, owned, file }) {
  * listed and the diffs read (`peerDiffReader`) at most once, however many packets ask — lazily, so
  * a round with no packet (a stopped file) runs no git call. Any throw or rejection on the way ⇒
  * no peer diffs (no hint), memoised like a success.
- * @param {string} repoRoot @param {{base: string | null, owned: string[], file: string}} opts
+ * @param {string} repoRoot @param {{base: string | null, owned: string[], ownedKinds?: Record<string, string>, file: string}} opts
  * @returns {() => Promise<import('../review/moved.mjs').PeerDiff[]>}
  */
-export function blockPeerDiffs(repoRoot, { base, owned, file }) {
+export function blockPeerDiffs(repoRoot, { base, owned, ownedKinds, file }) {
   /** @type {Promise<import('../review/moved.mjs').PeerDiff[]> | null} */
   let once = null;
   return () => {
     once ??= (async () => {
       try {
-        return await peerDiffReader({ repoRoot, base, file, peers: await blockPeers(repoRoot, { base, owned, file }) })();
+        return await peerDiffReader({ repoRoot, base, file, peers: await blockPeers(repoRoot, { base, owned, ownedKinds, file }) })();
       } catch {
         return [];
       }
@@ -326,10 +329,10 @@ export function mayTakeRung(state, kind, cfg, rungUsed) {
  * first full round, or any round once the rung is gone) runs outside the block lock, in parallel
  * with the block's other files.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, level: string, owned: string[], blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
+ * @param {{base: string | null, level: string, owned: string[], ownedKinds?: Record<string, string>, blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key, workDir, factsExcerpt, peerDiffs }) {
+async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, blockKindOf, key, workDir, factsExcerpt, peerDiffs }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   const readRows = ctx.readRows;
   /** @type {{outcome: ReviewOutcome} | {round: () => Promise<ReviewOutcome>}} */
@@ -343,7 +346,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
     // Check-then-write under the block lock: no other ticket of this block reads the rows between
     // this check and the budget row's write, so the row is written once per block.
     if (!rows.some((r) => r?.event === 'review.budget' && r.block === ticket.block)) {
-      await recordBlockBudget(ticket, ctx, { base, owned });
+      await recordBlockBudget(ticket, ctx, { base, owned, ownedKinds });
     }
     const where = { runRootDir: ctx.runRootDir, runId: ctx.runId, block: ticket.block, file: ticket.file, key, rows };
     const loaded = loadState(where);
@@ -489,15 +492,15 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
  * not run yet), written as ONE `review.budget` row (+ `review.over_budget` when over). Best effort:
  * a git or ledger failure is swallowed, the review goes on.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, owned: string[]}} opts
+ * @param {{base: string | null, owned: string[], ownedKinds?: Record<string, string>}} opts
  */
-async function recordBlockBudget(ticket, ctx, { base, owned }) {
+async function recordBlockBudget(ticket, ctx, { base, owned, ownedKinds }) {
   try {
     /** @type {string[]} */
     let changed = [];
     if (base !== null && owned.length > 0) {
       try {
-        changed = (await computeFileSet({ cwd: ctx.repoRoot, base })).all.filter((f) => ownsFile(owned, f));
+        changed = (await computeFileSet({ cwd: ctx.repoRoot, base })).all.filter((f) => ownsFile(owned, f, ownedKinds));
       } catch {
         // no row on a git failure: a ticket-only forecast would be permanent (the row is written
         // once per block); the block's next keyed ticket retries

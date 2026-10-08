@@ -29,6 +29,7 @@
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { assertOwned, findOverlap, ownsFile } from '../state/registry.mjs';
+import { ownedKinds } from '../state/owned-kinds.mjs';
 import { extractClaims, parseSheet, sha256 } from './facts.mjs';
 import { findSection, nearMissWarning, REQUIRED_SECTIONS } from './plan-sections.mjs';
 
@@ -300,6 +301,9 @@ export function recordedLanes(rows, planName) {
  *   `run reload` is then backed by a VERIFIED `<bin> run reload`.
  * @property {Array<Record<string, any>>} [decisions] - the project's ledger rows (the recorded lanes);
  *   none given ⇒ no block has a recorded lane.
+ * @property {string} [root] - B57: the project root the owned paths are relative to; an exact owned
+ *   path that is a regular file there owns only itself in the overlap and seam checks (as at
+ *   `block open`). None given ⇒ every exact owned path is directory-like (fail closed).
  */
 
 /**
@@ -383,12 +387,23 @@ export function checkPlan(text, opts = {}) {
     else if (b.lines > limits.blockLines) errors.push(`block ${b.id}: lines forecast ${b.lines} exceeds budget.block_lines ${limits.blockLines} — split it`);
   }
 
-  // disjoint owned files per wave
+  // disjoint owned files per wave (B57: an exact path owns the paths below it unless it is a file)
+  // (paths are looked at only once they pass `assertOwned`: never `..` or absolute)
+  /** @param {PlanBlock} b @returns {Record<string, string>} */
+  const kindsFor = (b) => {
+    if (opts.root === undefined) return {};
+    try {
+      return ownedKinds(opts.root, assertOwned(b.owned));
+    } catch {
+      return {};
+    }
+  };
+  const kindsOf = new Map(blocks.map((b) => [b.id, kindsFor(b)]));
   for (let i = 0; i < blocks.length; i += 1) {
     for (let j = i + 1; j < blocks.length; j += 1) {
       const [a, b] = [blocks[i], blocks[j]];
       if (a.wave !== b.wave) continue;
-      const hit = findOverlap(a.owned, b.owned);
+      const hit = findOverlap(a.owned, b.owned, { kindsA: kindsOf.get(a.id), kindsB: kindsOf.get(b.id) });
       if (hit) errors.push(`blocks ${a.id} and ${b.id} (wave ${a.wave}) overlap: ${hit[0]} / ${hit[1]}`);
     }
   }
@@ -398,7 +413,7 @@ export function checkPlan(text, opts = {}) {
   for (const b of blocks) {
     const deps = closure(blocks, b.id);
     for (const imported of b.imports) {
-      const owner = blocks.find((o) => o.id !== b.id && ownsFile(o.owned, imported));
+      const owner = blocks.find((o) => o.id !== b.id && ownsFile(o.owned, imported, kindsOf.get(o.id)));
       if (owner && !deps.has(owner.id)) errors.push(`block ${b.id} imports ${imported} owned by ${owner.id}, which is not in its depends_on`);
     }
   }

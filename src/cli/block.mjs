@@ -218,7 +218,7 @@ export async function runBlock(args, deps = {}) {
           const real = async (/** @type {string} */ p) => realpath(p).catch(() => path.resolve(p));
           const wsPrefix = path.relative(await real(top), await real(record.workspace)).split(path.sep).join('/');
           const owns = ownsAt(wsPrefix);
-          const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f);
+          const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f, entry.owned_kinds);
           const changed = await changedFiles({ repoRoot: top, base: entry.base_sha });
           // the file set is the diff since base ∪ every owned file with review rows of this block —
           // work the diff cannot see (committed before `block open`, done in another worktree) is
@@ -238,7 +238,7 @@ export async function runBlock(args, deps = {}) {
         // B20: the high paths come first — a base the workspace does not know refuses the close here
         const highPaths = await highPathsAt(record.workspace, entry.base_sha);
         const { top, wsPrefix, owns, changed, fileSet, reviewed } = await tree();
-        const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f);
+        const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f, entry.owned_kinds);
         const key = await loadKey(runId);
         // B52: an empty diff with review rows is never silent — name the likely cause
         if (reviewed.length > 0 && !changed.some(isMine)) {

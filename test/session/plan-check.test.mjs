@@ -1,5 +1,6 @@
 import { freshDir, sink } from './helpers.mjs';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { copyFileSync, mkdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -44,6 +45,19 @@ async function checkVariant(from, to, extra = ['--slug', 'lanes']) {
  * @param {Array<[string, string]>} pairs @param {string[]} [extra]
  */
 async function checkVariants(pairs, extra = ['--slug', 'lanes'], files = /** @type {Record<string, string>} */ ({})) {
+  const dir = writeVariant(pairs, files);
+  const stdout = sink();
+  const stderr = sink();
+  const code = await runPlanVerb(['check', 'plans/x.plan.md', ...extra], { stdout, stderr, cwd: dir });
+  return { code, errors: stderr.text().split('\n').filter(Boolean), out: stdout.text() };
+}
+
+/**
+ * The folder {@link checkVariants} checks: `plans/x.plan.md` (the fixture with `pairs` applied),
+ * the brief, and `files` at the top.
+ * @param {Array<[string, string]>} pairs @param {Record<string, string>} files @returns {string}
+ */
+function writeVariant(pairs, files) {
   let text = GOOD_TEXT;
   for (const [from, to] of pairs) {
     assert.equal(text.split(from).length, 2, `fixture text must occur once: ${from}`);
@@ -55,10 +69,7 @@ async function checkVariants(pairs, extra = ['--slug', 'lanes'], files = /** @ty
   copyFileSync(path.join(REPO, 'test', 'fixtures', 'briefs', 'tool-brief.md'), path.join(dir, 'briefs', 'tool-brief.md'));
   writeFileSync(path.join(dir, 'plans', 'x.plan.md'), text);
   for (const [name, content] of Object.entries(files)) writeFileSync(path.join(dir, name), content);
-  const stdout = sink();
-  const stderr = sink();
-  const code = await runPlanVerb(['check', 'plans/x.plan.md', ...extra], { stdout, stderr, cwd: dir });
-  return { code, errors: stderr.text().split('\n').filter(Boolean), out: stdout.text() };
+  return dir;
 }
 
 const TOLERANCE_ROW = '1. `--max-turns` is NOT-FOUND — B2 cites it only to prove the reviewer never passes it; tolerance: B2 asserts against the help fixture, never a live CLI.';
@@ -83,6 +94,25 @@ test('plan check: a missing caller map exits 1', async () => {
 test('plan check: a block importing a batch-mate exits 1', async () => {
   const r = await checkVariant('`src/util/log.mjs`', '`src/config/load.mjs`');
   assert.deepEqual([r.code, r.errors], [1, ['block B2 imports src/config/load.mjs owned by B1, which is not in its depends_on']]);
+});
+
+test('B57 plan check: an exact owned path is directory-like unless it is a regular file at the project root — then a glob that matches only paths below it is no overlap', async () => {
+  const pairs = /** @type {Array<[string, string]>} */ ([
+    ['`src/config/**`, `test/config/**`', '`src/config/**`, `test/config/**`, `NOTES/*.md`'],
+    ['`src/session/**`, `test/session/**`', '`src/session/**`, `test/session/**`, `NOTES`'],
+  ]);
+  const absent = await checkVariants(pairs);
+  assert.deepEqual([absent.code, absent.errors], [1, ['blocks B1 and B2 (wave 1) overlap: NOTES/*.md / NOTES']]);
+  const file = await checkVariants(pairs, ['--slug', 'lanes'], { NOTES: 'notes\n' });
+  assert.deepEqual([file.code, file.errors, file.out], [0, [], `plan check: ok (3 blocks)\n${LANES_LINE}`]);
+  // through the real binary: `code-forge plan check` passes the project root, so the file case passes there too
+  const bin = path.join(REPO, 'bin', 'code-forge.mjs');
+  const run = (/** @type {Record<string, string>} */ files) =>
+    spawnSync(process.execPath, [bin, 'plan', 'check', 'plans/x.plan.md', '--slug', 'lanes'], { cwd: writeVariant(pairs, files), env: process.env, encoding: 'utf8' });
+  const viaBinFile = run({ NOTES: 'notes\n' });
+  assert.deepEqual([viaBinFile.status, viaBinFile.stdout, viaBinFile.stderr], [0, `plan check: ok (3 blocks)\n${LANES_LINE}`, '']);
+  const viaBinAbsent = run({});
+  assert.deepEqual([viaBinAbsent.status, viaBinAbsent.stderr], [1, 'blocks B1 and B2 (wave 1) overlap: NOTES/*.md / NOTES\n']);
 });
 
 test('plan check: a @types/** glob exits 1 naming the block', async () => {

@@ -115,6 +115,9 @@ describe('moved code reaches the reviewer (B56)', () => {
     writeFile(repo, 'src/c.mjs', text(['export const notOwned = 1;']));
     assert.deepEqual(await blockPeers(repo, { base, owned: ['src/a.mjs', 'src/b.mjs'], file: 'src/a.mjs' }), ['src/b.mjs']);
     assert.deepEqual(await blockPeers(repo, { base, owned: ['src/**'], file: 'src/b.mjs' }), ['src/a.mjs', 'src/c.mjs']);
+    // B57: an owned directory owns the files below it — never a sibling that only shares its prefix
+    assert.deepEqual(await blockPeers(repo, { base, owned: ['src'], file: 'src/b.mjs' }), ['src/a.mjs', 'src/c.mjs']);
+    assert.deepEqual(await blockPeers(repo, { base, owned: ['sr'], file: 'src/b.mjs' }), []);
     assert.deepEqual(await blockPeers(repo, { base: null, owned: ['src/a.mjs', 'src/b.mjs'], file: 'src/a.mjs' }), []);
     assert.deepEqual(await blockPeers(repo, { base: 'f'.repeat(40), owned: ['src/a.mjs', 'src/b.mjs'], file: 'src/a.mjs' }), []);
   });

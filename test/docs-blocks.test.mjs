@@ -70,8 +70,9 @@ const NIGHT_LOG_ADDED_IDS = ['B1.2', 'B4.1', 'B11.1', 'B12c'];
  *   - B54 long documents reviewed by section (2026-10-08, issue #2)
  *   - B55 schema-miss fallback to the second level (2026-10-08, issue #2)
  *   - B56 moved-code hint across files of a block (2026-10-08, issue #2)
+ *   - B57 one ownership rule: an owned directory owns the paths below it everywhere (2026-10-08, issue #2)
  */
-const ROOT_ADDED_LATER_IDS = ['B22', 'B23', 'B24', 'B25', 'B26', 'B27', 'B28', 'B29', 'B30', 'B31', 'B32', 'B33', 'B34', 'B35', 'B36', 'B37', 'B38', 'B39', 'B40', 'B41', 'B42', 'B43', 'B44', 'B45', 'B46', 'B47', 'B48', 'B49a', 'B49b', 'B50', 'B51', 'B52', 'B53', 'B54', 'B55', 'B56'];
+const ROOT_ADDED_LATER_IDS = ['B22', 'B23', 'B24', 'B25', 'B26', 'B27', 'B28', 'B29', 'B30', 'B31', 'B32', 'B33', 'B34', 'B35', 'B36', 'B37', 'B38', 'B39', 'B40', 'B41', 'B42', 'B43', 'B44', 'B45', 'B46', 'B47', 'B48', 'B49a', 'B49b', 'B50', 'B51', 'B52', 'B53', 'B54', 'B55', 'B56', 'B57'];
 
 // The plan is maintainer-only (not tracked since 2026-09-25): the drift check runs where it exists.
 const HAS_PLAN = existsSync(PLAN_PATH);
@@ -85,8 +86,8 @@ test('blocks.json ids deep-equal §10.4\'s table rows plus the NIGHT-LOG additio
   const expected = [...fromPlan, ...NIGHT_LOG_ADDED_IDS, ...ROOT_ADDED_LATER_IDS].sort();
   const actual = Object.keys(doc.blocks).sort();
   assert.deepEqual(actual, expected);
-  assert.equal(actual.length, 59);
-  assert.equal(doc.block_count, 59);
+  assert.equal(actual.length, 60);
+  assert.equal(doc.block_count, 60);
 });
 
 test('B10c is marked deleted (Q16 = cut) — negative: no other block is', () => {
@@ -106,7 +107,7 @@ test('every depends_on id resolves to a blocks key or a baseline_ids entry (B0-B
   assert.deepEqual(doc.baseline_ids, ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8']);
   const known = new Set([...Object.keys(doc.blocks), ...doc.baseline_ids]);
   const allDeps = Object.values(doc.blocks).flatMap((b) => b.depends_on);
-  assert.equal(allDeps.length, 102);
+  assert.equal(allDeps.length, 103);
   const unresolved = Object.entries(doc.blocks).flatMap(([id, b]) =>
     b.depends_on.filter((dep) => !known.has(dep)).map((dep) => `${id} -> ${dep}`),
   );

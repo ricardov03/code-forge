@@ -17,9 +17,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { BLOCK_KINDS, blockKind, dispatchLevel } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
+import { ownedKinds, pathKind } from './owned-kinds.mjs';
 import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
-import { assertOwned, findOverlap, scopeGate } from './registry.mjs';
+import { assertOwned, findOverlap, isExactEntry, ownsFile, scopeGate } from './registry.mjs';
 import { checkWorkerPin, readRun, saveRun, withRunLock, writeSigned } from './run.mjs';
 import { verifyRow, loadKey } from './signer.mjs';
 
@@ -289,13 +290,16 @@ export async function openBlock(opts) {
 
   const block = await mutateRun(runId, null, writeRow, async (record) => {
     if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
+    // B57: what each exact owned entry is on disk, under the lock (as `block claim`) — a regular
+    // file owns only itself, here and in every later check
+    const kinds = ownedKinds(record.workspace, owned);
     for (const [otherId, other] of Object.entries(activeBlocks(record))) {
-      const pair = findOverlap(owned, other.owned_files);
+      const pair = findOverlap(owned, other.owned_files, { kindsA: kinds, kindsB: other.owned_kinds });
       if (pair) throw new StateError('overlap', `block ${id} owns ${pair[0]}, which overlaps ${pair[1]} owned by open block ${otherId}`);
     }
     const baseSha = await resolveCommit(opts.base ?? 'HEAD', record.workspace);
     if (baseSha !== stampedBase || record.workspace !== workspace) throw new StateError('base-moved', `the base moved while block ${id} was being opened; run block open again`);
-    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen };
+    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen };
     record.blocks[id] = entry;
     const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
     return {
@@ -318,7 +322,8 @@ export async function attemptBlock({ runId, id, writeRow }) {
  * `block rebase` — move the base to `head` only when the old base is its ancestor and no commit
  * in between touched a file this block owns (that is a conflict ⇒ stop). Rename detection is OFF
  * (`--no-renames`): a rename lists both its old and its new path, so moving an owned file away
- * is a conflict too. Never silent.
+ * is a conflict too. Never silent. Owned means `ownsFile` (B57: a directory entry owns the files
+ * below it).
  * @param {{runId: string, id: string, head?: string, writeRow: WriteRow}} opts
  * @returns {Promise<{old_base: string, new_base: string}>}
  */
@@ -329,7 +334,7 @@ export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
     const ancestor = await git(isAncestorArgv(block.base_sha, newBase), cwd, [0, 1]);
     if (ancestor.code !== 0) throw new StateError('base-not-ancestor', `block ${id}: base ${block.base_sha.slice(0, 12)} is not an ancestor of ${head}`);
     const diff = await git(['git', 'diff', '--no-renames', '--name-only', block.base_sha, newBase], cwd);
-    const conflicts = diff.stdout.split('\n').filter((file) => file.length > 0 && findOverlap(block.owned_files, [file]) !== null);
+    const conflicts = diff.stdout.split('\n').filter((file) => file.length > 0 && ownsFile(block.owned_files, file, block.owned_kinds));
     if (conflicts.length > 0) throw new StateError('owned-conflict', `block ${id}: commits since its base changed owned files: ${conflicts.join(', ')}`);
     const moved = { old_base: block.base_sha, new_base: newBase };
     block.base_sha = newBase;
@@ -339,18 +344,25 @@ export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
 
 /**
  * `block claim` — assign one EXACT path (an orphan, or any unowned path) to `id`; refused for a
- * glob, and when another open block owns it.
+ * glob, and when another open block owns it — or anything it would own: the claimed path becomes an
+ * owned entry, so it is checked with `findOverlap` (B57: an entry owns the paths below it too,
+ * unless it is a regular file now — its kind is recorded in `owned_kinds` as at `block open`).
  * @param {{runId: string, id: string, file: string, writeRow: WriteRow}} opts
  */
 export async function claimPath({ runId, id, file, writeRow }) {
   assertOwned([file]);
-  if (/[*?{]/.test(file)) throw new StateError('bad-owned', `block claim takes one exact path, not a glob (${JSON.stringify(file)})`);
+  if (!isExactEntry(file)) throw new StateError('bad-owned', `block claim takes one exact path, not a glob (${JSON.stringify(file)})`);
   await mutateRun(runId, id, writeRow, (record, block) => {
+    const kinds = { [file]: pathKind(record.workspace, file) };
     for (const [otherId, other] of Object.entries(activeBlocks(record))) {
-      if (otherId !== id && findOverlap([file], other.owned_files)) throw new StateError('overlap', `${file} is owned by open block ${otherId}`);
+      const pair = otherId === id ? null : findOverlap([file], other.owned_files, { kindsA: kinds, kindsB: other.owned_kinds });
+      if (pair) throw new StateError('overlap', `${file} overlaps ${pair[1]} owned by open block ${otherId}`);
     }
-    if (!block.owned_files.includes(file)) block.owned_files.push(file);
-    record.orphans = record.orphans.filter((/** @type {string} */ o) => o !== file);
+    if (!block.owned_files.includes(file)) {
+      block.owned_files.push(file);
+      block.owned_kinds = { ...block.owned_kinds, ...kinds };
+    }
+    record.orphans = record.orphans.filter((/** @type {string} */ o) => !ownsFile([file], o, kinds));
     return { result: undefined, rows: [{ event: 'block.claim', block: id, path: file }] };
   });
 }

@@ -34,13 +34,61 @@ test('`block open` twice with overlapping globs is refused, and the registry kee
   });
 });
 
+test('B57: `block open` refuses a directory/file overlap either way round, and `block claim` of a path inside another block\'s directory', async () => {
+  await withFixture(async ({ ws }) => {
+    const { writeRow } = rowSink();
+    await start(ws, 'r-dir', writeRow);
+    await openBlock({ runId: 'r-dir', id: 'B1', level: 'L2', owned: ['src/feature'], acceptance: ACCEPTANCE, writeRow });
+    await assert.rejects(() => openBlock({ runId: 'r-dir', id: 'B2', level: 'L1', owned: ['a.txt', 'src/feature/x.swift'], acceptance: ACCEPTANCE, writeRow }), {
+      code: 'overlap',
+      message: 'block B2 owns src/feature/x.swift, which overlaps src/feature owned by open block B1',
+    });
+    await assert.rejects(() => openBlock({ runId: 'r-dir', id: 'B3', level: 'L1', owned: ['src'], acceptance: ACCEPTANCE, writeRow }), {
+      code: 'overlap',
+      message: 'block B3 owns src, which overlaps src/feature owned by open block B1',
+    });
+    await openBlock({ runId: 'r-dir', id: 'B4', level: 'L1', owned: ['src/featureX'], acceptance: ACCEPTANCE, writeRow });
+    await assert.rejects(() => claimPath({ runId: 'r-dir', id: 'B4', file: 'src/feature/y.swift', writeRow }), {
+      code: 'overlap',
+      message: 'src/feature/y.swift overlaps src/feature owned by open block B1',
+    });
+    assert.deepEqual(Object.keys((await readRun('r-dir')).blocks), ['B1', 'B4']);
+  });
+});
+
+test('B57: `block open`/`claim` record each exact entry\'s kind; a regular file owns only itself, so a `**` glob does not overlap it — an absent path stays directory-like', async () => {
+  await withFixture(async ({ ws }) => {
+    const { writeRow } = rowSink();
+    await start(ws, 'r-kind', writeRow);
+    await mkdir(path.join(ws, 'lib'), { recursive: true });
+    await openBlock({ runId: 'r-kind', id: 'B1', level: 'L2', owned: ['**/*.mjs'], acceptance: ACCEPTANCE, writeRow });
+    // `a.txt` is a regular file `**/*.mjs` does not match; `lib` is a directory B1's glob may own files inside
+    await assert.rejects(() => openBlock({ runId: 'r-kind', id: 'B2', level: 'L1', owned: ['a.txt', 'lib', 'docs/{x,y}.md'], acceptance: ACCEPTANCE, writeRow }), {
+      code: 'overlap',
+      message: 'block B2 owns lib, which overlaps **/*.mjs owned by open block B1',
+    });
+    const opened = await openBlock({ runId: 'r-kind', id: 'B2', level: 'L1', owned: ['a.txt', 'docs/{x,y}.md'], acceptance: ACCEPTANCE, writeRow });
+    assert.deepEqual(opened.block.owned_kinds, { 'a.txt': 'file' });
+    await assert.rejects(() => openBlock({ runId: 'r-kind', id: 'B3', level: 'L1', owned: ['new/later.txt'], acceptance: ACCEPTANCE, writeRow }), {
+      code: 'overlap',
+      message: 'block B3 owns new/later.txt, which overlaps **/*.mjs owned by open block B1',
+    });
+    await claimPath({ runId: 'r-kind', id: 'B2', file: 'd.txt', writeRow });
+    await assert.rejects(() => claimPath({ runId: 'r-kind', id: 'B2', file: 'later.txt', writeRow }), { code: 'overlap', message: 'later.txt overlaps **/*.mjs owned by open block B1' });
+    const record = await readRun('r-kind');
+    assert.deepEqual(record.blocks.B2.owned_files, ['a.txt', 'docs/{x,y}.md', 'd.txt']);
+    assert.deepEqual(record.blocks.B2.owned_kinds, { 'a.txt': 'file', 'd.txt': 'file' });
+    assert.deepEqual(record.blocks.B1.owned_kinds, {});
+  });
+});
+
 test('`block open` records base = HEAD, level, attempt, acceptance, forecast, and writes a signed dispatch row', async () => {
   await withFixture(async ({ ws, headSha }) => {
     const { rows, writeRow } = rowSink();
     await start(ws, 'r-rec', writeRow);
     const { block } = await openBlock({ runId: 'r-rec', id: 'B8', level: 'L2', owned: ['a.txt', 'b.txt'], acceptance: ACCEPTANCE, lines: 640, writeRow });
     assert.deepEqual({ ...block, opened_at: 'x' }, {
-      block: 'B8', base_sha: headSha, owned_files: ['a.txt', 'b.txt'], level: 'L2', kind: 'code', attempt: 1, opened_at: 'x', acceptance: ACCEPTANCE, lines_forecast: 640, status: 'open',
+      block: 'B8', base_sha: headSha, owned_files: ['a.txt', 'b.txt'], owned_kinds: { 'a.txt': 'file', 'b.txt': 'file' }, level: 'L2', kind: 'code', attempt: 1, opened_at: 'x', acceptance: ACCEPTANCE, lines_forecast: 640, status: 'open',
       // B52: the fixture's dirty set {a.txt, c.txt, d.txt}, each stamped with its mode (not executable) and its bytes' sha256
       tree_at_open: { 'a.txt': `file:-:${sha256('a.txt dirty\n')}`, 'c.txt': `file:-:${sha256('c.txt dirty\n')}`, 'd.txt': `file:-:${sha256('d.txt untracked\n')}` },
     });

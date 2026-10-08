@@ -36,7 +36,7 @@ import { acquireProofLock, lockHolder, releaseProofLock } from '../proof/lock.mj
 import { MECHANISMS, readJournal, restoreJournal, runRedGreen } from '../proof/red-green.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { blockFileSet, repoRelativePath } from '../review/gate-check.mjs';
-import { findOverlap } from '../state/registry.mjs';
+import { ownsFile } from '../state/registry.mjs';
 
 const USAGE =
   'usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]\n' +
@@ -126,6 +126,7 @@ async function exportAndRecord({ runId, record, blockId, block, config, writeRow
     blockId,
     baseSha: block.base_sha,
     owned: block.owned_files,
+    ownedKinds: block.owned_kinds,
     linkDirs: config?.proof?.export?.link_dirs ?? DEFAULT_LINK_DIRS,
     copyUntracked: config?.proof?.export?.copy_untracked ?? DEFAULT_COPY_UNTRACKED,
   });
@@ -243,7 +244,7 @@ export async function runProof(args, deps = {}) {
         repoRoot: record.workspace,
         base: block.base_sha,
         owned: block.owned_files,
-        matchOwned: (f) => findOverlap(block.owned_files, [f]) !== null,
+        matchOwned: (f) => ownsFile(block.owned_files, f, block.owned_kinds),
       });
       const sources = mechanism === 'assertion-deletion' ? [] : changed.map((c) => c.file).filter((f) => f !== file && !TEST_PATH.test(f));
       if (mechanism === 'revert' && sources.length === 0) {

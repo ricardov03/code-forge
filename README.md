@@ -12,6 +12,14 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 Next release:
 
+- **An owned directory owns the files inside it, everywhere.** A block that owns `src/feature`
+  now owns `src/feature/a.swift` for `block open`, `block claim`, `block rebase`, the scope gate,
+  proof and the review worker, not only for `block close`. `block open` refuses a second block
+  that owns a file or folder inside it (or a folder around it), so two coders can no longer edit
+  the same files at once. A path that is already a file when the block opens owns only itself.
+
+In 0.7.4:
+
 - **Code moved between files is no longer read as deleted.** When a block moves code from one
   file to another, each file's review packet now says where the lines went (or came from), so the
   reviewer of the old file stops reporting the removal as a lost feature, also on rechecks. Every

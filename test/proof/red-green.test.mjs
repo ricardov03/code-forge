@@ -96,6 +96,7 @@ test('red→green prints RED then GREEN for a real new case, measured in the blo
     blockId: 'A',
     baseSha: repo.baseSha,
     owned: ['src/math.mjs', 'test/clamp.spec.mjs'],
+    ownedKinds: {},
     linkDirs: [],
     copyUntracked: [],
   });

@@ -257,6 +257,24 @@ test('B52 (b) CLI: a block opened before B52 (no tree_at_open) closes with a WAR
   assert.deepEqual(await close([]), [0, 'WARN block B1: opened before code-forge recorded the tree at block open; unowned changes were not checked\nblock B1 closed\n']);
 });
 
+test('B57 CLI: the close reads the stored owned_kinds — an entry recorded as a regular file owns no path below it; a block recorded before B57 (no owned_kinds) stays directory-like', async () => {
+  const { repo, close, approve } = await closeFixture('b57-kinds', 'r-b57-kinds');
+  const record = await readRun('r-b57-kinds');
+  assert.deepEqual(record.blocks.B1.owned_kinds, { 'src/a.mjs': 'file' });
+  record.blocks.B1.owned_files = ['src/a.mjs', 'src/feature'];
+  record.blocks.B1.owned_kinds = { 'src/a.mjs': 'file', 'src/feature': 'file' };
+  await saveRun(record);
+  writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
+  writeFile(repo, 'src/feature/x.mjs', 'export const x = 1;\n');
+  await approve('src/a.mjs');
+  assert.deepEqual(await close([]), [1, 'block B1 open: unowned_change src/feature/x.mjs\n']);
+  const old = await readRun('r-b57-kinds');
+  delete old.blocks.B1.owned_kinds;
+  await saveRun(old);
+  await approve('src/feature/x.mjs');
+  assert.deepEqual(await close([]), [0, 'block B1 closed\n']);
+});
+
 const ui = (/** @type {unknown} */ answer) => ({ confirm: async () => answer, isCancel: (/** @type {unknown} */ v) => v === CANCEL });
 const CANCEL = Symbol('cancel');
 

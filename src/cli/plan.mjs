@@ -71,7 +71,7 @@ export async function runPlanVerb(args, deps = {}) {
     // package.json fails only the plans that depend on it
     let result;
     try {
-      result = checkPlan(text, { planPath, factsPath, factsText, cfg, decisions, projectBins: () => readProjectBins(root) });
+      result = checkPlan(text, { planPath, factsPath, factsText, cfg, decisions, root, projectBins: () => readProjectBins(root) });
     } catch (err) {
       if (!(err instanceof FactsError)) throw err;
       writeSafe(stderr, `plan: ${err.message}\n`);

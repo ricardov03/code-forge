@@ -2,7 +2,7 @@
 import { withFixture } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertOwned, computeScopes, expandBraces, findOverlap, globMatch, ownsFile, scopeGate } from '../../src/state/registry.mjs';
+import { assertOwned, computeScopes, expandBraces, findOverlap, globMatch, isExactEntry, ownsFile, scopeGate } from '../../src/state/registry.mjs';
 import { dirtyFiles } from '../fixtures/repos/two-blocks/build.mjs';
 
 test('registry X{a,b} Y{c} with the fixture tree dirty on {a,c,d}: X scope {a}, Y scope {c}, orphans {d}, both gates refuse', async () => {
@@ -35,6 +35,30 @@ const OVERLAP_CASES = [
   [['src/*.mjs'], ['src/cli/*.mjs'], ['src/*.mjs', 'src/cli/*.mjs']],
   [['src/a/*.mjs'], ['src/b/*.mjs'], null],
   [['src/state/**'], ['src/engines/**'], null],
+  // B57: an exact entry owns its path and every path below it — exact/exact, dir/file, file/dir,
+  // dir/dir parent-child either way, siblings that only share a name prefix, glob/dir
+  [['src/feature'], ['src/feature'], ['src/feature', 'src/feature']],
+  [['src/feature'], ['src/feature/x.swift'], ['src/feature', 'src/feature/x.swift']],
+  [['src/feature/x.swift'], ['src/feature'], ['src/feature/x.swift', 'src/feature']],
+  [['src/feature'], ['src/feature/sub'], ['src/feature', 'src/feature/sub']],
+  [['src/feature/sub'], ['src/feature'], ['src/feature/sub', 'src/feature']],
+  [['a.txt', 'src/feature/deep/sub'], ['b.txt', 'src'], ['src/feature/deep/sub', 'src']],
+  [['src/feature'], ['src/featureX'], null],
+  [['src/feature'], ['src/featureX/a.swift'], null],
+  [['src/featureX/a.swift'], ['src/feature'], null],
+  [['src/feature'], ['src/**'], ['src/feature', 'src/**']],
+  [['src/feature/*.swift'], ['src/feature'], ['src/feature/*.swift', 'src/feature']],
+  [['src/feature'], ['src/*'], ['src/feature', 'src/*']],
+  [['src/feature'], ['src/*/*.swift'], ['src/feature', 'src/*/*.swift']],
+  [['src/feature'], ['src/feat*/x/**'], ['src/feature', 'src/feat*/x/**']],
+  [['src/feature'], ['src/{feature,other}/*.swift'], ['src/feature', 'src/{feature,other}/*.swift']],
+  [['src/*.mjs'], ['src/feature'], null],
+  [['src/featureX/*'], ['src/feature'], null],
+  [['src/feature'], ['lib/**'], null],
+  // fails closed: a FILE named exactly under a `**` glob overlaps (the entry could be a directory)
+  [['src/README'], ['src/**/*.mjs'], ['src/README', 'src/**/*.mjs']],
+  // a brace entry is a glob: its alternatives own exactly themselves, nothing below
+  [['src/{feature,other}'], ['src/feature/x.swift'], null],
 ];
 
 for (const [a, b, expected] of OVERLAP_CASES) {
@@ -115,4 +139,55 @@ test('ownsFile matches exact paths and globs, not near misses', () => {
   assert.equal(ownsFile(['src/state/**'], 'src/stateful.mjs'), false);
   assert.equal(ownsFile(['src/cli/{run,block}.mjs'], 'src/cli/block.mjs'), true);
   assert.equal(ownsFile(['src/cli/{run,block}.mjs'], 'src/cli/keys.mjs'), false);
+});
+
+test('B57: an exact entry owns its path and every path below it, never a sibling sharing its prefix; a glob only what it matches', () => {
+  const owned = ['src/feature', 'test/feature/', 'lib/*.mjs', 'docs/{a,b}'];
+  const files = ['src/feature', 'src/feature/Fan.swift', 'src/feature/deep/A.swift', 'src/featureX/B.swift', 'src/featur', 'src', 'test/feature/T.swift', 'lib/a.mjs', 'lib/sub/a.mjs', 'docs/a', 'docs/a/x.md'];
+  assert.deepEqual(files.map((f) => ownsFile(owned, f)), [true, true, true, false, false, false, true, true, false, true, false]);
+  assert.equal(ownsFile([null, '', '/'], 'x'), false);
+  const { scopes, orphans } = computeScopes({ A: { owned_files: ['src/feature'] }, B: { owned_files: ['src/featureX/B.swift'] } }, ['src/feature/Fan.swift', 'src/feature/deep/A.swift', 'src/featureX/B.swift', 'src/other.swift']);
+  assert.deepEqual(scopes, { A: ['src/feature/Fan.swift', 'src/feature/deep/A.swift'], B: ['src/featureX/B.swift'] });
+  assert.deepEqual(orphans, ['src/other.swift']);
+});
+
+test('B57: `kinds` — an exact entry recorded as a regular file owns only itself; any other kind, or none, stays directory-like', () => {
+  const file = { 'src/README': 'file' };
+  assert.equal(findOverlap(['src/README'], ['src/**/*.mjs'], { kindsA: file }), null);
+  assert.deepEqual(findOverlap(['src/**/*.mjs'], ['src/README'], { kindsB: file }), null);
+  assert.deepEqual(findOverlap(['src/README'], ['src/**'], { kindsA: file }), ['src/README', 'src/**']);
+  assert.deepEqual(findOverlap(['src/README'], ['src/README'], { kindsA: file, kindsB: file }), ['src/README', 'src/README']);
+  assert.equal(findOverlap(['src/README'], ['src/README/x'], { kindsA: file }), null);
+  for (const kind of ['dir', 'absent', 'other']) {
+    assert.deepEqual(findOverlap(['src/README'], ['src/**/*.mjs'], { kindsA: { 'src/README': kind } }), ['src/README', 'src/**/*.mjs']);
+  }
+  assert.deepEqual(findOverlap(['src/README'], ['src/**/*.mjs'], { kindsB: file }), ['src/README', 'src/**/*.mjs']); // the kind belongs to its own list
+  assert.equal(ownsFile(['src/a'], 'src/a/x', { 'src/a': 'file' }), false);
+  assert.equal(ownsFile(['src/a'], 'src/a', { 'src/a': 'file' }), true);
+  assert.equal(ownsFile(['src/a'], 'src/a/x', { 'src/a': 'dir' }), true);
+  assert.equal(ownsFile(['constructor'], 'constructor/x', {}), true); // never a prototype key
+  const { scopes, orphans } = computeScopes({ A: { owned_files: ['src/a'], owned_kinds: { 'src/a': 'file' } }, B: { owned_files: ['src/b'] } }, ['src/a', 'src/a/x', 'src/b/y']);
+  assert.deepEqual([scopes, orphans], [{ A: ['src/a'], B: ['src/b/y'] }, ['src/a/x']]);
+});
+
+test('B57 fix 1: one normalisation — an exact entry with a trailing slash matches as its path in findOverlap as in ownsFile', () => {
+  assert.deepEqual(findOverlap(['src/feature/'], ['src/feature/a']), ['src/feature/', 'src/feature/a']);
+  assert.deepEqual(findOverlap(['src/feature/a'], ['src/feature//']), ['src/feature/a', 'src/feature//']);
+  assert.deepEqual(findOverlap(['src/feature/'], ['src/feature']), ['src/feature/', 'src/feature']);
+  assert.equal(findOverlap(['src/feature/'], ['src/featureX/a']), null);
+  assert.equal(findOverlap(['/'], ['src/a']), null); // an empty path owns nothing, as in ownsFile
+  assert.deepEqual([ownsFile(['src/feature/'], 'src/feature/a'), ownsFile(['/'], 'src/a')], [true, false]);
+  assert.equal(findOverlap(['src/a/'], ['src/a/x'], { kindsA: { 'src/a/': 'file' } }), null); // kinds keyed by the entry as written
+});
+
+test('B57 fix 2: one glob definition — `*`, `?`, `{` make a glob; `[ ]` stay literal in an exact path', () => {
+  assert.deepEqual(['src/a.mjs', 'pages/[id].vue', 'src/[ab].mjs', 'src/*.mjs', 'src/a?.mjs', 'src/{a,b}.mjs', 'lit}.txt'].map(isExactEntry), [true, true, true, false, false, false, true]);
+  assert.deepEqual(assertOwned(['src/[ab].mjs']), ['src/[ab].mjs']);
+  assert.equal(findOverlap(['src/[ab].mjs'], ['src/a.mjs']), null); // the literal name `[ab].mjs`, never a class
+  assert.deepEqual(findOverlap(['src/[ab].mjs'], ['src/*.mjs']), ['src/[ab].mjs', 'src/*.mjs']);
+  assert.deepEqual([ownsFile(['src/[ab].mjs'], 'src/a.mjs'), ownsFile(['src/[ab].mjs'], 'src/[ab].mjs')], [false, true]);
+});
+
+test('B57: a trailing slash stays refused at `block open` (owned entries are canonical paths)', () => {
+  assert.throws(() => assertOwned(['src/feature/']), { code: 'bad-owned', message: 'owned files: invalid path "src/feature/": no ".", ".." or empty segments' });
 });

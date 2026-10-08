@@ -23,7 +23,8 @@ export const HIGH_RISK = 2;
 /**
  * @param {{file: string, risk: number, securitySensitive?: boolean, highPaths?: ReadonlyArray<string>}} input
  *   `risk` is the S1 `risk` answer (0–3); `highPaths` is `proof.tiers.high.paths` (exact paths or
- *   globs in the registry's syntax: `*`, `?`, `**`, `{a,b}`).
+ *   globs in the registry's syntax: `*`, `?`, `**`, `{a,b}`; an exact path also covers the paths
+ *   below it, B57).
  * @returns {{tier: Tier, reason: TierReason}} the FIRST reason that applies, in the order
  *   security, risk, path — every one of them yields `high`, so the order only picks the label.
  * @throws {TypeError} on a non-string file, a risk outside 0–3, or a non-array `highPaths`.
