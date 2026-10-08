@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.7.5] — 2026-10-08
+
 ### Fixed
 
 - An owned entry with no glob character now owns every path below it everywhere, not only at `block close`: `block open`
