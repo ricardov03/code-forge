@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.7.1] — 2026-10-07
+
 ### Fixed
 
 - A structured clean pass (passed: true, no findings, every hunk acknowledged, a non-blank summary) is no longer refused
