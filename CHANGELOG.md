@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.7.3] — 2026-10-08
+
 ### Added
 
 - Review: a packet whose answer fails the schema twice is retried once on `review.second_levels.<level>` when configured
