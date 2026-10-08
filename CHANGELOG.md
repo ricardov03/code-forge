@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.7.4] — 2026-10-08
+
 ### Added
 
 - Review: code moved between two changed files of the same block is named in a ## moved code packet section
