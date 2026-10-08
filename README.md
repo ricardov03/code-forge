@@ -12,6 +12,12 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 Next release:
 
+- **Long documents get reviewed.** The packet budget (`review.budgets.full_in`) is now 32,000
+  tokens, and a Markdown file still too large is reviewed section by section instead of refused;
+  a `split_required` result now says its size and the budget.
+
+In 0.7.1:
+
 - **Short clean reviews count.** A clean pass (no findings, every hunk acknowledged, a summary)
   needs only 40 output tokens on any diff size, so a correct short "no defect" review is no
   longer refused as `too_short`.

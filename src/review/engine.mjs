@@ -19,7 +19,15 @@
  *     request with a non-repo-relative path is refused (`needs_file-refused`, never approval);
  *  6. a session that ends in `timeout` is spawned ONCE more on the same packet and level
  *     (`session-retry.mjs`, B30); a second timeout is `unavailable: timeout`. The summary's
- *     `attempts` says how many ran.
+ *     `attempts` says how many ran;
+ *  7. a diff alone over the packet budget is `split_required` (with `tokens_in` and `budget`) —
+ *     except a Markdown file (B54), which is reviewed SECTION BY SECTION (`sections.mjs`): every
+ *     section packet runs the whole plan above (its own sessions, judge and stub guard, its own
+ *     `review.plan` row with `section`), in file order, stopping at the first one that is not
+ *     reviewed (the file is then `unavailable`). The file is approved only when EVERY section is;
+ *     the findings of all sections are merged with ids `S<section>.<id>`, every session summary
+ *     names its `section`, and `sections` lists them. A section that alone is still over the
+ *     budget keeps the file `split_required` (plus `section`: its heading) — never truncated.
  * Approval (until B12b's triage lands) = the final answer (the judge's in dual/consensus mode, else
  * the single reviewer's) passed the guard, says `passed: true`, and carries no `critical` or
  * `warning` finding.
@@ -32,7 +40,8 @@ import { resolveLevel } from '../config/known-ids.mjs';
 import { blockKind, isDocsKind } from '../decide/escalation.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { tierFor } from '../proof/tiers.mjs';
-import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, readFileDiff } from './packet.mjs';
+import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, readFileDiff } from './packet.mjs';
+import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
 import { assertRowPath } from '../worker/ticket.mjs';
@@ -215,34 +224,99 @@ export async function reviewFile(input, deps) {
   };
 
   const reviewers = plan.sessions.filter((s) => s.role === 'reviewer');
-  const packets = reviewers.map((spec) => assemblePacket({ diff, lens: spec.lens, rulesDigest: input.rulesDigest, factsExcerpt: input.factsExcerpt, cfg }));
-  const split = packets.find((p) => p.status === 'split_required');
-  if (split) return { status: 'split_required', approved: false, ...head, tokens_in: split.tokensIn, budget: split.budget, sessions: [] };
-  const firstPacket = /** @type {any} */ (packets[0]);
-  await note(deps, { event: 'review.plan', depth_unconstrained: plan.depth, depth_chosen: plan.depth, degrade_step: 0, risk, context_mode: firstPacket?.contextMode ?? null, forecast_tokens: packets.reduce((n, p) => n + p.tokensIn, 0) });
-  const done = await Promise.all(reviewers.map((spec, i) => run(spec, /** @type {any} */ (packets[i]))));
-  const sessions = done.map(publicSummary);
-  const failed = done.find((s) => s.status !== 'ok');
-  if (failed) {
-    await note(deps, { event: 'review.unavailable', reason: failed.reason, lens: failed.lens });
-    return { status: 'unavailable', reason: failed.reason, approved: false, ...head, sessions };
-  }
-
-  let final = done[0];
   const judgeSpec = plan.sessions.find((s) => s.role === 'judge');
-  if (judgeSpec) {
-    const bySlot = Object.fromEntries(done.map((s) => [s.slot, s.review]));
-    const packet = assembleJudgePacket({ diff, reports: { A: bySlot.A, B: bySlot.B }, cfg });
-    final = await runOne(judgeSpec, packet.text, packet, { deps, workDir, min, cfg });
-    sessions.push(publicSummary(final));
-    if (final.status !== 'ok') {
-      await note(deps, { event: 'review.unavailable', reason: final.reason, lens: 'judge' });
-      return { status: 'unavailable', reason: final.reason, approved: false, ...head, sessions };
+  /** @param {import('./packet.mjs').FileDiff} part */
+  const packetsFor = (part) => reviewers.map((spec) => assemblePacket({ diff: part, lens: spec.lens, rulesDigest: input.rulesDigest, factsExcerpt: input.factsExcerpt, cfg }));
+
+  /**
+   * The plan on one packet set (the whole file, or one Markdown section): reviewers, then the judge.
+   * @param {import('./packet.mjs').FileDiff} part @param {Array<Record<string, any>>} packets
+   * @param {Record<string, any>} [rowExtra] - added to the `review.plan` row (`section`).
+   * @returns {Promise<{status: 'reviewed' | 'unavailable', reason?: string, approved: boolean, summary?: string, findings?: Array<Record<string, any>>, sessions: Array<Record<string, any>>}>}
+   */
+  const reviewPart = async (part, packets, rowExtra = {}) => {
+    await note(deps, { event: 'review.plan', depth_unconstrained: plan.depth, depth_chosen: plan.depth, degrade_step: 0, risk, context_mode: packets[0]?.contextMode ?? null, forecast_tokens: packets.reduce((n, p) => n + p.tokensIn, 0), ...rowExtra });
+    const done = await Promise.all(reviewers.map((spec, i) => run(spec, /** @type {any} */ (packets[i]))));
+    const sessions = done.map(publicSummary);
+    const failed = done.find((s) => s.status !== 'ok');
+    if (failed) {
+      await note(deps, { event: 'review.unavailable', reason: failed.reason, lens: failed.lens, ...rowExtra });
+      return { status: 'unavailable', reason: failed.reason, approved: false, sessions };
     }
+    let final = done[0];
+    if (judgeSpec) {
+      const bySlot = Object.fromEntries(done.map((s) => [s.slot, s.review]));
+      const packet = assembleJudgePacket({ diff: part, reports: { A: bySlot.A, B: bySlot.B }, cfg });
+      final = await runOne(judgeSpec, packet.text, packet, { deps, workDir, min, cfg });
+      sessions.push(publicSummary(final));
+      if (final.status !== 'ok') {
+        await note(deps, { event: 'review.unavailable', reason: final.reason, lens: 'judge', ...rowExtra });
+        return { status: 'unavailable', reason: final.reason, approved: false, sessions };
+      }
+    }
+    const findings = final.review.findings;
+    const approved = final.review.passed === true && findings.every((/** @type {any} */ f) => f.severity === 'nit');
+    return { status: 'reviewed', approved, summary: final.review.summary, findings, sessions };
+  };
+
+  const packets = packetsFor(diff);
+  const split = /** @type {{status: 'split_required', tokensIn: number, budget: number} | undefined} */ (packets.find((p) => p.status === 'split_required'));
+  if (!split) {
+    const { status, reason, approved, summary, findings, sessions } = await reviewPart(diff, packets);
+    if (status !== 'reviewed') return { status, reason, approved: false, ...head, sessions };
+    return { status, approved, ...head, summary, findings, sessions };
   }
-  const findings = final.review.findings;
-  const approved = final.review.passed === true && findings.every((/** @type {any} */ f) => f.severity === 'nit');
-  return { status: 'reviewed', approved, ...head, summary: final.review.summary, findings, sessions };
+  if (!isMarkdownFile(diff.file)) return { status: 'split_required', approved: false, ...head, tokens_in: split.tokensIn, budget: split.budget, sessions: [] };
+
+  // B54: a Markdown file over the budget is reviewed section by section
+  /** @param {import('./packet.mjs').FileDiff} part @returns {number} the diff-only packet tokens, largest over the lenses. */
+  const measure = (part) => Math.max(...reviewers.map((spec) => diffOnlyTokens({ diff: part, lens: spec.lens })));
+  const packed = packSections({ diff, budget: split.budget, measure });
+  /**
+   * A `split_required` outcome, its size always numeric (measured here when the packet lacks it).
+   * @param {import('./packet.mjs').FileDiff} part @param {{tokensIn?: unknown, budget?: unknown}} over @param {string | null} section
+   */
+  const splitOutcome = (part, over, section) => ({
+    status: 'split_required',
+    approved: false,
+    ...head,
+    tokens_in: Number.isFinite(over.tokensIn) ? over.tokensIn : measure(part),
+    budget: Number.isFinite(over.budget) ? over.budget : split.budget,
+    ...(section ? { section } : {}),
+    sessions: [],
+  });
+  if (packed.status !== 'ok') {
+    // a named section is measured on its own diff, never the whole file's
+    const group = packed.section ? sectionGroups(diff)?.find((g) => g.heading === packed.section) : undefined;
+    return splitOutcome(group ? group.diff : diff, packed, packed.section);
+  }
+  // never approve with no section: no packet ⇒ no session ⇒ split_required at the whole size
+  if (packed.sections.length === 0) return splitOutcome(diff, split, null);
+  // every section packet is assembled BEFORE any session runs. Packing and `assemblePacket` share
+  // one measure, so with the real packer none is ever not `ok`: this is a DEFENSIVE guard (a test
+  // reaches it through a mocked packer) — one that is not `ok` stops the file as split_required,
+  // sized on that section's own diff
+  const sectionPackets = packed.sections.map((section) => packetsFor(section.diff));
+  for (const [i, set] of sectionPackets.entries()) {
+    const over = /** @type {{tokensIn?: unknown, budget?: unknown} | undefined} */ (set.find((p) => p.status !== 'ok'));
+    if (over) return splitOutcome(packed.sections[i].diff, over, packed.sections[i].headings[0] ?? '(before first heading)');
+  }
+  const sections = packed.sections.map((s) => ({ index: s.index, headings: s.headings, hunks: s.diff.hunks.length }));
+  /** @type {Array<Record<string, any>>} */
+  const sessions = [];
+  /** @type {Array<Record<string, any>>} */
+  const findings = [];
+  const summaries = [];
+  let approved = true;
+  for (const [i, section] of packed.sections.entries()) {
+    const part = await reviewPart(section.diff, sectionPackets[i], { section: section.index, sections: packed.sections.length });
+    sessions.push(...part.sessions.map((s) => ({ ...s, section: section.index })));
+    if (part.status !== 'reviewed') return { status: part.status, reason: part.reason, approved: false, ...head, sections, sessions };
+    approved = approved && part.approved;
+    findings.push(...sectionFindings(/** @type {Array<{id: string}>} */ (part.findings), section.index));
+    summaries.push(`S${section.index}: ${part.summary}`);
+  }
+  return { status: 'reviewed', approved, ...head, summary: summaries.join('\n'), findings, sessions, sections };
 }
 
 /**

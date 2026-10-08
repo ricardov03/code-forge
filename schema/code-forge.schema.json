@@ -117,7 +117,7 @@
           "additionalProperties": false,
           "properties": {
             "quick_in": { "type": "integer", "minimum": 1, "default": 6000 },
-            "full_in": { "type": "integer", "minimum": 1, "default": 12000 },
+            "full_in": { "type": "integer", "minimum": 1, "default": 32000, "description": "Packet budget in tokens (bytes / 4) for a full, lens A/B or recheck review session. A diff alone over it is split_required, except a Markdown file, which is reviewed section by section (B54)." },
             "judge_in": { "type": "integer", "minimum": 1, "default": 8000 },
             "out": { "type": "integer", "minimum": 1, "default": 1200 }
           }

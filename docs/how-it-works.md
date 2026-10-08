@@ -149,6 +149,17 @@ Every reviewer packet carries the block's acceptance clauses (from `block open -
 redacted and cut to fit the packet budget; a block whose clauses cannot be read is still reviewed,
 with `(acceptance unavailable)` in their place.
 
+One packet holds at most `review.budgets.full_in` tokens (default 32,000, about 4 bytes a token).
+When the context does not fit, it shrinks first; the diff is never cut. A diff that alone is over
+the budget is `split_required`: the file is not reviewed, and the result says how large the packet
+was (`tokens_in`) and what the budget is (`budget`). A Markdown file (`.md`, `.markdown`) is
+reviewed **section by section** instead: its diff is cut at the headings (a `#` inside a fenced
+code block does not count), consecutive sections share a packet while it fits, and each packet is
+reviewed like a file of its own. The file is approved only when every section is; findings are
+merged with ids such as `S2.F1` and go through the normal fix rounds, whose rechecks are split the
+same way. Only a section that alone is over the budget keeps the file `split_required`, and so
+does a deleted Markdown file or one with no heading (it has one section only).
+
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
 exactly, and the output is long enough (`review.min_tokens_out`, default 120). A clean pass
 (`passed: true`, no findings, a summary) needs only 40 tokens, whatever the diff size. Anything else is `review.unavailable`, never approval.

@@ -204,7 +204,9 @@ function lastJSON(text) {
 
 /**
  * @typedef {{file: string, result: 'approved' | 'unchanged' | 'findings' | 'stopped' | 'unavailable', reason: string | null,
- *   findings: Array<{id: unknown, severity: unknown, lines: string, claim: string, fix: string}>}} FileOutcome
+ *   findings: Array<{id: unknown, severity: unknown, lines: string, claim: string, fix: string}>,
+ *   tokens_in?: number | null, budget?: number | null, section?: string}} FileOutcome - `tokens_in`/`budget`
+ *   (null when unknown; and a Markdown `section`): a `split_required` stop's packet size, only then (B54).
  */
 
 /**
@@ -222,8 +224,11 @@ export function classify(file, waited) {
   if (!r || typeof r !== 'object') return out('unavailable', 'unreadable result');
   if (r.approved === true) return out('approved', null);
   if (r.status === 'no_change') return out('unchanged', null);
-  if (r.status === 'stopped') return out('stopped', String(r.stopped ?? 'stopped'));
-  if (r.status === 'split_required') return out('stopped', 'split_required');
+  // B54: a split_required stop (only) says how large the packet was and what the budget is
+  const fin = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  const size = { tokens_in: fin(r.tokens_in), budget: fin(r.budget), ...(typeof r.section === 'string' ? { section: r.section } : {}) };
+  if (r.status === 'stopped') return { ...out('stopped', String(r.stopped ?? 'stopped')), ...(r.stopped === 'split_required' ? size : {}) };
+  if (r.status === 'split_required') return { ...out('stopped', 'split_required'), ...size };
   if (r.status === 'reviewed' && findings.length > 0) return out('findings', null);
   return out('unavailable', String(r.reason ?? r.status ?? 'not approved'));
 }
@@ -231,6 +236,9 @@ export function classify(file, waited) {
 /** @param {FileOutcome} o @returns {string} */
 function label(o) {
   if (o.result === 'findings') return `${o.findings.length} finding${o.findings.length === 1 ? '' : 's'}`;
+  if (o.result === 'stopped' && o.reason === 'split_required' && Number.isFinite(o.tokens_in) && Number.isFinite(o.budget)) {
+    return `${o.result}: ${o.reason} (~${o.tokens_in} tokens, budget ${o.budget}${o.section ? `; section ${JSON.stringify(o.section)}` : ''})`;
+  }
   if (o.result === 'stopped' || o.result === 'unavailable') return `${o.result}: ${o.reason}`;
   return o.result;
 }

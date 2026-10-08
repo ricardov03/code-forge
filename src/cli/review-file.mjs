@@ -11,7 +11,9 @@
  * A done result that is not approved and carries open findings adds `fix_list` (what the coder
  * fixes before re-running `review-file <path>`, which is then a round-2 recheck of the fix hunks,
  * §4.11); a result the loop stopped adds `stop` with the reason (`review_cap`, …) — the coder
- * stops and reports; only the orchestrator and the human act on it.
+ * stops and reports; only the orchestrator and the human act on it. A `split_required` result
+ * (the packet is over `review.budgets.full_in`) adds `stop: split_required` with `tokens_in` and
+ * `budget` (always; null when unknown) and a Markdown `section` — never for another result (B54); a Markdown file gets there only when one of its sections alone is too large.
  *
  * Everything is a file read/write inside the workspace (a sandboxed coder has no network). The
  * path is given relative to the current directory and stored relative to the REPOSITORY ROOT
@@ -80,6 +82,12 @@ export function fixList(result) {
     }));
   }
   if (typeof result.stopped === 'string') out.stop = result.stopped;
+  else if (result.status === 'split_required') out.stop = 'split_required';
+  // B54: a split_required stop (only) says how large the packet was, the budget, and the section
+  if (out.stop === 'split_required') {
+    const fin = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+    Object.assign(out, { tokens_in: fin(result.tokens_in), budget: fin(result.budget), ...(typeof result.section === 'string' ? { section: result.section } : {}) });
+  }
   return out;
 }
 

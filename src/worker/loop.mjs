@@ -160,6 +160,21 @@ export function loopResult(outcome) {
 }
 
 /**
+ * B54: the packet size of a `split_required` outcome (round 1 `status: split_required`, or a
+ * recheck `stopped: split_required`) — and ONLY of one: `tokens_in` and `budget` always (null when
+ * not a finite number), plus the Markdown `section` that alone is over the budget when one is named. The result
+ * file and the ledger `review.result` row carry the same fields.
+ * @param {Record<string, any>} outcome @returns {Record<string, any>}
+ */
+export function packetSize(outcome) {
+  if (outcome.status !== 'split_required' && outcome.stopped !== 'split_required') return {};
+  return { tokens_in: finiteOrNull(outcome.tokens_in), budget: finiteOrNull(outcome.budget), ...(typeof outcome.section === 'string' ? { section: outcome.section } : {}) };
+}
+
+/** @param {unknown} v @returns {number | null} `v` when a finite number, else null. */
+export const finiteOrNull = (v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+
+/**
  * B52: the verdict a result is recorded with (its signed file and its ledger row), always with
  * `approved` and `open`: `approved: true, open: []` only when the outcome said so AND it lists no
  * critical finding. Otherwise `approved: false` and `open` = ALL its findings (`openFindings`:
@@ -302,6 +317,7 @@ export async function createWorker(opts, deps = {}) {
         engine: outcome.engine,
         ...(typeof outcome.reason === 'string' ? { reason: outcome.reason } : {}),
         ...(Array.isArray(outcome.findings) ? { findings: outcome.findings } : {}),
+        ...packetSize(outcome),
         ...loopResult(outcome),
         sessions: outcome.sessions,
       };
@@ -387,6 +403,8 @@ export async function createWorker(opts, deps = {}) {
         ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
         ...(typeof result.trigger === 'string' ? { trigger: result.trigger } : {}),
         ...(typeof result.stopped === 'string' ? { stopped: result.stopped } : {}),
+        // B54: a split_required result says how far over the budget it was (the result file's fields)
+        ...packetSize(result),
       });
     } catch {
       // the signed result file stands; the gate reads it (§4.6)

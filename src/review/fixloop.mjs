@@ -47,7 +47,17 @@
  * with no context at all, exceed the budget) is deterministic — re-running the round would build
  * the same packet — so it is TERMINAL, never a retry: `stopped`, `next: {action: 'stop', reason:
  * <packet.status>}`, and the gate-relevant `review.cap` row (the gate then refuses the file's open
- * findings until a human waives them or the file is reviewed again).
+ * findings until a human waives them or the file is reviewed again). The stop carries the packet's
+ * `tokens_in` and `budget` (and a Markdown section's heading as `section`) in `next` and in the
+ * `review.cap` row (B54).
+ *
+ * Markdown sections (B54): a Markdown file whose recheck packet is over the budget is rechecked
+ * SECTION BY SECTION (`sections.mjs`, `packRecheck`: packets sized with their open-findings list)
+ * instead: one recheck session per section packet, each listing only the open findings that fall
+ * in it (`sectionOf`: the spanning or nearest section), each through the stub guard (its
+ * own `reviewed_hunks`). A finding closes only when ITS section's session resolves it; new
+ * findings get ids `S<section>.<id>`; any section session unavailable ⇒ `retry` of the whole
+ * round. A section still over the budget alone ⇒ the terminal stop above (`split_required`).
  *
  * A session that fails the stub guard is `unavailable`, and a failed write of a gate-relevant row
  * (`review.late_finding`, `review.round`, `review.cap`) is `ledger_write_failed`: either way the
@@ -64,7 +74,8 @@ import { verifyRow } from '../state/signer.mjs';
 import { decisionProblem, grantCoverProblem } from './gate-check.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { parseDiff } from './context.mjs';
-import { assemblePacket, assertPacketPath, readFileDiff } from './packet.mjs';
+import { assemblePacket, assertPacketPath, diffOnlyTokens, readFileDiff } from './packet.mjs';
+import { isMarkdownFile, packSections, sectionFindings, sectionGroups, sectionOf } from './sections.mjs';
 import { cameFromJudge, resolvedBand, triageFindings } from './triage.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
@@ -78,6 +89,9 @@ import { spawnWithTimeoutRetry } from './session-retry.mjs';
  * @property {string} [level] - the level the next fix is coded at.
  * @property {string | null} [trigger] - the escalation trigger that moved the level, if any.
  * @property {string} [reason] - `review_cap`, `l3_patch_exhausted`, a non-ok packet status (`split_required`), … for `stop`; the stub-guard reason for `retry`.
+ * @property {number} [tokens_in] - a `split_required` stop: the estimated tokens of the diff-only packet (B54).
+ * @property {number} [budget] - a `split_required` stop: the packet budget it exceeded (B54).
+ * @property {string} [section] - a `split_required` stop of a Markdown recheck: the heading of the section that alone is over (B54).
  */
 
 /**
@@ -93,7 +107,7 @@ import { spawnWithTimeoutRetry } from './session-retry.mjs';
  * @property {boolean} l3_rung_used - the block's L3 rung (rule 5 or 6) was used — once per block.
  * @property {'open' | 'complete' | 'stopped'} status
  * @property {NextStep | null} next
- * @property {{context_mode: string, context_lines: number} | null} [last_packet] - the last recheck packet's context.
+ * @property {{context_mode: string, context_lines: number} | null} [last_packet] - the last recheck round's context: one packet's, or over a Markdown recheck's section packets the summed lines and the one mode they share, else `mixed` (B54).
  * @property {'full' | 'recheck' | 'patch_check' | null} [pending_kind] - the round to re-run after a `retry`.
  */
 
@@ -121,6 +135,58 @@ async function note(deps, row) {
   } catch {
     // the loop's verdict stands; the ledger row is best-effort
   }
+}
+
+/**
+ * Token counts over a round's sessions: a missing count (null/undefined) adds nothing, and no
+ * count at all stays null (one session without usage ⇒ null, as before B54).
+ * @param {number | null | undefined} a @param {number | null | undefined} b @returns {number | null}
+ */
+export const sum = (a, b) => (typeof a !== 'number' ? (typeof b === 'number' ? b : null) : typeof b === 'number' ? a + b : a);
+
+/**
+ * The round's `last_packet` over its recheck packets (B54): the context lines add up; the context
+ * mode is the packets' one mode when they all agree, else `mixed`.
+ * @param {{context_mode: string, context_lines: number} | null} info
+ * @param {{contextMode: string, contextLines: number}} packet
+ * @returns {{context_mode: string, context_lines: number}}
+ */
+export function mergePacketInfo(info, packet) {
+  if (info === null) return { context_mode: packet.contextMode, context_lines: packet.contextLines };
+  return { context_mode: info.context_mode === packet.contextMode ? info.context_mode : 'mixed', context_lines: info.context_lines + packet.contextLines };
+}
+
+/**
+ * Pack a Markdown recheck into section packets (B54), each sized with {@link recheckTokens} over
+ * its own diff and its own open findings. Each open finding belongs to ONE heading group — the one
+ * `sectionOf` picks over the groups (spanning, else nearest) — and is sized and listed in the
+ * packet that holds that group, so sizing and listing never disagree. No group at all (no hunk,
+ * or hunks that do not parse one to one) ⇒ `split_required` at the whole size, never sectioned;
+ * a finding no packet holds is listed in the LAST packet — every open finding is listed once.
+ * @param {import('./packet.mjs').FileDiff} diff @param {Finding[]} open @param {number} budget
+ * @returns {{status: 'ok', sections: Array<import('./sections.mjs').Section & {open: Finding[]}>} | {status: 'split_required', tokensIn: number, budget: number, section: string | null}}
+ */
+export function packRecheck(diff, open, budget) {
+  const groups = sectionGroups(diff);
+  if (groups === null || groups.length === 0) return { status: 'split_required', tokensIn: recheckTokens(diff, open), budget, section: null };
+  /** @type {Map<Finding, number>} */
+  const keyOf = new Map();
+  for (const f of open) {
+    const at = sectionOf(groups, f);
+    if (at >= 0) keyOf.set(f, groups[at].key);
+  }
+  /** @param {ReadonlyArray<number>} keys @returns {Finding[]} the open findings of those groups, in order. */
+  const openIn = (keys) => open.filter((f) => keyOf.has(f) && keys.includes(/** @type {number} */ (keyOf.get(f))));
+  const packed = packSections({ diff, budget, measure: (part, set) => recheckTokens(part, openIn(set.map((g) => g.key))) });
+  if (packed.status !== 'ok') return packed;
+  const sections = packed.sections.map((sec) => ({ ...sec, open: openIn(sec.keys) }));
+  if (sections.length === 0) return { status: 'split_required', tokensIn: recheckTokens(diff, open), budget, section: null };
+  // defensive: a finding no packet holds goes to the last packet (it is sized there by the check
+  // every packet passes before any session) — never dropped, never closed unseen
+  const listed = new Set(sections.flatMap((sec) => sec.open));
+  const last = /** @type {(typeof sections)[number]} */ (sections.at(-1));
+  for (const f of open) if (!listed.has(f)) last.open.push(f);
+  return { status: 'ok', sections };
 }
 
 /** @param {unknown} v @param {number} d @returns {number} `v` when a non-negative integer, else `d`. */
@@ -247,6 +313,25 @@ export async function fixHunkDiff({ file, previous, current, workDir }) {
   }
 }
 
+/** The heading of the open-findings list a recheck packet ends with. */
+const OPEN_FINDINGS_HEAD = '## open findings\n';
+
+/** @param {Finding} f @returns {string} the finding's line in a recheck packet's open-findings list. */
+export const openFindingLine = (f) => `- ${f.id} (${f.severity}, lines ${f.line_start}-${f.line_end}): ${f.claim ?? ''}`;
+
+/** @param {ReadonlyArray<Finding>} open @returns {string} the open-findings list a recheck packet ends with. */
+const openFindingsText = (open) => `${OPEN_FINDINGS_HEAD}${open.length > 0 ? open.map(openFindingLine).join('\n') : '(none)'}\n`;
+
+/**
+ * The size a recheck packet is held to (B54): its diff-only `recheck` packet (the measure behind
+ * `split_required`) plus the open-findings list `buildRecheckPacket` appends. Section packing and
+ * the check before any session use this ONE function.
+ * @param {import('./packet.mjs').FileDiff} diff @param {ReadonlyArray<Finding>} open @returns {number}
+ */
+export function recheckTokens(diff, open) {
+  return diffOnlyTokens({ diff, lens: 'recheck' }) + Math.ceil(Buffer.byteLength(openFindingsText(open)) / 4);
+}
+
 /**
  * The recheck packet: the `recheck` lens on the fix hunks (hunk form, never the whole file), then
  * the open findings by id. Over budget ⇒ `minimal` (see the module doc).
@@ -255,8 +340,7 @@ export async function fixHunkDiff({ file, previous, current, workDir }) {
 export function buildRecheckPacket({ diff, open, cfg, contextMode = 'recheck', rulesDigest, factsExcerpt }) {
   const packet = assemblePacket({ diff, lens: 'recheck', cfg, contextMode, rulesDigest, factsExcerpt });
   if (packet.status !== 'ok') return packet;
-  const listed = open.map((f) => `- ${f.id} (${f.severity}, lines ${f.line_start}-${f.line_end}): ${f.claim ?? ''}`);
-  const text = `${packet.text}## open findings\n${listed.length > 0 ? listed.join('\n') : '(none)'}\n`;
+  const text = `${packet.text}${openFindingsText(open)}`;
   return { ...packet, text, tokensIn: packet.tokensIn + Math.ceil(Buffer.byteLength(text.slice(packet.text.length)) / 4) };
 }
 
@@ -373,14 +457,20 @@ function retry(state, kind, reason) {
  * not written, the open set stays as it was, and the gate-relevant `review.cap` row goes through
  * the must-write path — a failed write is a `retry`, never a silent stop.
  * @param {FileState} state @param {LoopDeps} deps
- * @param {'full' | 'recheck' | 'patch_check'} kind @param {string} file @param {string} reason
+ * @param {'full' | 'recheck' | 'patch_check'} kind @param {string} file
+ * @param {{status: string, tokensIn?: number, budget?: number, section?: string | null}} packet - the non-ok packet (a Markdown section names its heading).
  * @returns {Promise<FileState>}
  */
-async function stopBeforeRound(state, deps, kind, file, reason) {
-  const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id) };
+async function stopBeforeRound(state, deps, kind, file, packet) {
+  const reason = packet.status;
+  const size =
+    typeof packet.tokensIn === 'number' && typeof packet.budget === 'number'
+      ? { tokens_in: packet.tokensIn, budget: packet.budget, ...(typeof packet.section === 'string' ? { section: packet.section } : {}) }
+      : {};
+  const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id), ...size };
   if (!(await mustNote(deps, row))) return retry(state, kind, 'ledger_write_failed');
   state.status = 'stopped';
-  state.next = { action: 'stop', reason };
+  state.next = { action: 'stop', reason, ...size };
   state.pending_kind = null;
   return state;
 }
@@ -434,34 +524,68 @@ export async function runRound(state, deps, opts = {}) {
       }
       draft.open = [];
       if (pending.length > 0) {
-        const packet = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode: s.scope === 'file' ? 'auto' : 'recheck', rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt });
-        // deterministic (the same hunks build the same packet): terminal, never a retry
-        if (packet.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, packet.status);
-        packetInfo = { context_mode: packet.contextMode, context_lines: packet.contextLines };
-        const session = await recheckSession(packet, deps);
-        tokensIn = session.tokens_in;
-        tokensOut = session.tokens_out;
-        if (!session.verdict.ok) {
-          await note(deps, { event: 'review.unavailable', file: current.rel, lens: 'recheck', reason: session.verdict.reason });
-          return retry(state, kind, session.verdict.reason ?? 'unavailable');
+        const contextMode = s.scope === 'file' ? 'auto' : 'recheck';
+        const whole = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt });
+        /** @type {Array<{index: number | null, heading: string | null, diff: import('./packet.mjs').FileDiff, open: Finding[]}>} */
+        let parts = [{ index: null, heading: null, diff, open: pending }];
+        if (whole.status !== 'ok') {
+          // deterministic (the same hunks build the same packet): terminal, never a retry — except
+          // a Markdown file whose packet is `split_required`, rechecked section by section (B54);
+          // any other status stops as it always did
+          const packed = whole.status === 'split_required' && isMarkdownFile(current.rel) ? packRecheck(diff, pending, whole.budget) : null;
+          if (!packed || packed.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, packed ?? whole);
+          parts = packed.sections.map((sec) => ({ index: sec.index, heading: sec.headings[0], diff: sec.diff, open: sec.open }));
         }
-        const review = /** @type {Record<string, any>} */ (session.verdict.review);
-        const resolvedIds = new Set((review.resolved ?? []).filter((/** @type {any} */ r) => r?.resolved === true).map((/** @type {any} */ r) => r.id));
-        const stillOpen = pending.filter((f) => !resolvedIds.has(f.id));
-        closed += pending.length - stillOpen.length;
+        // EVERY packet is built and held to the budget BEFORE any session runs: a section over it
+        // stops the round as split_required (with its heading) before anything is spent
+        /** @type {Array<Record<string, any>>} */
+        const built = [];
+        for (const part of parts) {
+          if (part.index === null) {
+            built.push(whole);
+            continue;
+          }
+          const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt });
+          // a packet that fails to build stops with ITS status (and size, when it has one)
+          if (packet.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, { ...packet, section: part.heading });
+          const size = recheckTokens(part.diff, part.open);
+          if (size > whole.budget) return stopBeforeRound(state, deps, kind, current.rel, { status: 'split_required', tokensIn: size, budget: whole.budget, section: part.heading });
+          built.push(packet);
+        }
+        /** @type {Set<Finding>} the pending findings a session that LISTED them resolved */
+        const resolved = new Set();
         /** @type {Finding[]} */
         const inside = [];
         /** @type {Finding[]} */
         const blocking = [];
-        for (const f of /** @type {Finding[]} */ (review.findings ?? [])) {
-          if (insideHunks(f, diff.hunks)) {
-            inside.push(f);
-            continue;
+        for (const [i, part] of parts.entries()) {
+          const packet = /** @type {any} */ (built[i]);
+          packetInfo = mergePacketInfo(packetInfo, packet);
+          const session = await recheckSession(packet, deps);
+          tokensIn = sum(tokensIn, session.tokens_in);
+          tokensOut = sum(tokensOut, session.tokens_out);
+          if (!session.verdict.ok) {
+            await note(deps, { event: 'review.unavailable', file: current.rel, lens: 'recheck', reason: session.verdict.reason, ...(part.index === null ? {} : { section: part.index }) });
+            return retry(state, kind, session.verdict.reason ?? 'unavailable');
           }
-          draft.late.push(f);
-          lateRows.push({ event: 'review.late_finding', file: current.rel, round: state.round + 1, finding: f.id, severity: f.severity, line_start: f.line_start, line_end: f.line_end, mode: s.late });
-          if (s.late === 'block' && f.severity !== 'nit') blocking.push(f);
+          const review = /** @type {Record<string, any>} */ (session.verdict.review);
+          const resolvedIds = new Set((review.resolved ?? []).filter((/** @type {any} */ r) => r?.resolved === true).map((/** @type {any} */ r) => r.id));
+          // only the findings listed in THIS packet can be resolved by its session
+          for (const f of part.open) if (resolvedIds.has(f.id)) resolved.add(f);
+          const found = /** @type {Finding[]} */ (review.findings ?? []);
+          for (const f of part.index === null ? found : sectionFindings(found, part.index)) {
+            if (insideHunks(f, diff.hunks)) {
+              inside.push(f);
+              continue;
+            }
+            draft.late.push(f);
+            lateRows.push({ event: 'review.late_finding', file: current.rel, round: state.round + 1, finding: f.id, severity: f.severity, line_start: f.line_start, line_end: f.line_end, mode: s.late });
+            if (s.late === 'block' && f.severity !== 'nit') blocking.push(f);
+          }
         }
+        // every pending finding stays open unless the session that listed it resolved it
+        const stillOpen = pending.filter((f) => !resolved.has(f));
+        closed += pending.length - stillOpen.length;
         const triaged = await triageFindings({ file: current.rel, findings: inside, fromJudge: false, diffText: diff.diffText, cfg: deps.cfg, jev: deps.jev, rule: deps.rule, writeRow: deps.writeRow });
         newInHunks = triaged.fix_now.length;
         draft.open = [...stillOpen, ...triaged.fix_now, ...blocking];

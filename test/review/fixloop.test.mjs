@@ -367,8 +367,9 @@ test('fix 2: a fix hunk too large for the budget (non-ok recheck packet) is term
     },
   };
   const state = await converge(newFileState({ file: FILE, level: 'L2' }), deps);
-  assert.deepEqual([state.status, state.next, state.pending_kind, state.round, fixes, packets.length], ['stopped', { action: 'stop', reason: 'split_required' }, null, 1, 1, 0]);
-  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.file, r.round, r.reason, r.open]), [[FILE, 1, 'split_required', ['F1']]]);
+  // B54: the stop (and its review.cap row) says how large the packet was and what the budget is
+  assert.deepEqual([state.status, state.next, state.pending_kind, state.round, fixes, packets.length], ['stopped', { action: 'stop', reason: 'split_required', tokens_in: 415, budget: 40 }, null, 1, 1, 0]);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.file, r.round, r.reason, r.open, r.tokens_in, r.budget]), [[FILE, 1, 'split_required', ['F1'], 415, 40]]);
   assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.kind]), [[1, 'full']]);
   await converge(state, deps);
   assert.deepEqual([state.status, fixes, rows.filter((r) => r.event === 'review.cap').length], ['stopped', 1, 1]);

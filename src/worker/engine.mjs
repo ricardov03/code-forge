@@ -15,7 +15,8 @@
  *    last round reviewed and the current content), with the open findings by id;
  *  - `next: patch` (the L3 rung at the cap) ⇒ the `patch_check` round; a `retry` re-runs its round;
  *  - `stopped` (`review_cap`, `l3_patch_exhausted`, `split_required`) ⇒ no session: the result
- *    repeats the stop — only the human moves on (§4.11 rule 5).
+ *    repeats the stop — only the human moves on (§4.11 rule 5). A `split_required` result (round 1
+ *    or a recheck stop) carries `tokens_in` and `budget` (B54).
  * The round's outcome: `approved: true` ONLY when the loop is `complete` AND its signed
  * `review.approved` row (keyed `run, block, file, content_hash` = the ticket's hash) was written;
  * else `findings` = the open fix list, `next` = what the orchestrator does (`fix` at `level`,
@@ -83,6 +84,10 @@ import { assertTicketId } from './ticket.mjs';
  * @property {string | null} [trigger] - `review_stall`, `review_rounds`, `review_cap`, or null.
  * @property {string} [stopped] - the stop reason (`review_cap`, `l3_patch_exhausted`, …).
  * @property {number} [late] - late findings recorded so far for the file.
+ * @property {number} [tokens_in] - `split_required` (or `stopped: split_required`): the estimated
+ *   tokens of the diff-only packet that was over the budget (B54).
+ * @property {number} [budget] - with `tokens_in`: the packet budget it exceeded (B54).
+ * @property {string} [section] - a Markdown file's section that alone is over the budget (B54).
  */
 
 /**
@@ -302,7 +307,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
     reopenForExtraRound(state, extraRounds, ctx.cfg);
 
     if (state.status === 'stopped') {
-      return { outcome: /** @type {ReviewOutcome} */ ({ ...loopFields(state, null), status: 'stopped', stopped: state.next?.reason ?? 'stopped', approved: false, engine: 'adaptive', sessions: [], findings: state.open }) };
+      return { outcome: /** @type {ReviewOutcome} */ ({ ...loopFields(state, null), status: 'stopped', stopped: state.next?.reason ?? 'stopped', ...stopSize(state), approved: false, engine: 'adaptive', sessions: [], findings: state.open }) };
     }
 
     /** @type {'full' | 'recheck' | 'patch_check'} */
@@ -404,7 +409,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
     if (!approvalWritten) return { ...head, status: 'unavailable', reason: 'approval-not-written', approved: false };
     return { ...head, status: 'reviewed', approved: true, findings: [] };
   }
-  if (status === 'stopped') return { ...head, status: 'stopped', stopped: next?.reason ?? 'stopped', approved: false, findings: state.open };
+  if (status === 'stopped') return { ...head, status: 'stopped', stopped: next?.reason ?? 'stopped', ...stopSize(state), approved: false, findings: state.open };
   return { ...head, status: 'reviewed', approved: false, reason: 'findings-open', findings: state.open };
 }
 
@@ -455,6 +460,18 @@ function failureReason(err) {
  */
 function loopFields(state, kind) {
   return { round: state.round, ...(kind ? { kind } : {}), level: state.level, next: state.next, trigger: state.next?.trigger ?? null, late: state.late.length };
+}
+
+/**
+ * B54: a `split_required` stop's packet size (`tokens_in`, `budget` — null when unknown — and a
+ * Markdown `section`), from the state's `next`; nothing for any other stop.
+ * @param {import('../review/fixloop.mjs').FileState} state @returns {{tokens_in?: number | null, budget?: number | null, section?: string}}
+ */
+function stopSize(state) {
+  const next = state.next;
+  if (next?.reason !== 'split_required') return {};
+  const fin = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);
+  return { tokens_in: fin(next.tokens_in), budget: fin(next.budget), ...(typeof next.section === 'string' ? { section: next.section } : {}) };
 }
 
 /**

@@ -96,7 +96,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.judge_sees_diff` | boolean |  | `false` |  |
 | `review.budgets` | object |  | — |  |
 | `review.budgets.quick_in` | integer |  | `6000` | min 1 |
-| `review.budgets.full_in` | integer |  | `12000` | min 1 |
+| `review.budgets.full_in` | integer |  | `32000` | min 1; Packet budget in tokens (bytes / 4) for a full, lens A/B or recheck review session. A diff alone over it is split_required, except a Markdown file, which is reviewed section by section (B54). |
 | `review.budgets.judge_in` | integer |  | `8000` | min 1 |
 | `review.budgets.out` | integer |  | `1200` | min 1 |
 | `review.context` | object |  | — |  |

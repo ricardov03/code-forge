@@ -17,9 +17,10 @@
  * (`git diff --no-index -- /dev/null <file>`). A tracked file with no change yields no packet.
  *
  * Budget (§4.3): `review.budgets.full_in` (`quick_in` for the quick lens), in tokens estimated as
- * bytes / 4. A diff that alone exceeds it ⇒ `split_required`. Otherwise over budget ⇒ the context
- * shrinks to ± `min_context_lines` (`minimal`) FIRST, then the digest is trimmed from the end;
- * the diff is never cut.
+ * bytes / 4. A diff that alone exceeds it ⇒ `split_required` (a Markdown file is then reviewed
+ * section by section — `sections.mjs`, B54). Otherwise over budget ⇒ the context shrinks to
+ * ± `min_context_lines` (`minimal`) FIRST, then the digest is trimmed from the end; the diff is
+ * never cut.
  *
  * Path rule (V4): `file` is repo-root-relative; `./`, `../`, absolute values, symlinks and paths
  * under `.git/` or `.code-forge/` are refused with `bad-path` before git runs. So is anything git
@@ -40,7 +41,8 @@ export const LENSES = Object.freeze(['quick', 'full', 'recheck', 'A', 'B', 'judg
 /** The rules digest never exceeds this many lines (§4.3). */
 export const DIGEST_MAX_LINES = 60;
 
-export const DEFAULT_BUDGETS = Object.freeze({ quick_in: 6000, full_in: 12000, judge_in: 8000 });
+/** `full_in` was 12 000 until B54: a 1,590-line design brief (~25k tokens) was refused unreviewed. */
+export const DEFAULT_BUDGETS = Object.freeze({ quick_in: 6000, full_in: 32000, judge_in: 8000 });
 
 const LENS_DIR = path.join(path.dirname(fileURLToPath(import.meta.url)), 'lenses');
 const GIT_TIMEOUT_MS = 30000;
@@ -191,9 +193,9 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   const lensText = loadLens(lens);
   const limit = budget ?? budgetFor(cfg, lens === 'quick' ? 'quick_in' : 'full_in');
   const hunkHeaders = diff.hunks.map((h) => h.header);
-  const diffSection = [`file: ${diff.file}`, 'hunks:', ...hunkHeaders.map((h) => `- ${h}`), '', diff.diffText.trimEnd()].join('\n');
-  const bare = render(lensText, [], '', '', diffSection);
-  if (estimateTokens(bare) > limit) return { status: 'split_required', tokensIn: estimateTokens(bare), budget: limit };
+  const diffSection = diffSectionOf(diff);
+  const bare = bareTokens(lensText, diffSection);
+  if (bare > limit) return { status: 'split_required', tokensIn: bare, budget: limit };
 
   let digest = splitLines(rulesDigest).slice(0, DIGEST_MAX_LINES);
   let ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: contextMode });
@@ -208,6 +210,29 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   }
   const tokensIn = estimateTokens(text);
   return { status: 'ok', text, hunkHeaders, contextMode: ctx.mode, contextLines: ctx.lineCount, digestLines: digest.length, tokensIn, budget: limit, overBudget: tokensIn > limit };
+}
+
+/**
+ * The tokens of the diff-only packet (lens + diff, no digest, facts or context): what
+ * `assemblePacket` holds against the budget before it says `split_required`.
+ * @param {{diff: FileDiff, lens: string}} opts @returns {number}
+ */
+export function diffOnlyTokens({ diff, lens }) {
+  return bareTokens(loadLens(lens), diffSectionOf(diff));
+}
+
+/**
+ * The ONE measure behind `split_required` (`assemblePacket`) and section packing (`diffOnlyTokens`,
+ * B54), so the two can never disagree.
+ * @param {string} lensText @param {string} diffSection @returns {number}
+ */
+function bareTokens(lensText, diffSection) {
+  return estimateTokens(render(lensText, [], '', '', diffSection));
+}
+
+/** @param {FileDiff} diff @returns {string} the `## diff` section body. */
+function diffSectionOf(diff) {
+  return [`file: ${diff.file}`, 'hunks:', ...diff.hunks.map((h) => `- ${h.header}`), '', diff.diffText.trimEnd()].join('\n');
 }
 
 /**

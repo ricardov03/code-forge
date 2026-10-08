@@ -6,6 +6,18 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- review.budgets.full_in defaults to 32,000 tokens (was 12,000), and a Markdown file whose diff alone is still over it
+  is reviewed section by section (cut at its headings, outside fenced code; approved only when every section is;
+  findings as S<section>.<id>; rechecks split the same way) instead of split_required. Only a section that alone is over
+  the budget keeps the file split_required (issue #2).
+
+### Fixed
+
+- A split_required result lost its size: the signed result, the ledger review.result row, review-file --wait (now stop:
+  split_required) and code-forge review output now carry tokens_in and budget (issue #2).
+
 ## [0.7.1] — 2026-10-07
 
 ### Fixed

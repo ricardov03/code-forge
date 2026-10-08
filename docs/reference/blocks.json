@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 56,
+  "block_count": 57,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -762,6 +762,22 @@
         "B52"
       ],
       "note": "root-added 2026-10-07; GitHub issue #6; also amends src/review/engine.mjs (smallDiff removed), schema/code-forge.schema.json, docs/reference/config.md, docs/how-it-works.md, skill/references/review.md"
+    },
+    "B54": {
+      "title": "Long documents get reviewed (issue #2): review.budgets.full_in defaults to 32000; a Markdown file whose diff is still over the budget is reviewed section by section (hunks cut at headings outside fenced code and front matter, sections packed within the budget, every section packet built and checked before any session, approved only when every section is, findings as S<n>.<id>, rechecks sectioned the same way); a split_required result carries tokens_in, budget and section",
+      "wave": 12,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/review/sections.mjs",
+        "test/review/sections.test.mjs",
+        "test/review/sections-guard.test.mjs",
+        "test/worker/split-size.test.mjs"
+      ],
+      "depends_on": [
+        "B53"
+      ],
+      "note": "root-added 2026-10-08; GitHub issue #2 note of 2026-10-02 (25k-token brief never reviewed); also amends src/review/{packet,engine,fixloop}.mjs, src/worker/{engine,loop}.mjs, src/cli/{review,review-file}.mjs, schema/code-forge.schema.json, docs/reference/config.md, docs/how-it-works.md, skill/references/review.md"
     }
   }
 }
