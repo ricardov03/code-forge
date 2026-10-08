@@ -59,6 +59,10 @@
  * findings get ids `S<section>.<id>`; any section session unavailable ⇒ `retry` of the whole
  * round. A section still over the budget alone ⇒ the terminal stop above (`split_required`).
  *
+ * Schema misses (B55): a recheck (or patch_check) session whose answer fails the schema at its
+ * packet's second miss is tried once on `review.second_levels.L2` when configured
+ * (`schema-fallback.mjs`); only when that fails too is the round `unavailable` as below.
+ *
  * A session that fails the stub guard is `unavailable`, and a failed write of a gate-relevant row
  * (`review.late_finding`, `review.round`, `review.cap`) is `ledger_write_failed`: either way the
  * round is not counted, nothing closes, and `next.action: 'retry'` with `pending_kind` set —
@@ -79,6 +83,7 @@ import { isMarkdownFile, packSections, sectionFindings, sectionGroups, sectionOf
 import { cameFromJudge, resolvedBand, triageFindings } from './triage.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
+import { afterSchemaMiss, logSecondLevelMiss } from './schema-fallback.mjs';
 
 /** @typedef {import('./triage.mjs').Finding} Finding */
 /** @typedef {import('./context.mjs').Hunk} Hunk */
@@ -126,6 +131,7 @@ import { spawnWithTimeoutRetry } from './session-retry.mjs';
  * @property {string | null} [base] - the block base (only for `recheck_scope: file`).
  * @property {string} [rulesDigest] @property {string} [factsExcerpt]
  * @property {number} [extraRounds] - B47: rounds past `review.max_rounds_per_file` granted by autopilot (`extraRoundsFor`).
+ * @property {import('./schema-fallback.mjs').SchemaHistory} [schemaHistory] - B55: the packet's signed schema-miss history; absent ⇒ no second-level try.
  */
 
 /** @param {LoopDeps} deps @param {Record<string, any>} row */
@@ -353,7 +359,8 @@ export function insideHunks(f, hunks) {
 }
 
 /**
- * One recheck session through the stub guard.
+ * One recheck session through the stub guard — and, on a `schema` miss, the B55 second-level try
+ * on the same packet (`schema-fallback.mjs`; rechecks and the patch_check alike).
  * @param {{text: string, hunkHeaders: string[], tokensIn: number, contextMode: string}} packet
  * @param {LoopDeps} deps
  */
@@ -361,26 +368,62 @@ async function recheckSession(packet, deps) {
   mkdirSync(deps.workDir, { recursive: true, mode: 0o700 });
   const promptPath = path.join(deps.workDir, `recheck-${randomBytes(6).toString('hex')}.md`);
   writeFileSync(promptPath, packet.text, { mode: 0o600 });
+  const min = minTokensOut(deps.cfg);
+  const session = { lens: 'recheck', role: 'reviewer', level: 'L2' };
+  /** @param {Record<string, any> | undefined} cfg */
+  const attempt = async (cfg) =>
+    deps.spawn
+      ? // a `timeout` is spawned once more on the same packet and level (B30)
+        spawnWithTimeoutRetry(
+          deps.spawn,
+          { level: 'L2', role: 'reviewer', promptPath, schema: FINDING_SCHEMA, rowExtra: { lens: 'recheck', context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn }, ...(cfg ? { cfg } : {}) },
+          (row) => note(deps, row),
+        )
+      : { res: null, attempts: 0 };
   /** @type {Record<string, any> | null} */
   let res = null;
+  /** @type {import('./validate-review.mjs').Verdict} */
+  let verdict = { ok: false, reason: 'exit', detail: 'no session result' };
+  /** @type {number | null} the round's tokens: the first session's, plus a second-level try's */
+  let tokensIn = null;
+  /** @type {number | null} */
+  let tokensOut = null;
+  // the packet file is removed on every path, and only after the second-level try (which reads it)
   try {
-    // a `timeout` is spawned once more on the same packet and level (B30)
-    res = deps.spawn
-      ? (
-          await spawnWithTimeoutRetry(
-            deps.spawn,
-            { level: 'L2', role: 'reviewer', promptPath, schema: FINDING_SCHEMA, rowExtra: { lens: 'recheck', context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn } },
-            (row) => note(deps, row),
-          )
-        ).res
-      : null;
-  } catch {
-    res = null; // the helper never throws; if it ever did, it is still an `exit` failure
+    try {
+      res = (await attempt(undefined)).res;
+    } catch {
+      res = null; // the helper never throws; if it ever did, it is still an `exit` failure
+    }
+    tokensIn = res?.usage?.tokens_in ?? null;
+    tokensOut = res?.usage?.tokens_out ?? null;
+    verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+    if (!verdict.ok && verdict.reason === 'schema') {
+      try {
+        // no ledger writer ⇒ nothing logged, nothing tried; every row goes through the same writer
+        // (each helper handles its own failed write)
+        const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<LoopDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
+        const second = await afterSchemaMiss({ res, session, packetText: packet.text, cfg: deps.cfg ?? {}, allowed: true /* rechecks are never consensus; the budget gate is inside the spawn */, history: deps.schemaHistory, writeRow: write, spawnAt: attempt });
+        if (second) {
+          // compute everything first, then assign together, so a throw never leaves a mixed state
+          const secondVerdict = validateReview(second.res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+          const sumIn = sum(tokensIn, second.res?.usage?.tokens_in);
+          const sumOut = sum(tokensOut, second.res?.usage?.tokens_out);
+          res = second.res;
+          verdict = secondVerdict;
+          tokensIn = sumIn;
+          tokensOut = sumOut;
+          if (!verdict.ok && verdict.reason === 'schema') await logSecondLevelMiss({ res, session, packetText: packet.text, writeRow: write });
+        }
+      } catch {
+        // defensive only: the helpers never throw. If they ever did, the first session's result
+        // and its `schema` verdict stand (never turned into `exit`, never approval)
+      }
+    }
   } finally {
     rmSync(promptPath, { force: true });
   }
-  const verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: minTokensOut(deps.cfg) });
-  return { verdict, tokens_in: res?.usage?.tokens_in ?? null, tokens_out: res?.usage?.tokens_out ?? null };
+  return { verdict, tokens_in: tokensIn, tokens_out: tokensOut };
 }
 
 /**

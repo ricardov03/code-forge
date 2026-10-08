@@ -12,6 +12,14 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 Next release:
 
+- **A model that keeps failing the answer format gets a stand-in.** When a reviewer's answer
+  fails the schema twice on the same packet and you set `review.second_levels` for that level, the
+  worker retries that packet once with the second model, and the ledger records it. Each failed
+  answer's shape (its keys, types and schema errors, never its text) is logged, so you can see
+  what went wrong.
+
+In 0.7.2:
+
 - **Long documents get reviewed.** The packet budget (`review.budgets.full_in`) is now 32,000
   tokens, and a Markdown file still too large is reviewed section by section instead of refused;
   a `split_required` result now says its size and the budget.

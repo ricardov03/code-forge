@@ -39,7 +39,7 @@ export const LOG_FILE = 'autopilot-log.md';
 export const NONE_YET = 'none yet';
 
 /** The ledger events (besides every `autopilot.*`) that belong to the log and the timeline. */
-const EXTRA_EVENTS = Object.freeze(['block.close', 'review.session_timeout', 'worker.down', 'worker.replaced', 'ledger.tamper', 'budget.refused', 'gate.red', 'gate.done']);
+const EXTRA_EVENTS = Object.freeze(['block.close', 'review.session_timeout', 'review.schema_fallback', 'worker.down', 'worker.replaced', 'ledger.tamper', 'budget.refused', 'gate.red', 'gate.done']);
 
 /** @typedef {Record<string, any>} Row */
 /** @typedef {{home?: string | null, cwd?: string | null}} ScrubCtx */
@@ -146,6 +146,8 @@ function describe(row) {
       return { event: 'Block closed', detail: `status ${row.status ?? 'unknown'}${short(first(row.commit, row.sha, row.commit_sha)) ? ` · commit ${short(first(row.commit, row.sha, row.commit_sha))}` : ''}`, link: first(row.pr_url, row.pr) };
     case 'review.session_timeout':
       return { event: 'Review session timed out', detail: `${row.lens ?? row.role ?? 'session'} · attempt ${u(row.attempt)} · ${row.retried === true ? 'retried' : 'gave up'}`, link: null };
+    case 'review.schema_fallback':
+      return { event: 'Review answer off-schema twice', detail: `${row.lens ?? row.role ?? 'session'} · ${u(row.from_model, 'unknown model')} → ${u(row.to_model, 'unknown model')} · ${typeof row.refused === 'string' ? `refused (${u(row.refused)})` : 'retried once'}`, link: null };
     case 'worker.down':
       return { event: 'Worker down', detail: 'the pinned worker is not running', link: null };
     case 'worker.replaced':
@@ -180,6 +182,31 @@ export function buildFullLog({ runId, rows, scrubCtx }) {
 
 /** @param {Row} row @returns {string} the subject line of an event, e.g. ` · b1 · src/a.mjs`. */
 const where = (row) => `${str(row.block) ? ` · ${u(row.block)}` : ''}${str(row.file) ? ` · ${u(row.file)}` : ''}`;
+
+/**
+ * B55: what the owner does about a refused second-level try, by refusal. `schema-fallback.mjs`
+ * writes `closed-book` (every model left is Codex for a closed-book role) and `same-model`
+ * (nothing but the failed model is configured). No writer puts `budget` in this row today — the
+ * budget gate refuses inside the spawn and writes its own `budget.refused` row — so `budget` is
+ * shown only when a row carries it; any other string gets the generic fix.
+ */
+const SCHEMA_FALLBACK_FIX = Object.freeze({
+  'closed-book': 'Set a second level that can run closed-book (not Codex), or review the file by hand.',
+  'same-model': 'Set review.second_levels to a different model than the one that failed, or review the file by hand.',
+  budget: 'Raise the budget (only you can) or review the file by hand.',
+});
+
+/**
+ * The incident of a `review.schema_fallback` row (B55): retried once, or refused and why.
+ * @param {Row} r @param {string | null} time
+ * @returns {{time: string | null, what: string, effect: string, fix: string}}
+ */
+function schemaFallbackIncident(r, time) {
+  const what = `A ${r.lens ?? r.role ?? 'review'} answer failed the schema twice on the same packet (${u(r.from_model, 'unknown model')})`;
+  if (typeof r.refused !== 'string') return { time, what, effect: `It was retried once on the second level (${u(r.to_model, 'unknown model')}).`, fix: "Check the file's next review result." };
+  const fix = Object.hasOwn(SCHEMA_FALLBACK_FIX, r.refused) ? SCHEMA_FALLBACK_FIX[/** @type {keyof typeof SCHEMA_FALLBACK_FIX} */ (r.refused)] : 'Review the file by hand.';
+  return { time, what, effect: `The second-level try was refused (${u(r.refused)}); the review stays unavailable.`, fix };
+}
 
 /**
  * @param {Row[]} blockRows rows of one block @param {Row | undefined} entry its run-record entry
@@ -285,6 +312,7 @@ export function buildBinnacle({ runId, rows, record, now, scrubCtx = scrubCtxOf(
   for (const { row, time } of mine) {
     const r = row;
     if (r.event === 'review.session_timeout') incidents.push({ time, what: `A ${r.lens ?? r.role ?? 'review'} session timed out (attempt ${u(r.attempt)})`, effect: r.retried === true ? 'It was retried.' : 'No retry left; the review was marked unavailable.', fix: r.retried === true ? 'None needed unless it repeats.' : 'Run the review again.' });
+    else if (r.event === 'review.schema_fallback') incidents.push(schemaFallbackIncident(r, time));
     else if (r.event === 'worker.down' || r.event === 'worker.replaced') incidents.push({ time, what: r.event === 'worker.down' ? 'The pinned worker was down' : 'The pinned worker was replaced', effect: 'Reviews wait until the worker is back.', fix: 'Restart the worker for this run.' });
     else if (r.event === 'ledger.tamper') incidents.push({ time, what: `A ledger check failed for block ${r.block ?? 'unknown'}`, effect: 'The block was stopped.', fix: 'Look at the block before reopening it.' });
     else if (r.event === 'autopilot.issue_failed') incidents.push({ time, what: `The waiver issue for ${u(r.finding, 'unknown finding')} in ${u(r.file, 'unknown file')} could not be opened`, effect: 'The waiver stands without an issue.', fix: 'Open the tracking issue by hand.' });

@@ -314,3 +314,80 @@ describe('B34 fix round 1: kind derived from the file, contract blocks, fraction
     assert.deepEqual(readRecords(h.records).map((r) => r.name), ['claude', 'claude', 'claude']);
   });
 });
+
+describe('B55 schema fallback, through the real spawner and the fake CLIs', () => {
+  const INVALID = { passed: 'maybe', summary: 'not a review' };
+  const second = { min_tokens_out: 5, second_levels: { L2: { provider: 'xai', model: 'grok-4.7' } } }; // the fake grok reports 9 tokens out
+  /**
+   * Review FILE where claude-opus-5-5 answers off-schema and every other model validly.
+   * @param {{failures: number, fellBack: boolean}} seen - the packet's history.
+   * @param {Record<string, any>} cfg @param {number} risk
+   * @param {string | null} [throwFor] - a model whose spawn throws.
+   */
+  async function missed(seen, cfg, risk = 0, throwFor = null) {
+    const repo = await fixture();
+    const h = harness({ repoRoot: repo, cfg, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)), FAKE_ANSWER_BY_MODEL: JSON.stringify({ 'claude-opus-5-5': INVALID }) } });
+    const spawn = async (/** @type {Record<string, any>} */ o) => {
+      if (throwFor !== null && o.cfg?.levels?.[o.level]?.model === throwFor) throw new Error('spawn exploded');
+      return h.spawn(o);
+    };
+    const outcome = await reviewFile({ repoRoot: repo, file: FILE, base: null, cfg, risk, workDir: h.workDir }, { spawn, writeRow: h.writeRow, schemaHistory: async () => seen });
+    return { outcome, recs: readRecords(h.records), rows: h.rows, packetFiles: readdirSync(h.workDir) };
+  }
+
+  test('the packet\'s second miss: claude\'s off-schema answer is logged, then grok (second_levels.L2) reviews the same packet ⇒ approved', async () => {
+    const { outcome, recs, rows, packetFiles } = await missed({ failures: 1, fellBack: false }, cfgFor(second));
+    assert.deepEqual(recs.map((r) => [r.name, flag(r.argv, '--model') ?? flag(r.argv, '-m')]), [['claude', 'claude-opus-5-5'], ['grok', 'grok-4.7']]);
+    assert.deepEqual(packetFiles, []); // the packet file is removed after the second-level try
+    // the session's tokens are both sessions' (the fakes: claude 42 out, grok 9 out; in = packet bytes / 4 each)
+    const inEach = Math.max(1, Math.ceil(Buffer.byteLength(stdinOf(recs[0])) / 4));
+    assert.deepEqual(outcome.sessions.map((s) => [s.tokens_in, s.tokens_out]), [[2 * inEach, 42 + 9]]);
+    assert.deepEqual([outcome.status, outcome.approved], ['reviewed', true]);
+    assert.deepEqual(outcome.sessions.map((s) => [s.provider, s.model, s.schema_fallback, s.attempts]), [['xai', 'grok-4.7', { level: 'review.second_levels.L2', provider: 'xai', model: 'grok-4.7' }, 2]]);
+    assert.deepEqual(rows.map((r) => r.event), ['review.plan', 'review.schema_invalid', 'review.schema_fallback']);
+    const [, miss, fb] = rows;
+    assert.deepEqual([miss.provider, miss.model, miss.second_level, miss.answer_kind, miss.top_keys, miss.errors_total], ['anthropic', 'claude-opus-5-5', false, 'json', { passed: 'string', summary: 'string' }, 3]);
+    assert.deepEqual(miss.schema_errors.map((/** @type {any} */ e) => [e.path, e.keyword, e.params]), [
+      ['', 'required', { missingProperty: 'reviewed_hunks' }],
+      ['', 'required', { missingProperty: 'findings' }],
+      ['/passed', 'type', { type: 'boolean' }],
+    ]);
+    assert.equal(JSON.stringify(rows).includes('not a review'), false); // the answer's text never reaches a row
+    assert.deepEqual([fb.from_model, fb.to_provider, fb.to_model, fb.attempts, fb.packet_hash], ['claude-opus-5-5', 'xai', 'grok-4.7', 2, miss.packet_hash]);
+  });
+
+  test('a second-level spawn that throws: unavailable: exit, the packet file removed, the first session\'s tokens kept', async () => {
+    const { outcome, recs, rows, packetFiles } = await missed({ failures: 1, fellBack: false }, cfgFor(second), 0, 'grok-4.7');
+    assert.deepEqual([outcome.status, outcome.reason, outcome.approved], ['unavailable', 'exit', false]);
+    assert.deepEqual(recs.map((r) => r.name), ['claude']);
+    assert.deepEqual(packetFiles, []);
+    assert.deepEqual(rows.map((r) => r.event), ['review.plan', 'review.schema_invalid', 'review.schema_fallback', 'review.unavailable']);
+    const inFirst = Math.max(1, Math.ceil(Buffer.byteLength(stdinOf(recs[0])) / 4));
+    assert.deepEqual(outcome.sessions.map((s) => [s.provider, s.model, s.tokens_in, s.tokens_out, s.attempts]), [[null, null, inFirst, 42, 2]]);
+  });
+
+  test('the packet\'s first miss: one session, unavailable: schema, the answer logged', async () => {
+    const { outcome, recs, rows } = await missed({ failures: 0, fellBack: false }, cfgFor(second));
+    assert.equal(recs.length, 1);
+    assert.deepEqual([outcome.status, outcome.reason, outcome.approved], ['unavailable', 'schema', false]);
+    assert.deepEqual(rows.map((r) => r.event), ['review.plan', 'review.schema_invalid', 'review.unavailable']);
+  });
+
+  test('no ledger writer: nothing is logged, nothing is tried; the session keeps its schema verdict and model', async () => {
+    const cfg = cfgFor(second);
+    const repo = await fixture();
+    const h = harness({ repoRoot: repo, cfg, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)), FAKE_ANSWER_BY_MODEL: JSON.stringify({ 'claude-opus-5-5': INVALID }) } });
+    const outcome = await reviewFile({ repoRoot: repo, file: FILE, base: null, cfg, risk: 0, workDir: h.workDir }, { spawn: h.spawn, schemaHistory: async () => ({ failures: 1, fellBack: false }) });
+    assert.deepEqual([outcome.status, outcome.reason], ['unavailable', 'schema']);
+    assert.deepEqual(outcome.sessions.map((s) => [s.provider, s.model, s.status, s.reason, Object.hasOwn(s, 'schema_fallback')]), [['anthropic', 'claude-opus-5-5', 'unavailable', 'schema', false]]);
+    assert.deepEqual(readRecords(h.records).map((r) => r.name), ['claude']);
+    assert.equal(h.rows.length, 0);
+  });
+
+  test('consensus mode never swaps a provider: the second miss stays unavailable', async () => {
+    const { outcome, recs, rows } = await missed({ failures: 1, fellBack: false }, cfgFor({ ...second, multimodel: true, second_provider: 'xai' }), 2);
+    assert.deepEqual([outcome.engine, outcome.status, outcome.reason], ['consensus', 'unavailable', 'schema']);
+    assert.deepEqual(recs.map((r) => r.name).sort(), ['claude', 'grok']);
+    assert.equal(rows.filter((r) => r.event === 'review.schema_fallback').length, 0);
+  });
+});

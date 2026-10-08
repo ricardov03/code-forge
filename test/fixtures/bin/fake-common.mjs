@@ -10,6 +10,8 @@
  *  - `FAKE_402_MODELS`: comma list of model ids that answer HTTP 402 (payment required).
  *  - `FAKE_SLEEP_MS`: wait this long before answering (timeout and background tests).
  *  - `FAKE_ANSWER`: the JSON answer to return (default: a valid S2 answer).
+ *  - `FAKE_ANSWER_BY_MODEL`: JSON object model id ⇒ answer; a listed model returns its own answer
+ *    instead of `FAKE_ANSWER` (fake-claude and fake-grok).
  *  - `FAKE_EXIT`: exit with this code after printing a normal (non-error) result.
  *  - `FAKE_CODEX_QUIET`: fake-codex puts the answer ONLY in the `-o` file (no agent_message event).
  */
@@ -77,8 +79,10 @@ export async function maybeSleep() {
   if (ms > 0) await new Promise((resolve) => setTimeout(resolve, ms));
 }
 
-/** @returns {unknown} */
-export function answer() {
+/** @param {string | undefined} [model] @returns {unknown} */
+export function answer(model) {
+  const byModel = process.env.FAKE_ANSWER_BY_MODEL ? JSON.parse(process.env.FAKE_ANSWER_BY_MODEL) : {};
+  if (model !== undefined && Object.hasOwn(byModel, model)) return byModel[model];
   return process.env.FAKE_ANSWER ? JSON.parse(process.env.FAKE_ANSWER) : DEFAULT_ANSWER;
 }
 

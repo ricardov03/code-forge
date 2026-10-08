@@ -164,6 +164,16 @@ A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks
 exactly, and the output is long enough (`review.min_tokens_out`, default 120). A clean pass
 (`passed: true`, no findings, a summary) needs only 40 tokens, whatever the diff size. Anything else is `review.unavailable`, never approval.
 
+An answer that does not match the finding schema is `unavailable: schema`. The ledger keeps a
+structural diagnosis of that answer (`review.schema_invalid`: its keys, their types and the schema
+errors, or where it stopped being JSON), never its text, so the miss can be explained. Asking for a file again after `unavailable` re-runs the same packet;
+if that answer misses the schema too and you set `review.second_levels` for the level, the worker
+tries the same packet **once** on that second model and writes a `review.schema_fallback` row. Its
+answer goes through the same checks, and its approval is a normal one. If it fails too, the file
+stays unavailable. That packet never gets another second-level try. Without a second level,
+nothing else changes. The try is refused when `budget.usd` is reached, never runs in consensus
+mode, and is refused for Codex unless `review.allow_open_book_codex` is on.
+
 A session that runs past `review.session_timeout_s` (default 300 seconds) is killed and started once
 more on the same packet. Only a second timeout is `unavailable: timeout`. The ledger keeps a cleaned
 tail of its stderr to explain the hang. While a long session runs, the worker keeps writing a

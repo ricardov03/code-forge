@@ -20,6 +20,12 @@
  *  6. a session that ends in `timeout` is spawned ONCE more on the same packet and level
  *     (`session-retry.mjs`, B30); a second timeout is `unavailable: timeout`. The summary's
  *     `attempts` says how many ran;
+ *  6b. a session whose answer fails the schema logs it (`review.schema_invalid`, the raw answer
+ *     redacted); at the packet's second such miss it is tried ONCE on `review.second_levels.<level>`
+ *     when the owner configured one (`schema-fallback.mjs`, B55; never in consensus mode).
+ *     The summary then carries `schema_fallback: {level, provider, model}` (`level`:
+ *     `review.second_levels.<level>`), the second level's own provider/model, and `tokens_in` /
+ *     `tokens_out` summed over both sessions;
  *  7. a diff alone over the packet budget is `split_required` (with `tokens_in` and `budget`) —
  *     except a Markdown file (B54), which is reviewed SECTION BY SECTION (`sections.mjs`): every
  *     section packet runs the whole plan above (its own sessions, judge and stub guard, its own
@@ -44,6 +50,7 @@ import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTo
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
+import { afterSchemaMiss, logSecondLevelMiss } from './schema-fallback.mjs';
 import { assertRowPath } from '../worker/ticket.mjs';
 
 /**
@@ -161,7 +168,10 @@ export function rulesRisk({ file, plusCount, cfg }) {
  *   session (`spawnSession` opts minus the worker-pinned ones); a per-call `cfg` selects another
  *   provider's level for the same slot (consensus).
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow] - ledger rows
- *   (`review.plan`, `review.unavailable`); a failed write never fails the review.
+ *   (`review.plan`, `review.unavailable`, `review.schema_invalid`, `review.schema_fallback`); a
+ *   failed write never fails the review (a failed `review.schema_fallback` write means no try).
+ * @property {import('./schema-fallback.mjs').SchemaHistory} [schemaHistory] - B55: the packet's
+ *   signed schema-miss history (the worker's); absent ⇒ no second-level try.
  */
 
 /** @param {ReviewDeps} deps @param {Record<string, any>} row */
@@ -203,11 +213,13 @@ export async function reviewFile(input, deps) {
   if (diff.diffText.trim().length === 0) return { status: 'no_change', approved: false, ...head, sessions: [] };
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
   const min = minTokensOut(cfg);
+  // B55: never in consensus mode — its providers (two reviewers, the judge) are the check itself
+  const schemaFallback = plan.mode !== 'consensus';
 
   /** @param {SessionSpec} spec @param {{text: string, hunkHeaders: string[], tokensIn: number, contextMode: string | null}} packet */
   const run = async (spec, packet) => {
     /** @type {Record<string, any>} */
-    let summary = await runOne(spec, packet.text, packet, { deps, workDir, min, cfg });
+    let summary = await runOne(spec, packet.text, packet, { deps, workDir, min, cfg, schemaFallback });
     const needs = summary.review?.needs_file;
     if (spec.role === 'reviewer' && summary.status === 'ok' && Array.isArray(needs) && needs.length > 0) {
       const paths = safeNeeds(needs);
@@ -218,7 +230,7 @@ export async function reviewFile(input, deps) {
         extra = null;
       }
       if (extra === null) return { ...summary, status: 'unavailable', reason: 'needs_file-refused', review: null };
-      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, cfg })), needs_file_round: true };
+      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, cfg, schemaFallback })), needs_file_round: true };
     }
     return summary;
   };
@@ -247,7 +259,7 @@ export async function reviewFile(input, deps) {
     if (judgeSpec) {
       const bySlot = Object.fromEntries(done.map((s) => [s.slot, s.review]));
       const packet = assembleJudgePacket({ diff: part, reports: { A: bySlot.A, B: bySlot.B }, cfg });
-      final = await runOne(judgeSpec, packet.text, packet, { deps, workDir, min, cfg });
+      final = await runOne(judgeSpec, packet.text, packet, { deps, workDir, min, cfg, schemaFallback });
       sessions.push(publicSummary(final));
       if (final.status !== 'ok') {
         await note(deps, { event: 'review.unavailable', reason: final.reason, lens: 'judge', ...rowExtra });
@@ -320,22 +332,29 @@ export async function reviewFile(input, deps) {
 }
 
 /**
- * One session: packet file (0600, removed after), spawn, stub guard.
+ * One session: packet file (0600, removed after), spawn, stub guard — and, on a `schema` miss, the
+ * B55 second-level try (`schema-fallback.mjs`) on the same packet file before it is removed.
  * @param {SessionSpec} spec @param {string} text
  * @param {{hunkHeaders: string[], tokensIn: number, contextMode: string | null}} packet
- * @param {{deps: ReviewDeps, workDir: string, min: number, cfg: Record<string, any>}} env
+ * @param {{deps: ReviewDeps, workDir: string, min: number, cfg: Record<string, any>, schemaFallback?: boolean}} env -
+ *   `schemaFallback: false` (consensus mode: its providers ARE the check) never tries.
  */
-async function runOne(spec, text, packet, { deps, workDir, min }) {
+async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallback = true }) {
   const promptPath = path.join(workDir, `${spec.lens}-${randomBytes(6).toString('hex')}.md`);
   const base = { lens: spec.lens, role: spec.role, level: spec.level, slot: spec.slot, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn };
   writeFileSync(promptPath, text, { mode: 0o600 });
   /** @type {Record<string, any> | null} */
   let res = null;
   let attempts = 0;
-  try {
+  /** @type {import('./validate-review.mjs').Verdict} */
+  let verdict = { ok: false, reason: 'exit', detail: 'no session result' };
+  /** @type {{level: string, provider: string, model: string} | null} */
+  let fellBackTo = null;
+  /** @param {Record<string, any> | undefined} sessionCfg @param {number} done - attempts before this call. */
+  const attempt = (sessionCfg, done) =>
     // a `timeout` is spawned once more on the same packet and level (B30); a spawn that throws
     // (bad config, refused argv) is an `exit` failure, never approval
-    ({ res, attempts } = await spawnWithTimeoutRetry(
+    spawnWithTimeoutRetry(
       deps.spawn,
       {
         level: spec.level,
@@ -343,33 +362,86 @@ async function runOne(spec, text, packet, { deps, workDir, min }) {
         promptPath,
         schema: FINDING_SCHEMA,
         rowExtra: { lens: spec.lens, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn },
-        ...(spec.cfg ? { cfg: spec.cfg } : {}),
+        ...(sessionCfg ? { cfg: sessionCfg } : {}),
       },
       (row) => note(deps, row),
       (n) => {
-        attempts = n;
+        attempts = done + n;
       },
-    ));
-  } catch {
-    // defensive only: the helper never throws. If it ever did, it is still an `exit` failure,
-    // never approval, with the attempts it had reported so far (at least 1).
-    res = null;
-    attempts = Math.max(attempts, 1);
+    );
+  /** @type {number | null} the session's tokens: the first spawn's, plus a second-level try's */
+  let tokensIn = null;
+  /** @type {number | null} */
+  let tokensOut = null;
+  // the packet file is removed on every path, and only after the second-level try (which reads it)
+  try {
+    try {
+      ({ res, attempts } = await attempt(spec.cfg, 0));
+    } catch {
+      // defensive only: the helper never throws. If it ever did, it is still an `exit` failure,
+      // never approval, with the attempts it had reported so far (at least 1).
+      res = null;
+      attempts = Math.max(attempts, 1);
+    }
+    tokensIn = res?.usage?.tokens_in ?? null;
+    tokensOut = res?.usage?.tokens_out ?? null;
+    verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+    if (!verdict.ok && verdict.reason === 'schema') {
+      try {
+        const session = { lens: spec.lens, role: spec.role, level: spec.level };
+        const done = attempts;
+        // no ledger writer ⇒ nothing logged, nothing tried; every row goes through the same writer
+        // (each helper handles its own failed write)
+        const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<ReviewDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
+        const second = await afterSchemaMiss({
+          res,
+          session,
+          packetText: text,
+          cfg: spec.cfg ?? cfg,
+          allowed: schemaFallback && !spec.cfg,
+          history: deps.schemaHistory,
+          writeRow: write,
+          spawnAt: (c) => attempt(c, done),
+        });
+        if (second) {
+          const secondVerdict = validateReview(second.res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+          res = second.res;
+          attempts = done + second.attempts;
+          fellBackTo = second.to;
+          verdict = secondVerdict;
+          tokensIn = addTokens(tokensIn, second.res?.usage?.tokens_in);
+          tokensOut = addTokens(tokensOut, second.res?.usage?.tokens_out);
+          if (!verdict.ok && verdict.reason === 'schema') await logSecondLevelMiss({ res, session, packetText: text, writeRow: write });
+        }
+      } catch {
+        // defensive only: the helpers never throw. If they ever did, the first session's result
+        // and its `schema` verdict stand (never turned into `exit`, never approval)
+      }
+    }
   } finally {
     rmSync(promptPath, { force: true });
   }
-  const verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
   const meta = {
     ...base,
     provider: res?.provider ?? null,
     model: res?.model ?? null,
     fallback_step: res?.fallback_step ?? 0,
     attempts,
-    tokens_in: res?.usage?.tokens_in ?? null,
-    tokens_out: res?.usage?.tokens_out ?? null,
+    ...(fellBackTo ? { schema_fallback: fellBackTo } : {}),
+    tokens_in: tokensIn,
+    tokens_out: tokensOut,
   };
   if (!verdict.ok) return { ...meta, status: 'unavailable', reason: verdict.reason, review: null };
   return { ...meta, status: 'ok', reason: null, review: verdict.review };
+}
+
+/**
+ * Two token counts added; a missing one (not a number) adds nothing, both missing ⇒ null.
+ * @param {unknown} a @param {unknown} b @returns {number | null}
+ */
+function addTokens(a, b) {
+  if (typeof a !== 'number') return typeof b === 'number' ? b : null;
+  return typeof b === 'number' ? a + b : a;
 }
 
 /** The per-session summary the worker signs: the answer's verdict and findings, never the packet. */

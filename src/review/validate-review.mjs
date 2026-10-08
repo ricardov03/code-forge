@@ -37,6 +37,17 @@ const validateSchema = (() => {
   return new Ajv2020({ allErrors: true, strict: false }).compile(body);
 })();
 
+/**
+ * The finding-schema errors of `value` from the SAME validator the stub guard uses (B55): Ajv's
+ * raw error objects, every one (`allErrors`). Callers must strip anything that can carry the
+ * answer's content (`review/schema-fallback.mjs`); this returns them as Ajv gives them.
+ * @param {unknown} value @returns {Array<import('ajv').ErrorObject>} empty when it validates.
+ */
+export function schemaErrorsOf(value) {
+  if (validateSchema(value) === true) return [];
+  return [...(validateSchema.errors ?? [])];
+}
+
 /** @param {Record<string, any> | undefined} cfg @returns {number} */
 export function minTokensOut(cfg) {
   const v = cfg?.review?.min_tokens_out;

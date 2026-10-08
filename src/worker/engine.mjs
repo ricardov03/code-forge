@@ -30,6 +30,10 @@
  * block's review budget (§4.10, B19): the forecast over the block's changed owned files (tier from
  * the path floors, before S1), one `review.budget` row per block; a failure there never fails the
  * review.
+ * B55: every round gets the packet's signed schema-miss history (`ledgerSchemaHistory`: rows of
+ * this run for this file and content hash whose MAC verifies with the run key), so a packet's
+ * second `schema` miss — this round's first try after the earlier ticket's — is tried once on
+ * `review.second_levels.<level>` when one is configured.
  * The review NEVER approves an empty or failed session: that is `unavailable` (§4.2 stub guard).
  * A throw inside the round is `unavailable` too, with the state saved as `next: retry` (see
  * `fixLoopRound`): the next ticket re-runs that round, never a fresh round 1.
@@ -45,6 +49,8 @@ import { reviewFile, rulesRisk } from '../review/engine.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { extraRoundsFor, newFileState, reopenForExtraRound, runRound } from '../review/fixloop.mjs';
 import { readRun } from '../state/run.mjs';
+import { ledgerSchemaHistory } from '../review/schema-fallback.mjs';
+import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
 import { keyedLock } from '../util/locks.mjs';
 import { blockAnchors, blockRungUsed, loadState, saveState } from './review-state.mjs';
@@ -355,6 +361,23 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
   /** @type {string | null} */
   let crashed = null;
   try {
+    // B55: a packet's schema misses are counted from the run's signed rows for this run, file,
+    // content hash AND packet hash (`ledgerSchemaHistory` is asked per packet). Built inside the
+    // guarded block: a throw here is this round's `unavailable` with `next: retry`, like any other;
+    // a ledger read that throws later only disables the second-level try (with one warning line).
+    // Once per packet holds because this ticket holds the (block, file) file lock (`loop.mjs`) for
+    // the whole round — round 1, its retry, a recheck and the patch_check alike — and
+    // `schema-fallback.mjs` adds a per-packet lock around read-history → write-mark.
+    // The rows are matched on the values the worker's writeRow stamps on them (`loop.mjs`:
+    // `{...row, block, file, content_hash: ticket.content_hash}`): `ticket.file` and
+    // `ticket.content_hash` here are the same ticket's, for round 1 and rechecks alike (a recheck
+    // ticket's hash is the fixed content's). `where.key` is the run key: `loop.mjs` puts the run's
+    // `key` in `ctx.key` (`key, // signs the fix-loop state`), `reviewTicket` passes `key: ctx.key`
+    // to `fixLoopRound`, which builds `where = {…, key, rows}`. A row whose check throws is not
+    // counted (`ledgerSchemaHistory` catches per row).
+    const schemaHistory = ctx.readRows
+      ? ledgerSchemaHistory({ readRows: ctx.readRows, verify: (row) => verifyRow(row, where.key).ok, runId: ctx.runId, file: ticket.file, contentHash: ticket.content_hash })
+      : undefined;
     await runRound(
       state,
       {
@@ -366,8 +389,9 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         factsExcerpt,
         extraRounds,
         ...(jev ? { jev } : {}),
+        ...(schemaHistory ? { schemaHistory } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt }, { spawn: ctx.spawn, writeRow });
+          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
           return engineOutcome;
         },
         spawn: async (opts) => {

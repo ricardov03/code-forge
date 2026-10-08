@@ -6,6 +6,13 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Review: a packet whose answer fails the schema twice is retried once on `review.second_levels.<level>` when configured
+  (signed `review.schema_fallback` row; never in consensus mode; budget and closed-book rules apply), and every schema
+  miss logs a structural diagnosis of the answer (`review.schema_invalid`: keys, types, schema errors or the parse error
+  offset, never the text); the autopilot binnacle shows each fallback as an incident (issue #2).
+
 ## [0.7.2] — 2026-10-07
 
 ### Changed

@@ -402,13 +402,43 @@ test('critical findings: one owner action per (block, file); the latest review.d
 });
 
 test('no text says undefined or null: rows missing their optional fields get a fallback', () => {
-  const bare = ['autopilot.grant', 'autopilot.stop', 'autopilot.expire', 'autopilot.link', 'autopilot.pause', 'autopilot.approve', 'autopilot.restore', 'autopilot.restore_skipped', 'autopilot.extra_round', 'autopilot.level', 'autopilot.issue_failed', 'review.waived', 'block.close', 'review.session_timeout', 'worker.down', 'ledger.tamper', 'budget.refused', 'gate.red', 'gate.done'].map((event, i) => ({ run: 'r7', event, ...(event === 'review.waived' ? { by: 'autopilot' } : {}), ts: T(i) }));
+  const bare = ['autopilot.grant', 'autopilot.stop', 'autopilot.expire', 'autopilot.link', 'autopilot.pause', 'autopilot.approve', 'autopilot.restore', 'autopilot.restore_skipped', 'autopilot.extra_round', 'autopilot.level', 'autopilot.issue_failed', 'review.waived', 'block.close', 'review.session_timeout', 'review.schema_fallback', 'worker.down', 'ledger.tamper', 'budget.refused', 'gate.red', 'gate.done'].map((event, i) => ({ run: 'r7', event, ...(event === 'review.waived' ? { by: 'autopilot' } : {}), ts: T(i) }));
   const rows = [...bare, { run: 'r7', event: 'autopilot.decision', acted: true, ts: T(30) }, { run: 'r7', event: 'autopilot.decision', acted: false, ts: T(31) }, { run: 'r7', event: 'session', role: 'delegate', ts: T(32) }];
   const b = buildBinnacle({ runId: 'r7', rows, record: { run_id: 'r7', status: 'active', blocks: { x: {} } }, now: NOW, scrubCtx: SC });
   const all = [JSON.stringify(b), renderBinnacleMarkdown(b, SC), JSON.stringify(buildFullLog({ runId: 'r7', rows, scrubCtx: SC }).map((e) => ({ ...e, block: e.block ?? '', file: e.file ?? '', link: e.link ?? '' })))].join('\n');
   assert.equal(all.includes('undefined'), false);
   assert.equal(renderBinnacleMarkdown(b, SC).includes('null'), false);
-  assert.equal(buildFullLog({ runId: 'r7', rows, scrubCtx: SC }).length, 22);
+  assert.equal(buildFullLog({ runId: 'r7', rows, scrubCtx: SC }).length, 23);
+});
+
+test('B55: review.schema_fallback is an incident and a log entry, like review.session_timeout; a refused one says why and what to do', () => {
+  const base = { run: 'r9', event: 'review.schema_fallback', block: 'b1', file: 'src/a.swift', lens: 'quick', role: 'reviewer', level: 'L2', packet_hash: 'ab', from_provider: 'anthropic', from_model: 'model-a', to: 'review.second_levels.L2', to_provider: 'xai', to_model: 'model-b', attempts: 2 };
+  const rows = [
+    { ...base, ts: T(1) },
+    { ...base, to_provider: 'openai', to_model: 'model-c', refused: 'closed-book', ts: T(2) },
+    { ...base, to_provider: null, to_model: null, refused: 'same-model', ts: T(3) },
+    { ...base, refused: 'budget', ts: T(4) },
+    { ...base, refused: 'other-reason', ts: T(5) },
+    { ...base, refused: true, ts: T(6) },
+  ];
+  const b = buildBinnacle({ runId: 'r9', rows, record: { run_id: 'r9', status: 'active', blocks: { b1: {} } }, now: NOW, scrubCtx: SC });
+  const what = 'A quick answer failed the schema twice on the same packet (model-a)';
+  assert.deepEqual(b.incidents, [
+    { time: T(1), what, effect: 'It was retried once on the second level (model-b).', fix: "Check the file's next review result." },
+    { time: T(2), what, effect: 'The second-level try was refused (closed-book); the review stays unavailable.', fix: 'Set a second level that can run closed-book (not Codex), or review the file by hand.' },
+    { time: T(3), what, effect: 'The second-level try was refused (same-model); the review stays unavailable.', fix: 'Set review.second_levels to a different model than the one that failed, or review the file by hand.' },
+    { time: T(4), what, effect: 'The second-level try was refused (budget); the review stays unavailable.', fix: 'Raise the budget (only you can) or review the file by hand.' },
+    { time: T(5), what, effect: 'The second-level try was refused (other-reason); the review stays unavailable.', fix: 'Review the file by hand.' },
+    { time: T(6), what, effect: 'It was retried once on the second level (model-b).', fix: "Check the file's next review result." },
+  ]);
+  assert.deepEqual(buildFullLog({ runId: 'r9', rows, scrubCtx: SC }), [
+    { time: T(6), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · retried once', link: null },
+    { time: T(5), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · refused (other-reason)', link: null },
+    { time: T(4), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · refused (budget)', link: null },
+    { time: T(3), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → unknown model · refused (same-model)', link: null },
+    { time: T(2), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-c · refused (closed-book)', link: null },
+    { time: T(1), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · retried once', link: null },
+  ]);
 });
 
 test('a pipe in a shown text reaches its table cell escaped, so the row keeps its column count', () => {

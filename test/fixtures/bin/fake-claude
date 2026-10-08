@@ -16,7 +16,7 @@ if (pays402(model)) {
   process.stdout.write(`${JSON.stringify({ ...base, subtype: 'success', is_error: true, api_error_status: 402, result: 'API Error: 402 insufficient credits' })}\n`);
   process.exit(1);
 }
-const value = answer();
+const value = answer(model);
 const out = {
   ...base,
   subtype: 'success',
