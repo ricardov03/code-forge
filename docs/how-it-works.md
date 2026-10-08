@@ -160,6 +160,22 @@ merged with ids such as `S2.F1` and go through the normal fix rounds, whose rech
 same way. Only a section that alone is over the budget keeps the file `split_required`, and so
 does a deleted Markdown file or one with no heading (it has one section only).
 
+Each file is reviewed alone, so code a block **moves** from one file to another would look like a
+deletion to the first file's reviewer. The worker lists the block's other changed files (owned by
+the block, diffed against the same base) and compares their lines, with no model call: a run of
+removed lines that shows up as added lines in another file of the block (compared trimmed, with
+whitespace collapsed, ignoring blank and brace-only lines; at least 3 matching lines, or at least
+120 matching characters) is named in a `## moved code` section, just before the diff — for example
+`- base lines 4-10 removed here were added in src/b.mjs lines 3-9 in this block.`, and the reverse
+note in the other file's packet. The reviewer is told not to report the removal itself, only stale
+references or imports. The section is extra text: every hunk is still in the packet, and
+`reviewed_hunks` is checked as before. It is in round 1, every recheck (computed from the diff
+against the base, not the fix hunks) and the judge's packet, lists at most 12 ranges, and counts
+toward the packet budget. A Markdown file reviewed section by section gets, in each section's
+packet, only the moves that sit under that section's headings (none, no section). The other
+files are listed and read once per review (a file the block deleted counts, all its lines removed), and a file that cannot be read gives no hint. Code
+moved inside one file (removed in one place, added in another) is not detected.
+
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
 exactly, and the output is long enough (`review.min_tokens_out`, default 120). A clean pass
 (`passed: true`, no findings, a summary) needs only 40 tokens, whatever the diff size. Anything else is `review.unavailable`, never approval.

@@ -10,6 +10,7 @@
  *   ## project rules   the rules digest (≤ 60 lines)
  *   ## facts           the facts-sheet excerpt
  *   ## context         the current file (whole, or hunk windows — `context.mjs`)
+ *   ## moved code      only when code moved to/from another file of the block (`moved.mjs`, B56)
  *   ## diff            `file:`, the `hunks:` list the reviewer must echo, then the diff
  *
  * Diff source (§4.1): a file in the index is diffed against the block's base SHA
@@ -20,7 +21,8 @@
  * bytes / 4. A diff that alone exceeds it ⇒ `split_required` (a Markdown file is then reviewed
  * section by section — `sections.mjs`, B54). Otherwise over budget ⇒ the context shrinks to
  * ± `min_context_lines` (`minimal`) FIRST, then the digest is trimmed from the end; the diff is
- * never cut.
+ * never cut. The `## moved code` section (B56) is part of that measure: it is counted in the diff-only
+ * size (`diffOnlyTokens`, `split_required`) and never trimmed.
  *
  * Path rule (V4): `file` is repo-root-relative; `./`, `../`, absolute values, symlinks and paths
  * under `.git/` or `.code-forge/` are refused with `bad-path` before git runs. So is anything git
@@ -54,10 +56,13 @@ const PATHSPEC_MAGIC = /[*?[\]]/;
 const SECRET_LIKE = [/(^|\/)\.env[^/]*$/i, /\.pem$/i, /\.key$/i, /\.p12$/i, /(^|\/)id_(rsa|ed25519|ecdsa)[^/]*$/i, /(^|\/)credentials[^/]*$/i, /(^|\/)\.code-forge(\/|$)/i];
 
 /** @param {string} rel @returns {boolean} */
-const isSecretLike = (rel) => SECRET_LIKE.some((re) => re.test(rel));
+export const isSecretLike = (rel) => SECRET_LIKE.some((re) => re.test(rel));
 
 /** The env for every child git in this module: B11's clean env plus literal pathspecs. */
-const reviewGitEnv = () => ({ ...gitChildEnv(), GIT_LITERAL_PATHSPECS: '1' });
+export const reviewGitEnv = () => ({ ...gitChildEnv(), GIT_LITERAL_PATHSPECS: '1' });
+
+/** B11's clean env alone: for `git check-ignore`, which refuses the literal-pathspec magic. */
+export const plainGitEnv = () => gitChildEnv();
 
 /** A refusal with a stable `code`: `bad-path`, `bad-lens`, `git`. */
 export class PacketError extends Error {
@@ -185,49 +190,50 @@ export async function readFileDiff({ repoRoot, file, base }) {
  * Assemble a reviewer packet (pure).
  * @param {{
  *   diff: FileDiff, lens: string, rulesDigest?: string, factsExcerpt?: string,
- *   cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', budget?: number,
- * }} opts
+ *   cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', budget?: number, moved?: string,
+ * }} opts - `moved`: the file's `## moved code` section (`moved.mjs`), '' for none.
  * @returns {Packet | {status: 'split_required', tokensIn: number, budget: number}}
  */
-export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = '', cfg, contextMode = 'auto', budget }) {
+export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = '', cfg, contextMode = 'auto', budget, moved = '' }) {
   const lensText = loadLens(lens);
   const limit = budget ?? budgetFor(cfg, lens === 'quick' ? 'quick_in' : 'full_in');
   const hunkHeaders = diff.hunks.map((h) => h.header);
   const diffSection = diffSectionOf(diff);
-  const bare = bareTokens(lensText, diffSection);
+  const bare = bareTokens(lensText, diffSection, moved);
   if (bare > limit) return { status: 'split_required', tokensIn: bare, budget: limit };
 
   let digest = splitLines(rulesDigest).slice(0, DIGEST_MAX_LINES);
   let ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: contextMode });
-  let text = render(lensText, digest, factsExcerpt, ctx.text, diffSection);
+  let text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
   if (estimateTokens(text) > limit) {
     ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: 'minimal' });
-    text = render(lensText, digest, factsExcerpt, ctx.text, diffSection);
+    text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
   }
   while (estimateTokens(text) > limit && digest.length > 0) {
     digest = digest.slice(0, -1);
-    text = render(lensText, digest, factsExcerpt, ctx.text, diffSection);
+    text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
   }
   const tokensIn = estimateTokens(text);
   return { status: 'ok', text, hunkHeaders, contextMode: ctx.mode, contextLines: ctx.lineCount, digestLines: digest.length, tokensIn, budget: limit, overBudget: tokensIn > limit };
 }
 
 /**
- * The tokens of the diff-only packet (lens + diff, no digest, facts or context): what
- * `assemblePacket` holds against the budget before it says `split_required`.
- * @param {{diff: FileDiff, lens: string}} opts @returns {number}
+ * The tokens of the diff-only packet (lens + moved code + diff, no digest, facts or context): what
+ * `assemblePacket` holds against the budget before it says `split_required`. Pass the SAME `moved`
+ * section the packet gets.
+ * @param {{diff: FileDiff, lens: string, moved?: string}} opts @returns {number}
  */
-export function diffOnlyTokens({ diff, lens }) {
-  return bareTokens(loadLens(lens), diffSectionOf(diff));
+export function diffOnlyTokens({ diff, lens, moved = '' }) {
+  return bareTokens(loadLens(lens), diffSectionOf(diff), moved);
 }
 
 /**
  * The ONE measure behind `split_required` (`assemblePacket`) and section packing (`diffOnlyTokens`,
  * B54), so the two can never disagree.
- * @param {string} lensText @param {string} diffSection @returns {number}
+ * @param {string} lensText @param {string} diffSection @param {string} moved @returns {number}
  */
-function bareTokens(lensText, diffSection) {
-  return estimateTokens(render(lensText, [], '', '', diffSection));
+function bareTokens(lensText, diffSection, moved) {
+  return estimateTokens(render(lensText, [], '', '', diffSection, moved));
 }
 
 /** @param {FileDiff} diff @returns {string} the `## diff` section body. */
@@ -237,9 +243,9 @@ function diffSectionOf(diff) {
 
 /**
  * @param {string} lensText @param {string[]} digest @param {string} facts @param {string} context
- * @param {string} diffSection
+ * @param {string} diffSection @param {string} [moved] - the `## moved code` section (heading included), '' for none.
  */
-function render(lensText, digest, facts, context, diffSection) {
+function render(lensText, digest, facts, context, diffSection, moved = '') {
   return [
     '# code-forge review packet',
     '## lens',
@@ -250,6 +256,7 @@ function render(lensText, digest, facts, context, diffSection) {
     facts.trim().length > 0 ? facts.trimEnd() : '(none)',
     '## context',
     context.length > 0 ? context : '(none)',
+    ...(moved.length > 0 ? [moved] : []),
     '## diff',
     diffSection,
     '',
@@ -271,11 +278,12 @@ export async function buildPacket(opts) {
 
 /**
  * The judge's packet (§4.2 step 3, §4.4): the judge lens, the hunk list, the two blind reports,
- * and the diff only when `review.judge_sees_diff` is true (R3, default false).
- * @param {{diff: FileDiff, reports: {A: unknown, B: unknown}, cfg?: Record<string, any>}} opts
+ * and the diff only when `review.judge_sees_diff` is true (R3, default false); the file's
+ * `## moved code` section (B56) before the diff when there is one.
+ * @param {{diff: FileDiff, reports: {A: unknown, B: unknown}, cfg?: Record<string, any>, moved?: string}} opts
  * @returns {{status: 'ok', text: string, hunkHeaders: string[], tokensIn: number, budget: number, contextMode: null}}
  */
-export function assembleJudgePacket({ diff, reports, cfg }) {
+export function assembleJudgePacket({ diff, reports, cfg, moved = '' }) {
   const hunkHeaders = diff.hunks.map((h) => h.header);
   const seesDiff = cfg?.review?.judge_sees_diff === true;
   const text = [
@@ -286,6 +294,7 @@ export function assembleJudgePacket({ diff, reports, cfg }) {
     JSON.stringify(reports.A, null, 1),
     '## reviewer B',
     JSON.stringify(reports.B, null, 1),
+    ...(moved.length > 0 ? [moved] : []),
     '## diff',
     [`file: ${diff.file}`, 'hunks:', ...hunkHeaders.map((h) => `- ${h}`), ...(seesDiff ? ['', diff.diffText.trimEnd()] : [])].join('\n'),
     '',

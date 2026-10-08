@@ -6,6 +6,15 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Review: code moved between two changed files of the same block is named in a ## moved code packet section
+  (deterministic line matching against the block's other changed owned files, same base: >= 3 significant lines or >=
+  120 significant characters; at most 12 ranges; a Markdown section packet lists only the moves in that section) in
+  round 1, rechecks, patch checks and the judge packet, so the source file's reviewer no longer reports the removal as a
+  deleted feature; every hunk and the reviewed_hunks check are unchanged, and the section counts toward the packet
+  budget (issue #2).
+
 ## [0.7.3] — 2026-10-08
 
 ### Added

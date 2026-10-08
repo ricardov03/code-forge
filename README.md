@@ -12,6 +12,13 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 Next release:
 
+- **Code moved between files is no longer read as deleted.** When a block moves code from one
+  file to another, each file's review packet now says where the lines went (or came from), so the
+  reviewer of the old file stops reporting the removal as a lost feature, also on rechecks. Every
+  hunk is still reviewed.
+
+In 0.7.3:
+
 - **A model that keeps failing the answer format gets a stand-in.** When a reviewer's answer
   fails the schema twice on the same packet and you set `review.second_levels` for that level, the
   worker retries that packet once with the second model, and the ledger records it. Each failed

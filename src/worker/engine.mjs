@@ -34,6 +34,9 @@
  * this run for this file and content hash whose MAC verifies with the run key), so a packet's
  * second `schema` miss — this round's first try after the earlier ticket's — is tried once on
  * `review.second_levels.<level>` when one is configured.
+ * B56: every round gets ONE memoised reader of the block's OTHER changed files' diffs
+ * (`blockPeerDiffs`: listed and read at most once per ticket) so the review can name code moved
+ * between them in a `## moved code` packet section (round 1, rechecks and patch check alike).
  * The review NEVER approves an empty or failed session: that is `unavailable` (§4.2 stub guard).
  * A throw inside the round is `unavailable` too, with the state saved as `next: retry` (see
  * `fixLoopRound`): the next ticket re-runs that round, never a fresh round 1.
@@ -46,6 +49,7 @@ import { askJev } from '../decide/jev-client.mjs';
 import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { reviewFile, rulesRisk } from '../review/engine.mjs';
+import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { extraRoundsFor, newFileState, reopenForExtraRound, runRound } from '../review/fixloop.mjs';
 import { readRun } from '../state/run.mjs';
@@ -206,17 +210,58 @@ export async function reviewTicket(ticket, ctx) {
     return { status: 'unavailable', reason: err instanceof Error ? err.message : 'run-record-unreadable', approved: false, engine: 'adaptive', sessions: [] };
   }
   if (entry.kind === null) entry = { ...entry, kind: blockKind({ owned: [ticket.file] }) };
+  const peerDiffs = blockPeerDiffs(ctx.repoRoot, { base: entry.base, owned: entry.owned, file: ticket.file });
   try {
     if (!ctx.key) {
       return await reviewFile(
-        { repoRoot: ctx.repoRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) },
+        { repoRoot: ctx.repoRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg), peerDiffs },
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg) });
+    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg), peerDiffs });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
+}
+
+/**
+ * B56: the block's OTHER changed files — the §4.1 file set since the block base (tracked changes ∪
+ * untracked), filtered to the block's owned files (`ownsFile`, as the budget row does), minus the
+ * ticket's file. The review names code moved between them (`## moved code`). No base, no owned
+ * list, or a git failure ⇒ [] (no hint; the review itself goes on unchanged).
+ * @param {string} repoRoot @param {{base: string | null, owned: string[], file: string}} opts
+ * @returns {Promise<string[]>}
+ */
+export async function blockPeers(repoRoot, { base, owned, file }) {
+  if (base === null || !Array.isArray(owned) || owned.length === 0) return [];
+  try {
+    return (await computeFileSet({ cwd: repoRoot, base })).all.filter((f) => f !== file && ownsFile(owned, f));
+  } catch {
+    return [];
+  }
+}
+
+/**
+ * B56: ONE memoised reader per ticket of the block's other changed files' diffs: the file set is
+ * listed and the diffs read (`peerDiffReader`) at most once, however many packets ask — lazily, so
+ * a round with no packet (a stopped file) runs no git call. Any throw or rejection on the way ⇒
+ * no peer diffs (no hint), memoised like a success.
+ * @param {string} repoRoot @param {{base: string | null, owned: string[], file: string}} opts
+ * @returns {() => Promise<import('../review/moved.mjs').PeerDiff[]>}
+ */
+export function blockPeerDiffs(repoRoot, { base, owned, file }) {
+  /** @type {Promise<import('../review/moved.mjs').PeerDiff[]> | null} */
+  let once = null;
+  return () => {
+    once ??= (async () => {
+      try {
+        return await peerDiffReader({ repoRoot, base, file, peers: await blockPeers(repoRoot, { base, owned, file }) })();
+      } catch {
+        return [];
+      }
+    })();
+    return once;
+  };
 }
 
 /**
@@ -281,10 +326,10 @@ export function mayTakeRung(state, kind, cfg, rungUsed) {
  * first full round, or any round once the rung is gone) runs outside the block lock, in parallel
  * with the block's other files.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, level: string, owned: string[], blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string}} opts
+ * @param {{base: string | null, level: string, owned: string[], blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key, workDir, factsExcerpt }) {
+async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key, workDir, factsExcerpt, peerDiffs }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   const readRows = ctx.readRows;
   /** @type {{outcome: ReviewOutcome} | {round: () => Promise<ReviewOutcome>}} */
@@ -324,7 +369,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
       state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
     }
     const fixed = state;
-    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt, extraRounds });
+    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt, extraRounds, peerDiffs });
     // a round that could take the rung keeps the block lock until its state is saved
     if (mayTakeRung(fixed, kind, ctx.cfg, rungUsed)) return { outcome: await round() };
     return { round };
@@ -335,10 +380,10 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, blockKindOf, key,
 /**
  * Run the prepared round and save the file's state: the ticket's outcome.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string, extraRounds?: number}} opts
+ * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string, extraRounds?: number, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, extraRounds = 0 }) {
+async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, extraRounds = 0, peerDiffs }) {
   /** @type {Record<string, any> | null} */
   let engineOutcome = null;
   let approvalWritten = false;
@@ -388,10 +433,11 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         writeRow,
         factsExcerpt,
         extraRounds,
+        ...(peerDiffs ? { peerDiffs } : {}),
         ...(jev ? { jev } : {}),
         ...(schemaHistory ? { schemaHistory } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
+          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
           return engineOutcome;
         },
         spawn: async (opts) => {

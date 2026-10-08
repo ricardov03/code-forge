@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 58,
+  "block_count": 59,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -794,6 +794,22 @@
         "B54"
       ],
       "note": "root-added 2026-10-08; GitHub issue #2 note of 2026-10-06; also amends src/review/{engine,fixloop,validate-review}.mjs, src/worker/engine.mjs, src/session/spawn.mjs (stderr tail moved to util), src/autopilot/binnacle.mjs, test fakes, docs/how-it-works.md, skill/references/review.md"
+    },
+    "B56": {
+      "title": "Moved-code hint (issue #2): code moved between changed files of the same block is detected by deterministic line matching (>= 3 significant lines or >= 120 significant characters; peers in the base diffed against it, deleted peers included) and named in a ## moved code packet section on both files, in round 1, rechecks, patch checks, the judge packet and per Markdown section; extra text only (every hunk and reviewed_hunks unchanged); counted in the packet budget with one measure; unsafe peer names never read or printed; peer diffs read once per ticket with a 2 MiB per-peer cap",
+      "wave": 12,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/review/moved.mjs",
+        "test/review/moved.test.mjs",
+        "test/review/moved-wiring.test.mjs",
+        "test/worker/moved-peers-guard.test.mjs"
+      ],
+      "depends_on": [
+        "B55"
+      ],
+      "note": "root-added 2026-10-08; GitHub issue #2 note of 2026-10-06 (stale critical from a cross-file move); also amends src/review/{packet,engine,fixloop,sections}.mjs, src/worker/engine.mjs, docs/how-it-works.md, skill/references/review.md"
     }
   }
 }

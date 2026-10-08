@@ -203,14 +203,15 @@ function diffOf(diff, fileHeader, pieces) {
  * Pack the heading groups into section packets within `budget` (step 3 of the module doc). A
  * candidate's size is `measure(its diff, its groups)` (a recheck adds the open findings it lists
  * for those groups). Never `ok` with no section: a diff with no hunk, or one whose hunks do not
- * parse one to one, is `split_required` at `measure(diff, [])` with `section: null`.
- * @param {{diff: FileDiff, budget: number, measure: (diff: FileDiff, groups: SectionGroup[]) => number}} opts -
- *   `measure`: the packet tokens of a candidate (the largest over the session lenses).
+ * parse one to one, is `split_required` at `measure(diff, null)` with `section: null`.
+ * @param {{diff: FileDiff, budget: number, measure: (diff: FileDiff, groups: SectionGroup[] | null) => number}} opts -
+ *   `measure`: the packet tokens of a candidate (the largest over the session lenses); `groups`
+ *   null ⇒ the whole file (B56: its whole moved-code section), never an empty section.
  * @returns {{status: 'ok', sections: Section[]} | {status: 'split_required', tokensIn: number, budget: number, section: string | null}}
  */
 export function packSections({ diff, budget, measure }) {
   const groups = sectionGroups(diff);
-  if (groups === null || groups.length === 0) return { status: 'split_required', tokensIn: measure(diff, []), budget, section: null };
+  if (groups === null || groups.length === 0) return { status: 'split_required', tokensIn: measure(diff, null), budget, section: null };
   /** @param {SectionGroup[]} set */
   const size = (set) => measure(merge(diff, set), set);
   /** @type {Section[]} */

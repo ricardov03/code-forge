@@ -59,6 +59,15 @@
  * findings get ids `S<section>.<id>`; any section session unavailable ⇒ `retry` of the whole
  * round. A section still over the budget alone ⇒ the terminal stop above (`split_required`).
  *
+ * Moved code (B56): when `deps.peerDiffs` (or `deps.peers`) names the block's other changed files,
+ * every recheck and patch_check packet carries the file's `## moved code` section — computed from
+ * the file's diff against the block base (`deps.base`), never from the fix hunks, so a stale
+ * "feature deleted" finding on code that moved to another file meets the same hint as round 1. A
+ * Markdown section packet lists only the moves in its section. Sizing (`recheckTokens`,
+ * `packRecheck`) uses the same section text. The peers are read once per deps object (one ticket):
+ * the caller's `deps.peerDiffs` reader, else one memoised reader per deps (`recheckPeerDiffs`). Any
+ * failure there means no hint, never a failed recheck.
+ *
  * Schema misses (B55): a recheck (or patch_check) session whose answer fails the schema at its
  * packet's second miss is tried once on `review.second_levels.L2` when configured
  * (`schema-fallback.mjs`); only when that fails too is the round `unavailable` as below.
@@ -79,6 +88,7 @@ import { decisionProblem, grantCoverProblem } from './gate-check.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { parseDiff } from './context.mjs';
 import { assemblePacket, assertPacketPath, diffOnlyTokens, readFileDiff } from './packet.mjs';
+import { movedText, movesFor, peerDiffReader } from './moved.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups, sectionOf } from './sections.mjs';
 import { cameFromJudge, resolvedBand, triageFindings } from './triage.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
@@ -128,7 +138,9 @@ import { afterSchemaMiss, logSecondLevelMiss } from './schema-fallback.mjs';
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow]
  * @property {(req: {file: string, round: number, level: string, open: Finding[], l3_patch: boolean}) => Promise<unknown>} [fix] - a fresh coder session at `level`; `l3_patch` = the block's L3 patch is in the tree (§3.6).
  * @property {(req: {file: string, level: 'L3', open: Finding[]}) => Promise<unknown>} [patch] - the L3 patch rung (≤ 80 lines, owned files only).
- * @property {string | null} [base] - the block base (only for `recheck_scope: file`).
+ * @property {string | null} [base] - the block base (`recheck_scope: file`, and the B56 moved-code diff).
+ * @property {ReadonlyArray<string>} [peers] - B56: the block's other changed files (moved-code hints).
+ * @property {() => Promise<import('./moved.mjs').PeerDiff[]>} [peerDiffs] - B56: a memoised reader of their diffs (`peerDiffReader`); wins over `peers`.
  * @property {string} [rulesDigest] @property {string} [factsExcerpt]
  * @property {number} [extraRounds] - B47: rounds past `review.max_rounds_per_file` granted by autopilot (`extraRoundsFor`).
  * @property {import('./schema-fallback.mjs').SchemaHistory} [schemaHistory] - B55: the packet's signed schema-miss history; absent ⇒ no second-level try.
@@ -170,11 +182,14 @@ export function mergePacketInfo(info, packet) {
  * or hunks that do not parse one to one) ⇒ `split_required` at the whole size, never sectioned;
  * a finding no packet holds is listed in the LAST packet — every open finding is listed once.
  * @param {import('./packet.mjs').FileDiff} diff @param {Finding[]} open @param {number} budget
+ * @param {import('./moved.mjs').Moves | null} [moves] - the file's moves (B56): each candidate is sized
+ *   with the `## moved code` text of ITS sections (`movedText`), the whole size with all of them.
  * @returns {{status: 'ok', sections: Array<import('./sections.mjs').Section & {open: Finding[]}>} | {status: 'split_required', tokensIn: number, budget: number, section: string | null}}
  */
-export function packRecheck(diff, open, budget) {
+export function packRecheck(diff, open, budget, moves = null) {
+  const moved = movedText(moves, diff.content, null);
   const groups = sectionGroups(diff);
-  if (groups === null || groups.length === 0) return { status: 'split_required', tokensIn: recheckTokens(diff, open), budget, section: null };
+  if (groups === null || groups.length === 0) return { status: 'split_required', tokensIn: recheckTokens(diff, open, moved), budget, section: null };
   /** @type {Map<Finding, number>} */
   const keyOf = new Map();
   for (const f of open) {
@@ -183,10 +198,10 @@ export function packRecheck(diff, open, budget) {
   }
   /** @param {ReadonlyArray<number>} keys @returns {Finding[]} the open findings of those groups, in order. */
   const openIn = (keys) => open.filter((f) => keyOf.has(f) && keys.includes(/** @type {number} */ (keyOf.get(f))));
-  const packed = packSections({ diff, budget, measure: (part, set) => recheckTokens(part, openIn(set.map((g) => g.key))) });
+  const packed = packSections({ diff, budget, measure: (part, set) => (set === null ? recheckTokens(part, open, moved) : recheckTokens(part, openIn(set.map((g) => g.key)), movedText(moves, diff.content, set.map((g) => g.key)))) });
   if (packed.status !== 'ok') return packed;
   const sections = packed.sections.map((sec) => ({ ...sec, open: openIn(sec.keys) }));
-  if (sections.length === 0) return { status: 'split_required', tokensIn: recheckTokens(diff, open), budget, section: null };
+  if (sections.length === 0) return { status: 'split_required', tokensIn: recheckTokens(diff, open, moved), budget, section: null };
   // defensive: a finding no packet holds goes to the last packet (it is sized there by the check
   // every packet passes before any session) — never dropped, never closed unseen
   const listed = new Set(sections.flatMap((sec) => sec.open));
@@ -332,22 +347,75 @@ const openFindingsText = (open) => `${OPEN_FINDINGS_HEAD}${open.length > 0 ? ope
  * The size a recheck packet is held to (B54): its diff-only `recheck` packet (the measure behind
  * `split_required`) plus the open-findings list `buildRecheckPacket` appends. Section packing and
  * the check before any session use this ONE function.
- * @param {import('./packet.mjs').FileDiff} diff @param {ReadonlyArray<Finding>} open @returns {number}
+ * @param {import('./packet.mjs').FileDiff} diff @param {ReadonlyArray<Finding>} open
+ * @param {string} [moved] - the `## moved code` section the packet carries (B56).
+ * @returns {number}
  */
-export function recheckTokens(diff, open) {
-  return diffOnlyTokens({ diff, lens: 'recheck' }) + Math.ceil(Buffer.byteLength(openFindingsText(open)) / 4);
+export function recheckTokens(diff, open, moved = '') {
+  return diffOnlyTokens({ diff, lens: 'recheck', moved }) + Math.ceil(Buffer.byteLength(openFindingsText(open)) / 4);
 }
 
 /**
  * The recheck packet: the `recheck` lens on the fix hunks (hunk form, never the whole file), then
  * the open findings by id. Over budget ⇒ `minimal` (see the module doc).
- * @param {{diff: import('./packet.mjs').FileDiff, open: Finding[], cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', rulesDigest?: string, factsExcerpt?: string}} opts
+ * @param {{diff: import('./packet.mjs').FileDiff, open: Finding[], cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', rulesDigest?: string, factsExcerpt?: string, moved?: string}} opts -
+ *   `moved`: the file's `## moved code` section (B56), '' for none.
  */
-export function buildRecheckPacket({ diff, open, cfg, contextMode = 'recheck', rulesDigest, factsExcerpt }) {
-  const packet = assemblePacket({ diff, lens: 'recheck', cfg, contextMode, rulesDigest, factsExcerpt });
+export function buildRecheckPacket({ diff, open, cfg, contextMode = 'recheck', rulesDigest, factsExcerpt, moved = '' }) {
+  const packet = assemblePacket({ diff, lens: 'recheck', cfg, contextMode, rulesDigest, factsExcerpt, moved });
   if (packet.status !== 'ok') return packet;
   const text = `${packet.text}${openFindingsText(open)}`;
   return { ...packet, text, tokensIn: packet.tokensIn + Math.ceil(Buffer.byteLength(text.slice(packet.text.length)) / 4) };
+}
+
+/**
+ * B56: the peer readers built from `deps.peers` (no `deps.peerDiffs`): per deps object, one reader
+ * per (repoRoot, base, file, peers) key, so A → B → A on one deps reads A's peers once.
+ * @type {WeakMap<object, Map<string, () => Promise<import('./moved.mjs').PeerDiff[]>>>}
+ */
+const peerReaders = new WeakMap();
+
+/**
+ * The peers' diffs reader of a recheck: `deps.peerDiffs` when the caller gave one, else ONE
+ * memoised `peerDiffReader` per deps object and (repoRoot, base, file, peers) key, so the peers are
+ * read once however many rechecks run with the same deps (one ticket), whatever the order.
+ * @param {LoopDeps} deps @param {string} base @param {string} rel
+ * @returns {() => Promise<import('./moved.mjs').PeerDiff[]>}
+ */
+function recheckPeerDiffs(deps, base, rel) {
+  if (deps.peerDiffs) return deps.peerDiffs;
+  const key = JSON.stringify([deps.repoRoot, base, rel, deps.peers ?? null]);
+  let readers = peerReaders.get(deps);
+  if (!readers) {
+    readers = new Map();
+    peerReaders.set(deps, readers);
+  }
+  const known = readers.get(key);
+  if (known) return known;
+  const reader = peerDiffReader({ repoRoot: deps.repoRoot, base, file: rel, peers: deps.peers });
+  readers.set(key, reader);
+  return reader;
+}
+
+/**
+ * The recheck's moves (B56): from the file's diff against the block base (the one already read
+ * for `recheck_scope: file`, else read here), never from the fix hunks; the peers' diffs from the
+ * memoised reader (`recheckPeerDiffs`). No base, no peer, or ANY failure (building the reader
+ * included) ⇒ null: no hint, the recheck goes on.
+ * @param {LoopDeps} deps @param {string} rel @param {import('./packet.mjs').FileDiff | null} baseDiff
+ * @returns {Promise<import('./moved.mjs').Moves | null>}
+ */
+async function recheckMoves(deps, rel, baseDiff) {
+  try {
+    if (typeof deps.base !== 'string') return null;
+    const peerDiffs = recheckPeerDiffs(deps, deps.base, rel);
+    // nothing to read when there is no peer: the base diff is read only for a real peer set
+    if ((await peerDiffs()).length === 0) return null;
+    const diff = baseDiff ?? (await readFileDiff({ repoRoot: deps.repoRoot, file: rel, base: deps.base }));
+    return await movesFor({ diff, peerDiffs });
+  } catch {
+    return null;
+  }
 }
 
 /** @param {Finding} f @param {ReadonlyArray<Hunk>} hunks @returns {boolean} */
@@ -568,16 +636,17 @@ export async function runRound(state, deps, opts = {}) {
       draft.open = [];
       if (pending.length > 0) {
         const contextMode = s.scope === 'file' ? 'auto' : 'recheck';
-        const whole = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt });
-        /** @type {Array<{index: number | null, heading: string | null, diff: import('./packet.mjs').FileDiff, open: Finding[]}>} */
-        let parts = [{ index: null, heading: null, diff, open: pending }];
+        const moves = await recheckMoves(deps, current.rel, s.scope === 'file' ? diff : null);
+        const whole = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved: movedText(moves, diff.content, null) });
+        /** @type {Array<{index: number | null, heading: string | null, diff: import('./packet.mjs').FileDiff, open: Finding[], keys: number[] | null}>} */
+        let parts = [{ index: null, heading: null, diff, open: pending, keys: null }];
         if (whole.status !== 'ok') {
           // deterministic (the same hunks build the same packet): terminal, never a retry — except
           // a Markdown file whose packet is `split_required`, rechecked section by section (B54);
           // any other status stops as it always did
-          const packed = whole.status === 'split_required' && isMarkdownFile(current.rel) ? packRecheck(diff, pending, whole.budget) : null;
+          const packed = whole.status === 'split_required' && isMarkdownFile(current.rel) ? packRecheck(diff, pending, whole.budget, moves) : null;
           if (!packed || packed.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, packed ?? whole);
-          parts = packed.sections.map((sec) => ({ index: sec.index, heading: sec.headings[0], diff: sec.diff, open: sec.open }));
+          parts = packed.sections.map((sec) => ({ index: sec.index, heading: sec.headings[0], diff: sec.diff, open: sec.open, keys: sec.keys }));
         }
         // EVERY packet is built and held to the budget BEFORE any session runs: a section over it
         // stops the round as split_required (with its heading) before anything is spent
@@ -588,10 +657,11 @@ export async function runRound(state, deps, opts = {}) {
             built.push(whole);
             continue;
           }
-          const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt });
+          const moved = movedText(moves, diff.content, part.keys);
+          const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved });
           // a packet that fails to build stops with ITS status (and size, when it has one)
           if (packet.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, { ...packet, section: part.heading });
-          const size = recheckTokens(part.diff, part.open);
+          const size = recheckTokens(part.diff, part.open, moved);
           if (size > whole.budget) return stopBeforeRound(state, deps, kind, current.rel, { status: 'split_required', tokensIn: size, budget: whole.budget, section: part.heading });
           built.push(packet);
         }
