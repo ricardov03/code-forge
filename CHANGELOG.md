@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.7.6] — 2026-10-11
+
 ### Added
 
 - review.external {required, name} (B58, issue #11): an owner-approved outside reviewer replaces the local per-file
