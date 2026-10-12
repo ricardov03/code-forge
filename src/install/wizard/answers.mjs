@@ -58,8 +58,9 @@ export function linkDirsFromManifests(cwd) {
 
 /**
  * The proof profile is decided from the project, not from the gate detector's stack name alone:
- * `detectGates` (B5) names only `php-pest`, so a Laravel app on PHPUnit reaches here as `node`
- * (its Vite `package.json`) or `unknown` — `composer.json` + `artisan` is Laravel either way.
+ * `detectGates` names a Laravel app `php-pest` or `php-phpunit` only once its runner is installed
+ * (`vendor/bin/…`); before that it reaches here as `node` (its Vite `package.json`) or `unknown` —
+ * `composer.json` + `artisan` is Laravel either way.
  * @param {string} stack - `detectGates().stack`
  * @param {string} cwd
  * @returns {string} the proof profile: `laravel`, `php`, `node`, `python`, `rust`, `go` or `unknown`.

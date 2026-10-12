@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 63,
+  "block_count": 64,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -866,6 +866,19 @@
         "B59"
       ],
       "note": "root-added 2026-10-11; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/gates/{run,detect}.mjs, src/proof/{export,lock}.mjs, src/cli/{gates,block}.mjs, src/state/{block,registry}.mjs, src/config/validate.mjs, src/doctor/local.mjs, src/install/wizard/{answers,steps,summary}.mjs, src/autopilot/binnacle.mjs, schema/code-forge.schema.json, docs/reference/config.md, docs/{how-it-works,concepts}.md, skill/SKILL.md, skill/references/{proof,code,ledger}.md"
+    },
+    "B61": {
+      "title": "Laravel under export, verified (issue #13 item 3): composer.json + vendor/bin/phpunit without Pest is the php-phpunit stack (php artisan test --compact with artisan, else vendor/bin/phpunit; PHP is detected before Node); export copies a Composer vendor (link_dirs entry holding composer/autoload_real.php, resolved through realpath, reflink when possible) instead of linking it, because PHP resolves __DIR__ through symlinks and a linked vendor autoloaded app code from the main tree; absolute links into the main tree are pointed into the export; an opt-in live test (CODE_FORGE_LIVE_PHP=1) runs a Laravel skeleton on PHPUnit and on Pest green through the export while the main tree is red; proof.md marks PHP under export VERIFIED",
+      "wave": 13,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "test/proof/laravel-live.test.mjs"
+      ],
+      "depends_on": [
+        "B60"
+      ],
+      "note": "root-added 2026-10-11; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/gates/detect.mjs, src/proof/export.mjs, src/install/wizard/answers.mjs (comment), test/gates/detect.test.mjs, test/proof/export.test.mjs, test/init/fix-r3.test.mjs (Laravel+PHPUnit now php-phpunit), docs/{how-it-works,concepts,getting-started}.md, skill/references/proof.md"
     }
   }
 }

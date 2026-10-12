@@ -10,7 +10,12 @@
  *   (c) `proof.export.copy_untracked` paths that exist in the main tree ride along through
  *       `git archive --add-file` (never anything under `.code-forge/`);
  *   (d) the block's owned files at their CURRENT content (new files included, deleted ones removed);
- *   (e) `proof.export.link_dirs` symlinked from the main tree.
+ *   (e) `proof.export.link_dirs` symlinked from the main tree — except a Composer vendor directory
+ *       (B61: it holds `composer/autoload_real.php`), which is COPIED. PHP resolves `__DIR__`
+ *       through symlinks, so a linked vendor makes Composer's autoloader load the app's own classes
+ *       (`App\…`, `Tests\…`) from the MAIN tree, not the export: another block's half-written file
+ *       would leak into the measurement. Composer's generated paths are relative to the vendor
+ *       directory, so the copy points at the export's own `app/`, `tests/` and `database/`.
  *
  * A gate that fails inside the export on a file the export lacks but the main tree has is
  * `export.incomplete: <path>`, never a red test (`classifyExportFailure`).
@@ -24,7 +29,8 @@
  * `checkout-index`).
  */
 
-import { copyFile, lstat, mkdir, mkdtemp, readlink, realpath, rm, stat, symlink } from 'node:fs/promises';
+import { constants } from 'node:fs';
+import { copyFile, cp, lstat, mkdir, mkdtemp, readdir, readlink, realpath, rm, stat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { runGates } from '../gates/run.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -44,6 +50,8 @@ export const ISOLATIONS = Object.freeze(/** @type {const} */ (['export', 'lock']
 const BLOCK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const GIT_TIMEOUT_MS = 120000;
 const STATE_DIR = '.code-forge';
+/** B61: the file that makes a `link_dirs` entry a Composer vendor directory (copied, not linked). */
+const COMPOSER_AUTOLOADER = path.join('composer', 'autoload_real.php');
 
 /**
  * `process.env` minus every `GIT_*`, plus `extra`.
@@ -83,6 +91,58 @@ function assertRelPath(p, key) {
     throw new StateError('bad-path', `${key}: no ".", ".." or empty segments`);
   }
   return p;
+}
+
+/**
+ * B61: a Composer vendor directory (it holds `composer/autoload_real.php`) — copied into the export,
+ * never linked: PHP resolves `__DIR__` through a symlink, so a linked vendor would autoload the
+ * app's classes from the main tree.
+ * @param {string} dir @returns {Promise<boolean>}
+ */
+async function isComposerVendor(dir) {
+  return (await stat(path.join(dir, COMPOSER_AUTOLOADER)).catch(() => null))?.isFile() ?? false;
+}
+
+/**
+ * B61: inside a copied dependency dir, every absolute symlink whose target is in the main tree
+ * (a Composer path repository: `vendor/acme/pkg -> <main>/packages/pkg`) is pointed at the same
+ * place in the export; a link to the main-tree root points at the export root. Relative links,
+ * links outside the main tree and links into the main tree's `.code-forge/` (the export has none)
+ * stay as they are.
+ *
+ * `copy` must be a real directory (refused otherwise, before anything changes), and the walk never
+ * goes through a symlink: a `Dirent` from `readdir` describes the entry itself (lstat semantics), so
+ * only real directories are entered — a link is only ever rewritten, never followed, and nothing
+ * outside the copy is touched.
+ * @param {string} copy - the copied dir in the export @param {string[]} mainRoots - the main tree, as given and real
+ * @param {string} dir - the export root
+ */
+async function retargetMainTreeLinks(copy, mainRoots, dir) {
+  const at = await lstatOrNull(copy);
+  if (!at?.isDirectory()) throw new StateError('export-not-copied', `buildExport: ${copy} is not a real directory; its links are left unchanged`);
+  /** @type {string[]} */
+  const pending = [copy];
+  while (pending.length > 0) {
+    const current = /** @type {string} */ (pending.pop());
+    for (const entry of await readdir(current, { withFileTypes: true })) {
+      const entryPath = path.join(current, entry.name);
+      if (entry.isDirectory()) {
+        pending.push(entryPath);
+        continue;
+      }
+      if (!entry.isSymbolicLink()) continue;
+      const target = await readlink(entryPath);
+      if (!path.isAbsolute(target)) continue;
+      for (const root of mainRoots) {
+        const rel = path.relative(root, target);
+        if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) continue;
+        if (rel === STATE_DIR || rel.startsWith(`${STATE_DIR}${path.sep}`)) break;
+        await rm(entryPath, { force: true });
+        await symlink(rel === '' ? dir : path.join(dir, rel), entryPath);
+        break;
+      }
+    }
+  }
 }
 
 /** @param {string} p @returns {Promise<import('node:fs').Stats | null>} */
@@ -160,8 +220,8 @@ async function exportIgnoredBlobs(entries, base, cwd) {
  *   cwd: string, blockId: string, baseSha: string, owned: ReadonlyArray<string>, ownedKinds?: Readonly<Record<string, string>>,
  *   linkDirs?: ReadonlyArray<string>, copyUntracked?: ReadonlyArray<string>, exportRoot?: string,
  * }} opts
- * @returns {Promise<{dir: string, base: string, restored: string[], untracked: string[], owned: string[], removed: string[], linked: string[]}>}
- *   repo-relative lists, sorted.
+ * @returns {Promise<{dir: string, base: string, restored: string[], untracked: string[], owned: string[], removed: string[], linked: string[], copied: string[]}>}
+ *   repo-relative lists, sorted; `copied` is the `linkDirs` entries copied as Composer vendor dirs.
  */
 export async function buildExport(opts) {
   const { blockId, baseSha, owned, linkDirs = DEFAULT_LINK_DIRS, copyUntracked = DEFAULT_COPY_UNTRACKED } = opts;
@@ -268,8 +328,9 @@ export async function buildExport(opts) {
       ownedCopied.push(rel);
     }
 
-    // (e) dependency dirs, linked from the main tree.
+    // (e) dependency dirs, linked from the main tree; a Composer vendor dir is copied (B61).
     const linked = [];
+    const copied = [];
     for (const rel of linkDirs) {
       const src = path.join(cwd, rel);
       const st = await stat(src).catch(() => null);
@@ -277,11 +338,31 @@ export async function buildExport(opts) {
       const dest = path.join(dir, rel);
       await rm(dest, { recursive: true, force: true });
       await mkdir(path.dirname(dest), { recursive: true });
+      const real = await realpath(src);
+      if (await isComposerVendor(real)) {
+        // Copied from its real directory, so the copy is a real directory even when the main tree's
+        // entry is a symlink. Relative symlinks inside (vendor/bin entries) resolve in the copy;
+        // absolute ones into the main tree are pointed at the export. A copy-on-write clone where
+        // the file system has one.
+        await cp(real, dest, { recursive: true, verbatimSymlinks: true, mode: constants.COPYFILE_FICLONE });
+        await retargetMainTreeLinks(dest, [...new Set([path.resolve(opts.cwd), cwd])], dir);
+        copied.push(rel);
+        continue;
+      }
       await symlink(src, dest, 'dir');
       linked.push(rel);
     }
 
-    return { dir, base, restored: [...restored].sort(), untracked: untracked.sort(), owned: ownedCopied, removed: [...removedSet].sort(), linked: linked.sort() };
+    return {
+      dir,
+      base,
+      restored: [...restored].sort(),
+      untracked: untracked.sort(),
+      owned: ownedCopied,
+      removed: [...removedSet].sort(),
+      linked: linked.sort(),
+      copied: copied.sort(),
+    };
   } finally {
     await rm(scratch, { recursive: true, force: true });
   }

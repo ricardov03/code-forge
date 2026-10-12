@@ -12,6 +12,10 @@ waits on a second real consumer (plan §10.4, Q17).
   item exactly {test_files} becomes those files, or the full suite runs when the block owns more than
   gates.full_suite_threshold_files files or no test file is known. Gate rows carry scope, reason and test_count. A gate
   can be {argv, env}; env values are never printed or recorded, and child output masks values of 8 or more characters.
+- B61: Laravel under export isolation is verified. A Laravel or plain PHP project on PHPUnit without Pest is detected as
+  php-phpunit. Export copies a Composer vendor folder instead of linking it, so PHP autoloads the code of the block and
+  not the main tree. An opt-in live check (CODE_FORGE_LIVE_PHP=1) runs a Laravel app on PHPUnit and on Pest through the
+  export.
 
 ## [0.7.7] — 2026-10-11
 

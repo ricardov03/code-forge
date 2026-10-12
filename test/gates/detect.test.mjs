@@ -1,5 +1,7 @@
 import './support.mjs';
 import assert from 'node:assert/strict';
+import { mkdir, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import test from 'node:test';
 import { detectGates } from '../../src/gates/detect.mjs';
 import { withTempDir } from './support.mjs';
@@ -103,6 +105,77 @@ test('php artisan absent ⇒ falls back to bare vendor/bin/pest', async () => {
     await mkdir(path.join(dir, 'vendor', 'bin'), { recursive: true });
     await writeFile(path.join(dir, 'vendor', 'bin', 'pest'), '#!/usr/bin/env php\n');
     assert.deepEqual(detectGates(dir).test, ['vendor/bin/pest']);
+  });
+});
+
+// ── B61: PHPUnit without Pest ────────────────────────────────────────────────
+
+/**
+ * Write fixture files into `dir`: `package.json` gets the given `scripts`; every other path (an
+ * `artisan` file, `vendor/bin/*` binaries, a `phpstan.neon*` config) gets a PHP stub.
+ * @param {string} dir @param {string[]} files @param {Record<string, string>} [scripts]
+ */
+async function writeFiles(dir, files, scripts = { dev: 'vite', build: 'vite build' }) {
+  for (const rel of files) {
+    await mkdir(path.dirname(path.join(dir, rel)), { recursive: true });
+    await writeFile(path.join(dir, rel), rel === 'package.json' ? JSON.stringify({ private: true, scripts }) : '#!/usr/bin/env php\n<?php\n');
+  }
+}
+
+/**
+ * Write a PHP project: a `composer.json`, then `files` through `writeFiles`.
+ * @param {string} dir @param {string[]} files @param {Record<string, string>} [scripts]
+ */
+async function writePhpProject(dir, files, scripts) {
+  await writeFile(path.join(dir, 'composer.json'), JSON.stringify({ name: 'fixture/php', require: { php: '^8.2' } }, null, 2));
+  await writeFiles(dir, files, scripts);
+}
+
+test('B61 Laravel+PHPUnit: composer.json + artisan + vendor/bin/phpunit, no pest ⇒ php-phpunit, php artisan test --compact, phpstan, pint --test', async () => {
+  await withTempDir(async (dir) => {
+    await writePhpProject(dir, ['artisan', 'vendor/bin/phpunit', 'vendor/bin/pint', 'phpstan.neon.dist', 'package.json']);
+    assert.deepEqual(detectGates(dir), {
+      stack: 'php-phpunit',
+      test: ['php', 'artisan', 'test', '--compact'],
+      lint: null,
+      types: ['vendor/bin/phpstan'],
+      format: ['vendor/bin/pint', '--test'],
+    });
+  });
+});
+
+test('B61 plain PHPUnit: no artisan ⇒ php-phpunit runs vendor/bin/phpunit; no phpstan config and no pint ⇒ types and format null', async () => {
+  await withTempDir(async (dir) => {
+    await writePhpProject(dir, ['vendor/bin/phpunit']);
+    assert.deepEqual(detectGates(dir), { stack: 'php-phpunit', test: ['vendor/bin/phpunit'], lint: null, types: null, format: null });
+  });
+});
+
+test('B61 Laravel+Pest is unchanged: with both vendor/bin/pest and vendor/bin/phpunit the stack is php-pest with the same argv', async () => {
+  await withTempDir(async (dir) => {
+    await buildLaravelVue(dir);
+    await writeFiles(dir, ['vendor/bin/phpunit']); // the fixture's own composer.json is kept
+    assert.deepEqual(detectGates(dir), {
+      stack: 'php-pest',
+      test: ['php', 'artisan', 'test', '--compact'],
+      lint: null,
+      types: ['vendor/bin/phpstan'],
+      format: ['vendor/bin/pint', '--test'],
+    });
+  });
+});
+
+test('B61 PHP before Node: composer.json + vendor/bin/phpunit + a package.json with a test script ⇒ php-phpunit, not node', async () => {
+  await withTempDir(async (dir) => {
+    await writePhpProject(dir, ['vendor/bin/phpunit', 'package.json'], { test: 'vitest run' });
+    assert.deepEqual(detectGates(dir), { stack: 'php-phpunit', test: ['vendor/bin/phpunit'], lint: null, types: null, format: null });
+  });
+});
+
+test('B61 no vendor: composer.json + artisan without an installed runner is not a PHP stack (unknown, every gate null)', async () => {
+  await withTempDir(async (dir) => {
+    await writePhpProject(dir, ['artisan', 'phpstan.neon', 'package.json']);
+    assert.deepEqual(detectGates(dir), { stack: 'unknown', test: null, lint: null, types: null, format: null });
   });
 });
 

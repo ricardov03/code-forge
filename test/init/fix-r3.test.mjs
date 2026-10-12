@@ -49,10 +49,11 @@ async function laravelRun(args, extraEnv = { CLAUDECODE: '1', CODE_FORGE_KEY_JEV
 
 // ── 1. Laravel on PHPUnit ───────────────────────────────────────────────────
 
-test('a Laravel app on PHPUnit (stack is not php-pest) gets copy_untracked [".env", ".env.testing"]', async () => {
+test('a Laravel app on PHPUnit (stack php-phpunit, not php-pest) gets copy_untracked [".env", ".env.testing"]', async () => {
   const cwd = await makeProject(buildLaravelPhpunit);
-  // the gate detector does not know this project as PHP at all — the profile must not depend on it
-  assert.equal(detectGates(cwd).stack, 'unknown');
+  // B61: the gate detector knows it as php-phpunit; the profile must not depend on the stack name
+  assert.equal(detectGates(cwd).stack, 'php-phpunit');
+  assert.equal(proofProfile('php-phpunit', cwd), 'laravel');
   assert.equal(proofProfile('unknown', cwd), 'laravel');
   assert.equal(proofProfile('node', cwd), 'laravel');
   const home = freshDir('home');

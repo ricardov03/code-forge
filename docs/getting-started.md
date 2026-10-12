@@ -83,10 +83,10 @@ anything; it asks about them only if you pick **Customize now**:
 
 | Setting | Where it comes from | When nothing is found | Flag to set it |
 |---|---|---|---|
-| `gates.test`, `gates.lint`, `gates.types`, `gates.format` | detected from `package.json`, `composer.json`, `Cargo.toml`, `pyproject.toml`, `go.mod` | blank (`null`) | `--gate name=cmd` |
+| `gates.test`, `gates.lint`, `gates.types`, `gates.format` | detected from `package.json`, `composer.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`. PHP needs its runner installed: `vendor/bin/pest` (Pest), else `vendor/bin/phpunit` (PHPUnit); a Laravel app (`artisan`) tests with `php artisan test --compact`, other PHP with the runner itself. The first match wins, in this order: PHP (`composer.json` with a runner installed), `package.json`, `Cargo.toml`, `pyproject.toml`, `go.mod`; so a Laravel app with a `package.json` is a PHP stack | blank (`null`) | `--gate name=cmd` |
 | `proof.tiers.high.paths` | never detected: the project does not say which paths are high-risk | blank (`[]`): no file is high tier because of its path (risk and security still can make it high) | `--proof high=a,b` |
 | `proof.isolation` | `export` | — | `--proof isolation=export\|lock` |
-| `proof.export.link_dirs` | each dependency folder whose manifest exists, installed or not: `composer.json` or `go.mod` ⇒ `vendor`; `package.json` ⇒ `node_modules`; `pyproject.toml`, `requirements.txt`, `setup.py` or `Pipfile` ⇒ `.venv`; `Cargo.toml` ⇒ `target` | blank (`[]`) | `--proof link_dirs=a,b` |
+| `proof.export.link_dirs` | each dependency folder whose manifest exists, installed or not: `composer.json` or `go.mod` ⇒ `vendor`; `package.json` ⇒ `node_modules`; `pyproject.toml`, `requirements.txt`, `setup.py` or `Pipfile` ⇒ `.venv`; `Cargo.toml` ⇒ `target`. The export links each one, except a Composer `vendor` (it holds `composer/autoload_real.php`), which it copies | blank (`[]`) | `--proof link_dirs=a,b` |
 | `proof.export.copy_untracked` | the stack's env files that exist: Laravel `.env`, `.env.testing`; Node `.env`, `.env.test`; other PHP and Python `.env`. A PHP project (`composer.json`) counts as Laravel when it has an `artisan` file in its root, whatever its test runner | blank (`[]`) | `--proof copy_untracked=a,b` |
 
 For a Node project with no type checker the summary reads:

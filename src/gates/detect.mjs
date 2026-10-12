@@ -4,7 +4,7 @@
  * arrays, or `null` when the stack has no tool for that gate. Detection is pure filesystem
  * evidence (`fs.existsSync`/`readFileSync`) — no `git`, no child process, no network.
  *
- * Evidence is checked in the table's own order (PHP/Pest, then `package.json` scripts, Cargo,
+ * Evidence is checked in the table's own order (PHP/Pest or PHPUnit, then `package.json` scripts, Cargo,
  * pyproject, go.mod); the first stack whose marker file exists wins. A project with no marker
  * file at all is `unknown`: every gate is `null`, and `code` (a later block) refuses to run a
  * block whose `gates.test` is null — a block without a test gate cannot produce evidence.
@@ -23,7 +23,10 @@ import path from 'node:path';
  * @typedef {string[] | {argv: string[], failOnStdout?: true, env?: Record<string, string>}} GateCommand
  * @typedef {GateCommand | null} Gate
  */
-/** @typedef {{stack: string, test: Gate, lint: Gate, types: Gate, format: Gate}} DetectedGates */
+/**
+ * `stack` is one of `php-pest`, `php-phpunit`, `node`, `rust`, `python`, `go` or `unknown`.
+ * @typedef {{stack: string, test: Gate, lint: Gate, types: Gate, format: Gate}} DetectedGates
+ */
 
 /** @param {string} root @param {string} rel @returns {boolean} */
 function has(root, rel) {
@@ -51,15 +54,23 @@ function readText(root, rel) {
   }
 }
 
-// ── PHP / Pest ───────────────────────────────────────────────────────────────
+// ── PHP (Pest, PHPUnit) ─────────────────────────────────────────────────────
 
-/** @param {string} root @returns {DetectedGates | null} */
+/**
+ * `composer.json` plus an installed runner: `vendor/bin/pest` is `php-pest` (checked first, so a
+ * project with both binaries is Pest), else `vendor/bin/phpunit` is `php-phpunit` (B61). A Laravel
+ * app (`artisan` present) runs either through `php artisan test --compact`; without `artisan` the
+ * runner's own binary runs. `types` and `format` do not depend on the runner.
+ * @param {string} root @returns {DetectedGates | null}
+ */
 function detectPhp(root) {
-  if (!has(root, 'composer.json') || !has(root, 'vendor/bin/pest')) return null;
-  const test = has(root, 'artisan') ? ['php', 'artisan', 'test', '--compact'] : ['vendor/bin/pest'];
+  if (!has(root, 'composer.json')) return null;
+  const runner = has(root, 'vendor/bin/pest') ? 'pest' : has(root, 'vendor/bin/phpunit') ? 'phpunit' : null;
+  if (runner === null) return null;
+  const test = has(root, 'artisan') ? ['php', 'artisan', 'test', '--compact'] : [`vendor/bin/${runner}`];
   const types = has(root, 'phpstan.neon') || has(root, 'phpstan.neon.dist') ? ['vendor/bin/phpstan'] : null;
   const format = has(root, 'pint.json') || has(root, 'vendor/bin/pint') ? ['vendor/bin/pint', '--test'] : null;
-  return { stack: 'php-pest', test, lint: null, types, format };
+  return { stack: `php-${runner}`, test, lint: null, types, format };
 }
 
 // ── Node (package.json scripts) ────────────────────────────────────────────

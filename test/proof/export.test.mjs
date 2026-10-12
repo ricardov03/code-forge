@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readlinkSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { buildExport, incompleteMessage, runGatesInExport } from '../../src/proof/export.mjs';
@@ -114,4 +114,119 @@ test('a file missing from the main tree too is a real red, not export.incomplete
   const run = await runGatesInExport({ gates: { test: [process.execPath, 'gate.mjs', 'missing.txt'] }, exportDir: exp.dir, mainTree: ws });
 
   assert.deepEqual([run.results[0].result, run.incomplete.length, run.allOk], ['red', 0, false]);
+});
+
+// ── B61: a Composer vendor dir is copied, not linked ───────────────────────────
+
+/**
+ * A Composer-style `vendor/` in the main tree: the generated autoloader, one package file and a
+ * relative `vendor/bin` symlink to it.
+ * @param {string} ws
+ */
+function writeComposerVendor(ws) {
+  mkdirSync(path.join(ws, 'vendor/composer'), { recursive: true });
+  mkdirSync(path.join(ws, 'vendor/acme/tool'), { recursive: true });
+  mkdirSync(path.join(ws, 'vendor/bin'), { recursive: true });
+  writeFileSync(path.join(ws, 'vendor/composer/autoload_real.php'), '<?php // fixture autoloader\n');
+  writeFileSync(path.join(ws, 'vendor/autoload.php'), '<?php // fixture autoload\n');
+  writeFileSync(path.join(ws, 'vendor/acme/tool/run.php'), '<?php // tool v1\n');
+  symlinkSync('../acme/tool/run.php', path.join(ws, 'vendor/bin/tool'));
+}
+
+test('B61: a link_dirs entry holding composer/autoload_real.php is copied into the export (a real directory, relative vendor/bin links kept); node_modules stays linked', async () => {
+  const ws = tempDir('composer-vendor');
+  const { baseSha } = buildExportIgnoreRepo(ws);
+  writeComposerVendor(ws);
+  const exp = await buildExport({ cwd: ws, blockId: 'A', baseSha, owned: OWNED_A, ...DEFAULT_OPTS });
+
+  assert.deepEqual([exp.copied, exp.linked], [['vendor'], ['node_modules']]);
+  const vendor = path.join(exp.dir, 'vendor');
+  assert.deepEqual([lstatSync(vendor).isSymbolicLink(), lstatSync(vendor).isDirectory()], [false, true]);
+  assert.deepEqual([readlinkSync(path.join(vendor, 'bin/tool')), readIn(exp.dir, 'vendor/bin/tool')], ['../acme/tool/run.php', '<?php // tool v1\n']);
+  // what an autoloader computing its directory from its own real path sees: the export, not the main tree
+  const where = await runGatesInExport({
+    gates: { test: [process.execPath, '-e', "process.stdout.write(require('node:fs').realpathSync('vendor/composer/autoload_real.php'))"] },
+    exportDir: exp.dir,
+    mainTree: ws,
+  });
+  assert.deepEqual([where.allOk, where.results[0].stdout], [true, path.join(realpathSync(exp.dir), 'vendor/composer/autoload_real.php')]);
+  // a later change to the main tree's vendor does not reach the export
+  writeFileSync(path.join(ws, 'vendor/acme/tool/run.php'), '<?php // tool v2\n');
+  assert.equal(readIn(exp.dir, 'vendor/acme/tool/run.php'), '<?php // tool v1\n');
+});
+
+test('B61: in a copied Composer vendor an absolute link into the main tree (a path repository) points into the export; a link outside the main tree is kept', async () => {
+  const ws = tempDir('composer-path-repo');
+  const { baseSha } = buildExportIgnoreRepo(ws);
+  writeComposerVendor(ws);
+  mkdirSync(path.join(ws, 'packages/pkg'), { recursive: true });
+  const outside = tempDir('composer-outside');
+  symlinkSync(path.join(ws, 'packages/pkg'), path.join(ws, 'vendor/acme/pkg'));
+  symlinkSync(path.join(realpathSync(ws), 'packages/pkg'), path.join(ws, 'vendor/acme/pkg-real'));
+  symlinkSync(outside, path.join(ws, 'vendor/acme/shared'));
+  const exp = await buildExport({ cwd: ws, blockId: 'A', baseSha, owned: OWNED_A, ...DEFAULT_OPTS });
+
+  assert.deepEqual(exp.copied, ['vendor']);
+  assert.deepEqual(
+    ['vendor/acme/pkg', 'vendor/acme/pkg-real', 'vendor/acme/shared', 'vendor/bin/tool'].map((rel) => readlinkSync(path.join(exp.dir, rel))),
+    [path.join(exp.dir, 'packages/pkg'), path.join(exp.dir, 'packages/pkg'), outside, '../acme/tool/run.php'],
+  );
+  // the main tree's links are untouched
+  assert.equal(readlinkSync(path.join(ws, 'vendor/acme/pkg')), path.join(ws, 'packages/pkg'));
+});
+
+test('B61: in a copied Composer vendor a link to the main-tree root points at the export root; a link into the main tree\'s .code-forge/ is kept', async () => {
+  const ws = tempDir('composer-root-link');
+  const { baseSha } = buildExportIgnoreRepo(ws);
+  writeComposerVendor(ws);
+  symlinkSync(ws, path.join(ws, 'vendor/acme/root'));
+  symlinkSync(path.join(ws, '.code-forge/cache'), path.join(ws, 'vendor/acme/state'));
+  const exp = await buildExport({ cwd: ws, blockId: 'A', baseSha, owned: OWNED_A, ...DEFAULT_OPTS });
+
+  assert.deepEqual(
+    ['vendor/acme/root', 'vendor/acme/state'].map((rel) => readlinkSync(path.join(exp.dir, rel))),
+    [exp.dir, path.join(ws, '.code-forge/cache')],
+  );
+});
+
+test('B61: a main-tree vendor that is a symlink to a Composer vendor elsewhere is copied as a real directory, and the real vendor\'s links (and those behind a linked dir) stay byte-for-byte', async () => {
+  const ws = tempDir('composer-linked-vendor');
+  const { baseSha } = buildExportIgnoreRepo(ws);
+  const shared = tempDir('composer-shared');
+  writeComposerVendor(shared);
+  const behind = tempDir('composer-behind-link');
+  symlinkSync(path.join(ws, 'packages/inner'), path.join(behind, 'inner'));
+  symlinkSync(path.join(ws, 'packages/pkg'), path.join(shared, 'vendor/acme/pkg'));
+  symlinkSync(behind, path.join(shared, 'vendor/acme/linked-dir'));
+  symlinkSync(path.join(shared, 'vendor'), path.join(ws, 'vendor'));
+  const links = [
+    path.join(shared, 'vendor/bin/tool'),
+    path.join(shared, 'vendor/acme/pkg'),
+    path.join(shared, 'vendor/acme/linked-dir'),
+    path.join(behind, 'inner'),
+    path.join(ws, 'vendor'),
+  ];
+  const before = links.map((p) => readlinkSync(p, { encoding: 'buffer' }));
+  const exp = await buildExport({ cwd: ws, blockId: 'A', baseSha, owned: OWNED_A, ...DEFAULT_OPTS });
+
+  assert.deepEqual([exp.copied, exp.linked], [['vendor'], ['node_modules']]);
+  const vendor = path.join(exp.dir, 'vendor');
+  assert.deepEqual([lstatSync(vendor).isSymbolicLink(), lstatSync(vendor).isDirectory()], [false, true]);
+  assert.deepEqual(
+    ['vendor/acme/pkg', 'vendor/acme/linked-dir', 'vendor/bin/tool'].map((rel) => readlinkSync(path.join(exp.dir, rel))),
+    [path.join(exp.dir, 'packages/pkg'), behind, '../acme/tool/run.php'],
+  );
+  assert.deepEqual(links.map((p) => readlinkSync(p, { encoding: 'buffer' })), before);
+});
+
+test('B61: a vendor dir without composer/autoload_real.php (a Go vendor) is still linked, and nothing is copied', async () => {
+  const ws = tempDir('go-vendor');
+  const { baseSha } = buildExportIgnoreRepo(ws);
+  mkdirSync(path.join(ws, 'vendor/example.com/mod'), { recursive: true });
+  writeFileSync(path.join(ws, 'vendor/modules.txt'), '# example.com/mod v1.0.0\n');
+  const exp = await buildExport({ cwd: ws, blockId: 'A', baseSha, owned: OWNED_A, ...DEFAULT_OPTS });
+
+  assert.deepEqual([exp.copied, exp.linked], [[], ['node_modules', 'vendor']]);
+  const vendor = path.join(exp.dir, 'vendor');
+  assert.deepEqual([lstatSync(vendor).isSymbolicLink(), readlinkSync(vendor)], [true, path.join(realpathSync(ws), 'vendor')]);
 });

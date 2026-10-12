@@ -17,6 +17,10 @@ Next release:
   files than `gates.full_suite_threshold_files`, or no test file is known, the full suite runs.
   The ledger row says which one ran. A gate can also be `{argv, env}`. Env values are never
   printed. Gate env is not a secret store.
+- **Laravel works under export, checked live.** A Laravel app on PHPUnit (no Pest) is now
+  detected. Export copies the Composer `vendor` folder instead of linking it, so the tests load
+  the block's code, not the main tree's. A live check (`CODE_FORGE_LIVE_PHP=1`) runs a Laravel
+  app on PHPUnit and on Pest through the export.
 
 In 0.7.7:
 
