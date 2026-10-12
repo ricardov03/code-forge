@@ -10,6 +10,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Review state is saved under ~/.code-forge/runs/<run>/review-state/ instead of the temp root; older state files are
   moved once after an anchor check; doctor warns about missing state files of active runs (#15)
+- Review state: the reviewed text is stored as a git blob (reviewed_content_blob in the signed review.state body), so a
+  restored state keeps reviewed_content after the file changed; a missing, malformed or mismatching blob falls back to
+  the full-file review.
 
 ### Fixed
 

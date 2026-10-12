@@ -509,7 +509,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
     if (loaded.status === 'restored' && loaded.state !== null) {
       // B68: the lost file is rebuilt from the anchor's signed body; saved as a new seq, then recorded
       const writeRow = /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow);
-      await saveState({ ...where, state: loaded.state, seq, writeRow });
+      await saveState({ ...where, state: loaded.state, seq, writeRow, contentRoot: ctx.contentRoot ?? ctx.repoRoot });
       seq += 1;
       await writeRow({ event: RESTORED_EVENT, block: ticket.block, file: ticket.file, seq, from_seq: loaded.seq });
     }
@@ -628,7 +628,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
       state.pending_kind = kind;
     }
   }
-  await saveState({ ...where, state, seq, writeRow: /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow) });
+  await saveState({ ...where, state, seq, writeRow: /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow), contentRoot: ctx.contentRoot ?? ctx.repoRoot });
 
   const eng = /** @type {Record<string, any> | null} */ (engineOutcome);
   const head = { ...loopFields(state, kind), engine: eng?.engine ?? 'adaptive', sessions: eng?.sessions ?? rechecks };

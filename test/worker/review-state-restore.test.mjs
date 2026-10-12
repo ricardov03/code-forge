@@ -10,11 +10,36 @@ const { enqueue, queueDir, readResult } = await import('../../src/worker/queue.m
 const { createWorker } = await import('../../src/worker/loop.mjs');
 const { loadKey, signRow, verifyRow } = await import('../../src/state/signer.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
-const { loadState, statePath } = await import('../../src/worker/review-state.mjs');
+const { loadState, saveState, statePath } = await import('../../src/worker/review-state.mjs');
+const { exec } = await import('../../src/util/exec.mjs');
+const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 
 const FILE = 'src/a.mjs';
 const BLOCK = 'B11';
 const sha = (/** @type {string} */ text) => createHash('sha256').update(text).digest('hex');
+
+/** @param {string} text @returns {string} the git (SHA-1 repo) blob id of `text`'s UTF-8 bytes. */
+const blobId = (text) => createHash('sha1').update(`blob ${Buffer.byteLength(text, 'utf8')}\0${text}`).digest('hex');
+
+/**
+ * Delete a blob's loose object file (what `git gc --prune` does to an unreachable blob).
+ * @param {string} repo @param {string} id
+ */
+function dropBlob(repo, id) {
+  const loose = path.join(repo, '.git', 'objects', id.slice(0, 2), id.slice(2));
+  assert.equal(existsSync(loose), true);
+  rmSync(loose);
+}
+
+/**
+ * Write `text` as a blob into `repo`'s object store (argv only, GIT_* stripped).
+ * @param {string} repo @param {string} text @returns {Promise<string>} its id.
+ */
+async function hashObject(repo, text) {
+  const res = await exec(['git', 'hash-object', '-w', '--no-filters', '--stdin'], { cwd: repo, env: gitChildEnv(), input: text, timeoutMs: 20000 });
+  assert.equal(res.result, 'ok');
+  return res.stdout.trim();
+}
 
 /** @param {string} id @param {string} [pad] */
 const finding = (id, pad = '') => ({ id, file: FILE, line_start: 1, line_end: 1, severity: 'warning', category: 'correctness', claim: `claim ${id}${pad}`, evidence: `e${pad}`, fix: `f${pad}` });
@@ -134,7 +159,7 @@ describe('a lost review-state file is rebuilt from the signed ledger, never rese
     assert.equal(w.anchors().length, 1);
     assert.equal(verifyRow(anchor, w.key).ok, true);
     const body = anchor.state_body;
-    assert.deepEqual(Object.keys(body).sort(), ['block', 'file', 'mac', 'reviewed_content_sha', 'run', 'seq', 'state', 'ts']);
+    assert.deepEqual(Object.keys(body).sort(), ['block', 'file', 'mac', 'reviewed_content_blob', 'reviewed_content_sha', 'run', 'seq', 'state', 'ts']);
     assert.equal(verifyRow(body, w.key).ok, true);
     assert.deepEqual([body.run, body.block, body.file, body.seq], [w.runId, BLOCK, FILE, 1]);
     assert.equal(body.state.reviewed_content, null);
@@ -170,7 +195,7 @@ describe('a lost review-state file is rebuilt from the signed ledger, never rese
     assert.deepEqual([saved.status, saved.seq, saved.state?.round, saved.state?.open.map((f) => f.id)], ['ok', 3, 2, ['F2']]);
   });
 
-  test('(2) the file unchanged since the review: the restored reviewed_content is that text and round 2 diffs only the fix; changed: round 2 carries the full file', async () => {
+  test('(2) the file unchanged since the review: the restored reviewed_content is that text and round 2 diffs only the fix; changed with no blob left: round 2 carries the full file', async () => {
     const same = await wired([finding('F1'), finding('F2')]);
     assert.equal((await same.round()).round, 1);
     const reviewed = readFileSync(path.join(same.repo, FILE), 'utf8');
@@ -195,9 +220,11 @@ describe('a lost review-state file is rebuilt from the signed ledger, never rese
     assert.deepEqual([fixed.round, fixed.kind], [2, 'recheck']);
     assert.deepEqual(hunksOf(same.packets[1]), ['@@ -1,2 +1,3 @@']); // the fix diff against the 2 reviewed lines, not the full file
 
+    // changed AND its B78 blob gone from the object store: the B68 fallback, the full file
     const moved = await wired([finding('F1'), finding('F2')]);
     assert.equal((await moved.round()).round, 1);
     rmSync(moved.stateFile);
+    dropBlob(moved.repo, moved.anchors()[0].state_body.reviewed_content_blob);
     const r = await moved.round(); // the coder's fix landed while the state was gone
     assert.deepEqual([r.round, r.kind], [2, 'recheck']);
     assert.equal(moved.restoredRows().length, 1);
@@ -301,5 +328,123 @@ describe('a lost review-state file is rebuilt from the signed ledger, never rese
     assert.equal(orphan.anchors().length, 0);
     await refused(orphan, 'review-state-tampered');
     assert.equal(readFileSync(orphan.stateFile, 'utf8'), kept);
+  });
+});
+
+describe('B78: the reviewed text comes back from a git blob after a restore', () => {
+  const REVIEWED = 'export const a = 1;\nexport const fix1 = 1;\n';
+  const LATER = 'export const later = 2;\n';
+
+  /**
+   * Replace the anchor's state_body with `inner` (no mac) signed with the run key, the anchor re-signed too.
+   * @param {Awaited<ReturnType<typeof wired>>} w @param {Record<string, any>} anchor @param {Record<string, any>} inner
+   */
+  const rebody = (w, anchor, inner) => w.resign(anchor, { ...anchor, state_body: signRow(inner, w.key) });
+
+  test('(a) the file CHANGED after the review: the restored reviewed_content is the old reviewed text exactly and round 2 diffs only the change', async () => {
+    const w = await wired([finding('F1'), finding('F2')]);
+    assert.equal((await w.round()).round, 1);
+    const [anchor] = w.anchors();
+    assert.equal(anchor.state_body.reviewed_content_blob, blobId(REVIEWED));
+    assert.equal(anchor.state_body.reviewed_content_sha, sha(REVIEWED));
+    rmSync(w.stateFile);
+    appendFileSync(path.join(w.repo, FILE), LATER);
+    const probe = loadState({ ...w.where(), contentRoot: w.repo });
+    assert.deepEqual([probe.status, probe.seq, probe.state?.reviewed_content, probe.state?.round], ['restored', 1, REVIEWED, 1]);
+    // no content root: nothing to read the blob from, null as before
+    assert.equal(loadState(w.where()).state?.reviewed_content, null);
+    const r = await w.round(); // one more coder edit: the file now has 4 lines, 2 of them reviewed
+    assert.deepEqual([r.status, r.round, r.kind], ['reviewed', 2, 'recheck']);
+    assert.equal(w.restoredRows().length, 1);
+    assert.deepEqual(hunksOf(w.packets[1]), ['@@ -1,2 +1,4 @@']); // the change since the review, not the full file
+  });
+
+  test('(b) the blob pruned from the object store: falls back, reviewed_content null for a changed file and the full file next round', async () => {
+    const w = await wired([finding('F1'), finding('F2')]);
+    assert.equal((await w.round()).round, 1);
+    rmSync(w.stateFile);
+    appendFileSync(path.join(w.repo, FILE), LATER);
+    dropBlob(w.repo, w.anchors()[0].state_body.reviewed_content_blob);
+    const probe = loadState({ ...w.where(), contentRoot: w.repo });
+    assert.deepEqual([probe.status, probe.seq, probe.state?.reviewed_content], ['restored', 1, null]);
+    const r = await w.round();
+    assert.deepEqual([r.round, r.kind], [2, 'recheck']);
+    assert.deepEqual(hunksOf(w.packets[1]), ['@@ -0,0 +1,4 @@']); // the full file
+  });
+
+  test('(c) a signed body whose blob id names another text, or no object id at all, is never used: the sha check rejects it', async () => {
+    const w = await wired([finding('F1')]);
+    assert.equal((await w.round()).round, 1);
+    rmSync(w.stateFile);
+    const other = 'export const somethingElse = 3;\n';
+    const otherId = await hashObject(w.repo, other);
+    assert.equal(otherId, blobId(other)); // the blob is there and readable
+    const [anchor] = w.anchors();
+    const { mac: _m, ...inner } = anchor.state_body;
+    rebody(w, anchor, { ...inner, reviewed_content_blob: otherId });
+    // file unchanged: the wrong blob is skipped, the B68 rule gives the current (= reviewed) text
+    const unchanged = loadState({ ...w.where(), contentRoot: w.repo });
+    assert.deepEqual([unchanged.status, unchanged.state?.reviewed_content], ['restored', REVIEWED]);
+    // file changed: the wrong blob is still skipped, nothing matches the sha, null
+    appendFileSync(path.join(w.repo, FILE), LATER);
+    const wrong = loadState({ ...w.where(), contentRoot: w.repo });
+    assert.deepEqual([wrong.status, wrong.state?.reviewed_content], ['restored', null]);
+    // ids that are not 40/64 lowercase hex are ignored, even a ref or a prefix that names the right text
+    const goodId = inner.reviewed_content_blob;
+    assert.equal(goodId, blobId(REVIEWED));
+    for (const id of ['HEAD', goodId.toUpperCase(), goodId.slice(0, 39), `-${goodId.slice(1)}`, 42]) {
+      const [now] = w.anchors();
+      rebody(w, now, { ...inner, reviewed_content_blob: id });
+      const got = loadState({ ...w.where(), contentRoot: w.repo });
+      assert.deepEqual([got.status, got.state?.reviewed_content], ['restored', null], String(id));
+    }
+    // the real id again: the text comes back (the loop above failed for the id, not the repo)
+    const [last] = w.anchors();
+    rebody(w, last, { ...inner, reviewed_content_blob: goodId });
+    assert.equal(loadState({ ...w.where(), contentRoot: w.repo }).state?.reviewed_content, REVIEWED);
+  });
+
+  test('(d) an old anchor with no reviewed_content_blob restores exactly as B68: the current text when unchanged, else null', async () => {
+    const w = await wired([finding('F1')]);
+    assert.equal((await w.round()).round, 1);
+    rmSync(w.stateFile);
+    const [anchor] = w.anchors();
+    const { mac: _m, reviewed_content_blob: _b, ...inner } = anchor.state_body;
+    rebody(w, anchor, inner);
+    assert.equal(Object.hasOwn(w.anchors()[0].state_body, 'reviewed_content_blob'), false);
+    const same = loadState({ ...w.where(), contentRoot: w.repo });
+    assert.deepEqual([same.status, same.seq, same.state?.reviewed_content], ['restored', 1, REVIEWED]);
+    appendFileSync(path.join(w.repo, FILE), LATER);
+    const changed = loadState({ ...w.where(), contentRoot: w.repo });
+    assert.deepEqual([changed.status, changed.seq, changed.state?.reviewed_content], ['restored', 1, null]);
+  });
+
+  test('(e) the blob write fails (content root not a git repo): the save still succeeds with reviewed_content_blob null', async () => {
+    const w = await wired([finding('F1')]);
+    assert.equal((await w.round()).round, 1);
+    const loaded = loadState(w.where());
+    assert.deepEqual([loaded.status, loaded.state?.reviewed_content], ['ok', REVIEWED]);
+    const state = /** @type {NonNullable<typeof loaded.state>} */ (loaded.state);
+    /** @type {Array<Record<string, any>>} */
+    const out = [];
+    // a plain directory INSIDE the run's git checkout: discovery stops at its parent, so the
+    // enclosing repo is never written into
+    const notRepo = path.join(w.repo, 'plain', 'tree');
+    mkdirSync(notRepo, { recursive: true });
+    const expectedId = blobId(REVIEWED);
+    const has = async (/** @type {string} */ id) => (await exec(['git', 'cat-file', '-e', id], { cwd: w.repo, env: gitChildEnv(), timeoutMs: 20000 })).code;
+    dropBlob(w.repo, expectedId); // round 1 put the reviewed text there; start without it
+    assert.notEqual(await has(expectedId), 0);
+    assert.equal(await saveState({ ...w.where(), state, seq: 1, writeRow: async (row) => void out.push(row), contentRoot: notRepo }), undefined);
+    assert.notEqual(await has(expectedId), 0); // the enclosing repo gained no object for that text
+    assert.equal(out.length, 1);
+    assert.deepEqual([out[0].event, out[0].seq, out[0].state_body.reviewed_content_blob, out[0].state_body.reviewed_content_sha], ['review.state', 2, null, sha(REVIEWED)]);
+    assert.equal(JSON.parse(readFileSync(w.stateFile, 'utf8')).state.reviewed_content, REVIEWED);
+    assert.equal(sha(readFileSync(w.stateFile, 'utf8')), out[0].state_sha);
+    // the same save into the git repo writes the blob
+    assert.equal(await saveState({ ...w.where(), state, seq: 2, writeRow: async (row) => void out.push(row), contentRoot: w.repo }), undefined);
+    assert.equal(out.length, 2);
+    assert.deepEqual([out[1].seq, out[1].state_body.reviewed_content_blob], [3, expectedId]);
+    assert.equal(await has(expectedId), 0);
   });
 });

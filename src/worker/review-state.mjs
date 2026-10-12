@@ -27,14 +27,24 @@
  * `review.state` row of the run whose MAC does not verify is `tampered` for every block and file
  * of it (`blockAnchors`). Whether the block's one L3 rung was used comes from the anchors, never
  * from the state files.
+ *
+ * B78: the reviewed text itself is kept as a git blob in the content root's object store
+ * (`git hash-object -w --no-filters --stdin`), its id in the signed body as `reviewed_content_blob`.
+ * A restore reads it back (`git cat-file blob`) and uses it only when its sha256 equals
+ * `reviewed_content_sha`; a missing, pruned or mismatching blob falls back to the B68 rule. A blob
+ * write that fails saves `reviewed_content_blob: null` and never fails the round.
  */
 
+import { spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { exec } from '../util/exec.mjs';
 import { assertRunId, runsDir } from '../state/paths.mjs';
 import { signRow, verifyRow } from '../state/signer.mjs';
-import { assertBlockId, assertRowPath } from './ticket.mjs';
+// B78: every blob `git` call runs with `gitChildEnv()`: inherited GIT_* removed, no system config,
+// global config = /dev/null
+import { assertBlockId, assertRowPath, gitChildEnv } from './ticket.mjs';
 
 /** @typedef {import('../review/fixloop.mjs').FileState} FileState */
 /** @typedef {{runRootDir: string, runId: string, block: string, file: string, key: Buffer, rows: Array<Record<string, any>>}} Where */
@@ -75,6 +85,66 @@ export function legacyStatePath(runRootDir, block, file) {
 
 /** @param {string} text @returns {string} */
 const sha = (text) => createHash('sha256').update(text).digest('hex');
+
+/**
+ * B78: the env of a blob `git` call in `contentRoot`: `gitChildEnv()` plus a discovery ceiling at
+ * the root's parent, so a content root that is not itself a repository never reaches (and writes
+ * into) an enclosing one.
+ * @param {string} contentRoot @returns {NodeJS.ProcessEnv}
+ */
+const blobEnv = (contentRoot) => ({ ...gitChildEnv(), GIT_CEILING_DIRECTORIES: path.dirname(path.resolve(contentRoot)) });
+
+/** B78: a git object id (SHA-1 or SHA-256 repository), lowercase hex only. */
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+/** B78: how long one blob write or read may take before it counts as failed. */
+const BLOB_TIMEOUT_MS = 10_000;
+
+/**
+ * B78: write `text` (its UTF-8 bytes, no filters) as a blob into `contentRoot`'s object store.
+ * @param {string} contentRoot @param {string} text
+ * @returns {Promise<string | null>} the blob id, or null on any failure (never throws).
+ */
+async function writeBlob(contentRoot, text) {
+  try {
+    const res = await exec(['git', 'hash-object', '-w', '--no-filters', '--stdin'], {
+      cwd: contentRoot,
+      env: blobEnv(contentRoot),
+      input: Buffer.from(text, 'utf8'),
+      timeoutMs: BLOB_TIMEOUT_MS,
+    });
+    const id = res.stdout.trim();
+    return res.result === 'ok' && OBJECT_ID.test(id) ? id : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * B78: the blob's text when it is in `contentRoot`'s object store and its sha256 is `wanted`.
+ * Synchronous (the load is), so it spawns with `spawnSync`: argv only, no shell, a timeout.
+ * @param {string} contentRoot @param {unknown} id @param {string} wanted
+ * @returns {string | null} null when the id is not an object id, the blob is unreadable or gone,
+ *   or its text does not match `wanted` (a mismatching blob is never used).
+ */
+function readBlob(contentRoot, id, wanted) {
+  if (typeof id !== 'string' || !OBJECT_ID.test(id)) return null;
+  try {
+    const res = spawnSync('git', ['cat-file', 'blob', id], {
+      cwd: contentRoot,
+      env: blobEnv(contentRoot),
+      shell: false,
+      stdio: ['ignore', 'pipe', 'pipe'],
+      timeout: BLOB_TIMEOUT_MS,
+      killSignal: 'SIGKILL',
+      maxBuffer: 64 * 1024 * 1024,
+    });
+    if (res.error || res.status !== 0 || !Buffer.isBuffer(res.stdout)) return null;
+    const text = res.stdout.toString('utf8');
+    return sha(text) === wanted ? text : null;
+  } catch {
+    return null;
+  }
+}
 
 /**
  * The block's verified `review.state` anchors, or null when any anchor of the RUN fails: EVERY
@@ -127,8 +197,9 @@ function bodyMatches(body, { runId, block, file, key, seq }) {
 
 /**
  * B68: rebuild a lost state file from its latest anchor's signed `state_body`. `reviewed_content`
- * is the file's current working-tree content when its sha equals the body's
- * `reviewed_content_sha`, else null (the next round then reviews the full file).
+ * is (B78) the body's `reviewed_content_blob` read from the content root's object store when its
+ * sha equals `reviewed_content_sha`; else the file's current working-tree content when its sha
+ * equals it; else null (the next round then reviews the full file).
  * @param {Record<string, any>} anchor
  * @param {{runId: string, block: string, file: string, key: Buffer, contentRoot?: string}} at
  * @returns {{status: 'restored' | 'lost' | 'tampered', state: FileState | null, seq: number}}
@@ -140,7 +211,8 @@ function restoreFromAnchor(anchor, { runId, block, file, key, contentRoot }) {
   const wanted = body.reviewed_content_sha;
   /** @type {string | null} */
   let reviewed = null;
-  if (typeof wanted === 'string' && typeof contentRoot === 'string') {
+  if (typeof wanted === 'string' && typeof contentRoot === 'string') reviewed = readBlob(contentRoot, body.reviewed_content_blob, wanted);
+  if (reviewed === null && typeof wanted === 'string' && typeof contentRoot === 'string') {
     try {
       const current = readFileSync(path.join(contentRoot, file), 'utf8');
       if (sha(current) === wanted) reviewed = current;
@@ -332,17 +404,23 @@ export function missingStateFiles({ runId, key, rows, runRootDir }) {
 /**
  * Anchor, then write: the signed `review.state` row goes to the ledger FIRST (a failed ledger write
  * changes nothing and throws), then the state file is replaced atomically (mode 0600).
- * @param {Where & {state: FileState, seq: number, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
- *   `seq` - the loaded state's seq (0 for a new file); this save is `seq + 1`.
+ * @param {Where & {state: FileState, seq: number, writeRow: (row: Record<string, any>) => Promise<unknown>, contentRoot?: string}} opts
+ *   `seq` - the loaded state's seq (0 for a new file); this save is `seq + 1`. `contentRoot` (B78):
+ *   the tree the round read the file in; the reviewed text goes into its object store as a blob.
  */
-export async function saveState({ runId, block, file, key, state, seq, writeRow }) {
+export async function saveState({ runId, block, file, key, state, seq, writeRow, contentRoot }) {
   const target = statePath(runId, block, file);
   const next = seq + 1;
   const text = `${JSON.stringify(signRow({ run: runId, block, file, seq: next, state }, key))}\n`;
   // B68: the slim signed state rides on the anchor (its own MAC covers it), so a lost file can be
-  // rebuilt; the full reviewed text stays out of the ledger, only its sha goes in
+  // rebuilt; the full reviewed text stays out of the ledger, only its sha (and, B78, the id of its
+  // git blob in the content root's object store) goes in
   const reviewed = typeof state.reviewed_content === 'string' ? state.reviewed_content : null;
-  const stateBody = signRow({ run: runId, block, file, seq: next, state: { ...state, reviewed_content: null }, reviewed_content_sha: reviewed === null ? null : sha(reviewed) }, key);
+  const blob = reviewed !== null && typeof contentRoot === 'string' ? await writeBlob(contentRoot, reviewed) : null;
+  const stateBody = signRow(
+    { run: runId, block, file, seq: next, state: { ...state, reviewed_content: null }, reviewed_content_sha: reviewed === null ? null : sha(reviewed), reviewed_content_blob: blob },
+    key,
+  );
   const slim = Buffer.byteLength(JSON.stringify(stateBody), 'utf8') > STATE_BODY_CAP ? { state_omitted: 'too_large' } : { state_body: stateBody };
   await writeRow({ event: STATE_EVENT, block, file, seq: next, state_sha: sha(text), l3_rung_used: state.l3_rung_used === true, ...slim });
   writeAtomic(target, text);
