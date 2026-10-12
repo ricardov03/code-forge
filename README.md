@@ -8,7 +8,7 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new in 0.7
+## What's new in 0.8
 
 In 0.8.0:
 
@@ -55,6 +55,8 @@ In 0.8.0:
   from a brief to a closed block with an outside reviewer: related tests, a worktree, the context
   pack, the done file and hook, `status`, and the outside review rounds in `report`. A test runs
   the page's own config and steps, so the page and the CLI stay the same.
+
+## What's new in 0.7
 
 In 0.7.7:
 
