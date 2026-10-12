@@ -16,7 +16,7 @@ import { mkdir, readFile, rename, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from '../util/exec.mjs';
 import { StateError, assertRunId, assertWorkspaceOutsideRuns, mirrorPath, newRunId, runRecordPath, runsDir } from './paths.mjs';
-import { changedKeyPaths, configHash, IMMUTABLE_KEYS, immutableChanges, initialConfigState } from './config-snapshot.mjs';
+import { changedKeyPaths, configHash, externalReviewer, IMMUTABLE_KEYS, immutableChanges, initialConfigState } from './config-snapshot.mjs';
 import { generateKey, loadKey, signRow } from './signer.mjs';
 
 /** @typedef {(row: Record<string, any>) => Promise<unknown>} WriteRow */
@@ -149,6 +149,12 @@ export async function startRun(opts) {
     throw new StateError('bad-project', 'project slug must match /^[a-z0-9][a-z0-9-]*$/ (config key project.slug)');
   }
   const workspace = assertWorkspaceOutsideRuns(opts.workspace);
+  // B58: the schema lets `review.external` stand without a name while `required` is off; on, the
+  // reviewer must be named — refused before anything is written
+  const external = config.review?.external;
+  if (external?.required === true && (typeof external.name !== 'string' || external.name.trim() === '')) {
+    throw new StateError('external-no-name', 'review.external.required is true but review.external.name is missing or blank');
+  }
   const worker = await pinWorker(opts.workerPid, probe);
   const record = {
     version: 1,
@@ -179,6 +185,9 @@ export async function startRun(opts) {
     await generateKey(runId);
     await saveRun(record);
     await writeSigned(runId, writeRow, { event: 'run.start', engine: record.engine, worker_pinned: worker !== null });
+    // B58: the owner's outside reviewer is on the ledger from the first row of the run on
+    const reviewer = externalReviewer(record);
+    if (reviewer !== null) await writeSigned(runId, writeRow, { event: 'review.external', required: true, reviewer });
     return record;
   });
 }
@@ -198,8 +207,8 @@ export async function startRun(opts) {
  * Fixed keys ({@link IMMUTABLE_KEYS}): every one that changed is refused at once
  * (`immutable-key`, nothing written). A record from before snapshots (no `config`) is checked
  * against what it does store: `engine` and the ledger slug (`effectiveSlug`, computed by the
- * caller the same way `run start` did); it then gets its first snapshot, `changed_keys: null`,
- * `old_hash: null`.
+ * caller the same way `run start` did), and B58's `review.external.required` must not turn true;
+ * it then gets its first snapshot, `changed_keys: null`, `old_hash: null`.
  *
  * No change (same hash) ⇒ nothing written, no row. Otherwise the record is saved FIRST (it is the
  * source of truth), then one signed `run.reload` row: the changed key PATHS (never values) and
@@ -238,6 +247,9 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
       frozen = [];
       if (effectiveSlug !== undefined && effectiveSlug !== current.project) frozen.push('project.slug');
       if (typeof current.engine === 'string' && (config.engine ?? 'auto') !== current.engine) frozen.push('engine');
+      // B58: a run started without the key has none to keep — turning it on now is a change; an
+      // entry that leaves it off (`required` false or absent, as the schema default) is not
+      if (config.review?.external?.required === true) frozen.push('review.external');
     }
     if (frozen.length > 0) {
       const why = frozen.map((key) => `${key} cannot change mid-run (${IMMUTABLE_KEYS[/** @type {keyof typeof IMMUTABLE_KEYS} */ (key)]})`);

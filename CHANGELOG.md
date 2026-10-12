@@ -6,6 +6,21 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- review.external {required, name} (B58, issue #11): an owner-approved outside reviewer replaces the local per-file
+  review. Read only from the run-start config snapshot (run reload refuses to change it; run start refuses required:
+  true without a name) and signed as a review.external row; block close then skips the per-file review check (also
+  not_approved) and writes a signed gate.reviews_waived {by: config, reviewer} row just before block.close, only when
+  the block closes, with no TTY and under autopilot. Unowned, proof, no_changes, transcript, orphans and closeBlock
+  checks still refuse. block open and block claim refuse an owned entry that covers .code-forge.yml. Without the key
+  nothing changes.
+
+### Changed
+
+- block open, block claim and block close now read the run's config snapshot; a snapshot that does not match its hash
+  refuses them with config-snapshot, with or without review.external (B58).
+
 ## [0.7.5] — 2026-10-08
 
 ### Fixed

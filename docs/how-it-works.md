@@ -99,7 +99,7 @@ edit the file and run `code-forge run reload --run <run>`:
 - open blocks stay open with their attempt numbers; review tickets already queued finish on the
   config they were enqueued with, new tickets use the new one, and the worker picks it up without
   a restart;
-- `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key` and `version` are fixed for the run:
+- `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key`, `review.external` and `version` are fixed for the run:
   a change to one is refused with the key's name. End the run and start a new one to change them;
 - while an autopilot grant is active, a change to any limit key (budgets, thresholds, review caps,
   escalation, proof, System 1, `autopilot.*`) is refused. Only you change one, with
@@ -293,6 +293,19 @@ higher, at most L2), and an S2 ruling. A docs or contract block is never coded b
 `--no-require-reviews` lifts the per-file review rows and `no_changes` (never `unowned_change` or `unproven`). Only
 the owner may use it: it asks for a yes at a terminal (stdin and stdout must both be terminals), has no `--yes`, and is refused while an
 autopilot grant is active. It leaves a signed `gate.reviews_waived {by: human}` row.
+
+When an outside reviewer reviews each block, set `review.external: {required: true, name: <reviewer>}`
+in `.code-forge.yml` before `run start`. `run start` refuses `required: true` with a missing or blank
+name. It writes a signed `review.external` row with the name, and `run reload` refuses to add,
+remove or change the key. Then `block close` does not check the per-file review rows or the
+report's ticket ids. It needs no terminal and it works while an autopilot grant is active. When the
+block closes, it writes a signed `gate.reviews_waived {by: config, reviewer}` row just before
+`block.close`. A refused close writes no such row. `unowned_change`, `unproven`, `no_changes`, the
+transcript grep and orphans in the registry still refuse. While the key is
+on, `block open` and `block claim` refuse an owned entry that covers `.code-forge.yml`, so a coder
+cannot own the switch. To find the key, `block open`, `block claim` and `block close` read the
+run's config snapshot. A snapshot that does not match its hash refuses them with
+`config-snapshot`, with or without the key.
 
 A file is **high tier** when S1 risk ≥ 2, when it matches `proof.tiers.high.paths`, or when it is
 security-sensitive. Everything else is **light tier**.

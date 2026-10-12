@@ -50,6 +50,15 @@
  * FAILED: no review-file ticket id for <files>` (skipped under `--no-require-reviews`, the human's
  * way out). It runs after the review rows and reuses their file set (listed once).
  *
+ * B58 (issue #11): `review.external.required: true` in the run's config snapshot (the owner set it
+ * before `run start`; `run reload` refuses to change it) is the owner's non-interactive way out
+ * when an outside reviewer reviews the block: the per-file review checks and the `--report` ticket
+ * check are skipped, with no TTY and under an active autopilot grant, and a signed
+ * `gate.reviews_waived {by: config, reviewer: <name>}` row is written just before `block.close`,
+ * only when the block closes. Everything
+ * else still refuses — `unowned_change`, `unproven`, `no_changes`, the transcript grep and
+ * `closeBlock`'s own rows. With `--no-require-reviews` the human path runs exactly as without the key.
+ *
  * B47: `block open` without `--level` takes the level `autopilot level` chose for the block (the
  * latest `autopilot.level` row of the run for it whose MAC verifies, `autopilotLevel`); with
  * neither it is a usage error (`no --level given and no autopilot level recorded for <id>`). An
@@ -67,6 +76,7 @@ import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
+import { externalReviewer } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
@@ -201,6 +211,9 @@ export async function runBlock(args, deps = {}) {
           return 1;
         }
       }
+      // B58: the owner's other way out — `review.external.required` in the run's config snapshot
+      // (set before `run start`, immutable): no TTY, allowed under autopilot, the human flag wins
+      const external = reviewsWaived ? null : externalReviewer(record);
       const rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
       // B52: ONE path base and ONE listing, memoised as a promise and shared by every check. The
       // base is the repository top level: the worker signs every review row with a repo-root-
@@ -265,8 +278,9 @@ export async function runBlock(args, deps = {}) {
           unowned: scope?.unowned ?? [],
           // B52: an old ledger's review.result rows are judged by their signed result files
           resultFiles: await resultFilesFor({ repoRoot: top, runId, block: id, rows }),
-          files: reviewsWaived ? [] : fileSet,
-          // B52: nothing changed and nothing reviewed is never a pass (the owner's way out is --no-require-reviews)
+          files: reviewsWaived || external !== null ? [] : fileSet,
+          // B52: nothing changed and nothing reviewed is never a pass (the owner's way out is
+          // --no-require-reviews); B58: `review.external` does not lift it
           noChanges: !reviewsWaived && fileSet.length === 0,
           // B20: high-tier files need a proven red→green row; `--no-require-reviews` does not lift it
           proofFiles: fileSet,
@@ -275,7 +289,7 @@ export async function runBlock(args, deps = {}) {
       });
       // B36: the coder's report names a review-file ticket for every changed file, or it is FAILED
       const report = async () => {
-        if (typeof flags.report !== 'string' || reviewsWaived) return { ok: true };
+        if (typeof flags.report !== 'string' || reviewsWaived || external !== null) return { ok: true };
         let text;
         try {
           text = await readFile(flags.report, 'utf8');
@@ -286,7 +300,10 @@ export async function runBlock(args, deps = {}) {
         const missing = missingReviewTickets(text, fileSet.map((f) => f.file));
         return missing.length === 0 ? { ok: true } : { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
       };
-      const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews, report] });
+      // B58: the config waiver row is written by `closeBlock` under the run lock, just before
+      // `block.close` and only when every other check passed — never by a refused close
+      const closeRows = external === null ? [] : [{ event: 'gate.reviews_waived', block: id, by: 'config', reviewer: external }];
+      const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews, report], closeRows });
       (result.ok ? out : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
       return result.ok ? 0 : 1;
     }

@@ -17,6 +17,8 @@ import os from 'node:os';
 import path from 'node:path';
 import { BLOCK_KINDS, blockKind, dispatchLevel } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
+import { DEFAULT_CONFIG_FILENAME } from '../config/load.mjs';
+import { externalReviewer } from './config-snapshot.mjs';
 import { ownedKinds, pathKind } from './owned-kinds.mjs';
 import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
@@ -255,6 +257,39 @@ function activeBlocks(record) {
 }
 
 /**
+ * B58: with `review.external.required` set in the run's snapshot, the project's `.code-forge.yml`
+ * is the owner's switch past the local per-file review, so no block may own it. These are the
+ * spellings an owned entry may match it by: relative to the workspace and, for a workspace in a
+ * subdirectory, relative to the repository top level (the close gate matches both, `ownsAt`).
+ * Empty when the key is not set.
+ * @param {Record<string, any>} record @returns {Promise<string[]>}
+ * @throws {StateError} `config-snapshot`, `git-failed`
+ */
+async function guardedConfigPaths(record) {
+  if (externalReviewer(record) === null) return [];
+  const top = await repoTop(record.workspace);
+  // the repo-top spelling `<prefix>/.code-forge.yml` may also match a different file of the same
+  // name under the workspace (`<ws>/<prefix>/.code-forge.yml`): that over-match only refuses more,
+  // never less, and is the one `ownsAt` gives the close gate
+  const prefix = path.relative(top, realpathSync(record.workspace)).split(path.sep).join('/');
+  return prefix === '' ? [DEFAULT_CONFIG_FILENAME] : [DEFAULT_CONFIG_FILENAME, `${prefix}/${DEFAULT_CONFIG_FILENAME}`];
+}
+
+/**
+ * B58: refuse an owned entry that owns one of `guarded` (B57's rule, `ownsFile`: the exact path,
+ * a directory above it, or a glob that matches it).
+ * @param {ReadonlyArray<string>} owned @param {import('./registry.mjs').OwnedKinds} kinds @param {ReadonlyArray<string>} guarded
+ * @throws {StateError} `config-owned`
+ */
+function refuseConfigOwner(owned, kinds, guarded) {
+  for (const entry of owned) {
+    if (guarded.some((file) => ownsFile([entry], file, kinds))) {
+      throw new StateError('config-owned', `owned entry ${JSON.stringify(entry)} covers the project's ${DEFAULT_CONFIG_FILENAME}; no block may own it while review.external.required is true`);
+    }
+  }
+}
+
+/**
  * `block open` — refuses a second open of the same id and any owned set that overlaps another
  * ACTIVE block's; records base, owned files, level, attempt, acceptance, line forecast and the
  * block kind (B34: the declared `kind`, else `blockKind` of the owned files). A docs/contract
@@ -262,6 +297,8 @@ function activeBlocks(record) {
  * and the dispatch row carry the floor level, and the row adds `requested_level` and
  * `trigger: 'docs_floor'`. B52: the entry also records `tree_at_open` ({@link treeAtOpen}), the
  * tree's changes at open, which `block close` reads to tell the coder's changes from earlier ones.
+ * B58: with `review.external.required` set, an owned entry that owns the project's config is
+ * refused (`config-owned`, {@link refuseConfigOwner}).
  * @param {{
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
@@ -284,15 +321,19 @@ export async function openBlock(opts) {
 
   // B52: the tree is stamped BEFORE the run lock (hashing can be slow; other block commands must
   // not wait on it); under the lock the base is resolved again and must be the one stamped against
-  const { workspace } = await readRun(runId);
+  const before = await readRun(runId);
+  const { workspace } = before;
   const stampedBase = await resolveCommit(opts.base ?? 'HEAD', workspace);
   const treeOpen = await treeAtOpen(workspace, stampedBase);
+  // B58: `review.external` cannot change mid-run, so the record read here decides
+  const guarded = await guardedConfigPaths(before);
 
   const block = await mutateRun(runId, null, writeRow, async (record) => {
     if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
     // B57: what each exact owned entry is on disk, under the lock (as `block claim`) — a regular
     // file owns only itself, here and in every later check
     const kinds = ownedKinds(record.workspace, owned);
+    refuseConfigOwner(owned, kinds, guarded);
     for (const [otherId, other] of Object.entries(activeBlocks(record))) {
       const pair = findOverlap(owned, other.owned_files, { kindsA: kinds, kindsB: other.owned_kinds });
       if (pair) throw new StateError('overlap', `block ${id} owns ${pair[0]}, which overlaps ${pair[1]} owned by open block ${otherId}`);
@@ -347,13 +388,17 @@ export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
  * glob, and when another open block owns it — or anything it would own: the claimed path becomes an
  * owned entry, so it is checked with `findOverlap` (B57: an entry owns the paths below it too,
  * unless it is a regular file now — its kind is recorded in `owned_kinds` as at `block open`).
+ * B58: with `review.external.required` set, a path that owns the project's config is refused
+ * (`config-owned`), as at `block open`.
  * @param {{runId: string, id: string, file: string, writeRow: WriteRow}} opts
  */
 export async function claimPath({ runId, id, file, writeRow }) {
   assertOwned([file]);
   if (!isExactEntry(file)) throw new StateError('bad-owned', `block claim takes one exact path, not a glob (${JSON.stringify(file)})`);
+  const guarded = await guardedConfigPaths(await readRun(runId));
   await mutateRun(runId, id, writeRow, (record, block) => {
     const kinds = { [file]: pathKind(record.workspace, file) };
+    refuseConfigOwner([file], kinds, guarded);
     for (const [otherId, other] of Object.entries(activeBlocks(record))) {
       const pair = otherId === id ? null : findOverlap([file], other.owned_files, { kindsA: kinds, kindsB: other.owned_kinds });
       if (pair) throw new StateError('overlap', `${file} overlaps ${pair[1]} owned by open block ${otherId}`);
@@ -396,15 +441,18 @@ export async function stopBlock({ runId, id, reason, writeRow, event = 'block.st
  * stopped); the block's signed `dispatch` row must exist and verify, and every other
  * gate-relevant row of the block must verify ⇒ else `ledger.tamper` (block stopped); then
  * `extraChecks`; finally, UNDER the run lock, orphans in the registry ⇒ refused (block stays
- * open), else closed.
+ * open), else closed. B58: `closeRows` are signed and written under that same lock just before
+ * `block.close`, and only when the block closes — a row that records why it may close is never
+ * left behind by a refused close.
  * @param {{
  *   runId: string, id: string, rows: Record<string, any>[], writeRow: WriteRow,
  *   livePid?: number, probe?: import('./run.mjs').StartTimeProbe,
  *   extraChecks?: Array<() => Promise<{ok: boolean, reason?: string}>>,
+ *   closeRows?: Record<string, any>[],
  * }} opts
  * @returns {Promise<{ok: boolean, status: 'closed' | 'stopped' | 'open', reason?: string, event?: string}>}
  */
-export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, extraChecks = [] }) {
+export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, extraChecks = [], closeRows = [] }) {
   const record = await readRun(runId);
   if (record.blocks[id]?.status !== 'open') throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
 
@@ -442,6 +490,6 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
     block.status = 'closed';
     /** @type {CloseResult} */
     const closed = { ok: true, status: 'closed' };
-    return { result: closed, rows: [{ event: 'block.close', block: id, status: 'complete' }] };
+    return { result: closed, rows: [...closeRows, { event: 'block.close', block: id, status: 'complete' }] };
   });
 }

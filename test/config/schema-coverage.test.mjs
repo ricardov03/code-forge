@@ -356,8 +356,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * warning_threshold}, review.{multimodel_for_docs,single_reviewer_max_risk} ⇒ 145. B33: +1 = budget.usd ⇒ 146.
  * B32: +1 = review.allow_open_book_codex ⇒ 147. B40: +4 = review.provider_concurrency{,.anthropic,.openai,.xai} ⇒ 151.
  * B42: +1 = review.parallel_tickets ⇒ 152. B46: +2 = autopilot, autopilot.min_confidence ⇒ 154.
+ * B58: +3 = review.external{,.required,.name} ⇒ 157.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 154;
+const EXPECTED_SCHEMA_PATH_COUNT = 157;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

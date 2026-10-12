@@ -12,6 +12,14 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 Next release:
 
+- **An outside reviewer can replace the local review.** Set `review.external: {required: true,
+  name: <reviewer>}` in `.code-forge.yml`. `block close` then skips the per-file review check
+  and writes a signed `gate.reviews_waived` row with `by: config`. It needs no TTY and works
+  under autopilot. All other close checks still run. The key is fixed at `run start`, and a
+  coder can never own `.code-forge.yml`.
+
+In 0.7.5:
+
 - **An owned directory owns the files inside it, everywhere.** A block that owns `src/feature`
   now owns `src/feature/a.swift` for `block open`, `block claim`, `block rebase`, the scope gate,
   proof and the review worker, not only for `block close`. `block open` refuses a second block

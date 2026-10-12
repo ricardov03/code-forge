@@ -117,6 +117,9 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.provider_concurrency.openai` | integer |  | `2` | min 1 |
 | `review.provider_concurrency.xai` | integer |  | `2` | min 1 |
 | `review.parallel_tickets` | integer |  | `3` | min 1; max 16; B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap. |
+| `review.external` | object |  | — |  |
+| `review.external.required` | boolean |  | `false` | B58: true ⇒ block close skips the local per-file review checks (and the --report ticket check), with no terminal and under autopilot, and writes a signed gate.reviews_waived {by: config} row. Unowned changes, proof, no_changes and the transcript grep still refuse. No block may own .code-forge.yml. |
+| `review.external.name` | string |  | — | minLength 1; B58: the outside reviewer, written in the review.external and gate.reviews_waived rows. Required when required is true: run start refuses a missing or blank name. |
 | `engine` | enum: `auto`, `solo`, `harness`, `subprocess` |  | `"auto"` |  |
 | `harnesses` | array<string> |  | — |  |
 | `harness` | object |  | — |  |

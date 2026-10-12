@@ -18,6 +18,7 @@
  */
 
 import { createHash } from 'node:crypto';
+import { StateError } from './paths.mjs';
 
 /**
  * Keys that cannot change mid-run, each with why. A change to one is refused by `run reload`
@@ -30,6 +31,9 @@ export const IMMUTABLE_KEYS = Object.freeze({
   'tmp.root': "the worker's run temp root is created at run start",
   keys: 'the worker resolves keys once, at start',
   'system1.key': 'the worker resolves the Jev key once, at start',
+  // B58: the owner's switch past the local per-file review is set before the run starts or not at
+  // all, so nobody turns it on (or off) mid-run
+  'review.external': 'the outside reviewer is fixed by the owner before the run starts',
 });
 
 /** @param {unknown} v @returns {boolean} what `JSON.stringify` drops from an object. */
@@ -147,4 +151,27 @@ export function snapshotFor(record, ticket) {
   const config = own(snaps, hash);
   if (!isMapping(config) || configHash(config) !== hash) throw new Error('config-snapshot');
   return { hash, config };
+}
+
+/**
+ * B58: the outside reviewer named by the snapshot in force when `review.external.required` is
+ * true; null otherwise (key absent, `required` false, or a record from before snapshots). The key
+ * is immutable ({@link IMMUTABLE_KEYS}), so this is the value `run start` stored.
+ * @param {Record<string, any>} record
+ * @returns {string | null}
+ * @throws {StateError} `config-snapshot` when the snapshot in force does not match its hash.
+ */
+export function externalReviewer(record) {
+  let snap;
+  try {
+    snap = snapshotFor(record, '');
+  } catch (thrown) {
+    if (!(thrown instanceof Error) || thrown.message !== 'config-snapshot') throw thrown;
+    throw new StateError('config-snapshot', `run ${record.run_id}: the config snapshot in force does not match its hash`);
+  }
+  const external = snap?.config.review?.external;
+  if (!isMapping(external) || external.required !== true) return null;
+  // required without a usable name is no switch at all (the schema refuses it; this is the floor)
+  const name = typeof external.name === 'string' ? external.name.trim() : '';
+  return name === '' ? null : name; // trimmed: no row ever carries padding
 }
