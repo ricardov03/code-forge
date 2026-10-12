@@ -220,10 +220,11 @@ edit the file and run `code-forge run reload --run <run>`:
 - open blocks stay open with their attempt numbers; review tickets already queued finish on the
   config they were enqueued with, new tickets use the new one, and the worker picks it up without
   a restart;
-- `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key`, `review.external`, `proof.isolation`, `proof.worktree` and `version` are fixed for the run:
+- `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key`, `review.external`, `proof.isolation`, `proof.worktree`, `context.require_coder_tests` and `version` are fixed for the run:
   a change to one is refused with the key's name. End the run and start a new one to change them;
-- `context` (the coder context pack) is not fixed: a change to it is accepted, and new review
-  tickets carry the new rules and lessons;
+- every `context` key except `context.require_coder_tests` is live: a change to the coder context
+  pack is accepted, and new review tickets carry the new rules and lessons.
+  `context.require_coder_tests` is fixed (it changes what `block close` needs);
 - while an autopilot grant is active, a change to any limit key (budgets, thresholds, review caps,
   escalation, proof, System 1, `autopilot.*`) is refused. Only you change one, with
   `code-forge autopilot approve`.
@@ -436,6 +437,34 @@ on, `block open` and `block claim` refuse an owned entry that covers `.code-forg
 cannot own the switch. To find the key, `block open`, `block claim` and `block close` read the
 run's config snapshot. A snapshot that does not match its hash refuses them with
 `config-snapshot`, with or without the key.
+
+Every coder brief asks the coder to run the block's test command and print one line,
+`TESTS <command> exit=<n>`, just before its `===BLOCK <id> COMPLETE===` sentinel. `<command>` must
+not be empty, and `<n>` is a decimal 0–255 with no leading zeros (`exit=0`, never `exit=00`); a
+non-numeric, signed or out-of-range value does not count. The line is matched after trimming, and
+only a line that is exactly the `TESTS` line counts, never one quoted in prose. The last `TESTS`
+line after the previous sentinel of any block and before the block's sentinel wins, so a line from
+an earlier attempt or from another block never carries over.
+
+To make that line a close check, set `context.require_coder_tests: true` in `.code-forge.yml`
+before `run start`. `block close` reads it from the run's config snapshot only, and `run reload`
+refuses to change it. With it on, `--report` is required, and `block close <id> --report <file>`
+refuses (exit 1, the block stays open, no `block.close` row) with one of the messages below. The
+check runs before the other close checks, so a refusal here writes no row, not even the
+`--no-require-reviews` waiver row:
+
+- `coder report FAILED: context.require_coder_tests needs --report` (no `--report`);
+- `coder report FAILED: --report cannot be read`;
+- `coder report FAILED: no ===BLOCK <id> COMPLETE=== sentinel` (the block's last sentinel in the
+  report is missing or FAILED);
+- `coder report FAILED: no TESTS line` (none in that sentinel's segment);
+- `coder report FAILED: TESTS exit=<n>` (the exit is not 0).
+
+`--no-require-reviews` and `review.external` waive reviews, not tests: the check still runs. A
+close that passes writes a signed `coder.tests {block, command, exit}` row (the command redacted)
+under the run lock with the other close rows, only when every other check passed: after any waiver
+row, just before `block.close`. With the key false or absent, close ignores the line and writes no
+such row.
 
 A file is **high tier** when S1 risk ≥ 2, when it matches `proof.tiers.high.paths`, or when it is
 security-sensitive. Everything else is **light tier**.

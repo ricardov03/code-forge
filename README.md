@@ -31,6 +31,10 @@ Next release:
   the build and test commands, the project rules and the lessons, cut to `max_lines`. It prints
   the path and a token estimate, and writes a signed `context.pack` row. Review packets now
   carry the same rules and lessons. With no `context` key, nothing changes.
+- **Coders prove a green test run.** A coder prints `TESTS <command> exit=<n>` just before its
+  COMPLETE sentinel. With `context.require_coder_tests: true` (fixed at `run start`),
+  `block close --report` refuses a report with no such line or a non-zero exit, even when
+  reviews are waived, and writes a signed `coder.tests` row when it passes.
 
 In 0.7.7:
 

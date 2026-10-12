@@ -38,6 +38,9 @@ export const IMMUTABLE_KEYS = Object.freeze({
   // own worktree may share owned paths — so neither key changes mid-run
   'proof.isolation': 'every block of the run is isolated the same way',
   'proof.worktree': 'the worktrees and branches of the open blocks were made with it',
+  // B63b: it tightens `block close` (the coder's green test run), so it is authority like
+  // `review.external`; the rest of `context` stays live
+  'context.require_coder_tests': 'whether close needs the coder\'s green test run is fixed by the owner before the run starts',
 });
 
 /** @param {unknown} v @returns {boolean} what `JSON.stringify` drops from an object. */
@@ -187,4 +190,18 @@ export function externalReviewer(record) {
   // required without a usable name is no switch at all (the schema refuses it; this is the floor)
   const name = typeof external.name === 'string' ? external.name.trim() : '';
   return name === '' ? null : name; // trimmed: no row ever carries padding
+}
+
+/**
+ * B63b: whether `block close` needs the coder's `TESTS <command> exit=0` line — true only when the
+ * snapshot in force sets `context.require_coder_tests: true` (false for the key absent or false,
+ * or a record from before snapshots). The key is immutable ({@link IMMUTABLE_KEYS}), so this is
+ * the value `run start` stored; the live config is never read.
+ * @param {Record<string, any>} record
+ * @returns {boolean}
+ * @throws {StateError} `config-snapshot` when the snapshot in force does not match its hash.
+ */
+export function requireCoderTests(record) {
+  const context = configInForce(record)?.context;
+  return isMapping(context) && context.require_coder_tests === true;
 }

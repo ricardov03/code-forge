@@ -286,3 +286,53 @@ test('B51: R17 "Never relax a rule alone" is in rules-core.md, SKILL.md §4, aut
   const decisions = section(await readSkillFile('references/decisions.md'), 7);
   assert.equal(decisions.split('`rules-core.md` R17').length - 1, 1);
 });
+
+test('B63b: the coder-brief template has its sections in order, the Context pack slot just before Project rules, and states the TESTS line as code.md does', async () => {
+  const brief = await readSkillFile('templates/coder-brief.md');
+  const heads = brief.split('\n').filter((l) => l.startsWith('## '));
+  assert.deepEqual(heads, [
+    '## Reply contract',
+    '## The file loop',
+    '## Final report — FAILED unless it lists the ticket ids',
+    '## Fix-round brief (round ≥ 2, or a respawn after a climb)',
+    '## Context pack',
+    '## Project rules',
+  ]);
+  /** @param {string} head @returns {string} the text from `head` to the next `## ` heading */
+  const part = (head) => {
+    const start = brief.indexOf(`\n${head}\n`);
+    assert.notEqual(start, -1, head);
+    const next = brief.indexOf('\n## ', start + head.length + 1);
+    return brief.slice(start, next === -1 ? undefined : next);
+  };
+  /** @param {string} text @param {string} needle */
+  const count = (text, needle) => text.split(needle).length - 1;
+
+  const report = part('## Final report — FAILED unless it lists the ticket ids');
+  assert.match(report, /^Run the block's test command \(`test_command`\) and print its result on a line of its own, exactly:$/m);
+  assert.equal(count(report, '`TESTS <command> exit=<n>`'), 1);
+  assert.match(report, /^`TESTS <command> exit=<n>`$/m);
+  // the example: one TESTS line, and the next non-blank line is the COMPLETE sentinel
+  const lines = report.split('\n');
+  const at = lines.flatMap((l, i) => (/^TESTS \S/.test(l) ? [i] : []));
+  assert.equal(at.length, 1, lines.join('\n'));
+  const after = lines.slice(at[0] + 1).find((l) => l.trim() !== '');
+  assert.equal(after, '===BLOCK B7 COMPLETE===');
+
+  const pack = part('## Context pack');
+  assert.equal(count(pack, '<!--'), 1);
+  assert.equal(count(pack, '`forge context pack --run <r> --block <id>` writes it'), 1);
+
+  const code = await readSkillFile('references/code.md');
+  assert.equal(count(code, 'prints one line that is exactly `TESTS <command> exit=<n>` just before `===BLOCK <id> COMPLETE===`'), 1);
+  assert.equal(count(code, 'Set `context.require_coder_tests: true` in `.code-forge.yml` **before `run start`** to make it a close check'), 1);
+  for (const reason of [
+    '`coder report FAILED: context.require_coder_tests needs --report`',
+    '`coder report FAILED: --report cannot be read`',
+    '`coder report FAILED: no ===BLOCK <id> COMPLETE=== sentinel`',
+    '`coder report FAILED: no TESTS line`',
+    '`coder report FAILED: TESTS exit=<n>`',
+  ]) {
+    assert.equal(count(code, reason), 1, reason);
+  }
+});

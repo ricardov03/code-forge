@@ -11,6 +11,16 @@
  * trimmed line (`^...$`), so a coder quoting the sentinel text inside ordinary prose ("I will not
  * print ===BLOCK B4 COMPLETE=== yet") never matches — only a line that IS exactly the sentinel does.
  *
+ * **TESTS.** B63b: a coder proves a green test run with a line that IS exactly `TESTS <command>
+ * exit=<n>` (matched after trimming; `<command>` non-empty free text, `<n>` a decimal 0–255 with no
+ * leading zeros — a non-numeric, signed or out-of-range value does not count) printed before its
+ * sentinel. On a returned sentinel, `tests: {command, exit}` is the LAST such line in that
+ * sentinel's own segment: after the previous sentinel line of ANY block (COMPLETE or FAILED) and
+ * before this one. A TESTS line before an earlier attempt's sentinel, or before another block's
+ * sentinel in a shared log, never carries over, and one after the sentinel is ignored; with none
+ * the result has no `tests` key at all. Like the sentinel, the pattern is anchored to the whole
+ * trimmed line, so a TESTS line quoted in prose never matches.
+ *
  * **ACK.** Before any tool call, a coder replies `ACK <sha8> lines=<n>` to the wire receipt it was
  * sent — the sha of the brief file, truncated to 8 hex characters (matched case-insensitively;
  * compared lowercased), and the brief's line count. `parseAck` returns the LAST matching line (fix
@@ -23,17 +33,21 @@
  * look like an ACK (an echoed instruction, a quoted example) being mistaken for the real one.
  */
 
-/** @typedef {{status: "complete", blockId: string} | {status: "failed", blockId: string, reason: string}} SentinelResult */
+/** @typedef {{command: string, exit: number}} TestsLine */
+/** @typedef {({status: "complete", blockId: string} | {status: "failed", blockId: string, reason: string}) & {tests?: TestsLine}} SentinelResult */
 
 const COMPLETE_RE = /^===BLOCK\s+(\S+)\s+COMPLETE===$/;
 const FAILED_RE = /^===BLOCK\s+(\S+)\s+FAILED:\s*(.*?)\s*===$/;
+/** B63b: `TESTS <command> exit=<n>` as a whole trimmed line (no leading zeros); 0–255 is checked after the match. */
+const TESTS_RE = /^TESTS\s+(\S.*?)\s+exit=(0|[1-9]\d{0,2})$/;
 
 /**
  * @param {string} output - the full captured transcript (subprocess stdout, or a Solo
  *   `get_process_output` join).
  * @param {string} [blockId] - when given, only sentinel lines for THIS block id count — a shared
  *   pane/log can interleave another block's lines.
- * @returns {SentinelResult | null} the LAST matching sentinel line, or `null` if none is present.
+ * @returns {SentinelResult | null} the LAST matching sentinel line, or `null` if none is present;
+ *   with `tests` when a `TESTS` line comes before it in its segment (B63b).
  */
 export function parseSentinel(output, blockId) {
   if (typeof output !== 'string') {
@@ -41,17 +55,24 @@ export function parseSentinel(output, blockId) {
   }
   /** @type {SentinelResult | null} */
   let last = null;
+  /** @type {TestsLine | null} */
+  let tests = null;
   for (const rawLine of output.split('\n')) {
     const line = rawLine.trim();
     const complete = COMPLETE_RE.exec(line);
-    if (complete && (!blockId || complete[1] === blockId)) {
-      last = { status: 'complete', blockId: complete[1] };
+    if (complete) {
+      if (!blockId || complete[1] === blockId) last = { status: 'complete', blockId: complete[1], ...(tests ? { tests } : {}) };
+      tests = null; // B63b: any sentinel line, of any block, ends the segment
       continue;
     }
     const failed = FAILED_RE.exec(line);
-    if (failed && (!blockId || failed[1] === blockId)) {
-      last = { status: 'failed', blockId: failed[1], reason: failed[2] };
+    if (failed) {
+      if (!blockId || failed[1] === blockId) last = { status: 'failed', blockId: failed[1], reason: failed[2], ...(tests ? { tests } : {}) };
+      tests = null;
+      continue;
     }
+    const run = TESTS_RE.exec(line);
+    if (run && Number(run[2]) <= 255) tests = { command: run[1], exit: Number(run[2]) };
   }
   return last;
 }

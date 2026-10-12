@@ -19,6 +19,19 @@ After you finish each file in `owned_files` (tests written and green) run `forge
 
 ## Final report — FAILED unless it lists the ticket ids
 
+Run the block's test command (`test_command`) and print its result on a line of its own, exactly:
+
+`TESTS <command> exit=<n>`
+
+`<command>` is the command you ran (not empty), `<n>` its exit code as a decimal 0–255 with no leading zeros (`exit=0`, never `exit=00`). Print it just before the sentinel; the last `TESTS` line after your previous sentinel and before this one is the one that counts, and a line inside prose does not count. When the run has `context.require_coder_tests`, `forge block close <id> --run <r> --report <file>` refuses a report without it or with an exit that is not 0 — the full list of refusals is in `references/code.md` §3 (the close check). For example:
+
+```
+TESTS npm test exit=0
+===BLOCK B7 COMPLETE===
+```
+
+The `TESTS` line stays ABOVE the sentinel; only the test summary comes after it.
+
 End with `===BLOCK <id> COMPLETE===`, the test summary and `git diff --stat`, then one line per changed file:
 
 `reviewed <path> ticket <ticket-id>`
@@ -29,7 +42,11 @@ Or `===BLOCK <id> FAILED: <reason>===`.
 
 ## Fix-round brief (round ≥ 2, or a respawn after a climb)
 
-The open findings by id, the fix history, the files they sit in. Fix only those hunks, then run `forge review-file <path> --block <id> --run <r>` and `--wait` on **every file the round changed** — a fix the reviewer never saw is not a fix. The final report follows the same rule: one `reviewed <path> ticket <ticket-id>` line per file changed in the round, or the round counts as FAILED.
+The open findings by id, the fix history, the files they sit in. Fix only those hunks, then run `forge review-file <path> --block <id> --run <r>` and `--wait` on **every file the round changed** — a fix the reviewer never saw is not a fix. The final report follows the same rule: one `reviewed <path> ticket <ticket-id>` line per file changed in the round, or the round counts as FAILED. Re-run the block's test command after the fixes and print a fresh `TESTS <command> exit=<n>` line just before the round's sentinel: a TESTS line from an earlier report does not count.
+
+## Context pack
+
+<!-- the block's context pack, pasted as text: the block header (run, block, level, owned and test files, worktree), the project's build, test, lint and format commands, the rules files and the lessons file. `forge context pack --run <r> --block <id>` writes it; paste its contents, never its run-root path (`references/code.md` §3). Without a `context` key, leave this section out. -->
 
 ## Project rules
 

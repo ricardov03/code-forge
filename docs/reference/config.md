@@ -187,6 +187,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `context.commands.lint` | array<string> |  | — | minItems 1; The lint command (argv), shown POSIX shell-quoted in the pack. |
 | `context.commands.format` | array<string> |  | — | minItems 1; The format command (argv), shown POSIX shell-quoted in the pack. |
 | `context.max_lines` | integer |  | `300` | min 20; The pack's line cap. Lessons are cut first, then the rules files from the last one backwards, each cut section ending in [cut: N lines dropped]; the header and the commands are never cut. |
+| `context.require_coder_tests` | boolean |  | `false` | block close refuses unless --report carries the block's COMPLETE sentinel with a `TESTS <command> exit=0` line before it, and writes a signed coder.tests row. Authority, unlike the rest of `context`: read from the run-start snapshot only, and `run reload` refuses a change to it. Reviews waived (--no-require-reviews or review.external) do not lift it. |
 | `autopilot` | object |  | — |  |
 | `autopilot.min_confidence` | number |  | `0.7` | min 0; max 1; B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner. |
 | `telemetry` | const `"off"` |  | `"off"` |  |

@@ -60,6 +60,16 @@
  * else still refuses — `unowned_change`, `unproven`, `no_changes`, the transcript grep and
  * `closeBlock`'s own rows. With `--no-require-reviews` the human path runs exactly as without the key.
  *
+ * B63b: `context.require_coder_tests: true` in the run's config snapshot (immutable like
+ * `review.external`; the live config is never read for it) adds one check after the report check:
+ * `--report` must be given and readable, its last sentinel for the block must be COMPLETE, and a
+ * `TESTS <command> exit=<n>` line must come before it with `n` 0 — else `coder report FAILED:
+ * context.require_coder_tests needs --report` / `--report cannot be read` / `no ===BLOCK <id>
+ * COMPLETE=== sentinel` / `no TESTS line` / `TESTS exit=<n>`. Waived reviews (the human flag or
+ * `review.external`) do not lift it. On a pass a signed `coder.tests {block, command, exit}` row
+ * (the command redacted) is one of `closeBlock`'s close rows, after any waiver row. Without the key
+ * (or false) nothing is added.
+ *
  * B47: `block open` without `--level` takes the level `autopilot level` chose for the block (the
  * latest `autopilot.level` row of the run for it whose MAC verifies, `autopilotLevel`); with
  * neither it is a usage error (`no --level given and no autopilot level recorded for <id>`). An
@@ -115,20 +125,20 @@ import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
-import { configInForce, externalReviewer } from '../state/config-snapshot.mjs';
+import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
 import { blockFileSet, changedFiles, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { checkExpiry } from '../autopilot/grant.mjs';
-import { writeSafe } from '../util/redact.mjs';
+import { redact, writeSafe } from '../util/redact.mjs';
 import { blockTree, prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
 import { gitChildEnv } from '../worker/ticket.mjs';
-import { missingReviewTickets } from '../engines/sentinel.mjs';
+import { missingReviewTickets, parseSentinel } from '../engines/sentinel.mjs';
 
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
@@ -398,8 +408,24 @@ export async function runBlock(args, deps = {}) {
       };
       // B58: the config waiver row is written by `closeBlock` under the run lock, just before
       // `block.close` and only when every other check passed — never by a refused close
+      /** @type {Record<string, any>[]} */
       const closeRows = external === null ? [] : [{ event: 'gate.reviews_waived', block: id, by: 'config', reviewer: external }];
-      const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews, report], closeRows });
+      /** @type {Array<() => Promise<{ok: boolean, reason?: string}>>} */
+      const extraChecks = [reviews, report];
+      // B63b: `context.require_coder_tests` in the run's config snapshot (never the live config)
+      // needs the coder's green test run — waived reviews do not lift it. It runs FIRST: it only
+      // reads the report, so a refusal here leaves no row (not even the human waiver row the review
+      // check writes). Absent or false: nothing is added, the close is exactly as before.
+      if (requireCoderTests(record)) {
+        extraChecks.unshift(async () => {
+          const tests = await coderTests(flags.report, id);
+          if (!tests.ok) return tests;
+          // signed under the run lock by `closeBlock`, after the waiver row, only when the block closes
+          closeRows.push({ event: 'coder.tests', block: id, command: redact(tests.command), exit: tests.exit });
+          return { ok: true };
+        });
+      }
+      const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows });
       (result.ok ? out : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
       if (!result.ok || !removeTree) return result.ok ? 0 : 1;
       return removeBlockTree(runId, id, entry.worktree, record.workspace, writeRow, out, err);
@@ -432,6 +458,28 @@ async function removeBlockTree(runId, id, worktree, workspace, writeRow, out, er
   await writeSigned(runId, writeRow, { event: 'worktree.remove_failed', block: id, path: worktree.path, reason: failed });
   err(`block ${id} worktree NOT removed: ${failed} — the block stays closed; the tree stays at ${worktree.path} (commit or clean it, then git worktree remove it)\n`);
   return 1;
+}
+
+/**
+ * B63b: the coder's green test run, read from its final report — the block's LAST sentinel must
+ * be COMPLETE, with a `TESTS <command> exit=0` line before it (`parseSentinel`).
+ * @param {unknown} reportFlag - the `--report` value (absent, or `true` for a valueless flag).
+ * @param {string} id
+ * @returns {Promise<{ok: true, command: string, exit: number} | {ok: false, reason: string}>}
+ */
+async function coderTests(reportFlag, id) {
+  if (typeof reportFlag !== 'string') return { ok: false, reason: 'coder report FAILED: context.require_coder_tests needs --report' };
+  let text;
+  try {
+    text = await readFile(reportFlag, 'utf8');
+  } catch {
+    return { ok: false, reason: 'coder report FAILED: --report cannot be read' };
+  }
+  const sentinel = parseSentinel(text, id);
+  if (sentinel?.status !== 'complete') return { ok: false, reason: `coder report FAILED: no ===BLOCK ${id} COMPLETE=== sentinel` };
+  if (!sentinel.tests) return { ok: false, reason: 'coder report FAILED: no TESTS line' };
+  if (sentinel.tests.exit !== 0) return { ok: false, reason: `coder report FAILED: TESTS exit=${sentinel.tests.exit}` };
+  return { ok: true, command: sentinel.tests.command, exit: 0 };
 }
 
 /** B52: the refusal when `--no-require-reviews` has no terminal to ask the human at. */

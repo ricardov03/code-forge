@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 67,
+  "block_count": 68,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -922,6 +922,19 @@
         "B62b"
       ],
       "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/util/breadcrumbs.mjs, schema/code-forge.schema.json, test/config/schema-coverage.test.mjs, docs/{how-it-works,concepts}.md, docs/reference/config.md, skill/SKILL.md, skill/references/{code,review,ledger}.md"
+    },
+    "B63b": {
+      "title": "Coders prove a green test run (issue #13 item 5, issue #10 item 1): parseSentinel returns tests {command, exit} from the last whole-line TESTS <command> exit=<n> in the returned sentinel's segment (after the previous sentinel of any block; 0-255, no leading zeros); context.require_coder_tests (run-start snapshot only, run reload refuses a change) makes block close refuse with no --report, an unreadable report, no COMPLETE sentinel, no TESTS line or a non-zero exit, even when reviews are waived or external, and on a pass writes a signed coder.tests row with the close rows; the coder brief template gets a context pack slot and the TESTS line; with the key false or absent close behaves as before",
+      "wave": 13,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "test/engines/sentinel-tests.test.mjs"
+      ],
+      "depends_on": [
+        "B63a"
+      ],
+      "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/engines/sentinel.mjs, src/cli/block.mjs, src/context/pack.mjs, src/state/{config-snapshot,run}.mjs, schema/code-forge.schema.json, test/config/schema-coverage.test.mjs, test/skill/structure.test.mjs, docs/{how-it-works,concepts}.md, docs/reference/config.md, skill/SKILL.md, skill/references/{code,ledger}.md, skill/templates/coder-brief.md"
     }
   }
 }

@@ -8,6 +8,7 @@
  *     lessons: docs/lessons.md                  one repository-relative file
  *     commands: {build: [...], test: [...], lint: [...], format: [...]}   argv arrays, each optional
  *     max_lines: 300                            the pack's line cap (integer >= 20)
+ *     require_coder_tests: false                B63b: close needs the coder's `TESTS … exit=0` line
  *
  * `assemblePack` turns it into ONE pack for a block, in this order: the header (run, block, level,
  * owned files, test files when the block has them, worktree path and branch when it has one), the
@@ -29,7 +30,10 @@
  * lessons path, or a header value (owned or test file, worktree path or branch) is refused, so
  * nothing can forge a line of the pack. Command lines go through `redact`, as the rules and
  * lessons do. The `context` key is not
- * authority: it is not fixed for the run, and `run reload` takes a change to it.
+ * authority: it is not fixed for the run, and `run reload` takes a change to it — except B63b's
+ * `context.require_coder_tests`, which tightens `block close`: it is read from the run-start
+ * snapshot only (`requireCoderTests`, `src/state/config-snapshot.mjs`) and `run reload` refuses a
+ * change to it. It plays no part in the pack.
  */
 
 import { lstatSync, readFileSync, readlinkSync, realpathSync } from 'node:fs';
@@ -109,6 +113,10 @@ export function contextSettings(cfg) {
     if (argv.some((a) => CONTROL.test(a))) throw new ContextError('bad-context', `context.commands.${key} contains a control character`);
     commands[key] = [...argv];
   }
+  // B63b: authority, read by `block close` from the run-start snapshot only; checked here so a
+  // pack is never built from a config that carries a malformed value
+  const requireTests = raw.require_coder_tests ?? false;
+  if (typeof requireTests !== 'boolean') throw new ContextError('bad-context', 'context.require_coder_tests must be true or false');
   const maxLines = raw.max_lines ?? DEFAULT_MAX_LINES;
   if (!Number.isInteger(maxLines) || /** @type {number} */ (maxLines) < MIN_MAX_LINES) throw new ContextError('bad-context', `context.max_lines must be an integer >= ${MIN_MAX_LINES}`);
   return { rules: [...rules], lessons: /** @type {string | null} */ (lessons), commands, maxLines: /** @type {number} */ (maxLines) };
