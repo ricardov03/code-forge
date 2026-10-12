@@ -336,3 +336,153 @@ test('B63b: the coder-brief template has its sections in order, the Context pack
     assert.equal(count(code, reason), 1, reason);
   }
 });
+
+// ── B67: brief mode in the docs and the skill ───────────────────────────────
+
+const BRIEF_DOC = path.join(ROOT, 'docs', 'brief-mode.md');
+const SCHEMA_FILE = path.join(ROOT, 'schema', 'code-forge.schema.json');
+
+/**
+ * @param {string} text @param {string} [lang] - a fence language; omitted = every fence, any
+ *   language or none.
+ * @returns {string[]} the fence bodies
+ */
+const fences = (text, lang) =>
+  [...text.matchAll(/^([ \t]*)```([\w-]*)[ \t]*\r?\n([\s\S]*?)^\1```[ \t]*\r?$/gm)].filter((m) => lang === undefined || m[2] === lang).map((m) => m[3]);
+
+/**
+ * The verbs a text names as `code-forge <verb>` / `forge <verb>` (`npx` in front allowed): in
+ * inline code spans, and in fences of any language or none, indented too. Each fenced line is
+ * split on `&&`, `;` and `|`; a leading `$ ` prompt and leading `VAR=value` assignments are
+ * stripped from each command first.
+ * @param {string} text @returns {Set<string>}
+ */
+function namedVerbs(text) {
+  /** @type {Set<string>} */
+  const named = new Set();
+  for (const m of text.matchAll(/`(?:npx\s+)?(?:code-forge|forge)\s+([a-z][a-z-]*)\b/g)) named.add(m[1]);
+  for (const body of fences(text)) {
+    for (const raw of body.split(/\r?\n/)) {
+      for (const part of raw.split(/&&|;|\|/)) {
+        const cmd = part.trim().replace(/^\$\s+/, '').replace(/^(?:[A-Za-z_][A-Za-z0-9_]*=\S*\s+)+/, '');
+        const m = cmd.match(/^(?:npx\s+)?(?:code-forge|forge)\s+([a-z][a-z-]*)\b/);
+        if (m) named.add(m[1]);
+      }
+    }
+  }
+  return named;
+}
+
+/**
+ * Every key path of a parsed YAML mapping, depth first (`gates.test.env.NODE_ENV`). The object
+ * elements of a list add their keys under the list's own path (`levels.L0.fallback.model`);
+ * scalars are leaves.
+ * @param {Record<string, any>} node @param {string} [prefix] @returns {string[]}
+ */
+function keyPaths(node, prefix = '') {
+  /** @type {string[]} */
+  const out = [];
+  for (const [k, v] of Object.entries(node)) {
+    const p = prefix ? `${prefix}.${k}` : k;
+    out.push(p);
+    const objects = Array.isArray(v) ? v.filter((e) => e !== null && typeof e === 'object' && !Array.isArray(e)) : v !== null && typeof v === 'object' ? [v] : [];
+    for (const o of objects) for (const sub of keyPaths(o, p)) if (!out.includes(sub)) out.push(sub);
+  }
+  return out;
+}
+
+/**
+ * The schema nodes a key path reaches: `$ref` is followed, every `anyOf`/`oneOf`/`allOf` branch
+ * is tried, an array's `items` is entered, `patternProperties` match by their pattern, and an
+ * object `additionalProperties` schema (or `additionalProperties: true`) takes any other key.
+ * `$ref` segments are JSON-pointer decoded (`~1` ⇒ `/`, `~0` ⇒ `~`). Empty when the path does
+ * not exist.
+ * @param {Record<string, any>} schema @param {string} keyPath @returns {Array<Record<string, any>>}
+ */
+function schemaAt(schema, keyPath) {
+  /** @param {string} s @returns {string} */
+  const unescape = (s) => s.replace(/~1/g, '/').replace(/~0/g, '~');
+  /** @param {Record<string, any>} n @returns {Array<Record<string, any>>} */
+  const expand = (n) => {
+    if (n.$ref) return expand(n.$ref.split('/').slice(1).map(unescape).reduce((/** @type {any} */ o, /** @type {string} */ k) => o[k], schema));
+    const branches = [...(n.anyOf ?? []), ...(n.oneOf ?? []), ...(n.allOf ?? [])];
+    const self = n.items && typeof n.items === 'object' ? [n, ...expand(n.items)] : [n];
+    return [...self, ...branches.flatMap(expand)];
+  };
+  let nodes = expand(schema);
+  for (const key of keyPath.split('.')) {
+    nodes = nodes.flatMap((n) => {
+      if (n.properties && Object.hasOwn(n.properties, key)) return expand(n.properties[key]);
+      const pattern = Object.entries(n.patternProperties ?? {}).find(([re]) => new RegExp(re).test(key));
+      if (pattern) return expand(pattern[1]);
+      if (n.additionalProperties === true) return [{}];
+      return n.additionalProperties && typeof n.additionalProperties === 'object' ? expand(n.additionalProperties) : [];
+    });
+  }
+  return nodes;
+}
+
+test('B67 (3): docs/brief-mode.md exists, docs/README.md lists it as 5c, how-it-works.md links it', async () => {
+  assert.equal(await exists(BRIEF_DOC), true);
+  const readme = await readFile(path.join(ROOT, 'docs', 'README.md'), 'utf8');
+  const rows = readme.split('\n').filter((l) => l.startsWith('|') && l.includes('](brief-mode.md)'));
+  assert.equal(rows.length, 1, rows.join('\n'));
+  assert.match(rows[0], /^\| 5c \| \[brief-mode\.md\]\(brief-mode\.md\) \| /);
+  const howItWorks = await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8');
+  assert.equal(howItWorks.split('[brief-mode.md](brief-mode.md)').length - 1, 1);
+});
+
+test('B67 (3): every code-forge verb docs/brief-mode.md names is a verb bin/code-forge.mjs discovers', async () => {
+  const doc = await readFile(BRIEF_DOC, 'utf8');
+  const verbs = new Set(await listVerbs());
+  const named = namedVerbs(doc);
+  assert.deepEqual([...named].sort(), ['block', 'context', 'gates', 'init', 'ledger', 'report', 'run', 'status', 'validate']);
+  assert.deepEqual([...named].filter((v) => !verbs.has(v)), []);
+  // controls: a prompt, env assignments and any fence language are read; an unknown verb is caught
+  const control = [
+    '```sh\n$ cd x && npx code-forge frobnicate --x\n```',
+    '```\nFOO=1 BAR=x forge validate | tee out; forge status\n```',
+    '- a list item:\n\n  ```console\r\n  $ forge gates run\r\n  ```\r\n',
+    '`npx code-forge report --slug s`',
+  ].join('\n\n');
+  assert.deepEqual([...namedVerbs(control)].sort(), ['frobnicate', 'gates', 'report', 'status', 'validate']);
+  assert.deepEqual([...namedVerbs(control)].filter((v) => !verbs.has(v)), ['frobnicate']);
+});
+
+test('B67 (3): every key path of the brief-mode.md config example exists in the schema, and a misspelt one is caught', async () => {
+  const doc = await readFile(BRIEF_DOC, 'utf8');
+  const yamlBlocks = fences(doc, 'yaml');
+  assert.equal(yamlBlocks.length, 1);
+  const { parse } = await import('yaml');
+  const example = parse(yamlBlocks[0]);
+  const schema = JSON.parse(await readFile(SCHEMA_FILE, 'utf8'));
+  const paths = keyPaths(example);
+  assert.equal(paths.length, 45);
+  assert.deepEqual(paths.filter((p) => schemaAt(schema, p).length === 0), []);
+  for (const p of ['review.external.required', 'review.external.name', 'gates.test.argv', 'gates.test.env', 'gates.full_suite_threshold_files', 'proof.isolation', 'proof.worktree.branch', 'context.rules', 'context.lessons', 'context.commands.test', 'context.max_lines', 'context.require_coder_tests', 'hooks.on_block_end.argv', 'hooks.on_block_end.timeout_s', 'autonomy.coder_may_push', 'autonomy.coder_may_open_draft_pr']) {
+    assert.equal(paths.includes(p), true, p);
+  }
+  assert.deepEqual(example.gates.test.argv, ['node', '--test', '{test_files}']);
+  // the walker refuses what the schema does not have
+  assert.deepEqual(['review.externl', 'hooks.on_block_end.shell', 'context.commands.deploy', 'autonomy.coder_may_merge'].map((p) => schemaAt(schema, p).length), [0, 0, 0, 0]);
+  // the example has no list of objects; the walker still enters one (levels.<L>.fallback[])
+  const fallback = keyPaths({ levels: { L0: { model: 'm', fallback: [{ provider: 'openai', model: 'x' }, { provider: 'xai', model: 'y', effort: 'high' }] } } });
+  assert.deepEqual(fallback, ['levels', 'levels.L0', 'levels.L0.model', 'levels.L0.fallback', 'levels.L0.fallback.provider', 'levels.L0.fallback.model', 'levels.L0.fallback.effort']);
+  assert.deepEqual(fallback.filter((p) => schemaAt(schema, p).length === 0), []);
+  assert.equal(schemaAt(schema, 'levels.L0.fallback.providr').length, 0);
+  // the example's levels are the provider: anthropic defaults
+  const anthropic = (await import('../../src/config/defaults/anthropic.mjs')).default;
+  assert.equal(example.provider, anthropic.provider);
+  assert.deepEqual(example.levels, JSON.parse(JSON.stringify(anthropic.levels)));
+});
+
+test('B67 (1)(2): SKILL.md names --mode brief and when to use each mode; code.md names the context pack, the done file, status and ledger outside-review', async () => {
+  const skill = await readSkillFile('SKILL.md');
+  assert.match(skill, /\*\*Brief mode\*\* — `forge run start --mode brief` \(`references\/plan\.md` §6\) — is for one small task or a short list of tasks/);
+  assert.match(skill, /no plan doc, no `forge plan check`, no plan approval/);
+  assert.match(skill, /\*\*Plan mode\*\* \(the default\) is for multi-block work that needs `forge plan check` and the owner's approval\./);
+  const code = await readSkillFile('references/code.md');
+  for (const needle of ['`forge context pack --run <r> --block <id>`', '`<run root>/blocks/<id>.done.json`', '`forge status` (B64a)', '`forge ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...`']) {
+    assert.equal(code.includes(needle), true, needle);
+  }
+});

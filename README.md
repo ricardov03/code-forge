@@ -10,7 +10,7 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 ## What's new in 0.7
 
-Next release:
+In 0.8.0:
 
 - **Run only the tests a block touches.** `block open --tests <paths>` names the block's test
   files. A gate argv item exactly `{test_files}` becomes those files. When the block owns more
@@ -51,6 +51,10 @@ Next release:
   outside reviewer needed on a PR (a later call for the same PR replaces it). `report` gets a
   14th section, `outside_review`: per PR, the rounds and findings next to the code-forge cost
   of its blocks.
+- **A walk-through for brief-only runs.** [docs/brief-mode.md](docs/brief-mode.md) walks one task
+  from a brief to a closed block with an outside reviewer: related tests, a worktree, the context
+  pack, the done file and hook, `status`, and the outside review rounds in `report`. A test runs
+  the page's own config and steps, so the page and the CLI stay the same.
 
 In 0.7.7:
 

@@ -15,11 +15,12 @@ disagree, the verb is right: each verb prints its own usage line when its argume
 | 5 | [tutorial-first-test.md](tutorial-first-test.md) | run one real end-to-end test: build the code-forge marketing site in a new repo |
 | 5a | [review-only.md](review-only.md) | only review code you already wrote: a branch, uncommitted work or some files, with CI exit codes |
 | 5b | [autopilot.md](autopilot.md) | step away while a run goes on: grant a delegate a few decisions for a set time, and review the live log (Binnacle and Full log) when you return |
+| 5c | [brief-mode.md](brief-mode.md) | code one small task from a brief, with no plan: a brief-mode run with an outside reviewer, related tests, worktrees, the context pack and the done file, step by step |
 | 6 | [examples/marketing-site/brief.md](examples/marketing-site/brief.md) | copy the brief the tutorial uses |
 | 7 | [marketing.md](marketing.md) | read the product story: the problem, the promise, the honest limits |
 
 New to the tool? Read 1 → 3 → 4, then do 5. Keep 2 open as a glossary. Only want reviews? Read 4,
-then 5a. Going away while a run goes on? Read 5b.
+then 5a. Going away while a run goes on? Read 5b. One small task, no plan? Read 5c.
 
 ## Reference pages (already in the repo)
 

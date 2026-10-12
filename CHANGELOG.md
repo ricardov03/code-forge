@@ -35,6 +35,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - ledger outside-review records an outside reviewer's rounds and findings per PR (signed outside_review row, link
   redacted); report gets a 14th section, outside_review, with the code-forge cost of the PR's blocks next to the rounds
   (issue #13)
+- docs/brief-mode.md walks a brief-only run with an outside reviewer, related tests, a worktree, the context pack and
+  the no-poll flow; a test runs the page's config and steps; the skill says when to use brief mode or plan mode (issue
+  #13)
 
 ### Changed
 
