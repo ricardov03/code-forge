@@ -22,7 +22,7 @@ import { externalReviewer } from './config-snapshot.mjs';
 import { ownedKinds, pathKind } from './owned-kinds.mjs';
 import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
-import { assertOwned, findOverlap, isExactEntry, ownsFile, scopeGate } from './registry.mjs';
+import { assertOwned, blocksOverlap, isExactEntry, ownsFile, scopeGate } from './registry.mjs';
 import { checkWorkerPin, readRun, saveRun, withRunLock, writeSigned } from './run.mjs';
 import { verifyRow, loadKey } from './signer.mjs';
 
@@ -290,6 +290,11 @@ function refuseConfigOwner(owned, kinds, guarded) {
 }
 
 /**
+ * @typedef {{path: string, branch: string, base_sha: string}} TreeRecord - a block entry's `worktree` (B62a).
+ * @typedef {{worktree: TreeRecord, created: boolean, rollback: (() => Promise<string | null>) | null}} OpenTree - `rollback` resolves to a sentence naming leftovers, or null.
+ */
+
+/**
  * `block open` — refuses a second open of the same id and any owned set that overlaps another
  * ACTIVE block's; records base, owned files, level, attempt, acceptance, line forecast and the
  * block kind (B34: the declared `kind`, else `blockKind` of the owned files). A docs/contract
@@ -307,13 +312,26 @@ function refuseConfigOwner(owned, kinds, guarded) {
  * B60: `tests` (`block open --tests <paths…>`, the same path rules as owned entries, else
  * `bad-tests`) is recorded as the entry's `test_files` and on the dispatch row; a gate argv item
  * `{test_files}` expands to them (`gates/expand.mjs`). Left out, neither carries the key.
+ * B62a: `worktree` (given by `block open` under `proof.isolation: worktree`, `proof/worktree.mjs`;
+ * this module never imports it) plans the block's own worktree, or the reuse of the one an earlier
+ * entry of the same id recorded (`previous`); its `make()` makes or reuses it. Both are called
+ * under the lock before anything is recorded: the plan before the overlap check (which lets this
+ * block share owned paths with another open block on a different tree, `blocksOverlap`), `make()`
+ * after every other check. A refusal there writes nothing; if the rows or the save fail after
+ * `make()` created a tree, its `rollback()` removes it again, and the original error is thrown
+ * with a sentence added naming anything the rollback could not remove. The entry stores the tree's
+ * `{path, branch, base_sha}` as `worktree`; a tree it made is a signed `worktree.created
+ * {block, path, branch, base}` row just before `dispatch`. On a re-open the block's base is the
+ * tree's `base_sha`, and a `base` that resolves to another commit is refused (`worktree-base`).
  * @param {{
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
  *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date, tests?: string[],
  *   decision?: {question: 'lane', answer: string, source: 'rules', facts: Record<string, unknown>}, decisionId?: string,
+ *   worktree?: (ctx: {baseSha: string, previous: TreeRecord | null}) => Promise<{path: string, make: () => Promise<OpenTree>}>,
  * }} opts
- * @returns {Promise<{block: Record<string, any>, pointer: string | null}>}
+ * @returns {Promise<{block: Record<string, any>, pointer: string | null, worktreeReused: boolean}>} `worktreeReused`:
+ *   the block took an earlier attempt's worktree as it was.
  */
 export async function openBlock(opts) {
   const { runId, id, level, attempt = 1, lines = null, writeRow, now = new Date() } = opts;
@@ -334,35 +352,70 @@ export async function openBlock(opts) {
   // not wait on it); under the lock the base is resolved again and must be the one stamped against
   const before = await readRun(runId);
   const { workspace } = before;
-  const stampedBase = await resolveCommit(opts.base ?? 'HEAD', workspace);
+  // B62a: a re-open of a block with a worktree keeps the tree's base — the block's base is the
+  // commit its tree started from, and a different --base is refused before anything is touched
+  /** @param {Record<string, any>} record @returns {{path: string, branch: string, base_sha: string} | null} */
+  const previousTree = (record) => (opts.worktree ? record.blocks[id]?.worktree ?? null : null);
+  const previous = previousTree(before);
+  const baseRef = previous ? previous.base_sha : opts.base ?? 'HEAD';
+  const stampedBase = await resolveCommit(baseRef, workspace);
+  if (previous && opts.base !== undefined && (await resolveCommit(opts.base, workspace)) !== previous.base_sha) {
+    throw new StateError('worktree-base', `block ${id}: --base ${opts.base} is not ${previous.base_sha.slice(0, 12)}, the base of the block's worktree ${previous.path}; a re-open keeps the worktree and its base — drop --base; nothing was recorded`);
+  }
   const treeOpen = await treeAtOpen(workspace, stampedBase);
   // B58: `review.external` cannot change mid-run, so the record read here decides
   const guarded = await guardedConfigPaths(before);
 
-  const block = await mutateRun(runId, null, writeRow, async (record) => {
-    if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
-    // B57: what each exact owned entry is on disk, under the lock (as `block claim`) — a regular
-    // file owns only itself, here and in every later check
-    const kinds = ownedKinds(record.workspace, owned);
-    refuseConfigOwner(owned, kinds, guarded);
-    for (const [otherId, other] of Object.entries(activeBlocks(record))) {
-      const pair = findOverlap(owned, other.owned_files, { kindsA: kinds, kindsB: other.owned_kinds });
-      if (pair) throw new StateError('overlap', `block ${id} owns ${pair[0]}, which overlaps ${pair[1]} owned by open block ${otherId}`);
+  /** @type {OpenTree | null} */
+  let made = null;
+  try {
+    const { block, reused } = await mutateRun(runId, null, writeRow, async (record) => {
+      if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
+      // B57: what each exact owned entry is on disk, under the lock (as `block claim`) — a regular
+      // file owns only itself, here and in every later check
+      const kinds = ownedKinds(record.workspace, owned);
+      refuseConfigOwner(owned, kinds, guarded);
+      const prior = previousTree(record);
+      const baseSha = await resolveCommit(prior ? prior.base_sha : opts.base ?? 'HEAD', record.workspace);
+      if (baseSha !== stampedBase || record.workspace !== workspace) throw new StateError('base-moved', `the base moved while block ${id} was being opened; run block open again`);
+      // B62a: the tree is planned (read-only checks) before the overlap check, which needs its path
+      const planned = opts.worktree ? await opts.worktree({ baseSha, previous: prior }) : null;
+      const self = { owned_files: owned, owned_kinds: kinds, worktree: planned ? { path: planned.path } : null };
+      for (const [otherId, other] of Object.entries(activeBlocks(record))) {
+        const pair = blocksOverlap(self, other);
+        if (pair) throw new StateError('overlap', `block ${id} owns ${pair[0]}, which overlaps ${pair[1]} owned by open block ${otherId}`);
+      }
+      // B62a: the worktree is made (or an earlier attempt's reused) last, once every other check
+      // passed; a tree made here is rolled back below if the rows or the save then fail
+      made = planned ? await planned.make() : null;
+      const tree = made;
+      const entry = { block: id, base_sha: baseSha, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(tree ? { worktree: tree.worktree } : {}) };
+      record.blocks[id] = entry;
+      const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
+      const created = tree?.created ? [{ event: 'worktree.created', block: id, path: tree.worktree.path, branch: tree.worktree.branch, base: tree.worktree.base_sha }] : [];
+      return {
+        result: { block: entry, reused: tree !== null && !tree.created },
+        rows: [
+          ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
+          ...created,
+          { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}) },
+        ],
+      };
+    });
+    return { block, pointer, worktreeReused: reused };
+  } catch (err) {
+    // B62a: nothing was recorded, so a tree this open made must not outlive it
+    if (made?.created && made.rollback) {
+      // the original error is thrown either way; what could not be removed is named in it (the
+      // rollback checks each git result and resolves, it does not throw)
+      const left = await made.rollback();
+      if (left !== null) {
+        if (!(err instanceof Error)) throw new Error(`${String(err).replace(/\.?$/, '.')} ${left}`, { cause: err });
+        err.message = `${err.message.replace(/\.?$/, '.')} ${left}`;
+      }
     }
-    const baseSha = await resolveCommit(opts.base ?? 'HEAD', record.workspace);
-    if (baseSha !== stampedBase || record.workspace !== workspace) throw new StateError('base-moved', `the base moved while block ${id} was being opened; run block open again`);
-    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}) };
-    record.blocks[id] = entry;
-    const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
-    return {
-      result: entry,
-      rows: [
-        ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
-        { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}) },
-      ],
-    };
-  });
-  return { block, pointer };
+    throw err;
+  }
 }
 
 /** @param {{runId: string, id: string, writeRow: WriteRow}} opts */
@@ -378,12 +431,15 @@ export async function attemptBlock({ runId, id, writeRow }) {
  * in between touched a file this block owns (that is a conflict ⇒ stop). Rename detection is OFF
  * (`--no-renames`): a rename lists both its old and its new path, so moving an owned file away
  * is a conflict too. Never silent. Owned means `ownsFile` (B57: a directory entry owns the files
- * below it).
+ * below it). B62a: refused for a block with its own worktree (`worktree-rebase`).
  * @param {{runId: string, id: string, head?: string, writeRow: WriteRow}} opts
  * @returns {Promise<{old_base: string, new_base: string}>}
  */
 export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
   return mutateRun(runId, id, writeRow, async (record, block) => {
+    // B62a: a worktree block's base is the commit its tree started from; moving it would leave the
+    // tree on its old base, so the rebase is refused
+    if (block.worktree) throw new StateError('worktree-rebase', `block ${id} has its own worktree ${block.worktree.path} on branch ${block.worktree.branch}; its base is the base of that tree, so block rebase does not apply — work on the branch in the tree instead`);
     const cwd = record.workspace;
     const newBase = await resolveCommit(head, cwd);
     const ancestor = await git(isAncestorArgv(block.base_sha, newBase), cwd, [0, 1]);
@@ -400,10 +456,11 @@ export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
 /**
  * `block claim` — assign one EXACT path (an orphan, or any unowned path) to `id`; refused for a
  * glob, and when another open block owns it — or anything it would own: the claimed path becomes an
- * owned entry, so it is checked with `findOverlap` (B57: an entry owns the paths below it too,
+ * owned entry, so it is checked with `blocksOverlap` (B57: an entry owns the paths below it too,
  * unless it is a regular file now — its kind is recorded in `owned_kinds` as at `block open`).
  * B58: with `review.external.required` set, a path that owns the project's config is refused
- * (`config-owned`), as at `block open`.
+ * (`config-owned`), as at `block open`. B62a: two blocks that each have their own worktree may
+ * own the same path (`blocksOverlap`).
  * @param {{runId: string, id: string, file: string, writeRow: WriteRow}} opts
  */
 export async function claimPath({ runId, id, file, writeRow }) {
@@ -414,7 +471,7 @@ export async function claimPath({ runId, id, file, writeRow }) {
     const kinds = { [file]: pathKind(record.workspace, file) };
     refuseConfigOwner([file], kinds, guarded);
     for (const [otherId, other] of Object.entries(activeBlocks(record))) {
-      const pair = otherId === id ? null : findOverlap([file], other.owned_files, { kindsA: kinds, kindsB: other.owned_kinds });
+      const pair = otherId === id ? null : blocksOverlap({ owned_files: [file], owned_kinds: kinds, worktree: block.worktree ?? null }, other);
       if (pair) throw new StateError('overlap', `${file} overlaps ${pair[1]} owned by open block ${otherId}`);
     }
     if (!block.owned_files.includes(file)) {

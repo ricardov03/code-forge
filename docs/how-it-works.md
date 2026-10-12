@@ -52,6 +52,45 @@ Nothing else counts as completion. Its report also lists one `reviewed <path> ti
 changed file. With `--report`, `block close` treats a report that misses one as FAILED, whatever its
 sentinel says (`coder report FAILED: no review-file ticket id for <files>`).
 
+### One worktree per block
+
+With `proof.isolation: worktree` (B62a), each block gets its own git worktree on its own branch.
+`block open` runs `git worktree add <dir>/<block> -b <branch> <base>` before the block is recorded:
+
+- The tree goes in `proof.worktree.dir`, resolved from the repository top level. The default is
+  `../<repo-name>-worktrees`, beside the repository; `<repo-name>` is replaced with the basename of
+  the repository top level.
+- The branch is `proof.worktree.branch`, default `forge/{run}/{block}`. Only `{run}` and `{block}`
+  are filled in, and git must accept the name.
+- The tree starts from `proof.worktree.base`, else the block's base.
+
+The block records `worktree {path, branch, base_sha}`, and a signed `worktree.created` row comes
+before `dispatch`. The open prints `worktree <path> · branch <branch>`. If the tree cannot be made, the
+open is refused and nothing is recorded:
+- the branch already exists (checked again just before the tree is made, so a branch made in
+  between is refused, never deleted),
+- something is already at the path,
+- the base is not a commit,
+- the name or the block id is invalid, or
+- `git worktree add` fails (a branch it made is deleted again).
+
+If the open fails after the tree was made, the tree and the branch it made are removed again.
+
+A re-open with `--attempt` reuses the same tree and branch, and the block keeps the tree's base; a
+`--base` naming another commit is refused, and so is `block rebase`. A tree that is gone (removed,
+or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
+another branch or a detached HEAD refuses the re-open.
+
+Two open blocks that each have a worktree, at different paths, may own the same path. A block without one is checked
+against every other open block as before. `block close <id> --run <run> --remove-worktree` removes
+the tree after a successful close with `git worktree remove` (never `--force`) and keeps the branch.
+It writes a signed `worktree.removed` row. A tree whose directory was already deleted by hand is
+pruned (`git worktree prune`) and counts as removed. A tree with uncommitted or untracked files stays where it
+is, with a `worktree.remove_failed` row and exit 1, and the block stays closed. Without the flag the
+tree stays. Coders may not use the flag. code-forge never pushes or merges, and never deletes a
+branch except one a failed open made itself. Until B62b, gates, reviews and the close check run as
+under export (from the main checkout) and do not see changes made only in the block's worktree.
+
 ### Lanes and the plan check
 
 The plan author writes a level for each block, but the level is not its choice. For each block the
@@ -99,7 +138,7 @@ edit the file and run `code-forge run reload --run <run>`:
 - open blocks stay open with their attempt numbers; review tickets already queued finish on the
   config they were enqueued with, new tickets use the new one, and the worker picks it up without
   a restart;
-- `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key`, `review.external` and `version` are fixed for the run:
+- `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key`, `review.external`, `proof.isolation`, `proof.worktree` and `version` are fixed for the run:
   a change to one is refused with the key's name. End the run and start a new one to change them;
 - while an autopilot grant is active, a change to any limit key (budgets, thresholds, review caps,
   escalation, proof, System 1, `autopilot.*`) is refused. Only you change one, with

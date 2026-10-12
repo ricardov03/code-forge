@@ -16,6 +16,9 @@ waits on a second real consumer (plan §10.4, Q17).
   php-phpunit. Export copies a Composer vendor folder instead of linking it, so PHP autoloads the code of the block and
   not the main tree. An opt-in live check (CODE_FORGE_LIVE_PHP=1) runs a Laravel app on PHPUnit and on Pest through the
   export.
+- proof.isolation: worktree — each block gets its own git worktree and branch (proof.worktree.dir/branch/base); owned
+  files need to be disjoint only inside one tree; block close --remove-worktree removes the tree and keeps the branch
+  (issue #13)
 
 ## [0.7.7] — 2026-10-11
 

@@ -21,6 +21,10 @@ Next release:
   detected. Export copies the Composer `vendor` folder instead of linking it, so the tests load
   the block's code, not the main tree's. A live check (`CODE_FORGE_LIVE_PHP=1`) runs a Laravel
   app on PHPUnit and on Pest through the export.
+- **One git worktree per block.** With `proof.isolation: worktree`, `block open` gives each block
+  its own git worktree and branch (`proof.worktree.dir`, `branch`, `base`). Blocks in different
+  trees may own the same files. Nothing is pushed. `block close --remove-worktree` removes the
+  tree and keeps the branch.
 
 In 0.7.7:
 

@@ -34,6 +34,10 @@ export const IMMUTABLE_KEYS = Object.freeze({
   // B58: the owner's switch past the local per-file review is set before the run starts or not at
   // all, so nobody turns it on (or off) mid-run
   'review.external': 'the outside reviewer is fixed by the owner before the run starts',
+  // B62a: every block of the run is isolated the same way — only two blocks that each have their
+  // own worktree may share owned paths — so neither key changes mid-run
+  'proof.isolation': 'every block of the run is isolated the same way',
+  'proof.worktree': 'the worktrees and branches of the open blocks were made with it',
 });
 
 /** @param {unknown} v @returns {boolean} what `JSON.stringify` drops from an object. */

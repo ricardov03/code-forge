@@ -34,6 +34,10 @@
  * vs `src/**` and vs `src/feature/*.swift` overlap, vs `src/*.mjs` and `src/featureX/*` do not);
  * a `file` entry against a glob overlaps only when the glob matches it (`src/README` vs
  * `src/**\/*.mjs` does not).
+ *
+ * B62a — between two OPEN BLOCKS the rule is `blocksOverlap`: two blocks that each have their own
+ * worktree (`proof.isolation: worktree`) may own the same path; any pair with a shared-tree block
+ * in it is checked with `findOverlap` exactly as above.
  */
 
 import { StateError } from './paths.mjs';
@@ -241,6 +245,30 @@ export function findOverlap(ownedA, ownedB, { kindsA, kindsB } = {}) {
     }
   }
   return null;
+}
+
+/**
+ * One open block as the overlap rule sees it: its owned entries, their kinds (B57) and its own
+ * worktree, if any (B62a). `worktree` is the run record's `{path, branch, base_sha}` (or, for a
+ * block being opened, `{path}` of the tree it is about to get); `null` or absent means it works in
+ * the shared tree (export or lock isolation). Every caller passes this one shape.
+ * @typedef {{owned_files: ReadonlyArray<string>, owned_kinds?: OwnedKinds, worktree?: {path: string} | null}} OverlapBlock
+ */
+
+/**
+ * B62a: the owned-files overlap rule between two open blocks. Two blocks that EACH have their own
+ * worktree, at different paths, may own the same path — each edits its own copy on its own branch,
+ * and nothing is merged by code-forge — so the pair never overlaps. Two blocks on the SAME tree
+ * path edit one tree, and a block without a worktree (export or lock isolation) edits the shared
+ * tree: both are checked exactly as before B62a ({@link findOverlap}, B57's kinds included).
+ * @param {OverlapBlock} a @param {OverlapBlock} b
+ * @returns {[string, string] | null} the first overlapping pair (a's entry, b's entry), or null.
+ */
+export function blocksOverlap(a, b) {
+  const treeA = a.worktree ?? null;
+  const treeB = b.worktree ?? null;
+  if (treeA !== null && treeB !== null && treeA.path !== treeB.path) return null;
+  return findOverlap(a.owned_files, b.owned_files, { kindsA: a.owned_kinds, kindsB: b.owned_kinds });
 }
 
 /**

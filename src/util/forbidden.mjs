@@ -277,7 +277,9 @@ export const FORBIDDEN = Object.freeze(
  * always appends them, so every list built for a coder carries them.
  *  - `code-forge block waive` — waiving a review finding is human-only;
  *  - `code-forge autopilot` (any subcommand, B45) — the owner's grant to a delegate;
- *  - `--no-require-reviews` — the human's way out of `block close`'s per-file review check.
+ *  - `--no-require-reviews` — the human's way out of `block close`'s per-file review check;
+ *  - `--remove-worktree` (B62a) — `block close` removing the block's worktree, the orchestrator's
+ *    alone. `block close` itself is not on this list, so the flag is listed on its own.
  * @type {ReadonlyArray<ForbiddenEntry>}
  */
 export const CODER_ONLY_FORBIDDEN = Object.freeze(
@@ -305,6 +307,12 @@ export const CODER_ONLY_FORBIDDEN = Object.freeze(
       kind: 'contains',
       tokens: ['--no-require-reviews'],
       description: 'Close a block without the per-file review check (--no-require-reviews) — human-only',
+    },
+    {
+      id: 'code-forge-remove-worktree',
+      kind: 'contains',
+      tokens: ['--remove-worktree'],
+      description: "Remove a block's worktree at close (block close --remove-worktree, B62a) — the orchestrator only",
     },
   ].map(freezeEntry),
 );

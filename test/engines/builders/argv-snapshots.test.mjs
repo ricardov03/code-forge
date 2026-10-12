@@ -116,10 +116,10 @@ test('Claude coder refuses a malformed fallback list with a clear TypeError nami
 
 test('Claude coder: EVERY forbidden entry is represented in --disallowedTools, exact rule-string count and set (not just "renderer length")', () => {
   const built = buildClaudeArgv({ role: 'coder', model: 'claude-opus-5-5', promptPath: '/p', cwd: '/c' });
-  // B4.2: the coder's list is mergeForbidden() — FORBIDDEN + the 3 coder-only entries (B45: + autopilot).
+  // B4.2: the coder's list is mergeForbidden() — FORBIDDEN + the coder-only entries (B45: + autopilot; B62a: + --remove-worktree, 4 in all).
   const fresh = renderForClaude(mergeForbidden());
   assert.equal(fresh.length, FORBIDDEN.length + CODER_ONLY_FORBIDDEN.length); // "count = list length"
-  assert.equal(CODER_ONLY_FORBIDDEN.length, 3);
+  assert.equal(CODER_ONLY_FORBIDDEN.length, 4); // B62a: + --remove-worktree
   const attached = valuesAfterFlag(built.argv, '--disallowedTools');
   const expectedRuleStrings = fresh.flatMap((e) => e.rules);
   assert.equal(attached.length, expectedRuleStrings.length); // exact count IN ARGV, not just the renderer's own output

@@ -2,7 +2,7 @@
 import { withFixture } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { assertOwned, computeScopes, expandBraces, findOverlap, globMatch, isExactEntry, ownsFile, scopeGate } from '../../src/state/registry.mjs';
+import { assertOwned, blocksOverlap, computeScopes, expandBraces, findOverlap, globMatch, isExactEntry, ownsFile, scopeGate } from '../../src/state/registry.mjs';
 import { dirtyFiles } from '../fixtures/repos/two-blocks/build.mjs';
 
 test('registry X{a,b} Y{c} with the fixture tree dirty on {a,c,d}: X scope {a}, Y scope {c}, orphans {d}, both gates refuse', async () => {
@@ -190,4 +190,29 @@ test('B57 fix 2: one glob definition — `*`, `?`, `{` make a glob; `[ ]` stay l
 
 test('B57: a trailing slash stays refused at `block open` (owned entries are canonical paths)', () => {
   assert.throws(() => assertOwned(['src/feature/']), { code: 'bad-owned', message: 'owned files: invalid path "src/feature/": no ".", ".." or empty segments' });
+});
+
+test('B62a: blocksOverlap — two blocks that each have their own worktree may own the same path; any block without one is checked exactly as findOverlap', () => {
+  const tree = { path: '/abs/repo-worktrees/B1', branch: 'forge/r1/B1', base_sha: 'a'.repeat(40) };
+  const other = { ...tree, path: '/abs/repo-worktrees/B2', branch: 'forge/r1/B2' };
+  assert.equal(blocksOverlap({ owned_files: ['src/a.mjs'], worktree: tree }, { owned_files: ['src/a.mjs'], worktree: other }), null);
+  assert.equal(blocksOverlap({ owned_files: ['src/**'], worktree: tree }, { owned_files: ['src/cli/run.mjs'], worktree: other }), null);
+  // one side without a worktree: the same pair as findOverlap, whichever side it is
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/a.mjs'], worktree: tree }, { owned_files: ['src/a.mjs'] }), ['src/a.mjs', 'src/a.mjs']);
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/cli/run.mjs'] }, { owned_files: ['src/**'], worktree: other }), ['src/cli/run.mjs', 'src/**']);
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/**'] }, { owned_files: ['src/cli/run.mjs'] }), ['src/**', 'src/cli/run.mjs']);
+  assert.equal(blocksOverlap({ owned_files: ['src/a.mjs'] }, { owned_files: ['src/b.mjs'] }), null);
+  // owned_kinds still reach findOverlap: a regular file owns only itself
+  assert.equal(blocksOverlap({ owned_files: ['src/README'], owned_kinds: { 'src/README': 'file' } }, { owned_files: ['src/README/x'] }), null);
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/README'] }, { owned_files: ['src/README/x'] }), ['src/README', 'src/README/x']);
+});
+
+test('B62a: blocksOverlap — worktree null on either side is the shared tree and is checked; two blocks on the SAME tree path are one tree and are checked', () => {
+  const tree = { path: '/abs/repo-worktrees/B1', branch: 'forge/r1/B1', base_sha: 'a'.repeat(40) };
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/a.mjs'], worktree: null }, { owned_files: ['src/a.mjs'], worktree: tree }), ['src/a.mjs', 'src/a.mjs']);
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/**'], worktree: tree }, { owned_files: ['src/b.mjs'], worktree: null }), ['src/**', 'src/b.mjs']);
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/a.mjs'], worktree: null }, { owned_files: ['src/a.mjs'], worktree: null }), ['src/a.mjs', 'src/a.mjs']);
+  // the same path (a block being opened gives only `{path}`): one tree, so the rule applies
+  assert.deepEqual(blocksOverlap({ owned_files: ['src/a.mjs'], worktree: { path: tree.path } }, { owned_files: ['src/**'], worktree: tree }), ['src/a.mjs', 'src/**']);
+  assert.equal(blocksOverlap({ owned_files: ['src/a.mjs'], worktree: { path: tree.path } }, { owned_files: ['src/b.mjs'], worktree: tree }), null);
 });

@@ -217,7 +217,8 @@ export async function startRun(opts) {
  * Fixed keys ({@link IMMUTABLE_KEYS}): every one that changed is refused at once
  * (`immutable-key`, nothing written). A record from before snapshots (no `config`) is checked
  * against what it does store: `engine` and the ledger slug (`effectiveSlug`, computed by the
- * caller the same way `run start` did), and B58's `review.external.required` must not turn true;
+ * caller the same way `run start` did), B58's `review.external.required` must not turn true, and
+ * B62a's `proof.isolation` must not turn to `worktree`;
  * it then gets its first snapshot, `changed_keys: null`, `old_hash: null`.
  *
  * No change (same hash) ⇒ nothing written, no row. Otherwise the record is saved FIRST (it is the
@@ -260,6 +261,9 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
       // B58: a run started without the key has none to keep — turning it on now is a change; an
       // entry that leaves it off (`required` false or absent, as the schema default) is not
       if (config.review?.external?.required === true) frozen.push('review.external');
+      // B62a: a run started without a snapshot was isolated by export (or lock); turning worktree
+      // isolation on now is a change
+      if (config.proof?.isolation === 'worktree') frozen.push('proof.isolation');
     }
     if (frozen.length > 0) {
       const why = frozen.map((key) => `${key} cannot change mid-run (${IMMUTABLE_KEYS[/** @type {keyof typeof IMMUTABLE_KEYS} */ (key)]})`);

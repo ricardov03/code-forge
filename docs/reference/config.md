@@ -145,7 +145,11 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `proof.tiers.high.paths` | array<string> |  | — |  |
 | `proof.tiers.light` | object |  | — |  |
 | `proof.extra` | array<string> |  | — |  |
-| `proof.isolation` | enum: `export`, `lock` |  | `"export"` |  |
+| `proof.isolation` | enum: `export`, `lock`, `worktree` |  | `"export"` | export: proof runs in a temporary copy; lock: in the shared tree under the proof lock; worktree (B62a): block open gives each block its own git worktree and branch (proof.worktree). Fixed for the run: run reload refuses to change it. |
+| `proof.worktree` | object |  | — |  |
+| `proof.worktree.dir` | string |  | `"../<repo-name>-worktrees"` | minLength 1; Where the trees go, relative to the repository top level (not the workspace). In the default, <repo-name> is replaced with the basename of the repository top level; the default text is never used as is. The default sits beside the repository, so the main tree never lists the trees as untracked. |
+| `proof.worktree.branch` | string |  | `"forge/{run}/{block}"` | minLength 1; The branch template: only {run} and {block} are substituted; the result must pass git check-ref-format --branch. |
+| `proof.worktree.base` | string |  | — | minLength 1; The commit-ish the tree starts from; default the block's base (block open --base, else HEAD). |
 | `proof.export` | object |  | — |  |
 | `proof.export.link_dirs` | array<string> |  | `["vendor","node_modules"]` |  |
 | `proof.export.copy_untracked` | array<string> |  | `[".env",".env.testing"]` |  |

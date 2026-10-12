@@ -232,7 +232,17 @@
           }
         },
         "extra": { "type": "array", "items": { "type": "string" } },
-        "isolation": { "type": "string", "enum": ["export", "lock"], "default": "export" },
+        "isolation": { "type": "string", "enum": ["export", "lock", "worktree"], "default": "export", "description": "export: proof runs in a temporary copy; lock: in the shared tree under the proof lock; worktree (B62a): block open gives each block its own git worktree and branch (proof.worktree). Fixed for the run: run reload refuses to change it." },
+        "worktree": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "B62a: used when proof.isolation is worktree. block open runs git worktree add <dir>/<block> -b <branch> <base>; nothing is pushed. Fixed for the run: run reload refuses to change it. Until B62b, gates, reviews and the close check run as under export (from the main checkout) and do not see changes made only in the block worktree.",
+          "properties": {
+            "dir": { "type": "string", "minLength": 1, "default": "../<repo-name>-worktrees", "description": "Where the trees go, relative to the repository top level (not the workspace). In the default, <repo-name> is replaced with the basename of the repository top level; the default text is never used as is. The default sits beside the repository, so the main tree never lists the trees as untracked." },
+            "branch": { "type": "string", "minLength": 1, "default": "forge/{run}/{block}", "description": "The branch template: only {run} and {block} are substituted; the result must pass git check-ref-format --branch." },
+            "base": { "type": "string", "minLength": 1, "description": "The commit-ish the tree starts from; default the block's base (block open --base, else HEAD)." }
+          }
+        },
         "export": {
           "type": "object",
           "additionalProperties": false,

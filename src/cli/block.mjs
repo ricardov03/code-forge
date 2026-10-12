@@ -8,7 +8,7 @@
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
- *   block close <id> --run <r> [--worker-pid <pid>]
+ *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree]
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text>   (human-only, §4.9)
  *
@@ -78,6 +78,17 @@
  * exactly `{test_files}` runs them (`gates run --run --block`). Without it the gate takes the owned
  * entries that look like tests.
  *
+ * B62a: under `proof.isolation: worktree` (the run's config snapshot, `proof/worktree.mjs`) `block
+ * open` makes the block's own worktree and branch before the block is recorded — or reuses the one
+ * an earlier attempt of the same block made — and prints a `worktree <path> · branch <branch>` line
+ * between the open line and the brief pointer. A refused `git worktree add` refuses the open (exit
+ * 1) with nothing recorded. `block close --remove-worktree` runs `git worktree remove <path>` (no
+ * `--force`; the branch is kept) only after the block closed, and writes a signed
+ * `worktree.removed` or `worktree.remove_failed` row; a failed removal is exit 1 with the block
+ * still closed. The flag on a block without a worktree, or on another subcommand, is a usage error
+ * (exit 2). It is coder-forbidden (`CODER_ONLY_FORBIDDEN`). Gates, reviews and the close check
+ * inside the tree are B62b: today they still run against the shared tree.
+ *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
  * through `closeBlock`'s `extraChecks`.
@@ -99,6 +110,7 @@ import { loadKey, verifyRow } from '../state/signer.mjs';
 import { blockFileSet, changedFiles, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { checkExpiry } from '../autopilot/grant.mjs';
 import { writeSafe } from '../util/redact.mjs';
+import { prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
@@ -108,7 +120,7 @@ import { missingReviewTickets } from '../engines/sentinel.mjs';
 
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
-  '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
+  '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n';
 
 const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'];
@@ -135,7 +147,7 @@ export async function runBlock(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews'] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree'] });
     // B60: --tests names exact paths (a file or a directory — PHPUnit and Pest take directories).
     // `*` and `?` are refused: a glob would reach the gate unexpanded. `[` and `{` are allowed,
     // since real paths use them (`app/[id]/page.test.tsx`) and argv never reaches a shell. A
@@ -150,6 +162,7 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'open' && (typeof flags.acceptance !== 'string' || !Array.isArray(flags.owned) || (flags.level !== undefined && typeof flags.level !== 'string'))) {
       throw new StateError('usage', 'block open needs --level, --owned and --acceptance');
     }
+    if (sub !== 'close' && flags['remove-worktree'] === true) throw new StateError('usage', '--remove-worktree is a block close flag');
     if (sub === 'claim' && (!extra || positionals.length !== 2)) throw new StateError('usage', 'block claim needs exactly one path');
     if ((sub === 'stop' || sub === 'waive') && typeof flags.reason !== 'string') throw new StateError('usage', `block ${sub} needs --reason`);
     if (sub === 'waive' && (!extra || positionals.length !== 2)) throw new StateError('usage', 'block waive needs exactly one finding id');
@@ -193,7 +206,9 @@ export async function runBlock(args, deps = {}) {
         if (relative.startsWith('..') || path.isAbsolute(relative)) throw new StateError('usage', '--brief must be a file inside the workspace');
         brief = { path: relative, content: await readFile(absolute) };
       }
-      const { block, pointer } = await openBlock({
+      // B62a: the run's isolation, from its config snapshot (fixed for the run)
+      const isolated = worktreeSettings(record);
+      const { block, pointer, worktreeReused } = await openBlock({
         runId,
         id,
         level,
@@ -208,12 +223,14 @@ export async function runBlock(args, deps = {}) {
         ...(Array.isArray(flags.tests) ? { tests: flags.tests } : {}),
         cfg: await openConfig(record.workspace),
         writeRow,
+        ...(isolated ? { worktree: (/** @type {{baseSha: string, previous: any}} */ ctx) => prepareWorktree({ cwd: record.workspace, settings: isolated, runId, id, ...ctx }) } : {}),
       });
       const raised = block.level !== level ? ` (${block.kind} floor, asked ${level})` : '';
       const chosen = typeof flags.level === 'string' ? '' : rules ? ' (rules lane)' : ' (autopilot level)';
       const testCount = Array.isArray(block.test_files) ? block.test_files.length : 0;
       const tests = testCount > 0 ? ` · ${testCount} test file${testCount === 1 ? '' : 's'}` : '';
       out(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}${tests}\n`);
+      if (block.worktree) out(`worktree ${block.worktree.path} · branch ${block.worktree.branch}${worktreeReused ? ' · reused' : ''}\n`);
       out(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
       return 0;
     }
@@ -247,6 +264,9 @@ export async function runBlock(args, deps = {}) {
       // B52: a block that is not open is refused here, with or without --no-require-reviews, by
       // the same check and message as `closeBlock` — and the owner is never asked about it
       if (entry.status !== 'open') throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
+      // B62a: removing a tree the block does not have is a usage error, before anything runs
+      const removeTree = flags['remove-worktree'] === true;
+      if (removeTree && !entry.worktree) throw new StateError('usage', `block ${id} has no worktree (proof.isolation is not worktree); --remove-worktree does not apply`);
       const reviewsWaived = flags['no-require-reviews'] === true;
       // B52: the human's way out is confirmed by the human, at a terminal, before anything is written
       if (reviewsWaived) {
@@ -350,7 +370,8 @@ export async function runBlock(args, deps = {}) {
       const closeRows = external === null ? [] : [{ event: 'gate.reviews_waived', block: id, by: 'config', reviewer: external }];
       const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks: [reviews, report], closeRows });
       (result.ok ? out : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
-      return result.ok ? 0 : 1;
+      if (!result.ok || !removeTree) return result.ok ? 0 : 1;
+      return removeBlockTree(runId, id, entry.worktree, record.workspace, writeRow, out, err);
     }
   } catch (thrown) {
     err(`block ${sub ?? ''}: ${thrown?.message ?? String(thrown)}\n`);
@@ -358,6 +379,28 @@ export async function runBlock(args, deps = {}) {
   }
   err(USAGE);
   return 2;
+}
+
+/**
+ * B62a: `block close --remove-worktree`, after the block closed: `git worktree remove <path>` (no
+ * `--force`, the branch is kept), then a signed `worktree.removed {block, path, branch}` or
+ * `worktree.remove_failed {block, path, reason}` row. A failed removal (a tree with modified or
+ * untracked files) leaves the tree where it is and the block closed, and is exit 1.
+ * @param {string} runId @param {string} id @param {{path: string, branch: string, base_sha: string}} worktree
+ * @param {string} workspace @param {(row: Record<string, any>) => Promise<unknown>} writeRow
+ * @param {(s: string) => unknown} out @param {(s: string) => unknown} err
+ * @returns {Promise<number>}
+ */
+async function removeBlockTree(runId, id, worktree, workspace, writeRow, out, err) {
+  const failed = await removeWorktree({ cwd: workspace, worktree });
+  if (failed === null) {
+    await writeSigned(runId, writeRow, { event: 'worktree.removed', block: id, path: worktree.path, branch: worktree.branch });
+    out(`block ${id} worktree removed: ${worktree.path} (branch ${worktree.branch} kept)\n`);
+    return 0;
+  }
+  await writeSigned(runId, writeRow, { event: 'worktree.remove_failed', block: id, path: worktree.path, reason: failed });
+  err(`block ${id} worktree NOT removed: ${failed} — the block stays closed; the tree stays at ${worktree.path} (commit or clean it, then git worktree remove it)\n`);
+  return 1;
 }
 
 /** B52: the refusal when `--no-require-reviews` has no terminal to ask the human at. */
