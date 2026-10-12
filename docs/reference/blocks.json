@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 70,
+  "block_count": 71,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -965,6 +965,19 @@
         "B64a"
       ],
       "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/cli/block.mjs, src/cli/status.mjs, src/state/{block,config-snapshot,run}.mjs, src/util/forbidden.mjs, schema, docs/{how-it-works,concepts}.md, docs/reference/config.md, skill/SKILL.md, skill/references/{code,ledger}.md"
+    },
+    "B65": {
+      "title": "Safer push and draft-PR defaults (issue #13 item 7): autonomy.coder_may_push and autonomy.coder_may_open_draft_pr default to false; init asks both (default no, the draft-PR question only after a push yes, pre-filled on a re-run), writes both keys, and takes --coder-may-push / --coder-may-open-draft-pr yes|no; a draft PR without push is refused; the skill gates every hand-back, push or PR on the same checks",
+      "wave": 13,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "test/init/autonomy.test.mjs"
+      ],
+      "depends_on": [
+        "B64b"
+      ],
+      "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); breaking default change; also amends src/install/wizard/{answers,flags,project-file,run,steps}.mjs, schema, docs/{how-it-works,concepts,getting-started,overview}.md, docs/reference/config.md, skill/references/code.md, test/init/{flags,settings}.test.mjs, test/fixtures/repos/laravel-vue/expected.code-forge.yml"
     }
   }
 }

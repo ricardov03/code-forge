@@ -298,6 +298,10 @@ function gateArgv(gate) {
  * @property {{test: GateValue, lint: GateValue, types: GateValue, format: GateValue}} gates
  * @property {{high: string[], isolation: string, link_dirs: string[], copy_untracked: string[]}} proof
  * @property {boolean} doctor
+ * @property {boolean} coder_may_push - `autonomy.coder_may_push` (B65; default false).
+ * @property {boolean} coder_may_open_draft_pr - `autonomy.coder_may_open_draft_pr` (B65; default
+ *   false). `resolveAnswers` sets it false whenever `coder_may_push` is false, except for an
+ *   explicit `--coder-may-open-draft-pr yes`, which `runInit` refuses (exit 2): a draft PR needs a push.
  */
 
 /**
@@ -306,10 +310,15 @@ function gateArgv(gate) {
  * @typedef {{gates: Record<string, 'flag'|'existing'|'detected'>, proof: Record<string, 'flag'|'existing'|'detected'|'default'>}} Origins
  */
 
-/** The answer keys in step order. */
+/**
+ * The answer keys in the order they are settled: `askAnswers` asks the two autonomy keys last of
+ * its questions (after `solo_project`); gates and proof come later, in the settings step, and
+ * `doctor` is never asked (only `--skip-doctor` sets it).
+ */
 export const ANSWER_KEYS = Object.freeze([
   'tools', 'yes_tools', 'harnesses', 'scope', 'method', 'provider', 'levels', 'refresh_models',
-  'multimodel', 'second_provider', 'jev', 'engine', 'solo_project', 'gates', 'proof', 'doctor',
+  'multimodel', 'second_provider', 'jev', 'engine', 'solo_project', 'coder_may_push',
+  'coder_may_open_draft_pr', 'gates', 'proof', 'doctor',
 ]);
 
 /**
@@ -387,6 +396,20 @@ export function resolveAnswers(ctx, existing, user, given) {
   if (lastFlag('engine')) override('engine', lastFlag('engine').value);
   set('solo_project', user?.solo?.project_id, () => null);
   if (lastFlag('solo_project')) override('solo_project', lastFlag('solo_project').value);
+
+  // B65: push and draft-PR autonomy default to no; a re-run proposes the existing booleans.
+  const exAutonomy = ex.autonomy && typeof ex.autonomy === 'object' ? ex.autonomy : {};
+  /** @param {unknown} b @returns {boolean|undefined} */
+  const bool = (b) => (typeof b === 'boolean' ? b : undefined);
+  set('coder_may_push', bool(exAutonomy.coder_may_push), () => false);
+  const pushFlag = lastFlag('coder_may_push');
+  if (pushFlag) override('coder_may_push', pushFlag.value);
+  set('coder_may_open_draft_pr', bool(exAutonomy.coder_may_open_draft_pr), () => false);
+  const draftFlag = lastFlag('coder_may_open_draft_pr');
+  if (draftFlag) override('coder_may_open_draft_pr', draftFlag.value);
+  // A draft PR needs a push: with push no, a kept draft-PR yes follows to no. Only an explicit
+  // `--coder-may-open-draft-pr yes` stays true here — `runInit` refuses that combination.
+  if (!v.coder_may_push && sources.coder_may_open_draft_pr !== 'flag') v.coder_may_open_draft_pr = false;
 
   // Gates and proof are never asked (B24): each value comes from a flag, else the existing
   // config, else the project. `origins` records which, per gate and per proof key. A gate the

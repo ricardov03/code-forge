@@ -59,6 +59,7 @@ export const USAGE = [
   '  [--harness a,b] [-g|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]…',
   '  [--refresh-models] [--multimodel on|off] [--second-provider P]',
   '  [--jev-ref <item-id|link|op://…> | --jev-env NAME | --no-jev] [--engine auto|solo|harness] [--solo-project N]',
+  '  [--coder-may-push yes|no] [--coder-may-open-draft-pr yes|no]',
   '  [--gate name=cmd]… [--proof isolation=export|lock | high=a,b | link_dirs=a,b | copy_untracked=a,b]… [--skip-doctor]',
 ].join('\n');
 
@@ -229,6 +230,11 @@ export async function runInit(args, deps = {}) {
     if (interactive) {
       ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
       await askAnswers(values, sources, ctx, ui);
+    }
+    // B65: a draft PR needs a push. `resolveAnswers` and `askAnswers` turn a kept draft-PR yes to
+    // no when push is no, so a yes left here came from the flag: refused.
+    if (values.coder_may_open_draft_pr && !values.coder_may_push) {
+      throw new InitFailure(2, '--coder-may-open-draft-pr yes needs autonomy.coder_may_push yes — a draft PR needs a push; pass --coder-may-push yes or drop the flag. Nothing written.');
     }
 
     // Gates and proof are never asked (B24): the summary says what was found and what is blank.

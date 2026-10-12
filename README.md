@@ -43,6 +43,9 @@ Next release:
   (status, commit, spend, open findings). With `hooks.on_block_end` (fixed at `run start`),
   code-forge also runs your command once per block end, with the block id, status and file path
   in its env, under a timeout, and writes a signed `hook.ran` row. A failing hook only warns.
+- **Breaking: coders no longer push or open draft PRs by default.** `autonomy.coder_may_push` and
+  `autonomy.coder_may_open_draft_pr` now default to `false`. `init` asks both (default no) and
+  writes your answers. To keep the old behaviour, set both to `true` in `.code-forge.yml`.
 
 In 0.7.7:
 
@@ -253,7 +256,7 @@ usage line.
 
 | Verb | Usage |
 |---|---|
-| `init` | `code-forge init [--no-interaction] [--tools recommended\|current] [--yes-tool <tool>]… [--harness a,b] [-g\|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]… [--refresh-models] [--multimodel on\|off] [--second-provider P] [--jev-ref <item-id\|link\|op://…> \| --jev-env NAME \| --no-jev] [--engine auto\|solo\|harness] [--solo-project N] [--gate name=cmd]… [--proof isolation=export\|lock \| high=a,b \| link_dirs=a,b \| copy_untracked=a,b]… [--skip-doctor]` |
+| `init` | `code-forge init [--no-interaction] [--tools recommended\|current] [--yes-tool <tool>]… [--harness a,b] [-g\|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]… [--refresh-models] [--multimodel on\|off] [--second-provider P] [--jev-ref <item-id\|link\|op://…> \| --jev-env NAME \| --no-jev] [--engine auto\|solo\|harness] [--solo-project N] [--gate name=cmd]… [--proof isolation=export\|lock \| high=a,b \| link_dirs=a,b \| copy_untracked=a,b]… [--coder-may-push yes\|no] [--coder-may-open-draft-pr yes\|no] [--skip-doctor]` |
 | `doctor` | `code-forge doctor [--quick] [--json] [--cwd <dir>]` |
 | `tools` | `code-forge tools [--json]` · `code-forge tools install [<id>…] [--yes] [--dry-run]` — see and install the recommended tools (claude, codex, gemini, grok, op, solo) |
 | `validate` | `code-forge validate [--file <path>]` |

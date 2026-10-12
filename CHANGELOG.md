@@ -33,6 +33,12 @@ waits on a second real consumer (plan §10.4, Q17).
 - Block-end signal: every block end writes <run root>/blocks/<id>.done.json; hooks.on_block_end runs a command once per
   block end (no shell, timeout, signed hook.ran row); a failing hook only warns (issue #13)
 
+### Changed
+
+- BREAKING: autonomy.coder_may_push and autonomy.coder_may_open_draft_pr now default to false, so a coder no longer
+  pushes or opens a draft PR unless the config allows it; init asks both (default no) and takes --coder-may-push /
+  --coder-may-open-draft-pr yes|no; set both to true to keep the old behaviour (issue #13)
+
 ## [0.7.7] — 2026-10-11
 
 ### Added

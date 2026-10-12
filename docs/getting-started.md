@@ -52,8 +52,9 @@ Every question has a default: press Enter to keep it. Each question shows a one-
 | 3 | Default provider, and keep the level matrix? | `anthropic` · `openai` · `xai`; edit any level as `model[:effort][@provider]` | `--provider P`, `--level Ln=model[:effort][@provider]`, `--refresh-models` |
 | 4 | Multimodel review (consensus)? | off. On: pick a second provider; the L3 judge must come from a third provider. It is used only for files above `review.single_reviewer_max_risk` (default 1), and not for docs blocks | `--multimodel on\|off`, `--second-provider P` |
 | 5 | Engine | `auto` · `solo` · `harness` (`subprocess` is never offered; write it in the config yourself) | `--engine auto\|solo\|harness`, `--solo-project N` |
-| 6 | Gates and proof settings (after the summary below) | **Use these** (the default: Enter keeps it; keep the detected values, blanks stay blank) · **Customize now** (asks gates `test`, `lint`, `types`, `format`, then high-risk paths, proof isolation, export directories to link and untracked files to copy, each pre-filled; Enter keeps it) · **Leave for later** (keeps them and prints the keys to edit) | `--gate name=cmd`, `--proof key=value` (a value set by a flag is not asked) |
-| 7 | Where is the Jev key? (asked only when none is found) | 1Password · environment variable · paste now (hidden, goes to the key store) · skip. For 1Password, paste only the item ID (or the item link, or an `op://vault/item/field` reference): code-forge finds the vault and the key field and saves a full reference. If 1Password is locked or not found, you can try again, type a full reference, pick another source or skip (see [Keys](#keys)) | `--jev-ref <item-id\|link\|op://…>`, `--jev-env NAME`, `--no-jev` |
+| 6 | May a coder push its block branch on its own? Then: May a coder open a draft PR on its own? | **no** · yes for each. The draft-PR question is asked only after a push yes (a draft PR needs a push); with push no it is no. Both answers are written as `autonomy.coder_may_push` and `autonomy.coder_may_open_draft_pr`, also when both are no. A re-run proposes the values already in `.code-forge.yml` | `--coder-may-push yes\|no`, `--coder-may-open-draft-pr yes\|no` (yes or no only; any other value is a usage error, exit 2. No flag: no; `--coder-may-open-draft-pr yes` with push no is refused, exit 2, nothing written) |
+| 7 | Gates and proof settings (after the summary below) | **Use these** (the default: Enter keeps it; keep the detected values, blanks stay blank) · **Customize now** (asks gates `test`, `lint`, `types`, `format`, then high-risk paths, proof isolation, export directories to link and untracked files to copy, each pre-filled; Enter keeps it) · **Leave for later** (keeps them and prints the keys to edit) | `--gate name=cmd`, `--proof key=value` (a value set by a flag is not asked) |
+| 8 | Where is the Jev key? (asked only when none is found) | 1Password · environment variable · paste now (hidden, goes to the key store) · skip. For 1Password, paste only the item ID (or the item link, or an `op://vault/item/field` reference): code-forge finds the vault and the key field and saves a full reference. If 1Password is locked or not found, you can try again, type a full reference, pick another source or skip (see [Keys](#keys)) | `--jev-ref <item-id\|link\|op://…>`, `--jev-env NAME`, `--no-jev` |
 
 At the end `init` runs `doctor --quick`; `--skip-doctor` skips it.
 
@@ -104,7 +105,7 @@ Project settings (detected)
 Set the blanks later: edit .code-forge.yml (gates.types, proof.tiers.high.paths), then run `code-forge validate`.
 ```
 
-After the summary `init` asks question 6 once. With `--no-interaction` at a terminal nothing is
+After the summary `init` asks question 7 once. With `--no-interaction` at a terminal nothing is
 asked and the summary is still printed. In agent mode or without a terminal no text summary is
 printed: the same facts appear only as `settings` and `blank` in the one JSON line. A re-run keeps
 every value you set by hand; a gate that was blank is filled when the project now shows one.

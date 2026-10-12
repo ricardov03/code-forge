@@ -26,6 +26,8 @@ const QUESTIONS = [
   'Read model ids from the Codex/Grok CLI caches on this machine?',
   'Multimodel review (consensus)?',
   'Engine',
+  // B65: push is asked (default no); the draft-PR question is not, since push stays no
+  'May a coder push its block branch on its own?',
   'Gates and proof settings:',
 ];
 
@@ -33,6 +35,7 @@ const QUESTIONS = [
 const ALL_OTHER_ANSWERS = [
   '--no-jev', '--tools', 'current', '--harness', 'claude', '-p', '--copy', '--provider', 'anthropic',
   '--level', 'L0=claude-haiku-4-5-20251001', '--refresh-models', '--multimodel', 'off', '--engine', 'auto',
+  '--coder-may-push', 'no', '--coder-may-open-draft-pr', 'no',
 ];
 
 /** The "Customize now" questions, first line, in order. */
@@ -292,11 +295,11 @@ test('the 1Password option and its follow-up question carry the exact item-ID hi
 });
 
 test('every question has exactly one non-empty hint line', async () => {
-  const ui = scriptedUi({ 'Multimodel review (consensus)?': true, 'Keep the level matrix?': false, 'Gates and proof settings:': 'customize' });
+  const ui = scriptedUi({ 'Multimodel review (consensus)?': true, 'Keep the level matrix?': false, 'May a coder push its block branch on its own?': true, 'Gates and proof settings:': 'customize' });
   const r = await run(buildNodeNoTypes, ['--no-jev'], { ui });
   assert.equal(r.code, 0, r.stderr);
-  // 9 questions + 4 levels + second provider + judge + the settings choice + 8 customize questions
-  assert.equal(ui.calls.length, 24, ui.calls.map(firstLine).join(" | "));
+  // 9 questions + 4 levels + second provider + judge + push + draft PR (B65) + the settings choice + 8 customize questions
+  assert.equal(ui.calls.length, 26, ui.calls.map(firstLine).join(" | "));
   for (const c of ui.calls) {
     const parts = c.message.split('\n');
     assert.equal(parts.length, 2, c.message);

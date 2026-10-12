@@ -62,12 +62,18 @@ export const HINTS = Object.freeze({
   judge: 'The judge settles disagreements between the two reviewers.',
   engine: 'auto uses Solo when present, otherwise the subagents of the current harness.',
   solo_project: 'The Solo project that coder processes run in; leave blank for none.',
+  coder_may_push: 'No: the coder hands back its branch and you (or the orchestrator) push it.',
+  coder_may_open_draft_pr: 'Only after an independent review passes; marking it ready and merging stay with you.',
   jev: 'Jev is the small fast classifier behind System 1; skip uses rules only.',
   env: 'That variable must hold the key whenever code-forge runs.',
   paste: 'The key goes to the OS key store; the config keeps only a reference.',
   settings: 'Pick how to treat the gate and proof values shown above.',
   apply: 'Only the listed keys change; your other edits stay.',
 });
+
+/** B65: the two autonomy questions, asked last among the answers (default no). */
+export const PUSH_QUESTION = 'May a coder push its block branch on its own?';
+export const DRAFT_PR_QUESTION = 'May a coder open a draft PR on its own?';
 
 /** The one-line hints of the "Customize now" questions, in the order they are asked (B24). */
 export const SETTING_HINTS = Object.freeze({
@@ -204,6 +210,16 @@ export async function askAnswers(values, sources, ctx, ui) {
   if (open('solo_project') && ctx.solo && values.engine !== 'harness') {
     const typed = await answer(ui, ui.text({ message: withHint('Solo project id (blank: none)', HINTS.solo_project), initialValue: values.solo_project === null ? '' : String(values.solo_project) }));
     values.solo_project = /^[1-9]\d{0,9}$/.test(String(typed).trim()) ? Number(String(typed).trim()) : null;
+  }
+  // B65: push first; a draft PR needs a push, so with push no the draft-PR question is not asked
+  // and its answer is no (a `--coder-may-open-draft-pr yes` flag is then refused by `runInit`).
+  if (open('coder_may_push')) {
+    values.coder_may_push = (await answer(ui, ui.confirm({ message: withHint(PUSH_QUESTION, HINTS.coder_may_push), initialValue: values.coder_may_push === true }))) === true;
+  }
+  if (values.coder_may_push && open('coder_may_open_draft_pr')) {
+    values.coder_may_open_draft_pr = (await answer(ui, ui.confirm({ message: withHint(DRAFT_PR_QUESTION, HINTS.coder_may_open_draft_pr), initialValue: values.coder_may_open_draft_pr === true }))) === true;
+  } else if (open('coder_may_open_draft_pr')) {
+    values.coder_may_open_draft_pr = false;
   }
   return values;
 }

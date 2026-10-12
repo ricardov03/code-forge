@@ -622,6 +622,15 @@ These come from real runs. The skill states each one (`skill/references/`):
 - **Review cost is bounded.** One reviewer for risk 0–1; no multimodel review for docs blocks.
 - **Coder reports fail closed.** A report with no review ticket id for a changed file is FAILED.
 - **Cost is watched all the time.** `budget.usd` per run, spend read after every block.
+- **Coders do not push unless you said so.** `autonomy.coder_may_push` and
+  `autonomy.coder_may_open_draft_pr` default to false, and `init` asks both (default no; the
+  draft-PR question only after a push yes). Whatever the setting, a branch is handed back, pushed
+  or put in a PR only after the block's checks and independent reviews pass (conditions (1)–(4) in
+  `skill/references/code.md` §7, "The PR contract"). With push off a coder never pushes or opens a
+  PR: it hands back its branch, and you or the orchestrator push it and open the draft PR. With push
+  on and draft PR off, the coder may push its branch and hands back its evidence; you or the
+  orchestrator open the draft PR from the pushed branch. With both on, a coder may push and open a
+  **draft** PR itself. Marking it ready stays with the orchestrator, merging with you.
 
 ## Who does what
 

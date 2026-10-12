@@ -161,8 +161,8 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `budget.usd` | number |  | — | > 0; Per-run spend stop in USD (R6). Before every session spawn the run's estimated spend is checked: one warning at 80%, new sessions refused at 100%. |
 | `budget.block_cases` | integer |  | `80` | min 10 |
 | `autonomy` | object |  | — |  |
-| `autonomy.coder_may_open_draft_pr` | boolean |  | `true` |  |
-| `autonomy.coder_may_push` | boolean |  | `true` |  |
+| `autonomy.coder_may_open_draft_pr` | boolean |  | `false` | A coder may open a draft PR on its own, under the skill's five-condition rule. Has effect only when coder_may_push is true. False or absent: it never opens a PR. |
+| `autonomy.coder_may_push` | boolean |  | `false` | A coder may push its block branch on its own. False or absent: it hands back the branch and the orchestrator (or the human) pushes. |
 | `commit` | object |  | — |  |
 | `commit.trailers` | enum: `none`, `harness` |  | `"none"` |  |
 | `wip` | object |  | — |  |

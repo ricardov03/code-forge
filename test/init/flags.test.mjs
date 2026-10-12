@@ -1,7 +1,7 @@
 /**
- * B13a acceptance: "each flag overrides exactly one answer". After Q16 = cut there are 19 answer
- * flags (`--no-nightly` is gone); each one, given alone, marks exactly one answer as `flag` and
- * sets it to the expected value.
+ * B13a acceptance: "each flag overrides exactly one answer". After Q16 = cut there were 19 answer
+ * flags (`--no-nightly` is gone); B65 adds `--coder-may-push` and `--coder-may-open-draft-pr`, so 21.
+ * Each one, given alone, marks exactly one answer as `flag` and sets it to the expected value.
  */
 
 import { PARENT, baseEnv, freshDir, makeProject } from './helpers.mjs';
@@ -54,11 +54,14 @@ const CASES = [
     copy_untracked: [],
   }],
   [['--skip-doctor'], 'doctor', false],
+  [['--coder-may-push', 'yes'], 'coder_may_push', true],
+  // flag parsing only: with push no this combination is refused later, by runInit (autonomy.test.mjs)
+  [['--coder-may-open-draft-pr', 'yes'], 'coder_may_open_draft_pr', true],
 ];
 
-test('19 answer flags after Q16 (no --no-nightly), each with one case below', () => {
-  assert.equal(Object.keys(ANSWER_FLAGS).length, 19);
-  assert.equal(CASES.length, 19);
+test('21 answer flags after Q16 (no --no-nightly) and B65, each with one case below', () => {
+  assert.equal(Object.keys(ANSWER_FLAGS).length, 21);
+  assert.equal(CASES.length, 21);
   assert.deepEqual(CASES.map((c) => c[0][0]).sort(), Object.keys(ANSWER_FLAGS).sort());
 });
 

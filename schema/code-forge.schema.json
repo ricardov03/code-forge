@@ -281,8 +281,16 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
-        "coder_may_open_draft_pr": { "type": "boolean", "default": true },
-        "coder_may_push": { "type": "boolean", "default": true }
+        "coder_may_open_draft_pr": {
+          "type": "boolean",
+          "default": false,
+          "description": "A coder may open a draft PR on its own, under the skill's five-condition rule. Has effect only when coder_may_push is true. False or absent: it never opens a PR."
+        },
+        "coder_may_push": {
+          "type": "boolean",
+          "default": false,
+          "description": "A coder may push its block branch on its own. False or absent: it hands back the branch and the orchestrator (or the human) pushes."
+        }
       }
     },
     "commit": {

@@ -4,6 +4,7 @@
 # B24: proof settings are not asked. High-risk paths are a deliberate blank; `link_dirs` follows
 # the manifests (`composer.json` ⇒ vendor, `package.json` ⇒ node_modules, installed or not);
 # `copy_untracked` keeps only files that exist, and `.env`/`.env.testing` do not.
+# B65: `autonomy` is always written, both keys; with no flag both answers are no.
 version: 1
 project:
   name: laravel-vue
@@ -49,3 +50,6 @@ proof:
       - vendor
       - node_modules
     copy_untracked: []
+autonomy:
+  coder_may_push: false
+  coder_may_open_draft_pr: false

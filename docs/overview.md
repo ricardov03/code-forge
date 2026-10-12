@@ -108,8 +108,9 @@ Providers in the level matrix: `anthropic` (default), `openai`, `xai`.
   [how-it-works.md](how-it-works.md#security-in-short).
 - **Not mutation testing.** Proof is exact tests plus a red→green runner. Mutation testing was
   considered and cut.
-- **Not a CI system or merge bot.** A coder may open a draft PR when the rules allow it. Marking
-  it ready is the orchestrator's job; merging is the human's.
+- **Not a CI system or merge bot.** By default a coder never pushes or opens a PR; with
+  `autonomy.coder_may_push` and `autonomy.coder_may_open_draft_pr` on, it may open a draft PR when
+  the rules allow it. Marking it ready is the orchestrator's job; merging is the human's.
 - **Not a promise of a cost saving.** The ledger records real tokens and an estimated cost per
   session, and `budget.usd` caps a run. No calibrated saving number is published yet.
 

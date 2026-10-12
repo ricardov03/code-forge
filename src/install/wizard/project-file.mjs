@@ -55,6 +55,8 @@ export function generatedConfig(a, ctx, jevRef) {
     isolation: a.proof.isolation,
     export: { link_dirs: [...a.proof.link_dirs], copy_untracked: [...a.proof.copy_untracked] },
   };
+  // B65: always both keys, also when both are false, so the file states the choice
+  cfg.autonomy = { coder_may_push: a.coder_may_push === true, coder_may_open_draft_pr: a.coder_may_push === true && a.coder_may_open_draft_pr === true };
   return cfg;
 }
 

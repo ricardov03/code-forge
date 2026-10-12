@@ -6,7 +6,8 @@
  * **Q16 = cut (Ricardo, 2026-09-25):** step 8 asks no mutation-tool or nightly question, so the
  * v1.2 `--no-nightly` flag is gone and `--proof` takes only the keys the schema still has
  * (`isolation`, `high`, `link_dirs`, `copy_untracked`). With `-g` and `-p` counted as two flags
- * (two tokens that each set the scope answer) there are 19 answer flags.
+ * (two tokens that each set the scope answer) there are 21 answer flags: B65 added
+ * `--coder-may-push` and `--coder-may-open-draft-pr` (`yes`/`no`, default no).
  *
  * Parsing is strict: an unknown flag, a missing value, a repeated single-value flag or a bad value
  * is a usage error. Error messages name the flag, never the value given (a user can paste a key
@@ -46,6 +47,8 @@ export const ANSWER_FLAGS = Object.freeze({
   '--gate': 'gates',
   '--proof': 'proof',
   '--skip-doctor': 'doctor',
+  '--coder-may-push': 'coder_may_push',
+  '--coder-may-open-draft-pr': 'coder_may_open_draft_pr',
 });
 
 const BOOLEAN_FLAGS = new Set(['-g', '-p', '--copy', '--refresh-models', '--no-jev', '--skip-doctor', '--no-interaction']);
@@ -190,6 +193,10 @@ function convert(flag, value) {
       if (argv.length === 0) throw new UsageError('--gate: empty command');
       return { name, argv };
     }
+    case '--coder-may-push':
+    case '--coder-may-open-draft-pr':
+      if (value !== 'yes' && value !== 'no') throw new UsageError(`${flag} must be yes or no`);
+      return value === 'yes';
     case '--proof': {
       const [key, raw] = keyValue('--proof', value);
       if (!PROOF_KEYS.includes(key)) throw new UsageError(`--proof: key must be one of ${PROOF_KEYS.join(', ')}`);
