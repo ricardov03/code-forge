@@ -352,6 +352,23 @@
         "require_coder_tests": { "type": "boolean", "default": false, "description": "block close refuses unless --report carries the block's COMPLETE sentinel with a `TESTS <command> exit=0` line before it, and writes a signed coder.tests row. Authority, unlike the rest of `context`: read from the run-start snapshot only, and `run reload` refuses a change to it. Reviews waived (--no-require-reviews or review.external) do not lift it." }
       }
     },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Commands code-forge runs on the owner's machine. Read from the run-start snapshot only: `run reload` refuses a change. With hooks.on_block_end set, .code-forge.yml is non-ownable (the same guard as review.external.required): no block may own it, also when hooks.on_block_end is the only key that guards it.",
+      "properties": {
+        "on_block_end": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["argv"],
+          "description": "Run once after every block end (block close closes or stops it, block stop), after the done file `<run root>/blocks/<id>.done.json` is written (its absolute path is in CODE_FORGE_DONE_FILE, the empty string when it was not written, and in done_file of close/stop --json) and outside the run lock. No shell; cwd is the repository top; stdin closed; output discarded; env adds CODE_FORGE_RUN, CODE_FORGE_BLOCK, CODE_FORGE_BLOCK_STATUS, CODE_FORGE_DONE_FILE. One signed hook.ran row (block, hook, argv0, exit, signal, timed_out, duration_ms) per block end, also when the hook fails. A failing, missing or timed-out hook only adds a stderr warning. A coder transcript that runs it refuses the close.",
+          "properties": {
+            "argv": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The command as an argv list (no shell): at least one item, and every item a non-empty string (an empty argument is refused). argv[0] is a program on PATH or a path." },
+            "timeout_s": { "type": "integer", "minimum": 1, "maximum": 600, "default": 60, "description": "Seconds before the hook's process group is killed (the hook.ran row then says timed_out)." }
+          }
+        }
+      }
+    },
     "autopilot": {
       "type": "object",
       "additionalProperties": false,

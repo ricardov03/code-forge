@@ -30,6 +30,8 @@ waits on a second real consumer (plan §10.4, Q17).
   `coder.tests` row (issue #13)
 - code-forge status: at most 10 lines per run (state, mode, spend, open blocks with level, model, last gate, open
   findings) or one --json line; every block verb takes --json and prints one JSON line (issue #13)
+- Block-end signal: every block end writes <run root>/blocks/<id>.done.json; hooks.on_block_end runs a command once per
+  block end (no shell, timeout, signed hook.ran row); a failing hook only warns (issue #13)
 
 ## [0.7.7] — 2026-10-11
 

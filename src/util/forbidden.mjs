@@ -350,6 +350,33 @@ export function mergeForbidden(extraTokens = []) {
   return [...FORBIDDEN, ...CODER_ONLY_FORBIDDEN, ...extras];
 }
 
+/** B64b: the id of the entry {@link hookForbidden} builds. */
+export const HOOK_FORBIDDEN_ID = 'code-forge-on-block-end-hook';
+
+/**
+ * B64b: the owner's `hooks.on_block_end` command as a coder-forbidden `prefix` entry — the hook
+ * runs only from the orchestrator's block-end verbs, never for a coder. The tokens are TRIMMED:
+ * the command name of `argv[0]` (its basename, as every reading normalizes it), plus `argv[1]`
+ * when there is one that is not blank (clause 3, "if any"). `argv[1]` stays ONE token even with
+ * inner whitespace — a literal match, as ruled. No entry (`[]`, so a list built with it is
+ * unchanged) when there is no hook (`argv` absent, empty, or not all non-empty strings), or when
+ * `argv[0]` is blank, names a directory (`/`, `dir/`), or is `.` or `..`. Appended by the caller
+ * after the static entries; it never replaces or weakens one.
+ * @param {unknown} argv
+ * @returns {ForbiddenEntry[]}
+ */
+export function hookForbidden(argv) {
+  if (!Array.isArray(argv) || argv.length === 0 || !argv.every((a) => typeof a === 'string' && a.length > 0)) return [];
+  const first = argv[0].trim();
+  // a command name that is blank, a directory (`/`, `dir/`), `.` or `..` matches nothing a coder runs
+  if (first.length === 0 || /[/\\]$/.test(first)) return [];
+  const name = commandName(first).trim();
+  if (name.length === 0 || name === '.' || name === '..') return [];
+  const arg = argv.length > 1 ? argv[1].trim() : '';
+  const tokens = arg.length > 0 ? [name, arg] : [name];
+  return [freezeEntry({ id: HOOK_FORBIDDEN_ID, kind: 'prefix', tokens, description: 'Run the configured on_block_end hook (hooks.on_block_end) — it runs only at a block end, from the orchestrator\'s verbs' })];
+}
+
 // ── Normalization ────────────────────────────────────────────────────────────
 
 /** git global options that take the NEXT argv token as their value (when not written `--opt=value`). */

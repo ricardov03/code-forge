@@ -39,6 +39,10 @@ Next release:
   state, mode, spend, and one line per open block with its level, model, last gate and open
   findings. It is read-only. Every `block` verb takes `--json` and prints one JSON line, so an
   orchestrator never has to read logs or poll transcripts.
+- **A signal when a block ends.** Every block end writes `~/.code-forge/runs/<run>/blocks/<id>.done.json`
+  (status, commit, spend, open findings). With `hooks.on_block_end` (fixed at `run start`),
+  code-forge also runs your command once per block end, with the block id, status and file path
+  in its env, under a timeout, and writes a signed `hook.ran` row. A failing hook only warns.
 
 In 0.7.7:
 

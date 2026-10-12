@@ -267,6 +267,8 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
       if (config.proof?.isolation === 'worktree') frozen.push('proof.isolation');
       // B63b: likewise, a run started without a snapshot never required the coder's tests
       if (config.context?.require_coder_tests === true) frozen.push('context.require_coder_tests');
+      // B64b: and never had a block-end hook
+      if (config.hooks?.on_block_end !== undefined) frozen.push('hooks.on_block_end');
     }
     if (frozen.length > 0) {
       const why = frozen.map((key) => `${key} cannot change mid-run (${IMMUTABLE_KEYS[/** @type {keyof typeof IMMUTABLE_KEYS} */ (key)]})`);

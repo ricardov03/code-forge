@@ -18,7 +18,7 @@ import path from 'node:path';
 import { BLOCK_KINDS, blockKind, dispatchLevel } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
 import { DEFAULT_CONFIG_FILENAME } from '../config/load.mjs';
-import { externalReviewer } from './config-snapshot.mjs';
+import { blockEndHook, externalReviewer } from './config-snapshot.mjs';
 import { ownedKinds, pathKind } from './owned-kinds.mjs';
 import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
@@ -261,30 +261,33 @@ function activeBlocks(record) {
  * is the owner's switch past the local per-file review, so no block may own it. These are the
  * spellings an owned entry may match it by: relative to the workspace and, for a workspace in a
  * subdirectory, relative to the repository top level (the close gate matches both, `ownsAt`).
- * Empty when the key is not set.
- * @param {Record<string, any>} record @returns {Promise<string[]>}
+ * Empty when the key is not set. B64b: `hooks.on_block_end` in the snapshot guards it the same way
+ * — the file names a command the orchestrator runs at every block end — and `why` names the key
+ * that guards it (`review.external.required` first, so its message is unchanged).
+ * @param {Record<string, any>} record @returns {Promise<{paths: string[], why: string}>}
  * @throws {StateError} `config-snapshot`, `git-failed`
  */
 async function guardedConfigPaths(record) {
-  if (externalReviewer(record) === null) return [];
+  const why = externalReviewer(record) !== null ? 'review.external.required is true' : blockEndHook(record) !== null ? 'hooks.on_block_end is set' : null;
+  if (why === null) return { paths: [], why: '' };
   const top = await repoTop(record.workspace);
   // the repo-top spelling `<prefix>/.code-forge.yml` may also match a different file of the same
   // name under the workspace (`<ws>/<prefix>/.code-forge.yml`): that over-match only refuses more,
   // never less, and is the one `ownsAt` gives the close gate
   const prefix = path.relative(top, realpathSync(record.workspace)).split(path.sep).join('/');
-  return prefix === '' ? [DEFAULT_CONFIG_FILENAME] : [DEFAULT_CONFIG_FILENAME, `${prefix}/${DEFAULT_CONFIG_FILENAME}`];
+  return { paths: prefix === '' ? [DEFAULT_CONFIG_FILENAME] : [DEFAULT_CONFIG_FILENAME, `${prefix}/${DEFAULT_CONFIG_FILENAME}`], why };
 }
 
 /**
  * B58: refuse an owned entry that owns one of `guarded` (B57's rule, `ownsFile`: the exact path,
  * a directory above it, or a glob that matches it).
- * @param {ReadonlyArray<string>} owned @param {import('./registry.mjs').OwnedKinds} kinds @param {ReadonlyArray<string>} guarded
+ * @param {ReadonlyArray<string>} owned @param {import('./registry.mjs').OwnedKinds} kinds @param {{paths: ReadonlyArray<string>, why: string}} guarded
  * @throws {StateError} `config-owned`
  */
 function refuseConfigOwner(owned, kinds, guarded) {
   for (const entry of owned) {
-    if (guarded.some((file) => ownsFile([entry], file, kinds))) {
-      throw new StateError('config-owned', `owned entry ${JSON.stringify(entry)} covers the project's ${DEFAULT_CONFIG_FILENAME}; no block may own it while review.external.required is true`);
+    if (guarded.paths.some((file) => ownsFile([entry], file, kinds))) {
+      throw new StateError('config-owned', `owned entry ${JSON.stringify(entry)} covers the project's ${DEFAULT_CONFIG_FILENAME}; no block may own it while ${guarded.why}`);
     }
   }
 }

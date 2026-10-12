@@ -24,6 +24,11 @@
  * error, a thrown refusal, a cancelled `--no-require-reviews` and a failed `--remove-worktree`
  * print nothing on stdout. Without `--json` every output is byte-identical to before.
  *
+ * B64b block end: a close that closes or stops the block and `block stop` write
+ * `<runs>/<run>/blocks/<id>.done.json` after the end's rows (`state/block-end.mjs`), then, with
+ * `hooks.on_block_end` in the run's snapshot, run that command outside the lock and add
+ * `done_file` to `close`/`stop --json`. Without the key the output is unchanged.
+ *
  * `block close [--transcript <file>] [--report <file>] [--no-require-reviews]` also runs B12b's review rows
  * (`review/gate-check.mjs`): a signed `review.approved` row for the current content hash of every
  * changed owned file (deletions included) that no later review of the same content made stale
@@ -151,6 +156,9 @@ import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
 import { gitChildEnv } from '../worker/ticket.mjs';
 import { missingReviewTickets, parseSentinel } from '../engines/sentinel.mjs';
+import { blockEndHook, runBlockEndHook, writeDoneFile } from '../state/block-end.mjs';
+import { blockOpenFindings } from '../review/open-findings.mjs';
+import { hookForbidden, scanTranscript } from '../util/forbidden.mjs';
 
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
@@ -167,9 +175,11 @@ const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', '
  *   stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, probe?: import('../state/run.mjs').StartTimeProbe, now?: () => Date,
  *   isTTY?: boolean, stdinIsTTY?: boolean, stdoutIsTTY?: boolean,
  *   ui?: {confirm: (o: {message: string, initialValue?: boolean}) => Promise<unknown>, isCancel: (v: unknown) => boolean},
+ *   removeBlockTree?: typeof removeBlockTree,
  * }} [deps] - `now` (B48): the clock of the autopilot expiry checks. `stdinIsTTY` / `stdoutIsTTY`
  *   (default `process.stdin.isTTY` / `process.stdout.isTTY`; `isTTY` sets both) and `ui` (default
  *   `@clack/prompts`): B52's confirmation of `--no-require-reviews`, which needs both to be TTYs.
+ *   `removeBlockTree` (B64b, tests only): the `--remove-worktree` step, default the real one.
  * @returns {Promise<number>}
  */
 export async function runBlock(args, deps = {}) {
@@ -209,6 +219,39 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     const record = await readRun(runId);
     const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
+    // B64b: the block-end signal — after an end's rows (and outside the run lock) the done file,
+    // then the owner's `hooks.on_block_end` from the run-start snapshot. Without the hook key the
+    // done file is the only addition: no row, and every output stays exactly as before.
+    const hook = blockEndHook(record);
+    const ended = async (/** @type {'closed' | 'stopped'} */ status, /** @type {string} */ event, /** @type {string | null} */ reason) => {
+      // ruling (e): `ended` never throws — any failure here is the done-file warning and a null
+      // `doneFile`, so the caller's try/finally still reaches the hook
+      /** @type {string | null} */
+      let doneFile = null;
+      try {
+        doneFile = await writeDoneFile({
+          record,
+          id,
+          status,
+          event,
+          reason: typeof reason === 'string' ? redact(reason) : null,
+          openFindings: (rows) => blockOpenFindings(record, rows, id),
+          err,
+        });
+      } catch (thrown) {
+        const code = /** @type {any} */ (thrown)?.code;
+        err(`warning: done file not written: ${typeof code === 'string' && /^[A-Z0-9_]{1,32}$/.test(code) ? code : 'UNKNOWN'}\n`);
+        doneFile = null;
+      }
+      return {
+        json: hook === null ? {} : { done_file: doneFile },
+        runHook: async () => {
+          if (hook === null) return;
+          const top = await repoTop(record.workspace).catch(() => record.workspace);
+          await runBlockEndHook({ hook, runId, id, status, doneFile: doneFile ?? '', repoTop: top, writeRow, err });
+        },
+      };
+    };
     // B48: every block command runs the lazy autopilot checks (grant expiry, expired approvals);
     // a failed check is a warning, never a reason to stop the block command
     try {
@@ -309,9 +352,14 @@ export async function runBlock(args, deps = {}) {
     }
     if (sub === 'stop') {
       await stopBlock({ runId, id, reason: /** @type {string} */ (flags.reason), writeRow });
-      say(`block ${id} stopped\n`);
-      if (json) emit({ block: id, event: 'stopped' });
-      return 0;
+      const end = await ended('stopped', 'block.stop', /** @type {string} */ (flags.reason));
+      try {
+        say(`block ${id} stopped\n`);
+        if (json) emit({ block: id, event: 'stopped', ...end.json });
+        return 0;
+      } finally {
+        await end.runHook();
+      }
     }
     if (sub === 'waive') {
       await waiveFinding({ runId, id, finding: extra, reason: /** @type {string} */ (flags.reason), file: /** @type {string} */ (flags.file), writeRow });
@@ -464,23 +512,43 @@ export async function runBlock(args, deps = {}) {
           return { ok: true };
         });
       }
+      // B64b: the hook command is the orchestrator's, never a coder's — a coder transcript that runs
+      // it refuses the close. Only with the hook configured (the list is otherwise unchanged); it
+      // only reads the transcript, so it runs first and a refusal here leaves no row.
+      if (hook !== null) {
+        extraChecks.unshift(async () => {
+          const text = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
+          const [hit] = text === null ? [] : scanTranscript(text, hookForbidden(hook.argv));
+          return hit ? { ok: false, reason: `rule_break transcript line ${hit.line}: ${hit.id}` } : { ok: true };
+        });
+      }
       const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows });
-      (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
-      // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
-      if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null });
-      const closedJson = { block: id, event: result.status, status: result.status, reason: result.reason ?? null, close_event: result.event ?? null };
-      if (!result.ok || !removeTree) {
-        if (json && result.ok) emit(closedJson);
-        return result.ok ? 0 : 1;
+      // B64b: the block ended (closed, or stopped by a worker pin event or ledger.tamper) — its rows
+      // are written and the run lock released; the done file is written before the tree is removed
+      const end = result.status === 'closed' || result.status === 'stopped' ? await ended(result.status, result.event ?? (result.status === 'stopped' ? 'block.stop' : 'block.close'), result.reason ?? null) : null;
+      // B64b ruling (e): the hook runs exactly once for this end, after everything else the verb
+      // does — also when a later step (the output, `--remove-worktree`) throws; it never changes
+      // the exit code or stdout (`runHook` never throws)
+      try {
+        (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
+        // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
+        if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null, ...(end?.json ?? {}) });
+        const closedJson = { block: id, event: result.status, status: result.status, reason: result.reason ?? null, close_event: result.event ?? null, ...(end?.json ?? {}) };
+        if (!result.ok || !removeTree) {
+          if (json && result.ok) emit(closedJson);
+          return result.ok ? 0 : 1;
+        }
+        const removed = await (deps.removeBlockTree ?? removeBlockTree)(runId, id, entry.worktree, record.workspace, writeRow, say, err);
+        // a failed removal is exit 1 with its stderr text and nothing on stdout, like every failure
+        if (json && removed === 0) {
+          // built from the block's own tree entry; `removed` is what removeBlockTree reported (0 = removed)
+          const treeJson = entry.worktree ? { removed: removed === 0, path: entry.worktree.path, branch: entry.worktree.branch } : null;
+          emit({ ...closedJson, worktree: treeJson });
+        }
+        return removed;
+      } finally {
+        await end?.runHook();
       }
-      const removed = await removeBlockTree(runId, id, entry.worktree, record.workspace, writeRow, say, err);
-      // a failed removal is exit 1 with its stderr text and nothing on stdout, like every failure
-      if (json && removed === 0) {
-        // built from the block's own tree entry; `removed` is what removeBlockTree reported (0 = removed)
-        const treeJson = entry.worktree ? { removed: removed === 0, path: entry.worktree.path, branch: entry.worktree.branch } : null;
-        emit({ ...closedJson, worktree: treeJson });
-      }
-      return removed;
     }
   } catch (thrown) {
     err(`block ${sub ?? ''}: ${thrown?.message ?? String(thrown)}\n`);

@@ -52,21 +52,17 @@ import path from 'node:path';
 import { loadProjectConfig, projectRootFor } from '../config/load.mjs';
 import { budgetUsdOf } from '../ledger/spend.mjs';
 import { readAllRows } from '../ledger/write.mjs';
-import { checkBlockReviews, reviewedFiles } from '../review/gate-check.mjs';
+import { findingsKey, openFindingsOf } from '../review/open-findings.mjs';
 import { briefStatus } from '../state/brief-status.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { runsDir, StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
-import { KEY_BYTES, loadKey } from '../state/signer.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
 const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
 
 /** The hard cap on text lines per run. */
 const STATUS_MAX_LINES = 10;
-
-/** The refusal codes that name one open review finding. */
-const FINDING_CODES = new Set(['not_approved', 'late_unruled', 'review_cap', 'autopilot_waiver_invalid']);
 
 /**
  * @typedef {import('../state/brief-status.mjs').RunStatus} RunStatus
@@ -79,28 +75,6 @@ async function realOr(p) {
   } catch {
     return path.resolve(p);
   }
-}
-
-/**
- * The open review findings of one block: the gate's own check over the files the block's review
- * rows name, each at the content hash it was last reviewed at.
- * @param {{block: string, runId: string, mine: Array<Record<string, any>>, rows: Array<Record<string, any>>, key: Buffer}} opts
- *   `mine`: the block's rows of the run; `rows`: every row of the project (waivers, rulings).
- * @returns {number}
- */
-function openFindingsOf({ block, runId, mine, rows, key }) {
-  /** @type {Map<string, string>} each reviewed file -> the content hash of its last review row */
-  const hashes = new Map();
-  for (const r of mine) {
-    if (typeof r.content_hash !== 'string') continue;
-    const [file] = reviewedFiles([r], block); // a review row naming a repo path, else none
-    if (file !== undefined) hashes.set(file, r.content_hash);
-  }
-  const files = reviewedFiles(mine, block).map((file) => ({ file, content_hash: hashes.get(file) ?? '' }));
-  if (files.length === 0 && !mine.some((r) => r.event === 'review.late_finding')) return 0;
-  const { refusals } = checkBlockReviews({ block, runId, files, rows, key, proofFiles: [], highPaths: [] });
-  const pairs = new Set(refusals.filter((r) => FINDING_CODES.has(r.code) && typeof r.finding === 'string').map((r) => `${r.file}\0${r.finding}`));
-  return pairs.size;
 }
 
 /**
@@ -123,13 +97,7 @@ async function statusOf(record) {
   } catch {
     budget = null;
   }
-  /** @type {Buffer} */
-  let key;
-  try {
-    key = await loadKey(record.run_id);
-  } catch {
-    key = Buffer.alloc(KEY_BYTES); // no key: nothing verifies, so no waiver or approval counts (fail closed)
-  }
+  const key = await findingsKey(record);
   const runId = String(record.run_id);
   const all = rows ?? [];
   /** @type {Map<string, Array<Record<string, any>>>} the run's rows, grouped by block once */

@@ -41,6 +41,9 @@ export const IMMUTABLE_KEYS = Object.freeze({
   // B63b: it tightens `block close` (the coder's green test run), so it is authority like
   // `review.external`; the rest of `context` stays live
   'context.require_coder_tests': 'whether close needs the coder\'s green test run is fixed by the owner before the run starts',
+  // B64b: the block-end hook runs a command on the owner's machine at every block end, so only
+  // the owner sets it, before the run starts
+  'hooks.on_block_end': 'it runs a command on the owner\'s machine at every block end; fixed by the owner before the run starts',
 });
 
 /** @param {unknown} v @returns {boolean} what `JSON.stringify` drops from an object. */
@@ -204,4 +207,31 @@ export function externalReviewer(record) {
 export function requireCoderTests(record) {
   const context = configInForce(record)?.context;
   return isMapping(context) && context.require_coder_tests === true;
+}
+
+/** The default `hooks.on_block_end.timeout_s`. */
+export const HOOK_TIMEOUT_DEFAULT_S = 60;
+/** The schema's bounds of `hooks.on_block_end.timeout_s`. */
+export const HOOK_TIMEOUT_MIN_S = 1;
+export const HOOK_TIMEOUT_MAX_S = 600;
+
+/**
+ * `hooks.on_block_end` of the run-start config snapshot (never the live config), or null when it
+ * is absent or malformed (the schema refuses a malformed one at `run start`).
+ * @param {Record<string, any>} record
+ * @returns {{argv: string[], timeoutS: number} | null}
+ */
+export function blockEndHook(record) {
+  let hook;
+  try {
+    hook = configInForce(record)?.hooks?.on_block_end;
+  } catch {
+    return null;
+  }
+  if (hook === null || typeof hook !== 'object') return null;
+  const { argv, timeout_s: timeout } = hook;
+  if (!Array.isArray(argv) || argv.length === 0 || !argv.every((a) => typeof a === 'string' && a.length > 0)) return null;
+  const timeoutS = timeout === undefined ? HOOK_TIMEOUT_DEFAULT_S : timeout;
+  if (!Number.isInteger(timeoutS) || timeoutS < HOOK_TIMEOUT_MIN_S || timeoutS > HOOK_TIMEOUT_MAX_S) return null;
+  return { argv: [...argv], timeoutS };
 }

@@ -109,8 +109,8 @@ Every block verb also takes `--json`. On success stdout is exactly one line,
 | `attempt` | `attempt` | `attempt` |
 | `rebase` | `rebased` | `old_base`, `new_base` |
 | `claim` | `claimed` | `path` |
-| `close` | `closed` | `status`, `reason`, `close_event` (or null); with `--remove-worktree` also `worktree` (`{removed, path, branch}`; a block with no worktree refuses `--remove-worktree` as a usage error, exit 2) |
-| `stop` | `stopped` | none |
+| `close` | `closed` | `status`, `reason`, `close_event` (or null); with `--remove-worktree` also `worktree` (`{removed, path, branch}`; a block with no worktree refuses `--remove-worktree` as a usage error, exit 2); with `hooks.on_block_end` set also `done_file` when the close ended the block (closed or stopped) — see [When a block ends](#when-a-block-ends-the-done-file-and-the-hook) |
+| `stop` | `stopped` | none; with `hooks.on_block_end` set, `done_file` |
 | `waive` | `waived` | `finding`, `file`, `by` |
 
 On failure the exit code and stderr are unchanged and stdout stays empty, except a close the gate
@@ -118,6 +118,75 @@ refused, which also prints `{"block":<id>,"ok":false,"reason":<text>}`; every ot
 (a usage error, a block not open, a cancelled `--no-require-reviews`, a failed worktree removal)
 leaves stdout empty. Without `--json` the output
 is byte-identical to before.
+
+### When a block ends: the done file and the hook
+
+A block ends when `block close` closes it, when `block close` stops it (a pin event or
+`ledger.tamper`), or with `block stop` (B64b). Every end writes `<run root>/blocks/<id>.done.json`
+— the run root here is the run's state folder, `~/.code-forge/runs/<run>/`, next to the run record
+(never the temp folder that holds the context packs) — after the end's ledger rows, atomically (a
+temp file in the same folder, then a rename); a later end of the same block overwrites it. Its
+absolute path is in the hook's `CODE_FORGE_DONE_FILE` and in `done_file` of `close --json` and
+`stop --json` (with the hook set). A close:
+
+```json
+{"block":"B1","run_id":"r1","status":"closed","event":"block.close","reason":null,"commit":"<sha>","spent_usd":1.25,"unknown_usd_sessions":0,"findings":0,"at":"<iso time>"}
+```
+
+A `block stop`:
+
+```json
+{"block":"B2","run_id":"r1","status":"stopped","event":"block.stop","reason":"not needed","commit":"<sha>","spent_usd":0.25,"unknown_usd_sessions":1,"findings":1,"at":"<iso time>"}
+```
+
+- `status` is `closed` or `stopped`.
+- `event` is `block.close` for a close that closed the block, `block.stop` for `block stop`, and
+  the close's own event (`worker.replaced`, `ledger.tamper`, …) for a close that stopped it.
+- `reason` is null for a plain close; otherwise the stop reason, redacted.
+- `commit` is HEAD of the block's worktree, else of the repository; null when it cannot be read.
+- `spent_usd` and `unknown_usd_sessions` come from the block's own ledger rows, computed as
+  `code-forge status` does; both null when the ledger cannot be read.
+- `findings` is the count of open review findings, as `code-forge status` counts them; null when
+  the ledger cannot be read or the count fails.
+
+The file never holds transcript text, diff text or secrets. If it cannot be written, the result,
+exit code and stdout stay the same (with the hook set, `done_file` is then null) and stderr adds
+`warning: done file not written: <reason>`.
+
+The owner can also set a command that runs at every block end:
+
+```yaml
+hooks:
+  on_block_end:
+    argv: [osascript, -e, 'display notification "block done"']
+    timeout_s: 60     # 1–600, default 60
+```
+
+It is read from the run's config snapshot and fixed for the run (`run reload` refuses a change).
+It runs once per end, after the done file and outside the run lock: no shell, cwd = the repository
+top level, stdin closed, output discarded, and its process group killed at `timeout_s`. Its env adds
+`CODE_FORGE_RUN`, `CODE_FORGE_BLOCK`, `CODE_FORGE_BLOCK_STATUS` and `CODE_FORGE_DONE_FILE` (the
+empty string when the done file was not written). It runs even when a later step of the verb
+(`--remove-worktree`) fails. One signed
+`hook.ran {block, hook, argv0, exit, signal, timed_out, duration_ms}` row per block end records it,
+also when the hook fails, times out or is not found (`argv0` is the basename only; `exit` is null
+unless the hook exited; `signal` names the killing signal, `SIGKILL` on a timeout, else null).
+A hook that does not exit 0 only warns, in one of these forms:
+`warning: on_block_end hook exit N`, `… timed out`, `… not found` (argv[0] does not exist),
+`… signal <NAME>`, or `… failed to start (<error code>)` (any other spawn error, a missing
+repository folder included). If the `hook.ran` row itself cannot be written, stderr adds one more
+line, `warning: on_block_end hook row not written (<error code>)` — an error code only, never
+message text. With the hook set, `close --json` and `stop --json` add `done_file`
+(the absolute path, or null when it was not written); without it, nothing changes (no hook, no row,
+the same output). The hook runs outside coders. `.code-forge.yml` is non-ownable (the same
+guard as `review.external.required`) with the hook set — also when `hooks.on_block_end` is the
+only key that guards it — and the close gate flags a coder transcript line that runs the hook (its
+argv[0] basename plus argv[1] when present and not blank, both trimmed; argv[1] is one literal
+token even with spaces inside, so such an argv[1] never matches a transcript line, which is split
+on spaces) as `rule_break … code-forge-on-block-end-hook`. The orchestrator waits for the done file or the hook
+instead of polling. A done file from an earlier end of the same block stays after a reopen, so it
+counts only when its `at` is later than the current dispatch; if no fresh done file appears by the
+time the coder agent reports, the orchestrator runs `code-forge status` once.
 
 ### The context pack
 
