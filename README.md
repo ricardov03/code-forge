@@ -12,6 +12,13 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 Next release:
 
+- **Work from a brief, with no plan.** `run start --mode brief` marks the run as brief-only.
+  Then `block open` without `--level` picks the lane from the rules: the owned files,
+  `--lines` and `proof.tiers.high.paths`. A signed `decision` row records it with
+  `source: rules`. `--level` still wins, and `report` shows the mode of each run.
+
+In 0.7.6:
+
 - **An outside reviewer can replace the local review.** Set `review.external: {required: true,
   name: <reviewer>}` in `.code-forge.yml`. `block close` then skips the per-file review check
   and writes a signed `gate.reviews_waived` row with `by: config`. It needs no TTY and works

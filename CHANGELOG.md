@@ -6,6 +6,14 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Brief-only mode (B59, issue #13 item 2): run start --mode brief writes a signed run.mode {mode: brief, plan: none}
+  row; the mode is fixed for the run. In a brief run, block open without --level takes the lane from the rules
+  (fallbackLane) over the owned entries, --lines and proof.tiers.high.paths of the run config snapshot, and writes a
+  signed decision row {question: lane, source: rules, facts} before dispatch; an explicit --level wins. report prints
+  the mode of each run in its text output (not in --json or --export). --mode plan or no flag keeps the old behaviour.
+
 ## [0.7.6] — 2026-10-11
 
 ### Added

@@ -12,7 +12,7 @@
  * coder/reviewer/judge/s2/author/facts spend (plus `ledger add coder` manual rows and
  * `session.background` rows, whose price is unknown); its dollars come from `./spend.mjs`
  * (`usd`, else `cost_usd`, else ESTIMATED from its tokens × `./prices.mjs`); `review.done` {block,file,context_mode,findings_by_severity,round}; `decision`
- * {block,question,source}; `outcome` {block,missed_after_degrade}; `escalation` {block,trigger};
+ * {block,question,source}; `run.start` {run}; `run.mode` {run,mode,plan} (B59, `buildRunModes`); `outcome` {block,missed_after_degrade}; `escalation` {block,trigger};
  * `review.unavailable` {block,reason}; `proof` {block,duration_ms}; `run.stop` {reason}.
  */
 
@@ -58,6 +58,20 @@ export function sessionCostUsd(row) {
 export function buildSpend(rows) {
   const acted = rows.filter((r) => r.source !== 'shadow');
   return { runs: spendByRun(acted), total: sumSpend(acted) };
+}
+
+/**
+ * B59: the mode of every run with a `run.start` row, in ledger order — `brief` when the run has a
+ * `run.mode {mode: brief}` row, else `plan` (a run with no `run.mode` row is a plan run). Like the
+ * spend, it is terminal text only (`src/cli/report.mjs`): it is not in `--json` or `--export`, so
+ * the pinned `SECTION_NAMES` sections stay exactly as they are.
+ * @param {Array<Record<string, any>>} rows
+ * @returns {Array<{run: string, mode: 'brief' | 'plan'}>}
+ */
+export function buildRunModes(rows) {
+  const brief = new Set(rows.filter((r) => r.event === 'run.mode' && r.mode === 'brief' && typeof r.run === 'string').map((r) => r.run));
+  const runs = [...new Set(rows.filter((r) => r.event === 'run.start' && typeof r.run === 'string').map((r) => r.run))];
+  return runs.map((run) => ({ run, mode: brief.has(run) ? 'brief' : 'plan' }));
 }
 
 /**

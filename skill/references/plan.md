@@ -52,3 +52,15 @@ Never treat a chat summary of the plan as the approval step, and never start `fo
 ## §5 Cost
 
 One L0 session per plan for the facts (typically a claim list of 40–80 items) and one L3 session per author round; `forge report --slug <slug>` shows both as `facts $` and coder/review splits.
+
+## §6 Brief mode — briefs, no plan
+
+For a small change whose blocks are clear from their briefs (a fix, a doc pass, one or two blocks with no ordering to argue about), skip §0–§4: `forge run start --mode brief`. The run record stores `mode: brief` and the ledger gets one signed `run.mode {mode: brief, plan: none}` row right after `run.start`; the mode is fixed for the run (`run reload` never changes it) and `forge report` lists each run as `brief` or `plan`. Plan mode (`--mode plan`, or no flag) is the default and is unchanged. There is no separate verb for a task: each block is still `forge block open` with its brief, owned files and acceptance clauses, and is closed by the same gate.
+
+In a brief-mode run `forge block open <id> --run <r> --owned <paths…> --acceptance <file> --brief <file> --lines <n>` may leave out `--level`: the lane then comes from the deterministic rules (the `--rules` fallback of `jev ask lane`), over these facts only —
+
+- an owned entry under `proof.tiers.high.paths` of the run's config snapshot (or a directory entry above one), a migration path, or a policy/middleware path ⇒ `L2`;
+- else more than 4 owned entries or more than 200 estimated changed lines (`--lines`) ⇒ `L1`;
+- else `L0` (a docs or contract block is still raised to `levels.coder_floor_docs`).
+
+`block open` writes one signed `decision {question: lane, answer: <lane>, source: rules}` row naming the block, then the `dispatch` row, and prints `(rules lane)` after the level. An explicit `--level` still wins and writes no decision row. Give `--lines` whenever you can: without it the size rule sees only the number of owned entries. Outside brief mode a missing `--level` with no autopilot level stays a usage error, and `--lines` stays the forecast it always was.

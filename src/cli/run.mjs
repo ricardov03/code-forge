@@ -2,7 +2,7 @@
  * `code-forge run start|status|end` (plan §4.9). The orchestrator runs these; a coder never does
  * (`run start` is on the forbidden list, ★ `code-forge-worker-from-coder`).
  *
- *   run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>]
+ *   run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]
  *   run start --reattach --run <id> [--worker-pid <pid>]
  *   run status --run <id>     (B33: includes spent_usd / budget_usd / unknown_usd_sessions)
  *   run reload --run <id>
@@ -13,6 +13,12 @@
  * queue and pins it; `run start --reattach` without `--worker-pid` re-pins the live worker the
  * queue announces (`repinWorker`). Called as `runRun(args, deps)` without `deps.startWorker` (the
  * state tests), no worker is launched and none is pinned unless `--worker-pid` is given.
+ *
+ * B59 `--mode brief`: a run with briefs and no plan. The mode is stored in the run record and on a
+ * signed `run.mode {mode: brief, plan: none}` row, and it is fixed for the run (`run reload` never
+ * touches it); `block open` without `--level` then takes the lane from the rules. `--mode plan`
+ * (the default) changes nothing; any other value, or `--mode` on any other verb or with
+ * `--reattach`, is a usage error (exit 2).
  *
  * B35 `run reload`: re-read and validate the workspace's `.code-forge.yml` and replace the run's
  * config snapshot (`reloadRun`) — no `block stop` / `run end` / `run start` cycle. An invalid
@@ -29,7 +35,7 @@ import { budgetUsdOf, runSpend } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
-import { endRun, processStartTime, readRun, reattachWorker, startRun, stopPinnedWorker } from '../state/run.mjs';
+import { endRun, processStartTime, readRun, reattachWorker, RUN_MODES, startRun, stopPinnedWorker } from '../state/run.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { sweepRoots, tmpBase } from '../util/tmp.mjs';
 import { launchWorker, repinWorker } from '../worker/loop.mjs';
@@ -101,9 +107,12 @@ export async function runRun(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags } = parseFlags(rest, { values: ['run', 'cwd', 'engine', 'worker-pid'], booleans: ['reattach'] });
+    const { flags } = parseFlags(rest, { values: ['run', 'cwd', 'engine', 'worker-pid', 'mode'], booleans: ['reattach'] });
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     const workerPid = intFlag(flags['worker-pid'], 'worker-pid');
+    const mode = typeof flags.mode === 'string' ? flags.mode : undefined;
+    if (mode !== undefined && (sub !== 'start' || flags.reattach)) throw new StateError('usage', '--mode is set once, by a new run start (the mode is fixed for the run)');
+    if (mode !== undefined && !RUN_MODES.includes(mode)) throw new StateError('usage', `--mode must be one of ${RUN_MODES.join(', ')}`);
 
     if (sub === 'start' && flags.reattach) {
       if (!runId) throw new StateError('usage', 'run start --reattach needs --run');
@@ -129,7 +138,7 @@ export async function runRun(args, deps = {}) {
       const engine = typeof flags.engine === 'string' ? flags.engine : undefined;
       const tmpRoot = typeof loaded.config?.tmp?.root === 'string' ? loaded.config.tmp.root : undefined;
       await sweepRoots({ root: tmpBase(tmpRoot) }); // dead runs' temp roots and orphans (§9.6, V12)
-      let record = await startRun({ workspace, project, config: loaded.config, engine, runId, workerPid, writeRow: ledgerWriter(project), probe });
+      let record = await startRun({ workspace, project, config: loaded.config, engine, mode, runId, workerPid, writeRow: ledgerWriter(project), probe });
       if (!record.worker && startWorker) {
         const launched = await startWorker({ runId: record.run_id, workspace });
         const startedAt = await (probe ?? processStartTime)(launched.pid); // what the stop below re-checks against
@@ -141,7 +150,8 @@ export async function runRun(args, deps = {}) {
           throw thrown;
         }
       }
-      out(`run ${record.run_id} started · engine ${record.engine} · worker ${record.worker ? `pid ${record.worker.pid}` : 'not pinned'}\n`);
+      const brief = record.mode === 'brief' ? ' · mode brief (no plan)' : '';
+      out(`run ${record.run_id} started · engine ${record.engine}${brief} · worker ${record.worker ? `pid ${record.worker.pid}` : 'not pinned'}\n`);
       if (!record.worker) err('run start: no worker pinned — start the worker, then `run start --reattach --run <id> --worker-pid <pid>`\n');
       return 0;
     }
@@ -211,7 +221,7 @@ async function reloadVerb(runId, { out, err }) {
 }
 
 const USAGE =
-  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n';
+  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function run(args) {

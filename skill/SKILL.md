@@ -11,7 +11,7 @@ You are the **orchestrator**: the session that invoked this skill. You dispatch,
 
 1. `forge validate` — exit 0, or stop and show the refusal (it names the key, never the value).
 2. `forge doctor --quick` — config, links, key resolution. On the first run of a day run `forge doctor` in full and read its `engine` row and its `signer: same-user boundary only` row (`references/security.md`).
-3. `forge run start` — prints `run <id> started · engine <e> · worker pid <n>`. The engine is `solo`, `harness` or `subprocess` (`engine: auto` picks; `subprocess` only by explicit config). No engine ⇒ the four-line stop text in `references/degraded.md` §1 is printed and you stop. Keep `<id>`: every later verb takes `--run <id>`.
+3. `forge run start` — prints `run <id> started · engine <e> · worker pid <n>`. The engine is `solo`, `harness` or `subprocess` (`engine: auto` picks; `subprocess` only by explicit config). No engine ⇒ the four-line stop text in `references/degraded.md` §1 is printed and you stop. Keep `<id>`: every later verb takes `--run <id>`. A small change with briefs and no plan starts with `forge run start --mode brief` instead (`references/plan.md` §6); the mode is fixed for the run.
 4. When the engine is not `solo`, print the banner of `references/degraded.md` §2 once.
 
 ## §1 Invocation and state

@@ -132,11 +132,17 @@ async function pinWorker(workerPid, probe) {
   return { pid: workerPid, started_at: startedAt };
 }
 
+/** B59: the run modes `run start --mode` takes; `plan` is the default and is never recorded. */
+export const RUN_MODES = Object.freeze(['plan', 'brief']);
+
 /**
  * `run start`: record + key + worker pin + ledger `run.start`, all under the run lock. An
  * existing run id is refused before anything is written (its key and record stay untouched).
+ * B59: `mode: 'brief'` (a run with briefs and no plan) is stored in the record as `mode` and
+ * written as a signed `run.mode {mode: 'brief', plan: 'none'}` row right after `run.start`; `plan`
+ * or no mode leaves the record and the rows exactly as before. Nothing changes the mode later.
  * @param {{
- *   workspace: string, project: string, config?: Record<string, any>, engine?: string,
+ *   workspace: string, project: string, config?: Record<string, any>, engine?: string, mode?: string,
  *   runId?: string, workerPid?: number, orchestratorPid?: number, soloPid?: string | null,
  *   writeRow: WriteRow, probe?: StartTimeProbe, now?: Date,
  * }} opts
@@ -149,6 +155,8 @@ export async function startRun(opts) {
     throw new StateError('bad-project', 'project slug must match /^[a-z0-9][a-z0-9-]*$/ (config key project.slug)');
   }
   const workspace = assertWorkspaceOutsideRuns(opts.workspace);
+  if (opts.mode !== undefined && !RUN_MODES.includes(opts.mode)) throw new StateError('usage', `--mode must be one of ${RUN_MODES.join(', ')}`);
+  const brief = opts.mode === 'brief';
   // B58: the schema lets `review.external` stand without a name while `required` is off; on, the
   // reviewer must be named — refused before anything is written
   const external = config.review?.external;
@@ -172,6 +180,7 @@ export async function startRun(opts) {
     status: 'active',
     blocks: {},
     orphans: [],
+    ...(brief ? { mode: 'brief' } : {}),
     // B35: the config snapshot the worker reviews with (`run reload` replaces it). Only when the
     // caller passed the loaded config: a record without it keeps the worker on its boot config.
     ...(opts.config !== undefined ? { config: initialConfigState(config) } : {}),
@@ -185,6 +194,7 @@ export async function startRun(opts) {
     await generateKey(runId);
     await saveRun(record);
     await writeSigned(runId, writeRow, { event: 'run.start', engine: record.engine, worker_pinned: worker !== null });
+    if (brief) await writeSigned(runId, writeRow, { event: 'run.mode', mode: 'brief', plan: 'none' });
     // B58: the owner's outside reviewer is on the ledger from the first row of the run on
     const reviewer = externalReviewer(record);
     if (reviewer !== null) await writeSigned(runId, writeRow, { event: 'review.external', required: true, reviewer });

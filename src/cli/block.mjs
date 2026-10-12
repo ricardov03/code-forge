@@ -64,6 +64,14 @@
  * neither it is a usage error (`no --level given and no autopilot level recorded for <id>`). An
  * explicit `--level` always wins; a repeated or valueless `--level` is a usage error as before.
  *
+ * B59: in a brief-mode run (`run start --mode brief`), `block open` without `--level` takes the
+ * lane from the §3.5 rules (`fallbackLane`) over facts built from the owned entries, `--lines`
+ * (estimated changed lines) and `proof.tiers.high.paths` of the run's config snapshot
+ * (`laneFacts`), and writes one signed `decision {question: lane, source: rules}` row naming the
+ * block, then the `dispatch` row (`openBlock`; neither when the open is refused). An explicit
+ * `--level` still wins, with no decision row. Outside brief mode `--lines` stays the forecast it
+ * always was, and no `--level` without an autopilot level is the usage error above.
+ *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
  * through `closeBlock`'s `extraChecks`.
@@ -73,10 +81,12 @@ import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
+import { fallbackLane } from '../decide/fallback-rules.mjs';
+import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
-import { externalReviewer } from '../state/config-snapshot.mjs';
+import { configInForce, externalReviewer } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
@@ -141,8 +151,25 @@ export async function runBlock(args, deps = {}) {
     }
 
     if (sub === 'open') {
-      // B47: no --level ⇒ the level autopilot chose for the block (a signed autopilot.level row)
-      const level = typeof flags.level === 'string' ? flags.level : await autopilotLevel(runId, id, record);
+      // an explicit --level wins; B59: else in a brief-mode run the rules lane; B47: else the level
+      // autopilot chose for the block (a signed autopilot.level row)
+      /** @type {{lane: string, facts: ReturnType<typeof laneFacts>} | null} */
+      let rules = null;
+      /** @type {string | null} */
+      let level;
+      // B59: only the rules lane parses --lines this early; every other open parses it where it
+      // always was (after the level check and --attempt), so its errors keep their pre-B59 order
+      /** @type {number | null | undefined} */
+      let lines;
+      if (typeof flags.level === 'string') {
+        level = flags.level;
+      } else if (record.mode === 'brief') {
+        lines = intFlag(flags.lines, 'lines') ?? null;
+        rules = rulesLane(record, /** @type {string[]} */ (flags.owned), lines);
+        level = rules.lane;
+      } else {
+        level = await autopilotLevel(runId, id, record);
+      }
       if (level === null) throw new StateError('usage', `no --level given and no autopilot level recorded for ${id}`);
       const acceptance = parseYAML(await readFile(/** @type {string} */ (flags.acceptance), 'utf8'), { prettyErrors: false });
       let brief;
@@ -160,14 +187,15 @@ export async function runBlock(args, deps = {}) {
         acceptance,
         attempt: intFlag(flags.attempt, 'attempt'),
         base: typeof flags.base === 'string' ? flags.base : undefined,
-        lines: intFlag(flags.lines, 'lines') ?? null,
+        lines: lines === undefined ? (intFlag(flags.lines, 'lines') ?? null) : lines,
         brief,
+        ...(rules ? { decision: { question: 'lane', answer: rules.lane, source: 'rules', facts: rules.facts } } : {}),
         ...(typeof flags.kind === 'string' ? { kind: flags.kind } : {}),
         cfg: await openConfig(record.workspace),
         writeRow,
       });
       const raised = block.level !== level ? ` (${block.kind} floor, asked ${level})` : '';
-      const chosen = typeof flags.level === 'string' ? '' : ' (autopilot level)';
+      const chosen = typeof flags.level === 'string' ? '' : rules ? ' (rules lane)' : ' (autopilot level)';
       out(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}\n`);
       out(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
       return 0;
@@ -342,6 +370,19 @@ async function confirmNoReviews(runId, id, deps) {
   const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
   const go = await ui.confirm({ message: `Close block ${id} of run ${runId} WITHOUT the per-file review checks? Only the owner may say yes.`, initialValue: false });
   return ui.isCancel(go) || go !== true ? 'cancelled' : 'confirmed';
+}
+
+/**
+ * B59: the rules lane for a brief-mode block — `fallbackLane` over the facts of its owned entries,
+ * the `--lines` estimate and the snapshot's `proof.tiers.high.paths` (none for a record from
+ * before snapshots).
+ * @param {Record<string, any>} record @param {string[]} owned @param {number | null} lines
+ * @returns {{lane: string, facts: ReturnType<typeof laneFacts>}}
+ */
+function rulesLane(record, owned, lines) {
+  const high = configInForce(record)?.proof?.tiers?.high?.paths;
+  const facts = laneFacts({ owned, lines, highPaths: high });
+  return { lane: fallbackLane(facts), facts };
 }
 
 /**

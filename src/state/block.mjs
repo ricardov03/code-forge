@@ -11,7 +11,7 @@
  * B12) — this module never imports them (C17).
  */
 
-import { createHash } from 'node:crypto';
+import { createHash, randomUUID } from 'node:crypto';
 import { createReadStream, existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
@@ -299,10 +299,16 @@ function refuseConfigOwner(owned, kinds, guarded) {
  * tree's changes at open, which `block close` reads to tell the coder's changes from earlier ones.
  * B58: with `review.external.required` set, an owned entry that owns the project's config is
  * refused (`config-owned`, {@link refuseConfigOwner}).
+ * B59: `decision` (the rules lane of a brief-mode block) is written as a signed `decision` row
+ * naming the block, with `decisionId` (default a fresh UUID) as its `decision_id`, just before the
+ * `dispatch` row — under the same lock, so a refused open writes neither. Its `answer` is the
+ * requested lane and must equal `level` (else `bad-decision`, nothing written); the docs floor may
+ * still raise the dispatched level, and the dispatch row then names the lane as `requested_level`.
  * @param {{
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
  *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date,
+ *   decision?: {question: 'lane', answer: string, source: 'rules', facts: Record<string, unknown>}, decisionId?: string,
  * }} opts
  * @returns {Promise<{block: Record<string, any>, pointer: string | null}>}
  */
@@ -313,6 +319,7 @@ export async function openBlock(opts) {
   if (!Number.isInteger(attempt) || attempt < 1) throw new StateError('bad-attempt', 'attempt must be an integer >= 1');
   if (lines !== null && !(Number.isInteger(lines) && lines > 0)) throw new StateError('bad-lines', 'lines forecast must be a positive integer');
   if (opts.kind !== undefined && !BLOCK_KINDS.includes(opts.kind)) throw new StateError('bad-kind', `kind must be one of ${BLOCK_KINDS.join(', ')}`);
+  if (opts.decision && opts.decision.answer !== level) throw new StateError('bad-decision', `the decision answer ${opts.decision.answer} is not the requested level ${level}`);
   const owned = assertOwned(opts.owned);
   const acceptance = assertAcceptance(opts.acceptance);
   const kind = blockKind({ owned, declared: opts.kind });
@@ -345,7 +352,10 @@ export async function openBlock(opts) {
     const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
     return {
       result: entry,
-      rows: [{ event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines }],
+      rows: [
+        ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
+        { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines },
+      ],
     };
   });
   return { block, pointer };

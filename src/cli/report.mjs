@@ -1,10 +1,12 @@
 /**
  * `code-forge report [--slug <slug>] [--json] [--export <dir>]` (plan §6.2, R4). Terminal output
- * only, plus an optional `--export <dir>` that writes the same 13 sections as JSON files.
+ * only, plus an optional `--export <dir>` that writes the same 13 sections as JSON files. The
+ * terminal output ends with the spend per run (B33) and the mode of each run (B59: brief or plan);
+ * both are text only, never in `--json` or `--export`, so the 13 pinned sections stay as they are.
  */
 
 import { writeSafe } from '../util/redact.mjs';
-import { buildReport, buildSpend } from '../ledger/report.mjs';
+import { buildReport, buildRunModes, buildSpend } from '../ledger/report.mjs';
 import { exportReportSections } from '../ledger/export.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 
@@ -61,6 +63,7 @@ export async function runReport(args, deps = {}) {
       out(`== ${name} ==\n${JSON.stringify(data, null, 2)}\n`);
     }
     out(spendLines(buildSpend(rows)));
+    out(modeLines(buildRunModes(rows)));
     return 0;
   } catch (err_) {
     err(`report: ${err_?.message ?? String(err_)}\n`);
@@ -79,6 +82,17 @@ export function spendLines({ runs, total }) {
   for (const r of runs) lines.push(`  run ${r.run ?? '(none)'}: $${r.usd.toFixed(4)} · ${r.sessions} session(s)${unknown(r.unknown)}`);
   lines.push(`  total: $${total.usd.toFixed(4)} · ${total.sessions} session(s)${unknown(total.unknown)}`);
   return `${lines.join('\n')}\n`;
+}
+
+/**
+ * B59: the mode of each run (`brief` or `plan`), after the spend — text only, never in `--json`
+ * or `--export`. Empty (no header) when the ledger has no run.
+ * @param {ReturnType<typeof buildRunModes>} modes
+ * @returns {string}
+ */
+export function modeLines(modes) {
+  if (modes.length === 0) return '';
+  return `${['run mode:', ...modes.map((m) => `  run ${m.run}: ${m.mode}`)].join('\n')}\n`;
 }
 
 /** @param {string[]} args @returns {Promise<number>} */

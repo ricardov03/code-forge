@@ -154,6 +154,22 @@ export function snapshotFor(record, ticket) {
 }
 
 /**
+ * The config snapshot in force for the run (no ticket pin), or null for a record from before
+ * snapshots.
+ * @param {Record<string, any>} record
+ * @returns {Record<string, any> | null}
+ * @throws {StateError} `config-snapshot` when the snapshot in force does not match its hash.
+ */
+export function configInForce(record) {
+  try {
+    return snapshotFor(record, '')?.config ?? null;
+  } catch (thrown) {
+    if (!(thrown instanceof Error) || thrown.message !== 'config-snapshot') throw thrown;
+    throw new StateError('config-snapshot', `run ${record.run_id}: the config snapshot in force does not match its hash`);
+  }
+}
+
+/**
  * B58: the outside reviewer named by the snapshot in force when `review.external.required` is
  * true; null otherwise (key absent, `required` false, or a record from before snapshots). The key
  * is immutable ({@link IMMUTABLE_KEYS}), so this is the value `run start` stored.
@@ -162,14 +178,7 @@ export function snapshotFor(record, ticket) {
  * @throws {StateError} `config-snapshot` when the snapshot in force does not match its hash.
  */
 export function externalReviewer(record) {
-  let snap;
-  try {
-    snap = snapshotFor(record, '');
-  } catch (thrown) {
-    if (!(thrown instanceof Error) || thrown.message !== 'config-snapshot') throw thrown;
-    throw new StateError('config-snapshot', `run ${record.run_id}: the config snapshot in force does not match its hash`);
-  }
-  const external = snap?.config.review?.external;
+  const external = configInForce(record)?.review?.external;
   if (!isMapping(external) || external.required !== true) return null;
   // required without a usable name is no switch at all (the schema refuses it; this is the floor)
   const name = typeof external.name === 'string' ? external.name.trim() : '';

@@ -51,6 +51,7 @@ import path from 'node:path';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { blockKind, isDocsKind } from '../decide/escalation.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
+import { isMigrationPath, isPolicyPath } from '../decide/lane-facts.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
@@ -152,8 +153,8 @@ export function rulesRisk({ file, plusCount, cfg }) {
     pathFloorHit,
     filesChanged: 1,
     linesAdded: plusCount,
-    touchesMigration: /migration/i.test(file),
-    touchesPolicyOrMiddleware: /polic(y|ies)|middleware/i.test(file),
+    touchesMigration: isMigrationPath(file),
+    touchesPolicyOrMiddleware: isPolicyPath(file),
   });
 }
 
