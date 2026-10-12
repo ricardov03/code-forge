@@ -18,7 +18,9 @@ import path from 'node:path';
  * (`gofmt -l`) exit 0 regardless of whether anything is unformatted and instead print the
  * offending file names to stdout — for those, the descriptor carries `failOnStdout: true` so
  * `run.mjs` treats non-empty stdout as red too, since a bare exit-code check can never fail.
- * @typedef {string[] | {argv: string[], failOnStdout: true}} GateCommand
+ * B60: a configured gate may be `{argv, env}` — `env` adds variables to the gate's environment
+ * (the values are never printed, `run.mjs`).
+ * @typedef {string[] | {argv: string[], failOnStdout?: true, env?: Record<string, string>}} GateCommand
  * @typedef {GateCommand | null} Gate
  */
 /** @typedef {{stack: string, test: Gate, lint: Gate, types: Gate, format: Gate}} DetectedGates */

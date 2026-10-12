@@ -12,6 +12,14 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 Next release:
 
+- **Run only the tests a block touches.** `block open --tests <paths>` names the block's test
+  files. A gate argv item exactly `{test_files}` becomes those files. When the block owns more
+  files than `gates.full_suite_threshold_files`, or no test file is known, the full suite runs.
+  The ledger row says which one ran. A gate can also be `{argv, env}`. Env values are never
+  printed. Gate env is not a secret store.
+
+In 0.7.7:
+
 - **Work from a brief, with no plan.** `run start --mode brief` marks the run as brief-only.
   Then `block open` without `--level` picks the lane from the rules: the owned files,
   `--lines` and `proof.tiers.high.paths`. A signed `decision` row records it with

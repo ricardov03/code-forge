@@ -363,6 +363,7 @@ test('schema: gates.test: [] is refused by the schema too ($defs.argvOrNull minI
     schemaErrors.map((e) => [e.path, e.keyword]),
     [
       ['/gates/test', 'minItems'],
+      ['/gates/test', 'type'], // B60: the {argv, env} branch
       ['/gates/test', 'type'],
       ['/gates/test', 'anyOf'],
     ],

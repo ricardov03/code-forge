@@ -505,3 +505,43 @@ test('refreshAutopilotFiles scrubs the run workspace as <project>, from any cwd;
   assert.equal(buildFullLog({ runId: 'c-ws', rows: rowsOf([]), scrubCtx: SC }).at(-1)?.detail, `grant g1 · delegate L2 · allow  · until ${UNTIL}`);
   assert.equal(JSON.stringify(b).includes('cannot start'), false); // the worker row's reason text stays out
 });
+
+test('B60: "Full suite" reads the last gate.done that was NOT a related-tests run and says when related runs came after it; the log names the scope', () => {
+  const gateRows = [
+    { run: 'r1', event: 'gate.done', block: 'b2', stack: 'node', all_ok: true, scope: 'full', reason: 'threshold', ts: T(56.1) },
+    { run: 'r1', event: 'gate.done', block: 'b2', stack: 'node', all_ok: false, scope: 'related', test_count: 2, ts: T(56.2) },
+  ];
+  const fullSuite = (/** @type {any[]} */ rows) => buildBinnacle({ runId: 'r1', rows: [...ROWS, ...rows], record: RECORD, now: NOW, scrubCtx: SC }).status.find((s) => s.item === 'Full suite');
+  assert.deepEqual(fullSuite(gateRows), { item: 'Full suite', value: `green · no full suite since ${T(56.1)}` });
+  assert.deepEqual(fullSuite([gateRows[0]]), { item: 'Full suite', value: 'green' });
+  assert.deepEqual(fullSuite([{ ...gateRows[0], all_ok: false }]), { item: 'Full suite', value: 'red' });
+  assert.deepEqual(fullSuite([gateRows[1], { ...gateRows[0], all_ok: false, ts: T(56.3) }]), { item: 'Full suite', value: 'red' });
+  assert.deepEqual(fullSuite([gateRows[1]]), { item: 'Full suite', value: 'not recorded · related tests only' });
+  assert.deepEqual(fullSuite([]), { item: 'Full suite', value: 'not recorded' });
+  const { ts: _ts, ...fullNoTs } = gateRows[0];
+  assert.deepEqual(fullSuite([fullNoTs, gateRows[1]]), { item: 'Full suite', value: 'green · no full suite since unknown time' });
+  const log = buildFullLog({ runId: 'r1', rows: gateRows, scrubCtx: SC });
+  assert.deepEqual(log.map((e) => e.detail), ['node · not all green · related tests (2)', 'node · all green · full suite (the block owns more files than the threshold)']);
+});
+
+test('B60: the gate.done detail — related with and without a count (never "unknown"), full with each reason, none or an unknown one, and no scope at all', () => {
+  const rows = [
+    { scope: 'related', test_count: 3 },
+    { scope: 'related' },
+    { scope: 'full', reason: 'threshold' },
+    { scope: 'full', reason: 'no_tests' },
+    { scope: 'full' },
+    { scope: 'full', reason: 'other' },
+    {},
+  ].map((extra, i) => ({ run: 'r1', event: 'gate.done', stack: 'node', all_ok: true, ...extra, ts: T(57 + i) }));
+  const log = buildFullLog({ runId: 'r1', rows, scrubCtx: SC });
+  assert.deepEqual(log.map((e) => e.detail).reverse(), [
+    'node · all green · related tests (3)',
+    'node · all green · related tests',
+    'node · all green · full suite (the block owns more files than the threshold)',
+    'node · all green · full suite (no test file known)',
+    'node · all green · full suite',
+    'node · all green · full suite',
+    'node · all green',
+  ]);
+});

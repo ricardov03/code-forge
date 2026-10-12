@@ -4,6 +4,7 @@
  *
  *   block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file>
  *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract]
+ *              [--tests <paths…>]
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
@@ -72,6 +73,11 @@
  * `--level` still wins, with no decision row. Outside brief mode `--lines` stays the forecast it
  * always was, and no `--level` without an autopilot level is the usage error above.
  *
+ * B60: `--tests <paths…>` names the block's test files (the same path rules as `--owned`); they are
+ * recorded as the block's `test_files` and on the dispatch row, and a gate argv item that is
+ * exactly `{test_files}` runs them (`gates run --run --block`). Without it the gate takes the owned
+ * entries that look like tests.
+ *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
  * through `closeBlock`'s `extraChecks`.
@@ -101,7 +107,7 @@ import { gitChildEnv } from '../worker/ticket.mjs';
 import { missingReviewTickets } from '../engines/sentinel.mjs';
 
 const USAGE =
-  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract]\n' +
+  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n';
 
@@ -129,7 +135,15 @@ export async function runBlock(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned'], booleans: ['no-require-reviews'] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews'] });
+    // B60: --tests names exact paths (a file or a directory — PHPUnit and Pest take directories).
+    // `*` and `?` are refused: a glob would reach the gate unexpanded. `[` and `{` are allowed,
+    // since real paths use them (`app/[id]/page.test.tsx`) and argv never reaches a shell. A
+    // leading "-" would be read as an option.
+    for (const t of sub === 'open' && Array.isArray(flags.tests) ? flags.tests : []) {
+      if (/[*?]/.test(t)) throw new StateError('usage', `--tests takes exact paths (a file or a directory); "*" and "?" are refused: ${JSON.stringify(t)}`);
+      if (t.startsWith('-')) throw new StateError('usage', `--tests: a path may not start with "-": ${JSON.stringify(t)}`);
+    }
     const [id, extra] = positionals;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
@@ -191,12 +205,15 @@ export async function runBlock(args, deps = {}) {
         brief,
         ...(rules ? { decision: { question: 'lane', answer: rules.lane, source: 'rules', facts: rules.facts } } : {}),
         ...(typeof flags.kind === 'string' ? { kind: flags.kind } : {}),
+        ...(Array.isArray(flags.tests) ? { tests: flags.tests } : {}),
         cfg: await openConfig(record.workspace),
         writeRow,
       });
       const raised = block.level !== level ? ` (${block.kind} floor, asked ${level})` : '';
       const chosen = typeof flags.level === 'string' ? '' : rules ? ' (rules lane)' : ' (autopilot level)';
-      out(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}\n`);
+      const testCount = Array.isArray(block.test_files) ? block.test_files.length : 0;
+      const tests = testCount > 0 ? ` · ${testCount} test file${testCount === 1 ? '' : 's'}` : '';
+      out(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}${tests}\n`);
       out(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
       return 0;
     }

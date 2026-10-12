@@ -205,7 +205,12 @@
             "invariants": { "type": "string" }
           }
         },
-        "full_suite_threshold_files": { "type": "integer", "minimum": 1, "default": 10 }
+        "full_suite_threshold_files": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "description": "A block that owns more files than this runs the full suite for a {test_files} gate (reason threshold), not its related tests. Owned files are counted this way. A glob or a directory counts the tracked and new (not ignored) files it covers. A path not created yet counts as 1. Outside git each entry counts 1. A git failure runs the full suite. block open --tests names the test files precisely."
+        }
       }
     },
     "proof": {
@@ -360,8 +365,23 @@
       }
     },
     "argvOrNull": {
+      "description": "An argv array (never a shell string), an {argv, env} object, or null. An argv item that is exactly {test_files} is replaced by the block's test files. It must be a whole item. It cannot be the command or the only item. The test files are the block open --tests paths, else the owned entries that are concrete test files. The item is dropped, and the full suite runs, in two cases. The block owns more files than full_suite_threshold_files (reason threshold). Or no test file is known, or the gate runs without --run/--block (reason no_tests). The gate.red and gate.done rows then carry scope related with test_count, or scope full with reason.",
       "anyOf": [
         { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["argv"],
+          "properties": {
+            "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "env": {
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": { "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" } },
+              "description": "Variables added to the gate's environment, NAME: value. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters. Only the names are shown (env_keys); put secrets in the environment or a secret manager."
+            }
+          }
+        },
         { "type": "null" }
       ]
     }

@@ -6,6 +6,13 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- B60: related-test gates (issue #13 item 3). block open --tests <paths> names the test files of a block; a gate argv
+  item exactly {test_files} becomes those files, or the full suite runs when the block owns more than
+  gates.full_suite_threshold_files files or no test file is known. Gate rows carry scope, reason and test_count. A gate
+  can be {argv, env}; env values are never printed or recorded, and child output masks values of 8 or more characters.
+
 ## [0.7.7] — 2026-10-11
 
 ### Added

@@ -7,7 +7,15 @@
  *   gates detect --cwd <dir>
  *   gates run --cwd <dir> [--slug <slug>] [--timeout-ms <n>] [--run <r> --block <id>]
  *     (with --run/--block the gates run behind the proof lock, `runGatesGuarded`: another block
- *     holding the lock ⇒ `{"result":"proof.busy","holder":…}` and exit 1)
+ *     holding the lock ⇒ `{"result":"proof.busy","holder":…}` and exit 1. B60: a gate argv item
+ *     that is exactly `{test_files}` runs the block's related tests, or is dropped for the full
+ *     suite — over `gates.full_suite_threshold_files` owned files (globs and directories count
+ *     the tracked and new (not ignored) files they cover), no test file known, or no --run/--block (`reason: no_tests`);
+ *     that gate's result and `gate.red` row, and the `gate.done` row, carry `scope: related|full`
+ *     with `test_count` or `reason: threshold|no_tests`, and with --run/--block the rows name `run`
+ *     and `block`. A gate given as `{argv, env}` runs with those variables, shown by name only
+ *     (`env_keys`). code-forge never prints or records an env value. Gate env is not a secret
+ *     store. Child output is masked only for values of 8 or more characters.)
  *   gates secret-scan --cwd <dir> --file <path> [--file <path> ...]
  *   gates safe-edit --cwd <dir> --base <sha>
  *   gates scope --cwd <dir> --base <sha>
@@ -20,6 +28,7 @@ import { writeSafe, redactJSON } from '../util/redact.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { detectGates } from '../gates/detect.mjs';
+import { printableGates, thresholdOf } from '../gates/expand.mjs';
 import { runGates } from '../gates/run.mjs';
 import { runGatesGuarded } from '../proof/lock.mjs';
 import { scanFiles } from '../gates/secret-scan.mjs';
@@ -28,18 +37,20 @@ import { computeFileSet } from '../gates/scope.mjs';
 import { checkAcceptance, parseTapPassed } from '../gates/acceptance.mjs';
 import { checkTranscript } from '../gates/transcript-grep.mjs';
 
+/** B60: the gate env rule, in the same words as the schema and proof.md. */
+const GATE_ENV_RULE = 'code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.';
+
 /**
  * Auto-detected gates (`detectGates`), overridden per-key by an on-disk `.code-forge.yml`'s
  * `gates.{test,lint,types,format}` when that key is explicitly present — a project that already
  * confirmed/edited its gates at `init` step 7 (plan §2 step 7) is authoritative over the table.
  * A missing/unparseable config file is not an error here: detection alone is a valid answer.
  * @param {string} cwd
- * @returns {Promise<import('../gates/detect.mjs').DetectedGates>}
+ * @param {Record<string, any> | null} configured - the config's `gates` section ({@link configuredGates}).
+ * @returns {import('../gates/detect.mjs').DetectedGates}
  */
-async function resolveGates(cwd) {
+function resolveGates(cwd, configured) {
   const detected = detectGates(cwd);
-  const loaded = await loadProjectConfig(cwd);
-  const configured = loaded.ok && loaded.config?.gates && typeof loaded.config.gates === 'object' ? loaded.config.gates : null;
   if (!configured) return detected;
   return {
     stack: detected.stack,
@@ -48,6 +59,16 @@ async function resolveGates(cwd) {
     types: 'types' in configured ? configured.types : detected.types,
     format: 'format' in configured ? configured.format : detected.format,
   };
+}
+
+/**
+ * The on-disk `.code-forge.yml`'s `gates` section, or null when there is none (or it does not load).
+ * @param {string} cwd
+ * @returns {Promise<Record<string, any> | null>}
+ */
+async function configuredGates(cwd) {
+  const loaded = await loadProjectConfig(cwd);
+  return loaded.ok && loaded.config?.gates && typeof loaded.config.gates === 'object' ? loaded.config.gates : null;
 }
 
 /**
@@ -112,6 +133,16 @@ function repeatedFlagValues(args, flag) {
 }
 
 /**
+ * B60: the scope fields of a `{test_files}` gate's result (`scope` with `test_count` or `reason`),
+ * or none for any other gate.
+ * @param {Record<string, any>} result @returns {Record<string, any>}
+ */
+function scopeOf({ scope, test_count: testCount, reason }) {
+  if (scope === undefined) return {};
+  return scope === 'related' ? { scope, test_count: testCount } : { scope, reason };
+}
+
+/**
  * @param {string[]} args
  * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}}} [deps]
  * @returns {Promise<number>}
@@ -121,7 +152,11 @@ export async function runGatesVerb(args, deps = {}) {
   const out = (/** @type {object} */ value) => writeSafe(stdout, `${redactJSON(value)}\n`);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
   const usage = () =>
-    err('usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n');
+    err(
+      'usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n' +
+        `  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n` +
+        `  gates run: a gate may be {argv, env}. ${GATE_ENV_RULE}\n`,
+    );
 
   const [sub] = args;
 
@@ -129,7 +164,9 @@ export async function runGatesVerb(args, deps = {}) {
     if (sub === 'detect') {
       const cwdArg = resolveCwd(args, err, 'gates detect');
       if (!cwdArg.ok) return 2;
-      out(await resolveGates(cwdArg.value));
+      const gates = resolveGates(cwdArg.value, await configuredGates(cwdArg.value));
+      // B60: a gate given with env is printed with its variable NAMES (`env_keys`), never the values
+      out(printableGates(gates));
       return 0;
     }
 
@@ -165,10 +202,12 @@ export async function runGatesVerb(args, deps = {}) {
         return 2;
       }
 
-      const gates = await resolveGates(cwd);
+      const configured = await configuredGates(cwd); // loaded once: the gates and the threshold
+      const gates = resolveGates(cwd, configured);
       let ran;
       if (runFlag.value !== undefined && blockFlag.value !== undefined) {
-        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates, cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+        const threshold = thresholdOf(configured?.full_suite_threshold_files);
+        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates, cwd, threshold, ...(timeoutMs ? { timeoutMs } : {}) });
         if (guarded.result === 'proof.busy') {
           out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
           return 1;
@@ -180,12 +219,17 @@ export async function runGatesVerb(args, deps = {}) {
       const { results, allOk } = ran;
 
       if (slug) {
+        // B60: with --run/--block the rows name the run and the block, so the run's binnacle reads them
+        const owner = runFlag.value !== undefined ? { run: runFlag.value, block: blockFlag.value } : {};
         for (const result of results) {
           if (!result.skipped && !result.ok) {
-            await appendRow({ event: 'gate.red', gate: result.gate, code: result.code }, { slug });
+            await appendRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result) }, { slug });
           }
         }
-        await appendRow({ event: 'gate.done', stack: gates.stack, all_ok: allOk }, { slug });
+        // B60: one scope per run (every `{test_files}` gate shares it), named on gate.done too;
+        // without --run/--block that is `scope: full, reason: no_tests`
+        const scoped = results.find((r) => r.scope !== undefined);
+        await appendRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk, ...(scoped ? scopeOf(scoped) : {}) }, { slug });
       }
       out({ stack: gates.stack, results, allOk });
       return allOk ? 0 : 1;

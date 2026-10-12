@@ -304,10 +304,13 @@ function refuseConfigOwner(owned, kinds, guarded) {
  * `dispatch` row — under the same lock, so a refused open writes neither. Its `answer` is the
  * requested lane and must equal `level` (else `bad-decision`, nothing written); the docs floor may
  * still raise the dispatched level, and the dispatch row then names the lane as `requested_level`.
+ * B60: `tests` (`block open --tests <paths…>`, the same path rules as owned entries, else
+ * `bad-tests`) is recorded as the entry's `test_files` and on the dispatch row; a gate argv item
+ * `{test_files}` expands to them (`gates/expand.mjs`). Left out, neither carries the key.
  * @param {{
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
- *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date,
+ *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date, tests?: string[],
  *   decision?: {question: 'lane', answer: string, source: 'rules', facts: Record<string, unknown>}, decisionId?: string,
  * }} opts
  * @returns {Promise<{block: Record<string, any>, pointer: string | null}>}
@@ -322,6 +325,7 @@ export async function openBlock(opts) {
   if (opts.decision && opts.decision.answer !== level) throw new StateError('bad-decision', `the decision answer ${opts.decision.answer} is not the requested level ${level}`);
   const owned = assertOwned(opts.owned);
   const acceptance = assertAcceptance(opts.acceptance);
+  const tests = opts.tests === undefined ? null : [...assertOwned(opts.tests, { label: 'test files', code: 'bad-tests' })];
   const kind = blockKind({ owned, declared: opts.kind });
   const dispatched = dispatchLevel({ lane: level, kind, cfg: opts.cfg });
   const pointer = opts.brief ? briefPointer(opts.brief.path, opts.brief.content) : null;
@@ -347,14 +351,14 @@ export async function openBlock(opts) {
     }
     const baseSha = await resolveCommit(opts.base ?? 'HEAD', record.workspace);
     if (baseSha !== stampedBase || record.workspace !== workspace) throw new StateError('base-moved', `the base moved while block ${id} was being opened; run block open again`);
-    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen };
+    const entry = { block: id, base_sha: baseSha, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}) };
     record.blocks[id] = entry;
     const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
     return {
       result: entry,
       rows: [
         ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
-        { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines },
+        { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}) },
       ],
     };
   });

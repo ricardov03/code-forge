@@ -16,6 +16,8 @@
  * with `isolation: lock` through the B6 writer.
  */
 
+import { hasTestFilesItem, testScope } from '../gates/expand.mjs';
+import { ownedFileCount } from '../gates/owned-count.mjs';
 import { runGates } from '../gates/run.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, saveRun, withRunLock } from '../state/run.mjs';
@@ -129,10 +131,31 @@ export async function withGateSlot({ runId, blockId, fn, pid = process.pid }) {
 }
 
 /**
- * B5's gate runner behind the lock — the entry point a gate caller (`gates run --run --block`,
- * the B12 block gate) uses.
- * @param {{runId: string, blockId: string, gates: Parameters<typeof runGates>[0], cwd: string, timeoutMs?: number}} opts
+ * B5's gate runner behind the lock. A gate caller (`gates run --run --block`, the B12 block gate)
+ * uses it.
+ *
+ * B60: a `{test_files}` gate runs the block's related tests. These are its `test_files` (from
+ * `block open --tests`), else its owned entries that look like tests (`testScope`, read from the
+ * run record once the slot is taken). The full suite runs instead when the block owns more than
+ * `threshold` (`gates.full_suite_threshold_files`) files, or when no test file is known. The
+ * owned files are counted by `ownedFileCount` over the tracked and new (not ignored) files at
+ * `cwd`. Gates with no `{test_files}` item run exactly as before B60: the run record is not read
+ * and nothing is counted.
+ * @param {{runId: string, blockId: string, gates: Parameters<typeof runGates>[0], cwd: string, timeoutMs?: number, threshold?: number}} opts
  */
-export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs }) {
-  return withGateSlot({ runId, blockId, fn: () => runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) }) });
+export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, threshold }) {
+  return withGateSlot({
+    runId,
+    blockId,
+    fn: async () => {
+      // plain gates (no `{test_files}` item) run exactly as before B60: no scope is worked out
+      if (!hasTestFilesItem(gates)) return runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+      // the slot checked the block is open; it may still be gone by the time it is read again
+      const block = (await readRun(runId)).blocks?.[blockId];
+      if (!block) throw new StateError('no-block', `block ${blockId} is not in run ${runId}`);
+      const ownedFiles = await ownedFileCount(cwd, block.owned_files, block.owned_kinds);
+      const scope = testScope({ testFiles: block.test_files, owned: block.owned_files, ownedFiles, ...(threshold === undefined ? {} : { threshold }) });
+      return runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}), scope });
+    },
+  });
 }

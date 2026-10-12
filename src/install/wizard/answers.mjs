@@ -275,6 +275,11 @@ function gateArgv(gate) {
 }
 
 /**
+ * A gate as the config holds it: an argv, `{argv, env}` (B60, kept from an existing config), or none.
+ * @typedef {string[] | {argv: string[], env?: Record<string, string>} | null} GateValue
+ */
+
+/**
  * @typedef {object} Answers
  * @property {'current'|'recommended'} tools
  * @property {string[]} yes_tools
@@ -289,7 +294,7 @@ function gateArgv(gate) {
  * @property {{mode: 'auto'} | {mode: 'ref', ref: string} | {mode: 'none'}} jev
  * @property {string} engine
  * @property {number|null} solo_project
- * @property {{test: string[]|null, lint: string[]|null, types: string[]|null, format: string[]|null}} gates
+ * @property {{test: GateValue, lint: GateValue, types: GateValue, format: GateValue}} gates
  * @property {{high: string[], isolation: string, link_dirs: string[], copy_untracked: string[]}} proof
  * @property {boolean} doctor
  */

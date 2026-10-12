@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 62,
+  "block_count": 63,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -850,6 +850,22 @@
         "B58"
       ],
       "note": "root-added 2026-10-11; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/state/{run,block,config-snapshot}.mjs, src/cli/{run,block,report}.mjs, src/ledger/report.mjs, src/review/engine.mjs (shared migration/policy path checks), docs/{how-it-works,concepts}.md, skill/SKILL.md, skill/references/plan.md"
+    },
+    "B60": {
+      "title": "Related-test gates (issue #13 item 3): block open --tests <paths> sets the block's test files (exact paths or directories; * ? and a leading - refused); a gate argv item exactly {test_files} expands to them (else owned entries that look like tests) and is dropped for the full suite when the block owns more than gates.full_suite_threshold_files files (tracked and new, not ignored; globs and directories count the files they cover) or no test file is known; gate.red/gate.done carry scope, reason, test_count, run and block; a gate may be {argv, env}: env values are never printed or recorded, and child output masks values of 8+ characters; plain gates run exactly as before",
+      "wave": 13,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/gates/expand.mjs",
+        "src/gates/owned-count.mjs",
+        "src/util/gate-token.mjs",
+        "test/gates/placeholders.test.mjs"
+      ],
+      "depends_on": [
+        "B59"
+      ],
+      "note": "root-added 2026-10-11; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/gates/{run,detect}.mjs, src/proof/{export,lock}.mjs, src/cli/{gates,block}.mjs, src/state/{block,registry}.mjs, src/config/validate.mjs, src/doctor/local.mjs, src/install/wizard/{answers,steps,summary}.mjs, src/autopilot/binnacle.mjs, schema/code-forge.schema.json, docs/reference/config.md, docs/{how-it-works,concepts}.md, skill/SKILL.md, skill/references/{proof,code,ledger}.md"
     }
   }
 }

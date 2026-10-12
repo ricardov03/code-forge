@@ -62,6 +62,7 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../schema/code-forge.schema.json' with { type: 'json' };
 import { redact } from '../util/redact.mjs';
+import { TEST_FILES_TOKEN } from '../util/gate-token.mjs';
 import { checkEffort, displayEffort } from '../engines/efforts.mjs';
 import { CLOSED_BOOK_LEVELS, CODEX_CLOSED_BOOK_REFUSAL, isNoClosedBookProvider, OPEN_BOOK_CODEX_WARNING, openBookCodexAllowed } from './closed-book.mjs';
 import { isKnownId, resolveLevel } from './known-ids.mjs';
@@ -458,19 +459,52 @@ function isArgvArray(value) {
   return Array.isArray(value) && value.length > 0 && value.every((item) => typeof item === 'string') && value[0].length > 0;
 }
 
-function checkGatesNotArgvArray(cfg) {
-  const issues = [];
-  for (const key of GATE_KEYS) {
-    const value = cfg?.gates?.[key];
-    if (value !== undefined && value !== null && !isArgvArray(value)) {
-      issues.push({
-        rule: 'gates-not-argv-array',
-        severity: 'error',
-        message: `gates.${key} must be a non-empty argv array of strings, or null`,
-      });
+/** B60: the keys a gate given as an object may have. */
+const GATE_OBJECT_KEYS = new Set(['argv', 'env']);
+/** B60: an environment variable name. */
+const ENV_NAME = /^[A-Za-z_][A-Za-z0-9_]*$/;
+
+/**
+ * Rule 9's messages for one gate: an argv array, `{argv, env}` (B60), or null. A message names a
+ * bad key or env variable NAME, never an env value.
+ * @param {string} key @param {unknown} value @returns {string[]}
+ */
+function gateMessages(key, value) {
+  if (value === undefined || value === null) return [];
+  // B60: `{test_files}` may expand to nothing, so it cannot be the command — and as the only item a
+  // full-suite run would be an empty argv
+  /** @param {string[]} argv @returns {string[]} */
+  const tokenMessages = (argv) =>
+    argv.length === 1 && argv[0] === TEST_FILES_TOKEN
+      ? [`gates.${key}: '${TEST_FILES_TOKEN}' cannot be the only item (the full suite would run an empty command)`]
+      : argv[0] === TEST_FILES_TOKEN
+        ? [`gates.${key}: '${TEST_FILES_TOKEN}' cannot be the command (argv[0])`]
+        : [];
+  if (typeof value !== 'object' || Array.isArray(value)) {
+    if (!isArgvArray(value)) return [`gates.${key} must be a non-empty argv array of strings, an {argv, env} object, or null`];
+    return tokenMessages(/** @type {string[]} */ (value));
+  }
+  const gate = /** @type {Record<string, unknown>} */ (value);
+  const messages = Object.keys(gate)
+    .filter((k) => !GATE_OBJECT_KEYS.has(k))
+    .map((k) => `gates.${key}: unknown key ${JSON.stringify(k)} (an object gate has only argv and env)`);
+  if (!isArgvArray(gate.argv)) messages.push(`gates.${key}.argv must be a non-empty argv array of strings`);
+  else messages.push(...tokenMessages(/** @type {string[]} */ (gate.argv)));
+  if (gate.env !== undefined) {
+    if (gate.env === null || typeof gate.env !== 'object' || Array.isArray(gate.env)) {
+      messages.push(`gates.${key}.env must be a map of variable names to string values`);
+    } else {
+      for (const [name, envValue] of Object.entries(gate.env)) {
+        if (!ENV_NAME.test(name)) messages.push(`gates.${key}.env: ${JSON.stringify(name)} is not a variable name (letters, digits and _, not starting with a digit)`);
+        else if (typeof envValue !== 'string') messages.push(`gates.${key}.env.${name} must be a string`);
+      }
     }
   }
-  return issues;
+  return messages;
+}
+
+function checkGatesNotArgvArray(cfg) {
+  return GATE_KEYS.flatMap((key) => gateMessages(key, cfg?.gates?.[key]).map((message) => ({ rule: 'gates-not-argv-array', severity: 'error', message })));
 }
 
 // ── 10. secret-looking-value (ERROR) ────────────────────────────────────────

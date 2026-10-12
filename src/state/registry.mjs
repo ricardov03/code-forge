@@ -99,21 +99,24 @@ export function expandBraces(pattern) {
 
 /**
  * @param {unknown} owned
+ * @param {{label?: string, code?: string}} [as] - B60: `block open --tests` checks its test files by
+ *   the same rules, named `test files` with the code `bad-tests`.
  * @returns {string[]}
  * An EXACT entry (no `*`, `?` or `{`) may contain `[ ] ( ) ! + @ }` — real routes such as
  * `pages/[id].vue`, `app/(group)/page.tsx`, `@types/x.d.ts` — and is matched literally by
  * string equality. A GLOB entry may not: there those characters would be character-class or
  * extglob syntax this matcher does not implement, so it is refused with that reason rather than
  * silently read one way by us and another way by git or a shell.
- * @throws {StateError} `bad-owned` — empty, absolute, `.`/`..`/empty segments (checked on every
+ * @throws {StateError} with code `as.code` (default `bad-owned`) and a message that starts with
+ *   `as.label` (default `owned files`) — empty, absolute, `.`/`..`/empty segments (checked on every
  *   brace alternative), backslashes, unbalanced braces, or unsupported glob syntax in a glob.
  */
-export function assertOwned(owned) {
-  if (!Array.isArray(owned) || owned.length === 0) throw new StateError('bad-owned', 'owned files: at least one path is required');
+export function assertOwned(owned, { label = 'owned files', code = 'bad-owned' } = {}) {
+  if (!Array.isArray(owned) || owned.length === 0) throw new StateError(code, `${label}: at least one path is required`);
   for (const entry of owned) {
     /** @param {string} why */
     const refuse = (why) => {
-      throw new StateError('bad-owned', `owned files: invalid path ${JSON.stringify(entry)}: ${why}`);
+      throw new StateError(code, `${label}: invalid path ${JSON.stringify(entry)}: ${why}`);
     };
     if (typeof entry !== 'string' || entry.length === 0) refuse('must be a non-empty string');
     if (entry.includes('\\')) refuse('backslashes are not allowed (POSIX paths only)');

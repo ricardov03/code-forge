@@ -104,7 +104,8 @@ export async function checkCommands(cfg, pathEnv) {
   rows.push(row('solo', 'INFO', 'solo', 'UNVERIFIED (no Solo probe in this version)'));
   const gates = cfg?.gates && typeof cfg.gates === 'object' ? cfg.gates : {};
   let any = false;
-  for (const [name, argv] of Object.entries(gates)) {
+  for (const [name, command] of Object.entries(gates)) {
+    const argv = command && !Array.isArray(command) && typeof command === 'object' ? command.argv : command; // B60: {argv, env}
     if (!Array.isArray(argv) || argv.length === 0) continue;
     any = true;
     const found = await commandOnPath(String(argv[0]), { pathEnv });

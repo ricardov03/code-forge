@@ -240,16 +240,20 @@ export async function askProjectSettings(values, origins, ui) {
   const changed = [];
   for (const name of GATE_NAMES) {
     if (origins.gates[name] === 'flag') continue;
-    const gates = /** @type {Record<string, string[]|null>} */ (values.gates);
+    const gates = /** @type {Record<string, import('./answers.mjs').GateValue>} */ (values.gates);
     const current = gates[name];
+    // B60: a gate kept as {argv, env} is edited by its argv; its env is kept (and never shown).
+    const currentArgv = /** @type {string[] | null} */ (Array.isArray(current) || !current ? current : current.argv);
     const typed = await answer(ui, ui.text({
       message: withHint(`Gate ${name} (blank or "none": no gate)`, SETTING_HINTS[/** @type {keyof typeof SETTING_HINTS} */ (name)]),
-      initialValue: current ? current.join(' ') : '',
+      initialValue: currentArgv ? currentArgv.join(' ') : '',
     }));
     const text = String(typed ?? '').trim();
+    // blank or "none" turns the gate off: a gate kept as {argv, env} then loses its env too
     const next = text === '' || text === 'none' ? null : shellWords(text);
-    if (JSON.stringify(next) !== JSON.stringify(current)) changed.push(`gates.${name}`);
-    gates[name] = next;
+    if (JSON.stringify(next) === JSON.stringify(currentArgv)) continue;
+    changed.push(`gates.${name}`);
+    gates[name] = next && current && !Array.isArray(current) ? { ...current, argv: next } : next;
   }
   const proof = values.proof;
   /** @param {'high'|'link_dirs'|'copy_untracked'} key @param {string} message @param {string} path */

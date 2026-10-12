@@ -421,3 +421,102 @@ test('a blank gate kept from .code-forge.yml says "empty in .code-forge.yml"', a
   ]);
   assert.deepEqual(out.blank, ['gates.lint', 'gates.types', 'gates.format', 'proof.tiers.high.paths', 'proof.export.link_dirs', 'proof.export.copy_untracked']);
 });
+
+test('B60: a blank gate with env names its env keys on the blank line too, matching env_keys; a blank gate with no env is unchanged', async () => {
+  const { summarizeSettings } = await import('../../src/install/wizard/summary.mjs');
+  const values = /** @type {any} */ ({
+    gates: { test: { argv: [], env: { B: 'x', A: 'y' } }, lint: [], types: null, format: null },
+    proof: { high: null, isolation: 'export', link_dirs: '', copy_untracked: undefined },
+  });
+  const origins = /** @type {any} */ ({
+    gates: { test: 'existing', lint: 'existing', types: 'detected', format: 'flag' },
+    proof: { high: 'existing', isolation: 'default', link_dirs: 'detected', copy_untracked: 'detected' },
+  });
+  const out = summarizeSettings(values, origins, { cwd: freshDir('blank-env'), profile: 'node', detected: { stack: 'node' } });
+  assert.deepEqual(out.lines.slice(1, 5), [
+    '  test: blank (env: A, B) — empty in .code-forge.yml',
+    '  lint: blank — empty in .code-forge.yml',
+    '  types: blank — no type checker found',
+    '  format: blank — set blank by --gate',
+  ]);
+  assert.deepEqual(out.settings['gates.test'], { value: [], source: 'existing', note: 'empty in .code-forge.yml', env_keys: ['A', 'B'] });
+  assert.equal(Object.hasOwn(out.settings['gates.lint'], 'env_keys'), false);
+  assert.equal(JSON.stringify(out).includes('"x"') || JSON.stringify(out).includes('"y"'), false);
+});
+
+test('B60: re-run keeps a {argv, env} gate as it is; the summary line and the JSON name its env keys apart from the argv value, never the values; a plain gate is unchanged', async () => {
+  const value = 's3cret-b60-init-k3';
+  const first = await run(buildNodeNoTypes, ['--no-interaction', '--no-jev'], { isTTY: false, agent: true });
+  assert.equal(first.code, 0, first.stderr);
+  const plainJson = oneJsonLine(first.stdout).settings['gates.lint'];
+  const cfg = first.read();
+  cfg.gates.test = { argv: ['npm', 'test', '--', '{test_files}'], env: { APP_ENV: value, CI: '1' } };
+  writeFileSync(first.file, stringify(cfg));
+
+  const agent = await runWizard(['--no-interaction', '--no-jev'], { cwd: first.cwd, home: first.home, env: first.env });
+  assert.equal(agent.code, 0, agent.stderr);
+  assert.equal(`${agent.stdout}${agent.stderr}`.includes('s3cret'), false);
+  const settings = oneJsonLine(agent.stdout).settings;
+  assert.deepEqual(settings['gates.test'], { value: ['npm', 'test', '--', '{test_files}'], source: 'existing', note: '.code-forge.yml', env_keys: ['APP_ENV', 'CI'] });
+  // a plain gate: the same object as before B60 (no env_keys key), byte for byte
+  assert.equal(JSON.stringify(settings['gates.lint']), JSON.stringify({ value: ['npm', 'run', 'lint'], source: 'existing', note: '.code-forge.yml' }));
+  assert.deepEqual(plainJson.value, ['npm', 'run', 'lint']);
+  assert.deepEqual(parseYAML(readFileSync(first.file, 'utf8')).gates.test, { argv: ['npm', 'test', '--', '{test_files}'], env: { APP_ENV: value, CI: '1' } });
+
+  const human = await runWizard(['--no-interaction', '--no-jev'], { cwd: first.cwd, home: first.home, env: baseEnv(first.home), isTTY: true, ui: scriptedUi() });
+  assert.equal(human.code, 0, human.stderr);
+  assert.equal(`${human.stdout}${human.stderr}`.includes('s3cret'), false);
+  assert.equal(count(human.stdout, '  test: npm test -- {test_files} (env: APP_ENV, CI) (from .code-forge.yml)\n'), 1);
+  assert.equal(count(human.stdout, '  lint: npm run lint (from .code-forge.yml)\n'), 1);
+});
+
+test('B60: re-running install over a {argv, env} gate and accepting the settings unchanged writes the same file back, byte for byte (the env is kept)', async () => {
+  const value = 's3cret-b60-init-k5';
+  const first = await run(buildNodeNoTypes, ['--no-interaction', '--no-jev'], { isTTY: false, agent: true });
+  assert.equal(first.code, 0, first.stderr);
+  const cfg = first.read();
+  cfg.gates.test = { argv: ['npm', 'test', '--', '{test_files}'], env: { APP_ENV: value, CI: '1' } };
+  writeFileSync(first.file, stringify(cfg));
+  const before = readFileSync(first.file, 'utf8');
+
+  const agent = await runWizard(['--no-interaction', '--no-jev'], { cwd: first.cwd, home: first.home, env: first.env });
+  assert.equal(agent.code, 0, agent.stderr);
+  assert.equal(readFileSync(first.file, 'utf8'), before);
+
+  const human = await runWizard(['--no-interaction', '--no-jev'], { cwd: first.cwd, home: first.home, env: baseEnv(first.home), isTTY: true, ui: scriptedUi() });
+  assert.equal(human.code, 0, human.stderr);
+  assert.equal(readFileSync(first.file, 'utf8'), before);
+
+  const ui = scriptedUi({ 'Gates and proof settings:': 'customize' });
+  const custom = await runWizard(ALL_OTHER_ANSWERS, { cwd: first.cwd, home: first.home, env: baseEnv(first.home), isTTY: true, ui });
+  assert.equal(custom.code, 0, custom.stderr);
+  assert.equal(count(custom.stdout, 'settings: customized (no change)\n'), 1);
+  assert.equal(readFileSync(first.file, 'utf8'), before);
+  assert.deepEqual(parseYAML(readFileSync(first.file, 'utf8')).gates.test, { argv: ['npm', 'test', '--', '{test_files}'], env: { APP_ENV: value, CI: '1' } });
+});
+
+test('B60: "Customize now" on a {argv, env} gate is pre-filled with its argv; an edited argv keeps the env, an unchanged one is no change', async () => {
+  const value = 's3cret-b60-init-k4';
+  const first = await run(buildNodeNoTypes, ['--no-interaction', '--no-jev'], { isTTY: false, agent: true });
+  assert.equal(first.code, 0, first.stderr);
+  const cfg = first.read();
+  cfg.gates.test = { argv: ['npm', 'test'], env: { APP_ENV: value } };
+  cfg.gates.lint = { argv: ['npm', 'run', 'lint'], env: { LINT_MODE: value } };
+  writeFileSync(first.file, stringify(cfg));
+  const ui = scriptedUi({ 'Gates and proof settings:': 'customize', 'Gate test': 'npm run test:ci' });
+  const again = await runWizard(ALL_OTHER_ANSWERS, { cwd: first.cwd, home: first.home, env: baseEnv(first.home), isTTY: true, ui });
+  assert.equal(again.code, 0, again.stderr);
+  assert.equal(`${again.stdout}${again.stderr}`.includes('s3cret'), false);
+  const asked = ui.calls.filter((c) => firstLine(c).startsWith('Gate '));
+  assert.deepEqual(asked.slice(0, 2).map((c) => c.initialValue), ['npm test', 'npm run lint']);
+  assert.equal(count(again.stdout, 'settings: customized (gates.test)\n'), 1);
+  const written = parseYAML(readFileSync(first.file, 'utf8')).gates;
+  assert.deepEqual([written.test, written.lint], [{ argv: ['npm', 'run', 'test:ci'], env: { APP_ENV: value } }, { argv: ['npm', 'run', 'lint'], env: { LINT_MODE: value } }]);
+
+  // nothing typed: the argv is unchanged, so nothing changed and the {argv, env} gate stays as it is
+  const ui2 = scriptedUi({ 'Gates and proof settings:': 'customize' });
+  const third = await runWizard(ALL_OTHER_ANSWERS, { cwd: first.cwd, home: first.home, env: baseEnv(first.home), isTTY: true, ui: ui2 });
+  assert.equal(third.code, 0, third.stderr);
+  assert.equal(count(third.stdout, 'settings: customized (no change)\n'), 1);
+  assert.deepEqual(parseYAML(readFileSync(first.file, 'utf8')).gates.test, { argv: ['npm', 'run', 'test:ci'], env: { APP_ENV: value } });
+});

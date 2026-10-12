@@ -130,15 +130,15 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `caps` | object |  | — |  |
 | `caps.coders` | integer |  | `2` | min 1 |
 | `gates` | object |  | — |  |
-| `gates.test` | array<string> \| null |  | — |  |
-| `gates.lint` | array<string> \| null |  | — |  |
-| `gates.types` | array<string> \| null |  | — |  |
-| `gates.format` | array<string> \| null |  | — |  |
+| `gates.test` | array<string> \| object \| null |  | — | An argv array (never a shell string), an {argv, env} object, or null. An argv item that is exactly {test_files} is replaced by the block's test files. It must be a whole item. It cannot be the command or the only item. The test files are the block open --tests paths, else the owned entries that are concrete test files. The item is dropped, and the full suite runs, in two cases. The block owns more files than full_suite_threshold_files (reason threshold). Or no test file is known, or the gate runs without --run/--block (reason no_tests). The gate.red and gate.done rows then carry scope related with test_count, or scope full with reason. |
+| `gates.lint` | array<string> \| object \| null |  | — | An argv array (never a shell string), an {argv, env} object, or null. An argv item that is exactly {test_files} is replaced by the block's test files. It must be a whole item. It cannot be the command or the only item. The test files are the block open --tests paths, else the owned entries that are concrete test files. The item is dropped, and the full suite runs, in two cases. The block owns more files than full_suite_threshold_files (reason threshold). Or no test file is known, or the gate runs without --run/--block (reason no_tests). The gate.red and gate.done rows then carry scope related with test_count, or scope full with reason. |
+| `gates.types` | array<string> \| object \| null |  | — | An argv array (never a shell string), an {argv, env} object, or null. An argv item that is exactly {test_files} is replaced by the block's test files. It must be a whole item. It cannot be the command or the only item. The test files are the block open --tests paths, else the owned entries that are concrete test files. The item is dropped, and the full suite runs, in two cases. The block owns more files than full_suite_threshold_files (reason threshold). Or no test file is known, or the gate runs without --run/--block (reason no_tests). The gate.red and gate.done rows then carry scope related with test_count, or scope full with reason. |
+| `gates.format` | array<string> \| object \| null |  | — | An argv array (never a shell string), an {argv, env} object, or null. An argv item that is exactly {test_files} is replaced by the block's test files. It must be a whole item. It cannot be the command or the only item. The test files are the block open --tests paths, else the owned entries that are concrete test files. The item is dropped, and the full suite runs, in two cases. The block owns more files than full_suite_threshold_files (reason threshold). Or no test file is known, or the gate runs without --run/--block (reason no_tests). The gate.red and gate.done rows then carry scope related with test_count, or scope full with reason. |
 | `gates.extra` | object |  | — |  |
 | `gates.extra.secret_scan` | boolean |  | `true` |  |
 | `gates.extra.safe_edit` | boolean |  | `true` |  |
 | `gates.extra.invariants` | string |  | — |  |
-| `gates.full_suite_threshold_files` | integer |  | `10` | min 1 |
+| `gates.full_suite_threshold_files` | integer |  | `10` | min 1; A block that owns more files than this runs the full suite for a {test_files} gate (reason threshold), not its related tests. Owned files are counted this way. A glob or a directory counts the tracked and new (not ignored) files it covers. A path not created yet counts as 1. Outside git each entry counts 1. A git failure runs the full suite. block open --tests names the test files precisely. |
 | `proof` | object |  | — |  |
 | `proof.tiers` | object |  | — |  |
 | `proof.tiers.high` | object |  | — |  |

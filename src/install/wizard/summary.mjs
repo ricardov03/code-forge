@@ -46,7 +46,10 @@ const STACK_MARKER = Object.freeze({ rust: 'Cargo.toml', python: 'pyproject.toml
 
 /**
  * @typedef {object} Setting
- * @property {unknown} value - what is written to the config.
+ * @property {unknown} value - the value shown (a gate: its argv). The config file is written from
+ *   `values.gates`, not from here, so a `{argv, env}` gate keeps its env.
+ * @property {string[]} [env_keys] - B60: a gate given as `{argv, env}` with a non-empty env: the
+ *   variable NAMES, sorted (never the values).
  * @property {'flag'|'existing'|'detected'|'default'} source
  * @property {string} note - where it came from, or why it is blank, in the summary's words.
  */
@@ -115,7 +118,12 @@ export function summarizeSettings(values, origins, ctx) {
 
   for (const name of GATE_NAMES) {
     const key = SETTING_KEYS[/** @type {keyof typeof SETTING_KEYS} */ (name)];
-    const argv = values.gates[/** @type {keyof typeof values.gates} */ (name)];
+    const command = values.gates[/** @type {keyof typeof values.gates} */ (name)];
+    // B60: a gate given as {argv, env} is summarised by its argv and its env NAMES, never the values;
+    // an empty env counts as none
+    const envKeys = command && !Array.isArray(command) && command.env && Object.keys(command.env).length > 0 ? Object.keys(command.env).sort() : null;
+    const envNote = envKeys ? ` (env: ${envKeys.join(', ')})` : '';
+    const argv = /** @type {string[] | null} */ (Array.isArray(command) || !command ? command : command.argv);
     const source = origins.gates[name] ?? 'detected';
     let note;
     if (argv === null || argv === undefined || argv.length === 0) {
@@ -123,12 +131,12 @@ export function summarizeSettings(values, origins, ctx) {
       else if (source === 'existing') note = 'empty in .code-forge.yml';
       else note = GATE_MISSING[/** @type {keyof typeof GATE_MISSING} */ (name)];
       blank.push(key);
-      lines.push(`  ${name}: blank — ${note}`);
+      lines.push(`  ${name}: blank${envNote} — ${note}`);
     } else {
       note = source === 'detected' ? gateEvidence(ctx.detected.stack, name, argv, ctx.cwd) : keptFrom(source, '--gate');
-      lines.push(`  ${name}: ${shown(argv)} (from ${note})`);
+      lines.push(`  ${name}: ${shown(argv)}${envNote} (from ${note})`);
     }
-    settings[key] = { value: argv, source, note };
+    settings[key] = { value: argv, source, note, ...(envKeys ? { env_keys: envKeys } : {}) };
   }
 
   const found = new Map(linkDirsFromManifests(ctx.cwd).map((e) => [e.dir, e.manifests]));

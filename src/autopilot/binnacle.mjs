@@ -105,6 +105,18 @@ const isDelegateSession = (row) => row.event === 'session' && row.role === 'dele
 const inLog = (row) => (typeof row.event === 'string' && (row.event.startsWith('autopilot.') || EXTRA_EVENTS.includes(row.event))) || (row.event === 'review.waived' && row.by === 'autopilot') || isDelegateSession(row);
 
 /**
+ * B60: what a `gate.done` row says about its tests — the related tests and their count, the full
+ * suite and why, or nothing for a gate run without the `{test_files}` item.
+ * @param {Row} row @returns {string}
+ */
+function gateScope(row) {
+  if (row.scope === 'related') return Number.isInteger(row.test_count) ? ` · related tests (${row.test_count})` : ' · related tests';
+  if (row.scope !== 'full') return '';
+  const why = row.reason === 'threshold' ? 'the block owns more files than the threshold' : row.reason === 'no_tests' ? 'no test file known' : null;
+  return why ? ` · full suite (${why})` : ' · full suite';
+}
+
+/**
  * Event label and fixed-format detail of one row (never the packet, question or answer text).
  * @param {Row} row @returns {{event: string, detail: string, link: string | null}}
  */
@@ -159,7 +171,7 @@ function describe(row) {
     case 'gate.red':
       return { event: 'Gate red', detail: `${row.gate ?? 'gate'} · exit ${row.code ?? 'unknown'}`, link: null };
     case 'gate.done':
-      return { event: 'Gates finished', detail: `${row.stack ?? 'stack'} · ${row.all_ok === true ? 'all green' : 'not all green'}`, link: null };
+      return { event: 'Gates finished', detail: `${row.stack ?? 'stack'} · ${row.all_ok === true ? 'all green' : 'not all green'}${gateScope(row)}`, link: null };
     default:
       return { event: String(row.event), detail: '', link: null };
   }
@@ -329,7 +341,13 @@ export function buildBinnacle({ runId, rows, record, now, scrubCtx = scrubCtxOf(
   const approved = new Set(all.filter((r) => r.event === 'review.approved').map((r) => `${u(r.block, 'unknown block')}\0${u(r.file, 'unknown file')}`)).size;
   const results = all.filter((r) => r.event === 'review.result').length;
   const prs = [...new Set(all.map((r) => first(r.pr_url, r.pr)).filter(str))];
-  const fullSuite = [...all].reverse().find((r) => r.event === 'gate.done');
+  // B60: a gate run on the block's related tests only (`scope: related`) is not the full suite; when
+  // related runs came after the last full one, the status says so, so an old full run does not look current
+  const gateRuns = all.filter((r) => r.event === 'gate.done');
+  const fullSuite = [...gateRuns].reverse().find((r) => r.scope !== 'related');
+  const fullSuiteText = !fullSuite
+    ? gateRuns.length > 0 ? 'not recorded · related tests only' : 'not recorded'
+    : `${fullSuite.all_ok === true ? 'green' : 'red'}${gateRuns.at(-1) !== fullSuite ? ` · no full suite since ${u(fullSuite.ts, 'unknown time')}` : ''}`;
   const readFiles = [...new Set([...all.filter((r) => (r.event === 'review.waived' && r.by === 'autopilot') || r.event === 'autopilot.extra_round').map((r) => r.file), ...toOwner.map((r) => r.subject?.file)].filter(str))];
   const baseSha = ids.map((id) => blocksRec[id]?.base_sha).find(str);
   const approx = mine.filter((x) => x.approx).length;
@@ -342,7 +360,7 @@ export function buildBinnacle({ runId, rows, record, now, scrubCtx = scrubCtxOf(
   const status = [
     { item: 'Result', value: ids.length === 0 ? 'no blocks yet' : `${closedIds.length} of ${ids.length} block${ids.length === 1 ? '' : 's'} closed` },
     { item: 'Stack/PRs', value: prs.length === 0 ? 'none recorded' : prs.join(', ') },
-    { item: 'Full suite', value: fullSuite ? (fullSuite.all_ok === true ? 'green' : 'red') : 'not recorded' },
+    { item: 'Full suite', value: fullSuiteText },
     { item: 'Reviews', value: `${results} result${results === 1 ? '' : 's'} · ${approved} file${approved === 1 ? '' : 's'} approved · ${waived} waived by autopilot` },
     { item: 'Files to read', value: readFiles.length === 0 ? 'none' : `${readFiles.slice(0, 5).join(', ')}${readFiles.length > 5 ? ` and ${readFiles.length - 5} more` : ''}` },
     { item: 'Base', value: short(baseSha) ?? 'unknown' },

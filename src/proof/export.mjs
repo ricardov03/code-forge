@@ -358,11 +358,13 @@ export function incompleteMessage(missing) {
 
 /**
  * Run the block's gates (B5 `runGates`) inside the export; a red gate whose output is a
- * missing-file error for a main-tree path is re-labelled `export.incomplete`.
- * @param {{gates: Parameters<typeof runGates>[0], exportDir: string, mainTree: string, timeoutMs?: number}} opts
+ * missing-file error for a main-tree path is re-labelled `export.incomplete`. B60: `scope` (the
+ * block's `testScope`) is handed to `runGates` for a `{test_files}` gate; the test paths are
+ * repo-relative, so they name the same files inside the export.
+ * @param {{gates: Parameters<typeof runGates>[0], exportDir: string, mainTree: string, timeoutMs?: number, scope?: import('../gates/expand.mjs').TestScope}} opts
  */
-export async function runGatesInExport({ gates, exportDir, mainTree, timeoutMs }) {
-  const { results } = await runGates(gates, { cwd: exportDir, ...(timeoutMs ? { timeoutMs } : {}) });
+export async function runGatesInExport({ gates, exportDir, mainTree, timeoutMs, scope }) {
+  const { results } = await runGates(gates, { cwd: exportDir, ...(timeoutMs ? { timeoutMs } : {}), ...(scope ? { scope } : {}) });
   /** @type {{gate: string, path: string, message: string}[]} */
   const incomplete = [];
   const labelled = [];
