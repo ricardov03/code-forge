@@ -1,9 +1,9 @@
 /**
  * `code-forge doctor` (plan §2.3; block B13b): every row, in print order. `--quick` = the three
  * rows the skill's preflight needs (config, harness links, Jev key resolution); the full run adds
- * the PATH/Solo/gate rows, the live Jev call, ledger, `tmp`, the provider CLI probes (presence,
- * version, flags, one call per role builder, isolation, path deny, Codex rules), the worker
- * start/stop, the signer key and the `signer: same-user boundary only` line.
+ * the PATH/Solo/gate rows, the live Jev call, ledger, `tmp`, `review state` (B69), the provider
+ * CLI probes (presence, version, flags, one call per role builder, isolation, path deny, Codex
+ * rules), the worker start/stop, the signer key and the `signer: same-user boundary only` line.
  */
 
 import { randomBytes } from 'node:crypto';
@@ -13,7 +13,7 @@ import path from 'node:path';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { newRunId } from '../state/paths.mjs';
 import { runRoot } from '../util/tmp.mjs';
-import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkReviewConcurrency, checkTmp, checkTools } from './local.mjs';
+import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkReviewConcurrency, checkReviewState, checkTmp, checkTools } from './local.mjs';
 import { configuredProviders, pingRoles, probeCli, probeCodexRules, probeIsolation, probePathDeny } from './probes.mjs';
 import { row } from './rows.mjs';
 import { probeWorkerAndSigner, SIGNER_ROW } from './worker-probe.mjs';
@@ -68,6 +68,7 @@ export async function runDoctor(opts = {}, deps = {}) {
   rows.push(...(await checkTools(toolOpts)));
   rows.push(...(await checkLedger()));
   rows.push(...checkTmp(cfg));
+  rows.push(...(await checkReviewState(cfg)));
   rows.push(checkReviewConcurrency(cfg));
   if (!cfg) {
     rows.push(row('probes', 'FAIL', 'probes', 'skipped: no valid config'));

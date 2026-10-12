@@ -83,7 +83,7 @@ async function wired(firstFindings) {
   };
   /** @returns {string} the file's one state file. */
   const stateFile = () => {
-    const dir = blockStateDir(runRootDir, 'B11');
+    const dir = blockStateDir(runId, 'B11');
     const names = readdirSync(dir);
     assert.equal(names.length, 1);
     return path.join(dir, names[0]);

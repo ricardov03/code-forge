@@ -178,6 +178,7 @@ Read these rows of the full `doctor`:
 | provider probes | each CLI exists, its flags work, one tiny call per role succeeds, closed-book sessions see no project file |
 | `ping=skipped(402)` | a provider with no balance. A warning, not a failure |
 | isolation | the closed-book reviewer saw no project file. An openai L2 fails it without running (see [above](#codex-and-closed-book-roles)) |
+| `review state` | only when an active run has review state files missing under `<code-forge home>/runs/<run>/review-state/` (default `~/.code-forge`) and not still at the old temp location (those are moved on their next load): how many the ledger can rebuild and how many are lost (those need `block reopen`, added in a later block), with up to 10 blocks and files. When the run's `tmp.root` is not absolute, the row says the old temp location could not be checked instead. A warning, not a failure |
 | `signer: same-user boundary only` | always printed. Signed rows are not a sandbox |
 
 `doctor --json` prints the same rows as JSON. `doctor --cwd <dir>` checks another project.

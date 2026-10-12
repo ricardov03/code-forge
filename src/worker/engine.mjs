@@ -21,7 +21,9 @@
  * anchor) or `review-state-lost` (the file is gone and its anchor has no `state_body`). A file
  * that is gone but whose anchor carries the signed body is `restored` (B68): saved as a new seq,
  * one signed `review.state_restored {block, file, seq, from_seq}` row, then the round runs as if
- * it had loaded.
+ * it had loaded. B69: the state file lives under the code-forge home (`runs/<run>/review-state/`),
+ * not the temp root; a valid file still at the old temp path is moved there on its first load
+ * (status `ok`, no restored row).
  * The round's outcome: `approved: true` ONLY when the loop is `complete` AND its signed
  * `review.approved` row (keyed `run, block, file, content_hash` = the ticket's hash) was written;
  * else `findings` = the open fix list, `next` = what the orchestrator does (`fix` at `level`,
@@ -99,7 +101,8 @@ import { assertTicketId, WorkerError } from './ticket.mjs';
  * @property {string} [contentRoot] - B62b: the tree the ticket's content is read in (the block's
  *   worktree); `repoRoot` when absent.
  * @property {string} runId
- * @property {string} runRootDir - the run's temp root (packets and session dirs live under it).
+ * @property {string} runRootDir - the run's temp root (packets and session dirs live under it; the
+ *   review state no longer does — B69 — it is only read there once, to move an old file).
  * @property {Record<string, any>} cfg - the project config.
  * @property {string | null} jevKey - resolved once by the worker through B2's chain; never print.
  * @property {(opts: Record<string, any>) => Promise<Record<string, any>>} spawn - one isolated
@@ -438,7 +441,7 @@ export function rungTaken(where) {
   for (const file of siblings) {
     let other;
     try {
-      other = loadState({ ...where, file });
+      other = loadState({ ...where, file, migrate: false }); // B69: a sibling's old file is read, never moved here
     } catch {
       return { status: 'ok', used: true };
     }

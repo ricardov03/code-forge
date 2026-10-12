@@ -1,7 +1,8 @@
 /**
  * Doctor rows that need no provider CLI (plan §2.3; block B13b): config, harness links, Jev key
  * resolution (the three `--quick` rows), `code-forge` on PATH, Solo, gate commands, the live Jev
- * call, ledger writability and the `tmp` row. Every check returns rows; none throws.
+ * call, ledger writability, the `tmp` row and (B69) the `review state` row. Every check returns
+ * rows; none throws.
  */
 
 import { constants, readdirSync } from 'node:fs';
@@ -17,10 +18,16 @@ import { missingTools } from '../install/tools.mjs';
 import { OP_MESSAGES } from '../keys/onepassword.mjs';
 import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { ledgerDir } from '../ledger/paths.mjs';
+import { readAllRows } from '../ledger/write.mjs';
 import { DEFAULT_PROVIDER_CONCURRENCY, providerLimit } from '../session/spawn.mjs';
+import { snapshotFor } from '../state/config-snapshot.mjs';
+import { assertRunId, runsDir } from '../state/paths.mjs';
+import { readRun } from '../state/run.mjs';
+import { loadKey } from '../state/signer.mjs';
 import { listEntries } from '../util/reaper.mjs';
-import { ownerState, tmpBase } from '../util/tmp.mjs';
+import { ownerState, runRootPath, tmpBase } from '../util/tmp.mjs';
 import { parallelTickets } from '../worker/loop.mjs';
+import { missingStateFiles } from '../worker/review-state.mjs';
 import { row } from './rows.mjs';
 
 /** @typedef {import('./rows.mjs').Row} Row */
@@ -190,6 +197,86 @@ export function checkTmp(cfg) {
   }
   const detail = `${roots} stale roots, ${pids} stale pids`;
   return [row('tmp', roots + pids > 0 ? 'WARN' : 'OK', 'tmp', roots + pids > 0 ? `${detail} (the next code-forge run start removes them)` : detail)];
+}
+
+/** B69: the most missing state files the `review state` row names. */
+export const LISTED_MAX = 10;
+
+/**
+ * B69: one WARN row per ACTIVE run (its record's `status` is `active`, as `run end` and the worker
+ * decide it) whose ledger has `review.state` anchors whose latest state file is missing — neither
+ * at `<code-forge home>/runs/<run>/review-state/` nor at the old temp-root path. The row counts the
+ * files the ledger can rebuild (the latest anchor carries `state_body`) and the lost ones (no body:
+ * the next ticket is refused `review-state-lost`; the owner needs `code-forge block reopen`), and
+ * names the first {@link LISTED_MAX} blocks and files (then `… and K more`). No row when nothing
+ * is missing. When the old temp location cannot be named (`tmp.root` not absolute), nothing is
+ * counted and the row says so; when an anchor of the run does not verify, the row says the review
+ * state was not checked. Each project's ledger is read once. Never throws: a run whose record, key
+ * or ledger cannot be read is skipped. No file content is read or printed.
+ * @param {Record<string, any> | null} cfg
+ * @returns {Promise<Row[]>}
+ */
+export async function checkReviewState(cfg) {
+  let names = [];
+  try {
+    names = readdirSync(runsDir()).filter((n) => n.endsWith('.json'));
+  } catch {
+    return [];
+  }
+  /** @type {Row[]} */
+  const rows = [];
+  /** @type {Map<string, Array<Record<string, any>>>} the ledger rows per project, read once */
+  const ledgers = new Map();
+  for (const name of names.sort()) {
+    const runId = name.slice(0, -'.json'.length);
+    try {
+      assertRunId(runId);
+      const record = await readRun(runId);
+      if (record?.status !== 'active' || typeof record.project !== 'string') continue;
+      const key = await loadKey(runId);
+      let ledger = ledgers.get(record.project);
+      if (ledger === undefined) {
+        ledger = await readAllRows(record.project);
+        ledgers.set(record.project, ledger);
+      }
+      const atNew = missingStateFiles({ runId, key, rows: ledger });
+      if (atNew === null) {
+        rows.push(row('review-state', 'WARN', 'review state', `run ${runId}: review.state anchors do not verify; review state not checked`));
+        continue;
+      }
+      let root;
+      try {
+        root = snapshotFor(record, '')?.config?.tmp?.root;
+      } catch {
+        root = undefined;
+      }
+      if (typeof root !== 'string') root = typeof cfg?.tmp?.root === 'string' ? cfg.tmp.root : undefined;
+      let runRootDir;
+      try {
+        runRootDir = runRootPath(runId, root === undefined ? {} : { root });
+      } catch {
+        runRootDir = undefined;
+      }
+      if (runRootDir === undefined) {
+        // the old place cannot be named: nothing is counted as missing, the row says why
+        if (atNew.length > 0) {
+          rows.push(row('review-state', 'WARN', 'review state', `run ${runId}: the old temp location could not be checked (tmp.root is not an absolute path); review state files are not counted`));
+        }
+        continue;
+      }
+      const missing = missingStateFiles({ runId, key, rows: ledger, runRootDir });
+      if (missing === null || missing.length === 0) continue;
+      const rebuildable = missing.filter((m) => m.rebuildable).length;
+      const lost = missing.length - rebuildable;
+      const shown = missing.slice(0, LISTED_MAX).map((m) => `${m.block} ${m.file} (${m.rebuildable ? 'rebuildable' : 'lost'})`).join(', ');
+      const more = missing.length > LISTED_MAX ? ` … and ${missing.length - LISTED_MAX} more` : '';
+      rows.push(row('review-state', 'WARN', 'review state',
+        `run ${runId}: ${missing.length} state file(s) missing — ${rebuildable} rebuildable from the ledger, ${lost} lost (needs code-forge block reopen): ${shown}${more}`));
+    } catch {
+      // an unreadable record, key or ledger: not this row's business
+    }
+  }
+  return rows;
 }
 
 /**

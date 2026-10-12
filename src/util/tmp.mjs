@@ -130,6 +130,21 @@ export function tmpBase(root) {
 }
 
 /**
+ * The run root's path `<base>/<runId>`, without creating anything (B69: doctor looks for old
+ * review-state files there). The same run id check as {@link runRoot}.
+ * @param {string} runId
+ * @param {{root?: string}} [opts]
+ * @returns {string}
+ * @throws {TypeError} a bad run id, or a `root` that is not absolute.
+ */
+export function runRootPath(runId, opts = {}) {
+  if (typeof runId !== 'string' || !RUN_ID.test(runId)) {
+    throw new TypeError('tmp: runId must be one path segment of letters, digits, ".", "_" or "-"');
+  }
+  return path.join(tmpBase(opts.root), runId);
+}
+
+/**
  * Create (if needed) the run root `<base>/<runId>/`, record this process as its owner, and
  * return its real absolute path.
  * @param {string} runId
@@ -137,11 +152,8 @@ export function tmpBase(root) {
  * @returns {string}
  */
 export function runRoot(runId, opts = {}) {
-  if (typeof runId !== 'string' || !RUN_ID.test(runId)) {
-    throw new TypeError('tmp: runId must be one path segment of letters, digits, ".", "_" or "-"');
-  }
+  const dir = runRootPath(runId, opts);
   const base = tmpBase(opts.root);
-  const dir = path.join(base, runId);
   // A parallel sweep that claimed a dead root of this name renames it away (see the claim rule)
   // between our mkdir and our write: the directory is then "missing" or the write fails with
   // ENOENT, and the retry creates a fresh directory in its place. A tombstone itself can never be

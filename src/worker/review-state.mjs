@@ -3,10 +3,16 @@
  *
  * B12b's `fixloop.mjs` is a state machine whose `FileState` (round, level, open findings,
  * `reviewed_content`, …) must survive between two `review-file` calls on the same file: round 1
- * is the first ticket, round 2 (the fix-hunk recheck) the next one, and so on. The worker keeps it
- * in the run's temp root, OUTSIDE the workspace:
+ * is the first ticket, round 2 (the fix-hunk recheck) the next one, and so on. B69: the worker
+ * keeps it in the run's own directory under the code-forge home, OUTSIDE the workspace and outside
+ * the temp root (a temp sweep or a TMPDIR cleanup no longer loses it):
  *
- *   <run-root>/review-state/<block>/<sha256(file)[0:24]>.json
+ *   <code-forge home>/runs/<run>/review-state/<block>/<sha256(file)[0:24]>.json   ({@link statePath})
+ *
+ * The old place, `<run temp root>/review-state/<block>/<name>.json` ({@link legacyStatePath}), is
+ * read once: a file missing at the new path but present at the old one that passes the same
+ * checks is moved (new written atomically 0600, old removed); a wrong one there is `tampered` and
+ * left where it is.
  *
  * Every state file is SIGNED with the run key (`{run, block, file, seq, state}` + `mac`) AND
  * anchored in the run's append-only ledger: each save first writes a signed row
@@ -24,8 +30,9 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { assertRunId, runsDir } from '../state/paths.mjs';
 import { signRow, verifyRow } from '../state/signer.mjs';
 import { assertBlockId, assertRowPath } from './ticket.mjs';
 
@@ -38,16 +45,32 @@ export const RESTORED_EVENT = 'review.state_restored';
 /** B68: an anchor's `state_body` over this many bytes (as JSON) is `state_omitted: "too_large"`. */
 export const STATE_BODY_CAP = 64 * 1024;
 
-/** @param {string} runRootDir @param {string} block @returns {string} */
-export const blockStateDir = (runRootDir, block) => path.join(runRootDir, 'review-state', assertBlockId(block));
+/**
+ * B69: the block's state directory, `<code-forge home>/runs/<run>/review-state/<block>` (the run's
+ * own directory, next to `runs/<run>/blocks/`).
+ * @param {string} runId @param {string} block @returns {string}
+ */
+export const blockStateDir = (runId, block) => path.join(runsDir(), assertRunId(runId), 'review-state', assertBlockId(block));
+
+/** @param {string} file @returns {string} the state file's name. */
+const stateName = (file) => `${createHash('sha256').update(assertRowPath(file)).digest('hex').slice(0, 24)}.json`;
 
 /**
- * @param {string} runRootDir @param {string} block @param {string} file - repo-root-relative.
+ * The ONE path every reader and writer of a file's review state uses (B69).
+ * @param {string} runId @param {string} block @param {string} file - repo-root-relative.
  * @returns {string}
  */
-export function statePath(runRootDir, block, file) {
-  const name = createHash('sha256').update(assertRowPath(file)).digest('hex').slice(0, 24);
-  return path.join(blockStateDir(runRootDir, block), `${name}.json`);
+export function statePath(runId, block, file) {
+  return path.join(blockStateDir(runId, block), stateName(file));
+}
+
+/**
+ * B69: where the state file lived before (the run's temp root) — read once, to move it.
+ * @param {string} runRootDir @param {string} block @param {string} file
+ * @returns {string}
+ */
+export function legacyStatePath(runRootDir, block, file) {
+  return path.join(runRootDir, 'review-state', assertBlockId(block), stateName(file));
 }
 
 /** @param {string} text @returns {string} */
@@ -130,23 +153,43 @@ function restoreFromAnchor(anchor, { runId, block, file, key, contentRoot }) {
 }
 
 /**
- * @param {Where & {contentRoot?: string}} where - `contentRoot`: the tree the file's current
- *   content is read from when a lost state is restored (B68); without it the restored
- *   `reviewed_content` is null.
- * @returns {{status: 'none' | 'ok' | 'restored' | 'lost' | 'tampered', state: FileState | null, seq: number}}
+ * @param {string} file @returns {string | null} the file's text, null when it does not exist.
+ * @throws any read error but ENOENT.
  */
-export function loadState({ runRootDir, runId, block, file, key, rows, contentRoot }) {
-  const anchors = blockAnchors({ runId, block, key, rows });
-  if (anchors === null) return { status: 'tampered', state: null, seq: 0 };
-  const anchor = latestAnchor(anchors, file);
-  let text = null;
+function readIfThere(file) {
   try {
-    text = readFileSync(statePath(runRootDir, block, file), 'utf8');
+    return readFileSync(file, 'utf8');
   } catch (err) {
-    if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') return { status: 'tampered', state: null, seq: 0 };
+    if (/** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT') return null;
+    throw err;
   }
-  if (anchor === null) return text === null ? { status: 'none', state: null, seq: 0 } : { status: 'tampered', state: null, seq: 0 };
-  if (text === null) return restoreFromAnchor(anchor, { runId, block, file, key, ...(contentRoot !== undefined ? { contentRoot } : {}) });
+}
+
+/**
+ * Replace `target` with `text` atomically (file mode 0600, a new dir 0700).
+ * @param {string} target @param {string} text
+ */
+function writeAtomic(target, text) {
+  mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+  const tmp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(tmp, text, { mode: 0o600 });
+    renameSync(tmp, target);
+  } finally {
+    try {
+      rmSync(tmp, { force: true });
+    } catch {
+      // a stray temp file never hides the write's own error
+    }
+  }
+}
+
+/**
+ * A state file's text checked against the file's latest anchor.
+ * @param {string} text @param {Record<string, any>} anchor @param {{runId: string, block: string, file: string, key: Buffer}} at
+ * @returns {{status: 'ok' | 'tampered', state: FileState | null, seq: number}}
+ */
+function checkText(text, anchor, { runId, block, file, key }) {
   if (sha(text) !== anchor.state_sha) return { status: 'tampered', state: null, seq: anchor.seq };
   let body = null;
   try {
@@ -159,13 +202,141 @@ export function loadState({ runRootDir, runId, block, file, key, rows, contentRo
 }
 
 /**
+ * @param {Omit<Where, 'runRootDir'> & {runRootDir?: string, contentRoot?: string, migrate?: boolean, afterMiss?: () => void}} where -
+ *   `contentRoot`: the tree the file's current content is read from when a lost state is restored
+ *   (B68); without it the restored `reviewed_content` is null. `runRootDir`: the run's temp root,
+ *   where an old state file may still be (B69). `migrate` (default true): move a valid old file to
+ *   the new path; false only reads it (a sibling's check never moves another ticket's file).
+ *   `afterMiss`: a test seam called when both paths were missing, before the new path is read
+ *   once more.
+ * @returns {{status: 'none' | 'ok' | 'restored' | 'lost' | 'tampered', state: FileState | null, seq: number}}
+ */
+export function loadState({ runRootDir, runId, block, file, key, rows, contentRoot, migrate = true, afterMiss }) {
+  const anchors = blockAnchors({ runId, block, key, rows });
+  if (anchors === null) return { status: 'tampered', state: null, seq: 0 };
+  const anchor = latestAnchor(anchors, file);
+  /** @type {string} */
+  let target;
+  let text = null;
+  /** @type {string | null} */
+  let legacy = null;
+  try {
+    target = statePath(runId, block, file);
+    text = readIfThere(target);
+    if (text === null && typeof runRootDir === 'string') {
+      legacy = legacyStatePath(runRootDir, block, file);
+      text = readIfThere(legacy);
+      if (text === null) {
+        legacy = null;
+        // another ticket may have moved the old file to the new path between the two reads
+        afterMiss?.();
+        text = readIfThere(target);
+      }
+    }
+  } catch {
+    return { status: 'tampered', state: null, seq: 0 };
+  }
+  if (anchor === null) return text === null ? { status: 'none', state: null, seq: 0 } : { status: 'tampered', state: null, seq: 0 };
+  if (text === null) return restoreFromAnchor(anchor, { runId, block, file, key, ...(contentRoot !== undefined ? { contentRoot } : {}) });
+  const checked = checkText(text, anchor, { runId, block, file, key });
+  if (checked.status !== 'ok' || legacy === null || !migrate) return checked;
+  // B69: a valid file at the old temp path moves to the new one — never over a file already there
+  // (a ticket that saved meanwhile wins and is loaded as usual) — then the old one is removed. A
+  // move that fails leaves the old file where it is; the load is `ok` either way (no throw)
+  const moved = moveIn(target, text);
+  if (moved === 'exists') {
+    const now = loadState({ runId, block, file, key, rows, ...(contentRoot !== undefined ? { contentRoot } : {}) });
+    if (now.status !== 'ok') return now;
+    // the new path holds a valid state (another ticket's move or save): the old copy is done
+    try {
+      rmSync(legacy, { force: true });
+    } catch {
+      // the old copy stays; the new path is read first from now on
+    }
+    return now;
+  }
+  if (moved === 'moved') {
+    try {
+      rmSync(legacy, { force: true });
+    } catch {
+      // the old copy stays; the new path is read first from now on
+    }
+  }
+  return checked;
+}
+
+/**
+ * B69: write `text` to the new state path without overwriting a file there: a hard link of a
+ * 0600 temp file, or — where hard links fail (EPERM, ENOTSUP, …) — an exclusive create.
+ * @param {string} target @param {string} text
+ * @returns {'moved' | 'exists' | 'failed'}
+ */
+function moveIn(target, text) {
+  let tmp = null;
+  try {
+    mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
+    tmp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    writeFileSync(tmp, text, { mode: 0o600 });
+    try {
+      linkSync(tmp, target);
+      return 'moved';
+    } catch (err) {
+      if (/** @type {NodeJS.ErrnoException} */ (err).code === 'EEXIST') return 'exists';
+    }
+    writeFileSync(target, text, { flag: 'wx', mode: 0o600 });
+    return 'moved';
+  } catch (err) {
+    return /** @type {NodeJS.ErrnoException} */ (err)?.code === 'EEXIST' ? 'exists' : 'failed';
+  } finally {
+    if (tmp !== null) {
+      try {
+        rmSync(tmp, { force: true });
+      } catch {
+        // a stray temp file never fails the load
+      }
+    }
+  }
+}
+
+/**
+ * B69 (doctor): the files of the run whose latest verified `review.state` anchor has a state file
+ * neither at the new path nor (when `runRootDir` is given) at the old one, each with whether that
+ * anchor carries a `state_body` (the ledger can rebuild it) or not (lost). The anchor is picked
+ * exactly as `loadState` picks it (`blockAnchors` per block, then `latestAnchor`).
+ * @param {{runId: string, key: Buffer, rows: Array<Record<string, any>>, runRootDir?: string}} opts
+ * @returns {Array<{block: string, file: string, rebuildable: boolean}> | null} null when an anchor
+ *   of the run does not verify (every ticket of the run is then refused `review-state-tampered`).
+ */
+export function missingStateFiles({ runId, key, rows, runRootDir }) {
+  const blocks = [...new Set(rows.filter((r) => r?.event === STATE_EVENT && r.run === runId).map((r) => r.block))];
+  const out = [];
+  for (const block of blocks) {
+    const anchors = blockAnchors({ runId, block, key, rows });
+    if (anchors === null) return null;
+    for (const file of new Set(anchors.map((a) => a.file))) {
+      const anchor = latestAnchor(anchors, file);
+      if (anchor === null) continue;
+      let paths;
+      try {
+        paths = [statePath(runId, block, file), ...(typeof runRootDir === 'string' ? [legacyStatePath(runRootDir, block, file)] : [])];
+      } catch {
+        continue; // a block id or a path no state file can have
+      }
+      if (paths.some((p) => existsSync(p))) continue;
+      out.push({ block, file, rebuildable: Object.hasOwn(anchor, 'state_body') });
+    }
+  }
+  return out;
+}
+
+/**
  * Anchor, then write: the signed `review.state` row goes to the ledger FIRST (a failed ledger write
  * changes nothing and throws), then the state file is replaced atomically (mode 0600).
  * @param {Where & {state: FileState, seq: number, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
  *   `seq` - the loaded state's seq (0 for a new file); this save is `seq + 1`.
  */
-export async function saveState({ runRootDir, runId, block, file, key, state, seq, writeRow }) {
-  const target = statePath(runRootDir, block, file);
+export async function saveState({ runId, block, file, key, state, seq, writeRow }) {
+  const target = statePath(runId, block, file);
   const next = seq + 1;
   const text = `${JSON.stringify(signRow({ run: runId, block, file, seq: next, state }, key))}\n`;
   // B68: the slim signed state rides on the anchor (its own MAC covers it), so a lost file can be
@@ -174,15 +345,7 @@ export async function saveState({ runRootDir, runId, block, file, key, state, se
   const stateBody = signRow({ run: runId, block, file, seq: next, state: { ...state, reviewed_content: null }, reviewed_content_sha: reviewed === null ? null : sha(reviewed) }, key);
   const slim = Buffer.byteLength(JSON.stringify(stateBody), 'utf8') > STATE_BODY_CAP ? { state_omitted: 'too_large' } : { state_body: stateBody };
   await writeRow({ event: STATE_EVENT, block, file, seq: next, state_sha: sha(text), l3_rung_used: state.l3_rung_used === true, ...slim });
-  mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
-  const tmp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  try {
-    writeFileSync(tmp, text, { mode: 0o600 });
-    renameSync(tmp, target);
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
-  }
+  writeAtomic(target, text);
 }
 
 /**

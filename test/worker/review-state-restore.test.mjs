@@ -94,7 +94,8 @@ async function wired(firstFindings) {
     assert.equal(await worker.drain(), 1);
     return /** @type {Record<string, any>} */ (readResult(repo, runId, t.ticket));
   };
-  const stateFile = statePath(runRootDir, BLOCK, FILE);
+  const stateFile = statePath(runId, BLOCK, FILE);
+  // B69: the state lives under the code-forge home; `runRootDir` stays only for the old-path lookup
   const where = () => ({ runRootDir, runId, block: BLOCK, file: FILE, key, rows });
   const anchors = () => rows.filter((r) => r.event === 'review.state');
   const restoredRows = () => rows.filter((r) => r.event === 'review.state_restored');

@@ -6,6 +6,11 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- Review state is saved under ~/.code-forge/runs/<run>/review-state/ instead of the temp root; older state files are
+  moved once after an anchor check; doctor warns about missing state files of active runs (#15)
+
 ### Fixed
 
 - A lost review state file is rebuilt from the signed ledger and recorded as review.state_restored; rounds, findings and
