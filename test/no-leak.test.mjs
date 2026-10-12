@@ -5,7 +5,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
-import { GUARDED_DIRS, snapshotGuarded, TEST_BASE } from './helpers/isolate.mjs';
+import { GUARDED_DIRS, leakedEntries, snapshotGuarded, TEST_BASE } from './helpers/isolate.mjs';
 import { runsDir } from '../src/state/paths.mjs';
 
 // Plan §9.6 rule 4 / V12: nothing a test does reaches the real `~/.code-forge` or the repo's
@@ -102,5 +102,5 @@ test('final step (CODE_FORGE_NO_LEAK=final): 0 new entries under the real dirs s
     rmSync(BASELINE_FILE, { force: true });
   }
   assert.ok(Array.isArray(parsed) && parsed.every((p) => typeof p === 'string'), 'the snapshot is a JSON array of paths');
-  assert.deepEqual(newEntries(GUARDED_DIRS, new Set(parsed)), []);
+  assert.deepEqual(leakedEntries(parsed, snapshotGuarded()), []);
 });

@@ -18,6 +18,7 @@
  *  5. on exit, SIGKILLs any registered child still running (start time checked), fails the
  *     process when the real `~/.code-forge` or `<repo>/.code-forge` gained an
  *     entry during its lifetime, and removes its root.
+ *     (`leakedEntries`: new paths of a run already in the baseline are a live run, not a leak.)
  * `src/**` modules are imported dynamically, AFTER `HOME` is pinned, so no `src` module can ever
  * see the real `HOME` from this process.
  */
@@ -56,6 +57,49 @@ export function snapshotGuarded(dirs = GUARDED_DIRS) {
   return seen;
 }
 
+/**
+ * The run id a path under `<dir>/runs/` belongs to, when that run's record `<dir>/runs/<id>.json`
+ * is in the baseline: `<id>` (its directory), `<id>.<anything>` or anything under `<id>/`.
+ * The id is matched exactly, never as a prefix (`r-1` does not cover `r-10.lock`).
+ * @param {string} dir - a guarded directory.
+ * @param {string} p - a path under `dir`.
+ * @param {ReadonlySet<string>} baseline
+ * @returns {boolean}
+ */
+function belongsToBaselineRun(dir, p, baseline) {
+  const runs = path.join(dir, 'runs');
+  if (!p.startsWith(runs + path.sep)) return false;
+  const seg = p.slice(runs.length + 1).split(path.sep)[0];
+  const covered = (/** @type {string} */ id) => id !== '' && baseline.has(path.join(runs, `${id}.json`));
+  if (p !== path.join(runs, seg)) return covered(seg);
+  if (covered(seg)) return true;
+  for (let i = seg.indexOf('.'); i !== -1; i = seg.indexOf('.', i + 1)) {
+    if (covered(seg.slice(0, i))) return true;
+  }
+  return false;
+}
+
+/**
+ * The new paths under the guarded dirs that count as leaks, sorted. A path not in `baseline` is a
+ * leak unless it belongs to a run whose record was already in the baseline (a live run of the
+ * developer that started before the tests): `runs/<id>`, `runs/<id>.<anything>`, `runs/<id>/…`.
+ * @param {Iterable<string>} baseline - the snapshot taken at start.
+ * @param {Iterable<string>} now - the snapshot taken at exit.
+ * @param {readonly string[]} [dirs] - defaults to the real guarded directories.
+ * @returns {string[]}
+ */
+export function leakedEntries(baseline, now, dirs = GUARDED_DIRS) {
+  const before = new Set(baseline);
+  const leaked = [];
+  for (const p of new Set(now)) {
+    if (before.has(p)) continue;
+    const dir = dirs.find((d) => p.startsWith(d + path.sep));
+    if (dir !== undefined && belongsToBaselineRun(dir, p, before)) continue;
+    leaked.push(p);
+  }
+  return leaked.sort();
+}
+
 const baseline = snapshotGuarded();
 
 // Pin before any src module is loaded. The roots live in a private base (0700, ours) rather than
@@ -92,7 +136,7 @@ process.env.CODE_FORGE_TEST_ROOT = root;
 process.chdir(root);
 
 process.on('exit', () => {
-  const leaked = [...snapshotGuarded()].filter((p) => !baseline.has(p));
+  const leaked = leakedEntries(baseline, snapshotGuarded());
   if (leaked.length > 0) {
     process.stderr.write(`isolate: ${leaked.length} new entries under the real code-forge dirs:\n${leaked.join('\n')}\n`);
     process.exitCode = 1;

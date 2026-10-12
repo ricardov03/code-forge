@@ -17,6 +17,8 @@ waits on a second real consumer (plan §10.4, Q17).
   stops stay; with no ledger copy the ticket is refused as review-state-lost, not tampered (#15)
 - A file whose every finding is cleared by accepted waivers counts as reviewed (reviewed_by_waiver) and block close
   writes a signed gate.review_waived_all row; unknown severities are human-only (#9)
+- Test isolation guard: new files of a run that existed before the test process (its lock, key or run directory) no
+  longer count as leaks; a new run id or any other new path still fails the process.
 
 ## [0.8.0] — 2026-10-12
 
