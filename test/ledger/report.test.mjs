@@ -1,6 +1,15 @@
 import assert from 'node:assert/strict';
-import { test } from 'node:test';
+import { execFile } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, readdir, rm, writeFile } from 'node:fs/promises';
+import os from 'node:os';
+import path from 'node:path';
+import { after, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 import { buildReport, SECTION_NAMES } from '../../src/ledger/report.mjs';
+
+const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'code-forge.mjs');
+const TMP_PARENT = await mkdtemp(path.join(os.tmpdir(), 'cf-b66-report-'));
+after(() => rm(TMP_PARENT, { recursive: true, force: true }));
 
 function threeBlockLedger() {
   const rows = [
@@ -175,5 +184,176 @@ test('B33: a block with session rows but NO block.close row is listed open with 
   assert.deepEqual(
     buildReport(rows).sections.cost_per_block.map((e) => [e.block, e.completed, e.coderUsd, e.totalUsd]),
     [['B1', false, 0.0225, 0.0225]],
+  );
+});
+
+/**
+ * B66: two PRs over shared (B2) and distinct (B1, B3) blocks of run r1, with priced and
+ * unknown-price sessions; the same block id B1 in another run r2 must not count; PR 12 is recorded
+ * twice (the later row wins); a shadow outside_review row and a shadow session are excluded.
+ */
+function outsideReviewLedger() {
+  return [
+    { event: 'run.start', run: 'r1' },
+    { event: 'session', run: 'r1', block: 'B1', role: 'coder', usd: 1.5 },
+    { event: 'session', run: 'r1', block: 'B1', role: 'reviewer', usd: 0.25 },
+    { event: 'block.close', run: 'r1', block: 'B1' },
+    { event: 'session', run: 'r1', block: 'B2', role: 'coder', usd: 2 },
+    { event: 'session', run: 'r1', block: 'B2', role: 'reviewer', usd: null, usd_unknown: true },
+    { event: 'session', run: 'r1', block: 'B3', role: 'reviewer', usd: 0.1 },
+    { event: 'session.background', run: 'r1', block: 'B3', role: 'coder' },
+    { event: 'session', run: 'r2', block: 'B1', role: 'coder', usd: 9 },
+    { event: 'outside_review', run: 'r1', pr: 12, rounds: 1, findings: 1, link: null, blocks: ['B1'] },
+    { event: 'outside_review', run: 'r1', pr: 7, rounds: 1, findings: 0, link: null, blocks: ['B2', 'B3'] },
+    { event: 'outside_review', run: 'r1', pr: 12, rounds: 3, findings: 7, link: 'https://github.com/o/r/pull/12', blocks: ['B1', 'B2'] },
+    { event: 'outside_review', run: 'r1', pr: 99, rounds: 5, findings: 5, link: null, blocks: ['B1'], source: 'shadow' },
+    { event: 'session', run: 'r1', block: 'B1', role: 'coder', usd: 100, source: 'shadow' },
+  ];
+}
+
+const EXPECTED_OUTSIDE = [
+  { pr: 7, rounds: 1, findings: 0, link: null, blocks: ['B2', 'B3'], code_forge_usd: 2.1, unknown_usd_sessions: 2 },
+  { pr: 12, rounds: 3, findings: 7, link: 'https://github.com/o/r/pull/12', blocks: ['B1', 'B2'], code_forge_usd: 3.75, unknown_usd_sessions: 1 },
+];
+
+test('B66 (2): outside_review — per PR sorted ascending, the latest row per PR, the cost of its blocks in its run (unknown-price sessions count 0 and are counted), shadow rows excluded', () => {
+  const { sections } = buildReport(outsideReviewLedger());
+  assert.deepEqual(sections.outside_review, EXPECTED_OUTSIDE);
+  // the PR dollars are the cost_per_block totals of the same blocks
+  const total = (/** @type {string} */ block) => sections.cost_per_block.find((e) => e.run === 'r1' && e.block === block).totalUsd;
+  assert.deepEqual([total('B1'), total('B2'), total('B3')], [1.75, 2, 0.1]);
+  // and the PR unknown counts are the cost_per_block unknown-session counts of the same blocks
+  const unknown = (/** @type {string} */ block) => sections.cost_per_block.find((e) => e.run === 'r1' && e.block === block).unknownUsdSessions;
+  assert.deepEqual([unknown('B1'), unknown('B2'), unknown('B3')], [0, 1, 1]);
+});
+
+test('B66 (2): with no outside_review rows the section is an empty array; a block-less PR costs 0', () => {
+  assert.deepEqual(buildReport([]).sections.outside_review, []);
+  assert.deepEqual(buildReport(outsideReviewLedger().filter((r) => r.event !== 'outside_review')).sections.outside_review, []);
+  const rows = [{ event: 'session', run: 'r1', block: 'B1', role: 'coder', usd: 1, usd_unknown: false }, { event: 'outside_review', run: 'r1', pr: 3, rounds: 2, findings: 1, link: null, blocks: [] }];
+  assert.deepEqual(buildReport(rows).sections.outside_review, [{ pr: 3, rounds: 2, findings: 1, link: null, blocks: [], code_forge_usd: 0, unknown_usd_sessions: 0 }]);
+});
+
+test('B66 (2): only shadow outside_review rows give an empty section', () => {
+  const rows = [{ event: 'outside_review', run: 'r1', pr: 1, rounds: 1, findings: 1, link: null, blocks: [], source: 'shadow' }];
+  assert.deepEqual(buildReport(rows).sections.outside_review, []);
+});
+
+test('B66 (2): an outside_review row whose rounds or findings are not 0-or-more safe integers is skipped', () => {
+  const bad = (/** @type {any} */ rounds, /** @type {any} */ findings) => ({ event: 'outside_review', run: 'r1', pr: 3, rounds, findings, link: null, blocks: [] });
+  const rows = [bad(-1, 0), bad(0, -1), bad(1.5, 0), bad(0, '2'), bad(null, 0), bad(0, 2 ** 53), bad(2, 4)];
+  assert.deepEqual(buildReport(rows).sections.outside_review, [
+    { pr: 3, rounds: 2, findings: 4, link: null, blocks: [], code_forge_usd: 0, unknown_usd_sessions: 0 },
+  ]);
+  // a bad row after a good one does not replace it
+  assert.deepEqual(buildReport([bad(2, 4), bad(-1, 0)]).sections.outside_review.map((/** @type {any} */ e) => e.rounds), [2]);
+  // a row with no string run never matches the null-run cost entries: 0 dollars, 0 unknown
+  const runless = [
+    { event: 'session', block: 'B1', role: 'coder', usd: 5 },
+    { event: 'session', block: 'B1', role: 'reviewer', usd: null, usd_unknown: true },
+    { event: 'outside_review', pr: 4, rounds: 1, findings: 1, link: null, blocks: ['B1'] },
+  ];
+  const { sections } = buildReport(runless);
+  assert.deepEqual(
+    sections.cost_per_block.map((/** @type {any} */ e) => [e.run, e.block, e.totalUsd, e.unknownUsdSessions]),
+    [[null, 'B1', 5, 1]],
+  );
+  assert.deepEqual(sections.outside_review, [{ pr: 4, rounds: 1, findings: 1, link: null, blocks: ['B1'], code_forge_usd: 0, unknown_usd_sessions: 0 }]);
+});
+
+test('B66 (2): SECTION_NAMES has 14 sections, in order, with outside_review appended last', () => {
+  assert.deepEqual(
+    [...SECTION_NAMES],
+    [
+      'cost_per_block',
+      'lane_distribution',
+      'escalations',
+      's1_calls_per_block',
+      's2_rate',
+      'review_budget',
+      'review_depth_and_findings',
+      'fix_rounds',
+      'review_unavailable',
+      'proof_time',
+      'forecast_vs_actual_lines',
+      'blocks_stopped_at_l3',
+      'run_stop_counts',
+      'outside_review',
+    ],
+  );
+});
+
+/**
+ * The real CLI under a temp HOME whose ledger for `slug` holds `rows`.
+ * @param {string} name @param {Array<Record<string, any>>} rows @param {(slug: string, dir: string) => string[]} argsFor
+ */
+async function reportCli(name, rows, argsFor) {
+  const dir = path.join(TMP_PARENT, name);
+  const home = path.join(dir, 'home');
+  await mkdir(path.join(home, '.code-forge', 'ledger'), { recursive: true });
+  const slug = `b66-${name}`;
+  await writeFile(path.join(home, '.code-forge', 'ledger', `${slug}.jsonl`), rows.map((r) => `${JSON.stringify(r)}\n`).join(''));
+  return new Promise((resolve) => {
+    execFile(process.execPath, [BIN, 'report', ...argsFor(slug, dir)], { cwd: dir, env: { ...process.env, HOME: home, CODE_FORGE_NO_ERROR_LOG: '1' } }, (error, stdout, stderr) =>
+      resolve({ code: error ? (typeof error.code === 'number' ? error.code : -1) : 0, stdout, stderr, dir }),
+    );
+  });
+}
+
+test('B66 (3): report --json carries outside_review; --export writes outside_review.json with the same data; both carry [] with no rows', async () => {
+  const json = await reportCli('json', outsideReviewLedger(), (slug) => ['--slug', slug, '--json']);
+  assert.equal(json.code, 0, json.stderr);
+  const parsed = JSON.parse(json.stdout);
+  assert.deepEqual(Object.keys(parsed), [...SECTION_NAMES]);
+  assert.deepEqual(parsed.outside_review, EXPECTED_OUTSIDE);
+
+  const exported = await reportCli('export', outsideReviewLedger(), (slug, dir) => ['--slug', slug, '--export', path.join(dir, 'out')]);
+  assert.deepEqual([exported.code, exported.stdout], [0, `exported 14 section file(s) to ${path.join(exported.dir, 'out')}\n`], exported.stderr);
+  assert.equal((await readdir(path.join(exported.dir, 'out'))).length, 14);
+  assert.deepEqual(JSON.parse(await readFile(path.join(exported.dir, 'out', 'outside_review.json'), 'utf8')), EXPECTED_OUTSIDE);
+
+  const none = [{ event: 'run.start', run: 'r1' }];
+  const emptyJson = await reportCli('empty-json', none, (slug) => ['--slug', slug, '--json']);
+  assert.equal(emptyJson.code, 0, emptyJson.stderr);
+  assert.deepEqual(JSON.parse(emptyJson.stdout).outside_review, []);
+  const emptyExport = await reportCli('empty-export', none, (slug, dir) => ['--slug', slug, '--export', path.join(dir, 'out')]);
+  assert.equal(emptyExport.code, 0, emptyExport.stderr);
+  assert.equal(await readFile(path.join(emptyExport.dir, 'out', 'outside_review.json'), 'utf8'), '[]\n');
+});
+
+test('B66 (2): the text report prints outside_review after run_stop_counts — one line per PR, or "outside review: none"', async () => {
+  const res = await reportCli('text', outsideReviewLedger(), (slug) => ['--slug', slug]);
+  assert.equal(res.code, 0, res.stderr);
+  const afterStops = res.stdout.split('== run_stop_counts ==\n')[1];
+  const section = afterStops.slice(afterStops.indexOf('== outside_review ==\n'));
+  // the header and its lines exactly: everything from the header up to the spend lines
+  assert.equal(
+    section.slice(0, section.indexOf('spend per run')),
+    '== outside_review ==\n' +
+      'PR #7 · 1 outside round · 0 findings · code-forge $2.10 (+2 unknown) · B2, B3\n' +
+      'PR #12 · 3 outside rounds · 7 findings · code-forge $3.75 (+1 unknown) · B1, B2\n',
+  );
+  assert.equal(res.stdout.match(/^== /gm)?.length, 14);
+
+  const none = await reportCli('text-none', [{ event: 'run.start', run: 'r1' }], (slug) => ['--slug', slug]);
+  assert.equal(none.code, 0, none.stderr);
+  assert.ok(none.stdout.includes('== run_stop_counts ==\n{\n  "overspend": 0,\n  "l3Fallback": 0,\n  "noEngineStops": 0\n}\n== outside_review ==\noutside review: none\nspend per run'), none.stdout);
+  const noneSection = none.stdout.slice(none.stdout.indexOf('== outside_review ==\n'));
+  assert.equal(noneSection.slice(0, noneSection.indexOf('spend per run')), '== outside_review ==\noutside review: none\n');
+
+  // a fully priced PR prints no "(+N unknown)"; a PR with no blocks prints $0.00 and "-"
+  const pricedRows = [
+    ...outsideReviewLedger().filter((r) => r.event !== 'outside_review'),
+    { event: 'outside_review', run: 'r1', pr: 20, rounds: 2, findings: 1, link: null, blocks: ['B1'] },
+    { event: 'outside_review', run: 'r1', pr: 21, rounds: 0, findings: 0, link: null, blocks: [] },
+  ];
+  const priced = await reportCli('text-priced', pricedRows, (slug) => ['--slug', slug]);
+  assert.equal(priced.code, 0, priced.stderr);
+  const pricedSection = priced.stdout.slice(priced.stdout.indexOf('== outside_review ==\n'));
+  assert.equal(
+    pricedSection.slice(0, pricedSection.indexOf('spend per run')),
+    '== outside_review ==\n' +
+      'PR #20 · 2 outside rounds · 1 finding · code-forge $1.75 · B1\n' +
+      'PR #21 · 0 outside rounds · 0 findings · code-forge $0.00 · -\n',
   );
 });

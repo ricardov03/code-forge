@@ -32,6 +32,9 @@ waits on a second real consumer (plan §10.4, Q17).
   findings) or one --json line; every block verb takes --json and prints one JSON line (issue #13)
 - Block-end signal: every block end writes <run root>/blocks/<id>.done.json; hooks.on_block_end runs a command once per
   block end (no shell, timeout, signed hook.ran row); a failing hook only warns (issue #13)
+- ledger outside-review records an outside reviewer's rounds and findings per PR (signed outside_review row, link
+  redacted); report gets a 14th section, outside_review, with the code-forge cost of the PR's blocks next to the rounds
+  (issue #13)
 
 ### Changed
 

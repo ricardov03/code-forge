@@ -1,5 +1,5 @@
 /**
- * `code-forge report` (plan §6.2, R4): builds the 13 report sections from a run's ledger rows.
+ * `code-forge report` (plan §6.2, R4): builds the 14 report sections from a run's ledger rows.
  * Pure data, no I/O — terminal rendering + `--export` live in `src/cli/report.mjs`.
  *
  * Shadow rows (`row.source === 'shadow'`) are excluded everywhere here (plan §6.3: shadow-sampled
@@ -13,9 +13,14 @@
  * `session.background` rows, whose price is unknown); its dollars come from `./spend.mjs`
  * (`usd`, else `cost_usd`, else ESTIMATED from its tokens × `./prices.mjs`); `review.done` {block,file,context_mode,findings_by_severity,round}; `decision`
  * {block,question,source}; `run.start` {run}; `run.mode` {run,mode,plan} (B59, `buildRunModes`); `outcome` {block,missed_after_degrade}; `escalation` {block,trigger};
- * `review.unavailable` {block,reason}; `proof` {block,duration_ms}; `run.stop` {reason}.
+ * `review.unavailable` {block,reason}; `proof` {block,duration_ms}; `run.stop` {reason};
+ * `outside_review` {run,pr,rounds,findings,link,blocks} (B66, `./outside-review.mjs`).
+ *
+ * Signatures are not verified here: like every other section, `outside_review` reads the rows as
+ * the ledger holds them (an unsigned or tampered row is counted, not dropped).
  */
 
+import { buildOutsideReview } from './outside-review.mjs';
 import { isSpendRow, rowUsd, spendByRun, sumSpend } from './spend.mjs';
 
 const ROLE_BUCKET = Object.freeze({
@@ -51,7 +56,7 @@ export function sessionCostUsd(row) {
 
 /**
  * B33: spend per run (running totals, open blocks included) and over the whole ledger — kept
- * beside the 13 sections, not as a 14th (`SECTION_NAMES` stays pinned at 13).
+ * beside the sections, never one of them (text only, not in `SECTION_NAMES`).
  * @param {Array<Record<string, any>>} rows
  * @returns {{runs: Array<{run: string | null, usd: number, unknown: number, sessions: number}>, total: {usd: number, unknown: number, sessions: number}}}
  */
@@ -257,7 +262,8 @@ const runStopCounts = (rows) => ({
   noEngineStops: rows.filter((r) => r.event === 'run.stop' && r.reason === 'no_engine').length,
 });
 
-/** The exact, ordered set of section keys `buildReport` produces (plan §6.2: "13 sections") —
+/** The exact, ordered set of section keys `buildReport` produces (plan §6.2; B66 appended the
+ * 14th, `outside_review` — append new sections, never reorder) —
  * exported so tests (and `--export`) can assert against ONE source of truth instead of a copy. */
 export const SECTION_NAMES = Object.freeze([
   'cost_per_block',
@@ -273,6 +279,7 @@ export const SECTION_NAMES = Object.freeze([
   'forecast_vs_actual_lines',
   'blocks_stopped_at_l3',
   'run_stop_counts',
+  'outside_review',
 ]);
 
 /**
@@ -281,8 +288,10 @@ export const SECTION_NAMES = Object.freeze([
  */
 export function buildReport(rows) {
   const acted = rows.filter((r) => r.source !== 'shadow');
+  // computed once: `cost_per_block` and `outside_review` share the same entries
+  const costs = costPerBlock(acted);
   const builders = {
-    cost_per_block: costPerBlock,
+    cost_per_block: () => costs,
     lane_distribution: laneDistribution,
     escalations: escalationsPerBlock,
     s1_calls_per_block: s1CallsPerBlock,
@@ -295,6 +304,9 @@ export function buildReport(rows) {
     forecast_vs_actual_lines: forecastVsActualLines,
     blocks_stopped_at_l3: blocksStoppedAtL3,
     run_stop_counts: runStopCounts,
+    // B66: per PR, the outside review rounds next to the cost of its blocks — the SAME
+    // `costPerBlock` entries the `cost_per_block` section shows
+    outside_review: (/** @type {any[]} */ r) => buildOutsideReview(r, costs),
   };
   /** @type {Record<string, any>} */
   const sections = {};

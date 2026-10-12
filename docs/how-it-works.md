@@ -47,7 +47,7 @@ flowchart TD
 | 10 | Proof | `code-forge proof export B1 --run <run>`, `code-forge gates run --cwd <export dir>`, `code-forge proof red-green B1 --run <run> --test <file::case>` | gates measured in a clean export (dependency folders linked, a Composer `vendor` copied; verified on Node and on Laravel with PHPUnit and Pest); one signed `proof` row per proven test. With `--run <run> --block B1`, a gate argv item that is exactly `{test_files}` runs only the block's tests (its `--tests`, else its owned test files), or the full suite above `gates.full_suite_threshold_files` owned files (globs and directories count the tracked and new (not ignored) files they cover; `reason: threshold`) or when none is known or no `--run/--block` is given (`reason: no_tests`); `gate.done` records `scope: related \| full` with `test_count` or the reason. A gate given as `{argv, env}` runs with those variables; code-forge shows only their names, and masks a value of 8+ characters in the gate's own output |
 | 10a | Progress | `code-forge status` (`--run <run>` for one run, `--json` for one line) | read-only, at most 10 lines per active run of this repository — see [Checking progress](#checking-progress) |
 | 11 | Close | `code-forge block close B1 --run <run> --report <coder report>` | `block B1 closed`, or the reason it stays open |
-| 12 | Report | `code-forge run end --run <run>` then `code-forge report --slug <slug>` | the worker stops; 13 report sections, from `cost_per_block` to `run_stop_counts`, then the spend per run and the total |
+| 12 | Report | `code-forge run end --run <run>` then `code-forge report --slug <slug>` | the worker stops; 14 report sections, from `cost_per_block` to `outside_review`, then the spend per run and the total |
 
 The coder's turn ends with `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===`.
 Nothing else counts as completion. Its report also lists one `reviewed <path> ticket <id>` line per
@@ -341,6 +341,32 @@ The orchestrator watches the spend during the whole run, not only at the end: it
 `code-forge status` (or `run status`) after every block close and records cloud or hand-run coder
 spend at once. When the budget stops work, it shows you the numbers and waits. Only you raise
 `budget.usd`, at most once per run. See [getting-started.md](getting-started.md#set-a-budget).
+
+### Outside review rounds
+
+When a PR also gets an outside review (a human reviewer, or a review bot on the PR), record its
+rounds and findings once it is done:
+
+```bash
+code-forge ledger outside-review --run <run> --pr 12 --rounds 3 --findings 7 \
+  --link https://github.com/<owner>/<repo>/pull/12 --block B1 --block B2
+```
+
+It writes one signed `outside_review {run, pr, rounds, findings, link, blocks}` row in the run's
+project ledger and prints `outside_review pr 12 · rounds 3 · findings 7 · blocks B1, B2`. `--pr` is
+a positive integer, `--rounds` and `--findings` are 0 or more (plain decimal with no sign or leading zeros), `--link` is an
+`https://` or `http://` URL of at most 2048 characters with no whitespace (masked like every secret
+code-forge knows before it is stored), and each `--block` (repeatable, duplicates dropped) must be a
+block of that run. A wrong flag exits 2 and an unknown run or block exits 1; neither writes a row.
+Calling it again for the same PR replaces the earlier numbers in `report` (the ledger keeps both
+rows). It is an orchestrator or owner command; coders never run it.
+
+`report` shows it as its 14th section, `outside_review`: per PR, sorted by number, the outside
+rounds and findings next to `code_forge_usd`, what code-forge spent on the PR's blocks in that run
+(the same totals as `cost_per_block`; sessions with no known price count 0 and are counted in
+`unknown_usd_sessions`). In the terminal it is one line per PR —
+`PR #12 · 3 outside rounds · 7 findings · code-forge $3.75 (+1 unknown) · B1, B2` — or
+`outside review: none`; `--json` and `--export` (`outside_review.json`) carry it as data.
 
 ### Changing the config mid-run
 

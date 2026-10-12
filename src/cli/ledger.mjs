@@ -8,18 +8,26 @@
  *   ledger outcome --pr <n> --ci red|green|reverted --slug <slug>
  *   ledger tail --slug <slug> [--n <count> | -n <count>]
  *   ledger add coder --run <r> --block <b> --usd <n> [--note "..."]
+ *   ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
  *
  * B33: `ledger add coder` records manual/cloud coder spend (a session code-forge never saw) as a
  * signed `session` row (`role: coder, manual: true, usd, cost_source: manual`) in the run's
  * ledger, so `report` and the `budget.usd` check count it. The slug is the run record's project.
+ *
+ * B66: `ledger outside-review` records the rounds and findings of an outside review of one PR as a
+ * signed `outside_review` row in the run's project ledger (the `report` section `outside_review`
+ * puts it next to the code-forge cost of the PR's blocks). An orchestrator/human verb, never a
+ * coder one. A later call for the same PR replaces the earlier row in every reader.
  */
 
-import { writeSafe } from '../util/redact.mjs';
 import { buildCalibration } from '../ledger/calibration.mjs';
 import { recordCiOutcome, reviewedEntriesFromRows, scanGitAndRecord } from '../ledger/outcome.mjs';
+import { OUTSIDE_REVIEW_EVENT, OUTSIDE_REVIEW_USAGE, outsideReviewRecordedLine, parseOutsideReviewArgs } from '../ledger/outside-review.mjs';
 import { roundUsd, runSpend } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
+import { loadKey } from '../state/signer.mjs';
+import { redact, writeSafe } from '../util/redact.mjs';
 
 /**
  * @param {string[]} args @param {string} flag
@@ -63,10 +71,11 @@ export async function runLedger(args, deps = {}) {
   const { stdout = process.stdout, stderr = process.stderr } = deps;
   const out = (/** @type {string} */ s) => writeSafe(stdout, s);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
-  const usage = () => err('usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."]\n');
+  const usage = () => err('usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...\n');
 
   const [sub] = args;
   if (sub === 'add') return addSpend(args.slice(1), { out, err });
+  if (sub === 'outside-review') return addOutsideReview(args.slice(1), { out, err });
   const slug = flagValue(args, '--slug');
   if (!slug) {
     usage();
@@ -241,6 +250,41 @@ async function addSpend(args, { out, err }) {
     return 0;
   } catch (thrown) {
     err(`ledger add: ${thrown?.message ?? String(thrown)}\n`);
+    return 1;
+  }
+}
+
+/**
+ * `ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>]
+ * [--block <id>]...` (B66). Usage errors exit 2, an unknown run or block exits 1; both write nothing.
+ * The run key is loaded (and so registered as a secret) BEFORE the link is redacted.
+ * @param {string[]} args - after `outside-review`.
+ * @param {{out: (s: string) => void, err: (s: string) => void}} io
+ * @returns {Promise<number>}
+ */
+async function addOutsideReview(args, { out, err }) {
+  const parsed = parseOutsideReviewArgs(args);
+  if ('message' in parsed) {
+    err(`ledger outside-review: ${parsed.message}\n${OUTSIDE_REVIEW_USAGE}\n`);
+    return 2;
+  }
+  const { run, pr, rounds, findings, link, blocks } = parsed.value;
+  try {
+    const record = await readRun(run);
+    const known = record.blocks && typeof record.blocks === 'object' ? record.blocks : {};
+    const unknown = blocks.find((id) => !Object.hasOwn(known, id));
+    if (unknown !== undefined) {
+      err(`ledger outside-review: block ${JSON.stringify(unknown)} is not a block of run ${run}; nothing written\n`);
+      return 1;
+    }
+    await loadKey(run);
+    const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
+    const row = { event: OUTSIDE_REVIEW_EVENT, pr, rounds, findings, link: link === null ? null : redact(link), blocks };
+    await writeSigned(run, writeRow, row);
+    out(outsideReviewRecordedLine(row));
+    return 0;
+  } catch (thrown) {
+    err(`ledger outside-review: ${thrown?.message ?? String(thrown)}\n`);
     return 1;
   }
 }

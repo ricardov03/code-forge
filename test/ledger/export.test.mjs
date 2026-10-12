@@ -9,12 +9,13 @@ import { buildReport, SECTION_NAMES } from '../../src/ledger/report.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { captureStream, withTempHome } from './helpers.mjs';
 
-test('exportReportSections writes exactly the SECTION_NAMES files (13), each byte-for-byte round-tripping its section data', async () => {
+test('exportReportSections writes exactly the SECTION_NAMES files (14), each byte-for-byte round-tripping its section data', async () => {
   await withTempHome(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'code-forge-export-'));
     try {
       const { sections } = buildReport([{ event: 'dispatch', block: 'b1', level: 'L1', lane: 'L1' }]);
-      assert.equal(Object.keys(sections).length, 13);
+      assert.equal(Object.keys(sections).length, 14);
+      assert.equal(SECTION_NAMES.at(-1), 'outside_review');
 
       const paths = await exportReportSections(dir, sections);
 
@@ -29,6 +30,8 @@ test('exportReportSections writes exactly the SECTION_NAMES files (13), each byt
         const parsed = JSON.parse(await readFile(path.join(dir, `${key}.json`), 'utf8'));
         assert.deepEqual(parsed, sections[key], `section "${key}" did not round-trip`);
       }
+      // B66: the fixture has no outside_review row, so its file is written and holds []
+      assert.deepEqual(JSON.parse(await readFile(path.join(dir, 'outside_review.json'), 'utf8')), []);
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

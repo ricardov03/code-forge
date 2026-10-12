@@ -1,13 +1,15 @@
 /**
  * `code-forge report [--slug <slug>] [--json] [--export <dir>]` (plan §6.2, R4). Terminal output
- * only, plus an optional `--export <dir>` that writes the same 13 sections as JSON files. The
+ * only, plus an optional `--export <dir>` that writes the same 14 sections as JSON files. The
  * terminal output ends with the spend per run (B33) and the mode of each run (B59: brief or plan);
- * both are text only, never in `--json` or `--export`, so the 13 pinned sections stay as they are.
+ * both are text only, never in `--json` or `--export`. The 14th section, `outside_review` (B66), is
+ * printed as text lines under its header (`outside review: none`, or one line per PR).
  */
 
 import { writeSafe } from '../util/redact.mjs';
 import { buildReport, buildRunModes, buildSpend } from '../ledger/report.mjs';
 import { exportReportSections } from '../ledger/export.mjs';
+import { outsideReviewLines } from '../ledger/outside-review.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 
 /**
@@ -60,7 +62,8 @@ export async function runReport(args, deps = {}) {
     }
 
     for (const [name, data] of Object.entries(sections)) {
-      out(`== ${name} ==\n${JSON.stringify(data, null, 2)}\n`);
+      const body = name === 'outside_review' ? outsideReviewLines(data) : `${JSON.stringify(data, null, 2)}\n`;
+      out(`== ${name} ==\n${body}`);
     }
     out(spendLines(buildSpend(rows)));
     out(modeLines(buildRunModes(rows)));
@@ -72,7 +75,7 @@ export async function runReport(args, deps = {}) {
 }
 
 /**
- * B33: the running spend per run (open blocks included), after the 13 sections. Unknown-price
+ * B33: the running spend per run (open blocks included), after the 14 sections. Unknown-price
  * sessions are named, never priced.
  * @param {ReturnType<typeof buildSpend>} spend @returns {string}
  */

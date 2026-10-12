@@ -245,8 +245,8 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
     assert.equal(line[0].startsWith(`cost per completed block: ${BLOCK} $${usd} (estimated from 4 priced session row(s); facts $`), true, line[0]);
   });
 
-  // 13 sections, as landed (B6's report.mjs); the plan's "14" is a logged plan/code gap — root ruling, B17 fix round 1.
-  test('report --slug prints its 13 sections, in order', () => {
+  // 13 sections as landed (B6's report.mjs), plus B66's 14th, outside_review, appended last.
+  test('report --slug prints its 14 sections, in order', () => {
     const headers = res.stdout.split('\n').filter((l) => /^== [a-z0-9_]+ ==$/.test(l)).map((l) => l.slice(3, -3));
     assert.deepEqual(headers, [
       'cost_per_block',
@@ -262,7 +262,12 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
       'forecast_vs_actual_lines',
       'blocks_stopped_at_l3',
       'run_stop_counts',
+      'outside_review',
     ]);
+  });
+
+  test('the outside_review section is empty: exactly one "outside review: none" line', () => {
+    assert.equal(res.stdout.split('\n').filter((l) => l === 'outside review: none').length, 1);
   });
 
   test('the harness degrade banner is shown exactly once', () => {

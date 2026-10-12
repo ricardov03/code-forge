@@ -46,6 +46,11 @@ Next release:
 - **Breaking: coders no longer push or open draft PRs by default.** `autonomy.coder_may_push` and
   `autonomy.coder_may_open_draft_pr` now default to `false`. `init` asks both (default no) and
   writes your answers. To keep the old behaviour, set both to `true` in `.code-forge.yml`.
+- **Outside review rounds next to code-forge cost.** `code-forge ledger outside-review --run <r>
+  --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]…` records how many rounds an
+  outside reviewer needed on a PR (a later call for the same PR replaces it). `report` gets a
+  14th section, `outside_review`: per PR, the rounds and findings next to the code-forge cost
+  of its blocks.
 
 In 0.7.7:
 

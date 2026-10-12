@@ -168,9 +168,9 @@ test('ledger outcome --scan-git outside a git repo returns a clean error (exit 1
   });
 });
 
-test('report --json prints exactly the SECTION_NAMES keys (13 of them), sorted, matching the module export', async () => {
+test('report --json prints exactly the SECTION_NAMES keys (14 of them), sorted, matching the module export', async () => {
   await withTempHome(async () => {
-    assert.equal(SECTION_NAMES.length, 13, 'SECTION_NAMES itself must stay pinned at 13 — this is the §6.2 requirement, not just self-consistency');
+    assert.equal(SECTION_NAMES.length, 14, 'SECTION_NAMES itself must stay pinned at 14 (§6.2 plus B66 outside_review) — not just self-consistency');
     await appendRow({ event: 'dispatch', block: 'b1', level: 'L1', lane: 'L0' }, { slug: 'report-proj' });
     const stdout = captureStream();
     const code = await runReport(['--slug', 'report-proj', '--json'], { stdout });

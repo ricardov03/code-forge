@@ -223,6 +223,7 @@ active, `run reload` refuses limit keys; use `code-forge autopilot approve` (see
 | `code-forge run status --run <run>` | `spent_usd`, `budget_usd` and how many sessions have no known price |
 | `code-forge report --slug <slug>` | cost per block, open blocks included, then the spend per run and the total |
 | `code-forge ledger add coder --run <run> --block <id> --usd <n> [--note "..."]` | records spend code-forge did not see, such as a coder you ran in the cloud or by hand |
+| `code-forge ledger outside-review --run <run> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...` | records an outside review of a PR; `report` shows it next to what code-forge spent on the PR's blocks |
 
 
 ## Keys

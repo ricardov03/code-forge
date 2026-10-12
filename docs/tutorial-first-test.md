@@ -348,10 +348,12 @@ code-forge run end --run site-1
 code-forge report --slug code-forge-site
 ```
 
-**Look for:** the worker process is gone, and the report prints 13 sections, each headed
+**Look for:** the worker process is gone, and the report prints 14 sections, each headed
 `== <name> ==`: `cost_per_block`, `lane_distribution`, `escalations`, `s1_calls_per_block`,
 `s2_rate`, `review_budget`, `review_depth_and_findings`, `fix_rounds`, `review_unavailable`,
-`proof_time`, `forecast_vs_actual_lines`, `blocks_stopped_at_l3`, `run_stop_counts`.
+`proof_time`, `forecast_vs_actual_lines`, `blocks_stopped_at_l3`, `run_stop_counts`,
+`outside_review`. Until you record an outside review with `ledger outside-review`, the last
+section is the header `== outside_review ==` followed by the one line `outside review: none`.
 `cost_per_block` shows B1 with its split between coder, review, S1+S2 and facts. Tokens are
 facts; dollars are estimates. `report --json` and `report --export <dir>` give the same data as
 JSON. After the sections it prints the spend per run, in estimated US dollars, and the total.
@@ -370,7 +372,7 @@ The first test passes when all of these hold:
 6. `proof red-green` proved the hero test with `red_kind: assertion`.
 7. `block close B1` printed `block B1 closed`, with no `rule_break` or `ledger.tamper` row.
 8. `npm test` is green in the repository, and `site/index.html` shows `npm install -g @codedology/code-forge`.
-9. `report --slug code-forge-site` prints all 13 sections, with B1 in `cost_per_block`.
+9. `report --slug code-forge-site` prints all 14 sections, with B1 in `cost_per_block`.
 
 Then run B2 and B3 the same way. B3 is where the link and unscoped-command checks land.
 
