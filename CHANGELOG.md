@@ -6,6 +6,11 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- A lost review state file is rebuilt from the signed ledger and recorded as review.state_restored; rounds, findings and
+  stops stay; with no ledger copy the ticket is refused as review-state-lost, not tampered (#15)
+
 ## [0.8.0] — 2026-10-12
 
 ### Added

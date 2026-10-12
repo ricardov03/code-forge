@@ -10,6 +10,10 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 ## What's new in 0.8
 
+In the next release:
+
+- **A lost review state is rebuilt, not reset.** When the review state file of a file is gone (for example, macOS cleaned its temp folder), the worker rebuilds it from the signed ledger and writes a `review.state_restored` row. Rounds, open findings and stops stay as they were. If the ledger cannot rebuild it, the ticket is refused as `review-state-lost`, not `tampered` (#15).
+
 In 0.8.0:
 
 - **Run only the tests a block touches.** `block open --tests <paths>` names the block's test

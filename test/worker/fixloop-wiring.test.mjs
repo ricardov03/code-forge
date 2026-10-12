@@ -181,11 +181,14 @@ describe('the worker drives the §4.11 fix loop one ticket per round (B12c)', ()
     await assertRefused(w);
   });
 
-  test('the state file deleted after round 1 is refused (the ledger anchor says round 1 happened), never a fresh round 1', async () => {
+  test('the state file deleted after round 1 is rebuilt from the ledger anchor (B68), never a fresh round 1', async () => {
     const w = await wired([finding('F1')]);
     assert.equal((await w.round()).round, 1);
     rmSync(w.stateFile());
-    await assertRefused(w);
+    const r = await w.round();
+    assert.deepEqual([r.status, r.round, r.kind, r.approved], ['reviewed', 2, 'recheck', true]);
+    assert.deepEqual(w.lenses, ['quick', 'recheck']);
+    assert.equal(w.rows.filter((row) => row.event === 'review.state_restored').length, 1);
   });
 
   test('an older signed state restored over the current one (rollback) is refused', async () => {

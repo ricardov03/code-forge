@@ -11,9 +11,13 @@
  * Every state file is SIGNED with the run key (`{run, block, file, seq, state}` + `mac`) AND
  * anchored in the run's append-only ledger: each save first writes a signed row
  * `{event: 'review.state', block, file, seq, state_sha, l3_rung_used}`. A load matches the file
- * against the LATEST verified anchor (highest `seq`) for the file: a missing file, an older signed
- * file (rollback), a different sha, or a file with no anchor is `tampered` — the hook refuses the
- * ticket, never a fresh round 1 that could clear a `review_cap` stop or an open finding. A
+ * against the LATEST verified anchor (highest `seq`) for the file: an older signed file
+ * (rollback), a different sha, or a file with no anchor is `tampered` — the hook refuses the
+ * ticket, never a fresh round 1 that could clear a `review_cap` stop or an open finding. B68: the
+ * anchor also carries `state_body`, the signed state with `reviewed_content` set to null and its
+ * sha carried as `reviewed_content_sha` (or `state_omitted: "too_large"` over `STATE_BODY_CAP`), so a MISSING file is `restored` from it
+ * (the engine saves it as a new seq and writes `review.state_restored`); an anchor with no body
+ * makes a missing file `lost` (refused, never a round 1). A
  * `review.state` row of the run whose MAC does not verify is `tampered` for every block and file
  * of it (`blockAnchors`). Whether the block's one L3 rung was used comes from the anchors, never
  * from the state files.
@@ -29,6 +33,10 @@ import { assertBlockId, assertRowPath } from './ticket.mjs';
 /** @typedef {{runRootDir: string, runId: string, block: string, file: string, key: Buffer, rows: Array<Record<string, any>>}} Where */
 
 export const STATE_EVENT = 'review.state';
+/** B68: the row the engine writes after rebuilding a lost state file from its anchor. */
+export const RESTORED_EVENT = 'review.state_restored';
+/** B68: an anchor's `state_body` over this many bytes (as JSON) is `state_omitted: "too_large"`. */
+export const STATE_BODY_CAP = 64 * 1024;
 
 /** @param {string} runRootDir @param {string} block @returns {string} */
 export const blockStateDir = (runRootDir, block) => path.join(runRootDir, 'review-state', assertBlockId(block));
@@ -73,10 +81,61 @@ function latestAnchor(anchors, file) {
 }
 
 /**
- * @param {Where} where
- * @returns {{status: 'none' | 'ok' | 'tampered', state: FileState | null, seq: number}}
+ * Whether a signed body (a state file's, or an anchor's `state_body`) is this file's state at the
+ * anchor's seq: its MAC verifies with the run key, its run/block/file/seq equal the anchor's, and
+ * `state.file === file`.
+ * @param {any} body @param {{runId: string, block: string, file: string, key: Buffer, seq: number}} at
+ * @returns {boolean}
  */
-export function loadState({ runRootDir, runId, block, file, key, rows }) {
+function bodyMatches(body, { runId, block, file, key, seq }) {
+  return Boolean(
+    body &&
+      typeof body === 'object' &&
+      verifyRow(body, key).ok &&
+      body.run === runId &&
+      body.block === block &&
+      body.file === file &&
+      body.seq === seq &&
+      body.state &&
+      typeof body.state === 'object' &&
+      body.state.file === file,
+  );
+}
+
+/**
+ * B68: rebuild a lost state file from its latest anchor's signed `state_body`. `reviewed_content`
+ * is the file's current working-tree content when its sha equals the body's
+ * `reviewed_content_sha`, else null (the next round then reviews the full file).
+ * @param {Record<string, any>} anchor
+ * @param {{runId: string, block: string, file: string, key: Buffer, contentRoot?: string}} at
+ * @returns {{status: 'restored' | 'lost' | 'tampered', state: FileState | null, seq: number}}
+ */
+function restoreFromAnchor(anchor, { runId, block, file, key, contentRoot }) {
+  if (!Object.hasOwn(anchor, 'state_body')) return { status: 'lost', state: null, seq: anchor.seq };
+  const body = anchor.state_body;
+  if (!bodyMatches(body, { runId, block, file, key, seq: anchor.seq })) return { status: 'tampered', state: null, seq: anchor.seq };
+  const wanted = body.reviewed_content_sha;
+  /** @type {string | null} */
+  let reviewed = null;
+  if (typeof wanted === 'string' && typeof contentRoot === 'string') {
+    try {
+      const current = readFileSync(path.join(contentRoot, file), 'utf8');
+      if (sha(current) === wanted) reviewed = current;
+    } catch {
+      // unreadable now: reviewed stays null, the next round reviews the full file
+    }
+  }
+  const state = /** @type {FileState} */ ({ ...body.state, reviewed_content: reviewed });
+  return { status: 'restored', state, seq: anchor.seq };
+}
+
+/**
+ * @param {Where & {contentRoot?: string}} where - `contentRoot`: the tree the file's current
+ *   content is read from when a lost state is restored (B68); without it the restored
+ *   `reviewed_content` is null.
+ * @returns {{status: 'none' | 'ok' | 'restored' | 'lost' | 'tampered', state: FileState | null, seq: number}}
+ */
+export function loadState({ runRootDir, runId, block, file, key, rows, contentRoot }) {
   const anchors = blockAnchors({ runId, block, key, rows });
   if (anchors === null) return { status: 'tampered', state: null, seq: 0 };
   const anchor = latestAnchor(anchors, file);
@@ -87,25 +146,15 @@ export function loadState({ runRootDir, runId, block, file, key, rows }) {
     if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'ENOENT') return { status: 'tampered', state: null, seq: 0 };
   }
   if (anchor === null) return text === null ? { status: 'none', state: null, seq: 0 } : { status: 'tampered', state: null, seq: 0 };
-  if (text === null || sha(text) !== anchor.state_sha) return { status: 'tampered', state: null, seq: anchor.seq };
+  if (text === null) return restoreFromAnchor(anchor, { runId, block, file, key, ...(contentRoot !== undefined ? { contentRoot } : {}) });
+  if (sha(text) !== anchor.state_sha) return { status: 'tampered', state: null, seq: anchor.seq };
   let body = null;
   try {
     body = JSON.parse(text);
   } catch {
     body = null;
   }
-  const ok =
-    body &&
-    typeof body === 'object' &&
-    verifyRow(body, key).ok &&
-    body.run === runId &&
-    body.block === block &&
-    body.file === file &&
-    body.seq === anchor.seq &&
-    body.state &&
-    typeof body.state === 'object' &&
-    body.state.file === file;
-  if (!ok) return { status: 'tampered', state: null, seq: anchor.seq };
+  if (!bodyMatches(body, { runId, block, file, key, seq: anchor.seq })) return { status: 'tampered', state: null, seq: anchor.seq };
   return { status: 'ok', state: /** @type {FileState} */ (body.state), seq: anchor.seq };
 }
 
@@ -119,7 +168,12 @@ export async function saveState({ runRootDir, runId, block, file, key, state, se
   const target = statePath(runRootDir, block, file);
   const next = seq + 1;
   const text = `${JSON.stringify(signRow({ run: runId, block, file, seq: next, state }, key))}\n`;
-  await writeRow({ event: STATE_EVENT, block, file, seq: next, state_sha: sha(text), l3_rung_used: state.l3_rung_used === true });
+  // B68: the slim signed state rides on the anchor (its own MAC covers it), so a lost file can be
+  // rebuilt; the full reviewed text stays out of the ledger, only its sha goes in
+  const reviewed = typeof state.reviewed_content === 'string' ? state.reviewed_content : null;
+  const stateBody = signRow({ run: runId, block, file, seq: next, state: { ...state, reviewed_content: null }, reviewed_content_sha: reviewed === null ? null : sha(reviewed) }, key);
+  const slim = Buffer.byteLength(JSON.stringify(stateBody), 'utf8') > STATE_BODY_CAP ? { state_omitted: 'too_large' } : { state_body: stateBody };
+  await writeRow({ event: STATE_EVENT, block, file, seq: next, state_sha: sha(text), l3_rung_used: state.l3_rung_used === true, ...slim });
   mkdirSync(path.dirname(target), { recursive: true, mode: 0o700 });
   const tmp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   try {

@@ -17,6 +17,11 @@
  *  - `stopped` (`review_cap`, `l3_patch_exhausted`, `split_required`) ⇒ no session: the result
  *    repeats the stop — only the human moves on (§4.11 rule 5). A `split_required` result (round 1
  *    or a recheck stop) carries `tokens_in` and `budget` (B54).
+ * A state that does not load is refused with no session: `review-state-tampered` (a wrong file or
+ * anchor) or `review-state-lost` (the file is gone and its anchor has no `state_body`). A file
+ * that is gone but whose anchor carries the signed body is `restored` (B68): saved as a new seq,
+ * one signed `review.state_restored {block, file, seq, from_seq}` row, then the round runs as if
+ * it had loaded.
  * The round's outcome: `approved: true` ONLY when the loop is `complete` AND its signed
  * `review.approved` row (keyed `run, block, file, content_hash` = the ticket's hash) was written;
  * else `findings` = the open fix list, `next` = what the orchestrator does (`fix` at `level`,
@@ -85,7 +90,7 @@ import { ledgerSchemaHistory } from '../review/schema-fallback.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
 import { keyedLock } from '../util/locks.mjs';
-import { blockAnchors, blockRungUsed, loadState, saveState } from './review-state.mjs';
+import { blockAnchors, blockRungUsed, loadState, RESTORED_EVENT, saveState } from './review-state.mjs';
 import { assertTicketId, WorkerError } from './ticket.mjs';
 
 /**
@@ -116,6 +121,7 @@ import { assertTicketId, WorkerError } from './ticket.mjs';
  * @property {string} engine - `adaptive` or `consensus`.
  * @property {Array<Record<string, any>>} sessions - one summary per session run.
  * @property {string} [reason] - why it is not `reviewed` (stub-guard reason, `needs_file-refused`, …).
+ * @property {string} [message] - a refusal's human-readable explanation (`review-state-lost`).
  * @property {Array<Record<string, any>>} [findings] - the open fix list (`reviewed` / `stopped`).
  * @property {number} [round] - the fix-loop round this ticket ran (patch_check rounds not counted).
  * @property {string} [kind] - `full`, `recheck` or `patch_check`.
@@ -413,6 +419,9 @@ export function blockPeerDiffs(repoRoot, { base, owned, ownedKinds, file }) {
  */
 export const blockLockKey = (runId, block) => `block:${runId}\0${block}`;
 
+/** B68: the `review-state-lost` refusal's message (the file is gone and the ledger has no body). */
+export const LOST_MESSAGE = 'the review state file is gone and the ledger cannot rebuild it (its anchor carries no state_body); the file is not reviewed again from round 1 — the owner can run `code-forge block reopen`';
+
 /**
  * Whether the block's one L3 rung is taken: a verified anchor says so (`blockRungUsed`), OR another
  * file of the block has a saved state whose round decided `next: patch` — that round took the rung,
@@ -433,7 +442,8 @@ export function rungTaken(where) {
     } catch {
       return { status: 'ok', used: true };
     }
-    if (other.status !== 'ok' || other.state?.next?.action === 'patch') return { status: 'ok', used: true };
+    // a sibling that would be restored (B68) counts by its rebuilt state; lost or tampered fails closed
+    if ((other.status !== 'ok' && other.status !== 'restored') || other.state?.next?.action === 'patch') return { status: 'ok', used: true };
   }
   return rung;
 }
@@ -488,9 +498,18 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
       await recordBlockBudget(ticket, ctx, { base, owned, ownedKinds });
     }
     const where = { runRootDir: ctx.runRootDir, runId: ctx.runId, block: ticket.block, file: ticket.file, key, rows };
-    const loaded = loadState(where);
+    const loaded = loadState({ ...where, contentRoot: ctx.contentRoot ?? ctx.repoRoot });
     const rung = rungTaken(where);
     if (loaded.status === 'tampered' || rung.status === 'tampered') return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-tampered', approved: false, engine: 'adaptive', sessions: [] }) };
+    if (loaded.status === 'lost') return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-lost', message: LOST_MESSAGE, approved: false, engine: 'adaptive', sessions: [] }) };
+    let seq = loaded.seq;
+    if (loaded.status === 'restored' && loaded.state !== null) {
+      // B68: the lost file is rebuilt from the anchor's signed body; saved as a new seq, then recorded
+      const writeRow = /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow);
+      await saveState({ ...where, state: loaded.state, seq, writeRow });
+      seq += 1;
+      await writeRow({ event: RESTORED_EVENT, block: ticket.block, file: ticket.file, seq, from_seq: loaded.seq });
+    }
     const rungUsed = rung.used;
     let state = loaded.state;
     if (state === null || state.status === 'complete') state = newFileState({ file: ticket.file, level, l3RungUsed: rungUsed });
@@ -511,7 +530,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
       state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
     }
     const fixed = state;
-    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest, extraRounds, peerDiffs });
+    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest, extraRounds, peerDiffs });
     // a round that could take the rung keeps the block lock until its state is saved
     if (mayTakeRung(fixed, kind, ctx.cfg, rungUsed)) return { outcome: await round() };
     return { round };

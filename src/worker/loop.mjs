@@ -318,6 +318,7 @@ export async function createWorker(opts, deps = {}) {
         approved: outcome.approved === true,
         engine: outcome.engine,
         ...(typeof outcome.reason === 'string' ? { reason: outcome.reason } : {}),
+        ...(typeof outcome.message === 'string' ? { message: outcome.message } : {}),
         ...(Array.isArray(outcome.findings) ? { findings: outcome.findings } : {}),
         ...packetSize(outcome),
         ...loopResult(outcome),
