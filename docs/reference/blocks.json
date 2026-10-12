@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 65,
+  "block_count": 66,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -893,6 +893,19 @@
         "B61"
       ],
       "note": "root-added 2026-10-11; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/state/{block,registry,run,config-snapshot}.mjs, src/cli/block.mjs, src/util/forbidden.mjs, schema/code-forge.schema.json, docs/reference/config.md, docs/{how-it-works,concepts}.md, skill/references/{proof,code,ledger,security}.md, test/state/registry.test.mjs, test/util/forbidden.test.mjs, test/config/schema-coverage.test.mjs, test/engines/{codex-home,builders/argv-snapshots,builders/forbidden-rendering}.test.mjs"
+    },
+    "B62b": {
+      "title": "Worktree isolation, gates, reviews and the close check (issue #13 item 4): for a block with a worktree, gates run --block runs in the tree (--cwd must name the workspace's place in the tree, else exit 2; --cwd=<dir> is refused), {test_files} and the threshold count in the tree, gate rows name the tree; review-file queues in the main tree but hashes the tree's content, the ticket id includes the tree, and the worker reads content and the diff against worktree.base_sha from the run record's tree (a mismatch, a missing, malformed, off-branch or foreign tree is unavailable or refused); block close measures changed and unowned files in the tree against its base with no sibling or tree_at_open exemption; proof export and red-green build the export from the tree and never write to it, and proof lock is refused for a worktree block; nothing is pushed, merged or checked out, and the main tree's HEAD and index stay unchanged; blocks without a worktree behave as before",
+      "wave": 13,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "test/proof/worktree-flow.test.mjs"
+      ],
+      "depends_on": [
+        "B62a"
+      ],
+      "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/cli/{block,gates,proof,review-file}.mjs, src/proof/worktree.mjs, src/review/gate-check.mjs, src/worker/{engine,loop,queue,ticket}.mjs, test/proof/worktree.test.mjs, test/review/engine.test.mjs, test/worker/queue.test.mjs, docs/{how-it-works,concepts}.md, skill/references/{proof,review,code,ledger}.md"
     }
   }
 }

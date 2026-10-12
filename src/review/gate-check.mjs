@@ -671,17 +671,21 @@ const currentHash = (repoRoot, file) => (isOnDisk(repoRoot, file) ? contentHash(
  * A stopped block accounts for nothing. Paths match through {@link ownsPath} (globs as at `block
  * open`). A stamp that throws counts as not accounted (refused). A block opened before B52 has no
  * `tree_at_open`: null — nothing can tell the coder's changes from earlier ones, so the caller
- * warns that the check did not run (never a silent pass).
+ * warns that the check did not run (never a silent pass). B62b: `ownTree` (a block measured in
+ * its own worktree) drops every exemption but the block's own files and code-forge's state: the
+ * tree started clean at the block's base, so no `tree_at_open` stamp (taken in the main tree)
+ * applies, and no other block works there (another block's close measures only its own tree), so
+ * no sibling or closed block accounts for a change in it.
  * @param {{
  *   top: string, changed: ReadonlyArray<string>, id: string, blocks: Record<string, any>,
- *   rows: Array<Record<string, any>>, key: Buffer, isMine: (file: string) => boolean, owns?: (owned: ReadonlyArray<string>, file: string, kinds?: Readonly<Record<string, string>>) => boolean, stateDir?: string,
+ *   rows: Array<Record<string, any>>, key: Buffer, isMine: (file: string) => boolean, owns?: (owned: ReadonlyArray<string>, file: string, kinds?: Readonly<Record<string, string>>) => boolean, stateDir?: string, ownTree?: boolean,
  * }} opts `blocks`: the run record's `blocks`; `rows`: the run's ledger rows; `owns` (default {@link ownsPath}): how another block's `owned_files` (with its `owned_kinds`) match a path.
  * @returns {Promise<{unowned: string[], siblings: Array<{file: string, block: string}>} | null>}
  */
-export async function unownedChanges({ top, changed, id, blocks, rows, key, isMine, owns = ownsPath, stateDir = '.code-forge' }) {
-  const atOpen = blocks?.[id]?.tree_at_open;
+export async function unownedChanges({ top, changed, id, blocks, rows, key, isMine, owns = ownsPath, stateDir = '.code-forge', ownTree = false }) {
+  const atOpen = ownTree ? {} : blocks?.[id]?.tree_at_open;
   if (!atOpen || typeof atOpen !== 'object' || Array.isArray(atOpen)) return null;
-  const others = Object.entries(blocks ?? {}).filter(([other, b]) => other !== id && b && Array.isArray(b.owned_files));
+  const others = ownTree ? [] : Object.entries(blocks ?? {}).filter(([other, b]) => other !== id && b && Array.isArray(b.owned_files));
   /** @param {string} file @returns {boolean} */
   const approvedClosed = (file) => {
     let hash;

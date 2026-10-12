@@ -1,6 +1,7 @@
 /**
  * Review tickets (plan §4.8, V4; block B11): repo-root-relative paths, content hashes and ticket
- * ids. Pure functions plus the one `git rev-parse --show-toplevel` call.
+ * ids. Pure functions plus the `git rev-parse` calls that find the repository root (and, B62b,
+ * the main working tree of a linked worktree: `mainRootOf`).
  *
  * Path rule (V4): a ticket's `file` — and every `review.*` row the worker writes — is relative to
  * the REPOSITORY ROOT (realpath'd `git rev-parse --show-toplevel`), whatever directory the coder
@@ -8,8 +9,9 @@
  * `bad-path` before anything is written; so is a result outside the root or under `.git/` or
  * `.code-forge/`. A stored value is re-checked by `assertRowPath` (tickets are coder-writable).
  *
- * Ticket id = the first 24 hex chars of `sha256(run \0 block \0 file \0 content_hash)`: the same
- * content enqueued twice is the same ticket (idempotent), an edited file is a new one.
+ * Ticket id = the first 24 hex chars of `sha256(run \0 block \0 file \0 content_hash)`, plus
+ * `\0 tree` for content hashed in a block's worktree (B62b): the same content enqueued twice is
+ * the same ticket (idempotent), an edited file is a new one.
  */
 
 import { createHash } from 'node:crypto';
@@ -71,6 +73,39 @@ export async function repoRootOf(cwd) {
   const top = res.stdout.trim();
   if (res.result !== 'ok' || top.length === 0) throw new WorkerError('no-repo', 'not inside a git repository');
   return realpathSync(top);
+}
+
+/**
+ * B62b: the top level of the MAIN working tree of the repository containing `cwd`, realpath'd —
+ * `cwd`'s own top level ({@link repoRootOf}) unless `cwd` is inside a linked worktree (`git
+ * worktree add`), whose main tree is the first record `git worktree list` prints. The review queue
+ * and the worker live there, whichever tree the coder works in. A repository whose main entry is
+ * bare has no main working tree to hold them, and is refused.
+ * @param {string} cwd
+ * @returns {Promise<string>}
+ * @throws {WorkerError} `no-repo` (also for git older than 2.36), `bare-main`, `no-main-tree`
+ */
+export async function mainRootOf(cwd) {
+  const top = await repoRootOf(cwd);
+  const opts = { cwd, env: gitChildEnv(), timeoutMs: 10000 };
+  const dirs = await exec(['git', 'rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], opts);
+  if (dirs.result !== 'ok') throw new WorkerError('no-repo', `not inside a git repository, or git is older than 2.36 (code-forge needs git >= 2.36): ${dirs.stderr.trim()}`);
+  const [gitDir, commonDir] = dirs.stdout.split('\n');
+  if (!gitDir || !commonDir) throw new WorkerError('no-repo', 'git rev-parse printed no git directory');
+  if (realOrSelf(gitDir) === realOrSelf(commonDir)) return top;
+  const list = await exec(['git', 'worktree', 'list', '--porcelain', '-z'], opts);
+  if (list.result !== 'ok') throw new WorkerError('no-repo', `the main working tree of the repository cannot be listed (code-forge needs git >= 2.36): ${list.stderr.trim()}`);
+  // records end with an empty field; the first record is the main tree's
+  const first = list.stdout.split('\0\0')[0].split('\0');
+  const where = first.find((line) => line.startsWith('worktree '));
+  if (!where) throw new WorkerError('no-repo', 'git worktree list printed no main working tree');
+  if (first.includes('bare')) throw new WorkerError('bare-main', `the repository's main entry ${where.slice('worktree '.length)} is bare: it has no main working tree for the review queue`);
+  const main = where.slice('worktree '.length);
+  try {
+    return realpathSync(main);
+  } catch {
+    throw new WorkerError('no-main-tree', `the repository's main working tree ${main} does not exist (moved or removed): the review queue lives there`);
+  }
 }
 
 /**
@@ -187,9 +222,14 @@ export function readRegularFileNoFollow(repoRoot, file) {
 }
 
 /**
- * @param {{run: string, block: string, file: string, content_hash: string}} t
+ * B62b: a ticket that names the tree its content was hashed in (`tree`, a block's worktree) has
+ * the tree in its identity too — `sha256(run \0 block \0 file \0 content_hash \0 tree)` — so a
+ * main-tree ticket and a tree ticket for the same bytes are two tickets. Without a tree the id is
+ * the one from before B62b.
+ * @param {{run: string, block: string, file: string, content_hash: string, tree?: string | null}} t
  * @returns {string} the ticket id.
  */
-export function ticketId({ run, block, file, content_hash }) {
-  return createHash('sha256').update([run, block, file, content_hash].join('\0')).digest('hex').slice(0, 24);
+export function ticketId({ run, block, file, content_hash, tree = null }) {
+  const parts = tree === null ? [run, block, file, content_hash] : [run, block, file, content_hash, tree];
+  return createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 24);
 }

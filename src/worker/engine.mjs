@@ -40,9 +40,30 @@
  * The review NEVER approves an empty or failed session: that is `unavailable` (§4.2 stub guard).
  * A throw inside the round is `unavailable` too, with the state saved as `next: retry` (see
  * `fixLoopRound`): the next ticket re-runs that round, never a fresh round 1.
+ * B62b: for a block the run record gives a worktree (`proof.isolation: worktree`) every content
+ * read — the file, its diff against the block base, the peers' diffs, the fix hunks and the
+ * budget's file set — happens in that tree, against the tree's `base_sha` (`contentRootFor`; the
+ * tree comes from the run record, never from the coder-writable ticket), and the packet's facts
+ * slot names the tree and its branch. A file changed only in the main tree is never seen. The
+ * base, the tree and the facts come from ONE read of the run record. A ticket is `unavailable`
+ * with one of these reasons:
+ *  - `worktree-missing`: the recorded tree is gone;
+ *  - `worktree-not-dir`: its path is not a directory;
+ *  - `worktree-malformed`: no absolute path, a branch that is empty or has control characters, or
+ *    a base_sha that is not a full hex id;
+ *  - `worktree-branch-mismatch`: the tree is not on its recorded branch;
+ *  - `worktree-foreign`: the tree belongs to another repository;
+ *  - `worktree-workspace-missing`: the workspace's subdirectory is not in the tree;
+ *  - `worktree-mismatch`: the tree the worker hashed the ticket in (`ctx.contentRoot`, from the
+ *    ticket's `tree` or its absence) is not the record's tree;
+ *  - `git-failed`: git could not be run on the tree;
+ *  - `run-record-unreadable`: the record cannot be parsed, or names no workspace.
+ * A block without a worktree, or one the run record does not know, reads the main tree as before.
+ * The tree is passed as `contentRoot`: `repoRoot` stays the main tree, and the fix-loop state
+ * stays under the run root.
  */
 
-import { rmSync } from 'node:fs';
+import { realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { blockKind } from '../decide/escalation.mjs';
 import { askJev } from '../decide/jev-client.mjs';
@@ -53,16 +74,20 @@ import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { extraRoundsFor, newFileState, reopenForExtraRound, runRound } from '../review/fixloop.mjs';
 import { readRun } from '../state/run.mjs';
+import { StateError } from '../state/paths.mjs';
+import { blockTree, worktreeRecord } from '../proof/worktree.mjs';
 import { ledgerSchemaHistory } from '../review/schema-fallback.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
 import { keyedLock } from '../util/locks.mjs';
 import { blockAnchors, blockRungUsed, loadState, saveState } from './review-state.mjs';
-import { assertTicketId } from './ticket.mjs';
+import { assertTicketId, WorkerError } from './ticket.mjs';
 
 /**
  * @typedef {object} ReviewContext
- * @property {string} repoRoot
+ * @property {string} repoRoot - the main tree (the queue, the worker).
+ * @property {string} [contentRoot] - B62b: the tree the ticket's content is read in (the block's
+ *   worktree); `repoRoot` when absent.
  * @property {string} runId
  * @property {string} runRootDir - the run's temp root (packets and session dirs live under it).
  * @property {Record<string, any>} cfg - the project config.
@@ -110,14 +135,17 @@ import { assertTicketId } from './ticket.mjs';
  * of its owned files. `ownedKinds` is the recorded `owned_kinds` (B57: which exact entries were
  * regular files at `block open`/`claim`), `{}` when there is none (every exact entry directory-like).
  *   With no run record the kind is null: `reviewTicket` takes the ticket file's kind.
- * @returns {Promise<{base: string | null, level: string, owned: string[], ownedKinds: Record<string, string>, acceptance?: unknown, kind: string | null}>}
+ * `tree` (B62b) is the recorded `worktree` `{path, branch, base_sha}`, null when the block has
+ * none; `base` is then the tree's `base_sha`. A recorded worktree that `worktreeRecord` refuses
+ * (path, branch, hex base_sha) throws `worktree-malformed`.
+ * @returns {Promise<{base: string | null, level: string, owned: string[], ownedKinds: Record<string, string>, acceptance?: unknown, kind: string | null, tree: WorktreeEntry | null, workspace: string | null}>}
  */
 export async function blockEntryFor(runId, block) {
   let record;
   try {
     record = await readRun(runId);
   } catch (err) {
-    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], ownedKinds: {}, acceptance: undefined, kind: null };
+    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], ownedKinds: {}, acceptance: undefined, kind: null, tree: null, workspace: null };
     throw new Error('run-record-unreadable');
   }
   if (!record || typeof record !== 'object' || !record.blocks || typeof record.blocks !== 'object') throw new Error('run-record-unreadable');
@@ -128,7 +156,85 @@ export async function blockEntryFor(runId, block) {
   const owned = Array.isArray(entry.owned_files) ? entry.owned_files.filter((f) => typeof f === 'string') : [];
   const kinds = entry.owned_kinds;
   const ownedKinds = kinds && typeof kinds === 'object' && !Array.isArray(kinds) ? kinds : {};
-  return { base: sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }) };
+  /** @type {WorktreeEntry | null} */
+  let tree = null;
+  if (entry.worktree !== undefined && entry.worktree !== null) {
+    try {
+      tree = worktreeRecord(entry.worktree);
+    } catch {
+      throw new Error('worktree-malformed');
+    }
+  }
+  return { base: tree ? tree.base_sha : sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }), tree, workspace: typeof record.workspace === 'string' ? record.workspace : null };
+}
+
+/** @typedef {{path: string, branch: string, base_sha: string}} WorktreeEntry */
+
+/** The refusals of {@link blockTree} a ticket answers with, as its `reason`. */
+const TREE_CODES = new Set(['worktree-malformed', 'worktree-missing', 'worktree-not-dir', 'worktree-branch-mismatch', 'worktree-workspace-missing', 'worktree-foreign', 'git-failed']);
+
+/**
+ * B62b: where the content of a ticket of `block` is read — the top of the block's worktree from
+ * the run record (`blockTree`: present, a directory, on its recorded branch, of this repository),
+ * else `repoRoot`. `repoRoot` exactly as before B62b when there is no run record, the block is not
+ * in it, or it has no `worktree`: only a block WITH a worktree record can be refused here.
+ * @param {string} runId @param {string} block @param {string} repoRoot
+ * @returns {Promise<string>}
+ * @throws {WorkerError} a code of {@link TREE_CODES}, or `run-record-unreadable` for a record that
+ *   cannot be parsed or is not a record; any other failure (an I/O error) is rethrown.
+ */
+export async function contentRootFor(runId, block, repoRoot) {
+  let record;
+  try {
+    record = await readRun(runId);
+  } catch (err) {
+    if (/** @type {any} */ (err)?.code === 'no-run') return repoRoot;
+    if (err instanceof SyntaxError) throw new WorkerError('run-record-unreadable', `block ${block}: the run record cannot be read`);
+    throw err;
+  }
+  if (record === null || typeof record !== 'object') throw new WorkerError('run-record-unreadable', `block ${block}: the run record cannot be read`);
+  const blocks = record.blocks;
+  const entry = blocks && typeof blocks === 'object' && typeof block === 'string' && Object.hasOwn(blocks, block) ? blocks[block] : null;
+  if (entry?.worktree === undefined || entry.worktree === null) return repoRoot;
+  return treeTopOf(record.workspace, block, entry.worktree);
+}
+
+/**
+ * The realpath'd top of the recorded worktree `worktree` of `block` (`blockTree`).
+ * @param {string} workspace @param {string} block @param {unknown} worktree
+ * @returns {Promise<string>}
+ * @throws {WorkerError} a code of {@link TREE_CODES}; any other failure is rethrown.
+ */
+async function treeTopOf(workspace, block, worktree) {
+  if (typeof workspace !== 'string' || !path.isAbsolute(workspace)) throw new WorkerError('run-record-unreadable', `block ${block}: the run record names no workspace`);
+  try {
+    return /** @type {import('../proof/worktree.mjs').BlockTree} */ (await blockTree(workspace, { worktree })).top;
+  } catch (err) {
+    const code = /** @type {any} */ (err)?.code;
+    if (err instanceof StateError && TREE_CODES.has(code)) throw new WorkerError(code, `block ${block}: ${err.message}`);
+    throw err;
+  }
+}
+
+/** @param {string} p @returns {string} `p` realpath'd, or `p` itself when it cannot be resolved. */
+export function canonicalPath(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
+  }
+}
+
+/**
+ * The packet's facts slot: the acceptance clauses, and for a block with a worktree (B62b) a line
+ * naming the tree and its branch the file is reviewed in.
+ * @param {{acceptance?: unknown, tree: WorktreeEntry | null}} entry @param {Record<string, any> | undefined} cfg
+ * @returns {string}
+ */
+function factsFor(entry, cfg) {
+  const excerpt = acceptanceExcerpt(entry.acceptance, cfg);
+  if (!entry.tree) return excerpt;
+  return `${excerpt}\nWorktree: the file is reviewed as it is in the block's worktree ${redact(entry.tree.path)} (branch ${redact(entry.tree.branch)}), against the block base.`;
 }
 
 /** The acceptance line written when the block's clauses cannot be read. */
@@ -213,15 +319,30 @@ export async function reviewTicket(ticket, ctx) {
     return { status: 'unavailable', reason: err instanceof Error ? err.message : 'run-record-unreadable', approved: false, engine: 'adaptive', sessions: [] };
   }
   if (entry.kind === null) entry = { ...entry, kind: blockKind({ owned: [ticket.file] }) };
-  const peerDiffs = blockPeerDiffs(ctx.repoRoot, { base: entry.base, owned: entry.owned, ownedKinds: entry.ownedKinds, file: ticket.file });
+  // B62b: every content read of this ticket happens in the block's tree (the main tree without
+  // one), taken from the SAME entry as the base and the facts. The worker passes the tree it
+  // hashed the ticket in as `ctx.contentRoot`; a record that changed since names another tree.
+  let contentRoot;
+  try {
+    contentRoot = entry.tree ? await treeTopOf(entry.workspace, ticket.block, entry.tree) : ctx.repoRoot;
+  } catch (err) {
+    return { status: 'unavailable', reason: err instanceof WorkerError ? err.code : 'run-record-unreadable', approved: false, engine: 'adaptive', sessions: [] };
+  }
+  if (ctx.contentRoot !== undefined && canonicalPath(ctx.contentRoot) !== canonicalPath(contentRoot)) {
+    return { status: 'unavailable', reason: 'worktree-mismatch', approved: false, engine: 'adaptive', sessions: [] };
+  }
+  /** @type {ReviewContext} */
+  const tctx = { ...ctx, contentRoot };
+  const factsExcerpt = factsFor(entry, ctx.cfg);
+  const peerDiffs = blockPeerDiffs(contentRoot, { base: entry.base, owned: entry.owned, ownedKinds: entry.ownedKinds, file: ticket.file });
   try {
     if (!ctx.key) {
       return await reviewFile(
-        { repoRoot: ctx.repoRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg), peerDiffs },
+        { repoRoot: contentRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt, peerDiffs },
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, ctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt: acceptanceExcerpt(entry.acceptance, ctx.cfg), peerDiffs });
+    return await fixLoopRound(ticket, tctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt, peerDiffs });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -429,7 +550,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
     await runRound(
       state,
       {
-        repoRoot: ctx.repoRoot,
+        repoRoot: ctx.contentRoot ?? ctx.repoRoot,
         cfg: ctx.cfg,
         workDir,
         base,
@@ -440,7 +561,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         ...(jev ? { jev } : {}),
         ...(schemaHistory ? { schemaHistory } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
+          engineOutcome = await reviewFile({ repoRoot: ctx.contentRoot ?? ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
           return engineOutcome;
         },
         spawn: async (opts) => {
@@ -500,7 +621,7 @@ async function recordBlockBudget(ticket, ctx, { base, owned, ownedKinds }) {
     let changed = [];
     if (base !== null && owned.length > 0) {
       try {
-        changed = (await computeFileSet({ cwd: ctx.repoRoot, base })).all.filter((f) => ownsFile(owned, f, ownedKinds));
+        changed = (await computeFileSet({ cwd: ctx.contentRoot ?? ctx.repoRoot, base })).all.filter((f) => ownsFile(owned, f, ownedKinds));
       } catch {
         // no row on a git failure: a ticket-only forecast would be permanent (the row is written
         // once per block); the block's next keyed ticket retries

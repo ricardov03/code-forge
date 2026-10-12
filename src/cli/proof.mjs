@@ -20,6 +20,13 @@
  * `export` reads `proof.export.{link_dirs,copy_untracked}` from the workspace's `.code-forge.yml`
  * (defaults §1.3) and writes a signed `proof` row `isolation: export`; `lock`/`unlock` write
  * `isolation: lock` rows (B6 writer, B8 signer).
+ *
+ * B62b: for a block with a worktree, `export` and `red-green` read the block's files, the test
+ * and the base in its tree (`blockTree`, against the tree's `base_sha`) and measure in an export
+ * built FROM the tree into the main tree's `.code-forge/export/<block>` — never in the tree, which
+ * is left exactly as it was. The config still comes from the main tree. A recorded tree that is
+ * gone or malformed refuses (exit 1, `…; no proof was run`). `lock`, `unlock`, `restore` and
+ * `export --remove` touch only the run's lock and that export directory, as before.
  */
 
 import { lstat } from 'node:fs/promises';
@@ -35,6 +42,7 @@ import { DEFAULT_COPY_UNTRACKED, DEFAULT_LINK_DIRS, buildExport, exportDirFor, r
 import { acquireProofLock, lockHolder, releaseProofLock } from '../proof/lock.mjs';
 import { MECHANISMS, readJournal, restoreJournal, runRedGreen } from '../proof/red-green.mjs';
 import { tierFor } from '../proof/tiers.mjs';
+import { blockTree } from '../proof/worktree.mjs';
 import { blockFileSet, repoRelativePath } from '../review/gate-check.mjs';
 import { ownsFile } from '../state/registry.mjs';
 
@@ -117,23 +125,53 @@ async function configAt(cwd) {
 }
 
 /**
- * Build the block's measurement export and write its signed `proof` row (`step: export`).
- * @param {{runId: string, record: Record<string, any>, blockId: string, block: Record<string, any>, config: Record<string, any>, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
+ * @typedef {object} ProofPlace
+ * @property {string} dir - where the block's files, its test and its base are read: the workspace,
+ *   or the workspace's place in the block's worktree.
+ * @property {string} base - the block's `base_sha`, or its tree's.
+ * @property {string | null} tree - the block's worktree, null without one.
  */
-async function exportAndRecord({ runId, record, blockId, block, config, writeRow }) {
+
+/**
+ * B62b: where a block's proof is measured. A block without a worktree: the workspace and the
+ * block's base, as before. A block with one: its tree (`blockTree`) and the tree's `base_sha`. A
+ * recorded tree that is gone or malformed refuses (exit 1), as `gates run` does.
+ * @param {string} runId @param {Record<string, any>} record @param {string} blockId @param {Record<string, any>} block
+ * @returns {Promise<ProofPlace>}
+ * @throws {StateError} `worktree-*`
+ */
+async function proofPlace(runId, record, blockId, block) {
+  let wt;
+  try {
+    wt = await blockTree(record.workspace, block);
+  } catch (thrown) {
+    if (thrown instanceof StateError) throw new StateError(thrown.code, `block ${blockId} of run ${runId}: ${thrown.message}; no proof was run`);
+    throw thrown;
+  }
+  return wt === null ? { dir: record.workspace, base: block.base_sha, tree: null } : { dir: wt.workspace, base: wt.base_sha, tree: wt.path };
+}
+
+/**
+ * Build the block's measurement export and write its signed `proof` row (`step: export`). A block
+ * with a worktree is exported FROM its tree, into the main tree's `.code-forge/export/<block>`: the
+ * tree itself is never written to, and its row names it (`worktree`).
+ * @param {{runId: string, record: Record<string, any>, blockId: string, block: Record<string, any>, place: ProofPlace, config: Record<string, any>, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
+ */
+async function exportAndRecord({ runId, record, blockId, block, place, config, writeRow }) {
   const exp = await buildExport({
-    cwd: record.workspace,
+    cwd: place.dir,
     blockId,
-    baseSha: block.base_sha,
+    baseSha: place.base,
     owned: block.owned_files,
     ownedKinds: block.owned_kinds,
     linkDirs: config?.proof?.export?.link_dirs ?? DEFAULT_LINK_DIRS,
     copyUntracked: config?.proof?.export?.copy_untracked ?? DEFAULT_COPY_UNTRACKED,
+    exportRoot: place.tree === null ? undefined : path.dirname(exportDirFor(record.workspace, blockId)),
   });
   await recordProof({
     runId,
     writeRow,
-    row: { block: blockId, isolation: 'export', step: 'export', base_sha: exp.base, restored: exp.restored, untracked: exp.untracked },
+    row: { block: blockId, isolation: 'export', step: 'export', base_sha: exp.base, restored: exp.restored, untracked: exp.untracked, ...(place.tree === null ? {} : { worktree: place.tree }) },
   });
   return exp;
 }
@@ -193,6 +231,9 @@ export async function runProof(args, deps = {}) {
       const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
 
       if (sub === 'lock') {
+        // B62b: a block with its own tree never measures under the lock (see red-green)
+        const recorded = record.blocks?.[blockId]?.worktree;
+        if (recorded !== undefined && recorded !== null) throw new StateError('usage', `block ${blockId} is proven in an export built from its tree; proof lock does not apply`);
         out({ locked: await acquireProofLock({ runId, blockId, writeRow }) });
         return 0;
       }
@@ -210,8 +251,10 @@ export async function runProof(args, deps = {}) {
         return 0;
       }
       const config = await configAt(record.workspace);
-      if (config?.proof?.isolation === 'lock') throw new StateError('isolation-lock', 'proof.isolation is lock — use proof lock instead of an export');
-      out(await exportAndRecord({ runId, record, blockId, block, config, writeRow }));
+      const place = await proofPlace(runId, record, blockId, block);
+      // a block with its own tree is always proven in an export made from it (see red-green)
+      if (place.tree === null && config?.proof?.isolation === 'lock') throw new StateError('isolation-lock', 'proof.isolation is lock — use proof lock instead of an export');
+      out(await exportAndRecord({ runId, record, blockId, block, place, config, writeRow }));
       return 0;
     }
 
@@ -232,17 +275,20 @@ export async function runProof(args, deps = {}) {
       const record = await readRun(runId);
       const block = record.blocks?.[blockId];
       if (block?.status !== 'open') throw new StateError('no-block', `block ${blockId} is not open in run ${runId}`);
-      await assertTestFile(record.workspace, file);
+      const place = await proofPlace(runId, record, blockId, block);
+      await assertTestFile(place.dir, file);
       const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
       const config = await configAt(record.workspace);
-      const isolation = config?.proof?.isolation === 'lock' ? 'lock' : 'export';
+      // A block with its own tree is always proven in an export made from that tree (never in the
+      // tree itself, never under the lock), whatever the config says; otherwise lock or export.
+      const isolation = place.tree !== null ? 'export' : config?.proof?.isolation === 'lock' ? 'lock' : 'export';
       if (isolation === 'lock' && (await lockHolder(runId)) !== blockId) {
         throw new StateError('proof.busy', `proof.isolation is lock — run code-forge proof lock ${blockId} --run ${runId} first`);
       }
       // `revert` puts every changed non-test owned file back to base; `assertion-deletion` touches only the test.
       const changed = await blockFileSet({
-        repoRoot: record.workspace,
-        base: block.base_sha,
+        repoRoot: place.dir,
+        base: place.base,
         owned: block.owned_files,
         matchOwned: (f) => ownsFile(block.owned_files, f, block.owned_kinds),
       });
@@ -250,12 +296,12 @@ export async function runProof(args, deps = {}) {
       if (mechanism === 'revert' && sources.length === 0) {
         throw new StateError('usage', `block ${blockId} changed no non-test source file to revert — use --mechanism assertion-deletion`);
       }
-      const exp = isolation === 'export' ? await exportAndRecord({ runId, record, blockId, block, config, writeRow }) : null;
+      const exp = isolation === 'export' ? await exportAndRecord({ runId, record, blockId, block, place, config, writeRow }) : null;
       if (exp) await assertTestFile(exp.dir, file); // the test must also be where it runs (owned, or tracked at base)
       const result = await runRedGreen({
-        workDir: exp ? exp.dir : record.workspace,
-        repoDir: record.workspace,
-        base: block.base_sha,
+        workDir: exp ? exp.dir : place.dir,
+        repoDir: place.dir,
+        base: place.base,
         argv,
         test: { file, ...(testCase === undefined ? {} : { case: testCase }), characterization: mechanism === 'assertion-deletion' },
         sources,

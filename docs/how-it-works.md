@@ -84,12 +84,32 @@ another branch or a detached HEAD refuses the re-open.
 Two open blocks that each have a worktree, at different paths, may own the same path. A block without one is checked
 against every other open block as before. `block close <id> --run <run> --remove-worktree` removes
 the tree after a successful close with `git worktree remove` (never `--force`) and keeps the branch.
-It writes a signed `worktree.removed` row. A tree whose directory was already deleted by hand is
-pruned (`git worktree prune`) and counts as removed. A tree with uncommitted or untracked files stays where it
+It writes a signed `worktree.removed` row. A tree whose directory was already deleted by hand
+refuses the close itself (see below). A tree with uncommitted or untracked files stays where it
 is, with a `worktree.remove_failed` row and exit 1, and the block stays closed. Without the flag the
 tree stays. Coders may not use the flag. code-forge never pushes or merges, and never deletes a
-branch except one a failed open made itself. Until B62b, gates, reviews and the close check run as
-under export (from the main checkout) and do not see changes made only in the block's worktree.
+branch except one a failed open made itself.
+
+Gates, reviews and the close check of a worktree block run in its tree (B62b):
+
+- `gates run --run <run> --block <id>` runs the gates with the tree as cwd, and `{test_files}` and the
+  full-suite threshold count the files there. Its rows name the tree (`worktree: <path>`). A `--cwd`
+  other than the tree is refused (exit 2) and no gate runs.
+- `review-file` queues in the main tree, where the worker runs, but the worker reads the file and
+  its diff against the block's base in the tree. The ticket names the tree, and so does the packet. A
+  change made only in the main tree is never seen. The tree is part of the ticket id. A recorded tree
+  that is gone, or no longer on the block's branch, refuses `review-file` (exit 1, nothing queued).
+- `block close` runs no gate. It measures the changed and unowned files in the tree against its
+  base, committed and uncommitted. Changes in the main tree or another block's tree never count, and
+  inside the tree nothing is exempt: a file a sibling block owns, or one dirty in the main tree at
+  open, is unowned there too. A tree that is gone, or not on the block's branch, refuses the close;
+  nothing is recorded until it is restored.
+- `proof export` and `proof red-green` read the block's files and base in the tree, and run the
+  mutation proof in an export built from the tree (kept under the main tree's `.code-forge/export`),
+  so the tree itself is never changed.
+
+None of these pushes, merges or checks anything out: the work stays on the block's branch, and the
+main tree's HEAD and index do not move.
 
 ### Lanes and the plan check
 

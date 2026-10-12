@@ -86,8 +86,20 @@
  * `--force`; the branch is kept) only after the block closed, and writes a signed
  * `worktree.removed` or `worktree.remove_failed` row; a failed removal is exit 1 with the block
  * still closed. The flag on a block without a worktree, or on another subcommand, is a usage error
- * (exit 2). It is coder-forbidden (`CODER_ONLY_FORBIDDEN`). Gates, reviews and the close check
- * inside the tree are B62b: today they still run against the shared tree.
+ * (exit 2). It is coder-forbidden (`CODER_ONLY_FORBIDDEN`).
+ *
+ * B62b: `block close` of a block with a worktree measures that tree (`blockTree`), not the main
+ * one: the changed files (committed on the block's branch and uncommitted, against
+ * `worktree.base_sha`), the file set and its content hashes, and the unowned changes all come from
+ * the tree, by the same rules as for the main tree. A change in the main tree or in another
+ * block's tree never counts for the block. A fresh tree holds nothing but the block's own work,
+ * so every change in it is the block's: the `tree_at_open` stamps (taken in the main tree) do not
+ * exempt anything there, and a file another block owns is not left to that block (its close
+ * measures only its own tree) — a change in the tree to any file this block does not own is
+ * `unowned_change`. The whole close uses one base, the tree's `base_sha`. A tree that is gone,
+ * not a directory, without the workspace's subdirectory, or recorded malformed refuses the close
+ * before anything is asked or written. The ledger, the signed result files and the high paths stay
+ * in the main tree. Nothing is checked out, pushed or merged.
  *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
@@ -110,7 +122,7 @@ import { loadKey, verifyRow } from '../state/signer.mjs';
 import { blockFileSet, changedFiles, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { checkExpiry } from '../autopilot/grant.mjs';
 import { writeSafe } from '../util/redact.mjs';
-import { prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
+import { blockTree, prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
@@ -267,6 +279,18 @@ export async function runBlock(args, deps = {}) {
       // B62a: removing a tree the block does not have is a usage error, before anything runs
       const removeTree = flags['remove-worktree'] === true;
       if (removeTree && !entry.worktree) throw new StateError('usage', `block ${id} has no worktree (proof.isolation is not worktree); --remove-worktree does not apply`);
+      // B62b: the block's tree is where its work is measured — a tree that is gone refuses the close
+      // before anything is asked or written
+      const wt = await blockTree(record.workspace, entry).catch((thrown) => {
+        if (thrown?.code === 'worktree-missing') {
+          throw new StateError('worktree-missing', `block ${id}: its worktree ${entry.worktree.path} is gone (removed or moved), so its work cannot be measured — restore it on branch ${entry.worktree.branch} (git worktree prune, then git worktree add ${entry.worktree.path} ${entry.worktree.branch}) and close again; nothing was recorded`);
+        }
+        if (typeof thrown?.code === 'string' && thrown.code.startsWith('worktree-')) throw new StateError(thrown.code, `block ${id}: ${thrown.message}, so its work cannot be measured; nothing was recorded`);
+        throw thrown;
+      });
+      // ONE base for the whole close: a worktree block is measured against the commit its tree was
+      // made from (B62a keeps it equal to the block's base_sha: a re-open keeps it, a rebase is refused)
+      const base = wt !== null ? wt.base_sha : entry.base_sha;
       const reviewsWaived = flags['no-require-reviews'] === true;
       // B52: the human's way out is confirmed by the human, at a terminal, before anything is written
       if (reviewsWaived) {
@@ -285,25 +309,29 @@ export async function runBlock(args, deps = {}) {
       // relative `file` and keeps its queue and signed result files under `<top>/.code-forge/`
       // (`repoRootOf`), and `tree_at_open` is stamped there too. An owned entry matches a path
       // as given or, for a workspace in a subdirectory, relative to the workspace (`ownsAt`).
-      // A failure here is the usual `git-failed` refusal.
-      /** @type {Promise<{top: string, wsPrefix: string, owns: (owned: ReadonlyArray<string>, file: string) => boolean, changed: string[], fileSet: Array<{file: string, content_hash: string}>, reviewed: string[]}> | undefined} */
+      // A failure here is the usual `git-failed` refusal. B62b: for a block with a worktree the
+      // listing and the content are the tree's (`top`); `mainTop` keeps the run's state.
+      /** @type {Promise<{top: string, mainTop: string, where: string, inTree: boolean, wsPrefix: string, owns: (owned: ReadonlyArray<string>, file: string) => boolean, changed: string[], fileSet: Array<{file: string, content_hash: string}>, reviewed: string[]}> | undefined} */
       let treeOnce;
       const tree = () =>
         (treeOnce ??= (async () => {
-          const top = await repoTop(record.workspace);
+          const mainTop = await repoTop(record.workspace);
+          const inTree = wt !== null;
+          const top = inTree ? wt.top : mainTop;
+          const where = inTree ? `the worktree ${wt.path}` : 'the workspace';
           // both sides as realpaths: git prints the top resolved (/private/var on macOS) while the
           // run record may keep a symlinked spelling (/var)
           const real = async (/** @type {string} */ p) => realpath(p).catch(() => path.resolve(p));
-          const wsPrefix = path.relative(await real(top), await real(record.workspace)).split(path.sep).join('/');
+          const wsPrefix = path.relative(await real(mainTop), await real(record.workspace)).split(path.sep).join('/');
           const owns = ownsAt(wsPrefix);
           const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f, entry.owned_kinds);
-          const changed = await changedFiles({ repoRoot: top, base: entry.base_sha });
+          const changed = await changedFiles({ repoRoot: top, base });
           // the file set is the diff since base ∪ every owned file with review rows of this block —
           // work the diff cannot see (committed before `block open`, done in another worktree) is
-          // still checked, at its content in the workspace
+          // still checked, at its content in the workspace (in the block's worktree when it has one)
           const reviewed = reviewedFiles(rows, id).filter(isMine);
-          const fileSet = await blockFileSet({ repoRoot: top, base: entry.base_sha, owned: entry.owned_files, matchOwned: isMine, changed: [...new Set([...changed, ...reviewed])].sort() });
-          return { top, wsPrefix, owns, changed, fileSet, reviewed };
+          const fileSet = await blockFileSet({ repoRoot: top, base, owned: entry.owned_files, matchOwned: isMine, changed: [...new Set([...changed, ...reviewed])].sort() });
+          return { top, mainTop, where, inTree, wsPrefix, owns, changed, fileSet, reviewed };
         })());
       const reviews = reviewGateCheck(async () => {
         const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
@@ -314,13 +342,14 @@ export async function runBlock(args, deps = {}) {
         // the human's way out of the per-file review check leaves a signed audit row before the close
         if (reviewsWaived) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
         // B20: the high paths come first — a base the workspace does not know refuses the close here
-        const highPaths = await highPathsAt(record.workspace, entry.base_sha);
-        const { top, wsPrefix, owns, changed, fileSet, reviewed } = await tree();
+        const highPaths = await highPathsAt(record.workspace, base);
+        const { top, mainTop, where, inTree, wsPrefix, owns, changed, fileSet, reviewed } = await tree();
         const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f, entry.owned_kinds);
         const key = await loadKey(runId);
         // B52: an empty diff with review rows is never silent — name the likely cause
         if (reviewed.length > 0 && !changed.some(isMine)) {
-          err(`WARN block ${id}: no owned file differs from the block base in the workspace, but ${reviewed.length} owned file(s) have review rows — the work was likely committed before block open or done in another worktree; they are checked at their content in the workspace\n`);
+          const likely = inTree ? 'done outside the block\'s worktree (in the main checkout or another tree)' : 'committed before block open or done in another worktree';
+          err(`WARN block ${id}: no owned file differs from the block base in ${where}, but ${reviewed.length} owned file(s) have review rows — the work was likely ${likely}; they are checked at their content in ${where}\n`);
         }
         // B52: only code-forge's own state is exempt — `<top>/.code-forge/`, where the worker keeps
         // its queue and signed results — never a `--transcript` or `--report` path in the source
@@ -330,7 +359,9 @@ export async function runBlock(args, deps = {}) {
         // `.code-forge/runs/<run>/<id>.log`)
         const wsRel = (/** @type {string} */ p) => path.posix.join(wsPrefix, p);
         const ownState = new Set([wsRel(`.code-forge/runs/${runId}.json`), wsRel(`.code-forge/runs/${runId}/${id}.log`)]);
-        const scope = await unownedChanges({ top, changed: changed.filter((f) => !ownState.has(f)), id, blocks: record.blocks, rows, key, isMine, owns, stateDir: '.code-forge' });
+        // B62b: a block's own tree started clean at its base and no other block works in it — no
+        // stamp from the main tree and no other block's ownership exempts a change there
+        const scope = await unownedChanges({ top, changed: changed.filter((f) => !ownState.has(f)), id, blocks: record.blocks, rows, key, isMine, owns, stateDir: '.code-forge', ownTree: inTree });
         if (scope === null) err(`WARN block ${id}: opened before code-forge recorded the tree at block open; unowned changes were not checked\n`);
         for (const { file, block: other } of scope?.siblings ?? []) err(`WARN block ${id}: ${file} changed and is owned by open block ${other}; not checked here (its own gate reviews it)\n`);
         return {
@@ -342,7 +373,7 @@ export async function runBlock(args, deps = {}) {
           // B52: a change no block of the run owns is refused — `--no-require-reviews` does not lift it
           unowned: scope?.unowned ?? [],
           // B52: an old ledger's review.result rows are judged by their signed result files
-          resultFiles: await resultFilesFor({ repoRoot: top, runId, block: id, rows }),
+          resultFiles: await resultFilesFor({ repoRoot: mainTop, runId, block: id, rows }),
           files: reviewsWaived || external !== null ? [] : fileSet,
           // B52: nothing changed and nothing reviewed is never a pass (the owner's way out is
           // --no-require-reviews); B58: `review.external` does not lift it

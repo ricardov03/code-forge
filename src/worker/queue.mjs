@@ -9,10 +9,13 @@
  *
  * The forbidden list (§8.4 ★) denies a coder any write under `reviews/` and to `queue/*.done`;
  * the MAC makes an edit visible anyway (T1/T2). Writes are atomic (temp file + rename).
+ *
+ * B62b: `<repo>` is always the MAIN tree's top level, where the worker runs — a block with its own
+ * worktree still queues there; only the reviewed content is read in the block's tree.
  */
 
 import { randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
 import { isAlive, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
@@ -54,26 +57,48 @@ function readJSON(file) {
 }
 
 /**
- * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string}} Ticket
+ * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string}} Ticket
+ *   `tree` (B62b): the block's worktree the content was hashed in. It is part of the ticket id,
+ *   and the worker only checks it against the tree it takes from the run record (a ticket whose
+ *   tree is not that one is `unavailable`, `worktree-mismatch`); it never reads content there.
  */
 
 /**
  * Enqueue `file` (already repo-root-relative) for review. Idempotent by content hash: the same
- * content returns the same ticket and never rewrites it.
- * @param {{repoRoot: string, run: string, block: string, file: string, now?: Date}} opts
- * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string}}
+ * content returns the same ticket and never rewrites it. The queue is under `repoRoot`; the
+ * content is hashed under `tree` when given (B62b: the block's worktree, realpath'd here), else
+ * under `repoRoot`. The tree is part of the ticket id, so a main-tree ticket and a tree ticket for
+ * the same bytes differ, and the answer names the tree given here, never a stored value.
+ * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null, now?: Date}} opts
+ * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string}}
+ * @throws {WorkerError} `bad-path` for a relative `tree` or one that cannot be resolved.
  */
-export function enqueue({ repoRoot, run, block, file, now = new Date() }) {
+export function enqueue({ repoRoot, run, block, file, tree = null, now = new Date() }) {
   const rel = assertRowPath(file);
-  const content_hash = contentHash(repoRoot, rel);
-  const ticket = ticketId({ run, block, file: rel, content_hash });
+  const root = tree === null ? null : realTree(tree);
+  const content_hash = contentHash(root ?? repoRoot, rel);
+  const ticket = ticketId({ run, block, file: rel, content_hash, tree: root });
   const target = path.join(queueDir(repoRoot), `${ticket}.json`);
+  const named = root === null ? {} : { tree: root };
   if (!existsSync(target)) {
     /** @type {Ticket} */
-    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: now.toISOString() };
+    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: now.toISOString(), ...named };
     writeAtomic(target, `${JSON.stringify(body)}\n`);
   }
-  return { ticket, status: isDone(repoRoot, ticket) ? 'done' : 'queued', file: rel, content_hash };
+  return { ticket, status: isDone(repoRoot, ticket) ? 'done' : 'queued', file: rel, content_hash, ...named };
+}
+
+/**
+ * @param {string} tree @returns {string} `tree` realpath'd.
+ * @throws {WorkerError} `bad-path` when it is relative or cannot be resolved.
+ */
+function realTree(tree) {
+  if (!path.isAbsolute(tree)) throw new WorkerError('bad-path', `the content tree ${tree} is not an absolute path`);
+  try {
+    return realpathSync(tree);
+  } catch {
+    throw new WorkerError('bad-path', `the content tree ${tree} cannot be resolved`);
+  }
 }
 
 /** @param {string} repoRoot @param {string} ticket */
@@ -113,6 +138,7 @@ export function readTicket(repoRoot, id) {
   const t = readJSON(path.join(queueDir(repoRoot), `${assertTicketId(id)}.json`));
   if (!t || typeof t !== 'object') throw new WorkerError('bad-ticket', `ticket ${id} is not readable JSON`);
   assertRowPath(t.file);
+  if (t.tree !== undefined && (typeof t.tree !== 'string' || !path.isAbsolute(t.tree))) throw new WorkerError('bad-ticket', `ticket ${id} names a tree that is not an absolute path`);
   if (typeof t.run !== 'string' || typeof t.block !== 'string' || typeof t.content_hash !== 'string' || ticketId(t) !== id) {
     throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
   }

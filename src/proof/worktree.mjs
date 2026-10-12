@@ -19,13 +19,18 @@
  *                          `--base` flag of `block open`, else HEAD).
  *
  * Every git call is an argv array (never a shell) with the inherited `GIT_*` environment stripped
- * (`gitEnv`), like the other git calls of the package. Gates, reviews and the close check
- * inside the tree are B62b; this module only makes, reuses and removes trees. It never leaves
- * half a tree behind: a failed `git worktree add` deletes the branch it made, and a tree made for
- * an open that then fails to record is removed again (`rollback`).
+ * (`gitEnv`), like the other git calls of the package. It never leaves half a tree behind: a
+ * failed `git worktree add` deletes the branch it made, and a tree made for an open that then
+ * fails to record is removed again (`rollback`).
+ *
+ * B62b: {@link blockTree} says where a block with a tree does its work — `gates run --run --block`
+ * runs the gates there, `review-file` hashes the content there and the worker reviews it there,
+ * and `block close` measures that tree against its base. The run's state (the record, the ledger,
+ * the review queue and signed results under the main top level's `.code-forge/`) stays in the
+ * main tree, and nothing checks out, pushes or merges: the work stays on the block's branch.
  */
 
-import { lstatSync, realpathSync } from 'node:fs';
+import { lstatSync, realpathSync, statSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { configInForce } from '../state/config-snapshot.mjs';
@@ -365,4 +370,113 @@ async function repoTopOf(cwd) {
   const res = await git(['git', 'rev-parse', '--show-toplevel'], cwd);
   if (res.result !== 'ok') throw new StateError('git-failed', `git rev-parse --show-toplevel failed (${gitReason(res)})`);
   return realpathSync(res.stdout.trim());
+}
+
+/**
+ * @typedef {{top: string, workspace: string, path: string, branch: string, base_sha: string}} BlockTree
+ *   `top`: the tree's top level, realpath'd; `workspace`: the run's workspace at its place in the
+ *   tree (the tree itself, or the same subdirectory of it when the workspace is a subdirectory of
+ *   the main tree); `path`, `branch`, `base_sha`: as the block entry records them.
+ */
+
+/**
+ * B62b: where the block `entry` of the run whose workspace is `workspace` does its work — null for
+ * a block without a `worktree` record (export and lock runs, and blocks opened before B62a).
+ * @param {string} workspace - the run record's `workspace` (in the main tree).
+ * @param {Record<string, any> | undefined} entry - the run record's block entry.
+ * The messages name the tree but not the block or what was skipped: each caller adds those.
+ * @returns {Promise<BlockTree | null>} null exactly when the entry has no `worktree` record.
+ * @throws {StateError} `worktree-malformed` ({@link worktreeRecord}); `worktree-missing` when the
+ *   recorded tree is gone; `worktree-not-dir` when its path is not a directory;
+ *   `worktree-branch-mismatch` when the tree is not on its recorded branch (another branch, a
+ *   detached HEAD, or a plain directory that is no git worktree); `worktree-workspace-missing`
+ *   when the workspace's subdirectory is not in the tree; `worktree-foreign` when the tree belongs
+ *   to another repository (its git common dir is not the workspace's); `git-failed` when git
+ *   cannot run (a timeout, a spawn error) or the main top level cannot be read.
+ */
+export async function blockTree(workspace, entry) {
+  if (entry?.worktree === undefined || entry.worktree === null) return null;
+  const tree = worktreeRecord(entry.worktree);
+  let top;
+  try {
+    top = realpathSync(tree.path);
+  } catch {
+    throw new StateError('worktree-missing', `the worktree ${tree.path} is gone (removed or moved)`);
+  }
+  if (!statSync(top).isDirectory()) throw new StateError('worktree-not-dir', `the worktree ${tree.path} is not a directory`);
+  await assertOnBranch(top, tree);
+  if ((await commonDirOf(top)) !== (await commonDirOf(workspace))) throw new StateError('worktree-foreign', `the worktree ${tree.path} belongs to another repository`);
+  const rel = path.relative(await repoTopOf(workspace), real(workspace));
+  if (rel.startsWith('..') || path.isAbsolute(rel)) throw new StateError('worktree-workspace-missing', `the run's workspace ${workspace} is not inside its repository, so it has no place in the worktree ${tree.path}`);
+  const inTree = rel === '' ? top : path.join(top, rel);
+  if (rel !== '' && !isDirectory(inTree)) throw new StateError('worktree-workspace-missing', `the worktree ${tree.path} has no ${rel} directory (the run's workspace)`);
+  return { top, workspace: inTree, path: tree.path, branch: tree.branch, base_sha: tree.base_sha };
+}
+
+/** A full hex object id: SHA-1 (40 hex digits) or SHA-256 (64). */
+const OBJECT_ID = /^(?:[0-9a-f]{40}|[0-9a-f]{64})$/;
+/** A control character (newlines included). */
+const CONTROL = /[\u0000-\u001f\u007f]/;
+
+/**
+ * B62b: a block's recorded `worktree`, checked before any of it reaches a path or git: an absolute
+ * `path` without control characters, a non-empty `branch` without control characters, and a `base_sha` that is a full hex
+ * object id (so it can never be read as a git option).
+ * @param {unknown} recorded
+ * @returns {{path: string, branch: string, base_sha: string}}
+ * @throws {StateError} `worktree-malformed`
+ */
+export function worktreeRecord(recorded) {
+  const t = /** @type {Record<string, unknown>} */ (recorded);
+  const ok =
+    t !== null &&
+    typeof t === 'object' &&
+    typeof t.path === 'string' &&
+    path.isAbsolute(t.path) &&
+    !CONTROL.test(t.path) &&
+    typeof t.branch === 'string' &&
+    t.branch.length > 0 &&
+    !CONTROL.test(t.branch) &&
+    typeof t.base_sha === 'string' &&
+    OBJECT_ID.test(t.base_sha);
+  if (!ok) throw new StateError('worktree-malformed', 'malformed worktree record (it needs an absolute path, a branch and a base_sha)');
+  return { path: /** @type {string} */ (t.path), branch: /** @type {string} */ (t.branch), base_sha: /** @type {string} */ (t.base_sha) };
+}
+
+/**
+ * The tree at `top` must still be on its recorded branch: a read-only `git symbolic-ref -q HEAD`
+ * that does not look above `top`, so a plain directory is never taken for a tree.
+ * @param {string} top - realpath'd @param {{path: string, branch: string}} tree
+ * @throws {StateError} `worktree-branch-mismatch`; `git-failed` when git cannot run (a timeout, a
+ *   spawn error, a signal) — that is never read as a branch mismatch.
+ */
+async function assertOnBranch(top, tree) {
+  const res = await exec(['git', '-C', top, 'symbolic-ref', '-q', 'HEAD'], { cwd: top, env: { ...gitEnv(), GIT_CEILING_DIRECTORIES: path.dirname(top) }, timeoutMs: GIT_TIMEOUT_MS });
+  if (res.timedOut || res.error !== undefined || res.signal !== null) {
+    throw new StateError('git-failed', `git symbolic-ref HEAD could not run in the worktree ${tree.path} (${res.timedOut ? 'timed out' : (res.error ?? `killed by ${res.signal}`)})`);
+  }
+  const head = res.result === 'ok' ? res.stdout.trim() : null;
+  if (head === `refs/heads/${tree.branch}`) return;
+  const now = head === null ? 'its HEAD is detached, or it is not a git worktree' : `it is on ${head.startsWith('refs/heads/') ? head.slice('refs/heads/'.length) : head}`;
+  throw new StateError('worktree-branch-mismatch', `the worktree ${tree.path} is not on its branch ${tree.branch} (${now})`);
+}
+
+/**
+ * @param {string} cwd @returns {Promise<string>} the realpath of the git common dir of the
+ *   repository at `cwd` (the main `.git`, which all of its worktrees share).
+ * @throws {StateError} `git-failed`
+ */
+async function commonDirOf(cwd) {
+  const res = await git(['git', 'rev-parse', '--path-format=absolute', '--git-common-dir'], cwd);
+  if (res.result !== 'ok') throw new StateError('git-failed', `git rev-parse --git-common-dir failed in ${cwd} (${gitReason(res)})`);
+  return real(res.stdout.trim());
+}
+
+/** @param {string} p @returns {boolean} whether `p` is a directory (following symlinks). */
+function isDirectory(p) {
+  try {
+    return statSync(p).isDirectory();
+  } catch {
+    return false;
+  }
 }

@@ -23,13 +23,28 @@
  * down on two polls in a row, and a worker whose pid is alive with a fresh heartbeat is never down
  * (`liveWorker`, B30). Output is one JSON line on stdout.
  * Exit codes: 0 queued/done/pending, 1 bad-path or another refusal, 2 usage, 3 worker_down.
+ *
+ * B62b: the queue and the worker are always the MAIN tree's (`mainRootOf`), also when the coder
+ * runs `review-file` inside a block's worktree. For a block the run record gives a worktree
+ * (`proof.isolation: worktree`), the content is hashed in that tree — never in the main tree — and
+ * the ticket and the answer carry `tree: <tree top level>`; the worker reviews the same tree. The
+ * path is still given relative to the current directory, inside the tree it is called from, and is
+ * re-checked in the tree the content is read from. A block the record gives no worktree is hashed
+ * in the main tree, wherever `review-file` is called. When the run record does not exist here or
+ * cannot be opened (a sandboxed coder), the content is hashed in the tree `review-file` is called
+ * from, which is the block's tree when the coder works there. A record naming a worktree that is
+ * gone or malformed is refused (exit 1, `reason: worktree-missing|worktree-malformed|…`), and
+ * nothing is queued.
  */
 
-import { readFileSync, rmSync } from 'node:fs';
+import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { enqueue, isDone, liveWorker, queueDir } from '../worker/queue.mjs';
-import { assertBlockId, assertTicketId, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
+import { assertBlockId, assertInsideRoot, assertTicketId, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
+import { StateError } from '../state/paths.mjs';
+import { readRun } from '../state/run.mjs';
+import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
 const USAGE = 'usage: code-forge review-file <path> --block <id> [--run <id>] | review-file --wait <ticket> [--max <seconds>s]\n';
@@ -60,6 +75,39 @@ function doneResult(repoRoot, ticket) {
     return JSON.parse(readFileSync(path.join(repoRoot, rel), 'utf8'));
   } catch {
     return null;
+  }
+}
+
+/**
+ * B62b: where the block `block` of run `runId` keeps its content, from the run record (read from
+ * the user's state dir, `~/.code-forge/runs`, whatever the current directory): `{top}` with the
+ * top level of its worktree, realpath'd; `{top: null}` when the record gives the block no worktree
+ * (then the main tree, never the tree `review-file` is called from); null when the record does
+ * not exist here or cannot be opened (a sandboxed coder: no such file, or no permission) — only
+ * then is the content hashed in the tree `review-file` is called from, and the worker refuses a
+ * ticket hashed in the wrong tree. A record that names a worktree which cannot be used (gone,
+ * moved, malformed, off its branch) is refused, and so is a record that cannot be parsed or is not
+ * a record (`run-record-unreadable`): nothing is queued. Any other failure is rethrown.
+ * @param {string} runId @param {string} block
+ * @returns {Promise<{top: string | null} | null>}
+ * @throws {WorkerError} a `worktree-*` code, or `run-record-unreadable`.
+ */
+async function blockTreeOf(runId, block) {
+  let record;
+  try {
+    record = await readRun(runId);
+  } catch (err) {
+    const code = /** @type {{code?: unknown}} */ (err)?.code;
+    if (code === 'no-run' || code === 'EACCES' || code === 'EPERM') return null;
+    if (!(err instanceof SyntaxError)) throw err;
+    record = null;
+  }
+  if (record === null || typeof record !== 'object') throw new WorkerError('run-record-unreadable', `the run record of ${runId} cannot be read (corrupt or not a record); nothing was queued`);
+  try {
+    return { top: (await blockTree(record.workspace, record.blocks?.[block]))?.top ?? null };
+  } catch (err) {
+    if (err instanceof StateError) throw new WorkerError(err.code, `block ${block}: ${err.message}; nothing was queued`);
+    throw err;
   }
 }
 
@@ -103,7 +151,8 @@ export async function runReviewFile(args, deps = {}) {
   const cwd = deps.cwd ?? process.cwd();
   try {
     const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'max'] });
-    const repoRoot = await repoRootOf(cwd);
+    // the queue and the worker: the main tree, also from inside a block's worktree
+    const repoRoot = await mainRootOf(cwd);
 
     if (typeof flags.wait === 'string') {
       if (positionals.length > 0 || flags.block !== undefined) throw new WorkerError('usage', '--wait takes only a ticket and --max');
@@ -132,18 +181,24 @@ export async function runReviewFile(args, deps = {}) {
 
     if (positionals.length !== 1 || typeof flags.block !== 'string' || flags.max !== undefined) throw new WorkerError('usage', 'give one path and --block');
     const block = assertBlockId(flags.block);
-    const file = normalizeRequestPath(positionals[0], cwd, repoRoot);
+    const file = normalizeRequestPath(positionals[0], cwd, await repoRootOf(cwd));
     const worker = liveWorker(repoRoot);
     if (!worker || (typeof flags.run === 'string' && flags.run !== worker.run)) {
       say({ status: 'worker_down', file });
       return 3;
     }
-    const queued = enqueue({ repoRoot, run: worker.run, block, file });
+    // the content: the block's worktree when the record gives one, the main tree when it gives
+    // none; only a record that cannot be opened here falls back to the tree review-file is called from
+    const recorded = await blockTreeOf(worker.run, block);
+    const tree = recorded === null ? await repoRootOf(cwd) : (recorded.top ?? repoRoot);
+    assertInsideRoot(tree, file); // the path, re-checked in the tree its content is read from
+    const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree };
+    const queued = enqueue({ repoRoot, run: worker.run, block, file, ...where });
     if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'unavailable') {
       // `unavailable` is never approval AND never final: drop the done marker so the worker runs
       // the ticket again (the fix loop re-runs its pending round); the signed result is replaced.
       rmSync(path.join(queueDir(repoRoot), `${queued.ticket}.done`), { force: true });
-      say({ ...enqueue({ repoRoot, run: worker.run, block, file }), retry: true });
+      say({ ...enqueue({ repoRoot, run: worker.run, block, file, ...where }), retry: true });
       return 0;
     }
     say(queued);

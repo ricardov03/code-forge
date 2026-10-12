@@ -1,12 +1,13 @@
-import { cli, makeRepo, queued } from './helpers.mjs';
+import { cli, freshDir, makeRepo, queued } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync, symlinkSync, writeFileSync } from 'node:fs';
+import { readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
 const { announceWorker, enqueue, retractWorker, verifyResult, writeResult, reviewsDir } = await import('../../src/worker/queue.mjs');
 const { loadKey } = await import('../../src/state/signer.mjs');
-const { contentHash, normalizeRequestPath } = await import('../../src/worker/ticket.mjs');
+const { contentHash, gitChildEnv, normalizeRequestPath, ticketId } = await import('../../src/worker/ticket.mjs');
+const { exec } = await import('../../src/util/exec.mjs');
 
 describe('review-file enqueue (V4 paths, timing, worker_down)', () => {
   test('enqueue from the repo root returns {ticket, status: queued} in < 1 s', async () => {
@@ -103,6 +104,39 @@ describe('review-file enqueue (V4 paths, timing, worker_down)', () => {
     const edited = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
     assert.notEqual(edited.ticket, first.ticket);
     assert.equal(queued(repo, 'json').length, 2);
+  });
+
+  test('B62b: a ticket hashed in a real worktree hashes the tree\'s bytes, has the tree in its id and names the realpath\'d tree; the answer never echoes the stored tree; a relative or missing tree is bad-path', async () => {
+    const { repo, runId } = await makeRepo();
+    const tree = `${repo}-tree`;
+    for (const args of [['add', '-A'], ['commit', '-q', '-m', 'files'], ['worktree', 'add', '-q', '-b', 'side', tree]]) {
+      const res = await exec(['git', '-c', 'user.name=Fake Tester', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 });
+      assert.equal(res.result, 'ok', res.stderr);
+    }
+    writeFileSync(path.join(tree, 'src', 'a.mjs'), 'export const a = "tree";\n');
+    const treeHash = contentHash(tree, 'src/a.mjs');
+    const mainHash = contentHash(repo, 'src/a.mjs');
+    assert.notEqual(treeHash, mainHash);
+    const realTree = realpathSync(tree);
+    const id = ticketId({ run: runId, block: 'B11', file: 'src/a.mjs', content_hash: treeHash, tree: realTree });
+    const first = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs', tree });
+    assert.deepEqual(first, { ticket: id, status: 'queued', file: 'src/a.mjs', content_hash: treeHash, tree: realTree });
+    // the main tree's ticket for the same file: the main tree's bytes, no tree, another ticket
+    const main = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
+    assert.deepEqual(main, { ticket: ticketId({ run: runId, block: 'B11', file: 'src/a.mjs', content_hash: mainHash }), status: 'queued', file: 'src/a.mjs', content_hash: mainHash });
+    // the very same bytes in the main tree are still another ticket than the tree's
+    writeFileSync(path.join(repo, 'src', 'a.mjs'), readFileSync(path.join(tree, 'src', 'a.mjs')));
+    const same = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
+    assert.deepEqual([same.content_hash, same.ticket === id, Object.hasOwn(same, 'tree')], [treeHash, false, false]);
+    // a coder-edited stored tree is never echoed; a symlink to the tree is the tree (realpath'd)
+    const stored = path.join(repo, '.code-forge', 'queue', `${id}.json`);
+    writeFileSync(stored, JSON.stringify({ ...JSON.parse(readFileSync(stored, 'utf8')), tree: '/elsewhere' }));
+    const link = path.join(freshDir('link'), 'tree');
+    symlinkSync(tree, link);
+    assert.deepEqual(enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs', tree: link }), first);
+    assert.throws(() => enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/b.mjs', tree: 'rel/tree' }), { code: 'bad-path', message: 'the content tree rel/tree is not an absolute path' });
+    assert.throws(() => enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/b.mjs', tree: `${repo}-gone` }), { code: 'bad-path', message: `the content tree ${repo}-gone cannot be resolved` });
+    assert.deepEqual(queued(repo, 'json'), [id, main.ticket, same.ticket].sort());
   });
 });
 

@@ -7,8 +7,9 @@ import { test } from 'node:test';
 // B62a (issue #13 item 4): `proof.isolation: worktree` gives each block its own git worktree on its
 // own branch, made by `block open` and removed on request by `block close --remove-worktree`. These
 // tests run real `git worktree` in temp repositories and pin paths, branches, rows, exit codes and
-// messages. Gates, reviews and the close check inside the tree are B62b: the closes below run their
-// checks in the main tree, under `review.external` so no local review is needed.
+// messages. Since B62b a close measures the block's tree (test/proof/worktree-flow.test.mjs), so
+// the work of the closes below is written in the tree, under `review.external` so no local review
+// is needed.
 
 const { runRun } = await import('../../src/cli/run.mjs');
 const { runBlock } = await import('../../src/cli/block.mjs');
@@ -16,7 +17,7 @@ const { readAllRows } = await import('../../src/ledger/write.mjs');
 const { readRun, reloadRun, saveRun } = await import('../../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
-const { DEFAULT_BRANCH_TEMPLATE, prepareWorktree, worktreeSettings } = await import('../../src/proof/worktree.mjs');
+const { DEFAULT_BRANCH_TEMPLATE, blockTree, prepareWorktree, removeWorktree, worktreeSettings } = await import('../../src/proof/worktree.mjs');
 const { exec } = await import('../../src/util/exec.mjs');
 const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 
@@ -278,7 +279,9 @@ test('B62a (4): block close --remove-worktree removes the tree after the close, 
   const fx = await fixture('b62a-remove', 'r-b62a-remove');
   const tree = `${fx.repo}-worktrees/B1`;
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
-  writeFile(fx.repo, 'src/a.mjs', 'export const a = 2;\n');
+  writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
+  await git(['commit', '-q', '-am', 'tree work'], tree);
+  const work = await fx.branchSha('forge/r-b62a-remove/B1');
   assert.deepEqual(await fx.close('B1', ['--remove-worktree']), [0, `block B1 closed\nblock B1 worktree removed: ${tree} (branch forge/r-b62a-remove/B1 kept)\n`]);
   const rows = await fx.rows();
   assert.deepEqual(rows.map((r) => r.event).slice(-3), ['gate.reviews_waived', 'block.close', 'worktree.removed']);
@@ -286,16 +289,17 @@ test('B62a (4): block close --remove-worktree removes the tree after the close, 
   assert.deepEqual(verifyRow(rows.at(-1) ?? {}, await loadKey('r-b62a-remove')), { ok: true });
   assert.equal(existsSync(tree), false);
   assert.deepEqual(await registered(fx.repo), [fx.repo]);
-  assert.equal(await fx.branchSha('forge/r-b62a-remove/B1'), fx.head);
+  assert.notEqual(work, fx.head);
+  assert.equal(await fx.branchSha('forge/r-b62a-remove/B1'), work);
   assert.equal((await readRun('r-b62a-remove')).blocks.B1.status, 'closed');
 });
 
-test('B62a (4): a tree with untracked files is not removed — signed worktree.remove_failed, exit 1, the block stays closed, the tree stays', async () => {
+test('B62a (4): a tree with uncommitted work is not removed — signed worktree.remove_failed, exit 1, the block stays closed, the tree stays', async () => {
   const fx = await fixture('b62a-dirty', 'r-b62a-dirty');
   const tree = `${fx.repo}-worktrees/B1`;
-  assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
+  assert.equal((await fx.open('B1', ['src/a.mjs', 'notes.txt']))[0], 0);
   writeFile(tree, 'notes.txt', 'not committed\n');
-  writeFile(fx.repo, 'src/a.mjs', 'export const a = 2;\n');
+  writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
   const [code, text] = await fx.close('B1', ['--remove-worktree']);
   assert.equal(code, 1, text);
   // our own framing is exact; git's reason only has to name the tree and say why
@@ -319,7 +323,7 @@ test('B62a (4): without --remove-worktree the tree stays; the flag on a block wi
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   assert.deepEqual(await cli(runBlock, ['stop', 'B1', '--run', 'r-b62a-keep', '--reason', 'x', '--remove-worktree']), [2, 'block stop: --remove-worktree is a block close flag\n']);
   assert.deepEqual(await cli(runBlock, ['open', 'B2', '--run', 'r-b62a-keep', '--level', 'L2', '--owned', 'src/b.mjs', '--acceptance', ACC, '--remove-worktree']), [2, 'block open: --remove-worktree is a block close flag\n']);
-  writeFile(fx.repo, 'src/a.mjs', 'export const a = 2;\n');
+  writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
   assert.deepEqual(await fx.close('B1'), [0, 'block B1 closed\n']);
   assert.equal(existsSync(path.join(tree, 'src/a.mjs')), true);
   assert.equal((await fx.events()).some((e) => e.startsWith('worktree.r')), false);
@@ -494,18 +498,23 @@ test('B62a (2): a branch made between the plan and make() refuses the open with 
   assert.deepEqual(await registered(repo), [repo]);
 });
 
-test('B62a (4): block close --remove-worktree on a tree whose directory was deleted by hand prunes it and writes worktree.removed, not remove_failed', async () => {
+test('B62a/B62b (4): a tree whose directory was deleted by hand refuses block close (its work cannot be measured; nothing recorded), and removeWorktree prunes such a tree', async () => {
   const fx = await fixture('b62a-gone', 'r-b62a-gone');
   const tree = `${fx.repo}-worktrees/B1`;
   const branch = 'forge/r-b62a-gone/B1';
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   rmSync(tree, { recursive: true, force: true });
-  writeFile(fx.repo, 'src/a.mjs', 'export const a = 2;\n');
-  assert.deepEqual(await fx.close('B1', ['--remove-worktree']), [0, `block B1 closed\nblock B1 worktree removed: ${tree} (branch ${branch} kept)\n`]);
-  const rows = await fx.rows();
-  assert.deepEqual(rows.map((r) => r.event).slice(-2), ['block.close', 'worktree.removed']);
-  assert.equal(rows.some((r) => r.event === 'worktree.remove_failed'), false);
-  assert.deepEqual(strip(rows.at(-1) ?? {}), { run: 'r-b62a-gone', event: 'worktree.removed', block: 'B1', path: tree, branch, tokens_source: null, cost_source: null });
+  const before = await fx.events();
+  assert.deepEqual(await fx.close('B1', ['--remove-worktree']), [
+    1,
+    `block close: block B1: its worktree ${tree} is gone (removed or moved), so its work cannot be measured — restore it on branch ${branch} (git worktree prune, then git worktree add ${tree} ${branch}) and close again; nothing was recorded\n`,
+  ]);
+  assert.deepEqual(await fx.events(), before);
+  assert.equal((await readRun('r-b62a-gone')).blocks.B1.status, 'open');
+  // the refused close pruned nothing: git still lists the vanished tree until the removal
+  assert.deepEqual(await registered(fx.repo), [fx.repo, tree]);
+  // the removal itself still treats a vanished (prunable) tree as removed
+  assert.equal(await removeWorktree({ cwd: fx.repo, worktree: { path: tree, branch, base_sha: fx.head } }), null);
   assert.deepEqual(await registered(fx.repo), [fx.repo]);
   assert.equal(await fx.branchSha(branch), fx.head);
 });
@@ -588,4 +597,85 @@ test('B62a (2): prepareWorktree refuses a block id that is not one plain path se
   const planned = await prepareWorktree({ cwd: repo, settings, runId: 'r-seg', id: 'B1', baseSha: head, previous: null });
   assert.equal(planned.path, `${repo}-worktrees/B1`);
   assert.equal(existsSync(planned.path), false);
+});
+
+test('B62b: blockTree resolves a block\'s tree at the workspace\'s place in it, null without one; a malformed record (a base_sha that is not a full hex id, a branch with control characters), a missing tree, a file, a tree off its branch or a plain directory, or a tree without the workspace directory each refuse with their own code and message', async () => {
+  const repo = await makeRepo();
+  writeFile(repo, 'pkg/index.mjs', 'export {};\n');
+  await commitAll(repo);
+  const head = (await git(['rev-parse', 'HEAD'], repo)).trim();
+  const tree = `${repo}-tree`;
+  await git(['worktree', 'add', '-q', '-b', 'side', tree, 'HEAD'], repo);
+  const good = { path: tree, branch: 'side', base_sha: head };
+  assert.equal(await blockTree(repo, {}), null);
+  assert.equal(await blockTree(repo, { worktree: null }), null);
+  assert.deepEqual(await blockTree(repo, { worktree: good }), { top: tree, workspace: tree, path: tree, branch: 'side', base_sha: head });
+  assert.deepEqual(await blockTree(path.join(repo, 'pkg'), { worktree: good }), { top: tree, workspace: path.join(tree, 'pkg'), path: tree, branch: 'side', base_sha: head });
+  const malformed = { code: 'worktree-malformed', message: 'malformed worktree record (it needs an absolute path, a branch and a base_sha)' };
+  const bad = [
+    'x',
+    { ...good, base_sha: '' },
+    { ...good, base_sha: undefined },
+    { ...good, base_sha: '--output=x' },
+    { ...good, base_sha: head.slice(0, 12) },
+    { ...good, base_sha: head.toUpperCase() },
+    { ...good, base_sha: `${head}\n` },
+    { ...good, branch: '' },
+    { ...good, branch: 'side\nmain' },
+    { ...good, branch: 'side\u0007' },
+    { ...good, branch: 7 },
+    { ...good, path: 'rel/tree' },
+    { ...good, path: `${tree}\n` },
+    { ...good, path: `${tree}\u0000x` },
+  ];
+  for (const worktree of bad) {
+    await assert.rejects(blockTree(repo, { worktree }), malformed);
+  }
+  // a SHA-256 object id is a full hex id too
+  assert.equal((await blockTree(repo, { worktree: { ...good, base_sha: 'a'.repeat(64) } }))?.base_sha, 'a'.repeat(64));
+  // the tree must be on its recorded branch: another branch, a detached HEAD, a plain directory
+  const offBranch = (now) => ({ code: 'worktree-branch-mismatch', message: `the worktree ${tree} is not on its branch side (${now})` });
+  await git(['checkout', '-q', '-b', 'other'], tree);
+  await assert.rejects(blockTree(repo, { worktree: good }), offBranch('it is on other'));
+  await git(['checkout', '-q', '--detach'], tree);
+  await assert.rejects(blockTree(repo, { worktree: good }), offBranch('its HEAD is detached, or it is not a git worktree'));
+  await git(['checkout', '-q', 'side'], tree);
+  assert.equal((await blockTree(repo, { worktree: good }))?.top, tree);
+  const plain = `${repo}-plain`;
+  mkdirSync(plain);
+  await assert.rejects(blockTree(repo, { worktree: { ...good, path: plain } }), {
+    code: 'worktree-branch-mismatch',
+    message: `the worktree ${plain} is not on its branch side (its HEAD is detached, or it is not a git worktree)`,
+  });
+  await assert.rejects(blockTree(repo, { worktree: { ...good, path: `${repo}-nowhere` } }), { code: 'worktree-missing', message: `the worktree ${repo}-nowhere is gone (removed or moved)` });
+  writeFile(path.dirname(repo), `${path.basename(repo)}-file`, 'x\n');
+  await assert.rejects(blockTree(repo, { worktree: { ...good, path: `${repo}-file` } }), { code: 'worktree-not-dir', message: `the worktree ${repo}-file is not a directory` });
+  // a workspace directory the tree does not have (untracked in the main tree only)
+  mkdirSync(path.join(repo, 'local'));
+  await assert.rejects(blockTree(path.join(repo, 'local'), { worktree: good }), { code: 'worktree-workspace-missing', message: `the worktree ${tree} has no local directory (the run's workspace)` });
+});
+
+test('B62b: blockTree refuses a tree of another repository on the same branch name (worktree-foreign), and a git that cannot run (git-failed with the reason)', async () => {
+  const repo = await makeRepo();
+  const head = (await git(['rev-parse', 'HEAD'], repo)).trim();
+  const tree = `${repo}-tree`;
+  await git(['worktree', 'add', '-q', '-b', 'side', tree, 'HEAD'], repo);
+  const good = { path: tree, branch: 'side', base_sha: head };
+  // another repository, checked out on a branch of the same name, at the path the record names
+  const other = await makeRepo();
+  await git(['checkout', '-q', '-b', 'side'], other);
+  await assert.rejects(blockTree(repo, { worktree: { ...good, path: other } }), { code: 'worktree-foreign', message: `the worktree ${other} belongs to another repository` });
+  // a linked worktree of the other repository on that branch name is foreign too
+  await git(['checkout', '-q', '--detach'], other);
+  const otherTree = `${other}-tree`;
+  await git(['worktree', 'add', '-q', otherTree, 'side'], other);
+  await assert.rejects(blockTree(repo, { worktree: { ...good, path: otherTree } }), { code: 'worktree-foreign', message: `the worktree ${otherTree} belongs to another repository` });
+  assert.equal((await blockTree(repo, { worktree: good }))?.top, tree);
+  const saved = process.env.PATH;
+  process.env.PATH = '';
+  try {
+    await assert.rejects(blockTree(repo, { worktree: good }), { code: 'git-failed', message: `git symbolic-ref HEAD could not run in the worktree ${tree} (spawn git ENOENT)` });
+  } finally {
+    process.env.PATH = saved;
+  }
 });

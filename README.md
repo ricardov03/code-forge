@@ -24,7 +24,8 @@ Next release:
 - **One git worktree per block.** With `proof.isolation: worktree`, `block open` gives each block
   its own git worktree and branch (`proof.worktree.dir`, `branch`, `base`). Blocks in different
   trees may own the same files. Nothing is pushed. `block close --remove-worktree` removes the
-  tree and keeps the branch.
+  tree and keeps the branch. Gates, reviews, the close check and the mutation proof of that
+  block all run on the block's tree, never on the main checkout.
 
 In 0.7.7:
 

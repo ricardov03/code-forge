@@ -15,7 +15,16 @@
  *     with `test_count` or `reason: threshold|no_tests`, and with --run/--block the rows name `run`
  *     and `block`. A gate given as `{argv, env}` runs with those variables, shown by name only
  *     (`env_keys`). code-forge never prints or records an env value. Gate env is not a secret
- *     store. Child output is masked only for values of 8 or more characters.)
+ *     store. Child output is masked only for values of 8 or more characters.
+ *     B62b: for a block with a worktree (`proof.isolation: worktree`) the gates run in that tree —
+ *     at the workspace's place in it (`blockTree`) — and `{test_files}` and the threshold count
+ *     the files there. The gates are detected in the tree and configured by the main workspace's
+ *     `.code-forge.yml`. `--cwd` may be left out, or must name the workspace's place in the tree:
+ *     the tree's top level when the workspace is the repository's top level, else the same
+ *     subdirectory of the tree (then the tree's top level is refused too). Any other `--cwd`, and
+ *     any `--cwd=<dir>` argument, is refused (exit 2, nothing run). A tree that is gone, malformed or off its branch is refused
+ *     with exit 1 (the message on stderr, no gate run, no row). The JSON output and the `gate.red` and
+ *     `gate.done` rows then carry `worktree: <tree path>`.)
  *   gates secret-scan --cwd <dir> --file <path> [--file <path> ...]
  *   gates safe-edit --cwd <dir> --base <sha>
  *   gates scope --cwd <dir> --base <sha>
@@ -23,7 +32,9 @@
  *   gates transcript-grep --file <path>
  */
 
+import { realpathSync } from 'node:fs';
 import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { writeSafe, redactJSON } from '../util/redact.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
@@ -31,6 +42,9 @@ import { detectGates } from '../gates/detect.mjs';
 import { printableGates, thresholdOf } from '../gates/expand.mjs';
 import { runGates } from '../gates/run.mjs';
 import { runGatesGuarded } from '../proof/lock.mjs';
+import { blockTree } from '../proof/worktree.mjs';
+import { readRun } from '../state/run.mjs';
+import { StateError } from '../state/paths.mjs';
 import { scanFiles } from '../gates/secret-scan.mjs';
 import { checkSafeEdit } from '../gates/safe-edit.mjs';
 import { computeFileSet } from '../gates/scope.mjs';
@@ -112,7 +126,8 @@ function flagValue(args, flag) {
  * go through `flagValue(...) ?? process.cwd()`, which cannot tell "absent" from "malformed" apart
  * and silently ran gates in the wrong directory for the latter).
  * @param {string[]} args @param {(s: string) => void} err @param {string} label
- * @returns {{ok: true, value: string} | {ok: false}}
+ * `given` says whether `--cwd` was on the command line (`value` is then its value, not the default).
+ * @returns {{ok: true, value: string, given: boolean} | {ok: false}}
  */
 function resolveCwd(args, err, label) {
   const flag = readOptionalFlag(args, '--cwd');
@@ -120,7 +135,7 @@ function resolveCwd(args, err, label) {
     err(`${label}: --cwd requires a value\n`);
     return { ok: false };
   }
-  return { ok: true, value: flag.value ?? process.cwd() };
+  return { ok: true, value: flag.value ?? process.cwd(), given: flag.value !== undefined };
 }
 
 /** @param {string[]} args @param {string} flag @returns {string[]} every value of a repeatable flag. */
@@ -130,6 +145,41 @@ function repeatedFlagValues(args, flag) {
     if (args[i] === flag && i + 1 < args.length) values.push(args[i + 1]);
   }
   return values;
+}
+
+/**
+ * B62b: the worktree the block `blockId` of run `runId` works in, with the run's main workspace;
+ * null for a block without one. A run or block that cannot be read is null too: the proof lock
+ * (`runGatesGuarded`) refuses it with its own message.
+ * @param {string} runId @param {string} blockId
+ * @returns {Promise<{tree: import('../proof/worktree.mjs').BlockTree, workspace: string} | null>}
+ * @throws {import('../state/paths.mjs').StateError} a `worktree-*` code when the recorded tree is
+ *   malformed, gone or unusable; the message names the block and run and says no gate was run.
+ */
+async function blockWorktree(runId, blockId) {
+  let record;
+  try {
+    record = await readRun(runId);
+  } catch {
+    return null;
+  }
+  let tree;
+  try {
+    tree = await blockTree(record.workspace, record.blocks?.[blockId]);
+  } catch (thrown) {
+    if (thrown instanceof StateError) throw new StateError(thrown.code, `block ${blockId} of run ${runId}: ${thrown.message}; no gate was run`);
+    throw thrown;
+  }
+  return tree ? { tree, workspace: record.workspace } : null;
+}
+
+/** @param {string} p @returns {string} the realpath of `p`, or `p` resolved when it does not exist. */
+function realOrResolved(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return path.resolve(p);
+  }
 }
 
 /**
@@ -173,7 +223,7 @@ export async function runGatesVerb(args, deps = {}) {
     if (sub === 'run') {
       const cwdArg = resolveCwd(args, err, 'gates run');
       if (!cwdArg.ok) return 2;
-      const cwd = cwdArg.value;
+      let cwd = cwdArg.value;
 
       const timeoutFlag = readOptionalFlag(args, '--timeout-ms');
       if (!timeoutFlag.ok) {
@@ -202,8 +252,24 @@ export async function runGatesVerb(args, deps = {}) {
         return 2;
       }
 
-      const configured = await configuredGates(cwd); // loaded once: the gates and the threshold
+      // B62b: a block with a worktree runs its gates in that tree, configured by the main workspace
+      const placed = runFlag.value !== undefined && blockFlag.value !== undefined ? await blockWorktree(runFlag.value, blockFlag.value) : null;
+      if (placed) {
+        // `--cwd=<dir>` is no form of --cwd: for a worktree block it is refused, never ignored
+        const joined = args.find((a) => a.startsWith('--cwd='));
+        if (joined !== undefined) {
+          err(`gates run: block ${blockFlag.value} of run ${runFlag.value} works in its worktree ${placed.tree.workspace}, not in ${joined} — drop it (--cwd=<dir> is not read as --cwd); no gate was run\n`);
+          return 2;
+        }
+        if (cwdArg.given && realOrResolved(cwd) !== realOrResolved(placed.tree.workspace)) {
+          err(`gates run: block ${blockFlag.value} of run ${runFlag.value} works in its worktree ${placed.tree.workspace}, not in --cwd ${cwd} — drop --cwd (or give the worktree); no gate was run\n`);
+          return 2;
+        }
+        cwd = placed.tree.workspace;
+      }
+      const configured = await configuredGates(placed ? placed.workspace : cwd); // loaded once: the gates and the threshold
       const gates = resolveGates(cwd, configured);
+      const inTree = placed ? { worktree: placed.tree.path } : {};
       let ran;
       if (runFlag.value !== undefined && blockFlag.value !== undefined) {
         const threshold = thresholdOf(configured?.full_suite_threshold_files);
@@ -220,7 +286,7 @@ export async function runGatesVerb(args, deps = {}) {
 
       if (slug) {
         // B60: with --run/--block the rows name the run and the block, so the run's binnacle reads them
-        const owner = runFlag.value !== undefined ? { run: runFlag.value, block: blockFlag.value } : {};
+        const owner = runFlag.value !== undefined ? { run: runFlag.value, block: blockFlag.value, ...inTree } : {};
         for (const result of results) {
           if (!result.skipped && !result.ok) {
             await appendRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result) }, { slug });
@@ -231,7 +297,7 @@ export async function runGatesVerb(args, deps = {}) {
         const scoped = results.find((r) => r.scope !== undefined);
         await appendRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk, ...(scoped ? scopeOf(scoped) : {}) }, { slug });
       }
-      out({ stack: gates.stack, results, allOk });
+      out({ stack: gates.stack, ...inTree, results, allOk });
       return allOk ? 0 : 1;
     }
 

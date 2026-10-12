@@ -50,7 +50,7 @@ import { keyedLock } from '../util/locks.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
-import { reviewTicket } from './engine.mjs';
+import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
 import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
 import { contentHash, DELETED_HASH, repoRootOf, WorkerError } from './ticket.mjs';
 
@@ -285,13 +285,15 @@ export async function createWorker(opts, deps = {}) {
    * One ticket through the engine hook with `tcfg` (the ticket's config snapshot): the unsigned result.
    * @param {import('./queue.mjs').Ticket} ticket @param {Record<string, any>} base
    * @param {Record<string, any>} tcfg
+   * @param {string} contentRoot - B62b: the tree the content was hashed in, and is reviewed in.
    * @returns {Promise<Record<string, any>>}
    */
-  async function reviewWith(ticket, base, tcfg) {
+  async function reviewWith(ticket, base, tcfg, contentRoot) {
     const timeoutS = Number.isInteger(tcfg?.review?.session_timeout_s) && tcfg.review.session_timeout_s > 0 ? tcfg.review.session_timeout_s : DEFAULT_SESSION_TIMEOUT_S;
     /** @type {import('./engine.mjs').ReviewContext} */
     const ctx = {
       repoRoot,
+      contentRoot,
       runId,
       runRootDir,
       cfg: tcfg,
@@ -360,15 +362,32 @@ export async function createWorker(opts, deps = {}) {
    */
   async function reviewOne(id, ticket) {
     const base = { event: 'review.result', block: ticket.block, file: ticket.file, content_hash: ticket.content_hash };
-    /** @type {string | null} */
+    if (ticket.run !== runId) return { ...base, status: 'refused', reason: 'other-run', approved: false };
+    // B62b: the tree the content is hashed AND reviewed in — a block's worktree (from the run
+    // record, as review-file did), else the main tree. A tree that cannot be used (gone, malformed)
+    // or a block entry that cannot be read is `unavailable` with its code: never approval, and a
+    // later ticket for the same content runs again once it is fixed.
+    let contentRoot;
+    try {
+      contentRoot = await contentRootFor(runId, ticket.block, repoRoot);
+    } catch (err) {
+      // only the codes contentRootFor answers with; an I/O failure goes to runOne (`worker-error`)
+      if (!(err instanceof WorkerError)) throw err;
+      return { ...base, status: 'unavailable', reason: err.code, approved: false };
+    }
+    // a ticket was hashed in the tree it names (the main tree when it names none): never review it
+    // in another one — also a ticket with no tree for a block the record gives a worktree
+    const hashedIn = typeof ticket.tree === 'string' ? ticket.tree : repoRoot;
+    if (canonicalPath(hashedIn) !== canonicalPath(contentRoot)) return { ...base, status: 'unavailable', reason: 'worktree-mismatch', approved: false };
+    /** @type {string} */
     let current;
     try {
-      current = ticket.run === runId ? contentHash(repoRoot, ticket.file) : null;
+      current = contentHash(contentRoot, ticket.file);
     } catch (err) {
       // the path no longer passes the on-disk check, or the file cannot be read
-      return { ...base, status: 'refused', reason: err instanceof WorkerError ? err.code : 'unreadable', approved: false };
+      const reason = err instanceof WorkerError ? err.code : 'unreadable';
+      return { ...base, status: 'refused', reason, approved: false };
     }
-    if (ticket.run !== runId) return { ...base, status: 'refused', reason: 'other-run', approved: false };
     if (current === DELETED_HASH && ticket.content_hash !== DELETED_HASH) return { ...base, status: 'stale', reason: 'missing-file', approved: false };
     if (current !== ticket.content_hash) return { ...base, status: 'stale', approved: false };
     let ticketCfg;
@@ -377,7 +396,7 @@ export async function createWorker(opts, deps = {}) {
     } catch {
       return { ...base, status: 'unavailable', reason: 'config-snapshot', approved: false };
     }
-    return reviewWith(ticket, base, ticketCfg);
+    return reviewWith(ticket, base, ticketCfg, contentRoot);
   }
 
   /**

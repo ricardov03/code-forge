@@ -1,12 +1,12 @@
-import { answerFor, cfgFor, flag, git, harness, lines, makeRepo, readRecords, stdinOf, writeFile } from './helpers.mjs';
+import { answerFor, cfgFor, flag, freshDir, git, harness, lines, makeRepo, readRecords, stdinOf, writeFile } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
 const { planSessions, reviewFile } = await import('../../src/review/engine.mjs');
 const { PacketError } = await import('../../src/review/packet.mjs');
-const { reviewTicket } = await import('../../src/worker/engine.mjs');
+const { contentRootFor, reviewTicket } = await import('../../src/worker/engine.mjs');
 const { runRecordPath } = await import('../../src/state/paths.mjs');
 const { startRun } = await import('../../src/state/run.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
@@ -239,6 +239,85 @@ describe('the B11 hook', () => {
     const outcome = await reviewTicket(ticket, /** @type {any} */ (h.ctx));
     assert.equal(readRecords(h.records).length, 0);
     assert.deepEqual([outcome.status, outcome.reason, outcome.approved], ['unavailable', 'run-record-unreadable', false]);
+  });
+
+  test('B62b: a block with a worktree is reviewed in that tree with its branch named, the main tree\'s HEAD and status untouched; a relative path or an empty branch is worktree-malformed, a tree off its branch worktree-branch-mismatch — unavailable with 0 sessions', async () => {
+    const repo = await fixture();
+    const MAIN_ONLY = 'export const mainOnly = "only-in-the-main-tree";\n';
+    writeFile(repo, FILE, MAIN_ONLY); // the main tree has its own bytes; the review must never see them
+    const runId = 'r-b62b-engine';
+    const writeRow = async () => {};
+    await startRun({ workspace: repo, project: 'b62b-engine', runId, writeRow });
+    await openBlock({ runId, id: 'B1', level: 'L2', owned: ['src/**'], acceptance: [{ clause: 'reviewed', tests: ['t'] }], writeRow });
+    const tree = `${repo}-tree`;
+    await git(['worktree', 'add', '-q', '-b', 'b62b-engine', tree, 'HEAD'], repo);
+    writeFile(tree, FILE, lines(12));
+    const base = (await git(['rev-parse', 'HEAD'], repo)).trim();
+    const mainState = async () => [(await git(['rev-parse', 'HEAD'], repo)).trim(), await git(['status', '--porcelain'], repo)];
+    const before = await mainState();
+    /** @param {Record<string, any>} worktree */
+    const record = (worktree) => {
+      const run = JSON.parse(readFileSync(runRecordPath(runId), 'utf8'));
+      run.blocks.B1.worktree = worktree;
+      writeFileSync(runRecordPath(runId), JSON.stringify(run));
+    };
+    const ticket = { ticket: '0123456789abcdef0123456c', run: runId, block: 'B1', file: FILE, content_hash: 'x', enqueued_at: '' };
+    const refusedAs = async (/** @type {string} */ reason) => {
+      const h = harness({ repoRoot: repo, cfg: cfgFor(), runId, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)) } });
+      const out = await reviewTicket(ticket, /** @type {any} */ (h.ctx));
+      assert.deepEqual([out.status, out.reason, out.approved, out.sessions.length, readRecords(h.records).length], ['unavailable', reason, false, 0, 0]);
+    };
+
+    record({ path: 'relative/tree', branch: 'b62b-engine', base_sha: base });
+    await refusedAs('worktree-malformed');
+    record({ path: tree, branch: '', base_sha: base });
+    await refusedAs('worktree-malformed');
+    record({ path: tree, branch: 'b62b-engine', base_sha: base });
+    await git(['checkout', '-q', '-b', 'b62b-other'], tree);
+    await refusedAs('worktree-branch-mismatch');
+    await git(['checkout', '-q', 'b62b-engine'], tree);
+
+    const h2 = harness({ repoRoot: repo, cfg: cfgFor(), runId, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)) } });
+    // the worker hashed the ticket in another tree than the one the record names now: never reviewed
+    const h3 = harness({ repoRoot: repo, cfg: cfgFor(), runId, env: { FAKE_ANSWER: JSON.stringify(answerFor(HUNKS)) } });
+    const stale = await reviewTicket(ticket, /** @type {any} */ ({ ...h3.ctx, contentRoot: repo }));
+    assert.deepEqual([stale.status, stale.reason, stale.approved, stale.sessions.length, readRecords(h3.records).length], ['unavailable', 'worktree-mismatch', false, 0, 0]);
+    // the same tree (through a symlink) is the same tree
+    const link = path.join(freshDir('tree-link'), 'tree');
+    symlinkSync(tree, link);
+    const outcome = await reviewTicket(ticket, /** @type {any} */ ({ ...h2.ctx, contentRoot: link }));
+    assert.deepEqual([outcome.status, outcome.approved, outcome.sessions.length], ['reviewed', true, 1]);
+    const packet = stdinOf(readRecords(h2.records)[0]);
+    assert.equal(packet.includes(`\nWorktree: the file is reviewed as it is in the block's worktree ${tree} (branch b62b-engine), against the block base.\n`), true, packet);
+    assert.equal(packet.includes('+export const v12 = 12;'), true);
+    assert.equal(packet.includes('only-in-the-main-tree'), false, packet);
+    assert.equal(readFileSync(path.join(repo, FILE), 'utf8'), MAIN_ONLY);
+    assert.equal(await git(['status', '--porcelain'], tree), '?? src/\n');
+    assert.deepEqual(await mainState(), before);
+  });
+
+  test('B62b: contentRootFor — no run record, an unknown block or a block without a worktree read the main tree; a workspace git cannot read is git-failed; a record with no workspace is run-record-unreadable', async () => {
+    const repo = await fixture();
+    const runId = 'r-b62b-root';
+    assert.equal(await contentRootFor(runId, 'B1', repo), repo);
+    const writeRow = async () => {};
+    await startRun({ workspace: repo, project: 'b62b-root', runId, writeRow });
+    await openBlock({ runId, id: 'B1', level: 'L2', owned: ['src/**'], acceptance: [{ clause: 'reviewed', tests: ['t'] }], writeRow });
+    assert.equal(await contentRootFor(runId, 'B9', repo), repo);
+    assert.equal(await contentRootFor(runId, 'B1', repo), repo);
+    const tree = `${repo}-root-tree`;
+    await git(['worktree', 'add', '-q', '-b', 'b62b-root', tree, 'HEAD'], repo);
+    const run = JSON.parse(readFileSync(runRecordPath(runId), 'utf8'));
+    run.blocks.B1.worktree = { path: tree, branch: 'b62b-root', base_sha: (await git(['rev-parse', 'HEAD'], repo)).trim() };
+    writeFileSync(runRecordPath(runId), JSON.stringify(run));
+    assert.equal(await contentRootFor(runId, 'B1', repo), tree);
+    // a workspace that is no git repository: git cannot name its repository
+    run.workspace = freshDir('not-a-repo');
+    writeFileSync(runRecordPath(runId), JSON.stringify(run));
+    await assert.rejects(contentRootFor(runId, 'B1', repo), { code: 'git-failed' });
+    run.workspace = 7;
+    writeFileSync(runRecordPath(runId), JSON.stringify(run));
+    await assert.rejects(contentRootFor(runId, 'B1', repo), { code: 'run-record-unreadable', message: 'block B1: the run record names no workspace' });
   });
 });
 

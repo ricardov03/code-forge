@@ -19,6 +19,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - proof.isolation: worktree — each block gets its own git worktree and branch (proof.worktree.dir/branch/base); owned
   files need to be disjoint only inside one tree; block close --remove-worktree removes the tree and keeps the branch
   (issue #13)
+- Worktree blocks: gates run --block, review-file, the worker, block close and proof export/red-green all measure the
+  block's own tree (against its base), never the main checkout; a missing, malformed, off-branch or foreign tree is
+  refused (issue #13)
 
 ## [0.7.7] — 2026-10-11
 
