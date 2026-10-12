@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.8.0] — 2026-10-12
+
 ### Added
 
 - B60: related-test gates (issue #13 item 3). block open --tests <paths> names the test files of a block; a gate argv
