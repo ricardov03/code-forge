@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 68,
+  "block_count": 69,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -935,6 +935,21 @@
         "B63a"
       ],
       "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/engines/sentinel.mjs, src/cli/block.mjs, src/context/pack.mjs, src/state/{config-snapshot,run}.mjs, schema/code-forge.schema.json, test/config/schema-coverage.test.mjs, test/skill/structure.test.mjs, docs/{how-it-works,concepts}.md, docs/reference/config.md, skill/SKILL.md, skill/references/{code,ledger}.md, skill/templates/coder-brief.md"
+    },
+    "B64a": {
+      "title": "Short status (issue #13 item 6, part 1): code-forge status [--run] [--json] is read-only and prints at most 10 lines per run (run id, state, mode, spend; one line per open block with level, coder model, last gate and the open findings the close gate would refuse; an overflow line and a closed/stopped tally), or one JSON line; every block verb takes --json and prints one JSON line, with stdout empty on failure except a gate-refused close; without --json block output is unchanged",
+      "wave": 13,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/cli/status.mjs",
+        "src/state/brief-status.mjs",
+        "test/cli/status.test.mjs"
+      ],
+      "depends_on": [
+        "B63b"
+      ],
+      "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/cli/block.mjs, docs/{how-it-works,concepts}.md, skill/SKILL.md, skill/references/code.md"
     }
   }
 }

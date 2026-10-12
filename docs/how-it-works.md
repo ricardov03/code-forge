@@ -45,6 +45,7 @@ flowchart TD
 | 8 | Code | the engine starts the coder with the pointer | the coder replies `ACK <sha8> lines=<n>`, then its facts diff and forecast, then code, file by file |
 | 9 | Review per file | `code-forge review-file <path> --block B1 --run <run>`, then `review-file --wait <ticket>` | a verdict packet (or `status: pending` when `--max`, default 90s, passes first: wait again); a signed `review.approved` row when the file converges |
 | 10 | Proof | `code-forge proof export B1 --run <run>`, `code-forge gates run --cwd <export dir>`, `code-forge proof red-green B1 --run <run> --test <file::case>` | gates measured in a clean export (dependency folders linked, a Composer `vendor` copied; verified on Node and on Laravel with PHPUnit and Pest); one signed `proof` row per proven test. With `--run <run> --block B1`, a gate argv item that is exactly `{test_files}` runs only the block's tests (its `--tests`, else its owned test files), or the full suite above `gates.full_suite_threshold_files` owned files (globs and directories count the tracked and new (not ignored) files they cover; `reason: threshold`) or when none is known or no `--run/--block` is given (`reason: no_tests`); `gate.done` records `scope: related \| full` with `test_count` or the reason. A gate given as `{argv, env}` runs with those variables; code-forge shows only their names, and masks a value of 8+ characters in the gate's own output |
+| 10a | Progress | `code-forge status` (`--run <run>` for one run, `--json` for one line) | read-only, at most 10 lines per active run of this repository — see [Checking progress](#checking-progress) |
 | 11 | Close | `code-forge block close B1 --run <run> --report <coder report>` | `block B1 closed`, or the reason it stays open |
 | 12 | Report | `code-forge run end --run <run>` then `code-forge report --slug <slug>` | the worker stops; 13 report sections, from `cost_per_block` to `run_stop_counts`, then the spend per run and the total |
 
@@ -52,6 +53,71 @@ The coder's turn ends with `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED:
 Nothing else counts as completion. Its report also lists one `reviewed <path> ticket <id>` line per
 changed file. With `--report`, `block close` treats a report that misses one as FAILED, whatever its
 sentinel says (`coder report FAILED: no review-file ticket id for <files>`).
+
+### Checking progress
+
+`code-forge status` (B64a) is how the orchestrator checks progress, instead of reading logs or
+polling the coder's transcript. It is read-only: it writes no ledger row and no file beyond the
+breadcrumb every verb writes, and it never takes the run lock, so it never blocks a worker or a
+block verb (nor waits on them). It shows every run that is not ended whose workspace is the
+current repository, newest first, with one blank line between runs, in at most 10 lines per run.
+A run with ten open blocks, two closed and one stopped:
+
+```
+run <run> · active · plan · spent $1.20+? of $5.00
+B1 open L1 · openai/<model> · gate fail (test) · findings 1
+B2 attempt-2 L2 · - · gate pass · findings 0
+B3 open L1 · - · gate none · findings 0
+B4 open L1 · - · gate none · findings 0
+B5 open L0 · - · gate none · findings 0
+B6 open L1 · - · gate none · findings 0
+B7 open L1 · - · gate none · findings 0
+… +3 more blocks
+closed 2 · stopped 1
+```
+
+- **Line 1**: the run, its status, its mode (`plan` or `brief`) and the spend: `run status`'s
+  spent_usd with 2 decimals, followed by `+?` when at least one session has no known price (its
+  cost is not in the sum), or `$?` alone when the ledger cannot be read. ` of $<budget>` shows
+  only with `budget.usd` set.
+- **One line per open or in-attempt block**, in block id order: its state (`open`, or
+  `attempt-<n>`), its level, the model of its latest coder session row (`-` when the ledger names
+  none), its last gate run and its open findings — the number of review findings the close gate
+  (`checkBlockReviews`) would refuse today. The gate field is printed as `gate pass`, `gate fail
+  (<gate>)` (the failing gate named by the last `gate.red` of that run), `gate fail` (a failed run
+  with no named gate) or `gate none` (no gate ran yet).
+- **`… +<k> more blocks`** is the last block line when the blocks do not fit.
+- **`closed <a> · stopped <b>`** shows only when either is non-zero. It is printed LAST, but it
+  keeps its place in the 10-line cap ahead of block lines: when the lines do not fit, block lines
+  are dropped first, never this one.
+
+With no such run it prints `no active run` (exit 0). `--run <run>` shows that run, even ended; an
+unknown run exits 1 (`status: no run record for <run>`), and a usage error (an unknown flag, an
+argument) exits 2. `--json` prints exactly one line, `{"runs":[{run_id, status, mode, spent_usd,
+unknown_usd_sessions, budget_usd, blocks: [{id, state, level, model, gate: {result, name},
+findings}], more, closed, stopped}]}`, with every open block (no cap) and `more` always 0;
+`gate.result` is `pass`, `fail` or `none`, and `gate.name` is the failing gate's name, or null for
+`pass`, for `none` and for a fail with no named gate; `spent_usd` and `unknown_usd_sessions` are
+null when the ledger cannot be read. Transcript and diff text are never printed.
+
+Every block verb also takes `--json`. On success stdout is exactly one line,
+`{"block":<id>,"event":<event>,…}`:
+
+| Verb | `event` | Other fields |
+|---|---|---|
+| `open` | `open` | `level`, `asked`, `source` (`flag`, `rules` or `autopilot`), `kind`, `attempt`, `base_sha` (full), `tests` (count), `worktree` (`{path, branch, reused}` or null), `brief` (the pointer or null) |
+| `attempt` | `attempt` | `attempt` |
+| `rebase` | `rebased` | `old_base`, `new_base` |
+| `claim` | `claimed` | `path` |
+| `close` | `closed` | `status`, `reason`, `close_event` (or null); with `--remove-worktree` also `worktree` (`{removed, path, branch}`; a block with no worktree refuses `--remove-worktree` as a usage error, exit 2) |
+| `stop` | `stopped` | none |
+| `waive` | `waived` | `finding`, `file`, `by` |
+
+On failure the exit code and stderr are unchanged and stdout stays empty, except a close the gate
+refused, which also prints `{"block":<id>,"ok":false,"reason":<text>}`; every other close refusal
+(a usage error, a block not open, a cancelled `--no-require-reviews`, a failed worktree removal)
+leaves stdout empty. Without `--json` the output
+is byte-identical to before.
 
 ### The context pack
 
@@ -202,10 +268,10 @@ and `report` show the spend; `ledger add coder --usd <n>` adds spend code-forge 
 Sessions that run together each reserve their estimated cost first, so they cannot spend past the
 budget together (see [Several files at once](#several-files-at-once)).
 
-The orchestrator watches the spend during the whole run, not only at the end: it reads `run
-status` after every block close and records cloud or hand-run coder spend at once. When the
-budget stops work, it shows you the numbers and waits. Only you raise `budget.usd`, at most once
-per run. See [getting-started.md](getting-started.md#set-a-budget).
+The orchestrator watches the spend during the whole run, not only at the end: it reads
+`code-forge status` (or `run status`) after every block close and records cloud or hand-run coder
+spend at once. When the budget stops work, it shows you the numbers and waits. Only you raise
+`budget.usd`, at most once per run. See [getting-started.md](getting-started.md#set-a-budget).
 
 ### Changing the config mid-run
 

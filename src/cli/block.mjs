@@ -12,6 +12,18 @@
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text>   (human-only, §4.9)
  *
+ * B64a `--json` (every subcommand): on success stdout is exactly ONE JSON line instead of the
+ * text — `{"block", "event", …}` with the facts the text prints (open: level, asked, source,
+ * kind, attempt, base_sha, tests, worktree, brief; attempt: attempt; rebase (`rebased`): old_base,
+ * new_base; claim (`claimed`): path; stop (`stopped`); waive (`waived`): finding, file, by;
+ * close (`closed`): status, reason, close_event (the close result's own event word, as the text
+ * prints it in parentheses, else null), and `worktree {removed, path, branch}` with
+ * `--remove-worktree`). On
+ * failure the exit code and stderr are unchanged and stdout stays empty, except a close the gate
+ * refused (`closeBlock` said no), which also prints `{"block", "ok": false, "reason"}`. A usage
+ * error, a thrown refusal, a cancelled `--no-require-reviews` and a failed `--remove-worktree`
+ * print nothing on stdout. Without `--json` every output is byte-identical to before.
+ *
  * `block close [--transcript <file>] [--report <file>] [--no-require-reviews]` also runs B12b's review rows
  * (`review/gate-check.mjs`): a signed `review.approved` row for the current content hash of every
  * changed owned file (deletions included) that no later review of the same content made stale
@@ -143,7 +155,8 @@ import { missingReviewTickets, parseSentinel } from '../engines/sentinel.mjs';
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
-  '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n';
+  '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
+  '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
 const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'];
 const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report'];
@@ -169,7 +182,12 @@ export async function runBlock(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree'] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json'] });
+    // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
+    // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
+    const json = flags.json === true;
+    const say = json ? (/** @type {string} */ _s) => {} : out;
+    const emit = (/** @type {Record<string, unknown>} */ obj) => out(`${JSON.stringify(obj)}\n`);
     // B60: --tests names exact paths (a file or a directory — PHPUnit and Pest take directories).
     // `*` and `?` are refused: a glob would reach the gate unexpanded. `[` and `{` are allowed,
     // since real paths use them (`app/[id]/page.test.tsx`) and argv never reaches a shell. A
@@ -251,33 +269,54 @@ export async function runBlock(args, deps = {}) {
       const chosen = typeof flags.level === 'string' ? '' : rules ? ' (rules lane)' : ' (autopilot level)';
       const testCount = Array.isArray(block.test_files) ? block.test_files.length : 0;
       const tests = testCount > 0 ? ` · ${testCount} test file${testCount === 1 ? '' : 's'}` : '';
-      out(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}${tests}\n`);
-      if (block.worktree) out(`worktree ${block.worktree.path} · branch ${block.worktree.branch}${worktreeReused ? ' · reused' : ''}\n`);
-      out(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
+      say(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}${tests}\n`);
+      if (block.worktree) say(`worktree ${block.worktree.path} · branch ${block.worktree.branch}${worktreeReused ? ' · reused' : ''}\n`);
+      say(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
+      if (json) {
+        emit({
+          block: id,
+          event: 'open',
+          level: block.level,
+          asked: level ?? null,
+          source: typeof flags.level === 'string' ? 'flag' : rules ? 'rules' : 'autopilot',
+          kind: block.kind,
+          attempt: block.attempt,
+          base_sha: block.base_sha,
+          tests: testCount,
+          worktree: block.worktree ? { path: block.worktree.path, branch: block.worktree.branch, reused: Boolean(worktreeReused) } : null,
+          brief: pointer ?? null,
+        });
+      }
       return 0;
     }
     if (sub === 'attempt') {
-      out(`block ${id} attempt ${await attemptBlock({ runId, id, writeRow })}\n`);
+      const n = await attemptBlock({ runId, id, writeRow });
+      say(`block ${id} attempt ${n}\n`);
+      if (json) emit({ block: id, event: 'attempt', attempt: n });
       return 0;
     }
     if (sub === 'rebase') {
       const moved = await rebaseBlock({ runId, id, head: typeof flags.head === 'string' ? flags.head : undefined, writeRow });
-      out(`block ${id} rebased ${moved.old_base.slice(0, 12)} → ${moved.new_base.slice(0, 12)}\n`);
+      say(`block ${id} rebased ${moved.old_base.slice(0, 12)} → ${moved.new_base.slice(0, 12)}\n`);
+      if (json) emit({ block: id, event: 'rebased', old_base: moved.old_base, new_base: moved.new_base });
       return 0;
     }
     if (sub === 'claim') {
       await claimPath({ runId, id, file: extra, writeRow });
-      out(`block ${id} claimed ${extra}\n`);
+      say(`block ${id} claimed ${extra}\n`);
+      if (json) emit({ block: id, event: 'claimed', path: extra });
       return 0;
     }
     if (sub === 'stop') {
       await stopBlock({ runId, id, reason: /** @type {string} */ (flags.reason), writeRow });
-      out(`block ${id} stopped\n`);
+      say(`block ${id} stopped\n`);
+      if (json) emit({ block: id, event: 'stopped' });
       return 0;
     }
     if (sub === 'waive') {
       await waiveFinding({ runId, id, finding: extra, reason: /** @type {string} */ (flags.reason), file: /** @type {string} */ (flags.file), writeRow });
-      out(`block ${id} waived ${extra} in ${flags.file} (by: human)\n`);
+      say(`block ${id} waived ${extra} in ${flags.file} (by: human)\n`);
+      if (json) emit({ block: id, event: 'waived', finding: extra, file: flags.file, by: 'human' });
       return 0;
     }
     if (sub === 'close') {
@@ -426,9 +465,22 @@ export async function runBlock(args, deps = {}) {
         });
       }
       const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows });
-      (result.ok ? out : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
-      if (!result.ok || !removeTree) return result.ok ? 0 : 1;
-      return removeBlockTree(runId, id, entry.worktree, record.workspace, writeRow, out, err);
+      (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
+      // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
+      if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null });
+      const closedJson = { block: id, event: result.status, status: result.status, reason: result.reason ?? null, close_event: result.event ?? null };
+      if (!result.ok || !removeTree) {
+        if (json && result.ok) emit(closedJson);
+        return result.ok ? 0 : 1;
+      }
+      const removed = await removeBlockTree(runId, id, entry.worktree, record.workspace, writeRow, say, err);
+      // a failed removal is exit 1 with its stderr text and nothing on stdout, like every failure
+      if (json && removed === 0) {
+        // built from the block's own tree entry; `removed` is what removeBlockTree reported (0 = removed)
+        const treeJson = entry.worktree ? { removed: removed === 0, path: entry.worktree.path, branch: entry.worktree.branch } : null;
+        emit({ ...closedJson, worktree: treeJson });
+      }
+      return removed;
     }
   } catch (thrown) {
     err(`block ${sub ?? ''}: ${thrown?.message ?? String(thrown)}\n`);

@@ -28,6 +28,8 @@ waits on a second real consumer (plan §10.4, Q17).
 - Coder test proof: the coder report may carry `TESTS <command> exit=<n>`; with `context.require_coder_tests: true`
   (fixed at run start) `block close --report` refuses a report without a green TESTS line and writes a signed
   `coder.tests` row (issue #13)
+- code-forge status: at most 10 lines per run (state, mode, spend, open blocks with level, model, last gate, open
+  findings) or one --json line; every block verb takes --json and prints one JSON line (issue #13)
 
 ## [0.7.7] — 2026-10-11
 

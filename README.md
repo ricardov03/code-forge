@@ -35,6 +35,10 @@ Next release:
   COMPLETE sentinel. With `context.require_coder_tests: true` (fixed at `run start`),
   `block close --report` refuses a report with no such line or a non-zero exit, even when
   reviews are waived, and writes a signed `coder.tests` row when it passes.
+- **Short status.** `code-forge status [--run <id>] [--json]` prints at most 10 lines per run:
+  state, mode, spend, and one line per open block with its level, model, last gate and open
+  findings. It is read-only. Every `block` verb takes `--json` and prints one JSON line, so an
+  orchestrator never has to read logs or poll transcripts.
 
 In 0.7.7:
 
