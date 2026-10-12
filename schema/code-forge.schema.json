@@ -330,6 +330,27 @@
         }
       }
     },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The coder context pack. `code-forge context pack --run <id> --block <id>` builds one pack per block from it (header, commands, rules, lessons; cut to max_lines), and every review packet carries the rules and lessons in its project-rules digest. Read from the live config, not the run-start snapshot: it is not authority, and `run reload` accepts a change to it. Without this key packets are unchanged.",
+      "properties": {
+        "rules": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "default": [], "description": "Rules files (paths relative to the repository root), in order. Read from the main tree; a missing file or a path outside the repository is refused." },
+        "lessons": { "type": "string", "minLength": 1, "description": "One lessons-learned file (path relative to the repository root). Cut first when the pack is over max_lines." },
+        "commands": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The project's commands as argv lists, shown to the coder in the pack. code-forge never runs them.",
+          "properties": {
+            "build": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The build command (argv), shown POSIX shell-quoted in the pack." },
+            "test": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The test command (argv), shown POSIX shell-quoted in the pack." },
+            "lint": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The lint command (argv), shown POSIX shell-quoted in the pack." },
+            "format": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The format command (argv), shown POSIX shell-quoted in the pack." }
+          }
+        },
+        "max_lines": { "type": "integer", "minimum": 20, "default": 300, "description": "The pack's line cap. Lessons are cut first, then the rules files from the last one backwards, each cut section ending in [cut: N lines dropped]; the header and the commands are never cut." }
+      }
+    },
     "autopilot": {
       "type": "object",
       "additionalProperties": false,

@@ -22,6 +22,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - Worktree blocks: gates run --block, review-file, the worker, block close and proof export/red-green all measure the
   block's own tree (against its base), never the main checkout; a missing, malformed, off-branch or foreign tree is
   refused (issue #13)
+- Context pack: a top-level `context` key (rules, lessons, commands, max_lines) and `code-forge context pack --run
+  --block [--json]`, which writes the pack, prints its path and token estimate and appends a signed `context.pack` row;
+  review packets carry the rules and lessons (issue #13)
 
 ## [0.7.7] — 2026-10-11
 

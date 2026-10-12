@@ -27,6 +27,7 @@ import path from 'node:path';
 export const SUBCOMMANDS = Object.freeze({
   autopilot: ['start', 'status', 'stop'],
   block: ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'],
+  context: ['pack'],
   gates: ['detect', 'run', 'secret-scan', 'safe-edit', 'scope', 'acceptance', 'transcript-grep'],
   jev: ['ask'],
   keys: ['list', 'set', 'test', 'remove'],

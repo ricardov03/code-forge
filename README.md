@@ -26,6 +26,11 @@ Next release:
   trees may own the same files. Nothing is pushed. `block close --remove-worktree` removes the
   tree and keeps the branch. Gates, reviews, the close check and the mutation proof of that
   block all run on the block's tree, never on the main checkout.
+- **A context pack for coders.** Set `context: {rules, lessons, commands, max_lines}`.
+  `code-forge context pack --run <r> --block <id>` writes one file with the block's header,
+  the build and test commands, the project rules and the lessons, cut to `max_lines`. It prints
+  the path and a token estimate, and writes a signed `context.pack` row. Review packets now
+  carry the same rules and lessons. With no `context` key, nothing changes.
 
 In 0.7.7:
 

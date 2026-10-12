@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 66,
+  "block_count": 67,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -906,6 +906,22 @@
         "B62a"
       ],
       "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/cli/{block,gates,proof,review-file}.mjs, src/proof/worktree.mjs, src/review/gate-check.mjs, src/worker/{engine,loop,queue,ticket}.mjs, test/proof/worktree.test.mjs, test/review/engine.test.mjs, test/worker/queue.test.mjs, docs/{how-it-works,concepts}.md, skill/references/{proof,review,code,ledger}.md"
+    },
+    "B63a": {
+      "title": "Context pack (issue #13 item 5, issue #10 item 2): a top-level context key (rules, lessons, commands, max_lines default 300); code-forge context pack --run --block [--json] writes <run-root>/context/<block>.md with a header, the redacted commands in POSIX quoting, the rules and the lessons, cut to max_lines (lessons first, then rules from the last file back, each cut marked), prints the path and a token estimate, and appends a signed context.pack row unless the block's last row has the same sha256; paths outside the repository, missing files and control characters are refused with nothing written; review packets (first and recheck) carry the rules and lessons from the main tree in the 60-line digest slot, read from the live config, and an unreadable file makes the ticket unavailable (context-unreadable); with no context key everything behaves as before",
+      "wave": 13,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/context/pack.mjs",
+        "src/cli/context.mjs",
+        "src/worker/engine.mjs",
+        "test/context/pack.test.mjs"
+      ],
+      "depends_on": [
+        "B62b"
+      ],
+      "note": "root-added 2026-10-12; GitHub issue #13 adoption plan (plans/adoption-13/plan.md); also amends src/util/breadcrumbs.mjs, schema/code-forge.schema.json, test/config/schema-coverage.test.mjs, docs/{how-it-works,concepts}.md, docs/reference/config.md, skill/SKILL.md, skill/references/{code,review,ledger}.md"
     }
   }
 }

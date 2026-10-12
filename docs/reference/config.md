@@ -178,6 +178,15 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `keys.<key>` | string |  | — | user-defined key |
 | `tmp` | object |  | — |  |
 | `tmp.root` | string \| null |  | `null` |  |
+| `context` | object |  | — |  |
+| `context.rules` | array<string> |  | `[]` | Rules files (paths relative to the repository root), in order. Read from the main tree; a missing file or a path outside the repository is refused. |
+| `context.lessons` | string |  | — | minLength 1; One lessons-learned file (path relative to the repository root). Cut first when the pack is over max_lines. |
+| `context.commands` | object |  | — |  |
+| `context.commands.build` | array<string> |  | — | minItems 1; The build command (argv), shown POSIX shell-quoted in the pack. |
+| `context.commands.test` | array<string> |  | — | minItems 1; The test command (argv), shown POSIX shell-quoted in the pack. |
+| `context.commands.lint` | array<string> |  | — | minItems 1; The lint command (argv), shown POSIX shell-quoted in the pack. |
+| `context.commands.format` | array<string> |  | — | minItems 1; The format command (argv), shown POSIX shell-quoted in the pack. |
+| `context.max_lines` | integer |  | `300` | min 20; The pack's line cap. Lessons are cut first, then the rules files from the last one backwards, each cut section ending in [cut: N lines dropped]; the header and the commands are never cut. |
 | `autopilot` | object |  | — |  |
 | `autopilot.min_confidence` | number |  | `0.7` | min 0; max 1; B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner. |
 | `telemetry` | const `"off"` |  | `"off"` |  |

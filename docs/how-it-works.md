@@ -41,6 +41,7 @@ flowchart TD
 | 5a | Approval | under the skill: the orchestrator shows the checked plan in the harness's plan mode (Claude Code: EnterPlanMode → ExitPlanMode) | your yes. No block starts before it. A harness without a plan mode shows the plan and waits for an explicit yes |
 | 6 | Run start | `code-forge run start --run <run>` | `run <run> started · engine <e> · worker pid <n>`, a per-run signing key, the review worker. With `--mode brief` (briefs, no plan; steps 1–5a are skipped) it prints `· mode brief (no plan)` and writes a signed `run.mode {mode: brief, plan: none}` row; the mode is fixed for the run, and any value other than `plan` or `brief` is a usage error (exit 2) |
 | 7 | Block open | `code-forge block open B1 --run <run> --level L1 --owned <paths…> --acceptance <file> --brief <file> --lines <n>` (`--kind docs` for a docs block; `--tests <paths…>` names the block's test files for a `{test_files}` gate). In a brief-mode run `--level` may be left out: the rules pick the lane from the owned entries, `--lines` and `proof.tiers.high.paths` (a high, migration or policy/middleware path ⇒ L2; more than 4 entries or 200 lines ⇒ L1; else L0) and a signed `decision` row with `source: rules` names the block and the lane | a `dispatch` ledger row and the pointer `BRIEF <path> lines=<n> sha=<sha8> <<<EOM>>>` for the coder. Refused when an owned path overlaps another open block's. An owned path with no glob character (`*`, `?`, `{`) owns itself and every path below it: `src/feature` owns `src/feature/a.swift` (not `src/featureX/a.swift`), so it overlaps `src/feature/x.swift` or `src` in another block. A path that is a regular file when the block opens (or when `block claim` adds it) owns only itself, so `src/README` and `src/**/*.mjs` do not overlap; a path not there yet stays a possible directory. A brace entry (`src/{a,b}`) is a glob: each name owns only itself. Block open, claim, rebase, the scope and close gates, proof, the plan check and the worker all use this one rule |
+| 7a | Context pack | `code-forge context pack --run <run> --block B1` (with a `context` key in the config) | `<run root>/context/B1.md` and `tokens ~<n>` (`--json`: path, tokens, lines, cut, sha256); a signed `context.pack` row when the pack is new. The orchestrator sends the file with every coder task — see [The context pack](#the-context-pack) |
 | 8 | Code | the engine starts the coder with the pointer | the coder replies `ACK <sha8> lines=<n>`, then its facts diff and forecast, then code, file by file |
 | 9 | Review per file | `code-forge review-file <path> --block B1 --run <run>`, then `review-file --wait <ticket>` | a verdict packet (or `status: pending` when `--max`, default 90s, passes first: wait again); a signed `review.approved` row when the file converges |
 | 10 | Proof | `code-forge proof export B1 --run <run>`, `code-forge gates run --cwd <export dir>`, `code-forge proof red-green B1 --run <run> --test <file::case>` | gates measured in a clean export (dependency folders linked, a Composer `vendor` copied; verified on Node and on Laravel with PHPUnit and Pest); one signed `proof` row per proven test. With `--run <run> --block B1`, a gate argv item that is exactly `{test_files}` runs only the block's tests (its `--tests`, else its owned test files), or the full suite above `gates.full_suite_threshold_files` owned files (globs and directories count the tracked and new (not ignored) files they cover; `reason: threshold`) or when none is known or no `--run/--block` is given (`reason: no_tests`); `gate.done` records `scope: related \| full` with `test_count` or the reason. A gate given as `{argv, env}` runs with those variables; code-forge shows only their names, and masks a value of 8+ characters in the gate's own output |
@@ -51,6 +52,67 @@ The coder's turn ends with `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED:
 Nothing else counts as completion. Its report also lists one `reviewed <path> ticket <id>` line per
 changed file. With `--report`, `block close` treats a report that misses one as FAILED, whatever its
 sentinel says (`coder report FAILED: no review-file ticket id for <files>`).
+
+### The context pack
+
+With a top-level `context` key in `.code-forge.yml` (B63a), every coder task carries the same
+project rules, lessons and commands:
+
+```yaml
+context:
+  rules: [CLAUDE.md, docs/conventions.md]   # paths relative to the repository root, in order
+  lessons: docs/lessons.md                  # one file
+  commands:                                 # argv lists, each optional; never run by code-forge
+    build: [npm, run, build]
+    test: [npm, test]
+    lint: [npm, run, lint]
+    format: [npm, run, format]
+  max_lines: 300                            # default 300, at least 20
+```
+
+`code-forge context pack --run <run> --block <id>` writes `<run root>/context/<id>.md`:
+
+- a header: run, block, level, owned files, test files (from `--tests`) and, for a worktree
+  block, its path and branch;
+- the commands, as argv text in POSIX shell quoting (a token with anything but letters, digits
+  and `_@%+=:,./-` is single-quoted, an embedded `'` written `'\''`, and an empty token shown as
+  `''` — though the config refuses an empty token), so a pasted line expands nothing; each line
+  goes through the same secret redaction as the rules and lessons. A control character (a newline
+  included) in a token, a rules or lessons path, or an owned or test file name is refused ("contains
+  a control character"), so no value can forge a line of the pack;
+- each rules file, then the lessons file, each headed by its path (an empty or whitespace-only file
+  gives its heading alone).
+
+Over `max_lines` the lessons are cut first, then the rules files from the last one backwards; each
+cut section ends in `[cut: N lines dropped]`. The header and the commands are never cut. It prints
+the path and `tokens ~<n>` (bytes / 4, as for review packets), or with `--json` one line
+`{"path":…,"tokens":…,"lines":…,"cut":…,"sha256":…}`. A new pack writes a signed `context.pack`
+row with the fields `{block, path, sha256, tokens, lines, cut}`. A second pack with the same
+content writes no row and prints the same output: the check is against the block's last
+`context.pack` row (same sha256 and path). The ledger is read before anything is written. The new
+text goes to a temp file, the row is appended, and only then is the file renamed into place: a row
+that cannot be appended removes the temp file and leaves an earlier pack as it was (exit 1,
+"nothing was written"); a rename that fails after the row says the row was already written.
+
+Coders may run `context pack` themselves; `.code-forge.yml` stays non-ownable, so a coder cannot
+change what goes into it.
+
+Rules and lessons are always read from the main tree, never from a block worktree. A missing file,
+an absolute path, a `..` segment or a symlink that leads out of the repository is refused (exit 1,
+naming the key and the path; a broken symlink is judged by where it points: outside is refused as
+outside, inside as missing), and so is a config without `context` or with a bad `context` value;
+nothing is written then. A file name that merely starts with `..` (`..notes.md`) is inside.
+
+The review packets carry the same rules and lessons in their project-rules slot (at most 60 lines,
+the rules first, then `### lessons`, trimmed together under that one cap), read from the main tree
+when the ticket is reviewed. A rules or lessons file that is missing, outside the repository or
+unreadable at that moment makes the ticket `unavailable` with `reason: context-unreadable` (see
+the review results below). Without a `context` key the packets are exactly as before.
+
+`context` is not authority: code-forge reads the live config for it, not the copy fixed at
+`run start`, and `run reload` accepts a change to it (the next review ticket uses it; the next
+`context pack` reads the live config directly). The pack's run root still comes from the run's own
+snapshot (`tmp.root` is fixed for the run).
 
 ### One worktree per block
 
@@ -160,6 +222,8 @@ edit the file and run `code-forge run reload --run <run>`:
   a restart;
 - `project.slug`, `engine`, `tmp.root`, `keys`, `system1.key`, `review.external`, `proof.isolation`, `proof.worktree` and `version` are fixed for the run:
   a change to one is refused with the key's name. End the run and start a new one to change them;
+- `context` (the coder context pack) is not fixed: a change to it is accepted, and new review
+  tickets carry the new rules and lessons;
 - while an autopilot grant is active, a change to any limit key (budgets, thresholds, review caps,
   escalation, proof, System 1, `autopilot.*`) is refused. Only you change one, with
   `code-forge autopilot approve`.
@@ -238,6 +302,13 @@ moved inside one file (removed in one place, added in another) is not detected.
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
 exactly, and the output is long enough (`review.min_tokens_out`, default 120). A clean pass
 (`passed: true`, no findings, a summary) needs only 40 tokens, whatever the diff size. Anything else is `review.unavailable`, never approval.
+
+`unavailable: context-unreadable` (B63a) comes before any session: a rules or lessons file named
+by `context` is missing, outside the repository or unreadable, or the `context` value is bad. No
+session runs and the ticket's packet directory is removed. The worker does not retry it; the
+ticket is done with that signed result. Running `review-file` on the same content again is a
+fresh attempt (`retry: true`) every time, with no cap, so once the file is back the file is
+reviewed normally.
 
 An answer that does not match the finding schema is `unavailable: schema`. The ledger keeps a
 structural diagnosis of that answer (`review.schema_invalid`: its keys, their types and the schema

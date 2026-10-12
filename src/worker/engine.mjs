@@ -59,6 +59,10 @@
  *  - `git-failed`: git could not be run on the tree;
  *  - `run-record-unreadable`: the record cannot be parsed, or names no workspace.
  * A block without a worktree, or one the run record does not know, reads the main tree as before.
+ * B63a: a ticket is also `unavailable` with `context-unreadable` when the config's `context` key
+ * is bad or one of its rules or lessons files is missing, outside the repository or unreadable at
+ * review time; no session runs and the packet dir is removed. The worker does not retry it (the
+ * ticket is done); `review-file` on the same content is a fresh attempt every time (`retry: true`).
  * The tree is passed as `contentRoot`: `repoRoot` stays the main tree, and the fix-loop state
  * stays under the run root.
  */
@@ -69,6 +73,7 @@ import { blockKind } from '../decide/escalation.mjs';
 import { askJev } from '../decide/jev-client.mjs';
 import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
+import { ContextError, reviewDigest } from '../context/pack.mjs';
 import { reviewFile, rulesRisk } from '../review/engine.mjs';
 import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
@@ -336,13 +341,26 @@ export async function reviewTicket(ticket, ctx) {
   const factsExcerpt = factsFor(entry, ctx.cfg);
   const peerDiffs = blockPeerDiffs(contentRoot, { base: entry.base, owned: entry.owned, ownedKinds: entry.ownedKinds, file: ticket.file });
   try {
+    // B63a: the `context` rules and lessons, read from the MAIN tree (`ctx.repoRoot`, never the
+    // block's worktree) with the config in force for this ticket; '' without a `context` key, so
+    // the packet stays as it was. A bad `context` value or a rules/lessons file that is missing,
+    // outside the repository or unreadable makes the ticket `unavailable` (`context-unreadable`,
+    // re-queued by `review-file` on the same content, as often as asked): no review runs without the rules it was promised.
+    let rulesDigest;
+    try {
+      rulesDigest = reviewDigest({ repoRoot: ctx.repoRoot, cfg: ctx.cfg });
+    } catch (err) {
+      if (!(err instanceof ContextError)) throw err;
+      return { status: 'unavailable', reason: 'context-unreadable', approved: false, engine: 'adaptive', sessions: [] };
+    }
+    const digest = rulesDigest === '' ? {} : { rulesDigest };
     if (!ctx.key) {
       return await reviewFile(
-        { repoRoot: contentRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt, peerDiffs },
+        { repoRoot: contentRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt, ...digest, peerDiffs },
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, tctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt, peerDiffs });
+    return await fixLoopRound(ticket, tctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt, rulesDigest, peerDiffs });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -450,10 +468,10 @@ export function mayTakeRung(state, kind, cfg, rungUsed) {
  * first full round, or any round once the rung is gone) runs outside the block lock, in parallel
  * with the block's other files.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, level: string, owned: string[], ownedKinds?: Record<string, string>, blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
+ * @param {{base: string | null, level: string, owned: string[], ownedKinds?: Record<string, string>, blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string, rulesDigest?: string, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, blockKindOf, key, workDir, factsExcerpt, peerDiffs }) {
+async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, blockKindOf, key, workDir, factsExcerpt, rulesDigest = '', peerDiffs }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   const readRows = ctx.readRows;
   /** @type {{outcome: ReviewOutcome} | {round: () => Promise<ReviewOutcome>}} */
@@ -493,7 +511,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
       state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
     }
     const fixed = state;
-    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt, extraRounds, peerDiffs });
+    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq: loaded.seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest, extraRounds, peerDiffs });
     // a round that could take the rung keeps the block lock until its state is saved
     if (mayTakeRung(fixed, kind, ctx.cfg, rungUsed)) return { outcome: await round() };
     return { round };
@@ -504,10 +522,10 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
 /**
  * Run the prepared round and save the file's state: the ticket's outcome.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string, extraRounds?: number, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
+ * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string, rulesDigest?: string, extraRounds?: number, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, extraRounds = 0, peerDiffs }) {
+async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest = '', extraRounds = 0, peerDiffs }) {
   /** @type {Record<string, any> | null} */
   let engineOutcome = null;
   let approvalWritten = false;
@@ -556,12 +574,13 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         base,
         writeRow,
         factsExcerpt,
+        ...(rulesDigest !== '' ? { rulesDigest } : {}),
         extraRounds,
         ...(peerDiffs ? { peerDiffs } : {}),
         ...(jev ? { jev } : {}),
         ...(schemaHistory ? { schemaHistory } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.contentRoot ?? ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
+          engineOutcome = await reviewFile({ repoRoot: ctx.contentRoot ?? ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...(rulesDigest !== '' ? { rulesDigest } : {}), ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
           return engineOutcome;
         },
         spawn: async (opts) => {
