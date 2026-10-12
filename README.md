@@ -14,6 +14,7 @@ In the next release:
 
 - **A lost review state is rebuilt, not reset.** When the review state file of a file is gone (for example, macOS cleaned its temp folder), the worker rebuilds it from the signed ledger and writes a `review.state_restored` row. Rounds, open findings and stops stay as they were. If the ledger cannot rebuild it, the ticket is refused as `review-state-lost`, not `tampered` (#15).
 - **Review state no longer lives in the temp folder.** It is saved under `~/.code-forge/runs/<run>/review-state/`, so a temp cleanup or a worker restart does not touch it. A state file from an older run is moved there once, after a check against its signed anchor. `code-forge doctor` warns when a state file of an active run is missing and says whether the ledger can rebuild it (#15).
+- **Waiving every finding is a real way out.** A file whose signed review on its current content left findings, all cleared by accepted waivers, now counts as reviewed (`reviewed_by_waiver`, never approved). `block close` writes one signed `gate.review_waived_all` row for it. A critical still needs a human waiver, and a finding with an unknown severity does too (#9).
 
 In 0.8.0:
 

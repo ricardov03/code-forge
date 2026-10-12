@@ -109,7 +109,7 @@ Every block verb also takes `--json`. On success stdout is exactly one line,
 | `attempt` | `attempt` | `attempt` |
 | `rebase` | `rebased` | `old_base`, `new_base` |
 | `claim` | `claimed` | `path` |
-| `close` | `closed` | `status`, `reason`, `close_event` (or null); with `--remove-worktree` also `worktree` (`{removed, path, branch}`; a block with no worktree refuses `--remove-worktree` as a usage error, exit 2); with `hooks.on_block_end` set also `done_file` when the close ended the block (closed or stopped) — see [When a block ends](#when-a-block-ends-the-done-file-and-the-hook) |
+| `close` | `closed` | `status`, `reason`, `close_event` (or null); when a file passed as reviewed by waiver also `reviewed_by_waiver` (`[{file, content_hash, status, findings, by}]`); with `--remove-worktree` also `worktree` (`{removed, path, branch}`; a block with no worktree refuses `--remove-worktree` as a usage error, exit 2); with `hooks.on_block_end` set also `done_file` when the close ended the block (closed or stopped) — see [When a block ends](#when-a-block-ends-the-done-file-and-the-hook) |
 | `stop` | `stopped` | none; with `hooks.on_block_end` set, `done_file` |
 | `waive` | `waived` | `finding`, `file`, `by` |
 
@@ -560,7 +560,9 @@ flowchart TD
   `stopped: review_cap`; otherwise the fixes continue at L2.
 - **When a file stops**, the block cannot close. The human fixes it by hand, waives the finding
   (`code-forge block waive <id> <finding-id> --run <run> --file <path> --reason <text>`), or splits
-  the block.
+  the block. When a signed review round on the current bytes left findings and every finding the
+  review left open is waived, the file counts as reviewed (`reviewed_by_waiver`, never approved)
+  and the block can close — see the next table.
 
 Other escalation triggers, first rule wins: attempts at a level used up
 (`escalation.retries_per_level`, default 2), review rounds at a level used up
@@ -574,7 +576,7 @@ higher, at most L2), and an S2 ruling. A docs or contract block is never coded b
 | Claim | Checked by |
 |---|---|
 | only owned files touched | every changed or new file since the block's base must be in its `owned_files`, unchanged since `block open` recorded the tree, owned by another block of the run that is still open, or still exactly what a closed block's gate approved; anything else refuses `unowned_change <file>` (`block claim` it, or put it back). Only files under the repository top-level `.code-forge/` are not changes (for a workspace in a subdirectory, its own `.code-forge/` counts as source tree except this run's record mirror and the block's default transcript), so keep transcripts and reports there. A file a closed block of the run owns is accounted for while it is exactly the content that block's gate approved. A file an open sibling block owns is left to that block's gate: the close cannot tell which coder wrote it, so it prints a `WARN` line naming each such file |
-| every file reviewed | the files are every owned file changed since the base plus every owned file with any review row for this block (so work committed before `block open` or done in another worktree is still checked, with a WARN naming the likely cause); an owned entry with no glob owns the paths below it; a block with no such file refuses `no_changes`, which only the owner's `--no-require-reviews` (confirmed at a terminal) lifts. Each needs a **signed** `review.approved` row for its current content hash, and no later review of that same content that did not approve it. A later review that left findings open refuses `not_approved <file> <finding>` per finding until it is fixed and approved again or waived; a critical finding only by the human's `block waive` |
+| every file reviewed | the files are every owned file changed since the base plus every owned file with any review row for this block (so work committed before `block open` or done in another worktree is still checked, with a WARN naming the likely cause); an owned entry with no glob owns the paths below it; a block with no such file refuses `no_changes`, which only the owner's `--no-require-reviews` (confirmed at a terminal) lifts. Each needs a **signed** `review.approved` row for its current content hash, and no later review of that same content that did not approve it. A later review that left findings open refuses `not_approved <file> <finding>` per finding until it is fixed and approved again or waived; a critical finding only by the human's `block waive`. A file with no approval refuses `unreviewed <file>` unless it is **reviewed by waiver**: a signed `review.round` row exists for its current hash (a session really reviewed these bytes — a repeated stop or an `unavailable` result never counts), the latest refusal row is signed, carries `content_hash` equal to the current hash (a row with no hash never qualifies), and names at least one finding, and every finding it names and every open id of the file's `review.cap` rows is waived (a critical only by the human, an autopilot waiver only when its grant covered it). Such a file is reported `reviewed_by_waiver`, never approved; the close prints `block <id>: <file> reviewed_by_waiver (<ids>; by <human\|autopilot>)`, `--json` adds `reviewed_by_waiver`, and one signed `gate.review_waived_all {file, content_hash, findings, by}` row per such file (`findings`: the sorted ids) is written just before `block.close` — none when the close is refused |
 | tests green | the gates, run again |
 | clauses covered | every clause names a test that exists and passed; S1 `scope` on the other hunks |
 | size | net lines against `--lines`: over 1.25 × stops the block and asks for a split |

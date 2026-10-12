@@ -15,6 +15,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - A lost review state file is rebuilt from the signed ledger and recorded as review.state_restored; rounds, findings and
   stops stay; with no ledger copy the ticket is refused as review-state-lost, not tampered (#15)
+- A file whose every finding is cleared by accepted waivers counts as reviewed (reviewed_by_waiver) and block close
+  writes a signed gate.review_waived_all row; unknown severities are human-only (#9)
 
 ## [0.8.0] — 2026-10-12
 

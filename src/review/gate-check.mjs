@@ -11,7 +11,14 @@
  *    another block of the run that is still OPEN owns it — the gate cannot tell which coder wrote
  *    it, so the close WARNs naming each such file — or a closed one owns it and its gate approved
  *    exactly the current content);
- *  - `unreviewed`: a changed or new file has NO `review.approved` row for its CURRENT content hash;
+ *  - `unreviewed`: a changed or new file has NO `review.approved` row for its CURRENT content hash —
+ *    unless (B70) it is `reviewed_by_waiver`: a signed `review.round` row for that hash exists (a
+ *    session really reviewed these bytes; a repeated stop or an `unavailable` result never counts),
+ *    the latest refusal row for the hash is signed, carries `content_hash` (a hash-less one does
+ *    not qualify, though it still refuses) and names at least one finding, and every finding it
+ *    names and every open id of the file's `review.cap` rows is cleared by a waiver the gate
+ *    accepts (the same rule as below: a critical only by `by: human`). Such a file is never
+ *    approved; the close writes one signed `gate.review_waived_all` row for it ({@link reviewGateCheck});
  *  - `unsigned`:   the file's approvals for that hash exist but none carries a valid MAC;
  *  - `not_approved`: (B52) the file's signed approval for its current hash is STALE — a later row of
  *    the block (ledger order) for the same file and hash refuses it ({@link denialOf}: a
@@ -76,6 +83,11 @@ import { DELETED_HASH, contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { verifyResult } from '../worker/queue.mjs';
 
 /**
+ * @typedef {{file: string, content_hash: string, status: 'reviewed_by_waiver', findings: string[], by: 'human' | 'autopilot'}} WaivedAll
+ *   B70: a file that counts as reviewed (never approved) because every finding its review left open was waived.
+ */
+
+/**
  * @typedef {{code: 'no_changes' | 'unowned_change' | 'not_approved' | 'unreviewed' | 'unsigned' | 'rule_break' | 'late_unruled' | 'review_cap' | 'unproven' | 'autopilot_waiver_invalid', file?: string, finding?: string, detail?: string}} Refusal
  */
 
@@ -96,7 +108,8 @@ const verified = (row, key) => verifyRow(row, key).ok;
  *   but never the proof check; `highPaths` is `proof.tiers.high.paths`. Both are REQUIRED: a
  *   caller that leaves one out gets a TypeError, never a silent default that skips the proof.
  *   `runId` is required too: the proof check matches its rows on this run only (fix round 4).
- * @returns {{ok: boolean, refusals: Refusal[]}}
+ * @returns {{ok: boolean, refusals: Refusal[], waivedAll: WaivedAll[]}} `waivedAll` (B70): the files
+ *   that passed as `reviewed_by_waiver` — empty whenever the check refuses.
  * @throws {TypeError} `runId`, `proofFiles` or `highPaths` undefined
  */
 export function checkBlockReviews({ block, runId, files, rows, key, transcript = null, extraTokens = [], proofFiles, highPaths, unowned = [], resultFiles = {}, noChanges = false }) {
@@ -112,15 +125,18 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
    * B52: the index of the last signed approval and the latest refusal AFTER it for (file, hash);
    * `denial` is null when that approval stands (or there is none — `unreviewed` / `unsigned` say
    * so). A refusal row with no `content_hash` counts for every hash of its file (fail closed).
-   * `latest` is the latest refusal for (file, hash) whether or not an approval exists.
+   * `latest` is the latest refusal for (file, hash) whether or not an approval exists, `latestRow`
+   * the row it came from.
    * @param {string} file @param {string} hash
-   * @returns {{lastApproval: number, denial: Denial | null, latest: Denial | null}}
+   * @returns {{lastApproval: number, denial: Denial | null, latest: Denial | null, latestRow: Record<string, any> | null}}
    */
   const latestOf = (file, hash) => {
     let lastApproval = -1;
     /** @type {Denial | null} */
     let denial = null;
     let lastDenial = -1;
+    /** @type {Record<string, any> | null} */
+    let latestRow = null;
     mine.forEach((r, i) => {
       if (r.file !== file) return;
       if (r.event === 'review.approved') {
@@ -132,9 +148,10 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
       if (d !== null) {
         denial = d;
         lastDenial = i;
+        latestRow = r;
       }
     });
-    return { lastApproval, denial: lastApproval >= 0 && lastDenial > lastApproval ? denial : null, latest: denial };
+    return { lastApproval, denial: lastApproval >= 0 && lastDenial > lastApproval ? denial : null, latest: denial, latestRow };
   };
   const staleBy = (/** @type {string} */ file, /** @type {string} */ hash) => latestOf(file, hash).denial;
 
@@ -142,13 +159,113 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
 
   if (noChanges) refusals.push({ code: 'no_changes', detail: `block ${block} changed no owned file and has no reviews` });
 
+  const signedOf = (/** @type {string} */ event) => mine.filter((r) => r.event === event && verified(r, key));
+  const waivers = signedOf('review.waived').filter((r) => r.by === 'human');
+  const autopilotWaivers = mine.filter((r) => r.event === 'review.waived' && r.by === 'autopilot');
+  const runRows = rows.filter((r) => r?.run === runId);
+  const rulings = signedOf('review.late_ruling');
+  const matches = (/** @type {Record<string, any>} */ r, /** @type {string} */ file, /** @type {string} */ finding) => r.finding === finding && r.file === file;
+  /**
+   * THE waiver rule: who clears the finding — `human` (a signed human waiver), `autopilot` (an
+   * autopilot waiver its grant covered, {@link autopilotWaiverProblem}) or null. `severity`: the
+   * one a refusal row RECORDS for it — REQUIRED: only an explicit null (none recorded there; the
+   * signed review rows decide, {@link autopilotWaiverProblem}) or warning/nit may be delegated;
+   * anything else (`undefined`, a critical, an unknown value) is the human's alone
+   * ({@link delegableSeverity}). `invalid`: why the autopilot waivers naming it do not count (null
+   * when none names it).
+   * @param {string} file @param {string} finding @param {unknown} severity
+   * @returns {{by: 'human' | 'autopilot' | null, invalid: string | null}}
+   */
+  const waiverOf = (file, finding, severity) => {
+    if (waivers.some((r) => matches(r, file, finding))) return { by: 'human', invalid: null };
+    const named = autopilotWaivers.filter((r) => matches(r, file, finding));
+    if (named.length === 0) return { by: null, invalid: null };
+    if (!delegableSeverity(severity)) return { by: null, invalid: `the latest review records it ${severity}; only the human waives it` };
+    const problems = named.map((w) => autopilotWaiverProblem(w, { blockRows: mine, runRows, allRows: rows, key }));
+    if (problems.some((p) => p === null)) return { by: 'autopilot', invalid: null };
+    return { by: null, invalid: /** @type {string} */ (problems[0]) };
+  };
+  /**
+   * Whether the finding is waived: a signed human waiver, or an autopilot waiver its grant covered.
+   * @param {string} file @param {string} finding @returns {{waived: boolean, invalid: string | null}}
+   */
+  const waiverFor = (file, finding) => {
+    const w = waiverOf(file, finding, null);
+    return { waived: w.by !== null, invalid: w.invalid };
+  };
+  /** @param {Refusal} refusal @param {string} finding @param {string | null} invalid @returns {Refusal} */
+  const orInvalid = (refusal, finding, invalid) =>
+    invalid === null ? refusal : { code: 'autopilot_waiver_invalid', file: refusal.file, finding, detail: `the autopilot waiver of ${finding} in ${refusal.file} does not count: ${invalid}` };
+
+  /**
+   * B70: the worst severity any signed hash-bound refusal row of `file` at `hash` records for
+   * `finding` (a cap row records none), or `unknown` when none does — never delegable.
+   * @param {string} file @param {string} hash @param {string} finding @returns {string}
+   */
+  const recordedRefusalSeverity = (file, hash, finding) => {
+    let worst = '';
+    for (const r of mine) {
+      if (r.file !== file || r.content_hash !== hash || !verified(r, key)) continue;
+      for (const o of denialOf(r, resultFiles)?.open ?? []) {
+        if (o.id !== finding || o.severity === null) continue;
+        // 'unknown' is itself an OPEN_RANK key (ranked above critical), so any value outside it
+        // maps to 'unknown' and wins: fail closed
+        const sev = Object.hasOwn(OPEN_RANK, o.severity) ? o.severity : 'unknown';
+        if (worst === '' || /** @type {Record<string, number>} */ (OPEN_RANK)[sev] > /** @type {Record<string, number>} */ (OPEN_RANK)[worst]) worst = sev;
+      }
+    }
+    return worst === '' ? 'unknown' : worst;
+  };
+
+  /**
+   * B70: a file with no approval for its current hash that counts as reviewed because the human
+   * (or a covered autopilot grant) waived everything a real review of these bytes left open, or
+   * null. All of: a signed `review.round` row for (file, hash) — a session reviewed these bytes;
+   * the latest refusal row for (file, hash) is signed, carries `content_hash: hash` (a hash-less
+   * one never qualifies) and names at least one finding; every finding it names and every open id
+   * of the file's `review.cap` rows is cleared by {@link waiverOf}. Severities: an id the latest
+   * refusal names (a cap row's too, when that is the latest) uses the severity THAT row records;
+   * a recorded null (a cap row records none) is decided by {@link autopilotWaiverProblem} from the
+   * signed review rows. Any other open cap id uses {@link recordedRefusalSeverity}, whose
+   * `unknown` (no signed refusal at `hash` records one) is the human's alone. A cap row whose
+   * `open` is not an array of non-empty strings (the fix loop's shape) fails closed: null. `by` is
+   * `human` when every clearing waiver is the human's, else `autopilot`.
+   * @param {string} file @param {string} hash
+   * @returns {WaivedAll | null}
+   */
+  const waivedAllOf = (file, hash) => {
+    if (!mine.some((r) => r.event === 'review.round' && r.file === file && r.content_hash === hash && verified(r, key))) return null;
+    const { latest, latestRow } = latestOf(file, hash);
+    if (latest === null || latestRow === null || latestRow.content_hash !== hash || !verified(latestRow, key) || latest.open.length === 0) return null;
+    /** @type {Map<string, unknown>} */
+    const named = new Map(latest.open.map((f) => [f.id, f.severity]));
+    for (const cap of mine.filter((r) => r.event === 'review.cap' && r.file === file)) {
+      if (!Array.isArray(cap.open) || !cap.open.every((/** @type {unknown} */ id) => typeof id === 'string' && id.length > 0)) return null;
+      for (const id of cap.open) if (!named.has(id)) named.set(id, recordedRefusalSeverity(file, hash, id));
+    }
+    let byHuman = true;
+    for (const [finding, severity] of named) {
+      const w = waiverOf(file, finding, severity);
+      if (w.by === null) return null;
+      if (w.by !== 'human') byHuman = false;
+    }
+    return { file, content_hash: hash, status: 'reviewed_by_waiver', findings: [...named.keys()].sort(), by: byHuman ? 'human' : 'autopilot' };
+  };
+
+  /** @type {WaivedAll[]} */
+  const waivedAll = [];
+
   /** @type {Array<{file: string, denial: Denial}>} */
   const stale = [];
   for (const { file, content_hash } of files) {
     const approvals = approvedFor(file, content_hash);
     const signedApproval = approvals.some((r) => verified(r, key));
-    if (approvals.length === 0) refusals.push({ code: 'unreviewed', file, detail: `no review.approved row for ${file} at its current content` });
-    else if (!signedApproval) refusals.push({ code: 'unsigned', file, detail: `the review.approved row for ${file} has no valid MAC` });
+    if (approvals.length === 0) {
+      // B70: a review whose every open finding was waived counts as reviewed — never as approved
+      const all = waivedAllOf(file, content_hash);
+      if (all !== null) waivedAll.push(all);
+      else refusals.push({ code: 'unreviewed', file, detail: `no review.approved row for ${file} at its current content` });
+    } else if (!signedApproval) refusals.push({ code: 'unsigned', file, detail: `the review.approved row for ${file} has no valid MAC` });
     if (signedApproval) {
       const denial = staleBy(file, content_hash);
       if (denial !== null) stale.push({ file, denial });
@@ -167,29 +284,6 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
     for (const hit of scanTranscript(transcript, mergeForbidden(extraTokens))) refusals.push({ code: 'rule_break', detail: `transcript line ${hit.line}: ${hit.id}` });
   }
 
-  const signedOf = (/** @type {string} */ event) => mine.filter((r) => r.event === event && verified(r, key));
-  const waivers = signedOf('review.waived').filter((r) => r.by === 'human');
-  const autopilotWaivers = mine.filter((r) => r.event === 'review.waived' && r.by === 'autopilot');
-  const runRows = rows.filter((r) => r?.run === runId);
-  const rulings = signedOf('review.late_ruling');
-  const matches = (/** @type {Record<string, any>} */ r, /** @type {string} */ file, /** @type {string} */ finding) => r.finding === finding && r.file === file;
-  /**
-   * Whether the finding is waived: a signed human waiver, or an autopilot waiver its grant covered.
-   * `invalid`: why the autopilot waivers naming it do not count (null when none names it).
-   * @param {string} file @param {string} finding @returns {{waived: boolean, invalid: string | null}}
-   */
-  const waiverFor = (file, finding) => {
-    if (waivers.some((r) => matches(r, file, finding))) return { waived: true, invalid: null };
-    const named = autopilotWaivers.filter((r) => matches(r, file, finding));
-    if (named.length === 0) return { waived: false, invalid: null };
-    const problems = named.map((w) => autopilotWaiverProblem(w, { blockRows: mine, runRows, allRows: rows, key }));
-    if (problems.some((p) => p === null)) return { waived: true, invalid: null };
-    return { waived: false, invalid: /** @type {string} */ (problems[0]) };
-  };
-  /** @param {Refusal} refusal @param {string} finding @param {string | null} invalid @returns {Refusal} */
-  const orInvalid = (refusal, finding, invalid) =>
-    invalid === null ? refusal : { code: 'autopilot_waiver_invalid', file: refusal.file, finding, detail: `the autopilot waiver of ${finding} in ${refusal.file} does not count: ${invalid}` };
-
   /** B52: a ruling clears a late finding only when it rules `nit` on one recorded warning or nit. @param {Record<string, any>} late */
   const ruledNit = (late) => (late.severity === 'warning' || late.severity === 'nit') && rulings.some((r) => matches(r, late.file, late.finding) && r.ruling === 'nit');
 
@@ -204,14 +298,8 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
       notApproved.add(`${file}\0${finding}`);
       const refusal = /** @type {Refusal} */ ({ code: 'not_approved', file, finding, detail: `the latest review of ${file}'s current content left ${finding} open and it is not waived` });
       // the severity the refusal row records wins: anything but warning/nit is the human's alone
-      if (severity !== null && !DELEGABLE_SEVERITIES.includes(severity)) {
-        if (waivers.some((r) => matches(r, file, finding))) continue;
-        const delegated = autopilotWaivers.some((r) => matches(r, file, finding));
-        refusals.push(delegated ? { code: 'autopilot_waiver_invalid', file, finding, detail: `the autopilot waiver of ${finding} in ${file} does not count: the latest review records it ${severity}; only the human waives it` } : refusal);
-        continue;
-      }
-      const w = waiverFor(file, finding);
-      if (!w.waived) refusals.push(orInvalid(refusal, finding, w.invalid));
+      const w = waiverOf(file, finding, severity);
+      if (w.by === null) refusals.push(orInvalid(refusal, finding, w.invalid));
     }
   }
 
@@ -239,7 +327,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
     const w = waiverFor(/** @type {string} */ (r.file), PROOF_FINDING);
     if (!w.waived) refusals.push(orInvalid(r, PROOF_FINDING, w.invalid));
   }
-  return { ok: refusals.length === 0, refusals };
+  return { ok: refusals.length === 0, refusals, waivedAll: refusals.length === 0 ? waivedAll : [] };
 }
 
 /**
@@ -360,6 +448,17 @@ export async function resultFilesFor({ repoRoot, runId, block, rows }) {
 
 /** The finding severities autopilot may waive (B47); anything else is never delegated. */
 export const DELEGABLE_SEVERITIES = Object.freeze(['warning', 'nit']);
+
+/**
+ * Whether a finding with the severity a refusal row records may be cleared by an autopilot waiver
+ * at all (B70, fail closed): an explicit null (the row records none — the signed review rows then
+ * decide, {@link autopilotWaiverProblem}) or warning/nit. `undefined`, a critical, an unknown
+ * severity or any other value is the human's alone.
+ * @param {unknown} severity @returns {boolean}
+ */
+export function delegableSeverity(severity) {
+  return severity === null || (typeof severity === 'string' && DELEGABLE_SEVERITIES.includes(severity));
+}
 
 /** Severity order for {@link recordedSeverity}: the worst recorded one wins. */
 const SEVERITY_RANK = Object.freeze({ nit: 0, warning: 1, critical: 2, blocker: 3 });
@@ -739,14 +838,22 @@ function isOnDisk(repoRoot, file) {
 }
 
 /**
- * A `closeBlock` extra check (B8's `extraChecks` seam): refusals joined into one reason.
+ * A `closeBlock` extra check (B8's `extraChecks` seam): refusals joined into one reason. B70: on a
+ * pass, `onWaivedAll` (when given) receives the files that passed as `reviewed_by_waiver` (empty
+ * when none). It only buffers that list: the close's `gate.review_waived_all` rows for it are
+ * signed and written by `closeBlock` after EVERY check passed, just before `block.close` — a
+ * refused close writes none.
  * @param {() => Promise<Parameters<typeof checkBlockReviews>[0]>} load
+ * @param {{onWaivedAll?: (files: WaivedAll[]) => void}} [hooks]
  * @returns {() => Promise<{ok: boolean, reason?: string}>}
  */
-export function reviewGateCheck(load) {
+export function reviewGateCheck(load, { onWaivedAll } = {}) {
   return async () => {
     const result = checkBlockReviews(await load());
-    if (result.ok) return { ok: true };
+    if (result.ok) {
+      onWaivedAll?.(result.waivedAll);
+      return { ok: true };
+    }
     return { ok: false, reason: result.refusals.map((r) => `${r.code}${r.file ? ` ${r.file}` : ''}${r.finding ? ` ${r.finding}` : ''}`).join('; ') };
   };
 }

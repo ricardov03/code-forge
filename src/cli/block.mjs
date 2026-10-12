@@ -77,6 +77,15 @@
  * else still refuses — `unowned_change`, `unproven`, `no_changes`, the transcript grep and
  * `closeBlock`'s own rows. With `--no-require-reviews` the human path runs exactly as without the key.
  *
+ * B70 (issue #9 a): a file with no approval for its current hash whose real review (a signed
+ * `review.round` at that hash) left findings that are all waived — `block waive`, or an autopilot
+ * waiver its grant covered for a non-critical — passes as `reviewed_by_waiver`, never approved
+ * (`checkBlockReviews`). When the block closes, one signed `gate.review_waived_all {file,
+ * content_hash, findings, by}` row per such file is written just before `block.close` (after any
+ * other close row); a refused close writes none. The close prints `block <id>: <file>
+ * reviewed_by_waiver (<ids>; by <who>)` before the closed line, and `--json` adds
+ * `reviewed_by_waiver: [{file, content_hash, status, findings, by}]` (only when there is one).
+ *
  * B63b: `context.require_coder_tests: true` in the run's config snapshot (immutable like
  * `review.external`; the live config is never read for it) adds one check after the report check:
  * `--report` must be given and readable, its last sentinel for the block must be COMPLETE, and a
@@ -430,6 +439,22 @@ export async function runBlock(args, deps = {}) {
           const fileSet = await blockFileSet({ repoRoot: top, base, owned: entry.owned_files, matchOwned: isMine, changed: [...new Set([...changed, ...reviewed])].sort() });
           return { top, mainTop, where, inTree, wsPrefix, owns, changed, fileSet, reviewed };
         })());
+      // B58: the config waiver row is written by `closeBlock` under the run lock, just before
+      // `block.close` and only when every other check passed — never by a refused close
+      /** @type {Record<string, any>[]} */
+      const closeRows = external === null ? [] : [{ event: 'gate.reviews_waived', block: id, by: 'config', reviewer: external }];
+      /** @type {import('../review/gate-check.mjs').WaivedAll[]} */
+      let waivedAll = [];
+      // B70: a file whose review left only waived findings passes as `reviewed_by_waiver`; its signed
+      // `gate.review_waived_all` row joins the close rows (written just before `block.close`, only
+      // when the block closes — a refused close writes none)
+      const onWaivedAll = (/** @type {import('../review/gate-check.mjs').WaivedAll[]} */ files) => {
+        // idempotent: the waived rows are rebuilt from the final list, never appended per call
+        // (closeBlock reads closeRows only after every extra check passed)
+        waivedAll = files;
+        const others = closeRows.filter((r) => r.event !== 'gate.review_waived_all');
+        closeRows.splice(0, closeRows.length, ...others, ...files.map((f) => ({ event: 'gate.review_waived_all', block: id, file: f.file, content_hash: f.content_hash, findings: f.findings, by: f.by })));
+      };
       const reviews = reviewGateCheck(async () => {
         const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
         if (transcript === null) {
@@ -479,7 +504,7 @@ export async function runBlock(args, deps = {}) {
           proofFiles: fileSet,
           highPaths,
         };
-      });
+      }, { onWaivedAll });
       // B36: the coder's report names a review-file ticket for every changed file, or it is FAILED
       const report = async () => {
         if (typeof flags.report !== 'string' || reviewsWaived || external !== null) return { ok: true };
@@ -493,10 +518,6 @@ export async function runBlock(args, deps = {}) {
         const missing = missingReviewTickets(text, fileSet.map((f) => f.file));
         return missing.length === 0 ? { ok: true } : { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
       };
-      // B58: the config waiver row is written by `closeBlock` under the run lock, just before
-      // `block.close` and only when every other check passed — never by a refused close
-      /** @type {Record<string, any>[]} */
-      const closeRows = external === null ? [] : [{ event: 'gate.reviews_waived', block: id, by: 'config', reviewer: external }];
       /** @type {Array<() => Promise<{ok: boolean, reason?: string}>>} */
       const extraChecks = [reviews, report];
       // B63b: `context.require_coder_tests` in the run's config snapshot (never the live config)
@@ -530,10 +551,21 @@ export async function runBlock(args, deps = {}) {
       // does — also when a later step (the output, `--remove-worktree`) throws; it never changes
       // the exit code or stdout (`runHook` never throws)
       try {
+        // B70: each file that passed as reviewed_by_waiver is named before the closed line
+        if (result.ok) for (const f of waivedAll) say(`block ${id}: ${f.file} reviewed_by_waiver (${f.findings.join(', ')}; by ${f.by})\n`);
         (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
         // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
         if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null, ...(end?.json ?? {}) });
-        const closedJson = { block: id, event: result.status, status: result.status, reason: result.reason ?? null, close_event: result.event ?? null, ...(end?.json ?? {}) };
+        const closedJson = {
+          block: id,
+          event: result.status,
+          status: result.status,
+          reason: result.reason ?? null,
+          close_event: result.event ?? null,
+          ...(end?.json ?? {}),
+          // B70: only when a file passed as reviewed_by_waiver (otherwise the output is unchanged)
+          ...(result.ok && waivedAll.length > 0 ? { reviewed_by_waiver: waivedAll.map((f) => ({ file: f.file, content_hash: f.content_hash, status: f.status, findings: f.findings, by: f.by })) } : {}),
+        };
         if (!result.ok || !removeTree) {
           if (json && result.ok) emit(closedJson);
           return result.ok ? 0 : 1;
