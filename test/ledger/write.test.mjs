@@ -211,16 +211,24 @@ test('claimRotatedName: when two racers both successfully link() to different ca
     // see the source and link its own candidate before A's unlink runs.
     await link(file, path.join(dir, 'dup.1.jsonl'));
 
-    // Racer B (the real code under test): tries n=1 (EEXIST, A owns it), claims n=2, then races
-    // its own unlink against "A" finishing first (scheduled to fire after B's link resolves).
-    const bDone = claimRotatedName(file, dir, 'dup');
-    await new Promise((resolve) => setImmediate(resolve)); // let B's link() land before A unlinks
-    await unlink(file).catch(() => {}); // "A" finishes its unlink now, racing with B's own unlink
-    await bDone;
+    // Racer B (the real code under test): tries n=1 (EEXIST, A owns it), claims n=2. The afterLink
+    // seam forces the order: "A" finishes its unlink of the source exactly after B's link() lands
+    // and before B's own unlink() — no timing, so B's unlink deterministically sees ENOENT.
+    const afterLinkCalls = [];
+    await claimRotatedName(file, dir, 'dup', {
+      afterLink: async (candidate) => {
+        afterLinkCalls.push(path.basename(candidate));
+        await unlink(file); // racer A's unlink
+      },
+    });
 
+    assert.deepEqual(afterLinkCalls, ['dup.2.jsonl'], 'B links exactly once, to dup.2.jsonl');
     const rotatedFiles = (await readdir(dir)).filter((f) => f.startsWith('dup.') && f.endsWith('.jsonl'));
-    assert.equal(rotatedFiles.length, 1, `expected exactly 1 surviving rotated file, got: ${rotatedFiles.join(', ')}`);
+    // B's own candidate (dup.2.jsonl) is the one removed; A's dup.1.jsonl survives; the source is gone.
+    assert.deepEqual(rotatedFiles, ['dup.1.jsonl'], `expected exactly dup.1.jsonl to survive, got: ${rotatedFiles.join(', ')}`);
+    assert.deepEqual((await readdir(dir)).sort(), ['dup.1.jsonl']);
     const rows = await readAllRows('dup');
     assert.equal(rows.length, 1, 'the shared row must be counted once, not twice via two hardlinks');
+    assert.equal(rows[0].event, 'shared');
   });
 });

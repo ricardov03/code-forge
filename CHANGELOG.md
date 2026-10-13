@@ -44,6 +44,8 @@ waits on a second real consumer (plan §10.4, Q17).
   (B79).
 - `block reopen` refuses a non-string `tmp.root` as `reopen-config`, and `reopen-write-failed` names the error code,
   never a path (B79).
+- The ledger rotation race test forces the order of the two racers with an `afterLink` hook instead of scheduling them,
+  so it no longer fails at random under load (B81).
 
 ## [0.8.0] — 2026-10-12
 

@@ -53,9 +53,14 @@ function normalizeRow(row) {
 /**
  * Claim `<base>.<n>.jsonl` for `n = 1, 2, ...` atomically via `link()` (hardlink the still-full
  * file under the rotated name, then unlink the original) instead of `rename()`.
+ *
+ * `hooks.afterLink` is a test seam only: when given, it is awaited with the claimed candidate path
+ * right after a successful `link()` and before this call's `unlink()` of the source, so a test can
+ * force another racer's unlink into exactly that window. Production callers pass nothing.
  * @param {string} file @param {string} dir @param {string} base
+ * @param {{ afterLink?: (candidate: string) => Promise<void> | void }} [hooks]
  */
-export async function claimRotatedName(file, dir, base) {
+export async function claimRotatedName(file, dir, base, hooks = {}) {
   let n = 1;
   for (;;) {
     const candidate = path.join(dir, `${base}.${n}.jsonl`);
@@ -70,6 +75,7 @@ export async function claimRotatedName(file, dir, base) {
       if (err.code === 'ENOENT') return; // `file` vanished before we could link it — a racer already rotated it out
       throw err;
     }
+    if (hooks.afterLink) await hooks.afterLink(candidate);
     try {
       await unlink(file);
       return;
