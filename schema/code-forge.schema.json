@@ -267,10 +267,27 @@
             "type": "object",
             "additionalProperties": false,
             "required": ["match", "adapter", "argv"],
+            "if": { "patternProperties": { "^adapter$": { "const": "xcodebuild" } } },
+            "then": { "not": { "propertyNames": { "not": { "const": "xcode" } } } },
+            "else": { "propertyNames": { "not": { "const": "xcode" } } },
             "properties": {
               "match": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "Globs of the test files this runner runs, relative to the repository (the same glob rules as owned entries)." },
-              "adapter": { "type": "string", "enum": ["junit", "swift"], "description": "How the result is read. junit: the runner writes a JUnit XML report to {report} (PHPUnit, Pest, pytest and other JUnit runners). swift: swift test with --xunit-output {report}." },
-              "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "The command, an argv array (never a shell string). These items are replaced when an item is exactly the token: {test_file} (the test path), {test_id} (<file>::<case>, or <file> with no case), {test_filter} (the case, regex-escaped), {report} (a fresh report path outside the work dir). {report} and one test token are required. A token cannot be the command (argv[0]) or part of a longer item." },
+              "adapter": { "type": "string", "enum": ["junit", "swift", "xcodebuild"], "description": "How the result is read. junit: the runner writes a JUnit XML report to {report} (PHPUnit, Pest, pytest and other JUnit runners). swift: swift test with --xunit-output {report}. xcodebuild: xcodebuild test with -resultBundlePath {result_bundle}; the result is read with xcrun xcresulttool, and a precheck needs full Xcode and the destination's simulator first." },
+              "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "The command, an argv array (never a shell string). These items are replaced when an item is exactly the token. junit and swift: {test_file} (the test path), {test_id} (<file>::<case>, or <file> with no case), {test_filter} (the case, regex-escaped), {report} (a fresh report path outside the work dir); {report} and one test token are required. xcodebuild: {workspace}, {project}, {scheme}, {destination} (from xcode), {only_testing} (one item, -only-testing:<test_target>/<Suite>[/<case>]), {result_bundle} (a fresh result bundle path outside the work dir); {scheme}, {destination}, {only_testing} and {result_bundle} are required. A token cannot be the command (argv[0]) or part of a longer item." },
+              "xcode": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["scheme", "destination", "test_target"],
+                "dependentSchemas": { "workspace": { "propertyNames": { "not": { "const": "project" } } } },
+                "description": "B102: the xcodebuild adapter's values; required for it, refused on any other adapter. Each value is a non-empty string that does not start with -. At most one of workspace and project.",
+                "properties": {
+                  "workspace": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The .xcworkspace for {workspace}. At most one of workspace and project; neither = a Swift package in the work dir." },
+                  "project": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The .xcodeproj for {project}. At most one of workspace and project." },
+                  "scheme": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The scheme for {scheme}." },
+                  "destination": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The destination for {destination}, e.g. platform=iOS Simulator,name=iPhone 17. A simulator destination must name a device xcrun simctl lists as available (by name or id, and OS when given); platform=macOS needs none. code-forge never boots, creates or deletes a simulator." },
+                  "test_target": { "type": "string", "minLength": 1, "pattern": "^[^-/][^/]*$", "description": "The test target (one name, no /) that {only_testing} starts with; every test in the result must sit under <test_target>/<Suite>." }
+                }
+              },
               "env": {
                 "type": "object",
                 "additionalProperties": false,

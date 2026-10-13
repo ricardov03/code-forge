@@ -452,8 +452,8 @@ function confirmXCTest(tests, run) {
 
 /**
  * Does the console text show a Swift compile or build failure (§1.3 item 3)? Colours are stripped
- * first. An XCTest assertion line is not one. Used by the `swift` adapter only (B102 adds the
- * `xcodebuild` one).
+ * first. An XCTest assertion line is not one. Used by the `swift` adapter and, next to its own
+ * build-failure lines, by the `xcodebuild` one (`./xcresult.mjs`, B102).
  * @param {string} text @returns {boolean}
  */
 export function swiftCompileError(text) {

@@ -1,0 +1,82 @@
+{
+  "devices" : [
+    {
+      "architecture" : "arm64",
+      "deviceId" : "B34751C7-0149-456C-B4E6-1529B94F6C66",
+      "deviceName" : "iPhone 17",
+      "modelName" : "iPhone 17",
+      "osBuildNumber" : "23F77",
+      "osVersion" : "26.5",
+      "platform" : "iOS Simulator"
+    }
+  ],
+  "testNodes" : [
+    {
+      "children" : [
+        {
+          "children" : [
+            {
+              "children" : [
+                {
+                  "children" : [
+                    {
+                      "name" : "ClampXCTests.swift:16: failed - near name",
+                      "nodeType" : "Failure Message"
+                    }
+                  ],
+                  "duration" : "0.038s",
+                  "durationInSeconds" : 0.03834092617034912,
+                  "name" : "testAlwaysFails()",
+                  "nodeIdentifier" : "ClampXCTestsExtra/testAlwaysFails()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/ClampXCTestsExtra/testAlwaysFails",
+                  "nodeType" : "Test Case",
+                  "result" : "Failed"
+                }
+              ],
+              "name" : "ClampXCTestsExtra",
+              "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/ClampXCTestsExtra",
+              "nodeType" : "Test Suite",
+              "result" : "Failed"
+            },
+            {
+              "children" : [
+                {
+                  "children" : [
+                    {
+                      "name" : "ClampSwiftTests.swift:16: Expectation failed: Bool(false)",
+                      "nodeType" : "Failure Message"
+                    }
+                  ],
+                  "duration" : "0.0044s",
+                  "durationInSeconds" : 0.00436091423034668,
+                  "name" : "alwaysFails()",
+                  "nodeIdentifier" : "MoreClampSwiftTests/alwaysFails()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/MoreClampSwiftTests/alwaysFails()",
+                  "nodeType" : "Test Case",
+                  "result" : "Failed"
+                }
+              ],
+              "name" : "MoreClampSwiftTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/MoreClampSwiftTests",
+              "nodeType" : "Test Suite",
+              "result" : "Failed"
+            }
+          ],
+          "name" : "KitTests",
+          "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests",
+          "nodeType" : "Unit test bundle",
+          "result" : "Failed"
+        }
+      ],
+      "name" : "Kit",
+      "nodeType" : "Test Plan",
+      "result" : "Failed"
+    }
+  ],
+  "testPlanConfigurations" : [
+    {
+      "configurationId" : "1",
+      "configurationName" : "Test Scheme Action"
+    }
+  ]
+}

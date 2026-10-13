@@ -689,3 +689,34 @@ test('B89 (4): proof.md §2 gives the PHP runner and the new-class rule; §4 say
   assert.equal(occurrences(s4, 'exit 0, 4 tests passed'), 0);
   assert.equal(occurrences(s4, 'The captured reports are the PHP fixtures in `test/fixtures/junit/`.'), 1);
 });
+
+// ── B102: the xcodebuild adapter ─────────────────────────────────────────────
+
+test('B102 (7): proof.md §2 shows the Xcode runner, its tokens, the precheck codes, the reader and the build-failure rule', async () => {
+  const proof = await readSkillFile('references/proof.md');
+  const s2 = section(proof, 2);
+  assert.equal(occurrences(s2, '- **Xcode (B102).**'), 1);
+  assert.equal(occurrences(s2, 'argv: [xcodebuild, test, -workspace, "{workspace}", -scheme, "{scheme}", -destination, "{destination}", "{only_testing}", -resultBundlePath, "{result_bundle}"]'), 1);
+  assert.equal(occurrences(s2, '`{only_testing}` (one item, `-only-testing:<test_target>/<Suite>[/<test>]`'), 1);
+  assert.equal(occurrences(s2, '`{result_bundle}` (a fresh `<step dir>/r.xcresult` path under the run\'s temp root, outside the work dir, that does not exist yet)'), 1);
+  assert.equal(occurrences(s2, '**a Swift Testing case needs its `()`:** `::ClampSwiftTests/capsHigh()`; without them nothing is selected and `xcodebuild` exits 0; an XCTest case works with or without `()`.'), 1);
+  assert.equal(occurrences(s2, 'a near-name suite (`ClampXCTestsExtra`, `MoreClampSwiftTests`) was not selected'), 1);
+  assert.equal(occurrences(s2, 'matches exactly'), 0);
+  assert.equal(occurrences(s2, '**Exit 0 with no test run is `RED_INVALID error`** (the filter ran no test). This differs from `junit` and `swift`, where any exit 0 is `NOT_RED`'), 1);
+  assert.equal(occurrences(s2, 'With a case, the scope is still the whole `<test_target>/<Suite>/`: another test of the same suite in the result is not refused'), 1);
+  assert.equal(occurrences(s2, 'A nested Swift Testing suite cannot be named as a case: `Outer/Inner/test()` is refused (`usage`, nothing run)'), 1);
+  assert.equal(occurrences(s2, 'two tests with the same id, and a node type, place or result the reader does not know: no readable result, `RED_INVALID error` at RED and `NOT_GREEN` at GREEN.'), 1);
+  assert.equal(occurrences(s2, 'a parameterized Swift Testing test (`Arguments` nodes), repetitions (`Repetition`, `Test Case Run`), a run over several destinations or test plan configurations (`Device`, `Test Plan Configuration`), a `Runtime Warning`, and the result `Expected Failure`.'), 1);
+  assert.equal(occurrences(s2, 'else exit 1 `xcode-missing` (Command Line Tools only, or no developer directory)'), 1);
+  assert.equal(occurrences(s2, 'else exit 1 `destination-unavailable`, with the names that do exist (at most 10). A simulator destination with neither `name` nor `id` is `destination-unavailable` too, before `simctl` runs: the message says it names no simulator. `platform=macOS` needs no simulator check.'), 1);
+  assert.equal(occurrences(s2, 'code-forge never boots, creates or deletes a simulator.'), 1);
+  assert.equal(occurrences(s2, '**Only the named suite counts:** a test outside `<test_target>/<Suite>/` is `RED_INVALID error`'), 1);
+  assert.equal(occurrences(s2, 'This holds for a run that exits 0 too: a passing run with any test outside the suite, or with only such tests, is `RED_INVALID error`, never `NOT_RED`'), 1);
+  assert.equal(occurrences(s2, 'with an unknown adapter, an argv without a report item of any adapter (`{report}` or `{result_bundle}`) or without a test token of any adapter (`{test_file}`, `{test_id}`, `{test_filter}` or `{only_testing}`)'), 1);
+  assert.equal(occurrences(s2, 'A clean exit with no bundle or an unreadable one is `RED_INVALID error` too. At GREEN, an empty run, a missing or unreadable bundle, or a test outside the suite is `NOT_GREEN`.'), 1);
+  assert.equal(occurrences(s2, "`xcodebuild test`'s `Testing cancelled because the build failed.`"), 1);
+  assert.equal(occurrences(s2, 'Both commands get the runner\'s env (no `GIT_*`) and a 30 s timeout.'), 1);
+  assert.equal(occurrences(s2, '**A build failure is `RED_INVALID compile`:** `** BUILD FAILED **` or `** TEST BUILD FAILED **` in the output'), 1);
+  assert.equal(occurrences(s2, '`xcrun xcresulttool get test-results tests --path <bundle>` (argv only, 60 s timeout, output capped at 8 MiB)'), 1);
+  assert.equal(occurrences(s2, '`xcodebuild` (`xcodebuild test`, read from its result bundle; it needs an `xcode` object, Xcode below)'), 1);
+});

@@ -289,7 +289,7 @@ test('(5) validate refuses each bad runner with a message that names the key pat
   const cmd = 'vendor/bin/pest';
   /** @type {[string, Record<string, any>, string[]][]} */
   const cases = [
-    ['unknown adapter', { match: ['tests/**'], adapter: 'pest', argv: [cmd, '{test_file}', '{report}'] }, ['proof.runners[0].adapter must be one of: junit, swift']],
+    ['unknown adapter', { match: ['tests/**'], adapter: 'pest', argv: [cmd, '{test_file}', '{report}'] }, ['proof.runners[0].adapter must be one of: junit, swift, xcodebuild']],
     ['empty match', { match: [], adapter: 'junit', argv: [cmd, '{test_file}', '{report}'] }, ['proof.runners[0].match must be a non-empty list of globs']],
     [
       '--log-junit={report}',
@@ -321,21 +321,26 @@ test('(5) validate refuses each bad runner with a message that names the key pat
     ['a non-string argv item', { match: ['tests/**'], adapter: 'junit', argv: [cmd, 7, '{test_file}', '{report}'] }, ['proof.runners[0].argv must be a non-empty argv array of strings']],
     ['a NUL in an argv item', { match: ['tests/**'], adapter: 'junit', argv: [cmd, '--x=FAKE\0y', '{test_file}', '{report}'] }, ['proof.runners[0].argv[1] contains a NUL character']],
     ['a NUL in an env value', { match: ['tests/**'], adapter: 'junit', argv: [cmd, '{test_file}', '{report}'], env: { FAKE_KEY: 'FAKE\0value' } }, ['proof.runners[0].env.FAKE_KEY contains a NUL character']],
-    ['a key typo (timeout)', { match: ['tests/**'], adapter: 'junit', argv: [cmd, '{test_file}', '{report}'], timeout: 60 }, ['proof.runners[0]: "timeout" is not a runner key (match, adapter, argv, env, timeout_s)']],
+    ['a key typo (timeout)', { match: ['tests/**'], adapter: 'junit', argv: [cmd, '{test_file}', '{report}'], timeout: 60 }, ['proof.runners[0]: "timeout" is not a runner key (match, adapter, argv, env, timeout_s, xcode)']],
     [
       'a bad adapter still refuses a token no adapter knows',
       { match: ['tests/**'], adapter: 'pest', argv: [cmd, '{tset_file}', '{test_file}', '{report}'] },
-      ['proof.runners[0].adapter must be one of: junit, swift', 'proof.runners[0].argv[1] is not a token of any adapter ({test_file}, {test_id}, {test_filter}, {report})'],
+      ['proof.runners[0].adapter must be one of: junit, swift, xcodebuild', 'proof.runners[0].argv[1] is not a token of any adapter ({test_file}, {test_id}, {test_filter}, {report}, {workspace}, {project}, {scheme}, {destination}, {only_testing}, {result_bundle})'],
     ],
     [
       'a bad adapter does not hide the argv errors',
       { match: ['tests/**'], adapter: 'pest', argv: [cmd, '--log={report}'] },
       [
-        'proof.runners[0].adapter must be one of: junit, swift',
+        'proof.runners[0].adapter must be one of: junit, swift, xcodebuild',
         'proof.runners[0].argv[1]: a token must be a whole argv item (give it as its own item)',
-        'proof.runners[0].argv needs a {report} item (every adapter reads the report code-forge places there)',
-        'proof.runners[0].argv needs a test token ({test_file}, {test_id}, {test_filter}): a proof must name its test',
+        'proof.runners[0].argv needs a report item ({report}, {result_bundle}): every adapter reads the report code-forge places there',
+        'proof.runners[0].argv needs a test token ({test_file}, {test_id}, {test_filter}, {only_testing}): a proof must name its test',
       ],
+    ],
+    [
+      'a bad adapter accepts the report item and test token of any adapter',
+      { match: ['tests/**'], adapter: 'pest', argv: [cmd, '{only_testing}', '{result_bundle}'] },
+      ['proof.runners[0].adapter must be one of: junit, swift, xcodebuild'],
     ],
   ];
   for (const [name, entry, messages] of cases) {

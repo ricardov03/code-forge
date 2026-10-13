@@ -368,6 +368,13 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'proof.runners.argv',
   'proof.runners.env',
   'proof.runners.timeout_s',
+  // B102: the six `proof.runners.xcode` paths behind the 182 -> 188 re-pin.
+  'proof.runners.xcode',
+  'proof.runners.xcode.workspace',
+  'proof.runners.xcode.project',
+  'proof.runners.xcode.scheme',
+  'proof.runners.xcode.destination',
+  'proof.runners.xcode.test_target',
 ]);
 
 /**
@@ -388,8 +395,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * B64b: +4 = hooks, hooks.on_block_end{,.argv,.timeout_s} ⇒ 175.
  * B84: +1 = keys.cache_hours ⇒ 176.
  * B87: +6 = proof.runners{,.match,.adapter,.argv,.env,.timeout_s} ⇒ 182.
+ * B102: +6 = proof.runners.xcode{,.workspace,.project,.scheme,.destination,.test_target} ⇒ 188.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 182;
+const EXPECTED_SCHEMA_PATH_COUNT = 188;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

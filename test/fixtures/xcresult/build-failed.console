@@ -1,0 +1,105 @@
+Command line invocation:
+    /Applications/Xcode.app/Contents/Developer/usr/bin/xcodebuild test -scheme Kit -destination "platform=iOS Simulator,name=iPhone 17" "-only-testing:KitTests/WrapTests" -derivedDataPath /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd -resultBundlePath /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/out/build-failed.xcresult
+
+Resolve Package Graph
+2026-10-13 02:51:53.693 xcodebuild[71112:195195838] [MT] IDERunDestination: Supported platforms for the buildables in the current scheme is empty.
+
+
+Resolved source packages:
+  Kit: /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit
+
+Writing result bundle at path:
+	/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/out/build-failed.xcresult
+
+ComputePackagePrebuildTargetDependencyGraph
+
+Prepare packages
+
+CreateBuildRequest
+
+SendProjectDescription
+
+CreateBuildOperation
+
+ComputeTargetDependencyGraph
+note: Building targets in dependency order
+note: Target dependency graph (3 targets)
+    Target 'Kit' in project 'Kit'
+        ➜ Explicit dependency on target 'Kit' in project 'Kit'
+    Target 'KitTests' in project 'Kit'
+        ➜ Explicit dependency on target 'Kit' in project 'Kit'
+    Target 'Kit' in project 'Kit' (no dependencies)
+
+GatherProvisioningInputs
+
+CreateBuildDescription
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc --version
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang -v -E -dM -isysroot /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -x c -c /dev/null
+
+ExecuteExternalTool /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/ld -version_details
+
+Build description signature: c5bbac5c50578ac263dcb7882614768e
+Build description path: /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/XCBuildData/c5bbac5c50578ac263dcb7882614768e.xcbuilddata
+ClangStatCache /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/SDKStatCaches.noindex/iphonesimulator26.5-23F81a-6cfe768891a92b912361537c460fe42b.sdkstatcache
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/.swiftpm/xcode
+    /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/clang-stat-cache /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -o /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/SDKStatCaches.noindex/iphonesimulator26.5-23F81a-6cfe768891a92b912361537c460fe42b.sdkstatcache
+
+WriteAuxiliaryFile /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.SwiftConstValuesFileList (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit
+    write-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.SwiftConstValuesFileList
+
+WriteAuxiliaryFile /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests-OutputFileMap.json (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit
+    write-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests-OutputFileMap.json
+
+WriteAuxiliaryFile /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.LinkFileList (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit
+    write-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.LinkFileList
+
+WriteAuxiliaryFile /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.SwiftFileList (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit
+    write-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.SwiftFileList
+
+ProcessInfoPlistFile /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator/KitTests.xctest/Info.plist /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/empty-KitTests.plist (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit
+    builtin-infoPlistUtility /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/empty-KitTests.plist -producttype com.apple.product-type.bundle.unit-test -expandbuildsettings -format binary -platform iphonesimulator -o /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator/KitTests.xctest/Info.plist
+
+SwiftDriver KitTests normal arm64 com.apple.xcode.tools.swift.compiler (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/.swiftpm/xcode
+    builtin-SwiftDriver -- /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swiftc -module-name KitTests -Onone @/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.SwiftFileList -DSWIFT_PACKAGE -DDEBUG -DXcode -plugin-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing -enable-experimental-feature DebugDescriptionMacro -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -target arm64-apple-ios17.0-simulator -g -module-cache-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/ModuleCache.noindex -Xfrontend -serialize-debugging-options -profile-coverage-mapping -profile-generate -enable-testing -index-store-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Index.noindex/DataStore -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -swift-version 6 -I /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator/PackageFrameworks -F /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -c -j10 -enable-batch-mode -incremental -Xcc -ivfsstatcache -Xcc /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/SDKStatCaches.noindex/iphonesimulator26.5-23F81a-6cfe768891a92b912361537c460fe42b.sdkstatcache -output-file-map /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests-OutputFileMap.json -use-frontend-parseable-output -save-temps -no-color-diagnostics -explicit-module-build -module-cache-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -clang-scanner-module-cache-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/ModuleCache.noindex -sdk-module-cache-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/ModuleCache.noindex -serialize-diagnostics -emit-dependencies -emit-module -emit-module-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.swiftmodule -validate-clang-modules-once -clang-build-session-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/ModuleCache.noindex/Session.modulevalidation -package-name kit -emit-const-values -Xfrontend -const-gather-protocols-file -Xfrontend /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests_const_extract_protocols.json -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator/include -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/DerivedSources-normal/arm64 -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/DerivedSources/arm64 -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/DerivedSources -Xcc -DSWIFT_PACKAGE -Xcc -DDEBUG\=1 -working-directory /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/.swiftpm/xcode -experimental-emit-module-separately -disable-cmo
+
+SwiftEmitModule normal arm64 Emitting\ module\ for\ KitTests (in target 'KitTests' from project 'Kit')
+
+EmitSwiftModule normal arm64 (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/.swiftpm/xcode
+    
+
+SwiftCompile normal arm64 Compiling\ WrapTests.swift /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/WrapTests.swift (in target 'KitTests' from project 'Kit')
+Failed frontend command:
+/Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/bin/swift-frontend -frontend -c /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/ClampSwiftTests.swift /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/ClampXCTests.swift /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/ThrowSwiftTests.swift /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/ThrowXCTests.swift -primary-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/WrapTests.swift -emit-dependencies-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/WrapTests.d -emit-const-values-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/WrapTests.swiftconstvalues -emit-reference-dependencies-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/WrapTests.swiftdeps -serialize-diagnostics-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/WrapTests.dia -target arm64-apple-ios17.0-simulator -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libFoundationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#FoundationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libObservationMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#ObservationMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libPreviewsMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#PreviewsMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/lib/swift/host/plugins/libSwiftUIMacros.dylib\#/Applications/Xcode.app/Contents/Developer/Platforms/iPhoneOS.platform/Developer/usr/bin/swift-plugin-server\#SwiftUIMacros -load-resolved-plugin /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/plugins/testing/libTestingMacros.dylib\#\#TestingMacros -disable-implicit-swift-modules -Xcc -fno-implicit-modules -Xcc -fno-implicit-module-maps -explicit-swift-module-map-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests-dependencies-1.json -debug-module-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests.swiftmodule -Xllvm -aarch64-use-tbi -enable-objc-interop -sdk /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk -I /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator -Isystem /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/usr/lib -F /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator/PackageFrameworks -F /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/Library/Frameworks -F /Applications/Xcode.app/Contents/Developer/Platforms/iPhoneSimulator.platform/Developer/SDKs/iPhoneSimulator26.5.sdk/Developer/Library/Frameworks -no-color-diagnostics -Xcc -fno-color-diagnostics -enable-testing -g -debug-info-format\=dwarf -dwarf-version\=4 -module-cache-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/SwiftExplicitPrecompiledModules -profile-generate -profile-coverage-mapping -swift-version 6 -Onone -D SWIFT_PACKAGE -D DEBUG -D Xcode -serialize-debugging-options -const-gather-protocols-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/KitTests_const_extract_protocols.json -enable-experimental-feature DebugDescriptionMacro -empty-abi-descriptor -validate-clang-modules-once -clang-build-session-file /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/ModuleCache.noindex/Session.modulevalidation -Xcc -working-directory -Xcc /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/.swiftpm/xcode -enable-anonymous-context-mangled-names -file-compilation-dir /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/.swiftpm/xcode -Xcc -D_LIBCPP_HARDENING_MODE\=_LIBCPP_HARDENING_MODE_DEBUG -Xcc -ivfsstatcache -Xcc /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/SDKStatCaches.noindex/iphonesimulator26.5-23F81a-6cfe768891a92b912361537c460fe42b.sdkstatcache -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Products/Debug-iphonesimulator/include -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/DerivedSources-normal/arm64 -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/DerivedSources/arm64 -Xcc -I/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/DerivedSources -Xcc -DSWIFT_PACKAGE -Xcc -DDEBUG\=1 -no-auto-bridging-header-chaining -module-name KitTests -package-name kit -frontend-parseable-output -disable-clang-spi -clang-target arm64-apple-ios26.5-simulator -target-sdk-version 26.5 -target-sdk-name iphonesimulator26.5 -in-process-plugin-server-path /Applications/Xcode.app/Contents/Developer/Toolchains/XcodeDefault.xctoolchain/usr/lib/swift/host/libSwiftInProcPluginServer.dylib -o /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Build/Intermediates.noindex/Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/WrapTests.o -index-unit-output-path /Kit.build/Debug-iphonesimulator/KitTests.build/Objects-normal/arm64/WrapTests.o -index-store-path /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/dd/Index.noindex/DataStore -index-system-modules
+
+SwiftCompile normal arm64 /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/WrapTests.swift (in target 'KitTests' from project 'Kit')
+    cd /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/.swiftpm/xcode
+    
+/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/WrapTests.swift:6:17: error: cannot find 'wrap' in scope
+        #expect(wrap(12, 10) == 2)
+                ^~~~
+
+
+Test session results, code coverage, and logs:
+	/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/out/build-failed.xcresult
+
+Testing failed:
+	Cannot find 'wrap' in scope
+	Testing cancelled because the build failed.
+
+** TEST FAILED **
+
+
+The following build commands failed:
+	SwiftCompile normal arm64 Compiling\ WrapTests.swift /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/WrapTests.swift (in target 'KitTests' from project 'Kit')
+	SwiftCompile normal arm64 /var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/b102-capture.INJZar/Kit/Tests/KitTests/WrapTests.swift (in target 'KitTests' from project 'Kit')
+	Testing workspace Kit with scheme Kit
+(3 failures)

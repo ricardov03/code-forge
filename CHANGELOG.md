@@ -25,6 +25,9 @@ waits on a second real consumer (plan §10.4, Q17).
   `CODE_FORGE_LIVE_SWIFT=1` verified on Swift 6.3.3 (B88, #7).
 - PHP red→green through the `junit` adapter, verified live on Laravel 13 with PHPUnit 12 and Pest 4
   (`CODE_FORGE_LIVE_PHP=1`); captured reports replace the hand-written PHP fixtures (B89, #7).
+- The `xcodebuild` adapter for `proof.runners`: `xcode` keys, `{only_testing}` and `{result_bundle}` tokens, a precheck
+  for full Xcode and an available simulator (`xcode-missing`, `destination-unavailable`), a fail-closed `xcresulttool`
+  reader, and `RED_INVALID compile` for a build failure; fixtures captured from Xcode 26.6 (B102, #7).
 
 ### Fixed
 

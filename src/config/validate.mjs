@@ -801,20 +801,36 @@ function checkClosedBookOnOpenai(cfg) {
 export const RUNNER_ADAPTER_TOKENS = Object.freeze({
   junit: Object.freeze(['{test_file}', '{test_id}', '{test_filter}', '{report}']),
   swift: Object.freeze(['{test_file}', '{test_id}', '{test_filter}', '{report}']),
+  // B102: the values come from the entry's `xcode` object; `{only_testing}` names the test and
+  // `{result_bundle}` is the fresh result bundle path code-forge reads
+  xcodebuild: Object.freeze(['{workspace}', '{project}', '{scheme}', '{destination}', '{only_testing}', '{result_bundle}']),
 });
-/** B87: the tokens that name the test; a runner needs at least one (a proof must name its test). */
+/** B87: the tokens that name the test; a `junit` or `swift` runner needs at least one (a proof must name its test). */
 export const RUNNER_TEST_TOKENS = Object.freeze(['{test_file}', '{test_id}', '{test_filter}']);
-/** B87: every token any adapter knows, today or in a planned adapter (B102: xcodebuild). */
+/** B87: every token any adapter knows. */
 const ALL_RUNNER_TOKENS = Object.freeze(['{test_file}', '{test_id}', '{test_filter}', '{report}', '{workspace}', '{project}', '{scheme}', '{destination}', '{only_testing}', '{result_bundle}']);
+/** B102: the keys of an `xcodebuild` entry's `xcode` object, and the ones it must have. */
+export const XCODE_KEYS = Object.freeze(['workspace', 'project', 'scheme', 'destination', 'test_target']);
+const XCODE_REQUIRED = Object.freeze(['scheme', 'destination', 'test_target']);
+/** B102: the tokens an `xcodebuild` argv must have, and why. */
+const XCODE_REQUIRED_TOKENS = Object.freeze([
+  ['{scheme}', 'the xcodebuild adapter fills it from xcode.scheme'],
+  ['{destination}', 'the xcodebuild adapter fills it from xcode.destination, the one the precheck checks'],
+  ['{only_testing}', 'a proof must name its test'],
+  ['{result_bundle}', 'the xcodebuild adapter reads the result bundle code-forge places there'],
+]);
 /** B87: an item that is a whole `{word}` is read as a token. */
 const TOKEN_SHAPE = /^\{[a-z_]+\}$/;
 /** B87: the bounds of `proof.runners[].timeout_s`, in seconds. */
 const RUNNER_TIMEOUT_MIN_S = 60;
 const RUNNER_TIMEOUT_MAX_S = 7200;
 /** B87: the keys a runner entry may have (the schema's `additionalProperties: false`, as a rule). */
-const RUNNER_KEYS = Object.freeze(['match', 'adapter', 'argv', 'env', 'timeout_s']);
+const RUNNER_KEYS = Object.freeze(['match', 'adapter', 'argv', 'env', 'timeout_s', 'xcode']);
 /** B87: every token some adapter lists; with a bad adapter, an item outside it is still refused. */
 const ANY_ADAPTER_TOKENS = Object.freeze([...new Set(Object.values(RUNNER_ADAPTER_TOKENS).flat())]);
+/** B102: the report items and the test tokens of every adapter; a bad adapter's argv needs one of each. */
+const ANY_REPORT_TOKENS = Object.freeze(['{report}', '{result_bundle}']);
+const ANY_TEST_TOKENS = Object.freeze([...RUNNER_TEST_TOKENS, '{only_testing}']);
 
 /**
  * Rule 17's messages for one runner entry. A message names the key path and the rule; it may name
@@ -857,10 +873,20 @@ export function runnerMessages(entry, i) {
         messages.push(`${at}.argv[${j}]: a token must be a whole argv item (give it as its own item)`);
       }
     });
-    const reader = adapter === null ? 'every adapter reads' : `the ${adapter} adapter reads`;
-    if (!argv.slice(1).includes('{report}')) messages.push(`${at}.argv needs a {report} item (${reader} the report code-forge places there)`);
-    if (!argv.slice(1).some((item) => RUNNER_TEST_TOKENS.includes(item))) messages.push(`${at}.argv needs a test token (${RUNNER_TEST_TOKENS.join(', ')}): a proof must name its test`);
+    // the required tokens depend on the adapter; with a bad adapter, every adapter's report items
+    // and test tokens count, so an argv that names no report or no test is still refused
+    const items = argv.slice(1);
+    if (adapter === 'junit' || adapter === 'swift') {
+      if (!items.includes('{report}')) messages.push(`${at}.argv needs a {report} item (the ${adapter} adapter reads the report code-forge places there)`);
+      if (!items.some((item) => RUNNER_TEST_TOKENS.includes(item))) messages.push(`${at}.argv needs a test token (${RUNNER_TEST_TOKENS.join(', ')}): a proof must name its test`);
+    } else if (adapter === 'xcodebuild') {
+      for (const [token, why] of XCODE_REQUIRED_TOKENS) if (!items.includes(token)) messages.push(`${at}.argv needs a ${token} item (${why})`);
+    } else {
+      if (!items.some((item) => ANY_REPORT_TOKENS.includes(item))) messages.push(`${at}.argv needs a report item (${ANY_REPORT_TOKENS.join(', ')}): every adapter reads the report code-forge places there`);
+      if (!items.some((item) => ANY_TEST_TOKENS.includes(item))) messages.push(`${at}.argv needs a test token (${ANY_TEST_TOKENS.join(', ')}): a proof must name its test`);
+    }
   }
+  messages.push(...xcodeMessages(runner, adapter, at));
   if (runner.env !== undefined) {
     if (runner.env === null || typeof runner.env !== 'object' || Array.isArray(runner.env)) {
       messages.push(`${at}.env must be a map of variable names to string values`);
@@ -876,6 +902,52 @@ export function runnerMessages(entry, i) {
     const t = runner.timeout_s;
     if (typeof t !== 'number' || !Number.isInteger(t) || t < RUNNER_TIMEOUT_MIN_S || t > RUNNER_TIMEOUT_MAX_S) {
       messages.push(`${at}.timeout_s must be a whole number of seconds from ${RUNNER_TIMEOUT_MIN_S} to ${RUNNER_TIMEOUT_MAX_S}`);
+    }
+  }
+  return messages;
+}
+
+/** @param {unknown} value @returns {boolean} */
+const isPlainObject = (value) => value !== null && typeof value === 'object' && !Array.isArray(value);
+
+/**
+ * B102: rule 17's messages for an entry's `xcode` object. An `xcodebuild` entry needs one; any other
+ * adapter refuses one. Its values are argv items of `xcodebuild`, so each is a non-empty string with
+ * no NUL that does not start with `-` (it would be read as an option). Messages name key paths only.
+ * @param {Record<string, unknown>} runner @param {string | null} adapter @param {string} at
+ * @returns {string[]}
+ */
+function xcodeMessages(runner, adapter, at) {
+  const xcode = runner.xcode;
+  if (xcode === undefined) return adapter === 'xcodebuild' ? [`${at}.xcode is required for the xcodebuild adapter (${XCODE_REQUIRED.join(', ')})`] : [];
+  if (adapter !== null && adapter !== 'xcodebuild') return [`${at}.xcode is only for the xcodebuild adapter`];
+  if (!isPlainObject(xcode)) return [`${at}.xcode must be an object with ${XCODE_REQUIRED.join(', ')}`];
+  const values = /** @type {Record<string, unknown>} */ (xcode);
+  const messages = [];
+  for (const key of Object.keys(values)) {
+    if (!XCODE_KEYS.includes(key)) messages.push(`${at}.xcode: ${JSON.stringify(key)} is not an xcode key (${XCODE_KEYS.join(', ')})`);
+  }
+  for (const key of XCODE_KEYS) {
+    const value = values[key];
+    if (value === undefined) {
+      if (XCODE_REQUIRED.includes(key)) messages.push(`${at}.xcode.${key} is required`);
+    } else if (typeof value !== 'string' || value.length === 0 || value.startsWith('-')) {
+      messages.push(`${at}.xcode.${key} must be a non-empty string that does not start with "-"`);
+    } else if (value.includes('\0')) {
+      messages.push(`${at}.xcode.${key} contains a NUL character`);
+    } else if (key === 'test_target' && value.includes('/')) {
+      messages.push(`${at}.xcode.test_target must be one target name, without "/"`);
+    }
+  }
+  if (values.workspace !== undefined && values.project !== undefined) messages.push(`${at}.xcode: give workspace or project, not both`);
+  // a {workspace} / {project} item and its xcode key come together: one without the other is a
+  // value xcodebuild would never see, or an argv item with no value
+  const argv = isArgvArray(runner.argv) ? /** @type {string[]} */ (runner.argv).slice(1) : null;
+  if (argv !== null) {
+    for (const key of ['workspace', 'project']) {
+      const token = `{${key}}`;
+      if (argv.includes(token) && values[key] === undefined) messages.push(`${at}.argv has ${token} but ${at}.xcode.${key} is not set`);
+      if (!argv.includes(token) && values[key] !== undefined) messages.push(`${at}.xcode.${key} is set but ${at}.argv has no ${token} item`);
     }
   }
   return messages;

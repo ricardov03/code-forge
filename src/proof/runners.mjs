@@ -31,6 +31,21 @@
  *     no failed data; GREEN needs every report RED had;
  *   - a failed run that wrote no report and printed a `swiftc` error is `RED_INVALID compile`
  *     (`swiftCompileError`): a test of an API that does not exist yet needs the owner's waiver.
+ *
+ * The `xcodebuild` adapter (plan §1.6, B102) runs `xcodebuild test` and reads its result bundle:
+ *   - its tokens come from the entry's `xcode` object (`{workspace}`, `{project}`, `{scheme}`,
+ *     `{destination}`); `{only_testing}` is one item `-only-testing:<test_target>/<Suite>[/<test>]`
+ *     (the `::case`, or the file's base name without `.swift`); as seen on Xcode 26.6, a Swift
+ *     Testing test needs its `()` (`capsHigh()`; without it nothing is selected), an XCTest test
+ *     works with or without them, and a near-name suite is not selected; a nested Swift Testing
+ *     suite (`Outer/Inner/test()`) is refused as a case: give the outer `<Suite>`;
+ *     `{result_bundle}` is `<step dir>/r.xcresult`, which does not exist yet;
+ *   - the precheck (`adapterPrecheck`) runs before the export is built: `xcode-select -p` must not
+ *     be Command Line Tools (`xcode-missing`), and a simulator destination must name a device that
+ *     `xcrun simctl list devices available -j` lists (`destination-unavailable`); it never boots,
+ *     creates or deletes a simulator;
+ *   - the result is read with `xcresulttool` and classified by `./xcresult.mjs`; every test must sit
+ *     under `<test_target>/<Suite>/`.
  */
 
 import { mkdtemp, readdir, rm } from 'node:fs/promises';
@@ -43,11 +58,26 @@ import { exec } from '../util/exec.mjs';
 import { registerSecret } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
 import { classifyGreen, classifyReport, loadReport, swiftCompileError } from './junit.mjs';
+import { classifyXcodeGreen, classifyXcodeRed, loadXcresult } from './xcresult.mjs';
 
 /** `proof.runners[].timeout_s` when an entry leaves it out (the schema default). */
 export const DEFAULT_RUNNER_TIMEOUT_S = 600;
 /** The report file name inside a step's dir. */
 const REPORT_NAME = 'report.xml';
+/** B102: the result bundle name inside a step's dir (`{result_bundle}`). */
+const RESULT_BUNDLE_NAME = 'r.xcresult';
+/** B102: each precheck command may run this long. */
+export const PRECHECK_TIMEOUT_MS = 30_000;
+/** B102: the precheck names at most this many available simulators. */
+const MAX_NAMED_SIMULATORS = 10;
+/** B102: a simulator platform of a destination, and its CoreSimulator runtime prefix. */
+const SIMULATOR_RUNTIMES = Object.freeze({
+  'iOS Simulator': 'iOS',
+  'watchOS Simulator': 'watchOS',
+  'tvOS Simulator': 'tvOS',
+  'visionOS Simulator': 'xrOS',
+});
+const RUNTIME_KEY = /^com\.apple\.CoreSimulator\.SimRuntime\.([A-Za-z]+)-(\d+(?:-\d+)*)$/;
 
 /**
  * B88: the report files a swift RED step wrote, keyed by its result. GREEN needs each of them
@@ -62,10 +92,11 @@ export const SWIFT_NO_MAIN_REPORT =
 /**
  * @typedef {object} RunnerEntry
  * @property {string[]} match
- * @property {'junit' | 'swift'} adapter
+ * @property {'junit' | 'swift' | 'xcodebuild'} adapter
  * @property {string[]} argv
  * @property {Record<string, string>} [env]
  * @property {number} [timeout_s]
+ * @property {{workspace?: string, project?: string, scheme: string, destination: string, test_target: string}} [xcode]
  */
 
 /**
@@ -137,17 +168,75 @@ const swiftDefaultFilter = (file) => `\\.${regexEscape(path.posix.basename(file,
 const swiftCaseFilter = (testCase) => `(?:^|[./])${regexEscape(testCase)}(?![^/])`;
 
 /**
- * The entry's argv with its tokens replaced, for a report at `report`.
- * @param {RunnerEntry} entry @param {{file: string, testCase?: string, report: string}} values
- * @returns {string[]}
+ * B102: the `xcodebuild` adapter's test path within its target: the `::case` (`<Suite>` or
+ * `<Suite>/<test>`), or the file's base name without `.swift`.
+ * @param {string} file @param {string | undefined} testCase @returns {string}
  * @throws {StateError} `usage`
  */
-export function expandRunnerArgv(entry, { file, testCase, report }) {
+function xcodeTestPath(file, testCase) {
+  if (testCase === undefined) return path.posix.basename(file, '.swift');
+  if (testCase.startsWith('-')) throw new StateError('usage', 'the test case starts with "-" (it would be read as an option)');
+  if (testCase.startsWith('/') || testCase.endsWith('/') || testCase.includes('//')) throw new StateError('usage', 'an xcodebuild test case is <Suite> or <Suite>/<test>, with no empty part');
+  if (testCase.split('/').length > 2) {
+    throw new StateError('usage', 'an xcodebuild test case is <Suite> or <Suite>/<test>; a nested Swift Testing suite (Outer/Inner/test()) is not supported — give the outer <Suite> to run all of it');
+  }
+  return testCase;
+}
+
+/**
+ * B102: the entry's `xcode.test_target`, which `{only_testing}` and the scope start with.
+ * @param {RunnerEntry} entry @returns {string}
+ * @throws {StateError} `runner-invalid` when it is not one target name (the validator refuses this, but a record is a file on disk)
+ */
+function xcodeTestTarget(entry) {
+  const target = entry.xcode?.test_target;
+  if (typeof target !== 'string' || target === '' || target.includes('/')) {
+    throw new StateError('runner-invalid', "the xcodebuild runner's xcode.test_target is not set to one target name; no proof was run");
+  }
+  return target;
+}
+
+/**
+ * B102: the prefix every test id of an `xcodebuild` result must have: `<test_target>/<Suite>/`.
+ * @param {RunnerEntry} entry @param {{file: string, testCase?: string}} test @returns {string}
+ */
+export function xcodeScope(entry, { file, testCase }) {
+  return `${xcodeTestTarget(entry)}/${xcodeTestPath(file, testCase).split('/')[0]}/`;
+}
+
+/**
+ * The entry's argv with its tokens replaced, for a report at `report` (and, for `xcodebuild`, a
+ * result bundle at `resultBundle`).
+ * @param {RunnerEntry} entry @param {{file: string, testCase?: string, report: string, resultBundle?: string}} values
+ * @returns {string[]}
+ * @throws {StateError} `usage`, or `runner-invalid` for an `xcodebuild` entry whose token has no value
+ */
+export function expandRunnerArgv(entry, { file, testCase, report, resultBundle }) {
   if (file.startsWith('-')) throw new StateError('usage', `the test path ${JSON.stringify(file)} starts with "-" (it would be read as an option)`);
   // one source of truth: the adapter's own token list (the validator refuses any other token)
   const known = RUNNER_ADAPTER_TOKENS[entry.adapter];
   const uses = (/** @type {string} */ token) => known.includes(token) && entry.argv.slice(1).includes(token);
   if (testCase === '') throw new StateError('usage', '--test <file>::<case> needs a case name after ::');
+  if (entry.adapter === 'xcodebuild') {
+    const xcode = entry.xcode;
+    const target = xcodeTestTarget(entry);
+    /** @type {Record<string, string | undefined>} */
+    const xvalues = {
+      '{workspace}': xcode?.workspace,
+      '{project}': xcode?.project,
+      '{scheme}': xcode?.scheme,
+      '{destination}': xcode?.destination,
+      '{only_testing}': `-only-testing:${target}/${xcodeTestPath(file, testCase)}`,
+      '{result_bundle}': resultBundle ?? path.join(path.dirname(report), RESULT_BUNDLE_NAME),
+    };
+    return entry.argv.map((item, i) => {
+      if (i === 0 || !known.includes(item)) return item;
+      const value = xvalues[item];
+      // fail closed: the validator refuses this, but a record is a file on disk
+      if (typeof value !== 'string') throw new StateError('runner-invalid', `the xcodebuild runner's ${item} has no value in its xcode object; no proof was run`);
+      return value;
+    });
+  }
   if (uses('{test_filter}')) {
     if (testCase === undefined && entry.adapter !== 'swift') throw new StateError('usage', `the ${entry.adapter} runner for ${file} filters by test case — give --test <file>::<case>`);
     if (testCase !== undefined && testCase.startsWith('-')) throw new StateError('usage', 'the test case starts with "-" (it would be read as an option)');
@@ -186,12 +275,117 @@ export function runnerTimeoutMs(entry) {
 }
 
 /**
- * The adapter's precheck, run before the export is built and before any file is reverted. The
- * `junit` and `swift` adapters have none (B102 adds one for `xcodebuild`).
- * @param {RunnerEntry} _entry
- * @returns {Promise<void>}
+ * Run a precheck command: argv only, the runner env (no `GIT_*`), a timeout. Never throws; a
+ * command that runs past the timeout is stopped and read as failed.
+ * @param {string[]} argv @param {NodeJS.ProcessEnv} env @param {number} timeoutMs
+ * @returns {Promise<{ok: boolean, stdout: string}>}
  */
-export async function adapterPrecheck(_entry) {}
+async function precheckRun(argv, env, timeoutMs) {
+  try {
+    const res = await exec(argv, { env, timeoutMs });
+    return { ok: res.result === 'ok' && res.code === 0 && !res.signal && !res.timedOut, stdout: res.stdout };
+  } catch {
+    return { ok: false, stdout: '' };
+  }
+}
+
+/**
+ * B102: a destination string's `key=value` pairs, or null when it is not such a list.
+ * @param {string} destination @returns {Map<string, string> | null}
+ */
+function destinationPairs(destination) {
+  const pairs = new Map();
+  for (const part of destination.split(',')) {
+    const eq = part.indexOf('=');
+    if (eq <= 0) return null;
+    const key = part.slice(0, eq).trim();
+    if (key === '' || pairs.has(key)) return null;
+    pairs.set(key, part.slice(eq + 1).trim());
+  }
+  return pairs;
+}
+
+/**
+ * B102: the available simulators of one runtime family from `xcrun simctl list devices available -j`,
+ * or null when the output is not the shape this reader knows.
+ * @param {string} text @param {string} family - `iOS`, `watchOS`, `tvOS`, `xrOS`
+ * @returns {{name: string, udid: string, os: string}[] | null}
+ */
+function availableSimulators(text, family) {
+  let doc;
+  try {
+    doc = JSON.parse(text);
+  } catch {
+    return null;
+  }
+  if (doc === null || typeof doc !== 'object' || doc.devices === null || typeof doc.devices !== 'object' || Array.isArray(doc.devices)) return null;
+  const out = [];
+  for (const [runtime, devices] of Object.entries(doc.devices)) {
+    if (!Array.isArray(devices)) return null;
+    const m = RUNTIME_KEY.exec(runtime);
+    if (!m || m[1] !== family) continue;
+    for (const device of devices) {
+      if (device === null || typeof device !== 'object' || typeof device.name !== 'string' || typeof device.udid !== 'string') return null;
+      // `available` already filters; a device that still says otherwise is not offered
+      if (device.isAvailable !== true) continue;
+      out.push({ name: device.name, udid: device.udid, os: m[2].replaceAll('-', '.') });
+    }
+  }
+  return out;
+}
+
+/**
+ * The adapter's precheck, run before the export is built and before any file is reverted. The
+ * `junit` and `swift` adapters have none. `xcodebuild` (B102) needs full Xcode, and a simulator
+ * destination needs a device `simctl` lists as available (by `name` or `id`, and `OS` when given;
+ * `OS=latest` matches any). It only reads: it never boots, creates or deletes a simulator.
+ * Messages never repeat a config value.
+ * @param {RunnerEntry} entry
+ * @param {{env?: NodeJS.ProcessEnv, timeoutMs?: number}} [opts] - the env the runner would get
+ *   (default `process.env`), and how long each command may run (default `PRECHECK_TIMEOUT_MS`;
+ *   tests shorten it)
+ * @returns {Promise<void>}
+ * @throws {StateError} `xcode-missing`, `destination-unavailable`
+ */
+export async function adapterPrecheck(entry, opts = {}) {
+  if (entry.adapter !== 'xcodebuild') return;
+  const env = runnerEnv(opts.env ?? process.env, entry);
+  const timeoutMs = opts.timeoutMs ?? PRECHECK_TIMEOUT_MS;
+  const select = await precheckRun(['xcode-select', '-p'], env, timeoutMs);
+  const developerDir = select.stdout.trim();
+  if (!select.ok || developerDir === '' || developerDir.includes('CommandLineTools')) {
+    throw new StateError(
+      'xcode-missing',
+      'xcode-missing: xcode-select -p does not point at a full Xcode (Command Line Tools only, or no developer directory); the xcodebuild runner needs Xcode — install it and run xcode-select -s; no proof was run',
+    );
+  }
+  const pairs = destinationPairs(entry.xcode?.destination ?? '');
+  if (pairs === null) throw new StateError('destination-unavailable', "destination-unavailable: the runner's xcode.destination is not a list of key=value pairs; no proof was run");
+  const family = SIMULATOR_RUNTIMES[/** @type {keyof typeof SIMULATOR_RUNTIMES} */ (pairs.get('platform') ?? '')];
+  // platform=macOS and every other non-simulator destination need no simulator
+  if (family === undefined) return;
+  const name = pairs.get('name');
+  const id = pairs.get('id');
+  const os = pairs.get('OS');
+  if (name === undefined && id === undefined) {
+    throw new StateError(
+      'destination-unavailable',
+      "destination-unavailable: the runner's xcode.destination names no simulator: a simulator destination needs name= or id=; no proof was run",
+    );
+  }
+  const list = await precheckRun(['xcrun', 'simctl', 'list', 'devices', 'available', '-j'], env, timeoutMs);
+  const simulators = list.ok ? availableSimulators(list.stdout, family) : null;
+  if (simulators === null) throw new StateError('destination-unavailable', 'destination-unavailable: xcrun simctl did not list the available simulators; no proof was run');
+  const fits = simulators.some(
+    (s) => (name === undefined || s.name === name) && (id === undefined || s.udid === id) && (os === undefined || os === 'latest' || s.os === os || s.os.startsWith(`${os}.`)),
+  );
+  if (fits) return;
+  const names = [...new Set(simulators.map((s) => s.name))].sort().slice(0, MAX_NAMED_SIMULATORS);
+  throw new StateError(
+    'destination-unavailable',
+    `destination-unavailable: the runner's xcode.destination names no simulator that xcrun simctl lists as available (by name or id, and OS when given); available: ${names.length > 0 ? names.join(', ') : 'none'} — code-forge never boots, creates or deletes a simulator; no proof was run`,
+  );
+}
 
 /**
  * Validate the expansion up front (so a usage error changes nothing) and build the hook
@@ -204,6 +398,7 @@ export function runnerHook(entry, { file, testCase }) {
   expandRunnerArgv(entry, { file, testCase, report: path.join(currentRunRoot(), REPORT_NAME) });
   // gate env is not a secret store, and neither is this; long values are still masked in output
   for (const value of Object.values(entry.env ?? {})) if (value.length >= MASK_MIN_LENGTH) registerSecret(value);
+  if (entry.adapter === 'xcodebuild') return xcodeHook(entry, { file, testCase });
 
   /** @param {{cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number}} step */
   const runStep = async ({ cwd, env, timeoutMs }) => {
@@ -244,5 +439,34 @@ export function runnerHook(entry, { file, testCase }) {
       }
       return classifyGreen({ run, reports, redFailed: red.failed_ids }).verdict;
     },
+  };
+}
+
+/**
+ * B102: the `xcodebuild` hook. Each step runs `xcodebuild` with a fresh `{result_bundle}` in its
+ * own dir under the run temp root, reads the bundle with `xcresulttool`, and removes the dir.
+ * @param {RunnerEntry} entry @param {{file: string, testCase?: string}} test
+ * @returns {RunnerHook}
+ */
+function xcodeHook(entry, { file, testCase }) {
+  const scope = xcodeScope(entry, { file, testCase });
+  /** @param {{cwd: string, env: NodeJS.ProcessEnv, timeoutMs: number}} step */
+  const runStep = async ({ cwd, env, timeoutMs }) => {
+    const dir = await mkdtemp(path.join(currentRunRoot(), 'proof-report-'));
+    try {
+      const resultBundle = path.join(dir, RESULT_BUNDLE_NAME);
+      const argv = expandRunnerArgv(entry, { file, testCase, report: path.join(dir, REPORT_NAME), resultBundle });
+      const childEnv = runnerEnv(env, entry);
+      const run = await exec(argv, { cwd, env: childEnv, timeoutMs });
+      return { run, report: await loadXcresult(resultBundle, { cwd: dir, env: childEnv }) };
+    } finally {
+      await rm(dir, { recursive: true, force: true });
+    }
+  };
+  return {
+    adapter: entry.adapter,
+    env_keys: runnerEnvKeys(entry),
+    red: async (step) => classifyXcodeRed({ ...(await runStep(step)), scope }),
+    green: async ({ red, ...step }) => classifyXcodeGreen({ ...(await runStep(step)), redFailed: red.failed_ids, scope }).verdict,
   };
 }

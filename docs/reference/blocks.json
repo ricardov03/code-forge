@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 94,
+  "block_count": 95,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1398,6 +1398,45 @@
         "B88"
       ],
       "note": "root-added 2026-10-13; issue #7 part 4 (plans/red-green/plan.md §1.4); live VERIFIED PHP 8.4.25, Laravel 13.35.0, PHPUnit 12.5.39, Pest 4.7.8 through php artisan test; red-parse reads Laravel 13's JSON-escaped agent console (folded-in candidate B108); no <warning> seen"
+    },
+    "B102": {
+      "title": "The xcodebuild adapter for proof.runners: Xcode precheck, -only-testing, result bundle reader",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/proof/xcresult.mjs",
+        "src/proof/runners.mjs",
+        "src/proof/junit.mjs",
+        "src/config/validate.mjs",
+        "schema/code-forge.schema.json",
+        "docs/reference/config.md",
+        "skill/references/proof.md",
+        "test/proof/xcodebuild-adapter.test.mjs",
+        "test/proof/runners.test.mjs",
+        "test/config/schema-coverage.test.mjs",
+        "test/skill/structure.test.mjs",
+        "test/fixtures/xcresult/bare-fail.json",
+        "test/fixtures/xcresult/build-failed.console",
+        "test/fixtures/xcresult/build-failed.json",
+        "test/fixtures/xcresult/build-for-testing-failed.console",
+        "test/fixtures/xcresult/near-names.json",
+        "test/fixtures/xcresult/swift-testing-case.json",
+        "test/fixtures/xcresult/swift-testing-noparens.json",
+        "test/fixtures/xcresult/swift-testing-pass.json",
+        "test/fixtures/xcresult/swift-testing.console",
+        "test/fixtures/xcresult/swift-testing.json",
+        "test/fixtures/xcresult/thrown.console",
+        "test/fixtures/xcresult/thrown.json",
+        "test/fixtures/xcresult/xctest-case.json",
+        "test/fixtures/xcresult/xctest-pass.json",
+        "test/fixtures/xcresult/xctest.console",
+        "test/fixtures/xcresult/xctest.json"
+      ],
+      "depends_on": [
+        "B89"
+      ],
+      "note": "root-added 2026-10-13; issue #7 part 5 (plans/red-green/plan.md §1.6); fixtures captured from Xcode 26.6 (17F113), iPhone 17 simulator iOS 26.5, xcresulttool schema 0.1.0; Swift Testing -only-testing needs (); exit 0 with no test, no bundle, an unreadable bundle or an out-of-scope test is RED_INVALID error; parameterized Swift Testing, repetitions, multi-destination, Runtime Warning and Expected Failure make the bundle unreadable (fail closed)"
     }
   }
 }

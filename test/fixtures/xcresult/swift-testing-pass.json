@@ -1,0 +1,62 @@
+{
+  "devices" : [
+    {
+      "architecture" : "arm64",
+      "deviceId" : "B34751C7-0149-456C-B4E6-1529B94F6C66",
+      "deviceName" : "iPhone 17",
+      "modelName" : "iPhone 17",
+      "osBuildNumber" : "23F77",
+      "osVersion" : "26.5",
+      "platform" : "iOS Simulator"
+    }
+  ],
+  "testNodes" : [
+    {
+      "children" : [
+        {
+          "children" : [
+            {
+              "children" : [
+                {
+                  "duration" : "0.00097s",
+                  "durationInSeconds" : 0.0009748935699462891,
+                  "name" : "capsHigh()",
+                  "nodeIdentifier" : "ClampSwiftTests/capsHigh()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/ClampSwiftTests/capsHigh()",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                },
+                {
+                  "duration" : "0.00092s",
+                  "durationInSeconds" : 0.0009191036224365234,
+                  "name" : "keepsInside()",
+                  "nodeIdentifier" : "ClampSwiftTests/keepsInside()",
+                  "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/ClampSwiftTests/keepsInside()",
+                  "nodeType" : "Test Case",
+                  "result" : "Passed"
+                }
+              ],
+              "name" : "ClampSwiftTests",
+              "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests/ClampSwiftTests",
+              "nodeType" : "Test Suite",
+              "result" : "Passed"
+            }
+          ],
+          "name" : "KitTests",
+          "nodeIdentifierURL" : "test://com.apple.xcode/Kit/KitTests",
+          "nodeType" : "Unit test bundle",
+          "result" : "Passed"
+        }
+      ],
+      "name" : "Kit",
+      "nodeType" : "Test Plan",
+      "result" : "Passed"
+    }
+  ],
+  "testPlanConfigurations" : [
+    {
+      "configurationId" : "1",
+      "configurationName" : "Test Scheme Action"
+    }
+  ]
+}
