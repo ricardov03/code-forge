@@ -12,6 +12,32 @@ const { runRun } = await import('../../src/cli/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 
+/**
+ * Wait for each pid to be gone (`process.kill(pid, 0)` throws ESRCH), polling every 25 ms up to a
+ * 5 s deadline. A SIGKILLed session can stay a zombie for a moment after `stopWorker` returns
+ * (its parent, the worker, is gone; launchd/init reaps it a little later), so the test waits for
+ * the real exit instead of reading it once. Returns the pids still alive at the deadline.
+ * @param {number[]} pids @param {number} [ms]
+ */
+async function waitDead(pids, ms = 5000) {
+  /** @param {number} pid */
+  const gone = (pid) => {
+    try {
+      process.kill(pid, 0);
+      return false;
+    } catch (err) {
+      return /** @type {NodeJS.ErrnoException} */ (err).code === 'ESRCH';
+    }
+  };
+  const until = Date.now() + ms;
+  let left = pids.filter((pid) => !gone(pid));
+  while (left.length > 0 && Date.now() < until) {
+    await new Promise((r) => setTimeout(r, 25));
+    left = left.filter((pid) => !gone(pid));
+  }
+  return left;
+}
+
 describe('a long review session (the fake sleeps 3 s; the coder waits 1 s at a time)', () => {
   test('the coder-side wait ends first; the ticket still ends done; 0 tickets lost', async () => {
     // The plan's 150 s is scaled to 3 s through the fake's FAKE_SLEEP_MS knob; what is shown is the
@@ -82,7 +108,9 @@ describe('worker restart', () => {
   test('a new worker re-reads 3 queued tickets and completes them; run start --reattach re-pins its pid', async () => {
     const { repo, runId } = await makeRepo();
     const recordDir = freshDir('records');
-    const first = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '5000' });
+    // The first worker's sessions sleep 30 s: far past the 5 s wait for their death below, so a
+    // session that stopWorker did not kill can never pass by ending on its own.
+    const first = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '30000' });
     assert.equal((await cli(['run', 'start', '--reattach', '--run', runId], repo)).code, 0);
     assert.equal((await readRun(runId)).worker.pid, first.pid);
     const tickets = [];
@@ -92,7 +120,9 @@ describe('worker restart', () => {
     assert.ok(await waitFor(() => records(recordDir).length >= 1));
     await stopWorker(first, runId);
     const inFlight = records(recordDir).map((r) => r.pid);
-    for (const pid of inFlight) assert.equal(alive(pid), false);
+    assert.ok(inFlight.length >= 1 && inFlight.length <= 3, `in-flight sessions: ${inFlight.length}`);
+    const stillAlive = await waitDead(inFlight);
+    assert.deepEqual(stillAlive, [], `killed sessions still alive 5 s after stopWorker: ${stillAlive.join(', ')}`);
     assert.deepEqual(queued(repo, 'done'), []); // the killed session was abandoned, not recorded
 
     const second = await startWorker(repo, runId, { FAKE_RECORD: recordDir });

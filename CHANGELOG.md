@@ -51,6 +51,8 @@ waits on a second real consumer (plan §10.4, Q17).
   never a path (B79).
 - The ledger rotation race test forces the order of the two racers with an `afterLink` hook instead of scheduling them,
   so it no longer fails at random under load (B81).
+- The worker restart test waits up to 5 s for killed sessions to exit instead of checking once, so it no longer fails at
+  random under load (B82).
 
 ## [0.8.0] — 2026-10-12
 

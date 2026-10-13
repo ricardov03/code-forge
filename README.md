@@ -24,6 +24,7 @@ In the next release:
 - **A steadier test suite (B81).** The ledger rotation race test forces the race order through a test hook, so it no longer fails at random under load.
 - **Deleted files get a useful review (B74).** When a block deletes an owned file, the review packet says the file is deleted and lists up to 20 files that still name it, so the reviewer can look for dangling references. A deletion still needs an approval.
 - **`review-file --fresh` (B75).** Runs a file's review again only when the cached result never counted (`stale`, `unavailable`, or a non-verdict refusal such as `other-run`). A counted result is refused `fresh-needs-reopen` and names `block reopen` and `block waive`; a tampered one is refused `fresh-tampered`. A coder may use it.
+- **Another steadier test (B82).** The worker restart test waits for killed sessions to exit instead of checking once, so it no longer fails at random under load.
 
 In 0.8.0:
 
