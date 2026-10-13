@@ -97,7 +97,7 @@ Both `autonomy` keys default to false. Whatever they say, a block's branch is ha
 2. The block's test command green, case count read from the runner and written to the block record.
 3. Type check and lint green under the project's gates.
 4. Every changed or new file reviewed by a fresh L2 session and converged under the convergence rule (≤ `review.max_rounds_per_file`, or a human decision on record).
-5. Red→green rows for every new test; proof rows per tier (`proof.md`).
+5. Red→green rows for every new test; proof rows per tier (`proof.md`). A test that is not a `node:test` file (PHPUnit, Pest, pytest, Swift) is proven through the `proof.runners` entry the owner set before the run (`proof.md` §2): `forge proof red-green <id> --run <r> --test <file>::<case>`, with the case as the runner itself names it. The `::<case>` is needed only when the runner's argv has `{test_filter}`. Without `{test_filter}`, a case only labels the proof: `{test_id}` becomes `<file>::<case>`, and `{test_file}` still runs the whole file. A coder never edits `proof.runners`.
 6. Forecast vs actual (cases and lines) recorded; misses attributed (architect-added scope vs coder under-forecast) — a finished green block is accepted and recorded either way.
 7. One commit for the block; the draft PR (when the project uses PRs) carries the evidence.
 8. Every artifact that proves something is committed, not left in a scratch dir; no claim shipped that the evidence does not carry.

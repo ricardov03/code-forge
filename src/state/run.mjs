@@ -269,6 +269,8 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
       if (config.context?.require_coder_tests === true) frozen.push('context.require_coder_tests');
       // B64b: and never had a block-end hook
       if (config.hooks?.on_block_end !== undefined) frozen.push('hooks.on_block_end');
+      // B87: and never had a proof runner
+      if (config.proof?.runners !== undefined) frozen.push('proof.runners');
     }
     if (frozen.length > 0) {
       const why = frozen.map((key) => `${key} cannot change mid-run (${IMMUTABLE_KEYS[/** @type {keyof typeof IMMUTABLE_KEYS} */ (key)]})`);

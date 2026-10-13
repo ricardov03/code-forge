@@ -153,6 +153,12 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `proof.export` | object |  | — |  |
 | `proof.export.link_dirs` | array<string> |  | `["vendor","node_modules"]` |  |
 | `proof.export.copy_untracked` | array<string> |  | `[".env",".env.testing"]` |  |
+| `proof.runners` | array<object> |  | — | minItems 1; B87: how proof red-green runs a test file that is not a node:test file. proof red-green uses the first entry whose match covers the --test file (list order). With no match, a .mjs/.cjs/.js file uses the built-in node:test command and any other file is refused. Fixed for the run: run start copies the list into the run snapshot, run reload refuses to change it, and with it set no block may own .code-forge.yml. An empty list is refused: leave the key out for no runner. |
+| `proof.runners[].match` | array<string> | yes | — | minItems 1; Globs of the test files this runner runs, relative to the repository (the same glob rules as owned entries). |
+| `proof.runners[].adapter` | enum: `junit`, `swift` | yes | — | How the result is read. junit: the runner writes a JUnit XML report to {report} (PHPUnit, Pest, pytest and other JUnit runners). swift: swift test with --xunit-output {report}. |
+| `proof.runners[].argv` | array<string> | yes | — | minItems 1; The command, an argv array (never a shell string). These items are replaced when an item is exactly the token: {test_file} (the test path), {test_id} (<file>::<case>, or <file> with no case), {test_filter} (the case, regex-escaped), {report} (a fresh report path outside the work dir). {report} and one test token are required. A token cannot be the command (argv[0]) or part of a longer item. |
+| `proof.runners[].env` | object |  | — |  |
+| `proof.runners[].timeout_s` | integer |  | `600` | min 60; max 7200; Seconds each step (RED, GREEN) may run before it is stopped. |
 | `budget` | object |  | — |  |
 | `budget.block_lines` | integer |  | `600` | min 1 |
 | `budget.block_tokens_soft` | integer |  | — | min 1 |

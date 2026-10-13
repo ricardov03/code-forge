@@ -16,6 +16,9 @@
  *                             which this block must hold; exit 0 proven, 1 not proven or refused).
  *                             The signed row carries `covers` (B20): the reverted sources, or
  *                             the test file for `assertion-deletion`.
+ *                             B87: a test file a `proof.runners` entry of the run snapshot matches
+ *                             runs with that entry's argv and is read from its JUnit report; the
+ *                             row and the output then carry `runner`, `env_keys` and `failed_tests`.
  *
  * `export` reads `proof.export.{link_dirs,copy_untracked}` from the workspace's `.code-forge.yml`
  * (defaults §1.3) and writes a signed `proof` row `isolation: export`; `lock`/`unlock` write
@@ -35,12 +38,14 @@ import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { validateConfig } from '../config/validate.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
+import { proofRunners } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { redactJSON, writeSafe } from '../util/redact.mjs';
 import { DEFAULT_COPY_UNTRACKED, DEFAULT_LINK_DIRS, buildExport, exportDirFor, recordProof, removeExport } from '../proof/export.mjs';
 import { acquireProofLock, lockHolder, releaseProofLock } from '../proof/lock.mjs';
 import { MECHANISMS, readJournal, restoreJournal, runRedGreen } from '../proof/red-green.mjs';
+import { adapterPrecheck, runnerCovers, runnerHook, runnerTimeoutMs, selectRunner } from '../proof/runners.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { blockFileSet, repoRelativePath } from '../review/gate-check.mjs';
@@ -83,13 +88,15 @@ async function assertTestFile(dir, file) {
 
 /**
  * The test command filtered to one test: `node --test [--test-name-pattern ^<case>$] <file>`, run
- * with the Node that runs this CLI. Other stacks (Pest, Vitest…) have no filtered command here yet.
+ * with the Node that runs this CLI. Other stacks need a `proof.runners` entry (B87).
  * @param {string} file @param {string | undefined} testCase
  * @returns {string[]}
  * @throws {StateError} `unsupported-test`
  */
 function filteredTestArgv(file, testCase) {
-  if (!NODE_TEST_FILE.test(file)) throw new StateError('unsupported-test', 'only node:test files (.mjs, .cjs, .js) have a filtered test command in this version');
+  if (!NODE_TEST_FILE.test(file)) {
+    throw new StateError('unsupported-test', 'only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)');
+  }
   const pattern = testCase === undefined ? [] : ['--test-name-pattern', `^${testCase.replace(/[.*+?^${}()|[\]\\]/g, '\\$&')}$`];
   return [process.execPath, '--test', ...pattern, file];
 }
@@ -178,11 +185,14 @@ async function exportAndRecord({ runId, record, blockId, block, place, config, w
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}}} [deps]
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown},
+ *   precheck?: (entry: import('../proof/runners.mjs').RunnerEntry) => Promise<void>,
+ *   hook?: (entry: import('../proof/runners.mjs').RunnerEntry, test: {file: string, testCase?: string}) => import('../proof/runners.mjs').RunnerHook | null}} [deps] -
+ *   `precheck` and `hook` are test-only seams for the runner adapter's precheck and hook (B87)
  * @returns {Promise<number>}
  */
 export async function runProof(args, deps = {}) {
-  const { stdout = process.stdout, stderr = process.stderr } = deps;
+  const { stdout = process.stdout, stderr = process.stderr, precheck = adapterPrecheck, hook = runnerHook } = deps;
   const out = (/** @type {object} */ value) => writeSafe(stdout, `${redactJSON(value)}\n`);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
   const [sub, ...rest] = args;
@@ -270,9 +280,17 @@ export async function runProof(args, deps = {}) {
       const testCase = sep < 0 ? undefined : flags.test.slice(sep + 2);
       if (testCase === '') throw new StateError('usage', '--test <file>::<case> needs a case name after ::');
       const file = normalizeTestPath(sep < 0 ? flags.test : flags.test.slice(0, sep));
-      const argv = filteredTestArgv(file, testCase);
       const runId = flags.run;
       const record = await readRun(runId);
+      // B87: the runner comes from the run snapshot only, never the live file; no entry matches ⇒
+      // the built-in node:test command, or the refusal
+      const runners = proofRunners(record);
+      const entry = selectRunner(runners, file);
+      const runner = entry === null ? null : (hook(entry, { file, testCase }) ?? null);
+      // a matched entry is run by its hook or not at all: never a node:test fallback (no row, no precheck)
+      if (entry !== null && runner === null) throw new StateError('usage', `the ${entry.adapter} runner for ${file} has no hook; no proof was run`);
+      // exactly one of the two: the built-in argv without a runner, the runner (its own argv) with one
+      const how = runner === null || entry === null ? { argv: filteredTestArgv(file, testCase) } : { runner, timeoutMs: runnerTimeoutMs(entry) };
       const block = record.blocks?.[blockId];
       if (block?.status !== 'open') throw new StateError('no-block', `block ${blockId} is not open in run ${runId}`);
       const place = await proofPlace(runId, record, blockId, block);
@@ -292,17 +310,20 @@ export async function runProof(args, deps = {}) {
         owned: block.owned_files,
         matchOwned: (f) => ownsFile(block.owned_files, f, block.owned_kinds),
       });
-      const sources = mechanism === 'assertion-deletion' ? [] : changed.map((c) => c.file).filter((f) => f !== file && !TEST_PATH.test(f));
+      // B87: a file a configured runner matches is a test too, never a source
+      const sources = mechanism === 'assertion-deletion' ? [] : changed.map((c) => c.file).filter((f) => f !== file && !TEST_PATH.test(f) && !runnerCovers(runners, f));
       if (mechanism === 'revert' && sources.length === 0) {
         throw new StateError('usage', `block ${blockId} changed no non-test source file to revert — use --mechanism assertion-deletion`);
       }
+      // B87: the adapter's precheck runs before the export is built and before any file is reverted
+      if (entry !== null) await precheck(entry);
       const exp = isolation === 'export' ? await exportAndRecord({ runId, record, blockId, block, place, config, writeRow }) : null;
       if (exp) await assertTestFile(exp.dir, file); // the test must also be where it runs (owned, or tracked at base)
       const result = await runRedGreen({
         workDir: exp ? exp.dir : place.dir,
         repoDir: place.dir,
         base: place.base,
-        argv,
+        ...how,
         test: { file, ...(testCase === undefined ? {} : { case: testCase }), characterization: mechanism === 'assertion-deletion' },
         sources,
         isolation,
@@ -317,6 +338,11 @@ export async function runProof(args, deps = {}) {
       // still lands, `proven: false` and `red_kind: null`, and the verb exits 1.
       const red = result.red ?? null;
       const proven = result.proven === true && red !== null;
+      // B87: only when a runner really ran, names only — its adapter, the bounded failed test names
+      // and the env variable names (row and JSON alike); `failed_ids` stays in memory, and env
+      // values are never shown
+      const runnerFields =
+        runner === null ? {} : { runner: runner.adapter, failed_tests: red !== null && 'failed_tests' in red ? red.failed_tests : [], env_keys: [...runner.env_keys] };
       await recordProof({
         runId,
         writeRow,
@@ -332,6 +358,7 @@ export async function runProof(args, deps = {}) {
           proven,
           failed: red?.failed ?? null,
           covers,
+          ...runnerFields,
         },
       });
       out({
@@ -343,6 +370,7 @@ export async function runProof(args, deps = {}) {
         red_kind: red?.red_kind ?? null,
         green: result.green ?? null,
         proven,
+        ...runnerFields,
         ...(exp ? { export: { dir: exp.dir, restored: exp.restored, untracked: exp.untracked } } : {}),
       });
       return proven ? 0 : 1;

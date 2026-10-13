@@ -311,6 +311,11 @@ code-forge proof export B1 --run site-1 --remove
   fix the test (see the brief's "How to write the tests").
 - A signed `proof` row in the ledger.
 
+This site's tests are `node:test` files, so `proof red-green` runs them with Node. A PHPUnit,
+Pest, pytest or Swift test needs a `proof.runners` entry in `.code-forge.yml` before `run start`
+(an argv that writes a JUnit report to `{report}`; see `skill/references/proof.md` §2). Without
+one, `proof red-green` refuses such a file and says so.
+
 Red→green is **required** at close only for high-tier files. These files are light tier, so it is
 optional here. Run it anyway: it is the step that proves the test can fail.
 

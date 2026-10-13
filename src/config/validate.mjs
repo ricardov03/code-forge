@@ -4,7 +4,7 @@
  *
  *  1. **Schema validation** (Ajv, draft 2020-12, `additionalProperties: false` almost everywhere)
  *     catches shape errors: unknown keys, wrong types, missing required fields.
- *  2. **Domain rules** (`DOMAIN_RULES` below, 16 of them as of B32) catch things no JSON Schema can express:
+ *  2. **Domain rules** (`DOMAIN_RULES` below, 17 of them as of B87) catch things no JSON Schema can express:
  *     cross-field comparisons (two levels resolving to the same tuple), a value that needs a
  *     second config value to be reachable (`second_levels.L2.provider` vs. the effective L2
  *     provider) and rules that reach outside the config object entirely (is a CLI on PATH, is a
@@ -36,6 +36,7 @@
  *  14  caps-coders-exceeds-cap               WARN   (v1.3/R10/B1.1: caps.coders > 2)
  *  15  effort-not-valid-for-provider         ERROR  (B29: a level's / fallback's effort vs. its provider)
  *  16  closed-book-on-openai                 WARN   (B32: Codex has no no-tools mode)
+ *  17  proof-runners-invalid                 ERROR  (B87: a proof.runners entry: adapter, match, argv tokens, env, timeout_s)
  *
  * **B1.2 (v1.3, Q16 cut) removed rule:** `proof-tool-absent-for-high-tier` (formerly #13) — the
  * key it warned about (`proof.tiers.high.tool`) left the schema in the same amendment, along with
@@ -790,11 +791,112 @@ function checkClosedBookOnOpenai(cfg) {
   }));
 }
 
+// ── 17. proof-runners-invalid (ERROR, B87) ──────────────────────────────────
+
 /**
- * The 16 domain rules paired with the exact `rule` id string each one emits — the single source
+ * B87: the argv tokens each `proof.runners` adapter expands. A token is a whole argv item, never
+ * the command. `proof/runners.mjs` expands exactly these (proof may import config; config may not
+ * import proof).
+ */
+export const RUNNER_ADAPTER_TOKENS = Object.freeze({
+  junit: Object.freeze(['{test_file}', '{test_id}', '{test_filter}', '{report}']),
+  swift: Object.freeze(['{test_file}', '{test_id}', '{test_filter}', '{report}']),
+});
+/** B87: the tokens that name the test; a runner needs at least one (a proof must name its test). */
+export const RUNNER_TEST_TOKENS = Object.freeze(['{test_file}', '{test_id}', '{test_filter}']);
+/** B87: every token any adapter knows, today or in a planned adapter (B102: xcodebuild). */
+const ALL_RUNNER_TOKENS = Object.freeze(['{test_file}', '{test_id}', '{test_filter}', '{report}', '{workspace}', '{project}', '{scheme}', '{destination}', '{only_testing}', '{result_bundle}']);
+/** B87: an item that is a whole `{word}` is read as a token. */
+const TOKEN_SHAPE = /^\{[a-z_]+\}$/;
+/** B87: the bounds of `proof.runners[].timeout_s`, in seconds. */
+const RUNNER_TIMEOUT_MIN_S = 60;
+const RUNNER_TIMEOUT_MAX_S = 7200;
+/** B87: the keys a runner entry may have (the schema's `additionalProperties: false`, as a rule). */
+const RUNNER_KEYS = Object.freeze(['match', 'adapter', 'argv', 'env', 'timeout_s']);
+/** B87: every token some adapter lists; with a bad adapter, an item outside it is still refused. */
+const ANY_ADAPTER_TOKENS = Object.freeze([...new Set(Object.values(RUNNER_ADAPTER_TOKENS).flat())]);
+
+/**
+ * Rule 17's messages for one runner entry. A message names the key path and the rule; it may name
+ * an env variable NAME or an unknown entry key (key paths), never a value (argv items, env values) — only the adapter's
+ * own token words, which are code-forge's. The argv checks run even when the adapter is bad, so
+ * one pass shows every error. `proof/runners.mjs` checks the snapshot's entries with it again
+ * before it runs one.
+ * @param {unknown} entry @param {number} i @returns {string[]}
+ */
+export function runnerMessages(entry, i) {
+  const at = `proof.runners[${i}]`;
+  if (entry === null || typeof entry !== 'object' || Array.isArray(entry)) return [`${at} must be an object with match, adapter and argv`];
+  const runner = /** @type {Record<string, unknown>} */ (entry);
+  const messages = [];
+  const adapter = typeof runner.adapter === 'string' && Object.hasOwn(RUNNER_ADAPTER_TOKENS, runner.adapter) ? runner.adapter : null;
+  if (adapter === null) messages.push(`${at}.adapter must be one of: ${Object.keys(RUNNER_ADAPTER_TOKENS).join(', ')}`);
+  for (const key of Object.keys(runner)) {
+    if (!RUNNER_KEYS.includes(key)) messages.push(`${at}: ${JSON.stringify(key)} is not a runner key (${RUNNER_KEYS.join(', ')})`);
+  }
+  const match = runner.match;
+  if (!Array.isArray(match) || match.length === 0 || !match.every((glob) => typeof glob === 'string' && glob.length > 0)) {
+    messages.push(`${at}.match must be a non-empty list of globs`);
+  }
+  if (!isArgvArray(runner.argv)) {
+    messages.push(`${at}.argv must be a non-empty argv array of strings`);
+  } else {
+    const argv = /** @type {string[]} */ (runner.argv);
+    if (TOKEN_SHAPE.test(argv[0])) messages.push(`${at}.argv[0]: a token cannot be the command`);
+    // with a bad adapter, a token-shaped item is checked against every adapter's tokens instead;
+    // every other argv check still runs
+    const known = adapter === null ? null : RUNNER_ADAPTER_TOKENS[/** @type {keyof typeof RUNNER_ADAPTER_TOKENS} */ (adapter)];
+    argv.forEach((item, j) => {
+      if (item.includes('\0')) {
+        messages.push(`${at}.argv[${j}] contains a NUL character`);
+      } else if (j > 0 && TOKEN_SHAPE.test(item) && known !== null && !known.includes(item)) {
+        messages.push(`${at}.argv[${j}] is not a token of the ${adapter} adapter (${known.join(', ')})`);
+      } else if (j > 0 && TOKEN_SHAPE.test(item) && known === null && !ANY_ADAPTER_TOKENS.includes(item)) {
+        messages.push(`${at}.argv[${j}] is not a token of any adapter (${ANY_ADAPTER_TOKENS.join(', ')})`);
+      } else if (!TOKEN_SHAPE.test(item) && ALL_RUNNER_TOKENS.some((token) => item.includes(token))) {
+        messages.push(`${at}.argv[${j}]: a token must be a whole argv item (give it as its own item)`);
+      }
+    });
+    const reader = adapter === null ? 'every adapter reads' : `the ${adapter} adapter reads`;
+    if (!argv.slice(1).includes('{report}')) messages.push(`${at}.argv needs a {report} item (${reader} the report code-forge places there)`);
+    if (!argv.slice(1).some((item) => RUNNER_TEST_TOKENS.includes(item))) messages.push(`${at}.argv needs a test token (${RUNNER_TEST_TOKENS.join(', ')}): a proof must name its test`);
+  }
+  if (runner.env !== undefined) {
+    if (runner.env === null || typeof runner.env !== 'object' || Array.isArray(runner.env)) {
+      messages.push(`${at}.env must be a map of variable names to string values`);
+    } else {
+      for (const [name, envValue] of Object.entries(runner.env)) {
+        if (!ENV_NAME.test(name)) messages.push(`${at}.env: ${JSON.stringify(name)} is not a variable name (letters, digits and _, not starting with a digit)`);
+        else if (typeof envValue !== 'string') messages.push(`${at}.env.${name} must be a string`);
+        else if (envValue.includes('\0')) messages.push(`${at}.env.${name} contains a NUL character`);
+      }
+    }
+  }
+  if (runner.timeout_s !== undefined) {
+    const t = runner.timeout_s;
+    if (typeof t !== 'number' || !Number.isInteger(t) || t < RUNNER_TIMEOUT_MIN_S || t > RUNNER_TIMEOUT_MAX_S) {
+      messages.push(`${at}.timeout_s must be a whole number of seconds from ${RUNNER_TIMEOUT_MIN_S} to ${RUNNER_TIMEOUT_MAX_S}`);
+    }
+  }
+  return messages;
+}
+
+function checkProofRunnersInvalid(cfg) {
+  const runners = cfg?.proof?.runners;
+  if (runners === undefined) return [];
+  const messages = !Array.isArray(runners)
+    ? ['proof.runners must be a list of runner entries']
+    : runners.length === 0
+      ? ['proof.runners must list at least one runner (leave the key out for none)']
+      : runners.flatMap((entry, i) => runnerMessages(entry, i));
+  return messages.map((message) => ({ rule: 'proof-runners-invalid', severity: /** @type {const} */ ('error'), message }));
+}
+
+/**
+ * The 17 domain rules paired with the exact `rule` id string each one emits — the single source
  * of truth both `DOMAIN_RULES` (below, what `validateConfig` runs) and the exported
  * `DOMAIN_RULE_IDS` are built from. `'schema'` (the ajv layer's own issues) is deliberately not
- * one of these 16 (B29 added rule 15, B32 rule 16). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
+ * one of these 17 (B29 added rule 15, B32 rule 16, B87 rule 17). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
  * @type {ReadonlyArray<{fn: (cfg: Record<string, any>, opts?: object) => ValidationIssue[], id: string}>}
  */
 const RULE_TABLE = Object.freeze([
@@ -814,12 +916,13 @@ const RULE_TABLE = Object.freeze([
   { fn: checkCapsCodersExceedsCap, id: 'caps-coders-exceeds-cap' },
   { fn: checkEffortNotValidForProvider, id: 'effort-not-valid-for-provider' },
   { fn: checkClosedBookOnOpenai, id: 'closed-book-on-openai' },
+  { fn: checkProofRunnersInvalid, id: 'proof-runners-invalid' },
 ]);
 
-/** The 16 domain rules, in the order documented above. */
+/** The 17 domain rules, in the order documented above. */
 const DOMAIN_RULES = Object.freeze(RULE_TABLE.map((entry) => entry.fn));
 
-/** The 16 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
+/** The 17 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
 export const DOMAIN_RULE_IDS = Object.freeze(RULE_TABLE.map((entry) => entry.id));
 
 /**

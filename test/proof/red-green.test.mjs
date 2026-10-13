@@ -390,7 +390,8 @@ test('proof red-green refuses: no --test (2), a bad mechanism (2), a block not o
     [['red-green', 'C', '--run', RUN], 2, 'proof red-green: proof red-green needs one block id, --run and --test <file[::case]>\n'],
     [['red-green', 'C', '--run', RUN, '--test', 'test/clamp.spec.mjs', '--mechanism', 'mutate'], 2, 'proof red-green: --mechanism must be one of revert, assertion-deletion\n'],
     [['red-green', 'Z', '--run', RUN, '--test', 'test/clamp.spec.mjs'], 1, `proof red-green: block Z is not open in run ${RUN}\n`],
-    [['red-green', 'C', '--run', RUN, '--test', 'tests/ClampTest.php'], 1, 'proof red-green: only node:test files (.mjs, .cjs, .js) have a filtered test command in this version\n'],
+    // B87: no proof.runners in the run snapshot ⇒ today's refusal plus one sentence, exit 1, no row
+    [['red-green', 'C', '--run', RUN, '--test', 'tests/ClampTest.php'], 1, 'proof red-green: only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)\n'],
   ];
   const before = (await readAllRows(SLUG)).length;
   for (const [args, code, stderr] of cases) {

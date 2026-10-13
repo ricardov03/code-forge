@@ -24,6 +24,11 @@
  *      ordinary error of the red step (a write error, a command that does not start) restores too;
  *   6. when the red step was `RED`, run `argv` again: exit 0 ⇒ `GREEN`.
  *
+ * B87: with a `runner` (a `proof.runners` entry, `runners.mjs`), steps 4 and 6 run the runner's
+ * argv with a fresh JUnit report per step and classify from the report (`junit.mjs`): RED with
+ * `classifyReport`, GREEN with `classifyGreen` (exit 0 and every test that failed at RED passed).
+ * The journal, restore and signal rules are the same.
+ *
  * Signals: while the test child runs, `exec` forwards SIGINT/SIGTERM/SIGHUP to its process group
  * and the runner dies of the signal. The journal is left in place on purpose: restoring from a
  * signal handler could itself be interrupted, so the one recovery path is `proof restore`, which
@@ -437,28 +442,33 @@ function testEnv() {
  * @property {string} workDir - absolute: the export dir, or the workspace under the proof lock
  * @property {string} [repoDir] - the git repository the base is read from (default `workDir`)
  * @property {string} base - the block's base sha
- * @property {string[]} argv - the test command, already filtered to this test
+ * @property {string[]} [argv] - the test command, already filtered to this test (exactly one of
+ *   `argv` and `runner` is given)
  * @property {{file: string, case?: string, characterization?: boolean}} test
  * @property {string[]} [sources] - the block's non-test changed files (repo-relative)
  * @property {'export' | 'lock'} isolation
  * @property {number} [timeoutMs]
  * @property {(line: string) => void} [print]
  * @property {{runId: string, blockId: string, writeRow: import('../state/run.mjs').WriteRow}} [record]
+ * @property {import('./runners.mjs').RunnerHook} [runner] - B87: a `proof.runners` entry runs both
+ *   steps in place of `argv` (a fresh report per step) and classifies them from its JUnit report
  */
 
 /**
  * Run one red→green proof. See the module comment for the steps.
  * @param {RedGreenOptions} opts
- * @returns {Promise<{label: string, mechanism: 'revert' | 'assertion-deletion', red: import('./red-parse.mjs').RedParse, green: 'GREEN' | 'NOT_GREEN' | null, proven: boolean}>}
+ * @returns {Promise<{label: string, mechanism: 'revert' | 'assertion-deletion', red: import('./red-parse.mjs').RedParse | import('./junit.mjs').JUnitRedParse, green: 'GREEN' | 'NOT_GREEN' | null, proven: boolean}>}
  * @throws {StateError} `journal-present`, `bad-path`, `bad-isolation`, `bad-ref`, and the assertion-deletion refusals
  */
 export async function runRedGreen(opts) {
-  const { workDir, base, argv, test, sources = [], isolation, timeoutMs = DEFAULT_TEST_TIMEOUT_MS, print = () => {}, record } = opts;
+  const { workDir, base, argv, test, sources = [], isolation, timeoutMs = DEFAULT_TEST_TIMEOUT_MS, print = () => {}, record, runner } = opts;
   if (typeof workDir !== 'string' || !path.isAbsolute(workDir)) throw new StateError('bad-path', 'red-green: workDir must be an absolute path');
   const repoDir = opts.repoDir ?? workDir;
   if (!path.isAbsolute(repoDir)) throw new StateError('bad-path', 'red-green: repoDir must be an absolute path');
   if (!ISOLATIONS.includes(/** @type {any} */ (isolation))) throw new StateError('bad-isolation', `red-green: isolation must be one of ${ISOLATIONS.join(', ')}`);
-  if (!Array.isArray(argv) || argv.length === 0 || !argv.every((a) => typeof a === 'string')) throw new StateError('usage', 'red-green: argv must be a non-empty array of strings');
+  // B87: exactly one way to run the test — never a runner with a stray argv, never neither
+  if ((argv === undefined) === (runner === undefined)) throw new StateError('usage', 'red-green: give exactly one of argv and runner');
+  if (runner === undefined && (!Array.isArray(argv) || argv.length === 0 || !argv.every((a) => typeof a === 'string'))) throw new StateError('usage', 'red-green: argv must be a non-empty array of strings');
   assertRelPath(test?.file, 'test.file');
   for (const s of sources) assertRelPath(s, 'sources');
   if (sources.includes(test.file)) throw new StateError('bad-path', 'red-green: the test file cannot also be a source file');
@@ -482,7 +492,7 @@ export async function runRedGreen(opts) {
   }
 
   await writeJournal(workDir, [...redState.keys()], { mechanism, test: label, ...(record ? { block: record.blockId } : {}) });
-  /** @type {import('./red-parse.mjs').RedParse} */
+  /** @type {import('./red-parse.mjs').RedParse | import('./junit.mjs').JUnitRedParse} */
   let red;
   try {
     for (const [rel, bytes] of redState) {
@@ -493,7 +503,7 @@ export async function runRedGreen(opts) {
         await writeFile(abs, bytes);
       }
     }
-    red = parseRed(await exec(argv, { cwd: workDir, env: testEnv(), timeoutMs }));
+    red = runner ? await runner.red({ cwd: workDir, env: testEnv(), timeoutMs }) : parseRed(await exec(/** @type {string[]} */ (argv), { cwd: workDir, env: testEnv(), timeoutMs }));
   } finally {
     // Any ordinary error in the red step still restores (signals keep the journal: module comment).
     await restoreJournal({ workDir });
@@ -503,8 +513,18 @@ export async function runRedGreen(opts) {
   /** @type {'GREEN' | 'NOT_GREEN' | null} */
   let green = null;
   if (red.verdict === 'RED') {
-    const greenRun = await exec(argv, { cwd: workDir, env: testEnv(), timeoutMs });
-    green = greenRun.result === 'ok' ? 'GREEN' : 'NOT_GREEN';
+    if (runner) {
+      // B87: GREEN needs exit 0 AND a report in which every test that failed at RED passed. A
+      // GREEN step that throws is NOT_GREEN (fail closed), and the row is still written.
+      try {
+        green = await runner.green({ cwd: workDir, env: testEnv(), timeoutMs, red: /** @type {import('./junit.mjs').JUnitRedParse} */ (red) });
+      } catch {
+        green = 'NOT_GREEN';
+      }
+    } else {
+      const greenRun = await exec(/** @type {string[]} */ (argv), { cwd: workDir, env: testEnv(), timeoutMs });
+      green = greenRun.result === 'ok' ? 'GREEN' : 'NOT_GREEN';
+    }
     print(`${green} ${label}`);
   }
   const proven = red.verdict === 'RED' && green === 'GREEN';
@@ -512,7 +532,20 @@ export async function runRedGreen(opts) {
     await recordProof({
       runId: record.runId,
       writeRow: record.writeRow,
-      row: { block: record.blockId, isolation, step: 'red-green', test: label, mechanism, red_kind: red.red_kind, red: red.verdict, green, proven, failed: red.failed },
+      row: {
+        block: record.blockId,
+        isolation,
+        step: 'red-green',
+        test: label,
+        mechanism,
+        red_kind: red.red_kind,
+        red: red.verdict,
+        green,
+        proven,
+        failed: red.failed,
+        // B87: names only (`failed_ids` stays in memory, never in a row)
+        ...(runner ? { runner: runner.adapter, failed_tests: /** @type {import('./junit.mjs').JUnitRedParse} */ (red).failed_tests, env_keys: [...runner.env_keys] } : {}),
+      },
     });
   }
   return { label, mechanism, red, green, proven };

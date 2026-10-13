@@ -61,7 +61,7 @@ export const MAX_TEST_NAME = 200;
 
 /** The `type` or `message` of an assertion failure, per runner. */
 const ASSERTION_PATTERNS = Object.freeze([
-  /\bAssertionError\b/, // node, Jest/Vitest, pytest
+  /\bAssertionError\b/, // node:assert and pytest. Not Jest: its report names no assertion type, so Jest RED is not supported yet
   /\bERR_ASSERTION\b/, // node:assert
   /\bExpectationFailedException\b/, // PHPUnit and Pest
   /\bAssertionFailedError\b/, // PHPUnit's assertion base class ($this->fail())

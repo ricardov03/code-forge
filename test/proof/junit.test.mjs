@@ -291,6 +291,9 @@ test('B86 (3): a raw NUL or C0 control in text or an attribute is unreadable; a 
     '<testsuite><testcase name="a"><system-out>x\u0000y</system-out></testcase></testsuite>',
     '<testsuite><testcase name="a\u0001b"/></testsuite>',
     '<testsuite><testcase name="a"><![CDATA[\u001f]]></testcase></testsuite>',
+    // B87 (B86 leftover): the two noncharacters U+FFFE and U+FFFF, raw in text and in an attribute
+    '<testsuite><testcase name="a"><system-out>x\uFFFEy</system-out></testcase></testsuite>',
+    '<testsuite><testcase name="a\uFFFFb"/></testsuite>',
   ]) {
     assert.throws(() => readJUnit(xml), { message: 'report-unreadable: a character that is not an XML character' });
     assert.deepEqual(parseReport(Buffer.from(xml)), { unreadable: 'a character that is not an XML character' });

@@ -584,7 +584,7 @@ test('B86 (9): proof.md §2 says how a test report is read and gives the 8-row f
   const proof = await readSkillFile('references/proof.md');
   const s2 = section(proof, 2);
   assert.equal(occurrences(s2, '**How a test report is read (B86).**'), 1);
-  assert.equal(occurrences(s2, 'The reader fails closed: a report that is missing, empty, over 8 MiB, not UTF-8 or malformed, that has a `<!DOCTYPE` or `<!ENTITY` (no entity is ever expanded), or that has an element other than `testsuites`, `testsuite`, `testcase`, `failure`, `error`, `skipped`, `system-out`, `system-err`, `properties`, `property` is unreadable.'), 1);
+  assert.equal(occurrences(s2, 'The reader fails closed: a report that is missing, empty, over 8 MiB, not UTF-8 or malformed, that has a `<!DOCTYPE` or `<!ENTITY` (no entity is ever expanded) or a character that is not an XML character, or that has an element other than `testsuites`, `testsuite`, `testcase`, `failure`, `error`, `skipped`, `system-out`, `system-err`, `properties`, `property` is unreadable.'), 1);
   assert.equal(occurrences(s2, 'This table applies only to a runner that writes a report; a `node:test` file is still classified from its console text, as above.'), 1);
   const rows = tableRows(s2, '`red_kind`');
   assert.deepEqual(rows.map((r) => [r[0], r[1], r[2]]), [
@@ -597,7 +597,32 @@ test('B86 (9): proof.md §2 says how a test report is read and gives the 8-row f
     ['at least one test failed on an assertion', '`RED`', '`assertion`'],
     ['the run failed, but the report has no failure', '`RED_INVALID`', '`error`'],
   ]);
-  assert.equal(occurrences(s2, 'Such a bare failure (no `type`, message exactly `failed`, empty body) counts as an assertion only when the console text has XCTest\'s assertion line for that same test'), 1);
+  assert.equal(occurrences(s2, 'Such a bare failure (no `type`, message exactly `failed`, an empty body; a body of only whitespace, as text or CDATA, counts as empty) counts as an assertion only when the console text has XCTest\'s assertion line for that same test'), 1);
   assert.equal(occurrences(s2, '`failed_tests` lists at most 20 test ids of at most 200 characters each, never a failure message.'), 1);
   assert.equal(occurrences(s2, 'every test that failed at RED present and passed; anything else is `NOT_GREEN`.'), 1);
+});
+
+// ── B87: proof.runners ───────────────────────────────────────────────────────
+
+test('B87 (12): proof.md §2 has a Runners part: keys, tokens, selection from the snapshot, the fail-closed rules and the row', async () => {
+  const proof = await readSkillFile('references/proof.md');
+  const s2 = section(proof, 2);
+  assert.equal(occurrences(s2, '**Runners (B87).**'), 1);
+  assert.equal(occurrences(s2, '`only node:test files (.mjs, .cjs, .js) have a filtered test command in this version — add a proof.runners entry for it (see proof.md §2)`'), 1);
+  assert.deepEqual(
+    ['- **Keys.**', '- **Tokens.**', '- **Selection.**', '- **Fail closed.**', '- **The run.**', '- **The row.**'].map((label) => occurrences(s2, label)),
+    [1, 1, 1, 1, 1, 1],
+  );
+  assert.equal(occurrences(s2, 'In this version `swift` runs exactly as `junit`'), 1);
+  assert.equal(occurrences(s2, 'A token is a whole item, never part of one (`--log-junit={report}` is refused; give `--log-junit`, `"{report}"`), and never `argv[0]`.'), 1);
+  assert.equal(occurrences(s2, 'The runner list is read from the run\'s config snapshot, never from the live `.code-forge.yml`: `run start` freezes it, `run reload` refuses to change it, and while it is set no block may own `.code-forge.yml`.'), 1);
+  assert.equal(occurrences(s2, '`--test <file>` with no `::case` is a usage error (exit 2, no row)'), 1);
+  assert.equal(occurrences(s2, 'A changed file that a runner\'s `match` covers is a test, never a source: it is not reverted.'), 1);
+  assert.equal(occurrences(s2, 'add `runner: <adapter>`, `env_keys` (the entry\'s env variable names, `[]` without an `env`) and `failed_tests` (names only) when a runner was used.'), 1);
+  assert.equal(occurrences(s2, 'the entry is never run, never skipped, and the file never falls through to another entry or to `node:test`.'), 1);
+  assert.equal(occurrences(s2, 'a bounded list of test names (at most 20, each cut at 200 characters, control characters removed), never a failure message.'), 1);
+  assert.equal(occurrences(s2, 'The full list of failed ids that GREEN checks (`failed_ids`) stays in memory and is never stored.'), 1);
+  assert.equal(occurrences(s2, 'RED is classified from the report (the table above), GREEN by the GREEN rule above; a GREEN step that throws is `NOT_GREEN`, and the row is still written.'), 1);
+  assert.equal(occurrences(s2, 'which never inherits a `GIT_*` variable'), 1);
+  assert.equal(occurrences(s2, 'a token of another adapter'), 0);
 });

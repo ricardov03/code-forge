@@ -15,6 +15,7 @@ In the next release:
 - **Choose how long a 1Password key stays cached (B84).** Set `keys.cache_hours` (1 to 24, default 8) in `.code-forge.yml`, or `keys set <name> --op <ref> --cache-hours <n>` for one key. A lower value shortens keys that are already cached at the next read.
 - **Warnings before a cached key runs out (B85).** `keys list` and `doctor` warn when a 1Password key has less than 1 hour left. When the cached key expired and 1Password does not answer, `jev ask` prints the exact command to re-link it: `code-forge keys set jev --op <ref>`.
 - **A test report reader for red-green proof (B86).** code-forge can now read a JUnit XML test report (XCTest, Swift Testing, PHPUnit, Pest, pytest). A missing, broken or empty report, or an error that is not a failed assertion, never counts as red. B87 connects it to `proof red-green`.
+- **Red-green proof for any test runner (B87).** A new `proof.runners` list in `.code-forge.yml` names a runner per test-file glob: an adapter (`junit` or `swift`), an argv with `{test_file}`, `{test_id}`, `{test_filter}` and `{report}`, optional `env` and `timeout_s`. `proof red-green` runs that argv and reads its JUnit report, so PHPUnit, Pest, XCTest or pytest tests can be proven. The list is fixed at `run start`; a bad entry refuses the proof and never falls back to `node:test`.
 
 In 0.9.0:
 
@@ -308,7 +309,7 @@ usage line.
 | `author` | `code-forge author --job plan\|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]` |
 | `facts` | `code-forge facts --brief <file> [--sources <path>…] [--out <file>] [--run <id>] [--timeout <seconds>]` |
 | `plan` | `code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]` — every block's level must be the lane recorded by `jev ask lane --block <id>`; prints `lanes: B1 L1 (rules) · …` |
-| `proof` | `code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]` · `proof export <block> --run <r> [--remove]` · `proof lock\|unlock\|restore <block> --run <r>` · `proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert\|assertion-deletion]` |
+| `proof` | `code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]` · `proof export <block> --run <r> [--remove]` · `proof lock\|unlock\|restore <block> --run <r>` · `proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert\|assertion-deletion]` (a non-`node:test` file runs through its `proof.runners` entry) |
 | `gates` | `code-forge gates detect\|run\|secret-scan\|safe-edit\|scope\|acceptance\|transcript-grep --cwd <dir> …` |
 | `jev` | `code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]` — `--rules` answers `lane`, `risk` or `security_sensitive` without Jev; writes to the project's ledger slug |
 | `keys` | `code-forge keys list \| set <name> [--op <item-id\|link\|op://ref> [--cache-hours <1-24>]] \| test <name> [--ref <ref>] \| remove <name>` |
@@ -353,7 +354,8 @@ CLI verbs like any other and every one of them is exercised by this package's ow
   the warnings and the command list off. Every field is listed in [docs/privacy.md](docs/privacy.md).
 - **No mutation testing.** Neither this package's own tests nor the product it ships run mutation
   testing (Ricardo's ruling R14/Q16, 2026-09-25). Proof is plain unit and feature tests with exact
-  assertions, plus a red→green runner that proves a new test fails before the fix and passes after.
+  assertions, plus a red→green runner that proves a new test fails before the fix and passes after (`node:test`
+  built in; any other runner through a `proof.runners` entry that writes a JUnit report).
 
 ## Configuration reference
 

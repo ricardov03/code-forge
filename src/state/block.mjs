@@ -18,7 +18,7 @@ import path from 'node:path';
 import { BLOCK_KINDS, blockKind, dispatchLevel } from '../decide/escalation.mjs';
 import { exec } from '../util/exec.mjs';
 import { DEFAULT_CONFIG_FILENAME } from '../config/load.mjs';
-import { blockEndHook, externalReviewer } from './config-snapshot.mjs';
+import { blockEndHook, configInForce, externalReviewer } from './config-snapshot.mjs';
 import { ownedKinds, pathKind } from './owned-kinds.mjs';
 import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
@@ -263,12 +263,22 @@ function activeBlocks(record) {
  * subdirectory, relative to the repository top level (the close gate matches both, `ownsAt`).
  * Empty when the key is not set. B64b: `hooks.on_block_end` in the snapshot guards it the same way
  * — the file names a command the orchestrator runs at every block end — and `why` names the key
- * that guards it (`review.external.required` first, so its message is unchanged).
+ * that guards it (`review.external.required` first, so its message is unchanged). B87:
+ * `proof.runners` in the snapshot guards it too — the file names the commands that prove a block;
+ * any stored value guards it (fail closed: `validate` refuses an empty or malformed list anyway).
  * @param {Record<string, any>} record @returns {Promise<{paths: string[], why: string}>}
  * @throws {StateError} `config-snapshot`, `git-failed`
  */
 async function guardedConfigPaths(record) {
-  const why = externalReviewer(record) !== null ? 'review.external.required is true' : blockEndHook(record) !== null ? 'hooks.on_block_end is set' : null;
+  const runners = configInForce(record)?.proof?.runners;
+  const why =
+    externalReviewer(record) !== null
+      ? 'review.external.required is true'
+      : blockEndHook(record) !== null
+        ? 'hooks.on_block_end is set'
+        : runners !== undefined && runners !== null
+          ? 'proof.runners is set'
+          : null;
   if (why === null) return { paths: [], why: '' };
   const top = await repoTop(record.workspace);
   // the repo-top spelling `<prefix>/.code-forge.yml` may also match a different file of the same

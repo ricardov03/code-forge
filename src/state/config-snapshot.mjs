@@ -44,6 +44,8 @@ export const IMMUTABLE_KEYS = Object.freeze({
   // B64b: the block-end hook runs a command on the owner's machine at every block end, so only
   // the owner sets it, before the run starts
   'hooks.on_block_end': 'it runs a command on the owner\'s machine at every block end; fixed by the owner before the run starts',
+  // B87: the runner argv proves the coder's own work, so only the owner sets it, before the run starts
+  'proof.runners': 'the commands that prove a block are fixed by the owner before the run starts',
 });
 
 /** @param {unknown} v @returns {boolean} what `JSON.stringify` drops from an object. */
@@ -234,4 +236,23 @@ export function blockEndHook(record) {
   const timeoutS = timeout === undefined ? HOOK_TIMEOUT_DEFAULT_S : timeout;
   if (!Number.isInteger(timeoutS) || timeoutS < HOOK_TIMEOUT_MIN_S || timeoutS > HOOK_TIMEOUT_MAX_S) return null;
   return { argv: [...argv], timeoutS };
+}
+
+/**
+ * B87: `proof.runners` of the run-start config snapshot (never the live config), as a deep copy
+ * (entries and argv arrays), or null when the key is absent or the record is from before
+ * snapshots. `proof/runners.mjs` checks each entry again before it runs one (fail closed).
+ * @param {Record<string, any>} record
+ * @returns {unknown[] | null}
+ * @throws {StateError} `config-snapshot` when the snapshot in force does not match its hash;
+ *   `runner-invalid` when the stored value is not a list, or is an empty one.
+ */
+export function proofRunners(record) {
+  const runners = configInForce(record)?.proof?.runners;
+  if (runners === undefined || runners === null) return null;
+  if (!Array.isArray(runners)) throw new StateError('runner-invalid', `run ${record.run_id}: proof.runners in the run snapshot is not a list`);
+  // `validate` refuses an empty list (minItems 1); a record that holds one anyway is refused too
+  if (runners.length === 0) throw new StateError('runner-invalid', `run ${record.run_id}: proof.runners in the run snapshot is an empty list`);
+  // a deep copy: a caller that changes an entry or an argv array never changes the snapshot
+  return structuredClone(runners);
 }
