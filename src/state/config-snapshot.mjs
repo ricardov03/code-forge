@@ -46,6 +46,9 @@ export const IMMUTABLE_KEYS = Object.freeze({
   'hooks.on_block_end': 'it runs a command on the owner\'s machine at every block end; fixed by the owner before the run starts',
   // B87: the runner argv proves the coder's own work, so only the owner sets it, before the run starts
   'proof.runners': 'the commands that prove a block are fixed by the owner before the run starts',
+  // B93: the coder sandbox profile widens what the coder may write, so only the owner sets it,
+  // before the run starts (a coder can never own `.code-forge.yml`)
+  'coder.sandbox': 'the coder sandbox widens what the coder may write; fixed by the owner before the run starts',
 });
 
 /** @param {unknown} v @returns {boolean} what `JSON.stringify` drops from an object. */
@@ -255,4 +258,19 @@ export function proofRunners(record) {
   if (runners.length === 0) throw new StateError('runner-invalid', `run ${record.run_id}: proof.runners in the run snapshot is an empty list`);
   // a deep copy: a caller that changes an entry or an argv array never changes the snapshot
   return structuredClone(runners);
+}
+
+/**
+ * B93: `coder.sandbox` of the run-start config snapshot (never the live config). A record from
+ * before snapshots has no run-start value: `{snapshot: false}`. Otherwise `{snapshot: true,
+ * sandbox}`, where `sandbox` is a deep copy of the value, or null when the snapshot has no key.
+ * @param {Record<string, any>} record
+ * @returns {{snapshot: false} | {snapshot: true, sandbox: Record<string, any> | null}}
+ * @throws {StateError} `config-snapshot` when the snapshot in force does not match its hash.
+ */
+export function coderSandbox(record) {
+  const config = configInForce(record);
+  if (config === null) return { snapshot: false };
+  const sandbox = config.coder?.sandbox;
+  return { snapshot: true, sandbox: sandbox === undefined || sandbox === null ? null : structuredClone(sandbox) };
 }

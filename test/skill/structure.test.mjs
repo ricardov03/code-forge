@@ -939,3 +939,77 @@ test('B92 (6): review.md §3 and how-it-works say the packet has a `## test-qual
   ])
     assert.equal(occurrences(howItWorks, flat(pin)), 1, pin);
 });
+
+test('B93 (7): subprocess.md §3 and security.md say what each coder.sandbox profile opens', async () => {
+  const s3 = flat(section(await readSkillFile('references/adapters/subprocess.md'), 3));
+  for (const pin of [
+    'Only the Codex (openai) coder reads it; it has no effect on the Claude and Grok coders, whose argv does not change.',
+    'with writes limited to the workspace where the CLI supports it, except under `coder.sandbox.profile: full`;',
+    '`doctor` prints no `coder sandbox` row without the key, one INFO row with it, a WARN row for `full`, and a no-effect INFO row only when a Claude or Grok coder is configured.',
+    '`workspace` (the default, and what no `coder` key means): `-s workspace-write`, today\'s argv. The project tree (`-C <cwd>`) is the only writable root;',
+    '`toolchain`: the same, plus one `--add-dir <abs>` per `coder.sandbox.add_dirs` entry right after `-s workspace-write`',
+    'The argv keeps the `$TMPDIR` and `/tmp` exclusion flags, which Codex ignores there.',
+    // the containment rule and the symlink rule (fix round 1)
+    'Each entry is absolute or starts with `~/`, which expands against HOME, and becomes an absolute realpath: symlinks are judged by their target, a dangling symlink too.',
+    'refuse `/`, the home directory itself, and an entry that is, holds or sits inside any refused dir: `~/.code-forge`, `~/.codex` (and `$CODEX_HOME`), `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config`, `~/Library/Keychains`, the run temp root or the session `CODEX_HOME`.',
+    'So `~/Library` is refused (it holds `~/Library/Keychains`), and so is `$TMPDIR` or `/tmp` when it holds the run temp root.',
+    'the message names the key path (`coder.sandbox.add_dirs[<i>]`), never the value.',
+    'Under `workspace` or `full` the entries are unused: `validate` warns `sandbox-dirs-unused`, and a refused entry is still refused.',
+    '`full`: `-s danger-full-access`, which turns the Codex sandbox off: the coder writes anywhere you can, with network as the CLI allows. Like the Claude coder, the deny rules, the transcript grep and the gates are the only limits; `doctor` prints a WARN row.',
+    '`run reload` refuses a change, and `forge spawn --role coder --run <r>` exits 1 `sandbox-changed` when the live value differs from the run-start snapshot. Without `--run`, spawn reads the live config',
+    'A run recorded before config snapshots has no run-start value; spawn then uses the live config.',
+  ])
+    assert.equal(occurrences(s3, flat(pin)), 1, pin);
+  const security = flat(await readSkillFile('references/security.md'));
+  for (const pin of [
+    "`workspace` (the default; no key gives today's argv) opens only the project tree for writes;",
+    '`toolchain` also opens each checked `add_dirs` entry.',
+    'An entry is refused (`sandbox-dir-refused`) when it is `/` or the home directory, or is, holds or sits inside `~/.code-forge`, `~/.codex`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config`, `~/Library/Keychains`, the run temp root or the session `CODEX_HOME`, so `~/Library` is refused too;',
+    '`~/` expands against HOME, each entry becomes an absolute realpath, and a symlink is judged by its target; the message names the key path, never the value.',
+    '`full` (`-s danger-full-access`) turns the Codex sandbox off: it opens every path the OS user can write, `~/.code-forge/runs/` included, with network as the CLI allows, so only the same-user rules above hold, like the Claude coder;',
+    'the argv keeps the `$TMPDIR` and `/tmp` exclusion flags, which Codex ignores there.',
+    'Under `workspace` or `full`, `add_dirs` is unused and `validate` warns `sandbox-dirs-unused`.',
+    '`doctor` prints no `coder sandbox` row without the key, one INFO row with it, a WARN row for `full`, and a no-effect INFO row only when a Claude or Grok coder is configured.',
+    'The key has no effect on the Claude and Grok coders.',
+    'fixed at `run start`, refused by `run reload`, and a differing live value stops `forge spawn --role coder --run <r>` with `sandbox-changed`; without `--run` the live config is read.',
+  ])
+    assert.equal(occurrences(security, flat(pin)), 1, pin);
+});
+
+test('B93 (8): how-it-works and brief-mode say the coder sandbox behaviour; config.md lists the coder keys', async () => {
+  const howItWorks = flat(await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8'));
+  for (const pin of [
+    "**The Codex coder's sandbox.** A Codex coder writes only in the project tree (`-s workspace-write`, with `$TMPDIR` and `/tmp` excluded). That is profile `workspace`, the default: no key gives today's argv.",
+    '`coder.sandbox.profile: toolchain` adds one `--add-dir` per `coder.sandbox.add_dirs` entry, for a build cache or a package store.',
+    'An entry is refused (`sandbox-dir-refused`) when it is `/` or your home directory, or is, holds or sits inside `~/.code-forge`, `~/.codex`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config`, `~/Library/Keychains`, the run\'s temp root or the session `CODEX_HOME`, so `~/Library` is refused too.',
+    '`~/` expands against HOME, each entry becomes an absolute realpath, and a symlink is judged by its target.',
+    '`profile: full` runs `-s danger-full-access`, which turns the Codex sandbox off: the coder writes anywhere you can, with network as the CLI allows,',
+    'The argv keeps the `$TMPDIR` and `/tmp` exclusion flags, which Codex ignores there.',
+    'Under `workspace` or `full`, `add_dirs` is unused and `validate` warns `sandbox-dirs-unused`.',
+    '`doctor` prints no `coder sandbox` row without the key, one INFO row with it, a WARN row for `full`, and a no-effect INFO row only when a Claude or Grok coder is configured.',
+    'The Claude and Grok coders do not change.',
+    "`spawn --role coder --run <r>` stops with `sandbox-changed` when the live value differs from the run's snapshot. Without `--run`, spawn reads the live config.",
+  ])
+    assert.equal(occurrences(howItWorks, flat(pin)), 1, pin);
+  const brief = flat(await readFile(path.join(ROOT, 'docs', 'brief-mode.md'), 'utf8'));
+  for (const pin of [
+    'A Codex coder (provider `openai`) writes only in the project tree unless you set `coder.sandbox`; the default profile is `workspace`, and no key gives today\'s argv.',
+    '`~/` expands against HOME, each entry becomes an absolute realpath, and a symlink is judged by its target.',
+    '`profile: full` (`-s danger-full-access`) turns the Codex sandbox off: the coder writes anywhere you can, with network as the CLI allows; the argv keeps the `$TMPDIR` and `/tmp` exclusion flags, which Codex ignores there.',
+    'Under `workspace` or `full`, `add_dirs` is unused and `validate` warns `sandbox-dirs-unused`.',
+    'or that is, holds or sits inside a secret directory such as `~/.ssh`, `~/.codex` or `~/Library/Keychains` (so `~/Library` too), the run\'s temp root or the session `CODEX_HOME` (`sandbox-dir-refused`).',
+    '`coder.sandbox` is fixed for the run too',
+    '`spawn --role coder --run <r>` stops with `sandbox-changed` when the live value differs; without `--run`, spawn reads the live config.',
+    'The Claude and Grok coders ignore it.',
+    '`doctor` prints no `coder sandbox` row without the key, one INFO row with it, a WARN row for `full`, and a no-effect INFO row only when a Claude or Grok coder is configured.',
+  ])
+    assert.equal(occurrences(brief, flat(pin)), 1, pin);
+  const config = await readFile(path.join(ROOT, 'docs', 'reference', 'config.md'), 'utf8');
+  for (const key of ['| `coder.sandbox.profile` |', '| `coder.sandbox.add_dirs` |']) assert.equal(occurrences(config, key), 1, key);
+  for (const pin of [
+    'symlinks are followed, even a dangling one, so a symlink is judged by its target.',
+    'and any directory that is, holds or sits inside ~/.code-forge, ~/.codex or $CODEX_HOME, ~/.ssh, ~/.gnupg, ~/.aws, ~/.config, ~/Library/Keychains, the run temp root (so $TMPDIR or /tmp when it holds it), or the session CODEX_HOME; for example ~/Library is refused because it holds ~/Library/Keychains.',
+    'under workspace or full they are unused and validate warns (rule sandbox-dirs-unused)',
+  ])
+    assert.equal(occurrences(config, pin), 1, pin);
+});

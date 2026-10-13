@@ -904,14 +904,15 @@ test('rule 16 with review.allow_open_book_codex: true: the same 2 places warn wi
 // (B1.2/v1.3, Q16 cut: 15 -> 14 — `proof-tool-absent-for-high-tier` removed, its key gone from schema.)
 // (B29: 14 -> 15 — `effort-not-valid-for-provider` added. B32: 15 -> 16 — `closed-book-on-openai` added.
 // B87: 16 -> 17 — `proof-runners-invalid` added; its refusals are tested in test/proof/runners.test.mjs.
-// B90: 17 -> 18 — `review-routes-invalid` added; its refusals are tested in test/config/validate-routes.test.mjs.)
+// B90: 17 -> 18 — `review-routes-invalid` added; its refusals are tested in test/config/validate-routes.test.mjs.
+// B93: 18 -> 20 — `sandbox-dir-refused` and `sandbox-dirs-unused` added; both are tested in test/engines/sandbox-profile.test.mjs.)
 
-test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 18 distinct ids', () => {
-  assert.equal(DOMAIN_RULE_IDS.length, 18);
-  assert.equal(new Set(DOMAIN_RULE_IDS).size, 18, 'no duplicate rule ids');
+test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 20 distinct ids', () => {
+  assert.equal(DOMAIN_RULE_IDS.length, 20);
+  assert.equal(new Set(DOMAIN_RULE_IDS).size, 20, 'no duplicate rule ids');
 });
 
-test('every rule id exercised by THIS test file is a member of the real DOMAIN_RULE_IDS set (catches a renamed/dropped rule)', () => {
+test('every rule id exercised by THIS test file (or the file named beside it) is a member of the real DOMAIN_RULE_IDS set (catches a renamed/dropped rule)', () => {
   const exercisedInThisFile = [
     'level-missing',
     'unknown-model-id',
@@ -931,6 +932,8 @@ test('every rule id exercised by THIS test file is a member of the real DOMAIN_R
     'closed-book-on-openai',
     'proof-runners-invalid', // B87: exercised in test/proof/runners.test.mjs
     'review-routes-invalid', // B90: exercised in test/config/validate-routes.test.mjs
+    'sandbox-dir-refused', // B93: exercised in test/engines/sandbox-profile.test.mjs
+    'sandbox-dirs-unused', // B93: exercised in test/engines/sandbox-profile.test.mjs
   ];
   assert.deepEqual([...exercisedInThisFile].sort(), [...DOMAIN_RULE_IDS].sort());
 });

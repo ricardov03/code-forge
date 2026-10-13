@@ -32,6 +32,7 @@ import { mergeForbidden, renderForCodex } from '../util/forbidden.mjs';
 import { buildArgv } from '../engines/builders/index.mjs';
 import { probeHelpText } from '../engines/probe.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
+import { DEFAULT_SANDBOX_PROFILE, SANDBOX_PROFILES } from '../engines/sandbox-dirs.mjs';
 import { commandOnPath } from '../install/detect.mjs';
 import { classifyUnavailable, readAnswer, spawnSession } from '../session/spawn.mjs';
 import { S2_SCHEMA } from '../session/s2.mjs';
@@ -96,6 +97,43 @@ export function configuredProviders(cfg) {
     for (const f of Array.isArray(level.fallback) ? level.fallback : []) if (typeof f?.provider === 'string') out.add(f.provider);
   }
   return [...out];
+}
+
+/** B93: the coders `coder.sandbox` never changes, by provider, in the order doctor names them. */
+const SANDBOX_NO_EFFECT = Object.freeze([
+  ['anthropic', 'Claude (anthropic)'],
+  ['xai', 'Grok (xai)'],
+]);
+
+/**
+ * B93: the `coder.sandbox` rows. None without the key, for a null config, or for a value the
+ * schema refuses (a non-mapping, an unknown profile: config validation reports those). With it:
+ *  - one INFO row `coder-sandbox` naming the profile (and, for `toolchain`, how many extra dirs);
+ *  - one INFO row `coder-sandbox-no-effect` only when a Claude (anthropic) or Grok (xai) coder is
+ *    configured (any level or fallback): the key has no effect on it, its argv does not change;
+ *  - one WARN row `coder-sandbox-full` when the profile is `full` (`-s danger-full-access`).
+ * Rows name the profile and a count, never a directory.
+ * @param {Record<string, any> | null | undefined} cfg
+ * @returns {import('./rows.mjs').Row[]}
+ */
+export function checkCoderSandbox(cfg) {
+  const sandbox = cfg?.coder?.sandbox;
+  if (sandbox === null || typeof sandbox !== 'object' || Array.isArray(sandbox)) return [];
+  const profile = sandbox.profile ?? DEFAULT_SANDBOX_PROFILE;
+  if (!SANDBOX_PROFILES.includes(profile)) return [];
+  const dirs = Array.isArray(sandbox.add_dirs) ? sandbox.add_dirs.length : 0;
+  const extra = profile === 'toolchain' ? `, ${dirs} extra writable ${dirs === 1 ? 'dir' : 'dirs'}` : '';
+  const rows = [row('coder-sandbox', 'INFO', 'coder sandbox', `profile ${profile}${extra}; applies to the Codex (openai) coder only`)];
+  const providers = configuredProviders(cfg);
+  const others = SANDBOX_NO_EFFECT.filter(([id]) => providers.includes(id)).map(([, name]) => name);
+  if (others.length > 0) {
+    const who = others.length === 1 ? `the ${others[0]} coder` : `the ${others.join(' and ')} coders`;
+    rows.push(row('coder-sandbox-no-effect', 'INFO', 'coder sandbox', `coder.sandbox has no effect on ${who}: the argv does not change`));
+  }
+  if (profile === 'full') {
+    rows.push(row('coder-sandbox-full', 'WARN', 'coder sandbox', 'profile full runs the Codex coder with -s danger-full-access: it can write anywhere you can; only the forbidden list, the transcript grep and the gates limit it'));
+  }
+  return rows;
 }
 
 /** @param {Record<string, any>} cfg @returns {Record<string, any>} the config with every level's fallback removed. */

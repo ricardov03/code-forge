@@ -869,6 +869,23 @@ the plan file. See `skill/references/continuity.md`.
   `block waive`, `block reopen`, `autopilot`, writing review results, and more. It becomes each
   CLI's own deny rules (`--disallowedTools` for Claude, an execpolicy rules file plus prose for Codex), is copied into
   every brief, and is grepped from every transcript at `block close`. A hit is a `rule_break`.
+- **The Codex coder's sandbox.** A Codex coder writes only in the project tree
+  (`-s workspace-write`, with `$TMPDIR` and `/tmp` excluded). That is profile `workspace`, the
+  default: no key gives today's argv. `coder.sandbox.profile: toolchain` adds one `--add-dir` per
+  `coder.sandbox.add_dirs` entry, for a build cache or a package store. An entry is refused
+  (`sandbox-dir-refused`) when it is `/` or your home directory, or is, holds or sits inside
+  `~/.code-forge`, `~/.codex`, `~/.ssh`, `~/.gnupg`, `~/.aws`, `~/.config`, `~/Library/Keychains`,
+  the run's temp root or the session `CODEX_HOME`, so `~/Library` is refused too. `~/` expands
+  against HOME, each entry becomes an absolute realpath, and a symlink is judged by its target.
+  `profile: full` runs `-s danger-full-access`, which turns the Codex sandbox off: the coder
+  writes anywhere you can, with network as the CLI allows, and like the Claude coder only the
+  deny rules, the transcript grep and the gates limit it. The argv keeps the `$TMPDIR` and `/tmp`
+  exclusion flags, which Codex ignores there. Under `workspace` or `full`, `add_dirs` is unused
+  and `validate` warns `sandbox-dirs-unused`. The Claude and Grok coders do not change.
+  `doctor` prints no `coder sandbox` row without the key, one INFO row with it, a WARN row for
+  `full`, and a no-effect INFO row only when a Claude or Grok coder is configured. The key is fixed for the run: `run reload`
+  refuses a change, and `spawn --role coder --run <r>` stops with `sandbox-changed` when the live
+  value differs from the run's snapshot. Without `--run`, spawn reads the live config.
 - **Signed rows.** Every gate-relevant ledger row carries an HMAC made with the per-run key. A
   forged, edited or stale approval is refused, and a replaced worker stops the block.
 - **Closed-book reviews.** Reviewers, judges, System 2 and the plan author get no tools. Codex

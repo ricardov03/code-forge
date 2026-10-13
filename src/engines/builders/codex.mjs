@@ -65,6 +65,8 @@ import { CODEX_RULES_FILE_NAME, defaultCodexHome, isInside, prepareCodexHome } f
 import { hasAnyRenderedRule } from '../render-rules.mjs';
 import { assertEffortForProvider, PROVIDER_EFFORTS } from '../efforts.mjs';
 import { assertBaseParams } from './validate-params.mjs';
+import { checkSandboxDirs, DEFAULT_SANDBOX_PROFILE, SandboxDirError, sandboxRefusalMessage, SANDBOX_PROFILES } from '../sandbox-dirs.mjs';
+import { tmpBase } from '../../util/tmp.mjs';
 import { CODEX_CLOSED_BOOK_REFUSAL, isNeverOpenBookRole, isNoToolRole } from '../../config/closed-book.mjs';
 
 export const CLI = 'codex';
@@ -123,6 +125,11 @@ export const VALID_EFFORTS = PROVIDER_EFFORTS.openai;
  * @property {string} [codexHome] - coder role only: the per-session Codex home to create (absolute,
  *   must not exist as the real `~/.codex` or inside it); defaults to `defaultCodexHome()` under the
  *   run temp root.
+ * @property {{profile?: string, add_dirs?: string[]}} [sandbox] - B93, coder role only: the
+ *   `coder.sandbox` config value. Absent ⇒ today's argv. `toolchain` adds one `--add-dir <abs>`
+ *   per checked `add_dirs` entry; `full` builds `-s danger-full-access`. A refused entry throws
+ *   a `SandboxDirError` (code `sandbox-dir-refused`) naming the key path, never the value.
+ * @property {string} [runRoot] - B93, coder role only: the run temp root, refused as an `add_dirs` tree.
  */
 
 /**
@@ -158,13 +165,23 @@ function assertValidEffort(effort) {
 /**
  * The Codex coder argv itself — pure, no I/O, no rules file (B4.2). `buildCoderArgv` uses it, and
  * the doctor's flags probe builds it with placeholder values for its static conflict check.
- * @param {{model: string, effort?: string, cwd: string, outPath: string, promptPath: string}} p
+ * B93: `profile` `full` swaps `-s workspace-write` for `-s danger-full-access`; `addDirs` (already
+ * checked and resolved, `toolchain` only) follow `-s workspace-write` as `--add-dir <abs>` pairs.
+ * The tmp exclusions stay in every profile: under `danger-full-access` Codex ignores the
+ * `sandbox_workspace_write.*` keys, and one argv shape keeps the forbidden-list check the same.
+ * @param {{model: string, effort?: string, cwd: string, outPath: string, promptPath: string, profile?: string, addDirs?: ReadonlyArray<string>}} p
  * @returns {string[]}
  */
-export function coderFlagArgv({ model, effort, cwd, outPath, promptPath }) {
+export function coderFlagArgv({ model, effort, cwd, outPath, promptPath, profile = DEFAULT_SANDBOX_PROFILE, addDirs = [] }) {
+  if (!SANDBOX_PROFILES.includes(profile)) throw new TypeError(`coderFlagArgv: profile must be one of ${SANDBOX_PROFILES.join(', ')}`);
   const argv = ['codex', 'exec', '-m', model];
   if (effort) argv.push('-c', `model_reasoning_effort=${effort}`);
-  argv.push('-s', 'workspace-write');
+  if (profile === 'full') {
+    argv.push('-s', 'danger-full-access');
+  } else {
+    argv.push('-s', 'workspace-write');
+    if (profile === 'toolchain') for (const dir of addDirs) argv.push('--add-dir', dir);
+  }
   // INVARIANT (B4.1 fix round 1): the session CODEX_HOME lives under the run temp root, so the
   // sandbox must not make $TMPDIR or /tmp writable — the project cwd is then the only writable
   // root, and a home inside the cwd is refused below. See `../codex-home.mjs`.
@@ -179,6 +196,26 @@ export function coderFlagArgv({ model, effort, cwd, outPath, promptPath }) {
 }
 
 /**
+ * B93: the checked sandbox of one coder build. Absent ⇒ the default profile with no extra dir.
+ * The `add_dirs` are checked here too (defence in depth: validation checks them first), against
+ * the protected home dirs plus `extra` (the session CODEX_HOME, the run temp root and base).
+ * @param {unknown} sandbox @param {ReadonlyArray<string | undefined>} extra
+ * @returns {{profile: string, addDirs: string[]}}
+ */
+function coderSandbox(sandbox, extra) {
+  if (sandbox === undefined || sandbox === null) return { profile: DEFAULT_SANDBOX_PROFILE, addDirs: [] };
+  if (typeof sandbox !== 'object' || Array.isArray(sandbox)) throw new TypeError('buildCodexArgv: coder.sandbox must be a mapping');
+  const s = /** @type {{profile?: unknown, add_dirs?: unknown}} */ (sandbox);
+  const profile = s.profile ?? DEFAULT_SANDBOX_PROFILE;
+  if (typeof profile !== 'string' || !SANDBOX_PROFILES.includes(profile)) {
+    throw new TypeError(`buildCodexArgv: coder.sandbox.profile must be one of ${SANDBOX_PROFILES.join(', ')}`);
+  }
+  const checked = checkSandboxDirs(s.add_dirs, { extra });
+  if ('keyPath' in checked) throw new SandboxDirError(sandboxRefusalMessage(checked));
+  return { profile, addDirs: profile === 'toolchain' ? checked.dirs : [] };
+}
+
+/**
  * @param {CodexBuildParams} params
  * @returns {{cli: "codex", role: "coder", argv: string[], cwd: string, outPath: string, env: {CODEX_HOME: string}, forbiddenRendered: ReadonlyArray<RenderedCodexEntry>, rulesFile: {fileName: string, path: string, content: string, count: number}}}
  */
@@ -189,7 +226,6 @@ function buildCoderArgv(params) {
   if (!hasAnyRenderedRule(renderedForbidden)) {
     throw new Error('buildCodexArgv: coder role requires a non-empty forbidden-list render (got 0 usable patterns)');
   }
-  const argv = coderFlagArgv({ model, effort, cwd, outPath, promptPath });
   const codexHome = params.codexHome ?? defaultCodexHome();
   // Fix round 4: a non-absolute home is refused here, before any I/O, and the containment check
   // below then runs EVERY time (no `isAbsolute` short-circuit that could skip it).
@@ -202,6 +238,10 @@ function buildCoderArgv(params) {
   if (isInside(codexHome, cwd)) {
     throw new Error('buildCodexArgv: the session CODEX_HOME must not be inside the coder cwd (the sandbox can write there)');
   }
+  // B93 (fix round 1): the sandbox dirs are checked only after the home is known to be absolute
+  // and outside the cwd, so the home they are checked against is the one the session will use.
+  const sandbox = coderSandbox(params.sandbox, [codexHome, params.runRoot, tmpBase()]);
+  const argv = coderFlagArgv({ model, effort, cwd, outPath, promptPath, ...sandbox });
   const home = prepareCodexHome(codexHome, renderedForbidden);
   return {
     cli: CLI,

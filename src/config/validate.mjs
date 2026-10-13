@@ -4,7 +4,7 @@
  *
  *  1. **Schema validation** (Ajv, draft 2020-12, `additionalProperties: false` almost everywhere)
  *     catches shape errors: unknown keys, wrong types, missing required fields.
- *  2. **Domain rules** (`DOMAIN_RULES` below, 18 of them as of B90) catch things no JSON Schema can express:
+ *  2. **Domain rules** (`DOMAIN_RULES` below, 20 of them as of B93) catch things no JSON Schema can express:
  *     cross-field comparisons (two levels resolving to the same tuple), a value that needs a
  *     second config value to be reachable (`second_levels.L2.provider` vs. the effective L2
  *     provider) and rules that reach outside the config object entirely (is a CLI on PATH, is a
@@ -38,6 +38,8 @@
  *  16  closed-book-on-openai                 WARN   (B32: Codex has no no-tools mode)
  *  17  proof-runners-invalid                 ERROR  (B87: a proof.runners entry: adapter, match, argv tokens, env, timeout_s)
  *  18  review-routes-invalid                 ERROR  (B90: a review.routes rule: level, duplicate level+min_lines, provider vs. the second reviewer)
+ *  19  sandbox-dir-refused                   ERROR  (B93: a coder.sandbox.add_dirs entry opens /, the home dir, a secret dir or the run temp tree)
+ *  20  sandbox-dirs-unused                   WARN   (B93: coder.sandbox.add_dirs set under a profile other than toolchain)
  *
  * **B1.2 (v1.3, Q16 cut) removed rule:** `proof-tool-absent-for-high-tier` (formerly #13) — the
  * key it warned about (`proof.tiers.high.tool`) left the schema in the same amendment, along with
@@ -71,6 +73,8 @@ import { isKnownId, resolveLevel } from './known-ids.mjs';
 // B90: the routing module's own level list and provider resolution, so rules 16 and 18 check a
 // route with exactly the provider the worker spawns it on (they cannot drift)
 import { ROUTE_LEVELS, ruleProvider } from '../review/route.mjs';
+import { DEFAULT_SANDBOX_PROFILE, SANDBOX_PROFILES, sandboxDirRefusals, SANDBOX_DIR_REFUSED } from '../engines/sandbox-dirs.mjs';
+import { tmpBase } from '../util/tmp.mjs';
 import { looksLikeSecret, maskSecretTokens, SECRET_MASK, secretTokensIn } from './secret-patterns.mjs';
 
 /**
@@ -1046,11 +1050,62 @@ function checkReviewRoutesInvalid(cfg) {
   return messages.map((message) => ({ rule: 'review-routes-invalid', severity: /** @type {const} */ ('error'), message }));
 }
 
+// ── 19. sandbox-dir-refused (ERROR, B93) ────────────────────────────────────
 /**
- * The 18 domain rules paired with the exact `rule` id string each one emits — the single source
+ * A `coder.sandbox.add_dirs` entry that is not absolute / `~/`, or that is `/`, the home dir, or
+ * is, holds or sits inside a secret dir (`~/.code-forge`, `~/.codex`, `~/.ssh`, …) or the run
+ * temp base (every run temp root and session CODEX_HOME live under it). One issue per refused
+ * entry; the message names the key path, never the value. The builder checks again at spawn.
+ * @param {Record<string, any>} cfg
+ * @returns {ValidationIssue[]}
+ */
+function checkSandboxDirRefused(cfg) {
+  const sandbox = isPlainObject(cfg.coder) ? cfg.coder.sandbox : undefined;
+  // a non-list add_dirs, or a non-string entry, is the schema layer's issue (fix round 1)
+  if (!isPlainObject(sandbox) || !Array.isArray(sandbox.add_dirs)) return [];
+  const dirs = /** @type {unknown[]} */ (sandbox.add_dirs);
+  /** @type {string[]} */
+  const extra = [];
+  try {
+    extra.push(tmpBase(isPlainObject(cfg.tmp) ? cfg.tmp.root ?? undefined : undefined));
+  } catch {
+    extra.push(tmpBase()); // a bad tmp.root is the schema's issue; the default base still counts
+  }
+  const nonStrings = new Set(dirs.flatMap((entry, i) => (typeof entry === 'string' ? [] : [`coder.sandbox.add_dirs[${i}]`])));
+  return sandboxDirRefusals(dirs, { extra })
+    .filter((r) => !nonStrings.has(r.keyPath))
+    .map((r) => ({
+      rule: SANDBOX_DIR_REFUSED,
+      severity: /** @type {const} */ ('error'),
+      message: `${r.keyPath} is refused — ${r.why}`,
+    }));
+}
+
+// ── 20. sandbox-dirs-unused (WARN, B93 fix round 1) ─────────────────────────
+/**
+ * `coder.sandbox.add_dirs` is set (a non-empty list) but the profile is not `toolchain`: only
+ * `toolchain` adds `--add-dir`, so the entries change nothing (rule 19 still refuses a bad one).
+ * The message names the key path and the profile, never a dir.
+ * @param {Record<string, any>} cfg
+ * @returns {ValidationIssue[]}
+ */
+function checkSandboxDirsUnused(cfg) {
+  const sandbox = isPlainObject(cfg.coder) ? cfg.coder.sandbox : undefined;
+  if (!isPlainObject(sandbox) || !Array.isArray(sandbox.add_dirs) || sandbox.add_dirs.length === 0) return [];
+  const profile = sandbox.profile ?? DEFAULT_SANDBOX_PROFILE;
+  if (profile === 'toolchain' || !SANDBOX_PROFILES.includes(profile)) return [];
+  return [{
+    rule: 'sandbox-dirs-unused',
+    severity: /** @type {const} */ ('warning'),
+    message: `coder.sandbox.add_dirs is set but coder.sandbox.profile is ${profile}, which does not use it — only toolchain adds --add-dir`,
+  }];
+}
+
+/**
+ * The 20 domain rules paired with the exact `rule` id string each one emits — the single source
  * of truth both `DOMAIN_RULES` (below, what `validateConfig` runs) and the exported
  * `DOMAIN_RULE_IDS` are built from. `'schema'` (the ajv layer's own issues) is deliberately not
- * one of these 18 (B29 added rule 15, B32 rule 16, B87 rule 17, B90 rule 18). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
+ * one of these 20 (B29 added rule 15, B32 rule 16, B87 rule 17, B90 rule 18, B93 rules 19 and 20). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
  * @type {ReadonlyArray<{fn: (cfg: Record<string, any>, opts?: object) => ValidationIssue[], id: string}>}
  */
 const RULE_TABLE = Object.freeze([
@@ -1072,12 +1127,14 @@ const RULE_TABLE = Object.freeze([
   { fn: checkClosedBookOnOpenai, id: 'closed-book-on-openai' },
   { fn: checkProofRunnersInvalid, id: 'proof-runners-invalid' },
   { fn: checkReviewRoutesInvalid, id: 'review-routes-invalid' },
+  { fn: checkSandboxDirRefused, id: 'sandbox-dir-refused' },
+  { fn: checkSandboxDirsUnused, id: 'sandbox-dirs-unused' },
 ]);
 
-/** The 18 domain rules, in the order documented above. */
+/** The 20 domain rules, in the order documented above. */
 const DOMAIN_RULES = Object.freeze(RULE_TABLE.map((entry) => entry.fn));
 
-/** The 18 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
+/** The 20 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
 export const DOMAIN_RULE_IDS = Object.freeze(RULE_TABLE.map((entry) => entry.id));
 
 /**

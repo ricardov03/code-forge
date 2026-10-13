@@ -36,6 +36,11 @@ waits on a second real consumer (plan §10.4, Q17).
 - A `## test-quality` section in review packets lists the lines of a test file that read a source file and assert on its
   text; every reviewer lens gets one rule to judge those lines (a hint, not a finding); recheck packets get the rule but
   no section (B92, #10).
+- `coder.sandbox` with `profile: workspace|toolchain|full` and `add_dirs`: `toolchain` gives the Codex coder one
+  `--add-dir` per entry, `full` runs it with `-s danger-full-access` and `doctor` warns; entries that are, hold or sit
+  inside a protected dir (home, `~/.ssh`, `~/.codex`, `~/.code-forge`, the run temp root, …) are refused
+  `sandbox-dir-refused` after symlinks are followed; the key is fixed for the run and `forge spawn --role coder --run`
+  refuses a changed live value `sandbox-changed` (B93, #10).
 
 ### Changed
 

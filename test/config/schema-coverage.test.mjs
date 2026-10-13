@@ -379,6 +379,11 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'review.routes',
   'review.routes.session_timeout_s',
   'review.routes.second.fallback.model',
+  // B93: the four `coder` paths behind the 207 -> 211 re-pin.
+  'coder',
+  'coder.sandbox',
+  'coder.sandbox.profile',
+  'coder.sandbox.add_dirs',
 ]);
 
 /**
@@ -403,8 +408,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * B90: +19 = review.routes{,.min_lines,.level,.model,.effort,.provider,.session_timeout_s},
  *   review.routes.fallback{,.provider,.model,.effort}, review.routes.second{,.model,.effort,.provider},
  *   review.routes.second.fallback{,.provider,.model,.effort} ⇒ 207.
+ * B93: +4 = coder, coder.sandbox{,.profile,.add_dirs} ⇒ 211.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 207;
+const EXPECTED_SCHEMA_PATH_COUNT = 211;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

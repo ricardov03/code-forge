@@ -54,6 +54,7 @@ import { compileSchema } from '../config/schema-compile.mjs';
 import { buildArgv } from '../engines/builders/index.mjs';
 import { removeCodexHome } from '../engines/codex-home.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
+import { DEFAULT_SANDBOX_PROFILE, SANDBOX_DIR_REFUSED, SandboxDirError } from '../engines/sandbox-dirs.mjs';
 import { parseSentinel } from '../engines/sentinel.mjs';
 import { parseUsage } from '../engines/usage-parse.mjs';
 import { budgetUsdOf, checkBudget, estimateSessionUsd, priceSession, reservedUsd, reserveBudget, SPEND_UNREADABLE_MESSAGE, withBudgetLock } from '../ledger/spend.mjs';
@@ -609,7 +610,7 @@ export async function spawnSession(opts, deps = {}) {
         if (hit) throw new SessionError('forbidden', `coder argv refused before spawn: forbidden entry ${hit.id}`);
       }
       writeSafe(stderr, `level=${level} provider=${step.provider} model=${step.model} effort=${step.effort ?? 'none'} fallback_step=${step.fallback_step}\n`);
-      const base = { role, level, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, run: opts.run ?? null, block: opts.block ?? null, ...(role === 's2' ? { source: step.fallback_step > 0 ? 's2-fallback' : 's2' } : {}), ...(opts.rowExtra ?? {}) };
+      const base = { role, level, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, run: opts.run ?? null, block: opts.block ?? null, ...(role === 's2' ? { source: step.fallback_step > 0 ? 's2-fallback' : 's2' } : {}), ...sandboxRowField(opts, cli), ...(opts.rowExtra ?? {}) };
 
       if (opts.background) {
         keep = true;
@@ -829,6 +830,12 @@ function buildStep(opts, step, sessionDir, openBook) {
   if (cli === 'codex') params.outPath = path.join(sessionDir, 'out.json');
   // B32 opt-in: only a no-tools role needs it; coder and facts build exactly as without it
   if (cli === 'codex' && openBook && isNoToolRole(opts.role)) params.allowOpenBook = true;
+  // B93: the Codex coder's sandbox profile; no `coder.sandbox` key builds exactly today's argv
+  const sandbox = coderSandboxFor(opts, cli);
+  if (sandbox !== null) {
+    params.sandbox = sandbox;
+    params.runRoot = opts.runRoot ?? currentRunRoot();
+  }
   /** @type {Record<string, any> | null} */
   let compiled = null;
   const strict = variantFor(step.provider) === 'strict';
@@ -841,8 +848,38 @@ function buildStep(opts, step, sessionDir, openBook) {
       params.schema = compiled;
     }
   }
-  const built = buildArgv(/** @type {any} */ (params));
+  let built;
+  try {
+    built = buildArgv(/** @type {any} */ (params));
+  } catch (err) {
+    // B93: a refused `add_dirs` entry; the message names the key path, never the value
+    if (err instanceof SandboxDirError) throw new SessionError(SANDBOX_DIR_REFUSED, err.message);
+    throw err;
+  }
   return { ...built, argv: [...built.argv], compiled, strict };
+}
+
+/**
+ * B93: `{sandbox: <profile>}` for a Codex coder session row when `coder.sandbox` is set; `{}`
+ * otherwise, so a row without the key is byte-equal to the row before B93.
+ * @param {SessionOpts} opts @param {string} cli @returns {{sandbox?: string}}
+ */
+function sandboxRowField(opts, cli) {
+  const sandbox = coderSandboxFor(opts, cli);
+  if (sandbox === null) return {};
+  return { sandbox: typeof sandbox.profile === 'string' ? sandbox.profile : DEFAULT_SANDBOX_PROFILE };
+}
+
+/**
+ * B93: the `coder.sandbox` value a Codex coder session builds with, or null (no key, another
+ * role, or another CLI — the Claude and Grok coders do not read it).
+ * @param {SessionOpts} opts @param {string} cli
+ * @returns {Record<string, any> | null}
+ */
+function coderSandboxFor(opts, cli) {
+  if (cli !== 'codex' || opts.role !== 'coder') return null;
+  const sandbox = /** @type {Record<string, any> | undefined} */ (opts.cfg)?.coder?.sandbox;
+  return sandbox === undefined || sandbox === null ? null : sandbox;
 }
 
 /**

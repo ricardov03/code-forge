@@ -457,6 +457,22 @@
         "min_confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7, "description": "B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner." }
       }
     },
+    "coder": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "B93: what the coder session may write beyond the project tree. Read by the Codex (openai) coder only; it has no effect on the Claude (anthropic) and Grok (xai) coders, whose argv does not change. No key means profile workspace and today's coder argv. Authority: fixed at run start; `run reload` refuses a change; `forge spawn --role coder --run <id>` refuses a live value that differs from the run-start snapshot (sandbox-changed). Without --run, spawn reads the live config.",
+      "properties": {
+        "sandbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The Codex coder sandbox profile and its extra writable directories.",
+          "properties": {
+            "profile": { "type": "string", "enum": ["workspace", "toolchain", "full"], "default": "workspace", "description": "workspace (the default; no key gives today's argv): `-s workspace-write`, the project tree is the only writable root. toolchain: the same plus one `--add-dir <abs>` per add_dirs entry (a build cache, a package store). full: `-s danger-full-access`, the coder writes anywhere the user can; like the Claude coder, the forbidden list, the transcript grep and the gates are the only limits, and doctor prints a WARN row. Every profile keeps the $TMPDIR and /tmp exclusions in the argv; Codex ignores them under danger-full-access." },
+            "add_dirs": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^(/|~/)" }, "uniqueItems": true, "default": [], "description": "Extra writable directories for profile toolchain; under workspace or full they are unused and validate warns (rule sandbox-dirs-unused), and a refused entry is still refused. Each entry is absolute or starts with ~/ (expanded against the process HOME) and becomes an absolute realpath: symlinks are followed, even a dangling one, so a symlink is judged by its target. Refused (rule sandbox-dir-refused, by validate and again by the builder; the message names the key path, never the value): /, the home directory itself, and any directory that is, holds or sits inside ~/.code-forge, ~/.codex or $CODEX_HOME, ~/.ssh, ~/.gnupg, ~/.aws, ~/.config, ~/Library/Keychains, the run temp root (so $TMPDIR or /tmp when it holds it), or the session CODEX_HOME; for example ~/Library is refused because it holds ~/Library/Keychains." }
+          }
+        }
+      }
+    },
     "telemetry": { "type": "string", "const": "off", "default": "off" }
   },
   "$defs": {

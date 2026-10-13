@@ -103,6 +103,22 @@ and `context.require_coder_tests` are fixed for the run: `run reload` refuses a 
 The rest of `context` may change mid-run. With `review.external.required` or `hooks.on_block_end`
 set, no block may own `.code-forge.yml`.
 
+This walk-through's coder runs on Claude. A Codex coder (provider `openai`) writes only in the
+project tree unless you set `coder.sandbox`; the default profile is `workspace`, and no key gives
+today's argv. `profile: toolchain` with `add_dirs: [~/.cache/npm]` also opens that directory
+(`--add-dir`); `~/` expands against HOME, each entry becomes an absolute realpath, and a symlink
+is judged by its target. `profile: full` (`-s danger-full-access`) turns the Codex sandbox off:
+the coder writes anywhere you can, with network as the CLI allows; the argv keeps the `$TMPDIR`
+and `/tmp` exclusion flags, which Codex ignores there. Under `workspace` or `full`, `add_dirs` is
+unused and `validate` warns `sandbox-dirs-unused`. `validate` refuses an `add_dirs` entry that is `/` or your home directory, or that is,
+holds or sits inside a secret directory such as `~/.ssh`, `~/.codex` or `~/Library/Keychains`
+(so `~/Library` too), the run's temp root or the session `CODEX_HOME`
+(`sandbox-dir-refused`). `coder.sandbox` is fixed for the run too: `run reload` refuses a change,
+and `spawn --role coder --run <r>` stops with `sandbox-changed` when the live value differs;
+without `--run`, spawn reads the live config. The Claude and Grok coders ignore it. `doctor`
+prints no `coder sandbox` row without the key, one INFO row with it, a WARN row for `full`, and
+a no-effect INFO row only when a Claude or Grok coder is configured.
+
 The hook in this walk-through appends one line per block end to a log. A real hook could post to
 chat or wake the orchestrator.
 
