@@ -8,9 +8,11 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new in 0.9
+## What's new in 0.10
 
 In the next release:
+
+In 0.10.0:
 
 - **Choose how long a 1Password key stays cached (B84).** Set `keys.cache_hours` (1 to 24, default 8) in `.code-forge.yml`, or `keys set <name> --op <ref> --cache-hours <n>` for one key. A lower value shortens keys that are already cached at the next read.
 - **Warnings before a cached key runs out (B85).** `keys list` and `doctor` warn when a 1Password key has less than 1 hour left. When the cached key expired and 1Password does not answer, `jev ask` prints the exact command to re-link it: `code-forge keys set jev --op <ref>`.
@@ -26,6 +28,8 @@ In the next release:
 - **More room for the Codex coder (B93).** New setting `coder.sandbox`. With `profile: toolchain`, the Codex coder may also write to the folders you list in `add_dirs`, such as a build cache. With `profile: full`, the Codex sandbox is off and `doctor` warns you. Secret folders like `~/.ssh` are always refused. The setting is fixed for the whole run.
 - **One fix round per block (B94).** The skill now waits for every review and test of a block. Then it sends the coder ONE fix message with every failing test and every open finding. It never sends findings one at a time.
 - **Waive and reopen ask you at a terminal (B80).** `block waive` and `block reopen` now ask the human for a yes in their own terminal. There is no `--yes`. With no terminal they record nothing. The prompt is a speed bump, not proof of a human: a pseudo-terminal passes it.
+
+## What's new in 0.9
 
 In 0.9.0:
 
