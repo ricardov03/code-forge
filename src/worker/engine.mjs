@@ -42,7 +42,7 @@
  * second `schema` miss — this round's first try after the earlier ticket's — is tried once on
  * `review.second_levels.<level>` when one is configured.
  * B56: every round gets ONE memoised reader of the block's OTHER changed files' diffs
- * (the ticket's `fileContext`: listed and read at most once per ticket) so the review can name code moved
+ * (the ticket's `fileContext`: listed once, diffs read lazily at most once per ticket) so the review can name code moved
  * between them in a `## moved code` packet section (round 1, rechecks and patch check alike).
  * The review NEVER approves an empty or failed session: that is `unavailable` (§4.2 stub guard).
  * A throw inside the round is `unavailable` too, with the state saved as `next: retry` (see
@@ -379,14 +379,14 @@ export async function reviewTicket(ticket, ctx) {
   // authorize an untracked attachment. Read lazily so a stopped ticket needs no file listing.
   /** @type {Promise<FileContext> | undefined} */
   let contextOnce;
-  /** @type {import('../review/moved.mjs').PeerDiff[]} */
-  let diffs = [];
+  /** @type {() => Promise<import('../review/moved.mjs').PeerDiff[]>} */
+  let readDiffs = () => Promise.resolve([]);
   const fileContext = () => contextOnce ??= (async () => {
     try {
       // Read the listing directly: blockPeers' [] fallback would hide a git failure and
       // still authorize explicit tests. Context and peer diffs must fail soft together.
       const peers = entry.base === null || entry.owned.length === 0 ? [] : (await computeFileSet({ cwd: contentRoot, base: entry.base })).all.filter((f) => f !== ticket.file && ownsFile(entry.owned, f, entry.ownedKinds));
-      diffs = await peerDiffReader({ repoRoot: contentRoot, base: entry.base, file: ticket.file, peers })();
+      readDiffs = peerDiffReader({ repoRoot: contentRoot, base: entry.base, file: ticket.file, peers });
       const changedFiles = [...peers, ticket.file].filter((f) => ownsFile(entry.owned, f, entry.ownedKinds));
       return { peers, changedFiles, ownedFiles: [...new Set([...changedFiles, ...entry.testFiles])], testFiles: entry.testFiles };
     } catch {
@@ -395,7 +395,7 @@ export async function reviewTicket(ticket, ctx) {
   })();
   const peerDiffs = async () => {
     await fileContext();
-    return diffs;
+    return readDiffs();
   };
   try {
     // B63a: the `context` rules and lessons, read from the MAIN tree (`ctx.repoRoot`, never the

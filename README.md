@@ -19,6 +19,7 @@ In the next release:
 - **A recheck that did not really review never stalls (B111).** A recheck on unchanged content runs no session and counts no round; it returns `reason: 'no-fix-hunks'`. A recheck answer that skips an open finding is a broken answer, not a "still open". So the stall rule sees only real rechecks. The recheck summary now shows each session's status and tokens.
 - **Paired files for the reviewer, part 1 (B97).** code-forge can now find a changed file's test file (or a test's source file) by name, and list its test names or exported symbols in a small `## paired` packet section. The section is dropped first when the packet is too big. A reviewer can also ask for a new, untracked test file when the block owns and changed it. B98 sends these to the reviewers.
 - **Reviewers see the paired test file (B98).** When a block changes `src/a.mjs` and `test/a.test.mjs`, the reviewer of `src/a.mjs` now gets the test names in a `## paired` section, in the first review and in rechecks. Tests named with `block open --tests` count too. The reviewer is told those tests exist, so it no longer reports them as missing. It can still ask for a test file's body, even a new untracked one the block owns.
+- **Faster reviews (B112).** A review ticket reads the diffs of the block's other changed files only when the review asks for them, and only once.
 
 In 0.10.0:
 

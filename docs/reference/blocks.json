@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 109,
+  "block_count": 110,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1782,6 +1782,21 @@
         "B97"
       ],
       "note": "root-added 2026-10-13; Group E E5 part 2 (plans/run-speed/plan.md B98); pairedContext builds ## paired from the block's owned changed peers plus its test_files (glob entries dropped) in round 1, full rounds and rechecks; the worker passes ownedFiles/changedFiles so needs_file can attach a new untracked owned test file; a failing peer listing is fail-soft (empty context); the four lenses say a test named in ## paired exists; built by Codex at high effort in 2 rounds"
+    },
+    "B112": {
+      "title": "Suite speed: peer diffs read lazily again (B98 regression); bench test load-proof",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/worker/engine.mjs",
+        "test/worker/peer-diffs-lazy.test.mjs",
+        "test/bench-review.test.mjs"
+      ],
+      "depends_on": [
+        "B98"
+      ],
+      "note": "root-added 2026-10-13; velocity; review.test.mjs 89 s -> 44 s"
     }
   }
 }

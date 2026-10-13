@@ -30,6 +30,8 @@ waits on a second real consumer (plan §10.4, Q17).
 - A recheck with no fix hunks counts no round and returns `reviewed`, `approved: false`, `reason: 'no-fix-hunks'`; a
   recheck answer that lacks a `resolved` entry for an open finding of its packet is a `schema` miss; the worker's
   recheck summary adds `status`, `tokens_in`, `tokens_out` and `reason` (B111, #16).
+- A review ticket reads the diffs of the block's other changed files only when the review asks for them, once per ticket
+  (B112)
 
 ## [0.10.0] — 2026-10-13
 
