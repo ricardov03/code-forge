@@ -8,7 +8,7 @@ Never selected automatically (`degraded.md` §1). Coders are detached CLI proces
 
 ## §2 Completion and evidence
 
-The coder's stdout is captured; completion is the **last** `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===` line in it (a quoted sentinel inside a sentence never matches). Process exit without a sentinel is a failed block. Then the re-measurement of `code.md` §5 and `forge block close <id> --run <r> --transcript <captured stdout> --report <captured stdout>` — the transcript grep runs on the capture. A coder that hangs is killed at `--timeout` together with its process group; the pid entry is cleared.
+The coder's stdout is captured; completion is the **last** `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===` line in it (a quoted sentinel inside a sentence never matches). Process exit without a sentinel is a failed block. Then the re-measurement of `code.md` §5 and `forge block close <id> --run <r> --transcript <captured stdout> --report <captured stdout>` — the transcript grep runs on the capture. A coder that hangs is killed at `--timeout` together with its process group; the pid entry is cleared. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`code.md` §4). Here a fix round is a new spawn, and the brief of that spawn is the one fix message.
 
 ## §3 What the coder's sandbox looks like per provider
 

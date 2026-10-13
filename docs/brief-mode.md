@@ -227,6 +227,9 @@ run cart-1 · active · brief · spent $0.00
 B1 open L0 · - · gate pass · findings 0
 ```
 
+When a test fails or a review leaves a finding open, the coder gets a fix round.
+Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
+
 ## Step 7: close the block
 
 ```text

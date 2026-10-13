@@ -48,6 +48,9 @@ waits on a second real consumer (plan §10.4, Q17).
   (`review.second_levels.<level>`, or a routed rule's `second`) is tried once in the same ticket;
   `review.session_timeout` notes carry `packet_hash` and are signed, and `review.schema_fallback` gains `trigger:
   schema|timeout` (B91, #10).
+- The skill sends ONE fix message per block: after the coder's first COMPLETE it waits for every `review-file` ticket
+  and the block's tests, then sends every failing test and every open finding together; a later finding waits for the
+  next round, and the per-file round cap still counts per file (B94, #10).
 
 ### Fixed
 

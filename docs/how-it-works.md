@@ -635,6 +635,13 @@ flowchart TD
   pc -- "closed one, round < 4" --> rn
 ```
 
+- **One fix round per block.** After the coder's first COMPLETE, wait until every `review-file`
+  ticket of the block is answered and the block's tests ran; then send ONE fix message with every
+  failing test (name and first error line) and every open finding (by file and id). Never one
+  finding or one file at a time. A finding that arrives after that message waits for the next
+  round. In that round the coder fixes, runs the block's tests, re-runs `review-file` on every
+  changed file, and prints its `TESTS` line. The per-file cap still counts per file: one block
+  round is one round for each file it touched. The chart above shows the rounds of one file.
 - Round 1 reviews the whole file packet. Round 2 and later review **only the fix hunks** and the
   open findings.
 - After each round with findings still open, the **cap is checked first**
@@ -781,6 +788,8 @@ These come from real runs. The skill states each one (`skill/references/`):
   category the plan author picks.
 - **Climb early.** A heavy round climbs the coder at once; a coder never spends three rounds at one
   level.
+- **One fix message per block.** See "One fix round per block" under
+  [Fix rounds and the escalation ladder](#fix-rounds-and-the-escalation-ladder).
 - **L0 never codes docs or contracts.** Those blocks start at `levels.coder_floor_docs` (L1).
 - **Review cost is bounded.** One reviewer for risk 0–1; no multimodel review for docs blocks.
 - **Coder reports fail closed.** A report with no review ticket id for a changed file is FAILED.

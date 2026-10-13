@@ -1013,3 +1013,143 @@ test('B93 (8): how-it-works and brief-mode say the coder sandbox behaviour; conf
   ])
     assert.equal(occurrences(config, pin), 1, pin);
 });
+
+// ── B94: one fix round per block ────────────────────────────────────────────
+
+/** Text A, the rule: word for word in code.md §4, solo.md §3 step 7 and how-it-works. */
+const B94_RULE = [
+  "After the coder's first COMPLETE, wait until every `review-file` ticket of the block is answered and the block's tests ran; then send ONE fix message with every failing test (name and first error line) and every open finding (by file and id).",
+  'Never one finding or one file at a time.',
+  'A finding that arrives after that message waits for the next round.',
+  "In that round the coder fixes, runs the block's tests, re-runs `review-file` on every changed file, and prints its `TESTS` line.",
+];
+/** Text B, the pointer: word for word in the adapters (path `code.md`) and the docs (path `skill/references/code.md`). */
+const B94_POINTER_BODY =
+  'Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round';
+const B94_POINTER_SKILL = `${B94_POINTER_BODY} (\`code.md\` §4).`;
+const B94_POINTER_DOCS = `${B94_POINTER_BODY} (\`skill/references/code.md\` §4).`;
+/** The per-file cap phrase, in the same words wherever the cap is named. */
+const B94_CAP = 'one block round is one round for each file it touched';
+/** Old sentences that sent findings one at a time or one file at a time, and the round-0 paraphrases. */
+const B94_GONE = [
+  'Each open finding is a fix round sent to the **warm coder**',
+  'which fixes and re-runs `review-file` on that file',
+  "starts a fix round (each one counts toward the file's cap)",
+  'it runs `review-file` again on the fixed file',
+  'one block fix round',
+  "the block's tests ran. Then send ONE fix message",
+  'make ONE fix round for the block',
+  'A fix round is a new spawn with one fix brief for the block',
+  'A fix round is one message for the whole block.',
+  "It goes in the block's one fix message",
+  "The orchestrator waits for every review ticket and the block's tests",
+];
+/** The files B94 owns that may name the fix loop (README included). */
+const B94_FILES = [
+  'skill/references/code.md',
+  'skill/references/review.md',
+  'skill/references/adapters/solo.md',
+  'skill/references/adapters/claude-code.md',
+  'skill/references/adapters/subprocess.md',
+  'skill/references/ledger.md',
+  'docs/how-it-works.md',
+  'docs/concepts.md',
+  'docs/brief-mode.md',
+  'docs/autopilot.md',
+  'README.md',
+];
+/** @param {string} rel @returns {Promise<string>} */
+const b94Read = (rel) => readFile(path.join(ROOT, rel), 'utf8');
+
+test('B94 (1): code.md §4 carries text A once, with the per-file cap', async () => {
+  const code = await readSkillFile('references/code.md');
+  const s4 = flat(section(code, 4));
+  assert.deepEqual(B94_RULE.map((pin) => occurrences(s4, flat(pin))), [1, 1, 1, 1]);
+  assert.equal(occurrences(s4, flat(`The per-file cap still counts per file: ${B94_CAP} (\`review.md\` §5).`)), 1);
+  // the rule lives in §4 only: the whole file has each sentence once
+  assert.deepEqual(B94_RULE.map((pin) => occurrences(flat(code), flat(pin))), [1, 1, 1, 1]);
+});
+
+test('B94 (2): solo.md §3 step 7 carries text A once and sends it by send_input', async () => {
+  const solo = await readSkillFile('references/adapters/solo.md');
+  const s3 = flat(section(solo, 3));
+  assert.deepEqual(B94_RULE.map((pin) => occurrences(flat(solo), flat(pin))), [1, 1, 1, 1]);
+  assert.deepEqual(B94_RULE.map((pin) => occurrences(s3, flat(pin))), [1, 1, 1, 1]);
+  assert.equal(occurrences(s3, flat('The message goes to the **warm coder** by `send_input`, ending in `<<<EOM>>>`; when it is over the input limit (§1), write it to a file and send its path.')), 1);
+  assert.equal(occurrences(flat(solo), flat(B94_CAP)), 1);
+});
+
+test('B94 (3): how-it-works carries text A once; the rules bullet points to it with no second "Never"', async () => {
+  const how = flat(await b94Read('docs/how-it-works.md'));
+  assert.deepEqual(B94_RULE.map((pin) => occurrences(how, flat(pin))), [1, 1, 1, 1]);
+  assert.equal(occurrences(how, flat(`The per-file cap still counts per file: ${B94_CAP}.`)), 1);
+  assert.equal(occurrences(how, flat('**One fix message per block.** See "One fix round per block" under [Fix rounds and the escalation ladder](#fix-rounds-and-the-escalation-ladder).')), 1);
+  assert.equal(occurrences(how, flat('### Fix rounds and the escalation ladder')), 1);
+});
+
+test('B94 (4): text B sits once in the adapters and the docs, with the right path', async () => {
+  /** Per file: [the skill-path pointer, the docs-path pointer]. */
+  const expected = {
+    'skill/references/adapters/claude-code.md': [1, 0],
+    'skill/references/adapters/subprocess.md': [1, 0],
+    'docs/concepts.md': [0, 1],
+    'docs/brief-mode.md': [0, 1],
+    'docs/autopilot.md': [0, 1],
+  };
+  for (const [rel, counts] of Object.entries(expected)) {
+    const text = flat(await b94Read(rel));
+    assert.deepEqual([occurrences(text, flat(B94_POINTER_SKILL)), occurrences(text, flat(B94_POINTER_DOCS))], counts, rel);
+  }
+  // text A is not copied into the pointer files, and no other owned file has B
+  for (const rel of Object.keys(expected))
+    assert.equal(occurrences(flat(await b94Read(rel)), flat(B94_RULE[1])), 0, rel);
+  for (const rel of B94_FILES.filter((f) => !(f in expected))) {
+    const text = flat(await b94Read(rel));
+    assert.equal(occurrences(text, flat(B94_POINTER_BODY)), 0, rel);
+  }
+});
+
+test('B94 (5): subprocess and claude-code say what the fix spawn carries and does', async () => {
+  const sub = flat(section(await readSkillFile('references/adapters/subprocess.md'), 2));
+  assert.equal(occurrences(sub, flat('Here a fix round is a new spawn, and the brief of that spawn is the one fix message.')), 1);
+  const cc = flat(section(await readSkillFile('references/adapters/claude-code.md'), 2));
+  assert.equal(occurrences(cc, flat(`Its brief says: ${B94_RULE[3]}`)), 1);
+  assert.equal(occurrences(cc, flat('Dispatch that message as one new `Agent` call at the level the ladder says')), 1);
+});
+
+test('B94 (6): brief-mode puts the pointer in the gates step, not the context-pack step', async () => {
+  const brief = await b94Read('docs/brief-mode.md');
+  const step = (/** @type {string} */ head) => {
+    const from = brief.indexOf(head);
+    assert.notEqual(from, -1, `brief-mode has the heading ${head}`);
+    const next = brief.indexOf('\n## ', from + head.length);
+    return flat(brief.slice(from, next === -1 ? undefined : next));
+  };
+  assert.equal(occurrences(step('## Step 4:'), flat(B94_POINTER_DOCS)), 0);
+  assert.equal(occurrences(step('## Step 6:'), flat(B94_POINTER_DOCS)), 1);
+  assert.equal(occurrences(step('## Step 6:'), flat('When a test fails or a review leaves a finding open, the coder gets a fix round.')), 1);
+});
+
+test('B94 (7): the per-file cap phrase is the same in every file that names it; the old sentences are gone', async () => {
+  const expected = {
+    'skill/references/code.md': 1,
+    'skill/references/review.md': 1,
+    'skill/references/adapters/solo.md': 1,
+    'skill/references/adapters/claude-code.md': 1,
+    'skill/references/adapters/subprocess.md': 0,
+    'skill/references/ledger.md': 1,
+    'docs/how-it-works.md': 1,
+    'docs/concepts.md': 1,
+    'docs/brief-mode.md': 0,
+    'docs/autopilot.md': 1,
+    'README.md': 0,
+  };
+  assert.deepEqual(Object.keys(expected), B94_FILES);
+  for (const [rel, n] of Object.entries(expected))
+    assert.equal(occurrences(flat(await b94Read(rel)), flat(B94_CAP)), n, rel);
+  const s5 = flat(section(await readSkillFile('references/review.md'), 5));
+  assert.equal(occurrences(s5, flat(`The per-file cap still counts per file: the orchestrator sends one fix message per block (\`code.md\` §4), and ${B94_CAP}.`)), 1);
+  assert.equal(occurrences(flat(await b94Read('docs/autopilot.md')), flat(`The per-file cap still counts per file: ${B94_CAP}.`)), 1);
+  assert.equal(occurrences(flat(await readSkillFile('references/ledger.md')), flat(`fix rounds per file (${B94_CAP}, \`review.md\` §5)`)), 1);
+  for (const rel of B94_FILES) assertGone(rel, await b94Read(rel), B94_GONE);
+});

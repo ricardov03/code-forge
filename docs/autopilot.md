@@ -39,6 +39,9 @@ scopes, the deny list, the spend per category, and where the log is.
 | `round:extra` | one fix round past the review cap for a file |
 | `model:choose` | choose the coder level for a block |
 
+An extra round is a normal fix round. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
+The per-file cap still counts per file: one block round is one round for each file it touched.
+
 The **deny list** is fixed in the code. You cannot allow these, whatever you pass:
 
 | Scope | Never delegated |

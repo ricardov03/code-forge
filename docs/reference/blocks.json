@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 100,
+  "block_count": 101,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1562,6 +1562,29 @@
         "B92"
       ],
       "note": "root-added 2026-10-13; issue #10 item 1 (plans/iteration/plan.md B93); profiles workspace (default, today's argv), toolchain (--add-dir per entry), full (danger-full-access, doctor WARN); refused dirs checked after a per-component symlink walk with native realpath; rule 19 sandbox-dir-refused, rule 20 sandbox-dirs-unused (WARN); immutable key; spawn --role coder --run checks the snapshot (sandbox-changed)"
+    },
+    "B94": {
+      "title": "Skill: one fix round per block",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "skill/references/code.md",
+        "skill/references/review.md",
+        "skill/references/adapters/solo.md",
+        "skill/references/adapters/claude-code.md",
+        "skill/references/adapters/subprocess.md",
+        "docs/how-it-works.md",
+        "test/skill/structure.test.mjs",
+        "docs/concepts.md",
+        "docs/brief-mode.md",
+        "docs/autopilot.md",
+        "skill/references/ledger.md"
+      ],
+      "depends_on": [
+        "B93"
+      ],
+      "note": "root-added 2026-10-13; issue #10 item 5 (plans/iteration/plan.md B94); skill and docs only; the full rule word for word in code.md §4, solo.md §3 step 7 and how-it-works; one fixed pointer sentence in the other docs; the per-file cap counts per file"
     }
   }
 }

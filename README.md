@@ -24,6 +24,7 @@ In the next release:
 - **Timeouts reach the second level (B91).** A timeout now counts as a broken result, like an answer that fails the schema. At the second broken result on one file, the second-level model is tried at once, in the same ticket. You no longer wait for a second ticket.
 - **Test-quality hint (B92).** A test that reads a source file and checks its text is a weak test. The review packet now lists those lines for the reviewer. The reviewer decides if it is a problem. The list is a hint, not a finding.
 - **More room for the Codex coder (B93).** New setting `coder.sandbox`. With `profile: toolchain`, the Codex coder may also write to the folders you list in `add_dirs`, such as a build cache. With `profile: full`, the Codex sandbox is off and `doctor` warns you. Secret folders like `~/.ssh` are always refused. The setting is fixed for the whole run.
+- **One fix round per block (B94).** The skill now waits for every review and test of a block. Then it sends the coder ONE fix message with every failing test and every open finding. It never sends findings one at a time.
 
 In 0.9.0:
 
