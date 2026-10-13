@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 107,
+  "block_count": 108,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1738,6 +1738,25 @@
         "B110"
       ],
       "note": "root-added 2026-10-13; issue #16 item 3 (plans/field-bugs/plan.md B111, D3 = a); P1: a recheck with no fix hunks runs no session, counts no round and returns reviewed, approved false, reason no-fix-hunks; P2: a recheck answer without a resolved entry for each open finding of its packet is a schema miss (B55/B91 second level at the second broken result, else unavailable); the worker recheck summary gains status, tokens_in, tokens_out and reason; 10 fixtures now answer resolved explicitly; built by Codex at high effort in 2 rounds"
+    },
+    "B97": {
+      "title": "Paired-file names in the packet; untracked owned files can be attached",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/review.md",
+        "src/review/packet.mjs",
+        "src/review/paired.mjs",
+        "test/review/engine.test.mjs",
+        "test/review/packet.test.mjs",
+        "test/review/paired.test.mjs"
+      ],
+      "depends_on": [
+        "B111"
+      ],
+      "note": "root-added 2026-10-13; Group E E5 part 1 (plans/run-speed/plan.md B97, D4 = a); pairsFor by stem for .mjs/.ts/PHP/Go/Python/Swift; summarize lists at most 40 unique test names or exported symbols of at most 120 chars, redacted before truncation; assemblePacket takes paired and renders ## paired after ## context, dropped first over budget, never split_required; attachFiles attaches an untracked file only when owned and changed in the block and not ignored or secret-like; builders wire it in B98; built by Codex at high effort in 2 rounds"
     }
   }
 }

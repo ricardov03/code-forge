@@ -11,6 +11,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - `npm run release` moves the README "In the next release:" bullets under the new version, refuses an empty [Unreleased]
   or a missing README anchor in preflight, restores README on a failed check, and runs `gen-config-doc --check`;
   `docs/releasing.md` gets a releasing checklist (B108).
+- `pairsFor` and `summarize` (src/review/paired.mjs) and an optional `## paired` packet section after `## context`,
+  dropped first over budget; `attachFiles` attaches an untracked file only when it is an owned, changed file of the
+  block and not ignored or secret-like (B97).
 
 ### Changed
 

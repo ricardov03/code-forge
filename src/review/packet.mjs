@@ -10,6 +10,7 @@
  *   ## project rules   the rules digest (≤ 60 lines)
  *   ## facts           the facts-sheet excerpt
  *   ## context         the current file (whole, or hunk windows — `context.mjs`)
+ *   ## paired          optional paired-file names and summary (B97), dropped first over budget
  *   ## moved code      only when code moved to/from another file of the block (`moved.mjs`, B56)
  *   ## diff            `file:`, the `hunks:` list the reviewer must echo, then the diff
  *
@@ -20,7 +21,7 @@
  * Budget (§4.3): `review.budgets.full_in` (`quick_in` for the quick lens), in tokens estimated as
  * bytes / 4. A diff that alone exceeds it ⇒ `split_required` (a Markdown file is then reviewed
  * section by section — `sections.mjs`, B54). Otherwise over budget ⇒ the context shrinks to
- * ± `min_context_lines` (`minimal`) FIRST, then the digest is trimmed from the end; the diff is
+ * ± `min_context_lines` (`minimal`) after dropping paired, then the digest is trimmed from the end; the diff is
  * never cut. The `## moved code` section (B56) is part of that measure: it is counted in the diff-only
  * size (`diffOnlyTokens`, `split_required`) and never trimmed.
  *
@@ -190,11 +191,11 @@ export async function readFileDiff({ repoRoot, file, base }) {
  * Assemble a reviewer packet (pure).
  * @param {{
  *   diff: FileDiff, lens: string, rulesDigest?: string, factsExcerpt?: string,
- *   cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', budget?: number, moved?: string,
+ *   cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', budget?: number, moved?: string, paired?: string,
  * }} opts - `moved`: the file's `## moved code` section (`moved.mjs`), '' for none.
  * @returns {Packet | {status: 'split_required', tokensIn: number, budget: number}}
  */
-export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = '', cfg, contextMode = 'auto', budget, moved = '' }) {
+export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = '', cfg, contextMode = 'auto', budget, moved = '', paired = '' }) {
   const lensText = loadLens(lens);
   const limit = budget ?? budgetFor(cfg, lens === 'quick' ? 'quick_in' : 'full_in');
   const hunkHeaders = diff.hunks.map((h) => h.header);
@@ -204,7 +205,12 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
 
   let digest = splitLines(rulesDigest).slice(0, DIGEST_MAX_LINES);
   let ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: contextMode });
-  let text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
+  let pairedSection = boundedPaired(paired, budgetFor(cfg, 'full_in'));
+  let text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved, pairedSection);
+  if (estimateTokens(text) > limit && pairedSection.length > 0) {
+    pairedSection = '';
+    text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
+  }
   if (estimateTokens(text) > limit) {
     ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: 'minimal' });
     text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
@@ -215,6 +221,22 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   }
   const tokensIn = estimateTokens(text);
   return { status: 'ok', text, hunkHeaders, contextMode: ctx.mode, contextLines: ctx.lineCount, digestLines: digest.length, tokensIn, budget: limit, overBudget: tokensIn > limit };
+}
+
+/** Cap the entire section at full_in / 16 tokens, without cutting a UTF-8 character.
+ * @param {string} paired @param {number} fullIn @returns {string}
+ */
+function boundedPaired(paired, fullIn) {
+  if (paired.trim().length === 0) return '';
+  const heading = '## paired\n';
+  let left = Math.floor(fullIn / 16) * 4 - Buffer.byteLength(heading) - 1;
+  let body = '';
+  for (const char of paired) {
+    left -= Buffer.byteLength(char);
+    if (left < 0) break;
+    body += char;
+  }
+  return body.length > 0 ? heading + body.trimEnd() : '';
 }
 
 /**
@@ -244,8 +266,9 @@ function diffSectionOf(diff) {
 /**
  * @param {string} lensText @param {string[]} digest @param {string} facts @param {string} context
  * @param {string} diffSection @param {string} [moved] - the `## moved code` section (heading included), '' for none.
+ * @param {string} [paired] - the bounded `## paired` section (heading included).
  */
-function render(lensText, digest, facts, context, diffSection, moved = '') {
+function render(lensText, digest, facts, context, diffSection, moved = '', paired = '') {
   return [
     '# code-forge review packet',
     '## lens',
@@ -256,6 +279,7 @@ function render(lensText, digest, facts, context, diffSection, moved = '') {
     facts.trim().length > 0 ? facts.trimEnd() : '(none)',
     '## context',
     context.length > 0 ? context : '(none)',
+    ...(paired.length > 0 ? [paired] : []),
     ...(moved.length > 0 ? [moved] : []),
     '## diff',
     diffSection,
@@ -319,9 +343,10 @@ function readRepoText(repoRoot, rel) {
 
 /**
  * Why `rel` may not be attached, or null.
- * @param {string} repoRoot @param {string} rel @returns {Promise<string | null>}
+ * @param {string} repoRoot @param {string} rel @param {ReadonlyArray<string>} ownedFiles
+ * @param {ReadonlyArray<string>} changedFiles @returns {Promise<string | null>}
  */
-async function attachRefusal(repoRoot, rel) {
+async function attachRefusal(repoRoot, rel, ownedFiles, changedFiles) {
   if (isSecretLike(rel)) return 'refused: secret-like path';
   let st;
   try {
@@ -330,20 +355,29 @@ async function attachRefusal(repoRoot, rel) {
     return 'missing';
   }
   if (!st.isFile()) return 'not a file';
-  const res = await exec(['git', 'ls-files', '-z', '--error-unmatch', '--', rel], { cwd: repoRoot, env: reviewGitEnv(), timeoutMs: GIT_TIMEOUT_MS });
-  if (res.result !== 'ok' || res.stdout.length === 0) return 'refused: not tracked by git';
+  const res = await exec(['git', 'ls-files', '-z', '--', rel], { cwd: repoRoot, env: reviewGitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+  if (res.result !== 'ok') return 'refused: git failed';
+  if (res.stdout === `${rel}\0`) return null;
+  if (res.stdout.length > 0) return 'refused: git failed';
+  if (!ownedFiles.includes(rel)) return 'refused: untracked, not owned by this block';
+  if (!changedFiles.includes(rel)) return 'refused: untracked, not changed in this block';
+  const ignored = await exec(['git', 'check-ignore', '-q', '--', rel], { cwd: repoRoot, env: plainGitEnv(), timeoutMs: GIT_TIMEOUT_MS, okExitCodes: [0, 1] });
+  if (ignored.result !== 'ok' || (ignored.code !== 0 && ignored.code !== 1)) return 'refused: git failed';
+  if (ignored.code === 0) return 'refused: gitignored';
   return null;
 }
 
 /**
  * The `needs_file` follow-up (§4.2): the requested files, read-only, appended AFTER the packet
- * (the stable prefix stays stable). Only regular files git TRACKS are attached — an untracked or
- * ignored file (`.env`, a key) never reaches a provider — and secret-like paths are refused even
+ * (the stable prefix stays stable). Regular tracked files, or untracked files present in BOTH
+ * concrete path lists of this block, are attached. Ignored untracked files never reach a provider,
+ * and secret-like paths are refused even
  * when tracked; every refusal is named in the section. The attachment is trimmed to `budgetTokens`.
- * @param {{repoRoot: string, paths: ReadonlyArray<unknown>, budgetTokens: number}} opts
+ * @param {{repoRoot: string, paths: ReadonlyArray<unknown>, budgetTokens: number, ownedFiles?: ReadonlyArray<string>, changedFiles?: ReadonlyArray<string>}} opts
+ * `ownedFiles` and `changedFiles`: resolved paths from the SAME block in this repoRoot; no globs.
  * @returns {Promise<string>} the section to append.
  */
-export async function attachFiles({ repoRoot, paths, budgetTokens }) {
+export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = [], changedFiles = [] }) {
   const out = ['## attached files (read-only, requested in needs_file)'];
   let left = budgetTokens * 4;
   for (const raw of paths.slice(0, 10)) {
@@ -356,7 +390,7 @@ export async function attachFiles({ repoRoot, paths, budgetTokens }) {
       out.push(notFile ? `### ${String(raw)} (not a file)` : '### (refused: not a repo-relative path)');
       continue;
     }
-    const refusal = await attachRefusal(repoRoot, rel);
+    const refusal = await attachRefusal(repoRoot, rel, ownedFiles, changedFiles);
     if (refusal) {
       out.push(`### ${rel} (${refusal})`);
       continue;

@@ -113,7 +113,7 @@ describe('needs_file (§4.2): one more round, only with safe, tracked files', ()
     assert.equal(recs.length, 2);
     const second = stdinOf(recs[1]);
     const attached = second.slice(second.indexOf('## attached files')).split('\n').filter((l) => l.startsWith('### '));
-    assert.deepEqual(attached, ['### .env (refused: secret-like path)', '### lib (not a file)', '### notes.txt (refused: not tracked by git)', '### lib/dep.mjs']);
+    assert.deepEqual(attached, ['### .env (refused: secret-like path)', '### lib (not a file)', '### notes.txt (refused: untracked, not owned by this block)', '### lib/dep.mjs']);
     assert.equal(recs.filter((r) => stdinOf(r).includes('FAKE-secret-b12a')).length, 0);
     assert.deepEqual([outcome.status, outcome.sessions[0].needs_file_round], ['reviewed', true]);
   });

@@ -1,10 +1,98 @@
 import { commitAll, freshDir, lines, makeRepo, writeFile } from './helpers.mjs';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
-const { buildPacket, PacketError, readFileDiff } = await import('../../src/review/packet.mjs');
+const { assemblePacket, attachFiles, buildPacket, PacketError, readFileDiff } = await import('../../src/review/packet.mjs');
+
+test('B97 reproduction: needs_file attaches a new owned changed test file', async () => {
+  const repo = await makeRepo();
+  writeFile(repo, 'test/widget.test.mjs', "test('handles empty input', () => {});\n");
+  const section = await attachFiles({
+    repoRoot: repo, paths: ['test/widget.test.mjs'], budgetTokens: 1000,
+    ownedFiles: ['test/widget.test.mjs'], changedFiles: ['test/widget.test.mjs'],
+  });
+  assert.equal(section, "## attached files (read-only, requested in needs_file)\n### test/widget.test.mjs\n1| test('handles empty input', () => {});\n");
+});
+
+/** @type {import('../../src/review/packet.mjs').FileDiff} */
+const fixtureDiff = {
+  file: 'src/widget.mjs', kind: 'new', content: 'export const widget = 1;\n',
+  diffText: '@@ -0,0 +1 @@\n+export const widget = 1;\n',
+  hunks: [{ header: '@@ -0,0 +1 @@', oldStart: 0, oldLines: 0, newStart: 1, newLines: 1 }],
+  plusCount: 1, minusCount: 0,
+};
+const fixtureOpts = { diff: fixtureDiff, lens: 'quick', rulesDigest: 'rule one\nrule two', factsExcerpt: 'F1: fixture', moved: '## moved code\n(none moved)' };
+
+test('B97 legacy: no paired input is byte-equal to the HEAD packet', () => {
+  const packet = assemblePacket(fixtureOpts);
+  assert.equal(packet.status, 'ok');
+  if (packet.status !== 'ok') return;
+  // Captured from HEAD 79bbe61 before packet.mjs changed; hashes output, never src text.
+  assert.equal(createHash('sha256').update(packet.text).digest('hex'), 'a187a50dcf5624afb3b6a5bf862f401ee5b6095bf4a546b667857beba75447fa');
+  assert.deepEqual([packet.contextMode, packet.contextLines, packet.digestLines, packet.tokensIn, packet.budget, packet.overBudget], ['whole', 1, 2, 547, 6000, false]);
+  assert.deepEqual(assemblePacket({ ...fixtureOpts, paired: '' }), packet);
+  assert.deepEqual(assemblePacket({ ...fixtureOpts, paired: '  \n' }), packet);
+});
+
+test('B97 paired section: after context, before moved and diff, capped at full_in / 16', () => {
+  const packet = assemblePacket({ ...fixtureOpts, paired: 'test/widget.test.mjs\n- handles empty input' });
+  assert.equal(packet.status, 'ok');
+  if (packet.status !== 'ok') return;
+  assert.deepEqual(packet.text.split('\n').filter((line) => ['## context', '## paired', '## moved code', '## diff'].includes(line)), ['## context', '## paired', '## moved code', '## diff']);
+  assert.equal(packet.text.split('## paired\n')[1].split('## moved code')[0], 'test/widget.test.mjs\n- handles empty input\n');
+  const capped = assemblePacket({ ...fixtureOpts, paired: 'é'.repeat(300), cfg: { review: { budgets: { full_in: 1600 } } } });
+  assert.equal(capped.status, 'ok');
+  if (capped.status !== 'ok') return;
+  const section = capped.text.split('## paired\n')[1].split('## moved code')[0];
+  assert.equal(section, 'é'.repeat(194) + '\n');
+  assert.equal(Buffer.byteLength('## paired\n' + section), 399);
+});
+
+test('B97 paired budget: dropped first with whole context, digest and diff preserved', () => {
+  const plain = assemblePacket(fixtureOpts);
+  assert.equal(plain.status, 'ok');
+  if (plain.status !== 'ok') return;
+  const packet = assemblePacket({ ...fixtureOpts, budget: plain.tokensIn, paired: 'test/widget.test.mjs\n' + 'extra context '.repeat(5000) });
+  assert.deepEqual(packet, { ...plain, budget: plain.tokensIn });
+  if (packet.status !== 'ok') return;
+  assert.equal(packet.text.split('## paired').length - 1, 0);
+  assert.equal(packet.text.split('## diff\n')[1], 'file: src/widget.mjs\nhunks:\n- @@ -0,0 +1 @@\n\n@@ -0,0 +1 @@\n+export const widget = 1;\n');
+});
+
+test('B97 attachment refusals: unowned, unchanged, ignored, secret and missing eligibility', async () => {
+  const repo = await makeRepo();
+  writeFile(repo, '.gitignore', 'test/ignored.test.mjs\n');
+  for (const file of ['test/unowned.test.mjs', 'test/unchanged.test.mjs', 'test/ignored.test.mjs', '.env', 'test/eligible.test.mjs']) writeFile(repo, file, 'FAKE-refused-body\n');
+  const section = await attachFiles({
+    repoRoot: repo, paths: ['test/unowned.test.mjs', 'test/unchanged.test.mjs', 'test/ignored.test.mjs', '.env'], budgetTokens: 1000,
+    ownedFiles: ['test/unchanged.test.mjs', 'test/ignored.test.mjs', '.env'],
+    changedFiles: ['test/unowned.test.mjs', 'test/ignored.test.mjs', '.env'],
+  });
+  assert.equal(section, '## attached files (read-only, requested in needs_file)\n### test/unowned.test.mjs (refused: untracked, not owned by this block)\n### test/unchanged.test.mjs (refused: untracked, not changed in this block)\n### test/ignored.test.mjs (refused: gitignored)\n### .env (refused: secret-like path)\n');
+  assert.equal(section.split('FAKE-refused-body').length - 1, 0);
+  assert.equal(await attachFiles({ repoRoot: repo, paths: ['test/eligible.test.mjs'], budgetTokens: 1000 }), '## attached files (read-only, requested in needs_file)\n### test/eligible.test.mjs (refused: untracked, not owned by this block)\n');
+});
+
+test('B97 attachment git safety: inherited GIT_* stripped and git failure refuses', async () => {
+  const repo = await makeRepo();
+  const other = await makeRepo();
+  writeFile(repo, 'test/widget.test.mjs', 'FAKE-allowed-body\n');
+  const saved = { GIT_DIR: process.env.GIT_DIR, GIT_WORK_TREE: process.env.GIT_WORK_TREE, GIT_INDEX_FILE: process.env.GIT_INDEX_FILE, GIT_CONFIG_COUNT: process.env.GIT_CONFIG_COUNT };
+  Object.assign(process.env, { GIT_DIR: path.join(other, '.git'), GIT_WORK_TREE: other, GIT_INDEX_FILE: path.join(other, 'missing-index'), GIT_CONFIG_COUNT: 'invalid' });
+  try {
+    assert.equal(await attachFiles({ repoRoot: repo, paths: ['test/widget.test.mjs'], budgetTokens: 1000, ownedFiles: ['test/widget.test.mjs'], changedFiles: ['test/widget.test.mjs'] }), '## attached files (read-only, requested in needs_file)\n### test/widget.test.mjs\n1| FAKE-allowed-body\n');
+  } finally {
+    for (const [key, value] of Object.entries(saved)) {
+      if (value === undefined) delete process.env[key]; else process.env[key] = value;
+    }
+  }
+  const nonRepo = freshDir('nongit');
+  writeFile(nonRepo, 'widget.mjs', 'FAKE-refused-git-body\n');
+  assert.equal(await attachFiles({ repoRoot: nonRepo, paths: ['widget.mjs'], budgetTokens: 1000, ownedFiles: ['widget.mjs'], changedFiles: ['widget.mjs'] }), '## attached files (read-only, requested in needs_file)\n### widget.mjs (refused: git failed)\n');
+});
 
 /** @param {string} text @returns {string[]} the diff body lines that add a line. */
 function plusLines(text) {

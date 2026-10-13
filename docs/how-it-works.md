@@ -464,12 +464,30 @@ session. A second plan that is not `full` keeps the original stop. Fitting quick
 risk-1 files keep their existing plans with no `step_up`; Markdown keeps section splitting,
 and rechecks already use `full_in`.
 
-When the context does not fit, it shrinks first; the diff is never cut. A diff that alone is over
-the budget is `split_required`: the file is not reviewed, and the result says how large the packet
-was (`tokens_in`) and what the budget is (`budget`). A Markdown file (`.md`, `.markdown`) is
-reviewed **section by section** instead: its diff is cut at the headings (a `#` inside a fenced
-code block does not count), consecutive sections share a packet while it fits, and each packet is
-reviewed like a file of its own. The file is approved only when every section is; findings are
+The packet helper supports an optional `## paired` section after `## context`, before moved code
+and the diff (B97). Packet builders send paired files from B98; with B97 alone, no packet has
+`## paired` yet. The section names paired files with test names or exported symbols, at most
+40 entries per file and 120 characters per entry, redacting secret-looking and registered values.
+Pairs match stems for `.mjs`/`.ts` (`.test`, `.spec`, or the `test/` tree), PHP (`FooTest.php`),
+Go (`foo_test.go`), Python (`test_foo.py`), and Swift (`FooTests.swift`). The whole section is
+capped at `review.budgets.full_in / 16` tokens and is
+dropped first when the packet exceeds its budget. It never causes `split_required` and never
+cuts the diff; without paired input the packet bytes stay the same.
+
+For `needs_file`, the attachment helper can accept an untracked file when the caller supplies
+it in both the owned and changed concrete file lists of the same block and tree. It refuses
+unowned, unchanged, git-ignored and secret paths, and fails closed on a git error. Without those
+lists it attaches tracked files only. The reviewer can request a paired file's body when its
+name and summary are insufficient; all existing path and read-only checks still apply.
+
+Over budget, drop `## paired` first, then shrink the context to minimal
+(`review.context.min_context_lines`), then trim the rules digest from the end. The diff is never
+cut. A diff alone over budget gives `split_required`: the file is not reviewed, and the result
+says how large the packet was (`tokens_in`) and what the budget is (`budget`). A Markdown file
+(`.md`, `.markdown`) is reviewed **section by section** instead: its diff is cut at the headings
+(a `#` inside a fenced code block does not count), consecutive sections share a packet while it
+fits, and each packet is reviewed like a file of its own. The file is approved only when every
+section is; findings are
 merged with ids such as `S2.F1` and go through the normal fix rounds, whose rechecks are split the
 same way. Only a section that alone is over the budget keeps the file `split_required`, and so
 does a deleted Markdown file or one with no heading (it has one section only).
