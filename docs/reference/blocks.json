@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 78,
+  "block_count": 79,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1077,6 +1077,20 @@
         "B77"
       ],
       "note": "root-added 2026-10-12; tool fix found while building (plans/pipeline.md), follows B68 (issue #15); reviewed_content_blob in the signed state_body, git hash-object/cat-file with a discovery ceiling, sha-checked, falls back to B68; also amends src/worker/engine.mjs, skill/references/review.md and skill/references/ledger.md"
+    },
+    "B71": {
+      "title": "review-file --answers: a reviewer judges a fix made in another owned file",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/review/answers.mjs",
+        "test/review/answers.test.mjs"
+      ],
+      "depends_on": [
+        "B78"
+      ],
+      "note": "root-added 2026-10-12; GitHub issue #9 review-exits plan (plans/review-exits/plan.md); answers ticket kind, signed review.answered rows bound to both content hashes, gate counts a still-current answer like a waiver (answered list on gate.review_waived_all), unknown severities fail closed; also amends src/review/gate-check.mjs, src/cli/review-file.mjs, src/cli/block.mjs, src/worker/queue.mjs, src/worker/engine.mjs, src/worker/loop.mjs, skill/references/review.md, skill/references/ledger.md and docs/how-it-works.md"
     }
   }
 }

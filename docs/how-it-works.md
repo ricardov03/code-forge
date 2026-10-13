@@ -487,6 +487,33 @@ more on the same packet. Only a second timeout is `unavailable: timeout`. The le
 tail of its stderr to explain the hang. While a long session runs, the worker keeps writing a
 heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
 
+### Answering a finding from another file
+
+Sometimes a finding on one file is fixed in a different file of the same block: the reviewer of
+`src/a.mjs` says a case is untested, and the test goes in `test/a.test.mjs`. The coder then runs
+`review-file test/a.test.mjs --block B1 --answers W1,W2 --of src/a.mjs` (at most 10 ids, none
+twice; `--of` names the source because finding ids are numbered per file). The request is its own
+ticket kind, whose id covers the source, its hash and the ids, so it never collides with the
+answering file's normal review ticket. Nothing is queued unless the block owns both files (`answers-not-owned`), they are two
+different files (`answers-same-file`), and every id is still open on the source's current content
+(`answers-not-open`: an id already waived or answered there, an id open only on an older version,
+the proof finding or an id of unknown severity is not open). A bad id list is `usage`. The worker
+checks the same again and asks one fresh L2 reviewer, with the findings, the source lines around
+each and the answering file's diff against the block base (all of it when the file is new), whether
+each finding is resolved. The worker reads each file once and builds the packet from those bytes,
+so the answer is bound to exactly what the reviewer saw (a file gone by then is
+`answers-file-missing`; a file changed since the request is `stale`). Every `resolved` answer is a
+`review.answered {block, file, content_hash, finding, by_file, by_hash, ticket}` row (the source
+and its hash, the answering file and its hash; see `skill/references/ledger.md`) signed with the
+run key, which only the worker holds; the close ignores a row that is unsigned or wrongly signed. Anything else (no answer,
+a broken one) is `not_resolved`, and a failed session is `unavailable`: retry it, it is not a
+verdict. If the ledger write fails part way, the same request again finishes the job with one row
+per finding. At the close an answer clears its finding the way a waiver does, but only while
+neither file has changed since, and it can clear a critical. The close line then reads, for
+example, `block B1: src/a.mjs reviewed_by_waiver (answered W1, W2)`, and the
+`gate.review_waived_all` row lists the ids under `answered`. The answering file still needs its own
+approval, and the source's fix-loop state is left as it was.
+
 ### Several files at once
 
 The worker keeps a **pool** of review tickets. `review.parallel_tickets` (1 to 16, default 3) is

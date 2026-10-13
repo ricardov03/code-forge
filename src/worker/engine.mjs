@@ -72,6 +72,11 @@
  * ticket is done); `review-file` on the same content is a fresh attempt every time (`retry: true`).
  * The tree is passed as `contentRoot`: `repoRoot` stays the main tree, and the fix-loop state
  * stays under the run root.
+ * B71: a ticket with `kind: 'answers'` (`review-file --answers`) runs no fix-loop round: after the
+ * same run-record, tree and mismatch checks it goes to `reviewAnswers` (`review/answers.mjs`) —
+ * one fresh L2 session that judges whether the answering file resolves the named open findings of
+ * the source, with signed `review.answered` rows for the resolved ones; the source's fix-loop
+ * state is neither read for a round nor saved.
  */
 
 import { realpathSync, rmSync } from 'node:fs';
@@ -82,6 +87,7 @@ import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { ContextError, reviewDigest } from '../context/pack.mjs';
 import { reviewFile, rulesRisk } from '../review/engine.mjs';
+import { reviewAnswers } from '../review/answers.mjs';
 import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { extraRoundsFor, newFileState, reopenForExtraRound, runRound } from '../review/fixloop.mjs';
@@ -93,7 +99,8 @@ import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
 import { keyedLock } from '../util/locks.mjs';
 import { blockAnchors, blockRungUsed, loadState, RESTORED_EVENT, saveState } from './review-state.mjs';
-import { assertTicketId, WorkerError } from './ticket.mjs';
+import { assertAnswers } from './queue.mjs';
+import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } from './ticket.mjs';
 
 /**
  * @typedef {object} ReviewContext
@@ -347,6 +354,14 @@ export async function reviewTicket(ticket, ctx) {
   }
   /** @type {ReviewContext} */
   const tctx = { ...ctx, contentRoot };
+  if (ticket.kind === 'answers') {
+    // B71: an answers ticket is no review round: one answers session, the fix-loop state untouched
+    try {
+      return await reviewAnswers(ticket, tctx, { entry, workDir, io: { readFile: readRegularFileNoFollow, loadState, assertAnswers } });
+    } finally {
+      rmSync(workDir, { recursive: true, force: true });
+    }
+  }
   const factsExcerpt = factsFor(entry, ctx.cfg);
   const peerDiffs = blockPeerDiffs(contentRoot, { base: entry.base, owned: entry.owned, ownedKinds: entry.ownedKinds, file: ticket.file });
   try {

@@ -12,9 +12,14 @@
  *
  * B62b: `<repo>` is always the MAIN tree's top level, where the worker runs — a block with its own
  * worktree still queues there; only the reviewed content is read in the block's tree.
+ *
+ * B71: an ANSWERS ticket (`kind: 'answers'`, from `review-file <answering file> --answers <ids>
+ * --of <source>`) asks the worker whether `by_file` resolves the open findings `answers` of
+ * `file` (the source). Its id adds `answers`, `by_file`, `by_hash` and the sorted ids to the
+ * normal ticket's parts, so it never collides with a review ticket of the same source content.
  */
 
-import { randomBytes } from 'node:crypto';
+import { createHash, randomBytes } from 'node:crypto';
 import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
@@ -57,7 +62,7 @@ function readJSON(file) {
 }
 
 /**
- * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string}} Ticket
+ * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string, kind?: 'answers', by_file?: string, by_hash?: string, answers?: string[]}} Ticket
  *   `tree` (B62b): the block's worktree the content was hashed in. It is part of the ticket id,
  *   and the worker only checks it against the tree it takes from the run record (a ticket whose
  *   tree is not that one is `unavailable`, `worktree-mismatch`); it never reads content there.
@@ -86,6 +91,67 @@ export function enqueue({ repoRoot, run, block, file, tree = null, now = new Dat
     writeAtomic(target, `${JSON.stringify(body)}\n`);
   }
   return { ticket, status: isDone(repoRoot, ticket) ? 'done' : 'queued', file: rel, content_hash, ...named };
+}
+
+/** B71: the most finding ids one answers ticket may name. */
+export const MAX_ANSWERS = 10;
+
+/** B71: the finding-id shape (the one `block waive` and the review results use). */
+const ANSWER_ID = /^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/;
+
+/**
+ * B71: the id of an answers ticket — the normal ticket's parts (run, block, source, source hash,
+ * tree) plus `answers`, the answering file, its hash and the sorted ids, so it differs from the
+ * normal ticket of the same source content and from an answer of other ids or another file.
+ * @param {{run: string, block: string, file: string, content_hash: string, by_file: string, by_hash: string, answers: string[], tree?: string | null}} t
+ * @returns {string}
+ */
+export function answersTicketId({ run, block, file, content_hash, by_file, by_hash, answers, tree = null }) {
+  const parts = ['answers', run, block, file, content_hash, by_file, by_hash, [...answers].sort().join(','), ...(tree === null ? [] : [tree])];
+  return createHash('sha256').update(parts.join('\0')).digest('hex').slice(0, 24);
+}
+
+/**
+ * B71: refuse an id list that is not 1..MAX_ANSWERS finding ids; returns them sorted and unique.
+ * @param {unknown} answers @returns {string[]}
+ * @throws {WorkerError} `usage`
+ */
+export function assertAnswers(answers) {
+  if (!Array.isArray(answers) || answers.length === 0) throw new WorkerError('usage', '--answers needs at least one finding id');
+  if (answers.some((a) => typeof a !== 'string' || !ANSWER_ID.test(a))) throw new WorkerError('usage', 'a finding id is letters, digits, . _ : - (at most 64)');
+  const ids = [...new Set(/** @type {string[]} */ (answers))].sort();
+  if (ids.length > MAX_ANSWERS) throw new WorkerError('usage', `--answers takes at most ${MAX_ANSWERS} finding ids`);
+  return ids;
+}
+
+/**
+ * @typedef {Ticket & {kind: 'answers', by_file: string, by_hash: string, answers: string[]}} AnswersTicket
+ */
+
+/**
+ * B71: enqueue an answers ticket: `byFile` answers the findings `answers` of `file` (both
+ * repo-root-relative). Both files are hashed now (under `tree` when given); idempotent like
+ * {@link enqueue}. The caller has already refused the same file and the id list.
+ * @param {{repoRoot: string, run: string, block: string, file: string, byFile: string, answers: string[], tree?: string | null, now?: Date}} opts
+ * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, by_file: string, by_hash: string, answers: string[], tree?: string}}
+ * @throws {WorkerError} `bad-path`, `usage`
+ */
+export function enqueueAnswers({ repoRoot, run, block, file, byFile, answers, tree = null, now = new Date() }) {
+  const rel = assertRowPath(file);
+  const by_file = assertRowPath(byFile);
+  const ids = assertAnswers(answers);
+  const root = tree === null ? null : realTree(tree);
+  const content_hash = contentHash(root ?? repoRoot, rel);
+  const by_hash = contentHash(root ?? repoRoot, by_file);
+  const ticket = answersTicketId({ run, block, file: rel, content_hash, by_file, by_hash, answers: ids, tree: root });
+  const target = path.join(queueDir(repoRoot), `${ticket}.json`);
+  const named = root === null ? {} : { tree: root };
+  if (!existsSync(target)) {
+    /** @type {AnswersTicket} */
+    const body = { ticket, kind: 'answers', run, block, file: rel, content_hash, by_file, by_hash, answers: ids, enqueued_at: now.toISOString(), ...named };
+    writeAtomic(target, `${JSON.stringify(body)}\n`);
+  }
+  return { ticket, status: isDone(repoRoot, ticket) ? 'done' : 'queued', file: rel, content_hash, by_file, by_hash, answers: ids, ...named };
 }
 
 /**
@@ -139,9 +205,23 @@ export function readTicket(repoRoot, id) {
   if (!t || typeof t !== 'object') throw new WorkerError('bad-ticket', `ticket ${id} is not readable JSON`);
   assertRowPath(t.file);
   if (t.tree !== undefined && (typeof t.tree !== 'string' || !path.isAbsolute(t.tree))) throw new WorkerError('bad-ticket', `ticket ${id} names a tree that is not an absolute path`);
-  if (typeof t.run !== 'string' || typeof t.block !== 'string' || typeof t.content_hash !== 'string' || ticketId(t) !== id) {
+  if (typeof t.run !== 'string' || typeof t.block !== 'string' || typeof t.content_hash !== 'string') {
     throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
   }
+  if (t.kind !== undefined) {
+    // B71: the only other kind is an answers ticket; its id covers the answering file and the ids
+    if (t.kind !== 'answers') throw new WorkerError('bad-ticket', `ticket ${id} has an unknown kind`);
+    assertRowPath(t.by_file);
+    let ids;
+    try {
+      ids = assertAnswers(t.answers);
+    } catch {
+      throw new WorkerError('bad-ticket', `ticket ${id} names no valid finding ids`);
+    }
+    if (typeof t.by_hash !== 'string' || ids.join(',') !== t.answers.join(',') || answersTicketId(t) !== id) throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
+    return /** @type {Ticket} */ (t);
+  }
+  if (ticketId(t) !== id) throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
   return /** @type {Ticket} */ (t);
 }
 

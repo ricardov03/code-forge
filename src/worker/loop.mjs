@@ -390,7 +390,8 @@ export async function createWorker(opts, deps = {}) {
       return { ...base, status: 'refused', reason, approved: false };
     }
     if (current === DELETED_HASH && ticket.content_hash !== DELETED_HASH) return { ...base, status: 'stale', reason: 'missing-file', approved: false };
-    if (current !== ticket.content_hash) return { ...base, status: 'stale', approved: false };
+    // B71: an answers ticket names why (its source moved); a review ticket keeps no reason
+    if (current !== ticket.content_hash) return { ...base, status: 'stale', ...(ticket.kind === 'answers' ? { reason: 'source-changed' } : {}), approved: false };
     let ticketCfg;
     try {
       ticketCfg = await configFor(id);

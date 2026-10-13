@@ -85,6 +85,10 @@
  * other close row); a refused close writes none. The close prints `block <id>: <file>
  * reviewed_by_waiver (<ids>; by <who>)` before the closed line, and `--json` adds
  * `reviewed_by_waiver: [{file, content_hash, status, findings, by}]` (only when there is one).
+ * B71: a finding a signed `review.answered` row clears (another owned file resolved it, judged by
+ * a reviewer) counts like a waived one, listed under `answered` next to `findings` in the close
+ * row and the `--json` entry; the line then reads `(<ids>; by <who>; answered <ids>)`, or
+ * `(answered <ids>)` when nothing was waived (`by` is then null).
  *
  * B63b: `context.require_coder_tests: true` in the run's config snapshot (immutable like
  * `review.external`; the live config is never read for it) adds one check after the report check:
@@ -453,7 +457,7 @@ export async function runBlock(args, deps = {}) {
         // (closeBlock reads closeRows only after every extra check passed)
         waivedAll = files;
         const others = closeRows.filter((r) => r.event !== 'gate.review_waived_all');
-        closeRows.splice(0, closeRows.length, ...others, ...files.map((f) => ({ event: 'gate.review_waived_all', block: id, file: f.file, content_hash: f.content_hash, findings: f.findings, by: f.by })));
+        closeRows.splice(0, closeRows.length, ...others, ...files.map((f) => ({ event: 'gate.review_waived_all', block: id, file: f.file, content_hash: f.content_hash, findings: f.findings, by: f.by, ...(f.answered?.length ? { answered: f.answered } : {}) })));
       };
       const reviews = reviewGateCheck(async () => {
         const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
@@ -552,7 +556,14 @@ export async function runBlock(args, deps = {}) {
       // the exit code or stdout (`runHook` never throws)
       try {
         // B70: each file that passed as reviewed_by_waiver is named before the closed line
-        if (result.ok) for (const f of waivedAll) say(`block ${id}: ${f.file} reviewed_by_waiver (${f.findings.join(', ')}; by ${f.by})\n`);
+        // B71: an answered finding is named as answered; a file with only answered findings has no `by`
+        if (result.ok) {
+          for (const f of waivedAll) {
+            const parts = f.findings.length > 0 ? [`${f.findings.join(', ')}; by ${f.by}`] : [];
+            if (f.answered?.length) parts.push(`answered ${f.answered.join(', ')}`);
+            say(`block ${id}: ${f.file} reviewed_by_waiver (${parts.join('; ')})\n`);
+          }
+        }
         (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
         // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
         if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null, ...(end?.json ?? {}) });
@@ -564,7 +575,7 @@ export async function runBlock(args, deps = {}) {
           close_event: result.event ?? null,
           ...(end?.json ?? {}),
           // B70: only when a file passed as reviewed_by_waiver (otherwise the output is unchanged)
-          ...(result.ok && waivedAll.length > 0 ? { reviewed_by_waiver: waivedAll.map((f) => ({ file: f.file, content_hash: f.content_hash, status: f.status, findings: f.findings, by: f.by })) } : {}),
+          ...(result.ok && waivedAll.length > 0 ? { reviewed_by_waiver: waivedAll.map((f) => ({ file: f.file, content_hash: f.content_hash, status: f.status, findings: f.findings, by: f.by, ...(f.answered?.length ? { answered: f.answered } : {}) })) } : {}),
         };
         if (!result.ok || !removeTree) {
           if (json && result.ok) emit(closedJson);

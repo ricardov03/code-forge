@@ -5,6 +5,9 @@
  *   review-file --wait <ticket> [--max <90s>]      poll; prints {ticket, status: done, result} or
  *                                                  {ticket, status: pending, reason: wait_timeout}
  *                                                  when --max elapses (the review is still running)
+ *   review-file <answering file> --block <id> --answers <ids> --of <source> [--run <id>]
+ *                                                  B71: enqueue an answers ticket; prints {ticket,
+ *                                                  status, kind: answers, file: source, by_file, answers}
  *
  * The same content enqueued again after an `unavailable` result is a fresh attempt (`retry: true`),
  * not the old result.
@@ -35,19 +38,37 @@
  * from, which is the block's tree when the coder works there. A record naming a worktree that is
  * gone or malformed is refused (exit 1, `reason: worktree-missing|worktree-malformed|…`), and
  * nothing is queued.
+ *
+ * B71: `--answers <id,id,…> --of <source>` (1 to 10 finding ids, comma-separated) asks the worker
+ * whether the change in the positional file (the answering file) resolves those open findings of
+ * `<source>`. It is refused before anything is queued — exit 2 `usage` for a missing `--of`, no
+ * ids, more than 10 ids or a malformed id; exit 1 `answers-same-file` when both name one file,
+ * `answers-not-owned` when the run record says the block does not own both, `answers-not-open`
+ * when an id is not open on the source at its current hash (not named by the latest refusal or
+ * cap row there, or already waived or answered; these two pre-checks read what this process can read, unverified, and are skipped when the run
+ * record cannot be opened here). The worker checks all of it again with the signed rows; that check
+ * is the one that counts. Its done result has `status: answers` and the coder-facing `answers:
+ * [{id, verdict: resolved|not_resolved, reason}]` instead of a fix list; a resolved id is a signed
+ * `review.answered` row the close counts until either file changes. The answering file still
+ * needs its own review.
  */
 
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { enqueue, isDone, liveWorker, queueDir } from '../worker/queue.mjs';
-import { assertBlockId, assertInsideRoot, assertTicketId, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
+import { answersTicketId, assertAnswers, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir } from '../worker/queue.mjs';
+import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
+import { namedOnHash } from '../review/gate-check.mjs';
+import { ownsFile } from '../state/registry.mjs';
+import { readAllRows } from '../ledger/write.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
-const USAGE = 'usage: code-forge review-file <path> --block <id> [--run <id>] | review-file --wait <ticket> [--max <seconds>s]\n';
+const USAGE =
+  'usage: code-forge review-file <path> --block <id> [--run <id>] | review-file --wait <ticket> [--max <seconds>s]\n' +
+  '       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n';
 
 export const DEFAULT_WAIT_MS = 90_000;
 const POLL_MS = 200;
@@ -112,7 +133,63 @@ async function blockTreeOf(runId, block) {
 }
 
 /**
- * The coder-facing summary of a done result: the fix list and the stop reason, when any.
+ * B71: the coder-side pre-checks of an answers ticket (fast refusal only): with a run record this
+ * process can open, the block must own both files and every id must be open on the source's
+ * current hash — named by the latest refusal or cap row there, not waived or answered yet — read by
+ * the close's rules over unverified rows ({@link namedOnHash}). A record or ledger that
+ * cannot be read here skips the check it needs: the worker re-checks everything with signed rows.
+ * The rows of the ticket this request gets do not close an id (the retry of an attempt whose
+ * ledger write failed part way). `treeName`: the ticket's tree (null in the main tree).
+ * @param {{runId: string, block: string, file: string, byFile: string, tree: string, answers: string[], treeName: string | null}} opts
+ * @throws {WorkerError} `answers-not-owned`, `answers-not-open`
+ */
+async function answersPrecheck({ runId, block, file, byFile, tree, answers, treeName }) {
+  let record;
+  try {
+    record = await readRun(runId);
+  } catch {
+    return;
+  }
+  const entry = record?.blocks?.[block];
+  if (!entry || typeof entry !== 'object') return;
+  const owned = Array.isArray(entry.owned_files) ? entry.owned_files : [];
+  if (!ownsFile(owned, file, entry.owned_kinds) || !ownsFile(owned, byFile, entry.owned_kinds)) {
+    throw new WorkerError('answers-not-owned', `block ${block} does not own both ${byFile} and ${file}; nothing was queued`);
+  }
+  let rows;
+  try {
+    rows = await readAllRows(record.project);
+  } catch {
+    return;
+  }
+  const hash = contentHash(tree, file);
+  const current = new Map([
+    [file, hash],
+    [byFile, contentHash(tree, byFile)],
+  ]);
+  const by_hash = /** @type {string} */ (current.get(byFile));
+  const ticket = answersTicketId({ run: runId, block, file, content_hash: hash, by_file: byFile, by_hash, answers, tree: treeName });
+  const named = namedOnHash({ block, runId, rows, file, hash, current, ticket });
+  const missing = answers.filter((id) => !named.has(id));
+  if (missing.length > 0) throw new WorkerError('answers-not-open', `${missing.join(', ')} is not an open finding of ${file} at its current content; nothing was queued`);
+}
+
+/**
+ * B71: the `--answers` list: comma-separated finding ids, 1 to {@link MAX_ANSWERS}.
+ * @param {unknown} raw @returns {string[]}
+ * @throws {WorkerError} `usage`
+ */
+function answersOf(raw) {
+  if (typeof raw !== 'string') throw new WorkerError('usage', '--answers needs finding ids');
+  const ids = raw.split(',');
+  if (ids.length > MAX_ANSWERS) throw new WorkerError('usage', `--answers takes at most ${MAX_ANSWERS} finding ids`);
+  if (new Set(ids).size !== ids.length) throw new WorkerError('usage', '--answers names a finding id twice');
+  return assertAnswers(ids);
+}
+
+/**
+ * The coder-facing summary of a done result: the fix list and the stop reason, when any. B71: an
+ * answers result gives `answers: [{id, verdict, reason}]` instead.
  * @param {Record<string, any> | null} result
  * @returns {Record<string, any>}
  */
@@ -120,6 +197,10 @@ export function fixList(result) {
   if (!result || result.approved === true) return {};
   /** @type {Record<string, any>} */
   const out = {};
+  if (result.kind === 'answers' || result.status === 'answers') {
+    if (Array.isArray(result.findings)) out.answers = result.findings.map((/** @type {Record<string, any>} */ f) => ({ id: f?.id ?? null, verdict: f?.verdict ?? 'not_resolved', reason: f?.reason ?? '' }));
+    return out;
+  }
   if (Array.isArray(result.findings) && result.findings.length > 0) {
     out.fix_list = result.findings.map((/** @type {Record<string, any>} */ f) => ({
       id: f?.id ?? null,
@@ -150,12 +231,12 @@ export async function runReviewFile(args, deps = {}) {
   const say = (/** @type {Record<string, any>} */ obj) => writeSafe(stdout, `${JSON.stringify(obj)}\n`);
   const cwd = deps.cwd ?? process.cwd();
   try {
-    const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'max'] });
+    const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'max', 'answers', 'of'] });
     // the queue and the worker: the main tree, also from inside a block's worktree
     const repoRoot = await mainRootOf(cwd);
 
     if (typeof flags.wait === 'string') {
-      if (positionals.length > 0 || flags.block !== undefined) throw new WorkerError('usage', '--wait takes only a ticket and --max');
+      if (positionals.length > 0 || flags.block !== undefined || flags.answers !== undefined || flags.of !== undefined) throw new WorkerError('usage', '--wait takes only a ticket and --max');
       const ticket = assertTicketId(flags.wait);
       const maxMs = flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max);
       const deadline = Date.now() + maxMs;
@@ -181,6 +262,7 @@ export async function runReviewFile(args, deps = {}) {
 
     if (positionals.length !== 1 || typeof flags.block !== 'string' || flags.max !== undefined) throw new WorkerError('usage', 'give one path and --block');
     const block = assertBlockId(flags.block);
+    if (flags.answers !== undefined || flags.of !== undefined) return await enqueueAnswersTicket({ flags, answering: positionals[0], block, cwd, repoRoot, say });
     const file = normalizeRequestPath(positionals[0], cwd, await repoRootOf(cwd));
     const worker = liveWorker(repoRoot);
     if (!worker || (typeof flags.run === 'string' && flags.run !== worker.run)) {
@@ -212,6 +294,41 @@ export async function runReviewFile(args, deps = {}) {
     say({ status: 'refused', reason: code, message: err?.message ?? String(err) });
     return 1;
   }
+}
+
+/**
+ * B71: `review-file <answering file> --block <id> --answers <ids> --of <source>`.
+ * @param {{flags: Record<string, any>, answering: string, block: string, cwd: string, repoRoot: string, say: (obj: Record<string, any>) => unknown}} opts
+ * @returns {Promise<number>}
+ * @throws {WorkerError}
+ */
+async function enqueueAnswersTicket({ flags, answering, block, cwd, repoRoot, say }) {
+  if (typeof flags.of !== 'string' || flags.of.length === 0) throw new WorkerError('usage', '--answers needs --of <source>');
+  const answers = answersOf(flags.answers);
+  const top = await repoRootOf(cwd);
+  const byFile = normalizeRequestPath(answering, cwd, top);
+  const file = normalizeRequestPath(flags.of, cwd, top);
+  if (byFile === file) throw new WorkerError('answers-same-file', `${file} cannot answer its own findings: give the file that resolves them`);
+  const worker = liveWorker(repoRoot);
+  if (!worker || (typeof flags.run === 'string' && flags.run !== worker.run)) {
+    say({ status: 'worker_down', file });
+    return 3;
+  }
+  const recorded = await blockTreeOf(worker.run, block);
+  const tree = recorded === null ? top : (recorded.top ?? repoRoot);
+  assertInsideRoot(tree, file);
+  assertInsideRoot(tree, byFile);
+  const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree };
+  await answersPrecheck({ runId: worker.run, block, file, byFile, tree, answers, treeName: where.tree === undefined ? null : realpathSync(tree) });
+  const opts = { repoRoot, run: worker.run, block, file, byFile, answers, ...where };
+  const queued = enqueueAnswers(opts);
+  if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'unavailable') {
+    rmSync(path.join(queueDir(repoRoot), `${queued.ticket}.done`), { force: true });
+    say({ ...enqueueAnswers(opts), kind: 'answers', retry: true });
+    return 0;
+  }
+  say({ ...queued, kind: 'answers' });
+  return 0;
 }
 
 /** @param {string[]} args @returns {Promise<number>} */

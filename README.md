@@ -17,6 +17,7 @@ In the next release:
 - **Waiving every finding is a real way out.** A file whose signed review on its current content left findings, all cleared by accepted waivers, now counts as reviewed (`reviewed_by_waiver`, never approved). `block close` writes one signed `gate.review_waived_all` row for it. A critical still needs a human waiver, and a finding with an unknown severity does too (#9).
 - **Tests no longer fail because of your own live run.** The test guard used to fail when a code-forge run you had open wrote its lock file during `npm test`. Now new files of a run that existed before the tests are not counted as leaks. A new run or any other new file still fails the tests.
 - **A restore brings back the exact reviewed text.** The reviewed text is now also kept as a git object, and the signed ledger points to it. After a lost state file is rebuilt, the next round reviews only what changed since the last review, even when the file changed. If git has removed the object, the round reviews the full file, as before (#15).
+- **A fix in another file can answer a finding.** `review-file <file> --block <id> --answers <ids> --of <source>` asks a fresh reviewer whether a change in another owned file of the block fixes findings of the source file. Each finding it judges `resolved` gets a signed `review.answered` row, and the source file can then close as `reviewed_by_waiver` with an `answered` list. If either file changes later, the answer no longer counts. The answering file still needs its own approval (#9).
 
 In 0.8.0:
 

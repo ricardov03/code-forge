@@ -6,6 +6,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- review-file --answers <ids> --of <source>: a fresh L2 session judges a fix made in another owned file; resolved ids
+  get signed review.answered rows bound to both content hashes, and the close gate counts a still-current answer like a
+  waiver (answered list on gate.review_waived_all).
+
 ### Changed
 
 - Review state is saved under ~/.code-forge/runs/<run>/review-state/ instead of the temp root; older state files are
