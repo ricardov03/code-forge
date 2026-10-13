@@ -28,6 +28,8 @@ waits on a second real consumer (plan §10.4, Q17).
 - The `xcodebuild` adapter for `proof.runners`: `xcode` keys, `{only_testing}` and `{result_bundle}` tokens, a precheck
   for full Xcode and an available simulator (`xcode-missing`, `destination-unavailable`), a fail-closed `xcresulttool`
   reader, and `RED_INVALID compile` for a build failure; fixtures captured from Xcode 26.6 (B102, #7).
+- A live `xcodebuild` red→green check on an iOS simulator (`CODE_FORGE_LIVE_XCODE=1`), verified with Xcode 26.6 on an
+  iPhone 17 simulator; it skips with a reason without full Xcode or an available simulator (B103, #7).
 
 ### Fixed
 

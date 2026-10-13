@@ -720,3 +720,21 @@ test('B102 (7): proof.md §2 shows the Xcode runner, its tokens, the precheck co
   assert.equal(occurrences(s2, '`xcrun xcresulttool get test-results tests --path <bundle>` (argv only, 60 s timeout, output capped at 8 MiB)'), 1);
   assert.equal(occurrences(s2, '`xcodebuild` (`xcodebuild test`, read from its result bundle; it needs an `xcode` object, Xcode below)'), 1);
 });
+
+test('B103 (4): proof.md §4 says Xcode red→green VERIFIED with the date, the Xcode version and the simulator; how-it-works names it', async () => {
+  const proof = await readSkillFile('references/proof.md');
+  const s4 = section(proof, 4);
+  assert.equal(occurrences(s4, '**Xcode (`xcodebuild test`, XCTest and Swift Testing on an iOS simulator) red→green under export: VERIFIED** on 2026-10-13 with Xcode 26.6 (17F113) and the iPhone 17 simulator (iOS 26.5), macOS 26 on arm64.'), 1);
+  assert.equal(occurrences(s4, 'Re-run it with `CODE_FORGE_LIVE_XCODE=1 node --import ./test/helpers/isolate.mjs --test test/proof/xcodebuild-live.test.mjs`'), 1);
+  assert.equal(occurrences(s4, 'when `xcode-select -p` points at the Command Line Tools, or when `xcrun simctl list devices available -j` lists no iPhone on an iOS runtime'), 1);
+  assert.equal(occurrences(s4, 'and never boots, creates, erases or deletes one itself'), 1);
+  assert.equal(occurrences(s4, '`xcode: {scheme: Kit, destination: "platform=iOS Simulator,name=<simulator>,OS=<iOS version>", test_target: KitTests}`, the destination filled in from the chosen simulator\'s name and iOS version (on the verified run `platform=iOS Simulator,name=iPhone 17,OS=26.5`)'), 1);
+  assert.equal(occurrences(s4, 'each with exactly that test in `failed_tests` (`KitTests/ClampXCTests/testCapsHigh()`, `KitTests/ClampSwiftTests/capsHigh()`)'), 1);
+  assert.equal(occurrences(s4, '`xcodebuild` exits 65 at RED and 0 at GREEN, and writes a result bundle at both'), 1);
+  assert.equal(occurrences(s4, 'a test of a new function gives `RED_INVALID compile` (exit 1;'), 1);
+  assert.equal(occurrences(s4, 'gives exit 1 `destination-unavailable` before the export is built: no row, no `xcodebuild` run, the package tree unchanged (same hash)'), 1);
+  assert.equal(occurrences(s4, 'so the B102 fixtures in `test/fixtures/xcresult/` are kept as captured'), 1);
+  assert.equal(occurrences(s4, 'red→green under export: UNVERIFIED'), 0);
+  const howItWorks = await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8');
+  assert.equal(occurrences(howItWorks, 'on Swift, and on Xcode through `xcodebuild test` on an iOS simulator)'), 1);
+});
