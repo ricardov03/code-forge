@@ -56,6 +56,9 @@ waits on a second real consumer (plan §10.4, Q17).
   so it no longer fails at random under load (B81).
 - The worker restart test waits up to 5 s for killed sessions to exit instead of checking once, so it no longer fails at
   random under load (B82).
+- `review-file --fresh`: a failed restore of the done marker no longer leaves the ticket looking pending; it writes a
+  refused `fresh-restore-failed` marker or keeps the claim, `block reopen` clears leftover claims, and the messages say
+  which state was left (B83).
 
 ## [0.8.0] — 2026-10-12
 

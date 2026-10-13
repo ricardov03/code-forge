@@ -26,6 +26,7 @@ In the next release:
 - **`review-file --fresh` (B75).** Runs a file's review again only when the cached result never counted (`stale`, `unavailable`, or a non-verdict refusal such as `other-run`). A counted result is refused `fresh-needs-reopen` and names `block reopen` and `block waive`; a tampered one is refused `fresh-tampered`. A coder may use it.
 - **Another steadier test (B82).** The worker restart test waits for killed sessions to exit instead of checking once, so it no longer fails at random under load.
 - **The review exits, in one place (B76).** `skill/references/review.md` §5, `code.md` and `docs/how-it-works.md` name the ways out of a stopped file in order: fix and the human's `block reopen`, `review-file --answers`, `block waive`, re-decompose. They also say `block attempt` never resets review state and that a lost state file is rebuilt from the ledger.
+- **`review-file --fresh` fails closed (B83).** When a cached result cannot be put back, the ticket gets a refused `fresh-restore-failed` marker (or keeps its claim), so the worker does not run it by itself. `block reopen` clears it. Messages name the error code only.
 
 In 0.8.0:
 

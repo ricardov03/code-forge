@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 87,
+  "block_count": 88,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1224,6 +1224,21 @@
         "B75"
       ],
       "note": "root-added 2026-10-12; group A docs; exits in order (fix + block reopen, --answers, block waive, re-decompose), block attempt never resets review state, a lost state is rebuilt from the ledger, when --fresh helps"
+    },
+    "B83": {
+      "title": "review-file --fresh fails closed when a marker cannot be restored",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/worker/queue.mjs",
+        "src/cli/review-file.mjs",
+        "test/worker/fresh.test.mjs"
+      ],
+      "depends_on": [
+        "B76"
+      ],
+      "note": "root-added 2026-10-12; B75 leftovers (plans/reviews/b75/r3.txt a-d); a failed link-back writes a refused fresh-restore-failed marker or keeps the claim; a kept claim holds the ticket; block reopen clears claims"
     }
   }
 }

@@ -22,6 +22,9 @@
  * `dropDoneIf` (an atomic claim by rename, then a byte compare), so two concurrent callers never
  * both drop it. A counted marker the read saw is never moved; only a newer marker the worker wrote
  * between that read and the claim is moved for a moment, then linked straight back (`changed`).
+ * B83: a claim that could not be linked back leaves a refused `fresh-restore-failed` marker in its
+ * place (or, when that write fails too, the claim itself, which `pendingTickets` treats as done),
+ * so a failed restore never hands the worker a ticket to run again; `clearDone` clears both.
  */
 
 import { createHash, randomBytes } from 'node:crypto';
@@ -189,10 +192,24 @@ export function isDone(repoRoot, ticket) {
   return existsSync(path.join(queueDir(repoRoot), `${assertTicketId(ticket)}.done`));
 }
 
+/** B83: a `dropDoneIf` claim of a done marker (`<ticket>.done.<pid>.<hex>.fresh`). */
+const CLAIM = /^([0-9a-f]{24})\.done\.\d+\.[0-9a-f]{8}\.fresh$/;
+
+/**
+ * B83: an fs error's code when it is a plain code word, else `unknown` (a message names the code
+ * only, never a path). @param {unknown} err @returns {string}
+ */
+function codeOf(err) {
+  const code = /** @type {{code?: unknown}} */ (err)?.code;
+  return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(code) ? code : 'unknown';
+}
+
 /**
  * B72 (`block reopen`, C11): drop the done marker of the review ticket for the file's CURRENT
  * content, so the next `review-file` on it runs instead of returning the cached result. The ticket
  * id comes from `resolveTicket`, the rule `enqueue` uses; no ticket is written. Synchronous.
+ * B83: it also removes the ticket's leftover `dropDoneIf` claims (`<ticket>.done.*.fresh`), which
+ * would otherwise keep the ticket off the worker for good; `removed` still names the marker only.
  * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null}} opts
  * @returns {{ticket: string, content_hash: string, removed: boolean}}
  * @throws {WorkerError} `bad-path` for a bad file path or a tree that cannot be resolved.
@@ -202,6 +219,15 @@ export function clearDone({ repoRoot, run, block, file, tree = null }) {
   const marker = path.join(queueDir(repoRoot), `${ticket}.done`);
   const removed = existsSync(marker);
   rmSync(marker, { force: true });
+  let names;
+  try {
+    names = readdirSync(queueDir(repoRoot));
+  } catch {
+    names = [];
+  }
+  // accepted race: a claim a concurrent dropDoneIf still uses may go here, which can leave a refused
+  // fresh-restore-failed marker (rare, fail closed; a second `block reopen` clears it)
+  for (const name of names) if (CLAIM.exec(name)?.[1] === ticket) rmSync(path.join(queueDir(repoRoot), name), { force: true });
   return { ticket, content_hash, removed };
 }
 
@@ -216,54 +242,113 @@ export function clearDone({ repoRoot, run, block, file, tree = null }) {
  *   3. the claim's bytes are compared with `seen`: equal, the claim is removed (`dropped`) and the
  *      caller enqueues; different (a newer result arrived), the marker is restored with
  *      `linkSync` only — on EEXIST a newer marker is there and wins, the claim is removed
- *      (`changed`); on any other link error the claim is LEFT in place (never an overwriting
- *      rename) and `fresh-restore-failed` is thrown.
+ *      (`changed`); on any other link error `fresh-restore-failed` is thrown (below).
+ * B83, fail closed — no failure leaves a ticket the worker runs again by itself:
+ *   - a link-back that fails with other than EEXIST writes a refused marker in place,
+ *     `{ticket, status: 'refused', reason: 'fresh-restore-failed'}` (no-overwrite open `wx`, mode
+ *     0o600; it names no result, so `--fresh` counts it and refuses, and `block reopen` clears it).
+ *     EEXIST on that write: a newer marker is in place. Any other write error keeps the claim; a
+ *     claim (`<ticket>.done.<pid>.<hex>.fresh`) counts as done for `pendingTickets`, and
+ *     `clearDone` (`block reopen`) removes it;
+ *   - a claim that cannot be removed after a `dropped` compare is `fresh-claim-failed` (it would
+ *     hold the re-queued ticket off the worker; `block reopen` clears it); after a good link-back
+ *     the marker is back, so a claim that cannot be removed is left for `clearDone`.
  * A crash between the drop and the caller's enqueue leaves a re-runnable ticket with no marker:
  * harmless — its ticket file is pending, and the next `review-file` queues it anyway. Synchronous.
  * @param {string} repoRoot @param {string} ticket @param {Buffer} seen
- * @param {{link?: (from: string, to: string) => void, read?: (file: string) => Buffer}} [io] - for
- *   tests (default `linkSync`, `readFileSync`). A claim that cannot be read is restored the same
- *   way and refused `fresh-restore-failed`.
+ * @param {{link?: (from: string, to: string) => void, read?: (file: string) => Buffer, rename?: (from: string, to: string) => void, remove?: (file: string) => void, write?: (file: string, text: string) => void}} [io] - for
+ *   tests (default `linkSync`, `readFileSync`, `renameSync`, `rmSync` with force, `writeFileSync`
+ *   with flag `wx` and mode 0o600). A claim that cannot be read is restored the same way and
+ *   refused `fresh-restore-failed`.
  * @returns {'dropped' | 'gone' | 'changed'}
- * @throws {WorkerError} `fresh-restore-failed` (the claim is kept; the message names no path).
+ * @throws {WorkerError} `fresh-claim-failed` (the claim could not be taken, or not removed after
+ *   the drop; nothing was queued) or `fresh-restore-failed` (the message says which state was left:
+ *   put back, a newer marker, a refused marker, the claim kept, or nothing). A message names an
+ *   error code, never a path.
  */
 export function dropDoneIf(repoRoot, ticket, seen, io = {}) {
   const marker = path.join(queueDir(repoRoot), `${assertTicketId(ticket)}.done`);
   const claim = `${marker}.${process.pid}.${randomBytes(4).toString('hex')}.fresh`;
+  const remove = io.remove ?? ((/** @type {string} */ file) => rmSync(file, { force: true }));
   try {
-    renameSync(marker, claim);
+    (io.rename ?? renameSync)(marker, claim);
   } catch (err) {
     if (/** @type {{code?: unknown}} */ (err)?.code === 'ENOENT') return 'gone';
-    throw err;
+    throw new WorkerError('fresh-claim-failed', `the done marker of ticket ${ticket} could not be claimed (${codeOf(err)}); nothing was queued`);
   }
-  const codeOf = (/** @type {unknown} */ err) => {
-    const code = /** @type {{code?: unknown}} */ (err)?.code;
-    return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(code) ? code : 'unknown';
-  };
   /** @type {string | null} */
   let readFailed = null;
+  /** @type {boolean} */
+  let same = false;
   try {
-    if ((io.read ?? readFileSync)(claim).equals(seen)) {
-      rmSync(claim, { force: true });
-      return 'dropped';
-    }
+    same = (io.read ?? readFileSync)(claim).equals(seen);
   } catch (err) {
     readFailed = codeOf(err);
   }
+  if (same) {
+    try {
+      remove(claim);
+    } catch (err) {
+      throw new WorkerError('fresh-claim-failed', `the done marker of ticket ${ticket} was dropped but its claim could not be removed (${codeOf(err)}); block reopen clears it; nothing was queued`);
+    }
+    return 'dropped';
+  }
+  /** @type {string | null} */
+  let linkFailed = null;
   try {
     (io.link ?? linkSync)(claim, marker);
   } catch (err) {
-    const code = codeOf(err);
-    if (code !== 'EEXIST') throw new WorkerError('fresh-restore-failed', `the done marker of ticket ${ticket} changed and could not be restored (${code}); its claim was kept; nothing was queued`);
+    linkFailed = codeOf(err);
   }
-  rmSync(claim, { force: true });
-  if (readFailed !== null) throw new WorkerError('fresh-restore-failed', `the claimed done marker of ticket ${ticket} could not be read (${readFailed}); it was put back; nothing was queued`);
+  const unread = `the claimed done marker of ticket ${ticket} could not be read (${readFailed})`;
+  if (linkFailed !== null && linkFailed !== 'EEXIST') {
+    const cause = readFailed !== null ? `${unread} and could not be restored (${linkFailed})` : `the done marker of ticket ${ticket} changed and could not be restored (${linkFailed})`;
+    throw new WorkerError('fresh-restore-failed', `${cause}; ${refuseInPlace(marker, claim, ticket, io, remove)}; nothing was queued`);
+  }
+  try {
+    remove(claim);
+  } catch {
+    // the marker is back (or a newer one won), so the ticket is done; `clearDone` removes the claim
+  }
+  if (readFailed !== null) throw new WorkerError('fresh-restore-failed', `${unread}; ${linkFailed === 'EEXIST' ? 'a newer marker is in place' : 'it was put back'}; nothing was queued`);
   return 'changed';
 }
 
 /**
+ * B83: after a failed link-back, put a refused `fresh-restore-failed` marker where the done marker
+ * was (never over one), so the worker does not run the ticket; the claim is then removed when it
+ * can be (`clearDone` removes a leftover one). When the write fails the claim is kept instead.
+ * @param {string} marker @param {string} claim @param {string} ticket
+ * @param {{write?: (file: string, text: string) => void}} io @param {(file: string) => void} remove
+ * @returns {string} which state was left, for the message (codes only, no path).
+ */
+function refuseInPlace(marker, claim, ticket, io, remove) {
+  const text = `${JSON.stringify({ ticket, status: 'refused', reason: 'fresh-restore-failed' })}\n`;
+  /** @type {string | null} */
+  let writeFailed = null;
+  try {
+    (io.write ?? ((/** @type {string} */ file, /** @type {string} */ body) => writeFileSync(file, body, { flag: 'wx', mode: 0o600 })))(marker, text);
+  } catch (err) {
+    writeFailed = codeOf(err);
+  }
+  if (writeFailed === null || writeFailed === 'EEXIST') {
+    try {
+      remove(claim);
+    } catch {
+      // the marker holds the ticket off the worker; `clearDone` removes the leftover claim
+    }
+    return writeFailed === null ? 'a refused fresh-restore-failed marker was written in its place, so the worker does not run the ticket' : 'a newer marker is in place';
+  }
+  // the claim holds the ticket off the worker (`pendingTickets`); a claim that is gone cannot
+  return existsSync(claim)
+    ? `the refused marker could not be written (${writeFailed}); its claim was kept, so the worker does not run the ticket; block reopen clears it`
+    : `the refused marker could not be written (${writeFailed}) and no claim exists`;
+}
+
+/**
  * Tickets with no done marker, oldest first (enqueue time, then id). Unparseable files are
- * skipped here and refused by the worker when it reads them.
+ * skipped here and refused by the worker when it reads them. B83: a ticket whose marker is held
+ * by a `dropDoneIf` claim is not pending either (a claim kept after a failed restore fails closed).
  * @param {string} repoRoot
  * @returns {string[]} ticket ids
  */
@@ -274,8 +359,9 @@ export function pendingTickets(repoRoot) {
   } catch {
     return [];
   }
+  const claimed = new Set(names.map((n) => CLAIM.exec(n)?.[1]));
   const ids = names.filter((n) => /^[0-9a-f]{24}\.json$/.test(n)).map((n) => n.slice(0, 24));
-  const pending = ids.filter((id) => !names.includes(`${id}.done`));
+  const pending = ids.filter((id) => !names.includes(`${id}.done`) && !claimed.has(id));
   const at = (/** @type {string} */ id) => {
     const t = readJSON(path.join(queueDir(repoRoot), `${id}.json`));
     return typeof t?.enqueued_at === 'string' ? t.enqueued_at : '';

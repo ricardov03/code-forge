@@ -9,12 +9,15 @@ import { describe, test } from 'node:test';
 // drives the real verb in process, in a temp HOME and a temp repo; this live process stands in for
 // the worker (announceWorker), and the cached results are written with the real run key.
 
-const { announceWorker, dropDoneIf, enqueue, queueDir, retractWorker, writeResult } = await import('../../src/worker/queue.mjs');
+const { announceWorker, clearDone, dropDoneIf, enqueue, pendingTickets, queueDir, retractWorker, writeResult } = await import('../../src/worker/queue.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 const { loadKey } = await import('../../src/state/signer.mjs');
 const { isForbidden, mergeForbidden } = await import('../../src/util/forbidden.mjs');
 
 const FILE = 'src/a.mjs';
+
+/** B83: the exact fail-closed marker a failed link-back leaves. @param {string} ticket */
+const refusedMarker = (ticket) => `{"ticket":"${ticket}","status":"refused","reason":"fresh-restore-failed"}\n`;
 
 /** @returns {{write: (s: string) => boolean, text: () => string}} */
 function capture() {
@@ -165,7 +168,7 @@ describe('B75 review-file --fresh: a counted result is never re-rolled', () => {
     try {
       f.cache({ status: 'stopped', stopped: 'review_cap', findings: [] });
       const stopped = await reviewFile(f.repo, [FILE, '--block', BLOCK, '--fresh']);
-      assert.equal(stopped.json.message, `fresh-needs-reopen: the cached result of ${FILE} counts as a review (or cannot be read); --fresh re-runs only stale, unavailable or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`);
+      assert.equal(stopped.json.message, `fresh-needs-reopen: the cached result of ${FILE} counts as a review (or cannot be read, or kept changing under the claim); --fresh re-runs only stale, unavailable or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`);
 
       f.cache({ status: 'refused', reason: 'review-state-tampered' });
       const before = readFileSync(f.marker);
@@ -285,7 +288,7 @@ describe('B75 dropDoneIf: claim only what was classified', () => {
     }
   });
 
-  test('a newer marker written before the restore wins (EEXIST); any other link error keeps the claim and refuses fresh-restore-failed', async () => {
+  test('a newer marker written before the restore wins (EEXIST); any other link error writes a refused fresh-restore-failed marker in place', async () => {
     const f = await fixture();
     try {
       f.cache({ status: 'stale' });
@@ -303,13 +306,18 @@ describe('B75 dropDoneIf: claim only what was classified', () => {
       };
       assert.throws(() => dropDoneIf(f.repo, f.first.ticket, Buffer.from('other'), { link: denied }), {
         code: 'fresh-restore-failed',
-        message: `the done marker of ticket ${f.first.ticket} changed and could not be restored (EPERM); its claim was kept; nothing was queued`,
+        message: `the done marker of ticket ${f.first.ticket} changed and could not be restored (EPERM); a refused fresh-restore-failed marker was written in its place, so the worker does not run the ticket; nothing was queued`,
       });
-      const left = readdirSync(queueDir(f.repo)).sort();
-      const claims = left.filter((n) => n.startsWith(`${f.first.ticket}.done.`) && n.endsWith('.fresh'));
-      assert.deepEqual([left.length, claims.length, left.includes(`${f.first.ticket}.done`)], [3, 1, false]);
-      assert.equal(readFileSync(path.join(queueDir(f.repo), claims[0]), 'utf8'), newer);
-      rmSync(path.join(queueDir(f.repo), claims[0]));
+      // B83 (c): the refused marker (no-overwrite, 0o600) stands in place; the claim is removed
+      assert.deepEqual(readdirSync(queueDir(f.repo)).sort(), [`${f.first.ticket}.done`, `${f.first.ticket}.json`, 'worker.json']);
+      assert.equal(readFileSync(f.marker, 'utf8'), refusedMarker(f.first.ticket));
+      assert.equal(statSync(f.marker).mode & 0o777, 0o600);
+      assert.deepEqual(pendingTickets(f.repo), []);
+      // a later --fresh counts it (not on the allow-list) and refuses; block reopen's clearDone clears it
+      const again = await reviewFile(f.repo, [FILE, '--block', BLOCK, '--fresh']);
+      assert.deepEqual([again.code, again.json.reason, readFileSync(f.marker, 'utf8')], [1, 'fresh-needs-reopen', refusedMarker(f.first.ticket)]);
+      assert.equal(clearDone({ repoRoot: f.repo, run: f.runId, block: BLOCK, file: FILE }).removed, true);
+      assert.deepEqual(pendingTickets(f.repo), [f.first.ticket]);
     } finally {
       f.done();
     }
@@ -330,6 +338,208 @@ describe('B75 dropDoneIf: claim only what was classified', () => {
       });
       assert.deepEqual([statSync(f.marker).ino, Buffer.compare(readFileSync(f.marker), bytes)], [st.ino, 0]);
       assert.deepEqual(readdirSync(queueDir(f.repo)).sort(), [`${f.first.ticket}.done`, `${f.first.ticket}.json`, 'worker.json']);
+    } finally {
+      f.done();
+    }
+  });
+});
+
+describe('B83 dropDoneIf: the double-failure paths fail closed and name the right cause', () => {
+  /** @param {string} repo @param {string} ticket @returns {string[]} the claim files of `ticket`. */
+  const claimsOf = (repo, ticket) => readdirSync(queueDir(repo)).filter((n) => n.startsWith(`${ticket}.done.`) && n.endsWith('.fresh'));
+  const eio = (/** @type {string} */ where) => Object.assign(new Error(`EIO at ${where}`), { code: 'EIO' });
+
+  test('(a) the claim cannot be read and a newer marker won the link-back (EEXIST): the message says a newer marker is in place, not put back', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const bytes = readFileSync(f.marker);
+      const newer = `${JSON.stringify({ ticket: f.first.ticket, status: 'reviewed', result: 'x' })}\n`;
+      const read = () => {
+        throw eio(f.marker);
+      };
+      const link = (/** @type {string} */ from, /** @type {string} */ to) => {
+        writeFileSync(to, newer);
+        throw Object.assign(new Error(`exists ${to}`), { code: 'EEXIST' });
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, bytes, { read, link }), (/** @type {any} */ err) => {
+        assert.deepEqual([err.code, err.message], ['fresh-restore-failed', `the claimed done marker of ticket ${f.first.ticket} could not be read (EIO); a newer marker is in place; nothing was queued`]);
+        return true;
+      });
+      assert.equal(readFileSync(f.marker, 'utf8'), newer);
+      assert.deepEqual([claimsOf(f.repo, f.first.ticket), pendingTickets(f.repo)], [[], []]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test('(b) the claim cannot be read and cannot be linked back: the read failure is named first, a refused marker is written and the worker skips the ticket', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const bytes = readFileSync(f.marker);
+      const read = () => {
+        throw eio(f.marker);
+      };
+      const link = () => {
+        throw Object.assign(new Error(`denied ${f.marker}`), { code: 'EPERM' });
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, bytes, { read, link }), (/** @type {any} */ err) => {
+        assert.deepEqual(
+          [err.code, err.message],
+          ['fresh-restore-failed', `the claimed done marker of ticket ${f.first.ticket} could not be read (EIO) and could not be restored (EPERM); a refused fresh-restore-failed marker was written in its place, so the worker does not run the ticket; nothing was queued`],
+        );
+        return true;
+      });
+      assert.deepEqual([readFileSync(f.marker, 'utf8'), claimsOf(f.repo, f.first.ticket), pendingTickets(f.repo)], [refusedMarker(f.first.ticket), [], []]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test('(b) the refused marker cannot be written either: the claim is kept and says so, the worker skips the ticket, and clearDone frees it', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const bytes = readFileSync(f.marker);
+      const link = () => {
+        throw Object.assign(new Error(`denied ${f.marker}`), { code: 'EPERM' });
+      };
+      const write = (/** @type {string} */ file) => {
+        throw Object.assign(new Error(`read-only ${file}`), { code: 'EROFS' });
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, Buffer.from('other'), { link, write }), {
+        code: 'fresh-restore-failed',
+        message: `the done marker of ticket ${f.first.ticket} changed and could not be restored (EPERM); the refused marker could not be written (EROFS); its claim was kept, so the worker does not run the ticket; block reopen clears it; nothing was queued`,
+      });
+      const claims = claimsOf(f.repo, f.first.ticket);
+      assert.deepEqual([claims.length, queued(f.repo, 'done'), pendingTickets(f.repo)], [1, [], []]);
+      assert.equal(Buffer.compare(readFileSync(path.join(queueDir(f.repo), claims[0])), bytes), 0);
+      // block reopen (clearDone) removes the leftover claim: the ticket is pending again
+      assert.equal(clearDone({ repoRoot: f.repo, run: f.runId, block: BLOCK, file: FILE }).removed, false);
+      assert.deepEqual([claimsOf(f.repo, f.first.ticket), pendingTickets(f.repo)], [[], [f.first.ticket]]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test('(b) a newer marker lands before the refused one (wx gives EEXIST): it is never overwritten and the message says a newer marker is in place', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const newer = `${JSON.stringify({ ticket: f.first.ticket, status: 'reviewed', result: 'x' })}\n`;
+      const link = () => {
+        writeFileSync(f.marker, newer);
+        throw Object.assign(new Error(`denied ${f.marker}`), { code: 'EPERM' });
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, Buffer.from('other'), { link }), {
+        code: 'fresh-restore-failed',
+        message: `the done marker of ticket ${f.first.ticket} changed and could not be restored (EPERM); a newer marker is in place; nothing was queued`,
+      });
+      assert.deepEqual([readFileSync(f.marker, 'utf8'), claimsOf(f.repo, f.first.ticket), pendingTickets(f.repo)], [newer, [], []]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test('(b) the claim vanished (read ENOENT) and the link-back fails: a refused marker is written; with that write failing too, no claim exists', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const bytes = readFileSync(f.marker);
+      const read = (/** @type {string} */ claim) => {
+        rmSync(claim);
+        return readFileSync(claim);
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, bytes, { read }), (/** @type {any} */ err) => {
+        assert.deepEqual(
+          [err.code, err.message],
+          ['fresh-restore-failed', `the claimed done marker of ticket ${f.first.ticket} could not be read (ENOENT) and could not be restored (ENOENT); a refused fresh-restore-failed marker was written in its place, so the worker does not run the ticket; nothing was queued`],
+        );
+        assert.equal(err.message.includes(f.repo), false);
+        return true;
+      });
+      assert.deepEqual([readFileSync(f.marker, 'utf8'), claimsOf(f.repo, f.first.ticket), pendingTickets(f.repo)], [refusedMarker(f.first.ticket), [], []]);
+
+      f.cache({ status: 'stale' });
+      const write = () => {
+        throw Object.assign(new Error('read-only'), { code: 'EROFS' });
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, readFileSync(f.marker), { read, write }), {
+        code: 'fresh-restore-failed',
+        message: `the claimed done marker of ticket ${f.first.ticket} could not be read (ENOENT) and could not be restored (ENOENT); the refused marker could not be written (EROFS) and no claim exists; nothing was queued`,
+      });
+      assert.deepEqual([claimsOf(f.repo, f.first.ticket), queued(f.repo, 'done')], [[], []]);
+      // no marker and no claim could be left, so nothing holds the ticket: fail-open is the accepted outcome here
+      assert.deepEqual(pendingTickets(f.repo), [f.first.ticket]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test('(d) removing the claim after a good link-back fails: still changed, no raw fs error; the marker is back', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const bytes = readFileSync(f.marker);
+      const st = statSync(f.marker);
+      const remove = (/** @type {string} */ file) => {
+        throw Object.assign(new Error(`denied ${file}`), { code: 'EPERM' });
+      };
+      assert.equal(dropDoneIf(f.repo, f.first.ticket, Buffer.from('other'), { remove }), 'changed');
+      assert.deepEqual([statSync(f.marker).ino, Buffer.compare(readFileSync(f.marker), bytes)], [st.ino, 0]);
+      assert.deepEqual([claimsOf(f.repo, f.first.ticket).length, pendingTickets(f.repo)], [1, []]);
+
+      // the read failed, the link-back held and the removal fails: the read failure, put back
+      const read = () => {
+        throw eio(f.marker);
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, bytes, { read, remove }), {
+        code: 'fresh-restore-failed',
+        message: `the claimed done marker of ticket ${f.first.ticket} could not be read (EIO); it was put back; nothing was queued`,
+      });
+      assert.equal(Buffer.compare(readFileSync(f.marker), bytes), 0);
+      assert.equal(claimsOf(f.repo, f.first.ticket).length, 2);
+      // block reopen's clearDone removes the marker and both leftover claims
+      assert.equal(clearDone({ repoRoot: f.repo, run: f.runId, block: BLOCK, file: FILE }).removed, true);
+      assert.deepEqual([claimsOf(f.repo, f.first.ticket), pendingTickets(f.repo)], [[], [f.first.ticket]]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test('(d) the claim cannot be removed after the drop: fresh-claim-failed with the code only, nothing queued, the claim holds the ticket until clearDone', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const remove = (/** @type {string} */ file) => {
+        throw Object.assign(new Error(`denied ${file}`), { code: 'EPERM' });
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, readFileSync(f.marker), { remove }), {
+        code: 'fresh-claim-failed',
+        message: `the done marker of ticket ${f.first.ticket} was dropped but its claim could not be removed (EPERM); block reopen clears it; nothing was queued`,
+      });
+      assert.deepEqual([claimsOf(f.repo, f.first.ticket).length, queued(f.repo, 'done'), pendingTickets(f.repo)], [1, [], []]);
+      assert.equal(clearDone({ repoRoot: f.repo, run: f.runId, block: BLOCK, file: FILE }).removed, false);
+      assert.deepEqual([claimsOf(f.repo, f.first.ticket), pendingTickets(f.repo)], [[], [f.first.ticket]]);
+    } finally {
+      f.done();
+    }
+  });
+
+  test('a claim rename that fails with other than ENOENT is fresh-claim-failed with the code only; the marker is not moved', async () => {
+    const f = await fixture();
+    try {
+      f.cache({ status: 'stale' });
+      const bytes = readFileSync(f.marker);
+      const rename = (/** @type {string} */ from) => {
+        throw Object.assign(new Error(`denied ${from}`), { code: 'EACCES' });
+      };
+      assert.throws(() => dropDoneIf(f.repo, f.first.ticket, bytes, { rename }), {
+        code: 'fresh-claim-failed',
+        message: `the done marker of ticket ${f.first.ticket} could not be claimed (EACCES); nothing was queued`,
+      });
+      assert.deepEqual([Buffer.compare(readFileSync(f.marker), bytes), claimsOf(f.repo, f.first.ticket), queued(f.repo, 'done')], [0, [], [f.first.ticket]]);
     } finally {
       f.done();
     }

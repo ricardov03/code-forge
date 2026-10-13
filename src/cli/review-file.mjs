@@ -223,7 +223,7 @@ function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDo
     ticket,
     file,
     exits: [...FRESH_EXITS],
-    message: `fresh-needs-reopen: the cached result of ${file} counts as a review (or cannot be read); --fresh re-runs only stale, unavailable or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`,
+    message: `fresh-needs-reopen: the cached result of ${file} counts as a review (or cannot be read, or kept changing under the claim); --fresh re-runs only stale, unavailable or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`,
   });
   return 1;
 }
