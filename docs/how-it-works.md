@@ -681,6 +681,18 @@ flowchart TD
   round is one round for each file it touched. The chart above shows the rounds of one file.
 - Round 1 reviews the whole file packet. Round 2 and later review **only the fix hunks** and the
   open findings.
+- Only real rechecks count toward the cap, per-level ladder and stall rules (B111). An unchanged
+  recheck runs no session and writes no `review.round`; it returns `reviewed`, `approved: false`,
+  `reason: 'no-fix-hunks'` with the open findings and unchanged round counters. An answer that
+  skips a `resolved` entry for an open finding in its packet is a schema miss. It follows the
+  normal fallback: when eligible (the packet's second broken result), that schema miss tries the
+  second level once. A successful second-level answer is accepted; only a failed second-level
+  try, or no available second level, leaves `review.unavailable` and retry. An unavailable recheck
+  closes nothing, counts no round and never stalls. Markdown packets check only their section's
+  listed findings. A real `resolved: false` still counts and can stall. An unchanged `patch_check`
+  still stops with `l3_patch_exhausted` (B73). The worker's recheck session summary shows `status`,
+  `tokens_in`, `tokens_out`, and `reason` for a string status other than `ok`; missing status is
+  `null` with no reason.
 - After each round with findings still open, the **cap is checked first**
   (`review.max_rounds_per_file`, default 4):
   - round 4 still open and the block has **not** used its L3 rung ⇒ the rung fires;

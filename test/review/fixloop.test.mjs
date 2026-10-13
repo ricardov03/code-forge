@@ -46,7 +46,8 @@ function stubSpawn(extra = () => ({})) {
   const spawn = async (/** @type {{promptPath: string}} */ o) => {
     const text = readFileSync(o.promptPath, 'utf8');
     packets.push(text);
-    return { status: 'ok', exit_code: 0, answer: answerFor(hunksOf(text), extra(text)), usage: { tokens_in: 900, tokens_out: 300 } };
+    const resolved = [...text.slice(text.indexOf('## open findings\n')).matchAll(/^- (\S+) \(/gm)].map((m) => ({ id: m[1], resolved: false, why: 'still open' }));
+    return { status: 'ok', exit_code: 0, answer: answerFor(hunksOf(text), { resolved, ...extra(text) }), usage: { tokens_in: 900, tokens_out: 300 } };
   };
   return { spawn, packets };
 }

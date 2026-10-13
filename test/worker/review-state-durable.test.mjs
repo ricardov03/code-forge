@@ -59,7 +59,7 @@ async function wired() {
     packets.push(text);
     const open = openIdsOf(text);
     const file = text.includes(OTHER) ? OTHER : FILE;
-    const resolved = lens === 'recheck' && open.length > 0 ? [{ id: open[0], resolved: true, why: 'fixed' }] : [];
+    const resolved = open.map((id, i) => ({ id, resolved: lens === 'recheck' && i === 0, why: i === 0 ? 'fixed' : 'still open' }));
     const answer = { passed: false, summary: 's', reviewed_hunks: hunksOf(text), findings: lens === 'recheck' ? [] : [finding('F1', file), finding('F2', file)], resolved, needs_file: [] };
     return { status: 'ok', exit_code: 0, answer, usage: { tokens_in: 900, tokens_out: 300 } };
   };

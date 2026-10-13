@@ -409,7 +409,8 @@ function stuckLoop(extraRounds, o = {}) {
       const text = readFileSync(s.promptPath, 'utf8');
       const listed = text.slice(text.indexOf('\nhunks:\n') + 8).split('\n');
       const hunks = listed.slice(0, listed.findIndex((l) => !l.startsWith('- @@'))).map((l) => l.slice(2));
-      return { status: 'ok', exit_code: 0, answer: answerFor(hunks), usage: { tokens_in: 900, tokens_out: 300 } };
+      const resolved = [...text.slice(text.indexOf('## open findings\n')).matchAll(/^- (\S+) \(/gm)].map((m) => ({ id: m[1], resolved: false, why: 'still open' }));
+      return { status: 'ok', exit_code: 0, answer: answerFor(hunks, { resolved }), usage: { tokens_in: 900, tokens_out: 300 } };
     },
     fix: async () => {
       fixes += 1;

@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 106,
+  "block_count": 107,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1711,6 +1711,33 @@
         "B109"
       ],
       "note": "root-added 2026-10-13; issue #16 item 2 (plans/field-bugs/plan.md B110); a cached round-1 split_required ran no session and counts no round: plain review-file re-queues it with retry: true and --fresh re-queues it, same ticket id; a recheck stop (status stopped, stopped split_required) still needs block reopen or waive; built by Codex at high effort"
+    },
+    "B111": {
+      "title": "An unchanged or incomplete recheck never counts or stalls",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/review.md",
+        "src/review/fixloop.mjs",
+        "src/worker/engine.mjs",
+        "test/review/recheck-real.test.mjs",
+        "test/autopilot/actions.test.mjs",
+        "test/cli/block-human-confirm.test.mjs",
+        "test/review/fixloop.test.mjs",
+        "test/review/moved-wiring.test.mjs",
+        "test/review/patch-progress.test.mjs",
+        "test/review/reopen.test.mjs",
+        "test/worker/fixloop-wiring.test.mjs",
+        "test/worker/pool.test.mjs",
+        "test/worker/review-state-durable.test.mjs",
+        "test/worker/review-state-restore.test.mjs"
+      ],
+      "depends_on": [
+        "B110"
+      ],
+      "note": "root-added 2026-10-13; issue #16 item 3 (plans/field-bugs/plan.md B111, D3 = a); P1: a recheck with no fix hunks runs no session, counts no round and returns reviewed, approved false, reason no-fix-hunks; P2: a recheck answer without a resolved entry for each open finding of its packet is a schema miss (B55/B91 second level at the second broken result, else unavailable); the worker recheck summary gains status, tokens_in, tokens_out and reason; 10 fixtures now answer resolved explicitly; built by Codex at high effort in 2 rounds"
     }
   }
 }

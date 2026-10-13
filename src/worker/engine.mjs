@@ -646,7 +646,10 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         },
         spawn: async (opts) => {
           const res = await ctx.spawn(opts);
-          rechecks.push({ lens: opts?.rowExtra?.lens ?? null, role: opts?.role ?? null, level: opts?.level ?? null, provider: res?.provider ?? null, model: res?.model ?? null });
+          rechecks.push({ lens: opts?.rowExtra?.lens ?? null, role: opts?.role ?? null, level: opts?.level ?? null, provider: res?.provider ?? null, model: res?.model ?? null,
+            status: res?.status ?? null, tokens_in: res?.usage?.tokens_in ?? res?.row?.tokens_in ?? null, tokens_out: res?.usage?.tokens_out ?? res?.row?.tokens_out ?? null,
+            ...(typeof res?.status === 'string' && res.status !== 'ok' ? { reason: res.reason ?? res.status } : {}),
+          });
           return res;
         },
       },
@@ -689,7 +692,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
     return { ...head, status: 'reviewed', approved: true, findings: [] };
   }
   if (status === 'stopped') return { ...head, status: 'stopped', stopped: next?.reason ?? 'stopped', ...stopSize(state), approved: false, findings: state.open };
-  return { ...head, status: 'reviewed', approved: false, reason: 'findings-open', findings: state.open };
+  return { ...head, status: 'reviewed', approved: false, reason: next?.reason === 'no-fix-hunks' ? 'no-fix-hunks' : 'findings-open', findings: state.open };
 }
 
 /**

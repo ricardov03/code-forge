@@ -56,7 +56,8 @@ async function run({ ids, patchCloses, patchFinds, afterPatch = [], cfg = cfgFor
     const text = readFileSync(o.promptPath, 'utf8');
     const found = reportNext.map((id) => finding(id, 150));
     reportNext = [];
-    return { status: 'ok', exit_code: 0, answer: answerFor(hunksOf(text), { findings: found }), usage: { tokens_in: 900, tokens_out: 300 } };
+    const resolved = [...text.slice(text.indexOf('## open findings\n')).matchAll(/^- (\S+) \(/gm)].map((m) => ({ id: m[1], resolved: false, why: 'still open' }));
+    return { status: 'ok', exit_code: 0, answer: answerFor(hunksOf(text), { findings: found, resolved }), usage: { tokens_in: 900, tokens_out: 300 } };
   };
   const deps = {
     repoRoot,

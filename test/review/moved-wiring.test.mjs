@@ -197,7 +197,7 @@ function recheckDeps(/** @type {string} */ repo, /** @type {string} */ base, /**
     spawn: async (/** @type {{promptPath: string}} */ o) => {
       const t = readFileSync(o.promptPath, 'utf8');
       seen(t);
-      return { status: 'ok', exit_code: 0, answer: answerFor(hunksOf(t)), usage: { tokens_in: 900, tokens_out: 300 } };
+      return { status: 'ok', exit_code: 0, answer: answerFor(hunksOf(t), { resolved: [{ id: 'F1', resolved: false, why: 'still open' }] }), usage: { tokens_in: 900, tokens_out: 300 } };
     },
     review: async () => ({ status: 'reviewed', engine: 'adaptive', depth: 'dual', findings: [stale], sessions: [{ role: 'judge', lens: 'judge' }] }),
     jev: async () => ({ ok: true, answers: { resolved: { type: 'noul', noul: 0.2 } } }),

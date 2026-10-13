@@ -16,6 +16,7 @@ In the next release:
 - **The close writes the ticket lines (B96).** The coder's final report no longer needs a `reviewed <path> ticket <id>` line per file. `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket. `--json` and the block's done file carry them as `reviewed: [{file, ticket, via}]`. With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr, and the close goes on.
 - **A big-diff file steps up to a full review (B109).** A low-risk file whose diff is too big for the quick review budget used to stop with `split_required`, and splitting it only made the diff bigger. Now the review plans again as one full L2 session. If the diff fits the full budget, the file is reviewed. The `review.plan` row records the step as `step_up`.
 - **A file that was too big can be reviewed again (B110).** A first-round `split_required` result ran no review. After you raise the budget and run `run reload`, `review-file` (or `review-file --fresh`) tries again with the same ticket. A recheck stop still needs `block reopen` or `block waive`.
+- **A recheck that did not really review never stalls (B111).** A recheck on unchanged content runs no session and counts no round; it returns `reason: 'no-fix-hunks'`. A recheck answer that skips an open finding is a broken answer, not a "still open". So the stall rule sees only real rechecks. The recheck summary now shows each session's status and tokens.
 
 In 0.10.0:
 

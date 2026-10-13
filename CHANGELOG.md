@@ -21,6 +21,9 @@ waits on a second real consumer (plan §10.4, Q17).
   the `review.plan` row carries `step_up: {from, tokens_in, budget}` (B109, #16).
 - A cached round-1 `split_required` is re-queued by `review-file` (`retry: true`) and by `review-file --fresh`, with the
   same ticket id; a recheck `split_required` stop still needs `block reopen` or `block waive` (B110, #16).
+- A recheck with no fix hunks counts no round and returns `reviewed`, `approved: false`, `reason: 'no-fix-hunks'`; a
+  recheck answer that lacks a `resolved` entry for an open finding of its packet is a `schema` miss; the worker's
+  recheck summary adds `status`, `tokens_in`, `tokens_out` and `reason` (B111, #16).
 
 ## [0.10.0] — 2026-10-13
 

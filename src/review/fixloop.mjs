@@ -436,12 +436,21 @@ export function insideHunks(f, hunks) {
  * (`schema-fallback.mjs`; rechecks and the patch_check alike).
  * @param {{text: string, hunkHeaders: string[], tokensIn: number, contextMode: string}} packet
  * @param {LoopDeps} deps
+ * @param {ReadonlyArray<Finding>} open - only the findings listed in this packet.
  */
-async function recheckSession(packet, deps) {
+async function recheckSession(packet, deps, open) {
   mkdirSync(deps.workDir, { recursive: true, mode: 0o700 });
   const promptPath = path.join(deps.workDir, `recheck-${randomBytes(6).toString('hex')}.md`);
   writeFileSync(promptPath, packet.text, { mode: 0o600 });
   const min = minTokensOut(deps.cfg);
+  /** @param {Record<string, any> | null} result @returns {import('./validate-review.mjs').Verdict} */
+  const validate = (result) => {
+    const verdict = validateReview(result, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+    if (!verdict.ok) return verdict;
+    const ids = new Set((verdict.review?.resolved ?? []).map((/** @type {{id: string}} */ entry) => entry.id));
+    if (open.some((finding) => !ids.has(finding.id))) return { ok: false, reason: 'schema', detail: 'resolved does not cover the packet open findings' };
+    return verdict;
+  };
   const session = { lens: 'recheck', role: 'reviewer', level: 'L2' };
   // no ledger writer ⇒ nothing logged, nothing tried; every row goes through the same writer
   // (each helper handles its own failed write)
@@ -485,7 +494,7 @@ async function recheckSession(packet, deps) {
     } catch {
       res = null; // the helper never throws; if it ever did, it is still an `exit` failure
     }
-    verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+    verdict = validate(res);
     if (first?.to) {
       // B91: a timed-out attempt was the packet's second broken result; the second level ran. The
       // verdict is already set: whatever throws after it leaves that verdict, never an exception
@@ -510,7 +519,7 @@ async function recheckSession(packet, deps) {
         const second = await tryNext(res, 'schema');
         if (second) {
           // compute everything first, then assign together, so a throw never leaves a mixed state
-          const secondVerdict = validateReview(second.res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+          const secondVerdict = validate(second.res);
           const sumIn = sum(tokensIn, second.res?.usage?.tokens_in);
           const sumOut = sum(tokensOut, second.res?.usage?.tokens_out);
           res = second.res;
@@ -664,6 +673,11 @@ export async function runRound(state, deps, opts = {}) {
       s.scope === 'file'
         ? await readFileDiff({ repoRoot: deps.repoRoot, file: current.rel, base: deps.base ?? null })
         : await fixHunkDiff({ file: current.rel, previous: state.reviewed_content ?? '', current: current.content, workDir: deps.workDir });
+    if (kind === 'recheck' && (current.content === state.reviewed_content || diff.hunks.length === 0)) {
+      state.next = { action: 'fix', level: state.level, trigger: null, reason: 'no-fix-hunks' };
+      state.pending_kind = null;
+      return state;
+    }
     if (diff.hunks.length > 0) {
       /** @type {Finding[]} */
       const pending = [];
@@ -713,7 +727,7 @@ export async function runRound(state, deps, opts = {}) {
         for (const [i, part] of parts.entries()) {
           const packet = /** @type {any} */ (built[i]);
           packetInfo = mergePacketInfo(packetInfo, packet);
-          const session = await recheckSession(packet, deps);
+          const session = await recheckSession(packet, deps, part.open);
           tokensIn = sum(tokensIn, session.tokens_in);
           tokensOut = sum(tokensOut, session.tokens_out);
           if (!session.verdict.ok) {
@@ -743,7 +757,7 @@ export async function runRound(state, deps, opts = {}) {
         draft.open = [...stillOpen, ...triaged.fix_now, ...blocking];
       }
     }
-    // no fix hunks (the content did not change): nothing closes — the round stalls
+    // A patch_check with no fix hunks closed nothing: B73 still stops it.
   }
 
   if (kind !== 'patch_check') {
@@ -828,6 +842,7 @@ export async function converge(state, deps) {
     }
     await deps.fix?.({ file: state.file, round: state.round + 1, level: state.level, open: [...state.open], l3_patch: state.l3_rung_used });
     await runRound(state, deps);
+    if (state.next?.reason === 'no-fix-hunks') return state;
   }
   return state;
 }

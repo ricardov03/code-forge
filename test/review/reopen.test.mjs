@@ -83,7 +83,8 @@ async function fixture(slug) {
   const spawn = async (/** @type {Record<string, any>} */ opts) => {
     const text = readFileSync(opts.promptPath, 'utf8');
     sessions.push({ lens: opts.rowExtra?.lens, level: opts.level, text });
-    const answer = { passed: script.findings.length === 0, summary: 's', reviewed_hunks: hunksOf(text), findings: script.findings, resolved: [], needs_file: [] };
+    const resolved = [...text.slice(text.indexOf('## open findings\n')).matchAll(/^- (\S+) \(/gm)].map((m) => ({ id: m[1], resolved: false, why: 'still open' }));
+    const answer = { passed: script.findings.length === 0, summary: 's', reviewed_hunks: hunksOf(text), findings: script.findings, resolved, needs_file: [] };
     return { status: 'ok', exit_code: 0, answer, usage: { tokens_in: 900, tokens_out: 300 } };
   };
   const jev = async (/** @type {{questions: Record<string, any>}} */ req) => {

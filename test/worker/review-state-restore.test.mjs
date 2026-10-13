@@ -79,7 +79,7 @@ async function wired(firstFindings) {
     lenses.push(lens);
     packets.push(text);
     const open = openIdsOf(text);
-    const resolved = lens === 'recheck' && script.resolveOne && open.length > 0 ? [{ id: open[0], resolved: true, why: 'fixed' }] : [];
+    const resolved = open.map((id, i) => ({ id, resolved: lens === 'recheck' && script.resolveOne && i === 0, why: i === 0 && script.resolveOne ? 'fixed' : 'still open' }));
     const answer = { passed: false, summary: 's', reviewed_hunks: hunksOf(text), findings: lens === 'recheck' ? [] : firstFindings, resolved, needs_file: [] };
     return { status: 'ok', exit_code: 0, answer, usage: { tokens_in: 900, tokens_out: 300 } };
   };

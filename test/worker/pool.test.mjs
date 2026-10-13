@@ -449,7 +449,7 @@ describe('the block lock (B42): budget row and L3 rung with two files of one blo
         const file = FILES.find((f) => text.includes(f)) ?? FILES[0];
         const at0 = text.indexOf('\n## open findings\n');
         const open = at0 >= 0 ? [...text.slice(at0).matchAll(/^- (\S+) \(/gm)].map((m) => m[1]) : [];
-        const resolved = lens === 'recheck' && open.length > 0 ? [{ id: open[0], resolved: true, why: 'fixed' }] : [];
+        const resolved = open.map((id, i) => ({ id, resolved: lens === 'recheck' && i === 0, why: i === 0 ? 'fixed' : 'still open' }));
         const tag = file === 'src/a.mjs' ? 'A' : 'B';
         const findings = lens === 'recheck' ? [] : [1, 2, 3, 4].map((n) => finding(file, `${tag}${n}`));
         const answer = { passed: false, summary: 's', reviewed_hunks: hunksOf(text), findings, resolved, needs_file: [] };

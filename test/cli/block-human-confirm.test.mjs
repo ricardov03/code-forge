@@ -118,7 +118,8 @@ async function fixture(slug) {
   const key = await loadKey(runId);
   const spawn = async (/** @type {Record<string, any>} */ opts) => {
     const text = readFileSync(opts.promptPath, 'utf8');
-    return { status: 'ok', exit_code: 0, answer: { passed: false, summary: 's', reviewed_hunks: hunksOf(text), findings: [C1], resolved: [], needs_file: [] }, usage: { tokens_in: 900, tokens_out: 300 } };
+    const resolved = [...text.slice(text.indexOf('## open findings\n')).matchAll(/^- (\S+) \(/gm)].map((m) => ({ id: m[1], resolved: false, why: 'still open' }));
+    return { status: 'ok', exit_code: 0, answer: { passed: false, summary: 's', reviewed_hunks: hunksOf(text), findings: [C1], resolved, needs_file: [] }, usage: { tokens_in: 900, tokens_out: 300 } };
   };
   const jev = async (/** @type {{questions: Record<string, any>}} */ req) => {
     const [id] = Object.keys(req.questions);
