@@ -157,9 +157,11 @@ describe('B92 (3): no section', () => {
 
 describe('B92 (4): the budget and the no-flag packet', () => {
   test('the section counts in the packet budget: at a budget the plain file fits, the flagged one is split_required, no session', async () => {
-    const at = (/** @type {number} */ quick_in) => cfgFor({ budgets: { quick_in } });
-    const flagged1 = await review({ file: 'test/a.test.mjs', content: A_TEST, cfg: at(1) });
-    const plain1 = await review({ file: 'test/a.test.mjs', content: A_TEST_PLAIN, cfg: at(1) });
+    // B109 steps an oversized quick packet up to full, so this budget check runs at risk 1 (the full
+    // tier directly) against full_in; the step-up itself is pinned in budget-step-up.test.mjs.
+    const at = (/** @type {number} */ full_in) => cfgFor({ budgets: { full_in } });
+    const flagged1 = await review({ file: 'test/a.test.mjs', content: A_TEST, risk: 1, cfg: at(1) });
+    const plain1 = await review({ file: 'test/a.test.mjs', content: A_TEST_PLAIN, risk: 1, cfg: at(1) });
     assert.deepEqual([flagged1.outcome.status, plain1.outcome.status, flagged1.recs.length, plain1.recs.length], ['split_required', 'split_required', 0, 0]);
     const tFlag = flagged1.outcome.tokens_in;
     const tPlain = plain1.outcome.tokens_in;
@@ -169,11 +171,11 @@ describe('B92 (4): the budget and the no-flag packet', () => {
     const sectionBytes = Buffer.byteLength(['## test-quality', 'file: test/a.test.mjs', 'lines: 6, 7', HINT].join('\n')) + 1;
     assert.equal(sectionBytes, 226);
     assert.equal([56, 57].includes(tFlag - tPlain), true, `gap ${tFlag - tPlain}`);
-    const plain = await review({ file: 'test/a.test.mjs', content: A_TEST_PLAIN, cfg: at(tPlain) });
+    const plain = await review({ file: 'test/a.test.mjs', content: A_TEST_PLAIN, risk: 1, cfg: at(tPlain) });
     assert.deepEqual([plain.outcome.status, plain.recs.length], ['reviewed', 1]);
     assert.equal(occurrences(plain.packets[0], HEADING), 0);
     // the same path any extra takes today: the diff-only size (lens + extras + diff) is over ⇒ split_required, never a cut
-    const flagged = await review({ file: 'test/a.test.mjs', content: A_TEST, cfg: at(tPlain) });
+    const flagged = await review({ file: 'test/a.test.mjs', content: A_TEST, risk: 1, cfg: at(tPlain) });
     assert.deepEqual(
       { status: flagged.outcome.status, tokens_in: flagged.outcome.tokens_in, budget: flagged.outcome.budget, sessions: flagged.outcome.sessions, spawned: flagged.recs.length },
       { status: 'split_required', tokens_in: tFlag, budget: tPlain, sessions: [], spawned: 0 },

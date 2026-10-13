@@ -452,7 +452,18 @@ Every reviewer packet carries the block's acceptance clauses (from `block open -
 redacted and cut to fit the packet budget; a block whose clauses cannot be read is still reviewed,
 with `(acceptance unavailable)` in their place.
 
-One packet holds at most `review.budgets.full_in` tokens (default 32,000, about 4 bytes a token).
+The `quick` lens uses `review.budgets.quick_in` (default 6,000 tokens); other reviewer lenses use
+`review.budgets.full_in` (default 32,000, about 4 bytes a token). When a non-Markdown file's quick
+diff packet is over budget, the engine plans again at risk 1 for the same block kind. If that
+plan is `full`, it rebuilds the packet and runs one full L2 session when it fits. The file's
+risk stays unchanged. Its `review.plan` row records both `depth_unconstrained` and `depth_chosen`
+as `full`, plus `step_up: {from: 'quick', tokens_in, budget}` with the original quick packet's
+size and budget; the review result's `depth` is `full`. If the full packet is still too large,
+the result is `split_required` with that packet's `tokens_in` and `full_in` budget, with no
+session. A second plan that is not `full` keeps the original stop. Fitting quick files and
+risk-1 files keep their existing plans with no `step_up`; Markdown keeps section splitting,
+and rechecks already use `full_in`.
+
 When the context does not fit, it shrinks first; the diff is never cut. A diff that alone is over
 the budget is `split_required`: the file is not reviewed, and the result says how large the packet
 was (`tokens_in`) and what the budget is (`budget`). A Markdown file (`.md`, `.markdown`) is

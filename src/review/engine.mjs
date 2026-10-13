@@ -29,7 +29,8 @@
  *     The summary then carries `schema_fallback: {level, provider, model}` (`level`:
  *     `review.second_levels.<level>`), the second level's own provider/model, and `tokens_in` /
  *     `tokens_out` summed over both sessions;
- *  7. a diff alone over the packet budget is `split_required` (with `tokens_in` and `budget`) —
+ *  7. a non-Markdown quick packet over budget first steps up to one full L2 session (B109).
+ *     A diff alone still over the packet budget is `split_required` (with `tokens_in` and `budget`) —
  *     except a Markdown file (B54), which is reviewed SECTION BY SECTION (`sections.mjs`): every
  *     section packet runs the whole plan above (its own sessions, judge and stub guard, its own
  *     `review.plan` row with `section`), in file order, stopping at the first one that is not
@@ -234,8 +235,8 @@ export async function reviewFile(input, deps) {
   const risk = input.risk ?? rulesRisk({ file: diff.file, plusCount: diff.plusCount, cfg });
   // no recorded kind ⇒ the reviewed file's own kind (a lone `.md` is a docs review), never a blind `code`
   const kind = typeof input.kind === 'string' ? input.kind : blockKind({ owned: [diff.file] });
-  const plan = planSessions({ risk, cfg, kind });
-  const head = { engine: plan.mode, depth: plan.depth, risk, file: diff.file };
+  let plan = planSessions({ risk, cfg, kind });
+  let head = { engine: plan.mode, depth: plan.depth, risk, file: diff.file };
   if (plan.refused) return { status: 'refused', reason: plan.refused, approved: false, ...head, sessions: [] };
   if (diff.diffText.trim().length === 0) return { status: 'no_change', approved: false, ...head, sessions: [] };
   mkdirSync(workDir, { recursive: true, mode: 0o700 });
@@ -290,8 +291,8 @@ export async function reviewFile(input, deps) {
     return summary;
   };
 
-  const reviewers = plan.sessions.filter((s) => s.role === 'reviewer');
-  const judgeSpec = plan.sessions.find((s) => s.role === 'judge');
+  let reviewers = plan.sessions.filter((s) => s.role === 'reviewer');
+  let judgeSpec = plan.sessions.find((s) => s.role === 'judge');
   /** @param {import('./packet.mjs').FileDiff} part @param {ReadonlyArray<number> | null} [keys] */
   const packetsFor = (part, keys = null) => reviewers.map((spec) => assemblePacket({ diff: part, lens: spec.lens, rulesDigest: input.rulesDigest, factsExcerpt: input.factsExcerpt, cfg, moved: movedOf(keys) }));
 
@@ -327,10 +328,25 @@ export async function reviewFile(input, deps) {
     return { status: 'reviewed', approved, summary: final.review.summary, findings, sessions };
   };
 
-  const packets = packetsFor(diff);
-  const split = /** @type {{status: 'split_required', tokensIn: number, budget: number} | undefined} */ (packets.find((p) => p.status === 'split_required'));
+  let packets = packetsFor(diff);
+  let split = /** @type {{status: 'split_required', tokensIn: number, budget: number} | undefined} */ (packets.find((p) => p.status === 'split_required'));
+  /** @type {Record<string, any>} */
+  let stepUp = {};
+  if (split && plan.depth === 'quick' && !isMarkdownFile(diff.file)) {
+    const full = planSessions({ risk: 1, cfg, kind });
+    // A configured consensus/refusal is not the single full session this step permits.
+    if (full.depth === 'full') {
+      stepUp = { step_up: { from: 'quick', tokens_in: split.tokensIn, budget: split.budget } };
+      plan = full;
+      head = { ...head, engine: plan.mode, depth: plan.depth };
+      reviewers = plan.sessions.filter((s) => s.role === 'reviewer');
+      judgeSpec = plan.sessions.find((s) => s.role === 'judge');
+      packets = packetsFor(diff);
+      split = /** @type {typeof split} */ (packets.find((p) => p.status === 'split_required'));
+    }
+  }
   if (!split) {
-    const { status, reason, approved, summary, findings, sessions } = await reviewPart(diff, packets);
+    const { status, reason, approved, summary, findings, sessions } = await reviewPart(diff, packets, stepUp);
     if (status !== 'reviewed') return { status, reason, approved: false, ...head, sessions };
     return { status, approved, ...head, summary, findings, sessions };
   }

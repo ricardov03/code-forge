@@ -14,6 +14,7 @@ In the next release:
 
 - **The release moves the README What's new list (B108).** `npm run release` now moves the "In the next release:" bullets under "In X.Y.Z:". A minor or major release starts a new "What's new in X.Y" heading. The empty anchor stays for the next block. The release refuses an empty CHANGELOG [Unreleased] or a missing anchor before it changes anything, and a failed check puts the README back with the other files. The checks now include `gen-config-doc --check`. `docs/releasing.md` has a releasing checklist.
 - **The close writes the ticket lines (B96).** The coder's final report no longer needs a `reviewed <path> ticket <id>` line per file. `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket. `--json` and the block's done file carry them as `reviewed: [{file, ticket, via}]`. With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr, and the close goes on.
+- **A big-diff file steps up to a full review (B109).** A low-risk file whose diff is too big for the quick review budget used to stop with `split_required`, and splitting it only made the diff bigger. Now the review plans again as one full L2 session. If the diff fits the full budget, the file is reviewed. The `review.plan` row records the step as `step_up`.
 
 In 0.10.0:
 

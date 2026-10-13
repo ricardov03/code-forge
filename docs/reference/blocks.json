@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 104,
+  "block_count": 105,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1675,6 +1675,23 @@
         "B108"
       ],
       "note": "root-added 2026-10-13; issue #16 item 6 (Group E); block close prints `reviewed <path> ticket <id>` for every file the review gate accepts, --json and the done file carry reviewed [{file, ticket, via}]; the coder report needs no hand ticket lines; a mismatched hand line under --report prints a held WARN; no-ticket, bad-ticket and lines-unavailable WARNs are held and print only on a successful close"
+    },
+    "B109": {
+      "title": "Step up from quick to one full review before split_required",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/review.md",
+        "src/review/engine.mjs",
+        "test/review/budget-step-up.test.mjs",
+        "test/review/test-quality.test.mjs"
+      ],
+      "depends_on": [
+        "B96"
+      ],
+      "note": "root-added 2026-10-13; issue #16 item 1 (plans/field-bugs/plan.md B109, D1 = a); a non-Markdown quick packet over quick_in is planned again at risk 1; if that plan is one full session and fits full_in it reviews with it (review.plan step_up {from: 'quick', tokens_in, budget}); otherwise split_required with the full packet's size; first block built by Codex at high effort"
     }
   }
 }
