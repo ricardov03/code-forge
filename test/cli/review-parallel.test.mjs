@@ -111,7 +111,8 @@ describe('code-forge review waits on all files together (B43)', () => {
     const r = await run(['--max', '2'], { 'a.mjs': 10, 'b.mjs': Infinity, 'c.mjs': 10 });
     assert.equal(r.code, 1, r.stderr);
     assert.equal(r.stdout, 'a.mjs  approved\nb.mjs  stopped: timeout\nc.mjs  approved\n\ntotals: 3 files · 2 approved · 0 with findings (0 findings) · 1 stopped · 0 unavailable\n');
-    assert.equal(r.elapsed >= 1900 && r.elapsed < 5000, true, `elapsed ${r.elapsed} ms`);
+    // the upper bound only catches a hang; the next test pins one deadline through the `--max 2` waits
+    assert.equal(r.elapsed >= 1900 && r.elapsed < 15000, true, `elapsed ${r.elapsed} ms`);
   });
 
   test('one deadline for the run: a slow first file gives the later files no extra time (all 3 waits get --max 2, the run ends near 2 s, not 3 x 2 s)', async () => {
