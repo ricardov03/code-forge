@@ -8,9 +8,11 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new in 0.8
+## What's new in 0.9
 
 In the next release:
+
+In 0.9.0:
 
 - **A lost review state is rebuilt, not reset.** When the review state file of a file is gone (for example, macOS cleaned its temp folder), the worker rebuilds it from the signed ledger and writes a `review.state_restored` row. Rounds, open findings and stops stay as they were. If the ledger cannot rebuild it, the ticket is refused as `review-state-lost`, not `tampered` (#15).
 - **Review state no longer lives in the temp folder.** It is saved under `~/.code-forge/runs/<run>/review-state/`, so a temp cleanup or a worker restart does not touch it. A state file from an older run is moved there once, after a check against its signed anchor. `code-forge doctor` warns when a state file of an active run is missing and says whether the ledger can rebuild it (#15).
@@ -27,6 +29,8 @@ In the next release:
 - **Another steadier test (B82).** The worker restart test waits for killed sessions to exit instead of checking once, so it no longer fails at random under load.
 - **The review exits, in one place (B76).** `skill/references/review.md` §5, `code.md` and `docs/how-it-works.md` name the ways out of a stopped file in order: fix and the human's `block reopen`, `review-file --answers`, `block waive`, re-decompose. They also say `block attempt` never resets review state and that a lost state file is rebuilt from the ledger.
 - **`review-file --fresh` fails closed (B83).** When a cached result cannot be put back, the ticket gets a refused `fresh-restore-failed` marker (or keeps its claim), so the worker does not run it by itself. `block reopen` clears it. Messages name the error code only.
+
+## What's new in 0.8
 
 In 0.8.0:
 
