@@ -8,8 +8,8 @@
  * Human-only like `block waive`: the verb is on `CODER_ONLY_FORBIDDEN` (`src/util/forbidden.mjs`)
  * and its row is signed with the run key, `by: human` (`block waive` has no other in-verb guard,
  * so neither has this). The verb (`reopenFile`) refuses, writing no row, with a stable code:
- *  - `usage` (exit 2) — no `--file`, no `--reason`, or a path that is not a normalised
- *    repo-root-relative path;
+ *  - `usage` (exit 2) — no `--file`, no `--reason`, or a path with a control character or that is
+ *    not a normalised repo-root-relative path (`checkFileForm`, shared with `block waive`);
  *  - `unknown_block` — the run does not know the block (the code `block waive` uses);
  *  - `reopen-block-not-open` — the block is not open (stopped or closed);
  *  - `reopen-not-owned` — the block does not own the file;
@@ -42,9 +42,9 @@
  *
  * This file imports nothing from `src/worker/`: the fix-loop state is read through `io`.
  */
-import path from 'node:path';
 import { StateError } from '../state/paths.mjs';
 import { verifyRow } from '../state/signer.mjs';
+import { checkFileForm } from './verb-forms.mjs';
 
 export const REOPENED_EVENT = 'review.reopened';
 
@@ -177,9 +177,7 @@ export function reopenRowFor(rows, { runId, block, file, key, status, state, seq
 export async function reopenFile({ runId, id, file, reason, record, rows, key, writeRow, writeSigned, io }) {
   if (typeof file !== 'string' || file.length === 0) throw new StateError('usage', 'block reopen needs --file <path>');
   if (typeof reason !== 'string' || reason.trim().length === 0) throw new StateError('usage', 'block reopen needs --reason');
-  if (path.isAbsolute(file) || file.split('/').includes('..') || file.startsWith('./') || path.posix.normalize(file) !== file) {
-    throw new StateError('usage', '--file must be repo-root-relative');
-  }
+  checkFileForm(file, { normalized: true });
   const entry = openBlockEntry(record, runId, id);
   const owned = Array.isArray(entry.owned_files) ? entry.owned_files : [];
   if (!io.owns(owned, file, entry.owned_kinds)) throw new StateError('reopen-not-owned', `reopen-not-owned: block ${id} does not own ${file}; nothing was recorded`);

@@ -1,4 +1,5 @@
 import { commitAll, freshDir, git, makeRepo, writeFile } from '../review/helpers.mjs';
+import { humanBlock } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { mkdirSync, readFileSync, readdirSync, realpathSync, renameSync, rmdirSync } from 'node:fs';
@@ -88,11 +89,29 @@ async function fixture(slug, runId, { extra = EXTERNAL, files = [], pid = PID } 
   const open = (id, owned, more = []) => cf(['block', 'open', id, '--run', runId, '--level', 'L1', '--owned', ...owned, '--acceptance', ACC, ...more], repo);
   /** @param {string[]} args */
   const block = (args) => cf(['block', ...args, '--run', runId], repo);
+  /**
+   * B80: a human-only verb (waive, reopen) runs in process, for THIS fixture's repo, with the human
+   * at a terminal saying yes (asked exactly once); a waive's signed row lands in THIS fixture's ledger.
+   * @param {string[]} args
+   */
+  const human = async (args) => {
+    const waivedRows = async () => (await readAllRows(slug)).filter((r) => r.run === runId && r.event === 'review.waived');
+    const before = (await waivedRows()).length;
+    const res = await humanBlock(repo, [...args, '--run', runId]);
+    assert.equal(res.asked.length, 1, res.stderr);
+    if (args[0] === 'waive' && res.code === 0) {
+      const now = await waivedRows();
+      assert.equal(now.length, before + 1);
+      const last = now[now.length - 1];
+      assert.deepEqual([last.block, last.finding, last.file, last.by], [args[1], args[2], args[args.indexOf('--file') + 1], 'human']);
+    }
+    return { code: res.code, stdout: res.stdout, stderr: res.stderr };
+  };
   /** @param {Record<string, any>} row */
   const row = (row) => appendRow({ run: runId, ...row }, { slug });
   const rows = () => readAllRows(slug);
   const head = async () => (await git(['rev-parse', 'HEAD'], repo)).trim();
-  return { repo, runId, slug, open, block, row, rows, head };
+  return { repo, runId, slug, open, block, human, row, rows, head };
 }
 
 /** @param {{code: number, stdout: string, stderr: string}} res @param {string} stdout */
@@ -158,7 +177,7 @@ test('B64a (1)(2)(3): status prints the run line, one line per open block (state
   // findings count off the last REVIEWED content (F1 stays open)
   await fx.row({ event: 'context.pack', block: 'B1', file: 'src/b1.mjs', content_hash: 'h-not-a-review' });
   await fx.row({ event: 'review.late_finding', block: 'B2', file: 'src/b2.mjs', finding: 'L1', severity: 'warning' });
-  ok(await fx.block(['waive', 'B1', 'F2', '--file', 'src/b1.mjs', '--reason', 'accepted']), 'block B1 waived F2 in src/b1.mjs (by: human)\n');
+  ok(await fx.human(['waive', 'B1', 'F2', '--file', 'src/b1.mjs', '--reason', 'accepted']), 'block B1 waived F2 in src/b1.mjs (by: human)\n');
 
   const text = 'run r-b64a-main · active · plan · spent $1.75 of $5.00\n' + 'B1 open L1 · openai/gpt-5-codex · gate fail (lint) · findings 1\n' + 'B2 open L1 · - · gate pass · findings 1\n' + 'B10 attempt-2 L1 · - · gate none · findings 0\n' + 'closed 1 · stopped 1\n';
   const before = await fx.rows();
@@ -415,8 +434,8 @@ test('B64a (4): every block verb prints one JSON line with --json, and exactly i
   one(await j.fx.block(['claim', 'B1', 'src/c.mjs', '--json']), { block: 'B1', event: 'claimed', path: 'src/c.mjs' });
   // waive (on B2, which is stopped next: its review rows never reach B1's close)
   for (const fx of [t.fx, j.fx]) await fx.row({ event: 'review.result', block: 'B2', file: 'src/b.mjs', content_hash: 'h1', status: 'reviewed', approved: false, open: [{ id: 'F1', severity: 'warning' }] });
-  ok(await t.fx.block(['waive', 'B2', 'F1', '--file', 'src/b.mjs', '--reason', 'fine']), 'block B2 waived F1 in src/b.mjs (by: human)\n');
-  one(await j.fx.block(['waive', 'B2', 'F1', '--file', 'src/b.mjs', '--reason', 'fine', '--json']), { block: 'B2', event: 'waived', finding: 'F1', file: 'src/b.mjs', by: 'human' });
+  ok(await t.fx.human(['waive', 'B2', 'F1', '--file', 'src/b.mjs', '--reason', 'fine']), 'block B2 waived F1 in src/b.mjs (by: human)\n');
+  one(await j.fx.human(['waive', 'B2', 'F1', '--file', 'src/b.mjs', '--reason', 'fine', '--json']), { block: 'B2', event: 'waived', finding: 'F1', file: 'src/b.mjs', by: 'human' });
   // stop
   ok(await t.fx.block(['stop', 'B2', '--reason', 'later']), 'block B2 stopped\n');
   one(await j.fx.block(['stop', 'B2', '--reason', 'later', '--json']), { block: 'B2', event: 'stopped' });

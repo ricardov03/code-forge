@@ -339,7 +339,7 @@ If the close is refused, the message names the reason. Common ones:
 |---|---|---|
 | `no_changes` | the block changed no owned file and nothing was reviewed for it | check the coder worked in this workspace on the owned paths; if the block really has nothing to change, close it with `--no-require-reviews` at your terminal |
 | `unreviewed <file>` | a changed file has no signed approval for its current content | run `review-file` for it and wait |
-| `not_approved <file> <finding>` | the file was approved, but a later review of the same content left that finding open | fix it and run `review-file` again; or, if you accept the finding, `code-forge block waive B1 <finding> --run site-1 --file <file> --reason <text>` (only you can waive a critical) |
+| `not_approved <file> <finding>` | the file was approved, but a later review of the same content left that finding open | fix it and run `review-file` again; or, if you accept the finding, `code-forge block waive B1 <finding> --run site-1 --file <file> --reason <text>`, run in your own terminal (it asks for a yes; there is no `--yes`; only you can waive a critical) |
 | `unowned_change <file>` | a file outside the block's owned files changed after `block open`, and no other block of the run accounts for it | `code-forge block claim B1 <path> --run site-1`, or put it back |
 | `orphans: <paths>` | a changed or untracked (not ignored) file that no open block owns | `code-forge block claim B1 <path> --run site-1`, or delete it |
 | `unproven <file>` | a high-tier file has no red→green row | run `proof red-green` for its test |

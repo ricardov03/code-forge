@@ -1,4 +1,5 @@
 import { commitAll, git, makeRepo, writeFile } from './helpers.mjs';
+import { humanSaysYes } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, symlinkSync, unlinkSync } from 'node:fs';
@@ -317,7 +318,7 @@ test('B52 (a) CLI: the field case — approved, then a later review of the same 
   await writeSigned('r-b52-stale', writeRow, { event: 'review.round', block: 'B1', file: 'src/a.mjs', content_hash: hash, round: 1, kind: 'full', open_after: 2 });
   await writeSigned('r-b52-stale', writeRow, { event: 'review.result', block: 'B1', file: 'src/a.mjs', content_hash: hash, ticket: 't', status: 'reviewed', approved: false, open: [{ id: 'C1', severity: 'critical' }, { id: 'C2', severity: 'critical' }] });
   assert.deepEqual(await close([]), [1, 'block B1 open: not_approved src/a.mjs C1; not_approved src/a.mjs C2\n']);
-  for (const id of ['C1', 'C2']) assert.equal(await runBlock(['waive', 'B1', id, '--run', 'r-b52-stale', '--file', 'src/a.mjs', '--reason', 'owner accepted in chat'], { stdout: capture(), stderr: capture(), now: () => T0 }), 0);
+  for (const id of ['C1', 'C2']) assert.equal(await runBlock(['waive', 'B1', id, '--run', 'r-b52-stale', '--file', 'src/a.mjs', '--reason', 'owner accepted in chat'], humanSaysYes({ stdout: capture(), stderr: capture(), now: () => T0 })), 0);
   assert.deepEqual(await close([]), [0, 'block B1 closed\n']);
 });
 

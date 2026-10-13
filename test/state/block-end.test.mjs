@@ -1,4 +1,5 @@
 import { commitAll, freshDir, git, makeRepo, writeFile } from '../review/helpers.mjs';
+import { humanBlock } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { execFile, spawn } from 'node:child_process';
 import { existsSync, readFileSync, realpathSync, writeFileSync } from 'node:fs';
@@ -119,6 +120,24 @@ async function fixture(slug, runId, { extra = EXTERNAL, files = [] } = {}) {
   };
   /** @param {string[]} args */
   const block = (args) => cf(['block', ...args, '--run', runId], repo);
+  /**
+   * B80: a human-only verb (waive, reopen) runs in process, for THIS fixture's repo, with the human
+   * at a terminal saying yes (asked exactly once); a waive's signed row lands in THIS fixture's ledger.
+   * @param {string[]} args
+   */
+  const human = async (args) => {
+    const waivedRows = async () => (await readAllRows(slug)).filter((r) => r.run === runId && r.event === 'review.waived');
+    const before = (await waivedRows()).length;
+    const res = await humanBlock(repo, [...args, '--run', runId]);
+    assert.equal(res.asked.length, 1, res.stderr);
+    if (args[0] === 'waive' && res.code === 0) {
+      const now = await waivedRows();
+      assert.equal(now.length, before + 1);
+      const last = now[now.length - 1];
+      assert.deepEqual([last.block, last.finding, last.file, last.by], [args[1], args[2], args[args.indexOf('--file') + 1], 'human']);
+    }
+    return { code: res.code, stdout: res.stdout, stderr: res.stderr };
+  };
   /** @param {Record<string, any>} row */
   const row = (row) => appendRow({ run: runId, ...row }, { slug });
   const head = async () => (await git(['rev-parse', 'HEAD'], repo)).trim();
@@ -127,7 +146,7 @@ async function fixture(slug, runId, { extra = EXTERNAL, files = [] } = {}) {
     return { raw, json: JSON.parse(raw) };
   };
   const hookRows = async () => (await readAllRows(slug)).filter((r) => r.run === runId && r.event === 'hook.ran');
-  return { repo, runId, slug, open, block, row, head, done, hookRows };
+  return { repo, runId, slug, open, block, human, row, head, done, hookRows };
 }
 
 const DONE_KEYS = ['block', 'run_id', 'status', 'event', 'reason', 'commit', 'spent_usd', 'unknown_usd_sessions', 'findings', 'at'];
@@ -245,7 +264,7 @@ test('B64b (1): block stop writes the done file (block rows only, open findings 
   writeFile(fx.repo, 'docs/n.md', 'n\n');
   await commitAll(fx.repo);
   await fx.open('B2', ['src/b.mjs']);
-  assert.equal((await fx.block(['waive', 'B2', 'F1', '--file', 'src/b.mjs', '--reason', 'fine'])).code, 0);
+  assert.equal((await fx.human(['waive', 'B2', 'F1', '--file', 'src/b.mjs', '--reason', 'fine'])).code, 0);
   assert.deepEqual(await fx.block(['stop', 'B2', '--reason', 'second']), { code: 0, stdout: 'block B2 stopped\n', stderr: '' });
   const head2 = await fx.head();
   assert.notEqual(head2, head);

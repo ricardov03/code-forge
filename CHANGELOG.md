@@ -51,6 +51,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - The skill sends ONE fix message per block: after the coder's first COMPLETE it waits for every `review-file` ticket
   and the block's tests, then sends every failing test and every open finding together; a later finding waits for the
   next round, and the per-file round cap still counts per file (B94, #10).
+- `block waive` and `block reopen` are human-only: they ask for a yes at a terminal, have no `--yes`, exit 2 and record
+  nothing with stdin or stdout not a terminal, and refuse a bad id, path, control character, unowned file or unknown
+  finding before asking; an autopilot grant does not change this; the prompt does not prove a human, since a
+  pseudo-terminal passes it (B80, #10).
 
 ### Fixed
 

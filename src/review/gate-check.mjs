@@ -93,6 +93,7 @@ import { tierFor } from '../proof/tiers.mjs';
 import { DELETED_HASH, contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { verifyResult } from '../worker/queue.mjs';
 import { stopExitsLine } from './stop-exits.mjs';
+import { checkFileForm, checkFindingId } from './verb-forms.mjs';
 
 /**
  * @typedef {{file: string, content_hash: string, status: 'reviewed_by_waiver', findings: string[], by: 'human' | 'autopilot' | null, answered?: string[]}} WaivedAll
@@ -1055,10 +1056,10 @@ export function reviewGateCheck(load, { onWaivedAll } = {}) {
  * @returns {Promise<Record<string, any>>} the signed row.
  */
 export async function waiveFinding({ runId, id, finding, reason, file, writeRow }) {
-  if (typeof finding !== 'string' || !/^[A-Za-z0-9][A-Za-z0-9._:-]{0,63}$/.test(finding)) throw new StateError('usage', 'a finding id is required (letters, digits, . _ : -)');
+  checkFindingId(finding);
   if (typeof reason !== 'string' || reason.trim().length === 0) throw new StateError('usage', 'block waive needs --reason');
   if (typeof file !== 'string' || file.length === 0) throw new StateError('usage', 'block waive needs --file <path>');
-  if (path.isAbsolute(file) || file.split('/').includes('..') || file.startsWith('./')) throw new StateError('usage', '--file must be repo-root-relative');
+  checkFileForm(file, { normalized: false });
   const record = await readRun(runId);
   if (!record.blocks?.[id]) throw new StateError('unknown_block', `block ${id} is not in run ${runId}`);
   const row = { event: 'review.waived', block: id, file, finding, reason: reason.trim(), by: 'human' };

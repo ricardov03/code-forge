@@ -292,7 +292,7 @@ export const CODER_ONLY_FORBIDDEN = Object.freeze(
         ['code-forge', 'block', 'waive'],
         ['forge', 'block', 'waive'],
       ],
-      description: 'Waive a review finding (forge block waive) — human-only, run by the orchestrator after the human said so (§4.9)',
+      description: 'Waive a review finding (forge block waive) — human-only, typed by the human in their own terminal (§4.9, B80)',
     },
     {
       id: 'code-forge-block-reopen-from-coder',
@@ -301,7 +301,7 @@ export const CODER_ONLY_FORBIDDEN = Object.freeze(
         ['code-forge', 'block', 'reopen'],
         ['forge', 'block', 'reopen'],
       ],
-      description: 'Reopen the review of a stopped or lost file (forge block reopen) — human-only, run by the orchestrator after the human said so (B72)',
+      description: 'Reopen the review of a stopped or lost file (forge block reopen) — human-only, typed by the human in their own terminal (B72, B80)',
     },
     {
       id: 'code-forge-autopilot-from-coder',

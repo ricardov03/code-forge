@@ -1,4 +1,5 @@
 import { commitAll, git, makeRepo, writeFile } from './helpers.mjs';
+import { humanSaysYes } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { test } from 'node:test';
@@ -140,7 +141,7 @@ test('CLI: close refuses an unknown block, an unruled late finding and an unrevi
   assert.equal(await runBlock(['waive', 'B1', 'L1', '--run', 'r-gate', '--reason', 'Ricardo: accepted in chat'], { stdout: noFile, stderr: noFile }), 2);
   assert.equal(noFile.text, 'block waive: block waive needs --file <path> (a finding id is scoped to one file)\n');
   const waived = capture();
-  assert.equal(await runBlock(['waive', 'B1', 'L1', '--run', 'r-gate', '--file', 'src/a.mjs', '--reason', 'Ricardo: accepted in chat'], { stdout: waived, stderr: waived }), 0);
+  assert.equal(await runBlock(['waive', 'B1', 'L1', '--run', 'r-gate', '--file', 'src/a.mjs', '--reason', 'Ricardo: accepted in chat'], humanSaysYes({ stdout: waived, stderr: waived })), 0);
   assert.equal(waived.text, 'block B1 waived L1 in src/a.mjs (by: human)\n');
   const rows = await readAllRows('gate-demo');
   const waivers = rows.filter((r) => r.event === 'review.waived');
@@ -301,7 +302,7 @@ test('B20 CLI: close refuses `unproven <file>` for a high file; a signed coverin
   await proven('B1', ['src/auth/a.mjs']);
   assert.deepEqual(await close('B2'), [1, 'block B2 open: unproven src/auth/a.mjs\n']);
   const waived = capture();
-  assert.equal(await runBlock(['waive', 'B2', 'proof', '--run', 'r-pf', '--file', 'src/auth/a.mjs', '--reason', 'Ricardo: no test reaches it'], { stdout: waived, stderr: waived }), 0);
+  assert.equal(await runBlock(['waive', 'B2', 'proof', '--run', 'r-pf', '--file', 'src/auth/a.mjs', '--reason', 'Ricardo: no test reaches it'], humanSaysYes({ stdout: waived, stderr: waived })), 0);
   assert.deepEqual(await close('B2'), [0, 'block B2 closed\n']);
 
   // high by recorded risk: refused, then a signed proven row covering the file closes it

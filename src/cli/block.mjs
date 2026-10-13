@@ -10,8 +10,8 @@
  *   block claim <id> <path> --run <r>
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree]
  *   block stop <id> --run <r> --reason <text>
- *   block waive <id> <finding-id> --run <r> --file <path> --reason <text>   (human-only, §4.9)
- *   block reopen <id> --run <r> --file <path> --reason <text>   (human-only, B72)
+ *   block waive <id> <finding-id> --run <r> --file <path> --reason <text>   (human-only, §4.9; asks at a terminal, B80)
+ *   block reopen <id> --run <r> --file <path> --reason <text>   (human-only, B72; asks at a terminal, B80)
  *
  * B64a `--json` (every subcommand): on success stdout is exactly ONE JSON line instead of the
  * text — `{"block", "event", …}` with the facts the text prints (open: level, asked, source,
@@ -22,7 +22,8 @@
  * `--remove-worktree`). On
  * failure the exit code and stderr are unchanged and stdout stays empty, except a close the gate
  * refused (`closeBlock` said no), which also prints `{"block", "ok": false, "reason"}`. A usage
- * error, a thrown refusal, a cancelled `--no-require-reviews` and a failed `--remove-worktree`
+ * error, a thrown refusal, a cancelled `--no-require-reviews`, `block waive` or `block reopen` (or
+ * one with no terminal, B80) and a failed `--remove-worktree`
  * print nothing on stdout. Without `--json` every output is byte-identical to before.
  *
  * B64b block end: a close that closes or stops the block and `block stop` write
@@ -156,6 +157,22 @@
  * <from>[ <stop reason>]; by: human)`; `--json`: `{"block", "event": "reopened", "file", "from",
  * "stop_reason", "at_seq", "from_hash", "to_hash", "ticket_cleared", "by"}`.
  *
+ * B80 (D1 = a): `block waive` and `block reopen` need the human at a terminal, through the same
+ * confirm as `--no-require-reviews` (`confirmAtTerminal`). Right after the usage checks and the run
+ * record read — before the autopilot expiry checks or anything else is written — stdin or stdout
+ * not a TTY prints `block <verb> needs the human at a terminal to confirm; nothing was recorded
+ * (there is no --yes)` (exit 2). At a terminal, what the verb would refuse is refused before the
+ * question: a `--file` or finding id with a control character or of the wrong form (`usage`, exit
+ * 2, `checkFileForm` / `checkFindingId` — the verbs' own checks), an unknown block, for reopen a
+ * block that is not open or a file it does not own (`reopen-not-owned`), for waive a file the block
+ * does not own (`waive-not-owned`) or a finding id no review row of the block names for the file
+ * (`waive-unknown-finding`; `proof` is exempt) — exit 1. A "no" or a cancel prints `block <id>
+ * <verb>: cancelled — nothing was recorded` (exit 1); a "yes" runs the verb exactly as before (the
+ * same signed row). There is no `--yes` (an unknown flag, exit 2). An active autopilot grant
+ * changes nothing here — autopilot waives through its own path (`autopilot waive`, `by:
+ * autopilot`). The prompt checks only that stdin and stdout are terminals; a pseudo-terminal
+ * passes it, so it does not prove a human. The coder deny-list entries stay.
+ *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
  * through `closeBlock`'s `extraChecks`.
@@ -174,7 +191,7 @@ import { configInForce, externalReviewer, requireCoderTests } from '../state/con
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
-import { blockFileSet, changedFiles, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
+import { PROOF_FINDING, blockFileSet, changedFiles, openFindings, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { checkExpiry } from '../autopilot/grant.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { blockTree, prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
@@ -186,6 +203,7 @@ import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { clearDone } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
 import { openBlockEntry, reopenFile } from '../review/reopen.mjs';
+import { checkFileForm, checkFindingId } from '../review/verb-forms.mjs';
 import { runRootPath } from '../util/tmp.mjs';
 import { missingReviewTickets, parseSentinel } from '../engines/sentinel.mjs';
 import { blockEndHook, runBlockEndHook, writeDoneFile } from '../state/block-end.mjs';
@@ -265,7 +283,8 @@ const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', '
  *   removeBlockTree?: typeof removeBlockTree,
  * }} [deps] - `now` (B48): the clock of the autopilot expiry checks. `stdinIsTTY` / `stdoutIsTTY`
  *   (default `process.stdin.isTTY` / `process.stdout.isTTY`; `isTTY` sets both) and `ui` (default
- *   `@clack/prompts`): B52's confirmation of `--no-require-reviews`, which needs both to be TTYs.
+ *   `@clack/prompts`): the human's confirmation (B52 `--no-require-reviews`, B80 `block waive` and
+ *   `block reopen`), which needs both to be TTYs.
  *   `removeBlockTree` (B64b, tests only): the `--remove-worktree` step, default the real one.
  * @returns {Promise<number>}
  */
@@ -307,7 +326,20 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'reopen' && typeof flags.file !== 'string') throw new StateError('usage', 'block reopen needs --file <path>');
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     const record = await readRun(runId);
-    const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
+    // B80: waive and reopen are the human's — asked at a terminal before anything is written (not
+    // even the autopilot expiry rows below); no terminal is exit 2, a "no" is exit 1
+    if (sub === 'waive' || sub === 'reopen') {
+      const asked = await confirmHumanVerb(sub, runId, id, { finding: extra, file: /** @type {string} */ (flags.file) }, record, deps);
+      if (asked === 'no-tty') {
+        err(`${humanVerbNoTTY(sub)}\n`);
+        return 2;
+      }
+      if (asked === 'cancelled') {
+        err(`block ${id} ${sub}: cancelled — nothing was recorded\n`);
+        return 1;
+      }
+    }
+    const writeRow =(/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
     // B64b: the block-end signal — after an end's rows (and outside the run lock) the done file,
     // then the owner's `hooks.on_block_end` from the run-start snapshot. Without the hook key the
     // done file is the only addition: no row, and every output stays exactly as before.
@@ -733,29 +765,137 @@ async function coderTests(reportFlag, id) {
 export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)';
 
 /**
+ * B80: the refusal when `block waive` or `block reopen` has no terminal to ask the human at.
+ * @param {'waive' | 'reopen'} verb @returns {string}
+ */
+export const humanVerbNoTTY = (verb) => `block ${verb} needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`;
+
+/**
+ * @typedef {{isTTY?: boolean, stdinIsTTY?: boolean, stdoutIsTTY?: boolean, ui?: {confirm: (o: {message: string, initialValue?: boolean}) => Promise<unknown>, isCancel: (v: unknown) => boolean}, now?: () => Date}} ConfirmDeps
+ */
+
+/**
+ * The ONE human confirm of the `block` verb (B52 `--no-require-reviews`, B80 `block waive` and
+ * `block reopen`): a flag or a verb can be run by any process (the orchestrator, a script, a
+ * coder), so the human answers a yes/no question at a terminal and there is NO `--yes`. No
+ * terminal — stdin AND stdout must both be TTYs (a piped stdout means nobody may see the
+ * question) — is `no-tty`, decided before anything is read or asked. `before` runs between the
+ * terminal check and the question (a refusal it throws means the human is never asked).
+ * `deps.stdinIsTTY` / `deps.stdoutIsTTY` inject each side, `deps.isTTY` both at once, `deps.ui`
+ * the prompt (default `@clack/prompts`). A "no" or a cancel (Ctrl-C) is `cancelled`.
+ * @param {ConfirmDeps} deps @param {string} message
+ * @param {() => Promise<unknown> | unknown} [before]
+ * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
+ */
+async function confirmAtTerminal(deps, message, before) {
+  const stdinTTY = deps.stdinIsTTY ?? deps.isTTY ?? process.stdin.isTTY === true;
+  const stdoutTTY = deps.stdoutIsTTY ?? deps.isTTY ?? process.stdout.isTTY === true;
+  if (!(stdinTTY && stdoutTTY)) return 'no-tty';
+  if (before) await before();
+  const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
+  const go = await ui.confirm({ message, initialValue: false });
+  return ui.isCancel(go) || go !== true ? 'cancelled' : 'confirmed';
+}
+
+/**
  * B52: `--no-require-reviews` lifts every per-file review check, so it is the human's alone — the
- * same rule as `autopilot approve`: a flag can be passed by any process (the orchestrator, a
- * script, the delegate's tooling), so the human confirms at a terminal and there is NO `--yes`.
- * No terminal — stdin AND stdout must both be TTYs (a piped stdout means nobody may see the
- * question) — ⇒ `usage` (exit 2); an active autopilot grant on the run ⇒ `autopilot-active`
- * (exit 1; the owner stops the grant first) — nothing is written either way. `deps.stdinIsTTY` /
- * `deps.stdoutIsTTY` inject each side; `deps.isTTY` injects both at once.
- * @param {string} runId @param {string} id
- * @param {{isTTY?: boolean, stdinIsTTY?: boolean, stdoutIsTTY?: boolean, ui?: {confirm: (o: {message: string, initialValue?: boolean}) => Promise<unknown>, isCancel: (v: unknown) => boolean}, now?: () => Date}} deps
+ * same rule as `autopilot approve` (`confirmAtTerminal`). No terminal ⇒ `usage` (exit 2); an
+ * active autopilot grant on the run ⇒ `autopilot-active` (exit 1; the owner stops the grant
+ * first) — nothing is written either way.
+ * @param {string} runId @param {string} id @param {ConfirmDeps} deps
  * @returns {Promise<'confirmed' | 'cancelled'>}
  * @throws {StateError} `usage`, `autopilot-active`
  */
 async function confirmNoReviews(runId, id, deps) {
-  const stdinTTY = deps.stdinIsTTY ?? deps.isTTY ?? process.stdin.isTTY === true;
-  const stdoutTTY = deps.stdoutIsTTY ?? deps.isTTY ?? process.stdout.isTTY === true;
-  if (!(stdinTTY && stdoutTTY)) throw new StateError('usage', NO_REVIEWS_NO_TTY);
-  const grant = await checkExpiry(runId, (deps.now ?? (() => new Date()))());
-  if (grant.state === 'active') {
-    throw new StateError('autopilot-active', `--no-require-reviews is refused while an autopilot grant is active on run ${runId} (stop it first: code-forge autopilot stop --run ${runId})`);
-  }
-  const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
-  const go = await ui.confirm({ message: `Close block ${id} of run ${runId} WITHOUT the per-file review checks? Only the owner may say yes.`, initialValue: false });
-  return ui.isCancel(go) || go !== true ? 'cancelled' : 'confirmed';
+  const asked = await confirmAtTerminal(deps, `Close block ${id} of run ${runId} WITHOUT the per-file review checks? Only the owner may say yes.`, async () => {
+    const grant = await checkExpiry(runId, (deps.now ?? (() => new Date()))());
+    if (grant.state === 'active') {
+      throw new StateError('autopilot-active', `--no-require-reviews is refused while an autopilot grant is active on run ${runId} (stop it first: code-forge autopilot stop --run ${runId})`);
+    }
+  });
+  if (asked === 'no-tty') throw new StateError('usage', NO_REVIEWS_NO_TTY);
+  return asked;
+}
+
+/**
+ * B80: `block waive` and `block reopen` are the human's alone (D1 = a): the human confirms at a
+ * terminal through `confirmAtTerminal`, exactly like `--no-require-reviews`, but an active
+ * autopilot grant changes nothing (autopilot waives through its own path, `by: autopilot`). The
+ * pre-checks (`reopenPrecheck`, `waivePrecheck`) run first, at a terminal, so the human is never
+ * asked about a waive or reopen the verb would refuse that way.
+ * @param {'waive' | 'reopen'} verb @param {string} runId @param {string} id
+ * @param {{finding?: string, file: string}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
+ * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
+ */
+function confirmHumanVerb(verb, runId, id, what, record, deps) {
+  const message =
+    verb === 'waive'
+      ? `Waive finding ${what.finding} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
+      : `Reopen the review of ${what.file} in block ${id} (run ${runId})? Only the owner may say yes.`;
+  return confirmAtTerminal(deps, message, async () => {
+    if (verb === 'reopen') await reopenPrecheck(record, runId, id, what.file);
+    else await waivePrecheck(record, runId, id, /** @type {string} */ (what.finding), what.file);
+  });
+}
+
+/**
+ * Does the block own `file`, by the rule both verbs use (`ownsAt` with the workspace's prefix
+ * inside its repo)?
+ * @param {Record<string, any>} record @param {Record<string, any>} entry @param {string} file
+ * @returns {Promise<boolean>}
+ */
+async function blockOwnsFile(record, entry, file) {
+  const real = async (/** @type {string} */ p) => realpath(p).catch(() => path.resolve(p));
+  const mainTop = await real(await repoTop(record.workspace));
+  const wsPrefix = path.relative(mainTop, await real(record.workspace)).split(path.sep).join('/');
+  const owned = Array.isArray(entry.owned_files) ? entry.owned_files : [];
+  return ownsAt(wsPrefix)(owned, file, entry.owned_kinds);
+}
+
+/**
+ * B80: the checks a reopen must pass BEFORE the human is asked, in `reopenFile`'s order: the
+ * `--file` form (`checkFileForm`, the reopen rule: `usage`), the block (`openBlockEntry`:
+ * `unknown_block`, `reopen-block-not-open`) and ownership (`reopen-not-owned`, the same message).
+ * The state checks that read the key and the ledger stay the verb's.
+ * @param {Record<string, any>} record @param {string} runId @param {string} id @param {string} file
+ * @returns {Promise<void>}
+ * @throws {StateError}
+ */
+async function reopenPrecheck(record, runId, id, file) {
+  checkFileForm(file, { normalized: true });
+  const entry = openBlockEntry(record, runId, id);
+  if (!(await blockOwnsFile(record, entry, file))) throw new StateError('reopen-not-owned', `reopen-not-owned: block ${id} does not own ${file}; nothing was recorded`);
+}
+
+/**
+ * B80: the checks a waive must pass BEFORE the human is asked, so the human is never asked about a
+ * waive the verb would refuse, in `waiveFinding`'s order: the finding id and `--file` have the
+ * forms `waiveFinding` takes (`checkFindingId`, `checkFileForm`: `usage`, the same helpers); the
+ * block is in the run (`unknown_block`); the block owns the file
+ * (`waive-not-owned`, the reopen's ownership rule through `ownsAt`); and, except for the proof
+ * finding (`proof`, which no review row names), a review row of this run and block for the file
+ * names the id (`waive-unknown-finding`): `review.triage` / `review.late_finding` `finding`, a
+ * `review.result` `open` id (as the gate reads it, `openFindings`) or a `review.cap` `open` id.
+ * @param {Record<string, any>} record @param {string} runId @param {string} id
+ * @param {string} finding @param {string} file
+ * @returns {Promise<void>}
+ * @throws {StateError}
+ */
+async function waivePrecheck(record, runId, id, finding, file) {
+  checkFindingId(finding);
+  checkFileForm(file, { normalized: false });
+  const entry = record.blocks?.[id];
+  if (!entry) throw new StateError('unknown_block', `block ${id} is not in run ${runId}`);
+  if (!(await blockOwnsFile(record, entry, file))) throw new StateError('waive-not-owned', `waive-not-owned: block ${id} does not own ${file}; nothing was recorded`);
+  if (finding === PROOF_FINDING) return;
+  const named = (await readAllRows(record.project)).some((r) => {
+    if (r?.run !== runId || r.block !== id || r.file !== file) return false;
+    if (r.event === 'review.triage' || r.event === 'review.late_finding') return r.finding === finding;
+    if (r.event === 'review.result') return Array.isArray(r.open) && openFindings(r.open).some((o) => o.id === finding);
+    if (r.event === 'review.cap') return Array.isArray(r.open) && r.open.includes(finding);
+    return false;
+  });
+  if (!named) throw new StateError('waive-unknown-finding', `waive-unknown-finding: no review row of block ${id} names finding ${finding} in ${file}; nothing was recorded`);
 }
 
 /**

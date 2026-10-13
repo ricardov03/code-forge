@@ -675,6 +675,24 @@ flowchart TD
      `code-forge block waive <id> <finding-id> --run <run> --file <path> --reason <text>`.
   4. **Re-decompose.** You split the block or plan the work again.
 
+  **You run `block waive` and `block reopen` yourself, in your own terminal.** Both ask for a yes
+  at a terminal. The orchestrator prints the exact command and never answers the prompt; you type
+  the command in your own terminal. The rule: a coder or the orchestrator never runs either verb. With stdin or
+  stdout not a terminal (a pipe, or a process started with no terminal) a waive exits 2 with
+  `block waive needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`
+  and a reopen with
+  `block reopen needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`;
+  neither writes a row or removes a done marker. Before it asks, both verbs refuse a malformed
+  `--file` or finding id, or one with a control character (exit 2); a reopen refuses a file the
+  block does not own (`reopen-not-owned`); a waive refuses a file the block does not own
+  (`waive-not-owned`) and a finding id no review row of the block names for that file
+  (`waive-unknown-finding`; `proof` is exempt), so you are never asked about a verb that would
+  fail. A "no" prints `block <id> <verb>: cancelled — nothing was recorded` (exit 1); a "yes"
+  writes the same signed row as before. There is no `--yes` (an unknown flag, exit 2). Under an
+  active autopilot grant both verbs still ask (only `block close --no-require-reviews` is refused);
+  the delegate's waivers go through `autopilot waive` (`by: autopilot`), which needs no terminal.
+  The prompt checks only that stdin and stdout are terminals; a pseudo-terminal passes it, so it does not prove a human (`skill/references/security.md` §3).
+
   When a signed review round on the current bytes left findings and every finding it left open is
   waived or answered, the file counts as reviewed (`reviewed_by_waiver`, never approved) and the
   block can close with a signed `gate.review_waived_all` row (see the next table). Two things are
@@ -687,7 +705,7 @@ flowchart TD
   Only a stopped file needs content that differs from what its stop reviewed (every stop records
   that content's hash in the signed state); a lost state file (one the ledger cannot rebuild) is
   reopened on its current content. It is human-only, like `block waive` (on the coder forbidden
-  list). It clears the cached result for the current content, then writes one signed
+  list, and you run it in your own terminal after a yes, as above). It clears the cached result for the current content, then writes one signed
   `review.reopened` row (`by: human`, naming the file's latest state seq). There is at most one
   such row per state seq: a retry on the same content finds that row and writes no second one,
   and a reopen on other content at the same seq is refused. The next `review-file` then starts over: round 1, a

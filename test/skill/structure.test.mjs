@@ -148,9 +148,11 @@ test('SKILL.md §3 names `forge facts` at a lower index than `forge author` (fac
   assert.ok(facts < author, `forge facts (${facts}) must come before forge author (${author})`);
 });
 
-test('references/security.md contains "same-user boundary only" exactly once', async () => {
+test('references/security.md contains "same-user boundary only" exactly twice: the doctor line once, and once in the B80 honest-limit sentence', async () => {
   const text = await readSkillFile('references/security.md');
-  assert.equal(text.split('same-user boundary only').length - 1, 1);
+  assert.equal(text.split('same-user boundary only').length - 1, 2);
+  assert.equal(text.split('`signer: same-user boundary only`').length - 1, 1);
+  assert.equal(text.split('The signer is a same-user boundary only.').length - 1, 1);
 });
 
 test('references/review.md states the four-round cap and the fix-hunk rule (2 of 2)', async () => {
@@ -521,7 +523,7 @@ test('B76 (1): review.md §5 names the 4 exits in order, the gate.review_waived_
   assert.equal(occurrences(s5, 'A missing file whose anchor has no `state_body` (an older run, or `state_omitted`) is `lost`.'), 1);
 });
 
-test('B76 (2): code.md §5 orders the exits, runs block reopen only after the human says so, and says when to use --answers and --fresh; the brief names no human-only verb', async () => {
+test('B76 (2): code.md §5 orders the exits, has the human run block reopen in their own terminal (B80), and says when to use --answers and --fresh; the brief names no human-only verb', async () => {
   const code = await readSkillFile('references/code.md');
   assert.equal(occurrences(code, '\n## §3 Dispatch — what the brief contains\n'), 1);
   assert.equal(occurrences(code, '\n## §5 The block gate is a re-measurement — `forge block close <id> --run <r>`\n'), 1);
@@ -529,7 +531,7 @@ test('B76 (2): code.md §5 orders the exits, runs block reopen only after the hu
   assertOnceInOrder(s5, [
     '**When a file stops** (`review_cap`, `l3_patch_exhausted`, `split_required`, …), the block cannot close.',
     '\n1. **Fix, then `block reopen`.**',
-    'Then run `forge block reopen <id> --file <path> --run <r> --reason <text>` only after the human says so in chat, with their reason, exactly like `block waive`.',
+    'Then print the exact command, `forge block reopen <id> --file <path> --run <r> --reason <text>` with the human\'s reason, and the human runs it in their own terminal, exactly like `block waive`.',
     '\n2. **`review-file --answers`.** Use it when the fix belongs in another owned file (a missing test, say).',
     '\n3. **`block waive`.**',
     '\n4. **Re-decompose.**',
@@ -1152,4 +1154,120 @@ test('B94 (7): the per-file cap phrase is the same in every file that names it; 
   assert.equal(occurrences(flat(await b94Read('docs/autopilot.md')), flat(`The per-file cap still counts per file: ${B94_CAP}.`)), 1);
   assert.equal(occurrences(flat(await readSkillFile('references/ledger.md')), flat(`fix rounds per file (${B94_CAP}, \`review.md\` §5)`)), 1);
   for (const rel of B94_FILES) assertGone(rel, await b94Read(rel), B94_GONE);
+});
+
+// B80: `block waive` and `block reopen` are run by the human in their own terminal. Skill and docs
+// text only (plus the CLI's exported no-terminal message, so the quoted text is the real one).
+const B80_ONCE = {
+  'skill/references/review.md': [
+    'The orchestrator prints the exact command, with the human\'s reason, and never answers the prompt; the human types the command in their own terminal. The rule: a coder or the orchestrator never runs either verb.',
+    'There is no `--yes`: it is an unknown flag (exit 2).',
+    'Under an active autopilot grant both verbs still prompt the same way (only `block close --no-require-reviews` is refused)',
+    'a file the block does not own (`waive-not-owned`) or a finding id that no review row of the block names for that file (`waive-unknown-finding`; the `proof` finding is exempt) — exit 1, nothing asked, nothing written.',
+  ],
+  'skill/references/code.md': [
+    'You print the exact command; the human runs it in their own terminal. The rule: a coder or the orchestrator never runs it and never answers its prompt. Separately, as a fact of the verb: when stdin or stdout is not a terminal (a pipe, or a process started with no terminal) it exits 2',
+    'Never run it yourself, and never for a coder',
+  ],
+  'skill/references/ledger.md': [
+    'no row on a "no", a cancel, no terminal, `--yes` (a usage error), or a pre-check refusal (a malformed or control-character finding id or `--file`, an unknown block, a file the block does not own, an unknown finding)',
+    'no row on a "no", a cancel, no terminal, `--yes` (a usage error), or a pre-check refusal (a malformed or control-character `--file`, an unknown or not-open block, a file the block does not own)',
+  ],
+  'skill/references/security.md': [
+    'The orchestrator prints the exact command and never answers the prompt; the human types the command in their own terminal.',
+    'Under an active autopilot grant `block waive` and `block reopen` still prompt the same way; only `block close --no-require-reviews` is refused under a grant. Autopilot\'s own waive path, `forge autopilot waive` (written `by: autopilot`), needs no terminal.',
+  ],
+  'skill/references/adapters/solo.md': [
+    'Print the exact command: the orchestrator never answers this prompt; the human types the command in their own terminal. You and the coder never run it.',
+    'Under an active autopilot grant `block waive` and `block reopen` still prompt; only `block close --no-require-reviews` is refused. Autopilot\'s own waive path, `forge autopilot waive` (`by: autopilot`), needs no terminal.',
+    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review, and it is also human-only and asks the same way.',
+  ],
+  'skill/references/adapters/claude-code.md': [
+    'Print the exact command: the orchestrator never answers this prompt; the human types the command in their own terminal. You and the subagent never run it.',
+    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review, and it is also human-only and asks the same way.',
+  ],
+  'skill/references/proof.md': ['the orchestrator prints the exact command and the human runs it in their own terminal; there is no `--yes`'],
+  'docs/how-it-works.md': [
+    'The orchestrator prints the exact command and never answers the prompt; you type the command in your own terminal. The rule: a coder or the orchestrator never runs either verb.',
+    'Under an active autopilot grant both verbs still ask (only `block close --no-require-reviews` is refused)',
+    'a waive refuses a file the block does not own (`waive-not-owned`) and a finding id no review row of the block names for that file (`waive-unknown-finding`; `proof` is exempt)',
+  ],
+  'docs/concepts.md': [
+    'You run `block waive` (and `block reopen`) in your own terminal: it asks for a yes, has no `--yes`, and with no terminal records nothing; the orchestrator only prints the exact command and never answers the prompt.',
+    'A coder is never told to run it, and the coder forbidden list denies it where the coder\'s CLI loads deny rules',
+  ],
+};
+/** Retired wording, absent from every B80 file: the round-1 pointer and the wrong no-terminal example. */
+const B80_GONE_ALL = ['are terminals; it does not prove a human','(a pipe, a child process)', 'for a fixed stopped file)'];
+const B80_GONE = {
+  'skill/references/review.md': ['run by the orchestrator only after the human says so', '(`block reopen …` for a reopen)', 'An active autopilot grant changes nothing here'],
+  'skill/references/code.md': ['only after the human says so in chat', 'Waive each open finding, after the human says so', 'from a tool call (no terminal)'],
+  'skill/references/security.md': ['an autopilot grant does not change it', 'in a tool call — both ask'],
+  'skill/references/adapters/solo.md': ['from a Solo process there is no terminal', 'and is refused under an active autopilot grant'],
+  'skill/references/adapters/claude-code.md': ['a Bash tool call has no terminal'],
+  'skill/references/ledger.md': ['a "no" or no terminal writes no row'],
+  'docs/how-it-works.md': ['(or `block reopen …`)', 'An autopilot grant does not change this;'],
+  'docs/getting-started.md': ['added in a later block'],
+  'docs/concepts.md': ['A coder can never run it'],
+};
+
+/**
+ * B80 ruling 1: the ONE canonical honest-limit sentence, word for word, in `security.md` §3 only;
+ * every other file that describes the prompt points to it with the one pointer sentence.
+ */
+const B80_CANON =
+  'the prompt checks only that stdin and stdout are terminals. It does not prove a human: a process that runs the verb in a pseudo-terminal (`script`, `expect`, a pty library, or an agent shell that is itself a pty, as Solo processes may be) passes the check and can answer yes, and a same-user process can read the run key and sign a row. The signer is a same-user boundary only.';
+const B80_POINTER = (/** @type {string} */ to) => `The prompt checks only that stdin and stdout are terminals; a pseudo-terminal passes it, so it does not prove a human (\`${to}\` §3).`;
+const B80_POINTS = {
+  'skill/references/review.md': 'security.md',
+  'skill/references/code.md': 'security.md',
+  'skill/references/adapters/solo.md': 'security.md',
+  'skill/references/adapters/claude-code.md': 'security.md',
+  'skill/references/ledger.md': 'security.md',
+  'docs/concepts.md': 'skill/references/security.md',
+  'docs/how-it-works.md': 'skill/references/security.md',
+};
+/**
+ * The generic no-terminal message the docs quote with `<verb>` (case and spacing exact). Kept as a
+ * literal: `humanVerbNoTTY` is typed `'waive' | 'reopen'`, so `humanVerbNoTTY('<verb>')` fails the
+ * typecheck; the last test asserts the literal equals the CLI's message for `<verb>` (cast at the call).
+ */
+const B80_GENERIC = 'block <verb> needs the human at a terminal to confirm; nothing was recorded (there is no --yes)';
+const squash = (/** @type {string} */ text) => text.replace(/\s+/g, ' ');
+
+test('B80 ruling 1: the canonical honest-limit sentence is in security.md §3 exactly once and nowhere else; each other file points to it exactly once', async () => {
+  const security = await readSkillFile('references/security.md');
+  assert.equal(occurrences(squash(section(security, 3)), B80_CANON), 1);
+  assert.equal(occurrences(squash(security), B80_CANON), 1);
+  for (const [rel, to] of Object.entries(B80_POINTS)) {
+    const text = squash(await b94Read(rel));
+    assert.equal(occurrences(text, B80_POINTER(to)), 1, `${rel}: pointer`);
+    assert.equal(occurrences(text, 'It does not prove a human: a process that runs the verb in a pseudo-terminal'), 0, `${rel}: the canonical sentence is only in security.md`);
+  }
+  assert.equal(occurrences(squash(security), 'it does not prove a human (`'), 0);
+});
+
+test('B80: the skill and docs say the orchestrator prints the command and the human runs it in their own terminal', async () => {
+  for (const [rel, needles] of Object.entries(B80_ONCE)) {
+    const text = flat(await b94Read(rel));
+    for (const needle of needles) assert.equal(occurrences(text, flat(needle)), 1, `${rel}: ${needle}`);
+  }
+  for (const [rel, gone] of Object.entries(B80_GONE)) assertGone(rel, await b94Read(rel), gone);
+  for (const rel of new Set([...Object.keys(B80_ONCE), ...Object.keys(B80_POINTS), 'skill/references/security.md'])) {
+    assertGone(rel, await b94Read(rel), B80_GONE_ALL);
+  }
+});
+
+test('B80: review.md §5 and how-it-works quote the CLI\'s exact no-terminal message', async () => {
+  const { humanVerbNoTTY } = await import('../../src/cli/block.mjs');
+  const s5 = section(await readSkillFile('references/review.md'), 5);
+  const how = await b94Read('docs/how-it-works.md');
+  for (const verb of /** @type {const} */ (['waive', 'reopen'])) {
+    assert.equal(occurrences(s5, `\`${humanVerbNoTTY(verb)}\``), 1, `review.md §5: ${verb}`);
+    assert.equal(occurrences(how, `\`${humanVerbNoTTY(verb)}\``), 1, `how-it-works: ${verb}`);
+  }
+  // the docs that use `<verb>` quote the generic form exactly, and it is the CLI's own text
+  assert.equal(humanVerbNoTTY(/** @type {any} */ ('<verb>')), B80_GENERIC);
+  assert.equal(occurrences(await readSkillFile('references/code.md'), `\`${B80_GENERIC}\``), 1);
+  assert.equal(occurrences(section(await readSkillFile('references/security.md'), 3), `\`${B80_GENERIC}\``), 1);
 });

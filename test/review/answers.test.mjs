@@ -1,4 +1,5 @@
 import { commitAll, freshDir, makeRepo, writeFile } from './helpers.mjs';
+import { humanSaysYes } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -423,7 +424,7 @@ test('B71 (6): an answer clears a critical (the answering file still needs its o
   assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${SRC}; unreviewed ${ANS}; review_cap ${SRC} K1\n`]);
   for (const id of ['U1', 'K1']) {
     const w = capture();
-    assert.equal(await runBlock(['waive', 'B1', id, '--run', f.runId, '--file', SRC, '--reason', 'owner accepted it in chat'], { stdout: w, stderr: w, now: () => T0 }), 0);
+    assert.equal(await runBlock(['waive', 'B1', id, '--run', f.runId, '--file', SRC, '--reason', 'owner accepted it in chat'], humanSaysYes({ stdout: w, stderr: w, now: () => T0 })), 0);
   }
   assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${ANS}\n`]);
   await f.sign({ event: 'review.approved' }, ANS);

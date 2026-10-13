@@ -1,4 +1,5 @@
 import { commitAll, makeRepo, writeFile, freshDir } from './helpers.mjs';
+import { humanSaysYes } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
@@ -106,7 +107,7 @@ async function fixture(slug) {
   const block = async (args) => {
     const stdout = capture();
     const stderr = capture();
-    const code = await runBlock(args, { stdout, stderr, probe, now: () => T0 });
+    const code = await runBlock(args, humanSaysYes({ stdout, stderr, probe, now: () => T0 }));
     return { code, out: stdout.text, err: stderr.text };
   };
   const reopen = (/** @type {string[]} */ extra = []) => block(['reopen', 'B1', '--run', runId, '--file', SRC, '--reason', 'the owner split the fix', ...extra]);

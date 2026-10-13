@@ -1,4 +1,5 @@
 import { commitAll, freshDir, makeRepo, writeFile } from './helpers.mjs';
+import { humanSaysYes } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
@@ -59,7 +60,7 @@ async function fixture(slug) {
   };
   const waive = async (/** @type {string} */ finding) => {
     const stream = capture();
-    const code = await runBlock(['waive', 'B1', finding, '--run', runId, '--file', FILE, '--reason', 'owner accepted it in chat'], { stdout: stream, stderr: stream, now: () => T0 });
+    const code = await runBlock(['waive', 'B1', finding, '--run', runId, '--file', FILE, '--reason', 'owner accepted it in chat'], humanSaysYes({ stdout: stream, stderr: stream, now: () => T0 }));
     assert.deepEqual([code, stream.text], [0, `block B1 waived ${finding} in ${FILE} (by: human)\n`]);
   };
   const rows = async () => (await readAllRows(slug)).filter((r) => r.run === runId);
