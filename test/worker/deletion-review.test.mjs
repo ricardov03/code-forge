@@ -128,7 +128,8 @@ test('B74 (1)(2): a committed deletion is reviewed at hash `deleted` with a note
   assert.deepEqual(approved.map((a) => [a.file, a.content_hash]), [[SRC, 'deleted']]);
   rmSync(path.join(f.repo, 'src/fresh.mjs')); // B1 does not own it: the close would refuse `unowned_change`
   const closed = await f.close();
-  assert.deepEqual([closed.code, closed.out, closed.err], [0, 'block B1 closed\n', '']);
+  // B96: the deleted file is named with the ticket review-file gave it
+  assert.deepEqual([closed.code, closed.out, closed.err], [0, `reviewed ${SRC} ticket ${r.out.ticket}\nblock B1 closed\n`, '']);
 });
 
 test('B74 (2): a deletion nothing names says "no references found"', async () => {

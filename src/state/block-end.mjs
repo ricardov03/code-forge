@@ -54,11 +54,13 @@ function safeId(id) {
  * @param {{
  *   block: string, runId: string, status: 'closed' | 'stopped', event: string, reason?: string | null,
  *   commit: string | null, spend: {usd: number, unknown: number} | null, findings: number | null, at: Date,
- * }} facts
+ *   reviewed?: ReadonlyArray<{file: string, ticket: string, via: string}>,
+ * }} facts `reviewed` (B96): the close's reviewed lines, sorted by file; the key is added last, and only when given.
  * @returns {{block: string, run_id: string, status: string, event: string, reason: string | null, commit: string | null,
- *   spent_usd: number | null, unknown_usd_sessions: number | null, findings: number | null, at: string}}
+ *   spent_usd: number | null, unknown_usd_sessions: number | null, findings: number | null, at: string,
+ *   reviewed?: Array<{file: string, ticket: string, via: string}>}}
  */
-export function doneFileContent({ block, runId, status, event, reason = null, commit, spend, findings, at }) {
+export function doneFileContent({ block, runId, status, event, reason = null, commit, spend, findings, at, reviewed }) {
   return {
     block,
     run_id: runId,
@@ -71,6 +73,7 @@ export function doneFileContent({ block, runId, status, event, reason = null, co
     unknown_usd_sessions: spend && Number.isInteger(spend.unknown) ? spend.unknown : null,
     findings: Number.isInteger(findings) ? findings : null,
     at: at.toISOString(),
+    ...(Array.isArray(reviewed) ? { reviewed: reviewed.map((r) => ({ file: r.file, ticket: r.ticket, via: r.via })).sort((x, y) => (x.file < y.file ? -1 : x.file > y.file ? 1 : 0)) } : {}),
   };
 }
 
@@ -97,12 +100,13 @@ async function headCommit(cwd) {
  * @param {{
  *   record: Record<string, any>, id: string, status: 'closed' | 'stopped', event: string, reason?: string | null,
  *   openFindings: (rows: Record<string, any>[]) => Promise<number>, err: (s: string) => unknown, now?: Date,
+ *   reviewed?: ReadonlyArray<{file: string, ticket: string, via: string}>,
  * }} opts - `record` is the run record read before the end (its `workspace` and the block's
  *   `worktree` do not change at an end); `openFindings` counts the block's open findings exactly
- *   as `code-forge status` does.
+ *   as `code-forge status` does. `reviewed` (B96): the close's reviewed lines, kept as the last key.
  * @returns {Promise<string | null>} the done file's absolute path, or null when it was not written.
  */
-export async function writeDoneFile({ record, id, status, event, reason = null, openFindings, err, now = new Date() }) {
+export async function writeDoneFile({ record, id, status, event, reason = null, openFindings, err, now = new Date(), reviewed }) {
   const runId = String(record?.run_id);
   try {
     const file = doneFilePath(runId, id);
@@ -127,7 +131,7 @@ export async function writeDoneFile({ record, id, status, event, reason = null, 
     }
     const tree = record.blocks?.[id]?.worktree?.path;
     const commit = await headCommit(typeof tree === 'string' && tree.length > 0 ? tree : record.workspace);
-    const content = doneFileContent({ block: id, runId, status, event, reason, commit, spend, findings, at: now });
+    const content = doneFileContent({ block: id, runId, status, event, reason, commit, spend, findings, at: now, ...(reviewed === undefined ? {} : { reviewed }) });
     const dir = path.dirname(file);
     await mkdir(dir, { recursive: true, mode: 0o700 });
     const tmp = path.join(dir, `.${path.basename(file)}.${process.pid}.${Date.now()}.tmp`);

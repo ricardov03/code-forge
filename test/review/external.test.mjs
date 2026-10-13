@@ -13,7 +13,9 @@ const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { readRun, reloadRun, saveRun, writeSigned } = await import('../../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { startGrant } = await import('../../src/autopilot/grant.mjs');
-const { contentHash } = await import('../../src/worker/ticket.mjs');
+const { contentHash, ticketId } = await import('../../src/worker/ticket.mjs');
+/** B96: the line a passing close prints for `file` of block B1 at its current content */
+const rv = (/** @type {string} */ root, /** @type {string} */ run, /** @type {string} */ file) => `reviewed ${file} ticket ${ticketId({ run, block: 'B1', file, content_hash: contentHash(root, file) })}\n`;
 const { validateConfig } = await import('../../src/config/validate.mjs');
 const { initialConfigState } = await import('../../src/state/config-snapshot.mjs');
 
@@ -205,7 +207,7 @@ test('B58 (1): with review.external required, close skips the per-file review an
   assert.equal((await readRun('r-b58-close')).blocks.B1.status, 'closed');
 });
 
-test('B58 (6): the same close without the key is refused as before (unreviewed, the report check) and writes no waiver', async () => {
+test('B58 (6): the same close without the key is refused as before (unreviewed) and writes no waiver; once approved, a report with no ticket lines closes (B96)', async () => {
   const fx = await fixture('b58-control', 'r-b58-control', { extra: 'review:\n  external: {required: false, name: Grok}\n' });
   opened(await fx.open('B1', ['src/a.mjs']));
   writeFile(fx.root, 'src/a.mjs', 'export const a = 2;\n');
@@ -213,7 +215,7 @@ test('B58 (6): the same close without the key is refused as before (unreviewed, 
   await writeSigned('r-b58-control', fx.writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(fx.root, 'src/a.mjs'), round: 1 });
   const report = path.join(freshDir('report'), 'report.md');
   writeFile(path.dirname(report), 'report.md', 'done, no tickets\n');
-  assert.deepEqual(await fx.close(['--report', report]), [1, 'block B1 open: coder report FAILED: no review-file ticket id for src/a.mjs\n']);
+  assert.deepEqual(await fx.close(['--report', report]), [0, `${rv(fx.root, 'r-b58-control', 'src/a.mjs')}block B1 closed\n`]);
   assert.deepEqual(waived(await fx.rows()), []);
 });
 
@@ -319,8 +321,9 @@ test('B58 (6): with no review key at all, a full close works as today — approv
   assert.deepEqual(await fx.close([]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
   await writeSigned('r-b58-absent', fx.writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(fx.root, 'src/a.mjs'), round: 1 });
   const report = path.join(freshDir('report'), 'report.md');
-  writeFile(path.dirname(report), 'report.md', 'reviewed src/a.mjs ticket 0123456789abcdef01234567\n');
-  assert.deepEqual(await fx.close(['--report', report]), [0, 'block B1 closed\n']);
+  const line = rv(fx.root, 'r-b58-absent', 'src/a.mjs');
+  writeFile(path.dirname(report), 'report.md', line);
+  assert.deepEqual(await fx.close(['--report', report]), [0, `${line}block B1 closed\n`]);
   const rows = await fx.rows();
   assert.deepEqual(waived(rows), []);
   assert.deepEqual(rows.filter((r) => r.event === 'review.external'), []);

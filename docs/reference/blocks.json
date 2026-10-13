@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 103,
+  "block_count": 104,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1640,6 +1640,41 @@
         "B80"
       ],
       "note": "root-added 2026-10-13; process fix after the 0.10.0 README miss (plans/field-bugs/plan.md B108); npm run release moves the 'In the next release:' bullets under 'In X.Y.Z:' (new '## What's new in X.Y' on a minor or major), keeps an empty anchor, refuses an empty [Unreleased] or a missing anchor in preflight, rolls README back with the other files, and runs gen-config-doc --check"
+    },
+    "B96": {
+      "title": "The close writes the reviewed ticket lines",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/concepts.md",
+        "docs/how-it-works.md",
+        "docs/tutorial-first-test.md",
+        "skill/SKILL.md",
+        "skill/references/code.md",
+        "skill/templates/coder-brief.md",
+        "src/cli/block.mjs",
+        "src/review/reviewed-lines.mjs",
+        "src/state/block-end.mjs",
+        "test/cli/close-report.test.mjs",
+        "test/cli/status.test.mjs",
+        "test/engines/sentinel-tests.test.mjs",
+        "test/integration/review-flow.test.mjs",
+        "test/review/answers.test.mjs",
+        "test/review/close-gate.test.mjs",
+        "test/review/external.test.mjs",
+        "test/review/gate-check.test.mjs",
+        "test/review/reopen.test.mjs",
+        "test/review/waived-all.test.mjs",
+        "test/session/plan-sections.test.mjs",
+        "test/skill/structure.test.mjs",
+        "test/state/block.test.mjs",
+        "test/worker/deletion-review.test.mjs"
+      ],
+      "depends_on": [
+        "B108"
+      ],
+      "note": "root-added 2026-10-13; issue #16 item 6 (Group E); block close prints `reviewed <path> ticket <id>` for every file the review gate accepts, --json and the done file carry reviewed [{file, ticket, via}]; the coder report needs no hand ticket lines; a mismatched hand line under --report prints a held WARN; no-ticket, bad-ticket and lines-unavailable WARNs are held and print only on a successful close"
     }
   }
 }

@@ -11,7 +11,10 @@ const { readRun, saveRun, startRun, writeSigned } = await import('../../src/stat
 const { openBlock } = await import('../../src/state/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { highPathsAt, runBlock } = await import('../../src/cli/block.mjs');
-const { DELETED_HASH, contentHash } = await import('../../src/worker/ticket.mjs');
+const { DELETED_HASH, contentHash, ticketId } = await import('../../src/worker/ticket.mjs');
+/** B96: the line a passing close prints for `file` at its current content */
+const rv = (/** @type {string} */ root, /** @type {string} */ run, /** @type {string} */ file, block = 'B1') =>
+  `reviewed ${file} ticket ${ticketId({ run, block, file, content_hash: contentHash(root, file) })}\n`;
 
 const KEY = randomBytes(32);
 const HASH = 'a'.repeat(64);
@@ -158,7 +161,7 @@ test('CLI: close refuses an unknown block, an unruled late finding and an unrevi
   writeFile(repo, '.code-forge/coder.log', '$ node --test\n');
   assert.deepEqual(await close(['--transcript', transcript]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
   await writeSigned('r-gate', writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(repo, 'src/a.mjs') });
-  assert.deepEqual(await close(['--transcript', transcript]), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close(['--transcript', transcript]), [0, `${rv(repo, 'r-gate', 'src/a.mjs')}block B1 closed\n`]);
   assert.equal((await readAllRows('gate-demo')).filter((r) => r.event === 'gate.reviews_waived').length, 0);
 });
 
@@ -289,7 +292,7 @@ test('B20 CLI: close refuses `unproven <file>` for a high file; a signed coverin
   await open('B1', ['src/b.mjs']);
   writeFile(repo, 'src/b.mjs', 'export const b = 2;\n');
   await approve('B1', 'src/b.mjs');
-  assert.deepEqual(await close('B1'), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close('B1'), [0, `${rv(repo, 'r-pf', 'src/b.mjs')}block B1 closed\n`]);
 
   // high by config path; the coder deletes the high paths in its own block — the base config still counts
   await open('B2', ['src/auth/a.mjs', '.code-forge.yml']);
@@ -303,7 +306,7 @@ test('B20 CLI: close refuses `unproven <file>` for a high file; a signed coverin
   assert.deepEqual(await close('B2'), [1, 'block B2 open: unproven src/auth/a.mjs\n']);
   const waived = capture();
   assert.equal(await runBlock(['waive', 'B2', 'proof', '--run', 'r-pf', '--file', 'src/auth/a.mjs', '--reason', 'Ricardo: no test reaches it'], humanSaysYes({ stdout: waived, stderr: waived })), 0);
-  assert.deepEqual(await close('B2'), [0, 'block B2 closed\n']);
+  assert.deepEqual(await close('B2'), [0, `${rv(repo, 'r-pf', '.code-forge.yml', 'B2')}${rv(repo, 'r-pf', 'src/auth/a.mjs', 'B2')}block B2 closed\n`]);
 
   // high by recorded risk: refused, then a signed proven row covering the file closes it
   await open('B3', ['src/c.mjs']);
@@ -312,7 +315,7 @@ test('B20 CLI: close refuses `unproven <file>` for a high file; a signed coverin
   await writeSigned('r-pf', writeRow, { event: 'review.plan', block: 'B3', file: 'src/c.mjs', risk: 2 });
   assert.deepEqual(await close('B3'), [1, 'block B3 open: unproven src/c.mjs\n']);
   await proven('B3', ['src/c.mjs']);
-  assert.deepEqual(await close('B3'), [0, 'block B3 closed\n']);
+  assert.deepEqual(await close('B3'), [0, `${rv(repo, 'r-pf', 'src/c.mjs', 'B3')}block B3 closed\n`]);
 
   // a tampered proof row never counts: the MAC check stops the block before the gate reads it
   await open('B4', ['src/auth/d.mjs']);
@@ -409,7 +412,7 @@ test('fix 1 CLI: a run record whose block lost its base, or names a base the wor
   assert.deepEqual(await close(), [1, 'block B1 open: no_changes\n']);
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
   await writeSigned('r-base', writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(repo, 'src/a.mjs') });
-  assert.deepEqual(await close(), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close(), [0, `${rv(repo, 'r-base', 'src/a.mjs')}block B1 closed\n`]);
 });
 
 const MATH_BASE = 'export const add = (a, b) => a + b;\nexport const clamp = (n) => n;\n';
@@ -458,5 +461,5 @@ test('fix 3 CLI: `proof red-green` with a ./-prefixed test (revert) and a ::case
     ['test/clamp.spec.mjs', 'revert', true, ['src/math.mjs']],
     ['test/add.spec.mjs::add pins', 'assertion-deletion', true, ['test/add.spec.mjs']],
   ]);
-  assert.deepEqual(await close(), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close(), [0, `${['src/math.mjs', 'test/add.spec.mjs', 'test/clamp.spec.mjs'].map((f) => rv(repo, 'r-cov', f)).join('')}block B1 closed\n`]);
 });

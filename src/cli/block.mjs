@@ -70,6 +70,21 @@
  * FAILED: no review-file ticket id for <files>` (skipped under `--no-require-reviews`, the human's
  * way out). It runs after the review rows and reuses their file set (listed once).
  *
+ * B96 (E1): the tool builds the close report. After the review gate passed, the close prints
+ * `reviewed <path> ticket <id>` for every file the gate accepted, sorted by path, before the
+ * `reviewed_by_waiver` lines and the closed line; the id is the queue's ticket for that file at the
+ * hash the gate accepted (`resolveTicket`: the tree of a worktree block is part of it). `--json`
+ * and the done file get `reviewed: [{file, ticket, via}]` (`via`: approved, waiver or answered —
+ * the gate's own verdict, `review/reviewed-lines.mjs`), only when there is a line. So `--report`
+ * needs no ticket line: a missing hand line refuses only for a file the tool has no line for, and a
+ * hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr while
+ * the close goes on (D1). A gate-accepted file with no ticket prints `WARN no ticket for <path>`
+ * (`WARN bad ticket for <path>` when the ticket is not 24 lowercase hex) and has no line; lines that
+ * cannot be built at all give no line and `WARN reviewed lines unavailable: <message>` — then
+ * `--report` needs a hand line for every file the gate accepted, as before B96. All four warnings
+ * are held and print only when the block closes. A waived or external-review close is unchanged:
+ * no line, no key.
+ *
  * B58 (issue #11): `review.external.required: true` in the run's config snapshot (the owner set it
  * before `run start`; `run reload` refuses to change it) is the owner's non-interactive way out
  * when an outside reviewer reviews the block: the per-file review checks and the `--report` ticket
@@ -200,12 +215,13 @@ import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
-import { clearDone } from '../worker/queue.mjs';
+import { clearDone, resolveTicket } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
 import { openBlockEntry, reopenFile } from '../review/reopen.mjs';
 import { checkFileForm, checkFindingId } from '../review/verb-forms.mjs';
 import { runRootPath } from '../util/tmp.mjs';
 import { missingReviewTickets, parseSentinel } from '../engines/sentinel.mjs';
+import { reportMismatches, reviewedLines } from '../review/reviewed-lines.mjs';
 import { blockEndHook, runBlockEndHook, writeDoneFile } from '../state/block-end.mjs';
 import { blockOpenFindings } from '../review/open-findings.mjs';
 import { hookForbidden, scanTranscript } from '../util/forbidden.mjs';
@@ -281,11 +297,14 @@ const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', '
  *   isTTY?: boolean, stdinIsTTY?: boolean, stdoutIsTTY?: boolean,
  *   ui?: {confirm: (o: {message: string, initialValue?: boolean}) => Promise<unknown>, isCancel: (v: unknown) => boolean},
  *   removeBlockTree?: typeof removeBlockTree,
+ *   resolveTicket?: typeof resolveTicket, reviewedLines?: typeof reviewedLines,
  * }} [deps] - `now` (B48): the clock of the autopilot expiry checks. `stdinIsTTY` / `stdoutIsTTY`
  *   (default `process.stdin.isTTY` / `process.stdout.isTTY`; `isTTY` sets both) and `ui` (default
  *   `@clack/prompts`): the human's confirmation (B52 `--no-require-reviews`, B80 `block waive` and
  *   `block reopen`), which needs both to be TTYs.
  *   `removeBlockTree` (B64b, tests only): the `--remove-worktree` step, default the real one.
+ *   `resolveTicket` / `reviewedLines` (B96, tests only): the queue's ticket rule and the reviewed
+ *   lines builder of the close, default the real ones.
  * @returns {Promise<number>}
  */
 export async function runBlock(args, deps = {}) {
@@ -344,7 +363,8 @@ export async function runBlock(args, deps = {}) {
     // then the owner's `hooks.on_block_end` from the run-start snapshot. Without the hook key the
     // done file is the only addition: no row, and every output stays exactly as before.
     const hook = blockEndHook(record);
-    const ended = async (/** @type {'closed' | 'stopped'} */ status, /** @type {string} */ event, /** @type {string | null} */ reason) => {
+    // B96: `reviewed` (the close's tool lines) joins the done file only when there is one
+    const ended = async (/** @type {'closed' | 'stopped'} */ status, /** @type {string} */ event, /** @type {string | null} */ reason, /** @type {import('../review/reviewed-lines.mjs').ReviewedLine[]} */ reviewed = []) => {
       // ruling (e): `ended` never throws — any failure here is the done-file warning and a null
       // `doneFile`, so the caller's try/finally still reaches the hook
       /** @type {string | null} */
@@ -358,6 +378,7 @@ export async function runBlock(args, deps = {}) {
           reason: typeof reason === 'string' ? redact(reason) : null,
           openFindings: (rows) => blockOpenFindings(record, rows, id),
           err,
+          ...(reviewed.length > 0 ? { reviewed } : {}),
         });
       } catch (thrown) {
         const code = /** @type {any} */ (thrown)?.code;
@@ -568,6 +589,9 @@ export async function runBlock(args, deps = {}) {
       // B70: a file whose review left only waived findings passes as `reviewed_by_waiver`; its signed
       // `gate.review_waived_all` row joins the close rows (written just before `block.close`, only
       // when the block closes — a refused close writes none)
+      // B96: whether the review gate passed — set from the gate's own result (below), so the files
+      // it checked are the ones it accepted and the tool can give their reviewed lines
+      let reviewsPassed = false;
       const onWaivedAll = (/** @type {import('../review/gate-check.mjs').WaivedAll[]} */ files) => {
         // idempotent: the waived rows are rebuilt from the final list, never appended per call
         // (closeBlock reads closeRows only after every extra check passed)
@@ -575,7 +599,7 @@ export async function runBlock(args, deps = {}) {
         const others = closeRows.filter((r) => r.event !== 'gate.review_waived_all');
         closeRows.splice(0, closeRows.length, ...others, ...files.map((f) => ({ event: 'gate.review_waived_all', block: id, file: f.file, content_hash: f.content_hash, findings: f.findings, by: f.by, ...(f.answered?.length ? { answered: f.answered } : {}) })));
       };
-      const reviews = reviewGateCheck(async () => {
+      const gate = reviewGateCheck(async () => {
         const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
         if (transcript === null) {
           await writeSigned(runId, writeRow, { event: 'gate.transcript_missing', block: id });
@@ -625,7 +649,63 @@ export async function runBlock(args, deps = {}) {
           highPaths,
         };
       }, { onWaivedAll });
-      // B36: the coder's report names a review-file ticket for every changed file, or it is FAILED
+      // B96: `reviewsPassed` comes from the gate's own result, not from the onWaivedAll call. Each
+      // extra check runs at most once per close (`closeBlock`'s one loop, src/state/block.mjs:562,
+      // and `closeBlock` is called once below), so the gate's one pass is its final one.
+      const reviews = async () => {
+        const result = await gate();
+        reviewsPassed = result.ok;
+        return result;
+      };
+      // B96: the stderr warnings of the reviewed lines (`WARN no ticket for <path>`, `WARN bad
+      // ticket for <path>`, `WARN reviewed lines unavailable: <message>`, `WARN report ticket
+      // mismatch <path>`): kept here and printed only when the block closes, before the reviewed
+      // lines — a refused close prints none
+      /** @type {string[]} */
+      const lineWarnings = [];
+      // B96: the tool's reviewed lines — one per file the review gate accepted, with the queue's
+      // ticket for that file at the hash the gate accepted (`resolveTicket`, the queue's own rule:
+      // the same path check, tree resolution and ticket id); a file whose content moved since the
+      // gate hashed it, or whose ticket cannot be given, has no line (fail closed, `WARN no ticket
+      // for <path>`), and so has a file whose ticket is not 24 lowercase hex (`WARN bad ticket for
+      // <path>`). None when the reviews were waived (the human flag or `review.external`) or the
+      // gate has not passed — and that empty answer is never memoised: the lines are built once,
+      // from the gate's pass (its file set and hashes, its waivedAll). It never throws: an error
+      // gives no lines and one held `WARN reviewed lines unavailable: <message>`, so the done file
+      // and the on_block_end hook of a closed block always follow.
+      /** @type {Promise<import('../review/reviewed-lines.mjs').ReviewedLine[]> | undefined} */
+      let linesOnce;
+      const toolLines = async () => {
+        if (!reviewsPassed || reviewsWaived || external !== null) return [];
+        linesOnce ??= (async () => {
+          try {
+            const { mainTop, top, inTree, fileSet } = await tree();
+            const resolve = deps.resolveTicket ?? resolveTicket;
+            const ticketOf = (/** @type {{file: string, content_hash: string}} */ f) => {
+              try {
+                const t = resolve({ repoRoot: mainTop, run: runId, block: id, file: f.file, tree: inTree ? top : null });
+                return t.content_hash === f.content_hash ? t.ticket : null;
+              } catch {
+                return null;
+              }
+            };
+            return await (deps.reviewedLines ?? reviewedLines)({
+              files: fileSet,
+              waivedAll,
+              ticketOf,
+              onNoTicket: (file) => lineWarnings.push(`WARN no ticket for ${file}\n`),
+              onBadTicket: (file) => lineWarnings.push(`WARN bad ticket for ${file}\n`),
+            });
+          } catch (thrown) {
+            lineWarnings.push(`WARN reviewed lines unavailable: ${thrown instanceof Error ? thrown.message : String(thrown)}\n`);
+            return [];
+          }
+        })();
+        return linesOnce;
+      };
+      // B36 → B96: the coder's report. The tool gives the reviewed lines, so a missing hand line is
+      // a refusal only for a file the tool has no line for; a hand line that names another ticket
+      // is a warning and the close goes on (D1: the tool lines are the record)
       const report = async () => {
         if (typeof flags.report !== 'string' || reviewsWaived || external !== null) return { ok: true };
         let text;
@@ -635,8 +715,12 @@ export async function runBlock(args, deps = {}) {
           return { ok: false, reason: 'coder report FAILED: --report cannot be read' };
         }
         const { fileSet } = await tree();
-        const missing = missingReviewTickets(text, fileSet.map((f) => f.file));
-        return missing.length === 0 ? { ok: true } : { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
+        const lines = await toolLines();
+        const given = new Set(lines.map((l) => l.file));
+        const missing = missingReviewTickets(text, fileSet.map((f) => f.file)).filter((f) => !given.has(f));
+        if (missing.length > 0) return { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
+        for (const file of reportMismatches(text, lines)) lineWarnings.push(`WARN report ticket mismatch ${file}\n`);
+        return { ok: true };
       };
       /** @type {Array<() => Promise<{ok: boolean, reason?: string}>>} */
       const extraChecks = [reviews, report];
@@ -666,14 +750,19 @@ export async function runBlock(args, deps = {}) {
       const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows });
       // B64b: the block ended (closed, or stopped by a worker pin event or ledger.tamper) — its rows
       // are written and the run lock released; the done file is written before the tree is removed
-      const end = result.status === 'closed' || result.status === 'stopped' ? await ended(result.status, result.event ?? (result.status === 'stopped' ? 'block.stop' : 'block.close'), result.reason ?? null) : null;
+      // B96: the tool's reviewed lines of a block that closed (also kept in its done file)
+      const reviewedJson = result.ok ? await toolLines() : [];
+      const end = result.status === 'closed' || result.status === 'stopped' ? await ended(result.status, result.event ?? (result.status === 'stopped' ? 'block.stop' : 'block.close'), result.reason ?? null, reviewedJson) : null;
       // B64b ruling (e): the hook runs exactly once for this end, after everything else the verb
       // does — also when a later step (the output, `--remove-worktree`) throws; it never changes
       // the exit code or stdout (`runHook` never throws)
       try {
+        // B96: the reviewed lines (sorted by path) come first, then the reviewed_by_waiver lines
         // B70: each file that passed as reviewed_by_waiver is named before the closed line
         // B71: an answered finding is named as answered; a file with only answered findings has no `by`
         if (result.ok) {
+          for (const w of lineWarnings) err(w);
+          for (const l of reviewedJson) say(`reviewed ${l.file} ticket ${l.ticket}\n`);
           for (const f of waivedAll) {
             const parts = f.findings.length > 0 ? [`${f.findings.join(', ')}; by ${f.by}`] : [];
             if (f.answered?.length) parts.push(`answered ${f.answered.join(', ')}`);
@@ -692,6 +781,8 @@ export async function runBlock(args, deps = {}) {
           ...(end?.json ?? {}),
           // B70: only when a file passed as reviewed_by_waiver (otherwise the output is unchanged)
           ...(result.ok && waivedAll.length > 0 ? { reviewed_by_waiver: waivedAll.map((f) => ({ file: f.file, content_hash: f.content_hash, status: f.status, findings: f.findings, by: f.by, ...(f.answered?.length ? { answered: f.answered } : {}) })) } : {}),
+          // B96: only when the tool gave reviewed lines (a waived or external close is unchanged)
+          ...(reviewedJson.length > 0 ? { reviewed: reviewedJson } : {}),
         };
         if (!result.ok || !removeTree) {
           if (json && result.ok) emit(closedJson);

@@ -59,15 +59,35 @@ test('B36: splitHeading reads §0.x, 0.6 and 3. numbers and leaves an unnumbered
   );
 });
 
-test('B36: the coder brief template states the fail-closed report rule for first attempts and fix rounds', () => {
+/** @param {string} text @returns {string} the text with every whitespace run one space, lower case */
+const flat = (text) => text.replace(/\s+/g, ' ').toLowerCase();
+
+/** The base (1d2d062) brief's ticket-line rule: each phrase as that brief had it, its line there in the comment. */
+const BRIEF_GONE = [
+  'FAILED unless it lists the ticket ids', // 22, the report heading
+  'then one line per changed file', // 37
+  '`reviewed <path> ticket <ticket-id>`', // 39 and 47
+  '**FAILED unless:** the report lists the `review-file` ticket id of every changed file', // 41
+  'A report with no ticket ids, or one that misses a changed file, counts as FAILED whatever its sentinel says', // 41
+  'no ticket ids', // 41
+  '`===BLOCK <id> FAILED: no review-file ticket ids===`', // 41
+  'no review-file ticket id', // 41
+  'The final report follows the same rule: one', // 47
+  'line per file changed in the round, or the round counts as FAILED', // 47
+];
+const BRIEF_NO_LINES =
+  "The final report needs no `reviewed <path> ticket <id>` lines: `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket.";
+
+test('B36 → B96: the coder brief template states the report rule for first attempts and fix rounds — the close prints the ticket lines', () => {
   const brief = read('skill/templates/coder-brief.md');
-  assert.equal(brief.split('`reviewed <path> ticket <ticket-id>`').length - 1, 2);
-  assert.equal(
-    brief.includes('**FAILED unless:** the report lists the `review-file` ticket id of every changed file. A report with no ticket ids, or one that misses a changed file, counts as FAILED whatever its sentinel says'),
-    true,
-  );
-  assert.equal(brief.includes('one `reviewed <path> ticket <ticket-id>` line per file changed in the round, or the round counts as FAILED.'), true);
-  assert.equal(read('skill/references/code.md').includes('5. **FAILED unless** (`templates/coder-brief.md`)'), true);
+  // the base brief's rule is gone, in any case and any wrapping; other --report checks (sentinel, TESTS) may keep a FAILED form
+  for (const gone of BRIEF_GONE) assert.equal(flat(brief).split(flat(gone)).length - 1, 0, gone);
+  assert.equal(brief.split(BRIEF_NO_LINES).length - 1, 1);
+  // outside that sentence nothing asks for a ticket line, whatever its placeholder (or path) is called
+  const rest = brief.replace(BRIEF_NO_LINES, '');
+  assert.deepEqual([rest.match(/reviewed[\s`*]+<[^>]+>[\s`*]+ticket/gi), rest.match(/\breviewed[\s`*]+\S+[\s`*]+ticket\b/gi)], [null, null]);
+  assert.equal(brief.split("The round's final report follows the same rule as the first: it needs no ticket lines.").length - 1, 1);
+  assert.equal(read('skill/references/code.md').split('5. **The close writes the ticket lines (B96)** (`templates/coder-brief.md`)').length - 1, 1);
 });
 
 test('B36: a §0.x heading with no distinctive word is not the unbackable section; "Unbackable" at §0.x is', () => {

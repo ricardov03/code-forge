@@ -195,7 +195,8 @@ test('B72 (1)(2)(3)(8): stopped ⇒ same content refused ⇒ attempt keeps the s
   assert.equal((await f.rows()).filter((r) => r.event === 'review.state_restored').length, 0);
 
   const closed = await f.close();
-  assert.deepEqual([closed.code, closed.out, closed.err], [0, 'block B1 closed\n', '']);
+  // B96: the close names the file with the ticket the fresh review-file gave
+  assert.deepEqual([closed.code, closed.out, closed.err], [0, `reviewed src/a.mjs ticket ${fresh.out.ticket}\nblock B1 closed\n`, '']);
 });
 
 test('B72 (6)(8): a reopened row works once, the spent rung makes the next cap a stop; forged, unsigned, other-run, non-human and stale rows are ignored', async () => {

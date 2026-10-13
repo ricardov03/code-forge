@@ -10,11 +10,11 @@ import { test } from 'node:test';
 
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { startRun, writeSigned } = await import('../../src/state/run.mjs');
-const { openBlock } = await import('../../src/state/block.mjs');
+const { checkScope, claimPath, openBlock } = await import('../../src/state/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { runBlock } = await import('../../src/cli/block.mjs');
 const { contentHash, ticketId } = await import('../../src/worker/ticket.mjs');
-const { writeResult } = await import('../../src/worker/queue.mjs');
+const { resolveTicket, writeResult } = await import('../../src/worker/queue.mjs');
 const { autopilotWaiverProblem, delegableSeverity } = await import('../../src/review/gate-check.mjs');
 
 const FILE = 'src/a.mjs';
@@ -52,10 +52,10 @@ async function fixture(slug) {
   writeFile(repo, FILE, 'export const a = 2;\n');
   const hash = contentHash(repo, FILE);
   const sign = (/** @type {Record<string, any>} */ row) => writeSigned(runId, writeRow, { block: 'B1', file: FILE, content_hash: hash, ...row });
-  /** @param {string[]} extra @returns {Promise<[number, string]>} */
-  const close = async (extra = []) => {
+  /** @param {string[]} extra @param {Record<string, any>} [deps] @returns {Promise<[number, string]>} */
+  const close = async (extra = [], deps = {}) => {
     const stream = capture();
-    const code = await runBlock(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...extra], { stdout: stream, stderr: stream, probe, now: () => T0 });
+    const code = await runBlock(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...extra], { stdout: stream, stderr: stream, probe, now: () => T0, ...deps });
     return [code, stream.text];
   };
   const waive = async (/** @type {string} */ finding) => {
@@ -71,7 +71,10 @@ async function fixture(slug) {
     await writeSigned(runId, writeRow, { event: 'autopilot.decision', decision_id: `ad-${finding}`, grant_id: `ap-${finding}`, scope: `waive:${severity}`, subject: { block: 'B1', file: FILE, finding }, decision: 'waive', acted: true, ts: '2026-10-07T10:00:00.000Z' });
     await writeSigned(runId, writeRow, { event: 'review.waived', block: 'B1', file: FILE, finding, by: 'autopilot', severity, grant_id: `ap-${finding}`, decision_id: `ad-${finding}`, reason: 'delegate: style only', ts: '2026-10-07T10:05:00.000Z' });
   };
-  return { runId, repo, hash, sign, close, waive, rows, waivedAllRows, autopilotWaive, writeRow };
+  // B96: the queue's ticket of the file at its edited content, and the line a passing close prints
+  const ticket = ticketId({ run: runId, block: 'B1', file: FILE, content_hash: hash });
+  const line = `reviewed ${FILE} ticket ${ticket}\n`;
+  return { runId, repo, hash, sign, close, waive, rows, waivedAllRows, autopilotWaive, writeRow, ticket, line };
 }
 
 test('B70 (1)+(4): a signed round at the current hash whose findings the human all waived closes with one signed gate.review_waived_all row just before block.close; refused closes write none', async () => {
@@ -83,14 +86,25 @@ test('B70 (1)+(4): a signed round at the current hash whose findings the human a
   await f.waive('W1');
   assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs C1\n']);
   await f.waive('C1');
-  // (4) the review check passes, a later check refuses: no row is left behind
+  // (4) the review check passes, a later check refuses: no row is left behind. The later refusal
+  // is an orphan in the registry, which closeBlock checks after every extra check (B96: a readable
+  // report with no ticket line no longer refuses). The gate ran and passed first: the close asked
+  // the queue for the file's ticket, which it does only once the gate passed — so the
+  // gate.review_waived_all row was built for the close, then dropped with it.
+  await checkScope({ runId: f.runId, id: 'B1', files: [FILE, 'zz.txt'], writeRow: f.writeRow });
   const reportDir = freshDir('b70-report');
-  writeFile(reportDir, 'report.md', '===BLOCK B1 COMPLETE===\n');
-  const report = `${reportDir}/report.md`;
-  assert.deepEqual(await f.close(['--report', report]), [1, 'block B1 open: coder report FAILED: no review-file ticket id for src/a.mjs\n']);
+  writeFile(reportDir, 'report.md', 'TESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n');
+  let asked = 0;
+  const counted = (/** @type {Parameters<typeof resolveTicket>[0]} */ t) => {
+    asked += 1;
+    return resolveTicket(t);
+  };
+  assert.deepEqual(await f.close(['--report', `${reportDir}/report.md`], { resolveTicket: counted }), [1, 'block B1 open: orphans: zz.txt\n']);
+  assert.equal(asked, 1);
   assert.equal((await f.waivedAllRows()).length, 0);
+  await claimPath({ runId: f.runId, id: 'B1', file: 'zz.txt', writeRow: f.writeRow });
   // (1) the close
-  assert.deepEqual(await f.close(), [0, 'block B1: src/a.mjs reviewed_by_waiver (C1, W1; by human)\nblock B1 closed\n']);
+  assert.deepEqual(await f.close(), [0, `${f.line}block B1: src/a.mjs reviewed_by_waiver (C1, W1; by human)\nblock B1 closed\n`]);
   const all = await f.rows();
   const waived = all.filter((r) => r.event === 'gate.review_waived_all');
   assert.equal(waived.length, 1);
@@ -122,6 +136,7 @@ test('B70 (2): a file stopped at review_cap with every open id waived closes —
     reason: null,
     close_event: null,
     reviewed_by_waiver: [{ file: FILE, content_hash: f.hash, status: 'reviewed_by_waiver', findings: ['N3', 'W2'], by: 'autopilot' }],
+    reviewed: [{ file: FILE, ticket: f.ticket, via: 'waiver' }],
   });
   const all = await f.rows();
   const waived = all.filter((r) => r.event === 'gate.review_waived_all');
@@ -202,7 +217,7 @@ test('B70 (3): a critical waived only by autopilot — still unreviewed only bec
   assert.equal((await f.waivedAllRows()).length, 0);
   // the human's waiver of the same critical makes it reviewed_by_waiver
   await f.waive('C1');
-  assert.deepEqual(await f.close(), [0, 'block B1: src/a.mjs reviewed_by_waiver (C1; by human)\nblock B1 closed\n']);
+  assert.deepEqual(await f.close(), [0, `${f.line}block B1: src/a.mjs reviewed_by_waiver (C1; by human)\nblock B1 closed\n`]);
   assert.deepEqual((await f.waivedAllRows()).map((r) => [r.file, r.findings, r.by]), [[FILE, ['C1'], 'human']]);
 });
 
@@ -210,7 +225,7 @@ test('B70: a close where no file needs it writes no gate.review_waived_all row',
   const f = await fixture('b70-approved');
   await f.sign({ event: 'review.round', round: 1, kind: 'full', open_after: 0 });
   await f.sign({ event: 'review.approved', round: 1 });
-  assert.deepEqual(await f.close(), [0, 'block B1 closed\n']);
+  assert.deepEqual(await f.close(), [0, `${f.line}block B1 closed\n`]);
   assert.equal((await f.waivedAllRows()).length, 0);
 });
 
@@ -229,7 +244,7 @@ test('B70 (2)+(3): a review.cap id the latest refusal does not name needs a seve
   assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
   await f.waive('W2');
-  assert.deepEqual(await f.close(), [0, 'block B1: src/a.mjs reviewed_by_waiver (N3, W2; by human)\nblock B1 closed\n']);
+  assert.deepEqual(await f.close(), [0, `${f.line}block B1: src/a.mjs reviewed_by_waiver (N3, W2; by human)\nblock B1 closed\n`]);
   assert.deepEqual((await f.waivedAllRows()).map((r) => [r.file, r.findings, r.by]), [[FILE, ['N3', 'W2'], 'human']]);
 });
 

@@ -122,7 +122,8 @@ describe('review-file → fix loop → signed approval → block close (B12c)', 
       assert.equal(verifyRow(approvals[0], await loadKey(f.runId)).ok, true);
       const closed = await f.close();
       assert.equal(closed.code, 0, closed.stderr);
-      assert.equal(closed.stdout, 'block B1 closed\n');
+      // B96: the close names the file with the ticket review-file itself gave
+      assert.equal(closed.stdout, `reviewed ${FILE} ticket ${out.queued.ticket}\nblock B1 closed\n`);
     } finally {
       await f.stop();
     }

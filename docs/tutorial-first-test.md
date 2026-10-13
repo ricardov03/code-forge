@@ -269,8 +269,13 @@ By hand, open a second Claude Code session in the repo and give it the pointer l
    `code-forge review-file --wait <ticket>`. If the review is still running after 90 seconds, the
    wait prints `"status": "pending", "reason": "wait_timeout"`; the coder waits again.
 5. A progress line per file in `.code-forge/runs/site-1/B1.log`.
-6. The final report: `===BLOCK B1 COMPLETE===`, the test summary, `git diff --stat`, and one
-   `reviewed <path> ticket <id>` line per changed file. Save it as `.code-forge/runs/site-1/B1.report.md`
+6. The final report: `===BLOCK B1 COMPLETE===`, the test summary and `git diff --stat`.
+   The final report needs no `reviewed <path> ticket <id>` lines: `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket.
+   The close prints the reviewed lines, then the `reviewed_by_waiver` lines, then the `closed` line.
+   With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr when the block closes, and the close goes on.
+   A file with a `review.waived` finding still gets a line; only a close with every review waived (`--no-require-reviews`) or `review.external` prints none.
+   The printed line has no `via`: `--json` and the block's done file carry the lines as `reviewed: [{file, ticket, via}]`, with `via: approved` for a file with a signed approval, `via: waiver` when at least one of its open findings was waived (also when the others were answered), and `via: answered` when every one was answered.
+   Save it as `.code-forge/runs/site-1/B1.report.md`
    (the skill does this for you).
 
 ## 9. Review per file
@@ -344,7 +349,7 @@ If the close is refused, the message names the reason. Common ones:
 | `orphans: <paths>` | a changed or untracked (not ignored) file that no open block owns | `code-forge block claim B1 <path> --run site-1`, or delete it |
 | `unproven <file>` | a high-tier file has no red→green row | run `proof red-green` for its test |
 | `WARN … no coder transcript found` | the transcript grep could not run | pass `--transcript <file>` |
-| `coder report FAILED: no review-file ticket id for <files>` | the report does not name a review ticket for those files | review them, add the `reviewed <path> ticket <id>` lines, and close again |
+| `coder report FAILED: no review-file ticket id for <files>` | under `--report`, a file the review gate accepts has no reviewed line from the close and no hand line for it in the report | add a `reviewed <path> ticket <id>` line with its `review-file` ticket for each of those files to the report, and close again |
 
 ## 12. End the run and read the report
 

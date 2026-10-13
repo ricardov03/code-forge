@@ -15,7 +15,7 @@ const { runBlock } = await import('../../src/cli/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { readRun, reloadRun, saveRun, writeSigned } = await import('../../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
-const { contentHash } = await import('../../src/worker/ticket.mjs');
+const { contentHash, ticketId } = await import('../../src/worker/ticket.mjs');
 const { validateConfig } = await import('../../src/config/validate.mjs');
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
@@ -167,6 +167,13 @@ async function fixture(slug, extra, owned = ['src/a.mjs']) {
   const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
   /** @param {string[]} more @param {Record<string, any>} [deps] */
   const close = (more = [], deps = {}) => cli(runBlock, ['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...more], deps);
+  /** B96: the close with stdout and stderr kept apart. @param {string[]} more @returns {Promise<[number, string, string]>} */
+  const closeSplit = async (more) => {
+    const out = capture();
+    const errs = capture();
+    const code = await runBlock(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...more], { stdout: out, stderr: errs, probe: PROBE, now: () => T0 });
+    return [code, out.text, errs.text];
+  };
   /** @param {string} text @returns {string} the path of a report file outside the repository */
   const report = (text) => {
     const dir = freshDir('report');
@@ -177,15 +184,20 @@ async function fixture(slug, extra, owned = ['src/a.mjs']) {
   const approve = async (files = ['src/a.mjs']) => {
     for (const file of files) await writeSigned(runId, writeRow, { event: 'review.approved', block: 'B1', file, content_hash: contentHash(repo, file), round: 1 });
   };
-  return { runId, repo, writeRow, close, report, approve, rows: () => readAllRows(slug) };
+  /** B96: the lines the close prints for the files the gate accepted, sorted by path */
+  const reviewed = (files = ['src/a.mjs']) =>
+    [...files]
+      .sort()
+      .map((file) => `reviewed ${file} ticket ${ticketId({ run: runId, block: 'B1', file, content_hash: contentHash(repo, file) })}\n`)
+      .join('');
+  return { runId, repo, writeRow, close, closeSplit, report, approve, reviewed, rows: () => readAllRows(slug) };
 }
 
 /** @param {Record<string, any>} row */
 const strip = ({ mac: _m, ts: _t, ...rest }) => rest;
 /** @param {Array<Record<string, any>>} rows @param {string} event */
 const only = (rows, event) => rows.filter((r) => r.event === event);
-const TICKET = 'reviewed src/a.mjs ticket 0123456789abcdef01234567\n';
-const GREEN = `TESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n${TICKET}`;
+const GREEN = 'TESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n';
 
 /**
  * @param {Awaited<ReturnType<typeof fixture>>} fx @param {[number, string]} result @param {string} reason
@@ -243,10 +255,9 @@ test('B63b (3): --no-require-reviews waives reviews, not tests — refused witho
 test('B63b (3): with the per-file review on, a reviewed and ticketed report still needs its TESTS line; a green one closes with the row', async () => {
   const fx = await fixture('b63b-reviews', REQUIRE);
   await fx.approve();
-  await refused(fx, await fx.close(['--report', fx.report(`===BLOCK B1 COMPLETE===\n${TICKET}`)]), 'no TESTS line');
-  // with a green TESTS line the B36 ticket check still runs
-  assert.deepEqual(await fx.close(['--report', fx.report('TESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n')]), [1, 'block B1 open: coder report FAILED: no review-file ticket id for src/a.mjs\n']);
-  assert.deepEqual(await fx.close(['--report', fx.report(GREEN)]), [0, 'block B1 closed\n']);
+  await refused(fx, await fx.close(['--report', fx.report(`===BLOCK B1 COMPLETE===\n${fx.reviewed()}`)]), 'no TESTS line');
+  // B96: a green report needs no ticket line; the close prints the tool's line
+  assert.deepEqual(await fx.close(['--report', fx.report(GREEN)]), [0, `${fx.reviewed()}block B1 closed\n`]);
   const tests = only(await fx.rows(), 'coder.tests');
   assert.deepEqual(tests.map(strip), [{ run: 'r-b63b-reviews', event: 'coder.tests', block: 'B1', command: 'npm test', exit: 0, tokens_source: null, cost_source: null }]);
   assert.deepEqual(verifyRow(tests[0], await loadKey('r-b63b-reviews')), { ok: true });
@@ -259,11 +270,12 @@ test('B63b (3): with the key absent or false, close is as before — no --report
   ]) {
     const fx = await fixture(slug, extra);
     await fx.approve();
-    assert.deepEqual(await fx.close([]), [0, 'block B1 closed\n']);
+    assert.deepEqual(await fx.close([]), [0, `${fx.reviewed()}block B1 closed\n`]);
     assert.deepEqual(only(await fx.rows(), 'coder.tests'), []);
     const ticketed = await fixture(`${slug}-r`, extra);
     await ticketed.approve();
-    assert.deepEqual(await ticketed.close(['--report', ticketed.report(GREEN)]), [0, 'block B1 closed\n']);
+    // B96: a hand line that names the tool's own ticket warns nothing: stderr is empty
+    assert.deepEqual(await ticketed.closeSplit(['--report', ticketed.report(`${GREEN}${ticketed.reviewed()}`)]), [0, `${ticketed.reviewed()}block B1 closed\n`, '']);
     const rows = await ticketed.rows();
     assert.deepEqual(only(rows, 'coder.tests'), []);
     assert.deepEqual(rows.map((r) => r.event).slice(-1), ['block.close']);
@@ -282,7 +294,7 @@ test('B63b (2): close reads the key from the run-start snapshot, never the live 
   const off = await fixture('b63b-live-off', '', both);
   writeFile(off.repo, '.code-forge.yml', configYaml('b63b-live-off', REQUIRE));
   await off.approve(both);
-  assert.deepEqual(await off.close([]), [0, 'block B1 closed\n']);
+  assert.deepEqual(await off.close([]), [0, `${off.reviewed(both)}block B1 closed\n`]);
   assert.deepEqual(only(await off.rows(), 'coder.tests'), []);
 });
 

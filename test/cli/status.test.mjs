@@ -18,7 +18,7 @@ const { runBlock } = await import('../../src/cli/block.mjs');
 const { ledgerDir } = await import('../../src/ledger/paths.mjs');
 const { runsDir } = await import('../../src/state/paths.mjs');
 const { loadKey, signRow } = await import('../../src/state/signer.mjs');
-const { contentHash } = await import('../../src/worker/ticket.mjs');
+const { contentHash, ticketId } = await import('../../src/worker/ticket.mjs');
 
 const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'bin', 'code-forge.mjs');
 /**
@@ -545,10 +545,13 @@ test('B64a (4): a --json close through the review gate (a signed approval of the
   assert.equal((await fx.open('B1', ['src/a.mjs'])).code, 0);
   writeFile(fx.repo, 'src/a.mjs', 'export const a = 2;\n');
   const key = await loadKey(fx.runId);
-  await appendRow(signRow({ run: fx.runId, event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(realpathSync(fx.repo), 'src/a.mjs') }, key), { slug: fx.slug });
+  const hash = contentHash(realpathSync(fx.repo), 'src/a.mjs');
+  await appendRow(signRow({ run: fx.runId, event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: hash }, key), { slug: fx.slug });
   const res = await fx.block(['close', 'B1', '--worker-pid', PID, '--json']);
   assert.equal(res.code, 0, res.stderr);
-  assert.deepEqual(oneLine(res), { block: 'B1', event: 'closed', status: 'closed', reason: null, close_event: null });
+  // B96: the gated close names the reviewed file and its queue ticket
+  const ticket = ticketId({ run: fx.runId, block: 'B1', file: 'src/a.mjs', content_hash: hash });
+  assert.deepEqual(oneLine(res), { block: 'B1', event: 'closed', status: 'closed', reason: null, close_event: null, reviewed: [{ file: 'src/a.mjs', ticket, via: 'approved' }] });
   // the gate ran: its warning (no transcript) is on stderr, never on stdout
   assert.match(res.stderr, /^WARN block B1: no coder transcript found /);
   assert.ok((await fx.rows()).some((r) => r.event === 'block.close' && r.block === 'B1'));

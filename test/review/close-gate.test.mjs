@@ -179,6 +179,9 @@ function capture() {
 }
 
 const T0 = new Date('2026-10-07T10:00:00.000Z');
+/** B96: the line a passing close prints for `file` (repo-root-relative) at its content under `root` */
+const rv = (/** @type {string} */ root, /** @type {string} */ run, /** @type {string} */ file, block = 'B1') =>
+  `reviewed ${file} ticket ${ticketId({ run, block, file, content_hash: contentHash(root, file) })}\n`;
 
 /**
  * A run with block B1 owning `src/a.mjs` and a committed transcript; `beforeOpen` files are
@@ -218,9 +221,9 @@ test('B52 (b) CLI: a file changed or created after block open outside owned_file
   writeFile(repo, 'README.md', '# demo\n'); // put back: no longer a change
   // a parallel block of the same run owns src/b.mjs: B1 closes on its own files
   await open('B2', ['src/b.mjs']);
-  assert.deepEqual(await close([]), [0, 'WARN block B1: src/b.mjs changed and is owned by open block B2; not checked here (its own gate reviews it)\nblock B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `WARN block B1: src/b.mjs changed and is owned by open block B2; not checked here (its own gate reviews it)\n${rv(repo, 'r-b52-unowned', 'src/a.mjs')}block B1 closed\n`]);
   await approve('src/b.mjs', 'B2');
-  assert.deepEqual(await close([], {}, 'B2'), [0, 'block B2 closed\n']);
+  assert.deepEqual(await close([], {}, 'B2'), [0, `${rv(repo, 'r-b52-unowned', 'src/b.mjs', 'B2')}block B2 closed\n`]);
 });
 
 test('B52 (b) CLI: a file already changed when the block opened (a plan file) is not the coder\'s — until the coder edits it', async () => {
@@ -230,7 +233,7 @@ test('B52 (b) CLI: a file already changed when the block opened (a plan file) is
   writeFile(repo, 'plans/p.plan.md', '# plan, edited by the coder\n');
   assert.deepEqual(await close([]), [1, 'block B1 open: unowned_change plans/p.plan.md\n']);
   writeFile(repo, 'plans/p.plan.md', '# plan\n');
-  assert.deepEqual(await close([]), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `${rv(repo, 'r-b52-preopen', 'src/a.mjs')}block B1 closed\n`]);
 });
 
 test('B52 (b) CLI: a parallel block that closed covers its file only while the file is the content its gate approved', async () => {
@@ -240,11 +243,11 @@ test('B52 (b) CLI: a parallel block that closed covers its file only while the f
   writeFile(repo, 'src/b.mjs', 'export const b = 1;\n');
   await approve('src/a.mjs');
   await approve('src/b.mjs', 'B2');
-  assert.deepEqual(await close([]), [0, 'WARN block B1: src/b.mjs changed and is owned by open block B2; not checked here (its own gate reviews it)\nblock B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `WARN block B1: src/b.mjs changed and is owned by open block B2; not checked here (its own gate reviews it)\n${rv(repo, 'r-b52-closed', 'src/a.mjs')}block B1 closed\n`]);
   writeFile(repo, 'src/a.mjs', 'export const a = 3;\n'); // B2's coder touched B1's file after B1 closed
   assert.deepEqual(await close([], {}, 'B2'), [1, 'block B2 open: unowned_change src/a.mjs\n']);
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n'); // exactly what B1's gate approved again
-  assert.deepEqual(await close([], {}, 'B2'), [0, 'block B2 closed\n']);
+  assert.deepEqual(await close([], {}, 'B2'), [0, `${rv(repo, 'r-b52-closed', 'src/b.mjs', 'B2')}block B2 closed\n`]);
 });
 
 test('B52 (b) CLI: a block opened before B52 (no tree_at_open) closes with a WARN that the unowned check did not run', async () => {
@@ -255,7 +258,7 @@ test('B52 (b) CLI: a block opened before B52 (no tree_at_open) closes with a WAR
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
   writeFile(repo, 'src/b.mjs', 'export const b = 1;\n');
   await approve('src/a.mjs');
-  assert.deepEqual(await close([]), [0, 'WARN block B1: opened before code-forge recorded the tree at block open; unowned changes were not checked\nblock B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `WARN block B1: opened before code-forge recorded the tree at block open; unowned changes were not checked\n${rv(repo, 'r-b52-old', 'src/a.mjs')}block B1 closed\n`]);
 });
 
 test('B57 CLI: the close reads the stored owned_kinds — an entry recorded as a regular file owns no path below it; a block recorded before B57 (no owned_kinds) stays directory-like', async () => {
@@ -273,7 +276,7 @@ test('B57 CLI: the close reads the stored owned_kinds — an entry recorded as a
   delete old.blocks.B1.owned_kinds;
   await saveRun(old);
   await approve('src/feature/x.mjs');
-  assert.deepEqual(await close([]), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `${rv(repo, 'r-b57-kinds', 'src/a.mjs')}${rv(repo, 'r-b57-kinds', 'src/feature/x.mjs')}block B1 closed\n`]);
 });
 
 const ui = (/** @type {unknown} */ answer) => ({ confirm: async () => answer, isCancel: (/** @type {unknown} */ v) => v === CANCEL });
@@ -319,7 +322,7 @@ test('B52 (a) CLI: the field case — approved, then a later review of the same 
   await writeSigned('r-b52-stale', writeRow, { event: 'review.result', block: 'B1', file: 'src/a.mjs', content_hash: hash, ticket: 't', status: 'reviewed', approved: false, open: [{ id: 'C1', severity: 'critical' }, { id: 'C2', severity: 'critical' }] });
   assert.deepEqual(await close([]), [1, 'block B1 open: not_approved src/a.mjs C1; not_approved src/a.mjs C2\n']);
   for (const id of ['C1', 'C2']) assert.equal(await runBlock(['waive', 'B1', id, '--run', 'r-b52-stale', '--file', 'src/a.mjs', '--reason', 'owner accepted in chat'], humanSaysYes({ stdout: capture(), stderr: capture(), now: () => T0 })), 0);
-  assert.deepEqual(await close([]), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `${rv(repo, 'r-b52-stale', 'src/a.mjs')}block B1 closed\n`]);
 });
 
 test('B52 (d): the fix loop writes no review.approved for a single reviewer\'s critical that S1 scores as a likely non-defect', async () => {
@@ -469,7 +472,7 @@ test('B52 fix 5 CLI: an old-ledger review.result is judged by its signed result 
   writeFile(repo, `.code-forge/reviews/${runId}/${ticket}.json`, `${JSON.stringify({ ...base, run: runId, ticket, approved: true, findings: [], mac: 'f'.repeat(64) })}\n`);
   assert.deepEqual(await close([]), [1, 'block B1 open: not_approved src/a.mjs\n']);
   writeResult({ repoRoot: repo, runId, ticket, key, result: { ...base, approved: true, findings: [] } });
-  assert.deepEqual(await close([]), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `${rv(repo, runId, 'src/a.mjs')}block B1 closed\n`]);
 });
 
 test('B52 item 18c/19: ownsPath — a directory entry owns the paths below it (never a name that only shares its prefix); reviewedFiles lists the block\'s reviewed paths', async () => {
@@ -513,7 +516,7 @@ test('B52 round 2 item 1: a workspace in a subdirectory — one path base (the r
   const hash = contentHash(top, 'app/src/a.mjs');
   // the worker signs repo-root-relative paths
   await writeSigned(runId, writeRow, { event: 'review.approved', block: 'B1', file: 'app/src/a.mjs', content_hash: hash, round: 1 });
-  assert.deepEqual(await close(), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close(), [0, `${rv(top, runId, 'app/src/a.mjs')}block B1 closed\n`]);
 
   // a second block: an unowned file inside and outside the workspace, and an old-ledger result
   const run2 = 'r-b52-subdir2';
@@ -574,7 +577,7 @@ test('B52 round 2 item 7 CLI: a nested repo already dirty at open and edited aga
   writeFile(nested, 'x.txt', 'x edited after open\n'); // the status line ( M x.txt) is the same as at open
   assert.deepEqual(await close(), [1, 'block B1 open: unowned_change vendor/lib/\n']);
   writeFile(nested, 'x.txt', 'x dirty at open\n');
-  assert.deepEqual(await close(), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close(), [0, `${rv(repo, runId, 'src/a.mjs')}block B1 closed\n`]);
 });
 
 test('B52 round 2 item 8: a directory with no .git that the index records as a gitlink stamps as gitlink:<commit>', async () => {
@@ -612,7 +615,7 @@ test('B52 round 3 item 1: with a workspace in app/, only the top-level .code-for
   // the run mirror (app/.code-forge/runs/<run>.json) is code-forge's own file and stays exempt
   assert.deepEqual(await close(), [1, 'block B1 open: unowned_change app/.code-forge/x\n']);
   unlinkSync(path.join(top, 'app', '.code-forge', 'x'));
-  assert.deepEqual(await close(), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close(), [0, `${rv(top, runId, 'app/src/a.mjs')}block B1 closed\n`]);
 });
 
 test('B52 round 3 item 2: --no-require-reviews needs BOTH stdin and stdout to be terminals', async () => {
@@ -629,7 +632,7 @@ test('B52 round 3 item 3: a block that is not open is refused the same way with 
   const { repo, close, approve } = await closeFixture('b52-notopen', 'r-b52-notopen');
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
   await approve('src/a.mjs');
-  assert.deepEqual(await close([]), [0, 'block B1 closed\n']);
+  assert.deepEqual(await close([]), [0, `${rv(repo, 'r-b52-notopen', 'src/a.mjs')}block B1 closed\n`]);
   let asked = 0;
   const counting = { confirm: async () => ((asked += 1), true), isCancel: () => false };
   const refused = [1, 'block close: block B1 is not open in run r-b52-notopen\n'];

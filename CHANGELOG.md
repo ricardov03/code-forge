@@ -12,6 +12,12 @@ waits on a second real consumer (plan §10.4, Q17).
   or a missing README anchor in preflight, restores README on a failed check, and runs `gen-config-doc --check`;
   `docs/releasing.md` gets a releasing checklist (B108).
 
+### Changed
+
+- `block close` prints the `reviewed <path> ticket <id>` lines itself, for every file the review gate accepts; `--json`
+  and the done file carry `reviewed: [{file, ticket, via}]`; the coder report no longer needs hand ticket lines, and a
+  mismatched hand line under `--report` is a WARN, not a refusal (B96, #16).
+
 ## [0.10.0] — 2026-10-13
 
 ### Added

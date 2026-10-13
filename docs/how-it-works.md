@@ -50,9 +50,27 @@ flowchart TD
 | 12 | Report | `code-forge run end --run <run>` then `code-forge report --slug <slug>` | the worker stops; 14 report sections, from `cost_per_block` to `outside_review`, then the spend per run and the total |
 
 The coder's turn ends with `===BLOCK <id> COMPLETE===` or `===BLOCK <id> FAILED: <reason>===`.
-Nothing else counts as completion. Its report also lists one `reviewed <path> ticket <id>` line per
-changed file. With `--report`, `block close` treats a report that misses one as FAILED, whatever its
-sentinel says (`coder report FAILED: no review-file ticket id for <files>`).
+Nothing else counts as completion. The final report needs no `reviewed <path> ticket <id>` lines:
+`block close` prints one for every file the review gate accepts (approved, waived or answered),
+with the queue's ticket. The close prints the reviewed lines, then the `reviewed_by_waiver` lines,
+then the `closed` line. With `--report`, a hand line that names another ticket prints
+`WARN report ticket mismatch <path>` on stderr when the block closes, and the close goes on. A file
+with a `review.waived` finding still gets a line; only a close with every review waived
+(`--no-require-reviews`) or `review.external` prints none. The printed line has no `via`: `--json`
+and the block's done file carry the lines as `reviewed: [{file, ticket, via}]`, with
+`via: approved` for a file with a signed approval, `via: waiver` when at least one of its open
+findings was waived (also when the others were answered), and `via: answered` when every one was
+answered.
+
+Two cases give a file the gate accepts no line. A file the gate accepts gets no line when the queue
+cannot give its ticket (its content changed after the gate read it, or its path cannot be
+resolved): the close prints `WARN no ticket for <path>`, or `WARN bad ticket for <path>` when the
+ticket is not 24 lowercase hex characters. If the lines cannot be built at all, the close still goes
+on, with no line and one `WARN reviewed lines unavailable: <message>`. Like the mismatch WARN, these
+go to stderr and print only when the block closes; a refused close prints none of them. The close
+refuses `coder report FAILED: no review-file ticket id for <files>` only when, under `--report`, a
+file the review gate accepts has no reviewed line from the close and no hand line for it in the
+report.
 
 ### Checking progress
 
@@ -810,7 +828,7 @@ These come from real runs. The skill states each one (`skill/references/`):
   [Fix rounds and the escalation ladder](#fix-rounds-and-the-escalation-ladder).
 - **L0 never codes docs or contracts.** Those blocks start at `levels.coder_floor_docs` (L1).
 - **Review cost is bounded.** One reviewer for risk 0–1; no multimodel review for docs blocks.
-- **Coder reports fail closed.** A report with no review ticket id for a changed file is FAILED.
+- **The close report is the tool's.** The close names each reviewed file and its ticket itself; a coder's hand line is only checked, never recorded.
 - **Cost is watched all the time.** `budget.usd` per run, spend read after every block.
 - **Coders do not push unless you said so.** `autonomy.coder_may_push` and
   `autonomy.coder_may_open_draft_pr` default to false, and `init` asks both (default no; the

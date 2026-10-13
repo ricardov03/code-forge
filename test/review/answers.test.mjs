@@ -127,7 +127,9 @@ async function fixture(slug) {
   const rows = async () => (await readAllRows(slug)).filter((r) => r.run === runId);
   const answeredRows = async () => (await rows()).filter((r) => r.event === 'review.answered');
   const queued = () => readdirSync(queueDir(repo)).filter((n) => n.endsWith('.json') && n !== 'worker.json').sort();
-  return { runId, repo, key, script, sessions, reviewFile, answers, drain, hashOf, sign, close, rows, answeredRows, queued, writeRow };
+  /** B96: the close's reviewed lines for both owned files at their current hash, sorted by path */
+  const reviewed = () => [SRC, ANS].map((file) => `reviewed ${file} ticket ${ticketId({ run: runId, block: 'B1', file, content_hash: hashOf(file) })}\n`).join('');
+  return { runId, repo, key, script, sessions, reviewFile, answers, drain, hashOf, sign, close, rows, answeredRows, queued, writeRow, reviewed };
 }
 
 /** Round 1 of the source through the real worker: one open finding C1 of `severity` at line 3. */
@@ -178,7 +180,7 @@ test('B71 (1): a resolved answer writes one signed review.answered row; the sour
   // the answering file still needs its own approval; the source no longer refuses
   assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${ANS}\n`]);
   await f.sign({ event: 'review.approved' }, ANS);
-  assert.deepEqual(await f.close(), [0, `block B1: ${SRC} reviewed_by_waiver (answered C1)\nblock B1 closed\n`]);
+  assert.deepEqual(await f.close(), [0, `${f.reviewed()}block B1: ${SRC} reviewed_by_waiver (answered C1)\nblock B1 closed\n`]);
   const all = await f.rows();
   const waived = all.filter((r) => r.event === 'gate.review_waived_all');
   assert.deepEqual(waived.map((r) => [r.file, r.content_hash, r.findings, r.by, r.answered]), [[SRC, srcHash, [], null, ['C1']]]);
@@ -355,7 +357,7 @@ test('B71 (4): a change to the source or to the answering file makes the answer 
   await c2.answers(['W1']);
   assert.equal(await c2.drain(), 1);
   await c2.sign({ event: 'review.approved' }, ANS);
-  assert.deepEqual(await c2.close(), [0, `block B1: ${SRC} reviewed_by_waiver (answered W1)\nblock B1 closed\n`]);
+  assert.deepEqual(await c2.close(), [0, `${c2.reviewed()}block B1: ${SRC} reviewed_by_waiver (answered W1)\nblock B1 closed\n`]);
   // (b) the source changes after the answer and is reviewed again with W1 open: the old answer does not count
   const f3 = await fixture('b71-stale-src');
   await signedReview(f3, [{ id: 'W1', severity: 'warning' }]);
@@ -394,7 +396,7 @@ test('B71 (5): an unsigned review.answered row or one with a bad MAC clears noth
   assert.deepEqual(await s.f.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
   // the same row, signed: the source closes
   await writeSigned(s.f.runId, s.f.writeRow, s.body);
-  assert.deepEqual(await s.f.close(), [0, `block B1: ${SRC} reviewed_by_waiver (answered W1)\nblock B1 closed\n`]);
+  assert.deepEqual(await s.f.close(), [0, `${s.f.reviewed()}block B1: ${SRC} reviewed_by_waiver (answered W1)\nblock B1 closed\n`]);
 });
 
 test('B71 (6): an answer clears a critical (the answering file still needs its own approval); an unknown severity or a cap-only id is never open for an answer', async () => {
@@ -503,7 +505,7 @@ test('B71 (9): a ledger write that fails part way leaves the ticket unavailable;
     assert.deepEqual(rows.map((x) => [x.finding, x.ticket]).sort(), [['W1', q.out?.ticket], ['W2', q.out?.ticket]], slug);
     assert.equal(f.sessions.filter((x) => x.lens === 'answers').length, 2, slug);
     await f.sign({ event: 'review.approved' }, ANS);
-    assert.deepEqual(await f.close(), [0, `block B1: ${SRC} reviewed_by_waiver (answered W1, W2)\nblock B1 closed\n`], slug);
+    assert.deepEqual(await f.close(), [0, `${f.reviewed()}block B1: ${SRC} reviewed_by_waiver (answered W1, W2)\nblock B1 closed\n`], slug);
   }
 });
 
@@ -583,7 +585,7 @@ test('B71 (11): an answer never clears a late finding or a cap id whose recorded
   assert.equal(await c.drain(), 1);
   await c.sign({ event: 'review.approved' }, ANS);
   await c.sign({ event: 'review.late_finding', round: 2, finding: 'W1', severity: 'warning', line_start: 1, line_end: 1, mode: 'block' });
-  assert.deepEqual(await c.close(), [0, `block B1: ${SRC} reviewed_by_waiver (answered W1)\nblock B1 closed\n`]);
+  assert.deepEqual(await c.close(), [0, `${c.reviewed()}block B1: ${SRC} reviewed_by_waiver (answered W1)\nblock B1 closed\n`]);
   // (b) a cap id no signed refusal records: a signed, current answer row naming it clears nothing
   const k = await fixture('b71-cap-unknown');
   await signedReview(k, [{ id: 'W1', severity: 'warning' }]);

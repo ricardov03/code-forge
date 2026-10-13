@@ -19,7 +19,7 @@ After you finish each file in `owned_files` (tests written and green) run `forge
 
 Proof is behaviour, not text: never read a source file in a test to assert on its text. Call the code and check what it does; a test may read a fixture. A test file that reads a source file and asserts on its text gets a `## test-quality` section in its review packet. The section is a hint, not a finding: the reviewer checks those lines and, when the test really reads source text to assert on it, raises a `warning` (unless the file read is a fixture).
 
-## Final report — FAILED unless it lists the ticket ids
+## Final report — the close prints the ticket ids
 
 Run the block's test command (`test_command`) and print its result on a line of its own, exactly:
 
@@ -34,17 +34,15 @@ TESTS npm test exit=0
 
 The `TESTS` line stays ABOVE the sentinel; only the test summary comes after it.
 
-End with `===BLOCK <id> COMPLETE===`, the test summary and `git diff --stat`, then one line per changed file:
+End with `===BLOCK <id> COMPLETE===`, the test summary and `git diff --stat`.
 
-`reviewed <path> ticket <ticket-id>`
-
-**FAILED unless:** the report lists the `review-file` ticket id of every changed file. A report with no ticket ids, or one that misses a changed file, counts as FAILED whatever its sentinel says: the orchestrator treats it as `===BLOCK <id> FAILED: no review-file ticket ids===` and `forge block close <id> --run <r> --report <file>` refuses it (`coder report FAILED: no review-file ticket id for <files>`). "All findings addressed" is not a report.
+The final report needs no `reviewed <path> ticket <id>` lines: `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket. The close prints the reviewed lines, then the `reviewed_by_waiver` lines, then the `closed` line. With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr when the block closes, and the close goes on. A file with a `review.waived` finding still gets a line; only a close whose every review the human waived, or a `review.external` close, prints none. The printed line has no `via`: `--json` and the block's done file carry the lines as `reviewed: [{file, ticket, via}]`, with `via: approved` for a file with a signed approval, `via: waiver` when at least one of its open findings was waived (also when the others were answered), and `via: answered` when every one was answered. Every changed file still needs its `review-file` run: a file the review did not accept keeps the block open. "All findings addressed" is not a report.
 
 Or `===BLOCK <id> FAILED: <reason>===`.
 
 ## Fix-round brief (round ≥ 2, or a respawn after a climb)
 
-The open findings by id, the fix history, the files they sit in. Fix only those hunks, then run `forge review-file <path> --block <id> --run <r>` and `--wait` on **every file the round changed** — a fix the reviewer never saw is not a fix. A fix made in another owned file is sent with `--answers <ids> --of <source>` (The file loop). The final report follows the same rule: one `reviewed <path> ticket <ticket-id>` line per file changed in the round, or the round counts as FAILED. Re-run the block's test command after the fixes and print a fresh `TESTS <command> exit=<n>` line just before the round's sentinel: a TESTS line from an earlier report does not count.
+The open findings by id, the fix history, the files they sit in. Fix only those hunks, then run `forge review-file <path> --block <id> --run <r>` and `--wait` on **every file the round changed** — a fix the reviewer never saw is not a fix. A fix made in another owned file is sent with `--answers <ids> --of <source>` (The file loop). The round's final report follows the same rule as the first: it needs no ticket lines. Re-run the block's test command after the fixes and print a fresh `TESTS <command> exit=<n>` line just before the round's sentinel: a TESTS line from an earlier report does not count.
 
 ## Context pack
 

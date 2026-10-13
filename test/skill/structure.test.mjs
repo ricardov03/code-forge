@@ -6,7 +6,7 @@
  * the CLI router discovers.
  */
 import assert from 'node:assert/strict';
-import { access, readFile } from 'node:fs/promises';
+import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { listVerbs } from '../../bin/code-forge.mjs';
@@ -295,7 +295,7 @@ test('B63b: the coder-brief template has its sections in order, the Context pack
   assert.deepEqual(heads, [
     '## Reply contract',
     '## The file loop',
-    '## Final report — FAILED unless it lists the ticket ids',
+    '## Final report — the close prints the ticket ids',
     '## Fix-round brief (round ≥ 2, or a respawn after a climb)',
     '## Context pack',
     '## Project rules',
@@ -310,7 +310,7 @@ test('B63b: the coder-brief template has its sections in order, the Context pack
   /** @param {string} text @param {string} needle */
   const count = (text, needle) => text.split(needle).length - 1;
 
-  const report = part('## Final report — FAILED unless it lists the ticket ids');
+  const report = part('## Final report — the close prints the ticket ids');
   assert.match(report, /^Run the block's test command \(`test_command`\) and print its result on a line of its own, exactly:$/m);
   assert.equal(count(report, '`TESTS <command> exit=<n>`'), 1);
   assert.match(report, /^`TESTS <command> exit=<n>`$/m);
@@ -1270,4 +1270,145 @@ test('B80: review.md §5 and how-it-works quote the CLI\'s exact no-terminal mes
   assert.equal(humanVerbNoTTY(/** @type {any} */ ('<verb>')), B80_GENERIC);
   assert.equal(occurrences(await readSkillFile('references/code.md'), `\`${B80_GENERIC}\``), 1);
   assert.equal(occurrences(section(await readSkillFile('references/security.md'), 3), `\`${B80_GENERIC}\``), 1);
+});
+
+// ── B96: the close report is built by the tool ──────────────────────────────
+
+const B96_NO_LINES =
+  "The final report needs no `reviewed <path> ticket <id>` lines: `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket.";
+const B96_ORDER = 'The close prints the reviewed lines, then the `reviewed_by_waiver` lines, then the `closed` line.';
+const B96_MISMATCH =
+  'With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr when the block closes, and the close goes on.';
+const B96_WAIVED = 'A file with a `review.waived` finding still gets a line; only a close with every review waived (`--no-require-reviews`) or `review.external` prints none.';
+/** The brief and code.md's brief items never name a human-only flag (B76), so they say the same without it. */
+const B96_WAIVED_BRIEF =
+  'A file with a `review.waived` finding still gets a line; only a close whose every review the human waived, or a `review.external` close, prints none.';
+const B96_BRIEF_FILES = new Set(['skill/templates/coder-brief.md', 'skill/references/code.md']);
+/** `via` is not on the printed line: `--json` and the done file carry it; the mixed rule is stated once, where `via` is named. */
+const B96_VIA =
+  "The printed line has no `via`: `--json` and the block's done file carry the lines as `reviewed: [{file, ticket, via}]`, with `via: approved` for a file with a signed approval, `via: waiver` when at least one of its open findings was waived (also when the others were answered), and `via: answered` when every one was answered.";
+/** When the old ticket-id refusal still fires (code.md and how-it-works; the tutorial's refusal row is this clause). */
+const B96_REFUSES_WHEN = 'under `--report`, a file the review gate accepts has no reviewed line from the close and no hand line for it in the report';
+/** code.md and how-it-works: the two cases with no line, their WARNs held for a close that succeeds, and when the old refusal fires. */
+const B96_NO_LINE_CASES = [
+  'A file the gate accepts gets no line when the queue cannot give its ticket (its content changed after the gate read it, or its path cannot be resolved): the close prints `WARN no ticket for <path>`, or `WARN bad ticket for <path>` when the ticket is not 24 lowercase hex characters.',
+  'If the lines cannot be built at all, the close still goes on, with no line and one `WARN reviewed lines unavailable: <message>`.',
+  'Like the mismatch WARN, these go to stderr and print only when the block closes; a refused close prints none of them.',
+  `The close refuses \`coder report FAILED: no review-file ticket id for <files>\` only when, ${B96_REFUSES_WHEN}.`,
+];
+/** code.md only: what a hand line is for each check, and what `--report` does when the lines cannot be built at all. */
+const B96_HAND_LINES = [
+  'For that check a hand line is a report line that names that file, no other file of the block, and a ticket id of 24 lowercase hex characters.',
+  'So when the lines cannot be built at all, every file the gate accepts needs a hand line, and no hand line is compared with a ticket.',
+  'For the mismatch WARN only a line that is exactly `reviewed <path> ticket <id>` counts (a `- `, `* ` or `1. ` list marker and backticks are fine), and since a ticket id is 24 lowercase hex characters, an id in capitals names another ticket.',
+];
+/** What the review gate accepts — an approval, or every open finding waived or answered — in SKILL.md step 7 and code.md §5. */
+const B96_GATE_SKILL =
+  'It needs every changed file accepted by the review gate — a signed `review.approved` row for its current content that no later review of the same content overrode (else `not_approved`), or every finding its review left open waived or answered (`reviewed_by_waiver`) —';
+const B96_GATE_CODE =
+  'The gate accepts a changed or new file with a **signed** `review.approved` row for its current content hash that no later review of the same content overrode (a `review.result` with `approved: false`, a `review.round` with findings open, a `review.cap`), or with every finding its review left open waived or answered (`reviewed_by_waiver`)';
+/** The coder's report carries the TESTS line (the base said "it prints", "it" being the report; only concepts.md had it). */
+const B96_TESTS = "Just before the sentinel the coder's report carries `TESTS <command> exit=<n>`";
+/** The old rule, each phrase as the base (1d2d062) had it under skill/, docs/ or README.md (the base files in the comment). */
+const B96_GONE = [
+  'line per file changed in the round', // coder-brief.md
+  'line per changed file', // SKILL.md, code.md, coder-brief.md, concepts.md, how-it-works.md, tutorial-first-test.md
+  'FAILED unless it lists the ticket ids', // coder-brief.md (the report heading)
+  'ticket id of every changed file', // code.md, coder-brief.md
+  'A report with no ticket ids, or one that misses a changed file', // coder-brief.md
+  'A report that misses one counts as FAILED', // concepts.md
+  'treats a report that misses one as FAILED', // how-it-works.md
+  'A report with no review ticket id for a changed file is FAILED', // how-it-works.md
+  'add the `reviewed <path> ticket <id>` lines', // tutorial-first-test.md
+  'The report names a `review-file` ticket id per changed file', // code.md §5
+  'a **signed** `review.approved` row for the current content hash of every changed or new file', // code.md §5
+  'a signed `review.approved` row per changed file', // SKILL.md step 7
+  'Just before the sentinel it prints `TESTS', // concepts.md
+];
+/** Wording of this block's own earlier review rounds that a later round replaced (never in the base). */
+const B96_GONE_BUILD = [
+  "prints one for every reviewed file, with the queue's ticket, before the `closed` line",
+  'A hand line that names another ticket prints `WARN report ticket mismatch <path>` and the close goes on.',
+  'A waived or `review.external` close prints none',
+  'A waived or `review.external` close prints no such line',
+  'still gets a line, with `via: waiver`',
+  '`via` one of `approved`, `waiver`, `answered`',
+  'the close has no reviewed line for those files: their content changed after the review gate read it',
+  'that file then needs its own hand line',
+];
+const B96_FILES = [
+  'skill/SKILL.md',
+  'skill/references/code.md',
+  'skill/templates/coder-brief.md',
+  'docs/concepts.md',
+  'docs/how-it-works.md',
+  'docs/tutorial-first-test.md',
+];
+
+/** @param {string} dir repo-relative @returns {Promise<string[]>} every file under it, repo-relative, sorted */
+async function b96Tree(dir) {
+  const entries = await readdir(path.join(ROOT, dir), { recursive: true, withFileTypes: true });
+  return entries.filter((e) => e.isFile()).map((e) => path.relative(ROOT, path.join(e.parentPath, e.name))).sort();
+}
+
+/**
+ * The paths `git <args>` prints (`-z`), run in the repo: argv only, GIT_* stripped, no system or
+ * global config (`gitChildEnv`), a timeout; anything but exit 0 fails the test.
+ * @param {string[]} args @returns {Promise<string[]>}
+ */
+async function b96Git(args) {
+  const { exec } = await import('../../src/util/exec.mjs');
+  const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
+  const res = await exec(['git', ...args], { cwd: ROOT, env: gitChildEnv(), timeoutMs: 20000 });
+  assert.equal(res.result, 'ok', `git ${args.join(' ')}: ${res.stderr}`);
+  return res.stdout.split('\0').filter((p) => p.length > 0);
+}
+
+test('B96: the skill and docs say which files get a reviewed line, the order, where the mismatch WARN goes, what a waived file gets and where `via` is — once each; the old rule is gone everywhere', async () => {
+  for (const rel of B96_FILES) {
+    const text = flat(await b94Read(rel));
+    const [waived, other] = B96_BRIEF_FILES.has(rel) ? [B96_WAIVED_BRIEF, B96_WAIVED] : [B96_WAIVED, B96_WAIVED_BRIEF];
+    // `via` is named once (the printed line has none), with the mixed rule once
+    assert.deepEqual([B96_NO_LINES, B96_ORDER, B96_MISMATCH, waived, other, B96_VIA, '`via`', '`via: waiver`', 'also when the others were answered'].map((s) => occurrences(text, flat(s))), [1, 1, 1, 1, 0, 1, 1, 1, 1], rel);
+  }
+  // the walk finds exactly the files git knows under skill/ and docs/ (tracked or new, not deleted;
+  // an ignored file is no shipped doc), plus README.md: a walk that drops a file fails here
+  const ignored = new Set(await b96Git(['ls-files', '-z', '--others', '--ignored', '--exclude-standard', '--', 'skill', 'docs']));
+  const deleted = new Set(await b96Git(['ls-files', '-z', '--deleted', '--', 'skill', 'docs', 'README.md']));
+  const known = [...new Set(await b96Git(['ls-files', '-z', '--cached', '--others', '--exclude-standard', '--', 'skill', 'docs', 'README.md']))].filter((f) => !deleted.has(f)).sort();
+  const every = [...(await b96Tree('skill')), ...(await b96Tree('docs'))].filter((f) => !ignored.has(f)).concat('README.md').sort();
+  assert.deepEqual(every, known);
+  // the old wording (the base's and this block's earlier rounds') is gone from all of them, and the
+  // sentence that replaced "it prints `TESTS" is where the old one was (concepts.md), once
+  /** @type {Array<[string, number]>} */
+  const withTests = [];
+  for (const rel of every) {
+    const text = await b94Read(rel);
+    assertGone(rel, text, [...B96_GONE, ...B96_GONE_BUILD]);
+    const n = occurrences(flat(text), flat(B96_TESTS));
+    if (n > 0) withTests.push([rel, n]);
+  }
+  assert.deepEqual(withTests, [['docs/concepts.md', 1]]);
+  // the brief's fix-round section says the round's report follows the same rule
+  const brief = await readSkillFile('templates/coder-brief.md');
+  const from = brief.indexOf('\n## Fix-round brief');
+  const to = brief.indexOf('\n## Context pack');
+  assert.ok(from !== -1 && to !== -1 && from < to, 'fix-round and context-pack headings exist, in order');
+  assert.equal(occurrences(flat(brief.slice(from, to)), flat("The round's final report follows the same rule as the first: it needs no ticket lines.")), 1);
+  // code.md and how-it-works: the two cases with no line, the held WARNs, when the old refusal fires
+  for (const rel of ['skill/references/code.md', 'docs/how-it-works.md']) {
+    const text = flat(await b94Read(rel));
+    assert.deepEqual(B96_NO_LINE_CASES.map((s) => occurrences(text, flat(s))), [1, 1, 1, 1], rel);
+  }
+  // code.md: what a hand line is for each check and what --report does with no lines; what the gate accepts
+  const code = flat(await b94Read('skill/references/code.md'));
+  assert.deepEqual([...B96_HAND_LINES, B96_GATE_CODE].map((s) => occurrences(code, flat(s))), [1, 1, 1, 1]);
+  // SKILL.md step 7: the gate accepts approved, waived and answered files, said once
+  assert.equal(occurrences(flat(await b94Read('skill/SKILL.md')), flat(B96_GATE_SKILL)), 1);
+  // the tutorial's refusal row says exactly when the old refusal still fires
+  const rows = tableRows(await b94Read('docs/tutorial-first-test.md'), 'Refusal').filter((r) => r[0] === '`coder report FAILED: no review-file ticket id for <files>`');
+  assert.deepEqual(
+    rows.map((r) => r.slice(1)),
+    [[B96_REFUSES_WHEN, 'add a `reviewed <path> ticket <id>` line with its `review-file` ticket for each of those files to the report, and close again']],
+  );
 });

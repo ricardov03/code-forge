@@ -9,7 +9,7 @@ import { runBlock } from '../../src/cli/block.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { briefPointer, checkScope, claimPath, closeBlock, openBlock, rebaseBlock } from '../../src/state/block.mjs';
 import { readRun, startRun, writeSigned } from '../../src/state/run.mjs';
-import { contentHash } from '../../src/worker/ticket.mjs';
+import { contentHash, ticketId } from '../../src/worker/ticket.mjs';
 import { loadKey, signRow, verifyRow } from '../../src/state/signer.mjs';
 import { dirtyFiles, git } from '../fixtures/repos/two-blocks/build.mjs';
 
@@ -287,14 +287,16 @@ test('CLI `block open` prints the brief pointer and refuses an overlapping owned
     await writeSigned('r-cli', (row) => appendRow(row, { slug: 'two-blocks' }), { event: 'review.approved', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
     const closed = captureStream();
     assert.equal(await runBlock(['close', 'B8', '--run', 'r-cli', '--worker-pid', '4242'], { stdout: closed, stderr: closed, probe: PROBE }), 0);
-    assert.equal(closed.text, 'WARN block B8: no coder transcript found (--transcript, run record, .code-forge/runs/r-cli/B8.log); the transcript grep did not run\nblock B8 closed\n');
+    // B96: the close names the approved file with the queue's ticket for its content
+    const ticket = ticketId({ run: 'r-cli', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
+    assert.equal(closed.text, `WARN block B8: no coder transcript found (--transcript, run record, .code-forge/runs/r-cli/B8.log); the transcript grep did not run\nreviewed a.txt ticket ${ticket}\nblock B8 closed\n`);
     assert.deepEqual((await readAllRows('two-blocks')).map((r) => r.event), ['dispatch', 'gate.transcript_missing', 'review.approved', 'gate.transcript_missing', 'block.close']);
     // B19: the live close row says the block completed (the report's cost_per_block reads it)
     assert.deepEqual((await readAllRows('two-blocks')).filter((r) => r.event === 'block.close').map((r) => [r.block, r.status]), [['B8', 'complete']]);
   });
 });
 
-test('B36 `block close --report`: a report with no review-file ticket id for a changed file is FAILED; naming the ticket closes', async () => {
+test('B36 → B96 `block close --report`: an unreadable report is FAILED; a hand line naming another ticket warns on stderr and the close goes on with the tool\'s line', async () => {
   await withFixture(async ({ ws }) => {
     await start(ws, 'r-rep', async () => {});
     await writeFile(path.join(ws, 'acc.yml'), '- clause: the thing works\n  tests: [test/a.test.mjs]\n');
@@ -305,18 +307,35 @@ test('B36 `block close --report`: a report with no review-file ticket id for a c
     const close = (/** @type {string} */ report) => ['close', 'B8', '--run', 'r-rep', '--worker-pid', '4242', '--transcript', path.join(ws, '.code-forge', 'transcript.log'), '--report', report];
 
     // B52: the transcript and reports live under .code-forge/ — a file the close reads elsewhere in the tree is still an unowned change
-    await writeFile(path.join(ws, '.code-forge', 'report-bad.md'), '===BLOCK B8 COMPLETE===\nall findings addressed\n');
-    const failed = captureStream();
-    assert.equal(await runBlock(close(path.join(ws, '.code-forge', 'report-bad.md')), { stdout: failed, stderr: failed, probe: PROBE }), 1);
-    assert.equal(failed.text, 'block B8 open: coder report FAILED: no review-file ticket id for a.txt\n');
     const unreadable = captureStream();
     assert.equal(await runBlock(close(path.join(ws, 'no-such-report.md')), { stdout: unreadable, stderr: unreadable, probe: PROBE }), 1);
     assert.equal(unreadable.text, 'block B8 open: coder report FAILED: --report cannot be read\n');
 
     await writeFile(path.join(ws, '.code-forge', 'report-ok.md'), '===BLOCK B8 COMPLETE===\nreviewed a.txt ticket 0123456789abcdef01234567\n');
     const closed = captureStream();
-    assert.equal(await runBlock(close(path.join(ws, '.code-forge', 'report-ok.md')), { stdout: closed, stderr: closed, probe: PROBE }), 0);
-    assert.equal(closed.text, 'block B8 closed\n');
+    const warned = captureStream();
+    assert.equal(await runBlock(close(path.join(ws, '.code-forge', 'report-ok.md')), { stdout: closed, stderr: warned, probe: PROBE }), 0);
+    const ticket = ticketId({ run: 'r-rep', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
+    assert.equal(closed.text, `reviewed a.txt ticket ${ticket}\nblock B8 closed\n`);
+    assert.equal(warned.text, 'WARN report ticket mismatch a.txt\n');
+  });
+});
+
+test('B36 → B96 `block close --report`: the old report-bad case — a sentinel and no reviewed line — now closes, exit 0, with the tool\'s line and an empty stderr', async () => {
+  await withFixture(async ({ ws }) => {
+    await start(ws, 'r-bad', async () => {});
+    await writeFile(path.join(ws, 'acc.yml'), '- clause: the thing works\n  tests: [test/a.test.mjs]\n');
+    const open = ['open', 'B8', '--run', 'r-bad', '--level', 'L1', '--owned', 'a.txt', 'b.txt', '--acceptance', path.join(ws, 'acc.yml')];
+    assert.equal(await runBlock(open, { stdout: captureStream(), stderr: captureStream() }), 0);
+    await writeSigned('r-bad', (row) => appendRow(row, { slug: 'two-blocks' }), { event: 'review.approved', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
+    await writeFile(path.join(ws, '.code-forge', 'transcript.log'), 'nothing forbidden\n');
+    await writeFile(path.join(ws, '.code-forge', 'report-bad.md'), '===BLOCK B8 COMPLETE===\nall findings addressed\n');
+    const closed = captureStream();
+    const warned = captureStream();
+    const args = ['close', 'B8', '--run', 'r-bad', '--worker-pid', '4242', '--transcript', path.join(ws, '.code-forge', 'transcript.log'), '--report', path.join(ws, '.code-forge', 'report-bad.md')];
+    assert.equal(await runBlock(args, { stdout: closed, stderr: warned, probe: PROBE }), 0);
+    const ticket = ticketId({ run: 'r-bad', block: 'B8', file: 'a.txt', content_hash: contentHash(ws, 'a.txt') });
+    assert.deepEqual([closed.text, warned.text], [`reviewed a.txt ticket ${ticket}\nblock B8 closed\n`, '']);
   });
 });
 
