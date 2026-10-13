@@ -20,6 +20,7 @@ In the next release:
 - **Red-green proof for PHP (B89).** A `proof.runners` entry with `adapter: junit` and `[php, artisan, test, "{test_file}", --filter, "{test_filter}", --log-junit, "{report}"]` proves PHPUnit and Pest tests in a Laravel app. A test of a class the block added is `RED_INVALID import`, also when Laravel prints its AI-agent JSON summary. Checked live with PHP 8.4, Laravel 13, PHPUnit 12 and Pest 4.
 - **Red-green proof for Xcode projects (B102).** A `proof.runners` entry with `adapter: xcodebuild` and an `xcode` object (`scheme`, `destination`, `test_target`) proves XCTest and Swift Testing tests through `xcodebuild test` on a simulator or on macOS. code-forge checks first that full Xcode and the simulator are there, runs only the named suite with `-only-testing`, and reads the result bundle. A build failure is `RED_INVALID compile`. code-forge never boots, creates or deletes a simulator.
 - **Xcode red-green checked live (B103).** An opt-in live check (`CODE_FORGE_LIVE_XCODE=1`) proves XCTest and Swift Testing tests red→green through `xcodebuild test` on an iPhone simulator. It skips with a reason when full Xcode or a simulator is missing. Verified with Xcode 26.6.
+- **Big files go to a big-context reviewer (B90).** Set `review.routes` once, for example `{min_lines: 400, model: <id>, session_timeout_s: 900}`. Files with that many lines get that model and timeout. No more editing `.code-forge.yml` per file. Each routed file gets a signed `review.route` row.
 
 In 0.9.0:
 
@@ -378,6 +379,7 @@ new in 0.5, `autopilot.min_confidence` in 0.6):
 | `review.multimodel_for_docs` | `false` | let docs and contract blocks use multimodel review too |
 | `review.allow_open_book_codex` | `false` | let Codex run reviewer, judge, System 2 and plan author anyway |
 | `review.session_timeout_s` | `300` | a review session that runs longer is killed and retried once |
+| `review.routes` | none | big files go to another model: a file with at least `min_lines` lines is reviewed by the rule's `model`, with its own `session_timeout_s` and `second` level |
 | `review.parallel_tickets` | `3` | review tickets the worker runs at once (1 to 16); `1` reviews one file at a time |
 | `review.provider_concurrency` | anthropic `4`, openai `2`, xai `2` | review sessions at once per provider |
 | `autopilot.min_confidence` | `0.7` | the lowest delegate confidence that is acted on; below it the question goes to you |

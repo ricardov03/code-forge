@@ -185,7 +185,15 @@ function realOrSelf(p) {
  * @returns {string}
  */
 export function contentHash(repoRoot, file) {
-  const bytes = readRegularFileNoFollow(repoRoot, file);
+  return hashBytes(readRegularFileNoFollow(repoRoot, file));
+}
+
+/**
+ * The one content-hash rule (B90: the worker hashes the bytes it also counts lines on): sha256 of
+ * the bytes, or `DELETED_HASH` for `null` (no file).
+ * @param {Buffer | null} bytes @returns {string}
+ */
+export function hashBytes(bytes) {
   if (bytes === null) return DELETED_HASH;
   return createHash('sha256').update(bytes).digest('hex');
 }

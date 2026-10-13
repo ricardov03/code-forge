@@ -4,7 +4,7 @@
  *
  *  1. **Schema validation** (Ajv, draft 2020-12, `additionalProperties: false` almost everywhere)
  *     catches shape errors: unknown keys, wrong types, missing required fields.
- *  2. **Domain rules** (`DOMAIN_RULES` below, 17 of them as of B87) catch things no JSON Schema can express:
+ *  2. **Domain rules** (`DOMAIN_RULES` below, 18 of them as of B90) catch things no JSON Schema can express:
  *     cross-field comparisons (two levels resolving to the same tuple), a value that needs a
  *     second config value to be reachable (`second_levels.L2.provider` vs. the effective L2
  *     provider) and rules that reach outside the config object entirely (is a CLI on PATH, is a
@@ -37,6 +37,7 @@
  *  15  effort-not-valid-for-provider         ERROR  (B29: a level's / fallback's effort vs. its provider)
  *  16  closed-book-on-openai                 WARN   (B32: Codex has no no-tools mode)
  *  17  proof-runners-invalid                 ERROR  (B87: a proof.runners entry: adapter, match, argv tokens, env, timeout_s)
+ *  18  review-routes-invalid                 ERROR  (B90: a review.routes rule: level, duplicate level+min_lines, provider vs. the second reviewer)
  *
  * **B1.2 (v1.3, Q16 cut) removed rule:** `proof-tool-absent-for-high-tier` (formerly #13) — the
  * key it warned about (`proof.tiers.high.tool`) left the schema in the same amendment, along with
@@ -67,6 +68,9 @@ import { TEST_FILES_TOKEN } from '../util/gate-token.mjs';
 import { checkEffort, displayEffort } from '../engines/efforts.mjs';
 import { CLOSED_BOOK_LEVELS, CODEX_CLOSED_BOOK_REFUSAL, isNoClosedBookProvider, OPEN_BOOK_CODEX_WARNING, openBookCodexAllowed } from './closed-book.mjs';
 import { isKnownId, resolveLevel } from './known-ids.mjs';
+// B90: the routing module's own level list and provider resolution, so rules 16 and 18 check a
+// route with exactly the provider the worker spawns it on (they cannot drift)
+import { ROUTE_LEVELS, ruleProvider } from '../review/route.mjs';
 import { looksLikeSecret, maskSecretTokens, SECRET_MASK, secretTokensIn } from './secret-patterns.mjs';
 
 /**
@@ -782,6 +786,21 @@ function checkClosedBookOnOpenai(cfg) {
   if (cfg?.review?.multimodel === true && isNoClosedBookProvider(effectiveSecondL2Provider(cfg))) {
     where.push('review.second_levels.L2 (else review.second_provider)');
   }
+  // B90: a review.routes rule replaces an L2/L3 level for a big file — the same closed-book limit
+  routeRulesOf(cfg).forEach((rule, i) => {
+    if (!isPlainObject(rule)) return;
+    if (isNoClosedBookProvider(ruleProvider(cfg, rule))) where.push(`review.routes[${i}]`);
+    if (Array.isArray(rule.fallback)) {
+      rule.fallback.forEach((fb, j) => {
+        if (isNoClosedBookProvider(fb?.provider)) where.push(`review.routes[${i}].fallback[${j}]`);
+      });
+    }
+    // like the second reviewer's own check above: only with multimodel on, and with the same
+    // effective second provider (the rule's own, else second_levels.L2, else second_provider)
+    if (cfg?.review?.multimodel === true && isPlainObject(rule.second) && isNoClosedBookProvider(rule.second.provider ?? effectiveSecondL2Provider(cfg))) {
+      where.push(`review.routes[${i}].second`);
+    }
+  });
   // B32 opt-in: the same places, but the text says what the opt-in costs instead of "refused".
   const text = openBookCodexAllowed(cfg) ? OPEN_BOOK_CODEX_WARNING : CODEX_CLOSED_BOOK_REFUSAL;
   return where.map((key) => ({
@@ -964,11 +983,74 @@ function checkProofRunnersInvalid(cfg) {
   return messages.map((message) => ({ rule: 'proof-runners-invalid', severity: /** @type {const} */ ('error'), message }));
 }
 
+// ── 18. review-routes-invalid (ERROR, B90) ──────────────────────────────────
+
+/** @param {Record<string, any>} cfg @returns {any[]} the `review.routes` list, `[]` when it is not one. */
+function routeRulesOf(cfg) {
+  const routes = cfg?.review?.routes;
+  return Array.isArray(routes) ? routes : [];
+}
+
 /**
- * The 17 domain rules paired with the exact `rule` id string each one emits — the single source
+ * B90: what the schema cannot say about `review.routes` — a level other than L2 or L3, two rules
+ * for the same level and `min_lines` (which one wins would be order-dependent), and, with
+ * `review.multimodel` on, an L2 rule whose provider (its own, else the top-level one) equals its
+ * own `second.provider`, or the second reviewer's effective L2 provider — the consensus slot B a
+ * routed ticket really runs with — (the consensus needs two providers on a big file too).
+ * Messages name key paths only, never a value.
+ * @param {Record<string, any>} cfg
+ */
+function checkReviewRoutesInvalid(cfg) {
+  const routes = cfg?.review?.routes;
+  if (routes === undefined || routes === null) return [];
+  /** @type {string[]} */
+  const messages = [];
+  if (!Array.isArray(routes)) {
+    messages.push('review.routes must be a list of rules');
+  } else {
+    /** @type {Map<string, number>} */
+    const seen = new Map();
+    const second = effectiveSecondL2Provider(cfg);
+    routes.forEach((rule, i) => {
+      const at = `review.routes[${i}]`;
+      if (!isPlainObject(rule)) {
+        messages.push(`${at} must be a rule object`);
+        return;
+      }
+      const level = rule.level ?? 'L2';
+      if (!ROUTE_LEVELS.includes(level)) {
+        messages.push(`${at}.level must be L2 or L3`);
+        return;
+      }
+      if (Number.isInteger(rule.min_lines)) {
+        const k = `${level}\0${rule.min_lines}`;
+        const first = seen.get(k);
+        if (first === undefined) seen.set(k, i);
+        else messages.push(`${at} has the same level and min_lines as review.routes[${first}]`);
+      }
+      if (cfg?.review?.multimodel === true && level === 'L2') {
+        // the provider the worker spawns this rule on: its own, else the top-level one (the rule
+        // REPLACES levels.L2, so levels.L2.provider is never inherited)
+        const first = ruleProvider(cfg, rule);
+        const own = isPlainObject(rule.second) ? rule.second.provider : undefined;
+        if (own !== undefined && first === own) {
+          // the rule's own second reviewer
+          messages.push(`${at}.provider (else provider) equals ${at}.second.provider — multimodel needs two different providers`);
+        } else if (second !== undefined && first === second) {
+          // the consensus slot B a routed ticket runs with (it keeps review.second_levels.L2)
+          messages.push(`${at}.provider (else provider) equals the second reviewer's effective L2 provider (review.second_levels.L2.provider, else review.second_provider) — multimodel needs two different providers`);
+        }
+      }
+    });
+  }
+  return messages.map((message) => ({ rule: 'review-routes-invalid', severity: /** @type {const} */ ('error'), message }));
+}
+
+/**
+ * The 18 domain rules paired with the exact `rule` id string each one emits — the single source
  * of truth both `DOMAIN_RULES` (below, what `validateConfig` runs) and the exported
  * `DOMAIN_RULE_IDS` are built from. `'schema'` (the ajv layer's own issues) is deliberately not
- * one of these 17 (B29 added rule 15, B32 rule 16, B87 rule 17). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
+ * one of these 18 (B29 added rule 15, B32 rule 16, B87 rule 17, B90 rule 18). (B1.2/v1.3, Q16 cut: `proof-tool-absent-for-high-tier` removed, 15 -> 14.)
  * @type {ReadonlyArray<{fn: (cfg: Record<string, any>, opts?: object) => ValidationIssue[], id: string}>}
  */
 const RULE_TABLE = Object.freeze([
@@ -989,12 +1071,13 @@ const RULE_TABLE = Object.freeze([
   { fn: checkEffortNotValidForProvider, id: 'effort-not-valid-for-provider' },
   { fn: checkClosedBookOnOpenai, id: 'closed-book-on-openai' },
   { fn: checkProofRunnersInvalid, id: 'proof-runners-invalid' },
+  { fn: checkReviewRoutesInvalid, id: 'review-routes-invalid' },
 ]);
 
-/** The 17 domain rules, in the order documented above. */
+/** The 18 domain rules, in the order documented above. */
 const DOMAIN_RULES = Object.freeze(RULE_TABLE.map((entry) => entry.fn));
 
-/** The 17 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
+/** The 18 rule ids `validateConfig` can emit, in `DOMAIN_RULES` order (see `RULE_TABLE`). */
 export const DOMAIN_RULE_IDS = Object.freeze(RULE_TABLE.map((entry) => entry.id));
 
 /**

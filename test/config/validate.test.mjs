@@ -903,11 +903,12 @@ test('rule 16 with review.allow_open_book_codex: true: the same 2 places warn wi
 // ── All 16 rule ids, cross-checked against the REAL exported set (MAJOR fix) ─
 // (B1.2/v1.3, Q16 cut: 15 -> 14 — `proof-tool-absent-for-high-tier` removed, its key gone from schema.)
 // (B29: 14 -> 15 — `effort-not-valid-for-provider` added. B32: 15 -> 16 — `closed-book-on-openai` added.
-// B87: 16 -> 17 — `proof-runners-invalid` added; its refusals are tested in test/proof/runners.test.mjs.)
+// B87: 16 -> 17 — `proof-runners-invalid` added; its refusals are tested in test/proof/runners.test.mjs.
+// B90: 17 -> 18 — `review-routes-invalid` added; its refusals are tested in test/config/validate-routes.test.mjs.)
 
-test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 17 distinct ids', () => {
-  assert.equal(DOMAIN_RULE_IDS.length, 17);
-  assert.equal(new Set(DOMAIN_RULE_IDS).size, 17, 'no duplicate rule ids');
+test('DOMAIN_RULE_IDS (imported from validate.mjs, not re-typed here) has exactly 18 distinct ids', () => {
+  assert.equal(DOMAIN_RULE_IDS.length, 18);
+  assert.equal(new Set(DOMAIN_RULE_IDS).size, 18, 'no duplicate rule ids');
 });
 
 test('every rule id exercised by THIS test file is a member of the real DOMAIN_RULE_IDS set (catches a renamed/dropped rule)', () => {
@@ -929,6 +930,7 @@ test('every rule id exercised by THIS test file is a member of the real DOMAIN_R
     'effort-not-valid-for-provider',
     'closed-book-on-openai',
     'proof-runners-invalid', // B87: exercised in test/proof/runners.test.mjs
+    'review-routes-invalid', // B90: exercised in test/config/validate-routes.test.mjs
   ];
   assert.deepEqual([...exercisedInThisFile].sort(), [...DOMAIN_RULE_IDS].sort());
 });

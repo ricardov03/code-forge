@@ -196,6 +196,27 @@ A reviewer session that hangs is killed after `review.session_timeout_s` (defaul
 started once more; only a second timeout makes the file `unavailable: timeout`. `--max` is the
 outer limit for the whole run.
 
+For big files, `review.routes` sets another model and timeout by
+line count: a rule `{min_lines: 400, model: <id>, session_timeout_s: 900}` sends the reviewers of
+every file of 400 lines or more to that model with a 900-second timeout, and leaves smaller files as they are.
+`min_lines` and `model` are required. A rule's level decides which sessions it changes: an L2
+rule (`level: L2`, the default) changes only the reviewers' model, and in consensus mode only
+slot A — slot B stays `review.second_levels.L2`; an L3 rule (`level: L3`) changes only the
+judge's model. The count is the file's lines at the reviewed state (the bytes in the review
+packet): its newline bytes, plus one for a last line with no newline. A deleted file is never
+routed. Rules compete only within their level: among the rules of one level, the largest
+`min_lines` at or under the count wins. Two rules with the same level and the same `min_lines`
+are refused (`review-routes-invalid`). A rule with no `provider` runs on the top-level
+`provider` (the rule replaces the level entry, so the level's own `provider` is not inherited),
+and validation checks it with that same provider; with no `effort` or `fallback` it has none.
+The timeout is one value for every session of the file: the largest `session_timeout_s` among
+the matched rules that set one (a matched rule without one is left out of that max), else the
+timeout above. A rule's `second` replaces `review.second_levels` for its level, except for an
+L2 rule in consensus mode. Each routed file gets a signed `review.route` row; its `second_model`
+is the rule's `second` model when that second is used, else null — always null for an L2 rule
+in consensus mode, because the consensus second reviewer (slot B) stays
+`review.second_levels.L2` and is not the rule's.
+
 ## Speed
 
 The worker reviews several files at once. `review.parallel_tickets` (1 to 16, default 3) sets how

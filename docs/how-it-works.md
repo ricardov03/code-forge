@@ -499,6 +499,30 @@ more on the same packet. Only a second timeout is `unavailable: timeout`. The le
 tail of its stderr to explain the hang. While a long session runs, the worker keeps writing a
 heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
 
+A big file can go to another model with a longer timeout, without editing `.code-forge.yml` for
+each file. Set `review.routes` once: in each rule `min_lines` and `model` are required, and it may
+set `level`, `provider`, `effort`, `fallback`, `session_timeout_s` and `second`. A rule's level
+decides which sessions it changes: an L2 rule (`level: L2`, the default) changes only the
+reviewers' model, and in consensus mode only slot A — slot B stays `review.second_levels.L2`; an
+L3 rule (`level: L3`) changes only the judge's model. The worker counts the file's lines at the
+reviewed state (the bytes in the review packet): newline bytes, plus one for a last line without
+one. Rules compete only within their level: among the rules of one level, the one with the
+largest `min_lines` at or under that count wins; two rules with the same level and `min_lines`
+are refused. Left out, an optional key gets: `provider` the top-level `provider` (the rule
+replaces the level entry, so the level's own `provider` is not inherited), and validation checks
+the rule with that same provider; `effort` none (the CLI's default); `fallback` none;
+`session_timeout_s` nothing (the rule does not count in the timeout); `second`
+`review.second_levels` for the rule's level. The timeout is one value for every session of the
+ticket: the largest `session_timeout_s` among the matched rules that set one (a matched rule
+without one is left out of that max), else `review.session_timeout_s`. The second-level try uses
+the rule's `second` instead of `review.second_levels`, except for an L2 rule in consensus mode.
+The worker writes one signed `review.route` row per routed level (the level, the rule's
+`min_lines`, the file's `lines`, provider, model, timeout and second model) before the first
+session, and never twice for one ticket. The second model is null when the rule's `second` is
+not used, which includes an L2 rule in consensus mode, because slot B is not the rule's.
+A deleted file is never routed. With no `review.routes`, or no rule that matches, the
+review runs exactly as before. `run reload` accepts a change to the key.
+
 ### Answering a finding from another file
 
 Sometimes a finding on one file is fixed in a different file of the same block: the reviewer of

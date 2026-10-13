@@ -738,3 +738,83 @@ test('B103 (4): proof.md §4 says Xcode red→green VERIFIED with the date, the 
   const howItWorks = await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8');
   assert.equal(occurrences(howItWorks, 'on Swift, and on Xcode through `xcodebuild test` on an iOS simulator)'), 1);
 });
+
+// ── B90: size-based review routing ───────────────────────────────────────────
+
+test('B90 (8): review.md §3 names review.routes, how a rule is picked, the row and the fail-closed codes, and says not to edit .code-forge.yml per file', async () => {
+  const review = await readSkillFile('references/review.md');
+  const s3 = section(review, 3);
+  assert.equal(occurrences(s3, 'Big files (B90): to send a big file to a long-context reviewer, set `review.routes` once — do not edit `.code-forge.yml` per file and restore it after.'), 1);
+  assert.equal(occurrences(s3, 'A rule is `{min_lines, level?, model, provider?, effort?, fallback?, session_timeout_s?, second?}`; `min_lines` and `model` are required.'), 1);
+  assert.equal(occurrences(s3, 'Left out, an optional key gets: `provider` — the top-level `provider` (the rule replaces the level entry, so the level\'s own `provider` is not inherited), and validation checks the rule with that same provider; `effort` — none (the CLI\'s default); `fallback` — none; `session_timeout_s` — the rule does not count in the timeout; `second` — `review.second_levels.<level>`.'), 1);
+  assert.equal(occurrences(s3, 'The rule\'s `second` is the second-level try\'s model (§4) for its level, in place of `review.second_levels.<level>` — except an L2 rule in consensus mode, whose `second` is not used.'), 1);
+  assert.equal(occurrences(s3, 'and one ticket can take one L2 rule and one L3 rule; two rules with the same `level` and `min_lines` are refused.'), 1);
+  assert.equal(occurrences(s3, '`second_model` is the rule\'s `second` model when that second is used, else null — always null for an L2 rule in consensus mode, because slot B is `review.second_levels.L2`, not the rule\'s'), 1);
+  assert.equal(occurrences(s3, 'A retry of the same ticket never writes its rows twice.'), 1);
+  assert.equal(occurrences(s3, 'One signed `review.route {level, min_lines, lines, provider, model, session_timeout_s, second_model}` row per routed level is written before the ticket\'s first session'), 1);
+  assert.equal(occurrences(s3, '`reason: route-row`'), 1);
+  assert.equal(occurrences(s3, '`reason: route-invalid`'), 1);
+  assert.equal(occurrences(s3, 'A deleted file is never routed.'), 1);
+  assert.equal(occurrences(s3, '`run reload` accepts a change to it; validation refuses two rules with the same `level` and `min_lines`, and, with `review.multimodel`, an L2 rule whose provider (its own, else the inherited top-level one) equals the second reviewer\'s (slot B\'s, or the rule\'s own `second.provider`)'), 1);
+  assert.equal(occurrences(s3, '(`review-routes-invalid`)'), 1);
+  // §4 still owns the timeout and second-level mechanics; the routes paragraph lives only in §3
+  assert.equal(occurrences(section(review, 4), 'review.routes'), 0);
+});
+
+test('B90 (9): how-it-works, review-only and the README key table say the routing behaviour; config.md lists the key', async () => {
+  const howItWorks = await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8');
+  assert.equal(occurrences(howItWorks, 'A big file can go to another model with a longer timeout, without editing `.code-forge.yml` for\neach file. Set `review.routes` once: in each rule `min_lines` and `model` are required'), 1);
+  assert.equal(occurrences(howItWorks, 'The worker writes one signed `review.route` row per routed level'), 1);
+  assert.equal(occurrences(howItWorks, 'The second model is null when the rule\'s `second` is\nnot used, which includes an L2 rule in consensus mode, because slot B is not the rule\'s.'), 1);
+  assert.equal(occurrences(howItWorks, 'A deleted file is never routed. With no `review.routes`, or no rule that matches, the\nreview runs exactly as before. `run reload` accepts a change to the key.'), 1);
+  const reviewOnly = await readFile(path.join(ROOT, 'docs', 'review-only.md'), 'utf8');
+  assert.equal(occurrences(reviewOnly, 'For big files, `review.routes` sets another model and timeout by\nline count'), 1);
+  assert.equal(occurrences(reviewOnly, 'its newline bytes, plus one for a last line with no newline. A deleted file is never\nrouted.'), 1);
+  assert.equal(occurrences(reviewOnly, 'Two rules with the same level and the same `min_lines`\nare refused (`review-routes-invalid`).'), 1);
+  assert.equal(occurrences(reviewOnly, 'A rule with no `provider` runs on the top-level\n`provider`'), 1);
+  assert.equal(occurrences(reviewOnly, 'its `second_model`\nis the rule\'s `second` model when that second is used, else null — always null for an L2 rule\nin consensus mode, because the consensus second reviewer (slot B) stays\n`review.second_levels.L2` and is not the rule\'s.'), 1);
+  const readme = await readFile(path.join(ROOT, 'README.md'), 'utf8');
+  assert.equal(occurrences(readme, '| `review.routes` | none | big files go to another model: a file with at least `min_lines` lines is reviewed by the rule\'s `model`, with its own `session_timeout_s` and `second` level |'), 1);
+  const config = await readFile(path.join(ROOT, 'docs', 'reference', 'config.md'), 'utf8');
+  for (const key of ['review.routes', 'review.routes[].min_lines', 'review.routes[].level', 'review.routes[].model', 'review.routes[].session_timeout_s', 'review.routes[].second']) {
+    assert.equal(occurrences(config, `| \`${key}\` |`), 1, key);
+  }
+  assert.equal(occurrences(config, '| `review.routes[].level` | enum: `L2`, `L3` |  | `"L2"` |'), 1);
+});
+
+test('B90 (10): the four routing texts (review.md §3, how-it-works, review-only, the schema description) say the same rules, in the same order', async () => {
+  const schema = JSON.parse(await readFile(path.join(ROOT, 'schema', 'code-forge.schema.json'), 'utf8'));
+  const routesParagraph = (/** @type {string} */ text, /** @type {string} */ start) => text.split('\n\n').find((p) => p.startsWith(start)) ?? '';
+  const texts = {
+    'review.md §3': routesParagraph(section(await readSkillFile('references/review.md'), 3), 'Big files (B90):'),
+    'how-it-works.md': routesParagraph(await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8'), 'A big file can go to another model'),
+    'review-only.md': routesParagraph(await readFile(path.join(ROOT, 'docs', 'review-only.md'), 'utf8'), 'For big files, `review.routes`'),
+    schema: schema.properties.review.properties.routes.description,
+  };
+  // compared as plain prose: one space for any run of whitespace, no backticks
+  const plain = (/** @type {string} */ t) => t.replace(/`/g, '').replace(/\s+/g, ' ');
+  const SAME = [
+    'min_lines and model are required',
+    "A rule's level decides which sessions it changes: an L2 rule (level: L2, the default) changes only the reviewers' model, and in consensus mode only slot A",
+    'slot B stays review.second_levels.L2',
+    "changes only the judge's model",
+    "the file's lines at the reviewed state (the bytes in the review packet)",
+    'Rules compete only within their level: among the rules of one level, the',
+    "the level's own provider is not inherited",
+    'with that same provider',
+    'The timeout is one value for every session of the',
+    'the largest session_timeout_s among the matched rules that set one',
+    'a matched rule without one is left out of that max',
+  ];
+  for (const [name, text] of Object.entries(texts)) {
+    const p = plain(text);
+    assert.notEqual(p, '', name);
+    for (const phrase of SAME) assert.equal(occurrences(p, phrase), 1, `${name}: ${phrase}`);
+    // the level comes before the winner: "within their level" is said before "the largest min_lines"
+    const within = p.indexOf('Rules compete only within their level');
+    const wins = p.indexOf('min_lines at or under');
+    assert.equal(within >= 0 && wins > within, true, `${name}: within-level before the winner`);
+    // gone: the claim that every session of the ticket runs on the rule's model
+    for (const old of ["uses the rule's model", "runs on the rule's model", "rule's model and timeout"]) assert.equal(occurrences(p, old), 0, `${name}: ${old}`);
+  }
+});

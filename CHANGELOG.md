@@ -30,6 +30,9 @@ waits on a second real consumer (plan §10.4, Q17).
   reader, and `RED_INVALID compile` for a build failure; fixtures captured from Xcode 26.6 (B102, #7).
 - A live `xcodebuild` red→green check on an iOS simulator (`CODE_FORGE_LIVE_XCODE=1`), verified with Xcode 26.6 on an
   iPhone 17 simulator; it skips with a reason without full Xcode or an available simulator (B103, #7).
+- `review.routes`: size-based review routing. A file with at least `min_lines` lines is reviewed (L2) or judged (L3) by
+  the rule's model, with its own session timeout and second level; one signed `review.route` row per routed level;
+  config rule 18 `review-routes-invalid` (B90, #10).
 
 ### Fixed
 

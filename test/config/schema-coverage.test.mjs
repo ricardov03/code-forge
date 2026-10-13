@@ -375,6 +375,10 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'proof.runners.xcode.scheme',
   'proof.runners.xcode.destination',
   'proof.runners.xcode.test_target',
+  // B90: three of the 19 `review.routes` paths behind the 188 -> 207 re-pin (depth 2, an item key, a `$ref` level's key).
+  'review.routes',
+  'review.routes.session_timeout_s',
+  'review.routes.second.fallback.model',
 ]);
 
 /**
@@ -396,8 +400,11 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * B84: +1 = keys.cache_hours ⇒ 176.
  * B87: +6 = proof.runners{,.match,.adapter,.argv,.env,.timeout_s} ⇒ 182.
  * B102: +6 = proof.runners.xcode{,.workspace,.project,.scheme,.destination,.test_target} ⇒ 188.
+ * B90: +19 = review.routes{,.min_lines,.level,.model,.effort,.provider,.session_timeout_s},
+ *   review.routes.fallback{,.provider,.model,.effort}, review.routes.second{,.model,.effort,.provider},
+ *   review.routes.second.fallback{,.provider,.model,.effort} ⇒ 207.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 188;
+const EXPECTED_SCHEMA_PATH_COUNT = 207;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

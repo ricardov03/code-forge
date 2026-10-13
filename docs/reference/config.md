@@ -108,6 +108,25 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.min_tokens_out` | integer |  | `120` | min 1; The stub guard: a review answer with fewer output tokens is unavailable (too_short). A clean pass (passed: true, no findings, a non-blank summary) needs only min(this, 40), whatever the diff size (B53). |
 | `review.batch_small_files` | boolean |  | `true` |  |
 | `review.session_timeout_s` | integer |  | `300` | min 1 |
+| `review.routes` | array<object> |  | — | B90: size-based review routing. min_lines and model are required. A rule's level decides which sessions it changes: an L2 rule (level: L2, the default) changes only the reviewers' model, and in consensus mode only slot A (slot B stays review.second_levels.L2); an L3 rule changes only the judge's model. The count is the file's lines at the reviewed state (the bytes in the review packet): newline bytes, plus one for a last line without one; a deleted file is never routed. Rules compete only within their level: among the rules of one level, the largest min_lines at or under the count wins; the same level and min_lines twice is refused. Left out, an optional key gets: provider the top-level provider (the rule replaces the level entry, so the level's own provider is not inherited; validation checks the rule with that same provider); effort none; fallback none; session_timeout_s nothing (the rule does not count in the timeout); second review.second_levels for the rule's level. The timeout is one value for every session of the ticket: the largest session_timeout_s among the matched rules that set one (a matched rule without one is left out of that max), else review.session_timeout_s. The second-level try uses the rule's second, except for an L2 rule in consensus mode. The worker writes one signed review.route row per routed level before the first session, never twice for one ticket; its second_model is null when the rule's second is not used, which includes an L2 rule in consensus mode, because slot B is not the rule's. run reload accepts a change. |
+| `review.routes[].min_lines` | integer | yes | — | min 0; B90: the rule applies to a file with at least this many lines (0: every file that is not deleted). |
+| `review.routes[].level` | enum: `L2`, `L3` |  | `"L2"` | B90: the level the rule replaces, L2 (the reviewers) or L3 (the judge). |
+| `review.routes[].model` | string | yes | — | minLength 1 |
+| `review.routes[].effort` | string |  | — |  |
+| `review.routes[].provider` | enum: `anthropic`, `openai`, `xai` |  | — |  |
+| `review.routes[].fallback` | array<object> |  | — |  |
+| `review.routes[].fallback[].provider` | enum: `anthropic`, `openai`, `xai` | yes | — |  |
+| `review.routes[].fallback[].model` | string | yes | — | minLength 1 |
+| `review.routes[].fallback[].effort` | string |  | — |  |
+| `review.routes[].session_timeout_s` | integer |  | — | min 1; B90: a matched rule's timeout; every session of the ticket runs at the largest one among the matched rules that set one. Unset: the rule does not count in that max (review.session_timeout_s applies only when no matched rule sets one). |
+| `review.routes[].second` | object |  | — |  |
+| `review.routes[].second.model` | string | yes | — | minLength 1 |
+| `review.routes[].second.effort` | string |  | — |  |
+| `review.routes[].second.provider` | enum: `anthropic`, `openai`, `xai` |  | — |  |
+| `review.routes[].second.fallback` | array<object> |  | — |  |
+| `review.routes[].second.fallback[].provider` | enum: `anthropic`, `openai`, `xai` | yes | — |  |
+| `review.routes[].second.fallback[].model` | string | yes | — | minLength 1 |
+| `review.routes[].second.fallback[].effort` | string |  | — |  |
 | `review.max_rounds_per_file` | integer |  | `4` | min 2; max 6 |
 | `review.recheck_scope` | enum: `fix_hunks`, `file` |  | `"fix_hunks"` |  |
 | `review.late_findings` | enum: `sweep`, `block` |  | `"sweep"` |  |

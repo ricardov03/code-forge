@@ -47,12 +47,13 @@ import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { logWarning } from '../util/error-log.mjs';
 import { keyedLock } from '../util/locks.mjs';
-import { writeSafe } from '../util/redact.mjs';
+import { redact, writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
+import { countLines, RouteError, routeTicket } from '../review/route.mjs';
 import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
 import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
-import { contentHash, DELETED_HASH, repoRootOf, WorkerError } from './ticket.mjs';
+import { DELETED_HASH, hashBytes, readRegularFileNoFollow, repoRootOf, WorkerError } from './ticket.mjs';
 
 /** Name of the key the worker resolves for System 1 (`keys.jev` / `system1.key` reference). */
 export const JEV_KEY_NAME = 'jev';
@@ -153,6 +154,18 @@ export async function resolveJevKey(cfg, { store, env, opRead, now }) {
     ...(now !== undefined ? { now } : {}),
   });
   return res.value;
+}
+
+/**
+ * B90: an unexpected failure inside a named worker step (today: `routing`). The ticket still ends
+ * `worker-error`; its result's `detail` says `<step>: <original error text>` (redacted).
+ */
+class StepError extends Error {
+  /** @param {string} step @param {unknown} cause */
+  constructor(step, cause) {
+    super(`${step}: ${cause instanceof Error ? `${cause.name}: ${cause.message}` : String(cause)}`, { cause });
+    this.step = step;
+  }
 }
 
 /** The fix-loop fields of an engine outcome the result carries (B12c, §4.11). */
@@ -291,14 +304,51 @@ export async function createWorker(opts, deps = {}) {
   }
 
   /**
-   * One ticket through the engine hook with `tcfg` (the ticket's config snapshot): the unsigned result.
+   * One ticket through the engine hook with the ticket's config snapshot, routed by size (B90): the unsigned result.
+   * @param {string} id - the ticket id (B90: a retried ticket never writes its route rows twice).
    * @param {import('./queue.mjs').Ticket} ticket @param {Record<string, any>} base
-   * @param {Record<string, any>} tcfg
+   * @param {Record<string, any>} snapshotCfg - the ticket's config snapshot, before B90 routing.
    * @param {string} contentRoot - B62b: the tree the content was hashed in, and is reviewed in.
+   * @param {{lines: number, deleted: boolean}} size - B90: the line count of the hashed bytes.
    * @returns {Promise<Record<string, any>>}
    */
-  async function reviewWith(ticket, base, tcfg, contentRoot) {
-    const timeoutS = Number.isInteger(tcfg?.review?.session_timeout_s) && tcfg.review.session_timeout_s > 0 ? tcfg.review.session_timeout_s : DEFAULT_SESSION_TIMEOUT_S;
+  async function reviewWith(id, ticket, base, snapshotCfg, contentRoot, size) {
+    const baseTimeoutS = Number.isInteger(snapshotCfg?.review?.session_timeout_s) && snapshotCfg.review.session_timeout_s > 0 ? snapshotCfg.review.session_timeout_s : DEFAULT_SESSION_TIMEOUT_S;
+    // B90: `review.routes` picks the model, second level and timeout of every session of this
+    // ticket from its size, once, before the first session. No route ⇒ the snapshot object itself.
+    // A route list that cannot be used is `unavailable` — never a review on a model it did not name.
+    let routed;
+    try {
+      routed = routeTicket(snapshotCfg, { lines: size.lines, deleted: size.deleted, timeoutS: baseTimeoutS });
+    } catch (err) {
+      // only a route list that cannot be used is `route-invalid`; anything else is a real failure
+      // and goes to runOne (`worker-error`), named as a routing-step failure with its own text
+      if (!(err instanceof RouteError)) throw new StepError('routing', err);
+      return { ...base, status: 'unavailable', reason: 'route-invalid', approved: false };
+    }
+    const tcfg = routed.cfg;
+    const timeoutS = routed.timeoutS;
+    // the signed `review.route` row comes before the first session; a row that cannot be written
+    // is `unavailable` (a routed review the ledger cannot explain never runs). One row per routed
+    // level per ticket: a retried ticket (same id) skips the levels whose row the ledger already has.
+    // `runId` is the run this ticket belongs to (reviewOne refuses `ticket.run !== runId` as
+    // other-run), and a restarted worker serves the same run id (startWorker: `opts.runId`), so the
+    // check holds across workers of that run.
+    if (routed.rows.length > 0) {
+      try {
+        const have = new Set(
+          (await readRows())
+            .filter((r) => r?.event === 'review.route' && r.run === runId && r.ticket === id)
+            .map((r) => r.level),
+        );
+        for (const row of routed.rows) {
+          if (have.has(row.level)) continue;
+          await ledger({ ...row, ticket: id, block: ticket.block, file: ticket.file, content_hash: ticket.content_hash });
+        }
+      } catch {
+        return { ...base, status: 'unavailable', reason: 'route-row', approved: false };
+      }
+    }
     /** @type {import('./engine.mjs').ReviewContext} */
     const ctx = {
       repoRoot,
@@ -391,8 +441,12 @@ export async function createWorker(opts, deps = {}) {
     if (canonicalPath(hashedIn) !== canonicalPath(contentRoot)) return { ...base, status: 'unavailable', reason: 'worktree-mismatch', approved: false };
     /** @type {string} */
     let current;
+    /** @type {Buffer | null} */
+    let bytes;
     try {
-      current = contentHash(contentRoot, ticket.file);
+      // B90: one read — the bytes hashed are the bytes whose lines route the review
+      bytes = readRegularFileNoFollow(contentRoot, ticket.file);
+      current = hashBytes(bytes);
     } catch (err) {
       // the path no longer passes the on-disk check, or the file cannot be read
       const reason = err instanceof WorkerError ? err.code : 'unreadable';
@@ -407,7 +461,7 @@ export async function createWorker(opts, deps = {}) {
     } catch {
       return { ...base, status: 'unavailable', reason: 'config-snapshot', approved: false };
     }
-    return reviewWith(ticket, base, ticketCfg, contentRoot);
+    return reviewWith(id, ticket, base, ticketCfg, contentRoot, { lines: countLines(bytes), deleted: bytes === null });
   }
 
   /**
@@ -454,9 +508,11 @@ export async function createWorker(opts, deps = {}) {
   async function runOne(id) {
     try {
       return (await processTicket(id)) !== null ? 1 : 0;
-    } catch {
+    } catch (err) {
+      // B90: a failure a step names (StepError) keeps its step and original text, redacted
+      const detail = err instanceof StepError ? { detail: redact(err.message) } : {};
       try {
-        await complete(id, { event: 'review.result', status: 'unavailable', reason: 'worker-error', approved: false });
+        await complete(id, { event: 'review.result', status: 'unavailable', reason: 'worker-error', ...detail, approved: false });
         return 1;
       } catch {
         poisoned.add(id);
