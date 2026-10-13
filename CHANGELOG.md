@@ -6,6 +6,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `npm run release` moves the README "In the next release:" bullets under the new version, refuses an empty [Unreleased]
+  or a missing README anchor in preflight, restores README on a failed check, and runs `gen-config-doc --check`;
+  `docs/releasing.md` gets a releasing checklist (B108).
+
 ## [0.10.0] — 2026-10-13
 
 ### Added

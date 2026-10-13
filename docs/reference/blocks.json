@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 102,
+  "block_count": 103,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1623,6 +1623,23 @@
         "B94"
       ],
       "note": "root-added 2026-10-13; issue #10 owner item 1 (plans/iteration/plan.md B80, D1 = a); block waive and block reopen ask the human for a yes at a terminal, no --yes, no terminal exits 2 and records nothing; pre-checks run before the question; a pseudo-terminal passes the check (honest limit in security.md §3); D1 (b) is a later option"
+    },
+    "B108": {
+      "title": "Release moves the README What's new bullets and checks the docs",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "README.md",
+        "docs/releasing.md",
+        "scripts/release.mjs",
+        "test/release-readme.test.mjs",
+        "test/release.test.mjs"
+      ],
+      "depends_on": [
+        "B80"
+      ],
+      "note": "root-added 2026-10-13; process fix after the 0.10.0 README miss (plans/field-bugs/plan.md B108); npm run release moves the 'In the next release:' bullets under 'In X.Y.Z:' (new '## What's new in X.Y' on a minor or major), keeps an empty anchor, refuses an empty [Unreleased] or a missing anchor in preflight, rolls README back with the other files, and runs gen-config-doc --check"
     }
   }
 }

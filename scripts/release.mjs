@@ -9,8 +9,10 @@
  *   node scripts/release.mjs notes <vX.Y.Z> [--out <file>]   (the GitHub release body; CI uses it)
  *
  * Steps: 1 preflight (clean tree, branch, up to date with origin, `[Unreleased]` has entries, the
+ * README's "In the next release:" list has bullets under the current "## What's new in X.Y", the
  * new version beats the current one and npm's latest, the tag is free locally and on origin),
- * 2 bump, 3 CHANGELOG, 4 checks (any failure restores every changed file byte-for-byte),
+ * 2 bump, 3 CHANGELOG and README (B108: the next-release bullets move under "In X.Y.Z:"),
+ * 4 checks (`gen-config-doc --check` first; any failure restores every changed file byte-for-byte),
  * 5 commit + tag, 6 next steps. `--dry-run` runs the preflight, prints the plan and the diffs, and
  * writes nothing (it never fetches either: origin is read with `git ls-remote`).
  *
@@ -35,6 +37,8 @@ const REPO_ENV = ['GIT_DIR', 'GIT_WORK_TREE', 'GIT_INDEX_FILE', 'GIT_PREFIX', 'G
   'GIT_COMMON_DIR', 'GIT_ALTERNATE_OBJECT_DIRECTORIES', 'GIT_IMPLICIT_WORK_TREE'];
 
 export class Refusal extends Error {}
+/** `## [Unreleased]` has no entries (the README's bullet count is added to the message). */
+export class EmptyUnreleased extends Refusal {}
 export class UsageError extends Error {}
 
 // ── arguments and versions ──────────────────────────────────────────────────────────────────
@@ -199,7 +203,7 @@ export function releaseChangelog(text, version, date) {
   const { start, end } = sec;
   const body = lines.slice(start + 1, end);
   if (!parseSubsections(lines, start + 1, end).some((s) => s.bullets.length)) {
-    throw new Refusal('CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"');
+    throw new EmptyUnreleased('CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"');
   }
   const notes = body.join('\n').trim();
   const out = [...lines.slice(0, start), '## [Unreleased]', '', `## [${version}] — ${date}`, ...body, ...lines.slice(end)];
@@ -210,6 +214,87 @@ export function releaseChangelog(text, version, date) {
     out.splice(linkIdx, 1, `[Unreleased]: ${m[1]}/compare/v${version}...HEAD`, `[${version}]: ${m[1]}/compare/${m[2]}...v${version}`);
   }
   return { text: out.join('\n'), notes };
+}
+
+// ── README ──────────────────────────────────────────────────────────────────────────────────
+
+/** The exact line the land step appends README bullets after (plans/tools/land-block.mjs). */
+export const README_ANCHOR = 'In the next release:';
+
+/**
+ * Read the README's next-release list: the one `In the next release:` line, the nearest `## `
+ * heading above it (must be `## What's new in X.Y` with the current version's X.Y, only blank
+ * lines between them), and the list after it up to the next `In x.y.z:` line, `## ` line or the
+ * end. The list may hold only blank lines, `- ` bullets and `  ` continuation lines. Anything else
+ * is refused: a README in another shape is never guessed at.
+ * @param {string} text @param {string} current - x.y.z, the package version
+ * @returns {{ lines: string[], heading: number, anchor: number, end: number, body: string[], bullets: number }}
+ */
+export function parseReadme(text, current) {
+  const lines = text.split('\n');
+  const anchors = lines.flatMap((l, i) => (l === README_ANCHOR ? [i] : []));
+  if (anchors.length === 0) {
+    throw new Refusal(`README.md has no "${README_ANCHOR}" line (the land step adds bullets after it): put it under "## What's new in X.Y"`);
+  }
+  if (anchors.length > 1) throw new Refusal(`README.md has ${anchors.length} "${README_ANCHOR}" lines, expected exactly 1`);
+  const anchor = anchors[0];
+  let heading = anchor - 1;
+  while (heading >= 0 && !lines[heading].startsWith('## ')) heading -= 1;
+  const hm = heading >= 0 ? /^## What's new in (\d+)\.(\d+)$/.exec(lines[heading]) : null;
+  if (!hm) throw new Refusal(`README.md: the nearest "## " heading above "${README_ANCHOR}" (line ${anchor + 1}) is not "## What's new in X.Y"`);
+  const cur = parseVersion(current);
+  if (!cur) throw new Refusal(`package.json version "${current}" is not x.y.z`);
+  if (Number(hm[1]) !== cur[0] || Number(hm[2]) !== cur[1]) {
+    throw new Refusal(`README.md: "${README_ANCHOR}" sits under "## What's new in ${hm[1]}.${hm[2]}" but package.json is ${current}: expected "## What's new in ${cur[0]}.${cur[1]}"`);
+  }
+  for (let i = heading + 1; i < anchor; i += 1) {
+    if (lines[i] !== '') throw new Refusal(`README.md line ${i + 1}: only blank lines may stand between "## What's new in ${hm[1]}.${hm[2]}" and "${README_ANCHOR}"`);
+  }
+  let end = anchor + 1;
+  while (end < lines.length && !/^In \d+\.\d+\.\d+:$/.test(lines[end]) && !lines[end].startsWith('## ')) end += 1;
+  let bullet = false;
+  for (let i = anchor + 1; i < end; i += 1) {
+    const l = lines[i];
+    if (l === '') continue;
+    if (l.startsWith('- ')) bullet = true;
+    else if (!(bullet && l.startsWith('  '))) {
+      throw new Refusal(`README.md line ${i + 1}: the "${README_ANCHOR}" list may hold only "- " bullets, their "  " continuation lines and blank lines`);
+    }
+  }
+  let a = anchor + 1;
+  let b = end;
+  while (a < b && lines[a] === '') a += 1;
+  while (b > a && lines[b - 1] === '') b -= 1;
+  const body = lines.slice(a, b);
+  return { lines, heading, anchor, end, body, bullets: body.filter((l) => l.startsWith('- ')).length };
+}
+
+/**
+ * Move the README's next-release bullets under `In <next>:`, keeping the anchor with an empty list
+ * followed by a blank line and the new `In <next>:` line (so the land step's next bullet lands
+ * above it). Same major.minor: the heading stays and the new list goes above the older ones. New
+ * major.minor: a new `## What's new in X.Y` heading takes the old heading's place, and the old
+ * heading moves down above its own `In <old>:` lists (the shape of commit 589096f); with no such
+ * lists the old heading is dropped, never left empty.
+ * @param {string} text @param {string} current @param {string} next - both x.y.z
+ * @returns {string}
+ */
+export function releaseReadme(text, current, next) {
+  const { lines, heading, anchor, end, body, bullets } = parseReadme(text, current);
+  if (bullets === 0) {
+    throw new Refusal(`README.md: the "${README_ANCHOR}" list is empty while CHANGELOG.md "## [Unreleased]" has entries: add a README bullet for each landed change`);
+  }
+  const cur = /** @type {[number, number, number]} */ (parseVersion(current));
+  const nxt = parseVersion(next);
+  if (!nxt) throw new Refusal(`the new version "${next}" is not x.y.z`);
+  const block = [README_ANCHOR, '', `In ${next}:`, '', ...body, ''];
+  const tail = lines.slice(end);
+  if (nxt[0] === cur[0] && nxt[1] === cur[1]) return [...lines.slice(0, anchor), ...block, ...tail].join('\n');
+  // The old heading moves down only when it still has `In x.y.z:` lists under it; a section that
+  // had only the next-release list (it ends at a `## ` line or the end) leaves no empty heading.
+  const oldHeading = end < lines.length && !lines[end].startsWith('## ') ? [lines[heading], ''] : [];
+  return [...lines.slice(0, heading), `## What's new in ${nxt[0]}.${nxt[1]}`, ...lines.slice(heading + 1, anchor),
+    ...block, ...oldHeading, ...tail].join('\n');
 }
 
 /**
@@ -356,8 +441,14 @@ function runChecks(root, name, version) {
     const tail = `${r.stdout}${r.stderr}`.trimEnd().split('\n').slice(-30).join('\n');
     return `${label} failed (exit ${r.code})${tail ? `:\n${tail}` : ''}`;
   };
+  const genDoc = path.join(root, 'scripts', 'gen-config-doc.mjs');
+  if (!existsSync(genDoc)) return 'gen-config-doc --check failed: scripts/gen-config-doc.mjs not found';
+  let r = run(process.execPath, [genDoc, '--check'], { cwd: root, timeout: 120000 });
+  if (r.code !== 0) return failed('gen-config-doc --check', r);
+  ok('gen-config-doc --check');
+
   process.stdout.write('check npm test …\n');
-  let r = run('npm', ['test'], { cwd: root });
+  r = run('npm', ['test'], { cwd: root });
   if (r.code !== 0) return failed('npm test', r);
   ok('npm test');
 
@@ -504,8 +595,28 @@ export function main(argv, root = process.cwd()) {
     const changelogPath = path.join(root, 'CHANGELOG.md');
     if (!existsSync(changelogPath)) throw new Refusal('CHANGELOG.md not found');
     const changelogBefore = readFileSync(changelogPath, 'utf8');
-    const { text: changelogAfter, notes } = releaseChangelog(changelogBefore, next, date);
+    let readmeBefore;
+    try {
+      readmeBefore = readFileSync(path.join(root, 'README.md'), 'utf8');
+    } catch {
+      throw new Refusal(`README.md is missing or unreadable: the release moves its "${README_ANCHOR}" bullets`);
+    }
+    let changelogRelease;
+    try {
+      changelogRelease = releaseChangelog(changelogBefore, next, date);
+    } catch (e) {
+      if (!(e instanceof EmptyUnreleased)) throw e;
+      let bullets = 0;
+      try {
+        bullets = parseReadme(readmeBefore, current).bullets;
+      } catch { /* the README's own refusal comes once the CHANGELOG has entries */ }
+      if (bullets) throw new Refusal(`${e.message}; README.md has ${bullets} bullet(s) under "${README_ANCHOR}" with no CHANGELOG entry`);
+      throw e;
+    }
+    const { text: changelogAfter, notes } = changelogRelease;
     ok('CHANGELOG.md [Unreleased] has entries');
+    const readmeAfter = releaseReadme(readmeBefore, current, next);
+    ok(`README.md "${README_ANCHOR}" has ${parseReadme(readmeBefore, current).bullets} bullet(s)`);
     /** @type {string[]} */
     const refusals = [];
     preflight(root, { branch, allowBranch: opts.allowBranch, tag, current, next, name }, (msg) => {
@@ -517,18 +628,20 @@ export function main(argv, root = process.cwd()) {
     const plan = [
       ...locations.map((l) => ({ file: l.file, label: l.label, before: l.before, after: l.bump(next) })),
       { file: 'CHANGELOG.md', label: `[Unreleased] → [${next}] — ${date}`, before: changelogBefore, after: changelogAfter },
+      { file: 'README.md', label: `"${README_ANCHOR}" → "In ${next}:"`, before: readmeBefore, after: readmeAfter },
     ];
+    const textFiles = new Set(['CHANGELOG.md', 'README.md']);
 
-    process.stdout.write('\n== 2. bump + 3. CHANGELOG ==\n');
+    process.stdout.write('\n== 2. bump + 3. CHANGELOG and README ==\n');
     for (const f of plan) {
-      process.stdout.write(`${f.file}: ${f.label}${f.file === 'CHANGELOG.md' ? '' : `  ${current} → ${next}`}\n`);
+      process.stdout.write(`${f.file}: ${f.label}${textFiles.has(f.file) ? '' : `  ${current} → ${next}`}\n`);
       const diff = lineDiff(f.before, f.after, 3);
-      if (opts.dryRun || f.file === 'CHANGELOG.md') for (const l of diff) process.stdout.write(`    ${l}\n`);
+      if (opts.dryRun || textFiles.has(f.file)) for (const l of diff) process.stdout.write(`    ${l}\n`);
     }
 
     if (opts.dryRun) {
       process.stdout.write('\n== plan (dry run) ==\n');
-      process.stdout.write(`would run the checks: ${opts.checks ? 'npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate .' : 'none (--no-checks)'}\n`);
+      process.stdout.write(`would run the checks: ${opts.checks ? 'gen-config-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate .' : 'none (--no-checks)'}\n`);
       process.stdout.write(`would commit "Release ${tag}" (${plan.length} files) and create the annotated tag ${tag}\n`);
       process.stdout.write(`would print: git push origin ${branch} --follow-tags\n`);
       process.stdout.write('dry run: 0 files changed, 0 commits, 0 tags\n');
@@ -553,7 +666,7 @@ export function main(argv, root = process.cwd()) {
         return 1;
       }
     } else {
-      warn('!!! --no-checks: npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!');
+      warn('!!! --no-checks: gen-config-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!');
     }
 
     process.stdout.write('\n== 5. commit + tag ==\n');

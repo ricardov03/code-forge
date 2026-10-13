@@ -12,6 +12,8 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 In the next release:
 
+- **The release moves the README What's new list (B108).** `npm run release` now moves the "In the next release:" bullets under "In X.Y.Z:". A minor or major release starts a new "What's new in X.Y" heading. The empty anchor stays for the next block. The release refuses an empty CHANGELOG [Unreleased] or a missing anchor before it changes anything, and a failed check puts the README back with the other files. The checks now include `gen-config-doc --check`. `docs/releasing.md` has a releasing checklist.
+
 In 0.10.0:
 
 - **Choose how long a 1Password key stays cached (B84).** Set `keys.cache_hours` (1 to 24, default 8) in `.code-forge.yml`, or `keys set <name> --op <ref> --cache-hours <n>` for one key. A lower value shortens keys that are already cached at the next read.
@@ -415,5 +417,6 @@ depends on, kept in sync with the maintainer's design plan.
 
 Releasing: record changes with `npm run changelog -- <type> "<text>"` and fixed error reports with
 `npm run known-fix -- add <fp> <version> "<summary>"`, then `npm run release -- <patch|minor|major|x.y.z> [--dry-run]`
-bumps, commits and tags (it never pushes or publishes). Publish with `npm publish` from your
+bumps, moves the README's "In the next release:" bullets under the new version, checks the config
+doc, commits and tags (it never pushes or publishes). Publish with `npm publish` from your
 machine, then push the tag: CI only creates the GitHub release. See [docs/releasing.md](docs/releasing.md).

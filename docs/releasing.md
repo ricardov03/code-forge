@@ -67,7 +67,7 @@ that run's job summary; it never changes an issue.
 ```
 npm run known-fix -- check              # if this release fixes reported errors: table is valid
 npm run release -- minor --dry-run      # see the plan and the diffs; writes nothing
-npm run release -- minor                # bump, CHANGELOG, checks, commit, tag
+npm run release -- minor                # bump, CHANGELOG, README, checks, commit, tag
 npm publish                             # publish to npm from your machine
 git push origin main --follow-tags      # then push; CI only creates the GitHub release
 ```
@@ -83,6 +83,15 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 | `--no-checks` | skip the checks in step 4, with a loud warning. For emergencies only |
 | `--allow-branch <name>` | release from a branch other than `main` |
 
+## Releasing checklist
+
+1. Every landed block has a README bullet under `In the next release:` and a CHANGELOG entry.
+2. `npm run known-fix -- check` when the release fixes reported errors.
+3. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
+4. `npm run release -- <bump>`.
+5. `npm publish`, then `git push origin main --follow-tags`.
+6. Comment the fixed version on each issue, and close it when all its items are done.
+
 ## What it does, in order
 
 1. **Preflight.** Refuses (exit 1) unless the tree is clean, you are on `main`, your branch is
@@ -90,7 +99,13 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
    `## [Unreleased]` in `CHANGELOG.md` has at least one entry, the new version is greater than
    the current one and the latest on npm (`npm view`; a network failure only warns), and the tag
    `vX.Y.Z` exists neither locally nor on origin. Every version location must also agree with
-   `package.json` before anything is bumped.
+   `package.json` before anything is bumped. It also refuses when `README.md` is missing, has no
+   `In the next release:` line or more than one, has no `## What's new in X.Y` heading right above
+   that line (only blank lines between them), or the heading's X.Y is not the current version's;
+   when the list under it holds anything but `- ` bullets, their `  ` continuation lines and blank
+   lines; and when the list is empty while `## [Unreleased]` has entries (an empty
+   `## [Unreleased]` with README bullets is refused, and the message names the README too).
+   `--dry-run` shows the same refusal.
 2. **Bump** every place that holds the version:
    - `package.json` `version`
    - `npm-shrinkwrap.json` `version` and `packages[""].version` (and `package-lock.json` if present)
@@ -102,10 +117,25 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 3. **CHANGELOG.** `## [Unreleased]` becomes `## [X.Y.Z] — <date>`, with a fresh empty
    `## [Unreleased]` above it. Compare links at the bottom are updated only when the file already
    has an `[Unreleased]: …/compare/…...HEAD` link; none are invented.
-4. **Checks.** `npm test`, `npm run typecheck`, `npm pack --dry-run` (the name and version must
-   match; the file count is printed), `npm ls --json` (0 invalid, 0 missing), and
-   `claude plugin validate .` when the `claude` CLI is installed (otherwise a warning).
-5. **Commit and tag.** One commit `Release vX.Y.Z` with only the changed files, then the annotated
+
+   **README.** The bullets under `In the next release:` move under a new `In X.Y.Z:` line. The
+   `In the next release:` line stays, with an empty list, a blank line and then `In X.Y.Z:`, so
+   the next landed bullet goes above it. Only the new version counts, not the bump word:
+   - **Same major.minor** (a patch, or for example `0.10.0` → `0.10.3`): the
+     `## What's new in X.Y` heading stays, and `In X.Y.Z:` with the bullets goes above the older
+     `In x.y.z:` lists, which do not change.
+   - **New major.minor** (a minor, a major, or for example `0.10.0` → `0.11.2`): a new
+     `## What's new in X.Y` heading takes the old heading's place, with the anchor and
+     `In X.Y.Z:` under it. The old heading moves down, above its own `In x.y.z:` lists. When the
+     old section has no `In x.y.z:` lists (the next-release list ends at a `## ` heading or the
+     end of the file), the old heading is dropped, so no empty `## What's new` section is left.
+4. **Checks.** `node scripts/gen-config-doc.mjs --check` first (a stale
+   `docs/reference/config.md` or a missing script fails), then `npm test`, `npm run typecheck`,
+   `npm pack --dry-run` (the name and version must match; the file count is printed),
+   `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the `claude` CLI
+   is installed (otherwise a warning).
+5. **Commit and tag.** One commit `Release vX.Y.Z` with only the changed files (six: the four
+   version files, `CHANGELOG.md` and `README.md`; seven with a `package-lock.json`), then the annotated
    tag `vX.Y.Z`, whose message is that version's CHANGELOG section.
 6. **Next steps.** It prints `npm publish` and then the push command (publish first; the tag push
    only creates the GitHub release), and the exact `gh release create … --verify-tag` command, with
