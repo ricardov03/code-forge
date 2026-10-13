@@ -234,7 +234,7 @@ test('gate: a valid autopilot waiver clears the cap finding; stopped-before (or 
   const decisionId = run.decide('waive:warning', W1);
   const base = run.rows.filter((r) => r.event !== 'autopilot.grant'); // review + decision rows
   const grantRow = run.rows.filter((r) => r.event === 'autopilot.grant');
-  assert.deepEqual(gate('a-gate', [...base, ...grantRow], run.key), [['review_cap', 'W1', `${FILE} stopped at review_cap; finding W1 is open and not waived`]]);
+  assert.deepEqual(gate('a-gate', [...base, ...grantRow], run.key), [['review_cap', 'W1', `${FILE} stopped at review_cap; finding W1 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose`]]);
 
   const res = await waiveForOwner({ runId: 'a-gate', ...WAIVE, decisionId }, { onPath: () => false, writeRow: run.writeRow, readRows: run.readRows, now: () => at(10) });
   assert.equal(res.ok, true);

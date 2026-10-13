@@ -28,6 +28,7 @@ test('fixList (B54): split_required ⇒ stop: split_required with tokens_in and 
   assert.deepEqual(fixList({ status: 'stopped', approved: false, stopped: 'split_required', tokens_in: 40001, budget: 32000, findings: [finding('S2.F1', 9)] }), {
     fix_list: [{ id: 'S2.F1', severity: 'warning', lines: '9-10', claim: 'claim S2.F1', fix: 'fix S2.F1' }],
     stop: 'split_required',
+    exits: ['block reopen', 'block waive', 'review-file --answers', 're-decompose'],
     tokens_in: 40001,
     budget: 32000,
   });
@@ -35,5 +36,5 @@ test('fixList (B54): split_required ⇒ stop: split_required with tokens_in and 
   // a split_required with no size still names both keys, null
   assert.deepEqual(fixList({ status: 'split_required', approved: false }), { stop: 'split_required', tokens_in: null, budget: null });
   // any other stop never carries a size
-  assert.deepEqual(fixList({ status: 'stopped', approved: false, stopped: 'review_cap', tokens_in: 9, budget: 8 }), { stop: 'review_cap' });
+  assert.deepEqual(fixList({ status: 'stopped', approved: false, stopped: 'review_cap', tokens_in: 9, budget: 8 }), { stop: 'review_cap', exits: ['block reopen', 'block waive', 'review-file --answers', 're-decompose'] });
 });

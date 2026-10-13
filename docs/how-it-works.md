@@ -562,9 +562,9 @@ flowchart TD
   trig -- "yes, at L2, rung used" --> stopx["stopped<br/>the human decides"]
   rung --> pc{"patch_check review"}
   pc -- clean --> approved
-  pc -- "open set not smaller" --> stopp["stopped: l3_patch_exhausted"]
-  pc -- "smaller, but round ≥ 4" --> stopcap
-  pc -- "smaller, round < 4" --> rn
+  pc -- "closed no old finding" --> stopp["stopped: l3_patch_exhausted"]
+  pc -- "closed one, but round ≥ 4" --> stopcap
+  pc -- "closed one, round < 4" --> rn
 ```
 
 - Round 1 reviews the whole file packet. Round 2 and later review **only the fix hunks** and the
@@ -582,12 +582,17 @@ flowchart TD
 - **L2 is the highest running level for a coder.** A coder never climbs past L2. At L2 the next
   step is the **L3 rung**: one fresh L3 session writes a patch of at most 80 lines inside the owned
   files. The rung fires **once per block**; a later trigger in that block stops instead.
-- **After the patch** comes a `patch_check` review: clean ⇒ the file is approved; the open set not
-  smaller than before the patch ⇒ `stopped: l3_patch_exhausted`; round at or over the cap ⇒
-  `stopped: review_cap`; otherwise the fixes continue at L2.
+- **After the patch** comes a `patch_check` review: clean ⇒ the file is approved; the patch
+  closed none of the findings that were open before it ⇒ `stopped: l3_patch_exhausted`; round at
+  or over the cap ⇒ `stopped: review_cap`; otherwise the fixes continue at L2. A patch that closed
+  at least one old finding is progress even when new findings in its fix hunks keep the open set
+  from shrinking (the findings are compared by id). The rung stays spent: a later stall at L2
+  stops.
 - **When a file stops**, the block cannot close. The human fixes it by hand, waives the finding
   (`code-forge block waive <id> <finding-id> --run <run> --file <path> --reason <text>`), or splits
-  the block. When a signed review round on the current bytes left findings and every finding the
+  the block. The stop names its ways out: `review-file`'s `stopped` answer carries
+  `exits: ["block reopen", "block waive", "review-file --answers", "re-decompose"]`, and the
+  close's `review_cap` and `unreviewed` details for a stopped file end with the same list. When a signed review round on the current bytes left findings and every finding the
   review left open is waived, the file counts as reviewed (`reviewed_by_waiver`, never approved)
   and the block can close — see the next table.
 - **Reopening a stopped or lost file.** A human may restart the review of a stopped file (any stop

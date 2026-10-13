@@ -15,6 +15,8 @@ waits on a second real consumer (plan §10.4, Q17).
   content (or a lost one on its current content) with a full round 1; signed review.reopened row, one per anchor seq;
   refusal codes reopen-same-content, reopen-tampered, reopen-not-stopped, reopen-block-not-open, reopen-not-owned,
   reopen-config, reopen-already-recorded, reopen-write-failed.
+- A stopped `review-file` answer carries `exits`, and the gate's `review_cap` and stopped-file `unreviewed` detail end
+  with the same exits (B73, issue #12).
 
 ### Changed
 
@@ -23,6 +25,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - Review state: the reviewed text is stored as a git blob (reviewed_content_blob in the signed review.state body), so a
   restored state keeps reviewed_content after the file changed; a missing, malformed or mismatching blob falls back to
   the full-file review.
+- A `patch_check` that closes at least one finding open before the patch (by id) and is under
+  `review.max_rounds_per_file` continues the fix loop at L2; a patch that closes nothing still stops
+  `l3_patch_exhausted` (B73, issue #12).
 
 ### Fixed
 

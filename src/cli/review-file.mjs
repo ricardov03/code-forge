@@ -13,7 +13,8 @@
  * not the old result.
  * A done result that is not approved and carries open findings adds `fix_list` (what the coder
  * fixes before re-running `review-file <path>`, which is then a round-2 recheck of the fix hunks,
- * §4.11); a result the loop stopped adds `stop` with the reason (`review_cap`, …) — the coder
+ * §4.11); a result the loop stopped adds `stop` with the reason (`review_cap`, …) and (B73)
+ * `exits: ["block reopen", "block waive", "review-file --answers", "re-decompose"]` — the coder
  * stops and reports; only the orchestrator and the human act on it. A `split_required` result
  * (the packet is over `review.budgets.full_in`) adds `stop: split_required` with `tokens_in` and
  * `budget` (always; null when unknown) and a Markdown `section` — never for another result (B54); a Markdown file gets there only when one of its sections alone is too large.
@@ -58,6 +59,7 @@ import path from 'node:path';
 import { answersTicketId, assertAnswers, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 import { namedOnHash } from '../review/gate-check.mjs';
+import { STOP_EXITS } from '../review/stop-exits.mjs';
 import { ownsFile } from '../state/registry.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
@@ -210,8 +212,11 @@ export function fixList(result) {
       fix: f?.fix ?? '',
     }));
   }
-  if (typeof result.stopped === 'string') out.stop = result.stopped;
-  else if (result.status === 'split_required') out.stop = 'split_required';
+  if (typeof result.stopped === 'string') {
+    out.stop = result.stopped;
+    // B73: a stopped file names its ways out (never a refused or tampered state: no `stopped`)
+    out.exits = [...STOP_EXITS];
+  } else if (result.status === 'split_required') out.stop = 'split_required';
   // B54: a split_required stop (only) says how large the packet was, the budget, and the section
   if (out.stop === 'split_required') {
     const fin = (/** @type {unknown} */ v) => (typeof v === 'number' && Number.isFinite(v) ? v : null);

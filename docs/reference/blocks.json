@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 81,
+  "block_count": 82,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1123,6 +1123,27 @@
         "B72"
       ],
       "note": "root-added 2026-10-12; leftovers from the B71 and B72 round-3 reviews; also amends B71 (answers packet, openAt) and B72 (reopen config, write failure)"
+    },
+    "B73": {
+      "title": "A patch check that closes findings is progress; stop answers name the exits",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/review/fixloop.mjs",
+        "src/review/stop-exits.mjs",
+        "src/cli/review-file.mjs",
+        "src/review/gate-check.mjs",
+        "test/review/patch-progress.test.mjs",
+        "test/worker/fix-list.test.mjs",
+        "test/autopilot/actions.test.mjs",
+        "docs/how-it-works.md",
+        "skill/references/review.md"
+      ],
+      "depends_on": [
+        "B79"
+      ],
+      "note": "root-added 2026-10-12; issue #12 items 9-10; also amends B71 (review-file stopped answer) and the gate review_cap/unreviewed detail"
     }
   }
 }

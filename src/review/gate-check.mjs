@@ -44,7 +44,9 @@
  *    `review.waived {by: human}` row — unless a signed approval of the file's current hash comes
  *    AFTER the cap row (ledger order) and no later refusal row made it stale (the human fixed it
  *    by hand and it was reviewed); a finding already refused as `not_approved` for that file is
- *    not repeated;
+ *    not repeated. B73: this detail, and an `unreviewed` detail for a file with a cap row, ends
+ *    with the stop's ways out (`exits: block reopen, block waive, review-file --answers,
+ *    re-decompose`, `stop-exits.mjs`);
  *  - `unproven`:   a changed owned file of tier `high` (B20, Ricardo 2026-09-25) has no covering
  *    red→green proof (`checkBlockProof`, below). Light-tier files need no proof row.
  * B71 (answers): a finding is also cleared — wherever a waiver clears it, by the one rule set
@@ -90,6 +92,7 @@ import { verifyRow } from '../state/signer.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { DELETED_HASH, contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { verifyResult } from '../worker/queue.mjs';
+import { stopExitsLine } from './stop-exits.mjs';
 
 /**
  * @typedef {{file: string, content_hash: string, status: 'reviewed_by_waiver', findings: string[], by: 'human' | 'autopilot' | null, answered?: string[]}} WaivedAll
@@ -160,7 +163,11 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
       // B70: a review whose every open finding was waived counts as reviewed — never as approved
       const all = waivedAllOf(file, content_hash);
       if (all !== null) waivedAll.push(all);
-      else refusals.push({ code: 'unreviewed', file, detail: `no review.approved row for ${file} at its current content` });
+      else {
+        // B73: a stopped file (a cap row of the block) names its ways out
+        const exits = mine.some((r) => r.event === 'review.cap' && r.file === file) ? `; ${stopExitsLine}` : '';
+        refusals.push({ code: 'unreviewed', file, detail: `no review.approved row for ${file} at its current content${exits}` });
+      }
     } else if (!signedApproval) refusals.push({ code: 'unsigned', file, detail: `the review.approved row for ${file} has no valid MAC` });
     if (signedApproval) {
       const denial = staleBy(file, content_hash);
@@ -217,7 +224,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
     for (const finding of Array.isArray(cap.open) ? cap.open : []) {
       if (notApproved.has(`${cap.file}\0${finding}`)) continue;
       const w = waiverFor(cap.file, finding, hash === undefined ? 'unknown' : recordedRefusalSeverity(cap.file, hash, finding));
-      if (!w.waived) refusals.push(orInvalid({ code: 'review_cap', file: cap.file, finding, detail: `${cap.file} stopped at review_cap; finding ${finding} is open and not waived` }, finding, w.invalid));
+      if (!w.waived) refusals.push(orInvalid({ code: 'review_cap', file: cap.file, finding, detail: `${cap.file} stopped at review_cap; finding ${finding} is open and not waived; ${stopExitsLine}` }, finding, w.invalid));
     }
   }
   for (const r of checkBlockProof({ runId, files: proofFiles, rows: mine, key, highPaths })) {

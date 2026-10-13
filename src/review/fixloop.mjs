@@ -24,11 +24,15 @@
  *     a coding level, R1) takes it, so for an L2 block the rung IS the +1 at round 2. After the
  *     patch the block continues at L2 (§3.6, Fable ruling A): `l3_rung_used = true`,
  *     `rounds_at_level = 0`, and the `patch_check` goes through `decideNext` like any recheck —
- *     clean ⇒ complete; open set not smaller than before the patch ⇒ `stopped: l3_patch_exhausted`
- *     (`trigger: review_stall`); round ≥ cap ⇒ `stopped: review_cap`; else `fix` at L2 with
- *     `l3_patch: true` in the brief. A later stall ⇒ `l3_patch_exhausted`; round 4 still open ⇒
- *     `review_cap` (the rung is spent). Either way the ledger `review.cap` row lists the open
- *     ids — the human decides (fix by hand, `block waive`, or re-decompose).
+ *     clean ⇒ complete; the patch closed NO finding that was open before it (ids compared, not
+ *     counts) ⇒ `stopped: l3_patch_exhausted` (`trigger: review_stall`); round ≥ cap ⇒
+ *     `stopped: review_cap`; else `fix` at L2 with `l3_patch: true` in the brief. B73 (issue #12):
+ *     a patch that closed ≥ 1 old id below the cap is progress, not a stall, even when new findings
+ *     in its fix hunks keep the open set from shrinking. A later stall at L2 ⇒ `l3_patch_exhausted`
+ *     (the rung is spent, never a second one); round 4 still open ⇒ `review_cap`. Either way the
+ *     ledger `review.cap` row lists the open ids — the human decides (`STOP_EXITS`,
+ *     `stop-exits.mjs`): `block reopen` after a fix, `block waive` per open finding,
+ *     `review-file --answers` for a fix in another owned file, or re-decompose.
  *  6. Ledger per round: `review.round {file, round, level, kind, open_before, closed,
  *     new_in_hunks, late, open_after, tokens_in, tokens_out}`; a converged file gets
  *     `review.approved {file, content_hash, round}` (the worker signs every row it writes).
@@ -497,17 +501,20 @@ async function recheckSession(packet, deps) {
 /**
  * After a counted round with open findings: cap first (rule 6), else stall / ladder (2b, 2).
  * @param {FileState} state @param {number} openBefore @param {ReturnType<typeof settings>} s
- * @param {'full' | 'recheck' | 'patch_check'} kind - a `patch_check` compares against the open
- *   set before the patch (the rung's own shrink test), whatever the round number.
+ * @param {'full' | 'recheck' | 'patch_check'} kind - a `patch_check` is judged by `closedIds`
+ *   (B73), whatever the round number.
+ * @param {number} closedIds - how many ids open before the round are not open after it.
  * @returns {NextStep}
  */
-function decideNext(state, openBefore, s, kind) {
+function decideNext(state, openBefore, s, kind, closedIds) {
   if (state.open.length === 0) return { action: 'complete' };
   if (kind === 'patch_check') {
-    // the block's one rung is spent: a patch that did not shrink the set stops FIRST — even when
-    // the rung was taken at the cap — then the cap; else the block continues at L2 below
-    if (reviewRoundStalled(openBefore, state.open.length)) return { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' };
+    // the block's one rung is spent: a patch that closed no old finding stops FIRST — even when
+    // the rung was taken at the cap — then the cap; else (B73: ≥ 1 old id closed is progress,
+    // whatever new findings its fix hunks brought) the block continues at L2: a fix, no stall
+    if (closedIds === 0) return { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' };
     if (state.round >= s.maxRounds) return { action: 'stop', reason: 'review_cap', trigger: 'review_cap' };
+    return { action: 'fix', level: state.level, trigger: null };
   }
   if (state.round >= s.maxRounds) {
     const esc = escalationAfterAttempt({ currentLevel: state.level, roundsAtFile: state.round, maxRoundsPerFile: s.maxRounds, openFixNowFinding: true, l3RungAlreadyUsed: state.l3_rung_used });
@@ -515,7 +522,7 @@ function decideNext(state, openBefore, s, kind) {
   }
   const esc = escalationAfterAttempt({
     currentLevel: state.level,
-    reviewStall: (kind === 'patch_check' || state.round >= 2) && reviewRoundStalled(openBefore, state.open.length),
+    reviewStall: state.round >= 2 && reviewRoundStalled(openBefore, state.open.length),
     openFixNowFinding: true,
     reviewRoundsAtLevel: state.rounds_at_level,
     reviewRoundsPerLevel: s.perLevel,
@@ -740,9 +747,12 @@ export async function runRound(state, deps, opts = {}) {
     draft.status = 'complete';
     draft.next = { action: 'complete' };
   } else {
-    // after a patch_check the block continues at L2 (§3.6): the rung is spent, so a stall now
-    // stops (`l3_patch_exhausted`) and the cap stops (`review_cap`); a shrunk set is fixed at L2
-    draft.next = decideNext(draft, openBefore, s, kind);
+    // after a patch_check the block continues at L2 (§3.6): the rung is spent, so a patch that
+    // closed no old id stops (`l3_patch_exhausted`) and the cap stops (`review_cap`); a patch that
+    // closed one is fixed at L2 (B73). Closed = an id open before the round, not open after it.
+    const after = new Set(draft.open.map((f) => f.id));
+    const closedIds = new Set(state.open.map((f) => f.id).filter((id) => !after.has(id))).size;
+    draft.next = decideNext(draft, openBefore, s, kind, closedIds);
     if (draft.next.action === 'stop') draft.status = 'stopped';
   }
   const rows = [...lateRows, roundRow];
