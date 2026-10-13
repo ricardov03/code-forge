@@ -486,3 +486,94 @@ test('B67 (1)(2): SKILL.md names --mode brief and when to use each mode; code.md
     assert.equal(code.includes(needle), true, needle);
   }
 });
+
+// ── B76: the review exits in the skill and the docs ─────────────────────────
+
+/** @param {string} text @param {string} needle @returns {number} how many times `needle` occurs */
+const occurrences = (text, needle) => text.split(needle).length - 1;
+
+/**
+ * Each needle occurs exactly once in `text`, and they occur in the given order.
+ * @param {string} text @param {string[]} needles
+ */
+function assertOnceInOrder(text, needles) {
+  assert.deepEqual(needles.map((n) => occurrences(text, n)), needles.map(() => 1), 'each needle exactly once');
+  const at = needles.map((n) => text.indexOf(n));
+  assert.deepEqual([...at].sort((a, b) => a - b), at, `in order: ${at.join(',')}`);
+}
+
+test('B76 (1): review.md §5 names the 4 exits in order, the gate.review_waived_all close and the rebuild from the ledger', async () => {
+  const review = await readSkillFile('references/review.md');
+  assert.equal(occurrences(review, '\n## §5 The convergence rule — bounded fix rounds (R15)\n'), 1);
+  const s5 = section(review, 5);
+  assertOnceInOrder(s5, [
+    '**The ways out of a stop, in this order** (take the first that fits):',
+    '\n   - **Exit 1 — fix, then `block reopen` (B72).**',
+    '\n   - **Exit 2 — `review-file --answers` (B71).**',
+    '\n   - **Exit 3 — `block waive`.**',
+    '\n   - **Exit 4 — re-decompose.**',
+    '\n   - **A fully waived or answered file closes with a `gate.review_waived_all` row.**',
+    '\n   - **Not exits.** `block attempt` never resets review state:',
+    '\n8. **A state file that goes missing is rebuilt from the ledger.**',
+  ]);
+  assert.equal(occurrences(s5, '**Exit '), 4);
+  assert.equal(occurrences(s5, 'The close writes one signed `gate.review_waived_all {block, file, content_hash, findings, by}` row per such file just before `block.close`'), 1);
+  assert.equal(occurrences(s5, 'A missing file whose anchor has no `state_body` (an older run, or `state_omitted`) is `lost`.'), 1);
+});
+
+test('B76 (2): code.md §5 orders the exits, runs block reopen only after the human says so, and says when to use --answers and --fresh; the brief names no human-only verb', async () => {
+  const code = await readSkillFile('references/code.md');
+  assert.equal(occurrences(code, '\n## §3 Dispatch — what the brief contains\n'), 1);
+  assert.equal(occurrences(code, '\n## §5 The block gate is a re-measurement — `forge block close <id> --run <r>`\n'), 1);
+  const s5 = section(code, 5);
+  assertOnceInOrder(s5, [
+    '**When a file stops** (`review_cap`, `l3_patch_exhausted`, `split_required`, …), the block cannot close.',
+    '\n1. **Fix, then `block reopen`.**',
+    'Then run `forge block reopen <id> --file <path> --run <r> --reason <text>` only after the human says so in chat, with their reason, exactly like `block waive`.',
+    '\n2. **`review-file --answers`.** Use it when the fix belongs in another owned file (a missing test, say).',
+    '\n3. **`block waive`.**',
+    '\n4. **Re-decompose.**',
+    '\n`block attempt` never resets review state: it only raises the attempt counter, and a stopped file stays stopped.',
+    'Use `review-file --fresh` only after a result that never counted (`stale`, `unavailable`, or `refused` with `other-run`, `context-unreadable` or `worktree-*`); it never re-runs a counted round.',
+    'A missing state file needs no exit: the worker first rebuilds it from its ledger anchor (`review.state_restored`).',
+    'Only a state whose anchor has no `state_body` is `lost` (`review-state-lost`); that one needs the human\'s `block reopen`, on its current content.',
+    'A `review-state-tampered` file has none of these exits: only the owner\'s `block close --no-require-reviews` gets past it.',
+  ]);
+  assert.equal(occurrences(s5, 'the next round is a full round 1 when the content differs from what the stop reviewed; on the stop\'s own content the stop repeats.'), 1);
+  // the coder brief (§3 items 1–6) never names a human-only verb; the rule itself stays
+  const s3 = section(code, 3);
+  const from = s3.indexOf('The brief file carries, in this order:');
+  const to = s3.indexOf('The brief never mentions');
+  assert.notEqual(from, -1, 'brief items start found');
+  assert.notEqual(to, -1, 'brief items end found');
+  const items = s3.slice(from, to);
+  assert.equal(items.length > 1000, true, `brief items found (${items.length} chars)`);
+  assert.deepEqual(['block reopen', 'block waive', '--no-require-reviews'].map((v) => occurrences(items, v)), [0, 0, 0]);
+  assert.equal(occurrences(items, '`forge review-file <that file> --block <id> --run <r> --answers <ids> --of <source>`'), 1);
+  assert.equal(occurrences(code, 'The brief never mentions `block waive`, `block reopen`, keys, or `~/.code-forge/runs/`.'), 1);
+});
+
+test('B76 (3): how-it-works.md says where review state lives and that the ledger anchors carry it', async () => {
+  const doc = await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8');
+  assert.equal(occurrences(doc, '\n## Where state lives\n'), 1);
+  const start = doc.indexOf('\n## Where state lives\n');
+  assert.notEqual(start, -1, 'Where state lives found');
+  const next = doc.indexOf('\n## ', start + 1);
+  const where = doc.slice(start, next === -1 ? undefined : next);
+  const rows = where.split('\n').filter((l) => l.startsWith('| `<code-forge home>/runs/<run>/review-state/<block>/` (default `~/.code-forge`) |'));
+  assert.equal(rows.length, 1);
+  assert.equal(occurrences(rows[0], 'Every save also writes a signed `review.state` anchor row to the ledger, and the anchor carries the state (`state_body`).'), 1);
+  assert.equal(occurrences(rows[0], 'A missing one is rebuilt from that anchor (a signed `review.state_restored` row)'), 1);
+  assert.equal(occurrences(rows[0], 'Outside the temp root, so a temp sweep does not lose it.'), 1);
+  assert.equal(occurrences(doc, 'only your `--no-require-reviews`'), 0);
+  assert.equal(occurrences(doc, 'not a stop and has none of these exits: only the owner\'s `block close --no-require-reviews` gets past it.'), 1);
+});
+
+test('B76 (4): the forbidden list names block reopen from a coder, and the brief template names --answers but no human-only verb', async () => {
+  const security = await readSkillFile('references/security.md');
+  assert.equal(occurrences(security, '`forge worker`, `run start`, `run reload`, `block waive` and `block reopen` from a coder (also via `npx`)'), 1);
+  const brief = await readSkillFile('templates/coder-brief.md');
+  assert.equal(occurrences(brief, '`forge review-file <that file> --block <id> --run <r> --answers <ids> --of <source>`'), 1);
+  assert.equal(occurrences(brief, 'A fix made in another owned file is sent with `--answers <ids> --of <source>` (The file loop).'), 1);
+  assert.deepEqual(['block reopen', 'block waive', '--no-require-reviews'].map((v) => occurrences(brief, v)), [0, 0, 0]);
+});

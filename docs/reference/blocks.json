@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 86,
+  "block_count": 87,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1206,6 +1206,24 @@
         "B75"
       ],
       "note": "root-added 2026-10-12; the 'new worker re-reads 3 queued tickets' test checked a killed pid once and failed under load (zombie window); it now waits for ESRCH with a 5 s deadline"
+    },
+    "B76": {
+      "title": "the skill and docs name the review exits in order",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "skill/references/review.md",
+        "skill/references/code.md",
+        "skill/references/security.md",
+        "skill/templates/coder-brief.md",
+        "docs/how-it-works.md",
+        "test/skill/structure.test.mjs"
+      ],
+      "depends_on": [
+        "B75"
+      ],
+      "note": "root-added 2026-10-12; group A docs; exits in order (fix + block reopen, --answers, block waive, re-decompose), block attempt never resets review state, a lost state is rebuilt from the ledger, when --fresh helps"
     }
   }
 }

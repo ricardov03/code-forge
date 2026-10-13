@@ -33,6 +33,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - A `patch_check` that closes at least one finding open before the patch (by id) and is under
   `review.max_rounds_per_file` continues the fix loop at L2; a patch that closes nothing still stops
   `l3_patch_exhausted` (B73, issue #12).
+- The skill and docs name the review exits in order, say where review state lives and how the ledger rebuilds it; the
+  coder brief names `review-file --answers`, and the security reference lists `block reopen` as forbidden to a coder
+  (B76).
 
 ### Fixed
 

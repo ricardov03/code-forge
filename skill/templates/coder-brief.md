@@ -15,7 +15,7 @@
 
 ## The file loop
 
-After you finish each file in `owned_files` (tests written and green) run `forge review-file <path> --block <id> --run <r>`; before the next file run `forge review-file --wait <ticket> [--max 90s]` and act on the packet. A `worker_down` answer ⇒ print `===BLOCK <id> FAILED: worker down===` (never approval).
+After you finish each file in `owned_files` (tests written and green) run `forge review-file <path> --block <id> --run <r>`; before the next file run `forge review-file --wait <ticket> [--max 90s]` and act on the packet. A finding whose fix belongs in another owned file (a missing test, say) is fixed there and sent with `forge review-file <that file> --block <id> --run <r> --answers <ids> --of <source>`. A `worker_down` answer ⇒ print `===BLOCK <id> FAILED: worker down===` (never approval).
 
 ## Final report — FAILED unless it lists the ticket ids
 
@@ -42,7 +42,7 @@ Or `===BLOCK <id> FAILED: <reason>===`.
 
 ## Fix-round brief (round ≥ 2, or a respawn after a climb)
 
-The open findings by id, the fix history, the files they sit in. Fix only those hunks, then run `forge review-file <path> --block <id> --run <r>` and `--wait` on **every file the round changed** — a fix the reviewer never saw is not a fix. The final report follows the same rule: one `reviewed <path> ticket <ticket-id>` line per file changed in the round, or the round counts as FAILED. Re-run the block's test command after the fixes and print a fresh `TESTS <command> exit=<n>` line just before the round's sentinel: a TESTS line from an earlier report does not count.
+The open findings by id, the fix history, the files they sit in. Fix only those hunks, then run `forge review-file <path> --block <id> --run <r>` and `--wait` on **every file the round changed** — a fix the reviewer never saw is not a fix. A fix made in another owned file is sent with `--answers <ids> --of <source>` (The file loop). The final report follows the same rule: one `reviewed <path> ticket <ticket-id>` line per file changed in the round, or the round counts as FAILED. Re-run the block's test command after the fixes and print a fresh `TESTS <command> exit=<n>` line just before the round's sentinel: a TESTS line from an earlier report does not count.
 
 ## Context pack
 

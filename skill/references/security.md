@@ -6,7 +6,7 @@
 
 ## §2 The forbidden list — one list, rendered per CLI at spawn, grepped from every transcript
 
-`gh pr ready|merge|close` and base retargets · `git push --force*` · `git reset --hard` · `git checkout --` · `git restore` · `git clean` · `git stash` · `git branch -D` · `git rm` · `rm -rf` outside `.code-forge/` · any argv containing a `production.markers` token or a `production.names` name · any read or write of `~/.code-forge/runs/` · `forge worker`, `run start`, `run reload` and `block waive` from a coder (also via `npx`) · `--remove-worktree` from a coder (B62a) · any write under `.code-forge/reviews/` or `.code-forge/queue/*.done`.
+`gh pr ready|merge|close` and base retargets · `git push --force*` · `git reset --hard` · `git checkout --` · `git restore` · `git clean` · `git stash` · `git branch -D` · `git rm` · `rm -rf` outside `.code-forge/` · any argv containing a `production.markers` token or a `production.names` name · any read or write of `~/.code-forge/runs/` · `forge worker`, `run start`, `run reload`, `block waive` and `block reopen` from a coder (also via `npx`) · `--remove-worktree` from a coder (B62a) · any write under `.code-forge/reviews/` or `.code-forge/queue/*.done`.
 
 Rendered into every coder spawn as the CLI's own deny rules (path rules widen a directory to `<dir>/**`; a read-write path denies read, edit and write); carried verbatim in the brief; refused by the package's own process spawner; and at block close the transcript (captured stdout, the harness log, or the Solo output) is grepped for the forbidden verbs **and paths** — a hit is a `rule_break` row that fails the gate. Where a CLI cannot load a rules file, `doctor` says so and the transcript grep remains the detector.
 
