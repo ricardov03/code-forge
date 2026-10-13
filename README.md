@@ -14,6 +14,7 @@ In the next release:
 
 - **Choose how long a 1Password key stays cached (B84).** Set `keys.cache_hours` (1 to 24, default 8) in `.code-forge.yml`, or `keys set <name> --op <ref> --cache-hours <n>` for one key. A lower value shortens keys that are already cached at the next read.
 - **Warnings before a cached key runs out (B85).** `keys list` and `doctor` warn when a 1Password key has less than 1 hour left. When the cached key expired and 1Password does not answer, `jev ask` prints the exact command to re-link it: `code-forge keys set jev --op <ref>`.
+- **A test report reader for red-green proof (B86).** code-forge can now read a JUnit XML test report (XCTest, Swift Testing, PHPUnit, Pest, pytest). A missing, broken or empty report, or an error that is not a failed assertion, never counts as red. B87 connects it to `proof red-green`.
 
 In 0.9.0:
 

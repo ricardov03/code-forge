@@ -577,3 +577,27 @@ test('B76 (4): the forbidden list names block reopen from a coder, and the brief
   assert.equal(occurrences(brief, 'A fix made in another owned file is sent with `--answers <ids> --of <source>` (The file loop).'), 1);
   assert.deepEqual(['block reopen', 'block waive', '--no-require-reviews'].map((v) => occurrences(brief, v)), [0, 0, 0]);
 });
+
+// ── B86: how a JUnit report is read ──────────────────────────────────────────
+
+test('B86 (9): proof.md §2 says how a test report is read and gives the 8-row fail-closed table', async () => {
+  const proof = await readSkillFile('references/proof.md');
+  const s2 = section(proof, 2);
+  assert.equal(occurrences(s2, '**How a test report is read (B86).**'), 1);
+  assert.equal(occurrences(s2, 'The reader fails closed: a report that is missing, empty, over 8 MiB, not UTF-8 or malformed, that has a `<!DOCTYPE` or `<!ENTITY` (no entity is ever expanded), or that has an element other than `testsuites`, `testsuite`, `testcase`, `failure`, `error`, `skipped`, `system-out`, `system-err`, `properties`, `property` is unreadable.'), 1);
+  assert.equal(occurrences(s2, 'This table applies only to a runner that writes a report; a `node:test` file is still classified from its console text, as above.'), 1);
+  const rows = tableRows(s2, '`red_kind`');
+  assert.deepEqual(rows.map((r) => [r[0], r[1], r[2]]), [
+    ['exit 0, no signal', '`NOT_RED`', '`none`'],
+    ['a timeout or a signal', '`RED_INVALID`', '`fatal`'],
+    ['the console text shows an import, compile or fatal error', '`RED_INVALID`', '`import` / `compile` / `fatal`'],
+    ['no report, or a report is unreadable', '`RED_INVALID`', '`error` (no readable test report)'],
+    ['no test ran (zero tests, or only skipped ones)', '`RED_INVALID`', '`error` (the filter ran no test)'],
+    ['any test errored, or failed without an assertion', '`RED_INVALID`', '`error`'],
+    ['at least one test failed on an assertion', '`RED`', '`assertion`'],
+    ['the run failed, but the report has no failure', '`RED_INVALID`', '`error`'],
+  ]);
+  assert.equal(occurrences(s2, 'Such a bare failure (no `type`, message exactly `failed`, empty body) counts as an assertion only when the console text has XCTest\'s assertion line for that same test'), 1);
+  assert.equal(occurrences(s2, '`failed_tests` lists at most 20 test ids of at most 200 characters each, never a failure message.'), 1);
+  assert.equal(occurrences(s2, 'every test that failed at RED present and passed; anything else is `NOT_GREEN`.'), 1);
+});

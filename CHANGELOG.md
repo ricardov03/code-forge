@@ -14,6 +14,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - `keys list` and `doctor` warn when a cached 1Password key has less than 1 hour left, and `jev ask` prints a re-link
   command (`code-forge keys set jev --op <ref>`, the ref shell-quoted when needed) when the cached key expired and
   1Password did not answer; the key index keeps the `op://` reference (B85, #14).
+- `src/proof/junit.mjs`: a fail-closed JUnit XML reader and RED/GREEN classifier for `proof red-green` (no DTD or
+  entities, 8 MiB cap, only failed assertions count as RED; a SwiftPM bare failure needs a matching XCTest console
+  line); used by `proof.runners` from B87 (B86, #7).
 
 ## [0.9.0] — 2026-10-12
 

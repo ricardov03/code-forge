@@ -1,0 +1,10 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- hand-written (B86) to the documented Swift Testing xunit format (the `-swift-testing.xml` sibling of `--xunit-output`); B88 replaces it with a captured report -->
+<testsuites>
+  <testsuite name="TestResults" errors="0" failures="1" tests="2" time="0.003">
+    <testcase classname="KitTests.ClampSuite" name="clampsLow()" time="0.001" />
+    <testcase classname="KitTests.ClampSuite" name="clampsHigh()" time="0.001">
+      <failure message="Expectation failed: (clamp(12, 0, 10) → 12) == 10" />
+    </testcase>
+  </testsuite>
+</testsuites>

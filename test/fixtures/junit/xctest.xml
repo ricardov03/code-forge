@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- hand-written (B86) to SwiftPM's `swift test --xunit-output` format for XCTest: every failed test is `<failure message="failed"></failure>`, with no cause; B88 replaces it with a captured report -->
+<testsuites>
+  <testsuite name="TestResults" errors="0" failures="1" tests="2" time="0.004">
+    <testcase classname="KitTests.ClampTests" name="testClampsLow" time="0.001">
+    </testcase>
+    <testcase classname="KitTests.ClampTests" name="testClampsHigh" time="0.002">
+      <failure message="failed"></failure>
+    </testcase>
+  </testsuite>
+</testsuites>
