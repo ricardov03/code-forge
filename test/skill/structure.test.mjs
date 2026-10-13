@@ -818,3 +818,82 @@ test('B90 (10): the four routing texts (review.md §3, how-it-works, review-only
     for (const old of ["uses the rule's model", "runs on the rule's model", "rule's model and timeout"]) assert.equal(occurrences(p, old), 0, `${name}: ${old}`);
   }
 });
+
+// ── B91: a timeout is a broken result ────────────────────────────────────────
+
+/** @param {string} text @returns {string} the text with every whitespace run one space, lower case (for absence checks). */
+const flat = (text) => text.replace(/\s+/g, ' ').toLowerCase();
+
+/**
+ * Old claims B91 removed: none may remain anywhere in `text` (whole file, any case, any wrapping).
+ * @param {string} name @param {string} text @param {string[]} gone
+ */
+function assertGone(name, text, gone) {
+  for (const old of gone) assert.equal(occurrences(flat(text), flat(old)), 0, `${name}: ${old}`);
+}
+
+/** The claims a timeout is never a broken result, or that only schema misses count. */
+const B91_GONE = [
+  'only a second timeout is `unavailable: timeout`',
+  'only a second timeout makes the file `unavailable: timeout`',
+  'second** `schema` miss',
+  'Without a second level only the diagnosis row is new',
+  'Without a second level, nothing else changes',
+  "A second timeout is the packet's second broken result: with a second level, that level is tried",
+  'that level is tried in the same ticket; without one the file is `unavailable: timeout`',
+];
+
+test('B91 (6): review.md §1 says a timeout counts as a broken result and when it is tried; §4 says the count, the trigger and the same-ticket try', async () => {
+  const review = await readSkillFile('references/review.md');
+  const s1 = flat(section(review, 1));
+  for (const pin of [
+    'A broken result is a `schema` miss or a timed-out attempt (B91): a timeout counts as a broken result, like a schema miss.',
+    'Misses and timeouts of the same packet, level and role are counted together, so one miss plus one timeout is two.',
+    "A packet's second broken result is tried once on the ticket's second level, in the same ticket, only when a second level exists (`review.second_levels.<level>`, or for a routed ticket the rule's `second`) and never in consensus mode (§4).",
+  ])
+    assert.equal(occurrences(s1, flat(pin)), 1, pin);
+  const s4 = flat(section(review, 4));
+  for (const pin of [
+    "At a packet's **second** broken result (same run, file, content hash, packet text, level and role — counted from the signed `review.schema_invalid` rows and the signed `review.session_timeout` notes of the level's own models, plus the result in hand; misses and timeouts count together, so one miss plus one timeout is a second broken result)",
+    "the worker tries the packet ONCE on the ticket's second level when there is one — `review.second_levels.<level>`, or for a routed ticket the rule's `second` (B90; an L2 rule's `second` never applies in consensus mode)",
+    '`review.schema_fallback {lens, role, level, packet_hash, from_provider, from_model, to, to_provider, to_model, attempts, trigger, refused?}`',
+    '`trigger` is `schema` or `timeout`, the kind of the second broken result; a row without it (written before B91) is a `schema` one.',
+    'Never in consensus mode; `budget.usd` refuses it like any session.',
+    'Without a second level nothing is tried and no `review.schema_fallback` row is written: a `schema` miss adds only its diagnosis row, and a timeout runs as before B91, its note now carrying `packet_hash` and signed.',
+    "A second timeout is the packet's second broken result: with a second level it is tried there in the same ticket (`trigger: timeout`), without one it is `unavailable: timeout`.",
+    'With a second level, a timeout after a `schema` miss on the same packet goes there at once, with no same-model retry; without one, that timeout is retried once on the same model, then the file is `unavailable: timeout`.',
+    "The second level's own misses and timeouts (`second_level: true`) never count.",
+    'Notes without `packet_hash` (written before B91), unsigned notes and `second_level: true` notes are read but never count.',
+    "a signed `review.session_timeout` ledger note with the packet's `packet_hash`",
+  ])
+    assert.equal(occurrences(s4, flat(pin)), 1, pin);
+  assertGone('review.md', review, B91_GONE);
+});
+
+test('B91 (7): how-it-works and review-only say a timeout is a broken result that reaches the ticket\'s second level', async () => {
+  const howItWorks = await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8');
+  for (const pin of [
+    'A schema miss and a timed-out attempt are both broken results, counted together per packet, level and role: one miss plus one timeout is two.',
+    "The ticket's second level is `review.second_levels.<level>`, or for a routed ticket the rule's `second` (an L2 rule's `second` does not apply in consensus mode).",
+    '`review.schema_fallback` row (`trigger: schema` or `trigger: timeout`).',
+    'Without a second level nothing is tried and no `review.schema_fallback` row is written.',
+    'The try is refused when `budget.usd` is reached, never runs in consensus mode,',
+    "The trigger is the packet's second broken result, whichever kind it is (a second timeout, or a timeout after a schema miss): with a second level, that level is tried in the same ticket, at once.",
+    'Without a second level, a timed-out session is started once more on the same model, and when that one times out too the file is `unavailable: timeout`.',
+    "Each timeout leaves a signed ledger note with a cleaned tail of its stderr, to explain the hang, and the packet's hash.",
+    "Notes without that hash (written before this rule), unsigned notes and the second level's own notes are never counted.",
+  ])
+    assert.equal(occurrences(flat(howItWorks), flat(pin)), 1, pin);
+  assertGone('how-it-works.md', howItWorks, B91_GONE);
+  const reviewOnly = await readFile(path.join(ROOT, 'docs', 'review-only.md'), 'utf8');
+  for (const pin of [
+    'A timeout counts as a broken result, like an answer that fails the schema; the two are counted together for the same packet, level and role, so one of each is enough.',
+    "At the second broken result, the file's second level is tried once in the same run: `review.second_levels.<level>`, or for a routed file the rule's `second` (an L2 rule's `second` does not apply in consensus mode, and consensus mode never tries).",
+    'Without a second level, a second timeout makes the file `unavailable: timeout`, as does a timeout after a schema miss once its same-model retry times out too.',
+    "Old timeout notes without the packet's hash, unsigned notes and the second level's own notes are read but never count.",
+    '`budget.usd` refuses the second-level try like any session.',
+    '`budget.usd` in `.code-forge.yml` caps it',
+  ])
+    assert.equal(occurrences(flat(reviewOnly), flat(pin)), 1, pin);
+  assertGone('review-only.md', reviewOnly, B91_GONE);
+});

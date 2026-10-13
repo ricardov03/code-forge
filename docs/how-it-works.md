@@ -486,17 +486,27 @@ reviewed normally.
 
 An answer that does not match the finding schema is `unavailable: schema`. The ledger keeps a
 structural diagnosis of that answer (`review.schema_invalid`: its keys, their types and the schema
-errors, or where it stopped being JSON), never its text, so the miss can be explained. Asking for a file again after `unavailable` re-runs the same packet;
-if that answer misses the schema too and you set `review.second_levels` for the level, the worker
-tries the same packet **once** on that second model and writes a `review.schema_fallback` row. Its
-answer goes through the same checks, and its approval is a normal one. If it fails too, the file
-stays unavailable. That packet never gets another second-level try. Without a second level,
-nothing else changes. The try is refused when `budget.usd` is reached, never runs in consensus
-mode, and is refused for Codex unless `review.allow_open_book_codex` is on.
+errors, or where it stopped being JSON), never its text, so the miss can be explained. A schema
+miss and a timed-out attempt are both broken results, counted together per packet, level and role:
+one miss plus one timeout is two. Asking for a file again after `unavailable` re-runs the same
+packet. At that packet's second broken result, if the ticket has a second level, the worker tries
+the same packet **once** on it and writes a `review.schema_fallback` row (`trigger: schema` or
+`trigger: timeout`). The ticket's second level is `review.second_levels.<level>`, or for a routed
+ticket the rule's `second` (an L2 rule's `second` does not apply in consensus mode). Its answer
+goes through the same checks, and its approval is a normal one. If it fails too, the file stays
+unavailable. That packet never gets another second-level try. Without a second level nothing is
+tried and no `review.schema_fallback` row is written. The try is refused when `budget.usd` is
+reached, never runs in consensus mode, and is refused for Codex unless
+`review.allow_open_book_codex` is on.
 
-A session that runs past `review.session_timeout_s` (default 300 seconds) is killed and started once
-more on the same packet. Only a second timeout is `unavailable: timeout`. The ledger keeps a cleaned
-tail of its stderr to explain the hang. While a long session runs, the worker keeps writing a
+A session that runs past `review.session_timeout_s` (default 300 seconds) is killed. The trigger
+is the packet's second broken result, whichever kind it is (a second timeout, or a timeout after a
+schema miss): with a second level, that level is tried in the same ticket, at once. Without a
+second level, a timed-out session is started once more on the same model, and when that one
+times out too the file is `unavailable: timeout`. Each timeout
+leaves a signed ledger note with a cleaned tail of its stderr, to explain the hang, and the
+packet's hash. Notes without that hash (written before this rule), unsigned notes and the second
+level's own notes are never counted. While a long session runs, the worker keeps writing a
 heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
 
 A big file can go to another model with a longer timeout, without editing `.code-forge.yml` for

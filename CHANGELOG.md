@@ -34,6 +34,13 @@ waits on a second real consumer (plan §10.4, Q17).
   the rule's model, with its own session timeout and second level; one signed `review.route` row per routed level;
   config rule 18 `review-routes-invalid` (B90, #10).
 
+### Changed
+
+- A timed-out review session is a broken result like a schema miss: at a packet's second broken result the second level
+  (`review.second_levels.<level>`, or a routed rule's `second`) is tried once in the same ticket;
+  `review.session_timeout` notes carry `packet_hash` and are signed, and `review.schema_fallback` gains `trigger:
+  schema|timeout` (B91, #10).
+
 ### Fixed
 
 - The JUnit reader accepts the real SwiftPM 6.3 bare XCTest failure (`message="failure"`), not only `failed`; captured

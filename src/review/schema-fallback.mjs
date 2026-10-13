@@ -1,5 +1,6 @@
 /**
- * The second-level retry after repeated `schema` misses on ONE packet (block B55, issue #2).
+ * The second-level retry after two broken results on ONE packet (block B55, issue #2): `schema`
+ * misses and, since B91, timed-out attempts, in any mix.
  *
  * Field data: one L2 reviewer model answered `unavailable: schema` four times in a row on the same
  * packet (round 1, its retry, a patch_check recheck, a fresh review), while the model configured in
@@ -13,8 +14,7 @@
  * `history`, which only counts rows whose MAC verifies) plus the miss in hand. In practice: the
  * round's first session is miss 1; the worker's existing retry of that round (`next: retry`, the
  * next ticket re-runs the SAME packet) is miss 2, and that ticket then tries the second level once.
- * A session that times out is retried first by `session-retry.mjs` and counts once, with its last
- * result; a `needs_file` round or a Markdown section is another packet text, so another count, and
+ * Each timed-out attempt counts too (B91, below); a `needs_file` round or a Markdown section is another packet text, so another count, and
  * so is a recheck whose pending set changed between tries (S1 `resolved` closed another finding,
  * so the open-findings list differs): a different packet starts its own count, by design.
  *
@@ -43,6 +43,19 @@
  * schema-side params, Ajv's message), for non-JSON the kind of parse error and its byte offset.
  * Text a model copies from the packet into a JSON string can never reach the ledger this way.
  *
+ * B91: a timed-out attempt is a broken result too. Every timed-out attempt of the level's own
+ * ladder leaves one signed `review.session_timeout` note with the packet's `packet_hash`
+ * (`session-retry.mjs`), so the count above is `review.schema_invalid` rows plus those notes
+ * (`second_level` not true) plus the miss in hand, schema and timeout in any mix. After each
+ * timed-out attempt `session-retry.mjs` asks {@link afterSchemaMiss} with `trigger: 'timeout'`:
+ * its note is already in the ledger (it IS the miss in hand, so nothing more is written or added),
+ * and at 2 the second level is tried in that same ticket instead of the same-model retry. The mark
+ * says which kind of broken result was the second one: `trigger: schema | timeout`; an old mark
+ * without `trigger` reads as `schema`. A note without `packet_hash` (written before B91), an
+ * unsigned note and a `second_level` note are read but never count. With no second level nothing
+ * is tried and no mark is written: the timeout is retried once on the same model as before, its
+ * note now carrying `packet_hash` and signed.
+ *
  * Concurrency: the worker never runs two tickets for one (block, file) at once (its file lock,
  * `worker/loop.mjs`), and round 1, its retry, every recheck and the patch_check of a file are all
  * tickets for that file, so one packet's history is read and written by one ticket at a time. The
@@ -61,7 +74,7 @@ import { logWarning } from '../util/error-log.mjs';
 import { keyedLock } from '../util/locks.mjs';
 import { schemaErrorsOf } from './validate-review.mjs';
 
-/** Schema misses of the level's own ladder on one packet before the second level is tried. */
+/** Broken results (B91: schema misses and timeouts) of the level's own ladder on one packet before the second level is tried. */
 export const SCHEMA_FAILURES_BEFORE_FALLBACK = 2;
 
 /** At most this many schema errors are kept in a diagnosis (`errors_total` has the full count). */
@@ -78,8 +91,9 @@ const KEPT_PARAMS = Object.freeze(['missingProperty', 'additionalProperty', 'typ
 /**
  * @typedef {(packetHash: string, who: {level: string, role: string}) => Promise<{failures: number, fellBack: boolean}>} SchemaHistory -
  *   the signed history of ONE packet (`packetHash`) at one level and role in this run for this
- *   file at this content hash: `failures` = `review.schema_invalid` rows of the level's own ladder
- *   (`second_level` not true), `fellBack` = a `review.schema_fallback` row exists. Built by the
+ *   file at this content hash: `failures` = `review.schema_invalid` and (B91)
+ *   `review.session_timeout` rows of the level's own ladder (`second_level` not true),
+ *   `fellBack` = a `review.schema_fallback` row exists. Built by the
  *   worker; absent ⇒ no second-level try.
  */
 
@@ -218,8 +232,24 @@ export function secondLevelFor(cfg, level, from, role) {
 }
 
 /**
- * Log a schema miss and, when it is the packet's second (see the module doc), try the second level
- * once. Never throws (see the module doc).
+ * Whether a {@link secondLevelFor} answer says no second level is configured (a `same-model` or
+ * `closed-book` refusal is a configured level that cannot run: its mark is still written).
+ * @param {ReturnType<typeof secondLevelFor>} second @returns {boolean}
+ */
+function noSecondLevel(second) {
+  return second.ok === false && second.reason === 'no-second-level';
+}
+
+/** @param {Record<string, any>} row @returns {'schema' | 'timeout'} what a mark says the second broken result was; an old mark without `trigger` is `schema`. */
+export function fallbackTrigger(row) {
+  return row?.trigger === 'timeout' ? 'timeout' : 'schema';
+}
+
+/**
+ * Log a schema miss and, when it is the packet's second broken result (see the module doc), try the
+ * second level once. B91: `trigger: 'timeout'` is a timed-out attempt whose signed note is already
+ * written (nothing more is logged, and the history already counts it). Never throws (see the
+ * module doc).
  * @param {object} p
  * @param {Record<string, any> | null} p.res - the missed session's result.
  * @param {{lens: string, role: string, level: string}} p.session
@@ -229,21 +259,41 @@ export function secondLevelFor(cfg, level, from, role) {
  * @param {SchemaHistory | undefined} p.history
  * @param {((row: Record<string, any>) => Promise<unknown>) | undefined} p.writeRow - throws on a
  *   failed write; absent ⇒ nothing is logged or tried.
- * @param {(cfg: Record<string, any>) => Promise<{res: Record<string, any> | null, attempts: number}>} p.spawnAt
- *   - the same session on the same packet with another config (timeout retry included).
+ * @param {(cfg: Record<string, any>, to: {level: string, provider: string, model: string}) => Promise<{res: Record<string, any> | null, attempts: number}>} p.spawnAt
+ *   - the same session on the same packet with another config (timeout retry included); `to`
+ *   says which second level it is (called only after the mark row was written).
+ * @param {'schema' | 'timeout'} [p.trigger] - B91: the kind of the miss in hand (default `schema`).
  * @returns {Promise<{res: Record<string, any> | null, attempts: number, to: {level: string, provider: string, model: string}} | null>}
  *   the second level's result, or null when none was spawned.
  */
-export async function afterSchemaMiss({ res, session, packetText, cfg, allowed, history, writeRow, spawnAt }) {
+export async function afterSchemaMiss({ res, session, packetText, cfg, allowed, history, writeRow, spawnAt, trigger = 'schema' }) {
   if (!writeRow) return null;
+  const timedOut = trigger === 'timeout';
+  // a timeout's note is written by the retry helper: where no try can be made there is nothing to
+  // do — no history read, no row (B91: with no second level a timeout runs exactly as before B30)
+  if (timedOut && (!allowed || !history)) return null;
   const write = writeRow;
   const hash = packetHash(packetText);
   const from = { provider: typeof res?.provider === 'string' ? res.provider : null, model: typeof res?.model === 'string' ? res.model : null };
+  if (timedOut && (from.provider === null || from.model === null)) {
+    // B91: a timed-out result may lack its model; it is the level's resolved one (what was spawned)
+    try {
+      const resolved = resolveLevel(cfg, /** @type {any} */ (session.level));
+      from.provider = from.provider ?? resolved.provider;
+      from.model = from.model ?? resolved.model;
+    } catch {
+      // an unresolvable level: the mark keeps null (the spawn itself could not have resolved it)
+    }
+  }
+  // no second level for a timeout: nothing read, nothing written. Asked with the SAME arguments as
+  // the decision below (cfg, level, from, role), so this guard can never disagree with it
+  if (timedOut && noSecondLevel(secondLevelFor(cfg, session.level, from, session.role))) return null;
   /** @type {{cfg: Record<string, any>, to: {level: string, provider: string, model: string}} | null} */
   let go = null;
   try {
     go = await keyedLock(`schema-fallback\0${hash}\0${session.level}\0${session.role}`, async () => {
-      // the history is read BEFORE this miss is logged: failures = signed earlier misses + this one
+      // the history is read BEFORE a schema miss is logged: failures = signed earlier misses + this
+      // one. A timeout's note is already in it (B91): it is the miss in hand, never added twice.
       let seen = null;
       if (allowed && history) {
         try {
@@ -253,18 +303,21 @@ export async function afterSchemaMiss({ res, session, packetText, cfg, allowed, 
           await logWarning({ warning: 'review_schema_history', message: 'the schema-miss history could not be read; no second-level try' }).catch(() => null);
         }
       }
-      try {
-        await write({ event: 'review.schema_invalid', lens: session.lens, role: session.role, level: session.level, ...from, fallback_step: res?.fallback_step ?? 0, packet_hash: hash, second_level: false, ...diagnoseAnswer(res) });
-      } catch {
-        // the log is best-effort; the count then misses this one (fewer tries, never more)
+      if (!timedOut) {
+        try {
+          await write({ event: 'review.schema_invalid', lens: session.lens, role: session.role, level: session.level, ...from, fallback_step: res?.fallback_step ?? 0, packet_hash: hash, second_level: false, ...diagnoseAnswer(res) });
+        } catch {
+          // the log is best-effort; the count then misses this one (fewer tries, never more)
+        }
       }
-      if (!seen || seen.fellBack || seen.failures + 1 < SCHEMA_FAILURES_BEFORE_FALLBACK) return null;
+      const broken = seen ? seen.failures + (timedOut ? 0 : 1) : 0;
+      if (!seen || seen.fellBack || broken < SCHEMA_FAILURES_BEFORE_FALLBACK) return null;
       const second = secondLevelFor(cfg, session.level, from, session.role);
       const to = `review.second_levels.${session.level}`;
       /** @type {string | null} */
       let refused = null;
       if (second.ok === false) {
-        if (second.reason === 'no-second-level') return null;
+        if (noSecondLevel(second)) return null;
         refused = second.reason; // `same-model` or `closed-book`: nothing of the level may run
       }
       await write({
@@ -278,7 +331,8 @@ export async function afterSchemaMiss({ res, session, packetText, cfg, allowed, 
         to,
         to_provider: second.ok ? second.provider : null,
         to_model: second.ok ? second.model : null,
-        attempts: seen.failures + 1,
+        attempts: broken,
+        trigger,
         ...(refused ? { refused } : {}),
       }); // the once-per-packet mark: a failed write throws ⇒ no try
       return !second.ok ? null : { cfg: second.cfg, to: { level: to, provider: second.provider, model: second.model } };
@@ -287,9 +341,9 @@ export async function afterSchemaMiss({ res, session, packetText, cfg, allowed, 
     return null;
   }
   if (!go) return null;
-  await logWarning({ warning: 'review_schema_fallback', message: 'a review answer failed the schema twice on one packet; the second level was tried once' }).catch(() => null);
+  await logWarning({ warning: 'review_schema_fallback', message: 'a review broke twice on one packet (schema or timeout); the second level was tried once' }).catch(() => null);
   try {
-    const out = await spawnAt(go.cfg);
+    const out = await spawnAt(go.cfg, go.to);
     return { res: out.res, attempts: out.attempts, to: go.to };
   } catch {
     // a throwing spawn is a session with no result: `exit` through the stub guard, never approval
@@ -326,6 +380,7 @@ export async function logSecondLevelMiss({ res, session, packetText, writeRow })
  * about, rows of `runId` for `file` at `contentHash` with that `packet_hash`, `level` and `role`
  * whose MAC verifies (`verify`; a row that does not verify, or whose check throws, counts for
  * nothing). A miss on another packet of the same content, or at another level, never counts.
+ * B91: a signed `review.session_timeout` note with that `packet_hash` counts like a schema miss.
  * @param {{readRows: () => Promise<Array<Record<string, any>>>, verify: (row: Record<string, any>) => boolean, runId: string, file: string, contentHash: string}} opts
  * @returns {SchemaHistory}
  */
@@ -335,7 +390,7 @@ export function ledgerSchemaHistory({ readRows, verify, runId, file, contentHash
     let failures = 0;
     let fellBack = false;
     for (const r of rows) {
-      if (r.event !== 'review.schema_invalid' && r.event !== 'review.schema_fallback') continue;
+      if (r.event !== 'review.schema_invalid' && r.event !== 'review.session_timeout' && r.event !== 'review.schema_fallback') continue;
       let ok = false;
       try {
         ok = verify(r);

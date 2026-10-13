@@ -193,8 +193,15 @@ shows the cost afterwards, and `budget.usd` in `.code-forge.yml` caps it: once t
 no new session starts and the files left are reported `unavailable: budget`.
 
 A reviewer session that hangs is killed after `review.session_timeout_s` (default 300 seconds) and
-started once more; only a second timeout makes the file `unavailable: timeout`. `--max` is the
-outer limit for the whole run.
+started once more. A timeout counts as a broken result, like an answer that fails the schema;
+the two are counted together for the same packet, level and role, so one of each is enough. At
+the second broken result, the file's second level is tried once in the same run:
+`review.second_levels.<level>`, or for a routed file the rule's `second` (an L2 rule's `second`
+does not apply in consensus mode, and consensus mode never tries). `budget.usd` refuses the
+second-level try like any session. Without a second level, a second timeout makes the file
+`unavailable: timeout`, as does a timeout after a schema miss once its same-model retry times out
+too. Old timeout notes without the packet's hash, unsigned notes and the second level's own notes
+are read but never count. `--max` is the outer limit for the whole run.
 
 For big files, `review.routes` sets another model and timeout by
 line count: a rule `{min_lines: 400, model: <id>, session_timeout_s: 900}` sends the reviewers of

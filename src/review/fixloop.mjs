@@ -97,7 +97,7 @@ import { isMarkdownFile, packSections, sectionFindings, sectionGroups, sectionOf
 import { cameFromJudge, resolvedBand, triageFindings } from './triage.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
-import { afterSchemaMiss, logSecondLevelMiss } from './schema-fallback.mjs';
+import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallback.mjs';
 
 /** @typedef {import('./triage.mjs').Finding} Finding */
 /** @typedef {import('./context.mjs').Hunk} Hunk */
@@ -431,8 +431,9 @@ export function insideHunks(f, hunks) {
 }
 
 /**
- * One recheck session through the stub guard — and, on a `schema` miss, the B55 second-level try
- * on the same packet (`schema-fallback.mjs`; rechecks and the patch_check alike).
+ * One recheck session through the stub guard — and, on a `schema` miss or (B91) a timed-out
+ * attempt that is the packet's second broken result, the B55 second-level try on the same packet
+ * (`schema-fallback.mjs`; rechecks and the patch_check alike).
  * @param {{text: string, hunkHeaders: string[], tokensIn: number, contextMode: string}} packet
  * @param {LoopDeps} deps
  */
@@ -442,14 +443,28 @@ async function recheckSession(packet, deps) {
   writeFileSync(promptPath, packet.text, { mode: 0o600 });
   const min = minTokensOut(deps.cfg);
   const session = { lens: 'recheck', role: 'reviewer', level: 'L2' };
-  /** @param {Record<string, any> | undefined} cfg */
+  // no ledger writer ⇒ nothing logged, nothing tried; every row goes through the same writer
+  // (each helper handles its own failed write)
+  const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<LoopDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
+  const hash = packetHash(packet.text);
+  /** @param {Record<string, any> | null} missed @param {'schema' | 'timeout'} trigger */
+  const tryNext = (missed, trigger) =>
+    afterSchemaMiss({ res: missed, session, packetText: packet.text, cfg: deps.cfg ?? {}, allowed: true /* rechecks are never consensus; the budget gate is inside the spawn */, history: deps.schemaHistory, writeRow: write, spawnAt: attempt, trigger });
+  /**
+   * @param {Record<string, any> | undefined} cfg - set only for the second-level try (B91: its
+   *   timeouts never count and never try again).
+   * @returns {Promise<{res: Record<string, any> | null, attempts: number, to?: Record<string, any>, broken?: Record<string, any>}>}
+   */
   const attempt = async (cfg) =>
     deps.spawn
-      ? // a `timeout` is spawned once more on the same packet and level (B30)
+      ? // a `timeout` is spawned once more on the same packet and level (B30); B91: the packet's
+        // second broken result tries the second level instead
         spawnWithTimeoutRetry(
           deps.spawn,
           { level: 'L2', role: 'reviewer', promptPath, schema: FINDING_SCHEMA, rowExtra: { lens: 'recheck', context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn }, ...(cfg ? { cfg } : {}) },
           (row) => note(deps, row),
+          undefined,
+          cfg ? { packetHash: hash, secondLevel: true } : { packetHash: hash, onBroken: (r) => tryNext(r, 'timeout') },
         )
       : { res: null, attempts: 0 };
   /** @type {Record<string, any> | null} */
@@ -462,20 +477,37 @@ async function recheckSession(packet, deps) {
   let tokensOut = null;
   // the packet file is removed on every path, and only after the second-level try (which reads it)
   try {
+    /** @type {{res: Record<string, any> | null, attempts: number, to?: Record<string, any>, broken?: Record<string, any>} | null} */
+    let first = null;
     try {
-      res = (await attempt(undefined)).res;
+      first = await attempt(undefined);
+      res = first.res;
     } catch {
       res = null; // the helper never throws; if it ever did, it is still an `exit` failure
     }
-    tokensIn = res?.usage?.tokens_in ?? null;
-    tokensOut = res?.usage?.tokens_out ?? null;
     verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
-    if (!verdict.ok && verdict.reason === 'schema') {
+    if (first?.to) {
+      // B91: a timed-out attempt was the packet's second broken result; the second level ran. The
+      // verdict is already set: whatever throws after it leaves that verdict, never an exception
+      // the second level's miss is logged first, in its own try, so no sum error can skip it
       try {
-        // no ledger writer ⇒ nothing logged, nothing tried; every row goes through the same writer
-        // (each helper handles its own failed write)
-        const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<LoopDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
-        const second = await afterSchemaMiss({ res, session, packetText: packet.text, cfg: deps.cfg ?? {}, allowed: true /* rechecks are never consensus; the budget gate is inside the spawn */, history: deps.schemaHistory, writeRow: write, spawnAt: attempt });
+        if (!verdict.ok && verdict.reason === 'schema') await logSecondLevelMiss({ res, session, packetText: packet.text, writeRow: write });
+      } catch {
+        // defensive only: the helper never throws; the verdict above stands (never approval)
+      }
+      try {
+        tokensIn = sum(first.broken?.usage?.tokens_in ?? null, res?.usage?.tokens_in);
+        tokensOut = sum(first.broken?.usage?.tokens_out ?? null, res?.usage?.tokens_out);
+      } catch {
+        // defensive only, as on the schema path below
+      }
+    } else {
+      tokensIn = res?.usage?.tokens_in ?? null;
+      tokensOut = res?.usage?.tokens_out ?? null;
+    }
+    if (!first?.to && !verdict.ok && verdict.reason === 'schema') {
+      try {
+        const second = await tryNext(res, 'schema');
         if (second) {
           // compute everything first, then assign together, so a throw never leaves a mixed state
           const secondVerdict = validateReview(second.res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });

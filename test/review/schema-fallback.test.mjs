@@ -84,6 +84,7 @@ describe('B55: the second-level try after the second schema miss on one packet',
       to_provider: 'xai',
       to_model: 'grok-4.7',
       attempts: 2,
+      trigger: 'schema',
     });
     assert.equal(spawned.length, 1);
     assert.deepEqual(spawned[0].levels.L2, { provider: 'xai', model: 'grok-4.7', fallback: [] });
@@ -196,6 +197,7 @@ describe('B55: the second-level try after the second schema miss on one packet',
       to_provider: null,
       to_model: null,
       attempts: 2,
+      trigger: 'schema',
       refused: 'same-model',
     });
   });

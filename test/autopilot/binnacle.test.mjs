@@ -441,6 +441,32 @@ test('B55: review.schema_fallback is an incident and a log entry, like review.se
   ]);
 });
 
+test('B91: a trigger: timeout mark says the review broke twice by timing out; trigger: schema and an old mark without trigger read off-schema', () => {
+  const base = { run: 'r9', event: 'review.schema_fallback', block: 'b1', file: 'src/a.swift', lens: 'quick', role: 'reviewer', level: 'L2', packet_hash: 'ab', from_provider: 'anthropic', from_model: 'model-a', to: 'review.second_levels.L2', to_provider: 'xai', to_model: 'model-b', attempts: 2 };
+  const rows = [
+    { ...base, ts: T(1) }, // before B91: no trigger
+    { ...base, trigger: 'schema', ts: T(2) },
+    { ...base, trigger: 'timeout', ts: T(3) },
+    { ...base, trigger: 'timeout', refused: 'budget', ts: T(4) },
+  ];
+  const b = buildBinnacle({ runId: 'r9', rows, record: { run_id: 'r9', status: 'active', blocks: { b1: {} } }, now: NOW, scrubCtx: SC });
+  const schema = 'A quick answer failed the schema twice on the same packet (model-a)';
+  const timeout = 'A quick session broke twice on the same packet, the second time by timing out (model-a)';
+  const retried = { effect: 'It was retried once on the second level (model-b).', fix: "Check the file's next review result." };
+  assert.deepEqual(b.incidents, [
+    { time: T(1), what: schema, ...retried },
+    { time: T(2), what: schema, ...retried },
+    { time: T(3), what: timeout, ...retried },
+    { time: T(4), what: timeout, effect: 'The second-level try was refused (budget); the review stays unavailable.', fix: 'Raise the budget (only you can) or review the file by hand.' },
+  ]);
+  assert.deepEqual(buildFullLog({ runId: 'r9', rows, scrubCtx: SC }), [
+    { time: T(4), event: 'Review broken twice (timeout)', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · refused (budget)', link: null },
+    { time: T(3), event: 'Review broken twice (timeout)', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · retried once', link: null },
+    { time: T(2), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · retried once', link: null },
+    { time: T(1), event: 'Review answer off-schema twice', block: 'b1', file: 'src/a.swift', detail: 'quick · model-a → model-b · retried once', link: null },
+  ]);
+});
+
 test('a pipe in a shown text reaches its table cell escaped, so the row keeps its column count', () => {
   const rows = [{ run: 'r8', event: 'review.waived', block: 'b1', file: 'a|b.mjs', finding: 'f1', reason: 'keep a | b', by: 'autopilot', grant_id: 'g', decision_id: 'ad-1', severity: 'nit', issue: null, ts: T(1) }];
   const md = renderBinnacleMarkdown(buildBinnacle({ runId: 'r8', rows, record: { run_id: 'r8', status: 'active', blocks: {} }, now: NOW, scrubCtx: SC }), SC);

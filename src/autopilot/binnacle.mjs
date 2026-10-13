@@ -159,7 +159,9 @@ function describe(row) {
     case 'review.session_timeout':
       return { event: 'Review session timed out', detail: `${row.lens ?? row.role ?? 'session'} · attempt ${u(row.attempt)} · ${row.retried === true ? 'retried' : 'gave up'}`, link: null };
     case 'review.schema_fallback':
-      return { event: 'Review answer off-schema twice', detail: `${row.lens ?? row.role ?? 'session'} · ${u(row.from_model, 'unknown model')} → ${u(row.to_model, 'unknown model')} · ${typeof row.refused === 'string' ? `refused (${u(row.refused)})` : 'retried once'}`, link: null };
+      // B91: `trigger: timeout` ⇒ the second broken result was a timed-out attempt; no trigger
+      // (rows before B91) or `schema` ⇒ two schema misses
+      return { event: row.trigger === 'timeout' ? 'Review broken twice (timeout)' : 'Review answer off-schema twice', detail: `${row.lens ?? row.role ?? 'session'} · ${u(row.from_model, 'unknown model')} → ${u(row.to_model, 'unknown model')} · ${typeof row.refused === 'string' ? `refused (${u(row.refused)})` : 'retried once'}`, link: null };
     case 'worker.down':
       return { event: 'Worker down', detail: 'the pinned worker is not running', link: null };
     case 'worker.replaced':
@@ -209,12 +211,16 @@ const SCHEMA_FALLBACK_FIX = Object.freeze({
 });
 
 /**
- * The incident of a `review.schema_fallback` row (B55): retried once, or refused and why.
+ * The incident of a `review.schema_fallback` row (B55): retried once, or refused and why. B91:
+ * a row with `trigger: timeout` says the second broken result was a timeout.
  * @param {Row} r @param {string | null} time
  * @returns {{time: string | null, what: string, effect: string, fix: string}}
  */
 function schemaFallbackIncident(r, time) {
-  const what = `A ${r.lens ?? r.role ?? 'review'} answer failed the schema twice on the same packet (${u(r.from_model, 'unknown model')})`;
+  const what =
+    r.trigger === 'timeout'
+      ? `A ${r.lens ?? r.role ?? 'review'} session broke twice on the same packet, the second time by timing out (${u(r.from_model, 'unknown model')})`
+      : `A ${r.lens ?? r.role ?? 'review'} answer failed the schema twice on the same packet (${u(r.from_model, 'unknown model')})`;
   if (typeof r.refused !== 'string') return { time, what, effect: `It was retried once on the second level (${u(r.to_model, 'unknown model')}).`, fix: "Check the file's next review result." };
   const fix = Object.hasOwn(SCHEMA_FALLBACK_FIX, r.refused) ? SCHEMA_FALLBACK_FIX[/** @type {keyof typeof SCHEMA_FALLBACK_FIX} */ (r.refused)] : 'Review the file by hand.';
   return { time, what, effect: `The second-level try was refused (${u(r.refused)}); the review stays unavailable.`, fix };

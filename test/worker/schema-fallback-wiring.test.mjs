@@ -143,6 +143,7 @@ describe('B55: a packet\'s second schema miss is tried once on review.second_lev
       to_provider: 'xai',
       to_model: SECOND,
       attempts: 2,
+      trigger: 'schema',
       block: 'B11',
       file: FILE,
       content_hash: again.contentHash,

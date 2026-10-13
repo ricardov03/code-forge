@@ -19,9 +19,12 @@
  *     request with a non-repo-relative path is refused (`needs_file-refused`, never approval);
  *  6. a session that ends in `timeout` is spawned ONCE more on the same packet and level
  *     (`session-retry.mjs`, B30); a second timeout is `unavailable: timeout`. The summary's
- *     `attempts` says how many ran;
+ *     `attempts` says how many ran. B91: a timed-out attempt is a broken result like a schema
+ *     miss: its signed `review.session_timeout` note carries the packet's `packet_hash`, and when
+ *     it is the packet's second broken result (schema or timeout, in any mix) the second level
+ *     (6b) is tried in the same session instead of the same-model retry (`trigger: timeout`);
  *  6b. a session whose answer fails the schema logs it (`review.schema_invalid`, the raw answer
- *     redacted); at the packet's second such miss it is tried ONCE on `review.second_levels.<level>`
+ *     redacted); at the packet's second broken result it is tried ONCE on `review.second_levels.<level>`
  *     when the owner configured one (`schema-fallback.mjs`, B55; never in consensus mode).
  *     The summary then carries `schema_fallback: {level, provider, model}` (`level`:
  *     `review.second_levels.<level>`), the second level's own provider/model, and `tokens_in` /
@@ -62,7 +65,7 @@ import { deletionNote, renderDeletionNote } from './deletion.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
-import { afterSchemaMiss, logSecondLevelMiss } from './schema-fallback.mjs';
+import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallback.mjs';
 import { assertRowPath } from '../worker/ticket.mjs';
 
 /**
@@ -383,8 +386,9 @@ export async function reviewFile(input, deps) {
 }
 
 /**
- * One session: packet file (0600, removed after), spawn, stub guard — and, on a `schema` miss, the
- * B55 second-level try (`schema-fallback.mjs`) on the same packet file before it is removed.
+ * One session: packet file (0600, removed after), spawn, stub guard — and, on a `schema` miss or
+ * (B91) a timed-out attempt, the B55 second-level try (`schema-fallback.mjs`) on the same packet
+ * file before it is removed.
  * @param {SessionSpec} spec @param {string} text
  * @param {{hunkHeaders: string[], tokensIn: number, contextMode: string | null}} packet
  * @param {{deps: ReviewDeps, workDir: string, min: number, cfg: Record<string, any>, schemaFallback?: boolean}} env -
@@ -401,10 +405,39 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
   let verdict = { ok: false, reason: 'exit', detail: 'no session result' };
   /** @type {{level: string, provider: string, model: string} | null} */
   let fellBackTo = null;
-  /** @param {Record<string, any> | undefined} sessionCfg @param {number} done - attempts before this call. */
-  const attempt = (sessionCfg, done) =>
+  const session = { lens: spec.lens, role: spec.role, level: spec.level };
+  // no ledger writer ⇒ nothing logged, nothing tried; every row goes through the same writer
+  // (each helper handles its own failed write)
+  const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<ReviewDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
+  const hash = packetHash(text);
+  /** @type {{level: string, provider: string, model: string} | null} the second level once its try started */
+  let tried = null;
+  /** @param {Record<string, any> | null} missed @param {'schema' | 'timeout'} trigger */
+  const tryNext = (missed, trigger) =>
+    afterSchemaMiss({
+      res: missed,
+      session,
+      packetText: text,
+      cfg: spec.cfg ?? cfg,
+      allowed: schemaFallback && !spec.cfg,
+      history: deps.schemaHistory,
+      writeRow: write,
+      // the second level's attempts follow the ones already run in this session
+      spawnAt: (c, to) => {
+        tried = to; // the try started: whatever happens next, the session fell back
+        return attempt(c, attempts, true);
+      },
+      trigger,
+    });
+  /**
+   * @param {Record<string, any> | undefined} sessionCfg @param {number} done - attempts before this call.
+   * @param {boolean} [secondLevel] - B91: the second-level try (its timeouts never count, never try again).
+   * @returns {ReturnType<typeof spawnWithTimeoutRetry>}
+   */
+  const attempt = (sessionCfg, done, secondLevel = false) =>
     // a `timeout` is spawned once more on the same packet and level (B30); a spawn that throws
-    // (bad config, refused argv) is an `exit` failure, never approval
+    // (bad config, refused argv) is an `exit` failure, never approval. B91: each timed-out attempt
+    // is a broken result of this packet; the second one tries the second level instead
     spawnWithTimeoutRetry(
       deps.spawn,
       {
@@ -419,6 +452,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
       (n) => {
         attempts = done + n;
       },
+      { packetHash: hash, secondLevel, ...(secondLevel ? {} : { onBroken: (/** @type {Record<string, any>} */ r) => tryNext(r, 'timeout') }) },
     );
   /** @type {number | null} the session's tokens: the first spawn's, plus a second-level try's */
   let tokensIn = null;
@@ -426,34 +460,42 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
   let tokensOut = null;
   // the packet file is removed on every path, and only after the second-level try (which reads it)
   try {
+    /** @type {Awaited<ReturnType<typeof spawnWithTimeoutRetry>> | null} */
+    let first = null;
     try {
-      ({ res, attempts } = await attempt(spec.cfg, 0));
+      first = await attempt(spec.cfg, 0);
+      ({ res, attempts } = first);
     } catch {
-      // defensive only: the helper never throws. If it ever did, it is still an `exit` failure,
-      // never approval, with the attempts it had reported so far (at least 1).
+      // defensive only: the helpers never throw. If they ever did, it is still an `exit` failure,
+      // never approval, with the attempts reported so far (at least 1; a second-level try's spawns
+      // included) and, once that try started, its second level (never a same-model spawn after it).
       res = null;
       attempts = Math.max(attempts, 1);
+      fellBackTo = tried;
     }
-    tokensIn = res?.usage?.tokens_in ?? null;
-    tokensOut = res?.usage?.tokens_out ?? null;
-    verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
-    if (!verdict.ok && verdict.reason === 'schema') {
+    if (first?.to) {
+      // B91: a timed-out attempt was the packet's second broken result; the second level ran and
+      // `attempts` already counts its spawns. The verdict is set first: whatever throws after it
+      // leaves that verdict (a failed one stays a non-approval), never an exception
+      fellBackTo = first.to;
+      verdict = { ok: false, reason: 'exit', detail: 'second-level result not checked' };
       try {
-        const session = { lens: spec.lens, role: spec.role, level: spec.level };
+        verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+        tokensIn = addTokens(first.broken?.usage?.tokens_in ?? null, res?.usage?.tokens_in);
+        tokensOut = addTokens(first.broken?.usage?.tokens_out ?? null, res?.usage?.tokens_out);
+        if (!verdict.ok && verdict.reason === 'schema') await logSecondLevelMiss({ res, session, packetText: text, writeRow: write });
+      } catch {
+        // defensive only, as on the schema path below
+      }
+    } else {
+      tokensIn = res?.usage?.tokens_in ?? null;
+      tokensOut = res?.usage?.tokens_out ?? null;
+      verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+    }
+    if (!fellBackTo && !verdict.ok && verdict.reason === 'schema') {
+      try {
         const done = attempts;
-        // no ledger writer ⇒ nothing logged, nothing tried; every row goes through the same writer
-        // (each helper handles its own failed write)
-        const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<ReviewDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
-        const second = await afterSchemaMiss({
-          res,
-          session,
-          packetText: text,
-          cfg: spec.cfg ?? cfg,
-          allowed: schemaFallback && !spec.cfg,
-          history: deps.schemaHistory,
-          writeRow: write,
-          spawnAt: (c) => attempt(c, done),
-        });
+        const second = await tryNext(res, 'schema');
         if (second) {
           const secondVerdict = validateReview(second.res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
           res = second.res;
@@ -467,6 +509,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
       } catch {
         // defensive only: the helpers never throw. If they ever did, the first session's result
         // and its `schema` verdict stand (never turned into `exit`, never approval)
+        fellBackTo = fellBackTo ?? tried;
       }
     }
   } finally {

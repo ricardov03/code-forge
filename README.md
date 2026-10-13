@@ -21,6 +21,7 @@ In the next release:
 - **Red-green proof for Xcode projects (B102).** A `proof.runners` entry with `adapter: xcodebuild` and an `xcode` object (`scheme`, `destination`, `test_target`) proves XCTest and Swift Testing tests through `xcodebuild test` on a simulator or on macOS. code-forge checks first that full Xcode and the simulator are there, runs only the named suite with `-only-testing`, and reads the result bundle. A build failure is `RED_INVALID compile`. code-forge never boots, creates or deletes a simulator.
 - **Xcode red-green checked live (B103).** An opt-in live check (`CODE_FORGE_LIVE_XCODE=1`) proves XCTest and Swift Testing tests red→green through `xcodebuild test` on an iPhone simulator. It skips with a reason when full Xcode or a simulator is missing. Verified with Xcode 26.6.
 - **Big files go to a big-context reviewer (B90).** Set `review.routes` once, for example `{min_lines: 400, model: <id>, session_timeout_s: 900}`. Files with that many lines get that model and timeout. No more editing `.code-forge.yml` per file. Each routed file gets a signed `review.route` row.
+- **Timeouts reach the second level (B91).** A timeout now counts as a broken result, like an answer that fails the schema. At the second broken result on one file, the second-level model is tried at once, in the same ticket. You no longer wait for a second ticket.
 
 In 0.9.0:
 
