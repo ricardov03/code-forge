@@ -42,7 +42,7 @@
  * second `schema` miss — this round's first try after the earlier ticket's — is tried once on
  * `review.second_levels.<level>` when one is configured.
  * B56: every round gets ONE memoised reader of the block's OTHER changed files' diffs
- * (`blockPeerDiffs`: listed and read at most once per ticket) so the review can name code moved
+ * (the ticket's `fileContext`: listed and read at most once per ticket) so the review can name code moved
  * between them in a `## moved code` packet section (round 1, rechecks and patch check alike).
  * The review NEVER approves an empty or failed session: that is `unavailable` (§4.2 stub guard).
  * A throw inside the round is `unavailable` too, with the state saved as `next: retry` (see
@@ -169,14 +169,14 @@ import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } fro
  * `tree` (B62b) is the recorded `worktree` `{path, branch, base_sha}`, null when the block has
  * none; `base` is then the tree's `base_sha`. A recorded worktree that `worktreeRecord` refuses
  * (path, branch, hex base_sha) throws `worktree-malformed`.
- * @returns {Promise<{base: string | null, level: string, owned: string[], ownedKinds: Record<string, string>, acceptance?: unknown, kind: string | null, tree: WorktreeEntry | null, workspace: string | null}>}
+ * @returns {Promise<{base: string | null, level: string, owned: string[], ownedKinds: Record<string, string>, testFiles: string[], acceptance?: unknown, kind: string | null, tree: WorktreeEntry | null, workspace: string | null}>}
  */
 export async function blockEntryFor(runId, block) {
   let record;
   try {
     record = await readRun(runId);
   } catch (err) {
-    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], ownedKinds: {}, acceptance: undefined, kind: null, tree: null, workspace: null };
+    if (/** @type {any} */ (err)?.code === 'no-run') return { base: null, level: 'L2', owned: [], ownedKinds: {}, testFiles: [], acceptance: undefined, kind: null, tree: null, workspace: null };
     throw new Error('run-record-unreadable');
   }
   if (!record || typeof record !== 'object' || !record.blocks || typeof record.blocks !== 'object') throw new Error('run-record-unreadable');
@@ -187,6 +187,7 @@ export async function blockEntryFor(runId, block) {
   const owned = Array.isArray(entry.owned_files) ? entry.owned_files.filter((f) => typeof f === 'string') : [];
   const kinds = entry.owned_kinds;
   const ownedKinds = kinds && typeof kinds === 'object' && !Array.isArray(kinds) ? kinds : {};
+  const testFiles = Array.isArray(entry.test_files) ? entry.test_files.filter((f) => typeof f === 'string' && !/[*?\[\]{}]/.test(f) && ownsFile(owned, f, ownedKinds)) : [];
   /** @type {WorktreeEntry | null} */
   let tree = null;
   if (entry.worktree !== undefined && entry.worktree !== null) {
@@ -196,10 +197,11 @@ export async function blockEntryFor(runId, block) {
       throw new Error('worktree-malformed');
     }
   }
-  return { base: tree ? tree.base_sha : sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }), tree, workspace: typeof record.workspace === 'string' ? record.workspace : null };
+  return { base: tree ? tree.base_sha : sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, testFiles, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }), tree, workspace: typeof record.workspace === 'string' ? record.workspace : null };
 }
 
 /** @typedef {{path: string, branch: string, base_sha: string}} WorktreeEntry */
+/** @typedef {{peers: string[], changedFiles: string[], ownedFiles: string[], testFiles: string[]}} FileContext */
 
 /** The refusals of {@link blockTree} a ticket answers with, as its `reason`. */
 const TREE_CODES = new Set(['worktree-malformed', 'worktree-missing', 'worktree-not-dir', 'worktree-branch-mismatch', 'worktree-workspace-missing', 'worktree-foreign', 'git-failed']);
@@ -373,7 +375,28 @@ export async function reviewTicket(ticket, ctx) {
     }
   }
   const factsExcerpt = factsFor(entry, ctx.cfg);
-  const peerDiffs = blockPeerDiffs(contentRoot, { base: entry.base, owned: entry.owned, ownedKinds: entry.ownedKinds, file: ticket.file });
+  // Resolve concrete paths in this block's tree; neither globs nor another block's tests
+  // authorize an untracked attachment. Read lazily so a stopped ticket needs no file listing.
+  /** @type {Promise<FileContext> | undefined} */
+  let contextOnce;
+  /** @type {import('../review/moved.mjs').PeerDiff[]} */
+  let diffs = [];
+  const fileContext = () => contextOnce ??= (async () => {
+    try {
+      // Read the listing directly: blockPeers' [] fallback would hide a git failure and
+      // still authorize explicit tests. Context and peer diffs must fail soft together.
+      const peers = entry.base === null || entry.owned.length === 0 ? [] : (await computeFileSet({ cwd: contentRoot, base: entry.base })).all.filter((f) => f !== ticket.file && ownsFile(entry.owned, f, entry.ownedKinds));
+      diffs = await peerDiffReader({ repoRoot: contentRoot, base: entry.base, file: ticket.file, peers })();
+      const changedFiles = [...peers, ticket.file].filter((f) => ownsFile(entry.owned, f, entry.ownedKinds));
+      return { peers, changedFiles, ownedFiles: [...new Set([...changedFiles, ...entry.testFiles])], testFiles: entry.testFiles };
+    } catch {
+      return { peers: [], changedFiles: [], ownedFiles: [], testFiles: [] };
+    }
+  })();
+  const peerDiffs = async () => {
+    await fileContext();
+    return diffs;
+  };
   try {
     // B63a: the `context` rules and lessons, read from the MAIN tree (`ctx.repoRoot`, never the
     // block's worktree) with the config in force for this ticket; '' without a `context` key, so
@@ -390,11 +413,11 @@ export async function reviewTicket(ticket, ctx) {
     const digest = rulesDigest === '' ? {} : { rulesDigest };
     if (!ctx.key) {
       return await reviewFile(
-        { repoRoot: contentRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt, ...digest, peerDiffs },
+        { repoRoot: contentRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt, ...digest, peerDiffs, ...(await fileContext()) },
         { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
-    return await fixLoopRound(ticket, tctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt, rulesDigest, peerDiffs });
+    return await fixLoopRound(ticket, tctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt, rulesDigest, peerDiffs, fileContext });
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
@@ -506,10 +529,10 @@ export function mayTakeRung(state, kind, cfg, rungUsed) {
  * first full round, or any round once the rung is gone) runs outside the block lock, in parallel
  * with the block's other files.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{base: string | null, level: string, owned: string[], ownedKinds?: Record<string, string>, blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string, rulesDigest?: string, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
+ * @param {{base: string | null, level: string, owned: string[], ownedKinds?: Record<string, string>, blockKindOf: string, key: Buffer, workDir: string, factsExcerpt: string, rulesDigest?: string, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>, fileContext: () => Promise<FileContext>}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, blockKindOf, key, workDir, factsExcerpt, rulesDigest = '', peerDiffs }) {
+async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, blockKindOf, key, workDir, factsExcerpt, rulesDigest = '', peerDiffs, fileContext }) {
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   const readRows = ctx.readRows;
   /** @type {{outcome: ReviewOutcome} | {round: () => Promise<ReviewOutcome>}} */
@@ -572,7 +595,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
       state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
     }
     const fixed = state;
-    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest, extraRounds, peerDiffs });
+    const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest, extraRounds, peerDiffs, fileContext });
     // a round that could take the rung keeps the block lock until its state is saved
     if (mayTakeRung(fixed, kind, ctx.cfg, rungUsed)) return { outcome: await round() };
     return { round };
@@ -583,10 +606,10 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
 /**
  * Run the prepared round and save the file's state: the ticket's outcome.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
- * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string, rulesDigest?: string, extraRounds?: number, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>}} opts
+ * @param {{state: import('../review/fixloop.mjs').FileState, kind: 'full' | 'recheck' | 'patch_check', where: import('./review-state.mjs').Where, seq: number, base: string | null, blockKindOf: string, workDir: string, factsExcerpt: string, rulesDigest?: string, extraRounds?: number, peerDiffs?: () => Promise<import('../review/moved.mjs').PeerDiff[]>, fileContext: () => Promise<FileContext>}} opts
  * @returns {Promise<ReviewOutcome>}
  */
-async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest = '', extraRounds = 0, peerDiffs }) {
+async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest = '', extraRounds = 0, peerDiffs, fileContext }) {
   /** @type {Record<string, any> | null} */
   let engineOutcome = null;
   let approvalWritten = false;
@@ -626,6 +649,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
     const schemaHistory = ctx.readRows
       ? ledgerSchemaHistory({ readRows: ctx.readRows, verify: (row) => verifyRow(row, where.key).ok, runId: ctx.runId, file: ticket.file, contentHash: ticket.content_hash })
       : undefined;
+    const files = await fileContext();
     await runRound(
       state,
       {
@@ -637,11 +661,12 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         factsExcerpt,
         ...(rulesDigest !== '' ? { rulesDigest } : {}),
         extraRounds,
+        ...files,
         ...(peerDiffs ? { peerDiffs } : {}),
         ...(jev ? { jev } : {}),
         ...(schemaHistory ? { schemaHistory } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.contentRoot ?? ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...(rulesDigest !== '' ? { rulesDigest } : {}), ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
+          engineOutcome = await reviewFile({ repoRoot: ctx.contentRoot ?? ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...files, ...(rulesDigest !== '' ? { rulesDigest } : {}), ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
           return engineOutcome;
         },
         spawn: async (opts) => {

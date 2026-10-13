@@ -14,6 +14,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - `pairsFor` and `summarize` (src/review/paired.mjs) and an optional `## paired` packet section after `## context`,
   dropped first over budget; `attachFiles` attaches an untracked file only when it is an owned, changed file of the
   block and not ignored or secret-like (B97).
+- The review engine, the fix-loop recheck and the worker send `## paired` (the block's owned changed peers and
+  `test_files`); the needs_file path passes the block's owned and changed files so a new untracked owned test file can
+  be attached; the lenses say a test named in `## paired` exists (B98).
 
 ### Changed
 

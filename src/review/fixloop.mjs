@@ -93,6 +93,7 @@ import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { parseDiff } from './context.mjs';
 import { assemblePacket, assertPacketPath, diffOnlyTokens, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
+import { pairedContext } from './engine.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups, sectionOf } from './sections.mjs';
 import { cameFromJudge, resolvedBand, triageFindings } from './triage.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
@@ -144,6 +145,9 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {(req: {file: string, level: 'L3', open: Finding[]}) => Promise<unknown>} [patch] - the L3 patch rung (≤ 80 lines, owned files only).
  * @property {string | null} [base] - the block base (`recheck_scope: file`, and the B56 moved-code diff).
  * @property {ReadonlyArray<string>} [peers] - B56: the block's other changed files (moved-code hints).
+ * @property {ReadonlyArray<string>} [ownedFiles] - concrete paths owned by this block.
+ * @property {ReadonlyArray<string>} [changedFiles] - concrete changed paths of the same block.
+ * @property {ReadonlyArray<string>} [testFiles] - the block's explicit test_files.
  * @property {() => Promise<import('./moved.mjs').PeerDiff[]>} [peerDiffs] - B56: a memoised reader of their diffs (`peerDiffReader`); wins over `peers`.
  * @property {string} [rulesDigest] @property {string} [factsExcerpt]
  * @property {number} [extraRounds] - B47: rounds past `review.max_rounds_per_file` granted by autopilot (`extraRoundsFor`).
@@ -362,11 +366,11 @@ export function recheckTokens(diff, open, moved = '') {
 /**
  * The recheck packet: the `recheck` lens on the fix hunks (hunk form, never the whole file), then
  * the open findings by id. Over budget ⇒ `minimal` (see the module doc).
- * @param {{diff: import('./packet.mjs').FileDiff, open: Finding[], cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', rulesDigest?: string, factsExcerpt?: string, moved?: string}} opts -
+ * @param {{diff: import('./packet.mjs').FileDiff, open: Finding[], cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', rulesDigest?: string, factsExcerpt?: string, moved?: string, paired?: string}} opts -
  *   `moved`: the file's `## moved code` section (B56), '' for none.
  */
-export function buildRecheckPacket({ diff, open, cfg, contextMode = 'recheck', rulesDigest, factsExcerpt, moved = '' }) {
-  const packet = assemblePacket({ diff, lens: 'recheck', cfg, contextMode, rulesDigest, factsExcerpt, moved });
+export function buildRecheckPacket({ diff, open, cfg, contextMode = 'recheck', rulesDigest, factsExcerpt, moved = '', paired = '' }) {
+  const packet = assemblePacket({ diff, lens: 'recheck', cfg, contextMode, rulesDigest, factsExcerpt, moved, paired });
   if (packet.status !== 'ok') return packet;
   const text = `${packet.text}${openFindingsText(open)}`;
   return { ...packet, text, tokensIn: packet.tokensIn + Math.ceil(Buffer.byteLength(text.slice(packet.text.length)) / 4) };
@@ -690,7 +694,8 @@ export async function runRound(state, deps, opts = {}) {
       if (pending.length > 0) {
         const contextMode = s.scope === 'file' ? 'auto' : 'recheck';
         const moves = await recheckMoves(deps, current.rel, s.scope === 'file' ? diff : null);
-        const whole = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved: movedText(moves, diff.content, null) });
+        const paired = pairedContext({ ...deps, file: current.rel });
+        const whole = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved: movedText(moves, diff.content, null), paired });
         /** @type {Array<{index: number | null, heading: string | null, diff: import('./packet.mjs').FileDiff, open: Finding[], keys: number[] | null}>} */
         let parts = [{ index: null, heading: null, diff, open: pending, keys: null }];
         if (whole.status !== 'ok') {
@@ -711,7 +716,7 @@ export async function runRound(state, deps, opts = {}) {
             continue;
           }
           const moved = movedText(moves, diff.content, part.keys);
-          const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved });
+          const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved, paired });
           // a packet that fails to build stops with ITS status (and size, when it has one)
           if (packet.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, { ...packet, section: part.heading });
           const size = recheckTokens(part.diff, part.open, moved);

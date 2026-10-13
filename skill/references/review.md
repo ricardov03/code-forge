@@ -23,18 +23,22 @@ The topology is decided in one place (`planSessions`). Consensus (§6) runs only
 
 ## §3 Isolation and the packet
 
-Paired-file support (B97): when supplied by a packet builder, `## paired` follows `## context`
-and precedes moved code and the diff. It names paired files and summarizes test names or exported
+The review engine, fix-loop recheck and worker send `## paired` after `## context`
+and before moved code and the diff, using the block's owned changed peers plus its explicit
+`test_files` (`block open --tests`), even when their stems differ. Missing or unreadable pairs
+are skipped; no pairs means no section. It names paired files and summarizes test names or exported
 symbols: at most 40 entries per file, each at most 120 characters, with secret-looking and
 registered values redacted. Stem matching supports `.mjs`/`.ts` (`.test`, `.spec`, and the `test/`
 tree), PHP (`FooTest.php`), Go (`foo_test.go`), Python (`test_foo.py`), and Swift (`FooTests.swift`).
 The entire section is capped at `review.budgets.full_in / 16` tokens. Over budget it is dropped
 before shrinking context or trimming rules; it never causes `split_required` or cuts the diff.
 Without paired input the packet bytes stay the same. The summary names tests; request their
-bodies with `needs_file` when needed. Packet-builder wiring is the next block (B98).
+bodies with `needs_file` when needed. A named test exists and must not be reported as unseen.
 
 The attachment helper accepts a new untracked file only when the caller supplies it in both
-the owned and changed concrete file lists of the same block and tree. A git-ignored file or a
+the owned and changed concrete file lists of the same block and tree. The review engine passes
+these lists to `attachFiles` in `reviewFile` for round 1 and full rounds, including those called
+from the worker's fix loop. The fix-loop recheck has no `needs_file` path. A git-ignored file or a
 secret path is refused, even when those lists name it; a failed git check also refuses it.
 Without those lists, attachments remain tracked-only. Existing path and read-only checks apply.
 

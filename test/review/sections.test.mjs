@@ -224,8 +224,12 @@ describe('Markdown sections (B54): the review engine', () => {
   });
 
   test('one section alone over the budget: split_required with its tokens_in, the budget and the section, no session', async () => {
-    const { repo, rel, alone } = await briefRepo();
-    const budget = Math.max(...alone) - 1;
+    const { repo, rel, diff, alone } = await briefRepo();
+    // B98's paired-test lens sentence grows every section by the same text. Token
+    // rounding breaks the old Alpha/Bravo/Delta tie: Bravo and Delta are now largest.
+    // Math.max(...alone) - 1 would leave Alpha fitting and report Bravo instead.
+    const budget = alone[1] - 1;
+    assert.deepEqual(sectionGroups(diff).filter((_, i) => alone[i] > budget).map((g) => g.heading).sort(), ['## Alpha', '## Bravo', '## Delta']);
     const { spawn, packets } = stubSpawn();
     const { outcome } = await review(repo, rel, cfgFor({ budgets: { full_in: budget } }), spawn);
     assert.deepEqual([outcome.status, outcome.approved, outcome.tokens_in, outcome.budget, outcome.section, packets.length], ['split_required', false, alone[1], budget, '## Alpha', 0]);

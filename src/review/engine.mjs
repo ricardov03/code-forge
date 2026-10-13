@@ -65,15 +65,17 @@ import { blockKind, isDocsKind } from '../decide/escalation.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { isMigrationPath, isPolicyPath } from '../decide/lane-facts.mjs';
 import { tierFor } from '../proof/tiers.mjs';
-import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, readFileDiff } from './packet.mjs';
+import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, isSecretLike, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
 import { deletionNote, renderDeletionNote } from './deletion.mjs';
 import { testQualityNote } from './test-quality.mjs';
+import { pairsFor, summarize } from './paired.mjs';
+import { redact } from '../util/redact.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
 import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallback.mjs';
-import { assertRowPath } from '../worker/ticket.mjs';
+import { assertRowPath, readRegularFileNoFollow } from '../worker/ticket.mjs';
 
 /**
  * @typedef {{lens: 'quick' | 'full' | 'A' | 'B' | 'judge', role: 'reviewer' | 'judge', level: 'L2' | 'L3', slot: 'A' | 'B' | null, cfg?: Record<string, any>}} SessionSpec -
@@ -186,6 +188,9 @@ export function rulesRisk({ file, plusCount, cfg }) {
  *   code moved between this file and one of them is named in every packet (`## moved code`).
  * @property {() => Promise<import('./moved.mjs').PeerDiff[]>} [peerDiffs] - B56: a memoised reader
  *   of those files' diffs (`peerDiffReader`), shared by the caller across the round; wins over `peers`.
+ * @property {ReadonlyArray<string>} [ownedFiles] - concrete paths owned by this block.
+ * @property {ReadonlyArray<string>} [changedFiles] - concrete changed paths of the same block.
+ * @property {ReadonlyArray<string>} [testFiles] - the block's explicit test_files, regardless of stem.
  */
 
 /**
@@ -223,6 +228,31 @@ function safeNeeds(needs) {
   } catch {
     return null;
   }
+}
+
+/**
+ * B98: names only, from owned changed peers and explicit tests in the reviewed tree.
+ * Missing, unsafe or unreadable pairs give no hint, never a failed review.
+ * @param {{repoRoot: string, file: string, peers?: ReadonlyArray<string>, ownedFiles?: ReadonlyArray<string>, changedFiles?: ReadonlyArray<string>, testFiles?: ReadonlyArray<string>}} input
+ * @returns {string}
+ */
+export function pairedContext({ repoRoot, file, peers = [], ownedFiles = [], changedFiles = peers, testFiles = [] }) {
+  if (ownedFiles.length === 0) return '';
+  const owned = new Set(ownedFiles);
+  const candidates = [...new Set([...pairsFor(file, changedFiles), ...testFiles])].filter((p) => p !== file && owned.has(p));
+  const lines = [];
+  for (const candidate of candidates) {
+    try {
+      const rel = assertRowPath(candidate);
+      if (isSecretLike(rel)) continue;
+      const bytes = readRegularFileNoFollow(repoRoot, rel);
+      if (bytes === null) continue;
+      lines.push(`- ${redact(rel)}`, ...summarize(bytes.toString('utf8'), rel).map((name) => `  - ${name}`));
+    } catch {
+      // The summary is optional; never follow a symlink or substitute another file.
+    }
+  }
+  return lines.join('\n');
 }
 
 /**
@@ -266,6 +296,7 @@ export async function reviewFile(input, deps) {
   // B92: a test that reads a source file and asserts on its text gets the `## test-quality` hint
   // (line numbers only), read once from the current content; '' for none
   const quality = testQualityNote(diff.file, diff.content);
+  const paired = pairedContext(input);
   /** @param {ReadonlyArray<number> | null} keys - a Markdown section's group keys; null ⇒ the whole file. */
   const movedOf = (keys) => [deleted, movedText(moves, diff.content, keys), quality].filter((t) => typeof t === 'string' && t.length > 0).join('\n');
   const min = minTokensOut(cfg);
@@ -281,7 +312,7 @@ export async function reviewFile(input, deps) {
       const paths = safeNeeds(needs);
       let extra = null;
       try {
-        extra = paths ? await attachFiles({ repoRoot, paths, budgetTokens: budgetFor(cfg, 'full_in') }) : null;
+        extra = paths ? await attachFiles({ repoRoot, paths, budgetTokens: budgetFor(cfg, 'full_in'), ownedFiles: input.ownedFiles, changedFiles: input.changedFiles ?? input.peers ?? [] }) : null;
       } catch {
         extra = null;
       }
@@ -294,7 +325,7 @@ export async function reviewFile(input, deps) {
   let reviewers = plan.sessions.filter((s) => s.role === 'reviewer');
   let judgeSpec = plan.sessions.find((s) => s.role === 'judge');
   /** @param {import('./packet.mjs').FileDiff} part @param {ReadonlyArray<number> | null} [keys] */
-  const packetsFor = (part, keys = null) => reviewers.map((spec) => assemblePacket({ diff: part, lens: spec.lens, rulesDigest: input.rulesDigest, factsExcerpt: input.factsExcerpt, cfg, moved: movedOf(keys) }));
+  const packetsFor = (part, keys = null) => reviewers.map((spec) => assemblePacket({ diff: part, lens: spec.lens, rulesDigest: input.rulesDigest, factsExcerpt: input.factsExcerpt, cfg, moved: movedOf(keys), paired }));
 
   /**
    * The plan on one packet set (the whole file, or one Markdown section): reviewers, then the judge.

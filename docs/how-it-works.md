@@ -464,9 +464,11 @@ session. A second plan that is not `full` keeps the original stop. Fitting quick
 risk-1 files keep their existing plans with no `step_up`; Markdown keeps section splitting,
 and rechecks already use `full_in`.
 
-The packet helper supports an optional `## paired` section after `## context`, before moved code
-and the diff (B97). Packet builders send paired files from B98; with B97 alone, no packet has
-`## paired` yet. The section names paired files with test names or exported symbols, at most
+The review engine, fix-loop recheck and worker send an optional `## paired` section after
+`## context`, before moved code and the diff. Candidates are the block's owned changed peers
+plus its explicit `test_files` (`block open --tests`), including tests whose stems differ.
+Missing or unreadable pairs are skipped; no pairs means no section. A test named there exists;
+use `needs_file` when its body matters. The section lists test names or exported symbols, at most
 40 entries per file and 120 characters per entry, redacting secret-looking and registered values.
 Pairs match stems for `.mjs`/`.ts` (`.test`, `.spec`, or the `test/` tree), PHP (`FooTest.php`),
 Go (`foo_test.go`), Python (`test_foo.py`), and Swift (`FooTests.swift`). The whole section is
@@ -475,7 +477,8 @@ dropped first when the packet exceeds its budget. It never causes `split_require
 cuts the diff; without paired input the packet bytes stay the same.
 
 For `needs_file`, the attachment helper can accept an untracked file when the caller supplies
-it in both the owned and changed concrete file lists of the same block and tree. It refuses
+it in both the owned and changed concrete file lists of the same block and tree; the worker
+and review engine now pass these lists on the request path. It refuses
 unowned, unchanged, git-ignored and secret paths, and fails closed on a git error. Without those
 lists it attaches tracked files only. The reviewer can request a paired file's body when its
 name and summary are insufficient; all existing path and read-only checks still apply.
