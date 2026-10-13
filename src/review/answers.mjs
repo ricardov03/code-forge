@@ -20,8 +20,10 @@
  * content when it is new). The reviewer answers per id `resolved` or `not_resolved` with a reason;
  * a missing, repeated or broken verdict is `not_resolved`, and a session that fails (no result,
  * not `ok`, a non-zero exit, a thrown spawn error: `session-error`) makes the ticket `unavailable`
- * with no row. A packet that cannot be built is `packet-unreadable`, one that cannot be written to
- * the work dir `packet-write-failed` (both `unavailable`). For each resolved id the
+ * with no row. A packet that cannot be built (B79: a secret-like source or answering file too) is
+ * `packet-unreadable`; the whole packet stays within the `full_in` budget, and one whose fixed text
+ * alone is over it is refused `packet-too-large`. One that cannot be written to the work dir is
+ * `packet-write-failed`. All three are refusals (`unavailable`: never approval, no session, no row). For each resolved id the
  * worker writes one signed `review.answered {block, file: source, content_hash: source hash,
  * finding, by_file, by_hash, ticket}` row (`ctx.writeRow` stamps the block, the source and its
  * hash). The ticket's result is `status: 'answers'`, never an approval: the gate never reads it
@@ -76,6 +78,15 @@ const AROUND = 5;
 
 /** A reason longer than this is cut (the reviewer's free text). */
 const REASON_MAX = 500;
+
+/** B79: what a part cut at the packet budget ends with. */
+export const TRUNCATED_MARKER = '[... truncated at the packet budget]';
+
+/** B79: what a cut part shows when its cap is too small for {@link TRUNCATED_MARKER}. */
+export const SHORT_MARKER = '[cut]';
+
+/** B79: the packet's fixed text (headings, labels, fences) alone is over the budget. */
+class PacketTooLarge extends Error {}
 
 /**
  * @typedef {object} AnswersOutcome
@@ -188,7 +199,10 @@ export async function reviewAnswers(ticket, ctx, { entry, workDir, io }) {
   let text;
   try {
     text = await packetText({ ticket, ctx, rows, root, entry, open, io, ids, srcBytes, byBytes, workDir });
-  } catch {
+  } catch (err) {
+    // B79: a packet whose fixed text alone is over the budget is refused like an unreadable one:
+    // never approval, no session, no row
+    if (err instanceof PacketTooLarge) return outcome('unavailable', 'packet-too-large');
     return outcome('unavailable', 'packet-unreadable');
   }
   const promptPath = path.join(workDir, `answers-${randomBytes(6).toString('hex')}.md`);
@@ -301,43 +315,114 @@ async function answeringChange({ root, file, base, bytes, workDir }) {
 }
 
 /**
+ * B79: `text` cut to at most `max` UTF-8 bytes, marker included — never more. The bytes are cut on
+ * the Buffer and the cut moves back to a character boundary (never half a character); a cut text
+ * ends with a newline and {@link TRUNCATED_MARKER}. When `max` is too small for that marker, the
+ * part's text is dropped for {@link SHORT_MARKER} (or for nothing, when even that does not fit).
+ * A text that fits is returned as it is.
+ * @param {string} text @param {number} max @returns {string}
+ */
+export function capBytes(text, max) {
+  const bytes = Buffer.from(text, 'utf8');
+  if (bytes.length <= max) return text;
+  const tail = `\n${TRUNCATED_MARKER}`;
+  const tailBytes = Buffer.byteLength(tail);
+  if (max < tailBytes) return max >= Buffer.byteLength(SHORT_MARKER) ? SHORT_MARKER : '';
+  let end = max - tailBytes;
+  // a UTF-8 continuation byte (10xxxxxx) never starts a character: step back to the lead byte
+  while (end > 0 && (bytes[end] & 0xc0) === 0x80) end -= 1;
+  return `${bytes.subarray(0, end).toString('utf8')}${tail}`;
+}
+
+/** The free-text fields of a finding the packet shows. */
+const FIELDS = /** @type {const} */ (['claim', 'evidence', 'fix']);
+
+/**
  * The packet: the findings, the source lines around each, and the answering file's change — all
- * from the bytes `reviewAnswers` read and hashed.
+ * from the bytes `reviewAnswers` read and hashed. Neither file may be secret-like (both refused the
+ * same way: `packet-unreadable`). B79: the WHOLE packet stays within the budget (`full_in` × 4
+ * bytes). Its fixed text (headings, labels, fences) is counted first — over the budget alone it is
+ * {@link PacketTooLarge}. Of the room left, the findings get half — per finding, each of claim,
+ * evidence and fix a fifth of its share and the source excerpt the rest — and the answering file's
+ * change what the findings leave. Each part is redacted BEFORE it is cut (a secret is never cut
+ * into a prefix redaction misses), and cut by {@link capBytes}: one marker per cut part, never over
+ * its cap. The fixed text is redacted before it is measured, so the joined packet is never cut: it
+ * ends with the change's closing fence. A joined packet redaction would still change (a secret
+ * across a part boundary) is refused, never cut — `packet-unreadable`.
  * @param {{ticket: AnswersTicket, ctx: AnswersContext, rows: Array<Record<string, any>>, root: string, entry: {base: string | null}, open: Map<string, unknown>, io: AnswersIo, ids: string[], srcBytes: Buffer, byBytes: Buffer, workDir: string}} opts
  * @returns {Promise<string>}
  */
 async function packetText({ ticket, ctx, rows, root, entry, open, io, ids, srcBytes, byBytes, workDir }) {
   const source = ticket.file;
   const byFile = /** @type {string} */ (ticket.by_file);
+  if (isSecretLike(assertPacketPath(root, source))) throw new Error('secret-like path');
   const details = findingDetails({ ticket, ctx, rows, root, io });
   const lines = srcBytes.toString('utf8').split('\n');
   const diff = await answeringChange({ root, file: byFile, base: entry.base, bytes: byBytes, workDir });
   const limit = budgetFor(ctx.cfg, 'full_in') * 4;
-  let change = diff.text;
-  if (change.length > limit) change = `${change.slice(0, limit)}\n[... truncated at the packet budget]`;
-  const out = [
+  // each finding: its fixed lines, and its free text (null: not recorded) and source excerpt (null: none)
+  const findings = ids.map((id) => {
+    const f = details.get(id) ?? null;
+    const start = Number.isInteger(f?.line_start) ? /** @type {number} */ (f?.line_start) : null;
+    const end = Number.isInteger(f?.line_end) ? /** @type {number} */ (f?.line_end) : start;
+    // the fixed text is redacted before it is measured: the joined packet never grows past its count
+    const head = [`## Finding ${id}`, '', `- file: ${source}`, `- lines: ${start === null ? 'unknown' : `${start}-${end}`}`, `- severity: ${String(f?.severity ?? open.get(id) ?? 'unknown')}`].map(redact);
+    /** @type {Record<typeof FIELDS[number], string | null>} */
+    const text = { claim: null, evidence: null, fix: null };
+    for (const k of FIELDS) text[k] = typeof f?.[k] === 'string' ? redact(f[k]) : null;
+    /** @type {{label: string, text: string} | null} */
+    let excerpt = null;
+    // a range recorded backwards (start after end) shows no lines, whatever the lines around it
+    if (start !== null && end !== null && start <= end && lines.length > 0) {
+      const from = Math.max(1, start - AROUND);
+      const to = Math.min(lines.length, end + AROUND);
+      // a recorded range past the end of the source, or a backwards one, shows no lines
+      if (from <= to) excerpt = { label: redact(`Source lines ${from}-${to}:`), text: redact(lines.slice(from - 1, to).map((l, i) => `${from + i}: ${l}`).join('\n')) };
+    }
+    return { head, text, excerpt };
+  });
+  const intro = [
     '# Answered findings',
     '',
     `A review of \`${source}\` left the findings below open. The coder says the change in \`${byFile}\` resolves them.`,
     'For EACH finding id, decide whether that change resolves it: `resolved` only when the change clearly removes the problem the finding names; otherwise `not_resolved`. Give a short reason for each.',
     'Reply with ONE JSON object: {"verdicts": [{"id": string, "verdict": "resolved" | "not_resolved", "reason": string}]}, one entry per id below.',
     '',
-  ];
-  for (const id of ids) {
-    const f = details.get(id) ?? null;
-    const start = Number.isInteger(f?.line_start) ? /** @type {number} */ (f?.line_start) : null;
-    const end = Number.isInteger(f?.line_end) ? /** @type {number} */ (f?.line_end) : start;
-    out.push(`## Finding ${id}`, '', `- file: ${source}`, `- lines: ${start === null ? 'unknown' : `${start}-${end}`}`, `- severity: ${String(f?.severity ?? open.get(id) ?? 'unknown')}`);
-    for (const k of /** @type {const} */ (['claim', 'evidence', 'fix'])) out.push(`- ${k}: ${typeof f?.[k] === 'string' ? f[k] : '(not recorded)'}`);
-    out.push('');
-    if (start !== null && end !== null && lines.length > 0) {
-      const from = Math.max(1, start - AROUND);
-      const to = Math.min(lines.length, end + AROUND);
-      out.push(`Source lines ${from}-${to}:`, '```', ...lines.slice(from - 1, to).map((l, i) => `${from + i}: ${l}`), '```', '');
-    }
-  }
-  out.push(`## The change in ${byFile}`, '', diff.kind === 'new' ? '(a new file: its full content)' : `(its diff against the block base)`, '```', change, '```', '');
-  return redact(out.join('\n'));
+  ].map(redact);
+  const changeHead = [`## The change in ${byFile}`, '', diff.kind === 'new' ? '(a new file: its full content)' : `(its diff against the block base)`, '```'].map(redact);
+  /**
+   * The packet with these part texts (`parts[i]`: finding i's fields and excerpt) and change.
+   * @param {Array<{claim: string, evidence: string, fix: string, excerpt: string}>} parts @param {string} change
+   */
+  const render = (parts, change) => {
+    const out = [...intro];
+    findings.forEach((f, i) => {
+      out.push(...f.head);
+      for (const k of FIELDS) out.push(`- ${k}: ${f.text[k] === null ? '(not recorded)' : parts[i][k]}`);
+      out.push('');
+      if (f.excerpt !== null) out.push(f.excerpt.label, '```', parts[i].excerpt, '```', '');
+    });
+    out.push(...changeHead, change, '```', '');
+    return out.join('\n');
+  };
+  const fixed = Buffer.byteLength(render(findings.map(() => ({ claim: '', evidence: '', fix: '', excerpt: '' })), ''));
+  if (fixed > limit) throw new PacketTooLarge('the packet fixed text is over the budget');
+  const share = Math.floor((limit - fixed) / 2 / Math.max(1, findings.length));
+  const textCap = Math.floor(share / 5);
+  const sourceCap = share - FIELDS.length * textCap;
+  const parts = findings.map((f) => ({
+    claim: capBytes(f.text.claim ?? '', textCap),
+    evidence: capBytes(f.text.evidence ?? '', textCap),
+    fix: capBytes(f.text.fix ?? '', textCap),
+    excerpt: capBytes(f.excerpt?.text ?? '', sourceCap),
+  }));
+  // the change gets what the fixed text and the findings leave
+  const used = Buffer.byteLength(render(parts, ''));
+  const packet = render(parts, capBytes(redact(diff.text), limit - used));
+  // every piece is redacted and counted: the packet is never cut here, only refused (fail closed)
+  if (Buffer.byteLength(packet) > limit) throw new PacketTooLarge('the packet is over the budget');
+  if (redact(packet) !== packet) throw new Error('a secret across a part boundary');
+  return packet;
 }
 
 /**

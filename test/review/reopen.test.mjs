@@ -20,7 +20,8 @@ const { contentHash } = await import('../../src/worker/ticket.mjs');
 const { announceWorker, queueDir, readResult } = await import('../../src/worker/queue.mjs');
 const { saveState, statePath } = await import('../../src/worker/review-state.mjs');
 const { ledgerPath } = await import('../../src/ledger/paths.mjs');
-const { runRecordPath } = await import('../../src/state/paths.mjs');
+const { runRecordPath, StateError } = await import('../../src/state/paths.mjs');
+const { initialConfigState } = await import('../../src/state/config-snapshot.mjs');
 const { createWorker } = await import('../../src/worker/loop.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 const { isForbidden, mergeForbidden } = await import('../../src/util/forbidden.mjs');
@@ -321,6 +322,28 @@ test('B72 (5): refused with no row — tampered, never reviewed, open, complete,
   await refused('reopen-block-not-open');
 });
 
+test('B79 (d): a tmp.root in the config snapshot that is set but not a string is refused reopen-config with no row; null or absent is the default root', async () => {
+  const f = await fixture('b79-tmp-root');
+  const recordFile = runRecordPath(f.runId);
+  const recordText = readFileSync(recordFile, 'utf8');
+  const record = JSON.parse(recordText);
+  for (const root of [42, true, ['/FAKE-root'], { dir: '/FAKE-root' }]) {
+    writeFileSync(recordFile, JSON.stringify({ ...record, config: initialConfigState({ tmp: { root } }) }));
+    const r = await f.reopen();
+    assert.deepEqual([r.code, r.out], [1, ''], String(root));
+    assert.equal(r.err, `block reopen: reopen-config: the run's config snapshot or its tmp.root cannot be read, so the review state of ${SRC} cannot be found; nothing was recorded\n`);
+    assert.deepEqual(await f.reopenedRows(), []);
+  }
+  // null and absent: the default root, so the reopen goes on to the file's own check (no state yet)
+  for (const config of [{ tmp: { root: null } }, { tmp: {} }]) {
+    writeFileSync(recordFile, JSON.stringify({ ...record, config: initialConfigState(config) }));
+    const r = await f.reopen();
+    assert.deepEqual([r.code, r.err], [1, `block reopen: reopen-not-stopped: ${SRC} has no review state; only a stopped or lost file is reopened; nothing was recorded\n`], JSON.stringify(config));
+  }
+  writeFileSync(recordFile, recordText);
+  assert.deepEqual(await f.reopenedRows(), []);
+});
+
 test('B72 (5): a block closed after its approval is refused reopen-block-not-open, with no row', async () => {
   const f = await fixture('b72-closed');
   const done = await f.review();
@@ -369,10 +392,31 @@ test('B72 (5): a row write that does not resolve with the row is reopen-write-fa
     },
   };
   const base = { runId: f.runId, id: 'B1', file: SRC, reason: 'r', record, rows: [], key: f.key, writeSigned, io };
-  for (const writeRow of [async () => undefined, async () => null, async () => false, async () => { throw new Error('FAKE disk full'); }]) {
-    await assert.rejects(reopenFile({ ...base, writeRow }), (/** @type {any} */ e) => e.code === 'reopen-write-failed' && e.message === `reopen-write-failed: the signed review.reopened row for ${SRC} was not written; run block reopen again`);
+  const message = (/** @type {string} */ code) => `reopen-write-failed: the signed review.reopened row for ${SRC} was not written (${code}); run block reopen again`;
+  for (const writeRow of [async () => undefined, async () => null, async () => false]) {
+    await assert.rejects(reopenFile({ ...base, writeRow }), (/** @type {any} */ e) => e.code === 'reopen-write-failed' && e.message === message('no-write') && !('cause' in e));
   }
-  assert.equal(cleared, 4);
+  // B79: a thrown write keeps its cause and names its code only — never the path or text it carries
+  const plain = new Error('FAKE disk full at /FAKE/ledger/path');
+  const denied = Object.assign(new Error('EACCES: permission denied, open /FAKE/ledger/path'), { code: 'EACCES', syscall: 'open', path: '/FAKE/ledger/path' });
+  const locked = new StateError('ledger-locked', 'the ledger /FAKE/ledger/path is locked');
+  // a code that is not code-shaped (a path, a number) is never named: the error's name instead
+  const pathCode = Object.assign(new Error('FAKE write failed'), { code: '/FAKE/ledger/path' });
+  const numberCode = Object.assign(new Error('FAKE write failed'), { code: 42 });
+  // a thrown value with no code-shaped code or name (here: `undefined`, a path string) is `unknown`
+  const cases = /** @type {Array<[unknown, string]>} */ ([[plain, 'Error'], [denied, 'EACCES'], [locked, 'ledger-locked'], [pathCode, 'Error'], [numberCode, 'Error'], [undefined, 'unknown'], ['/FAKE/ledger/path', 'unknown']]);
+  for (const [thrown, code] of cases) {
+    await assert.rejects(
+      reopenFile({
+        ...base,
+        writeRow: async () => {
+          throw thrown;
+        },
+      }),
+      (/** @type {any} */ e) => e.code === 'reopen-write-failed' && e.message === message(code) && e.cause === thrown && 'cause' in e && !Object.keys(e).includes('cause') && !JSON.stringify(e).includes('FAKE') && !JSON.stringify(e).includes('cause') && !e.message.includes('FAKE') && !e.message.includes('/ledger/'),
+    );
+  }
+  assert.equal(cleared, 10);
   assert.deepEqual(await f.reopenedRows(), []);
   // the happy path next to it: the ledger's writer resolves with the row
   const ok = await reopenFile({ ...base, writeRow: f.writeRow });

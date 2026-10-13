@@ -48,6 +48,24 @@ import { verifyRow } from '../state/signer.mjs';
 
 export const REOPENED_EVENT = 'review.reopened';
 
+/** A code a refusal may name: an errno (`EACCES`), a StateError code (`ledger-locked`), a name. */
+const CAUSE_CODE = /^[A-Za-z][A-Za-z0-9_.-]{0,63}$/;
+
+/**
+ * B79: the code a failed write names — the error's `code`, else its `name`, when it has the form
+ * {@link CAUSE_CODE}, else `unknown` (a thrown `undefined` or `null` too). Called only for a
+ * write that threw; one that wrote nothing is named `no-write` by its caller. Never the message:
+ * it may hold a path or a value.
+ * @param {unknown} err @returns {string}
+ */
+function causeCode(err) {
+  if (err === null || err === undefined) return 'unknown';
+  const e = /** @type {{code?: unknown, name?: unknown}} */ (err);
+  if (typeof e.code === 'string' && CAUSE_CODE.test(e.code)) return e.code;
+  if (typeof e.name === 'string' && CAUSE_CODE.test(e.name)) return e.name;
+  return 'unknown';
+}
+
 /**
  * Whether a row's MAC verifies with the run key (a throw is a no).
  * @param {Record<string, any>} row @param {Buffer} key
@@ -211,6 +229,10 @@ export async function reopenFile({ runId, id, file, reason, record, rows, key, w
   /** @type {Record<string, any> | null} */
   let written = null;
   let signedOut = null;
+  /** @type {unknown} */
+  let failure = null;
+  // a thrown `undefined` (or null) is still a throw: `threw`, not the value, says the write threw
+  let threw = false;
   try {
     signedOut = await writeSigned(runId, async (signed) => {
       const result = await writeRow(signed);
@@ -219,9 +241,18 @@ export async function reopenFile({ runId, id, file, reason, record, rows, key, w
       written = signed;
       return result;
     }, row);
-  } catch {
+  } catch (err) {
     written = null;
+    failure = err;
+    threw = true;
   }
-  if (written === null || signedOut === null || signedOut === undefined || signedOut === false) throw new StateError('reopen-write-failed', `reopen-write-failed: the signed review.reopened row for ${file} was not written; run block reopen again`);
+  if (written === null || signedOut === null || signedOut === undefined || signedOut === false) {
+    // B79: the cause is kept (`cause`) and named by its code only — never a path, key or config value
+    const refused = new StateError('reopen-write-failed', `reopen-write-failed: the signed review.reopened row for ${file} was not written (${threw ? causeCode(failure) : 'no-write'}); run block reopen again`);
+    // StateError takes (code, message) only (src/state/paths.mjs is not this block's): `cause` is
+    // set here, non-enumerable like a native one, so a serializer never emits the cause's path
+    if (threw) Object.defineProperty(refused, 'cause', { value: failure, enumerable: false, configurable: true, writable: true });
+    throw refused;
+  }
   return { row: written, cleared, existing: false };
 }

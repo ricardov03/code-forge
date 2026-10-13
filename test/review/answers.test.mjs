@@ -19,7 +19,8 @@ const { runBlock } = await import('../../src/cli/block.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 const { contentHash, readRegularFileNoFollow, ticketId } = await import('../../src/worker/ticket.mjs');
 const { announceWorker, answersTicketId, assertAnswers, enqueue, enqueueAnswers, queueDir, readResult } = await import('../../src/worker/queue.mjs');
-const { reviewAnswers } = await import('../../src/review/answers.mjs');
+const { SHORT_MARKER, TRUNCATED_MARKER, reviewAnswers } = await import('../../src/review/answers.mjs');
+const { clearSecrets, registerSecret } = await import('../../src/util/redact.mjs');
 const { createWorker } = await import('../../src/worker/loop.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 
@@ -675,4 +676,283 @@ test('B71 (14): a packet that cannot be written to the work dir is unavailable p
   // the control: a usable work dir runs the one session
   const ok = await reviewAnswers(ticket, ctx, { entry: { base: null, owned: [SRC, ANS] }, workDir: freshDir('work'), io });
   assert.deepEqual([ok.status, spawned], ['answers', 1]);
+});
+
+test('B79 (a): a cap id with no severity recorded at the hash is never open, even when the cap row is the latest refusal; a cap id recorded as a warning is', async () => {
+  const f = await fixture('b79-cap-latest');
+  // W1 is recorded as a warning by the review; the cap row naming K1 and W1 comes after it (the latest refusal)
+  await signedReview(f, [{ id: 'W1', severity: 'warning' }]);
+  await f.sign({ event: 'review.cap', open: ['K1', 'W1'] });
+  f.script.answer = resolvedAll;
+  const cli = await f.answers(['K1']);
+  assert.deepEqual([cli.code, cli.out?.status, cli.out?.reason], [1, 'refused', 'answers-not-open']);
+  const forced = enqueueAnswers({ repoRoot: f.repo, run: f.runId, block: 'B1', file: SRC, byFile: ANS, answers: ['K1'] });
+  assert.equal(await f.drain(), 1);
+  const fr = /** @type {Record<string, any>} */ (readResult(f.repo, f.runId, forced.ticket));
+  assert.deepEqual([fr.status, fr.reason], ['answers', 'answers-not-open']);
+  assert.equal(f.sessions.length, 0);
+  assert.equal((await f.answeredRows()).length, 0);
+  // W1 (named by the cap row too, recorded as a warning at this hash) is open: one session, one row
+  assert.equal((await f.answers(['W1'])).code, 0);
+  assert.equal(await f.drain(), 1);
+  assert.equal(f.sessions.filter((x) => x.lens === 'answers').length, 1);
+  assert.deepEqual((await f.answeredRows()).map((r) => r.finding), ['W1']);
+  // the close still refuses K1 at the cap
+  await f.sign({ event: 'review.approved' }, ANS);
+  assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${SRC}; review_cap ${SRC} K1\n`]);
+});
+
+/**
+ * An in-process answers review of the fixture's run (no CLI, no queue): the spawned packets and the
+ * rows the worker would write.
+ * @param {Awaited<ReturnType<typeof fixture>>} f @param {Record<string, any>} [cfg]
+ */
+function direct(f, cfg = {}) {
+  /** @type {string[]} */
+  const packets = [];
+  /** @type {Array<Record<string, any>>} */
+  const written = [];
+  const ctx = {
+    repoRoot: f.repo,
+    runId: f.runId,
+    key: f.key,
+    cfg,
+    spawn: /** @type {any} */ (
+      async (/** @type {Record<string, any>} */ opts) => {
+        packets.push(readFileSync(opts.promptPath, 'utf8'));
+        return { status: 'ok', exit_code: 0, answer: { verdicts: [] } };
+      }
+    ),
+    readRows: async () => f.rows(),
+    writeRow: async (/** @type {Record<string, any>} */ row) => {
+      written.push(row);
+    },
+  };
+  return { ctx, packets, written };
+}
+
+test('B79 (b): a secret-like source is refused packet-unreadable like a secret-like answering file — no packet, no session, no row', async () => {
+  const f = await fixture('b79-secret');
+  const SECRET = 'config/credentials.json';
+  writeFile(f.repo, SECRET, '{"user": "FAKE"}\n');
+  await f.sign({ event: 'review.round', round: 1, kind: 'full', open_after: 1 }, SECRET);
+  await f.sign({ event: 'review.result', ticket: 't1', status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }] }, SECRET);
+  await signedReview(f, [{ id: 'W1', severity: 'warning' }]);
+  const io = { readFile: readRegularFileNoFollow, loadState: () => ({ status: 'missing' }), assertAnswers };
+  const entry = { base: null, owned: [SRC, ANS, SECRET] };
+  const d = direct(f);
+  // [source, answering file]: the secret-like file on either side
+  for (const [source, byFile] of [[SECRET, ANS], [SRC, SECRET]]) {
+    const workDir = freshDir('work');
+    const ticket = { ticket: 'd'.repeat(24), block: 'B1', file: source, content_hash: f.hashOf(source), by_file: byFile, by_hash: f.hashOf(byFile), answers: ['W1'] };
+    const out = await reviewAnswers(ticket, d.ctx, { entry, workDir, io });
+    assert.deepEqual([out.status, out.reason, out.approved], ['unavailable', 'packet-unreadable', false], source);
+    assert.deepEqual(readdirSync(workDir), [], source);
+  }
+  assert.deepEqual([d.packets.length, d.written.length], [0, 0]);
+  // the control: two plain files run the one session
+  const ticket = { ticket: 'e'.repeat(24), block: 'B1', file: SRC, content_hash: f.hashOf(SRC), by_file: ANS, by_hash: f.hashOf(ANS), answers: ['W1'] };
+  const ok = await reviewAnswers(ticket, d.ctx, { entry, workDir: freshDir('work'), io });
+  assert.deepEqual([ok.status, d.packets.length], ['answers', 1]);
+});
+
+/**
+ * The text between `from` and the first `to` after it (`to` empty: the rest), or null when `from` is
+ * not in `text`.
+ * @param {string} text @param {string} from @param {string} to
+ */
+function between(text, from, to) {
+  const at = text.indexOf(from);
+  if (at === -1) return null;
+  const rest = text.slice(at + from.length);
+  return to === '' ? rest : rest.slice(0, rest.indexOf(to));
+}
+
+/** The B79 packet layout of one finding's parts: [claim, evidence, fix, source excerpt]. */
+const SECTIONS = /** @type {const} */ ([
+  ['- claim: ', '\n- evidence: '],
+  ['- evidence: ', '\n- fix: '],
+  ['- fix: ', '\n\n'],
+  ['```\n', '\n```\n'],
+]);
+
+test('B79 (c)(c2): the whole packet stays within the budget — claim, evidence, fix, source excerpt and change each cut on a character boundary with its own marker, each within its own cap; a range past the end or recorded backwards shows no lines', async () => {
+  const MARKER = '[... truncated at the packet budget]';
+  const f = await fixture('b79-budget');
+  // line 3 of the source is 30 000 two-byte characters; the budget is full_in 2000 ⇒ 8000 bytes
+  writeFile(f.repo, SRC, `export const a = 2;\nexport function add(x, y) {\n  return ${'é'.repeat(30000)};\n}\n`);
+  await signedReview(f, [{ id: 'W1', severity: 'warning' }]);
+  const limit = 8000;
+  const cfg = { review: { budgets: { full_in: 2000 } } };
+  /** @param {Record<string, any>} finding */
+  const io = (finding) => ({ readFile: readRegularFileNoFollow, loadState: () => ({ status: 'ok', state: { open: [{ id: 'W1', severity: 'warning', ...finding }] } }), assertAnswers });
+  const entry = { base: null, owned: [SRC, ANS] };
+  const ticket = () => ({ ticket: 'f'.repeat(24), block: 'B1', file: SRC, content_hash: f.hashOf(SRC), by_file: ANS, by_hash: f.hashOf(ANS), answers: ['W1'] });
+  // claim, evidence and fix: each huge, of a different multi-byte character (2, 3 and 4 bytes)
+  const huge = { line_start: 3, line_end: 3, claim: 'ü'.repeat(50000), evidence: '€'.repeat(40000), fix: '😀'.repeat(30000) };
+  const markers = (/** @type {string} */ text) => text.split(MARKER).length - 1;
+  const CHANGE = '(a new file: its full content)\n```\n';
+  /**
+   * Each of the finding's four parts, in place: one marker, at its end, after only its own
+   * character (`chars[i]`). Each part fills its own cap, worked out from the packet: the fixed
+   * text is the packet less its parts and change; the finding gets half of the rest, each text
+   * part a fifth of that, the source excerpt what the three leave. A cut steps back at most 3
+   * bytes (a character boundary), so each part is within (cap - 4, cap].
+   * @param {string} p @param {string[]} chars
+   */
+  const partsCut = (p, chars) => {
+    const parts = SECTIONS.map(([from, to], i) => {
+      const part = /** @type {string} */ (between(p, from, to));
+      assert.equal(markers(part), 1, from);
+      assert.equal(part.endsWith(`\n${MARKER}`), true, from);
+      const body = part.slice(0, -`\n${MARKER}`.length);
+      assert.equal(body.length > 0 && [...body].every((c) => chars[i].includes(c)), true, from);
+      return Buffer.byteLength(part);
+    });
+    const change = Buffer.byteLength(/** @type {string} */ (between(p, CHANGE, '\n```\n')));
+    const fixed = Buffer.byteLength(p) - parts.reduce((a, b) => a + b, 0) - change;
+    const share = Math.floor((limit - fixed) / 2);
+    const textCap = Math.floor(share / 5);
+    const caps = [textCap, textCap, textCap, share - 3 * textCap];
+    parts.forEach((bytes, i) => assert.equal(bytes <= caps[i] && bytes > caps[i] - 4, true, `${SECTIONS[i][0]}${bytes} of ${caps[i]}`));
+    // the change gets what the fixed text and the parts leave
+    assert.equal(change <= limit - fixed - parts.reduce((a, b) => a + b, 0), true);
+  };
+  // (1) a huge claim, evidence, fix and source line: four parts cut, the small change whole
+  const d = direct(f, cfg);
+  assert.equal((await reviewAnswers(ticket(), d.ctx, { entry, workDir: freshDir('work'), io: io(huge) })).status, 'answers');
+  assert.equal(d.packets.length, 1);
+  const p1 = d.packets[0];
+  assert.equal(Buffer.byteLength(p1) <= limit, true, String(Buffer.byteLength(p1)));
+  assert.equal(markers(p1), 4);
+  assert.equal(p1.includes('�'), false);
+  partsCut(p1, ['ü', '€', '😀', '0123456789:;abcdefghijklmnopqrstuvwxyz ()=é{}\n,']);
+  assert.equal(between(p1, '```\n', '\n```\n')?.startsWith('1: export const a = 2;\n2: export function add(x, y) {\n3:   return éé'), true);
+  for (const part of ['Source lines 1-5:', "if (add(1, 1) !== 2) throw new Error('add');"]) assert.equal(p1.includes(part), true, part);
+  assert.equal(p1.endsWith('```\n'), true);
+  // (2) the answering file is huge too: five parts cut, still within the budget
+  writeFile(f.repo, ANS, `${ANS_V1}// ${'x'.repeat(40000)}\n`);
+  const d2 = direct(f, cfg);
+  assert.equal((await reviewAnswers(ticket(), d2.ctx, { entry, workDir: freshDir('work'), io: io(huge) })).status, 'answers');
+  const p2 = d2.packets[0];
+  assert.equal(Buffer.byteLength(p2) <= limit, true, String(Buffer.byteLength(p2)));
+  assert.equal(markers(p2), 5);
+  partsCut(p2, ['ü', '€', '😀', '0123456789:;abcdefghijklmnopqrstuvwxyz ()=é{}\n,']);
+  assert.equal(between(p2, `## The change in ${ANS}`, '')?.endsWith(`xxx\n${MARKER}\n\`\`\`\n`), true);
+  assert.equal(p2.includes("if (add(1, 1) !== 2) throw new Error('add');"), true);
+  // (c2) a recorded range past the end of the source (5 lines with the empty last one): the lines are named, no source block
+  writeFile(f.repo, ANS, ANS_V1);
+  const d3 = direct(f, cfg);
+  assert.equal((await reviewAnswers(ticket(), d3.ctx, { entry, workDir: freshDir('work'), io: io({ line_start: 50, line_end: 50, claim: 'c' }) })).status, 'answers');
+  const p3 = d3.packets[0];
+  assert.deepEqual([p3.includes('- lines: 50-50'), p3.includes('Source lines'), markers(p3)], [true, false, 0]);
+  // (c2) a range recorded backwards inside the file (4 to 2): the lines are named, no source block
+  const d4 = direct(f, cfg);
+  assert.equal((await reviewAnswers(ticket(), d4.ctx, { entry, workDir: freshDir('work'), io: io({ line_start: 4, line_end: 2, claim: 'c' }) })).status, 'answers');
+  const p4 = d4.packets[0];
+  assert.deepEqual([p4.includes('- lines: 4-2'), p4.includes('Source lines'), markers(p4), p4.endsWith('```\n')], [true, false, 0, true]);
+});
+
+test('B79 (c): a part is redacted before it is cut — a secret across the cut leaves no prefix of itself in the packet', async () => {
+  const f = await fixture('b79-secret-cut');
+  await signedReview(f, [{ id: 'W1', severity: 'warning' }]);
+  const SECRET = 'FAKE-secret-token-0123456789abcdef';
+  registerSecret(SECRET);
+  try {
+    const cfg = { review: { budgets: { full_in: 2000 } } };
+    // every cut point falls inside or right after a secret: the claim is nothing but secrets
+    const claim = `${SECRET} `.repeat(2000);
+    const io = { readFile: readRegularFileNoFollow, loadState: () => ({ status: 'ok', state: { open: [{ id: 'W1', severity: 'warning', claim }] } }), assertAnswers };
+    const ticket = { ticket: 'f'.repeat(24), block: 'B1', file: SRC, content_hash: f.hashOf(SRC), by_file: ANS, by_hash: f.hashOf(ANS), answers: ['W1'] };
+    const d = direct(f, cfg);
+    assert.equal((await reviewAnswers(ticket, d.ctx, { entry: { base: null, owned: [SRC, ANS] }, workDir: freshDir('work'), io })).status, 'answers');
+    const p = d.packets[0];
+    assert.equal(Buffer.byteLength(p) <= 8000, true, String(Buffer.byteLength(p)));
+    assert.deepEqual([p.includes('FAKE'), p.includes('secret-token'), p.split(TRUNCATED_MARKER).length - 1], [false, false, 1]);
+    // the cut claim is a prefix of the redacted claim (masks only), then its marker
+    const cut = /** @type {string} */ (between(p, '- claim: ', '\n- evidence: '));
+    const body = cut.slice(0, -`\n${TRUNCATED_MARKER}`.length);
+    assert.deepEqual([cut.endsWith(`\n${TRUNCATED_MARKER}`), body.length > 0, '[REDACTED] '.repeat(2000).startsWith(body)], [true, true, true]);
+  } finally {
+    clearSecrets();
+  }
+});
+
+test('B79 (c): a redaction that grows every part never cuts the packet — the closing fence is the last line and each cut part has its one marker; a secret across a part boundary is refused, never cut', async () => {
+  const f = await fixture('b79-secret-grow');
+  // a 5-byte secret masked as `[REDACTED]` (10 bytes): every part doubles when redacted
+  const SECRET = 'FAKE1';
+  writeFile(f.repo, SRC, `export const a = 2;\nexport function add(x, y) {\n  return ${`${SECRET} `.repeat(6000)};\n}\n`);
+  writeFile(f.repo, ANS, `${ANS_V1}// ${`${SECRET} `.repeat(8000)}\n`);
+  await signedReview(f, [{ id: 'W1', severity: 'warning' }]);
+  const many = `${SECRET} `.repeat(4000);
+  /** @param {Record<string, any>} finding */
+  const io = (finding) => ({ readFile: readRegularFileNoFollow, loadState: () => ({ status: 'ok', state: { open: [{ id: 'W1', severity: 'warning', line_start: 3, line_end: 3, ...finding }] } }), assertAnswers });
+  const entry = { base: null, owned: [SRC, ANS] };
+  const ticket = { ticket: 'f'.repeat(24), block: 'B1', file: SRC, content_hash: f.hashOf(SRC), by_file: ANS, by_hash: f.hashOf(ANS), answers: ['W1'] };
+  registerSecret(SECRET);
+  try {
+    const d = direct(f, { review: { budgets: { full_in: 2000 } } });
+    assert.equal((await reviewAnswers(ticket, d.ctx, { entry, workDir: freshDir('work'), io: io({ claim: many, evidence: many, fix: many }) })).status, 'answers');
+    const p = d.packets[0];
+    assert.equal(Buffer.byteLength(p) <= 8000, true, String(Buffer.byteLength(p)));
+    // claim, evidence, fix, source excerpt and change: one marker each, no other
+    assert.deepEqual([p.split(TRUNCATED_MARKER).length - 1, p.includes(SECRET), p.endsWith(`\n${TRUNCATED_MARKER}\n\`\`\`\n`)], [5, false, true]);
+    assert.equal(p.split('\n').at(-2), '```');
+    for (const [from, to] of [...SECTIONS, ['(a new file: its full content)\n```\n', '\n```\n']]) assert.equal(between(p, from, to)?.split(TRUNCATED_MARKER).length, 2, from);
+    // a secret only the joined packet holds (the end of the claim, the evidence label): refused, no session, no row
+    clearSecrets();
+    registerSecret('FAKE2\n- evidence: x');
+    const workDir = freshDir('work');
+    const d2 = direct(f, { review: { budgets: { full_in: 2000 } } });
+    const out = await reviewAnswers(ticket, d2.ctx, { entry, workDir, io: io({ claim: 'FAKE2', evidence: 'x', fix: 'y' }) });
+    assert.deepEqual([out.status, out.reason, out.approved, d2.packets.length, d2.written.length, readdirSync(workDir)], ['unavailable', 'packet-unreadable', false, 0, 0, []]);
+  } finally {
+    clearSecrets();
+  }
+});
+
+test('B79 (c): many findings and a small budget — each part within its cap (a short marker when the cap cannot hold the full one); a fixed text over the budget is packet-too-large with no session', async () => {
+  const f = await fixture('b79-many');
+  writeFile(f.repo, SRC, `export const a = 2;\nexport function add(x, y) {\n  return ${'é'.repeat(30000)};\n}\n`);
+  writeFile(f.repo, ANS, `${ANS_V1}// ${'x'.repeat(40000)}\n`);
+  const ids = Array.from({ length: 10 }, (_, i) => `W${i + 1}`);
+  await signedReview(f, ids.map((id) => ({ id, severity: 'warning' })));
+  const open = ids.map((id) => ({ id, severity: 'warning', line_start: 3, line_end: 3, claim: 'ü'.repeat(5000), evidence: '€'.repeat(5000), fix: '😀'.repeat(5000) }));
+  const io = { readFile: readRegularFileNoFollow, loadState: () => ({ status: 'ok', state: { open } }), assertAnswers };
+  const entry = { base: null, owned: [SRC, ANS] };
+  const ticket = { ticket: 'f'.repeat(24), block: 'B1', file: SRC, content_hash: f.hashOf(SRC), by_file: ANS, by_hash: f.hashOf(ANS), answers: ids };
+  const count = (/** @type {string} */ text, /** @type {string} */ m) => text.split(m).length - 1;
+  /** One finding's block of the packet, its excerpt as given. @param {string} id @param {string} text @param {string} excerpt */
+  const block = (id, text, excerpt) => `## Finding ${id}\n\n- file: ${SRC}\n- lines: 3-3\n- severity: warning\n- claim: ${text}\n- evidence: ${text}\n- fix: ${text}\n\nSource lines 1-5:\n\`\`\`\n${excerpt}\n\`\`\`\n\n`;
+  /** @param {number} fullIn */
+  const run = async (fullIn) => {
+    const d = direct(f, { review: { budgets: { full_in: fullIn } } });
+    const workDir = freshDir('work');
+    const out = await reviewAnswers(ticket, d.ctx, { entry, workDir, io });
+    return { out, d, workDir, p: d.packets[0] ?? '' };
+  };
+  // [full_in, a finding's text part, its excerpt, short markers, full markers]: the fixed text of
+  // ten findings fits; each text part's cap is too small for the full marker (a short one when it
+  // fits, else nothing); the excerpt's larger cap takes the full marker once it can; the change
+  // takes the rest, cut with the full marker
+  const cases = /** @type {Array<[number, string, string, number, number]>} */ ([
+    [500, '', SHORT_MARKER, 10, 1],
+    [600, SHORT_MARKER, SHORT_MARKER, 40, 1],
+    [900, SHORT_MARKER, `1\n${TRUNCATED_MARKER}`, 30, 11],
+    [1000, SHORT_MARKER, `1: export\n${TRUNCATED_MARKER}`, 30, 11],
+  ]);
+  for (const [fullIn, text, excerpt, short, full] of cases) {
+    const { out, d, p } = await run(fullIn);
+    assert.deepEqual([out.status, d.packets.length], ['answers', 1], String(fullIn));
+    assert.equal(Buffer.byteLength(p) <= fullIn * 4, true, `${fullIn}: ${Buffer.byteLength(p)}`);
+    assert.deepEqual([count(p, SHORT_MARKER), count(p, TRUNCATED_MARKER)], [short, full], String(fullIn));
+    for (const id of ids) assert.equal(p.includes(block(id, text, excerpt)), true, `${fullIn} ${id}`);
+    assert.equal(p.endsWith(`xxx\n${TRUNCATED_MARKER}\n\`\`\`\n`), true, String(fullIn));
+    assert.equal(p.includes('�'), false);
+  }
+  // the fixed text of ten findings alone is over 1600 bytes: final for these ids, no packet, no session, no row
+  const { out, d, workDir } = await run(400);
+  assert.deepEqual([out.status, out.reason, out.approved], ['unavailable', 'packet-too-large', false]);
+  assert.deepEqual([d.packets.length, d.written.length, readdirSync(workDir)], [0, 0, []]);
 });

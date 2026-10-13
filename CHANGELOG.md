@@ -32,6 +32,13 @@ waits on a second real consumer (plan §10.4, Q17).
   writes a signed gate.review_waived_all row; unknown severities are human-only (#9)
 - Test isolation guard: new files of a run that existed before the test process (its lock, key or run directory) no
   longer count as leaks; a new run id or any other new path still fails the process.
+- `review-file --answers` reads the severity of every `review.cap` id from the signed refusal rows, so an id the close
+  cannot count is refused before a reviewer session (B79).
+- The answers packet checks the source file with the secret-path rule, redacts each part before it is cut, keeps every
+  part and the whole packet inside the budget, and refuses `packet-too-large` when the fixed text alone is over it
+  (B79).
+- `block reopen` refuses a non-string `tmp.root` as `reopen-config`, and `reopen-write-failed` names the error code,
+  never a path (B79).
 
 ## [0.8.0] — 2026-10-12
 

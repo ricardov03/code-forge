@@ -372,15 +372,31 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
   };
 
   /**
+   * B79: the ids every signed `review.cap` row for (file, hash) names. A cap row records no
+   * severity, so the rules read each of these ids at {@link recordedRefusalSeverity} — also when
+   * that cap row is the latest refusal (its own null never stands for them).
+   * @param {string} file @param {string} hash @returns {Set<string>}
+   */
+  const capIdsAt = (file, hash) => {
+    /** @type {Set<string>} */
+    const ids = new Set();
+    for (const cap of mine) {
+      if (cap.event !== 'review.cap' || cap.file !== file || cap.content_hash !== hash || !Array.isArray(cap.open) || !ok(cap)) continue;
+      for (const id of cap.open) if (typeof id === 'string' && id.length > 0) ids.add(id);
+    }
+    return ids;
+  };
+
+  /**
    * B70: the findings a real review of (file, hash) left open, with the severity each is read at,
    * or null when no such review qualifies. All of: a signed `review.round` row for (file, hash) — a
    * session reviewed these bytes; the latest refusal row for (file, hash) is signed, carries
    * `content_hash: hash` (a hash-less one never qualifies) and names at least one finding. The ids
    * are every finding it names and every open id of the file's `review.cap` rows. Severities: an id
-   * the latest refusal names (a cap row's too, when that is the latest) uses the severity THAT row
-   * records; a recorded null (a cap row records none) is decided by {@link autopilotWaiverProblem}
-   * from the signed review rows. Any other open cap id uses {@link recordedRefusalSeverity}, whose
-   * `unknown` (no signed refusal at `hash` records one) is the human's alone. A cap row whose
+   * a signed `review.cap` row at (file, hash) names ({@link capIdsAt}) — also when that cap row is
+   * the latest refusal — and any other open cap id use {@link recordedRefusalSeverity}, whose
+   * `unknown` (no signed refusal at `hash` records one) is the human's alone and never answered.
+   * Any other id the latest refusal names uses the severity THAT row records. A cap row whose
    * `open` is not an array of non-empty strings (the fix loop's shape) fails closed: null.
    * @param {string} file @param {string} hash
    * @returns {Map<string, unknown> | null}
@@ -391,6 +407,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     if (latest === null || latestRow === null || latestRow.content_hash !== hash || !ok(latestRow) || latest.open.length === 0) return null;
     /** @type {Map<string, unknown>} */
     const named = new Map(latest.open.map((f) => [f.id, f.severity]));
+    for (const id of capIdsAt(file, hash)) named.set(id, recordedRefusalSeverity(file, hash, id));
     for (const cap of mine.filter((r) => r.event === 'review.cap' && r.file === file)) {
       if (!Array.isArray(cap.open) || !cap.open.every((/** @type {unknown} */ id) => typeof id === 'string' && id.length > 0)) return null;
       for (const id of cap.open) if (!named.has(id)) named.set(id, recordedRefusalSeverity(file, hash, id));
@@ -434,8 +451,8 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
    * B71: the findings still open on `file` at `hash` an answer may name: every id the latest
    * signed, hash-bound refusal row for (file, hash) names, and every open id of a signed `review.cap`
    * row for (file, hash), that {@link waiverOf} does not clear yet (not waived, not answered), with
-   * the severity it is read at. An id the close could never count as answered — the proof
-   * finding, or one read at a severity outside {@link answerableSeverity} (an unknown value, or a
+   * the severity it is read at (a cap id's: {@link recordedRefusalSeverity}, B79). An id the close
+   * could never count as answered — the proof finding, or one read at a severity outside {@link answerableSeverity} (an unknown value, or a
    * cap id no signed refusal at `hash` records) — is never open here, so it is refused before any
    * session. `ticket`: that answers ticket's own rows do not close an id (a retry after a partial
    * write finishes instead of being refused).
@@ -447,10 +464,8 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     const named = new Map();
     const { latest, latestRow } = latestOf(file, hash);
     if (latest !== null && latestRow !== null && latestRow.content_hash === hash && ok(latestRow)) for (const f of latest.open) named.set(f.id, f.severity);
-    for (const cap of mine) {
-      if (cap.event !== 'review.cap' || cap.file !== file || cap.content_hash !== hash || !Array.isArray(cap.open) || !ok(cap)) continue;
-      for (const id of cap.open) if (typeof id === 'string' && id.length > 0 && !named.has(id)) named.set(id, recordedRefusalSeverity(file, hash, id));
-    }
+    // B79: a cap id is read at its recorded severity even when the cap row is the latest refusal
+    for (const id of capIdsAt(file, hash)) named.set(id, recordedRefusalSeverity(file, hash, id));
     return new Map([...named].filter(([id, severity]) => id !== PROOF_FINDING && answerableSeverity(severity) && waiverOf(file, id, severity, ticket).by === null));
   };
 

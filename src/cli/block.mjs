@@ -204,20 +204,20 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow }) {
   const entry = openBlockEntry(record, runId, id);
   const real = async (/** @type {string} */ p) => realpath(p).catch(() => path.resolve(p));
   const mainTop = await real(await repoTop(record.workspace));
-  /** @type {Awaited<ReturnType<typeof blockTree>>} */
-  let wt = null;
-  wt = await blockTree(record.workspace, entry).catch((thrown) => {
+  const wt = await blockTree(record.workspace, entry).catch((thrown) => {
     if (typeof thrown?.code === 'string' && thrown.code.startsWith('worktree-')) throw new StateError(thrown.code, `block ${id}: ${thrown.message}, so the file's content cannot be read; nothing was recorded`);
     throw thrown;
   });
   const contentRoot = wt === null ? mainTop : wt.top;
   const wsPrefix = path.relative(mainTop, await real(record.workspace)).split(path.sep).join('/');
   // the state is read where the worker keeps it: an unreadable snapshot or tmp.root is refused,
-  // never guessed (a wrong root would read as "no state")
+  // never guessed (a wrong root would read as "no state"); only an absent tmp.root (undefined or
+  // null) means the default root, any other non-string is refused (B79)
   /** @type {string} */
   let runRootDir;
   try {
     const root = configInForce(record)?.tmp?.root;
+    if (root !== undefined && root !== null && typeof root !== 'string') throw new TypeError('tmp.root is not a string');
     runRootDir = runRootPath(runId, typeof root === 'string' ? { root } : {});
   } catch {
     throw new StateError('reopen-config', `reopen-config: the run's config snapshot or its tmp.root cannot be read, so the review state of ${file} cannot be found; nothing was recorded`);

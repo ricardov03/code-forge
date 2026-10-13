@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 80,
+  "block_count": 81,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1105,6 +1105,24 @@
         "B71"
       ],
       "note": "root-added 2026-10-12; GitHub issues #12 and #15 review-exits plan (plans/review-exits/plan.md); human-only verb on CODER_ONLY_FORBIDDEN, signed review.reopened row bound to the latest anchor seq, stop_content_hash in the state, one row per at_seq, L3 rung stays spent; also amends src/cli/block.mjs, src/util/forbidden.mjs, src/worker/engine.mjs, src/worker/queue.mjs, the forbidden-list pin tests, skill/references/review.md, skill/references/ledger.md, skill/references/code.md and docs/how-it-works.md"
+    },
+    "B79": {
+      "title": "Review-exit leftovers: cap-row severity, answers packet secrets and budget, reopen config and write cause",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/review/answers.mjs",
+        "src/review/gate-check.mjs",
+        "src/cli/block.mjs",
+        "src/review/reopen.mjs",
+        "test/review/answers.test.mjs",
+        "test/review/reopen.test.mjs"
+      ],
+      "depends_on": [
+        "B72"
+      ],
+      "note": "root-added 2026-10-12; leftovers from the B71 and B72 round-3 reviews; also amends B71 (answers packet, openAt) and B72 (reopen config, write failure)"
     }
   }
 }
