@@ -461,6 +461,18 @@ packet, only the moves that sit under that section's headings (none, no section)
 files are listed and read once per review (a file the block deleted counts, all its lines removed), and a file that cannot be read gives no hint. Code
 moved inside one file (removed in one place, added in another) is not detected.
 
+A **deleted** owned file is reviewed like any other change (B74): `review-file <path>` on a file
+that is gone queues it at the content hash `deleted`, and its packet gets a `## deleted file`
+section before the diff. It says the file is deleted and lists the tree paths that still name its
+basename (one `git grep` in the working tree the diff is read from, untracked files included: at
+most 20 paths, sorted, never the deleted path itself or a secret-like path; a name with a control
+character is never printed, only counted in `(<n> more not listed)`), so the reviewer checks for
+dangling references. No match says `no references found`; a grep that fails, or a basename
+shorter than 3 characters, says `references not checked`. Only a file whose path is absent from
+the tree counts as deleted: a changed binary file never gets the note. It is a hint, not an exemption: a grep cannot prove nothing depends on
+a file, so a deletion still needs a signed approval (or a waiver or answers exit) to close, and an
+approval at `deleted` stops counting when the file comes back.
+
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
 exactly, and the output is long enough (`review.min_tokens_out`, default 120). A clean pass
 (`passed: true`, no findings, a summary) needs only 40 tokens, whatever the diff size. Anything else is `review.unavailable`, never approval.

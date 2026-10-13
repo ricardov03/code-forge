@@ -17,6 +17,9 @@ waits on a second real consumer (plan §10.4, Q17).
   reopen-config, reopen-already-recorded, reopen-write-failed.
 - A stopped `review-file` answer carries `exits`, and the gate's `review_cap` and stopped-file `unreviewed` detail end
   with the same exits (B73, issue #12).
+- The review packet of a deleted owned file carries a `## deleted file` note: up to 20 tracked or untracked paths that
+  still name its basename (one bounded `git grep`, secret-like and control-character paths left out), `no references
+  found`, or `references not checked` (B74, issue #8).
 
 ### Changed
 

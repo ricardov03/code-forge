@@ -40,12 +40,15 @@
  *     (`moved.mjs`, B56). The peers' diffs are read once per review (`input.peerDiffs`, or a
  *     reader built from `input.peers`). It is extra text: every hunk still goes to the reviewer,
  *     and it counts toward the budget in the same measure.
+ *  9. a pure deletion (the file is gone from the reviewed tree) gets a `## deleted file` note in
+ *     every packet — reviewers and judge — naming up to 20 tree paths that still name its basename
+ *     (`deletion.mjs`, B74). It is a hint, never an exemption: the deletion still needs approval.
  * Approval (until B12b's triage lands) = the final answer (the judge's in dual/consensus mode, else
  * the single reviewer's) passed the guard, says `passed: true`, and carries no `critical` or
  * `warning` finding.
  */
 
-import { mkdirSync, rmSync, writeFileSync } from 'node:fs';
+import { lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { resolveLevel } from '../config/known-ids.mjs';
@@ -55,6 +58,7 @@ import { isMigrationPath, isPolicyPath } from '../decide/lane-facts.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
+import { deletionNote, renderDeletionNote } from './deletion.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
@@ -182,6 +186,8 @@ export function rulesRisk({ file, plusCount, cfg }) {
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow] - ledger rows
  *   (`review.plan`, `review.unavailable`, `review.schema_invalid`, `review.schema_fallback`); a
  *   failed write never fails the review (a failed `review.schema_fallback` write means no try).
+ * @property {(opts: {repoRoot: string, file: string}) => Promise<string>} [deletionNote] - B74: the
+ *   deletion note reader (default `deletionNote`, `deletion.mjs`); a throw gives `references not checked`.
  * @property {import('./schema-fallback.mjs').SchemaHistory} [schemaHistory] - B55: the packet's
  *   signed schema-miss history (the worker's); absent ⇒ no second-level try.
  */
@@ -233,8 +239,22 @@ export async function reviewFile(input, deps) {
   } catch {
     moves = null; // no hint; the review goes on
   }
+  // B74: a pure deletion gets the `## deleted file` note in every packet, read once; it is extra
+  // text like the moved code, counted in the same measure. "Deleted" is explicit: the diff is not
+  // empty (checked above), the reader found no content (`readFileDiff` gives null ONLY for a path
+  // not on disk: a binary file is decoded text, an unreadable one throws) AND the path is absent
+  // from the reviewed tree now. The references are read in that same tree (`repoRoot`).
+  let deleted = '';
+  if (diff.content === null && isAbsent(repoRoot, diff.file)) {
+    const note = deps.deletionNote ?? deletionNote;
+    try {
+      deleted = await note({ repoRoot, file: diff.file });
+    } catch {
+      deleted = renderDeletionNote(diff.file, { status: 'not_checked', paths: [], more: 0 }); // the review goes on
+    }
+  }
   /** @param {ReadonlyArray<number> | null} keys - a Markdown section's group keys; null ⇒ the whole file. */
-  const movedOf = (keys) => movedText(moves, diff.content, keys);
+  const movedOf = (keys) => [deleted, movedText(moves, diff.content, keys)].filter((t) => typeof t === 'string' && t.length > 0).join('\n');
   const min = minTokensOut(cfg);
   // B55: never in consensus mode — its providers (two reviewers, the judge) are the check itself
   const schemaFallback = plan.mode !== 'consensus';
@@ -464,6 +484,20 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
   };
   if (!verdict.ok) return { ...meta, status: 'unavailable', reason: verdict.reason, review: null };
   return { ...meta, status: 'ok', reason: null, review: verdict.review };
+}
+
+/**
+ * B74: whether `file` is absent from the tree at `repoRoot` (lstat says ENOENT or ENOTDIR).
+ * @param {string} repoRoot @param {string} file @returns {boolean}
+ */
+function isAbsent(repoRoot, file) {
+  try {
+    lstatSync(path.join(repoRoot, file));
+    return false;
+  } catch (err) {
+    const code = /** @type {NodeJS.ErrnoException} */ (err).code;
+    return code === 'ENOENT' || code === 'ENOTDIR';
+  }
 }
 
 /**

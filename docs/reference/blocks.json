@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 83,
+  "block_count": 84,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1158,6 +1158,23 @@
         "B73"
       ],
       "note": "root-added 2026-10-12; the claimRotatedName two-racers test failed once under full-suite load during the B73 land; an afterLink hook forces the race order"
+    },
+    "B74": {
+      "title": "A deleted owned file is reviewed with a deletion note",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/review/engine.mjs",
+        "src/review/deletion.mjs",
+        "test/worker/deletion-review.test.mjs",
+        "docs/how-it-works.md",
+        "skill/references/review.md"
+      ],
+      "depends_on": [
+        "B81"
+      ],
+      "note": "root-added 2026-10-12; issue #8; the deletion flow already worked end to end (pinned by test); adds the deletion note with bounded reference search"
     }
   }
 }

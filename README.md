@@ -22,6 +22,7 @@ In the next release:
 - **Safer answers packets and clearer reopen errors (B79).** An id named only by a `review.cap` row with no recorded severity is refused before any reviewer session. The answers packet checks the source file for secrets, stays inside the packet budget and refuses `packet-too-large` instead of going over it. `block reopen` refuses a bad `tmp.root` and names the cause of a failed write.
 - **A last-chance patch that fixes something is progress (B73).** When the L3 patch closes at least one old finding and the file is under the round cap, the fix loop goes on at L2 instead of stopping `l3_patch_exhausted`. A stopped answer from `review-file` and the gate's `review_cap` detail now list the exits: `block reopen`, `block waive`, `review-file --answers`, re-decompose.
 - **A steadier test suite (B81).** The ledger rotation race test forces the race order through a test hook, so it no longer fails at random under load.
+- **Deleted files get a useful review (B74).** When a block deletes an owned file, the review packet says the file is deleted and lists up to 20 files that still name it, so the reviewer can look for dangling references. A deletion still needs an approval.
 
 In 0.8.0:
 
