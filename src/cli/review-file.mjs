@@ -10,8 +10,8 @@
  *                                                  status, kind: answers, file: source, by_file, answers}
  *   review-file <path> --block <id> --fresh        B75: re-run a cached result that never counted
  *
- * The same content enqueued again after an `unavailable` result is a fresh attempt (`retry: true`),
- * not the old result.
+ * The same content enqueued again after an `unavailable` or round-1 `split_required` result is a
+ * fresh attempt (`retry: true`), not the old result.
  * A done result that is not approved and carries open findings adds `fix_list` (what the coder
  * fixes before re-running `review-file <path>`, which is then a round-2 recheck of the fix hunks,
  * §4.11); a result the loop stopped adds `stop` with the reason (`review_cap`, …) and (B73)
@@ -28,8 +28,9 @@
  * down on two polls in a row, and a worker whose pid is alive with a fresh heartbeat is never down
  * (`liveWorker`, B30). Output is one JSON line on stdout.
  * B75: `--fresh` drops the cached done marker of the file's current content and queues the ticket
- * again ONLY when that result never counted as a review: `stale`, `unavailable`, or `refused` with
- * `other-run`, `context-unreadable` or a `worktree-*` reason (an allow-list, fail closed). Any
+ * again ONLY when that result never counted as a review: `stale`, `unavailable`, round-1
+ * `split_required`, or `refused` with `other-run`, `context-unreadable` or a `worktree-*` reason
+ * (an allow-list, fail closed). Any
  * other cached result — a round ran (findings, approved, stopped), `review-state-lost`, an answers
  * result, an unknown status or reason, an unreadable marker — is refused `fresh-needs-reopen`
  * (exit 1, `exits: [block reopen, block waive]`, the marker kept byte-for-byte); a
@@ -129,8 +130,9 @@ const FRESH_REFUSED = new Set(['other-run', 'context-unreadable']);
 
 /**
  * B75: may `--fresh` drop this cached result? An allow-list, fail closed: `rerun` only for a
- * result that never counted as a review — `stale`, `unavailable`, or `refused` with a reason that
- * is not a verdict (`other-run`, `context-unreadable`, `worktree-*`) — whose marker names the same
+ * result that never counted as a review — `stale`, `unavailable`, round-1 `split_required`, or
+ * `refused` with a reason that is not a verdict (`other-run`, `context-unreadable`, `worktree-*`)
+ * — whose marker names the same
  * status. `tampered` for `refused review-state-tampered`; `counted` for everything else (a round
  * ran, `review-state-lost`, an answers result, an unknown status or reason, an unreadable marker or
  * result).
@@ -145,7 +147,7 @@ export function freshVerdict(text, result) {
     return 'counted';
   }
   if (result === null || marker === null || typeof marker !== 'object' || marker.status !== result.status) return 'counted';
-  if (result.status === 'stale' || result.status === 'unavailable') return 'rerun';
+  if (result.status === 'stale' || result.status === 'unavailable' || result.status === 'split_required') return 'rerun';
   if (result.status !== 'refused' || typeof result.reason !== 'string') return 'counted';
   if (result.reason === 'review-state-tampered') return 'tampered';
   return FRESH_REFUSED.has(result.reason) || result.reason.startsWith('worktree-') ? 'rerun' : 'counted';
@@ -166,10 +168,11 @@ export const FRESH_EXITS = Object.freeze(['block reopen', 'block waive']);
  * crash between the drop and the enqueue leaves only a re-runnable pending ticket. Anything else is refused and the marker kept byte-for-byte:
  * `fresh-needs-reopen` (names `block reopen` and `block waive`) or `fresh-tampered` (names only
  * the owner's `block close --no-require-reviews`; reopen refuses a tampered state).
- * @param {{repoRoot: string, run: string, block: string, file: string, where: {tree?: string}, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf}} opts
+ * B110: a plain cached round-1 `split_required` uses the same claim, with `retry: true`.
+ * @param {{repoRoot: string, run: string, block: string, file: string, where: {tree?: string}, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf, retry?: boolean}} opts
  * @returns {number} the exit code.
  */
-function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDoneIf }) {
+function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDoneIf, retry = false }) {
   const { ticket } = resolveTicket({ repoRoot, run, block, file, tree: where.tree ?? null });
   const markerPath = path.join(queueDir(repoRoot), `${ticket}.done`);
   /** @type {'rerun' | 'tampered' | 'counted'} */
@@ -210,7 +213,7 @@ function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDo
     // dropped: queue it again now (a crash right here leaves a pending ticket with no marker, which
     // the next review-file queues anyway); gone: another caller took the marker, a normal enqueue
     const queued = enqueue({ repoRoot, run, block, file, ...where });
-    say(outcome === 'dropped' ? { ...queued, fresh: true } : queued);
+    say(outcome === 'dropped' ? { ...queued, ...(retry ? { retry: true } : { fresh: true }) } : queued);
     return 0;
   }
   if (verdict === 'tampered') {
@@ -223,7 +226,7 @@ function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDo
     ticket,
     file,
     exits: [...FRESH_EXITS],
-    message: `fresh-needs-reopen: the cached result of ${file} counts as a review (or cannot be read, or kept changing under the claim); --fresh re-runs only stale, unavailable or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`,
+    message: `fresh-needs-reopen: the cached result of ${file} counts as a review (or cannot be read, or kept changing under the claim); --fresh re-runs only stale, unavailable, round-1 split_required or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`,
   });
   return 1;
 }
@@ -410,6 +413,9 @@ export async function runReviewFile(args, deps = {}) {
     const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree };
     if (flags.fresh === true) return freshTicket({ repoRoot, run: worker.run, block, file, where, say, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
     const queued = enqueue({ repoRoot, run: worker.run, block, file, ...where });
+    if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'split_required') {
+      return freshTicket({ repoRoot, run: worker.run, block, file, where, say, retry: true, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
+    }
     if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'unavailable') {
       // `unavailable` is never approval AND never final: drop the done marker so the worker runs
       // the ticket again (the fix loop re-runs its pending round); the signed result is replaced.

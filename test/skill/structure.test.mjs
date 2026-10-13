@@ -536,7 +536,7 @@ test('B76 (2): code.md §5 orders the exits, has the human run block reopen in t
     '\n3. **`block waive`.**',
     '\n4. **Re-decompose.**',
     '\n`block attempt` never resets review state: it only raises the attempt counter, and a stopped file stays stopped.',
-    'Use `review-file --fresh` only after a result that never counted (`stale`, `unavailable`, or `refused` with `other-run`, `context-unreadable` or `worktree-*`); it never re-runs a counted round.',
+    'Use `review-file --fresh` only after a result that never counted (`stale`, `unavailable`, round-1 `split_required`, or `refused` with `other-run`, `context-unreadable` or `worktree-*`); it never re-runs a counted round.',
     'A missing state file needs no exit: the worker first rebuilds it from its ledger anchor (`review.state_restored`).',
     'Only a state whose anchor has no `state_body` is `lost` (`review-state-lost`); that one needs the human\'s `block reopen`, on its current content.',
     'A `review-state-tampered` file has none of these exits: only the owner\'s `block close --no-require-reviews` gets past it.',

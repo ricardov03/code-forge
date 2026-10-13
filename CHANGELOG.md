@@ -19,6 +19,8 @@ waits on a second real consumer (plan §10.4, Q17).
   mismatched hand line under `--report` is a WARN, not a refusal (B96, #16).
 - A quick review packet over `quick_in` steps up to one full L2 session when it fits `full_in`, before `split_required`;
   the `review.plan` row carries `step_up: {from, tokens_in, budget}` (B109, #16).
+- A cached round-1 `split_required` is re-queued by `review-file` (`retry: true`) and by `review-file --fresh`, with the
+  same ticket id; a recheck `split_required` stop still needs `block reopen` or `block waive` (B110, #16).
 
 ## [0.10.0] — 2026-10-13
 

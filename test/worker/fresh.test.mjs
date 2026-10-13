@@ -130,7 +130,7 @@ describe('B75 review-file --fresh: a counted result is never re-rolled', () => {
         { status: 'answers', findings: [] },
         { status: 'refused', reason: 'bad-path' },
         { status: 'refused' },
-        { status: 'split_required' },
+        { status: 'stopped', stopped: 'split_required' },
         { status: 'something-new' },
       ];
       const answers = [];
@@ -168,7 +168,7 @@ describe('B75 review-file --fresh: a counted result is never re-rolled', () => {
     try {
       f.cache({ status: 'stopped', stopped: 'review_cap', findings: [] });
       const stopped = await reviewFile(f.repo, [FILE, '--block', BLOCK, '--fresh']);
-      assert.equal(stopped.json.message, `fresh-needs-reopen: the cached result of ${FILE} counts as a review (or cannot be read, or kept changing under the claim); --fresh re-runs only stale, unavailable or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`);
+      assert.equal(stopped.json.message, `fresh-needs-reopen: the cached result of ${FILE} counts as a review (or cannot be read, or kept changing under the claim); --fresh re-runs only stale, unavailable, round-1 split_required or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`);
 
       f.cache({ status: 'refused', reason: 'review-state-tampered' });
       const before = readFileSync(f.marker);

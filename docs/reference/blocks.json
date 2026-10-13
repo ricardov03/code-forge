@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 105,
+  "block_count": 106,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1692,6 +1692,25 @@
         "B96"
       ],
       "note": "root-added 2026-10-13; issue #16 item 1 (plans/field-bugs/plan.md B109, D1 = a); a non-Markdown quick packet over quick_in is planned again at risk 1; if that plan is one full session and fits full_in it reviews with it (review.plan step_up {from: 'quick', tokens_in, budget}); otherwise split_required with the full packet's size; first block built by Codex at high effort"
+    },
+    "B110": {
+      "title": "Re-run a cached round-1 split_required",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/code.md",
+        "skill/references/review.md",
+        "src/cli/review-file.mjs",
+        "test/skill/structure.test.mjs",
+        "test/worker/fresh-split.test.mjs",
+        "test/worker/fresh.test.mjs"
+      ],
+      "depends_on": [
+        "B109"
+      ],
+      "note": "root-added 2026-10-13; issue #16 item 2 (plans/field-bugs/plan.md B110); a cached round-1 split_required ran no session and counts no round: plain review-file re-queues it with retry: true and --fresh re-queues it, same ticket id; a recheck stop (status stopped, stopped split_required) still needs block reopen or waive; built by Codex at high effort"
     }
   }
 }

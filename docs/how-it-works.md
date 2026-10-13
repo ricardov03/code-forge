@@ -584,6 +584,14 @@ not used, which includes an L2 rule in consensus mode, because slot B is not the
 A deleted file is never routed. With no `review.routes`, or no rule that matches, the
 review runs exactly as before. `run reload` accepts a change to the key.
 
+A cached round-1 `split_required` ran no session and counted no round. Plain `review-file`
+re-queues it with `retry: true`, and `review-file --fresh` re-queues it too (B110), keeping the
+same ticket id. After a budget change and `run reload`, the worker re-plans with the live config.
+If it still does not fit, it returns `split_required` again with no session or cost. A recheck
+stop (`status: stopped`, `stopped: split_required`) has a `review.cap` row and still needs
+`block reopen` or `block waive`: plain review returns it cached and `--fresh` refuses
+`fresh-needs-reopen`.
+
 ### Answering a finding from another file
 
 Sometimes a finding on one file is fixed in a different file of the same block: the reviewer of
@@ -727,8 +735,8 @@ flowchart TD
   block can close with a signed `gate.review_waived_all` row (see the next table). Two things are
   not exits. `block attempt` never resets review state: a stopped file stays stopped. And
   `review-file --fresh` re-runs only a result that never counted as a review (`stale`,
-  `unavailable`, or a refusal such as `other-run`); on a stop it is refused. A `tampered` state is
-  not a stop and has none of these exits: only the owner's `block close --no-require-reviews` gets past it.
+  `unavailable`, round-1 `split_required`, or a refusal such as `other-run`); on any stop it is
+  refused, a recheck `split_required` stop included. A `tampered` state is not a stop and has none of these exits: only the owner's `block close --no-require-reviews` gets past it.
 - **Reopening a stopped or lost file.** A human may restart the review of a stopped file (any stop
   reason) or a lost one: `code-forge block reopen <id> --file <path> --run <run> --reason <text>`.
   Only a stopped file needs content that differs from what its stop reviewed (every stop records
