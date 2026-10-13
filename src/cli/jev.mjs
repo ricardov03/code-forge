@@ -23,7 +23,8 @@
  * subfolder thus writes to the project's ledger. An unknown flag is a usage error.
  *
  * Resolves the Jev key through B2's chain (`resolveKey`, earlier batch — the seam rule allows a
- * Wave 1 module to import a block in an earlier batch statically), asks Jev, runs the answer
+ * Wave 1 module to import a block in an earlier batch statically) with the project's
+ * `keys.cache_hours` (B84; an invalid value warns once and uses 8 h), asks Jev, runs the answer
  * through `thresholds.decide()`, and appends one `{event: 'decision', ...}` row through B6's
  * writer (also an earlier batch) — the shape `ledger/calibration.mjs` already expects:
  * `decision_id`, `question`, `confidence` (plan §6.3's calibration buckets read exactly these).
@@ -40,7 +41,7 @@ import { buildQuestionPayload, isKnownQuestion, isQuestionDisabled } from '../de
 import { askJev as realAskJev } from '../decide/jev-client.mjs';
 import { decide } from '../decide/thresholds.mjs';
 import { resolveDispatchQuestionsByRules } from '../decide/fallback-rules.mjs';
-import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
+import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { appendRow as realAppendRow } from '../ledger/write.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
@@ -113,6 +114,7 @@ function badRuleFacts(state) {
  * @param {object} deps
  * @param {import('../keys/store.mjs').KeyStore} [deps.store]
  * @param {typeof loadConfigFile} [deps.loadConfig]
+ * @param {typeof import('../keys/onepassword.mjs').opRead} [deps.opRead] - the 1Password reader (tests inject a fake).
  * @param {typeof realAskJev} [deps.askJev]
  * @param {typeof realAppendRow} [deps.appendRow]
  * @param {{write: (s: string) => unknown}} [deps.stdout]
@@ -126,6 +128,7 @@ export async function runJev(args, deps = {}) {
   const {
     store,
     loadConfig = loadConfigFile,
+    opRead,
     askJev: ask = realAskJev,
     appendRow: write = realAppendRow,
     stdout = process.stdout,
@@ -218,9 +221,14 @@ export async function runJev(args, deps = {}) {
 
   const keyStore = store ?? (await createDefaultKeyStore(env));
   const keyRef = keyRefFlag.value ?? cfg?.keys?.jev;
+  // B84: the project's cache time; an invalid one warns once and falls back to the default
+  const cache = cacheHoursFrom(cfg);
+  if (cache.problem !== null) {
+    err(`WARN jev ask: ${cache.problem}; caching for the default ${cache.hours} h\n`);
+  }
   let resolved;
   try {
-    resolved = await resolveKey('jev', { store: keyStore, ref: keyRef, env, now: now() });
+    resolved = await resolveKey('jev', { store: keyStore, ref: keyRef, env, now: now(), cacheHours: cache.hours, ...(opRead ? { opRead } : {}) });
   } catch (thrown) {
     err(`jev ask: ${thrown?.message ?? String(thrown)}\n`);
     return 2;

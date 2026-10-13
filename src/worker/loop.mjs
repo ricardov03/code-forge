@@ -39,7 +39,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expiryChecks } from '../autopilot/limits.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
-import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
+import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
@@ -136,13 +136,22 @@ export function sessionEnv(env, secrets) {
 /**
  * Resolve the Jev key through B2's chain (env → store → 1Password). A missing key is not an error:
  * System 1 then falls back (`system1.fallback`, B3). The value is registered for redaction by B2.
+ * A refresh from 1Password is cached for the config's `keys.cache_hours` (B84: the run's snapshot;
+ * a snapshot from before the key has none ⇒ 8 h).
  * @param {Record<string, any>} cfg
- * @param {{store: import('../keys/store.mjs').KeyStore, env: NodeJS.ProcessEnv, opRead?: any}} deps
+ * @param {{store: import('../keys/store.mjs').KeyStore, env: NodeJS.ProcessEnv, opRead?: any, now?: number}} deps
  * @returns {Promise<string | null>}
  */
-export async function resolveJevKey(cfg, { store, env, opRead }) {
+export async function resolveJevKey(cfg, { store, env, opRead, now }) {
   const ref = cfg?.system1?.key ?? cfg?.keys?.[JEV_KEY_NAME];
-  const res = await resolveKey(JEV_KEY_NAME, { store, env, ref: typeof ref === 'string' ? ref : undefined, ...(opRead ? { opRead } : {}) });
+  const res = await resolveKey(JEV_KEY_NAME, {
+    store,
+    env,
+    ref: typeof ref === 'string' ? ref : undefined,
+    cacheHours: cacheHoursFrom(cfg).hours,
+    ...(opRead ? { opRead } : {}),
+    ...(now !== undefined ? { now } : {}),
+  });
   return res.value;
 }
 

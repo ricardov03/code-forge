@@ -326,6 +326,9 @@
     },
     "keys": {
       "type": "object",
+      "properties": {
+        "cache_hours": { "type": "integer", "minimum": 1, "maximum": 24, "default": 8, "description": "B84: how many whole hours a key read from 1Password stays cached in the per-user key store (keys set --op, keys test, jev ask, doctor, the worker). keys set --cache-hours wins over it. A cached key is never trusted for longer than the reader's value." }
+      },
       "additionalProperties": { "type": "string" }
     },
     "tmp": {

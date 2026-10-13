@@ -796,7 +796,12 @@ the plan file. See `skill/references/continuity.md`.
 
 - **Keys only where they are needed.** `.code-forge.yml` holds references (`env:NAME`,
   `keychain:<name>`, `op://…`, `user`), never values. Keys resolve in this order: environment →
-  OS keychain → 1Password (cached 8 hours) → ask at setup. They resolve only in the worker and the
+  OS keychain → 1Password (cached for `keys.cache_hours`: whole hours, default 8, at most 24;
+  `keys set --op … --cache-hours <1-24>` sets the stored expiry for that one key) → ask at setup.
+  On every read the CLI, worker and doctor cap a cached key at `keys.cache_hours` (8 when unset),
+  so lowering it shortens an existing cache at the next read, and a longer `--cache-hours` only
+  holds when the config allows it; only a reader that passes no hours (the setup wizard) caps at
+  the 24 h maximum. They resolve only in the worker and the
   orchestrator's own CLI calls.
 - **Coders get no keys.** A coder process receives neither the Jev key nor the signing key.
 - **One forbidden list, rendered per harness.** Force pushes, `git reset --hard`, `git stash`,

@@ -5,11 +5,15 @@
  *   1. env var       — `env:NAME` from the reference, else `CODE_FORGE_KEY_<NAME>`
  *   2. OS keychain   — this store (`@napi-rs/keyring` → macOS `security` CLI → 0600 file)
  *   3. 1Password     — `op read <op://…>` (retry once on a first-call timeout); a hit is cached
- *                      into the store as `{"v", "exp"}` for `cacheHours` (default 8)
+ *                      into the store as `{"v", "exp"}` for `cacheHours` (whole hours 1–24,
+ *                      default 8; `keys.cache_hours` / `keys set --cache-hours`, B84)
  *   4. ask           — hidden input, only when the caller passes `ask` (setup only)
  * An entry whose `exp` has passed is deleted on that first read and treated as absent, so the
- * chain moves on to 1Password and refreshes it. A backend that fails to read is skipped with a
- * non-secret reason (backend name + error code) in `errors`; the chain never aborts on it.
+ * chain moves on to 1Password and refreshes it. A cached entry is never trusted for longer than
+ * the reader's hours (B84, D2): a read whose entry has `exp > now + hours` moves the expiry
+ * earlier to `now + hours` (entry and index row rewritten, value kept, 1Password not asked); an
+ * expiry is never moved later, and a read with no hours caps at `MAX_CACHE_HOURS`. A backend that
+ * fails to read is skipped with a non-secret reason (backend name + error code) in `errors`; the chain never aborts on it.
  *
  * `source` names where the value came from: `env`, the store backend that held it (`keychain`,
  * `security-cli`, `file`), `op`, or `ask`.
@@ -42,6 +46,11 @@ import { createSecurityCliBackend } from './backends/security-cli.mjs';
 import { isOpRef, opRead as realOpRead } from './onepassword.mjs';
 
 export const DEFAULT_CACHE_HOURS = 8;
+/** The bounds of `keys.cache_hours` / `--cache-hours`; the schema carries the same numbers. */
+export const MIN_CACHE_HOURS = 1;
+export const MAX_CACHE_HOURS = 24;
+/** The one text for an out-of-range cache time; it never carries the value. */
+export const CACHE_HOURS_RULE = `a whole number of hours from ${MIN_CACHE_HOURS} to ${MAX_CACHE_HOURS}`;
 const HOUR_MS = 3_600_000;
 const NAME_PATTERN = /^[a-z][a-z0-9_-]{0,63}$/;
 
@@ -72,6 +81,43 @@ export function parseRef(name, ref) {
     throw new TypeError(`key "${name}": malformed 1Password reference`);
   }
   return { envName, storeName, opRef: ref?.startsWith('op://') ? ref : null };
+}
+
+/**
+ * @param {unknown} hours
+ * @returns {hours is number} a whole number of hours within the bounds.
+ */
+export function isCacheHours(hours) {
+  return Number.isInteger(hours) && /** @type {number} */ (hours) >= MIN_CACHE_HOURS && /** @type {number} */ (hours) <= MAX_CACHE_HOURS;
+}
+
+/**
+ * @param {unknown} hours
+ * @returns {number} the hours, when they are within the bounds.
+ * @throws {RangeError} otherwise — no path may cache for longer than the maximum.
+ */
+function assertCacheHours(hours) {
+  if (!isCacheHours(hours)) {
+    throw new RangeError(`cache hours must be ${CACHE_HOURS_RULE}`);
+  }
+  return hours;
+}
+
+/**
+ * The cache time a project asks for (`keys.cache_hours`). Absent ⇒ the default; present and valid
+ * ⇒ that value; anything else ⇒ the default with a problem text (never the value itself).
+ * @param {Record<string, any> | null | undefined} cfg
+ * @returns {{hours: number, source: 'config'|'default', problem: string|null}}
+ */
+export function cacheHoursFrom(cfg) {
+  const keys = cfg?.keys;
+  if (keys === null || typeof keys !== 'object' || !Object.hasOwn(keys, 'cache_hours')) {
+    return { hours: DEFAULT_CACHE_HOURS, source: 'default', problem: null };
+  }
+  if (isCacheHours(keys.cache_hours)) {
+    return { hours: keys.cache_hours, source: 'config', problem: null };
+  }
+  return { hours: DEFAULT_CACHE_HOURS, source: 'default', problem: `keys.cache_hours must be ${CACHE_HOURS_RULE}` };
 }
 
 /**
@@ -165,10 +211,13 @@ export async function createKeyStore({ backends, dir }) {
      * @param {string} name
      * @param {number} now
      * @param {string[]} [errors] - receives one non-secret reason per backend that failed.
+     * @param {{maxHours?: number}} [opts] - the reader's cache time; a longer `exp` is cut to
+     *   `now + maxHours` (default `MAX_CACHE_HOURS`).
      * @returns {Promise<{value: string, exp: number|null, backend: string}|null>}
      */
-    async read(name, now, errors = []) {
+    async read(name, now, errors = [], { maxHours = MAX_CACHE_HOURS } = {}) {
       assertKeyName(name);
+      const latest = now + assertCacheHours(maxHours) * HOUR_MS;
       for (const backend of readOrder) {
         let raw;
         try {
@@ -190,6 +239,26 @@ export async function createKeyStore({ backends, dir }) {
             delete index[name];
           });
           return null;
+        }
+        if (entry.exp !== null && entry.exp > latest) {
+          // D2: the shorter expiry applies now; the value stays and 1Password is not asked
+          // a failed rewrite leaves the index alone (it still matches the stored entry);
+          // the index row is only adjusted when one exists, never invented
+          const rewritten = await backend.set(name, encodeEntry(entry.value, latest)).then(
+            () => true,
+            (err) => {
+              errors.push(`${backend.name}: rewrite of the shortened expiry failed (${reasonOf(err)})`);
+              return false;
+            },
+          );
+          if (rewritten) {
+            await updateIndex((index) => {
+              if (index[name]) index[name] = { ...index[name], backend: backend.name, exp: latest };
+            }).catch((err) => {
+              errors.push(`index: rewrite of the shortened expiry failed (${reasonOf(err)})`);
+            });
+          }
+          return { value: entry.value, exp: latest, backend: backend.name };
         }
         return { ...entry, backend: backend.name };
       }
@@ -280,6 +349,7 @@ export function createDefaultKeyStore(
  * @returns {Promise<Resolution>}
  */
 export async function readOpAndCache(storeName, opRef, { store, opRead = realOpRead, now = Date.now(), cacheHours = DEFAULT_CACHE_HOURS }) {
+  assertCacheHours(cacheHours);
   const res = await opRead(opRef);
   if (res.value === null) {
     return { value: null, source: null, exp: null, errors: [res.error ?? 'op read failed'] };
@@ -305,11 +375,13 @@ export async function readOpAndCache(storeName, opRef, { store, opRead = realOpR
  * @param {typeof realOpRead} [deps.opRead]
  * @param {(name: string) => Promise<string|null>} [deps.ask] - setup only; omitted everywhere else.
  * @param {number} [deps.now]
- * @param {number} [deps.cacheHours]
+ * @param {number} [deps.cacheHours] - how long a 1Password read is cached, and the longest a cached
+ *   entry is trusted. Omitted: cached for `DEFAULT_CACHE_HOURS`, trusted up to `MAX_CACHE_HOURS`.
  * @returns {Promise<Resolution>}
  */
-export async function resolveKey(name, { store, ref, env = process.env, opRead = realOpRead, ask, now = Date.now(), cacheHours = DEFAULT_CACHE_HOURS }) {
+export async function resolveKey(name, { store, ref, env = process.env, opRead = realOpRead, ask, now = Date.now(), cacheHours }) {
   const { envName, storeName, opRef } = parseRef(name, ref);
+  const maxHours = cacheHours === undefined ? MAX_CACHE_HOURS : assertCacheHours(cacheHours);
   /** @type {string[]} */
   const errors = [];
 
@@ -319,13 +391,13 @@ export async function resolveKey(name, { store, ref, env = process.env, opRead =
     return { value: fromEnv, source: 'env', exp: null, errors };
   }
 
-  const cached = await store.read(storeName, now, errors);
+  const cached = await store.read(storeName, now, errors, { maxHours });
   if (cached) {
     return { value: cached.value, source: cached.backend, exp: cached.exp, errors };
   }
 
   if (opRef) {
-    const fromOp = await readOpAndCache(storeName, opRef, { store, opRead, now, cacheHours });
+    const fromOp = await readOpAndCache(storeName, opRef, { store, opRead, now, cacheHours: cacheHours ?? DEFAULT_CACHE_HOURS });
     errors.push(...fromOp.errors);
     if (fromOp.value !== null) {
       return { ...fromOp, errors };

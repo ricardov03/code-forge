@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { afterEach, test } from 'node:test';
-import { formatExpiry, parseKeysArgs, runKeys } from '../../src/cli/keys.mjs';
+import { formatExpiry, parseCacheHours, parseKeysArgs, runKeys } from '../../src/cli/keys.mjs';
 import { createFileBackend } from '../../src/keys/backends/file.mjs';
 import { createKeyStore, encodeEntry } from '../../src/keys/store.mjs';
 import { exec } from '../../src/util/exec.mjs';
@@ -13,7 +13,7 @@ const BIN = path.join(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 
 const NOW = 1_800_000_000_000;
 const HOUR = 3_600_000;
 const REF = 'op://Private/jev/credential';
-const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref>] | test <name> [--ref <ref>] | remove <name>\n';
+const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>\n';
 
 afterEach(() => clearSecrets());
 
@@ -23,8 +23,10 @@ async function harness(data = {}, backendName = 'keychain') {
   const store = await createKeyStore({ backends: [backend], dir: await tempHome() });
   const stdout = sink();
   const stderr = sink();
+  // B84: a temp cwd with no project config, so the cache time is the default 8 h
+  const cwd = await tempHome();
   /** @param {string[]} args @param {object} [extra] */
-  const run = (args, extra = {}) => runKeys(args, { store, stdout, stderr, env: {}, now: NOW, ...extra });
+  const run = (args, extra = {}) => runKeys(args, { store, stdout, stderr, env: {}, now: NOW, cwd, ...extra });
   return { store, backend, stdout, stderr, run };
 }
 
@@ -172,8 +174,16 @@ test('keys test with a malformed --ref exits 2 before any store call', async () 
   assert.deepEqual(h.backend.calls, []);
 });
 
-test('usage errors exit 2 with the usage line: 11 malformed argument lists', async () => {
+test('usage errors exit 2 with the usage line: 19 malformed argument lists', async () => {
   const cases = [
+    ['list', '--cache-hours', '3'],
+    ['remove', 'jev', '--cache-hours', '3'],
+    ['set', 'jev', '--op', REF, '--cache-hours', '--op'],
+    ['set', 'jev', '--cache-hours', '3'],
+    ['set', 'jev', '--op', REF, '--cache-hours'],
+    ['set', 'jev', '--op', REF, '--op', REF],
+    ['set', 'jev', '--op', REF, '--cache-hours', '3', '--cache-hours', '4'],
+    ['test', 'jev', '--cache-hours', '3'],
     [],
     ['frob'],
     ['set'],
@@ -186,6 +196,7 @@ test('usage errors exit 2 with the usage line: 11 malformed argument lists', asy
     ['test', 'jev', '--op', REF],
     ['remove', 'jev', 'extra'],
   ];
+  assert.equal(cases.length, 19);
   for (const args of cases) {
     const h = await harness();
     assert.equal(await h.run(args), 2, JSON.stringify(args));
@@ -194,9 +205,30 @@ test('usage errors exit 2 with the usage line: 11 malformed argument lists', asy
   }
 });
 
+test('--cache-hours values with spaces, an exponent or hex (" 3", "3 ", "1e1", "0x10") exit 2 before any op call', async () => {
+  const values = [' 3', '3 ', '1e1', '0x10'];
+  for (const value of values) {
+    assert.equal(parseCacheHours(value), null, JSON.stringify(value));
+    const h = await harness();
+    /** @type {string[]} */
+    const refs = [];
+    const opRead = async (/** @type {string} */ ref) => {
+      refs.push(ref);
+      return { value: FAKE_OP_KEY, attempts: 1 };
+    };
+    assert.equal(await h.run(['set', 'jev', '--op', REF, '--cache-hours', value], { opRead }), 2, JSON.stringify(value));
+    assert.deepEqual([refs, h.backend.calls, h.stdout.text], [[], [], ''], JSON.stringify(value));
+    assert.equal(h.stderr.text, 'keys: --cache-hours must be a whole number of hours from 1 to 24\n', JSON.stringify(value));
+  }
+  assert.equal(values.length, 4);
+  assert.deepEqual([parseCacheHours('3'), parseCacheHours('24')], [3, 24]);
+});
+
 test('parseKeysArgs: the accepted shapes', () => {
   assert.deepEqual(parseKeysArgs(['list']), { sub: 'list' });
   assert.deepEqual(parseKeysArgs(['set', 'jev', '--op', REF]), { sub: 'set', name: 'jev', flagArg: REF });
+  assert.deepEqual(parseKeysArgs(['set', 'jev', '--op', REF, '--cache-hours', '3']), { sub: 'set', name: 'jev', flagArg: REF, cacheHoursArg: '3' });
+  assert.deepEqual(parseKeysArgs(['set', 'jev', '--cache-hours', '3', '--op', REF]), { sub: 'set', name: 'jev', flagArg: REF, cacheHoursArg: '3' });
   assert.deepEqual(parseKeysArgs(['test', 'jev', '--ref', 'env:X']), { sub: 'test', name: 'jev', flagArg: 'env:X' });
   assert.deepEqual(parseKeysArgs(['remove', 'jev']), { sub: 'remove', name: 'jev' });
   assert.equal(parseKeysArgs(['toString']), null);

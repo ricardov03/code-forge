@@ -231,12 +231,28 @@ active, `run reload` refuses limit keys; use `code-forge autopilot approve` (see
 
 | Command | Does |
 |---|---|
-| `code-forge keys set <name> [--op <item-id\|link\|ref>]` | stores a key in the OS keychain from a hidden prompt, or reads it once from 1Password and caches it for 8 hours. The value never goes into argv |
+| `code-forge keys set <name> [--op <item-id\|link\|ref> [--cache-hours <1-24>]]` | stores a key in the OS keychain from a hidden prompt, or reads it once from 1Password and caches it for `--cache-hours`, else `keys.cache_hours`, else 8 hours. The value never goes into argv |
 | `code-forge keys test <name> [--ref <ref>]` | resolves and checks one key |
 | `code-forge keys remove <name>` | deletes a stored key |
 
-Lookup order: environment → OS keychain → 1Password (cached for 8 hours) → ask at setup.
-`.code-forge.yml` only ever holds the reference.
+Lookup order: environment → OS keychain → 1Password (cached for `keys.cache_hours`, default 8
+hours) → ask at setup. `.code-forge.yml` only ever holds the reference.
+
+**How long 1Password stays cached.** Each `op read` can make 1Password ask you to approve. To be
+asked less often, set the cache time in whole hours, from 1 to 24 (default 8):
+
+```yaml
+keys:
+  jev: op://<vault-id>/<item-id>/<field-id>
+  cache_hours: 24
+```
+
+`keys set --op`, `keys test`, `jev ask`, `doctor` and the worker (from the run's config, so from
+the next run) use it. `keys set <name> --op <ref> --cache-hours 3` overrides it for that one call;
+`--cache-hours` needs `--op`, because a typed key never expires. A value out of range is refused
+(`validate`, and `keys` exits 2 before it calls 1Password). A cached key is never trusted for
+longer than the value of the command that reads it: lower the value and the next read shortens the
+expiry, without asking 1Password again.
 
 **1Password: names or IDs.** You can paste only the item ID (`op item list` prints it in the
 first column) or the item's link. code-forge asks `op`

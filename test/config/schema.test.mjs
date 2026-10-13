@@ -105,10 +105,11 @@ test('mutation: deleting one schema property turns a specific path missing (prov
 // ── additionalProperties: false everywhere a key set is fixed ───────────────
 
 /**
- * The ONE object node that is allowed BOTH fixed `properties` AND an open-ended (typed)
- * `additionalProperties`: `thresholds` has `default`/`findings` plus arbitrary `<question>` keys.
+ * The TWO object nodes that are allowed BOTH fixed `properties` AND an open-ended (typed)
+ * `additionalProperties`: `thresholds` has `default`/`findings` plus arbitrary `<question>` keys,
+ * and `keys` has `cache_hours` (B84) plus arbitrary `<name>` key references.
  */
-const OPEN_WITH_FIXED_KEYS = new Set(['#/properties/thresholds']);
+const OPEN_WITH_FIXED_KEYS = new Set(['#/properties/thresholds', '#/properties/keys']);
 
 /**
  * A "typed" value schema: a non-empty schema object that declares `type` or `$ref`. `{}` (accepts
@@ -133,7 +134,7 @@ function isTypedSchema(value) {
  * MAJOR: a bare `{type:'object'}` used to be skipped entirely). An object node is one whose `type`
  * is `"object"` (or an array containing it) OR that owns a `properties` map. Each must either set
  * `additionalProperties: false`, or be a typed map (no `properties`, a typed value schema), or be
- * the one documented open node with fixed keys (`OPEN_WITH_FIXED_KEYS`, typed value schema).
+ * a documented open node with fixed keys (`OPEN_WITH_FIXED_KEYS`, typed value schema).
  * @param {Record<string, any>} node
  * @param {string} pointer
  * @param {string[]} violations
@@ -194,7 +195,7 @@ function walkAdditionalProperties(node, pointer, violations, onPath = new Set())
  */
 const OBJECT_NODE_COUNT_FROM_TEXT = (JSON.stringify(schema).match(/"type":"object"/g) ?? []).length;
 
-test('every object node in the schema is closed, a typed map, or the one documented open node — and the walk checks ALL of them (count from the raw JSON text)', () => {
+test('every object node in the schema is closed, a typed map, or a documented open node — and the walk checks ALL of them (count from the raw JSON text)', () => {
   const violations = [];
   const checked = walkAdditionalProperties(schema, '#', violations);
   assert.deepEqual(violations, []);

@@ -6,6 +6,12 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `keys.cache_hours` (1–24 h, default 8) and `keys set --op … --cache-hours <n>` set how long a key read from 1Password
+  stays cached; a lower value shortens an existing cached key at the next read, `keys set --op` refuses an invalid value
+  and other readers warn and use 8 h (B84, #14).
+
 ## [0.9.0] — 2026-10-12
 
 ### Added

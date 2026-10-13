@@ -359,6 +359,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'hooks.on_block_end',
   'hooks.on_block_end.argv',
   'hooks.on_block_end.timeout_s',
+  // B84: the one path behind the 175 -> 176 re-pin.
+  'keys.cache_hours',
 ]);
 
 /**
@@ -377,8 +379,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * B63a: +9 = context{,.rules,.lessons,.max_lines}, context.commands{,.build,.test,.lint,.format} ⇒ 170.
  * B63b: +1 = context.require_coder_tests ⇒ 171.
  * B64b: +4 = hooks, hooks.on_block_end{,.argv,.timeout_s} ⇒ 175.
+ * B84: +1 = keys.cache_hours ⇒ 176.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 175;
+const EXPECTED_SCHEMA_PATH_COUNT = 176;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

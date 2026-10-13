@@ -16,7 +16,7 @@ import { commandOnPath } from '../install/detect.mjs';
 import { installsPath, readInstalls, targetResolves } from '../install/link.mjs';
 import { missingTools } from '../install/tools.mjs';
 import { OP_MESSAGES } from '../keys/onepassword.mjs';
-import { createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
+import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { ledgerDir } from '../ledger/paths.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { DEFAULT_PROVIDER_CONCURRENCY, providerLimit } from '../session/spawn.mjs';
@@ -72,16 +72,24 @@ export async function checkLinks(home) {
 
 /**
  * Resolve the Jev key through B2's chain (env → keychain/file → 1Password). The value never
- * leaves this function except to the caller that makes the live call.
+ * leaves this function except to the caller that makes the live call. A refresh from 1Password is
+ * cached for `keys.cache_hours` (B84); a config that failed validation arrives as null ⇒ 8 h.
  * @param {Record<string, any> | null} cfg
- * @param {{env: NodeJS.ProcessEnv, store?: any, opRead?: any}} deps
+ * @param {{env: NodeJS.ProcessEnv, store?: any, opRead?: any, now?: number}} deps
  * @returns {Promise<{rows: Row[], key: string | null}>}
  */
 export async function checkKeys(cfg, deps) {
   try {
     const store = deps.store ?? (await createDefaultKeyStore(deps.env));
     const ref = cfg?.system1?.key ?? cfg?.keys?.jev;
-    const res = await resolveKey('jev', { store, env: deps.env, ref: typeof ref === 'string' ? ref : undefined, ...(deps.opRead ? { opRead: deps.opRead } : {}) });
+    const res = await resolveKey('jev', {
+      store,
+      env: deps.env,
+      ref: typeof ref === 'string' ? ref : undefined,
+      cacheHours: cacheHoursFrom(cfg).hours,
+      ...(deps.opRead ? { opRead: deps.opRead } : {}),
+      ...(deps.now !== undefined ? { now: deps.now } : {}),
+    });
     if (res.value === null) {
       // only fixed texts are shown: a 1Password failure by its classified message (B25), any other
       // reason as a fixed "key store error" — never a reference, a path or tool output

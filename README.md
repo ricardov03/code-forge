@@ -12,6 +12,8 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 In the next release:
 
+- **Choose how long a 1Password key stays cached (B84).** Set `keys.cache_hours` (1 to 24, default 8) in `.code-forge.yml`, or `keys set <name> --op <ref> --cache-hours <n>` for one key. A lower value shortens keys that are already cached at the next read.
+
 In 0.9.0:
 
 - **A lost review state is rebuilt, not reset.** When the review state file of a file is gone (for example, macOS cleaned its temp folder), the worker rebuilds it from the signed ledger and writes a `review.state_restored` row. Rounds, open findings and stops stay as they were. If the ledger cannot rebuild it, the ticket is refused as `review-state-lost`, not `tampered` (#15).
@@ -307,7 +309,7 @@ usage line.
 | `proof` | `code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]` · `proof export <block> --run <r> [--remove]` · `proof lock\|unlock\|restore <block> --run <r>` · `proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert\|assertion-deletion]` |
 | `gates` | `code-forge gates detect\|run\|secret-scan\|safe-edit\|scope\|acceptance\|transcript-grep --cwd <dir> …` |
 | `jev` | `code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]` — `--rules` answers `lane`, `risk` or `security_sensitive` without Jev; writes to the project's ledger slug |
-| `keys` | `code-forge keys list \| set <name> [--op <item-id\|link\|op://ref>] \| test <name> [--ref <ref>] \| remove <name>` |
+| `keys` | `code-forge keys list \| set <name> [--op <item-id\|link\|op://ref> [--cache-hours <1-24>]] \| test <name> [--ref <ref>] \| remove <name>` |
 | `ledger` | `code-forge ledger tail --slug <slug> [--n\|-n <count>]` · `ledger calibration --slug <slug> [--question <id>]` · `ledger outcome --slug <slug> --pr <n> --ci red\|green\|reverted` · `ledger outcome --slug <slug> --scan-git [--cwd <dir>] [--days <n>]` · `ledger add coder --run <r> --block <b> --usd <n> [--note "..."]` |
 | `report` | `code-forge report --slug <slug> [--json] [--export <dir>]` — 13 sections, then the spend per run (open blocks included) and the total |
 | `models` | `code-forge models [--refresh --from-cli-caches]` |
@@ -330,8 +332,8 @@ CLI verbs like any other and every one of them is exercised by this package's ow
   `doctor` always prints this line — the signature is not a defense against an attacker who
   already runs code as you, and no part of code-forge claims otherwise.
 - **Keys never reach a coder process.** Provider and Jev keys resolve only inside the worker or the
-  orchestrator's own CLI calls (`env:<NAME>` → OS keychain → 1Password, cached briefly → ask at
-  setup only). `keys list`/`keys test` never print a value; every stdout/stderr path is redacted.
+  orchestrator's own CLI calls (`env:<NAME>` → OS keychain → 1Password, cached for
+  `keys.cache_hours`: default 8 h, at most 24 h → ask at setup only). `keys list`/`keys test` never print a value; every stdout/stderr path is redacted.
 - **A forbidden-command list** stops a coder from starting its own worker, waiving a review, or
   running other orchestrator-only actions — rendered into each provider's own deny-list mechanism
   (`--disallowedTools` for Claude, an execpolicy rules file plus prose for Codex).

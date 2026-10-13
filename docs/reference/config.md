@@ -175,6 +175,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `calibration` | object |  | — |  |
 | `calibration.shadow_rate` | number |  | `0` | min 0; max 0.5 |
 | `keys` | object |  | — |  |
+| `keys.cache_hours` | integer |  | `8` | min 1; max 24; B84: how many whole hours a key read from 1Password stays cached in the per-user key store (keys set --op, keys test, jev ask, doctor, the worker). keys set --cache-hours wins over it. A cached key is never trusted for longer than the reader's value. |
 | `keys.<key>` | string |  | — | user-defined key |
 | `tmp` | object |  | — |  |
 | `tmp.root` | string \| null |  | `null` |  |
