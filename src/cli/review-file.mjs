@@ -8,6 +8,7 @@
  *   review-file <answering file> --block <id> --answers <ids> --of <source> [--run <id>]
  *                                                  B71: enqueue an answers ticket; prints {ticket,
  *                                                  status, kind: answers, file: source, by_file, answers}
+ *   review-file <path> --block <id> --fresh        B75: re-run a cached result that never counted
  *
  * The same content enqueued again after an `unavailable` result is a fresh attempt (`retry: true`),
  * not the old result.
@@ -26,6 +27,15 @@
  * `===BLOCK <id> FAILED: worker down===`. While waiting, `worker_down` needs the worker to look
  * down on two polls in a row, and a worker whose pid is alive with a fresh heartbeat is never down
  * (`liveWorker`, B30). Output is one JSON line on stdout.
+ * B75: `--fresh` drops the cached done marker of the file's current content and queues the ticket
+ * again ONLY when that result never counted as a review: `stale`, `unavailable`, or `refused` with
+ * `other-run`, `context-unreadable` or a `worktree-*` reason (an allow-list, fail closed). Any
+ * other cached result — a round ran (findings, approved, stopped), `review-state-lost`, an answers
+ * result, an unknown status or reason, an unreadable marker — is refused `fresh-needs-reopen`
+ * (exit 1, `exits: [block reopen, block waive]`, the marker kept byte-for-byte); a
+ * `review-state-tampered` one is refused `fresh-tampered` (names only `block close
+ * --no-require-reviews`). No cached result: a normal enqueue. A coder may run it; it never
+ * re-rolls a counted round and writes no ledger row.
  * Exit codes: 0 queued/done/pending, 1 bad-path or another refusal, 2 usage, 3 worker_down.
  *
  * B62b: the queue and the worker are always the MAIN tree's (`mainRootOf`), also when the coder
@@ -56,7 +66,7 @@
 
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { answersTicketId, assertAnswers, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir } from '../worker/queue.mjs';
+import { answersTicketId, assertAnswers, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 import { namedOnHash } from '../review/gate-check.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
@@ -69,7 +79,7 @@ import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
 const USAGE =
-  'usage: code-forge review-file <path> --block <id> [--run <id>] | review-file --wait <ticket> [--max <seconds>s]\n' +
+  'usage: code-forge review-file <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n' +
   '       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n';
 
 export const DEFAULT_WAIT_MS = 90_000;
@@ -92,13 +102,130 @@ export function parseMax(raw) {
  */
 function doneResult(repoRoot, ticket) {
   try {
-    const marker = JSON.parse(readFileSync(path.join(queueDir(repoRoot), `${ticket}.done`), 'utf8'));
-    const rel = typeof marker.result === 'string' ? marker.result : '';
-    if (!rel.startsWith(`.code-forge${path.sep}reviews${path.sep}`) || rel.split(path.sep).includes('..')) return null;
-    return JSON.parse(readFileSync(path.join(repoRoot, rel), 'utf8'));
+    return resultOfMarker(repoRoot, readFileSync(path.join(queueDir(repoRoot), `${ticket}.done`), 'utf8'));
   } catch {
     return null;
   }
+}
+
+/**
+ * @param {string} repoRoot @param {string} text - a done marker's text
+ * @returns {Record<string, any> | null} the worker's result it names (unverified), or null.
+ */
+function resultOfMarker(repoRoot, text) {
+  try {
+    const marker = JSON.parse(text);
+    const rel = typeof marker?.result === 'string' ? marker.result : '';
+    if (!rel.startsWith(`.code-forge${path.sep}reviews${path.sep}`) || rel.split(path.sep).includes('..')) return null;
+    const result = JSON.parse(readFileSync(path.join(repoRoot, rel), 'utf8'));
+    return result !== null && typeof result === 'object' && !Array.isArray(result) ? result : null;
+  } catch {
+    return null;
+  }
+}
+
+/** B75: the refused reasons that are not a verdict on the content (`--fresh` re-runs them). */
+const FRESH_REFUSED = new Set(['other-run', 'context-unreadable']);
+
+/**
+ * B75: may `--fresh` drop this cached result? An allow-list, fail closed: `rerun` only for a
+ * result that never counted as a review — `stale`, `unavailable`, or `refused` with a reason that
+ * is not a verdict (`other-run`, `context-unreadable`, `worktree-*`) — whose marker names the same
+ * status. `tampered` for `refused review-state-tampered`; `counted` for everything else (a round
+ * ran, `review-state-lost`, an answers result, an unknown status or reason, an unreadable marker or
+ * result).
+ * @param {string} text - the done marker's text @param {Record<string, any> | null} result
+ * @returns {'rerun' | 'tampered' | 'counted'}
+ */
+export function freshVerdict(text, result) {
+  let marker;
+  try {
+    marker = JSON.parse(text);
+  } catch {
+    return 'counted';
+  }
+  if (result === null || marker === null || typeof marker !== 'object' || marker.status !== result.status) return 'counted';
+  if (result.status === 'stale' || result.status === 'unavailable') return 'rerun';
+  if (result.status !== 'refused' || typeof result.reason !== 'string') return 'counted';
+  if (result.reason === 'review-state-tampered') return 'tampered';
+  return FRESH_REFUSED.has(result.reason) || result.reason.startsWith('worktree-') ? 'rerun' : 'counted';
+}
+
+/** B75: how many times --fresh classifies a marker that changed under its claim. */
+const FRESH_ATTEMPTS = 3;
+
+/** B75: the ways out a counted result names (human-only; a coder stops and reports). */
+export const FRESH_EXITS = Object.freeze(['block reopen', 'block waive']);
+
+/**
+ * B75: `review-file <path> --block <id> --fresh`. No done marker: a normal enqueue. The marker is
+ * read and classified IN PLACE; only a cached result that never counted is then claimed by
+ * `dropDoneIf` (rename, then a byte compare with what was classified) and the ticket queued again.
+ * A marker that changed under the claim is restored (link only) and classified again, at most
+ * {@link FRESH_ATTEMPTS} times. The queue has no lock: the rename claim is the exclusion, and a
+ * crash between the drop and the enqueue leaves only a re-runnable pending ticket. Anything else is refused and the marker kept byte-for-byte:
+ * `fresh-needs-reopen` (names `block reopen` and `block waive`) or `fresh-tampered` (names only
+ * the owner's `block close --no-require-reviews`; reopen refuses a tampered state).
+ * @param {{repoRoot: string, run: string, block: string, file: string, where: {tree?: string}, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf}} opts
+ * @returns {number} the exit code.
+ */
+function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDoneIf }) {
+  const { ticket } = resolveTicket({ repoRoot, run, block, file, tree: where.tree ?? null });
+  const markerPath = path.join(queueDir(repoRoot), `${ticket}.done`);
+  /** @type {'rerun' | 'tampered' | 'counted'} */
+  let verdict = 'counted';
+  // a marker that changed under the claim is classified again; bounded, then refused (fail closed)
+  for (let attempt = 0; attempt < FRESH_ATTEMPTS; attempt += 1) {
+    /** @type {Buffer | null} */
+    let bytes;
+    try {
+      bytes = readFileSync(markerPath);
+    } catch (err) {
+      // no marker: a normal enqueue; a marker that exists but cannot be read is never dropped
+      bytes = /** @type {{code?: unknown}} */ (err)?.code === 'ENOENT' ? null : Buffer.alloc(0);
+    }
+    if (bytes === null) {
+      say(enqueue({ repoRoot, run, block, file, ...where }));
+      return 0;
+    }
+    // classified IN PLACE: a refusal never moves, renames or touches the marker
+    const text = bytes.toString('utf8');
+    verdict = freshVerdict(text, resultOfMarker(repoRoot, text));
+    if (verdict !== 'rerun') break;
+    /** @type {unknown} */
+    let outcome;
+    try {
+      outcome = dropDone(repoRoot, ticket, bytes);
+    } catch (err) {
+      // a named refusal passes through; any other throw is named here, never echoed
+      if (err instanceof WorkerError) throw err;
+      throw new WorkerError('fresh-claim-failed', `the claim of the cached result of ${file} failed; nothing was queued`);
+    }
+    if (outcome === 'changed') {
+      verdict = 'counted';
+      continue;
+    }
+    // an allow-list of outcomes: anything else is refused and nothing is queued
+    if (outcome !== 'dropped' && outcome !== 'gone') throw new WorkerError('fresh-claim-unknown', `the claim of the cached result of ${file} gave an unknown outcome; nothing was queued`);
+    // dropped: queue it again now (a crash right here leaves a pending ticket with no marker, which
+    // the next review-file queues anyway); gone: another caller took the marker, a normal enqueue
+    const queued = enqueue({ repoRoot, run, block, file, ...where });
+    say(outcome === 'dropped' ? { ...queued, fresh: true } : queued);
+    return 0;
+  }
+  if (verdict === 'tampered') {
+    say({ status: 'refused', reason: 'fresh-tampered', ticket, file, exits: ['block close --no-require-reviews'], message: `fresh-tampered: the cached result of ${file} is review-state-tampered (a security event, not a stop); only the owner's block close --no-require-reviews gets past it; the cached result was kept` });
+    return 1;
+  }
+  say({
+    status: 'refused',
+    reason: 'fresh-needs-reopen',
+    ticket,
+    file,
+    exits: [...FRESH_EXITS],
+    message: `fresh-needs-reopen: the cached result of ${file} counts as a review (or cannot be read); --fresh re-runs only stale, unavailable or refused other-run/worktree-*/context-unreadable results; the human's ways out are block reopen and block waive; the cached result was kept`,
+  });
+  return 1;
 }
 
 /**
@@ -227,7 +354,7 @@ export function fixList(result) {
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number}} [deps]
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number, dropDone?: typeof dropDoneIf}} [deps] - `dropDone`: B75's claim, for tests.
  * @returns {Promise<number>}
  */
 export async function runReviewFile(args, deps = {}) {
@@ -236,12 +363,12 @@ export async function runReviewFile(args, deps = {}) {
   const say = (/** @type {Record<string, any>} */ obj) => writeSafe(stdout, `${JSON.stringify(obj)}\n`);
   const cwd = deps.cwd ?? process.cwd();
   try {
-    const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'max', 'answers', 'of'] });
+    const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'max', 'answers', 'of'], booleans: ['fresh'] });
     // the queue and the worker: the main tree, also from inside a block's worktree
     const repoRoot = await mainRootOf(cwd);
 
     if (typeof flags.wait === 'string') {
-      if (positionals.length > 0 || flags.block !== undefined || flags.answers !== undefined || flags.of !== undefined) throw new WorkerError('usage', '--wait takes only a ticket and --max');
+      if (positionals.length > 0 || flags.block !== undefined || flags.answers !== undefined || flags.of !== undefined || flags.fresh === true) throw new WorkerError('usage', '--wait takes only a ticket and --max');
       const ticket = assertTicketId(flags.wait);
       const maxMs = flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max);
       const deadline = Date.now() + maxMs;
@@ -267,6 +394,7 @@ export async function runReviewFile(args, deps = {}) {
 
     if (positionals.length !== 1 || typeof flags.block !== 'string' || flags.max !== undefined) throw new WorkerError('usage', 'give one path and --block');
     const block = assertBlockId(flags.block);
+    if (flags.fresh === true && (flags.answers !== undefined || flags.of !== undefined)) throw new WorkerError('usage', '--fresh takes no --answers or --of');
     if (flags.answers !== undefined || flags.of !== undefined) return await enqueueAnswersTicket({ flags, answering: positionals[0], block, cwd, repoRoot, say });
     const file = normalizeRequestPath(positionals[0], cwd, await repoRootOf(cwd));
     const worker = liveWorker(repoRoot);
@@ -280,6 +408,7 @@ export async function runReviewFile(args, deps = {}) {
     const tree = recorded === null ? await repoRootOf(cwd) : (recorded.top ?? repoRoot);
     assertInsideRoot(tree, file); // the path, re-checked in the tree its content is read from
     const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree };
+    if (flags.fresh === true) return freshTicket({ repoRoot, run: worker.run, block, file, where, say, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
     const queued = enqueue({ repoRoot, run: worker.run, block, file, ...where });
     if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'unavailable') {
       // `unavailable` is never approval AND never final: drop the done marker so the worker runs

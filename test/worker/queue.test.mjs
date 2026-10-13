@@ -140,6 +140,29 @@ describe('review-file enqueue (V4 paths, timing, worker_down)', () => {
   });
 });
 
+describe('B75: without --fresh the cached answers are unchanged', () => {
+  test('a cached stale or stopped result is answered done with the cached result, and its marker is kept', async () => {
+    const { repo, runId } = await makeRepo();
+    announceWorker(repo, { pid: process.pid, run: runId });
+    try {
+      const { ticket, content_hash } = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
+      const marker = path.join(repo, '.code-forge', 'queue', `${ticket}.done`);
+      const answers = [];
+      for (const result of [{ status: 'stale' }, { status: 'stopped', stopped: 'review_cap', findings: [] }]) {
+        writeResult({ repoRoot: repo, runId, ticket, key: await loadKey(runId), result: { event: 'review.result', block: 'B11', file: 'src/a.mjs', content_hash, approved: false, ...result } });
+        const before = readFileSync(marker, 'utf8');
+        const res = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
+        answers.push([res.code, res.json, readFileSync(marker, 'utf8') === before]);
+      }
+      const done = [0, { ticket, status: 'done', file: 'src/a.mjs', content_hash }, true];
+      assert.deepEqual(answers, [done, done]);
+      assert.deepEqual([queued(repo, 'json'), queued(repo, 'done')], [[ticket], [ticket]]);
+    } finally {
+      retractWorker(repo, process.pid);
+    }
+  });
+});
+
 describe('signed results (§8.6)', () => {
   test('a result signed with the run key verifies', async () => {
     const { repo, runId } = await makeRepo();

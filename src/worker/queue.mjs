@@ -17,10 +17,15 @@
  * --of <source>`) asks the worker whether `by_file` resolves the open findings `answers` of
  * `file` (the source). Its id adds `answers`, `by_file`, `by_hash` and the sorted ids to the
  * normal ticket's parts, so it never collides with a review ticket of the same source content.
+ *
+ * B75: `review-file --fresh` drops a done marker it classified in place as re-runnable through
+ * `dropDoneIf` (an atomic claim by rename, then a byte compare), so two concurrent callers never
+ * both drop it. A counted marker the read saw is never moved; only a newer marker the worker wrote
+ * between that read and the claim is moved for a moment, then linked straight back (`changed`).
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
 import { isAlive, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
@@ -198,6 +203,62 @@ export function clearDone({ repoRoot, run, block, file, tree = null }) {
   const removed = existsSync(marker);
   rmSync(marker, { force: true });
   return { ticket, content_hash, removed };
+}
+
+/**
+ * B75 (`review-file --fresh`): drop the done marker of `ticket` only while it still holds `seen`,
+ * the bytes the caller already read IN PLACE and classified as re-runnable (a marker classified
+ * as counted, tampered or unknown is never passed here, so it is never moved). The queue has no
+ * lock file; the order is the guarantee:
+ *   1. the caller reads the marker in place and classifies it (a refusal touches nothing);
+ *   2. only a re-runnable marker is claimed by an atomic rename to a name of this process — of
+ *      two concurrent callers only one takes it, the other gets `gone`;
+ *   3. the claim's bytes are compared with `seen`: equal, the claim is removed (`dropped`) and the
+ *      caller enqueues; different (a newer result arrived), the marker is restored with
+ *      `linkSync` only — on EEXIST a newer marker is there and wins, the claim is removed
+ *      (`changed`); on any other link error the claim is LEFT in place (never an overwriting
+ *      rename) and `fresh-restore-failed` is thrown.
+ * A crash between the drop and the caller's enqueue leaves a re-runnable ticket with no marker:
+ * harmless — its ticket file is pending, and the next `review-file` queues it anyway. Synchronous.
+ * @param {string} repoRoot @param {string} ticket @param {Buffer} seen
+ * @param {{link?: (from: string, to: string) => void, read?: (file: string) => Buffer}} [io] - for
+ *   tests (default `linkSync`, `readFileSync`). A claim that cannot be read is restored the same
+ *   way and refused `fresh-restore-failed`.
+ * @returns {'dropped' | 'gone' | 'changed'}
+ * @throws {WorkerError} `fresh-restore-failed` (the claim is kept; the message names no path).
+ */
+export function dropDoneIf(repoRoot, ticket, seen, io = {}) {
+  const marker = path.join(queueDir(repoRoot), `${assertTicketId(ticket)}.done`);
+  const claim = `${marker}.${process.pid}.${randomBytes(4).toString('hex')}.fresh`;
+  try {
+    renameSync(marker, claim);
+  } catch (err) {
+    if (/** @type {{code?: unknown}} */ (err)?.code === 'ENOENT') return 'gone';
+    throw err;
+  }
+  const codeOf = (/** @type {unknown} */ err) => {
+    const code = /** @type {{code?: unknown}} */ (err)?.code;
+    return typeof code === 'string' && /^[A-Za-z][A-Za-z0-9_-]{0,31}$/.test(code) ? code : 'unknown';
+  };
+  /** @type {string | null} */
+  let readFailed = null;
+  try {
+    if ((io.read ?? readFileSync)(claim).equals(seen)) {
+      rmSync(claim, { force: true });
+      return 'dropped';
+    }
+  } catch (err) {
+    readFailed = codeOf(err);
+  }
+  try {
+    (io.link ?? linkSync)(claim, marker);
+  } catch (err) {
+    const code = codeOf(err);
+    if (code !== 'EEXIST') throw new WorkerError('fresh-restore-failed', `the done marker of ticket ${ticket} changed and could not be restored (${code}); its claim was kept; nothing was queued`);
+  }
+  rmSync(claim, { force: true });
+  if (readFailed !== null) throw new WorkerError('fresh-restore-failed', `the claimed done marker of ticket ${ticket} could not be read (${readFailed}); it was put back; nothing was queued`);
+  return 'changed';
 }
 
 /**

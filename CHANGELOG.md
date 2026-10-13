@@ -20,6 +20,8 @@ waits on a second real consumer (plan §10.4, Q17).
 - The review packet of a deleted owned file carries a `## deleted file` note: up to 20 tracked or untracked paths that
   still name its basename (one bounded `git grep`, secret-like and control-character paths left out), `no references
   found`, or `references not checked` (B74, issue #8).
+- `review-file --fresh` drops a cached result that never counted and queues the ticket again; counted results refuse
+  `fresh-needs-reopen`, tampered ones `fresh-tampered`, and the cached marker is never moved (B75, issue #10 item 4).
 
 ### Changed
 
