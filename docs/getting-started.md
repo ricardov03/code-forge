@@ -194,7 +194,7 @@ All of these are safe to run in any project that has a `.code-forge.yml`:
 | `code-forge resolve L1` | `{provider, model, effort, fallback, cli}` for a level |
 | `code-forge models` | the model catalog per provider |
 | `code-forge list` | where the skill is installed, and whether each link still resolves |
-| `code-forge keys list` | `NAME / SOURCE / BACKEND / EXPIRES` for each key. Never a value |
+| `code-forge keys list` | `NAME / SOURCE / BACKEND / EXPIRES` for each key. Never a value. A key from 1Password with less than 1 hour left adds a `WARN` line on stderr with the command that re-links it |
 | `code-forge keys test jev` | resolves the Jev key and tests it |
 | `code-forge gates detect --cwd .` | the gate commands detected for this stack |
 | `code-forge ledger tail --slug <slug> -n 20` | the last 20 ledger rows (`--n 20` works too) |
@@ -253,6 +253,29 @@ the next run) use it. `keys set <name> --op <ref> --cache-hours 3` overrides it 
 (`validate`, and `keys` exits 2 before it calls 1Password). A cached key is never trusted for
 longer than the value of the command that reads it: lower the value and the next read shortens the
 expiry, without asking 1Password again.
+
+**Before and after a cached key expires.** When a key from 1Password has less than 1 hour left,
+`keys list` keeps its table and adds one line on stderr:
+
+```text
+WARN jev expires in 40 min; re-link: code-forge keys set jev --op op://<vault-id>/<item-id>/<field-id>
+```
+
+(a key cached by 0.9.0 or earlier shows `--op <your 1Password reference>` instead, until its next
+refresh). `doctor` shows its keys row as `WARN` with
+`jev key from <source> expires in <m> min; re-link with code-forge keys set jev --op <ref from keys.jev>`;
+with more than 1 hour left the row stays `OK`, and ends `(cache <n> h)` when `keys.cache_hours` is
+set. When the cached key has already expired and 1Password does not answer (locked, or nobody
+approved the request), `jev ask` prints the 1Password reason and then, instead of
+`no Jev key resolved`:
+
+```text
+jev ask: the cached jev key expired at <time> and 1Password did not answer; re-link: code-forge keys set jev --op <ref>
+```
+
+A reference with a space or another character a shell would split on is printed in single quotes,
+so the command can be pasted as is. Run that command yourself, in a terminal where you can
+approve 1Password; an agent session only relays it to you.
 
 **1Password: names or IDs.** You can paste only the item ID (`op item list` prints it in the
 first column) or the item's link. code-forge asks `op`

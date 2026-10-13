@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 89,
+  "block_count": 90,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1266,6 +1266,27 @@
         "B83"
       ],
       "note": "root-added 2026-10-12; issue #14 part 1 (plans/keys-cache/plan.md); 1-24 h, default 8; a lower value shortens a cached key at the next read; bad config refuses set --op, warns elsewhere"
+    },
+    "B85": {
+      "title": "key expiry warnings and the re-link line",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/keys/store.mjs",
+        "src/cli/keys.mjs",
+        "src/cli/jev.mjs",
+        "src/doctor/local.mjs",
+        "test/keys/expiry-warn.test.mjs",
+        "docs/getting-started.md",
+        "docs/how-it-works.md",
+        "skill/references/security.md",
+        "README.md"
+      ],
+      "depends_on": [
+        "B84"
+      ],
+      "note": "root-added 2026-10-12; issue #14 part 2 (plans/keys-cache/plan.md); index keeps the op ref; WARN under 1 h in keys list and doctor; jev ask prints the re-link line when the cache expired and 1Password fails; refs shell-quoted"
     }
   }
 }

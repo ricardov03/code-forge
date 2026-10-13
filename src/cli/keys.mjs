@@ -19,6 +19,11 @@
  * A cached entry is never
  * trusted for longer than those hours (`store.read`).
  *
+ * Expiry warning (B85): `keys list` keeps its stdout table and writes one stderr line per key with
+ * less than 1 hour left — `WARN <name> expires in <m> min; re-link: code-forge keys set <name> --op
+ * <ref>` — naming the `op://` reference from the index row, or a placeholder for a row written
+ * before the index carried it.
+ *
  * An `--op`/`--ref` value may be a 1Password item ID or item link instead of `op://vault/item/field`:
  * it is resolved to `op://<vaultId>/<itemId>/<fieldId>` first (`op item get`, B25).
  *
@@ -29,7 +34,7 @@ import path from 'node:path';
 import { writeSafe } from '../util/redact.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadConfigFile, projectRootFor } from '../config/load.mjs';
 import { describeOpItem, isOpRef, OP_APPROVE_NOTE, OP_MESSAGES, opItemIdFromInput, toOpRef } from '../keys/onepassword.mjs';
-import { assertKeyName, CACHE_HOURS_RULE, cacheHoursFrom, createDefaultKeyStore, DEFAULT_CACHE_HOURS, isCacheHours, parseRef, readOpAndCache, resolveKey } from '../keys/store.mjs';
+import { assertKeyName, CACHE_HOURS_RULE, cacheHoursFrom, createDefaultKeyStore, DEFAULT_CACHE_HOURS, isCacheHours, isTime, parseRef, readOpAndCache, resolveKey, shellWord } from '../keys/store.mjs';
 
 const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>\n';
 
@@ -49,14 +54,36 @@ export function parseCacheHours(text) {
   return isCacheHours(hours) ? hours : null;
 }
 
+/** Below this much time left, `keys list` warns (B85). */
+const WARN_BELOW_MS = 3_600_000;
+
+/**
+ * @param {{name: string, exp: number|null, ref?: string}} row
+ * @param {number} now
+ * @returns {string|null} the stderr warning for a key with less than 1 hour left, else null (also
+ *   for an `exp` that is not a valid time).
+ */
+export function expiryWarning(row, now) {
+  if (!isTime(row.exp) || row.exp <= now || row.exp - now >= WARN_BELOW_MS) {
+    return null;
+  }
+  // whole minutes left, never 0 and never 60 (under 1 hour is at most 59 min 59 s)
+  const minutes = Math.max(1, Math.floor((row.exp - now) / 60_000));
+  const ref = typeof row.ref === 'string' ? shellWord(row.ref) : '<your 1Password reference>';
+  return `WARN ${row.name} expires in ${minutes} min; re-link: code-forge keys set ${row.name} --op ${ref}\n`;
+}
+
 /**
  * @param {number|null} exp
  * @param {number} now
- * @returns {string}
+ * @returns {string} `unknown` for an `exp` that is not a valid time (a hand-edited index).
  */
 export function formatExpiry(exp, now) {
   if (exp === null) {
     return 'never';
+  }
+  if (!isTime(exp)) {
+    return 'unknown';
   }
   return exp <= now ? 'expired' : new Date(exp).toISOString();
 }
@@ -249,6 +276,10 @@ export async function runKeys(args, { store, stdout = process.stdout, stderr = p
     out('NAME\tSOURCE\tBACKEND\tEXPIRES\n');
     for (const row of rows) {
       out(`${row.name}\t${row.source}\t${row.backend}\t${formatExpiry(row.exp, now)}\n`);
+    }
+    for (const row of rows) {
+      const warning = expiryWarning(row, now);
+      if (warning !== null) err(warning);
     }
     return 0;
   }

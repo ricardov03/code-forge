@@ -29,6 +29,11 @@
  * writer (also an earlier batch) — the shape `ledger/calibration.mjs` already expects:
  * `decision_id`, `question`, `confidence` (plan §6.3's calibration buckets read exactly these).
  *
+ * B85: when no key resolved because the cached one expired and 1Password did not answer, and the
+ * reference is `op://…`, the generic "no Jev key resolved" line is replaced by one re-link line
+ * naming the expired time and the exact `code-forge keys set jev --op <ref>` command (the
+ * 1Password reasons still print first; same text with or without a TTY).
+ *
  * Never prints the key: it only ever reaches the `Authorization` header inside `askJev`, and
  * `resolveKey` has already registered it with `redact()` before this module sees it.
  */
@@ -41,7 +46,7 @@ import { buildQuestionPayload, isKnownQuestion, isQuestionDisabled } from '../de
 import { askJev as realAskJev } from '../decide/jev-client.mjs';
 import { decide } from '../decide/thresholds.mjs';
 import { resolveDispatchQuestionsByRules } from '../decide/fallback-rules.mjs';
-import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
+import { cacheHoursFrom, createDefaultKeyStore, isTime, resolveKey, shellWord } from '../keys/store.mjs';
 import { appendRow as realAppendRow } from '../ledger/write.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
@@ -236,6 +241,12 @@ export async function runJev(args, deps = {}) {
   if (resolved.value === null) {
     for (const reason of resolved.errors) {
       err(`jev ask: ${reason}\n`);
+    }
+    // `expired` is the dropped entry's exp in ms; anything that is not a valid time gives the
+    // generic line
+    if (isTime(resolved.expired) && typeof keyRef === 'string' && keyRef.startsWith('op://')) {
+      err(`jev ask: the cached jev key expired at ${new Date(resolved.expired).toISOString()} and 1Password did not answer; re-link: code-forge keys set jev --op ${shellWord(keyRef)}\n`);
+      return 1;
     }
     err('jev ask: no Jev key resolved (set one with "code-forge keys set jev")\n');
     return 1;

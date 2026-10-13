@@ -16,7 +16,7 @@ import { commandOnPath } from '../install/detect.mjs';
 import { installsPath, readInstalls, targetResolves } from '../install/link.mjs';
 import { missingTools } from '../install/tools.mjs';
 import { OP_MESSAGES } from '../keys/onepassword.mjs';
-import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
+import { cacheHoursFrom, createDefaultKeyStore, isTime, resolveKey } from '../keys/store.mjs';
 import { ledgerDir } from '../ledger/paths.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { DEFAULT_PROVIDER_CONCURRENCY, providerLimit } from '../session/spawn.mjs';
@@ -74,6 +74,8 @@ export async function checkLinks(home) {
  * Resolve the Jev key through B2's chain (env → keychain/file → 1Password). The value never
  * leaves this function except to the caller that makes the live call. A refresh from 1Password is
  * cached for `keys.cache_hours` (B84); a config that failed validation arrives as null ⇒ 8 h.
+ * B85: under 1 hour left the row is WARN with a fixed re-link text (never the reference); when
+ * `keys.cache_hours` is set the OK text ends `(cache <n> h)`.
  * @param {Record<string, any> | null} cfg
  * @param {{env: NodeJS.ProcessEnv, store?: any, opRead?: any, now?: number}} deps
  * @returns {Promise<{rows: Row[], key: string | null}>}
@@ -82,13 +84,15 @@ export async function checkKeys(cfg, deps) {
   try {
     const store = deps.store ?? (await createDefaultKeyStore(deps.env));
     const ref = cfg?.system1?.key ?? cfg?.keys?.jev;
+    const cache = cacheHoursFrom(cfg);
+    const now = deps.now ?? Date.now();
     const res = await resolveKey('jev', {
       store,
       env: deps.env,
       ref: typeof ref === 'string' ? ref : undefined,
-      cacheHours: cacheHoursFrom(cfg).hours,
+      cacheHours: cache.hours,
+      now,
       ...(deps.opRead ? { opRead: deps.opRead } : {}),
-      ...(deps.now !== undefined ? { now: deps.now } : {}),
     });
     if (res.value === null) {
       // only fixed texts are shown: a 1Password failure by its classified message (B25), any other
@@ -100,8 +104,17 @@ export async function checkKeys(cfg, deps) {
       const why = reasons.length > 0 ? ` (${reasons.join('; ')})` : '';
       return { rows: [row('keys', 'WARN', 'keys', `jev key not resolved${why}; System 1 falls back to rules`)], key: null };
     }
-    const exp = res.exp === null ? 'no expiry' : `expires ${new Date(res.exp).toISOString()}`;
-    return { rows: [row('keys', 'OK', 'keys', `jev key from ${res.source}, ${exp}`)], key: res.value };
+    if (isTime(res.exp) && res.exp - now < 3_600_000) {
+      // whole minutes left, never 0 and never 60 (as keys list)
+      const minutes = Math.max(1, Math.floor((res.exp - now) / 60_000));
+      return {
+        rows: [row('keys', 'WARN', 'keys', `jev key from ${res.source} expires in ${minutes} min; re-link with code-forge keys set jev --op <ref from keys.jev>`)],
+        key: res.value,
+      };
+    }
+    const exp = res.exp === null ? 'no expiry' : isTime(res.exp) ? `expires ${new Date(res.exp).toISOString()}` : 'expiry unknown';
+    const hours = cache.source === 'config' ? ` (cache ${cache.hours} h)` : '';
+    return { rows: [row('keys', 'OK', 'keys', `jev key from ${res.source}, ${exp}${hours}`)], key: res.value };
   } catch (err) {
     return { rows: [row('keys', 'FAIL', 'keys', `jev key resolution failed (${err?.code ?? err?.name ?? 'error'})`)], key: null };
   }

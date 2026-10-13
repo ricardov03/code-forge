@@ -802,7 +802,11 @@ the plan file. See `skill/references/continuity.md`.
   so lowering it shortens an existing cache at the next read, and a longer `--cache-hours` only
   holds when the config allows it; only a reader that passes no hours (the setup wizard) caps at
   the 24 h maximum. They resolve only in the worker and the
-  orchestrator's own CLI calls.
+  orchestrator's own CLI calls. Under 1 hour left, `keys list` (one stderr `WARN` line with the
+  `keys set <name> --op <ref>` command; the index keeps the `op://` reference, never a value) and
+  `doctor` (a `WARN` keys row with a fixed text, no reference) warn. When the cached key expired
+  and 1Password does not answer, `jev ask` ends with one line naming the expiry time and the exact
+  `code-forge keys set jev --op <ref>` re-link command.
 - **Coders get no keys.** A coder process receives neither the Jev key nor the signing key.
 - **One forbidden list, rendered per harness.** Force pushes, `git reset --hard`, `git stash`,
   `rm -rf` outside `.code-forge/`, reading `~/.code-forge/runs/`, starting a worker, `run start`, `run reload`,

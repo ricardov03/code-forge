@@ -13,6 +13,7 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 In the next release:
 
 - **Choose how long a 1Password key stays cached (B84).** Set `keys.cache_hours` (1 to 24, default 8) in `.code-forge.yml`, or `keys set <name> --op <ref> --cache-hours <n>` for one key. A lower value shortens keys that are already cached at the next read.
+- **Warnings before a cached key runs out (B85).** `keys list` and `doctor` warn when a 1Password key has less than 1 hour left. When the cached key expired and 1Password does not answer, `jev ask` prints the exact command to re-link it: `code-forge keys set jev --op <ref>`.
 
 In 0.9.0:
 
@@ -263,7 +264,7 @@ code-forge validate                 # loads and validates .code-forge.yml
 code-forge resolve L1                # {provider, model, effort, fallback, cli} for a level
 code-forge doctor --quick            # config + links + key resolution only
 code-forge list                      # what is installed where, and whether it still resolves
-code-forge keys list                 # NAME / SOURCE / BACKEND / EXPIRES — never a value
+code-forge keys list                 # NAME / SOURCE / BACKEND / EXPIRES — never a value; WARN under 1 h left
 code-forge models                    # the model catalog per provider
 code-forge --help                    # every verb, one per line
 code-forge version

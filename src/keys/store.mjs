@@ -22,7 +22,11 @@
  * redacted output path (`util/log`, `util/redact`) masks it from then on. Nothing here prints.
  *
  * Alongside the secrets the store keeps `index.json` (0600, no values): name → source, backend,
- * exp — what `keys list` shows.
+ * exp, and (B85) the `op://` reference a 1Password read came from — what `keys list` shows and
+ * what its re-link hint names. A row written before B85 has no `ref` and still lists.
+ *
+ * An entry dropped as expired is reported to the reader (B85): `resolveKey` returns its old `exp`
+ * as `expired` when nothing else resolved, so `jev ask` can print the exact re-link command.
  *
  * @typedef {object} Backend
  * @property {string} name
@@ -32,8 +36,8 @@
  * @property {(name: string, value: string) => Promise<void>} set
  * @property {(name: string) => Promise<boolean>} delete
  *
- * @typedef {{name: string, source: string, backend: string, exp: number|null}} IndexRow
- * @typedef {{value: string|null, source: string|null, exp: number|null, errors: string[]}} Resolution
+ * @typedef {{name: string, source: string, backend: string, exp: number|null, ref?: string}} IndexRow
+ * @typedef {{value: string|null, source: string|null, exp: number|null, errors: string[], expired?: number|null}} Resolution
  */
 
 import { readFile } from 'node:fs/promises';
@@ -81,6 +85,25 @@ export function parseRef(name, ref) {
     throw new TypeError(`key "${name}": malformed 1Password reference`);
   }
   return { envName, storeName, opRef: ref?.startsWith('op://') ? ref : null };
+}
+
+/**
+ * @param {unknown} exp
+ * @returns {exp is number} a time in ms that `new Date(exp)` can print: finite, |exp| <= 8.64e15.
+ */
+export function isTime(exp) {
+  return typeof exp === 'number' && Number.isFinite(exp) && Math.abs(exp) <= 8.64e15;
+}
+
+/**
+ * A reference as one POSIX shell word for a re-link command a human copies (B85): unchanged when
+ * every character is in `[A-Za-z0-9_./:@%+=-]`, else wrapped in single quotes with each `'` written
+ * as `'\''`.
+ * @param {string} ref
+ * @returns {string}
+ */
+export function shellWord(ref) {
+  return /^[A-Za-z0-9_./:@%+=-]+$/.test(ref) ? ref : `'${ref.replace(/'/g, "'\\''")}'`;
 }
 
 /**
@@ -168,8 +191,9 @@ export function codeForgeHome(env = process.env) {
  * @param {object} opts
  * @param {Backend[]} opts.backends - candidates, most preferred first; unavailable ones are dropped.
  * @param {string} opts.dir - where `index.json` lives.
+ * @param {typeof writePrivateFile} [opts.writeIndexFile] - writes `index.json` (tests inject a failure).
  */
-export async function createKeyStore({ backends, dir }) {
+export async function createKeyStore({ backends, dir, writeIndexFile = writePrivateFile }) {
   /** @type {Backend[]} */
   const live = [];
   for (const backend of backends) {
@@ -199,7 +223,7 @@ export async function createKeyStore({ backends, dir }) {
   const updateIndex = async (change) => {
     const index = await readIndex();
     change(index);
-    await writePrivateFile(indexFile, JSON.stringify(index, null, 2));
+    await writeIndexFile(indexFile, JSON.stringify(index, null, 2));
   };
 
   return {
@@ -211,11 +235,12 @@ export async function createKeyStore({ backends, dir }) {
      * @param {string} name
      * @param {number} now
      * @param {string[]} [errors] - receives one non-secret reason per backend that failed.
-     * @param {{maxHours?: number}} [opts] - the reader's cache time; a longer `exp` is cut to
-     *   `now + maxHours` (default `MAX_CACHE_HOURS`).
+     * @param {{maxHours?: number, onExpired?: (exp: number) => void}} [opts] - the reader's cache
+     *   time; a longer `exp` is cut to `now + maxHours` (default `MAX_CACHE_HOURS`). `onExpired`
+     *   gets the old `exp` of an entry this read dropped as expired (B85).
      * @returns {Promise<{value: string, exp: number|null, backend: string}|null>}
      */
-    async read(name, now, errors = [], { maxHours = MAX_CACHE_HOURS } = {}) {
+    async read(name, now, errors = [], { maxHours = MAX_CACHE_HOURS, onExpired } = {}) {
       assertKeyName(name);
       const latest = now + assertCacheHours(maxHours) * HOUR_MS;
       for (const backend of readOrder) {
@@ -235,8 +260,13 @@ export async function createKeyStore({ backends, dir }) {
           await backend.delete(name).catch((err) => {
             errors.push(`${backend.name}: delete of expired entry failed (${reasonOf(err)})`);
           });
+          // reported first, and a failed index update is a reason, never a reject: the reader still
+          // learns the key expired
+          onExpired?.(entry.exp);
           await updateIndex((index) => {
             delete index[name];
+          }).catch((err) => {
+            errors.push(`index: removal of the expired entry failed (${reasonOf(err)})`);
           });
           return null;
         }
@@ -268,9 +298,10 @@ export async function createKeyStore({ backends, dir }) {
     /**
      * @param {string} name
      * @param {string} value
-     * @param {{source: string, exp: number|null}} meta
+     * @param {{source: string, exp: number|null, ref?: string}} meta - `ref` (B85): the `op://`
+     *   reference the value was read from; it goes to the index, never a value.
      */
-    async put(name, value, { source, exp }) {
+    async put(name, value, { source, exp, ref }) {
       assertKeyName(name);
       if (!writer) {
         throw new Error('keys: no writable backend');
@@ -278,7 +309,7 @@ export async function createKeyStore({ backends, dir }) {
       registerSecret(value);
       await writer.set(name, encodeEntry(value, exp));
       await updateIndex((index) => {
-        index[name] = { source, backend: writer.name, exp };
+        index[name] = { source, backend: writer.name, exp, ...(typeof ref === 'string' ? { ref } : {}) };
       });
     },
 
@@ -307,6 +338,7 @@ export async function createKeyStore({ backends, dir }) {
           source: String(index[name].source),
           backend: String(index[name].backend),
           exp: index[name].exp ?? null,
+          ...(typeof index[name].ref === 'string' ? { ref: index[name].ref } : {}),
         }));
     },
   };
@@ -336,8 +368,8 @@ export function createDefaultKeyStore(
 }
 
 /**
- * Read a key from 1Password and cache it into the store as `{v, exp}` for `cacheHours`. A cache
- * write failure is reported in `errors` but does not lose the value just read.
+ * Read a key from 1Password and cache it into the store as `{v, exp}` for `cacheHours`; the index
+ * row records `opRef` (B85). A cache write failure is reported in `errors` but does not lose the value just read.
  *
  * @param {string} storeName
  * @param {string} opRef
@@ -358,7 +390,7 @@ export async function readOpAndCache(storeName, opRef, { store, opRead = realOpR
   const exp = now + cacheHours * HOUR_MS;
   /** @type {string[]} */
   const errors = [];
-  await store.put(storeName, res.value, { source: 'op', exp }).catch((err) => {
+  await store.put(storeName, res.value, { source: 'op', exp, ref: opRef }).catch((err) => {
     errors.push(`cache write failed (${reasonOf(err)})`);
   });
   return { value: res.value, source: 'op', exp, errors };
@@ -377,7 +409,8 @@ export async function readOpAndCache(storeName, opRef, { store, opRead = realOpR
  * @param {number} [deps.now]
  * @param {number} [deps.cacheHours] - how long a 1Password read is cached, and the longest a cached
  *   entry is trusted. Omitted: cached for `DEFAULT_CACHE_HOURS`, trusted up to `MAX_CACHE_HOURS`.
- * @returns {Promise<Resolution>}
+ * @returns {Promise<Resolution>} when nothing resolved, `expired` is the old `exp` of a cached
+ *   entry this call dropped as expired, else null (B85).
  */
 export async function resolveKey(name, { store, ref, env = process.env, opRead = realOpRead, ask, now = Date.now(), cacheHours }) {
   const { envName, storeName, opRef } = parseRef(name, ref);
@@ -391,7 +424,9 @@ export async function resolveKey(name, { store, ref, env = process.env, opRead =
     return { value: fromEnv, source: 'env', exp: null, errors };
   }
 
-  const cached = await store.read(storeName, now, errors, { maxHours });
+  /** @type {number|null} */
+  let expired = null;
+  const cached = await store.read(storeName, now, errors, { maxHours, onExpired: (exp) => { expired = exp; } });
   if (cached) {
     return { value: cached.value, source: cached.backend, exp: cached.exp, errors };
   }
@@ -415,5 +450,5 @@ export async function resolveKey(name, { store, ref, env = process.env, opRead =
     }
   }
 
-  return { value: null, source: null, exp: null, errors };
+  return { value: null, source: null, exp: null, errors, expired };
 }
