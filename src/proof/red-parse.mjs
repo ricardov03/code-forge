@@ -40,6 +40,8 @@ const INVALID_FAMILIES = /** @type {const} */ ([
       /\bClass "?[A-Za-z_\\][\w\\]*"? not found\b/,
       /\bFailed opening required\b/,
       /\bInterface "?[A-Za-z_\\][\w\\]*"? not found\b/,
+      // Laravel 13's one-line JSON summary under an AI agent: `Class \"App\\Support\\Greeting\" not found`
+      /\b(?:Class|Interface) \\"[A-Za-z_\\][\w\\]*\\" not found\b/,
     ],
   ],
   ['compile', 'a syntax or parse error', [/^\s*SyntaxError\b/m, /\bPHP Parse error\b/, /\bParseError\b/, /^\s*Parse error:/m]],

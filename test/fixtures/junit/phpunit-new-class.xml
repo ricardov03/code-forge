@@ -1,0 +1,11 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Unit\GreetingTest" file="/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/GreetingTest.php" tests="1" assertions="0" errors="1" failures="0" skipped="0" time="0.002208">
+    <testcase name="test_greeting_comes_from_the_owned_class" file="/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/GreetingTest.php" line="10" class="Tests\Unit\GreetingTest" classname="Tests.Unit.GreetingTest" assertions="0" time="0.002208">
+      <error type="Error">Tests\Unit\GreetingTest::test_greeting_comes_from_the_owned_class
+Error: Class "App\Support\Greeting" not found
+
+/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/GreetingTest.php:12</error>
+    </testcase>
+  </testsuite>
+</testsuites>

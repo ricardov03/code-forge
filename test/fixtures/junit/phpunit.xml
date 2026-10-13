@@ -1,17 +1,11 @@
 <?xml version="1.0" encoding="UTF-8"?>
-<!-- hand-written (B86) to the documented PHPUnit 12 `log-junit` format (absolute paths, as PHPUnit writes them); B89 replaces it with a captured report -->
 <testsuites>
-  <testsuite name="" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.012">
-    <testsuite name="Unit" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.012">
-      <testsuite name="Tests\Unit\ClampTest" file="/Users/dev/shop/tests/Unit/ClampTest.php" tests="2" assertions="2" errors="0" failures="1" skipped="0" time="0.012">
-        <testcase name="test_clamps_low" file="/Users/dev/shop/tests/Unit/ClampTest.php" line="9" class="Tests\Unit\ClampTest" classname="Tests.Unit.ClampTest" assertions="1" time="0.004"/>
-        <testcase name="test_clamps_high" file="/Users/dev/shop/tests/Unit/ClampTest.php" line="14" class="Tests\Unit\ClampTest" classname="Tests.Unit.ClampTest" assertions="1" time="0.008">
-          <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Unit\ClampTest::test_clamps_high
+  <testsuite name="Tests\Unit\ClampTest" file="/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/ClampTest.php" tests="1" assertions="1" errors="0" failures="1" skipped="0" time="0.001632">
+    <testcase name="test_caps_high" file="/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/ClampTest.php" line="10" class="Tests\Unit\ClampTest" classname="Tests.Unit.ClampTest" assertions="1" time="0.001632">
+      <failure type="PHPUnit\Framework\ExpectationFailedException">Tests\Unit\ClampTest::test_caps_high
 Failed asserting that 12 is identical to 10.
 
-/Users/dev/shop/tests/Unit/ClampTest.php:16</failure>
-        </testcase>
-      </testsuite>
-    </testsuite>
+/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/ClampTest.php:12</failure>
+    </testcase>
   </testsuite>
 </testsuites>

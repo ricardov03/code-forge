@@ -23,11 +23,14 @@ waits on a second real consumer (plan §10.4, Q17).
 - `swift` adapter for `proof.runners`: anchored `{test_filter}` (file base name or `Suite/test` case), reads the XCTest
   report and its Swift Testing sibling, `swiftc` compile errors give `RED_INVALID compile`; opt-in live check
   `CODE_FORGE_LIVE_SWIFT=1` verified on Swift 6.3.3 (B88, #7).
+- PHP red→green through the `junit` adapter, verified live on Laravel 13 with PHPUnit 12 and Pest 4
+  (`CODE_FORGE_LIVE_PHP=1`); captured reports replace the hand-written PHP fixtures (B89, #7).
 
 ### Fixed
 
 - The JUnit reader accepts the real SwiftPM 6.3 bare XCTest failure (`message="failure"`), not only `failed`; captured
   Swift reports replace the hand-written fixtures (B88, #7).
+- A missing class in Laravel 13's JSON-escaped AI-agent console summary is now read as `import`, not `error` (B89, #7).
 
 ## [0.9.0] — 2026-10-12
 

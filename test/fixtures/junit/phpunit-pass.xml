@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Unit\ClampTest" file="/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/ClampTest.php" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.000424">
+    <testcase name="test_caps_high" file="/private/var/folders/0y/7ddb8qyd05l4k0wl1mycn82w0000gn/T/code-forge-tests/code-forge-test-19626/cf-b10a-fSzyE3/laravel-live-phpunit/app/.code-forge/export/B1/tests/Unit/ClampTest.php" line="10" class="Tests\Unit\ClampTest" classname="Tests.Unit.ClampTest" assertions="1" time="0.000424"/>
+  </testsuite>
+</testsuites>

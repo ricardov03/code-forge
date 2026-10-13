@@ -660,3 +660,32 @@ test('B88 (7): proof.md §2 shows the Swift runner and the waiver for a new API;
   assert.equal(occurrences(s4, 'SwiftPM builds in the export (`.code-forge/export/A/.build`), never in the package; without XCTest no XCTest file is written; a test that crashes at base (`fatalError`) gives `RED_INVALID error`; a file whose suite is not named after it selects no test and gives `NOT_RED`'), 1);
   assert.equal(occurrences(s4, 'UNVERIFIED with'), 0);
 });
+
+// ── B89: PHP red→green through the junit adapter ────────────────────────────
+
+test('B89 (4): proof.md §2 gives the PHP runner and the new-class rule; §4 says PHP red→green VERIFIED with the versions and the artisan runner', async () => {
+  const proof = await readSkillFile('references/proof.md');
+  const s2 = section(proof, 2);
+  assert.equal(occurrences(s2, '- **PHP (B89).**'), 1);
+  assert.equal(occurrences(s2, '`php artisan test` passes the file, `--filter` and `--log-junit` through to PHPUnit and to Pest (verified live, §4), so a Laravel app needs no `vendor/bin/phpunit` or `vendor/bin/pest` runner'), 1);
+  assert.equal(occurrences(s2, 'the PHPUnit method (`--test tests/Unit/ClampTest.php::test_caps_high`) or the Pest description (`--test tests/Unit/ClampTest.php::caps high`)'), 1);
+  assert.equal(occurrences(s2, 'The report\'s ids are `Tests.Unit.ClampTest.test_caps_high` (PHPUnit) and `Tests.Unit.ClampTest.caps high` (Pest); in a filtered run the root suite is named after the test class (in a full-config run after the `phpunit.xml` path), and the reader does not depend on that name.'), 1);
+  assert.equal(occurrences(s2, '`{test_filter}` is the case, regex-escaped. PHPUnit and Pest read `--filter` as a regex'), 1);
+  assert.equal(occurrences(s2, 'a Pest description with `( ) [ ] . + ? /` is safe'), 1);
+  assert.equal(occurrences(s2, '**A PHP run that selects no test is `RED_INVALID error`, where a Swift one is `NOT_RED`,** because of the exit code'), 1);
+  assert.equal(occurrences(s2, 'so the classifier stops at its "the filter ran no test" row: `RED_INVALID error`'), 1);
+  assert.equal(occurrences(s2, '**A test of a class the block added is `RED_INVALID`:**'), 1);
+  assert.equal(occurrences(s2, 'the kind is `import` in both of Laravel\'s console forms: its plain text, and the one-line JSON summary Laravel 13 prints under an AI agent'), 1);
+  assert.equal(occurrences(s2, '`error` when it prints the one-line JSON summary'), 0);
+  const s4 = section(proof, 4);
+  assert.equal(occurrences(s4, '**PHP (PHPUnit and Pest, Laravel) red→green under export: VERIFIED** on 2026-10-13 with PHP 8.4.25, Composer 2.10.2 and Laravel Framework 13.35.0, on PHPUnit 12.5.39 and on Pest 4.7.8 (PHPUnit 12.5.33 under it)'), 1);
+  assert.equal(occurrences(s4, 'The runner is `php artisan test` (`[php, artisan, test, "{test_file}", --filter, "{test_filter}", --log-junit, "{report}"]`, §2 PHP): it passes `--log-junit` through to PHPUnit and to Pest, and both write the report.'), 1);
+  assert.equal(occurrences(s4, 'gives RED `assertion`, then GREEN, exit 0 and a signed row with `runner: junit`, exactly that test in `failed_tests`'), 1);
+  assert.equal(occurrences(s4, 'a test of the class the block added gives `RED_INVALID` `import` (`proof red-green` exits 1; the runner itself exits 2), from a plain terminal and under an AI agent (both seen live)'), 1);
+  assert.equal(occurrences(s4, 'a root suite named after the `phpunit.xml` path, then `Unit` and `Feature`, then the classes'), 1);
+  // the §2 pointer "verified live, §4" points at the section that holds the VERIFIED paragraph
+  assert.equal(occurrences(section(proof, 2), 'red→green under export: VERIFIED'), 0);
+  assert.equal(occurrences(s4, 'exit 0, 6 tests passed (the skeleton\'s 2 and the block\'s 4)'), 1);
+  assert.equal(occurrences(s4, 'exit 0, 4 tests passed'), 0);
+  assert.equal(occurrences(s4, 'The captured reports are the PHP fixtures in `test/fixtures/junit/`.'), 1);
+});

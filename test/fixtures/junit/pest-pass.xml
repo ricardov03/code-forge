@@ -1,0 +1,6 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="Tests\Unit\ClampTest" file="tests/Unit/ClampTest.php" tests="1" assertions="1" errors="0" failures="0" skipped="0" time="0.005142">
+    <testcase name="caps high" file="tests/Unit/ClampTest.php::caps high" class="Tests\Unit\ClampTest" classname="Tests.Unit.ClampTest" assertions="1" time="0.005142"/>
+  </testsuite>
+</testsuites>

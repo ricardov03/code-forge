@@ -1,8 +1,14 @@
 /**
  * B86: the fail-closed JUnit report reader and the RED/GREEN classifier (red-green plan §1.1).
- * Fixtures under `test/fixtures/junit/` are hand-written to each runner's documented format
- * (each file says so); B88 replaced the Swift ones (`xctest*.xml`, `swift-testing*.xml`) with reports captured by
- * `swift-live.test.mjs`, and B89 replaces the others.
+ * Fixtures under `test/fixtures/junit/`: B88 replaced the Swift ones (`xctest*.xml`, `swift-testing*.xml`) with
+ * reports captured by `swift-live.test.mjs`; B89 replaced the PHP ones (`phpunit*.xml`, `pest*.xml`) with
+ * reports captured by `laravel-live.test.mjs` on 2026-10-13 (PHP 8.4.25, Laravel Framework 13.35.0, PHPUnit
+ * 12.5.39, Pest 4.7.8 on PHPUnit 12.5.33; `php artisan test <file> --filter <case> --log-junit <report>`
+ * through `proof red-green`), byte-equal: `phpunit.xml` / `pest.xml` the RED step of the Clamp test's failing
+ * case, `*-pass.xml` its GREEN step, `*-new-class.xml` the RED step of a test whose class the block added;
+ * `phpunit-full.xml` a full-config run in the same check (`php artisan test --log-junit <report>`, no file, no
+ * `--filter`): the root suite named after the `phpunit.xml` path, then `Unit` / `Feature`, then the classes.
+ * `pytest.xml` is still hand-written to pytest's documented format (it says so).
  */
 import assert from 'node:assert/strict';
 import { execFileSync } from 'node:child_process';
@@ -48,14 +54,17 @@ test('B86 (1): one assertion <failure> per runner fixture is RED assertion, fail
   const expected = {
     'xctest.xml': 'KitTests.ClampXCTests.testCapsHigh',
     'swift-testing.xml': 'KitTests.ClampSwiftTests.capsHigh()',
-    'phpunit.xml': 'Tests.Unit.ClampTest.test_clamps_high',
-    'pest.xml': 'Tests.Unit.ClampTest.it clamps high',
+    'phpunit.xml': 'Tests.Unit.ClampTest.test_caps_high',
+    'pest.xml': 'Tests.Unit.ClampTest.caps high',
     'pytest.xml': 'tests.test_clamp.test_clamps_high',
   };
+  // the PHP reports come from a `--filter` run of the one failing case: 1 test, none passed
+  const counts = { 'phpunit.xml': [1, 0], 'pest.xml': [1, 0] };
   for (const [file, id] of Object.entries(expected)) {
     const parsed = readJUnit(fixture(file));
-    assert.equal(parsed.tests.length, 2, file);
-    assert.deepEqual(parsed.tests.filter((t) => t.status === 'passed').length, 1, file);
+    const [total, passed] = counts[/** @type {'phpunit.xml'} */ (file)] ?? [2, 1];
+    assert.equal(parsed.tests.length, total, file);
+    assert.deepEqual(parsed.tests.filter((t) => t.status === 'passed').length, passed, file);
     const run = file === 'xctest.xml' ? { ...FAILED_RUN, stdout: XCTEST_MAC_LINE } : FAILED_RUN;
     const result = classifyReport({ run, reports: [parsed] });
     assert.deepEqual(red(result), ['RED', 'assertion', 1, [id]], file);
@@ -65,12 +74,7 @@ test('B86 (1): one assertion <failure> per runner fixture is RED assertion, fail
 });
 
 test('B86 (1): the reader returns id, status and kind per testcase, through nested suites', () => {
-  assert.deepEqual(readJUnit(fixture('phpunit.xml')), {
-    tests: [
-      { id: 'Tests.Unit.ClampTest.test_clamps_low', status: 'passed' },
-      { id: 'Tests.Unit.ClampTest.test_clamps_high', status: 'failed', kind: 'assertion' },
-    ],
-  });
+  assert.deepEqual(readJUnit(fixture('phpunit.xml')), { tests: [{ id: 'Tests.Unit.ClampTest.test_caps_high', status: 'failed', kind: 'assertion' }] });
   // no classname: the id is the name; bytes are read as UTF-8; a BOM is skipped
   const bytes = Buffer.from('﻿<testsuites><testsuite name="a"><testcase name="só"/></testsuite><testsuite name="b"><testcase name="x"><skipped/></testcase></testsuite></testsuites>', 'utf8');
   assert.deepEqual(readJUnit(bytes), { tests: [{ id: 'só', status: 'passed' }, { id: 'x', status: 'skipped' }] });
@@ -190,15 +194,15 @@ test('B86 (5): exit 0 is NOT_RED; a timeout or signal is RED_INVALID fatal; an i
 
 test('B86 (6): GREEN only on exit 0 with every RED-failed id passed; a missing id, a new failure or zero tests is NOT_GREEN', () => {
   const redIds = classifyReport({ run: FAILED_RUN, reports: [readJUnit(fixture('pest.xml'))] }).failed_ids;
-  assert.deepEqual(redIds, ['Tests.Unit.ClampTest.it clamps high']);
-  const allPass = readJUnit(report([{ id: 'Tests.Unit.ClampTest.it clamps low', status: 'passed' }]).replace('<testsuite name="s">', '<testsuite name="s"><testcase classname="Tests.Unit.ClampTest" name="it clamps high"/>'));
-  assert.equal(allPass.tests.length, 2);
+  assert.deepEqual(redIds, ['Tests.Unit.ClampTest.caps high']);
+  const allPass = readJUnit(fixture('pest-pass.xml'));
+  assert.deepEqual(allPass, { tests: [{ id: 'Tests.Unit.ClampTest.caps high', status: 'passed' }] });
   const green = classifyGreen({ run: PASSED_RUN, reports: [allPass], redFailed: redIds });
   assert.deepEqual([green.verdict, green.failed, green.failed_tests], ['GREEN', 0, []]);
 
   const cases = [
     ['a missing id', { run: PASSED_RUN, reports: [readJUnit(report([{ id: 'other', status: 'passed' }]))], redFailed: redIds }, 'a test that failed at RED did not pass'],
-    ['the id skipped', { run: PASSED_RUN, reports: [readJUnit('<testsuite><testcase classname="Tests.Unit.ClampTest" name="it clamps high"><skipped/></testcase><testcase name="z"/></testsuite>')], redFailed: redIds }, 'a test that failed at RED did not pass'],
+    ['the id skipped', { run: PASSED_RUN, reports: [readJUnit('<testsuite><testcase classname="Tests.Unit.ClampTest" name="caps high"><skipped/></testcase><testcase name="z"/></testsuite>')], redFailed: redIds }, 'a test that failed at RED did not pass'],
     ['a new failure', { run: PASSED_RUN, reports: [allPass, readJUnit(report([{ id: 'new', status: 'failed' }]))], redFailed: redIds }, 'a test failed'],
     ['zero tests', { run: PASSED_RUN, reports: [readJUnit('<testsuites/>')], redFailed: redIds }, 'the filter ran no test'],
     ['a failed exit', { run: FAILED_RUN, reports: [allPass], redFailed: redIds }, 'the test run did not exit 0'],
@@ -305,4 +309,89 @@ test('B86 (3): a raw NUL or C0 control in text or an attribute is unreadable; a 
   assert.deepEqual(ws.tests, [{ id: 'K.S.t', status: 'failed', kind: 'error', needs_console: 'xctest' }]);
   const r = classifyReport({ run: { code: 1, stdout: '/x.swift:1: error: -[K.S t] : XCTAssertTrue failed\n' }, reports: [ws] });
   assert.deepEqual(red(r), ['RED', 'assertion', 1, ['K.S.t']]);
+});
+
+// ── B89: the captured PHP reports ───────────────────────────────────────────
+
+/**
+ * The console of the captured new-class RED steps (B89 live check; paths shortened, colour codes kept). Under an
+ * AI agent (`CLAUDECODE` and the like set) Laravel 13 prints one JSON summary line, where the class name is
+ * JSON-escaped (`Class \"App\\Support\\Greeting\" not found`); in a plain terminal it prints Collision's text,
+ * the class name as is.
+ */
+const PHP_NEW_CLASS_CONSOLE = {
+  json: {
+    phpunit:
+      '{"tool":"phpunit","result":"failed","tests":1,"passed":0,"assertions":0,"duration_ms":3,"errors":1,"error_details":[{"test":"Tests\\\\Unit\\\\GreetingTest::test_greeting_comes_from_the_owned_class","file":"/x/tests/Unit/GreetingTest.php","line":12,"message":"Class \\"App\\\\Support\\\\Greeting\\" not found"}]}\n',
+    pest: '{"tool":"pest","result":"failed","tests":1,"passed":0,"assertions":0,"duration_ms":10,"errors":1,"error_details":[{"test":"P\\\\Tests\\\\Unit\\\\GreetingTest::__pest_evaluable_greeting_comes_from_the_owned_class","file":"/x/tests/Unit/GreetingTest.php","line":6,"message":"Class \\"App\\\\Support\\\\Greeting\\" not found"}]}\n',
+  },
+  text: '  \u001b[41;1m FAILED \u001b[49;22m \u001b[1mTests\\Unit\\GreetingTest\u001b[22m \u001b[90m>\u001b[39m greeting comes from the owned cl… \u001b[41;1m Error \u001b[49;22m  \n\u001b[39;1m  Class "App\\Support\\Greeting" not found\u001b[39;22m\n',
+};
+
+test('B89 (3): the captured PHPUnit and Pest reports: RED assertion, GREEN on the pass report, and a new class is RED_INVALID import from both console forms (JSON agent line and plain text); without a console line it is error', () => {
+  const ids = {
+    phpunit: { clamp: 'Tests.Unit.ClampTest.test_caps_high', greeting: 'Tests.Unit.GreetingTest.test_greeting_comes_from_the_owned_class' },
+    pest: { clamp: 'Tests.Unit.ClampTest.caps high', greeting: 'Tests.Unit.GreetingTest.greeting comes from the owned class' },
+  };
+  for (const runner of /** @type {const} */ (['phpunit', 'pest'])) {
+    const { clamp, greeting } = ids[runner];
+    const redRun = classifyReport({ run: FAILED_RUN, reports: [readJUnit(fixture(`${runner}.xml`))] });
+    assert.deepEqual(red(redRun), ['RED', 'assertion', 1, [clamp]], runner);
+    const pass = readJUnit(fixture(`${runner}-pass.xml`));
+    assert.deepEqual(pass, { tests: [{ id: clamp, status: 'passed' }] }, runner);
+    const green = classifyGreen({ run: PASSED_RUN, reports: [pass], redFailed: redRun.failed_ids });
+    assert.deepEqual([green.verdict, green.failed, green.failed_tests], ['GREEN', 0, []], runner);
+    // the pass report is not RED; the RED report is not GREEN
+    assert.equal(classifyReport({ run: PASSED_RUN, reports: [pass] }).verdict, 'NOT_RED', runner);
+    assert.equal(classifyGreen({ run: FAILED_RUN, reports: [readJUnit(fixture(`${runner}.xml`))], redFailed: redRun.failed_ids }).verdict, 'NOT_GREEN', runner);
+
+    const newClass = readJUnit(fixture(`${runner}-new-class.xml`));
+    assert.deepEqual(newClass, { tests: [{ id: greeting, status: 'error', kind: 'error' }] }, runner);
+    const fromJson = classifyReport({ run: { ...FAILED_RUN, code: 2, stdout: PHP_NEW_CLASS_CONSOLE.json[runner] }, reports: [newClass] });
+    assert.deepEqual([fromJson.verdict, fromJson.red_kind, fromJson.failed_tests], ['RED_INVALID', 'import', [greeting]], runner);
+    // the report alone (no console line) still never proves: its <error> is RED_INVALID error
+    const reportOnly = classifyReport({ run: { ...FAILED_RUN, code: 2 }, reports: [newClass] });
+    assert.deepEqual([reportOnly.verdict, reportOnly.red_kind, reportOnly.failed_tests], ['RED_INVALID', 'error', [greeting]], runner);
+    const fromText = classifyReport({ run: { ...FAILED_RUN, code: 2, stdout: PHP_NEW_CLASS_CONSOLE.text }, reports: [newClass] });
+    assert.deepEqual([fromText.verdict, fromText.red_kind, fromText.failed_tests], ['RED_INVALID', 'import', [greeting]], runner);
+  }
+});
+
+test('B89 (3): the reader does not depend on the root suite name (PHPUnit and Pest name it after the test class)', () => {
+  for (const file of ['phpunit.xml', 'pest.xml', 'phpunit-new-class.xml', 'pest-new-class.xml']) {
+    const original = fixture(file);
+    const renamed = original.replace(/<testsuite name="[^"]*"/, '<testsuite name="Other Suite"');
+    assert.notEqual(renamed, original, file);
+    assert.deepEqual(readJUnit(renamed), readJUnit(original), file);
+    assert.deepEqual(readJUnit(original.replace(/<testsuite name="[^"]*"/, '<testsuite')), readJUnit(original), file);
+  }
+});
+
+test('B89 (2): a captured full-config PHPUnit run (no --filter): nested suites, exact ids and counts, whatever the root suite is named', () => {
+  const original = fixture('phpunit-full.xml');
+  // the captured shape: <testsuites> > root suite (the config path) > "Unit" / "Feature" > class suites
+  const names = [...original.matchAll(/<testsuite name="([^"]*)"/g)].map((m) => m[1]);
+  assert.deepEqual(names.slice(1), ['Unit', 'Tests\\Unit\\ClampTest', 'Tests\\Unit\\ExampleTest', 'Tests\\Unit\\GreetingTest', 'Feature', 'Tests\\Feature\\ExampleTest', 'Tests\\Feature\\UserCountTest']);
+  assert.equal(path.basename(names[0]), 'phpunit.xml');
+  const expected = {
+    tests: [
+      { id: 'Tests.Unit.ClampTest.test_caps_high', status: 'failed', kind: 'assertion' },
+      { id: 'Tests.Unit.ClampTest.test_keeps_inside', status: 'passed' },
+      { id: 'Tests.Unit.ExampleTest.test_that_true_is_true', status: 'passed' },
+      { id: 'Tests.Unit.GreetingTest.test_greeting_comes_from_the_owned_class', status: 'passed' },
+      { id: 'Tests.Feature.ExampleTest.test_the_application_returns_a_successful_response', status: 'passed' },
+      { id: 'Tests.Feature.UserCountTest.test_a_user_is_written_to_the_in_memory_database', status: 'passed' },
+    ],
+  };
+  assert.deepEqual(readJUnit(original), expected);
+  const redRun = classifyReport({ run: FAILED_RUN, reports: [readJUnit(original)] });
+  assert.deepEqual(red(redRun), ['RED', 'assertion', 1, ['Tests.Unit.ClampTest.test_caps_high']]);
+  // the root suite's name (an absolute config path) never matters: renamed, emptied or dropped, the same result
+  const root = `<testsuite name="${names[0]}"`;
+  assert.equal(original.split(root).length, 2);
+  for (const variant of [original.replace(root, '<testsuite name="Other Suite"'), original.replace(root, '<testsuite name=""'), original.replace(root, '<testsuite')]) {
+    assert.notEqual(variant, original);
+    assert.deepEqual(readJUnit(variant), expected);
+    assert.deepEqual(red(classifyReport({ run: FAILED_RUN, reports: [readJUnit(variant)] })), red(redRun));
+  }
 });
