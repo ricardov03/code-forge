@@ -72,6 +72,15 @@
  * ticket is done); `review-file` on the same content is a fresh attempt every time (`retry: true`).
  * The tree is passed as `contentRoot`: `repoRoot` stays the main tree, and the fix-loop state
  * stays under the run root.
+ * B72: a verified `review.reopened {by: human}` row of this run for the file whose `at_seq` is the
+ * file's latest anchor seq (`reopenRowFor`, `review/reopen.mjs`) restarts a `stopped` file whose
+ * content changed since the stop, or a `lost` one: a new state (round 1, a FULL review with no
+ * `reviewed_content`, the level from the run record), saved at `at_seq + 1`, so the row works
+ * once; no `review.state_restored` row then. The block's L3 rung stays spent (it is read from the
+ * anchors). A row that does not verify, of another run, not `by: human`, at another seq, or a
+ * stopped file on the stop's own content changes nothing: the stop (or the lost refusal) repeats.
+ * Every stop records the ticket's content hash as the state's `stop_content_hash` (signed with
+ * the state), the content `block reopen` and this check compare against.
  * B71: a ticket with `kind: 'answers'` (`review-file --answers`) runs no fix-loop round: after the
  * same run-record, tree and mismatch checks it goes to `reviewAnswers` (`review/answers.mjs`) —
  * one fresh L2 session that judges whether the answering file resolves the named open findings of
@@ -91,6 +100,7 @@ import { reviewAnswers } from '../review/answers.mjs';
 import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { extraRoundsFor, newFileState, reopenForExtraRound, runRound } from '../review/fixloop.mjs';
+import { reopenRowFor } from '../review/reopen.mjs';
 import { readRun } from '../state/run.mjs';
 import { StateError } from '../state/paths.mjs';
 import { blockTree, worktreeRecord } from '../proof/worktree.mjs';
@@ -519,9 +529,23 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
     const loaded = loadState({ ...where, contentRoot: ctx.contentRoot ?? ctx.repoRoot });
     const rung = rungTaken(where);
     if (loaded.status === 'tampered' || rung.status === 'tampered') return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-tampered', approved: false, engine: 'adaptive', sessions: [] }) };
-    if (loaded.status === 'lost') return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-lost', message: LOST_MESSAGE, approved: false, engine: 'adaptive', sessions: [] }) };
+    // B72: the human's `block reopen` row for this file's latest anchor seq restarts a stopped
+    // (on changed content) or lost file: a new state, saved at that seq + 1 — the row works once
+    // (`rows`: this run's rows read above under the block lock; `key`: the run key from opts)
+    const reopenAt = {
+      runId: ctx.runId,
+      block: ticket.block,
+      file: ticket.file,
+      key,
+      status: loaded.status,
+      state: loaded.state,
+      seq: loaded.seq,
+      contentHash: ticket.content_hash,
+    };
+    const reopened = reopenRowFor(rows, reopenAt) !== null;
+    if (loaded.status === 'lost' && !reopened) return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-lost', message: LOST_MESSAGE, approved: false, engine: 'adaptive', sessions: [] }) };
     let seq = loaded.seq;
-    if (loaded.status === 'restored' && loaded.state !== null) {
+    if (loaded.status === 'restored' && loaded.state !== null && !reopened) {
       // B68: the lost file is rebuilt from the anchor's signed body; saved as a new seq, then recorded
       const writeRow = /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow);
       await saveState({ ...where, state: loaded.state, seq, writeRow, contentRoot: ctx.contentRoot ?? ctx.repoRoot });
@@ -529,7 +553,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
       await writeRow({ event: RESTORED_EVENT, block: ticket.block, file: ticket.file, seq, from_seq: loaded.seq });
     }
     const rungUsed = rung.used;
-    let state = loaded.state;
+    let state = reopened ? null : loaded.state;
     if (state === null || state.status === 'complete') state = newFileState({ file: ticket.file, level, l3RungUsed: rungUsed });
     state.l3_rung_used = state.l3_rung_used || rungUsed;
     // B47: an autopilot extra round raises the file's cap; a file stopped at the old cap reopens
@@ -643,6 +667,11 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
       state.pending_kind = kind;
     }
   }
+  // B72: a stop (any reason) records the content it reviewed — the ticket's — in the signed state,
+  // so `block reopen` and the worker know which content this stop saw (`stopContentHash`)
+  const stamped = /** @type {Record<string, any>} */ (state);
+  if (state.status === 'stopped') stamped.stop_content_hash = ticket.content_hash;
+  else delete stamped.stop_content_hash;
   await saveState({ ...where, state, seq, writeRow: /** @type {(row: Record<string, any>) => Promise<unknown>} */ (ctx.writeRow), contentRoot: ctx.contentRoot ?? ctx.repoRoot });
 
   const eng = /** @type {Record<string, any> | null} */ (engineOutcome);

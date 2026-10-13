@@ -590,6 +590,29 @@ flowchart TD
   the block. When a signed review round on the current bytes left findings and every finding the
   review left open is waived, the file counts as reviewed (`reviewed_by_waiver`, never approved)
   and the block can close — see the next table.
+- **Reopening a stopped or lost file.** A human may restart the review of a stopped file (any stop
+  reason) or a lost one: `code-forge block reopen <id> --file <path> --run <run> --reason <text>`.
+  Only a stopped file needs content that differs from what its stop reviewed (every stop records
+  that content's hash in the signed state); a lost state file (one the ledger cannot rebuild) is
+  reopened on its current content. It is human-only, like `block waive` (on the coder forbidden
+  list). It clears the cached result for the current content, then writes one signed
+  `review.reopened` row (`by: human`, naming the file's latest state seq). There is at most one
+  such row per state seq: a retry on the same content finds that row and writes no second one,
+  and a reopen on other content at the same seq is refused. The next `review-file` then starts over: round 1, a
+  full review, up to `review.max_rounds_per_file` rounds at L2 again. The row works once. The
+  block's L3 rung stays spent if it was used. If the content is changed back to what the stop
+  reviewed before the next `review-file`, the stop repeats. Refusals write no row and exit 1:
+  `reopen-same-content` (the content is still what the stop reviewed, or that content is unknown;
+  change the file or waive instead), `reopen-tampered` (the state does not verify),
+  `reopen-not-stopped` (no state, or an open or complete one), `reopen-block-not-open` (the block
+  is stopped or closed), `reopen-not-owned` (the block does not own the file), `unknown_block`
+  (the run does not know the block, as for `block waive`; this and `reopen-block-not-open` are
+  checked before anything else is read), `reopen-config` (the run's config snapshot or `tmp.root`
+  cannot be read), `reopen-already-recorded` (a row for this state seq already names other
+  content: run `review-file`, or the content changed since that reopen) and `reopen-write-failed`
+  (the row was not written). A
+  missing `--file` or `--reason`, or a path that is not a plain repo-root-relative one, is `usage`
+  with exit 2.
 
 Other escalation triggers, first rule wins: attempts at a level used up
 (`escalation.retries_per_level`, default 2), review rounds at a level used up
@@ -732,7 +755,7 @@ what they can and S2 answers the rest (`system1.fallback: rules`, the default).
 | `.code-forge/` (repo) | review queue (`queue/`), review results (`reviews/<run>/`), run mirror and coder logs (`runs/<run>/`), measurement exports (`export/<block>/`) | no |
 | `~/.code-forge/runs/<run>.json` | the **authoritative** run record: active blocks, base sha, owned files, the pinned worker | no |
 | `~/.code-forge/runs/<run>.key` | the per-run signing key, mode 0600 | no |
-| `<code-forge home>/runs/<run>/review-state/<block>/` (default `~/.code-forge`) | each reviewed file's signed fix-loop state (round, level, open findings, stop), dir 0700, files 0600. Outside the temp root, so a temp sweep does not lose it. A file still at the old temp-root path is moved here on its first load only when it matches the file's latest `review.state` anchor; one that does not match is `tampered` and stays where it is. A missing one is rebuilt from the ledger's anchor when the anchor carries `state_body`; otherwise it is lost: `doctor` warns, and the file needs `block reopen` (added in a later block) | no |
+| `<code-forge home>/runs/<run>/review-state/<block>/` (default `~/.code-forge`) | each reviewed file's signed fix-loop state (round, level, open findings, stop), dir 0700, files 0600. Outside the temp root, so a temp sweep does not lose it. A file still at the old temp-root path is moved here on its first load only when it matches the file's latest `review.state` anchor; one that does not match is `tampered` and stays where it is. A missing one is rebuilt from the ledger's anchor when the anchor carries `state_body`; otherwise it is lost: `doctor` warns, and the file needs the human's `block reopen` | no |
 | `~/.code-forge/ledger/<slug>.jsonl` | the ledger: append-only, one JSON row per event | no |
 | `~/.code-forge/logs/`, `installs.json`, `cache/` | init logs, the error log (`errors.jsonl`) and the last command names (`breadcrumbs.json`), where the skill is installed, model catalog cache | no |
 | run temp root | `<tmp.root>/<run>/`, default `<os tmpdir>/code-forge/<run>/`. Empty cwds for closed-book sessions, the facts snapshot, pid registry. Swept by the next `run start` | no |
@@ -749,8 +772,8 @@ the plan file. See `skill/references/continuity.md`.
 - **Coders get no keys.** A coder process receives neither the Jev key nor the signing key.
 - **One forbidden list, rendered per harness.** Force pushes, `git reset --hard`, `git stash`,
   `rm -rf` outside `.code-forge/`, reading `~/.code-forge/runs/`, starting a worker, `run start`, `run reload`,
-  `block waive`, `autopilot`, writing review results, and more. It becomes each CLI's own deny rules
-  (`--disallowedTools` for Claude, an execpolicy rules file plus prose for Codex), is copied into
+  `block waive`, `block reopen`, `autopilot`, writing review results, and more. It becomes each
+  CLI's own deny rules (`--disallowedTools` for Claude, an execpolicy rules file plus prose for Codex), is copied into
   every brief, and is grepped from every transcript at `block close`. A hit is a `rule_break`.
 - **Signed rows.** Every gate-relevant ledger row carries an HMAC made with the per-run key. A
   forged, edited or stale approval is refused, and a replaced worker stops the block.

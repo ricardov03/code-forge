@@ -69,6 +69,21 @@ function readJSON(file) {
  */
 
 /**
+ * The review ticket for `file`'s CURRENT content: the one rule `enqueue` and `clearDone` (B72)
+ * share — the repo-relative path, the realpath'd tree (or null), the content hash taken under the
+ * tree when given (else under `repoRoot`) and the ticket id over all of them.
+ * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null}} opts
+ * @returns {{rel: string, root: string | null, content_hash: string, ticket: string}}
+ * @throws {WorkerError} `bad-path` for a bad file path or a tree that cannot be resolved.
+ */
+export function resolveTicket({ repoRoot, run, block, file, tree = null }) {
+  const rel = assertRowPath(file);
+  const root = tree === null ? null : realTree(tree);
+  const content_hash = contentHash(root ?? repoRoot, rel);
+  return { rel, root, content_hash, ticket: ticketId({ run, block, file: rel, content_hash, tree: root }) };
+}
+
+/**
  * Enqueue `file` (already repo-root-relative) for review. Idempotent by content hash: the same
  * content returns the same ticket and never rewrites it. The queue is under `repoRoot`; the
  * content is hashed under `tree` when given (B62b: the block's worktree, realpath'd here), else
@@ -79,10 +94,7 @@ function readJSON(file) {
  * @throws {WorkerError} `bad-path` for a relative `tree` or one that cannot be resolved.
  */
 export function enqueue({ repoRoot, run, block, file, tree = null, now = new Date() }) {
-  const rel = assertRowPath(file);
-  const root = tree === null ? null : realTree(tree);
-  const content_hash = contentHash(root ?? repoRoot, rel);
-  const ticket = ticketId({ run, block, file: rel, content_hash, tree: root });
+  const { rel, root, content_hash, ticket } = resolveTicket({ repoRoot, run, block, file, tree });
   const target = path.join(queueDir(repoRoot), `${ticket}.json`);
   const named = root === null ? {} : { tree: root };
   if (!existsSync(target)) {
@@ -170,6 +182,22 @@ function realTree(tree) {
 /** @param {string} repoRoot @param {string} ticket */
 export function isDone(repoRoot, ticket) {
   return existsSync(path.join(queueDir(repoRoot), `${assertTicketId(ticket)}.done`));
+}
+
+/**
+ * B72 (`block reopen`, C11): drop the done marker of the review ticket for the file's CURRENT
+ * content, so the next `review-file` on it runs instead of returning the cached result. The ticket
+ * id comes from `resolveTicket`, the rule `enqueue` uses; no ticket is written. Synchronous.
+ * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null}} opts
+ * @returns {{ticket: string, content_hash: string, removed: boolean}}
+ * @throws {WorkerError} `bad-path` for a bad file path or a tree that cannot be resolved.
+ */
+export function clearDone({ repoRoot, run, block, file, tree = null }) {
+  const { content_hash, ticket } = resolveTicket({ repoRoot, run, block, file, tree });
+  const marker = path.join(queueDir(repoRoot), `${ticket}.done`);
+  const removed = existsSync(marker);
+  rmSync(marker, { force: true });
+  return { ticket, content_hash, removed };
 }
 
 /**

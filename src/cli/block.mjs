@@ -1,5 +1,5 @@
 /**
- * `code-forge block open|attempt|rebase|claim|close|stop` (plan §4.9). The skill calls
+ * `code-forge block open|attempt|rebase|claim|close|stop|waive|reopen` (plan §4.9). The skill calls
  * `block open` before every spawn in every engine; it prints the brief pointer (≤ 200 bytes).
  *
  *   block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file>
@@ -11,6 +11,7 @@
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree]
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text>   (human-only, §4.9)
+ *   block reopen <id> --run <r> --file <path> --reason <text>   (human-only, B72)
  *
  * B64a `--json` (every subcommand): on success stdout is exactly ONE JSON line instead of the
  * text — `{"block", "event", …}` with the facts the text prints (open: level, asked, source,
@@ -141,6 +142,20 @@
  * before anything is asked or written. The ledger, the signed result files and the high paths stay
  * in the main tree. Nothing is checked out, pushed or merged.
  *
+ * B72 (issues #12, #15): `block reopen <id> --run <r> --file <path> --reason <text>` is the
+ * human's restart of a file whose review STOPPED or whose state is LOST (`review/reopen.mjs`):
+ * coder-forbidden like `block waive`. The done marker of the current content's ticket is removed
+ * (the ticket of the block's worktree when it has one), then one signed `review.reopened {block,
+ * file, from, stop_reason, at_seq, from_hash, to_hash, reason, by: human}` row is written, so the
+ * next `review-file` runs a full round 1. Refused (exit 1, no row): `unknown_block` and
+ * `reopen-block-not-open` (checked before anything is read), a `worktree-*` code (the block's tree
+ * cannot be read), `reopen-config` (the run's config snapshot or `tmp.root` cannot be read),
+ * `reopen-not-owned`, `reopen-tampered`, `reopen-not-stopped`, `reopen-same-content`,
+ * `reopen-already-recorded`, `reopen-write-failed`; a missing `--file` or `--reason` is a usage
+ * error (exit 2). It prints `block <id> reopened <file> (from
+ * <from>[ <stop reason>]; by: human)`; `--json`: `{"block", "event": "reopened", "file", "from",
+ * "stop_reason", "at_seq", "from_hash", "to_hash", "ticket_cleared", "by"}`.
+ *
  * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
  * through `closeBlock`'s `extraChecks`.
@@ -167,19 +182,78 @@ import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
-import { gitChildEnv } from '../worker/ticket.mjs';
+import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
+import { clearDone } from '../worker/queue.mjs';
+import { loadState } from '../worker/review-state.mjs';
+import { openBlockEntry, reopenFile } from '../review/reopen.mjs';
+import { runRootPath } from '../util/tmp.mjs';
 import { missingReviewTickets, parseSentinel } from '../engines/sentinel.mjs';
 import { blockEndHook, runBlockEndHook, writeDoneFile } from '../state/block-end.mjs';
 import { blockOpenFindings } from '../review/open-findings.mjs';
 import { hookForbidden, scanTranscript } from '../util/forbidden.mjs';
 
+/**
+ * B72: `block reopen` — the file's content is read where the block works (its worktree, else the
+ * main tree), its state is read (never moved) from the code-forge home or the run's old temp root,
+ * the checks, the done marker's removal and then the signed row are `reopenFile`'s.
+ * @param {{runId: string, id: string, file: string, reason: string, record: Record<string, any>, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
+ * @returns {Promise<{row: Record<string, any>, cleared: boolean}>}
+ */
+async function reopenBlockFile({ runId, id, file, reason, record, writeRow }) {
+  // the stable block codes come first, before any tree, config, key or ledger read
+  const entry = openBlockEntry(record, runId, id);
+  const real = async (/** @type {string} */ p) => realpath(p).catch(() => path.resolve(p));
+  const mainTop = await real(await repoTop(record.workspace));
+  /** @type {Awaited<ReturnType<typeof blockTree>>} */
+  let wt = null;
+  wt = await blockTree(record.workspace, entry).catch((thrown) => {
+    if (typeof thrown?.code === 'string' && thrown.code.startsWith('worktree-')) throw new StateError(thrown.code, `block ${id}: ${thrown.message}, so the file's content cannot be read; nothing was recorded`);
+    throw thrown;
+  });
+  const contentRoot = wt === null ? mainTop : wt.top;
+  const wsPrefix = path.relative(mainTop, await real(record.workspace)).split(path.sep).join('/');
+  // the state is read where the worker keeps it: an unreadable snapshot or tmp.root is refused,
+  // never guessed (a wrong root would read as "no state")
+  /** @type {string} */
+  let runRootDir;
+  try {
+    const root = configInForce(record)?.tmp?.root;
+    runRootDir = runRootPath(runId, typeof root === 'string' ? { root } : {});
+  } catch {
+    throw new StateError('reopen-config', `reopen-config: the run's config snapshot or its tmp.root cannot be read, so the review state of ${file} cannot be found; nothing was recorded`);
+  }
+  const key = await loadKey(runId);
+  const rows = await readAllRows(record.project);
+  const tree = contentRoot === mainTop ? {} : { tree: contentRoot };
+  const { row, cleared } = await reopenFile({
+    runId,
+    id,
+    file,
+    reason,
+    record,
+    rows,
+    key,
+    writeRow,
+    writeSigned,
+    io: {
+      owns: ownsAt(wsPrefix),
+      loadState: (where) => loadState({ .../** @type {any} */ (where), runRootDir, contentRoot, migrate: false }),
+      contentHash: (f) => contentHash(contentRoot, f),
+      // C11 (synchronous): the cached result of the current content's ticket would repeat the stop
+      clearDone: (f) => clearDone({ repoRoot: mainTop, run: runId, block: id, file: f, ...tree }).removed,
+    },
+  });
+  return { row, cleared };
+}
+
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
+  '       code-forge block reopen <id> --run <r> --file <path> --reason <text>\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
-const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive'];
+const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen'];
 const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report'];
 
 /**
@@ -227,8 +301,10 @@ export async function runBlock(args, deps = {}) {
     }
     if (sub !== 'close' && flags['remove-worktree'] === true) throw new StateError('usage', '--remove-worktree is a block close flag');
     if (sub === 'claim' && (!extra || positionals.length !== 2)) throw new StateError('usage', 'block claim needs exactly one path');
-    if ((sub === 'stop' || sub === 'waive') && typeof flags.reason !== 'string') throw new StateError('usage', `block ${sub} needs --reason`);
+    if ((sub === 'stop' || sub === 'waive' || sub === 'reopen') && typeof flags.reason !== 'string') throw new StateError('usage', `block ${sub} needs --reason`);
     if (sub === 'waive' && (!extra || positionals.length !== 2)) throw new StateError('usage', 'block waive needs exactly one finding id');
+    if (sub === 'reopen' && positionals.length !== 1) throw new StateError('usage', 'block reopen takes one block id (the file goes in --file)');
+    if (sub === 'reopen' && typeof flags.file !== 'string') throw new StateError('usage', 'block reopen needs --file <path>');
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     const record = await readRun(runId);
     const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
@@ -378,6 +454,14 @@ export async function runBlock(args, deps = {}) {
       await waiveFinding({ runId, id, finding: extra, reason: /** @type {string} */ (flags.reason), file: /** @type {string} */ (flags.file), writeRow });
       say(`block ${id} waived ${extra} in ${flags.file} (by: human)\n`);
       if (json) emit({ block: id, event: 'waived', finding: extra, file: flags.file, by: 'human' });
+      return 0;
+    }
+    if (sub === 'reopen') {
+      const file = /** @type {string} */ (flags.file);
+      const { row, cleared } = await reopenBlockFile({ runId, id, file, reason: /** @type {string} */ (flags.reason), record, writeRow });
+      const fromText = row.stop_reason == null ? row.from : `${row.from} ${row.stop_reason}`;
+      say(`block ${id} reopened ${file} (from ${fromText}; by: human)\n`);
+      if (json) emit({ block: id, event: 'reopened', file, from: row.from, stop_reason: row.stop_reason, at_seq: row.at_seq, from_hash: row.from_hash, to_hash: row.to_hash, ticket_cleared: cleared, by: 'human' });
       return 0;
     }
     if (sub === 'close') {

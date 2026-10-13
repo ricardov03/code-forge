@@ -276,6 +276,7 @@ export const FORBIDDEN = Object.freeze(
  * They are NOT part of `FORBIDDEN` (whose rendered count other blocks pin); `mergeForbidden()`
  * always appends them, so every list built for a coder carries them.
  *  - `code-forge block waive` — waiving a review finding is human-only;
+ *  - `code-forge block reopen` (B72) — restarting a stopped or lost file's review is human-only;
  *  - `code-forge autopilot` (any subcommand, B45) — the owner's grant to a delegate;
  *  - `--no-require-reviews` — the human's way out of `block close`'s per-file review check;
  *  - `--remove-worktree` (B62a) — `block close` removing the block's worktree, the orchestrator's
@@ -292,6 +293,15 @@ export const CODER_ONLY_FORBIDDEN = Object.freeze(
         ['forge', 'block', 'waive'],
       ],
       description: 'Waive a review finding (forge block waive) — human-only, run by the orchestrator after the human said so (§4.9)',
+    },
+    {
+      id: 'code-forge-block-reopen-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [
+        ['code-forge', 'block', 'reopen'],
+        ['forge', 'block', 'reopen'],
+      ],
+      description: 'Reopen the review of a stopped or lost file (forge block reopen) — human-only, run by the orchestrator after the human said so (B72)',
     },
     {
       id: 'code-forge-autopilot-from-coder',
