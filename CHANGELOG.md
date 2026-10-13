@@ -20,6 +20,14 @@ waits on a second real consumer (plan §10.4, Q17).
 - `proof.runners`: `proof red-green` proves a non-`node:test` file through the matching runner's argv and its JUnit
   report; the list is frozen in the run snapshot, validated by rule 17 `proof-runners-invalid`, and the row carries
   `runner`, `env_keys` and `failed_tests` (B87, #7).
+- `swift` adapter for `proof.runners`: anchored `{test_filter}` (file base name or `Suite/test` case), reads the XCTest
+  report and its Swift Testing sibling, `swiftc` compile errors give `RED_INVALID compile`; opt-in live check
+  `CODE_FORGE_LIVE_SWIFT=1` verified on Swift 6.3.3 (B88, #7).
+
+### Fixed
+
+- The JUnit reader accepts the real SwiftPM 6.3 bare XCTest failure (`message="failure"`), not only `failed`; captured
+  Swift reports replace the hand-written fixtures (B88, #7).
 
 ## [0.9.0] — 2026-10-12
 

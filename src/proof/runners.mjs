@@ -13,16 +13,27 @@
  *     `{report}` is replaced; nothing else is (no shell, no substring expansion).
  *   - Each step (RED, GREEN) gets a fresh report dir under the run temp root, outside the work dir;
  *     the dir is removed once the report is read.
- *   - Fail closed: an entry the validator refuses is never run (`runner-invalid`); a `{test_filter}`
- *     with no `::case`, or a test path or case that starts with `-`, is a usage error.
+ *   - Fail closed: an entry the validator refuses is never run (`runner-invalid`); a `junit`
+ *     `{test_filter}` with no `::case`, or a test path or case that starts with `-`, is a usage error.
  *   - The env is the test env without any inherited `GIT_*` variable, plus the entry's variables. Values of 8 or more characters are
  *     masked in every printed line; only the names are shown (`env_keys`).
  *
- * The `swift` adapter runs as `junit` in this block (B88 adds its default filter, the Swift
- * Testing report and compile-error detection).
+ * The `swift` adapter (plan §1.3, B88) differs from `junit` in three ways:
+ *   - `{test_filter}` with no `::case` is the file's base name without `.swift` (an XCTest class
+ *     or Swift Testing suite named after its file), regex-escaped and anchored as `\.<name>/`:
+ *     `swift test --filter` searches `Module.Suite/test` without anchors, so the bare name would
+ *     also select `BarFooTests` and `FooTestsHelpers`; with a case it is the case, regex-escaped,
+ *     with `(?:^|[./])` before it and `(?![^/])` after it (`swiftCaseFilter`);
+ *   - every `*.xml` in the step's report dir is read: `swift test --xunit-output <dir>/report.xml`
+ *     writes the XCTest report there (SwiftPM 6.3 writes it only with `--parallel`) and the Swift
+ *     Testing report next to it as `report-swift-testing.xml`; a failure in either counts; a
+ *     sibling without the main report is `RED_INVALID error` (`--parallel` missing) and carries
+ *     no failed data; GREEN needs every report RED had;
+ *   - a failed run that wrote no report and printed a `swiftc` error is `RED_INVALID compile`
+ *     (`swiftCompileError`): a test of an API that does not exist yet needs the owner's waiver.
  */
 
-import { mkdtemp, rm } from 'node:fs/promises';
+import { mkdtemp, readdir, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { RUNNER_ADAPTER_TOKENS, runnerMessages } from '../config/validate.mjs';
 import { MASK_MIN_LENGTH } from '../gates/expand.mjs';
@@ -31,12 +42,22 @@ import { globMatch } from '../state/registry.mjs';
 import { exec } from '../util/exec.mjs';
 import { registerSecret } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
-import { classifyGreen, classifyReport, loadReport } from './junit.mjs';
+import { classifyGreen, classifyReport, loadReport, swiftCompileError } from './junit.mjs';
 
 /** `proof.runners[].timeout_s` when an entry leaves it out (the schema default). */
 export const DEFAULT_RUNNER_TIMEOUT_S = 600;
 /** The report file name inside a step's dir. */
 const REPORT_NAME = 'report.xml';
+
+/**
+ * B88: the report files a swift RED step wrote, keyed by its result. GREEN needs each of them
+ * again: a report that RED had and GREEN lacks is NOT_GREEN, never skipped.
+ * @type {WeakMap<object, string[]>}
+ */
+const SWIFT_RED_REPORTS = new WeakMap();
+/** B88: the swift step wrote the Swift Testing report but not the XCTest one at `{report}`. */
+export const SWIFT_NO_MAIN_REPORT =
+  'swift test wrote a Swift Testing report but no XCTest report at {report}: keep --parallel in the runner argv (SwiftPM 6.3 writes the XCTest report only with it)';
 
 /**
  * @typedef {object} RunnerEntry
@@ -98,6 +119,24 @@ export function runnerCovers(runners, file) {
 const regexEscape = (s) => s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
 
 /**
+ * B88: the `swift` adapter's `{test_filter}` when no `::case` is given: the file's base name without
+ * `.swift` (an XCTest class or a Swift Testing suite named after its file), regex-escaped, with a
+ * `.` before it and a `/` after it, so it matches the `Module.Suite/test` id of that suite only.
+ * @param {string} file @returns {string}
+ */
+const swiftDefaultFilter = (file) => `\\.${regexEscape(path.posix.basename(file, '.swift'))}/`;
+
+/**
+ * B88: the `swift` adapter's `{test_filter}` for a `::case`: the case, regex-escaped, starting the
+ * id or after a `.` or `/`, and ending it or followed by a `/`. The end is not `$`: SwiftPM 6.3.3
+ * matches a Swift Testing test against an id with more after the test name, so `$` selects no
+ * Swift Testing test (checked live; `\.Suite/test$` still selects an XCTest test). `Suite/capsHigh()` then never selects
+ * `MoreSuite/capsHigh()`, and `testFoo` never selects `testFooBar`.
+ * @param {string} testCase @returns {string}
+ */
+const swiftCaseFilter = (testCase) => `(?:^|[./])${regexEscape(testCase)}(?![^/])`;
+
+/**
  * The entry's argv with its tokens replaced, for a report at `report`.
  * @param {RunnerEntry} entry @param {{file: string, testCase?: string, report: string}} values
  * @returns {string[]}
@@ -110,14 +149,14 @@ export function expandRunnerArgv(entry, { file, testCase, report }) {
   const uses = (/** @type {string} */ token) => known.includes(token) && entry.argv.slice(1).includes(token);
   if (testCase === '') throw new StateError('usage', '--test <file>::<case> needs a case name after ::');
   if (uses('{test_filter}')) {
-    if (testCase === undefined) throw new StateError('usage', `the ${entry.adapter} runner for ${file} filters by test case — give --test <file>::<case>`);
-    if (testCase.startsWith('-')) throw new StateError('usage', 'the test case starts with "-" (it would be read as an option)');
+    if (testCase === undefined && entry.adapter !== 'swift') throw new StateError('usage', `the ${entry.adapter} runner for ${file} filters by test case — give --test <file>::<case>`);
+    if (testCase !== undefined && testCase.startsWith('-')) throw new StateError('usage', 'the test case starts with "-" (it would be read as an option)');
   }
   /** @type {Record<string, string>} */
   const values = {
     '{test_file}': file,
     '{test_id}': testCase === undefined ? file : `${file}::${testCase}`,
-    '{test_filter}': testCase === undefined ? '' : regexEscape(testCase),
+    '{test_filter}': testCase === undefined ? swiftDefaultFilter(file) : entry.adapter === 'swift' ? swiftCaseFilter(testCase) : regexEscape(testCase),
     '{report}': report,
   };
   return entry.argv.map((item, i) => (i > 0 && known.includes(item) ? values[item] : item));
@@ -173,7 +212,13 @@ export function runnerHook(entry, { file, testCase }) {
       const report = path.join(dir, REPORT_NAME);
       const argv = expandRunnerArgv(entry, { file, testCase, report });
       const run = await exec(argv, { cwd, env: runnerEnv(env, entry), timeoutMs });
-      return { run, reports: [loadReport(report)] };
+      if (entry.adapter !== 'swift') return { run, reports: [loadReport(report)], noMain: false, names: [] };
+      const names = (await readdir(dir)).filter((name) => name.endsWith('.xml')).sort();
+      // none written ⇒ the missing main report, read as NO_REPORT
+      if (names.length === 0) return { run, reports: [loadReport(report)], noMain: false, names };
+      // a sibling without the main report: unreadable, so it never proves anything
+      const noMain = !names.includes(REPORT_NAME);
+      return { run, reports: [...(noMain ? [{ unreadable: SWIFT_NO_MAIN_REPORT }] : []), ...names.map((name) => loadReport(path.join(dir, name)))], noMain, names };
     } finally {
       await rm(dir, { recursive: true, force: true });
     }
@@ -181,7 +226,23 @@ export function runnerHook(entry, { file, testCase }) {
   return {
     adapter: entry.adapter,
     env_keys: runnerEnvKeys(entry),
-    red: async (step) => classifyReport(await runStep(step)),
-    green: async ({ red, ...step }) => classifyGreen({ ...(await runStep(step)), redFailed: red.failed_ids }).verdict,
+    red: async (step) => {
+      const { run, reports, noMain, names } = await runStep(step);
+      const parsed = classifyReport({ run, reports, ...(entry.adapter === 'swift' ? { compileError: swiftCompileError } : {}) });
+      // an invalid RED carries no failed data: the sibling's failures never reach the row
+      /** @type {import('./junit.mjs').JUnitRedParse} */
+      const result = noMain ? { ...parsed, verdict: 'RED_INVALID', red_kind: 'error', failed: null, failed_tests: [], failed_ids: [], reason: SWIFT_NO_MAIN_REPORT } : parsed;
+      if (entry.adapter === 'swift') SWIFT_RED_REPORTS.set(result, names);
+      return result;
+    },
+    green: async ({ red, ...step }) => {
+      const { run, reports, names } = await runStep(step);
+      if (entry.adapter === 'swift') {
+        // fail closed: a RED no swift hook classified, or a report RED had and GREEN lacks
+        const had = SWIFT_RED_REPORTS.get(red);
+        if (!had || had.some((name) => !names.includes(name))) return 'NOT_GREEN';
+      }
+      return classifyGreen({ run, reports, redFailed: red.failed_ids }).verdict;
+    },
   };
 }

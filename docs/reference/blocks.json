@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 92,
+  "block_count": 93,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1342,6 +1342,36 @@
         "B86"
       ],
       "note": "root-added 2026-10-13; issue #7 part 2 (plans/red-green/plan.md, C-D1=a); runners frozen in the run snapshot; argv only, GIT_* stripped; rule 17 proof-runners-invalid; no-hook match refused exit 2; env_keys names only; swift runs as junit until B88"
+    },
+    "B88": {
+      "title": "swift adapter for proof.runners, checked live with swift test",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/proof/runners.mjs",
+        "src/proof/junit.mjs",
+        "src/proof/red-green.mjs",
+        "test/proof/swift-adapter.test.mjs",
+        "test/proof/swift-live.test.mjs",
+        "test/proof/junit.test.mjs",
+        "test/proof/runners.test.mjs",
+        "test/fixtures/junit/xctest.xml",
+        "test/fixtures/junit/xctest-pass.xml",
+        "test/fixtures/junit/xctest-none.xml",
+        "test/fixtures/junit/swift-testing.xml",
+        "test/fixtures/junit/swift-testing-pass.xml",
+        "test/fixtures/junit/swift-testing-none.xml",
+        "test/fixtures/junit/swift-testing-crash.xml",
+        "test/fixtures/junit/pest.xml",
+        "test/fixtures/junit/pytest.xml",
+        "skill/references/proof.md",
+        "test/skill/structure.test.mjs"
+      ],
+      "depends_on": [
+        "B87"
+      ],
+      "note": "root-added 2026-10-13; issue #7 part 3 (plans/red-green/plan.md §1.3); live VERIFIED Swift 6.3.3 / Xcode 26.6 / macOS 26 arm64; real SwiftPM bare failure is message=\"failure\"; --parallel needed for the XCTest report; filters anchored; swiftc compile shapes; B87 r3 leftovers folded in"
     }
   }
 }

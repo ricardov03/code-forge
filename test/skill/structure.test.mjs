@@ -597,7 +597,7 @@ test('B86 (9): proof.md §2 says how a test report is read and gives the 8-row f
     ['at least one test failed on an assertion', '`RED`', '`assertion`'],
     ['the run failed, but the report has no failure', '`RED_INVALID`', '`error`'],
   ]);
-  assert.equal(occurrences(s2, 'Such a bare failure (no `type`, message exactly `failed`, an empty body; a body of only whitespace, as text or CDATA, counts as empty) counts as an assertion only when the console text has XCTest\'s assertion line for that same test'), 1);
+  assert.equal(occurrences(s2, 'Such a bare failure (no `type`, message exactly `failure` or `failed`, an empty body; a body of only whitespace, as text or CDATA, counts as empty) counts as an assertion only when the console text has XCTest\'s assertion line for that same test'), 1);
   assert.equal(occurrences(s2, '`failed_tests` lists at most 20 test ids of at most 200 characters each, never a failure message.'), 1);
   assert.equal(occurrences(s2, 'every test that failed at RED present and passed; anything else is `NOT_GREEN`.'), 1);
 });
@@ -613,16 +613,50 @@ test('B87 (12): proof.md §2 has a Runners part: keys, tokens, selection from th
     ['- **Keys.**', '- **Tokens.**', '- **Selection.**', '- **Fail closed.**', '- **The run.**', '- **The row.**'].map((label) => occurrences(s2, label)),
     [1, 1, 1, 1, 1, 1],
   );
-  assert.equal(occurrences(s2, 'In this version `swift` runs exactly as `junit`'), 1);
+  assert.equal(occurrences(s2, 'In this version `swift` runs exactly as `junit`'), 0); // B88 gave swift its own rules
   assert.equal(occurrences(s2, 'A token is a whole item, never part of one (`--log-junit={report}` is refused; give `--log-junit`, `"{report}"`), and never `argv[0]`.'), 1);
   assert.equal(occurrences(s2, 'The runner list is read from the run\'s config snapshot, never from the live `.code-forge.yml`: `run start` freezes it, `run reload` refuses to change it, and while it is set no block may own `.code-forge.yml`.'), 1);
   assert.equal(occurrences(s2, '`--test <file>` with no `::case` is a usage error (exit 2, no row)'), 1);
   assert.equal(occurrences(s2, 'A changed file that a runner\'s `match` covers is a test, never a source: it is not reverted.'), 1);
-  assert.equal(occurrences(s2, 'add `runner: <adapter>`, `env_keys` (the entry\'s env variable names, `[]` without an `env`) and `failed_tests` (names only) when a runner was used.'), 1);
+  assert.equal(occurrences(s2, 'add `runner: <adapter>`, `env_keys` (the entry\'s env variable names, `[]` without an `env`) and `failed_tests` (names only) when a runner was used; an invalid RED (a missing or unreadable report) has no `failed` count and an empty `failed_tests`.'), 1);
   assert.equal(occurrences(s2, 'the entry is never run, never skipped, and the file never falls through to another entry or to `node:test`.'), 1);
   assert.equal(occurrences(s2, 'a bounded list of test names (at most 20, each cut at 200 characters, control characters removed), never a failure message.'), 1);
   assert.equal(occurrences(s2, 'The full list of failed ids that GREEN checks (`failed_ids`) stays in memory and is never stored.'), 1);
   assert.equal(occurrences(s2, 'RED is classified from the report (the table above), GREEN by the GREEN rule above; a GREEN step that throws is `NOT_GREEN`, and the row is still written.'), 1);
   assert.equal(occurrences(s2, 'which never inherits a `GIT_*` variable'), 1);
   assert.equal(occurrences(s2, 'a token of another adapter'), 0);
+});
+
+// ── B88: the swift adapter ───────────────────────────────────────────────────
+
+test('B88 (7): proof.md §2 shows the Swift runner and the waiver for a new API; §4 says Swift VERIFIED with the versions', async () => {
+  const proof = await readSkillFile('references/proof.md');
+  const s2 = section(proof, 2);
+  assert.equal(occurrences(s2, '- **Swift (B88).**'), 1);
+  assert.equal(occurrences(s2, 'argv: [swift, test, --parallel, --filter, "{test_filter}", --xunit-output, "{report}"]'), 1);
+  assert.equal(occurrences(s2, 'A `swift` runner accepts a missing case: `{test_filter}` is then the file\'s base name, regex-escaped and anchored with a `.` before it and a `/` after it (`ClampXCTests.swift` gives `\\.ClampXCTests/`), so it selects that suite only'), 1);
+  assert.equal(occurrences(s2, 'A run that selects no test (a suite not named after its file) exits 0 and writes both reports with zero tests'), 1);
+  assert.equal(occurrences(s2, 'RED is `NOT_RED` (exit 1, no proof; like every verdict, it still writes its `red-green` row, with `green: null` and `proven: false`); a GREEN run that selects no test is `NOT_GREEN`'), 1);
+  assert.equal(occurrences(s2, 'gives `(?:^|[./])ClampSwiftTests/capsHigh\\(\\)(?![^/])`), so it never selects a near-name suite (`MoreClampSwiftTests/capsHigh()`) or a longer test name'), 1);
+  assert.equal(occurrences(s2, 'The end is not `$`: SwiftPM 6.3.3 matches a Swift Testing test against an id with more after the test name'), 1);
+  assert.equal(occurrences(s2, 'A missing or unreadable report proves nothing: at RED it is `RED_INVALID error`, with no `failed` count and no `failed_tests`; at GREEN it is `NOT_GREEN`, also when every test that failed at RED passed in the other report (GREEN needs every report file RED had).'), 1);
+  assert.equal(occurrences(s2, 'a step that wrote the Swift Testing report but no XCTest report is `RED_INVALID error` (the reason names `--parallel`)'), 1);
+  assert.equal(occurrences(s2, 'a crash (`<file>.swift:<line>: Fatal error: …`) and SwiftPM\'s closing `error: fatalError` are not compile errors'), 1);
+  assert.equal(occurrences(s2, '`error: compile command failed`, `error: fatalError`'), 0);
+  assert.equal(occurrences(s2, 'A `swift` runner accepts a missing case: it then filters by the file\'s suite (Swift, below).'), 1);
+  assert.equal(occurrences(s2, 'Keep `--parallel`: without it SwiftPM 6.3 writes no XCTest report at `{report}`, '), 1);
+  assert.equal(occurrences(s2, '`<report stem>-swift-testing.xml` (`report-swift-testing.xml`); a failure in either counts'), 1);
+  assert.equal(occurrences(s2, 'A failed run that wrote no report at all and whose console shows a `swiftc` error'), 1);
+  assert.equal(occurrences(s2, 'an XCTest assertion line (`<file>.swift:<line>: error: -[…]`, no column), a crash'), 1);
+  assert.equal(occurrences(s2, '**A test of a new API needs the human waiver:**'), 1);
+  assert.equal(occurrences(s2, 'For a high-tier file the only way past the gate is the human\'s `forge block waive <id> proof --file <path>` (D3)'), 1);
+  assert.equal(occurrences(s2, '(for `swift`, anchored as `(?:^|[./])<case>(?![^/])`, and with no case the file\'s base name, regex-escaped and anchored as `\\.<name>/`)'), 1);
+  assert.equal(occurrences(s2, '- **Fail closed.** A `junit` runner whose argv has `{test_filter}` needs a case'), 1);
+  const s4 = section(proof, 4);
+  assert.equal(occurrences(s4, '**Swift (`swift test`, XCTest and Swift Testing) red→green under export: VERIFIED** on 2026-10-13 with Apple Swift 6.3.3 (swiftlang-6.3.3.1.3), Xcode 26.6, macOS 26 on arm64.'), 1);
+  assert.equal(occurrences(s4, 'Re-run it with `CODE_FORGE_LIVE_SWIFT=1 node --import ./test/helpers/isolate.mjs --test test/proof/swift-live.test.mjs`'), 1);
+  assert.equal(occurrences(s4, 'a test of a new function gives `RED_INVALID compile` (exit 1), which needs the human waiver (§2 Swift)'), 1);
+  assert.equal(occurrences(s4, 'and one case of each (`::ClampXCTests/testCapsHigh`, `::ClampSwiftTests/capsHigh()`), each with exactly that test in `failed_tests`: neither anchored filter selects a near-name suite, also not one with a test of the same name'), 1);
+  assert.equal(occurrences(s4, 'SwiftPM builds in the export (`.code-forge/export/A/.build`), never in the package; without XCTest no XCTest file is written; a test that crashes at base (`fatalError`) gives `RED_INVALID error`; a file whose suite is not named after it selects no test and gives `NOT_RED`'), 1);
+  assert.equal(occurrences(s4, 'UNVERIFIED with'), 0);
 });

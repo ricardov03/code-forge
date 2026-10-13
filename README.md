@@ -16,6 +16,7 @@ In the next release:
 - **Warnings before a cached key runs out (B85).** `keys list` and `doctor` warn when a 1Password key has less than 1 hour left. When the cached key expired and 1Password does not answer, `jev ask` prints the exact command to re-link it: `code-forge keys set jev --op <ref>`.
 - **A test report reader for red-green proof (B86).** code-forge can now read a JUnit XML test report (XCTest, Swift Testing, PHPUnit, Pest, pytest). A missing, broken or empty report, or an error that is not a failed assertion, never counts as red. B87 connects it to `proof red-green`.
 - **Red-green proof for any test runner (B87).** A new `proof.runners` list in `.code-forge.yml` names a runner per test-file glob: an adapter (`junit` or `swift`), an argv with `{test_file}`, `{test_id}`, `{test_filter}` and `{report}`, optional `env` and `timeout_s`. `proof red-green` runs that argv and reads its JUnit report, so PHPUnit, Pest, XCTest or pytest tests can be proven. The list is fixed at `run start`; a bad entry refuses the proof and never falls back to `node:test`.
+- **Red-green proof for Swift (B88).** A `proof.runners` entry with `adapter: swift` runs `swift test --parallel --filter {test_filter} --xunit-output {report}` and reads both the XCTest and the Swift Testing reports. The test filter is anchored, so a similar suite or test name is never picked up. A test that does not compile at base is `RED_INVALID compile` (a test of a new API needs the human waiver). Checked live with Swift 6.3.3 and Xcode 26.6.
 
 In 0.9.0:
 

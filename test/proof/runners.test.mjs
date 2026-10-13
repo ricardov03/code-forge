@@ -7,8 +7,9 @@
  *
  * The repo is script-built under ONE `mkdtemp` parent (helpers.mjs, removed in `after()`):
  *
- *   base commit:   src/clamp.php (BROKEN) · checks/Support.php (BASE) · .code-forge.yml (runners)
+ *   base commit:   src/clamp.php (BROKEN) · checks/Support.php (BASE) · nodesrc/clamp.mjs (BROKEN) · .code-forge.yml (runners)
  *   working tree:  src/clamp.php (FIXED) · checks/ClampCheck.php (new) · checks/Support.php (CURRENT)
+ *                  nodesrc/clamp.mjs (FIXED) · nodetests/clamp.test.mjs (new, no runner matches it)
  *
  * `checks/**` is no test path by name; only the runner's `match` makes it a test, so a reverted
  * `checks/Support.php` would show (the fake runner then reports an `<error>`).
@@ -38,6 +39,7 @@ const BARE_RUN = 'r-b87-no-snapshot';
 const NODE = process.execPath;
 const TEST = 'checks/ClampCheck.php';
 const SWIFT_TEST = 'swiftchecks/ClampSwiftCheck.php';
+const NODE_TEST = 'nodetests/clamp.test.mjs';
 const TOKEN = 'FAKE-runner-token-value-0123456789';
 const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: SLUG });
 /** Every key of a signed red-green row from a runner, sorted. */
@@ -56,6 +58,9 @@ const CONTENT = Object.freeze({
   supportBase: "<?php // support BASE\n",
   supportNew: "<?php // support CURRENT\n",
   check: "<?php // ClampCheck: caps at hi\n",
+  nodeBase: 'export const clamp = (v) => v; // BROKEN\n',
+  nodeNew: 'export const clamp = (v, lo, hi) => Math.min(Math.max(v, lo), hi);\n',
+  nodeTest: "import assert from 'node:assert/strict';\nimport { test } from 'node:test';\nimport { clamp } from '../nodesrc/clamp.mjs';\ntest('caps at hi', () => assert.equal(clamp(12, 0, 10), 10));\n",
 });
 
 /** A Linux XCTest assertion line, as `swift test` prints it on the console. */
@@ -155,6 +160,7 @@ before(async () => {
   write('.code-forge.yml', configYaml(RUNNERS));
   write('src/clamp.php', CONTENT.clampBase);
   write('checks/Support.php', CONTENT.supportBase);
+  write('nodesrc/clamp.mjs', CONTENT.nodeBase);
   git(['init', '-q'], REPO);
   git(['symbolic-ref', 'HEAD', 'refs/heads/main'], REPO);
   git(['add', '-A'], REPO);
@@ -163,6 +169,8 @@ before(async () => {
   write('checks/Support.php', CONTENT.supportNew);
   write(TEST, CONTENT.check);
   write(SWIFT_TEST, CONTENT.check);
+  write('nodesrc/clamp.mjs', CONTENT.nodeNew);
+  write(NODE_TEST, CONTENT.nodeTest);
   const loaded = await loadConfigFile(path.join(REPO, '.code-forge.yml'));
   assert.equal(loaded.ok, true);
   assert.equal(validateConfig(loaded.config).valid, true);
@@ -237,30 +245,36 @@ test('(3) GREEN: the test that failed at RED is missing from the report ⇒ NOT_
   assert.deepEqual([res.code, res.stderr], [1, `RED ${TEST}\nNOT_GREEN ${TEST}\n`]);
   const printed = JSON.parse(res.stdout);
   assert.deepEqual([printed.red, printed.green, printed.proven], ['RED', 'NOT_GREEN', false]);
-  const row = (await readAllRows(SLUG)).slice(rowsBefore)[1];
-  assert.deepEqual([row.red, row.green, row.proven, row.failed_tests], ['RED', 'NOT_GREEN', false, ['ClampCheck.caps']]);
+  const added = (await readAllRows(SLUG)).slice(rowsBefore);
+  assert.deepEqual(
+    added.map((r) => [r.step, r.red ?? null, r.green ?? null, r.proven ?? null, r.runner ?? null, r.failed_tests ?? null]),
+    [['export', null, null, null, null, null], ['red-green', 'RED', 'NOT_GREEN', false, 'junit', ['ClampCheck.caps']]],
+  );
 });
 
 test('(4) the runner comes from the snapshot: a live argv edit changes nothing, run reload refuses it, block open refuses an owned .code-forge.yml', async () => {
   writeFileSync(MODE, 'normal\n');
   const edited = [{ ...RUNNERS[0], argv: [NODE, path.join(TOOLS, 'LIVE-missing.mjs'), '{test_file}', '{report}'] }, ...RUNNERS.slice(1)];
   write('.code-forge.yml', configYaml(edited));
-  const calls = logLines().length;
-  const res = await cli(proveArgs(TEST));
-  assert.deepEqual([res.code, res.stderr], [0, `RED ${TEST}\nGREEN ${TEST}\n`]);
-  assert.equal(logLines().length - calls, 2); // the snapshot's fake runner ran both steps
-  const live = await loadConfigFile(path.join(REPO, '.code-forge.yml'));
-  const rowsBefore = (await readAllRows(SLUG)).length;
-  await assert.rejects(reloadRun({ runId: RUN, config: /** @type {Record<string, any>} */ (live.config), writeRow }), {
-    code: 'immutable-key',
-    message: 'proof.runners cannot change mid-run (the commands that prove a block are fixed by the owner before the run starts) — put it back, or end the run and start a new one',
-  });
-  await assert.rejects(openBlock({ runId: RUN, id: 'B', level: 'L1', owned: ['.code-forge.yml'], acceptance: [{ clause: 'x', tests: [TEST] }], writeRow }), {
-    code: 'config-owned',
-    message: 'owned entry ".code-forge.yml" covers the project\'s .code-forge.yml; no block may own it while proof.runners is set',
-  });
-  assert.equal((await readAllRows(SLUG)).length, rowsBefore);
-  write('.code-forge.yml', configYaml(RUNNERS));
+  try {
+    const calls = logLines().length;
+    const res = await cli(proveArgs(TEST));
+    assert.deepEqual([res.code, res.stderr], [0, `RED ${TEST}\nGREEN ${TEST}\n`]);
+    assert.equal(logLines().length - calls, 2); // the snapshot's fake runner ran both steps
+    const live = await loadConfigFile(path.join(REPO, '.code-forge.yml'));
+    const rowsBefore = (await readAllRows(SLUG)).length;
+    await assert.rejects(reloadRun({ runId: RUN, config: /** @type {Record<string, any>} */ (live.config), writeRow }), {
+      code: 'immutable-key',
+      message: 'proof.runners cannot change mid-run (the commands that prove a block are fixed by the owner before the run starts) — put it back, or end the run and start a new one',
+    });
+    await assert.rejects(openBlock({ runId: RUN, id: 'B', level: 'L1', owned: ['.code-forge.yml'], acceptance: [{ clause: 'x', tests: [TEST] }], writeRow }), {
+      code: 'config-owned',
+      message: 'owned entry ".code-forge.yml" covers the project\'s .code-forge.yml; no block may own it while proof.runners is set',
+    });
+    assert.equal((await readAllRows(SLUG)).length, rowsBefore);
+  } finally {
+    write('.code-forge.yml', configYaml(RUNNERS));
+  }
 });
 
 test('(4) a run started without a snapshot cannot gain proof.runners at its first reload', async () => {
@@ -398,19 +412,27 @@ test('(5) the runner child sees no inherited GIT_* variable (a GIT_DIR in the pa
 });
 
 test('(11) a bare XCTest <failure message="failed"> is RED assertion with its console line, RED_INVALID error without it', async () => {
-  writeFileSync(MODE, 'xctest\n');
-  let rowsBefore = (await readAllRows(SLUG)).length;
-  const withLine = await cli(proveArgs(TEST));
-  assert.deepEqual([withLine.code, withLine.stderr], [0, `RED ${TEST}\nGREEN ${TEST}\n`]);
-  let row = (await readAllRows(SLUG)).slice(rowsBefore)[1];
-  assert.deepEqual([row.red, row.red_kind, row.green, row.proven, row.failed_tests], ['RED', 'assertion', 'GREEN', true, ['ClampCheck.caps']]);
-  writeFileSync(MODE, 'barenoline\n');
-  rowsBefore = (await readAllRows(SLUG)).length;
-  const noLine = await cli(proveArgs(TEST));
-  assert.deepEqual([noLine.code, noLine.stderr], [1, `RED_INVALID ${TEST} (error)\n`]);
-  row = (await readAllRows(SLUG)).slice(rowsBefore)[1];
-  assert.deepEqual([row.red, row.red_kind, row.green, row.proven], ['RED_INVALID', 'error', null, false]);
-  writeFileSync(MODE, 'normal\n');
+  const shape = (/** @type {Record<string, any>[]} */ rows) => rows.map((r) => [r.step, r.red ?? null, r.red_kind ?? null, r.green ?? null, r.proven ?? null, r.runner ?? null, r.failed_tests ?? null]);
+  try {
+    writeFileSync(MODE, 'xctest\n');
+    let rowsBefore = (await readAllRows(SLUG)).length;
+    const withLine = await cli(proveArgs(TEST));
+    assert.deepEqual([withLine.code, withLine.stderr], [0, `RED ${TEST}\nGREEN ${TEST}\n`]);
+    assert.deepEqual(shape((await readAllRows(SLUG)).slice(rowsBefore)), [
+      ['export', null, null, null, null, null, null],
+      ['red-green', 'RED', 'assertion', 'GREEN', true, 'junit', ['ClampCheck.caps']],
+    ]);
+    writeFileSync(MODE, 'barenoline\n');
+    rowsBefore = (await readAllRows(SLUG)).length;
+    const noLine = await cli(proveArgs(TEST));
+    assert.deepEqual([noLine.code, noLine.stderr], [1, `RED_INVALID ${TEST} (error)\n`]);
+    assert.deepEqual(shape((await readAllRows(SLUG)).slice(rowsBefore)), [
+      ['export', null, null, null, null, null, null],
+      ['red-green', 'RED_INVALID', 'error', null, false, 'junit', ['ClampCheck.caps']],
+    ]);
+  } finally {
+    writeFileSync(MODE, 'normal\n');
+  }
 });
 
 test('(6) an empty case after :: is a usage error (exit 2, no row, no runner call)', async () => {
@@ -507,6 +529,53 @@ test('(9) a runner whose GREEN step throws ⇒ NOT_GREEN, proven false, the row 
   assert.deepEqual([readFileSync(path.join(dir, 'src/a.php'), 'utf8'), existsSync(journalPath(dir))], ['<?php // FIXED\n', false]);
 });
 
+test('B88 runRedGreen refuses a runner that is not a whole hook (null included), with or without argv (usage, nothing touched)', async () => {
+  const { dir, base } = directRepo();
+  const common = { workDir: dir, base, test: { file: 'checks/ACheck.php' }, sources: ['src/a.php'], isolation: /** @type {const} */ ('lock') };
+  const message = 'red-green: runner must be an object with red and green functions, an adapter name and an env_keys list';
+  const good = fakeHook(async () => 'GREEN');
+  /** @type {[string, unknown][]} */
+  const bad = [
+    ['null', null],
+    ['false', false],
+    ['a string', 'junit'],
+    ['no red', { ...good, red: undefined }],
+    ['green not a function', { ...good, green: 'GREEN' }],
+    ['no env_keys', { ...good, env_keys: undefined }],
+    ['env_keys not strings', { ...good, env_keys: [7] }],
+    ['no adapter', { ...good, adapter: undefined }],
+  ];
+  for (const [name, runner] of bad) {
+    for (const argv of [undefined, [NODE, '-e', '']]) {
+      await assert.rejects(
+        runRedGreen({ ...common, ...(argv ? { argv } : {}), runner: /** @type {any} */ (runner) }).then(() => [name, 'resolved']),
+        (/** @type {any} */ err) => {
+          assert.deepEqual([name, err.code, err.message], [name, 'usage', message]);
+          return true;
+        },
+      );
+    }
+  }
+  assert.deepEqual([readFileSync(path.join(dir, 'src/a.php'), 'utf8'), existsSync(journalPath(dir))], ['<?php // FIXED\n', false]);
+});
+
+test('B88 a runner GREEN value other than the exact word GREEN is NOT_GREEN (proven false)', async () => {
+  const { dir, base } = directRepo();
+  /** @type {[unknown, string][]} */
+  const cases = [['GREEN', 'GREEN'], ['NOT_GREEN', 'NOT_GREEN'], ['green', 'NOT_GREEN'], [true, 'NOT_GREEN'], [undefined, 'NOT_GREEN'], [{ verdict: 'GREEN' }, 'NOT_GREEN']];
+  for (const [value, expected] of cases) {
+    const result = await runRedGreen({
+      workDir: dir,
+      base,
+      test: { file: 'checks/ACheck.php' },
+      sources: ['src/a.php'],
+      isolation: 'lock',
+      runner: fakeHook(async () => /** @type {any} */ (value)),
+    });
+    assert.deepEqual([JSON.stringify(value), result.green, result.proven], [JSON.stringify(value), expected, expected === 'GREEN']);
+  }
+});
+
 test('(1) a matched entry with no hook is refused: exit 2, no row, no precheck, no runner call — never a node:test fallback', async () => {
   writeFileSync(MODE, 'normal\n');
   const rowsBefore = (await readAllRows(SLUG)).length;
@@ -537,16 +606,44 @@ test('(2) selectRunner and runnerCovers refuse a snapshot value that is not a li
 });
 
 test('(11) a swift runner: a bare XCTest failure with its console line is RED assertion, then GREEN; the row says runner swift', async () => {
-  writeFileSync(MODE, 'xctest\n');
+  const shape = (/** @type {Record<string, any>[]} */ rows) => rows.map((r) => [r.step, r.red ?? null, r.red_kind ?? null, r.green ?? null, r.proven ?? null, r.runner ?? null, r.failed_tests ?? null, r.env_keys ?? null]);
+  try {
+    writeFileSync(MODE, 'xctest\n');
+    let rowsBefore = (await readAllRows(SLUG)).length;
+    const res = await cli(proveArgs(SWIFT_TEST));
+    assert.deepEqual([res.code, res.stderr], [0, `RED ${SWIFT_TEST}\nGREEN ${SWIFT_TEST}\n`]);
+    const printed = JSON.parse(res.stdout);
+    assert.deepEqual([printed.red_kind, printed.runner, printed.failed_tests, printed.env_keys], ['assertion', 'swift', ['ClampCheck.caps'], []]);
+    assert.deepEqual(shape((await readAllRows(SLUG)).slice(rowsBefore)), [
+      ['export', null, null, null, null, null, null, null],
+      ['red-green', 'RED', 'assertion', 'GREEN', true, 'swift', ['ClampCheck.caps'], []],
+    ]);
+    writeFileSync(MODE, 'barenoline\n');
+    rowsBefore = (await readAllRows(SLUG)).length;
+    const noLine = await cli(proveArgs(SWIFT_TEST));
+    assert.deepEqual([noLine.code, noLine.stderr], [1, `RED_INVALID ${SWIFT_TEST} (error)\n`]);
+    assert.deepEqual(shape((await readAllRows(SLUG)).slice(rowsBefore)), [
+      ['export', null, null, null, null, null, null, null],
+      ['red-green', 'RED_INVALID', 'error', null, false, 'swift', ['ClampCheck.caps'], []],
+    ]);
+  } finally {
+    writeFileSync(MODE, 'normal\n');
+  }
+});
+
+test('B88 a node:test proof (no runner matches the file): the row and the printed JSON carry no runner, env_keys or failed_tests', async () => {
+  await openBlock({ runId: RUN, id: 'N', level: 'L1', owned: ['nodesrc/**', 'nodetests/**'], acceptance: [{ clause: 'node clamp caps at hi', tests: [NODE_TEST] }], writeRow });
   const rowsBefore = (await readAllRows(SLUG)).length;
-  const res = await cli(proveArgs(SWIFT_TEST));
-  assert.deepEqual([res.code, res.stderr], [0, `RED ${SWIFT_TEST}\nGREEN ${SWIFT_TEST}\n`]);
+  const calls = logLines().length;
+  const res = await cli(['red-green', 'N', '--run', RUN, '--test', NODE_TEST]);
+  assert.deepEqual([res.code, res.stderr], [0, `RED ${NODE_TEST}\nGREEN ${NODE_TEST}\n`]);
   const printed = JSON.parse(res.stdout);
-  assert.deepEqual([printed.red_kind, printed.runner, printed.failed_tests, printed.env_keys], ['assertion', 'swift', ['ClampCheck.caps'], []]);
-  const row = (await readAllRows(SLUG)).slice(rowsBefore)[1];
-  assert.deepEqual([row.red, row.red_kind, row.green, row.proven, row.runner, row.failed_tests, row.env_keys], ['RED', 'assertion', 'GREEN', true, 'swift', ['ClampCheck.caps'], []]);
-  writeFileSync(MODE, 'barenoline\n');
-  const noLine = await cli(proveArgs(SWIFT_TEST));
-  assert.deepEqual([noLine.code, noLine.stderr], [1, `RED_INVALID ${SWIFT_TEST} (error)\n`]);
-  writeFileSync(MODE, 'normal\n');
+  const added = (await readAllRows(SLUG)).slice(rowsBefore);
+  assert.deepEqual(added.map((r) => [r.block, r.step, r.red ?? null, r.green ?? null, r.proven ?? null]), [['N', 'export', null, null, null], ['N', 'red-green', 'RED', 'GREEN', true]]);
+  const row = added[1];
+  assert.deepEqual(
+    [printed.red, printed.green, printed.proven, row.covers, ['runner', 'env_keys', 'failed_tests'].filter((k) => k in row || k in printed)],
+    ['RED', 'GREEN', true, ['nodesrc/clamp.mjs'], []],
+  );
+  assert.equal(logLines().length - calls, 0); // the fake runner never ran
 });

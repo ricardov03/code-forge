@@ -438,6 +438,17 @@ function testEnv() {
 }
 
 /**
+ * Is `runner` a usable hook: `red` and `green` functions, a string `adapter`, an `env_keys` list of strings?
+ * @param {unknown} runner @returns {boolean}
+ */
+function isRunnerHook(runner) {
+  if (runner === null || typeof runner !== 'object') return false;
+  const r = /** @type {any} */ (runner);
+  return typeof r.red === 'function' && typeof r.green === 'function' && typeof r.adapter === 'string'
+    && Array.isArray(r.env_keys) && r.env_keys.every((/** @type {unknown} */ k) => typeof k === 'string');
+}
+
+/**
  * @typedef {object} RedGreenOptions
  * @property {string} workDir - absolute: the export dir, or the workspace under the proof lock
  * @property {string} [repoDir] - the git repository the base is read from (default `workDir`)
@@ -467,8 +478,10 @@ export async function runRedGreen(opts) {
   if (!path.isAbsolute(repoDir)) throw new StateError('bad-path', 'red-green: repoDir must be an absolute path');
   if (!ISOLATIONS.includes(/** @type {any} */ (isolation))) throw new StateError('bad-isolation', `red-green: isolation must be one of ${ISOLATIONS.join(', ')}`);
   // B87: exactly one way to run the test — never a runner with a stray argv, never neither
-  if ((argv === undefined) === (runner === undefined)) throw new StateError('usage', 'red-green: give exactly one of argv and runner');
-  if (runner === undefined && (!Array.isArray(argv) || argv.length === 0 || !argv.every((a) => typeof a === 'string'))) throw new StateError('usage', 'red-green: argv must be a non-empty array of strings');
+  // B88: a runner that is given must be a whole hook (a `null` never falls back to argv)
+  if (runner !== undefined && !isRunnerHook(runner)) throw new StateError('usage', 'red-green: runner must be an object with red and green functions, an adapter name and an env_keys list');
+  if ((argv === undefined) === !runner) throw new StateError('usage', 'red-green: give exactly one of argv and runner');
+  if (!runner && (!Array.isArray(argv) || argv.length === 0 || !argv.every((a) => typeof a === 'string'))) throw new StateError('usage', 'red-green: argv must be a non-empty array of strings');
   assertRelPath(test?.file, 'test.file');
   for (const s of sources) assertRelPath(s, 'sources');
   if (sources.includes(test.file)) throw new StateError('bad-path', 'red-green: the test file cannot also be a source file');
@@ -517,7 +530,9 @@ export async function runRedGreen(opts) {
       // B87: GREEN needs exit 0 AND a report in which every test that failed at RED passed. A
       // GREEN step that throws is NOT_GREEN (fail closed), and the row is still written.
       try {
-        green = await runner.green({ cwd: workDir, env: testEnv(), timeoutMs, red: /** @type {import('./junit.mjs').JUnitRedParse} */ (red) });
+        const value = await runner.green({ cwd: workDir, env: testEnv(), timeoutMs, red: /** @type {import('./junit.mjs').JUnitRedParse} */ (red) });
+        // B88: only the exact word GREEN proves; any other value is NOT_GREEN
+        green = value === 'GREEN' ? 'GREEN' : 'NOT_GREEN';
       } catch {
         green = 'NOT_GREEN';
       }

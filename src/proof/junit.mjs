@@ -13,7 +13,9 @@
  * one; any other `<failure>` and every `<error>` is `error`.
  *
  * SwiftPM's XCTest report says nothing about the cause: every failed test is
- * `<failure message="failed"></failure>` (no `type`, no body). Such a test is read as `kind: error`
+ * `<failure message="failure"></failure>` (SwiftPM 6.3 on macOS, captured by the B88 live check;
+ * older and Linux builds write `message="failed"`), with no `type` and no body. Such a test is read
+ * as `kind: error`
  * with `needs_console: 'xctest'`, and the RED step counts it as an assertion only when the console
  * text has an XCTest assertion line for that very test (`<file>:<line>: error: -[Module.Suite test]
  * : XCTAssert… failed` on macOS, `… error: Suite.test : XCTAssert… failed` on Linux, or XCTFail's
@@ -28,6 +30,9 @@
  *   NOT_RED      none        exit 0, no signal
  *   RED_INVALID  fatal       a timeout or a signal
  *   RED_INVALID  import|compile|fatal   the console text hits a `parseRed` invalid family
+ *   RED_INVALID  compile     no report was written (every report is `NO_REPORT`) and the
+ *                            caller's compile check hits the console text (`swiftCompileError`
+ *                            for the `swift` adapter, B88)
  *   RED_INVALID  error       no report, or one is unreadable
  *   RED_INVALID  error       the report has no test that ran (zero, or only skipped)
  *   RED_INVALID  error       a test errored, or failed without an assertion
@@ -54,6 +59,12 @@ import { parseRed } from './red-parse.mjs';
 
 /** A report larger than this many bytes is refused. */
 export const MAX_REPORT_BYTES = 8 * 1024 * 1024;
+/**
+ * What `loadReport` returns for a report file that does not exist: one shared frozen object, so
+ * the compile rule can tell "no report was written" apart from every other unreadable report by
+ * identity, never by its message.
+ */
+export const NO_REPORT = Object.freeze({ unreadable: 'no report was written' });
 /** At most this many failed test names are kept. */
 export const MAX_FAILED_TESTS = 20;
 /** Each kept name is cut to this many characters. */
@@ -75,6 +86,14 @@ const ASSERTION_PATTERNS = Object.freeze([
 const ANSI = /\x1b\[[0-9;?]*[A-Za-z]/g;
 /** An XCTest assertion line: `-[Module.Suite test] : …` (macOS) or `Suite.test : …` (Linux). */
 const XCTEST_LINE = /:\d+: error: (?:-\[([^\s\]]+) ([^\s\]]+)\]|([^\s:]+)) : (?:XCTAssert\w* failed\b|failed - )/g;
+/**
+ * `swiftc` and SwiftPM build-failure lines: `<file>.swift:<line>:<col>: error:` (a compiler
+ * diagnostic always has a column; XCTest's assertion line `<file>.swift:<line>: error: -[…]` has
+ * none), and SwiftPM's own `error: emit-module command failed` and `error: compile command
+ * failed`. SwiftPM 6.3's closing `error: fatalError` is left out: it is SwiftPM's generic exit
+ * line, not a compiler diagnostic, and in the B88 live check it only follows the `swiftc` line.
+ */
+const SWIFT_COMPILE = [/\.swift:\d+:\d+: error: /, /^error: (?:emit-module command failed|compile command failed)\b/m];
 /** A crash in the test process: a bare XCTest failure next to one of these is never an assertion. */
 const SWIFT_CRASH = /\bFatal error\b|\bPrecondition failed\b|\bAssertion failed\b|\bUnexpectedly found nil\b|\bsignal code \d+|\bIllegal instruction\b|\bSegmentation fault\b/;
 
@@ -176,14 +195,14 @@ function readAttributes(text, pos) {
 
 /**
  * @param {Map<string, string>} attrs
- * @returns {'assertion' | 'error' | 'bare'} `bare` = SwiftPM's XCTest shape, `message="failed"` and
- *   no `type` (it also needs an empty body, checked at the end tag).
+ * @returns {'assertion' | 'error' | 'bare'} `bare` = SwiftPM's XCTest shape, `message="failure"` (or
+ *   `"failed"`) and no `type` (it also needs an empty body, checked at the end tag).
  */
 function failureKind(attrs) {
   const type = (attrs.get('type') ?? '').trim();
   if (type !== '') return ASSERTION_PATTERNS.some((p) => p.test(type)) ? 'assertion' : 'error';
   const message = attrs.get('message') ?? '';
-  if (message.trim() === 'failed') return 'bare';
+  if (message.trim() === 'failed' || message.trim() === 'failure') return 'bare';
   return ASSERTION_PATTERNS.some((p) => p.test(message)) ? 'assertion' : 'error';
 }
 
@@ -335,7 +354,7 @@ export function loadReport(file) {
   try {
     fd = openSync(file, constants.O_RDONLY | constants.O_NONBLOCK | constants.O_NOFOLLOW);
   } catch (err) {
-    return { unreadable: /** @type {any} */ (err)?.code === 'ENOENT' ? 'no report was written' : 'the report could not be opened' };
+    return /** @type {any} */ (err)?.code === 'ENOENT' ? NO_REPORT : { unreadable: 'the report could not be opened' };
   }
   try {
     const st = fstatSync(fd);
@@ -431,17 +450,30 @@ function confirmXCTest(tests, run) {
   return tests.map((t) => (t.needs_console === 'xctest' && seen(t.id) ? { id: t.id, status: t.status, kind: 'assertion' } : t));
 }
 
+/**
+ * Does the console text show a Swift compile or build failure (§1.3 item 3)? Colours are stripped
+ * first. An XCTest assertion line is not one. Used by the `swift` adapter only (B102 adds the
+ * `xcodebuild` one).
+ * @param {string} text @returns {boolean}
+ */
+export function swiftCompileError(text) {
+  const plain = String(text).replace(ANSI, '');
+  return SWIFT_COMPILE.some((p) => p.test(plain));
+}
+
 /** @param {RunResult} run @returns {boolean} */
 const exitedClean = (run) => run.code === 0 && !run.signal && !run.timedOut;
 
 /**
  * Classify the RED step from the run and its parsed reports. Never throws.
- * @param {{run: RunResult, reports: ReportResult[]}} input
+ * @param {{run: RunResult, reports: ReportResult[], compileError?: (text: string) => boolean}} input -
+ *   `compileError`: the adapter's compile check, asked only when no report was written at all
+ *   (a non-empty `reports` that holds only `NO_REPORT`)
  * @returns {JUnitRedParse}
  */
 export function classifyReport(input) {
   try {
-    const { run, reports } = input;
+    const { run, reports, compileError } = input;
     const tests = mergeReports(reports);
     const base = { framework: /** @type {const} */ ('junit'), ...failures(tests) };
     /** @param {JUnitRedParse['verdict']} verdict @param {JUnitRedParse['red_kind']} red_kind @param {string} reason @returns {JUnitRedParse} */
@@ -451,6 +483,10 @@ export function classifyReport(input) {
     const text = parseRed(run);
     if (text.verdict === 'RED_INVALID' && (text.red_kind === 'import' || text.red_kind === 'compile' || text.red_kind === 'fatal')) {
       return out('RED_INVALID', text.red_kind, text.reason);
+    }
+    const noneWritten = Array.isArray(reports) && reports.length > 0 && reports.every((r) => r === NO_REPORT);
+    if (!tests && noneWritten && typeof compileError === 'function' && compileError(`${run.stdout ?? ''}\n${run.stderr ?? ''}`)) {
+      return out('RED_INVALID', 'compile', 'the test did not compile');
     }
     if (!tests) return out('RED_INVALID', 'error', 'no readable test report');
     if (!tests.some((t) => t.status !== 'skipped')) return out('RED_INVALID', 'error', 'the filter ran no test');

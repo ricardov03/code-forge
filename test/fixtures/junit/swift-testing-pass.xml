@@ -1,0 +1,7 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<testsuites>
+  <testsuite name="TestResults" errors="0" tests="2" failures="0" skipped="0" time="0.000451916">
+    <testcase classname="KitTests.ClampSwiftTests" name="keepsInside()" time="9.0875e-05" />
+    <testcase classname="KitTests.ClampSwiftTests" name="capsHigh()" time="0.000119" />
+  </testsuite>
+</testsuites>
