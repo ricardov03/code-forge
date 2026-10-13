@@ -473,6 +473,28 @@ the tree counts as deleted: a changed binary file never gets the note. It is a h
 a file, so a deletion still needs a signed approval (or a waiver or answers exit) to close, and an
 approval at `deleted` stops counting when the file comes back.
 
+A **test that reads source text** proves text, not behaviour (B92). When a reviewed test file
+reads a source file (a quoted path ending in a source extension such as `.mjs`, `.ts`, `.swift`
+or `.py`, not under a `fixtures` dir) and asserts on text with a contains or match call
+(`includes(`, `contains(`, `toContain(`, `toMatch(`, ...), its packet gets a `## test-quality`
+section before the diff, in each reviewer's round-1 packet and the judge's. Rechecks get the lens
+rule but no `## test-quality` section. The section names the file and
+the flagged line numbers (at most 10, the rest counted), never the file's text. It is a hint, not a
+finding: it comes from a text match, writes no ledger row and changes no gate. The lens rule tells
+the reviewer to check those lines and raise such a test as a `warning` unless the file it reads is
+a fixture. A docs file, a test that reads a `.md` file, a test that never asserts on text and a
+file that is not a test get no section, and so does a read whose call holds a `fixtures` path
+segment in any string literal, such as `join(dir, 'fixtures', 'a.mjs')`, or that names a name
+bound to such a literal (`const FIXTURES = join(__dirname, 'fixtures')`). A read call split over
+lines by a formatter counts when its path is on one of the 3 lines after the call while the read
+call's own `(` is still open; the call's line is the one listed. A name bound to a source path
+counts too, when its value is that path (the literal alone, or passed straight to `join` or
+`resolve`), with modifiers and a type (`private val X`, `const val X`, `private static let X`,
+`private static final String X`, `private const string X`, `export const X`).
+The section counts toward the packet budget; a file with no flag gets no section. Over the budget
+it is treated like any extra: the context shrinks, then the digest is trimmed, and when the diff
+plus the extras alone are over budget the file is `split_required`, with no session.
+
 A review counts only if the process exited 0, the JSON is valid, `reviewed_hunks` match the packet
 exactly, and the output is long enough (`review.min_tokens_out`, default 120). A clean pass
 (`passed: true`, no findings, a summary) needs only 40 tokens, whatever the diff size. Anything else is `review.unavailable`, never approval.

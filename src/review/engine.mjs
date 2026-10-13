@@ -46,6 +46,11 @@
  *  9. a pure deletion (the file is gone from the reviewed tree) gets a `## deleted file` note in
  *     every packet — reviewers and judge — naming up to 20 tree paths that still name its basename
  *     (`deletion.mjs`, B74). It is a hint, never an exemption: the deletion still needs approval.
+ * 10. a test file that reads a source file and asserts on its text gets a `## test-quality` note in
+ *     every packet — reviewers and judge — naming up to 10 line numbers, never the file's text
+ *     (`test-quality.mjs`, B92). It is a hint, never a finding: the lens tells the reviewer to
+ *     raise it as a `warning` unless the read file is a fixture. It is extra text like the
+ *     moved code (after it), counted in the same measure; no flag ⇒ no section, no row.
  * Approval (until B12b's triage lands) = the final answer (the judge's in dual/consensus mode, else
  * the single reviewer's) passed the guard, says `passed: true`, and carries no `critical` or
  * `warning` finding.
@@ -62,6 +67,7 @@ import { tierFor } from '../proof/tiers.mjs';
 import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
 import { deletionNote, renderDeletionNote } from './deletion.mjs';
+import { testQualityNote } from './test-quality.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithTimeoutRetry } from './session-retry.mjs';
@@ -256,8 +262,11 @@ export async function reviewFile(input, deps) {
       deleted = renderDeletionNote(diff.file, { status: 'not_checked', paths: [], more: 0 }); // the review goes on
     }
   }
+  // B92: a test that reads a source file and asserts on its text gets the `## test-quality` hint
+  // (line numbers only), read once from the current content; '' for none
+  const quality = testQualityNote(diff.file, diff.content);
   /** @param {ReadonlyArray<number> | null} keys - a Markdown section's group keys; null ⇒ the whole file. */
-  const movedOf = (keys) => [deleted, movedText(moves, diff.content, keys)].filter((t) => typeof t === 'string' && t.length > 0).join('\n');
+  const movedOf = (keys) => [deleted, movedText(moves, diff.content, keys), quality].filter((t) => typeof t === 'string' && t.length > 0).join('\n');
   const min = minTokensOut(cfg);
   // B55: never in consensus mode — its providers (two reviewers, the judge) are the check itself
   const schemaFallback = plan.mode !== 'consensus';

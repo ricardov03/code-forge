@@ -369,7 +369,8 @@ describe('B90 (5): no review.routes ⇒ today\'s spawn options and rows', () => 
   // worktree outside the repo, removed after. Left out, because they differ per run by
   // construction: the run id (`run`), the ticket id (`ticket`), the signature (`mac`), the times
   // (`ts`), the signed state's hash (`state_sha`), and the spawn options' temp paths (`promptPath`,
-  // `runRoot`). The finding schema the session gets is pinned by its `$id`.
+  // `runRoot`). The finding schema the session gets is pinned by its `$id`. B92 adds one 287-byte
+  // rule line to every lens, so the packet's token count is the 8fadc12 value 6687 plus 72.
   const PER_RUN = new Set(['run', 'ticket', 'mac', 'ts', 'state_sha', 'promptPath', 'runRoot']);
   /** @param {any} v @returns {any} */
   const norm = (v) => (Array.isArray(v) ? v.map(norm) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).filter(([k]) => !PER_RUN.has(k)).map(([k, x]) => [k, norm(x)])) : v);
@@ -378,7 +379,7 @@ describe('B90 (5): no review.routes ⇒ today\'s spawn options and rows', () => 
     level: 'L2',
     role: 'reviewer',
     schema: 'https://code-forge.local/schema/review/finding.schema.json',
-    rowExtra: { lens: 'full', context_mode: 'hunks', ctx_tokens_in: 6687 },
+    rowExtra: { lens: 'full', context_mode: 'hunks', ctx_tokens_in: 6759 },
     block: 'B1',
     slug: 'route-test',
     timeoutMs: 60000,
@@ -389,7 +390,7 @@ describe('B90 (5): no review.routes ⇒ today\'s spawn options and rows', () => 
   const BASE_SPAWN_KEYS = ['cfg', 'level', 'role', 'promptPath', 'schema', 'rowExtra', 'runRoot', 'run', 'block', 'slug', 'timeoutMs', 'model', 'provider', 'lens'];
   const BASE_ROWS = [
     { event: 'review.budget', block: 'B1', budget: 150000, forecast_unconstrained: 7000, forecast_chosen: 7000, actual: null, raised: 0, over_budget: false, degrade_step: 0, file: FILE, content_hash: HASH },
-    { event: 'review.plan', depth_unconstrained: 'full', depth_chosen: 'full', degrade_step: 0, risk: 1, context_mode: 'hunks', forecast_tokens: 6687, block: 'B1', file: FILE, content_hash: HASH },
+    { event: 'review.plan', depth_unconstrained: 'full', depth_chosen: 'full', degrade_step: 0, risk: 1, context_mode: 'hunks', forecast_tokens: 6759, block: 'B1', file: FILE, content_hash: HASH },
     { event: 'review.round', file: FILE, round: 1, level: 'L2', kind: 'full', open_before: 0, closed: 0, new_in_hunks: 0, late: 0, open_after: 0, tokens_in: null, tokens_out: null, block: 'B1', content_hash: HASH },
     { event: 'review.approved', file: FILE, content_hash: HASH, round: 1, block: 'B1' },
     {
@@ -425,7 +426,7 @@ describe('B90 (5): no review.routes ⇒ today\'s spawn options and rows', () => 
     next: { action: 'complete' },
     trigger: null,
     late: 0,
-    sessions: [{ lens: 'full', role: 'reviewer', level: 'L2', slot: null, context_mode: 'hunks', ctx_tokens_in: 6687, provider: 'anthropic', model: PRIMARY, fallback_step: 0, attempts: 1, tokens_in: 900, tokens_out: 300, status: 'ok', reason: null, passed: true, findings: [] }],
+    sessions: [{ lens: 'full', role: 'reviewer', level: 'L2', slot: null, context_mode: 'hunks', ctx_tokens_in: 6759, provider: 'anthropic', model: PRIMARY, fallback_step: 0, attempts: 1, tokens_in: 900, tokens_out: 300, status: 'ok', reason: null, passed: true, findings: [] }],
     open: [],
   };
 

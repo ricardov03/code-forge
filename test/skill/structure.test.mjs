@@ -897,3 +897,45 @@ test('B91 (7): how-it-works and review-only say a timeout is a broken result tha
     assert.equal(occurrences(flat(reviewOnly), flat(pin)), 1, pin);
   assertGone('review-only.md', reviewOnly, B91_GONE);
 });
+
+// ── B92: a test that reads source text ──────────────────────────────────────
+
+/** The sentence the plan names verbatim for code.md §3 and the coder brief. */
+const B92_RULE = 'proof is behaviour, not text: never read a source file in a test to assert on its text';
+
+test('B92 (5): code.md §3 and the coder-brief template carry the proof-is-behaviour rule once', async () => {
+  const s3 = flat(section(await readSkillFile('references/code.md'), 3));
+  assert.equal(occurrences(s3, flat(B92_RULE)), 1);
+  const brief = await readSkillFile('templates/coder-brief.md');
+  assert.equal(occurrences(flat(brief), flat(B92_RULE)), 1);
+  // round 1: both say the section is a hint and when the reviewer raises a warning
+  const HINT = 'The section is a hint, not a finding: the reviewer checks those lines and, when the test really reads source text to assert on it, raises a `warning` (unless the file read is a fixture).';
+  assert.equal(occurrences(s3, flat(HINT)), 1);
+  assert.equal(occurrences(flat(brief), flat(HINT)), 1);
+});
+
+test('B92 (6): review.md §3 and how-it-works say the packet has a `## test-quality` section and that it is a hint, not a finding', async () => {
+  const s3 = flat(section(await readSkillFile('references/review.md'), 3));
+  for (const pin of [
+    'Test quality (B92): a test file that reads a source file and asserts on its text gets a `## test-quality` section before the diff',
+    "never the file's text.",
+    'The section is a hint, not a finding: it writes no row and changes no gate.',
+    'raise such a test as a `warning` ("test reads source text; prove behaviour instead") unless the read file is a fixture.',
+    'It is extra text counted in the packet budget, like the moved-code section; a file with no flag gets no section.',
+    'The read calls that count are `readFileSync`, `readFile`, `open(`, `read_text`, `String(contentsOf`, `contentsOfFile`, `File.read`, `os.ReadFile`, `fs::read_to_string`, `readText(`, `readString(` and `ReadAllText(`, matched as text.',
+    'Over budget it takes the path any extra takes: the context shrinks, then the digest is trimmed; when the diff plus the extras alone are over budget, the file is `split_required` (with `tokens_in` and `budget`, no session; a Markdown file is split by section instead).',
+    'Rechecks get the lens rule but no `## test-quality` section.',
+    "A fixture read never counts: a read whose span holds a string literal with a `fixtures`, `fixture` or `__fixtures__` path segment (`'test/fixtures/a.mjs'`, `join(dir, 'fixtures', 'a.mjs')`), or names a name bound on a line holding such a literal (`const FIXTURES = join(__dirname, 'fixtures')`).",
+  ])
+    assert.equal(occurrences(s3, flat(pin)), 1, pin);
+  const howItWorks = flat(await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8'));
+  for (const pin of [
+    'its packet gets a `## test-quality` section before the diff',
+    'It is a hint, not a finding: it comes from a text match, writes no ledger row and changes no gate.',
+    'raise such a test as a `warning` unless the file it reads is a fixture.',
+    'The section counts toward the packet budget; a file with no flag gets no section.',
+    'Over the budget it is treated like any extra: the context shrinks, then the digest is trimmed, and when the diff plus the extras alone are over budget the file is `split_required`, with no session.',
+    'Rechecks get the lens rule but no `## test-quality` section.',
+  ])
+    assert.equal(occurrences(howItWorks, flat(pin)), 1, pin);
+});

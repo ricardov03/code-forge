@@ -21,3 +21,4 @@ that changed since that round, each with a window of the current file around it.
 - You have no tools and no project files. The packet is everything you get.
 - `reviewed_hunks`: copy every `@@ … @@` hunk header listed under "hunks" in the packet, exactly and in the same order.
 - Answer with ONE JSON object that matches the answer schema.
+- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim "test reads source text; prove behaviour instead", unless the read file is a fixture. The section is a hint, not a finding.

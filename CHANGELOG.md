@@ -33,6 +33,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - `review.routes`: size-based review routing. A file with at least `min_lines` lines is reviewed (L2) or judged (L3) by
   the rule's model, with its own session timeout and second level; one signed `review.route` row per routed level;
   config rule 18 `review-routes-invalid` (B90, #10).
+- A `## test-quality` section in review packets lists the lines of a test file that read a source file and assert on its
+  text; every reviewer lens gets one rule to judge those lines (a hint, not a finding); recheck packets get the rule but
+  no section (B92, #10).
 
 ### Changed
 

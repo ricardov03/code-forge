@@ -17,6 +17,8 @@
 
 After you finish each file in `owned_files` (tests written and green) run `forge review-file <path> --block <id> --run <r>`; before the next file run `forge review-file --wait <ticket> [--max 90s]` and act on the packet. A finding whose fix belongs in another owned file (a missing test, say) is fixed there and sent with `forge review-file <that file> --block <id> --run <r> --answers <ids> --of <source>`. A `worker_down` answer ⇒ print `===BLOCK <id> FAILED: worker down===` (never approval).
 
+Proof is behaviour, not text: never read a source file in a test to assert on its text. Call the code and check what it does; a test may read a fixture. A test file that reads a source file and asserts on its text gets a `## test-quality` section in its review packet. The section is a hint, not a finding: the reviewer checks those lines and, when the test really reads source text to assert on it, raises a `warning` (unless the file read is a fixture).
+
 ## Final report — FAILED unless it lists the ticket ids
 
 Run the block's test command (`test_command`) and print its result on a line of its own, exactly:

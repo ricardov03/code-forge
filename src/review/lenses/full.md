@@ -21,3 +21,4 @@ Report each real defect once, at the lines where it lives.
 - Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.
 - `passed` is true only when you found no `critical` and no `warning`.
 - Do not invent a problem to look thorough. An empty `findings` list is a valid answer.
+- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim "test reads source text; prove behaviour instead", unless the read file is a fixture. The section is a hint, not a finding.
