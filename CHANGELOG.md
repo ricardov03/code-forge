@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.9.0] — 2026-10-12
+
 ### Added
 
 - review-file --answers <ids> --of <source>: a fresh L2 session judges a fix made in another owned file; resolved ids
