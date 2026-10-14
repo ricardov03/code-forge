@@ -594,6 +594,15 @@ function workerLive(w, nowMs) {
   return w.start_time === UNKNOWN_START_TIME || readStartTime(w.pid) === w.start_time;
 }
 
+/** @param {{pid: number, start_time: string, heartbeat_at?: string}} w @param {number} [nowMs] */
+function workerLiveAtBoot(w, nowMs) {
+  if (!isAlive(w.pid)) return false;
+  const startTime = readStartTime(w.pid);
+  // Boot trusts orchestrator ps; sandbox readers let fresh heartbeats mask unreliable ps.
+  if (startTime !== null && w.start_time !== UNKNOWN_START_TIME) return startTime === w.start_time;
+  return heartbeatFresh(w, nowMs) || w.start_time === UNKNOWN_START_TIME;
+}
+
 /** Read all entries, keeping unreadable/bad entries occupied. Only proven stale owners may be pruned.
  * @param {string} repoRoot @param {{prune?: boolean, nowMs?: number}} [opts]
  * @returns {Array<{file: string, worker: WorkerAnnouncement | null, live: boolean}>}
@@ -607,7 +616,7 @@ export function workerRegistry(repoRoot, opts = {}) {
     const file = path.join(workersDir(repoRoot), name);
     const w = readJSON(file);
     const worker = workerShape(w) && name === `${w.pid}-${w.start_time}.json` ? w : null;
-    const live = worker === null || workerLive(worker, opts.nowMs);
+    const live = worker === null || (opts.prune ? workerLiveAtBoot(worker, opts.nowMs) : workerLive(worker, opts.nowMs));
     if (!live && opts.prune) rmSync(file, { force: true });
     else entries.push({ file, worker, live });
   }

@@ -5,7 +5,8 @@ import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, s
 import path from 'node:path';
 import { mock, test } from 'node:test';
 
-const { announceWorker, beatWorker, liveWorker, queueDir, readWorker, retractWorker, HEARTBEAT_STALE_MS } = await import('../../src/worker/queue.mjs');
+const { announceWorker, beatWorker, liveWorker, queueDir, readWorker, retractWorker } = await import('../../src/worker/queue.mjs');
+const { readStartTime, UNKNOWN_START_TIME } = await import('../../src/util/reaper.mjs');
 const { bootWorker } = await import('../../src/worker/loop.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 const { checkLocks } = await import('../../src/doctor/local.mjs');
@@ -67,17 +68,17 @@ test('clause 2: a second boot is worker-running at limit one and writes no secon
   } finally { first.release(); }
 });
 
-test('clause 3: boot removes dead/recycled stale owners; unreadable and bad shapes block unchanged and doctor names each path', async () => {
+test('clause 3: boot removes dead/recycled owners with fresh heartbeats; unreadable and bad shapes block unchanged and doctor names each path', async () => {
   const { repo, runId } = await makeRepo();
   const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
   await new Promise((resolve, reject) => { child.once('exit', resolve); child.once('error', reject); });
-  const stale = new Date(Date.now() - HEARTBEAT_STALE_MS - 1).toISOString();
   const dead = put(repo, `${child.pid}-dead.json`, body(runId, { pid: child.pid, start_time: 'dead' }));
-  const recycled = put(repo, `${process.pid}-old start.json`, body(runId, { heartbeat_at: stale }));
-  const worker = await bootWorker({ runId, cwd: repo }, await deps());
+  const recycled = put(repo, `${process.pid}-old start.json`, body(runId));
+  let worker;
+  await assert.doesNotReject(async () => { worker = await bootWorker({ runId, cwd: repo }, await deps()); }, 'fresh heartbeat cannot rescue a recycled pid at boot');
   try {
     assert.equal(existsSync(dead), false, 'dead owner is removed even with fresh heartbeat');
-    assert.equal(existsSync(recycled), false, 'recycled pid with stale heartbeat is removed');
+    assert.equal(existsSync(recycled), false, 'recycled pid is removed even with fresh heartbeat');
     assert.equal(entries(repo).length, 1, 'only the booted worker remains');
   } finally { worker.release(); }
   const bad = [null, body(runId, { pid: 1 }), body(runId, { pid: 2.5 }), body(runId, { start_time: undefined }), body(runId, { start_time: 'bad-run', run: 1 }), body(runId, { start_time: 'bad-started', started_at: 1 }), body(runId, { start_time: 'bad-beat', heartbeat_at: 'invalid' })];
@@ -104,9 +105,11 @@ test('clause 3: boot removes dead/recycled stale owners; unreadable and bad shap
 
 test('clause 4: live registry serves review-file wait without worker.json; only no live registered worker is worker_down', async () => {
   const { repo, runId } = await makeRepo();
-  const fresh = body(runId);
+  const startTime = readStartTime(process.pid);
+  assert.notEqual(startTime, null, 'current process start time is readable');
+  const fresh = body(runId, { start_time: startTime });
   const file = put(repo, `${fresh.pid}-${fresh.start_time}.json`, fresh);
-  assert.deepEqual(liveWorker(repo), fresh, 'registry preserves full liveWorker return shape despite start mismatch');
+  assert.deepEqual(liveWorker(repo), fresh, 'registry preserves full liveWorker return shape');
   const ticket = 'a'.repeat(24);
   const wait = async () => {
     let out = '';
@@ -147,13 +150,30 @@ test('clause 5: forced count/announce race admits exactly one boot and refuses t
   assert.deepEqual(results.filter((r) => r.error).map((r) => r.error.code), ['worker-running'], 'exactly one boot refuses worker-running');
 });
 
-test('boundary: fresh recycled pid stays live, legacy first owner is preserved, and another owner heartbeat/retraction cannot alter it', async () => {
+test('boundary: boot prunes a fresh recycled pid while liveWorker still reports it', async () => {
   const { repo, runId } = await makeRepo();
   const registered = body(runId);
   const file = put(repo, `${registered.pid}-${registered.start_time}.json`, registered);
-  await assert.rejects(bootWorker({ runId, cwd: repo }, await deps()), { code: 'worker-running' }, 'fresh heartbeat wins over a start-time mismatch');
-  assert.equal(existsSync(file), true, 'fresh mismatched owner is retained');
-  rmSync(file);
+  assert.deepEqual(liveWorker(repo), registered, 'sandbox reader lets a fresh heartbeat win over a start-time mismatch');
+  let worker;
+  await assert.doesNotReject(async () => { worker = await bootWorker({ runId, cwd: repo }, await deps()); }, 'known start-time mismatch cannot block boot with a fresh heartbeat');
+  try {
+    assert.equal(existsSync(file), false, 'fresh mismatched owner is removed');
+    assert.equal(entries(repo).length, 1, 'only the booted worker remains');
+  } finally { worker.release(); }
+});
+
+test('boundary: an unknown start time with a fresh heartbeat is kept and blocks boot', async () => {
+  const { repo, runId } = await makeRepo();
+  const registered = body(runId, { start_time: UNKNOWN_START_TIME });
+  const file = put(repo, `${registered.pid}-${registered.start_time}.json`, registered);
+  await assert.rejects(bootWorker({ runId, cwd: repo }, await deps()), { code: 'worker-running' }, 'fresh unknown owner blocks boot');
+  assert.deepEqual(JSON.parse(readFileSync(file, 'utf8')), registered, 'fresh unknown owner is kept unchanged');
+  assert.equal(readWorker(repo), null, 'refused boot publishes no legacy announcement');
+});
+
+test('boundary: legacy first owner is preserved and another owner heartbeat/retraction cannot alter it', async () => {
+  const { repo, runId } = await makeRepo();
   const first = announceWorker(repo, { pid: process.pid, run: runId });
   const second = announceWorker(repo, { pid: process.pid + 1, run: runId });
   try {
