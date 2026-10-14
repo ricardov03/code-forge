@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 122,
+  "block_count": 123,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2073,6 +2073,30 @@
         "B120"
       ],
       "note": "E4a; built with code-forge run; 0 review findings; the orchestrator re-pinned the schema path count (212 -> 213)"
+    },
+    "B105": {
+      "title": "Cross-process locks for ticket claims, files, blocks and the budget row (E4b part 1)",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/review.md",
+        "src/autopilot/actions.mjs",
+        "src/doctor/index.mjs",
+        "src/doctor/local.mjs",
+        "src/ledger/spend.mjs",
+        "src/review/schema-fallback.mjs",
+        "src/util/file-locks.mjs",
+        "src/worker/engine.mjs",
+        "src/worker/loop.mjs",
+        "test/util/file-locks.test.mjs",
+        "test/worker/claim.test.mjs"
+      ],
+      "depends_on": [
+        "B101"
+      ],
+      "note": "attempt 1 refused at close (coder transcript read ~/.code-forge/runs); re-run clean; two stopped reviews reopened by the owner and approved"
     }
   }
 }

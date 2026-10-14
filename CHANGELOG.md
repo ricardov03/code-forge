@@ -8,6 +8,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Locks now hold across processes (`src/util/file-locks.mjs`, `~/.code-forge/locks`): ticket claims, the per-file and
+  block locks, the budget row, schema fallback and autopilot actions; a dead owner's lock (pid + start time) is broken
+  under a per-key break mutex; `doctor` lists bad locks and crashed break mutexes (B105)
 - New opt-in key `review.fair_share` (boolean, default `false`): the worker pool gives each free slot to the
   pending ticket whose block has the fewest running tickets; ties stay oldest first (B101)
 - `context pack` with no `context` key writes a pack with the block header and the built-in proof rule (300-line cap)

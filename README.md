@@ -17,6 +17,7 @@ In the next release:
 - **Clean rule checks on Codex logs (B119).** Run `codex exec --json` and pass the log to `block close --transcript`. code-forge then checks only the commands Codex ran and the files it wrote. Agent messages, reasoning and command output no longer give false rule breaks. The close reason names each rule break once.
 - **Gate results are recorded again (B120).** `gates run --run <r> --block <id>` now writes its `gate.done` row also when no gate uses `{test_files}`. Before, the row was missing, so `block close` warned after a green run and `status` showed no gate result.
 - **Fair share between blocks (B101).** Set `review.fair_share: true` and each free review slot goes to the block with the fewest running reviews. A block with many queued files no longer makes another block wait. Without the key, the order stays oldest first.
+- **Locks hold across processes (B105).** Ticket claims and the locks for files, blocks and the budget row now work across worker processes. Lock files live in `~/.code-forge/locks`. A lock of a dead process is taken over safely. A bad lock, or a break lock left by a crashed process, blocks its key until you remove it, and `code-forge doctor` names it.
 
 In 0.12.0:
 
