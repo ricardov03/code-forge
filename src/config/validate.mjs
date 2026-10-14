@@ -1162,3 +1162,10 @@ export function validateConfig(cfg, opts = {}) {
 }
 
 export { schema as configSchema };
+
+/** The effective file loop for a validated config; shared with future worker watch support.
+ * @param {Record<string, any>} cfg @returns {string}
+ */
+export function reviewFileLoop(cfg) {
+  return cfg?.review?.file_loop ?? 'wait';
+}

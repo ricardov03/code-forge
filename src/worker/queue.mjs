@@ -370,6 +370,25 @@ export function pendingTickets(repoRoot) {
 }
 
 /**
+ * Valid review tickets for one block and content tree, oldest first. Answers tickets cannot
+ * stand in for a file's own review. Unreadable tickets are refused, never silently omitted.
+ * @param {{repoRoot: string, run: string, block: string, tree?: string | null}} opts
+ * @returns {Ticket[]}
+ */
+export function blockTickets({ repoRoot, run, block, tree = null }) {
+  let names;
+  try {
+    names = readdirSync(queueDir(repoRoot));
+  } catch (err) {
+    if (err.code === 'ENOENT') return [];
+    throw new WorkerError('queue-unreadable', 'the review queue cannot be read');
+  }
+  const tickets = names.filter((n) => /^[0-9a-f]{24}\.json$/.test(n)).map((n) => readTicket(repoRoot, n.slice(0, 24)));
+  return tickets.filter((t) => !t.kind && t.run === run && t.block === block && (t.tree ?? null) === tree)
+    .sort((a, b) => a.enqueued_at.localeCompare(b.enqueued_at) || a.ticket.localeCompare(b.ticket));
+}
+
+/**
  * Read and re-validate a ticket (coder-writable): its id must match its content.
  * @param {string} repoRoot @param {string} id
  * @returns {Ticket}

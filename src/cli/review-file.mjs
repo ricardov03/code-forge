@@ -5,6 +5,8 @@
  *   review-file --wait <ticket> [--max <90s>]      poll; prints {ticket, status: done, result} or
  *                                                  {ticket, status: pending, reason: wait_timeout}
  *                                                  when --max elapses (the review is still running)
+ *   review-file --wait-block <id> --run <id>       join owned changed files' current tickets;
+ *                                                  prints {block, files, done}; never reviews here
  *   review-file <answering file> --block <id> --answers <ids> --of <source> [--run <id>]
  *                                                  B71: enqueue an answers ticket; prints {ticket,
  *                                                  status, kind: answers, file: source, by_file, answers}
@@ -67,20 +69,22 @@
 
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { answersTicketId, assertAnswers, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket } from '../worker/queue.mjs';
+import { answersTicketId, assertAnswers, blockTickets, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
-import { namedOnHash } from '../review/gate-check.mjs';
+import { blockFileSet, namedOnHash } from '../review/gate-check.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
 import { ownsFile } from '../state/registry.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
+import { assertRunId } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
 const USAGE =
   'usage: code-forge review-file <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n' +
+  '       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n' +
   '       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n';
 
 export const DEFAULT_WAIT_MS = 90_000;
@@ -356,6 +360,93 @@ export function fixList(result) {
 }
 
 /**
+ * B100: read block scope from the workspace mirror, never the private run record. This is a
+ * progress summary, not an approval: block close still verifies the authoritative signed rows.
+ * @param {string} repoRoot @param {string} cwd @param {string} run @param {string} block
+ * @returns {Promise<{entry: Record<string, any>, tree: string}>}
+ */
+async function waitBlockScope(repoRoot, cwd, run, block) {
+  const top = await repoRootOf(cwd);
+  const candidates = new Set([repoRoot]);
+  for (let dir = realpathSync(cwd); ; dir = path.dirname(dir)) {
+    candidates.add(dir);
+    if (dir === top || dir === path.dirname(dir)) break;
+  }
+  for (const dir of candidates) {
+    let record;
+    try {
+      record = JSON.parse(readFileSync(path.join(dir, '.code-forge', 'runs', `${run}.json`), 'utf8'));
+    } catch (err) {
+      if (err.code === 'ENOENT') continue;
+      throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
+    }
+    const entry = record?.blocks?.[block];
+    if (record?.run_id !== run || !entry || !Array.isArray(entry.owned_files) || entry.owned_files.length === 0) {
+      throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
+    }
+    const tree = (await blockTree(record.workspace, entry))?.top ?? repoRoot;
+    return { entry, tree };
+  }
+  throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
+}
+
+/** A block wait reads only the marker, never review results or the signing key.
+ * @param {string} repoRoot @param {string} ticket @returns {boolean}
+ */
+function blockTicketDone(repoRoot, ticket) {
+  try {
+    const marker = JSON.parse(readFileSync(path.join(queueDir(repoRoot), `${ticket}.done`), 'utf8'));
+    if (marker?.ticket === ticket && typeof marker.status === 'string' && marker.status.length > 0) return true;
+  } catch (err) {
+    if (err.code === 'ENOENT') return false;
+  }
+  throw new WorkerError('result-unreadable', 'a ticket completion marker cannot be read');
+}
+
+/**
+ * Join current-content tickets only. Re-scan on every poll, including before returning done,
+ * so a file edited while waiting gets a new ticket. The worker alone finishes old tickets.
+ * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown}} opts
+ */
+async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say }) {
+  const { entry, tree } = await waitBlockScope(repoRoot, cwd, run, block);
+  const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree: realpathSync(tree) };
+  const deadline = Date.now() + maxMs;
+  let downPolls = 0;
+  for (;;) {
+    const worker = liveWorker(repoRoot);
+    const live = worker?.run === run;
+    downPolls = live ? 0 : downPolls + 1;
+    const tickets = blockTickets({ repoRoot, run, block, ...where });
+    const current = await blockFileSet({ repoRoot: tree, base: entry.base_sha, owned: entry.owned_files, ownedKinds: entry.owned_kinds });
+    const files = current.map(({ file }) => {
+      const opts = { repoRoot, run, block, file, ...where };
+      const { ticket } = resolveTicket(opts);
+      const previous = tickets.filter((t) => t.file === file);
+      let present = previous.find((t) => t.ticket === ticket);
+      if (!present && previous.length > 0 && live) {
+        enqueue(opts);
+        present = { ...previous[previous.length - 1], ticket };
+      }
+      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : blockTicketDone(repoRoot, ticket) ? 'done' : 'pending' };
+    });
+    if (downPolls >= 2) {
+      say({ block, files, done: false, status: 'worker_down' });
+      return 3;
+    }
+    if (live && files.every((f) => f.status === 'done')) {
+      say({ block, files, done: true });
+      return 0;
+    }
+    if (live && (files.some((f) => f.status === 'not_queued') || Date.now() >= deadline)) {
+      say({ block, files, done: false, reason: files.some((f) => f.status === 'not_queued') ? 'not_queued' : 'wait_timeout' });
+      return 0;
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
+  }
+}
+
+/**
  * @param {string[]} args
  * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number, dropDone?: typeof dropDoneIf}} [deps] - `dropDone`: B75's claim, for tests.
  * @returns {Promise<number>}
@@ -366,9 +457,16 @@ export async function runReviewFile(args, deps = {}) {
   const say = (/** @type {Record<string, any>} */ obj) => writeSafe(stdout, `${JSON.stringify(obj)}\n`);
   const cwd = deps.cwd ?? process.cwd();
   try {
-    const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'max', 'answers', 'of'], booleans: ['fresh'] });
+    const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'wait-block', 'max', 'answers', 'of'], booleans: ['fresh'] });
     // the queue and the worker: the main tree, also from inside a block's worktree
     const repoRoot = await mainRootOf(cwd);
+
+    if (flags['wait-block'] !== undefined) {
+      if (positionals.length > 0 || flags.block !== undefined || flags.wait !== undefined || flags.answers !== undefined || flags.of !== undefined || flags.fresh === true || typeof flags.run !== 'string') {
+        throw new WorkerError('usage', '--wait-block takes a block, --run and --max only');
+      }
+      return await waitBlock({ repoRoot, cwd, block: assertBlockId(flags['wait-block']), run: assertRunId(flags.run), maxMs: flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max), pollMs: deps.pollMs ?? POLL_MS, say });
+    }
 
     if (typeof flags.wait === 'string') {
       if (positionals.length > 0 || flags.block !== undefined || flags.answers !== undefined || flags.of !== undefined || flags.fresh === true) throw new WorkerError('usage', '--wait takes only a ticket and --max');

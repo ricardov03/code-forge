@@ -13,6 +13,7 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 In the next release:
 
 - **Faster fix rounds (B99).** `code-forge gates run --run <r> --block <id> --changed` runs only the tests of files changed since the last green gate run, and `{changed_files}` passes only the changed files to lint or format gates. It falls back to the normal scope when it cannot be sure.
+- **Write while reviews run (B100).** With `review.file_loop: overlap`, the coder enqueues each green file and keeps working. Before it ends, `forge review-file --wait-block <id> --run <r>` waits once for every file of the block.
 
 In 0.11.0:
 

@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 112,
+  "block_count": 113,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1851,6 +1851,28 @@
         "B113"
       ],
       "note": "root-added 2026-10-13; #16; owner D2=a: fix-round TESTS may use --changed, orchestrator runs full gates before close"
+    },
+    "B100": {
+      "title": "Overlap loop: review-file --wait-block, review.file_loop overlap",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "docs/reference/config.md",
+        "schema/code-forge.schema.json",
+        "skill/references/code.md",
+        "skill/templates/coder-brief.md",
+        "src/cli/review-file.mjs",
+        "src/config/validate.mjs",
+        "src/worker/queue.mjs",
+        "test/config/schema-coverage.test.mjs",
+        "test/worker/wait-block.test.mjs"
+      ],
+      "depends_on": [
+        "B99"
+      ],
+      "note": "run-speed E3a; round 1 approved, minors noted (wait-block test 2/4 assertions could be stricter)"
     }
   }
 }

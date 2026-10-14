@@ -12,6 +12,10 @@ waits on a second real consumer (plan §10.4, Q17).
   changed sources, and a new `{changed_files}` gate token passes the changed paths; it falls back with `reason`
   `no_baseline`, `unpaired`, `threshold` or `no_changes`; a green `gate.done` records the owned file hashes as the next
   baseline (B99, #16)
+- `review.file_loop: overlap` and `review-file --wait-block <id> --run <r> [--max]`: one wait for all owned changed
+  files of a block, one JSON line `{block, files: [{file, ticket, status}], done}`; a file changed after its ticket gets
+  its current content enqueued; timeout exits 0 with `reason: wait_timeout`, `not_queued` files give `reason:
+  not_queued`, no live worker exits 3 with `worker_down` (B100)
 
 ## [0.11.0] — 2026-10-13
 
