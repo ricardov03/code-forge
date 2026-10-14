@@ -5,6 +5,17 @@ import { test } from 'node:test';
 const { pairsFor, summarize } = await import('../../src/review/paired.mjs');
 const { clearSecrets, registerSecret } = await import('../../src/util/redact.mjs');
 
+test('B115 paired Python: prefix and suffix tests pair in both directions and summarize only tests', () => {
+  const files = ['src/widget.py', 'src/test_widget.py', 'src/widget_test.py', 'tests/widget_test.py'];
+  assert.deepEqual(files.map((file) => pairsFor(file, files)), [files.slice(1), [files[0]], [files[0]], [files[0]]]);
+  assert.deepEqual(summarize('def helper(): pass\ndef test_empty(): pass\nasync def test_large(): pass', 'src/widget_test.py'), ['test_empty', 'test_large']);
+});
+
+test('B115 paired Python: empty prefix and suffix stems never pair, even in a test directory', () => {
+  const files = ['src/widget.py', 'tests/gadget_test.py', 'src/.py', 'src/_test.py', 'src/test_.py', 'tests/_test.py', 'tests/test_.py'];
+  assert.deepEqual(files.map((file) => pairsFor(file, files)), [[], [], [], [], [], [], []]);
+});
+
 test('B97 pairs: exact stems in both directions across six language extensions', () => {
   const candidates = [
     'src/widget.mjs', 'src/widget.test.mjs', 'test/widget.spec.mjs', 'test/widget.mjs',

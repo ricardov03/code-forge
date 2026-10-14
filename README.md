@@ -15,6 +15,7 @@ In the next release:
 - **Faster fix rounds (B99).** `code-forge gates run --run <r> --block <id> --changed` runs only the tests of files changed since the last green gate run, and `{changed_files}` passes only the changed files to lint or format gates. It falls back to the normal scope when it cannot be sure.
 - **Write while reviews run (B100).** With `review.file_loop: overlap`, the coder enqueues each green file and keeps working. Before it ends, `forge review-file --wait-block <id> --run <r>` waits once for every file of the block.
 - **Reopen after any stop (B114, #17).** Every review stop now records the content it reviewed. An older stop with unknown content can be reopened when the current content was never reviewed. A malformed `TESTS` line now gets its own clear error.
+- **Python `*_test.py` tests pair with their source (B115).** Fix rounds and review packets now find `widget_test.py` for `widget.py`, as they already found `test_widget.py`.
 
 In 0.11.0:
 

@@ -98,21 +98,28 @@ test('snapshot step (CODE_FORGE_NO_LEAK=snapshot): the pre-suite snapshot of the
 });
 
 test('final step (CODE_FORGE_NO_LEAK=final): 0 new entries under the real dirs and 0 live suite workers', { skip: SKIP_FINAL }, async () => {
-  assert.equal(existsSync(BASELINE_FILE), true, `no pre-suite snapshot at ${BASELINE_FILE}: run the snapshot step first`);
-  /** @type {unknown} */
-  let parsed;
+  let baselineError = null;
+  let baseline = [];
   try {
-    parsed = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
+    if (!existsSync(BASELINE_FILE)) baselineError = `no pre-suite snapshot at ${BASELINE_FILE}: run the snapshot step first`;
+    else {
+      const parsed = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
+      if (Array.isArray(parsed) && parsed.every((p) => typeof p === 'string')) baseline = parsed;
+      else baselineError = 'the snapshot is a JSON array of paths';
+    }
+  } catch (err) {
+    baselineError = err.message;
   } finally {
     rmSync(BASELINE_FILE, { force: true });
   }
-  assert.ok(Array.isArray(parsed) && parsed.every((p) => typeof p === 'string'), 'the snapshot is a JSON array of paths');
-  const dirs = leakedEntries(parsed, snapshotGuarded());
+  const dirs = leakedEntries(baseline, snapshotGuarded());
   let markerError = null;
   try { requireSuiteMarker(SUITE); } catch (err) { markerError = err.message; }
   // Allow cleanup and the orphan guard several seconds after the last test process exits.
   if (markerError === null) await new Promise((resolve) => setTimeout(resolve, 3000));
-  const workers = markerError === null ? suiteWorkers(SUITE, TEST_BASE) : [];
+  let workers = [];
+  let workerError = null;
+  try { workers = suiteWorkers(SUITE, TEST_BASE); } catch (err) { workerError = err.message; }
   if (workers.length > 0) process.stderr.write(`leaked workers: ${JSON.stringify(workers)}\n`);
-  assert.deepEqual({ dirs, workers, markerError }, { dirs: [], workers: [], markerError: null }, `suite leaks: directories ${JSON.stringify(dirs)}; leaked pid/run list ${JSON.stringify(workers)}; suite marker: ${markerError ?? 'valid'}`);
+  assert.deepEqual({ dirs, workers, baselineError, markerError, workerError }, { dirs: [], workers: [], baselineError: null, markerError: null, workerError: null }, `suite leaks: directories ${JSON.stringify(dirs)}; leaked pid/run list ${JSON.stringify(workers)}; baseline: ${baselineError ?? 'valid'}; suite marker: ${markerError ?? 'valid'}; worker report: ${workerError ?? 'valid'}`);
 });

@@ -17,6 +17,7 @@ function identity(file) {
     if (stem.endsWith('_test')) { test = true; stem = stem.slice(0, -5); }
   } else if (ext === '.py') {
     if (stem.startsWith('test_')) { test = true; stem = stem.slice(5); }
+    else if (stem.endsWith('_test')) { test = true; stem = stem.slice(0, -5); }
   } else if (ext === '.swift') {
     if (stem.endsWith('Tests')) { test = true; stem = stem.slice(0, -5); }
   } else return null;

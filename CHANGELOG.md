@@ -27,6 +27,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - every fix-loop stop (stall, cap, split, stop-at, L3 exhaustion) records `stop_content_hash`, so `block reopen` works
   after it; a stop with unknown content reopens when no verified `review.round` names the current hash (`from_hash:
   null`), and the refusal no longer points to `block waive` (B114, #17)
+- paired tests: a Python `<stem>_test.py` file pairs with `<stem>.py`, like `test_<stem>.py` (B115)
+- `npm test -- <args>` passes the extra args to the main test phase again; the snapshot and final no-leak steps still
+  run (B115)
 
 ## [0.11.0] — 2026-10-13
 

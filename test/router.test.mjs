@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { existsSync, readdirSync } from 'node:fs';
+import { existsSync, readdirSync, realpathSync } from 'node:fs';
 import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -101,23 +101,110 @@ test('package.json declares no peer or bundled dependencies, under either npm sp
   assert.equal(pkg.bundledDependencies, undefined);
 });
 
+/** Run the package test entry with a fake node; inspect phase argv and statuses, not source. */
+async function testPhases(snapshot, main, final, extraArgs = [], suite = 'b115-shell') {
+  const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  const dir = path.join(PKG, 'test-script-bin');
+  await mkdir(dir, { recursive: true });
+  await writeFile(path.join(dir, 'node'), `#!/bin/sh
+if [ "$1" = "-e" ]; then printf '%s' 'b115-generated-suite'; exit 0; fi
+case "$CODE_FORGE_NO_LEAK" in
+  snapshot) phase=snapshot; status=$SNAPSHOT_STATUS;;
+  final) phase=final; status=$FINAL_STATUS;;
+  *) phase=main; status=$MAIN_STATUS;;
+esac
+printf '%s|%s' "$phase" "$CODE_FORGE_TEST_SUITE"
+for arg do printf '|%s' "$arg"; done
+printf '\n'
+exit "$status"
+`, { mode: 0o755 });
+  const env = { ...process.env, PATH: dir + path.delimiter + process.env.PATH, SNAPSHOT_STATUS: String(snapshot), CODE_FORGE_TEST_SUITE: suite, CODE_FORGE_NO_LEAK: '', MAIN_STATUS: String(main), FINAL_STATUS: String(final) };
+  if (suite === null) delete env.CODE_FORGE_TEST_SUITE;
+  if (extraArgs.length === 0) return spawnSync('sh', ['-c', pkg.scripts.test], { cwd: ROOT, timeout: 20000, encoding: 'utf8', env });
+  return spawnSync(process.execPath, [npmJsPath(), 'test', '--', ...extraArgs], { cwd: ROOT, timeout: 20000, encoding: 'utf8', env: { ...env, npm_config_loglevel: 'silent' } });
+}
+
+/** Locate the npm JS entry independently of the fake node used by phase fixtures.
+ * @param {NodeJS.ProcessEnv} [env]
+ */
+function npmJsPath(env = process.env) {
+  const source = env.npm_execpath ? 'process.env.npm_execpath' : 'command -v npm';
+  const candidate = env.npm_execpath || spawnSync('/bin/sh', ['-c', 'command -v npm'], { encoding: 'utf8', env }).stdout.trim();
+  try {
+    const resolved = realpathSync(candidate);
+    assert.match(resolved, /\.(?:[cm]?js)$/);
+    return resolved;
+  } catch {
+    throw new Error(`npm JS entry not found via ${source}: ${candidate || '(empty result)'}; expected a JavaScript file`);
+  }
+}
+
+const PHASE_ARGV = [
+  'snapshot|b115-shell|--import|./test/helpers/isolate.mjs|--test|test/no-leak.test.mjs',
+  'main|b115-shell|--import|./test/helpers/isolate.mjs|--experimental-test-module-mocks|--test|test/**/*.test.mjs',
+  'final|b115-shell|--import|./test/helpers/isolate.mjs|--test|test/no-leak.test.mjs',
+];
+
 test('package.json requires Node >= 22 and runs tests under the isolate preload with module mocks enabled, between the no-leak snapshot and final steps', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.engines.node, '>=22');
-  assert.equal(pkg.scripts.test, `export CODE_FORGE_TEST_SUITE=\${CODE_FORGE_TEST_SUITE:-$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')}; CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && { node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test 'test/**/*.test.mjs'; cf_test_status=$?; CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs; cf_leak_status=$?; [ "$cf_test_status" -eq 0 ] && [ "$cf_leak_status" -eq 0 ]; }`);
+  const result = await testPhases(0, 0, 0);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), PHASE_ARGV);
 });
 
 test('B113: the test script preserves each failing phase status and runs final after main fails and skips main after snapshot fails', async () => {
-  const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  // A shell function shadows node, executing the actual script's control flow without a suite.
-  const stub = `node() { case "$*" in *--experimental-test-module-mocks*) echo main; return "$MAIN_STATUS";; *) case "$CODE_FORGE_NO_LEAK" in snapshot) echo snapshot; return "$SNAPSHOT_STATUS";; final) echo final; return "$FINAL_STATUS";; esac;; esac; }; `;
   for (const [snapshot, main, final, expected] of [[0, 0, 0, 0], [0, 7, 0, 1], [0, 0, 9, 1], [0, 7, 9, 1], [5, 0, 0, 5]]) {
-    const result = spawnSync('sh', ['-c', stub + pkg.scripts.test], {
-      timeout: 20000, encoding: 'utf8', env: { ...process.env, SNAPSHOT_STATUS: String(snapshot), CODE_FORGE_TEST_SUITE: 'b113-shell', CODE_FORGE_NO_LEAK: '', MAIN_STATUS: String(main), FINAL_STATUS: String(final) },
-    });
+    const result = await testPhases(snapshot, main, final);
     assert.equal(result.status, expected, result.stderr);
-    assert.deepEqual(result.stdout.trim().split('\n'), snapshot === 0 ? ['snapshot', 'main', 'final'] : ['snapshot']);
+    assert.deepEqual(result.stdout.trim().split('\n'), snapshot === 0 ? PHASE_ARGV : PHASE_ARGV.slice(0, 1));
   }
+});
+
+test('B115: npm test forwards extra argv to main only and still runs snapshot and final', async () => {
+  const args = ['--test-name-pattern=a b', '--test-name-pattern=x*', '*', '--test-reporter=spec'];
+  const result = await testPhases(0, 0, 0, args);
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), [PHASE_ARGV[0], 'main|b115-shell|--import|./test/helpers/isolate.mjs|--experimental-test-module-mocks|--test|' + args.join('|') + '|test/**/*.test.mjs', PHASE_ARGV[2]]);
+});
+
+test('B115: the test script generates one suite marker when unset and preserves a preset marker in all three phases', async () => {
+  for (const suite of [null, 'b115-preset-suite']) {
+    const result = await testPhases(0, 0, 0, [], suite);
+    assert.equal(result.status, 0, result.stderr);
+    const lines = result.stdout.trim().split('\n');
+    assert.equal(lines.length, 3);
+    const markers = lines.map((line) => line.split('|')[1]);
+    assert.notEqual(markers[0], '');
+    assert.deepEqual(markers, Array(3).fill(suite ?? markers[0]));
+    assert.deepEqual(lines, PHASE_ARGV.map((line) => line.replace('|b115-shell|', `|${markers[0]}|`)));
+  }
+});
+
+test('B115: npm lookup prefers npm_execpath, falls back to command -v npm, and names invalid JS entries', async () => {
+  const dir = path.join(PKG, 'npm-lookup');
+  await mkdir(dir);
+  const entry = path.join(dir, 'npm-cli.js');
+  const wrapper = path.join(dir, 'npm');
+  await writeFile(entry, '// fixture npm entry\n', { mode: 0o755 });
+  await symlink(entry, wrapper);
+  assert.equal(npmJsPath({ npm_execpath: entry, PATH: '' }), realpathSync(entry));
+  assert.equal(npmJsPath({ PATH: dir }), realpathSync(entry));
+  assert.throws(() => npmJsPath({ PATH: '' }), /npm JS entry not found via command -v npm: \(empty result\); expected a JavaScript file/);
+  const nonJs = path.join(dir, 'shell-wrapper');
+  await writeFile(nonJs, '#!/bin/sh\n', { mode: 0o755 });
+  assert.throws(() => npmJsPath({ npm_execpath: nonJs, PATH: dir }), (err) => {
+    assert.ok(err instanceof Error);
+    assert.equal(err.message, `npm JS entry not found via process.env.npm_execpath: ${nonJs}; expected a JavaScript file`);
+    return true;
+  });
+  await rm(wrapper);
+  await symlink(nonJs, wrapper);
+  assert.throws(() => npmJsPath({ PATH: dir }), (err) => {
+    assert.ok(err instanceof Error);
+    assert.equal(err.message, `npm JS entry not found via command -v npm: ${wrapper}; expected a JavaScript file`);
+    return true;
+  });
 });
 
 test('every dependency version is an exact semver — no ^, ~, *, "latest", or partial form', async () => {

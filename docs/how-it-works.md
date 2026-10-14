@@ -475,7 +475,7 @@ Missing or unreadable pairs are skipped; no pairs means no section. A test named
 use `needs_file` when its body matters. The section lists test names or exported symbols, at most
 40 entries per file and 120 characters per entry, redacting secret-looking and registered values.
 Pairs match stems for `.mjs`/`.ts` (`.test`, `.spec`, or the `test/` tree), PHP (`FooTest.php`),
-Go (`foo_test.go`), Python (`test_foo.py`), and Swift (`FooTests.swift`). The whole section is
+Go (`foo_test.go`), Python (`test_foo.py` or `foo_test.py`, with a non-empty stem), and Swift (`FooTests.swift`). The whole section is
 capped at `review.budgets.full_in / 16` tokens and is
 dropped first when the packet exceeds its budget. It never causes `split_required` and never
 cuts the diff; without paired input the packet bytes stay the same.

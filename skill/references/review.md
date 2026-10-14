@@ -29,7 +29,7 @@ and before moved code and the diff, using the block's owned changed peers plus i
 are skipped; no pairs means no section. It names paired files and summarizes test names or exported
 symbols: at most 40 entries per file, each at most 120 characters, with secret-looking and
 registered values redacted. Stem matching supports `.mjs`/`.ts` (`.test`, `.spec`, and the `test/`
-tree), PHP (`FooTest.php`), Go (`foo_test.go`), Python (`test_foo.py`), and Swift (`FooTests.swift`).
+tree), PHP (`FooTest.php`), Go (`foo_test.go`), Python (`test_foo.py` or `foo_test.py`, with a non-empty stem), and Swift (`FooTests.swift`).
 The entire section is capped at `review.budgets.full_in / 16` tokens. Over budget it is dropped
 before shrinking context or trimming rules; it never causes `split_required` or cuts the diff.
 Without paired input the packet bytes stay the same. The summary names tests; request their

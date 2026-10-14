@@ -178,6 +178,8 @@ export async function startWorker(repo, runId, extraEnv = {}) {
  * @param {{pid: number, exited: Promise<unknown>, child: import('node:child_process').ChildProcess}} w @param {string} runId
  */
 export async function stopWorker(w, runId) {
+  let stopError = null;
+  let stopFailed = false;
   try {
     if (w.child.exitCode === null && w.child.signalCode === null) {
       try {
@@ -195,8 +197,22 @@ export async function stopWorker(w, runId) {
         if (!(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, 2000))) throw new Error(`worker pid ${w.pid} did not stop`);
       }
     }
+  } catch (err) {
+    stopFailed = true;
+    stopError = err;
+    throw err;
   } finally {
-    await sweep(path.join(runRootOf(runId), 'pids'), { graceMs: 500 });
+    try {
+      await sweep(path.join(runRootOf(runId), 'pids'), { graceMs: 500 });
+    } catch (err) {
+      if (!stopFailed) throw err;
+      try {
+        stopError.cause = stopError.cause === undefined ? err : new AggregateError([stopError.cause, err], 'stop and sweep causes');
+      } catch {
+        // Primitive, frozen, or accessor-backed errors must still be thrown unchanged.
+        try { console.error('worker pid sweep failed after stop failure:', err); } catch { /* preserve the stop error even if logging fails */ }
+      }
+    }
   }
 }
 
