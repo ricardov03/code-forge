@@ -150,7 +150,11 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, t
     blockId,
     fn: async () => {
       // Plain gates without --changed need no scope or baseline.
-      if (!hasScopeItem(gates) && !changed) return runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+      if (!hasScopeItem(gates) && !changed) {
+        const record = await readRun(runId);
+        const ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+        return { ...ran, ledger_slug: slug ?? record.project };
+      }
       // the slot checked the block is open; it may still be gone by the time it is read again
       const record = await readRun(runId);
       const block = record.blocks?.[blockId];
