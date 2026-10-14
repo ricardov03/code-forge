@@ -1045,7 +1045,18 @@ export function reviewGateCheck(load, { onWaivedAll } = {}) {
       onWaivedAll?.(result.waivedAll);
       return { ok: true };
     }
-    return { ok: false, reason: result.refusals.map((r) => `${r.code}${r.file ? ` ${r.file}` : ''}${r.finding ? ` ${r.finding}` : ''}`).join('; ') };
+    const reasons = [];
+    const transcriptIds = new Set();
+    for (const r of result.refusals) {
+      const hit = r.code === 'rule_break' && /^transcript line \d+: (.+)$/.exec(r.detail);
+      if (hit) {
+        if (transcriptIds.has(hit[1])) continue;
+        transcriptIds.add(hit[1]);
+        if (transcriptIds.size <= 5) reasons.push(`rule_break ${r.detail}`);
+      } else reasons.push(`${r.code}${r.file ? ` ${r.file}` : ''}${r.finding ? ` ${r.finding}` : ''}`);
+    }
+    if (transcriptIds.size > 5) reasons.push(`+${transcriptIds.size - 5} more rule_break`);
+    return { ok: false, reason: reasons.join('; ') };
   };
 }
 
