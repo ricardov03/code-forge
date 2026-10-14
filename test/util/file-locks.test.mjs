@@ -1,10 +1,12 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import { spawn, spawnSync } from 'node:child_process';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
-import { after, beforeEach, test } from 'node:test';
+import { after, beforeEach, mock, test } from 'node:test';
 
 const home = mkdtempSync(path.join(os.tmpdir(), 'file-locks-'));
 const originalHome = process.env.HOME;
@@ -59,8 +61,51 @@ test('dead-owner break race: two afterRead arrivals yield exactly one holder', a
     assert.equal(results.filter((r) => r.ok).length, 1, 'exactly one breaker holds the lock');
     assert.deepEqual(results.filter((r) => !r.ok), [{ ok: false, result: 'held' }]);
     assert.equal(JSON.parse(readFileSync(lockPath(key), 'utf8')).pid, process.pid, 'winner replaces dead pid');
-    assert.equal(readdirSync(dir).length, 1, 'no stale break mutex or moved file');
+    assert.equal(readdirSync(dir).length, 1, 'only the winner lock remains');
   } finally { results.forEach((r) => { if (r.ok) r.release(); }); }
+});
+
+test('stale second breaker preserves the first owner against a third process', async () => {
+  const key = 'three-process-race';
+  put(key, { key, pid: await exitedPid(), start: 'dead' });
+  let read;
+  let resume;
+  const readGate = new Promise((resolve) => { read = resolve; });
+  const resumeGate = new Promise((resolve) => { resume = resolve; });
+  const stale = tryLock(key, { afterRead: async () => { read(); await resumeGate; } });
+  await readGate;
+  const first = await tryLock(key);
+  assert.equal(first.ok, true, 'first breaker owns the key before stale breaker resumes');
+  const firstBytes = readFileSync(lockPath(key));
+  const moduleUrl = new URL('../../src/util/file-locks.mjs', import.meta.url).href;
+  const contender = () => {
+    const child = spawnSync(process.execPath, ['--input-type=module', '-e', `
+      const { tryLock } = await import(${JSON.stringify(moduleUrl)});
+      console.log(JSON.stringify(await tryLock(${JSON.stringify(key)})));
+    `], { env: { ...process.env, HOME: home }, encoding: 'utf8' });
+    assert.equal(child.status, 0, child.stderr);
+    return JSON.parse(child.stdout);
+  };
+  let third;
+  const rename = fs.renameSync;
+  const hook = mock.method(fs, 'renameSync', (from, to) => {
+    rename(from, to);
+    if (from === lockPath(key)) third = contender();
+  });
+  syncBuiltinESMExports();
+  let second;
+  try {
+    resume();
+    second = await stale;
+    third ??= contender();
+    assert.equal([first, second, third].filter((r) => r.ok).length, 1, 'exactly one of the three processes acquires the key');
+    assert.deepEqual(readFileSync(lockPath(key)), firstBytes, 'stale breaker leaves the first owner file unchanged');
+  } finally {
+    hook.mock.restore();
+    syncBuiltinESMExports();
+    if (first.ok) first.release();
+    if (second?.ok) second.release();
+  }
 });
 
 test('live pid, other start time is broken; same start time is held', async () => {
@@ -109,16 +154,23 @@ test('withLock owns during fn and releases after return and throw', async () => 
   assert.equal(existsSync(lockPath(key)), false, 'throw removes the file');
 });
 
-test('boundary: changed bytes are restored and an old release preserves a replacement', async () => {
+test('boundary: changed bytes are untouched and an old release preserves a replacement', async () => {
   const key = 'changed';
   put(key, { key, pid: await exitedPid(), start: 'dead' });
   const replacement = JSON.stringify({ key, pid: process.pid, start: 'replacement' });
+  const hook = mock.method(fs, 'renameSync');
+  syncBuiltinESMExports();
   const result = await tryLock(key, { afterRead: async () => writeFileSync(lockPath(key), replacement) });
   try {
     assert.deepEqual(result, { ok: false, result: 'held' }, 'changed owner cannot be broken');
-    assert.equal(readFileSync(lockPath(key), 'utf8'), replacement, 'changed bytes are linked back');
-    assert.deepEqual(readdirSync(dir), [path.basename(lockPath(key))], 'successful restore removes moved file');
-  } finally { if (result.ok) result.release(); }
+    assert.equal(hook.mock.callCount(), 0, 'changed owner is never renamed');
+    assert.equal(readFileSync(lockPath(key), 'utf8'), replacement, 'changed bytes stay on their original path');
+    assert.deepEqual(readdirSync(dir), [path.basename(lockPath(key))], 'only the unchanged lock file remains');
+  } finally {
+    hook.mock.restore();
+    syncBuiltinESMExports();
+    if (result.ok) result.release();
+  }
   rmSync(lockPath(key));
   const owner = await tryLock(key);
   assert.equal(owner.ok, true);

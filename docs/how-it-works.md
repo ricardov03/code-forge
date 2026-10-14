@@ -659,7 +659,8 @@ free slot goes to the block with the fewest running tickets, with oldest first f
 
 Ticket claims and locks for files, blocks and the budget row now hold across processes.
 Lock files live in `~/.code-forge/locks`. A dead owner's lock is broken using its pid and
-process start time. An unreadable or malformed lock blocks its key until a human removes it.
+process start time, comparing its bytes again under a per-key break mutex before removal.
+An unreadable or malformed lock blocks its key until a human removes it.
 `code-forge doctor` names each bad lock by path.
 
 - **Same-file rule.** The same file (in the same block) is never reviewed twice at once. If the

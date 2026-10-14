@@ -1,6 +1,6 @@
 /** Cross-process locks, with FIFO serialization inside this process. */
-import { createHash, randomUUID } from 'node:crypto';
-import { closeSync, linkSync, mkdirSync, openSync, readFileSync, readdirSync, renameSync, unlinkSync, writeFileSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { closeSync, mkdirSync, openSync, readFileSync, readdirSync, unlinkSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { processStartTime } from '../state/run.mjs';
@@ -73,25 +73,15 @@ export async function tryLock(key, opts = {}) {
   }
   if (!dead) return HELD;
 
-  // A second stale reader must not rename the first breaker's newly created lock.
+  // Only unchanged dead-owner bytes may be removed under the per-key break mutex.
   const mutex = `${file}.break`;
   let guard;
   try { guard = openSync(mutex, 'wx', 0o600); }
   catch { return HELD; }
-  const moved = `${file}.${process.pid}.${randomUUID()}.break`;
   try {
-    try { renameSync(file, moved); }
+    try { if (!readFileSync(file).equals(seen)) return HELD; }
     catch { return HELD; }
-    let same = false;
-    try { same = readFileSync(moved).equals(seen); }
-    catch { /* unreadable moved bytes must be restored */ }
-    if (!same) {
-      try { linkSync(moved, file); }
-      catch { return HELD; } // EEXIST: keep moved bytes; the newer lock blocks this key
-      unlinkSync(moved);
-      return HELD;
-    }
-    unlinkSync(moved);
+    unlinkSync(file);
     return create(file, bytes);
   } finally {
     closeSync(guard);

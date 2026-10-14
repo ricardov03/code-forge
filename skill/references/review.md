@@ -100,7 +100,8 @@ Two L2 reviewers, one per effective provider (`resolve(L2)` and `review.second_l
 
 Ticket claims and locks for files, blocks and the budget row now hold across processes.
 They live in `~/.code-forge/locks`. A dead owner's lock is broken using its pid and process
-start time. An unreadable or malformed lock blocks its key until a human removes it.
+start time, comparing its bytes again under a per-key break mutex before removal.
+An unreadable or malformed lock blocks its key until a human removes it.
 `code-forge doctor` names each bad lock by path.
 
 `review.block_budget_tokens` (and optionally `review.block_budget_usd`) bounds every review, recheck, judge and S2 session made for the block. When the forecast exceeds it the worker degrades one step at a time, cheapest first: batch small files of one tier into one packet (`review.batch_small_files`) → one judge per block instead of per file → standard band `full` → `quick` → high tier `A + B + judge` → one `full` L2 + judge, the floor. Tools-only is never a review; a light `quick` stays `quick`. Still over ⇒ `review.over_budget`: raise the budget once per run (a config edit by the human, on record) or split the block — never silently, never below the floors. **Autopilot:** a budget raise is never delegated; a paused category waits for the owner (`autopilot.md` §5). The ledger keeps `depth_unconstrained` and `depth_chosen` per file so `forge report` can show `missed_after_degrade`.
