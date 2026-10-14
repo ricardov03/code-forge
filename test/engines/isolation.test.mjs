@@ -13,7 +13,7 @@ before(async () => {
 });
 
 after(async () => {
-  await rm(baseDir, { recursive: true, force: true });
+  if (baseDir) await rm(baseDir, { recursive: true, force: true });
 });
 
 test('createIsolatedWorkspace makes a fresh dir holding EXACTLY 1 file — the packet', async () => {
