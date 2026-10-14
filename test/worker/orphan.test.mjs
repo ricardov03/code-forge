@@ -1,4 +1,5 @@
 import { BIN, childEnv, cli, freshDir, makeRepo, pollMs, startWorker, stopPid, stopWorker, VALID_REVIEW, queued, waitFor } from './helpers.mjs';
+import { snapshotGuarded } from '../helpers/isolate.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -123,7 +124,7 @@ test('B113: the final check reports directory leaks together with an empty suite
   const base = path.join(guarded, 'code-forge-tests');
   mkdirSync(base, { recursive: true, mode: 0o700 });
   const baseline = path.join(base, `no-leak-${createHash('sha256').update('').digest('hex')}.json`);
-  writeFileSync(baseline, '[]');
+  writeFileSync(baseline, JSON.stringify([...snapshotGuarded([path.join(path.resolve(path.dirname(BIN), '..'), '.code-forge')])]));
   const leakedDir = path.join(guarded, '.code-forge');
   mkdirSync(leakedDir);
   const leakedFile = path.join(leakedDir, 'planted.json');
