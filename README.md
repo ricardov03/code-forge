@@ -386,7 +386,8 @@ CLI verbs like any other and every one of them is exercised by this package's ow
   you the full issue and sends nothing without your yes. `CODE_FORGE_NO_ERROR_LOG=1` turns the log,
   the warnings and the command list off. Every field is listed in [docs/privacy.md](docs/privacy.md).
 - **No mutation testing.** Neither this package's own tests nor the product it ships run mutation
-  testing (Ricardo's ruling R14/Q16, 2026-09-25). Proof is plain unit and feature tests with exact
+  testing (the owner's ruling R14/Q16, 2026-09-25). Coders do not make hand mutations either: each new
+  or changed test is proven red→green, and a weak assertion is fixed by a stronger assertion. Proof is plain unit and feature tests with exact
   assertions, plus a red→green runner that proves a new test fails before the fix and passes after (`node:test`
   built in; any other runner through a `proof.runners` entry that writes a JUnit report).
 
