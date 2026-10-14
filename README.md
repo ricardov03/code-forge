@@ -12,6 +12,9 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 In the next release:
 
+- **Every block gets the proof rule, with or without a `context` key (B118).** `code-forge context pack` no longer refuses a config with no `context` key. The pack then holds the block header and the proof rule.
+- **Safer block open and close (B118).** `block open` refuses an owned or test path that has spaces and names no file, a common shell quoting slip. `block close` warns when the block has no green gates run.
+
 In 0.12.0:
 
 - **Faster fix rounds (B99).** `code-forge gates run --run <r> --block <id> --changed` runs only the tests of files changed since the last green gate run, and `{changed_files}` passes only the changed files to lint or format gates. It falls back to the normal scope when it cannot be sure.

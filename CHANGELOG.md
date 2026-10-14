@@ -6,8 +6,17 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- `context pack` with no `context` key writes a pack with the block header and the built-in proof rule (300-line cap)
+  instead of refusing; a bad `context` value still refuses (B118)
+- `block close` prints `WARN block <id>: no green gates run for this block; …` when `gates.test` is set and the block's
+  last gate row is not a green `gate.done`; it still closes (B118)
+
 ### Fixed
 
+- `block open` refuses an `--owned` or `--tests` entry that contains whitespace and names no existing file or directory
+  (a shell quoting slip), naming the entry; nothing is written (B118)
 - `npm test -- --test-name-pattern=<p>` exits 0: six test files no longer call `rm(undefined)` in cleanup when
   their setup was skipped by the pattern (B116, built with `code-forge run` itself)
 
