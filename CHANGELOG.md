@@ -6,6 +6,11 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- `npm test -- --test-name-pattern=<p>` exits 0: six test files no longer call `rm(undefined)` in cleanup when
+  their setup was skipped by the pattern (B116, built with `code-forge run` itself)
+
 ## [0.12.0] — 2026-10-14
 
 ### Added
