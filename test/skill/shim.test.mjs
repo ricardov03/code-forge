@@ -45,7 +45,7 @@ before(async () => {
 });
 
 after(async () => {
-  await rm(parent, { recursive: true, force: true });
+  if (parent) await rm(parent, { recursive: true, force: true });
 });
 
 /**
