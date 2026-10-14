@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 111,
+  "block_count": 112,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1825,6 +1825,32 @@
         "B112"
       ],
       "note": "root-added 2026-10-13; bug; 226 orphan test workers drove load to 350-450 and broke the release test step"
+    },
+    "B99": {
+      "title": "Fix rounds check less: gates run --changed, {changed_files}",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "docs/reference/config.md",
+        "schema/code-forge.schema.json",
+        "skill/references/code.md",
+        "skill/references/proof.md",
+        "skill/templates/coder-brief.md",
+        "src/cli/gates.mjs",
+        "src/config/validate.mjs",
+        "src/gates/expand.mjs",
+        "src/gates/run.mjs",
+        "src/proof/lock.mjs",
+        "src/util/gate-token.mjs",
+        "test/gates/changed.test.mjs",
+        "test/gates/placeholders.test.mjs"
+      ],
+      "depends_on": [
+        "B113"
+      ],
+      "note": "root-added 2026-10-13; #16; owner D2=a: fix-round TESTS may use --changed, orchestrator runs full gates before close"
     }
   }
 }

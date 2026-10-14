@@ -66,7 +66,7 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../schema/code-forge.schema.json' with { type: 'json' };
 import { redact } from '../util/redact.mjs';
-import { TEST_FILES_TOKEN } from '../util/gate-token.mjs';
+import { TEST_FILES_TOKEN, CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
 import { checkEffort, displayEffort } from '../engines/efforts.mjs';
 import { CLOSED_BOOK_LEVELS, CODEX_CLOSED_BOOK_REFUSAL, isNoClosedBookProvider, OPEN_BOOK_CODEX_WARNING, openBookCodexAllowed } from './closed-book.mjs';
 import { isKnownId, resolveLevel } from './known-ids.mjs';
@@ -484,10 +484,10 @@ function gateMessages(key, value) {
   // full-suite run would be an empty argv
   /** @param {string[]} argv @returns {string[]} */
   const tokenMessages = (argv) =>
-    argv.length === 1 && argv[0] === TEST_FILES_TOKEN
-      ? [`gates.${key}: '${TEST_FILES_TOKEN}' cannot be the only item (the full suite would run an empty command)`]
-      : argv[0] === TEST_FILES_TOKEN
-        ? [`gates.${key}: '${TEST_FILES_TOKEN}' cannot be the command (argv[0])`]
+    argv.length === 1 && [TEST_FILES_TOKEN, CHANGED_FILES_TOKEN].includes(argv[0])
+      ? [`gates.${key}: '${argv[0]}' cannot be the only item (the full suite would run an empty command)`]
+      : [TEST_FILES_TOKEN, CHANGED_FILES_TOKEN].includes(argv[0])
+        ? [`gates.${key}: '${argv[0]}' cannot be the command (argv[0])`]
         : [];
   if (typeof value !== 'object' || Array.isArray(value)) {
     if (!isArgvArray(value)) return [`gates.${key} must be a non-empty argv array of strings, an {argv, env} object, or null`];

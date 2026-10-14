@@ -16,7 +16,8 @@
  * with `isolation: lock` through the B6 writer.
  */
 
-import { hasTestFilesItem, testScope } from '../gates/expand.mjs';
+import { changedScope, fileBaseline, hasScopeItem, testScope } from '../gates/expand.mjs';
+import { readAllRows } from '../ledger/write.mjs';
 import { ownedFileCount } from '../gates/owned-count.mjs';
 import { runGates } from '../gates/run.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -139,23 +140,35 @@ export async function withGateSlot({ runId, blockId, fn, pid = process.pid }) {
  * run record once the slot is taken). The full suite runs instead when the block owns more than
  * `threshold` (`gates.full_suite_threshold_files`) files, or when no test file is known. The
  * owned files are counted by `ownedFileCount` over the tracked and new (not ignored) files at
- * `cwd`. Gates with no `{test_files}` item run exactly as before B60: the run record is not read
- * and nothing is counted.
- * @param {{runId: string, blockId: string, gates: Parameters<typeof runGates>[0], cwd: string, timeoutMs?: number, threshold?: number}} opts
+ * `cwd`. Plain gates without --changed retain the old path. B99 records bounded owned hashes
+ * after green scoped runs; --changed uses the last green record and B97's stem pairs.
+ * @param {{runId: string, blockId: string, gates: Parameters<typeof runGates>[0], cwd: string, timeoutMs?: number, threshold?: number, changed?: boolean, slug?: string}} opts
  */
-export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, threshold }) {
+export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, threshold, changed = false, slug }) {
   return withGateSlot({
     runId,
     blockId,
     fn: async () => {
-      // plain gates (no `{test_files}` item) run exactly as before B60: no scope is worked out
-      if (!hasTestFilesItem(gates)) return runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+      // Plain gates without --changed need no scope or baseline.
+      if (!hasScopeItem(gates) && !changed) return runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
       // the slot checked the block is open; it may still be gone by the time it is read again
-      const block = (await readRun(runId)).blocks?.[blockId];
+      const record = await readRun(runId);
+      const block = record.blocks?.[blockId];
       if (!block) throw new StateError('no-block', `block ${blockId} is not in run ${runId}`);
       const ownedFiles = await ownedFileCount(cwd, block.owned_files, block.owned_kinds);
-      const scope = testScope({ testFiles: block.test_files, owned: block.owned_files, ownedFiles, ...(threshold === undefined ? {} : { threshold }) });
-      return runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}), scope });
+      const fallback = testScope({ testFiles: block.test_files, owned: block.owned_files, ownedFiles, ...(threshold === undefined ? {} : { threshold }) });
+      const current = await fileBaseline(cwd, block.owned_files, block.owned_kinds);
+      let baseline;
+      if (changed) {
+        const rows = await readAllRows(slug ?? record.project);
+        baseline = rows.filter((row) => row.event === 'gate.done' && row.run === runId && row.block === blockId && row.all_ok === true && row.worktree === block.worktree?.path).at(-1)?.files;
+      }
+      const scope = changed ? changedScope({ baseline, current, fallback, owned: block.owned_files, kinds: block.owned_kinds, ...(threshold === undefined ? {} : { threshold }) }) : fallback;
+      const ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}), scope });
+      // A command that changed an input did not measure the resulting bytes. Do not baseline it.
+      const after = ran.allOk && current ? await fileBaseline(cwd, block.owned_files, block.owned_kinds) : null;
+      const files = after && JSON.stringify(current?.files) === JSON.stringify(after.files) ? after.files : undefined;
+      return { ...ran, ledger_slug: slug ?? record.project, ...(files ? { files } : {}), ...(changed ? { changed_scope: scope } : {}) };
     },
   });
 }

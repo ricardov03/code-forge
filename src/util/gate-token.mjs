@@ -6,3 +6,6 @@
 
 /** A gate argv item that is EXACTLY this string expands to the block's test files. */
 export const TEST_FILES_TOKEN = '{test_files}';
+
+/** A whole argv item for lint/format paths, never a command. */
+export const CHANGED_FILES_TOKEN = '{changed_files}';

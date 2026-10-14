@@ -8,6 +8,7 @@
 
 import { exec } from '../util/exec.mjs';
 import { registerSecret } from '../util/redact.mjs';
+import { CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
 import { NO_BLOCK_SCOPE, envOf, expandArgv, maskableEnvValues, scopeFields } from './expand.mjs';
 
 /** @typedef {import('./detect.mjs').Gate} Gate */
@@ -25,9 +26,9 @@ import { NO_BLOCK_SCOPE, envOf, expandArgv, maskableEnvValues, scopeFields } fro
  * @property {number | null} code
  * @property {string} stdout
  * @property {string} stderr
- * @property {'related'|'full'} [scope] - B60: only on a gate whose argv has the `{test_files}` item.
+ * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'} [reason] - B60: with `scope: full`, why the item was dropped.
+ * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'} [reason] - why narrowing fell back.
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
  *   NAMES, sorted (the values are never in a result).
  */
@@ -53,7 +54,7 @@ function normalizeCommand(command) {
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment; a gate with neither runs exactly as before B60.
  * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate}} gates
- * @param {{cwd: string, timeoutMs?: number, scope?: TestScope}} opts
+ * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
  * @returns {Promise<{results: GateResult[], allOk: boolean}>}
  */
 export async function runGates(gates, opts) {
@@ -77,8 +78,9 @@ export async function runGates(gates, opts) {
     const command = gates[gate] ?? null;
     if (command === null) return { gate, command: null };
     const normalized = normalizeCommand(command);
+    if (normalized.argv[0] === CHANGED_FILES_TOKEN) throw new TypeError(`gates.${gate}: '{changed_files}' cannot be the command (argv[0])`);
     const { argv, scoped } = expandArgv(normalized.argv, scope);
-    if (argv.length === 0 && normalized.argv.length > 0) throw new TypeError(`gates.${gate}: the argv is empty once '{test_files}' is dropped for the full suite — put the test command before it`);
+    if (argv.length === 0 && normalized.argv.length > 0) throw new TypeError(`gates.${gate}: the argv is empty once ${normalized.argv.map((item) => `'${item}'`).join(' and ')} is dropped for the full suite — put the test command before it`);
     return { gate, command: { argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } };
   });
   /** @type {GateResult[]} */

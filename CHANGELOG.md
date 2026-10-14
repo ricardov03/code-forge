@@ -6,6 +6,13 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `gates run --changed` (with `--run` and `--block`) narrows `{test_files}` to changed tests and stem-paired tests of
+  changed sources, and a new `{changed_files}` gate token passes the changed paths; it falls back with `reason`
+  `no_baseline`, `unpaired`, `threshold` or `no_changes`; a green `gate.done` records the owned file hashes as the next
+  baseline (B99, #16)
+
 ## [0.11.0] — 2026-10-13
 
 ### Added

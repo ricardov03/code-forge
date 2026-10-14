@@ -39,7 +39,7 @@ import { writeSafe, redactJSON } from '../util/redact.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { detectGates } from '../gates/detect.mjs';
-import { printableGates, thresholdOf } from '../gates/expand.mjs';
+import { printableGates, scopeFields, thresholdOf } from '../gates/expand.mjs';
 import { runGates } from '../gates/run.mjs';
 import { runGatesGuarded } from '../proof/lock.mjs';
 import { blockTree } from '../proof/worktree.mjs';
@@ -189,6 +189,7 @@ function realOrResolved(p) {
  */
 function scopeOf({ scope, test_count: testCount, reason }) {
   if (scope === undefined) return {};
+  if (scope === 'changed') return { scope, test_count: testCount, ...(reason ? { reason } : {}) };
   return scope === 'related' ? { scope, test_count: testCount } : { scope, reason };
 }
 
@@ -251,6 +252,11 @@ export async function runGatesVerb(args, deps = {}) {
         err('gates run: --run <id> and --block <id> go together, each with a value\n');
         return 2;
       }
+      const changed = args.includes('--changed');
+      if (changed && runFlag.value === undefined) {
+        err('gates run: --changed needs --run <id> and --block <id>\n');
+        return 2;
+      }
 
       // B62b: a block with a worktree runs its gates in that tree, configured by the main workspace
       const placed = runFlag.value !== undefined && blockFlag.value !== undefined ? await blockWorktree(runFlag.value, blockFlag.value) : null;
@@ -273,29 +279,32 @@ export async function runGatesVerb(args, deps = {}) {
       let ran;
       if (runFlag.value !== undefined && blockFlag.value !== undefined) {
         const threshold = thresholdOf(configured?.full_suite_threshold_files);
-        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates, cwd, threshold, ...(timeoutMs ? { timeoutMs } : {}) });
+        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates, cwd, threshold, changed, slug, ...(timeoutMs ? { timeoutMs } : {}) });
         if (guarded.result === 'proof.busy') {
           out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
           return 1;
         }
-        ran = /** @type {{value: {results: any[], allOk: boolean}}} */ (guarded).value;
+        ran = /** @type {{value: {results: any[], allOk: boolean, ledger_slug?: string, files?: Record<string, string>, changed_scope?: import('../gates/expand.mjs').ChangedScope}}} */ (guarded).value;
       } else {
         ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
       }
       const { results, allOk } = ran;
 
-      if (slug) {
+      const ledgerSlug = slug ?? ran.ledger_slug;
+      if (ledgerSlug) {
         // B60: with --run/--block the rows name the run and the block, so the run's binnacle reads them
         const owner = runFlag.value !== undefined ? { run: runFlag.value, block: blockFlag.value, ...inTree } : {};
         for (const result of results) {
           if (!result.skipped && !result.ok) {
-            await appendRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result) }, { slug });
+            await appendRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result) }, { slug: ledgerSlug });
           }
         }
         // B60: one scope per run (every `{test_files}` gate shares it), named on gate.done too;
         // without --run/--block that is `scope: full, reason: no_tests`
         const scoped = results.find((r) => r.scope !== undefined);
-        await appendRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk, ...(scoped ? scopeOf(scoped) : {}) }, { slug });
+        await appendRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk,
+          ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
+          ...(ran.files ? { files: ran.files } : {}) }, { slug: ledgerSlug });
       }
       out({ stack: gates.stack, ...inTree, results, allOk });
       return allOk ? 0 : 1;

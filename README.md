@@ -12,6 +12,8 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 In the next release:
 
+- **Faster fix rounds (B99).** `code-forge gates run --run <r> --block <id> --changed` runs only the tests of files changed since the last green gate run, and `{changed_files}` passes only the changed files to lint or format gates. It falls back to the normal scope when it cannot be sure.
+
 In 0.11.0:
 
 - **The release moves the README What's new list (B108).** `npm run release` now moves the "In the next release:" bullets under "In X.Y.Z:". A minor or major release starts a new "What's new in X.Y" heading. The empty anchor stays for the next block. The release refuses an empty CHANGELOG [Unreleased] or a missing anchor before it changes anything, and a failed check puts the README back with the other files. The checks now include `gen-config-doc --check`. `docs/releasing.md` has a releasing checklist.

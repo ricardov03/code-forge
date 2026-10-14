@@ -1,5 +1,6 @@
 import { commitAll, freshDir, makeRepo, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
+import { createHash } from 'node:crypto';
 import { copyFileSync, readFileSync, rmSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -276,7 +277,8 @@ test('B60 (1)(2): block open --tests records test_files on the block and the dis
   assert.equal(ran.code, 0, ran.err);
   assert.deepEqual(p.seen().args, ['--run', 'test/a.test.mjs', 'test/b.test.mjs']);
   assert.deepEqual([ran.json.results[0].scope, ran.json.results[0].test_count], ['related', 2]);
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'related', test_count: 2, ...SRC }]);
+  const hash = createHash('sha256').update(readFileSync(path.join(fx.repo, 'src/a.mjs'))).digest('hex');
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'related', test_count: 2, files: { 'src/a.mjs': hash }, ...SRC }]);
 });
 
 test('B60 (1): with no --tests the gate takes the owned files that look like tests; one file prints "1 test file" only when --tests was given', async () => {
@@ -352,7 +354,8 @@ test('B60 (2): over gates.full_suite_threshold_files owned files the item is dro
   const ran = await fx.gate('B1');
   assert.deepEqual(p.seen().args, ['--run']);
   assert.equal(ran.code, 0, ran.err);
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'threshold', ...SRC }]);
+  const hash = createHash('sha256').update(readFileSync(path.join(fx.repo, 'src/a.mjs'))).digest('hex');
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'threshold', files: { 'src/a.mjs': hash }, ...SRC }]);
 
   // at the threshold (1 owned entry) the related red test runs: gate.red carries the scope too
   assert.equal((await fx.open('B2', ['--owned', 'lib/**', '--tests', 'test/red.test.mjs']))[0], 0);
@@ -373,7 +376,8 @@ test('B60 (2): no test file known (no --tests, no test-looking owned entry) ⇒ 
   assert.equal(ran.code, 0, ran.err);
   assert.deepEqual(p.seen().args, ['--run']);
   assert.deepEqual([ran.json.results[0].scope, ran.json.results[0].reason], ['full', 'no_tests']);
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'no_tests', ...SRC }]);
+  const hash = createHash('sha256').update(readFileSync(path.join(fx.repo, 'src/a.mjs'))).digest('hex');
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'no_tests', files: { 'src/a.mjs': hash }, ...SRC }]);
 });
 
 test('B60 (2): gates run without --run/--block has no block to scope to — the full suite, gate.done says full / no_tests and names no run or block', async () => {
