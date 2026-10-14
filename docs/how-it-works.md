@@ -436,6 +436,11 @@ changed since the merge base with the default branch (or `--files`). See
 When a coder finishes a file it runs `review-file`. The **worker** (started by `run start`, never
 by a coder) serves the ticket:
 
+Each worker writes one registry entry in `queue/workers/<pid>-<start_time>.json`.
+The first worker also writes `queue/worker.json` for older readers. Its timer beats both files,
+and a clean stop removes its announcements. `worker_down` means no registered worker is live.
+An unreadable or malformed registry entry blocks a new worker. Doctor names its path.
+
 1. **Tools first.** The project's gates on that file. Red ⇒ `tools_red` back to the coder, no model review.
 2. **S1 scores risk** 0–3 (path rules first). Low confidence ⇒ S2 picks the depth.
 3. **Depth by risk** (multimodel off, the default; at or below `review.single_reviewer_max_risk`,

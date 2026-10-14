@@ -48,7 +48,7 @@ import { semaphore } from '../util/locks.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { isAlive, listEntries, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
 import { pidsDir, runRoot, setRunRoot, tmpBase } from '../util/tmp.mjs';
-import { readWorker } from '../worker/queue.mjs';
+import { liveWorker } from '../worker/queue.mjs';
 import { gitChildEnv, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 
 const BIN = fileURLToPath(new URL('../../bin/code-forge.mjs', import.meta.url));
@@ -288,7 +288,7 @@ async function runWorkers(repoRoot, runId) {
   } catch {
     // no record: nothing pinned
   }
-  const w = readWorker(repoRoot);
+  const w = liveWorker(repoRoot);
   if (w?.run === runId && !found.some((f) => f.pid === w.pid)) {
     found.push({ pid: w.pid, same: async () => w.start_time === UNKNOWN_START_TIME || readStartTime(w.pid) === w.start_time });
   }

@@ -44,6 +44,10 @@ export const HEARTBEAT_STALE_MS = 60_000;
 
 /** @param {string} repoRoot */
 export const queueDir = (repoRoot) => path.join(repoRoot, '.code-forge', 'queue');
+/** @param {string} repoRoot */
+const workersDir = (repoRoot) => path.join(queueDir(repoRoot), 'workers');
+/** @param {string} repoRoot @param {{pid: number, start_time: string}} self */
+const workerPath = (repoRoot, self) => path.join(workersDir(repoRoot), `${self.pid}-${self.start_time}.json`);
 /** @param {string} repoRoot @param {string} runId */
 export const reviewsDir = (repoRoot, runId) => path.join(repoRoot, '.code-forge', 'reviews', runId);
 
@@ -503,7 +507,10 @@ export async function verifyResult(repoRoot, runId, ticket) {
 export function announceWorker(repoRoot, { pid, run }) {
   const now = new Date().toISOString();
   const body = { pid, start_time: readStartTime(pid) ?? UNKNOWN_START_TIME, run, started_at: now, heartbeat_at: now };
-  writeAtomic(path.join(queueDir(repoRoot), WORKER_FILE), `${JSON.stringify(body)}\n`);
+  mkdirSync(workersDir(repoRoot), { recursive: true, mode: 0o700 });
+  writeAtomic(workerPath(repoRoot, body), `${JSON.stringify(body)}\n`);
+  const legacy = readWorker(repoRoot);
+  if (!legacy || !workerLive(legacy)) writeAtomic(path.join(queueDir(repoRoot), WORKER_FILE), `${JSON.stringify(body)}\n`);
   return body;
 }
 
@@ -520,23 +527,22 @@ export function announceWorker(repoRoot, { pid, run }) {
  */
 export function beatWorker(repoRoot, self, now = new Date()) {
   const mine = (/** @type {Record<string, any> | null} */ w) => w?.pid === self.pid && w.start_time === self.start_time;
-  const w = readWorker(repoRoot);
-  if (!mine(w)) return false;
-  const file = path.join(queueDir(repoRoot), WORKER_FILE);
-  const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-  try {
-    writeFileSync(tmp, `${JSON.stringify({ ...w, heartbeat_at: now.toISOString() })}\n`, { mode: 0o644 });
-    // re-read right before the rename: an announcement that changed meanwhile is never replaced
-    if (!mine(readWorker(repoRoot))) {
+  let written = false;
+  for (const file of [workerPath(repoRoot, self), path.join(queueDir(repoRoot), WORKER_FILE)]) {
+    const w = readJSON(file);
+    if (!mine(w)) continue;
+    const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    try {
+      writeFileSync(tmp, `${JSON.stringify({ ...w, heartbeat_at: now.toISOString() })}\n`, { mode: 0o644 });
+      // Re-read before rename; another owner's announcement is never replaced.
+      if (!mine(readJSON(file))) continue;
+      renameSync(tmp, file);
+      written = true;
+    } finally {
       rmSync(tmp, { force: true });
-      return false;
     }
-    renameSync(tmp, file);
-    return true;
-  } catch (err) {
-    rmSync(tmp, { force: true });
-    throw err;
   }
+  return written;
 }
 
 /** A heartbeat further than this in the future is not fresh (clock skew tolerance). */
@@ -560,9 +566,50 @@ export function readWorker(repoRoot) {
   return w && Number.isInteger(w.pid) && w.pid > 1 && typeof w.run === 'string' ? w : null;
 }
 
-/** Remove the announcement if it is still `pid`'s. @param {string} repoRoot @param {number} pid */
-export function retractWorker(repoRoot, pid) {
-  if (readWorker(repoRoot)?.pid === pid) rmSync(path.join(queueDir(repoRoot), WORKER_FILE), { force: true });
+/** Remove only this owner's announcements. @param {string} repoRoot @param {number} pid @param {string} [startTime] */
+export function retractWorker(repoRoot, pid, startTime) {
+  const mine = (w) => w?.pid === pid && (startTime === undefined || w.start_time === startTime);
+  for (const entry of workerRegistry(repoRoot)) {
+    if (mine(entry.worker)) rmSync(entry.file, { force: true });
+  }
+  if (mine(readWorker(repoRoot))) rmSync(path.join(queueDir(repoRoot), WORKER_FILE), { force: true });
+}
+
+/** @typedef {{pid: number, start_time: string, run: string, started_at: string, heartbeat_at: string}} WorkerAnnouncement */
+
+/** Bad entries remain occupied until a human fixes them. @param {any} w @returns {w is WorkerAnnouncement} */
+function workerShape(w) {
+  return w && Number.isInteger(w.pid) && w.pid > 1 && typeof w.start_time === 'string' && w.start_time.length > 0
+    && !/[\\/]/.test(w.start_time) && typeof w.run === 'string' && w.run.length > 0
+    && typeof w.started_at === 'string' && Number.isFinite(Date.parse(w.started_at))
+    && typeof w.heartbeat_at === 'string' && Number.isFinite(Date.parse(w.heartbeat_at));
+}
+
+/** @param {{pid: number, start_time: string, heartbeat_at?: string}} w @param {number} [nowMs] */
+function workerLive(w, nowMs) {
+  if (!isAlive(w.pid)) return false;
+  if (heartbeatFresh(w, nowMs)) return true;
+  return w.start_time === UNKNOWN_START_TIME || readStartTime(w.pid) === w.start_time;
+}
+
+/** Read all entries, keeping unreadable/bad entries occupied. Only proven stale owners may be pruned.
+ * @param {string} repoRoot @param {{prune?: boolean, nowMs?: number}} [opts]
+ * @returns {Array<{file: string, worker: WorkerAnnouncement | null, live: boolean}>}
+ */
+export function workerRegistry(repoRoot, opts = {}) {
+  let names;
+  try { names = readdirSync(workersDir(repoRoot)); }
+  catch (err) { if (err.code === 'ENOENT') return []; throw err; }
+  const entries = [];
+  for (const name of names.sort().filter((n) => n.endsWith('.json'))) {
+    const file = path.join(workersDir(repoRoot), name);
+    const w = readJSON(file);
+    const worker = workerShape(w) && name === `${w.pid}-${w.start_time}.json` ? w : null;
+    const live = worker === null || workerLive(worker, opts.nowMs);
+    if (!live && opts.prune) rmSync(file, { force: true });
+    else entries.push({ file, worker, live });
+  }
+  return entries;
 }
 
 /**
@@ -574,13 +621,14 @@ export function retractWorker(repoRoot, pid) {
  * Accepted trade-off: a worker that is SIGKILLed (no retraction) leaves a heartbeat that stays
  * fresh for up to `HEARTBEAT_STALE_MS` (60 s); if the OS reuses its pid inside that window, the
  * queue reads as served until the heartbeat goes stale. A clean stop retracts the file at once.
- * @param {string} repoRoot @param {{nowMs?: number}} [opts]
+ * Registry entries take precedence; worker.json supports workers from older versions.
+ * @param {string} repoRoot @param {{nowMs?: number, pid?: number, registeredOnly?: boolean}} [opts]
  */
 export function liveWorker(repoRoot, opts = {}) {
+  const entry = workerRegistry(repoRoot, opts).find((e) => e.live && e.worker && (opts.pid === undefined || e.worker.pid === opts.pid));
+  if (entry) return entry.worker;
+  if (opts.registeredOnly) return null;
   const w = readWorker(repoRoot);
-  if (!w || !isAlive(w.pid)) return null;
-  if (heartbeatFresh(w, opts.nowMs)) return w;
-  if (w.start_time !== UNKNOWN_START_TIME && readStartTime(w.pid) !== w.start_time) return null;
-  return w;
+  return w && (opts.pid === undefined || w.pid === opts.pid) && workerLive(w, opts.nowMs) ? w : null;
 }
 

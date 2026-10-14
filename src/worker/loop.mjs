@@ -56,7 +56,7 @@ import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
 import { countLines, RouteError, routeTicket } from '../review/route.mjs';
 import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
-import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
+import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, readTicket, retractWorker, workerRegistry, writeResult } from './queue.mjs';
 import { DELETED_HASH, hashBytes, readRegularFileNoFollow, repoRootOf, WorkerError } from './ticket.mjs';
 import { watchTick } from './watch.mjs';
 
@@ -235,6 +235,7 @@ export function recordedVerdict(result) {
  * @property {typeof reviewTicket} [review] - the engine hook (default `./engine.mjs`).
  * @property {typeof spawnSession} [spawn]
  * @property {typeof readRun} [readRun] - the run-record read behind the per-ticket config (a test seam).
+ * @property {{beforeLock?: () => void, afterCount?: (count: number) => Promise<unknown>}} [hooks] - deterministic boot races.
  * @property {typeof readTicket} [readTicket] - the ticket read (a test seam).
  * @property {typeof import('../util/exec.mjs').exec} [watchExec] - watch git exec seam.
  * @property {Parameters<typeof watchTick>[0]['hooks']} [watchHooks] - deterministic watch races.
@@ -278,6 +279,8 @@ export async function createWorker(opts, deps = {}) {
   let stopping = false;
   /** @type {ReturnType<typeof setInterval> | null} */
   let heartbeat = null;
+  /** @type {ReturnType<typeof announceWorker> | null} */
+  let self = null;
   /** @type {(() => void) | null} */
   let wake = null;
   /** @type {(() => void) | null} wakes the pool's wait in `drain` (stop) */
@@ -717,7 +720,8 @@ export async function createWorker(opts, deps = {}) {
    * must still see the worker as live the whole time.
    */
   function announce() {
-    const self = announceWorker(repoRoot, { pid: process.pid, run: runId });
+    if (self !== null) return; // boot already announced under the lock
+    self = announceWorker(repoRoot, { pid: process.pid, run: runId });
     stopBeating();
     const timer = setInterval(() => {
       try {
@@ -782,11 +786,15 @@ export async function createWorker(opts, deps = {}) {
   /** Withdraw this process's announcement (`worker.json`) if it is still ours. */
   function release() {
     stopBeating();
-    retractWorker(repoRoot, process.pid);
+    if (self !== null) retractWorker(repoRoot, self.pid, self.start_time);
+    self = null;
   }
 
-  return { processTicket, drain, run, once, stop, release, watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
+  return { processTicket, drain, run, once, stop, release, announce, watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
 }
+
+/** This block permits one registered worker per queue. */
+const WORKER_LIMIT = 1;
 
 /**
  * Start-up for the `worker` verb: run record, repo root, config, run temp root (owned by this
@@ -810,13 +818,22 @@ export async function bootWorker(opts, deps = {}) {
     if (!loaded.ok) throw new WorkerError('config', loaded.message ?? 'the project config cannot be loaded');
     cfg = loaded.config;
   }
-  const other = liveWorker(repoRoot);
-  if (other && other.pid !== process.pid) throw new WorkerError('worker-running', `worker pid ${other.pid} already serves this queue`);
   const tmpRoot = typeof cfg?.tmp?.root === 'string' ? cfg.tmp.root : undefined;
   const runRootDir = runRoot(opts.runId, { root: tmpRoot });
   setRunRoot(runRootDir);
   const key = await loadKey(opts.runId);
   const worker = await createWorker({ runId: opts.runId, repoRoot, cfg, runRootDir, slug: record.project, key, pollMs: opts.pollMs, guardRunRecordPath: runRecordPath(opts.runId) }, deps);
+  deps.hooks?.beforeLock?.();
+  await withLock(`worker-boot:${repoRoot}`, async () => {
+    const entries = workerRegistry(repoRoot, { prune: true });
+    let count = entries.filter((entry) => entry.live).length;
+    // Older workers have only worker.json; do not boot over a live legacy owner.
+    const legacy = liveWorker(repoRoot);
+    if (legacy && !entries.some((entry) => entry.worker?.pid === legacy.pid && entry.worker.start_time === legacy.start_time)) count++;
+    await deps.hooks?.afterCount?.(count);
+    if (count >= WORKER_LIMIT) throw new WorkerError('worker-running', 'a live or unreadable worker entry already serves this queue');
+    worker.announce();
+  });
   return { ...worker, repoRoot, runRootDir };
 }
 
@@ -859,7 +876,7 @@ export async function launchWorker({ runId, workspace, env = process.env, timeou
   child.unref();
   const deadline = Date.now() + timeoutMs;
   while (Date.now() < deadline) {
-    if (typeof pid === 'number' && liveWorker(repoRoot)?.pid === pid) return { pid, repoRoot };
+    if (typeof pid === 'number' && liveWorker(repoRoot, { pid, registeredOnly: true })) return { pid, repoRoot };
     if (child.exitCode !== null || child.signalCode !== null) break;
     await new Promise((resolve) => setTimeout(resolve, 50));
   }

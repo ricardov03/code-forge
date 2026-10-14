@@ -28,18 +28,24 @@ import { listEntries } from '../util/reaper.mjs';
 import { listBadLocks } from '../util/file-locks.mjs';
 import { ownerState, runRootPath, tmpBase } from '../util/tmp.mjs';
 import { parallelTickets } from '../worker/loop.mjs';
+import { workerRegistry } from '../worker/queue.mjs';
+import { mainRootOf } from '../worker/ticket.mjs';
 import { missingStateFiles } from '../worker/review-state.mjs';
 import { row } from './rows.mjs';
 
 /** @typedef {import('./rows.mjs').Row} Row */
 
-/** @returns {Promise<Row[]>} */
-export async function checkLocks() {
+/** @param {string} [cwd] @returns {Promise<Row[]>} */
+export async function checkLocks(cwd = process.cwd()) {
   try {
     const paths = listBadLocks();
-    return paths.length === 0
+    const rows = paths.length === 0
       ? [row('locks', 'OK', 'locks', 'no unreadable or malformed locks')]
       : paths.map((file) => row('locks', 'WARN', 'locks', file));
+    let repoRoot = cwd;
+    try { repoRoot = await mainRootOf(cwd); } catch { /* non-repository doctor */ }
+    rows.push(...workerRegistry(repoRoot).filter((entry) => entry.worker === null).map((entry) => row('worker-registry', 'WARN', 'worker registry', entry.file)));
+    return rows;
   } catch (err) {
     return [row('locks', 'WARN', 'locks', `could not list locks (${err?.code ?? 'error'})`)];
   }
