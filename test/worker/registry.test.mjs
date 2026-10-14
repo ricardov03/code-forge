@@ -12,7 +12,7 @@ const { createKeyStore } = await import('../../src/keys/store.mjs');
 const { checkLocks } = await import('../../src/doctor/local.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 
-const dir = (repo) => path.join(queueDir(repo), 'workers');
+const dir = (repo) => path.join(repo, '.code-forge', 'workers');
 const entries = (repo) => existsSync(dir(repo)) ? readdirSync(dir(repo)).sort() : [];
 const fileOf = (repo, w) => path.join(dir(repo), `${w.pid}-${w.start_time}.json`);
 const body = (run, extra = {}) => ({ pid: process.pid, start_time: 'old start', run, started_at: new Date().toISOString(), heartbeat_at: new Date().toISOString(), ...extra });
@@ -43,11 +43,14 @@ test('clause 1: boot announces one registry entry and legacy file, beats both on
     assert.equal(self?.pid, process.pid, 'boot publishes its pid before run/once');
     assert.deepEqual(entries(repo), [`${self.pid}-${self.start_time}.json`], 'boot writes exactly one identity entry');
     assert.equal(statSync(dir(repo)).mode & 0o777, 0o700, 'registry directory is private');
+    assert.equal(statSync(fileOf(repo, self)).mode & 0o777, 0o600, 'registry entry is private');
+    assert.deepEqual(readdirSync(queueDir(repo)), ['worker.json'], 'registry lives outside the queue');
     assert.deepEqual(JSON.parse(readFileSync(fileOf(repo, self), 'utf8')), self, 'registry and legacy bodies agree');
     mock.timers.tick(5000);
     const beaten = readWorker(repo);
     assert.equal(Date.parse(beaten.heartbeat_at) - Date.parse(self.heartbeat_at), 5000, 'timer advances legacy heartbeat');
     assert.deepEqual(JSON.parse(readFileSync(fileOf(repo, self), 'utf8')), beaten, 'same timer beats registry');
+    assert.equal(statSync(fileOf(repo, self)).mode & 0o777, 0o600, 'heartbeat keeps the registry entry private');
     assert.equal(await worker.once(), 0, 'own re-announcement drains without refusing itself');
     assert.deepEqual(entries(repo), [], 'clean stop removes its one registry entry');
     assert.equal(readWorker(repo), null, 'clean stop removes its legacy file');
@@ -154,6 +157,7 @@ test('boundary: boot prunes a fresh recycled pid while liveWorker still reports 
   const { repo, runId } = await makeRepo();
   const registered = body(runId);
   const file = put(repo, `${registered.pid}-${registered.start_time}.json`, registered);
+  // liveWorker keeps the B30 fresh-heartbeat rule on purpose (issue #2: a sandboxed ps reads another time zone; pinned by test/worker/heartbeat.test.mjs:81); only the boot prune is strict.
   assert.deepEqual(liveWorker(repo), registered, 'sandbox reader lets a fresh heartbeat win over a start-time mismatch');
   let worker;
   await assert.doesNotReject(async () => { worker = await bootWorker({ runId, cwd: repo }, await deps()); }, 'known start-time mismatch cannot block boot with a fresh heartbeat');

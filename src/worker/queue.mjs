@@ -5,6 +5,7 @@
  *   <repo>/.code-forge/queue/<ticket>.json   the ticket (written by `review-file`, idempotent)
  *   <repo>/.code-forge/queue/<ticket>.done   the worker's done marker `{ticket, status, result}`
  *   <repo>/.code-forge/queue/worker.json     the worker's announcement `{pid, start_time, run, started_at, heartbeat_at}`
+ *   <repo>/.code-forge/workers/<pid>-<start_time>.json   each worker's private registry entry
  *   <repo>/.code-forge/reviews/<run>/<ticket>.json   the SIGNED result (run key HMAC, §8.6)
  *
  * The forbidden list (§8.4 ★) denies a coder any write under `reviews/` and to `queue/*.done`;
@@ -45,18 +46,18 @@ export const HEARTBEAT_STALE_MS = 60_000;
 /** @param {string} repoRoot */
 export const queueDir = (repoRoot) => path.join(repoRoot, '.code-forge', 'queue');
 /** @param {string} repoRoot */
-const workersDir = (repoRoot) => path.join(queueDir(repoRoot), 'workers');
+const workersDir = (repoRoot) => path.join(repoRoot, '.code-forge', 'workers');
 /** @param {string} repoRoot @param {{pid: number, start_time: string}} self */
 const workerPath = (repoRoot, self) => path.join(workersDir(repoRoot), `${self.pid}-${self.start_time}.json`);
 /** @param {string} repoRoot @param {string} runId */
 export const reviewsDir = (repoRoot, runId) => path.join(repoRoot, '.code-forge', 'reviews', runId);
 
-/** @param {string} file @param {string} text */
-function writeAtomic(file, text) {
+/** @param {string} file @param {string} text @param {number} [mode] */
+function writeAtomic(file, text, mode = 0o644) {
   mkdirSync(path.dirname(file), { recursive: true });
   const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
   try {
-    writeFileSync(tmp, text, { mode: 0o644 });
+    writeFileSync(tmp, text, { mode });
     renameSync(tmp, file);
   } catch (err) {
     rmSync(tmp, { force: true });
@@ -501,7 +502,7 @@ export async function verifyResult(repoRoot, runId, ticket) {
 }
 
 /**
- * Announce the serving worker in the queue directory (what `review-file` checks for liveness).
+ * Announce the serving worker in the private registry and legacy queue file.
  * @param {string} repoRoot @param {{pid: number, run: string}} who
  */
 export function announceWorker(repoRoot, { pid, run }) {
@@ -509,7 +510,7 @@ export function announceWorker(repoRoot, { pid, run }) {
   const body = { pid, start_time: readStartTime(pid) ?? UNKNOWN_START_TIME, run, started_at: now, heartbeat_at: now };
   mkdirSync(workersDir(repoRoot), { recursive: true, mode: 0o700 });
   chmodSync(workersDir(repoRoot), 0o700);
-  writeAtomic(workerPath(repoRoot, body), `${JSON.stringify(body)}\n`);
+  writeAtomic(workerPath(repoRoot, body), `${JSON.stringify(body)}\n`, 0o600);
   const legacy = readWorker(repoRoot);
   if (!legacy || !workerLive(legacy)) writeAtomic(path.join(queueDir(repoRoot), WORKER_FILE), `${JSON.stringify(body)}\n`);
   return body;
@@ -530,12 +531,13 @@ export function announceWorker(repoRoot, { pid, run }) {
 export function beatWorker(repoRoot, self, now = new Date()) {
   const mine = (/** @type {Record<string, any> | null} */ w) => w?.pid === self.pid && w.start_time === self.start_time;
   let written = false;
-  for (const file of [workerPath(repoRoot, self), path.join(queueDir(repoRoot), WORKER_FILE)]) {
+  const registryFile = workerPath(repoRoot, self);
+  for (const file of [registryFile, path.join(queueDir(repoRoot), WORKER_FILE)]) {
     const w = readJSON(file);
     if (!mine(w)) continue;
     const tmp = `${file}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
     try {
-      writeFileSync(tmp, `${JSON.stringify({ ...w, heartbeat_at: now.toISOString() })}\n`, { mode: 0o644 });
+      writeFileSync(tmp, `${JSON.stringify({ ...w, heartbeat_at: now.toISOString() })}\n`, { mode: file === registryFile ? 0o600 : 0o644 });
       // Re-read before rename; another owner's announcement is never replaced.
       if (!mine(readJSON(file))) continue;
       renameSync(tmp, file);

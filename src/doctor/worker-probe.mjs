@@ -11,8 +11,9 @@
  * MAC is tamper evidence within ordinary tool use, never a boundary against a same-user process.
  */
 
-import { copyFileSync, mkdirSync, readdirSync, rmSync } from 'node:fs';
+import { copyFileSync, mkdirSync, readdirSync, rmSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
+import { commandOnPath } from '../install/detect.mjs';
 import { runsDir } from '../state/paths.mjs';
 import { startRun } from '../state/run.mjs';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
@@ -94,7 +95,19 @@ export async function probeWorkerAndSigner(ctx) {
     const signerOk = verifyRow(signed, key).ok && verifyRow(flipped, key).reason === 'mismatch';
     rows.push(row('signer-key', signerOk ? 'OK' : 'FAIL', 'signer key', signerOk ? 'generated; a signed row verifies, a changed one is refused' : 'sign/verify round trip failed'));
 
-    const started = await launchWorker({ runId, workspace: repo, env });
+    // The boot lock needs ps even with a restricted provider PATH. Expose just that utility.
+    let workerEnv = env;
+    if (!await commandOnPath('ps', { pathEnv: env.PATH ?? '' })) {
+      const tools = path.join(repo, 'worker-tools');
+      for (const systemDir of ['/bin', '/usr/bin']) {
+        if (!await commandOnPath('ps', { pathEnv: systemDir })) continue;
+        mkdirSync(tools, { mode: 0o700 });
+        symlinkSync(path.join(systemDir, 'ps'), path.join(tools, 'ps'));
+        workerEnv = { ...env, PATH: [env.PATH, tools].filter(Boolean).join(path.delimiter) };
+        break;
+      }
+    }
+    const started = await launchWorker({ runId, workspace: repo, env: workerEnv });
     pid = started.pid;
     registerPid(pidsDir(ctx.runRootDir), pid, 'code-forge worker'); // a killed doctor's worker is reaped by the next sweep
     const announced = liveWorker(started.repoRoot)?.pid === pid;

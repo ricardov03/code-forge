@@ -436,7 +436,8 @@ changed since the merge base with the default branch (or `--files`). See
 When a coder finishes a file it runs `review-file`. The **worker** (started by `run start`, never
 by a coder) serves the ticket:
 
-Each worker writes one registry entry in `queue/workers/<pid>-<start_time>.json`.
+Each worker writes one registry entry in `<repo>/.code-forge/workers/<pid>-<start_time>.json`
+(0700 directory, 0600 files), outside the ticket queue.
 The first worker also writes `queue/worker.json` for older readers. Its timer beats both files,
 and a clean stop removes its announcements. `worker_down` means no registered worker is live.
 An unreadable or malformed registry entry blocks a new worker. Doctor names its path.
