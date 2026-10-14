@@ -433,6 +433,36 @@ export function blockTickets({ repoRoot, run, block, tree = null }) {
 }
 
 /**
+ * Atomically record the join's findings handoff once. Read only this marker, never a result.
+ * @param {{repoRoot: string, block: string, file: string, ticket: string}} opts
+ * @returns {boolean} true only for the join that first delivered the findings.
+ */
+export function deliverBlockFindings({ repoRoot, block, file, ticket }) {
+  const marker = path.join(queueDir(repoRoot), `${assertTicketId(ticket)}.delivered`);
+  const expected = { block, file, ticket };
+  const delivered = () => {
+    try {
+      const seen = JSON.parse(readFileSync(marker, 'utf8'));
+      if (seen?.block === block && seen.file === file && seen.ticket === ticket) return true;
+    } catch (err) {
+      if (err.code === 'ENOENT') return false;
+    }
+    throw new WorkerError('result-unreadable', 'a findings delivery marker cannot be read');
+  };
+  if (delivered()) return false;
+  const tmp = `${marker}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    writeFileSync(tmp, `${JSON.stringify(expected)}\n`, { flag: 'wx' });
+    try { linkSync(tmp, marker); } catch (err) {
+      if (err.code !== 'EEXIST') throw err;
+      if (delivered()) return false;
+      throw new WorkerError('result-unreadable', 'a findings delivery marker disappeared');
+    }
+    return true;
+  } finally { rmSync(tmp, { force: true }); }
+}
+
+/**
  * Read and re-validate a ticket (coder-writable): its id must match its content.
  * @param {string} repoRoot @param {string} id
  * @returns {Ticket}
@@ -473,7 +503,8 @@ export function writeResult({ repoRoot, runId, ticket, result, key }) {
   const signed = signRow({ ...result, run: runId, ticket: assertTicketId(ticket) }, key);
   const file = path.join(reviewsDir(repoRoot, runId), `${ticket}.json`);
   writeAtomic(file, `${JSON.stringify(signed)}\n`);
-  writeAtomic(path.join(queueDir(repoRoot), `${ticket}.done`), `${JSON.stringify({ ticket, status: signed.status, result: path.relative(repoRoot, file) })}\n`);
+  const openFindings = signed.status === 'reviewed' && signed.approved !== true && Array.isArray(signed.findings) && signed.findings.length > 0;
+  writeAtomic(path.join(queueDir(repoRoot), `${ticket}.done`), `${JSON.stringify({ ticket, status: signed.status, ...(openFindings ? { open_findings: true } : {}), result: path.relative(repoRoot, file) })}\n`);
   return signed;
 }
 

@@ -69,7 +69,7 @@
 
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { answersTicketId, assertAnswers, blockTickets, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket } from '../worker/queue.mjs';
+import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 import { blockFileSet, namedOnHash } from '../review/gate-check.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
@@ -391,21 +391,22 @@ async function waitBlockScope(repoRoot, cwd, run, block) {
 }
 
 /** A block wait reads only the marker, never review results or the signing key.
- * @param {string} repoRoot @param {string} ticket @returns {boolean}
+ * @param {string} repoRoot @param {string} ticket @returns {Record<string, any> | null}
  */
-function blockTicketDone(repoRoot, ticket) {
+function blockTicketMarker(repoRoot, ticket) {
   try {
     const marker = JSON.parse(readFileSync(path.join(queueDir(repoRoot), `${ticket}.done`), 'utf8'));
-    if (marker?.ticket === ticket && typeof marker.status === 'string' && marker.status.length > 0) return true;
+    if (marker?.ticket === ticket && typeof marker.status === 'string' && marker.status.length > 0) return marker;
   } catch (err) {
-    if (err.code === 'ENOENT') return false;
+    if (err.code === 'ENOENT') return null;
   }
   throw new WorkerError('result-unreadable', 'a ticket completion marker cannot be read');
 }
 
 /**
- * Join current-content tickets only. Re-scan on every poll, including before returning done,
- * so a file edited while waiting gets a new ticket. The worker alone finishes old tickets.
+ * A block wait reads only completion/delivery markers, never review results or the signing key.
+ * Re-scan current content on every poll. Deliver unseen findings of the newest earlier ticket
+ * before rechecking a blind edit; the next join queues the fix. Stopped files stay finished.
  * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown}} opts
  */
 async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say }) {
@@ -413,6 +414,7 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say }) {
   const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree: realpathSync(tree) };
   const deadline = Date.now() + maxMs;
   let downPolls = 0;
+  const deliveredHere = new Set();
   for (;;) {
     const worker = liveWorker(repoRoot);
     const live = worker?.run === run;
@@ -424,17 +426,28 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say }) {
       const { ticket } = resolveTicket(opts);
       const previous = tickets.filter((t) => t.file === file);
       let present = previous.find((t) => t.ticket === ticket);
+      if (!present && previous.length > 0) {
+        const newest = previous[previous.length - 1];
+        const marker = blockTicketMarker(repoRoot, newest.ticket);
+        if (marker?.status === 'stopped') return { file, ticket: newest.ticket, status: 'done' };
+        if (marker?.status === 'reviewed' && marker.open_findings === true && live) {
+          if (deliveredHere.has(newest.ticket) || deliverBlockFindings({ repoRoot, block, file, ticket: newest.ticket })) {
+            deliveredHere.add(newest.ticket);
+            return { file, ticket: newest.ticket, status: 'findings' };
+          }
+        }
+      }
       if (!present && previous.length > 0 && live) {
         enqueue(opts);
         present = { ...previous[previous.length - 1], ticket };
       }
-      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : blockTicketDone(repoRoot, ticket) ? 'done' : 'pending' };
+      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : blockTicketMarker(repoRoot, ticket) ? 'done' : 'pending' };
     });
     if (downPolls >= 2) {
       say({ block, files, done: false, status: 'worker_down' });
       return 3;
     }
-    if (live && files.every((f) => f.status === 'done')) {
+    if (live && files.every((f) => f.status === 'done' || f.status === 'findings')) {
       say({ block, files, done: true });
       return 0;
     }

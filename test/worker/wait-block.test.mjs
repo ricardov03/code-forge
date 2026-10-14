@@ -1,15 +1,16 @@
 import { BLOCK, makeRepo, startWorker, stopWorker, cli, queued, VALID_REVIEW, freshDir } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { mkdirSync, readFileSync, writeFileSync, rmSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 
-const { announceWorker, retractWorker, enqueue, queueDir, readResult, writeResult, enqueueAnswers } = await import('../../src/worker/queue.mjs');
+const { announceWorker, retractWorker, enqueue, queueDir, readResult, writeResult, enqueueAnswers, blockTickets, resolveTicket } = await import('../../src/worker/queue.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 const { validateConfig, reviewFileLoop } = await import('../../src/config/validate.mjs');
 const { loadConfigFile } = await import('../../src/config/load.mjs');
 const { loadKey } = await import('../../src/state/signer.mjs');
-const { readRun, saveRun } = await import('../../src/state/run.mjs');
+const { readRun, saveRun, startRun } = await import('../../src/state/run.mjs');
 const { exec } = await import('../../src/util/exec.mjs');
 const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 
@@ -176,4 +177,149 @@ test('worktree scope and ticket IDs use only that tree, sharing the main queue',
     assert.deepEqual(res, { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: normal.json.ticket, status: 'done' }], done: true } });
     assert.deepEqual([queued(repo, 'json').length, queued(repo, 'done').length], [2, 1]);
   } finally { retractWorker(repo, process.pid); }
+});
+
+const FILE = 'src/a.mjs';
+const deliveredPath = (repo, ticket) => path.join(queueDir(repo), `${ticket}.delivered`);
+const findings = ['F1', 'F2', 'F3'].map((id) => ({ id, file: FILE, line_start: 1, line_end: 1, severity: 'warning', category: 'correctness', claim: `claim ${id}`, evidence: 'e', fix: 'f' }));
+
+/** Marker-only join fixture; b and c already finished. */
+async function blindChange(status = 'reviewed', approved = false) {
+  const p = await makeRepo();
+  const key = await loadKey(p.runId);
+  const first = enqueue({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE });
+  writeResult({ repoRoot: p.repo, runId: p.runId, ticket: first.ticket, key, result: { status, approved, findings: approved ? [] : findings } });
+  for (const file of ['src/b.mjs', 'src/c.mjs']) {
+    const t = enqueue({ repoRoot: p.repo, run: p.runId, block: BLOCK, file });
+    writeResult({ repoRoot: p.repo, runId: p.runId, ticket: t.ticket, key, result: { status: 'reviewed', approved: true } });
+  }
+  writeFileSync(path.join(p.repo, FILE), 'export const a = 2;\n');
+  announceWorker(p.repo, { pid: process.pid, run: p.runId });
+  return { ...p, first };
+}
+
+test('B122 clause 1: blind changed content delivers findings once without a new ticket', async () => {
+  const p = await blindChange();
+  try {
+    const older = p.first.ticket;
+    p.first = enqueue({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE });
+    writeResult({ repoRoot: p.repo, runId: p.runId, ticket: p.first.ticket, key: await loadKey(p.runId), result: { status: 'reviewed', approved: false, findings } });
+    writeFileSync(path.join(p.repo, FILE), 'export const a = 3;\n');
+    assert.notEqual(p.first.ticket, older);
+    const res = await waitBlock(p.repo, p.runId, ['--max', '0ms']);
+    assert.deepEqual(res.json.files[0], { file: FILE, ticket: p.first.ticket, status: 'findings' });
+    assert.deepEqual([res.code, res.json.done, queued(p.repo, 'json').length], [0, true, 4]);
+    const names = readdirSync(queueDir(p.repo)).filter((n) => n.endsWith('.delivered'));
+    assert.deepEqual(names, [`${p.first.ticket}.delivered`]);
+    assert.deepEqual(JSON.parse(readFileSync(deliveredPath(p.repo, p.first.ticket), 'utf8')), { block: BLOCK, file: FILE, ticket: p.first.ticket });
+  } finally { retractWorker(p.repo, process.pid); }
+});
+
+test('B122 clause 2: the next join queues one latest-content ticket and runs one recheck', async () => {
+  const p = await blindChange();
+  try {
+    assert.equal((await waitBlock(p.repo, p.runId, ['--max', '0ms'])).json.files[0].status, 'findings');
+    const marker = statSync(deliveredPath(p.repo, p.first.ticket));
+    const latest = resolveTicket({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE }).ticket;
+    const joined = await waitBlock(p.repo, p.runId, ['--max', '0ms']);
+    assert.deepEqual(joined.json.files[0], { file: FILE, ticket: latest, status: 'pending' });
+    assert.deepEqual((await waitBlock(p.repo, p.runId, ['--max', '0ms'])).json, joined.json);
+    assert.equal(queued(p.repo, 'json').length, 4);
+    const sessions = [];
+    const { createWorker } = await import('../../src/worker/loop.mjs');
+    const { createKeyStore } = await import('../../src/keys/store.mjs');
+    const worker = await createWorker({ runId: p.runId, repoRoot: p.repo, cfg: {}, runRootDir: freshDir('delivery-worker'), slug: 'worker-test', key: await loadKey(p.runId) }, {
+      store: await createKeyStore({ backends: [], dir: freshDir('delivery-store') }), env: {}, writeRow: async () => {}, expiryCheck: async () => {},
+      review: async (ticket) => { sessions.push({ file: ticket.file, ticket: ticket.ticket, content_hash: ticket.content_hash }); return { status: 'reviewed', approved: true, engine: 'adaptive', sessions: [] }; },
+    });
+    assert.deepEqual([await worker.drain(), await worker.drain()], [1, 0]);
+    assert.deepEqual(sessions, [{ file: FILE, ticket: latest, content_hash: resolveTicket({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE }).content_hash }]);
+    assert.deepEqual([statSync(deliveredPath(p.repo, p.first.ticket)).ino, statSync(deliveredPath(p.repo, p.first.ticket)).mtimeMs], [marker.ino, marker.mtimeMs]);
+    assert.deepEqual((await waitBlock(p.repo, p.runId)).json.files[0], { file: FILE, ticket: latest, status: 'done' });
+  } finally { retractWorker(p.repo, process.pid); }
+});
+
+test('B122 clause 3: watch, blind commit, findings join, fix and one approved recheck never stall', async () => {
+  const { repo, runId } = await makeRepo({ start: false });
+  rmSync(path.join(repo, 'src/b.mjs')); rmSync(path.join(repo, 'src/c.mjs'));
+  const cfg = (await loadConfigFile(path.join(repo, '.code-forge.yml'))).config;
+  cfg.review.file_loop = 'watch';
+  const rows = [];
+  const writeRow = async (row) => { rows.push(row); };
+  await startRun({ workspace: repo, project: 'worker-test', runId, config: cfg, writeRow });
+  const { openBlock } = await import('../../src/state/block.mjs');
+  await openBlock({ runId, id: BLOCK, level: 'L2', owned: ['src/**'], acceptance: [{ clause: 'blind commit replay', tests: ['wait-block'] }], writeRow });
+  const { watchTick } = await import('../../src/worker/watch.mjs');
+  const { createWorker } = await import('../../src/worker/loop.mjs');
+  const { createKeyStore } = await import('../../src/keys/store.mjs');
+  const { spawnSession } = await import('../../src/session/spawn.mjs');
+  const script = path.join(freshDir('blind-script'), 'script.json');
+  writeFileSync(script, JSON.stringify({ full: { findings }, recheck: { resolve: true } }));
+  const sessions = [];
+  const worker = await createWorker({ runId, repoRoot: repo, cfg, runRootDir: freshDir('blind-worker'), slug: 'worker-test', key: await loadKey(runId), pollMs: 1 }, {
+    store: await createKeyStore({ backends: [], dir: freshDir('blind-store') }),
+    env: { PATH: process.env.PATH, HOME: process.env.HOME, TMPDIR: process.env.TMPDIR, FAKE_SCRIPT: script },
+    bins: { claude: fileURLToPath(new URL('./fake-scripted-reviewer.mjs', import.meta.url)) }, writeRow, readRows: async () => rows, expiryCheck: async () => {},
+    spawn: async (opts, deps) => { sessions.push(resolveTicket({ repoRoot: repo, run: runId, block: BLOCK, file: FILE }).content_hash); return spawnSession(opts, deps); },
+  });
+  const commit = async (text) => {
+    writeFileSync(path.join(repo, FILE), text);
+    for (const args of [['add', '--', FILE], ['-c', 'user.name=Fake', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'content']]) {
+      assert.equal((await exec(['git', ...args], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 })).code, 0);
+    }
+    await watchTick({ repoRoot: repo, runId, cfg, writeRow });
+    return resolveTicket({ repoRoot: repo, run: runId, block: BLOCK, file: FILE });
+  };
+  announceWorker(repo, { pid: process.pid, run: runId });
+  try {
+    const first = await commit('export const a = 1;\n');
+    assert.equal(await worker.drain(), 1);
+    const result = readResult(repo, runId, first.ticket);
+    assert.deepEqual([result.status, result.approved, result.findings.map((f) => f.id)], ['reviewed', false, ['F1', 'F2', 'F3']]);
+    const blind = await commit('export const a = 2;\n');
+    assert.equal(await worker.drain(), 0);
+    const joined = await waitBlock(repo, runId, ['--max', '0ms']);
+    assert.deepEqual(joined, { code: 0, json: { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'findings' }], done: true } });
+    assert.equal(await worker.drain(), 0);
+    const read = await cli(['review-file', '--wait', first.ticket], repo);
+    assert.deepEqual(read.json.fix_list.map((f) => f.id), ['F1', 'F2', 'F3']);
+    const fixed = await commit('export const a = 3;\n');
+    assert.equal(await worker.drain(), 0);
+    assert.deepEqual((await waitBlock(repo, runId, ['--max', '0ms'])).json.files, [{ file: FILE, ticket: fixed.ticket, status: 'pending' }]);
+    assert.deepEqual([await worker.drain(), await worker.drain()], [1, 0]);
+    const approved = readResult(repo, runId, fixed.ticket);
+    assert.deepEqual([approved.status, approved.approved, approved.findings, approved.stopped ?? null, approved.trigger ?? null], ['reviewed', true, [], null, null]);
+    assert.deepEqual(sessions, [first.content_hash, fixed.content_hash], 'exactly one session per initial/fixed content and zero for the blind commit');
+    assert.equal(sessions.filter((hash) => hash === blind.content_hash).length, 0);
+    assert.deepEqual(blockTickets({ repoRoot: repo, run: runId, block: BLOCK }).map((t) => t.ticket).sort(), [first.ticket, fixed.ticket].sort());
+    assert.deepEqual(rows.filter((r) => r.event === 'review.cap' || r.trigger === 'review_stall' || r.reason === 'l3_patch_exhausted'), []);
+    assert.equal((await waitBlock(repo, runId)).json.done, true);
+  } finally { retractWorker(repo, process.pid); }
+});
+
+test('B122 clause 4: newer content after approval queues; stopped content never requeues', async () => {
+  for (const status of ['reviewed', 'stopped']) {
+    const p = await blindChange(status);
+    try {
+      if (status === 'reviewed') {
+        p.first = enqueue({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE });
+        writeResult({ repoRoot: p.repo, runId: p.runId, ticket: p.first.ticket, key: await loadKey(p.runId), result: { status, approved: true, findings: [] } });
+        writeFileSync(path.join(p.repo, FILE), 'export const a = 3;\n');
+      }
+      const res = await waitBlock(p.repo, p.runId, ['--max', '0ms']);
+      const latest = resolveTicket({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE }).ticket;
+      assert.deepEqual(res.json.files[0], { file: FILE, ticket: status === 'stopped' ? p.first.ticket : latest, status: status === 'stopped' ? 'done' : 'pending' });
+      assert.equal(queued(p.repo, 'json').length, status === 'stopped' ? 3 : 5);
+      assert.deepEqual(readdirSync(queueDir(p.repo)).filter((n) => n.endsWith('.delivered')), []);
+    } finally { retractWorker(p.repo, process.pid); }
+  }
+});
+
+test('B122 boundary: an unreadable delivered marker refuses instead of queueing', async () => {
+  const p = await blindChange();
+  try {
+    mkdirSync(deliveredPath(p.repo, p.first.ticket));
+    const res = await waitBlock(p.repo, p.runId, ['--max', '0ms']);
+    assert.deepEqual([res.code, res.json.status, res.json.reason, queued(p.repo, 'json').length], [1, 'refused', 'result-unreadable', 3]);
+  } finally { retractWorker(p.repo, process.pid); }
 });
