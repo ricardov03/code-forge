@@ -107,7 +107,7 @@ import { blockTree, worktreeRecord } from '../proof/worktree.mjs';
 import { ledgerSchemaHistory } from '../review/schema-fallback.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
-import { keyedLock } from '../util/locks.mjs';
+import { withLock } from '../util/file-locks.mjs';
 import { blockAnchors, blockRungUsed, loadState, RESTORED_EVENT, saveState } from './review-state.mjs';
 import { assertAnswers } from './queue.mjs';
 import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } from './ticket.mjs';
@@ -536,7 +536,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
   if (!ctx.readRows || !ctx.writeRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   const readRows = ctx.readRows;
   /** @type {{outcome: ReviewOutcome} | {round: () => Promise<ReviewOutcome>}} */
-  const prepared = await keyedLock(blockLockKey(ctx.runId, ticket.block), async () => {
+  const prepared = await withLock(blockLockKey(ctx.runId, ticket.block), async () => {
     let rows;
     try {
       rows = (await readRows()).filter((r) => r?.run === ctx.runId);

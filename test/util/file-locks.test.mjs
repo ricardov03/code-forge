@@ -136,9 +136,21 @@ test('boundary: unknown start time stays held and withLock retries in FIFO order
   assert.equal(readFileSync(lockPath(key), 'utf8'), bytes, 'unknown live start does not prove death');
   const order = [];
   const expectedStart = await processStartTime(process.pid);
-  const first = withLock(key, () => { assert.equal(JSON.parse(readFileSync(lockPath(key), 'utf8')).start, expectedStart, 'FIFO fn owns its file, replacing the previous owner'); order.push(1); }, { pollMs: 1 });
-  const second = withLock(key, () => { order.push(2); }, { pollMs: 1 });
+  let read;
+  let resume;
+  const readGate = new Promise((resolve) => { read = resolve; });
+  const resumeGate = new Promise((resolve) => { resume = resolve; });
+  const opts = { pollMs: 1, alive: () => true, probe: async () => 's', afterRead: async () => { read(); await resumeGate; } };
+  const first = withLock(key, () => {
+    assert.equal(JSON.parse(readFileSync(lockPath(key), 'utf8')).start, expectedStart, 'FIFO fn owns its file, replacing the previous owner');
+    order.push(1);
+  }, opts);
+  const second = withLock(key, () => { order.push(2); }, opts);
+  // Racing first also makes an assertion failure in a missing-lock stub propagate promptly.
+  await Promise.race([readGate, first]);
+  assert.deepEqual(order, [], 'held key does not enter either fn');
   rmSync(lockPath(key));
+  resume();
   await Promise.all([first, second]);
   assert.deepEqual(order, [1, 2], 'same-process waiters run in call order after held key is freed');
   assert.equal(existsSync(lockPath(key)), false, 'last FIFO holder releases');

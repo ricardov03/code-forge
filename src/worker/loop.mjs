@@ -50,13 +50,13 @@ import { runRecordPath } from '../state/paths.mjs';
 import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { logWarning } from '../util/error-log.mjs';
-import { keyedLock } from '../util/locks.mjs';
+import { withLock, tryLock } from '../util/file-locks.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
 import { countLines, RouteError, routeTicket } from '../review/route.mjs';
 import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
-import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
+import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
 import { DELETED_HASH, hashBytes, readRegularFileNoFollow, repoRootOf, WorkerError } from './ticket.mjs';
 import { watchTick } from './watch.mjs';
 
@@ -417,7 +417,7 @@ export async function createWorker(opts, deps = {}) {
       // read, advanced and saved by one ticket at a time; the later one waits here. The key
       // carries the run so two workers in one process (tests) never share a lock.
       const t = ticket;
-      result = await keyedLock(`${runId}\0${fileLockKey(t.block, t.file)}`, () => reviewOne(id, t));
+      result = await withLock(`${runId}\0${fileLockKey(t.block, t.file)}`, () => reviewOne(id, t));
     }
     // Stopping: a ticket whose session our own stop killed ends `unavailable` — leave it queued
     // (no done marker) for the next worker instead of recording the kill as a failure. A ticket
@@ -656,6 +656,14 @@ export async function createWorker(opts, deps = {}) {
           }
           if (next === -1) break;
           const [id] = pending.splice(next, 1);
+          const claim = await tryLock(`ticket\0${runId}\0${id}`);
+          if (!claim.ok) continue; // another process owns it; no pool slot is taken
+          // Acquisition awaited a process probe: another worker may have completed this ticket
+          // since the pending snapshot, or stop() may have arrived while we waited.
+          if (stopping || isDone(repoRoot, id)) {
+            claim.release();
+            continue;
+          }
           const file = hints.get(id);
           const fileKey = file?.key ?? null;
           started.add(id);
@@ -667,6 +675,7 @@ export async function createWorker(opts, deps = {}) {
               done += n;
             })
             .finally(() => {
+              claim.release(); // the done marker is published before the claim is released
               // the slot is freed on every exit path (`runOne` never rejects)
               running.delete(id);
               activeTickets.delete(id);

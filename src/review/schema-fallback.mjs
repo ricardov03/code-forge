@@ -59,7 +59,7 @@
  * Concurrency: the worker never runs two tickets for one (block, file) at once (its file lock,
  * `worker/loop.mjs`), and round 1, its retry, every recheck and the patch_check of a file are all
  * tickets for that file, so one packet's history is read and written by one ticket at a time. The
- * read-history → write-mark section here also runs under an in-process lock per (packet hash,
+ * read-history → write-mark section here also runs under a cross-process lock per (packet hash,
  * level, role), so even the same file in two blocks cannot take a packet's one try twice.
  *
  * No ledger writer (`writeRow` absent) ⇒ nothing is logged and nothing is tried. The helpers never
@@ -71,7 +71,7 @@ import { createHash } from 'node:crypto';
 import { closedBookRefused, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { logWarning } from '../util/error-log.mjs';
-import { keyedLock } from '../util/locks.mjs';
+import { withLock } from '../util/file-locks.mjs';
 import { schemaErrorsOf } from './validate-review.mjs';
 
 /** Broken results (B91: schema misses and timeouts) of the level's own ladder on one packet before the second level is tried. */
@@ -291,7 +291,7 @@ export async function afterSchemaMiss({ res, session, packetText, cfg, allowed, 
   /** @type {{cfg: Record<string, any>, to: {level: string, provider: string, model: string}} | null} */
   let go = null;
   try {
-    go = await keyedLock(`schema-fallback\0${hash}\0${session.level}\0${session.role}`, async () => {
+    go = await withLock(`schema-fallback\0${hash}\0${session.level}\0${session.role}`, async () => {
       // the history is read BEFORE a schema miss is logged: failures = signed earlier misses + this
       // one. A timeout's note is already in it (B91): it is the miss in hand, never added twice.
       let seen = null;

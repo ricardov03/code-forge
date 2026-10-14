@@ -12,7 +12,7 @@
  */
 
 import { logWarning } from '../util/error-log.mjs';
-import { keyedLock } from '../util/locks.mjs';
+import { withLock } from '../util/file-locks.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { estimateCostUsd } from './prices.mjs';
 
@@ -199,7 +199,7 @@ export const SPEND_UNREADABLE_MESSAGE = "budget.usd is set but the run's spend c
  * Several sessions of one run can start at once (B40 slots, B42 ticket pool). The ledger only
  * learns a session's cost when its row is written, so a plain "spent < budget" check lets every
  * session that starts before the first row lands go through. Instead the check AND a reservation
- * of the session's estimated cost happen under ONE in-process lock per run (`withBudgetLock`):
+ * of the session's estimated cost happen under ONE cross-process lock per run (`withBudgetLock`):
  *
  *   spent ≥ budget, or spent + reserved + estimate > budget ⇒ refused (the B33 message, unchanged)
  *
@@ -275,7 +275,7 @@ export function reserveBudget(run, usd) {
  */
 export function withBudgetLock(run, fn) {
   lockCalls += 1;
-  return keyedLock(`budget:${run}`, fn);
+  return withLock(`budget:${run}`, fn);
 }
 
 /** Test spy: how many times {@link withBudgetLock} was entered since the last reset. */

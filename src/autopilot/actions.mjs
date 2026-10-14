@@ -40,12 +40,11 @@
  * stopped or expired in between (e.g. while gh ran) means no row; a waiver issue already created
  * then gets one best-effort comment "waiver cancelled: autopilot grant ended".
  *
- * The per-finding lock is in-process only (`keyedLock`); two separate processes waiving the same
- * finding at once rely on the marker search alone (accepted, B47 fix round 1).
+ * The per-finding lock holds across processes (`withLock`).
  *
  * Tracked issues: the dedupe searches the exact quoted marker with up to 100 results and confirms
  * it in the bodies; a full page without it is `search-failed` (no new issue). Two waives of one
- * finding in this process run one at a time (`keyedLock`), so they open one issue.
+ * finding run one at a time across processes (`withLock`), so they open one issue.
  */
 
 import { readFile } from 'node:fs/promises';
@@ -58,7 +57,7 @@ import { readRun, withRunLock, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
 import { exec as realExec } from '../util/exec.mjs';
 import { findReported, findSecret, ghRun, ghWithBodyFile, pathLookup } from '../util/gh.mjs';
-import { keyedLock } from '../util/locks.mjs';
+import { withLock } from '../util/file-locks.mjs';
 import { scrub } from './delegate.mjs';
 import { grantFor, grantState } from './grant.mjs';
 import { isFixedDeny } from './scopes.mjs';
@@ -328,7 +327,7 @@ export async function waiveForOwner(req, deps = {}) {
 
   // one finding at a time in this process: the dedupe search, the create and the waiver row of
   // two concurrent waives never interleave, so they open one issue
-  return keyedLock(`autopilot-waive\0${req.runId}\0${req.block}\0${file}\0${req.finding}`, async () => {
+  return withLock(`autopilot-waive\0${req.runId}\0${req.block}\0${file}\0${req.finding}`, async () => {
     const issue = await trackWaiverIssue({ workspace: record.workspace, text }, deps);
     // the gh work may have outlived the grant: re-check grant and decision under the run lock with
     // a fresh clock, and write the waiver there, dated then
