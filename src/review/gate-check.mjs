@@ -16,7 +16,7 @@
  *    session really reviewed these bytes; a repeated stop or an `unavailable` result never counts),
  *    the latest refusal row for the hash is signed, carries `content_hash` (a hash-less one does
  *    not qualify, though it still refuses) and names at least one finding, and every finding it
- *    names and every open id of the file's `review.cap` rows is cleared by a waiver the gate
+ *    names and every open id of the file's unsuperseded `review.cap` rows is cleared by a waiver the gate
  *    accepts (the same rule as below: a critical only by `by: human`). Such a file is never
  *    approved; the close writes one signed `gate.review_waived_all` row for it ({@link reviewGateCheck});
  *  - `unsigned`:   the file's approvals for that hash exist but none carries a valid MAC;
@@ -43,7 +43,8 @@
  *  - `review_cap`: a file stopped at `review_cap` has an open finding with no signed
  *    `review.waived {by: human}` row — unless a signed approval of the file's current hash comes
  *    AFTER the cap row (ledger order) and no later refusal row made it stale (the human fixed it
- *    by hand and it was reviewed); a finding already refused as `not_approved` for that file is
+ *    by hand and it was reviewed), or a verified human reopen after the cap is followed by a
+ *    signed review round of the current bytes; a finding already refused as `not_approved` for that file is
  *    not repeated. B73: this detail, and an `unreviewed` detail for a file with a cap row, ends
  *    with the stop's ways out (`exits: block reopen, block waive, review-file --answers,
  *    re-decompose`, `stop-exits.mjs`);
@@ -137,7 +138,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
   /** @type {Map<string, string>} */
   const current = new Map();
   for (const f of [...proofFiles, ...files]) current.set(f.file, f.content_hash);
-  const { mine, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, recordedRefusalSeverity } = reviewRules({ block, runId, rows, key, resultFiles, current });
+  const { mine, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, recordedRefusalSeverity, supersededCap } = reviewRules({ block, runId, rows, key, resultFiles, current });
   /** @type {Refusal[]} */
   const refusals = [];
   const approvedFor = (/** @type {string} */ file, /** @type {string} */ hash) => mine.filter((r) => r.event === 'review.approved' && r.file === file && r.content_hash === hash);
@@ -216,6 +217,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
   }
 
   for (const cap of mine.filter((r) => r.event === 'review.cap')) {
+    if (supersededCap(cap)) continue;
     const hash = hashOf.get(cap.file);
     // honoured unless a signed approval of the current content comes AFTER the cap and is not stale
     if (hash !== undefined) {
@@ -260,6 +262,16 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
   // namedOnHash}), which has no key and can only refuse; it then reads no autopilot waiver
   const ok = verify ?? ((/** @type {Record<string, any>} */ r) => verified(r, key));
   const mine = rows.filter((r) => r?.block === block && (runId === undefined || r.run === undefined || r.run === runId));
+  /** A human reopen followed by a real review of the current bytes clears older cap ids.
+   * @param {Record<string, any>} cap @returns {boolean}
+   */
+  const supersededCap = (cap) => {
+    const hash = current.get(cap.file);
+    if (hash === undefined) return false;
+    const at = mine.indexOf(cap);
+    return mine.some((r, i) => i > at && r.event === 'review.reopened' && r.run === runId && r.file === cap.file && r.by === 'human' && ok(r)
+      && mine.some((round, j) => j > i && round.event === 'review.round' && round.run === runId && round.file === cap.file && round.content_hash === hash && ok(round)));
+  };
   /**
    * B52: the index of the last signed approval and the latest refusal AFTER it for (file, hash);
    * `denial` is null when that approval stands (or there is none — `unreviewed` / `unsigned` say
@@ -380,7 +392,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
   };
 
   /**
-   * B79: the ids every signed `review.cap` row for (file, hash) names. A cap row records no
+   * B79: the ids every unsuperseded signed `review.cap` row for (file, hash) names. A cap row records no
    * severity, so the rules read each of these ids at {@link recordedRefusalSeverity} — also when
    * that cap row is the latest refusal (its own null never stands for them).
    * @param {string} file @param {string} hash @returns {Set<string>}
@@ -390,6 +402,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     const ids = new Set();
     for (const cap of mine) {
       if (cap.event !== 'review.cap' || cap.file !== file || cap.content_hash !== hash || !Array.isArray(cap.open) || !ok(cap)) continue;
+      if (supersededCap(cap)) continue;
       for (const id of cap.open) if (typeof id === 'string' && id.length > 0) ids.add(id);
     }
     return ids;
@@ -400,7 +413,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
    * or null when no such review qualifies. All of: a signed `review.round` row for (file, hash) — a
    * session reviewed these bytes; the latest refusal row for (file, hash) is signed, carries
    * `content_hash: hash` (a hash-less one never qualifies) and names at least one finding. The ids
-   * are every finding it names and every open id of the file's `review.cap` rows. Severities: an id
+   * are every finding it names and every open id of the file's unsuperseded `review.cap` rows. Severities: an id
    * a signed `review.cap` row at (file, hash) names ({@link capIdsAt}) — also when that cap row is
    * the latest refusal — and any other open cap id use {@link recordedRefusalSeverity}, whose
    * `unknown` (no signed refusal at `hash` records one) is the human's alone and never answered.
@@ -417,6 +430,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     const named = new Map(latest.open.map((f) => [f.id, f.severity]));
     for (const id of capIdsAt(file, hash)) named.set(id, recordedRefusalSeverity(file, hash, id));
     for (const cap of mine.filter((r) => r.event === 'review.cap' && r.file === file)) {
+      if (supersededCap(cap)) continue;
       if (!Array.isArray(cap.open) || !cap.open.every((/** @type {unknown} */ id) => typeof id === 'string' && id.length > 0)) return null;
       for (const id of cap.open) if (!named.has(id)) named.set(id, recordedRefusalSeverity(file, hash, id));
     }
@@ -477,7 +491,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     return new Map([...named].filter(([id, severity]) => id !== PROOF_FINDING && answerableSeverity(severity) && waiverOf(file, id, severity, ticket).by === null));
   };
 
-  return { mine, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, openAt, answerRows, recordedRefusalSeverity };
+  return { mine, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, openAt, answerRows, recordedRefusalSeverity, supersededCap };
 }
 
 /**

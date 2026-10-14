@@ -811,8 +811,10 @@ flowchart TD
   such row per state seq: a retry on the same content finds that row and writes no second one,
   and a reopen on other content at the same seq is refused. The next `review-file` then starts over: round 1, a
   full review, up to `review.max_rounds_per_file` rounds at L2 again. The row works once. The
-  block's L3 rung stays spent if it was used. If the content is changed back to what the stop
-  reviewed before the next `review-file`, the stop repeats. Refusals write no row and exit 1:
+  block's L3 rung stays spent if it was used. After a verified human reopen and a fresh signed
+  review of the current bytes, the old cap ids are cleared. The fresh review’s own findings still
+  count. If the content is changed back to what the stop reviewed before the next `review-file`,
+  the stop repeats. Refusals write no row and exit 1:
   `reopen-same-content` (the content is still what the stop reviewed: change it or waive;
   for unknown stop content with a verified round at the current hash, change the file and reopen,
   or the owner can use `block close --no-require-reviews`), `reopen-tampered` (the state does not verify),
