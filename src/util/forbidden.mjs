@@ -790,6 +790,10 @@ export function renderForCodex(list = FORBIDDEN) {
  * `$ cat ~/.code-forge/runs/r.key`, `Write(.code-forge/reviews/x.json)`, a stream-json
  * `"name":"Write"` followed by the path — is found. It is a grep: a line that merely MENTIONS a
  * forbidden command is a hit too (fail closed; the block gate reports it as `rule_break`, B5).
+ * Codex `exec --json` logs (every non-empty line an object with a string `type`, first event
+ * `thread.started`) scan command_execution commands and file_change paths as writes. Other
+ * items scan whole, except agent_message, reasoning and aggregated_output; non-item events
+ * are skipped. Any other log uses the plain-text grep above, unchanged.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated ONCE per line over its
  * tokens (a `write` path entry hits when a write command starts before a token naming the path);
@@ -801,6 +805,17 @@ export function renderForCodex(list = FORBIDDEN) {
  * @returns {{id: string, line: number}[]}
  */
 export function scanTranscript(text, list = FORBIDDEN) {
+  const lines = String(text).split('\n');
+  /** @type {any[] | null} */
+  let events = null;
+  try {
+    const parsed = lines.map((line) => line.trim() === '' ? undefined : JSON.parse(line));
+    const nonEmpty = parsed.filter((event) => event !== undefined);
+    if (nonEmpty[0]?.type === 'thread.started' && nonEmpty.every((event) =>
+      event !== null && typeof event === 'object' && !Array.isArray(event) && typeof event.type === 'string')) events = parsed;
+  } catch {
+    // One bad JSONL line makes the entire transcript a plain-text, fail-closed grep.
+  }
   const commandEntries = list.filter((e) => e.kind === 'prefix' || e.kind === 'commandFlag' || e.kind === 'anyPrefix');
   const firstWords = new Set(['npx', 'bunx', 'pnpm', 'yarn', 'node']);
   for (const e of commandEntries) {
@@ -811,9 +826,20 @@ export function scanTranscript(text, list = FORBIDDEN) {
   const writeStarts = new Set([...WRITE_VERBS, ...WRAPPERS, 'sed', 'perl', 'git']);
   /** @type {{id: string, line: number}[]} */
   const hits = [];
-  String(text)
-    .split('\n')
+  lines
     .forEach((lineText, index) => {
+      if (events !== null) {
+        const event = events[index];
+        if (!event?.type.startsWith('item.') || !event.item) return;
+        const item = event.item;
+        if (['agent_message', 'reasoning', 'aggregated_output'].includes(item.type)) return;
+        if (item.type === 'command_execution') lineText = typeof item.command === 'string' ? item.command : '';
+        else if (item.type === 'file_change') {
+          lineText = (Array.isArray(item.changes) ? item.changes : [])
+            .filter((change) => typeof change?.path === 'string')
+            .map((change) => `Write(${JSON.stringify(change.path)})`).join(' ');
+        } else lineText = JSON.stringify(item);
+      }
       const tokens = lineText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
       const ids = new Set();
       let firstWrite = -1;

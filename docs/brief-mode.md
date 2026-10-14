@@ -210,6 +210,18 @@ TESTS node --test test/cart.test.mjs exit=0
 Save the report to a file, for example `.code-forge/B1-report.txt`, and the coder's transcript to
 `.code-forge/B1-transcript.log`. Files under the repository's `.code-forge/` never count as changes.
 
+For a Codex coder, run `codex exec --json` in its worktree and save stdout as that transcript:
+
+```sh
+codex exec --json 'Implement B1 using its brief and context pack' > .code-forge/B1-transcript.log
+```
+
+Pass the saved log as `--transcript` at close. A Codex JSON log (every non-empty line is an
+object with a string `type`, first event `thread.started`) is checked by its commands:
+`command_execution` commands, `file_change` paths as writes, and other items whole (fail closed).
+Agent messages, reasoning, aggregated output and non-item events are skipped. Any other log
+is checked line by line; a mention of a forbidden command or path is a hit.
+
 ## Step 6: run the gates
 
 ```text
