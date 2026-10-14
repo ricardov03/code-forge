@@ -28,7 +28,7 @@
  */
 
 import { createHash, randomBytes } from 'node:crypto';
-import { existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
 import { isAlive, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
@@ -508,6 +508,7 @@ export function announceWorker(repoRoot, { pid, run }) {
   const now = new Date().toISOString();
   const body = { pid, start_time: readStartTime(pid) ?? UNKNOWN_START_TIME, run, started_at: now, heartbeat_at: now };
   mkdirSync(workersDir(repoRoot), { recursive: true, mode: 0o700 });
+  chmodSync(workersDir(repoRoot), 0o700);
   writeAtomic(workerPath(repoRoot, body), `${JSON.stringify(body)}\n`);
   const legacy = readWorker(repoRoot);
   if (!legacy || !workerLive(legacy)) writeAtomic(path.join(queueDir(repoRoot), WORKER_FILE), `${JSON.stringify(body)}\n`);
@@ -515,9 +516,10 @@ export function announceWorker(repoRoot, { pid, run }) {
 }
 
 /**
- * Refresh the announcement's `heartbeat_at` (B30) while it is still THIS worker's: the file is
+ * Refresh both announcements' `heartbeat_at` (B30) while each is still THIS worker's: each file is
  * re-read right before the write and must name the same `pid` AND `start_time` the worker
- * announced. Another worker's announcement is never overwritten (the caller stops beating).
+ * announced. Another worker's announcement is never overwritten. A worker keeps beating its
+ * registry entry even when another worker owns worker.json.
  * The beat is written to a temp file, the announcement re-read and compared once more, and only
  * then renamed over it. The worker calls this from a timer of its own, so it keeps beating while
  * a long review session is awaited.

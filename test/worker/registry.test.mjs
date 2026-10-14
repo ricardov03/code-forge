@@ -1,7 +1,7 @@
 import { freshDir, makeRepo } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { mock, test } from 'node:test';
 
@@ -33,6 +33,7 @@ function gate() {
 test('clause 1: boot announces one registry entry and legacy file, beats both on its timer, and clean stop removes both', async () => {
   const { repo, runId } = await makeRepo();
   const injected = await deps();
+  mkdirSync(dir(repo), { recursive: true, mode: 0o755 });
   mock.timers.enable({ apis: ['Date', 'setInterval'], now: Date.now() });
   let worker;
   try {
@@ -79,8 +80,8 @@ test('clause 3: boot removes dead/recycled stale owners; unreadable and bad shap
     assert.equal(existsSync(recycled), false, 'recycled pid with stale heartbeat is removed');
     assert.equal(entries(repo).length, 1, 'only the booted worker remains');
   } finally { worker.release(); }
-  const bad = [null, { pid: 1, start_time: 's', run: runId }, { pid: 2.5, start_time: 's', run: runId }, { pid: process.pid, run: runId }, { pid: process.pid, start_time: 's', run: 1 }];
-  const paths = bad.map((value, i) => put(repo, `bad-${i}.json`, value));
+  const bad = [null, body(runId, { pid: 1 }), body(runId, { pid: 2.5 }), body(runId, { start_time: undefined }), body(runId, { start_time: 'bad-run', run: 1 }), body(runId, { start_time: 'bad-started', started_at: 1 }), body(runId, { start_time: 'bad-beat', heartbeat_at: 'invalid' })];
+  const paths = bad.map((value, i) => put(repo, value ? `${value.pid}-${value.start_time}.json` : `bad-${i}.json`, value));
   const unreadable = path.join(dir(repo), 'unreadable.json');
   mkdirSync(unreadable);
   const malformed = path.join(dir(repo), 'malformed.json');
@@ -89,7 +90,6 @@ test('clause 3: boot removes dead/recycled stale owners; unreadable and bad shap
   for (const file of paths) {
     // Test each bad entry alone, so no other entry can hide an unsafe shape rule.
     const hidden = paths.filter((p) => p !== file);
-    const { renameSync } = await import('node:fs');
     hidden.forEach((p) => renameSync(p, `${p}.held`));
     try {
       const before = statSync(file).isDirectory() ? null : readFileSync(file);
@@ -138,6 +138,10 @@ test('clause 5: forced count/announce race admits exactly one boot and refuses t
     // The contender signals immediately before entering withLock. Its continuation has queued
     // before this observer runs; a missing lock instead enters afterCount with count zero.
     assert.deepEqual(counts, [0], 'lock keeps the second count out while the first announcement is held');
+    resume.open();
+    await Promise.all([first, second]);
+    assert.deepEqual(counts, [0, 1], 'contender counts the first announcement after the lock releases');
+    assert.deepEqual(entries(repo), [`${process.pid}-${readWorker(repo).start_time}.json`], 'exactly the admitted worker owns one entry');
   } finally { resume.open(); await Promise.all([first, second]); results.forEach((r) => r.worker?.release()); }
   assert.equal(results.filter((r) => r.worker).length, 1, 'exactly one boot announces');
   assert.deepEqual(results.filter((r) => r.error).map((r) => r.error.code), ['worker-running'], 'exactly one boot refuses worker-running');
