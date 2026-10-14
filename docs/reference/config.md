@@ -136,6 +136,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.provider_concurrency.openai` | integer |  | `2` | min 1 |
 | `review.provider_concurrency.xai` | integer |  | `2` | min 1 |
 | `review.parallel_tickets` | integer |  | `3` | min 1; max 16; B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap. |
+| `review.fair_share` | boolean |  | `false` | Give each free ticket slot to the block with the fewest running tickets; ties stay oldest first. |
 | `review.file_loop` | enum: `wait`, `overlap`, `watch` |  | `"wait"` | After each green file, enqueue its review. wait (default): wait for its ticket before the next file. overlap: continue coding, then run review-file --wait-block <id> --run <run> before the completion sentinel; inspect findings with --wait <ticket>. watch: commit each green file instead of running review-file; the worker queues committed owned content, supersedes pending older tickets, and --wait-block joins before the sentinel. |
 | `review.external` | object |  | — |  |
 | `review.external.required` | boolean |  | `false` | B58: true ⇒ block close skips the local per-file review checks (and the --report ticket check), with no terminal and under autopilot, and writes a signed gate.reviews_waived {by: config} row. Unowned changes, proof, no_changes and the transcript grep still refuse. No block may own .code-forge.yml. |

@@ -21,8 +21,9 @@
  * snapshots (or none) keeps the config the worker booted with.
  *
  * Ticket pool (B42): the worker runs up to `review.parallel_tickets` (default 3, 1–16) tickets at
- * once, oldest first; when one ends the next pending one starts. Two tickets for the same
- * (block, file) never overlap (a file lock; the later one stays pending without taking a slot),
+ * once, oldest first (or fewest running per block with `review.fair_share`); when one ends the
+ * next pending one starts. Two tickets for the same (block, file) never overlap (a file lock;
+ * the later one stays pending without taking a slot),
  * and the engine takes the block's budget row and L3 rung under a block lock (`engine.mjs`). A
  * throw in one ticket is that ticket's `unavailable` result and never stops the others. `stop()`
  * starts no new ticket and waits for the running ones. With 1 the worker runs exactly as before.
@@ -532,50 +533,50 @@ export async function createWorker(opts, deps = {}) {
   }
 
   /**
-   * B42: how many tickets run at once — `review.parallel_tickets` of the snapshot in force (so a
-   * `run reload` resizes the pool at the next drain), else of the boot config; anything but an
-   * integer 1–16 is the default.
-   * @returns {Promise<number>}
+   * Pool settings from the snapshot in force, else the boot config. A run reload applies at the
+   * next drain; anything but an integer 1–16 uses the default size.
+   * @returns {Promise<{limit: number, fairShare: boolean}>}
    */
-  async function poolSize() {
+  async function poolSettings() {
     let current = cfg;
     try {
       current = await configFor('');
     } catch {
-      // an unreadable record: the boot config's size (each ticket still fails closed on its own)
+      // an unreadable record: the boot settings (each ticket still fails closed on its own)
     }
-    return parallelTickets(current);
+    return { limit: parallelTickets(current), fairShare: current?.review?.fair_share === true };
   }
 
   /**
-   * The (block, file) key of each ticket read so far, by id: a written ticket never changes (its
-   * id is its content's hash), so it is read once for scheduling, however many wake-ups it waits.
+   * The block and (block, file) key of each ticket read so far, by id. A written ticket never
+   * changes (its id is its content's hash), so scheduling reads it once across wake-ups.
    * Dropped once the ticket is done.
-   * @type {Map<string, string>}
+   * @type {Map<string, {key: string, block: string}>}
    */
   const fileKeys = new Map();
 
   /**
-   * The (block, file) a pending ticket names, or null when it cannot be read (it is started
+   * The block and file-lock key a pending ticket names, or null when unreadable (it is started
    * anyway and refused by `processTicket`; a null is not cached). Only a scheduling hint:
    * `processTicket` takes the file lock on the ticket it actually read.
-   * @param {string} id @returns {string | null}
+   * @param {string} id @returns {{key: string, block: string} | null}
    */
   function fileKeyOf(id) {
     const known = fileKeys.get(id);
     if (known !== undefined) return known;
     try {
       const t = loadTicket(repoRoot, id);
-      const key = fileLockKey(t.block, t.file);
-      fileKeys.set(id, key);
-      return key;
+      const file = { key: fileLockKey(t.block, t.file), block: t.block };
+      fileKeys.set(id, file);
+      return file;
     } catch {
       return null;
     }
   }
 
   /**
-   * Serve every pending ticket (B42): up to `review.parallel_tickets` at once, oldest first; when
+   * Serve every pending ticket (B42): up to `review.parallel_tickets` at once, oldest first; with
+   * fair share, each slot goes to the block with fewest running tickets, ties oldest first. When
    * one finishes, the queue is re-read and the next pending ticket starts (no batch barrier; the
    * queue is also re-read every `pollMs` while tickets run, so a new ticket fills a free slot).
    * A ticket whose (block, file) is already running is left pending (it does not take a slot)
@@ -600,11 +601,14 @@ export async function createWorker(opts, deps = {}) {
     }
     /** @type {number | null} */
     let limit = null;
+    let fairShare = false;
     let done = 0;
     /** @type {Map<string, Promise<void>>} */
     const running = new Map();
     /** @type {Set<string>} the (block, file) keys of the running tickets */
     const busy = new Set();
+    /** @type {Map<string, number>} running tickets per block */
+    const runningByBlock = new Map();
     /** @type {Set<string>} */
     const started = new Set();
     for (;;) {
@@ -630,15 +634,34 @@ export async function createWorker(opts, deps = {}) {
           writeSafe(warnStream, `worker: WARN ${text}\n`);
           try { await logWarning({ warning: 'watch_tick_failed', message: text }); } catch { /* a log failure never stops dispatch */ }
         }
-        for (const id of pendingTickets(repoRoot)) {
-          if (poisoned.has(id) || started.has(id)) continue;
-          if (limit === null) limit = await poolSize();
-          if (running.size >= limit || stopping) break;
-          const fileKey = fileKeyOf(id);
-          if (fileKey !== null && busy.has(fileKey)) continue; // waits without a slot
+        const pending = pendingTickets(repoRoot).filter((id) => !poisoned.has(id) && !started.has(id));
+        if (pending.length > 0 && limit === null) ({ limit, fairShare } = await poolSettings());
+        // Cache even unreadable hints for this tick: ranking never reads a ticket twice.
+        /** @type {Map<string, ReturnType<typeof fileKeyOf>>} */
+        const hints = new Map();
+        while (pending.length > 0 && running.size < limit && !stopping) {
+          let next = -1;
+          let fewest = Infinity;
+          for (let i = 0; i < pending.length; i += 1) {
+            const id = pending[i];
+            if (!hints.has(id)) hints.set(id, fileKeyOf(id));
+            const file = hints.get(id);
+            if (file && busy.has(file.key)) continue; // waits without a slot
+            const count = fairShare && file ? runningByBlock.get(file.block) ?? 0 : 0;
+            if (count < fewest) {
+              next = i;
+              fewest = count;
+            }
+            if (count === 0) break; // best possible count; ties stay oldest first
+          }
+          if (next === -1) break;
+          const [id] = pending.splice(next, 1);
+          const file = hints.get(id);
+          const fileKey = file?.key ?? null;
           started.add(id);
           activeTickets.add(id);
           if (fileKey !== null) busy.add(fileKey);
+          if (file) runningByBlock.set(file.block, (runningByBlock.get(file.block) ?? 0) + 1);
           const slot = runOne(id)
             .then((n) => {
               done += n;
@@ -649,6 +672,7 @@ export async function createWorker(opts, deps = {}) {
               activeTickets.delete(id);
               fileKeys.delete(id);
               if (fileKey !== null) busy.delete(fileKey);
+              if (file) runningByBlock.set(file.block, runningByBlock.get(file.block) - 1);
             });
           running.set(id, slot);
         }

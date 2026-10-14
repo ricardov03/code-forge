@@ -654,6 +654,8 @@ approval, and the source's fix-loop state is left as it was.
 The worker keeps a **pool** of review tickets. `review.parallel_tickets` (1 to 16, default 3) is
 its size. Tickets start oldest first. When one ends, the next pending one starts at once. There
 is no batch to wait for.
+More parallel tickets raise the spend rate. With `review.fair_share: true` (default false), each
+free slot goes to the block with the fewest running tickets, with oldest first for ties.
 
 - **Same-file rule.** The same file (in the same block) is never reviewed twice at once. If the
   coder edits a file while its review runs, the new ticket waits. A ticket for another file takes
