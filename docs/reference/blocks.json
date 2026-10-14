@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 115,
+  "block_count": 116,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1917,6 +1917,32 @@
         "B114"
       ],
       "note": "owner 2026-10-13; 2 rounds; noted: 6 old test files call rm(undefined) in cleanup under --test-name-pattern (follow-up); no-leak-final pins report order only at beforeExit"
+    },
+    "B104": {
+      "title": "Commit watch: review.file_loop watch queues owned files from new commits",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "docs/reference/config.md",
+        "schema/code-forge.schema.json",
+        "skill/references/code.md",
+        "skill/references/review.md",
+        "skill/templates/coder-brief.md",
+        "src/config/validate.mjs",
+        "src/util/exec.mjs",
+        "src/worker/loop.mjs",
+        "src/worker/queue.mjs",
+        "src/worker/watch.mjs",
+        "test/skill/structure.test.mjs",
+        "test/worker/wait-block.test.mjs",
+        "test/worker/watch.test.mjs"
+      ],
+      "depends_on": [
+        "B115"
+      ],
+      "note": "3 rounds (r2 major fixed by the orchestrator with red→green); noted: activeTickets only from the scheduler pass; stop() during a watch tick still dispatches that pass; watch state reset after realpath; a file replaced by a directory stalls the watch after one skip row; enqueue passes the raw file to enqueueHash"
     }
   }
 }

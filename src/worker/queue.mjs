@@ -102,15 +102,54 @@ export function resolveTicket({ repoRoot, run, block, file, tree = null }) {
  * @throws {WorkerError} `bad-path` for a relative `tree` or one that cannot be resolved.
  */
 export function enqueue({ repoRoot, run, block, file, tree = null, now = new Date() }) {
-  const { rel, root, content_hash, ticket } = resolveTicket({ repoRoot, run, block, file, tree });
+  const { content_hash } = resolveTicket({ repoRoot, run, block, file, tree });
+  return enqueueHash({ repoRoot, run, block, file, tree, content_hash, now });
+}
+
+/** Queue proven git-object content through the same identity as a manual review.
+ * @param {{repoRoot: string, run: string, block: string, file: string, content_hash: string, tree?: string | null, now?: Date}} opts
+ * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string}}
+ */
+export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = null, now = new Date() }) {
+  const rel = assertRowPath(file);
+  const root = tree === null ? null : realTree(tree);
+  const ticket = ticketId({ run, block, file: rel, content_hash, tree: root });
   const target = path.join(queueDir(repoRoot), `${ticket}.json`);
   const named = root === null ? {} : { tree: root };
   if (!existsSync(target)) {
     /** @type {Ticket} */
     const body = { ticket, run, block, file: rel, content_hash, enqueued_at: now.toISOString(), ...named };
-    writeAtomic(target, `${JSON.stringify(body)}\n`);
+    // Publish a complete immutable ticket without replacing a concurrent coder's ticket.
+    mkdirSync(path.dirname(target), { recursive: true });
+    const tmp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+    try {
+      writeFileSync(tmp, `${JSON.stringify(body)}\n`, { mode: 0o644 });
+      try { linkSync(tmp, target); } catch (err) { if (err.code !== 'EEXIST') throw err; }
+    } finally { rmSync(tmp, { force: true }); }
   }
+  // Returning content is current again. Claim only a superseded marker's exact bytes;
+  // a real result that replaced it wins the comparison and is restored unchanged.
+  let seen;
+  let done;
+  try {
+    seen = readFileSync(path.join(queueDir(repoRoot), `${ticket}.done`));
+    done = JSON.parse(seen.toString('utf8'));
+  } catch { /* missing or unreadable markers remain untouched */ }
+  if (seen && done?.status === 'refused' && done.reason === 'superseded' && !done.result) dropDoneIf(repoRoot, ticket, seen);
   return { ticket, status: isDone(repoRoot, ticket) ? 'done' : 'queued', file: rel, content_hash, ...named };
+}
+
+/** Finish only an unstarted, pending review. A superseded marker has no review result.
+ * @param {string} repoRoot @param {string} ticket
+ * @param {{write?: (file: string, text: string) => void, link?: (from: string, to: string) => void}} [io] - publication seams for tests.
+ */
+export function supersedeTicket(repoRoot, ticket, io = {}) {
+  const marker = path.join(queueDir(repoRoot), `${assertTicketId(ticket)}.done`);
+  const tmp = `${marker}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+  try {
+    (io.write ?? ((file, text) => writeFileSync(file, text, { mode: 0o644 })))(tmp, `${JSON.stringify({ ticket, status: 'refused', reason: 'superseded' })}\n`);
+    try { (io.link ?? linkSync)(tmp, marker); } catch (err) { if (err.code !== 'EEXIST') throw err; }
+  } finally { rmSync(tmp, { force: true }); }
 }
 
 /** B71: the most finding ids one answers ticket may name. */

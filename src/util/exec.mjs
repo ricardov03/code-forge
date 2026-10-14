@@ -139,6 +139,7 @@ function untrackChild(pid) {
  * @param {object} [opts]
  * @param {string} [opts.cwd]
  * @param {NodeJS.ProcessEnv} [opts.env]
+ * @param {BufferEncoding} [opts.stdoutEncoding] - stdout encoding (default UTF-8); base64 preserves binary git blobs.
  * @param {number} [opts.timeoutMs] - Kill the child (and its process group) if it runs longer
  *   than this. Must be a finite number > 0 when given.
  * @param {number[]} [opts.okExitCodes] - Exit codes treated as `result: "ok"` (default `[0]`).
@@ -212,7 +213,7 @@ export function exec(argv, opts = {}) {
       child.kill(signal);
     };
 
-    const stdoutText = () => Buffer.concat(stdoutChunks).toString('utf8');
+    const stdoutText = () => Buffer.concat(stdoutChunks).toString(opts.stdoutEncoding ?? 'utf8');
     const stderrText = () => Buffer.concat(stderrChunks).toString('utf8');
 
     /** @param {ExecResult} result */

@@ -1025,6 +1025,8 @@ const B94_RULE = [
   'A finding that arrives after that message waits for the next round.',
   "In that round the coder fixes, runs the block's tests, re-runs `review-file` on every changed file, and prints its `TESTS` line.",
 ];
+// B104: these two guides also describe the selected overlap/watch fix loop.
+const B104_FIX_RULE = [...B94_RULE.slice(0, 3), "In that round the coder fixes, runs the block's tests, follows the selected file loop on every changed file, and prints its `TESTS` line."];
 /** Text B, the pointer: word for word in the adapters (path `code.md`) and the docs (path `skill/references/code.md`). */
 const B94_POINTER_BODY =
   'Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round';
@@ -1066,10 +1068,10 @@ const b94Read = (rel) => readFile(path.join(ROOT, rel), 'utf8');
 test('B94 (1): code.md §4 carries text A once, with the per-file cap', async () => {
   const code = await readSkillFile('references/code.md');
   const s4 = flat(section(code, 4));
-  assert.deepEqual(B94_RULE.map((pin) => occurrences(s4, flat(pin))), [1, 1, 1, 1]);
+  assert.deepEqual(B104_FIX_RULE.map((pin) => occurrences(s4, flat(pin))), [1, 1, 1, 1]);
   assert.equal(occurrences(s4, flat(`The per-file cap still counts per file: ${B94_CAP} (\`review.md\` §5).`)), 1);
   // the rule lives in §4 only: the whole file has each sentence once
-  assert.deepEqual(B94_RULE.map((pin) => occurrences(flat(code), flat(pin))), [1, 1, 1, 1]);
+  assert.deepEqual(B104_FIX_RULE.map((pin) => occurrences(flat(code), flat(pin))), [1, 1, 1, 1]);
 });
 
 test('B94 (2): solo.md §3 step 7 carries text A once and sends it by send_input', async () => {
@@ -1083,7 +1085,7 @@ test('B94 (2): solo.md §3 step 7 carries text A once and sends it by send_input
 
 test('B94 (3): how-it-works carries text A once; the rules bullet points to it with no second "Never"', async () => {
   const how = flat(await b94Read('docs/how-it-works.md'));
-  assert.deepEqual(B94_RULE.map((pin) => occurrences(how, flat(pin))), [1, 1, 1, 1]);
+  assert.deepEqual(B104_FIX_RULE.map((pin) => occurrences(how, flat(pin))), [1, 1, 1, 1]);
   assert.equal(occurrences(how, flat(`The per-file cap still counts per file: ${B94_CAP}.`)), 1);
   assert.equal(occurrences(how, flat('**One fix message per block.** See "One fix round per block" under [Fix rounds and the escalation ladder](#fix-rounds-and-the-escalation-ladder).')), 1);
   assert.equal(occurrences(how, flat('### Fix rounds and the escalation ladder')), 1);

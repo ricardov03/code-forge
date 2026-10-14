@@ -16,6 +16,9 @@ waits on a second real consumer (plan §10.4, Q17).
   files of a block, one JSON line `{block, files: [{file, ticket, status}], done}`; a file changed after its ticket gets
   its current content enqueued; timeout exits 0 with `reason: wait_timeout`, `not_queued` files give `reason:
   not_queued`, no live worker exits 3 with `worker_down` (B100)
+- `review.file_loop: watch`: the worker watches the block's HEAD and queues owned files from new commits, with the same
+  ticket ids as `review-file`; an older pending ticket of the same file is marked `superseded`; problems write one
+  `watch.skipped` row per reason (B104)
 
 ### Changed
 

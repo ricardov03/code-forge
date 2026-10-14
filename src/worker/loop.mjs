@@ -57,6 +57,7 @@ import { countLines, RouteError, routeTicket } from '../review/route.mjs';
 import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
 import { announceWorker, beatWorker, HEARTBEAT_MS, liveWorker, pendingTickets, readTicket, retractWorker, writeResult } from './queue.mjs';
 import { DELETED_HASH, hashBytes, readRegularFileNoFollow, repoRootOf, WorkerError } from './ticket.mjs';
+import { watchTick } from './watch.mjs';
 
 /** Name of the key the worker resolves for System 1 (`keys.jev` / `system1.key` reference). */
 export const JEV_KEY_NAME = 'jev';
@@ -234,6 +235,8 @@ export function recordedVerdict(result) {
  * @property {typeof spawnSession} [spawn]
  * @property {typeof readRun} [readRun] - the run-record read behind the per-ticket config (a test seam).
  * @property {typeof readTicket} [readTicket] - the ticket read (a test seam).
+ * @property {typeof import('../util/exec.mjs').exec} [watchExec] - watch git exec seam.
+ * @property {Parameters<typeof watchTick>[0]['hooks']} [watchHooks] - deterministic watch races.
  * @property {import('../keys/store.mjs').KeyStore} [store] - default: B2's production store.
  * @property {any} [opRead]
  * @property {NodeJS.ProcessEnv} [env]
@@ -281,6 +284,9 @@ export async function createWorker(opts, deps = {}) {
 
   /** @param {Record<string, any>} row */
   const ledger = (row) => writeRow(signRow({ run: runId, ...row }, key));
+  // Shared across direct ticks and the scheduler, so running tickets are never superseded.
+  const activeTickets = new Set();
+  const tickWatch = () => watchTick({ repoRoot, runId, cfg, readRun: loadRun, writeRow: ledger, running: activeTickets, exec: deps.watchExec, hooks: deps.watchHooks });
 
   /**
    * The config ticket `id` is reviewed with (B35): its snapshot from the run record, re-read per
@@ -617,6 +623,13 @@ export async function createWorker(opts, deps = {}) {
         }
       }
       if (!stopping) {
+        try {
+          await tickWatch();
+        } catch (thrown) {
+          const text = `watch tick failed (${errorKind(thrown)})`;
+          writeSafe(warnStream, `worker: WARN ${text}\n`);
+          try { await logWarning({ warning: 'watch_tick_failed', message: text }); } catch { /* a log failure never stops dispatch */ }
+        }
         for (const id of pendingTickets(repoRoot)) {
           if (poisoned.has(id) || started.has(id)) continue;
           if (limit === null) limit = await poolSize();
@@ -624,6 +637,7 @@ export async function createWorker(opts, deps = {}) {
           const fileKey = fileKeyOf(id);
           if (fileKey !== null && busy.has(fileKey)) continue; // waits without a slot
           started.add(id);
+          activeTickets.add(id);
           if (fileKey !== null) busy.add(fileKey);
           const slot = runOne(id)
             .then((n) => {
@@ -632,6 +646,7 @@ export async function createWorker(opts, deps = {}) {
             .finally(() => {
               // the slot is freed on every exit path (`runOne` never rejects)
               running.delete(id);
+              activeTickets.delete(id);
               fileKeys.delete(id);
               if (fileKey !== null) busy.delete(fileKey);
             });
@@ -737,7 +752,7 @@ export async function createWorker(opts, deps = {}) {
     retractWorker(repoRoot, process.pid);
   }
 
-  return { processTicket, drain, run, once, stop, release, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
+  return { processTicket, drain, run, once, stop, release, watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
 }
 
 /**

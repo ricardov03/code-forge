@@ -1163,7 +1163,7 @@ export function validateConfig(cfg, opts = {}) {
 
 export { schema as configSchema };
 
-/** The effective file loop for a validated config; shared with future worker watch support.
+/** The effective file loop for a validated config, including opt-in commit watch.
  * @param {Record<string, any>} cfg @returns {string}
  */
 export function reviewFileLoop(cfg) {

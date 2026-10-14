@@ -113,24 +113,24 @@ test('(5) absent or wrong-run worker returns worker_down, even with all markers 
   } finally { retractWorker(repo, process.pid); }
 });
 
-test('(6) file_loop accepts wait and overlap, defaults to wait, and rejects every other type/value', async () => {
+test('(6) file_loop accepts wait, overlap and watch, defaults to wait, and rejects every other type/value', async () => {
   const { repo } = await makeRepo();
   const loaded = await loadConfigFile(path.join(repo, '.code-forge.yml'));
   const cfg = loaded.config;
   assert.deepEqual([validateConfig(cfg).errors, reviewFileLoop(cfg)], [[], 'wait']);
   const accepted = [];
-  for (const mode of ['wait', 'overlap']) {
+  for (const mode of ['wait', 'overlap', 'watch']) {
     cfg.review.file_loop = mode;
     accepted.push([validateConfig(cfg).errors, reviewFileLoop(cfg)]);
   }
-  assert.deepEqual(accepted, [[[], 'wait'], [[], 'overlap']]);
+  assert.deepEqual(accepted, [[[], 'wait'], [[], 'overlap'], [[], 'watch']]);
   const rejected = [];
-  for (const mode of ['watch', 'other', '', null, 1, true, [], {}]) {
+  for (const mode of ['other', '', null, 1, true, [], {}]) {
     cfg.review.file_loop = mode;
     const result = validateConfig(cfg);
     rejected.push([result.valid, result.errors.map((e) => [e.rule, e.path])]);
   }
-  assert.deepEqual(rejected, [1, 1, 1, 2, 2, 2, 2, 2].map((count) => [false, Array.from({ length: count }, () => ['schema', '/review/file_loop'])]));
+  assert.deepEqual(rejected, [1, 1, 2, 2, 2, 2, 2].map((count) => [false, Array.from({ length: count }, () => ['schema', '/review/file_loop'])]));
 });
 
 test('unreadable scope or corrupt tickets fail closed; no files are silently skipped', async () => {
