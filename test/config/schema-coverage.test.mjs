@@ -386,6 +386,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'coder.sandbox.add_dirs',
   // B100: one path behind the 211 -> 212 re-pin.
   'review.file_loop',
+  // B101: one path behind the 212 -> 213 re-pin.
+  'review.fair_share',
 ]);
 
 /**
@@ -412,8 +414,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  *   review.routes.second.fallback{,.provider,.model,.effort} ⇒ 207.
  * B93: +4 = coder, coder.sandbox{,.profile,.add_dirs} ⇒ 211.
  * B100: +1 = review.file_loop ⇒ 212.
+ * B101: +1 = review.fair_share ⇒ 213.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 212;
+const EXPECTED_SCHEMA_PATH_COUNT = 213;
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);
