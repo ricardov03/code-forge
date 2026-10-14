@@ -16,6 +16,7 @@ import { after } from 'node:test';
 const HERE = path.dirname(fileURLToPath(import.meta.url));
 export const REPO = path.resolve(HERE, '..', '..');
 export const BIN = path.join(REPO, 'bin', 'code-forge.mjs');
+export const pollMs = 100;
 const FAKE = path.join(HERE, 'fake-reviewer.mjs');
 
 export const PARENT = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'cf-b11-')));
@@ -26,11 +27,20 @@ process.env.CODE_FORGE_KEY_BACKEND = 'file';
 
 /** @type {Array<() => Promise<void>>} */
 const cleanups = [];
-after(async () => {
-  for (const fn of cleanups.reverse()) await fn();
-  process.env.HOME = ORIGINAL_HOME;
-  rmSync(PARENT, { recursive: true, force: true });
-});
+/** Stop all registered workers and remove their fixture HOME, even when a cleanup fails. */
+export async function cleanupWorkers() {
+  const errors = [];
+  try {
+    for (const fn of cleanups.splice(0).reverse()) {
+      try { await fn(); } catch (err) { errors.push(err); }
+    }
+  } finally {
+    process.env.HOME = ORIGINAL_HOME;
+    rmSync(PARENT, { recursive: true, force: true });
+  }
+  if (errors.length > 0) throw new AggregateError(errors, 'worker cleanup failed');
+}
+after(cleanupWorkers);
 
 /** Fake secrets (contain FAKE so scanners allow them). */
 export const FAKE_JEV_KEY = 'FAKE-jev-key-b11-5e7a9c3d1f20';
@@ -39,6 +49,7 @@ export const FAKE_SNEAKY = 'FAKE-sneaky-token-b11-77aa31';
 const { exec } = await import('../../src/util/exec.mjs');
 const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 const { startRun } = await import('../../src/state/run.mjs');
+const { readRun } = await import('../../src/state/run.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { liveWorker } = await import('../../src/worker/queue.mjs');
 const { sweep } = await import('../../src/util/reaper.mjs');
@@ -131,7 +142,7 @@ function fakePath() {
  * @param {Record<string, string>} [extra]
  */
 export function childEnv(extra = {}) {
-  return { PATH: fakePath(), HOME: /** @type {string} */ (process.env.HOME), TMPDIR: PARENT, CODE_FORGE_KEY_BACKEND: 'file', ...extra };
+  return { PATH: fakePath(), HOME: /** @type {string} */ (process.env.HOME), TMPDIR: PARENT, CODE_FORGE_KEY_BACKEND: 'file', ...(process.env.CODE_FORGE_TEST_SUITE ? { CODE_FORGE_TEST_SUITE: process.env.CODE_FORGE_TEST_SUITE } : {}), ...extra };
 }
 
 /** @param {string} runId @returns {string} the worker's run root (TMPDIR = PARENT). */
@@ -142,7 +153,7 @@ export const runRootOf = (runId) => path.join(PARENT, 'code-forge', runId);
  * @param {string} repo @param {string} runId @param {Record<string, string>} [extraEnv]
  */
 export async function startWorker(repo, runId, extraEnv = {}) {
-  const child = spawn(process.execPath, [BIN, 'worker', '--run', runId, '--poll-ms', '100'], {
+  const child = spawn(process.execPath, [BIN, 'worker', '--run', runId, '--poll-ms', String(pollMs)], {
     cwd: repo,
     env: childEnv(extraEnv),
     detached: true,
@@ -167,23 +178,26 @@ export async function startWorker(repo, runId, extraEnv = {}) {
  * @param {{pid: number, exited: Promise<unknown>, child: import('node:child_process').ChildProcess}} w @param {string} runId
  */
 export async function stopWorker(w, runId) {
-  if (w.child.exitCode === null && w.child.signalCode === null) {
-    try {
-      process.kill(w.pid, 'SIGTERM');
-    } catch {
-      // gone
-    }
-    const done = await Promise.race([w.exited.then(() => true), new Promise((r) => setTimeout(() => r(false), 5000))]);
-    if (!done) {
+  try {
+    if (w.child.exitCode === null && w.child.signalCode === null) {
       try {
-        process.kill(-w.pid, 'SIGKILL');
+        process.kill(w.pid, 'SIGTERM');
       } catch {
         // gone
       }
-      await w.exited;
+      const done = await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, 5000);
+      if (!done) {
+        try {
+          process.kill(-w.pid, 'SIGKILL');
+        } catch {
+          // gone
+        }
+        if (!(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, 2000))) throw new Error(`worker pid ${w.pid} did not stop`);
+      }
     }
+  } finally {
+    await sweep(path.join(runRootOf(runId), 'pids'), { graceMs: 500 });
   }
-  await sweep(path.join(runRootOf(runId), 'pids'), { graceMs: 500 });
 }
 
 /**
@@ -210,7 +224,32 @@ export async function stopPid(pid, runId) {
 
 /** @param {number} pid @param {string} runId */
 export function stopPidAfter(pid, runId) {
+  const id = `${pid}/${runId}`;
+  if (registered.has(id)) return;
+  registered.add(id);
   cleanups.push(() => stopPid(pid, runId));
+}
+const registered = new Set();
+
+/** Register before launching a CLI review: its run may not exist until after an assertion fails.
+ * @param {string} runId */
+export function stopRunAfter(runId) {
+  cleanups.push(async () => {
+    let record;
+    try { record = await readRun(runId); } catch (err) {
+      if (err.code === 'no-run') return;
+      throw err;
+    }
+    const pid = record.worker?.pid;
+    if (!Number.isInteger(pid) || pid <= 1 || pid === process.pid) return;
+    let live = null;
+    try { live = liveWorker(record.workspace); } catch { /* corrupt or partial worker.json: nothing safe to stop */ }
+    if (!live || live.pid !== pid || live.run !== runId) return;
+    const id = `${pid}/${runId}`;
+    if (registered.has(id)) return;
+    registered.add(id);
+    await stopPid(pid, runId);
+  });
 }
 
 /**
@@ -219,8 +258,18 @@ export function stopPidAfter(pid, runId) {
  */
 export async function cli(args, cwd, extraEnv = {}) {
   const started = Date.now();
-  const res = await exec([process.execPath, BIN, ...args], { cwd, env: childEnv(extraEnv), timeoutMs: 60000 });
-  return { code: res.code, stdout: res.stdout, stderr: res.stderr, ms: Date.now() - started, json: parseLast(res.stdout) };
+  try {
+    const res = await exec([process.execPath, BIN, ...args], { cwd, env: childEnv(extraEnv), timeoutMs: 60000 });
+    return { code: res.code, stdout: res.stdout, stderr: res.stderr, ms: Date.now() - started, json: parseLast(res.stdout) };
+  } finally {
+    // Register even on timeout or failure, before the caller can assert about the CLI result.
+    try {
+      const live = liveWorker(cwd);
+      if (live && live.pid !== process.pid) stopPidAfter(live.pid, live.run);
+    } catch {
+      // An unreadable announcement must not hide the CLI result or its original error.
+    }
+  }
 }
 
 /** @param {string} text @returns {any} the last JSON line, or null. */

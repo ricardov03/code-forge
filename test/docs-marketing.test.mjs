@@ -16,6 +16,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test, after } from 'node:test';
 import { spawnSync } from 'node:child_process';
+import { liveWorker } from '../src/worker/queue.mjs';
 
 const REPO_ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MARKETING_PATH = path.join(REPO_ROOT, 'docs', 'marketing', 'code-forge-story.md');
@@ -171,7 +172,19 @@ test('README_COMMANDS is exactly the fenced ```bash command set in README.md (co
 });
 
 const PARENT = mkdtempSync(path.join(os.tmpdir(), 'cf-docs-readme-'));
-after(() => rmSync(PARENT, { recursive: true, force: true }));
+after(() => {
+  try {
+    // A failed start assertion or a timed-out test may never assign workerPid in its body.
+    const worker = liveWorker(CWD);
+    if (worker && Number.isInteger(worker.pid) && worker.pid > 1 && worker.pid !== process.pid) {
+      process.kill(worker.pid, 'SIGTERM');
+    }
+  } catch {
+    // A missing/corrupt announcement or an already-gone worker cannot prevent cleanup.
+  } finally {
+    rmSync(PARENT, { recursive: true, force: true });
+  }
+});
 
 const HOME = path.join(PARENT, 'home');
 const CWD = path.join(PARENT, 'cwd');
@@ -218,10 +231,10 @@ test('README verb reference: run/block/worker/review-file/proof/gates run for re
   let workerPid;
   try {
     let r = cf(['run', 'start', '--run', 'readme-demo']);
-    assert.equal(r.code, 0, r.stderr);
     const pidMatch = /worker pid (\d+)/.exec(r.stdout);
+    if (pidMatch) workerPid = Number(pidMatch[1]);
+    assert.equal(r.code, 0, r.stderr);
     assert.ok(pidMatch, r.stdout);
-    workerPid = Number(pidMatch[1]);
 
     r = cf(['run', 'status', '--run', 'readme-demo']);
     assert.equal(r.code, 0, r.stderr);

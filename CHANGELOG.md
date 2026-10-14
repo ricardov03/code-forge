@@ -33,6 +33,12 @@ waits on a second real consumer (plan §10.4, Q17).
 - A review ticket reads the diffs of the block's other changed files only when the review asks for them, once per ticket
   (B112)
 
+### Fixed
+
+- A worker stops by itself, without taking a new ticket, when its run record or its HOME is removed (B113)
+- Tests stop every worker they start, also when a test fails or times out; the final no-leak step of `npm test` fails
+  when a worker from this suite is still alive (B113)
+
 ## [0.10.0] — 2026-10-13
 
 ### Added

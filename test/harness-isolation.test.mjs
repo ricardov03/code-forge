@@ -109,7 +109,9 @@ async function runPreload(fakeTmp) {
   return { code, stderr };
 }
 
-test('a trusted base: the preload sweeps a stale root (dir removed, its registered child dead) and exits 0', { timeout: 15000 }, async () => {
+// The 60 s timeouts only catch a hang: each test starts 4–5 node processes, which take seconds
+// each on a loaded machine.
+test('a trusted base: the preload sweeps a stale root (dir removed, its registered child dead) and exits 0', { timeout: 60000 }, async () => {
   const fakeTmp = path.join(PARENT, 'trusted');
   const base = path.join(fakeTmp, 'code-forge-tests');
   mkdirSync(base, { recursive: true, mode: 0o700 });
@@ -123,7 +125,7 @@ test('a trusted base: the preload sweeps a stale root (dir removed, its register
   assert.deepEqual(readdirSync(base), [], 'the child removed its own root at exit');
 });
 
-test('an untrusted base (a symlink): the preload stops — no sweep, no signal, no root created, exit 1', { timeout: 15000 }, async () => {
+test('an untrusted base (a symlink): the preload stops — no sweep, no signal, no root created, exit 1', { timeout: 60000 }, async () => {
   const fakeTmp = path.join(PARENT, 'symlinked');
   const target = path.join(PARENT, 'elsewhere');
   mkdirSync(fakeTmp, { mode: 0o700 });

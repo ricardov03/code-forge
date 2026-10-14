@@ -107,7 +107,8 @@ const baseline = snapshotGuarded();
 mkdirSync(realTmp, { recursive: true });
 /** The private base every test root (and the no-leak baseline file) lives in. */
 export const TEST_BASE = path.join(realTmp, 'code-forge-tests');
-const planned = path.join(TEST_BASE, `code-forge-test-${process.pid}`);
+export const TEST_HOME_PREFIX = 'code-forge-test-';
+const planned = path.join(TEST_BASE, `${TEST_HOME_PREFIX}${process.pid}`);
 process.env.HOME = planned;
 process.env.TMPDIR = planned;
 
@@ -126,9 +127,9 @@ if (baseReason !== null) {
 }
 
 // Owner record first, sweep second: a parallel worker's sweep never sees this root ownerless.
-const root = realpathSync(tmp.runRoot(`code-forge-test-${process.pid}`, { root: TEST_BASE }));
+const root = realpathSync(tmp.runRoot(`${TEST_HOME_PREFIX}${process.pid}`, { root: TEST_BASE }));
 tmp.setRunRoot(root);
-await tmp.sweepRoots({ root: TEST_BASE, prefix: 'code-forge-test-' });
+await tmp.sweepRoots({ root: TEST_BASE, prefix: TEST_HOME_PREFIX });
 
 process.env.HOME = root;
 process.env.TMPDIR = root;

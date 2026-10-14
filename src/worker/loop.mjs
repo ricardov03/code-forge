@@ -35,6 +35,8 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
+import { existsSync, statSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expiryChecks } from '../autopilot/limits.mjs';
@@ -43,6 +45,7 @@ import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
+import { runRecordPath } from '../state/paths.mjs';
 import { readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { logWarning } from '../util/error-log.mjs';
@@ -220,6 +223,7 @@ export function recordedVerdict(result) {
  * @property {string} slug - ledger project slug (the run record's `project`).
  * @property {Buffer} key - the run's HMAC key.
  * @property {number} [pollMs]
+ * @property {string} [guardRunRecordPath] - booted workers stop when this authoritative record disappears.
  * @property {number} [heartbeatMs] - how often `heartbeat_at` is refreshed: an integer ≥ `MIN_HEARTBEAT_MS`,
  *   else `HEARTBEAT_MS`.
  */
@@ -598,6 +602,20 @@ export async function createWorker(opts, deps = {}) {
     /** @type {Set<string>} */
     const started = new Set();
     for (;;) {
+      // One cheap stat per scheduler tick, including while tickets are in flight. Removing a
+      // test HOME (or the run record) stops new tickets; an open real run remains untouched.
+      if (!stopping && opts.guardRunRecordPath) {
+        try {
+          statSync(opts.guardRunRecordPath);
+        } catch (err) {
+          if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
+            stop();
+            // The error log lives under HOME: never write it when HOME itself is gone, or the
+            // log write would create the removed HOME again.
+            if (existsSync(os.homedir())) await logWarning({ warning: 'worker_orphan_stop', message: `run record missing: ${opts.guardRunRecordPath}` }).catch(() => null);
+          }
+        }
+      }
       if (!stopping) {
         for (const id of pendingTickets(repoRoot)) {
           if (poisoned.has(id) || started.has(id)) continue;
@@ -750,7 +768,7 @@ export async function bootWorker(opts, deps = {}) {
   const runRootDir = runRoot(opts.runId, { root: tmpRoot });
   setRunRoot(runRootDir);
   const key = await loadKey(opts.runId);
-  const worker = await createWorker({ runId: opts.runId, repoRoot, cfg, runRootDir, slug: record.project, key, pollMs: opts.pollMs }, deps);
+  const worker = await createWorker({ runId: opts.runId, repoRoot, cfg, runRootDir, slug: record.project, key, pollMs: opts.pollMs, guardRunRecordPath: runRecordPath(opts.runId) }, deps);
   return { ...worker, repoRoot, runRootDir };
 }
 

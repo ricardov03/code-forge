@@ -580,6 +580,7 @@ leaves a signed ledger note with a cleaned tail of its stderr, to explain the ha
 packet's hash. Notes without that hash (written before this rule), unsigned notes and the second
 level's own notes are never counted. While a long session runs, the worker keeps writing a
 heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
+At each poll tick the worker checks that its authoritative run record still exists; removing the record or its HOME stops it cleanly without taking another ticket.
 
 A big file can go to another model with a longer timeout, without editing `.code-forge.yml` for
 each file. Set `review.routes` once: in each rule `min_lines` and `model` are required, and it may

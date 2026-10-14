@@ -104,12 +104,20 @@ test('package.json declares no peer or bundled dependencies, under either npm sp
 test('package.json requires Node >= 22 and runs tests under the isolate preload with module mocks enabled, between the no-leak snapshot and final steps', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(pkg.engines.node, '>=22');
-  assert.equal(
-    pkg.scripts.test,
-    'CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs' +
-      " && node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test 'test/**/*.test.mjs'" +
-      ' && CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs',
-  );
+  assert.equal(pkg.scripts.test, `export CODE_FORGE_TEST_SUITE=\${CODE_FORGE_TEST_SUITE:-$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')}; CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && { node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test 'test/**/*.test.mjs'; cf_test_status=$?; CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs; cf_leak_status=$?; [ "$cf_test_status" -eq 0 ] && [ "$cf_leak_status" -eq 0 ]; }`);
+});
+
+test('B113: the test script preserves each failing phase status and runs final after main fails and skips main after snapshot fails', async () => {
+  const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  // A shell function shadows node, executing the actual script's control flow without a suite.
+  const stub = `node() { case "$*" in *--experimental-test-module-mocks*) echo main; return "$MAIN_STATUS";; *) case "$CODE_FORGE_NO_LEAK" in snapshot) echo snapshot; return "$SNAPSHOT_STATUS";; final) echo final; return "$FINAL_STATUS";; esac;; esac; }; `;
+  for (const [snapshot, main, final, expected] of [[0, 0, 0, 0], [0, 7, 0, 1], [0, 0, 9, 1], [0, 7, 9, 1], [5, 0, 0, 5]]) {
+    const result = spawnSync('sh', ['-c', stub + pkg.scripts.test], {
+      timeout: 20000, encoding: 'utf8', env: { ...process.env, SNAPSHOT_STATUS: String(snapshot), CODE_FORGE_TEST_SUITE: 'b113-shell', CODE_FORGE_NO_LEAK: '', MAIN_STATUS: String(main), FINAL_STATUS: String(final) },
+    });
+    assert.equal(result.status, expected, result.stderr);
+    assert.deepEqual(result.stdout.trim().split('\n'), snapshot === 0 ? ['snapshot', 'main', 'final'] : ['snapshot']);
+  }
 });
 
 test('every dependency version is an exact semver — no ^, ~, *, "latest", or partial form', async () => {

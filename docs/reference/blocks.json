@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 110,
+  "block_count": 111,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -1797,6 +1797,34 @@
         "B98"
       ],
       "note": "root-added 2026-10-13; velocity; review.test.mjs 89 s -> 44 s"
+    },
+    "B113": {
+      "title": "No leaked workers: orphan stop, failure-safe test cleanup, no-leak worker check",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "package.json",
+        "src/worker/loop.mjs",
+        "test/cli/review.test.mjs",
+        "test/docs-marketing.test.mjs",
+        "test/harness-isolation.test.mjs",
+        "test/helpers/isolate.mjs",
+        "test/helpers/worker-processes.mjs",
+        "test/no-leak.test.mjs",
+        "test/router.test.mjs",
+        "test/worker/cli-cleanup.test.mjs",
+        "test/worker/helper-cleanup.test.mjs",
+        "test/worker/helpers.mjs",
+        "test/worker/orphan-guard.test.mjs",
+        "test/worker/orphan.test.mjs",
+        "test/worker/process-list.test.mjs"
+      ],
+      "depends_on": [
+        "B112"
+      ],
+      "note": "root-added 2026-10-13; bug; 226 orphan test workers drove load to 350-450 and broke the release test step"
     }
   }
 }

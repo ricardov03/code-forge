@@ -2,7 +2,7 @@
 // repo, with a temp HOME/TMPDIR (the worker helpers pin both under one per-file temp parent,
 // removed in `after()`), and a fake `claude` on PATH (no real CLI, no key, no network). The
 // helpers are imported FIRST so no `src` module ever sees the real HOME.
-import { alive, childEnv, cli, freshDir, stopPidAfter, useFake, waitFor } from '../worker/helpers.mjs';
+import { alive, childEnv, cli, freshDir, stopPidAfter, stopRunAfter, useFake, waitFor } from '../worker/helpers.mjs';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -68,6 +68,7 @@ async function makeRepo() {
   const baseSha = (await git(['rev-parse', 'HEAD'])).trim();
   seq += 1;
   const runId = `rv-${process.pid}-${seq}`;
+  stopRunAfter(runId);
   const records = freshDir('records');
   const scriptFile = path.join(freshDir('script'), 'script.json');
   writeFileSync(scriptFile, '{}');
