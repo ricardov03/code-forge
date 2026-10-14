@@ -238,7 +238,7 @@ test('B58 (2): unowned changes, no_changes and the transcript grep still refuse 
   assert.deepEqual(await fx.close([]), [1, 'block B1 open: unowned_change README.md\n']);
   writeFile(fx.root, 'README.md', '# demo\n');
   writeFile(fx.root, 'coder.log', '$ node --test\n$ forge block close B1 --no-require-reviews\n');
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: rule_break\n']);
+  assert.deepEqual(await fx.close([]), [1, 'block B1 open: rule_break transcript line 2: code-forge-no-require-reviews\n']);
   assert.equal((await readRun('r-b58-still')).blocks.B1.status, 'open');
   const rows = await fx.rows();
   assert.equal(rows.filter((r) => r.event === 'block.close').length, 0);
