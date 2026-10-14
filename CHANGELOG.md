@@ -8,6 +8,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- New opt-in key `review.fair_share` (boolean, default `false`): the worker pool gives each free slot to the
+  pending ticket whose block has the fewest running tickets; ties stay oldest first (B101)
 - `context pack` with no `context` key writes a pack with the block header and the built-in proof rule (300-line cap)
   instead of refusing; a bad `context` value still refuses (B118)
 - `block close` prints `WARN block <id>: no green gates run for this block; …` when `gates.test` is set and the block's

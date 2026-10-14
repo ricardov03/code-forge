@@ -16,6 +16,7 @@ In the next release:
 - **Safer block open and close (B118).** `block open` refuses an owned or test path that has spaces and names no file, a common shell quoting slip. `block close` warns when the block has no green gates run.
 - **Clean rule checks on Codex logs (B119).** Run `codex exec --json` and pass the log to `block close --transcript`. code-forge then checks only the commands Codex ran and the files it wrote. Agent messages, reasoning and command output no longer give false rule breaks. The close reason names each rule break once.
 - **Gate results are recorded again (B120).** `gates run --run <r> --block <id>` now writes its `gate.done` row also when no gate uses `{test_files}`. Before, the row was missing, so `block close` warned after a green run and `status` showed no gate result.
+- **Fair share between blocks (B101).** Set `review.fair_share: true` and each free review slot goes to the block with the fewest running reviews. A block with many queued files no longer makes another block wait. Without the key, the order stays oldest first.
 
 In 0.12.0:
 
