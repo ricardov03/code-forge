@@ -13,7 +13,7 @@ before(async () => {
 });
 
 after(async () => {
-  await rm(tmpDir, { recursive: true, force: true });
+  if (tmpDir) await rm(tmpDir, { recursive: true, force: true });
 });
 
 test('loadConfigFile returns ok:false, error:"not-found" for a missing file', async () => {
