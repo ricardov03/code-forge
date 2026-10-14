@@ -215,31 +215,8 @@ test('B122 clause 1: blind changed content delivers findings once without a new 
   } finally { retractWorker(p.repo, process.pid); }
 });
 
-test('B122 clause 2: the next join queues one latest-content ticket and runs one recheck', async () => {
-  const p = await blindChange();
-  try {
-    assert.equal((await waitBlock(p.repo, p.runId, ['--max', '0ms'])).json.files[0].status, 'findings');
-    const marker = statSync(deliveredPath(p.repo, p.first.ticket));
-    const latest = resolveTicket({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE }).ticket;
-    const joined = await waitBlock(p.repo, p.runId, ['--max', '0ms']);
-    assert.deepEqual(joined.json.files[0], { file: FILE, ticket: latest, status: 'pending' });
-    assert.deepEqual((await waitBlock(p.repo, p.runId, ['--max', '0ms'])).json, joined.json);
-    assert.equal(queued(p.repo, 'json').length, 4);
-    const sessions = [];
-    const { createWorker } = await import('../../src/worker/loop.mjs');
-    const { createKeyStore } = await import('../../src/keys/store.mjs');
-    const worker = await createWorker({ runId: p.runId, repoRoot: p.repo, cfg: {}, runRootDir: freshDir('delivery-worker'), slug: 'worker-test', key: await loadKey(p.runId) }, {
-      store: await createKeyStore({ backends: [], dir: freshDir('delivery-store') }), env: {}, writeRow: async () => {}, expiryCheck: async () => {},
-      review: async (ticket) => { sessions.push({ file: ticket.file, ticket: ticket.ticket, content_hash: ticket.content_hash }); return { status: 'reviewed', approved: true, engine: 'adaptive', sessions: [] }; },
-    });
-    assert.deepEqual([await worker.drain(), await worker.drain()], [1, 0]);
-    assert.deepEqual(sessions, [{ file: FILE, ticket: latest, content_hash: resolveTicket({ repoRoot: p.repo, run: p.runId, block: BLOCK, file: FILE }).content_hash }]);
-    assert.deepEqual([statSync(deliveredPath(p.repo, p.first.ticket)).ino, statSync(deliveredPath(p.repo, p.first.ticket)).mtimeMs], [marker.ino, marker.mtimeMs]);
-    assert.deepEqual((await waitBlock(p.repo, p.runId)).json.files[0], { file: FILE, ticket: latest, status: 'done' });
-  } finally { retractWorker(p.repo, process.pid); }
-});
-
-test('B122 clause 3: watch, blind commit, findings join, fix and one approved recheck never stall', async () => {
+/** Real watch and worker with scripted reviewer subprocesses, counting sessions by content. */
+async function scriptedWatch() {
   const { repo, runId } = await makeRepo({ start: false });
   rmSync(path.join(repo, 'src/b.mjs')); rmSync(path.join(repo, 'src/c.mjs'));
   const cfg = (await loadConfigFile(path.join(repo, '.code-forge.yml'))).config;
@@ -270,6 +247,33 @@ test('B122 clause 3: watch, blind commit, findings join, fix and one approved re
     await watchTick({ repoRoot: repo, runId, cfg, writeRow });
     return resolveTicket({ repoRoot: repo, run: runId, block: BLOCK, file: FILE });
   };
+  return { repo, runId, rows, sessions, worker, commit };
+}
+
+test('B122 clause 2: the next join queues one latest-content ticket and runs one recheck', async () => {
+  const { repo, runId, sessions, worker, commit } = await scriptedWatch();
+  announceWorker(repo, { pid: process.pid, run: runId });
+  try {
+    const first = await commit('export const a = 1;\n');
+    assert.equal(await worker.drain(), 1);
+    await commit('export const a = 2;\n');
+    assert.equal((await waitBlock(repo, runId, ['--max', '0ms'])).json.files[0].status, 'findings');
+    const marker = statSync(deliveredPath(repo, first.ticket));
+    const latest = await commit('export const a = 3;\n');
+    const joined = await waitBlock(repo, runId, ['--max', '0ms']);
+    assert.deepEqual(joined.json.files[0], { file: FILE, ticket: latest.ticket, status: 'pending' });
+    assert.deepEqual((await waitBlock(repo, runId, ['--max', '0ms'])).json, joined.json);
+    assert.equal(queued(repo, 'json').length, 2);
+    assert.deepEqual([await worker.drain(), await worker.drain()], [1, 0]);
+    assert.deepEqual(sessions, [first.content_hash, latest.content_hash], 'one initial session and exactly one recheck session for latest content');
+    assert.deepEqual([readResult(repo, runId, latest.ticket).kind, readResult(repo, runId, latest.ticket).approved], ['recheck', true]);
+    assert.deepEqual([statSync(deliveredPath(repo, first.ticket)).ino, statSync(deliveredPath(repo, first.ticket)).mtimeMs], [marker.ino, marker.mtimeMs]);
+    assert.deepEqual((await waitBlock(repo, runId)).json.files[0], { file: FILE, ticket: latest.ticket, status: 'done' });
+  } finally { retractWorker(repo, process.pid); }
+});
+
+test('B122 clause 3: watch, blind commit, findings join, fix and one approved recheck never stall', async () => {
+  const { repo, runId, rows, sessions, worker, commit } = await scriptedWatch();
   announceWorker(repo, { pid: process.pid, run: runId });
   try {
     const first = await commit('export const a = 1;\n');
