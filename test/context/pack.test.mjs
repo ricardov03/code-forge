@@ -319,6 +319,12 @@ describe('code-forge context pack: refusals write nothing', () => {
     assert.deepEqual((await packRows(slug, runId)).map(fieldsOf), [{ event: 'context.pack', run: runId, block: 'B1', ...res.json }]);
   });
 
+  test('B118 boundary: a present non-mapping context still refuses without a pack or ledger row', async () => {
+    for (const value of ['null', 'false', '[]', 'plain']) {
+      await refused({ context: `context: ${value}\n` }, 'context: context must be a mapping; nothing was written\n');
+    }
+  });
+
   test('a bad context value is refused naming the key: max_lines 19, a command that is not an argv list of strings, a rules file named twice', async () => {
     await refused({ context: 'context:\n  max_lines: 19\n' }, 'context: context.max_lines must be an integer >= 20; nothing was written\n');
     await refused({ context: 'context:\n  commands:\n    test: "npm test"\n' }, 'context: context.commands.test must be an argv list of non-empty strings; nothing was written\n');

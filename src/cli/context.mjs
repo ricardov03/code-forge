@@ -95,6 +95,7 @@ export async function runContext(args, deps = {}) {
     if (!loaded.ok) throw new ContextError('bad-config', loaded.message);
     const live = /** @type {Record<string, any>} */ (loaded.config);
     const settings = contextSettings(live);
+    if (settings === null && Object.hasOwn(live, 'context')) throw new ContextError('bad-context', 'context must be a mapping');
     const sources = readSources(repoRoot, settings);
     const { text, lines, cut } = assemblePack({
       settings,
