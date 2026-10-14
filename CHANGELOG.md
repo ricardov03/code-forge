@@ -12,6 +12,8 @@ waits on a second real consumer (plan §10.4, Q17).
   instead of refusing; a bad `context` value still refuses (B118)
 - `block close` prints `WARN block <id>: no green gates run for this block; …` when `gates.test` is set and the block's
   last gate row is not a green `gate.done`; it still closes (B118)
+- `block close --transcript` reads a Codex JSON log (`codex exec --json`) by its commands and file writes only;
+  agent messages, reasoning, command output and non-item events are skipped; other logs are scanned as before (B119)
 
 ### Fixed
 
@@ -19,6 +21,8 @@ waits on a second real consumer (plan §10.4, Q17).
   (a shell quoting slip), naming the entry; nothing is written (B118)
 - `npm test -- --test-name-pattern=<p>` exits 0: six test files no longer call `rm(undefined)` in cleanup when
   their setup was skipped by the pattern (B116, built with `code-forge run` itself)
+- The close reason names each transcript rule break once (`rule_break transcript line <n>: <id>`, at most 5,
+  then `+<k> more rule_break`) instead of repeating a bare `rule_break` (B119)
 
 ## [0.12.0] — 2026-10-14
 
