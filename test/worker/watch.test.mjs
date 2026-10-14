@@ -100,21 +100,51 @@ for (const tree of [false, true]) test(`(1) two committed files have review-file
   }
   assert.deepEqual([p.sessions.length, p.tickets().length, pendingTickets(p.repo)], [2, 2, []]);
 });
-test('(2) pending old ticket is superseded, never run; wait-block selects the new ticket', async () => {
+test('(2) later commits are held once per file per head and supersede older pending tickets', async () => {
   const p = await fixture();
-  await p.commit({ 'src/a.mjs': 'old\n' }); await p.tick();
-  const old = p.tickets()[0].ticket;
-  await p.commit({ 'src/a.mjs': 'new\n' }); await p.tick();
-  const newest = currentId(p, 'src/a.mjs');
-  assert.deepEqual(p.tickets().map((t) => t.ticket).sort(), [old, newest].sort());
-  assert.deepEqual(marker(p, old), { ticket: old, status: 'refused', reason: 'superseded' });
-  assert.deepEqual(pendingTickets(p.repo), [newest]);
+  const files = ['src/a.mjs', 'src/b.mjs'];
+  await p.commit(Object.fromEntries(files.map((file) => [file, 'old\n']))); await p.tick();
+  const old = p.tickets();
+  const expected = [];
+  for (const text of ['middle\n', 'latest\n']) {
+    await p.commit(Object.fromEntries(files.map((file) => [file, text])));
+    await p.tick(); await p.tick();
+    expected.push(...files.map((file) => ({ event: 'watch.held', block: BLOCK, file, content_hash: hashBytes(Buffer.from(text)) })));
+    assert.deepEqual(p.tickets(), old, 'held content must create zero new tickets for either file');
+    assert.deepEqual(pendingTickets(p.repo), [], 'both older pending tickets must be superseded');
+    assert.deepEqual(p.rows.filter((row) => row.event === 'watch.held'), expected, 'exactly one held row per file per new head');
+  }
+  for (const { ticket } of old) assert.deepEqual(marker(p, ticket), { ticket, status: 'refused', reason: 'superseded' });
+  assert.equal(await p.worker.drain(), 0);
+  assert.deepEqual(p.sessions, []);
+});
+test('three held fix commits join the latest content once through --wait-block', async () => {
+  const reviews = [];
+  const p = await fixture({ review: async (ticket) => {
+    reviews.push({ file: ticket.file, content_hash: ticket.content_hash });
+    return { status: 'reviewed', approved: true, sessions: [] };
+  } });
+  await p.commit({ 'src/a.mjs': 'initial\n' }); await p.tick();
+  const first = currentId(p, 'src/a.mjs');
   assert.equal(await p.worker.drain(), 1);
-  assert.deepEqual(p.sessions, [newest]);
-  announceWorker(p.repo, { pid: process.pid, run: p.runId });
-  try {
-    assert.deepEqual(await cli(p, ['--wait-block', BLOCK, '--run', p.runId]), { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: newest, status: 'done' }], done: true } });
-  } finally { retractWorker(p.repo, process.pid); }
+  for (const text of ['fix one\n', 'fix two\n', 'fix three\n']) {
+    await p.commit({ 'src/a.mjs': text }); await p.tick();
+    assert.equal(await p.worker.drain(), 0, 'no fix review may start before the join');
+    assert.deepEqual(p.tickets().map((ticket) => ticket.ticket), [first]);
+  }
+  const latest = currentId(p, 'src/a.mjs');
+  const joined = await cli(p, ['--wait-block', BLOCK, '--run', p.runId, '--max', '0ms']);
+  assert.deepEqual(joined, { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: latest, status: 'pending' }], done: false, reason: 'wait_timeout' } });
+  assert.deepEqual(p.tickets().map((ticket) => ticket.ticket).sort(), [first, latest].sort());
+  assert.deepEqual(pendingTickets(p.repo), [latest]);
+  assert.equal(await p.worker.drain(), 1);
+  assert.deepEqual(reviews, [
+    { file: 'src/a.mjs', content_hash: hashBytes(Buffer.from('initial\n')) },
+    { file: 'src/a.mjs', content_hash: hashBytes(Buffer.from('fix three\n')) },
+  ], 'one initial session and exactly one fix session for this file, none for middle commits');
+  assert.deepEqual(await cli(p, ['--wait-block', BLOCK, '--run', p.runId]), { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: latest, status: 'done' }], done: true } });
+  assert.equal(await p.worker.drain(), 0);
+  assert.deepEqual(p.sessions, [first, latest]);
 });
 test('(3) commit after head read queues that head, then supersedes it on the next tick; old approval cannot pass', async () => {
   const p = await fixture();
@@ -126,12 +156,14 @@ test('(3) commit after head read queues that head, then supersedes it on the nex
   const old = p.tickets()[0]; assert.equal(old.content_hash, firstHash);
   await p.tick();
   const newest = currentId(p, 'src/a.mjs');
-  assert.deepEqual(pendingTickets(p.repo), [newest]);
+  assert.deepEqual(pendingTickets(p.repo), []);
+  assert.deepEqual(p.tickets().map((ticket) => ticket.ticket), [old.ticket]);
   assert.deepEqual(marker(p, old.ticket), { ticket: old.ticket, status: 'refused', reason: 'superseded' });
   const key = await loadKey(p.runId);
   const gate = checkBlockReviews({ block: BLOCK, runId: p.runId, files: [{ file: old.file, content_hash: contentHash(p.root, old.file) }], rows: [signRow({ run: p.runId, event: 'review.approved', block: BLOCK, file: old.file, content_hash: old.content_hash }, key)], key, proofFiles: [], highPaths: [] });
   assert.deepEqual(gate.refusals.map(({ code, file }) => ({ code, file })), [{ code: 'unreviewed', file: 'src/a.mjs' }]);
   assert.equal(gate.ok, false);
+  await cli(p, ['--wait-block', BLOCK, '--run', p.runId, '--max', '0ms']);
   assert.equal(await p.worker.drain(), 1);
   assert.deepEqual(p.sessions, [newest]);
 });
@@ -214,26 +246,30 @@ test('(8) watch setting reaches exec spy; without setting idle drains do no watc
   for (let i = 0; i < 3; i++) assert.equal(await p.worker.drain(), 0);
   assert.deepEqual([calls, reads, readdirSync(p.repo).includes('.code-forge')], [0, 0, true]);
 });
-test('running old ticket finishes; a later pending ticket is superseded without overlapping it', async () => {
-  let p; let newer;
+test('held commits preserve running and done tickets while superseding a later pending ticket', async () => {
+  let p; let completed;
   p = await fixture({ review: async (ticket) => {
-    if (!newer) {
-      await p.commit({ 'src/a.mjs': 'second\n' }); await p.tick({ running: new Set([ticket.ticket]) });
-      const second = currentId(p, 'src/a.mjs');
-      assert.deepEqual(pendingTickets(p.repo), [ticket.ticket, second]);
+    if (ticket.file === 'src/a.mjs') {
+      await p.commit({ 'src/a.mjs': 'second\n', 'src/b.mjs': 'second\n' });
+      await p.tick({ running: new Set([ticket.ticket]) });
+      assert.deepEqual(pendingTickets(p.repo), [ticket.ticket], 'held content must not queue alongside the running review');
+      const second = enqueue({ ...p.opts, file: 'src/a.mjs' }).ticket;
       await p.commit({ 'src/a.mjs': 'third\n' }); await p.tick({ running: new Set([ticket.ticket]) });
-      newer = currentId(p, 'src/a.mjs');
-      assert.deepEqual(pendingTickets(p.repo), [ticket.ticket, newer]);
+      assert.deepEqual(pendingTickets(p.repo), [ticket.ticket]);
       assert.deepEqual(marker(p, second), { ticket: second, status: 'refused', reason: 'superseded' });
       assert.equal(isDone(p.repo, ticket.ticket), false);
       assert.equal(readResult(p.repo, p.runId, ticket.ticket), null);
+      assert.deepEqual(marker(p, completed.ticket), completed.marker, 'completed ticket must keep its real result');
     }
     return { status: 'reviewed', approved: true, sessions: [] };
   } });
-  await p.commit({ 'src/a.mjs': 'first\n' });
+  await p.commit({ 'src/a.mjs': 'first\n', 'src/b.mjs': 'first\n' }); await p.tick();
   const first = currentId(p, 'src/a.mjs');
-  assert.equal(await p.worker.drain(), 2);
-  assert.deepEqual(p.sessions, [first, newer]);
+  const done = currentId(p, 'src/b.mjs');
+  assert.equal((await p.worker.processTicket(done)).status, 'reviewed');
+  completed = { ticket: done, marker: marker(p, done) };
+  assert.equal(await p.worker.drain(), 1);
+  assert.deepEqual(p.sessions, [done, first]);
   assert.equal(readResult(p.repo, p.runId, first).approved, true);
 });
 test('watch hashes exact committed binary bytes and deletions, ignores dirty content', async () => {
@@ -247,27 +283,25 @@ test('watch hashes exact committed binary bytes and deletions, ignores dirty con
   await git(p.root, 'rm', '-f', 'src/a.mjs');
   await git(p.root, '-c', 'user.name=Fake', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'delete');
   await p.tick();
-  const deletion = ticketId({ run: p.runId, block: BLOCK, file: 'src/a.mjs', content_hash: DELETED_HASH });
-  assert.deepEqual(p.tickets().map(({ ticket, content_hash }) => ({ ticket, content_hash })).sort((a, b) => a.ticket.localeCompare(b.ticket)), [
-    { ticket: binary, content_hash: hashBytes(bytes) }, { ticket: deletion, content_hash: DELETED_HASH },
-  ].sort((a, b) => a.ticket.localeCompare(b.ticket)));
+  assert.deepEqual(p.tickets().map(({ ticket, content_hash }) => ({ ticket, content_hash })), [{ ticket: binary, content_hash: hashBytes(bytes) }]);
+  assert.deepEqual(p.rows.filter((row) => row.event === 'watch.held'), [{ event: 'watch.held', block: BLOCK, file: 'src/a.mjs', content_hash: DELETED_HASH }]);
   assert.deepEqual(marker(p, binary), { ticket: binary, status: 'refused', reason: 'superseded' });
-  assert.deepEqual(pendingTickets(p.repo), [deletion]);
-  assert.equal(await p.worker.drain(), 1);
-  assert.deepEqual(p.sessions, [deletion]);
+  assert.deepEqual(pendingTickets(p.repo), []);
+  assert.equal(await p.worker.drain(), 0);
+  assert.deepEqual(p.sessions, []);
 });
 
-test('returning A after A then B supersedes it reviews A exactly once through watch', async () => {
+test('returning A after held B keeps it superseded until manual enqueue reviews A once', async () => {
   const p = await fixture();
   await p.commit({ 'src/a.mjs': 'A\n' }); await p.tick();
   const a = currentId(p, 'src/a.mjs');
   await p.commit({ 'src/a.mjs': 'B\n' }); await p.tick();
-  const b = currentId(p, 'src/a.mjs');
+  assert.deepEqual(p.tickets().map((t) => t.ticket), [a]);
   assert.deepEqual(marker(p, a), { ticket: a, status: 'refused', reason: 'superseded' });
   await p.commit({ 'src/a.mjs': 'A\n' }); await p.tick();
-  assert.deepEqual(p.tickets().map((t) => t.ticket).sort(), [a, b].sort());
-  assert.deepEqual([isDone(p.repo, a), pendingTickets(p.repo)], [false, [a]]);
-  assert.deepEqual(marker(p, b), { ticket: b, status: 'refused', reason: 'superseded' });
+  assert.deepEqual(p.tickets().map((t) => t.ticket), [a]);
+  assert.deepEqual([isDone(p.repo, a), pendingTickets(p.repo)], [true, []]);
+  assert.equal(enqueue({ ...p.opts, file: 'src/a.mjs' }).status, 'queued');
   assert.equal(await p.worker.drain(), 1);
   assert.deepEqual(p.sessions, [a]);
   assert.equal(readResult(p.repo, p.runId, a).approved, true);
@@ -286,10 +320,10 @@ test('manual enqueue revives superseded current content and keeps real results',
   await p.commit({ 'src/a.mjs': 'A\n' }); await p.tick();
   const a = currentId(p, 'src/a.mjs');
   await p.commit({ 'src/a.mjs': 'B\n' }); await p.tick();
-  const b = currentId(p, 'src/a.mjs');
+  assert.deepEqual(p.tickets().map((t) => t.ticket), [a]);
   writeFileSync(path.join(p.root, 'src/a.mjs'), 'A\n');
   assert.deepEqual(enqueue({ ...p.opts, file: 'src/a.mjs' }), { ticket: a, status: 'queued', file: 'src/a.mjs', content_hash: hashBytes(Buffer.from('A\n')) });
-  assert.deepEqual(pendingTickets(p.repo).sort(), [a, b].sort());
+  assert.deepEqual(pendingTickets(p.repo), [a]);
   assert.equal((await p.worker.processTicket(a)).status, 'reviewed');
   const done = marker(p, a);
   assert.equal(enqueue({ ...p.opts, file: 'src/a.mjs' }).status, 'done');

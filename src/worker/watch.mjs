@@ -99,10 +99,12 @@ export async function watchTick({ repoRoot, runId, cfg, readRun: loadRun = readR
       if (unreadable) { await skip('unreadable_head'); continue; }
       await hooks.beforeQueue?.();
       for (const { file, content_hash } of hashes) {
-        const current = enqueueHash({ repoRoot, run: runId, block, file, content_hash, tree });
+        const held = earlier.some((old) => old.file === file);
+        if (!held) enqueueHash({ repoRoot, run: runId, block, file, content_hash, tree });
         for (const old of earlier) {
-          if (old.file === file && old.ticket !== current.ticket && !running.has(old.ticket) && !isDone(repoRoot, old.ticket)) supersedeTicket(repoRoot, old.ticket);
+          if (old.file === file && old.content_hash !== content_hash && !running.has(old.ticket) && !isDone(repoRoot, old.ticket)) supersedeTicket(repoRoot, old.ticket);
         }
+        if (held) await writeRow({ event: 'watch.held', block, file, content_hash });
       }
       save({ ...state, run: runId, base, tree, sha: head, skipped: [] });
     } catch {
