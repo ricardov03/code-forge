@@ -202,6 +202,7 @@ import { fallbackLane } from '../decide/fallback-rules.mjs';
 import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
+import { lastGate } from '../state/brief-status.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -784,6 +785,9 @@ export async function runBlock(args, deps = {}) {
         // B70: each file that passed as reviewed_by_waiver is named before the closed line
         // B71: an answered finding is named as answered; a file with only answered findings has no `by`
         if (result.ok) {
+          if (configInForce(record)?.gates?.test != null && lastGate(rows.filter((row) => row.block === id)).result !== 'pass') {
+            err(`WARN block ${id}: no green gates run for this block; run gates run --run ${runId} --block ${id} before close\n`);
+          }
           for (const w of lineWarnings) err(w);
           for (const l of reviewedJson) say(`reviewed ${l.file} ticket ${l.ticket}\n`);
           for (const f of waivedAll) {

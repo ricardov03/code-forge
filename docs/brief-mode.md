@@ -256,6 +256,8 @@ Every other check still runs:
   `coder.tests` row. Waived reviews never lift this check.
 
 `block close` does not run the gates. Run them in step 6 and read their result before you close.
+With `gates.test` set in the config in force, close warns if the block's last gate result is not
+a green `gate.done`, and still closes. With `gates.test: null`, it prints no such warning.
 
 `--remove-worktree` removes the tree after the close and keeps the branch, with a signed
 `worktree.removed` row. Push the branch and open the draft PR yourself.
