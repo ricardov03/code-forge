@@ -23,6 +23,8 @@ waits on a second real consumer (plan §10.4, Q17).
   their setup was skipped by the pattern (B116, built with `code-forge run` itself)
 - The close reason names each transcript rule break once (`rule_break transcript line <n>: <id>`, at most 5,
   then `+<k> more rule_break`) instead of repeating a bare `rule_break` (B119)
+- `gates run --run <r> --block <id>` with plain gates (no `{test_files}`, no `--changed`) writes its `gate.done` and
+  `gate.red` rows to the run's project ledger; before, it wrote none, so the B118 close warning fired after a green run (B120)
 
 ## [0.12.0] — 2026-10-14
 
