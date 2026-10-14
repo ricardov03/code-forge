@@ -8,6 +8,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- `review-file --wait-block`: a file whose newest review left open findings and whose content changed after it is not
+  re-queued; the join answers `status: findings` with that ticket and writes one delivered marker; the next join
+  queues the latest content once, so a commit made blind to the findings never counts as a stall round (B122)
 - Worker registry: each worker writes `<repo>/.code-forge/workers/<pid>-<start_time>.json` next to `queue/worker.json`
   and beats both; boot counts live entries and writes its entry under one cross-process lock (limit 1); boot
   removes dead entries (a known start-time mismatch is dead); an unreadable entry blocks the boot and `doctor`
