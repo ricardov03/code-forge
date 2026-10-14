@@ -42,7 +42,7 @@ before(async () => {
 });
 
 after(async () => {
-  await rm(path.dirname(tmpHome), { recursive: true, force: true });
+  if (tmpHome) await rm(path.dirname(tmpHome), { recursive: true, force: true });
 });
 
 /**
