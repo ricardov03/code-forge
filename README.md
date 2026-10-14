@@ -8,9 +8,11 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new in 0.10
+## What's new in 0.11
 
 In the next release:
+
+In 0.11.0:
 
 - **The release moves the README What's new list (B108).** `npm run release` now moves the "In the next release:" bullets under "In X.Y.Z:". A minor or major release starts a new "What's new in X.Y" heading. The empty anchor stays for the next block. The release refuses an empty CHANGELOG [Unreleased] or a missing anchor before it changes anything, and a failed check puts the README back with the other files. The checks now include `gen-config-doc --check`. `docs/releasing.md` has a releasing checklist.
 - **The close writes the ticket lines (B96).** The coder's final report no longer needs a `reviewed <path> ticket <id>` line per file. `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket. `--json` and the block's done file carry them as `reviewed: [{file, ticket, via}]`. With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr, and the close goes on.
@@ -21,6 +23,8 @@ In the next release:
 - **Reviewers see the paired test file (B98).** When a block changes `src/a.mjs` and `test/a.test.mjs`, the reviewer of `src/a.mjs` now gets the test names in a `## paired` section, in the first review and in rechecks. Tests named with `block open --tests` count too. The reviewer is told those tests exist, so it no longer reports them as missing. It can still ask for a test file's body, even a new untracked one the block owns.
 - **Faster reviews (B112).** A review ticket reads the diffs of the block's other changed files only when the review asks for them, and only once.
 - **No leftover workers (B113).** A worker stops by itself when its run record or its HOME is removed. `npm test` now fails when a test leaves a worker running.
+
+## What's new in 0.10
 
 In 0.10.0:
 

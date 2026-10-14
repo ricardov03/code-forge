@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.11.0] — 2026-10-13
+
 ### Added
 
 - `npm run release` moves the README "In the next release:" bullets under the new version, refuses an empty [Unreleased]
