@@ -40,8 +40,8 @@ after(async () => {
   else process.env.GIT_CONFIG_NOSYSTEM = originalGitConfigNoSystem;
   if (originalGitConfigGlobal === undefined) delete process.env.GIT_CONFIG_GLOBAL;
   else process.env.GIT_CONFIG_GLOBAL = originalGitConfigGlobal;
-  await rm(repoDir, { recursive: true, force: true });
-  await rm(homeDir, { recursive: true, force: true });
+  if (repoDir) await rm(repoDir, { recursive: true, force: true });
+  if (homeDir) await rm(homeDir, { recursive: true, force: true });
 });
 
 function reviewedEntries() {
