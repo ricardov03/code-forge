@@ -792,8 +792,8 @@ export function renderForCodex(list = FORBIDDEN) {
  * forbidden command is a hit too (fail closed; the block gate reports it as `rule_break`, B5).
  * Codex `exec --json` logs (every non-empty line an object with a string `type`, first event
  * `thread.started`) scan command_execution commands and file_change paths as writes. Other
- * items scan whole, except agent_message, reasoning and aggregated_output; non-item events
- * are skipped. Any other log uses the plain-text grep above, unchanged.
+ * items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
+ * is never scanned; non-item events are skipped. Any other log uses the plain-text grep above, unchanged.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated ONCE per line over its
  * tokens (a `write` path entry hits when a write command starts before a token naming the path);
@@ -832,8 +832,9 @@ export function scanTranscript(text, list = FORBIDDEN) {
         const event = events[index];
         if (!event?.type.startsWith('item.') || !event.item) return;
         const item = event.item;
-        if (['agent_message', 'reasoning', 'aggregated_output'].includes(item.type)) return;
-        if (item.type === 'command_execution') lineText = typeof item.command === 'string' ? item.command : '';
+        if (item.type === 'agent_message' || item.type === 'reasoning') return;
+        // a command that is not a string is scanned with the rest of its item (fail closed), its output left out
+        if (item.type === 'command_execution') lineText = typeof item.command === 'string' ? item.command : JSON.stringify({ ...item, aggregated_output: undefined });
         else if (item.type === 'file_change') {
           lineText = (Array.isArray(item.changes) ? item.changes : [])
             .filter((change) => typeof change?.path === 'string')

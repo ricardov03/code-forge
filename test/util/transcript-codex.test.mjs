@@ -24,6 +24,8 @@ test('Codex file changes scan paths as writes and unknown mcp_tool_call items sc
   assert.deepEqual(scanTranscript(jsonl(started, event({ type: 'mcp_tool_call', server: 'files', tool: 'read', arguments: {
     nested: { path: '~/.code-forge/runs/x.key' },
   } }))), [{ id: 'code-forge-runs-access', line: 2 }], 'unknown mcp_tool_call: exactly one nested-path hit');
+  assert.deepEqual(scanTranscript(jsonl(started, event({ type: 'command_execution', command: ['cat', '~/.code-forge/runs/x.key'], aggregated_output: '' }))),
+    [{ id: 'code-forge-runs-access', line: 2 }], 'a command that is not a string scans the item whole: exactly one hit');
 });
 
 test('Invalid Codex detection falls back to the unchanged plain-text hits for the entire log', () => {
@@ -53,7 +55,8 @@ test('Codex boundary: blank lines preserve numbering; skipped items and non-item
     event({ type: 'file_change', changes: [{ path: 'src/a.mjs', kind: 'update' }], output: mention }),
   ) + '\n';
   assert.deepEqual(scanTranscript(text), [
+    { id: 'code-forge-runs-access', line: 5 },
     { id: 'code-forge-runs-access', line: 7 },
     { id: 'code-forge-runs-access', line: 8 },
-  ], 'only the two command events hit, once each, on their original JSONL lines');
+  ], 'the unknown aggregated_output item type scans whole; the two command events hit; reasoning and non-item events give none');
 });

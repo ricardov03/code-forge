@@ -219,7 +219,7 @@ codex exec --json 'Implement B1 using its brief and context pack' > .code-forge/
 Pass the saved log as `--transcript` at close. A Codex JSON log (every non-empty line is an
 object with a string `type`, first event `thread.started`) is checked by its commands:
 `command_execution` commands, `file_change` paths as writes, and other items whole (fail closed).
-Agent messages, reasoning, aggregated output and non-item events are skipped. Any other log
+Agent messages, reasoning, command output (`aggregated_output`) and non-item events are skipped. Any other log
 is checked line by line; a mention of a forbidden command or path is a hit.
 
 ## Step 6: run the gates
