@@ -166,8 +166,21 @@ test('doctor names dead, malformed and unreadable break mutexes but leaves live 
 
 test('unreadable and malformed locks stay held; doctor names one path per warning', async () => {
   mkdirSync(lockPath('unreadable'));
-  const bad = [null, { key: 1, pid: 2, start: 's' }, { key: 'k', pid: 1, start: 's' }, { key: 'k', pid: 2.5, start: 's' }, { key: 'k', pid: 2 }, { key: 'k', pid: 2, start: 1 }];
-  bad.forEach((owner, i) => put(`bad-${i}`, owner));
+  const bad = [
+    null,
+    { key: 1, pid: 2, start: 's' },
+    { key: 'bad-2', pid: 1, start: 's' },
+    { key: 'bad-3', pid: 2.5, start: 's' },
+    { key: 'bad-4', pid: 2 },
+    { key: 'bad-5', pid: 2, start: 1 },
+  ];
+  bad.forEach((owner, i) => {
+    const key = `bad-${i}`;
+    if (owner && typeof owner.key === 'string') {
+      assert.equal(owner.key, key, `${key}: fixture isolates its pid or start shape rule`);
+    }
+    put(key, owner);
+  });
   writeFileSync(lockPath('json'), '{');
   const keys = ['unreadable', 'json', ...bad.map((_, i) => `bad-${i}`)];
   for (const key of keys) {
