@@ -13,6 +13,10 @@ their two answers, the list of hunk headers, and the diff only when the packet i
 - Your `findings` list is final: nothing you drop is fixed, everything you keep is.
 - `passed` is true only when you keep no `critical` and no `warning`.
 
+Never ask for hand mutations or for tests beyond the acceptance clauses.
+The fix for a weak assertion is a stronger assertion.
+Code or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.
+
 ## Rules for every answer
 
 - Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.

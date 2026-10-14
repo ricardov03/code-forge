@@ -294,6 +294,7 @@ test('B63b: the coder-brief template has its sections in order, the Context pack
   const heads = brief.split('\n').filter((l) => l.startsWith('## '));
   assert.deepEqual(heads, [
     '## Reply contract',
+    '## Proof',
     '## The file loop',
     '## Final report — the close prints the ticket ids',
     '## Fix-round brief (round ≥ 2, or a respawn after a climb)',
@@ -1413,4 +1414,35 @@ test('B96: the skill and docs say which files get a reviewed line, the order, wh
     rows.map((r) => r.slice(1)),
     [[B96_REFUSES_WHEN, 'add a `reviewed <path> ticket <id>` line with its `review-file` ticket for each of those files to the report, and close again']],
   );
+});
+
+const B117_DEFINITION = "Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.";
+const B117_RULE = [
+  "- Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure. `code-forge proof red-green` does this with the block's base code.",
+  "- No hand mutations. Do not break the code on purpose to test the tests. Red→green is the proof.",
+  "- One exact test per acceptance clause, plus one negative or boundary test where the clause can fail. Assertions say which element and how many, never only \"it exists\".",
+  "- Proof scales with risk: a light-tier file needs red→green per new test; a high-tier file must have it at the gate. Do not add tests, mutants, layers, options or abstractions that the acceptance does not ask for.",
+  "- A weak assertion is fixed by a stronger assertion, not by more tests or mutants."
+];
+
+test('B117 (5): the consumer brief and all eight skill and docs surfaces share the proof definition', async () => {
+  const brief = await readSkillFile('templates/coder-brief.md');
+  assert.equal(brief.split('## Proof\n\n')[1]?.split('\n\n## ')[0], B117_RULE.join('\n'));
+  const proof = await readSkillFile('references/proof.md');
+  assert.equal(section(proof, 2).trimStart().split('\n\n')[0], B117_DEFINITION);
+  for (const rel of ['skill/references/rules-core.md', 'docs/concepts.md', 'docs/how-it-works.md', 'docs/overview.md', 'docs/tutorial-first-test.md']) {
+    const text = await readFile(path.join(ROOT, rel), 'utf8');
+    assert.equal(occurrences(text, B117_DEFINITION), 1, rel);
+  }
+  const core = await readSkillFile('references/rules-core.md');
+  for (const line of ['No hand mutations.', 'Proof scales with risk; no extras the acceptance does not ask for.']) assert.equal(occurrences(core, line), 1, line);
+  assert.equal(occurrences(await readSkillFile('SKILL.md'), 'Red→green means an assertion failure on old code, then a pass on new code; no hand mutations; proof scales with risk; no extras beyond acceptance (R16).'), 1);
+  assert.equal(occurrences(await readSkillFile('references/code.md'), 'The pack carries the built-in proof rule before project rules and lessons.'), 1);
+});
+
+test('B117 (5) boundary: light proof is required per test while only high proof is enforced at the gate', async () => {
+  const proof = await readSkillFile('references/proof.md');
+  assert.equal(occurrences(proof, '| light | red→green required for every new or changed test; **optional at the gate** |'), 1);
+  assert.equal(occurrences(proof, 'red→green recommended'), 0);
+  assert.equal(occurrences(proof, 'Proof scales with risk; do not add more than the acceptance asks for.'), 1);
 });

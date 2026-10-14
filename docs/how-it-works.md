@@ -3,6 +3,8 @@
 This page follows one feature from a written brief to a closed block. The skill runs these steps
 for you; every step is also a plain CLI verb you can run and inspect by hand.
 
+Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
+
 ## The workflow at a glance
 
 ```mermaid
@@ -326,7 +328,7 @@ Gates, reviews and the close check of a worktree block run in its tree (B62b):
   open, is unowned there too. A tree that is gone, or not on the block's branch, refuses the close;
   nothing is recorded until it is restored.
 - `proof export` and `proof red-green` read the block's files and base in the tree, and run the
-  mutation proof in an export built from the tree (kept under the main tree's `.code-forge/export`),
+  red→green proof in an export built from the tree (kept under the main tree's `.code-forge/export`),
   so the tree itself is never changed.
 
 None of these pushes, merges or checks anything out: the work stays on the block's branch, and the

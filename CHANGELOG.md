@@ -19,11 +19,20 @@ waits on a second real consumer (plan §10.4, Q17).
 - `review.file_loop: watch`: the worker watches the block's HEAD and queues owned files from new commits, with the same
   ticket ids as `review-file`; an older pending ticket of the same file is marked `superseded`; problems write one
   `watch.skipped` row per reason (B104)
+- every `code-forge context pack` carries a built-in `## proof rule (code-forge)` section that `context.max_lines` never
+  cuts: the red→green definition, no hand mutations, one exact test per clause, proof scales with risk, no extras the
+  acceptance does not ask for (B117)
 
 ### Changed
 
 - `block close` reports `coder report FAILED: TESTS line malformed: <line>` for a `TESTS ` line that does not end in
   `exit=<n>`; no line at all still gives `no TESTS line` (B114)
+- every review lens tells the reviewer not to ask for hand mutations or tests beyond the acceptance; a weak assertion is
+  fixed by a stronger assertion; over-engineering is at most a `nit` (B117)
+
+### Removed
+
+- the unused `proofRequirements` export in src/proof/tiers.mjs (B117)
 
 ### Fixed
 

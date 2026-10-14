@@ -5,9 +5,8 @@
  *   high  ⇐ risk ≥ 2, or the path matches `proof.tiers.high.paths`, or `security_sensitive`
  *   light ⇐ everything else (the review-depth band `1 ≤ risk < 2` does NOT raise the proof tier)
  *
- * The light tier's proof is red→green (B10b). The high tier's extra proof — tool-made mutants on
- * changed lines — is held on Q16 (block B10c), so `proofRequirements('high')` reports it as
- * `held` and the gate enforces red→green only until Ricardo answers. Pure: no I/O.
+ * The light tier needs red→green per new or changed test. The high tier must have red→green
+ * at the gate. Mutation testing was cut by the owner (Q16). Pure: no I/O.
  */
 
 import { ownsFile } from '../state/registry.mjs';
@@ -49,15 +48,4 @@ export function tierFor({ file, risk, securitySensitive = false, highPaths = [] 
 export function blockTier(fileTiers) {
   if (!Array.isArray(fileTiers)) throw new TypeError('blockTier: fileTiers must be an array');
   return fileTiers.some((t) => t?.tier === 'high') ? 'high' : 'light';
-}
-
-/**
- * What the gate requires for a tier. `mutants: 'held'` = the high tier's mutation proof is
- * specified but not enforced until Q16 is answered (B10c).
- * @param {Tier} tier
- * @returns {{red_green: true, mutants: 'none' | 'held'}}
- */
-export function proofRequirements(tier) {
-  if (!TIERS.includes(tier)) throw new TypeError(`proofRequirements: tier must be one of ${TIERS.join(', ')}`);
-  return { red_green: true, mutants: tier === 'high' ? 'held' : 'none' };
 }

@@ -3,7 +3,7 @@
  * wizard answer (`ANSWER_FLAGS` maps flag -> answer key); `--no-interaction` is a mode switch and
  * overrides no answer.
  *
- * **Q16 = cut (Ricardo, 2026-09-25):** step 8 asks no mutation-tool or nightly question, so the
+ * **Q16 = cut (the owner, 2026-09-25):** step 8 asks no mutation-tool or nightly question, so the
  * v1.2 `--no-nightly` flag is gone and `--proof` takes only the keys the schema still has
  * (`isolation`, `high`, `link_dirs`, `copy_untracked`). With `-g` and `-p` counted as two flags
  * (two tokens that each set the scope answer) there are 21 answer flags: B65 added

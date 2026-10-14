@@ -127,7 +127,16 @@ async function packInProcess(args, deps) {
 }
 
 /** The header lines of a B1 pack with no test files, no worktree and no commands. @param {string} runId */
-const plainHeader = (runId) => ['# code-forge context pack', '## block', `run: ${runId}`, 'block: B1', 'level: L2', 'owned files:', '- src/a.mjs', '## commands (never run by code-forge)', '(none)'];
+const PROOF_LINES = [
+  "## proof rule (code-forge)",
+  "- Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure. `code-forge proof red-green` does this with the block's base code.",
+  "- No hand mutations. Do not break the code on purpose to test the tests. Red→green is the proof.",
+  "- One exact test per acceptance clause, plus one negative or boundary test where the clause can fail. Assertions say which element and how many, never only \"it exists\".",
+  "- Proof scales with risk: a light-tier file needs red→green per new test; a high-tier file must have it at the gate. Do not add tests, mutants, layers, options or abstractions that the acceptance does not ask for.",
+  "- A weak assertion is fixed by a stronger assertion, not by more tests or mutants."
+];
+
+const plainHeader = (runId) => ['# code-forge context pack', '## block', `run: ${runId}`, 'block: B1', 'level: L2', 'owned files:', '- src/a.mjs', '## commands (never run by code-forge)', '(none)', ...PROOF_LINES];
 
 const FULL_CONTEXT = `context:
   rules: [RULES.md, docs/style.md]
@@ -167,6 +176,7 @@ describe('code-forge context pack: the pack file, stdout and the ledger row', ()
       'worktree: /fake/trees/B1',
       'branch: code-forge/B1',
       ...FULL_COMMANDS,
+      ...PROOF_LINES,
       '## rules: RULES.md',
       'Rule one.',
       'Rule two.',
@@ -180,7 +190,7 @@ describe('code-forge context pack: the pack file, stdout and the ledger row', ()
     const tokens = estimateTokens(expected);
     assert.equal(res.stdout, `${packFile}\ntokens ~${tokens}\n`);
     const rows = await packRows(slug, runId);
-    assert.deepEqual(rows.map(fieldsOf), [{ event: 'context.pack', run: runId, block: 'B1', path: packFile, sha256: sha256Of(expected), tokens, lines: 23, cut: 0 }]);
+    assert.deepEqual(rows.map(fieldsOf), [{ event: 'context.pack', run: runId, block: 'B1', path: packFile, sha256: sha256Of(expected), tokens, lines: 29, cut: 0 }]);
     assert.equal(verifyRow(rows[0], await loadKey(runId)).ok, true);
   });
 
@@ -195,62 +205,62 @@ describe('code-forge context pack: the pack file, stdout and the ledger row', ()
     const text = readFileSync(packFile, 'utf8');
     const json = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
     assert.equal(json.code, 0, json.stderr);
-    assert.equal(json.stdout, `${JSON.stringify({ path: packFile, tokens: estimateTokens(text), lines: 19, cut: 0, sha256: sha256Of(text) })}\n`);
+    assert.equal(json.stdout, `${JSON.stringify({ path: packFile, tokens: estimateTokens(text), lines: 25, cut: 0, sha256: sha256Of(text) })}\n`);
     assert.equal((await packRows(slug, runId)).length, 1);
 
     writeFileSync(path.join(repo, 'RULES.md'), 'Rule one, amended.\n');
     const changed = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
     assert.equal(changed.code, 0, changed.stderr);
-    const newText = [...plainHeader(runId).slice(0, -2), ...FULL_COMMANDS, '## rules: RULES.md', 'Rule one, amended.', '## rules: docs/style.md', 'Style A.', '## lessons: docs/lessons.md', 'Lesson X.', ''].join('\n');
+    const newText = [...plainHeader(runId).slice(0, -8), ...FULL_COMMANDS, ...PROOF_LINES, '## rules: RULES.md', 'Rule one, amended.', '## rules: docs/style.md', 'Style A.', '## lessons: docs/lessons.md', 'Lesson X.', ''].join('\n');
     assert.equal(readFileSync(packFile, 'utf8'), newText);
     const rows = await packRows(slug, runId);
     assert.deepEqual(rows.map((r) => r.sha256), [sha256Of(text), sha256Of(newText)]);
-    assert.deepEqual(changed.json, { path: packFile, tokens: estimateTokens(newText), lines: 18, cut: 0, sha256: sha256Of(newText) });
+    assert.deepEqual(changed.json, { path: packFile, tokens: estimateTokens(newText), lines: 24, cut: 0, sha256: sha256Of(newText) });
   });
 
   test('over max_lines the lessons are cut first, then the rules from the last file back, each with a [cut: N lines dropped] marker', async () => {
     const files = { 'r1.md': fileOf('r1', 5), 'r2.md': fileOf('r2', 5), 'l.md': fileOf('l', 10) };
     const ctx = (/** @type {number} */ max) => `context:\n  rules: [r1.md, r2.md]\n  lessons: l.md\n  max_lines: ${max}\n`;
-    const { repo, runId, slug, packFile } = await packRepo({ context: ctx(30), files });
+    const { repo, runId, slug, packFile } = await packRepo({ context: ctx(36), files });
     const header = plainHeader(runId);
     const r1 = ['## rules: r1.md', ...numbered('r1', 5)];
 
-    // 32 lines uncut, cap 30: three lessons lines go (two over, plus the marker's own line)
+    // 38 lines uncut, cap 36: three lessons lines go (two over, plus the marker's own line)
     const partial = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
     assert.equal(partial.code, 0, partial.stderr);
     const partialText = [...header, ...r1, '## rules: r2.md', ...numbered('r2', 5), '## lessons: l.md', ...numbered('l', 7), '[cut: 3 lines dropped]', ''].join('\n');
     assert.equal(readFileSync(packFile, 'utf8'), partialText);
-    assert.deepEqual([partial.json.lines, partial.json.cut], [30, 3]);
+    assert.deepEqual([partial.json.lines, partial.json.cut], [36, 3]);
 
-    // cap 20: every lessons line goes, then four of r2's; the header and commands stay whole
-    writeFileSync(path.join(repo, '.code-forge.yml'), BASE_CONFIG(slug) + ctx(20));
+    // cap 26: every lessons line goes, then four of r2's; header, commands and proof stay whole
+    writeFileSync(path.join(repo, '.code-forge.yml'), BASE_CONFIG(slug) + ctx(26));
     const deep = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
     assert.equal(deep.code, 0, deep.stderr);
     const deepText = [...header, ...r1, '## rules: r2.md', 'r2 line 1', '[cut: 4 lines dropped]', '## lessons: l.md', '[cut: 10 lines dropped]', ''].join('\n');
     assert.equal(readFileSync(packFile, 'utf8'), deepText);
-    assert.deepEqual([deep.json.lines, deep.json.cut], [20, 14]);
-    assert.deepEqual((await packRows(slug, runId)).map((r) => [r.lines, r.cut]), [[30, 3], [20, 14]]);
+    assert.deepEqual([deep.json.lines, deep.json.cut], [26, 14]);
+    assert.deepEqual((await packRows(slug, runId)).map((r) => [r.lines, r.cut]), [[36, 3], [26, 14]]);
   });
 
   test('a later rules file is cut whole before an earlier one is cut in part', async () => {
-    // 9 header lines + r1 (1 + 10) + r2 (1 + 5) = 26 lines, cap 20: r2 loses all 5, r1 three
+    // 15 protected lines + r1 (1 + 10) + r2 (1 + 5) = 32; cap 20: r2 loses 5, r1 nine
     const files = { 'r1.md': fileOf('r1', 10), 'r2.md': fileOf('r2', 5) };
     const { repo, runId, packFile } = await packRepo({ context: 'context:\n  rules: [r1.md, r2.md]\n  max_lines: 20\n', files });
     const res = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
     assert.equal(res.code, 0, res.stderr);
-    const expected = [...plainHeader(runId), '## rules: r1.md', ...numbered('r1', 7), '[cut: 3 lines dropped]', '## rules: r2.md', '[cut: 5 lines dropped]', ''].join('\n');
+    const expected = [...plainHeader(runId), '## rules: r1.md', ...numbered('r1', 1), '[cut: 9 lines dropped]', '## rules: r2.md', '[cut: 5 lines dropped]', ''].join('\n');
     assert.equal(readFileSync(packFile, 'utf8'), expected);
-    assert.deepEqual([res.json.lines, res.json.cut], [20, 8]);
+    assert.deepEqual([res.json.lines, res.json.cut], [20, 14]);
   });
 
   test('without max_lines the pack is cut at exactly 300 lines', async () => {
     const { repo, runId, packFile } = await packRepo({ context: 'context:\n  lessons: l.md\n', files: { 'l.md': fileOf('l', 400) } });
     const res = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
     assert.equal(res.code, 0, res.stderr);
-    // 9 header lines + the lessons heading + 289 lessons lines + the marker = 300
-    const expected = [...plainHeader(runId), '## lessons: l.md', ...numbered('l', 289), '[cut: 111 lines dropped]', ''].join('\n');
+    // 15 protected lines + the lessons heading + 283 lessons lines + the marker = 300
+    const expected = [...plainHeader(runId), '## lessons: l.md', ...numbered('l', 283), '[cut: 117 lines dropped]', ''].join('\n');
     assert.equal(readFileSync(packFile, 'utf8'), expected);
-    assert.deepEqual([res.json.lines, res.json.cut], [300, 111]);
+    assert.deepEqual([res.json.lines, res.json.cut], [300, 117]);
   });
 
   test('an empty or whitespace-only rules or lessons file gives its heading and no lines', async () => {
@@ -499,7 +509,7 @@ describe('code-forge context pack: refusals write nothing', () => {
     const code = await packInProcess(['pack', '--run', runId, '--block', 'B1'], { stdout, stderr });
     assert.equal(code, 0, stderr.text);
     const text = readFileSync(packFile, 'utf8');
-    assert.equal(text, [...plainHeader(runId).slice(0, -1), "test: curl -H 'Authorization: Bearer [REDACTED]'", ''].join('\n'));
+    assert.equal(text, [...plainHeader(runId).slice(0, -7), "test: curl -H 'Authorization: Bearer [REDACTED]'", ...PROOF_LINES, ''].join('\n'));
     assert.equal(text.includes(secret), false);
   });
 
@@ -725,4 +735,27 @@ describe('review packets carry the context rules and lessons (B63a)', () => {
       await f.stop();
     }
   });
+});
+
+
+test('B117 (1): empty context still carries exactly one complete proof section after commands', async () => {
+  const { repo, runId, packFile } = await packRepo({ context: 'context: {}\n' });
+  const res = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
+  assert.equal(res.code, 0, res.stderr);
+  assert.equal(readFileSync(packFile, 'utf8'), [...plainHeader(runId), ''].join('\n'));
+  assert.deepEqual([res.json.lines, res.json.cut], [15, 0]);
+});
+
+test('B117 (1) boundary: protected proof exceeds max_lines intact after all rules and lessons are cut', async () => {
+  const { repo, runId, packFile } = await packRepo({
+    context: 'context:\n  rules: [r.md]\n  lessons: l.md\n  max_lines: 20\n',
+    files: { 'r.md': fileOf('r', 5), 'l.md': fileOf('l', 5) },
+    tests: Array.from({ length: 8 }, (_, i) => `test/${i}.test.mjs`),
+  });
+  const res = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
+  assert.equal(res.code, 0, res.stderr);
+  const header = plainHeader(runId);
+  header.splice(7, 0, 'test files:', ...Array.from({ length: 8 }, (_, i) => `- test/${i}.test.mjs`));
+  assert.equal(readFileSync(packFile, 'utf8'), [...header, '## rules: r.md', '[cut: 5 lines dropped]', '## lessons: l.md', '[cut: 5 lines dropped]', ''].join('\n'));
+  assert.deepEqual([res.json.lines, res.json.cut], [28, 10]);
 });

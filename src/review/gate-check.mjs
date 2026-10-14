@@ -47,7 +47,7 @@
  *    not repeated. B73: this detail, and an `unreviewed` detail for a file with a cap row, ends
  *    with the stop's ways out (`exits: block reopen, block waive, review-file --answers,
  *    re-decompose`, `stop-exits.mjs`);
- *  - `unproven`:   a changed owned file of tier `high` (B20, Ricardo 2026-09-25) has no covering
+ *  - `unproven`:   a changed owned file of tier `high` (B20, the owner 2026-09-25) has no covering
  *    red→green proof (`checkBlockProof`, below). Light-tier files need no proof row.
  * B71 (answers): a finding is also cleared — wherever a waiver clears it, by the one rule set
  * ({@link reviewRules}: `waiverOf`, so `reviewed_by_waiver` reads "waived or answered") — by a
@@ -803,7 +803,7 @@ export function closeTier({ file, rows, key, highPaths }) {
 }
 
 /**
- * B20 (Ricardo 2026-09-25): every changed owned file of tier `high` needs a covering red→green
+ * B20 (the owner 2026-09-25): every changed owned file of tier `high` needs a covering red→green
  * proof, checked PER FILE. A file is covered by a `proof` row of this run and block (`rows` must
  * already be the block's rows) with `step: 'red-green'`, `proven: true`, `red_kind: 'assertion'`,
  * whose MAC verifies and whose `covers` list (written by `proof red-green`: the sources the

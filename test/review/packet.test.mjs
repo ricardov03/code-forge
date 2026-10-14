@@ -5,7 +5,8 @@ import { symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
-const { assemblePacket, attachFiles, buildPacket, PacketError, readFileDiff } = await import('../../src/review/packet.mjs');
+const { buildRecheckPacket } = await import('../../src/review/fixloop.mjs');
+const { assemblePacket, assembleJudgePacket, attachFiles, buildPacket, PacketError, readFileDiff } = await import('../../src/review/packet.mjs');
 
 test('B97 reproduction: needs_file attaches a new owned changed test file', async () => {
   const repo = await makeRepo();
@@ -26,13 +27,13 @@ const fixtureDiff = {
 };
 const fixtureOpts = { diff: fixtureDiff, lens: 'quick', rulesDigest: 'rule one\nrule two', factsExcerpt: 'F1: fixture', moved: '## moved code\n(none moved)' };
 
-test('B97 legacy: no paired input is byte-equal to the HEAD packet', () => {
+test('B97/B117: no paired input preserves the packet with updated proof guidance', () => {
   const packet = assemblePacket(fixtureOpts);
   assert.equal(packet.status, 'ok');
   if (packet.status !== 'ok') return;
-  // Captured from HEAD 79bbe61 before packet.mjs changed; hashes output, never src text.
-  assert.equal(createHash('sha256').update(packet.text).digest('hex'), 'a187a50dcf5624afb3b6a5bf862f401ee5b6095bf4a546b667857beba75447fa');
-  assert.deepEqual([packet.contextMode, packet.contextLines, packet.digestLines, packet.tokensIn, packet.budget, packet.overBudget], ['whole', 1, 2, 547, 6000, false]);
+  // Exact output pin including B117 proof guidance; hashes output, never src text.
+  assert.equal(createHash('sha256').update(packet.text).digest('hex'), '38a1382d5304d19ce78e847210564e2f58a89148afabb829fa2e2b7a225dc00b');
+  assert.deepEqual([packet.contextMode, packet.contextLines, packet.digestLines, packet.tokensIn, packet.budget, packet.overBudget], ['whole', 1, 2, 614, 6000, false]);
   assert.deepEqual(assemblePacket({ ...fixtureOpts, paired: '' }), packet);
   assert.deepEqual(assemblePacket({ ...fixtureOpts, paired: '  \n' }), packet);
 });
@@ -234,4 +235,34 @@ describe('packet builder (§4.1)', () => {
       return true;
     });
   });
+});
+
+const PROOF_GUIDANCE = [
+  "Never ask for hand mutations or for tests beyond the acceptance clauses.",
+  "The fix for a weak assertion is a stronger assertion.",
+  "Code or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug."
+];
+
+test('B117 (2): all six built review packets carry the exact three-line proof guidance once', () => {
+  for (const lens of ['quick', 'full', 'A', 'B', 'recheck', 'judge']) {
+    const packet = lens === 'judge'
+      ? assembleJudgePacket({ diff: fixtureDiff, reports: { A: {}, B: {} } })
+      : lens === 'recheck'
+        ? buildRecheckPacket({ diff: fixtureDiff, open: [] })
+        : assemblePacket({ ...fixtureOpts, lens });
+    assert.equal(packet.status, 'ok', lens);
+    if (packet.status !== 'ok') continue;
+    const lines = packet.text.split('\n');
+    for (const line of PROOF_GUIDANCE) assert.equal(lines.filter((s) => s === line).length, 1, `${lens}: ${line}`);
+    assert.equal(packet.text.split(PROOF_GUIDANCE.join('\n')).length - 1, 1, `${lens}: three consecutive lines`);
+  }
+});
+
+
+test('B117 (2) boundary: trimming project rules keeps every proof-guidance line in the review packet', () => {
+  const packet = assemblePacket({ ...fixtureOpts, budget: 900, rulesDigest: 'project rule '.repeat(2000) });
+  assert.equal(packet.status, 'ok');
+  if (packet.status !== 'ok') return;
+  assert.equal(packet.digestLines, 0);
+  for (const line of PROOF_GUIDANCE) assert.equal(packet.text.split('\n').filter((s) => s === line).length, 1, line);
 });

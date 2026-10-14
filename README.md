@@ -17,6 +17,7 @@ In the next release:
 - **Reopen after any stop (B114, #17).** Every review stop now records the content it reviewed. An older stop with unknown content can be reopened when the current content was never reviewed. A malformed `TESTS` line now gets its own clear error.
 - **Python `*_test.py` tests pair with their source (B115).** Fix rounds and review packets now find `widget_test.py` for `widget.py`, as they already found `test_widget.py`.
 - **Commit watch (B104).** Set `review.file_loop: watch` and the coder just commits each green file. The worker sees the new commits, queues each owned file for review and drops older pending reviews of the same file. `review-file --wait-block` waits for them all.
+- **The proof rule travels with every block (B117).** Every context pack and every reviewer now carry one rule. Red→green: each new or changed test must fail on the old code first, then pass on the new code. No hand mutations. Proof scales with risk, and nothing is added that the task did not ask for.
 
 In 0.11.0:
 

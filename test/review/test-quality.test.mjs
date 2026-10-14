@@ -213,6 +213,10 @@ describe('B92 (4): the budget and the no-flag packet', () => {
       '',
       'Skip style, naming and structure unless it hides a bug. Keep `findings` short.',
       '',
+      "Never ask for hand mutations or for tests beyond the acceptance clauses.",
+      "The fix for a weak assertion is a stronger assertion.",
+      "Code or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.",
+      '',
       '## Rules for every answer',
       '',
       '- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.',
@@ -257,9 +261,9 @@ describe('B92 (4): the budget and the no-flag packet', () => {
       '+});',
       '',
     ];
-    // B92 adds one line to every reviewer lens (the RULE, last of "Rules for every answer"); nothing else
+    // B92 adds the RULE at the end; B117 adds the three proof-guidance lines before the answer rules.
     const lastRule = TODAY.indexOf('- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.');
-    assert.equal(lastRule, 22);
+    assert.equal(lastRule, 26);
     const expected = [...TODAY.slice(0, lastRule + 1), RULE, ...TODAY.slice(lastRule + 1)].join('\n');
     assert.equal(packets[0], expected);
   });

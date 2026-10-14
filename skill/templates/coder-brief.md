@@ -13,6 +13,14 @@
 2. Your facts diff: every contradiction between this brief and the code, in one message.
 3. Your forecast: cases and lines.
 
+## Proof
+
+- Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure. `code-forge proof red-green` does this with the block's base code.
+- No hand mutations. Do not break the code on purpose to test the tests. Red→green is the proof.
+- One exact test per acceptance clause, plus one negative or boundary test where the clause can fail. Assertions say which element and how many, never only "it exists".
+- Proof scales with risk: a light-tier file needs red→green per new test; a high-tier file must have it at the gate. Do not add tests, mutants, layers, options or abstractions that the acceptance does not ask for.
+- A weak assertion is fixed by a stronger assertion, not by more tests or mutants.
+
 ## The file loop
 
 After you finish each file in `owned_files` (tests written and green) run `forge review-file <path> --block <id> --run <r>`; before the next file run `forge review-file --wait <ticket> [--max 90s]` and act on the packet. A finding whose fix belongs in another owned file (a missing test, say) is fixed there and sent with `forge review-file <that file> --block <id> --run <r> --answers <ids> --of <source>`. A `worker_down` answer ⇒ print `===BLOCK <id> FAILED: worker down===` (never approval).
@@ -50,7 +58,7 @@ The open findings by id, the fix history, the files they sit in. Fix only those 
 
 ## Context pack
 
-<!-- the block's context pack, pasted as text: the block header (run, block, level, owned and test files, worktree), the project's build, test, lint and format commands, the rules files and the lessons file. `forge context pack --run <r> --block <id>` writes it; paste its contents, never its run-root path (`references/code.md` §3). Without a `context` key, leave this section out. -->
+<!-- the block's context pack, pasted as text: the block header (run, block, level, owned and test files, worktree), the project's build, test, lint and format commands, the built-in proof rule, the rules files and the lessons file. `forge context pack --run <r> --block <id>` writes it; paste its contents, never its run-root path (`references/code.md` §3). Without a `context` key, leave this section out. -->
 
 ## Project rules
 

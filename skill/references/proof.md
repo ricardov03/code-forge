@@ -6,16 +6,20 @@ Tier per file = `high` when `risk ≥ 2`, or a `proof.tiers.high.paths` match, o
 
 | tier | proof required | when |
 |---|---|---|
-| light | red→green recommended for every new or changed test; **optional at the gate** | the coder or orchestrator runs the runner per test (§2) |
+| light | red→green required for every new or changed test; **optional at the gate** | the coder or orchestrator runs the runner per test (§2) |
 | high | red→green **required at the gate** for every changed high-tier file, plus the deeper **review** depth of `review.md` §2 (two lenses and a judge) | as above; `block close` refuses `unproven <file>` |
 
 **`forge block close` enforces the high tier:** tier inputs are `proof.tiers.high.paths` (the union of the config at the block's base and the current one), the recorded `risk`, and `security_sensitive`; a row naming the file whose MAC fails makes it high. Each changed high-tier file needs a signed `proof` row of this run and block with `step: red-green`, `proven: true`, `red_kind: assertion` whose `covers` list names the file (`revert` covers the sources it put back; `assertion-deletion` covers only its test), else `unproven <file>`; only the human's `forge block waive <id> proof --file <path>` clears it (it asks for a yes at a terminal: the orchestrator prints the exact command and the human runs it in their own terminal; there is no `--yes`, `review.md` §5).
 
 **Mutation testing is not part of this product.** The question whether tool-made mutants on changed lines (Infection, Stryker) should be a user-facing proof tier was decided: **cut**. There is no `proof mutate`, no nightly mutation run, no `min_msi` floor, and no mutation-tool key in `.code-forge.yml`; a consumer that runs a mutation tool does so outside code-forge and never beside a coder's test run in the same tree. What replaces it as proof is the rule itself: one exact test per acceptance clause plus one negative or boundary where the clause has a failure mode — assertions that say **which** element and **how many**, never merely whether something exists — and the isolated per-file review with the convergence rule, which on this package's own build found the defects green suites had missed. The same holds for hand mutations by a coder: they cost about one test run each and a coder tends to pick mutants its own tests already kill, so a coder proves each new or changed test red→green (§2) instead; when a review finds a weak assertion, the fix is a stronger assertion, not a mutant.
 
+Proof scales with risk; do not add more than the acceptance asks for.
+
 `proof.extra` (an argv array) keeps a consumer's legacy proof commands running inside the gate.
 
 ## §2 Red→green — journaled, killable, RED must mean an assertion
+
+Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
 
 **One call proves one test** — a test file, or one case of it (`<file>::<case>` is the label) — with one of two mechanisms: `revert` (the block's changed source files are put back to their base version, so the test must fail against the code it was written for) or `assertion-deletion` (a characterization test, proven by deleting its assertions). The runner does not distinguish a new test from a changed one: the caller runs it once per test the acceptance names, new or changed alike, and the count of `RED` rows is the count of proven tests — there is no separate "new cases" tally. In this version the runner is invoked per test from the coder's or the orchestrator's side; the block gate reads the resulting signed `proof` rows but does not launch the runner itself.
 

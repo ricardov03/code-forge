@@ -64,6 +64,8 @@ State lives in the plan file's header — `facts → planned → hardened → co
 - **R16** Proof is exact assertions on the main behaviour
 - **R17** Never relax a rule alone
 
+Red→green means an assertion failure on old code, then a pass on new code; no hand mutations; proof scales with risk; no extras beyond acceptance (R16).
+
 ## §5 Where to read more
 
 | when | read |

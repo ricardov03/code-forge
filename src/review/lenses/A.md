@@ -11,6 +11,10 @@ You work blind: you do not see the other reviewer's answer.
 - State: ordering, concurrency, partial writes, values that can be stale.
 - Arithmetic and units: rounding, overflow, bytes versus characters, time zones.
 
+Never ask for hand mutations or for tests beyond the acceptance clauses.
+The fix for a weak assertion is a stronger assertion.
+Code or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.
+
 ## Rules for every answer
 
 - Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.

@@ -297,6 +297,8 @@ If a round stalls or a file reaches four rounds, the ledger shows an `escalation
 
 ## 10. Proof
 
+Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
+
 Measure in a clean export, not in your working tree:
 
 ```bash

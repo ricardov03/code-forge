@@ -3,7 +3,7 @@ import { writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runProof } from '../../src/cli/proof.mjs';
-import { blockTier, proofRequirements, tierFor } from '../../src/proof/tiers.mjs';
+import { blockTier, tierFor } from '../../src/proof/tiers.mjs';
 import { CONFIG_YAML, captureStream, tempDir } from './helpers.mjs';
 
 const HIGH_PATHS = ['app/Billing/**', 'config/auth.php'];
@@ -31,11 +31,11 @@ test('boundaries: risk 1.99 and a near-miss path stay light; risk outside 0–3 
   assert.throws(() => tierFor({ file: 'src/a.mjs', risk: 4 }), { name: 'TypeError', message: 'tierFor: risk must be a number from 0 to 3' });
 });
 
-test('block tier is the union of file tiers; high mutants are held (Q16)', () => {
+test('B117 (3): tier API has exactly four exports and no dead mutation requirement; block tier is the union', async () => {
+  const tiers = await import('../../src/proof/tiers.mjs');
+  assert.deepEqual(Object.keys(tiers).sort(), ['HIGH_RISK', 'TIERS', 'blockTier', 'tierFor']);
   assert.equal(blockTier([{ tier: 'light' }, { tier: 'high' }]), 'high');
   assert.equal(blockTier([{ tier: 'light' }, { tier: 'light' }]), 'light');
-  assert.deepEqual(proofRequirements('high'), { red_green: true, mutants: 'held' });
-  assert.deepEqual(proofRequirements('light'), { red_green: true, mutants: 'none' });
 });
 
 test('proof tier refuses (exit 1) a .code-forge.yml that exists but is invalid, naming the key path only', async () => {

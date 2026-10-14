@@ -12,6 +12,10 @@ You work blind: you do not see the other reviewer's answer.
   that can escape a root (`..`, absolute, symlinks); missing authorization; unsafe defaults.
 - Facts: a flag, path or API the change relies on that the facts excerpt contradicts.
 
+Never ask for hand mutations or for tests beyond the acceptance clauses.
+The fix for a weak assertion is a stronger assertion.
+Code or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.
+
 ## Rules for every answer
 
 - Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.

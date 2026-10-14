@@ -12,11 +12,11 @@
  *
  * `assemblePack` turns it into ONE pack for a block, in this order: the header (run, block, level,
  * owned files, test files when the block has them, worktree path and branch when it has one), the
- * commands (never run; each argv shown POSIX shell-quoted, so a pasted line expands nothing), each
- * rules file, then the lessons file — every file section headed by its source path (an empty
- * file: the heading alone). Over `max_lines` the lessons are cut first, then the
+ * commands (never run; each argv shown POSIX shell-quoted, so a pasted line expands nothing), the
+ * built-in proof rule, each rules file, then the lessons file — every file section headed by its
+ * source path (an empty file: the heading alone). Over `max_lines` the lessons are cut first, then the
  * rules from the last file backwards, each cut section ending in `[cut: N lines dropped]`; the
- * header and the commands are never cut.
+ * header, commands and proof rule are never cut; all count toward the budget.
  *
  * `reviewDigest` is the ONE builder of the review packets' rules digest (`## project rules`, ≤ 60
  * lines, `packet.mjs`): the rules files' text, then a `### lessons` subheading and the lessons.
@@ -41,6 +41,7 @@ import path from 'node:path';
 import { estimateTokens } from '../review/packet.mjs';
 import { splitLines } from '../review/context.mjs';
 import { redact } from '../util/redact.mjs';
+import { PROOF_RULE } from '../proof/rule.mjs';
 
 /** The pack's line cap when `context.max_lines` is not set. */
 export const DEFAULT_MAX_LINES = 300;
@@ -271,6 +272,8 @@ export function assemblePack({ settings, sources, block }) {
   if (keys.length === 0) header.push('(none)');
   // a command line can name a secret (a token in an argv): it is redacted as rules and lessons are
   for (const k of keys) header.push(`${k}: ${redact(argvText(settings.commands[k]))}`);
+
+  header.push(...splitLines(PROOF_RULE));
 
   /** @type {Array<{heading: string, body: string[], dropped: number}>} */
   const sections = sources.rules.map((r) => ({ heading: `## rules: ${r.path}`, body: [...r.lines], dropped: 0 }));

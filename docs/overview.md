@@ -47,6 +47,9 @@ Coding agents are good at writing code. The workflow around them is where things
 - **The coder's report is a claim sheet.** `block close` re-measures everything itself: files
   touched, reviews signed, gates green, clauses covered, line forecast, and red→green proof for
   high-tier files.
+
+  Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
+
 - **State lives outside the conversation.** A run record, a signed ledger and the plan file let a
   new session take over.
 
