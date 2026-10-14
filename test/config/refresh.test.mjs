@@ -38,7 +38,7 @@ before(async () => {
 });
 
 after(async () => {
-  await rm(tmpRoot, { recursive: true, force: true });
+  if (tmpRoot) await rm(tmpRoot, { recursive: true, force: true });
 });
 
 beforeEach(async () => {
