@@ -59,7 +59,7 @@ export const DIGEST_LESSONS_HEADING = '### lessons';
  * A refusal with a stable `code`. Thrown here: `bad-context` (a bad `context` value),
  * `control-character` (in a path or a header value), `outside`, `missing` (ENOENT), `unreadable`
  * (any other lstat or read error, with its code), `not-file`. Thrown by `src/cli/context.mjs`:
- * `no-block`, `bad-config`, `no-context`, `no-run-root`, `write-failed`.
+ * `no-block`, `bad-config`, `no-run-root`, `write-failed`.
  */
 export class ContextError extends Error {
   /** @param {string} code @param {string} message */
@@ -216,11 +216,12 @@ function readLines(repoRoot, rel, key) {
 
 /**
  * Every rules file and the lessons file, read. A missing or outside file is a refusal.
- * @param {string} repoRoot @param {ContextSettings} settings
+ * @param {string} repoRoot @param {ContextSettings | null} settings
  * @returns {{rules: Array<{path: string, lines: string[]}>, lessons: {path: string, lines: string[]} | null}}
  * @throws {ContextError}
  */
 export function readSources(repoRoot, settings) {
+  if (settings === null) return { rules: [], lessons: null };
   const rules = settings.rules.map((rel) => ({ path: rel, lines: readLines(repoRoot, rel, 'context.rules') }));
   const lessons = settings.lessons === null ? null : { path: settings.lessons, lines: readLines(repoRoot, settings.lessons, 'context.lessons') };
   return { rules, lessons };
@@ -249,7 +250,8 @@ export const argvText = (argv) => argv.map(argvToken).join(' ');
 
 /**
  * Build the pack text for a block (pure over what it is given).
- * @param {{settings: ContextSettings, sources: ReturnType<typeof readSources>, block: PackBlock}} opts
+ * Missing settings give a header and proof rule only, with the default line cap.
+ * @param {{settings: ContextSettings | null, sources: ReturnType<typeof readSources>, block: PackBlock}} opts
  * @returns {{text: string, lines: number, cut: number}} `cut`: the lines dropped.
  * @throws {ContextError} `control-character` when a header value holds one.
  */
@@ -267,11 +269,13 @@ export function assemblePack({ settings, sources, block }) {
     for (const f of block.tests) header.push(`- ${f}`);
   }
   if (block.worktree) header.push(`worktree: ${block.worktree.path}`, `branch: ${block.worktree.branch}`);
-  header.push('## commands (never run by code-forge)');
-  const keys = COMMAND_KEYS.filter((k) => Object.hasOwn(settings.commands, k));
-  if (keys.length === 0) header.push('(none)');
-  // a command line can name a secret (a token in an argv): it is redacted as rules and lessons are
-  for (const k of keys) header.push(`${k}: ${redact(argvText(settings.commands[k]))}`);
+  if (settings !== null) {
+    header.push('## commands (never run by code-forge)');
+    const keys = COMMAND_KEYS.filter((k) => Object.hasOwn(settings.commands, k));
+    if (keys.length === 0) header.push('(none)');
+    // a command line can name a secret (a token in an argv): it is redacted as rules and lessons are
+    for (const k of keys) header.push(`${k}: ${redact(argvText(settings.commands[k]))}`);
+  }
 
   header.push(...splitLines(PROOF_RULE));
 
@@ -282,7 +286,7 @@ export function assemblePack({ settings, sources, block }) {
   const total = () => header.length + sections.reduce((n, s) => n + 1 + s.body.length + (s.dropped > 0 ? 1 : 0), 0);
   // cut order: the lessons first, then the rules from the last file backwards
   for (const s of [...sections].reverse()) {
-    let excess = total() - settings.maxLines;
+    let excess = total() - (settings?.maxLines ?? DEFAULT_MAX_LINES);
     if (excess <= 0) break;
     // the marker takes one line: a section is only cut when that leaves it shorter
     if (s.body.length < 2) continue;

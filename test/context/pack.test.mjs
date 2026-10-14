@@ -309,8 +309,14 @@ describe('code-forge context pack: refusals write nothing', () => {
     assert.deepEqual(await packRows(slug, runId), []);
   }
 
-  test('no context key: exit 1 naming the key', async () => {
-    await refused({}, 'context: the config has no context key: add context (rules, lessons, commands, max_lines) to .code-forge.yml; nothing was written\n');
+  test('B118: no context key writes exactly the block header and proof rule with defaults', async () => {
+    const { repo, runId, slug, packFile } = await packRepo();
+    const res = await cli(['context', 'pack', '--run', runId, '--block', 'B1', '--json'], repo);
+    assert.deepEqual([res.code, res.stderr], [0, '']);
+    const expected = [...plainHeader(runId).slice(0, 7), ...PROOF_LINES, ''].join('\n');
+    assert.equal(readFileSync(packFile, 'utf8'), expected);
+    assert.deepEqual(res.json, { path: packFile, tokens: estimateTokens(expected), lines: 13, cut: 0, sha256: sha256Of(expected) });
+    assert.deepEqual((await packRows(slug, runId)).map(fieldsOf), [{ event: 'context.pack', run: runId, block: 'B1', ...res.json }]);
   });
 
   test('a bad context value is refused naming the key: max_lines 19, a command that is not an argv list of strings, a rules file named twice', async () => {

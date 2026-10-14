@@ -16,7 +16,8 @@
  * `<block>.md`. A row that cannot be appended removes only the temp file, so an earlier pack stays
  * as it was and nothing was written. A rename that fails after the row was appended says so.
  *
- * Exit codes: 0 written, 1 refused (no `context` key, a rules or lessons file missing or outside
+ * With no `context` key, the pack holds only the block header and built-in proof rule (300 lines).
+ * Exit codes: 0 written, 1 refused (a rules or lessons file missing or outside
  * the repository, a bad `context` value, a control character, an unknown run or block, a file or
  * ledger write that fails), 2 usage. Never runs any command it lists.
  */
@@ -94,7 +95,6 @@ export async function runContext(args, deps = {}) {
     if (!loaded.ok) throw new ContextError('bad-config', loaded.message);
     const live = /** @type {Record<string, any>} */ (loaded.config);
     const settings = contextSettings(live);
-    if (settings === null) throw new ContextError('no-context', 'the config has no context key: add context (rules, lessons, commands, max_lines) to .code-forge.yml');
     const sources = readSources(repoRoot, settings);
     const { text, lines, cut } = assemblePack({
       settings,
