@@ -13,7 +13,7 @@ import path from 'node:path';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
 import { newRunId } from '../state/paths.mjs';
 import { runRoot } from '../util/tmp.mjs';
-import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkReviewConcurrency, checkReviewState, checkTmp, checkTools } from './local.mjs';
+import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkLocks, checkReviewConcurrency, checkReviewState, checkTmp, checkTools } from './local.mjs';
 import { checkCoderSandbox, configuredProviders, pingRoles, probeCli, probeCodexRules, probeIsolation, probePathDeny } from './probes.mjs';
 import { row } from './rows.mjs';
 import { probeWorkerAndSigner, SIGNER_ROW } from './worker-probe.mjs';
@@ -67,6 +67,7 @@ export async function runDoctor(opts = {}, deps = {}) {
   };
   rows.push(...(await checkTools(toolOpts)));
   rows.push(...(await checkLedger()));
+  rows.push(...(await checkLocks()));
   rows.push(...checkTmp(cfg));
   rows.push(...(await checkReviewState(cfg)));
   rows.push(checkReviewConcurrency(cfg));

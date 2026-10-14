@@ -1,0 +1,145 @@
+import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { createHash } from 'node:crypto';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
+import path from 'node:path';
+import { after, beforeEach, test } from 'node:test';
+
+const home = mkdtempSync(path.join(os.tmpdir(), 'file-locks-'));
+const originalHome = process.env.HOME;
+process.env.HOME = home;
+assert.equal(os.homedir(), home, 'os.homedir must use the isolated HOME before imports');
+const { tryLock, withLock, listBadLocks } = await import('../../src/util/file-locks.mjs');
+const { checkLocks } = await import('../../src/doctor/local.mjs');
+const { processStartTime } = await import('../../src/state/run.mjs');
+const dir = path.join(home, '.code-forge', 'locks');
+const lockPath = (key) => path.join(dir, `${createHash('sha256').update(key).digest('hex')}.lock`);
+const put = (key, owner) => {
+  const bytes = JSON.stringify(owner);
+  writeFileSync(lockPath(key), bytes);
+  return bytes;
+};
+beforeEach(() => { rmSync(dir, { recursive: true, force: true }); mkdirSync(dir, { recursive: true }); });
+after(() => { process.env.HOME = originalHome; rmSync(home, { recursive: true, force: true }); });
+
+async function exitedPid() {
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  try {
+    await new Promise((resolve, reject) => { child.once('error', reject); child.once('exit', resolve); });
+    return child.pid;
+  } finally { if (child.exitCode === null) child.kill('SIGKILL'); }
+}
+
+test('free key: one live owner, held contender, release then acquisition', async () => {
+  const key = 'free\0key';
+  const first = await tryLock(key);
+  assert.equal(first.ok, true, 'first owner acquires the free key');
+  if (!first.ok) return;
+  try {
+    assert.deepEqual(JSON.parse(readFileSync(lockPath(key), 'utf8')), { key, pid: process.pid, start: await processStartTime(process.pid) });
+    assert.deepEqual(await tryLock(key), { ok: false, result: 'held' }, 'second owner is held while first is live');
+  } finally { first.release(); }
+  assert.equal(existsSync(lockPath(key)), false, 'release removes exactly the owner file');
+  const second = await tryLock(key);
+  assert.equal(second.ok, true, 'second owner acquires after release');
+  if (second.ok) { second.release(); second.release(); }
+});
+
+test('dead-owner break race: two afterRead arrivals yield exactly one holder', async () => {
+  const key = 'break-race';
+  put(key, { key, pid: await exitedPid(), start: 'exited child' });
+  let arrivals = 0;
+  let open;
+  const gate = new Promise((resolve) => { open = resolve; });
+  const afterRead = async () => { if (++arrivals === 2) open(); await gate; };
+  const results = await Promise.all([tryLock(key, { afterRead }), tryLock(key, { afterRead })]);
+  try {
+    assert.equal(arrivals, 2, 'both breakers read the dead owner before either proceeds');
+    assert.equal(results.filter((r) => r.ok).length, 1, 'exactly one breaker holds the lock');
+    assert.deepEqual(results.filter((r) => !r.ok), [{ ok: false, result: 'held' }]);
+    assert.equal(JSON.parse(readFileSync(lockPath(key), 'utf8')).pid, process.pid, 'winner replaces dead pid');
+    assert.equal(readdirSync(dir).length, 1, 'no stale break mutex or moved file');
+  } finally { results.forEach((r) => { if (r.ok) r.release(); }); }
+});
+
+test('live pid, other start time is broken; same start time is held', async () => {
+  const key = 'recycled-pid';
+  const bytes = put(key, { key, pid: process.pid, start: 'old start' });
+  assert.deepEqual(await tryLock(key, { alive: () => true, probe: async () => 'old start' }), { ok: false, result: 'held' });
+  assert.equal(readFileSync(lockPath(key), 'utf8'), bytes, 'same start time is never broken');
+  const acquired = await tryLock(key, { alive: () => true, probe: async () => 'other start' });
+  assert.equal(acquired.ok, true, 'a live recycled pid with another start time must be broken');
+  if (acquired.ok) acquired.release();
+});
+
+test('unreadable and malformed locks stay held; doctor names one path per warning', async () => {
+  mkdirSync(lockPath('unreadable'));
+  const bad = [null, { key: 1, pid: 2, start: 's' }, { key: 'k', pid: 1, start: 's' }, { key: 'k', pid: 2.5, start: 's' }, { key: 'k', pid: 2 }, { key: 'k', pid: 2, start: 1 }];
+  bad.forEach((owner, i) => put(`bad-${i}`, owner));
+  writeFileSync(lockPath('json'), '{');
+  const keys = ['unreadable', 'json', ...bad.map((_, i) => `bad-${i}`)];
+  for (const key of keys) {
+    let probed = 0;
+    assert.deepEqual(await tryLock(key, { alive: () => { probed++; return false; } }), { ok: false, result: 'held' });
+    assert.equal(probed, 0, `${key}: malformed owner is never probed or broken`);
+    assert.equal(existsSync(lockPath(key)), true, `${key}: bad lock remains`);
+  }
+  const paths = keys.map(lockPath).sort();
+  assert.deepEqual(await listBadLocks(), paths, 'every unreadable/bad lock is named exactly once');
+  assert.deepEqual(await checkLocks(), paths.map((p) => ({ id: 'locks', status: 'WARN', label: 'locks', detail: p })));
+  keys.forEach((k) => rmSync(lockPath(k), { recursive: true }));
+  put('good', { key: 'good', pid: process.pid, start: 's' });
+  assert.deepEqual(await listBadLocks(), [], 'well formed locks produce no bad paths');
+  assert.deepEqual(await checkLocks(), [{ id: 'locks', status: 'OK', label: 'locks', detail: 'no unreadable or malformed locks' }]);
+});
+
+test('withLock owns during fn and releases after return and throw', async () => {
+  const key = 'exit-paths';
+  assert.equal(await withLock(key, () => {
+    assert.equal(existsSync(lockPath(key)), true, 'returning fn runs with its lock file present');
+    return 42;
+  }), 42);
+  assert.equal(existsSync(lockPath(key)), false, 'return removes the file');
+  const failure = new Error('fn failed');
+  await assert.rejects(withLock(key, () => {
+    assert.equal(existsSync(lockPath(key)), true, 'throwing fn runs with its lock file present');
+    throw failure;
+  }), (err) => err === failure, 'the exact fn error is passed on');
+  assert.equal(existsSync(lockPath(key)), false, 'throw removes the file');
+});
+
+test('boundary: changed bytes are restored and an old release preserves a replacement', async () => {
+  const key = 'changed';
+  put(key, { key, pid: await exitedPid(), start: 'dead' });
+  const replacement = JSON.stringify({ key, pid: process.pid, start: 'replacement' });
+  const result = await tryLock(key, { afterRead: async () => writeFileSync(lockPath(key), replacement) });
+  try {
+    assert.deepEqual(result, { ok: false, result: 'held' }, 'changed owner cannot be broken');
+    assert.equal(readFileSync(lockPath(key), 'utf8'), replacement, 'changed bytes are linked back');
+    assert.deepEqual(readdirSync(dir), [path.basename(lockPath(key))], 'successful restore removes moved file');
+  } finally { if (result.ok) result.release(); }
+  rmSync(lockPath(key));
+  const owner = await tryLock(key);
+  assert.equal(owner.ok, true);
+  if (owner.ok) {
+    writeFileSync(lockPath(key), replacement);
+    owner.release();
+    assert.equal(readFileSync(lockPath(key), 'utf8'), replacement, 'old release never removes replacement bytes');
+  }
+});
+
+test('boundary: unknown start time stays held and withLock retries in FIFO order', async () => {
+  const key = 'unknown';
+  const bytes = put(key, { key, pid: process.pid, start: 's' });
+  assert.deepEqual(await tryLock(key, { alive: () => true, probe: async () => null }), { ok: false, result: 'held' });
+  assert.equal(readFileSync(lockPath(key), 'utf8'), bytes, 'unknown live start does not prove death');
+  const order = [];
+  const expectedStart = await processStartTime(process.pid);
+  const first = withLock(key, () => { assert.equal(JSON.parse(readFileSync(lockPath(key), 'utf8')).start, expectedStart, 'FIFO fn owns its file, replacing the previous owner'); order.push(1); }, { pollMs: 1 });
+  const second = withLock(key, () => { order.push(2); }, { pollMs: 1 });
+  rmSync(lockPath(key));
+  await Promise.all([first, second]);
+  assert.deepEqual(order, [1, 2], 'same-process waiters run in call order after held key is freed');
+  assert.equal(existsSync(lockPath(key)), false, 'last FIFO holder releases');
+});

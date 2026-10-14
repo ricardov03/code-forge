@@ -657,6 +657,11 @@ is no batch to wait for.
 More parallel tickets raise the spend rate. With `review.fair_share: true` (default false), each
 free slot goes to the block with the fewest running tickets, with oldest first for ties.
 
+Ticket claims and locks for files, blocks and the budget row now hold across processes.
+Lock files live in `~/.code-forge/locks`. A dead owner's lock is broken using its pid and
+process start time. An unreadable or malformed lock blocks its key until a human removes it.
+`code-forge doctor` names each bad lock by path.
+
 - **Same-file rule.** The same file (in the same block) is never reviewed twice at once. If the
   coder edits a file while its review runs, the new ticket waits. A ticket for another file takes
   the free slot.

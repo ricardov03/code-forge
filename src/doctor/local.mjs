@@ -25,12 +25,25 @@ import { assertRunId, runsDir } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { loadKey } from '../state/signer.mjs';
 import { listEntries } from '../util/reaper.mjs';
+import { listBadLocks } from '../util/file-locks.mjs';
 import { ownerState, runRootPath, tmpBase } from '../util/tmp.mjs';
 import { parallelTickets } from '../worker/loop.mjs';
 import { missingStateFiles } from '../worker/review-state.mjs';
 import { row } from './rows.mjs';
 
 /** @typedef {import('./rows.mjs').Row} Row */
+
+/** @returns {Promise<Row[]>} */
+export async function checkLocks() {
+  try {
+    const paths = listBadLocks();
+    return paths.length === 0
+      ? [row('locks', 'OK', 'locks', 'no unreadable or malformed locks')]
+      : paths.map((file) => row('locks', 'WARN', 'locks', file));
+  } catch (err) {
+    return [row('locks', 'WARN', 'locks', `could not list locks (${err?.code ?? 'error'})`)];
+  }
+}
 
 /** The ids of the `--quick` rows, in print order. */
 export const QUICK_IDS = Object.freeze(['config', 'links', 'keys']);
