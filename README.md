@@ -8,9 +8,11 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new in 0.11
+## What's new in 0.12
 
 In the next release:
+
+In 0.12.0:
 
 - **Faster fix rounds (B99).** `code-forge gates run --run <r> --block <id> --changed` runs only the tests of files changed since the last green gate run, and `{changed_files}` passes only the changed files to lint or format gates. It falls back to the normal scope when it cannot be sure.
 - **Write while reviews run (B100).** With `review.file_loop: overlap`, the coder enqueues each green file and keeps working. Before it ends, `forge review-file --wait-block <id> --run <r>` waits once for every file of the block.
@@ -18,6 +20,8 @@ In the next release:
 - **Python `*_test.py` tests pair with their source (B115).** Fix rounds and review packets now find `widget_test.py` for `widget.py`, as they already found `test_widget.py`.
 - **Commit watch (B104).** Set `review.file_loop: watch` and the coder just commits each green file. The worker sees the new commits, queues each owned file for review and drops older pending reviews of the same file. `review-file --wait-block` waits for them all.
 - **The proof rule travels with every block (B117).** Every context pack and every reviewer now carry one rule. Red→green: each new or changed test must fail on the old code first, then pass on the new code. No hand mutations. Proof scales with risk, and nothing is added that the task did not ask for.
+
+## What's new in 0.11
 
 In 0.11.0:
 
