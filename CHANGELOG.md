@@ -8,6 +8,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Close check: a `review.cap` row is superseded by a later verified human `review.reopened` row followed by a signed
+  `review.round` of the file's current content; a superseded cap row adds no ids, so old stop findings need no
+  waiver after a reopen (B123)
 - `review-file --wait-block`: a file whose newest review left open findings and whose content changed after it is not
   re-queued; the join answers `status: findings` with that ticket and writes one delivered marker; the next join
   queues the latest content once, so a commit made blind to the findings never counts as a stall round (B122)
