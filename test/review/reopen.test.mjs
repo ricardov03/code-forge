@@ -483,7 +483,7 @@ test('B72 (2)(6): the content a stop reviewed is the stop\'s own — a second st
   assert.equal((await f.reopenedRows()).length, 2);
 });
 
-test('B72 (2): a stopped state from before B72 (no stop_content_hash) uses only the review.cap row of its own stop; else the reopen is refused', async () => {
+test('B72 (2): a stopped state from before B72 (no stop_content_hash) uses only the review.cap row of its own stop; else only an unreviewed hash reopens', async () => {
   const f = await fixture('b72-legacy');
   await stopOnPatch(f);
   const hashA = f.hashOf();
@@ -506,10 +506,10 @@ test('B72 (2): a stopped state from before B72 (no stop_content_hash) uses only 
   // a legacy stopped state saved after that reopen: the only cap row is older than the reopen
   const anchor = JSON.parse(readFileSync(statePath(f.runId, 'B1', SRC), 'utf8'));
   await saveState({ runRootDir: freshDir('runroot-legacy'), rows: [], runId: f.runId, block: 'B1', file: SRC, key: f.key, state: anchor.state, seq: 3, writeRow: signedWrite, contentRoot: f.repo });
-  writeFile(f.repo, SRC, V(5));
+  writeFile(f.repo, SRC, V(3)); // a verified round exists for these bytes
   const unknown = await f.reopen();
   assert.deepEqual([unknown.code, unknown.out], [1, '']);
-  assert.equal(unknown.err, `block reopen: reopen-same-content: the content the stop of ${SRC} reviewed is unknown, so a change cannot be shown; waive its findings instead (block waive); nothing was recorded\n`);
+  assert.equal(unknown.err, `block reopen: reopen-same-content: the content the stop of ${SRC} reviewed is unknown and its current content has already been reviewed; change the file and run block reopen, or the owner can run block close --no-require-reviews; nothing was recorded\n`);
   assert.equal((await f.reopenedRows()).length, 1);
   // the worker agrees: the row at seq 3 is not usable (seq 4 is latest) and the stop repeats, no session
   const sessions = f.sessions.length;

@@ -847,6 +847,20 @@ async function coderTests(reportFlag, id) {
   }
   const sentinel = parseSentinel(text, id);
   if (sentinel?.status !== 'complete') return { ok: false, reason: `coder report FAILED: no ===BLOCK ${id} COMPLETE=== sentinel` };
+  // Keep diagnostics in the same segment as parseSentinel: any block's sentinel ends it.
+  let malformed = null;
+  let lastMalformed = null;
+  for (const rawLine of text.split('\n')) {
+    const line = rawLine.trim();
+    const end = parseSentinel(line);
+    if (end) {
+      if (end.blockId === id) lastMalformed = malformed;
+      malformed = null;
+    } else if (line.startsWith('TESTS ') && !parseSentinel(`${line}\n===BLOCK ${id} COMPLETE===`, id)?.tests) {
+      malformed = line.slice(0, 120);
+    }
+  }
+  if (lastMalformed !== null) return { ok: false, reason: `coder report FAILED: TESTS line malformed: ${lastMalformed}` };
   if (!sentinel.tests) return { ok: false, reason: 'coder report FAILED: no TESTS line' };
   if (sentinel.tests.exit !== 0) return { ok: false, reason: `coder report FAILED: TESTS exit=${sentinel.tests.exit}` };
   return { ok: true, command: sentinel.tests.command, exit: 0 };

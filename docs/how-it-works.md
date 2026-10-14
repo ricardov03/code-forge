@@ -779,7 +779,11 @@ flowchart TD
   reason) or a lost one: `code-forge block reopen <id> --file <path> --run <run> --reason <text>`.
   Only a stopped file needs content that differs from what its stop reviewed (every stop records
   that content's hash in the signed state); a lost state file (one the ledger cannot rebuild) is
-  reopened on its current content. It is human-only, like `block waive` (on the coder forbidden
+  reopened on its current content. For a legacy stop without a hash or matching verified
+  `review.cap`, reopen accepts only when the current hash has no verified `review.round` of
+  this run/block/file. It records `from_hash: null`, and the worker checks the same condition.
+  Otherwise change the file and reopen, or the owner can use `block close --no-require-reviews`;
+  waivers at an old hash cannot clear unreviewed current bytes. It is human-only, like `block waive` (on the coder forbidden
   list, and you run it in your own terminal after a yes, as above). It clears the cached result for the current content, then writes one signed
   `review.reopened` row (`by: human`, naming the file's latest state seq). There is at most one
   such row per state seq: a retry on the same content finds that row and writes no second one,
@@ -787,8 +791,9 @@ flowchart TD
   full review, up to `review.max_rounds_per_file` rounds at L2 again. The row works once. The
   block's L3 rung stays spent if it was used. If the content is changed back to what the stop
   reviewed before the next `review-file`, the stop repeats. Refusals write no row and exit 1:
-  `reopen-same-content` (the content is still what the stop reviewed, or that content is unknown;
-  change the file or waive instead), `reopen-tampered` (the state does not verify),
+  `reopen-same-content` (the content is still what the stop reviewed: change it or waive;
+  for unknown stop content with a verified round at the current hash, change the file and reopen,
+  or the owner can use `block close --no-require-reviews`), `reopen-tampered` (the state does not verify),
   `reopen-not-stopped` (no state, or an open or complete one), `reopen-block-not-open` (the block
   is stopped or closed), `reopen-not-owned` (the block does not own the file), `unknown_block`
   (the run does not know the block, as for `block waive`; this and `reopen-block-not-open` are
@@ -856,6 +861,8 @@ check runs before the other close checks, so a refusal here writes no row, not e
 - `coder report FAILED: no ===BLOCK <id> COMPLETE=== sentinel` (the block's last sentinel in the
   report is missing or FAILED);
 - `coder report FAILED: no TESTS line` (none in that sentinel's segment);
+- `coder report FAILED: TESTS line malformed: <line>` (a line starts with `TESTS ` but is invalid,
+  including text after `exit=<n>`; the line is cut to 120 characters);
 - `coder report FAILED: TESTS exit=<n>` (the exit is not 0).
 
 `--no-require-reviews` and `review.external` waive reviews, not tests: the check still runs. A

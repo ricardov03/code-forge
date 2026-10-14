@@ -18,7 +18,7 @@
  *  - `reopen-not-stopped` — no state, or a state that is open or complete;
  *  - `reopen-same-content` — a stopped file whose current content is the content its stop
  *    reviewed (no free re-roll: the human waives the findings instead), or a stop whose content
- *    is unknown;
+ *    is unknown and the current hash already has a verified review round;
  *  - `reopen-already-recorded` — a verified human row already names the file's latest anchor seq
  *    for other content (run `review-file`, or the content changed since that reopen);
  *  - `reopen-write-failed` — the signed row was not written.
@@ -32,7 +32,8 @@
  * which the worker sets on every stop (`src/worker/engine.mjs`) and which is signed through the
  * anchor. A state from before B72 has none: then the latest verified `review.cap` row of THIS
  * stop counts — written after the file's latest verified `review.reopened` row, with the state's
- * round and stop reason — else the content is unknown and the reopen is refused.
+ * round and stop reason — else the content is unknown. B114: unknown content can restart only
+ * when no verified review.round of this run/block/file names the current hash (from_hash: null).
  *
  * The worker (`fixLoopRound`) asks `reopenRowFor`: a verified human row of this run for the block
  * and file whose `at_seq` is the file's latest anchor seq starts a new state (round 1, a FULL
@@ -103,6 +104,15 @@ export function stopContentHash(state, rows, { runId, block, file, key }) {
 }
 
 /**
+ * A legacy stop with unknown content can restart only on bytes with no verified round here.
+ * @param {ReadonlyArray<Record<string, any>>} rows
+ * @param {{runId: string, block: string, file: string, key: Buffer, contentHash: string}} at
+ */
+function hasReviewedHash(rows, { runId, block, file, key, contentHash }) {
+  return rows.some((r) => r?.event === 'review.round' && r.run === runId && r.block === block && r.file === file && r.content_hash === contentHash && verified(r, key));
+}
+
+/**
  * The block checks every reopen runs first, before any config, key or ledger read: the run must
  * know the block (`unknown_block`, the code `block waive` uses) and the block must be open.
  * @param {Record<string, any>} record @param {string} runId @param {string} id
@@ -138,7 +148,8 @@ function latestRowAt(rows, { runId, block, file, key, seq }) {
  * verifies with the run key, of this run, block and file, `by: human`, and whose `at_seq` is the
  * file's latest anchor seq counts (the latest such row). A `lost` state needs `from: lost`; a
  * stopped state needs `from: stopped` AND current content that is neither the row's `from_hash`
- * nor the content the stop reviewed (`stopContentHash`; unknown ⇒ no restart).
+ * nor the content the stop reviewed (`stopContentHash`). Unknown content requires a null
+ * from_hash, the row's to_hash equal to current content, and no verified round at that hash.
  * @param {ReadonlyArray<Record<string, any>>} rows
  * @param {{runId: string, block: string, file: string, key: Buffer, status: string, state: Record<string, any> | null, seq: number, contentHash: string}} at
  * @returns {Record<string, any> | null}
@@ -149,7 +160,8 @@ export function reopenRowFor(rows, { runId, block, file, key, status, state, seq
   if (status === 'lost') return row.from === 'lost' ? row : null;
   if ((status === 'ok' || status === 'restored') && state?.status === 'stopped' && row.from === 'stopped') {
     const stopHash = stopContentHash(state, rows, { runId, block, file, key });
-    if (stopHash === null || contentHash === stopHash || contentHash === row.from_hash) return null;
+    if (contentHash === stopHash || contentHash === row.from_hash) return null;
+    if (stopHash === null && (row.from_hash !== null || row.to_hash !== contentHash || hasReviewedHash(rows, { runId, block, file, key, contentHash }))) return null;
     return row;
   }
   return null;
@@ -200,8 +212,8 @@ export async function reopenFile({ runId, id, file, reason, record, rows, key, w
     from = 'stopped';
     stopReason = typeof loaded.state.next?.reason === 'string' ? loaded.state.next.reason : 'stopped';
     fromHash = stopContentHash(loaded.state, runRows, { runId, block: id, file, key });
-    if (fromHash === null) {
-      throw new StateError('reopen-same-content', `reopen-same-content: the content the stop of ${file} reviewed is unknown, so a change cannot be shown; waive its findings instead (block waive); nothing was recorded`);
+    if (fromHash === null && hasReviewedHash(runRows, { runId, block: id, file, key, contentHash: current })) {
+      throw new StateError('reopen-same-content', `reopen-same-content: the content the stop of ${file} reviewed is unknown and its current content has already been reviewed; change the file and run block reopen, or the owner can run block close --no-require-reviews; nothing was recorded`);
     }
     if (fromHash === current) {
       throw new StateError('reopen-same-content', `reopen-same-content: ${file} still has the content its stop (${stopReason}) reviewed; change the file first, or waive its findings (block waive); nothing was recorded`);

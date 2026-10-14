@@ -17,6 +17,17 @@ waits on a second real consumer (plan §10.4, Q17).
   its current content enqueued; timeout exits 0 with `reason: wait_timeout`, `not_queued` files give `reason:
   not_queued`, no live worker exits 3 with `worker_down` (B100)
 
+### Changed
+
+- `block close` reports `coder report FAILED: TESTS line malformed: <line>` for a `TESTS ` line that does not end in
+  `exit=<n>`; no line at all still gives `no TESTS line` (B114)
+
+### Fixed
+
+- every fix-loop stop (stall, cap, split, stop-at, L3 exhaustion) records `stop_content_hash`, so `block reopen` works
+  after it; a stop with unknown content reopens when no verified `review.round` names the current hash (`from_hash:
+  null`), and the refusal no longer points to `block waive` (B114, #17)
+
 ## [0.11.0] — 2026-10-13
 
 ### Added

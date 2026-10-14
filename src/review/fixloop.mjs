@@ -126,6 +126,7 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {string | null} reviewed_content - the content the last counted round reviewed.
  * @property {boolean} l3_rung_used - the block's L3 rung (rule 5 or 6) was used — once per block.
  * @property {'open' | 'complete' | 'stopped'} status
+ * @property {string} [stop_content_hash] - bytes reviewed by a stop (absent in legacy states).
  * @property {NextStep | null} next
  * @property {{context_mode: string, context_lines: number} | null} [last_packet] - the last recheck round's context: one packet's, or over a Markdown recheck's section packets the summed lines and the one mode they share, else `mixed` (B54).
  * @property {'full' | 'recheck' | 'patch_check' | null} [pending_kind] - the round to re-run after a `retry`.
@@ -620,11 +621,11 @@ function retry(state, kind, reason) {
  * not written, the open set stays as it was, and the gate-relevant `review.cap` row goes through
  * the must-write path — a failed write is a `retry`, never a silent stop.
  * @param {FileState} state @param {LoopDeps} deps
- * @param {'full' | 'recheck' | 'patch_check'} kind @param {string} file
+ * @param {'full' | 'recheck' | 'patch_check'} kind @param {string} file @param {string} contentHash
  * @param {{status: string, tokensIn?: number, budget?: number, section?: string | null}} packet - the non-ok packet (a Markdown section names its heading).
  * @returns {Promise<FileState>}
  */
-async function stopBeforeRound(state, deps, kind, file, packet) {
+async function stopBeforeRound(state, deps, kind, file, contentHash, packet) {
   const reason = packet.status;
   const size =
     typeof packet.tokensIn === 'number' && typeof packet.budget === 'number'
@@ -633,6 +634,7 @@ async function stopBeforeRound(state, deps, kind, file, packet) {
   const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id), ...size };
   if (!(await mustNote(deps, row))) return retry(state, kind, 'ledger_write_failed');
   state.status = 'stopped';
+  state.stop_content_hash = contentHash;
   state.next = { action: 'stop', reason, ...size };
   state.pending_kind = null;
   return state;
@@ -703,7 +705,7 @@ export async function runRound(state, deps, opts = {}) {
           // a Markdown file whose packet is `split_required`, rechecked section by section (B54);
           // any other status stops as it always did
           const packed = whole.status === 'split_required' && isMarkdownFile(current.rel) ? packRecheck(diff, pending, whole.budget, moves) : null;
-          if (!packed || packed.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, packed ?? whole);
+          if (!packed || packed.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, current.hash, packed ?? whole);
           parts = packed.sections.map((sec) => ({ index: sec.index, heading: sec.headings[0], diff: sec.diff, open: sec.open, keys: sec.keys }));
         }
         // EVERY packet is built and held to the budget BEFORE any session runs: a section over it
@@ -718,9 +720,9 @@ export async function runRound(state, deps, opts = {}) {
           const moved = movedText(moves, diff.content, part.keys);
           const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved, paired });
           // a packet that fails to build stops with ITS status (and size, when it has one)
-          if (packet.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, { ...packet, section: part.heading });
+          if (packet.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, current.hash, { ...packet, section: part.heading });
           const size = recheckTokens(part.diff, part.open, moved);
-          if (size > whole.budget) return stopBeforeRound(state, deps, kind, current.rel, { status: 'split_required', tokensIn: size, budget: whole.budget, section: part.heading });
+          if (size > whole.budget) return stopBeforeRound(state, deps, kind, current.rel, current.hash, { status: 'split_required', tokensIn: size, budget: whole.budget, section: part.heading });
           built.push(packet);
         }
         /** @type {Set<Finding>} the pending findings a session that LISTED them resolved */
@@ -804,7 +806,10 @@ export async function runRound(state, deps, opts = {}) {
     const after = new Set(draft.open.map((f) => f.id));
     const closedIds = new Set(state.open.map((f) => f.id).filter((id) => !after.has(id))).size;
     draft.next = decideNext(draft, openBefore, s, kind, closedIds);
-    if (draft.next.action === 'stop') draft.status = 'stopped';
+    if (draft.next.action === 'stop') {
+      draft.status = 'stopped';
+      draft.stop_content_hash = current.hash;
+    }
   }
   const rows = [...lateRows, roundRow];
   if (draft.status === 'stopped') rows.push({ event: 'review.cap', file: current.rel, round: draft.round, reason: draft.next.reason, open: draft.open.map((f) => f.id) });
