@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- The leak test in `test/worker/orphan.test.mjs` takes the current contents of the repo's `.code-forge` folder as its baseline, so `npm test` passes when that folder already holds files (B126).
 - Close check: a `review.cap` row is superseded by a later verified human `review.reopened` row followed by a signed
   `review.round` of the file's current content; a superseded cap row adds no ids, so old stop findings need no
   waiver after a reopen (B123)

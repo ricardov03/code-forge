@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 127,
+  "block_count": 128,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2170,6 +2170,19 @@
         "B122"
       ],
       "note": "A review.cap row is superseded when a verified human review.reopened row comes after it and then a signed review.round of the file's current content. A superseded cap row adds no ids to the close check, so after a reopen only the fresh review's own findings need a fix, waiver or answer."
+    },
+    "B126": {
+      "title": "Leak test ignores files already in the repo's .code-forge",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "test/worker/orphan.test.mjs"
+      ],
+      "depends_on": [
+        "B113"
+      ],
+      "note": "The final-check test in orphan.test.mjs forged an empty baseline, so files already in the repo's .code-forge folder (normal when code-forge builds itself) showed up as leaks and failed npm test. The test now records the folder's current contents as the baseline and still checks the exact planted leak list."
     }
   }
 }

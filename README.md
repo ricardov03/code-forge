@@ -22,6 +22,7 @@ In the next release:
 - **One registry file per worker (B106).** Each worker writes its own file in `.code-forge/workers/` and keeps it fresh with its heartbeat. A new worker starts only when the live count is under the limit, which is 1 for now. The count and the new file are written under one lock, so two workers that start at the same time cannot both run. A file of a dead worker is removed at the next start. A file that cannot be read blocks the start, and `code-forge doctor` names it.
 - **The join shows findings before it rechecks (B122).** Sometimes the coder commits again before reading the last review. At `review-file --wait-block`, such a file is not reviewed again yet. The join answers `findings` with the old ticket, so the coder reads and fixes them first. The next join rechecks the latest content once. A blind commit no longer counts as a stall round.
 - **A reopen clears old stop findings (B123).** After `block reopen` and a fresh review of the new content, the close no longer asks you to waive the findings of the old stop. Only the fresh review's findings count.
+- **The test suite passes on machines that use code-forge on itself (B126).** A leak test no longer counts files that were already in the repo's `.code-forge` folder.
 
 In 0.12.0:
 
