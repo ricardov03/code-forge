@@ -79,6 +79,7 @@ export async function tryLock(key, opts = {}) {
   try { guard = openSync(mutex, 'wx', 0o600); }
   catch { return HELD; }
   try {
+    writeFileSync(guard, bytes);
     try { if (!readFileSync(file).equals(seen)) return HELD; }
     catch { return HELD; }
     unlinkSync(file);
@@ -102,13 +103,16 @@ export function withLock(key, fn, opts = {}) {
   });
 }
 
-/** @returns {string[]} paths of unreadable or malformed lock files. */
+/** @returns {string[]} paths of unreadable/malformed locks or dead-owner break mutexes. */
 export function listBadLocks() {
   let names;
   try { names = readdirSync(locksDir()); }
   catch (err) { if (err.code === 'ENOENT') return []; throw err; }
-  return names.filter((name) => name.endsWith('.lock')).sort().map((name) => path.join(locksDir(), name)).filter((file) => {
-    try { return ownerOf(readFileSync(file)) === null; }
+  return names.filter((name) => name.endsWith('.lock') || name.endsWith('.lock.break')).sort().map((name) => path.join(locksDir(), name)).filter((file) => {
+    try {
+      const owner = ownerOf(readFileSync(file));
+      return owner === null || (file.endsWith('.lock.break') && !alive(owner.pid));
+    }
     catch { return true; }
   });
 }

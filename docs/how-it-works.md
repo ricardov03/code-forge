@@ -662,6 +662,7 @@ Lock files live in `~/.code-forge/locks`. A dead owner's lock is broken using it
 process start time, comparing its bytes again under a per-key break mutex before removal.
 An unreadable or malformed lock blocks its key until a human removes it.
 `code-forge doctor` names each bad lock by path.
+A break mutex left by a crashed process blocks its key until a human removes it, and doctor names it.
 
 - **Same-file rule.** The same file (in the same block) is never reviewed twice at once. If the
   coder edits a file while its review runs, the new ticket waits. A ticket for another file takes

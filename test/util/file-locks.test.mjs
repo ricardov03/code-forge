@@ -118,6 +118,52 @@ test('live pid, other start time is broken; same start time is held', async () =
   if (acquired.ok) acquired.release();
 });
 
+test('break mutex records its live owner while the dead lock is replaced', async () => {
+  const key = 'mutex-owner';
+  put(key, { key, pid: await exitedPid(), start: 'dead' });
+  let observed;
+  const open = fs.openSync;
+  const hook = mock.method(fs, 'openSync', (file, flags, mode) => {
+    if (file === lockPath(key) && existsSync(`${file}.break`)) {
+      observed = JSON.parse(readFileSync(`${file}.break`, 'utf8'));
+    }
+    return open(file, flags, mode);
+  });
+  syncBuiltinESMExports();
+  let lock;
+  try {
+    lock = await tryLock(key);
+    assert.equal(lock.ok, true);
+    assert.deepEqual(observed, { key, pid: process.pid, start: await processStartTime(process.pid) });
+    assert.equal(existsSync(`${lockPath(key)}.break`), false, 'successful breaker removes its mutex');
+  } finally {
+    hook.mock.restore();
+    syncBuiltinESMExports();
+    if (lock?.ok) lock.release();
+  }
+});
+
+test('doctor names dead, malformed and unreadable break mutexes but leaves live ones alone', async () => {
+  const deadPid = await exitedPid();
+  const deadKey = 'dead-mutex';
+  put(deadKey, { key: deadKey, pid: deadPid, start: 'dead' });
+  const dead = `${lockPath(deadKey)}.break`;
+  const deadBytes = JSON.stringify({ key: deadKey, pid: deadPid, start: 'dead' });
+  writeFileSync(dead, deadBytes);
+  const live = `${lockPath('live-mutex')}.break`;
+  writeFileSync(live, JSON.stringify({ key: 'live-mutex', pid: process.pid, start: await processStartTime(process.pid) }));
+  const malformed = `${lockPath('malformed-mutex')}.break`;
+  writeFileSync(malformed, JSON.stringify({ key: 'malformed-mutex', pid: 2.5, start: 's' }));
+  const unreadable = `${lockPath('unreadable-mutex')}.break`;
+  mkdirSync(unreadable);
+  const paths = [dead, malformed, unreadable].sort();
+  assert.deepEqual(listBadLocks(), paths, 'all unusable break mutexes are reported; live mutex is omitted');
+  assert.deepEqual(await checkLocks(), paths.map((p) => ({ id: 'locks', status: 'WARN', label: 'locks', detail: p })));
+  assert.deepEqual(await tryLock(deadKey), { ok: false, result: 'held' }, 'a crashed mutex is never auto-broken');
+  assert.equal(readFileSync(dead, 'utf8'), deadBytes, 'crashed mutex stays for human removal');
+  assert.equal(JSON.parse(readFileSync(lockPath(deadKey), 'utf8')).pid, deadPid, 'blocked owner lock stays untouched');
+});
+
 test('unreadable and malformed locks stay held; doctor names one path per warning', async () => {
   mkdirSync(lockPath('unreadable'));
   const bad = [null, { key: 1, pid: 2, start: 's' }, { key: 'k', pid: 1, start: 's' }, { key: 'k', pid: 2.5, start: 's' }, { key: 'k', pid: 2 }, { key: 'k', pid: 2, start: 1 }];
