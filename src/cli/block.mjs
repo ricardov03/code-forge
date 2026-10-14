@@ -193,6 +193,7 @@
  * through `closeBlock`'s `extraChecks`.
  */
 
+import { statSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
@@ -288,6 +289,24 @@ const USAGE =
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
 const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen'];
+
+/** Refuse likely shell quoting slips before any row is written.
+ * @param {string} workspace @param {string[]} entries @param {string} label
+ */
+function checkWhitespacePaths(workspace, entries, label) {
+  for (const entry of entries) {
+    if (!/\s/u.test(entry)) continue;
+    let stat;
+    try {
+      stat = statSync(path.join(workspace, entry));
+    } catch {
+      // A missing or unreadable path cannot establish a literal whitespace-containing name.
+    }
+    if (!stat?.isFile() && !stat?.isDirectory()) {
+      throw new StateError(label === 'owned files' ? 'bad-owned' : 'bad-tests', `${label}: invalid path ${JSON.stringify(entry)}: contains whitespace but names no existing file or directory`);
+    }
+  }
+}
 const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report'];
 
 /**
@@ -345,6 +364,10 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'reopen' && typeof flags.file !== 'string') throw new StateError('usage', 'block reopen needs --file <path>');
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     const record = await readRun(runId);
+    if (sub === 'open') {
+      checkWhitespacePaths(record.workspace, /** @type {string[]} */ (flags.owned), 'owned files');
+      if (Array.isArray(flags.tests)) checkWhitespacePaths(record.workspace, flags.tests, 'test files');
+    }
     // B80: waive and reopen are the human's — asked at a terminal before anything is written (not
     // even the autopilot expiry rows below); no terminal is exit 2, a "no" is exit 1
     if (sub === 'waive' || sub === 'reopen') {
