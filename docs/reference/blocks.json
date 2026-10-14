@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 123,
+  "block_count": 124,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2097,6 +2097,25 @@
         "B101"
       ],
       "note": "attempt 1 refused at close (coder transcript read ~/.code-forge/runs); re-run clean; two stopped reviews reopened by the owner and approved"
+    },
+    "B121": {
+      "title": "Watch holds rechecks until the block join",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "docs/reference/config.md",
+        "schema/code-forge.schema.json",
+        "skill/references/code.md",
+        "skill/references/review.md",
+        "src/worker/watch.mjs",
+        "test/worker/watch.test.mjs"
+      ],
+      "depends_on": [
+        "B105"
+      ],
+      "note": "Watch mode queues a file's first commit at once; later commits of a file that already has a ticket are held (watch.held row) until review-file --wait-block queues one ticket for the latest content. Stops a half-done fix commit from using the file's review rounds."
     }
   }
 }

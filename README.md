@@ -18,6 +18,7 @@ In the next release:
 - **Gate results are recorded again (B120).** `gates run --run <r> --block <id>` now writes its `gate.done` row also when no gate uses `{test_files}`. Before, the row was missing, so `block close` warned after a green run and `status` showed no gate result.
 - **Fair share between blocks (B101).** Set `review.fair_share: true` and each free review slot goes to the block with the fewest running reviews. A block with many queued files no longer makes another block wait. Without the key, the order stays oldest first.
 - **Locks hold across processes (B105).** Ticket claims and the locks for files, blocks and the budget row now work across worker processes. Lock files live in `~/.code-forge/locks`. A lock of a dead process is taken over safely. A bad lock, or a break lock left by a crashed process, blocks its key until you remove it, and `code-forge doctor` names it.
+- **Watch waits for the whole fix (B121).** In watch mode, a file's first commit is reviewed at once. A later commit of a file that already has a review is held, and a `watch.held` row records it. `review-file --wait-block` then queues one review for the file's latest content. A half-done fix commit no longer uses up the file's review rounds.
 
 In 0.12.0:
 

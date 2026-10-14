@@ -8,6 +8,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Watch mode holds rechecks: a commit of a file that already has a ticket gets no ticket, only a `watch.held`
+  row; `review-file --wait-block` queues one ticket for the latest content; older pending tickets are still
+  superseded (B121)
 - Locks now hold across processes (`src/util/file-locks.mjs`, `~/.code-forge/locks`): ticket claims, the per-file and
   block locks, the budget row, schema fallback and autopilot actions; a dead owner's lock (pid + start time) is broken
   under a per-key break mutex; `doctor` lists bad locks and crashed break mutexes (B105)
