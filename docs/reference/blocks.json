@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 124,
+  "block_count": 125,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2116,6 +2116,26 @@
         "B105"
       ],
       "note": "Watch mode queues a file's first commit at once; later commits of a file that already has a ticket are held (watch.held row) until review-file --wait-block queues one ticket for the latest content. Stops a half-done fix commit from using the file's review rounds."
+    },
+    "B106": {
+      "title": "Worker registry: one announcement per worker",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/code.md",
+        "src/cli/review.mjs",
+        "src/doctor/local.mjs",
+        "src/doctor/worker-probe.mjs",
+        "src/worker/loop.mjs",
+        "src/worker/queue.mjs",
+        "test/worker/registry.test.mjs"
+      ],
+      "depends_on": [
+        "B105"
+      ],
+      "note": "Each worker writes <repo>/.code-forge/workers/<pid>-<start_time>.json next to worker.json and beats both; boot counts live entries and announces under one cross-process lock (limit 1); boot prunes dead entries (known start-time mismatch = dead); an unreadable entry blocks boot and doctor lists it; liveWorker keeps the B30 fresh-heartbeat rule."
     }
   }
 }

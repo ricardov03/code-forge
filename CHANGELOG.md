@@ -8,6 +8,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Worker registry: each worker writes `<repo>/.code-forge/workers/<pid>-<start_time>.json` next to `queue/worker.json`
+  and beats both; boot counts live entries and writes its entry under one cross-process lock (limit 1); boot
+  removes dead entries (a known start-time mismatch is dead); an unreadable entry blocks the boot and `doctor`
+  lists it; `liveWorker` keeps the B30 fresh-heartbeat rule (B106)
 - Watch mode holds rechecks: a commit of a file that already has a ticket gets no ticket, only a `watch.held`
   row; `review-file --wait-block` queues one ticket for the latest content; older pending tickets are still
   superseded (B121)
