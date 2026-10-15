@@ -215,3 +215,23 @@ test('clause 5: close prints each verified agent reopen and JSON adds only a non
     else assert.equal(Object.hasOwn(JSON.parse(text), 'agent_reopens'), false, kind);
   }
 });
+
+test('an agreed agent reopen and fresh clean review let close supersede old cap ids without waivers', async () => {
+  const f = await fixture();
+  // Current bytes were approved before a stop on other bytes. No new approval can mask
+  // whether the agreed reopen and subsequent review supersede that stop's cap ids.
+  await f.sign({ event: 'review.approved', content_hash: f.hash, round: 1 });
+  await f.sign({ event: 'review.cap', content_hash: f.fromHash, open: ['C1', 'C2'] });
+  assert.equal((await f.reopen())[0], 0);
+  await f.sign({ event: 'review.round', content_hash: f.hash, round: 1, open_after: 0 });
+  await f.sign({ event: 'review.result', content_hash: f.hash, status: 'reviewed', approved: true, open: [] });
+  const [code, text] = await f.close(['--json']);
+  assert.equal(code, 0, text);
+  const result = JSON.parse(text);
+  assert.deepEqual([result.block, result.event, result.status], ['B1', 'closed', 'closed']);
+  assert.deepEqual(result.agent_reopens, [{ file: FILE, reason: REASON, verdict: AGREE.answer }]);
+  assert.equal((await f.rows()).filter((r) => r.event === 'review.waived').length, 0);
+  assert.equal((await f.reopens()).length, 1);
+  assert.equal(f.calls.length, 1);
+  assert.equal(f.prompts(), 0);
+});

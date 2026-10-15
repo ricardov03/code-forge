@@ -43,7 +43,7 @@
  *  - `review_cap`: a file stopped at `review_cap` has an open finding with no signed
  *    `review.waived {by: human}` row — unless a signed approval of the file's current hash comes
  *    AFTER the cap row (ledger order) and no later refusal row made it stale (the human fixed it
- *    by hand and it was reviewed), or a verified human reopen after the cap is followed by a
+ *    by hand and it was reviewed), or a verified human or agreed agent reopen after the cap is followed by a
  *    signed review round of the current bytes; a finding already refused as `not_approved` for that file is
  *    not repeated. B73: this detail, and an `unreviewed` detail for a file with a cap row, ends
  *    with the stop's ways out (`exits: block reopen, block waive, review-file --answers,
@@ -262,14 +262,15 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
   // namedOnHash}), which has no key and can only refuse; it then reads no autopilot waiver
   const ok = verify ?? ((/** @type {Record<string, any>} */ r) => verified(r, key));
   const mine = rows.filter((r) => r?.block === block && (runId === undefined || r.run === undefined || r.run === runId));
-  /** A human reopen followed by a real review of the current bytes clears older cap ids.
+  /** A verified human or agreed agent reopen followed by a real review clears older cap ids.
    * @param {Record<string, any>} cap @returns {boolean}
    */
   const supersededCap = (cap) => {
     const hash = current.get(cap.file);
     if (hash === undefined) return false;
     const at = mine.indexOf(cap);
-    return mine.some((r, i) => i > at && r.event === 'review.reopened' && r.run === runId && r.file === cap.file && r.by === 'human' && ok(r)
+    return mine.some((r, i) => i > at && r.event === 'review.reopened' && r.run === runId && r.file === cap.file
+      && (r.by === 'human' || (r.by === 'agent' && r.verdict?.verdict === 'agree')) && ok(r)
       && mine.some((round, j) => j > i && round.event === 'review.round' && round.run === runId && round.file === cap.file && round.content_hash === hash && ok(round)));
   };
   /**

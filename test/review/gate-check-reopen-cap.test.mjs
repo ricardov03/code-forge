@@ -67,6 +67,31 @@ test('clause 3: a fresh review approving current bytes passes as approved withou
   assert.deepEqual(check([...rows.slice(1), approval]), { ok: true, refusals: [], waivedAll: [] });
 });
 
+test('an agreed verified agent reopen and fresh clean review supersede the cap; other agent rows still need waivers', () => {
+  const approval = signed({ event: 'review.approved' });
+  const cleanRound = signed({ event: 'review.round', round: 1, open_after: 0 });
+  const cleanResult = signed({ event: 'review.result', status: 'reviewed', approved: true, open: [] });
+  const agent = { ...unsigned(reopen), by: 'agent', verdict: { verdict: 'agree', reason: 'The cited fix addresses the stop.' } };
+  assert.deepEqual(check([approval, cap, signed(agent), cleanRound, cleanResult]), { ok: true, refusals: [], waivedAll: [] });
+  const capRefusals = ['F1', 'F2', 'F3'].map((finding) => ['review_cap', FILE, finding]);
+  /** @type {Array<[string, Record<string, any>, boolean]>} */
+  const cases = [
+    ['disagree', signed({ ...agent, verdict: { verdict: 'disagree', reason: 'Insufficient evidence.' } }), false],
+    ['missing verdict', signed({ ...agent, verdict: undefined }), false],
+    ['unsigned', agent, true],
+    ['bad MAC', { ...signed(agent), mac: '0'.repeat(64) }, true],
+  ];
+  for (const [name, row, unproven] of cases) {
+    const rows = [approval, cap, row, cleanRound, cleanResult];
+    const result = check(rows);
+    assert.equal(result.ok, false, name);
+    assert.deepEqual(refusals(result), [...capRefusals, ...(unproven ? [['unproven', FILE, null]] : [])], name);
+    assert.deepEqual(result.waivedAll, [], name);
+    if (!unproven) assert.deepEqual(check([...rows, ...['F1', 'F2', 'F3'].map(waive)]), { ok: true, refusals: [], waivedAll: [] }, name);
+  }
+  assert.deepEqual(refusals(check([approval, cap, signed(agent)])), capRefusals, 'a reopen alone does not supersede the cap');
+});
+
 test('clause 4: missing, invalid, mismatched or out-of-order reopen/round rows keep all three old cap ids', () => {
   // Positive control distinguishes a real supersede from merely retaining every cap.
   assert.deepEqual(check([cap, reopen, round, refusal, waive('F4')]), { ok: true, refusals: [], waivedAll: [waived(['F4'])] });
