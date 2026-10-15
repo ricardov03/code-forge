@@ -1172,27 +1172,42 @@ const B80_ONCE = {
     'A waive also checks ownership and that the finding is recorded.',
   ],
   'skill/references/code.md': [
-    'You print the exact command; the human runs it in their own terminal. The rule: a coder or the orchestrator never runs it and never answers its prompt. Separately, as a fact of the verb: when stdin or stdout is not a terminal (a pipe, or a process started with no terminal) it exits 2',
+    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
+    'A coder never runs either verb.',
     'Never run it yourself, and never for a coder',
   ],
   'skill/references/ledger.md': [
-    'no row on a "no", a cancel, no terminal, `--yes` (a usage error), or a pre-check refusal (a malformed or control-character finding id or `--file`, an unknown block, a file the block does not own, an unknown finding)',
+    '`block waive` writes no row on a "no", a cancel, no terminal without `--yes`, a `--yes` refusal, or a pre-check refusal.',
+    'The `--yes` refusal codes are `waive-yes-critical`, `waive-yes-no-evidence`, and `waive-yes-disagreed`.',
+    'An agreed `block waive --yes` writes one signed `review.waived` row with `by: agent`.',
     'no row on a "no", a cancel, no terminal, `--yes` (a usage error), or a pre-check refusal (a malformed or control-character `--file`, an unknown or not-open block, a file the block does not own)',
   ],
   'skill/references/security.md': [
-    'The orchestrator prints the exact command and never answers the prompt; the human types the command in their own terminal.',
-    'Under an active autopilot grant `block waive` and `block reopen` still prompt the same way; only `block close --no-require-reviews` is refused under a grant. Autopilot\'s own waive path, `forge autopilot waive` (written `by: autopilot`), needs no terminal.',
+    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
+    'A coder never runs either verb.',
+    'Under an active autopilot grant the human paths still prompt.',
+    'Autopilot\'s own waive path, `forge autopilot waive` (written `by: autopilot`), needs no terminal.',
   ],
   'skill/references/adapters/solo.md': [
-    'Print the exact command: the orchestrator never answers this prompt; the human types the command in their own terminal. You and the coder never run it.',
-    'Under an active autopilot grant `block waive` and `block reopen` still prompt; only `block close --no-require-reviews` is refused. Autopilot\'s own waive path, `forge autopilot waive` (`by: autopilot`), needs no terminal.',
-    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review, and it is also human-only and asks the same way.',
+    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
+    'A coder never runs either verb.',
+    'Under an active autopilot grant the human paths still prompt.',
+    'Autopilot\'s own waive path, `forge autopilot waive` (`by: autopilot`), needs no terminal.',
+    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review. It is human-only and asks for a yes at a terminal.',
   ],
   'skill/references/adapters/claude-code.md': [
-    'Print the exact command: the orchestrator never answers this prompt; the human types the command in their own terminal. You and the subagent never run it.',
-    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review, and it is also human-only and asks the same way.',
+    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
+    'A coder never runs either verb.',
+    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review. It is human-only and asks for a yes at a terminal.',
   ],
-  'skill/references/proof.md': ['the orchestrator prints the exact command and the human runs it in their own terminal; there is no `--yes`'],
+  'skill/references/proof.md': [
+    'The proof waiver has unknown severity and no `--yes` path.',
+    'The orchestrator prints the exact command and the human runs it in their own terminal (`review.md` §5)',
+  ],
   'docs/how-it-works.md': [
     'For `block reopen` and for `block waive` on a critical or unknown-severity finding, the orchestrator prints the exact command with the human\'s reason; you run it in your own terminal.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding, with evidence, and a fresh judge must agree.',
@@ -1201,7 +1216,8 @@ const B80_ONCE = {
     'A waive also checks ownership and that the finding is recorded.',
   ],
   'docs/concepts.md': [
-    'You run `block waive` (and `block reopen`) in your own terminal: it asks for a yes, has no `--yes`, and with no terminal records nothing; the orchestrator only prints the exact command and never answers the prompt.',
+    '`block reopen` and `block waive` on a critical or unknown-severity finding are human-only with no `--yes` path.',
+    '`block waive --yes` exists for a recorded warning or nit finding with evidence and a fresh judge.',
     'A coder is never told to run it, and the coder forbidden list denies it where the coder\'s CLI loads deny rules',
   ],
 };
@@ -1209,14 +1225,14 @@ const B80_ONCE = {
 const B80_GONE_ALL = ['are terminals; it does not prove a human','(a pipe, a child process)', 'for a fixed stopped file)'];
 const B80_GONE = {
   'skill/references/review.md': ['run by the orchestrator only after the human says so', '(`block reopen …` for a reopen)', 'An active autopilot grant changes nothing here'],
-  'skill/references/code.md': ['only after the human says so in chat', 'Waive each open finding, after the human says so', 'from a tool call (no terminal)'],
-  'skill/references/security.md': ['an autopilot grant does not change it', 'in a tool call — both ask'],
-  'skill/references/adapters/solo.md': ['from a Solo process there is no terminal', 'and is refused under an active autopilot grant'],
-  'skill/references/adapters/claude-code.md': ['a Bash tool call has no terminal'],
+  'skill/references/code.md': ['a coder or the orchestrator never runs it', '**`block waive` and `block reopen` are run by the human', 'only after the human says so in chat', 'Waive each open finding, after the human says so', 'from a tool call (no terminal)'],
+  'skill/references/security.md': ['There is no `--yes`.', 'the row requires `by: human`', 'an autopilot grant does not change it', 'in a tool call — both ask'],
+  'skill/references/adapters/solo.md': ['You and the coder never run it.', 'which asks for a yes at a terminal and has no `--yes`', 'from a Solo process there is no terminal', 'and is refused under an active autopilot grant'],
+  'skill/references/adapters/claude-code.md': ['You and the subagent never run it.', 'which asks for a yes at a terminal and has no `--yes`', 'a Bash tool call has no terminal'],
   'skill/references/ledger.md': ['a "no" or no terminal writes no row'],
   'docs/how-it-works.md': ['(or `block reopen …`)', 'An autopilot grant does not change this;'],
   'docs/getting-started.md': ['added in a later block'],
-  'docs/concepts.md': ['A coder can never run it'],
+  'docs/concepts.md': ['A human-only decision to accept an open finding', 'You run `block waive` (and `block reopen`) in your own terminal', 'A coder can never run it'],
 };
 
 /**
