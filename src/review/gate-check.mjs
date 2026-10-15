@@ -124,7 +124,7 @@ const verified = (row, key) => verifyRow(row, key).ok;
  *   but never the proof check; `highPaths` is `proof.tiers.high.paths`. Both are REQUIRED: a
  *   caller that leaves one out gets a TypeError, never a silent default that skips the proof.
  *   `runId` is required too: the proof check matches its rows on this run only (fix round 4).
- * @returns {{ok: boolean, refusals: Refusal[], waivedAll: WaivedAll[], acceptedHits: import('./accept-hit.mjs').AcceptedHit[]}} `waivedAll` (B70): the files
+ * @returns {{ok: boolean, refusals: Refusal[], waivedAll: WaivedAll[], acceptedHits?: import('./accept-hit.mjs').AcceptedHit[]}} `waivedAll` (B70): the files
  *   that passed as `reviewed_by_waiver` — empty whenever the check refuses.
  * @throws {TypeError} `runId`, `proofFiles` or `highPaths` undefined
  */
@@ -233,7 +233,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
     const w = waiverFor(/** @type {string} */ (r.file), PROOF_FINDING, 'unknown');
     if (!w.waived) refusals.push(orInvalid(r, PROOF_FINDING, w.invalid));
   }
-  return { ok: refusals.length === 0, refusals, waivedAll: refusals.length === 0 ? waivedAll : [], acceptedHits };
+  return { ok: refusals.length === 0, refusals, waivedAll: refusals.length === 0 ? waivedAll : [], ...(acceptedHits.length > 0 ? { acceptedHits } : {}) };
 }
 
 /** B71: the signed row the worker writes for a finding a reviewer judged resolved by another owned file. */
@@ -1063,7 +1063,7 @@ export function reviewGateCheck(load, { onWaivedAll, onAcceptedHits } = {}) {
     const result = checkBlockReviews(await load());
     if (result.ok) {
       onWaivedAll?.(result.waivedAll);
-      onAcceptedHits?.(result.acceptedHits);
+      onAcceptedHits?.(result.acceptedHits ?? []);
       return { ok: true };
     }
     const reasons = [];
