@@ -1174,6 +1174,7 @@ const B80_ONCE = {
   'skill/references/code.md': [
     'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
+    'The orchestrator never runs the human paths and never answers their prompt (not through a pseudo-terminal either); the human runs them in their own terminal.',
     'A coder never runs either verb.',
     'Never run it yourself, and never for a coder',
   ],
@@ -1181,6 +1182,7 @@ const B80_ONCE = {
     '`block waive` writes no row on a "no", a cancel, no terminal without `--yes`, a `--yes` refusal, or a pre-check refusal.',
     'The `--yes` refusal codes are `waive-yes-critical`, `waive-yes-no-evidence`, and `waive-yes-disagreed`.',
     'An agreed `block waive --yes` writes one signed `review.waived` row with `by: agent`.',
+    // block reopen (review.reopened): --yes stays a usage error until B124b
     'no row on a "no", a cancel, no terminal, `--yes` (a usage error), or a pre-check refusal (a malformed or control-character `--file`, an unknown or not-open block, a file the block does not own)',
   ],
   'skill/references/security.md': [
@@ -1282,7 +1284,7 @@ test('B80/B124a: skill and docs distinguish human commands from evidence-backed 
   }
 });
 
-test('B80: review.md §5 and how-it-works quote the CLI\'s exact no-terminal message', async () => {
+test('B80: review.md §5, how-it-works and code.md quote the CLI\'s exact no-terminal message', async () => {
   const { humanVerbNoTTY } = await import('../../src/cli/block.mjs');
   const s5 = section(await readSkillFile('references/review.md'), 5);
   const how = await b94Read('docs/how-it-works.md');
@@ -1293,6 +1295,7 @@ test('B80: review.md §5 and how-it-works quote the CLI\'s exact no-terminal mes
   // the docs that use `<verb>` quote the generic form exactly, and it is the CLI's own text
   assert.equal(humanVerbNoTTY(/** @type {any} */ ('<verb>')), B80_GENERIC);
   assert.equal(occurrences(await readSkillFile('references/code.md'), `\`${B80_GENERIC}\``), 1);
+  assert.equal(occurrences(await readSkillFile('references/code.md'), `\`${humanVerbNoTTY('waive')}\``), 1, 'code.md: waive');
   assert.equal(occurrences(section(await readSkillFile('references/security.md'), 3), `\`${B80_GENERIC}\``), 1);
 });
 
