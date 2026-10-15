@@ -1,4 +1,4 @@
-import { commitAll, makeRepo, writeFile, freshDir } from './helpers.mjs';
+import { commitAll, makeRepo, writeFile, freshDir, cfgFor } from './helpers.mjs';
 import { humanSaysYes } from '../helpers/human-confirm.mjs';
 import assert from 'node:assert/strict';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
@@ -424,6 +424,37 @@ test('B72 (5): a row write that does not resolve with the row is reopen-write-fa
   // the happy path next to it: the ledger's writer resolves with the row
   const ok = await reopenFile({ ...base, writeRow: f.writeRow });
   assert.deepEqual([ok.existing, ok.cleared, ok.row.at_seq, ok.row.to_hash, verifyRow(ok.row, f.key).ok], [false, true, 2, 'b'.repeat(64), true]);
+  assert.equal((await f.reopenedRows()).length, 1);
+});
+
+test('agent reopen reads the judge packet bytes through injected io', async () => {
+  const f = await fixture('b124c-reader');
+  const record = JSON.parse(readFileSync(runRecordPath(f.runId), 'utf8'));
+  record.config = initialConfigState(cfgFor());
+  const bytes = Buffer.from('export const supplied = true;\n');
+  const reads = [];
+  const packets = [];
+  const verdict = { verdict: 'agree', reason: 'The cited change addresses the stop.' };
+  const result = await reopenFile({
+    runId: f.runId, id: 'B1', file: SRC, reason: 'acceptance clause 1', record, rows: [], key: f.key,
+    writeSigned, writeRow: f.writeRow,
+    agent: { root: f.repo, judge: async (opts) => {
+      packets.push(JSON.parse(readFileSync(opts.promptPath, 'utf8')));
+      return { status: 'ok', answer: verdict };
+    } },
+    io: {
+      owns: () => true,
+      loadState: () => ({ status: 'ok', state: { status: 'stopped', stop_content_hash: 'old', open: [C1], next: { reason: 'review_stall' } }, seq: 2 }),
+      contentHash: () => 'current',
+      readFile: (file) => { reads.push(file); return bytes; },
+      clearDone: () => true,
+    },
+  });
+  assert.deepEqual(reads, [SRC]);
+  assert.deepEqual(packets, [{ stop_reason: 'review_stall', findings: [C1], reason: 'acceptance clause 1', file: { path: SRC, content: bytes.toString('utf8') } }]);
+  assert.equal(result.row.by, 'agent');
+  assert.deepEqual(result.row.verdict, verdict);
+  assert.deepEqual(verifyRow(result.row, f.key), { ok: true });
   assert.equal((await f.reopenedRows()).length, 1);
 });
 

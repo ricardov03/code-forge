@@ -216,7 +216,7 @@ import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
-import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
+import { contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
 import { clearDone, resolveTicket } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
 import { agentReopens, openBlockEntry, reopenFile } from '../review/reopen.mjs';
@@ -281,6 +281,7 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agen
       owns: ownsAt(wsPrefix),
       loadState: (where) => loadState({ .../** @type {any} */ (where), runRootDir, contentRoot, migrate: false }),
       contentHash: (f) => contentHash(contentRoot, f),
+      readFile: (f) => readRegularFileNoFollow(contentRoot, f),
       // C11 (synchronous): the cached result of the current content's ticket would repeat the stop
       clearDone: (f) => clearDone({ repoRoot: mainTop, run: runId, block: id, file: f, ...tree }).removed,
     },
