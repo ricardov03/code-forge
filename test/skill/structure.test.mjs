@@ -1163,16 +1163,16 @@ test('B94 (7): the per-file cap phrase is the same in every file that names it; 
 // text only (plus the CLI's exported no-terminal message, so the quoted text is the real one).
 const B80_ONCE = {
   'skill/references/review.md': [
-    'It is human-only and has no `--yes`; see **Human confirmation** below. `block waive` has an agent path through `--yes` for recorded warning or nit findings, with evidence and a fresh judge.',
-    'For `block reopen` and for `block waive` on a critical or unknown-severity finding, the orchestrator prints the exact command with the human\'s reason; the human runs it in their own terminal.',
+    'Without `--yes` it needs human confirmation; see **Human confirmation** below. Both verbs have evidence-backed agent paths with a fresh judge.',
+    'Without `--yes`, the orchestrator prints the exact command with the human\'s reason; the human runs it in their own terminal.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding, with evidence, and a fresh judge must agree.',
-    '`block reopen` is human-only and has no `--yes`.',
+    '`block reopen --yes` needs evidence and agreement from a fresh judge, at most once per block and file in a run.',
     'A coder never runs either verb.',
     'Under an active autopilot grant these human paths still prompt.',
     'A waive also checks ownership and that the finding is recorded.',
   ],
   'skill/references/code.md': [
-    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator prints the command for the human paths of `block reopen` and `block waive`.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
     'The orchestrator never runs the human paths and never answers their prompt (not through a pseudo-terminal either); the human runs them in their own terminal.',
     'A coder never runs either verb.',
@@ -1182,43 +1182,42 @@ const B80_ONCE = {
     '`block waive` writes no row on a "no", a cancel, no terminal without `--yes`, a `--yes` refusal, or a pre-check refusal.',
     'The `--yes` refusal codes are `waive-yes-critical`, `waive-yes-no-evidence`, and `waive-yes-disagreed`.',
     'An agreed `block waive --yes` writes one signed `review.waived` row with `by: agent`.',
-    // block reopen (review.reopened): --yes stays a usage error until B124b
-    'no row on a "no", a cancel, no terminal, `--yes` (a usage error), or a pre-check refusal (a malformed or control-character `--file`, an unknown or not-open block, a file the block does not own)',
+    'An agreed `block reopen --yes` writes one signed `review.reopened` row with `by: agent`, the reason and `verdict: {verdict, reason}`.',
   ],
   'skill/references/security.md': [
-    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator prints the command for the human paths of `block reopen` and `block waive`.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
     'A coder never runs either verb.',
     'Under an active autopilot grant the human paths still prompt.',
     'Autopilot\'s own waive path, `forge autopilot waive` (written `by: autopilot`), needs no terminal.',
   ],
   'skill/references/adapters/solo.md': [
-    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator prints the command for the human paths of `block reopen` and `block waive`.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
     'A coder never runs either verb.',
     'Under an active autopilot grant the human paths still prompt.',
     'Autopilot\'s own waive path, `forge autopilot waive` (`by: autopilot`), needs no terminal.',
-    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review. It is human-only and asks for a yes at a terminal.',
+    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review. Without `--yes` it asks for a yes at a terminal.',
   ],
   'skill/references/adapters/claude-code.md': [
-    'The orchestrator prints the command for `block reopen` and for a critical or unknown-severity `block waive`.',
+    'The orchestrator prints the command for the human paths of `block reopen` and `block waive`.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding with evidence and agreement from a fresh judge.',
     'A coder never runs either verb.',
-    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review. It is human-only and asks for a yes at a terminal.',
+    '`forge block reopen <id> --file <path> --run <r> --reason "<why>"` does not close anything: it sends a fixed stopped file back to review. Without `--yes` it asks for a yes at a terminal.',
   ],
   'skill/references/proof.md': [
     'The proof waiver has unknown severity and no `--yes` path.',
     'The orchestrator prints the exact command and the human runs it in their own terminal (`review.md` §5)',
   ],
   'docs/how-it-works.md': [
-    'For `block reopen` and for `block waive` on a critical or unknown-severity finding, the orchestrator prints the exact command with the human\'s reason; you run it in your own terminal.',
+    'Without `--yes`, the orchestrator prints the exact command with the human\'s reason; you run it in your own terminal.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding, with evidence, and a fresh judge must agree.',
     'A coder never runs either verb.',
     'Under an active autopilot grant these human paths still ask.',
     'A waive also checks ownership and that the finding is recorded.',
   ],
   'docs/concepts.md': [
-    '`block reopen` and `block waive` on a critical or unknown-severity finding are human-only with no `--yes` path.',
+    '`block reopen --yes` needs evidence and agreement from a fresh judge, at most once per block and file in a run.',
     '`block waive --yes` exists for a recorded warning or nit finding with evidence and a fresh judge.',
     'A coder is never told to run it, and the coder forbidden list denies it where the coder\'s CLI loads deny rules',
   ],
@@ -1292,11 +1291,11 @@ test('B80: review.md §5, how-it-works and code.md quote the CLI\'s exact no-ter
     assert.equal(occurrences(s5, `\`${humanVerbNoTTY(verb)}\``), 1, `review.md §5: ${verb}`);
     assert.equal(occurrences(how, `\`${humanVerbNoTTY(verb)}\``), 1, `how-it-works: ${verb}`);
   }
-  // the docs that use `<verb>` quote the generic form exactly, and it is the CLI's own text
+  // Other human-only verbs retain the generic form; reopen now points to its evidence path.
   assert.equal(humanVerbNoTTY(/** @type {any} */ ('<verb>')), B80_GENERIC);
-  assert.equal(occurrences(await readSkillFile('references/code.md'), `\`${B80_GENERIC}\``), 1);
+  assert.equal(occurrences(await readSkillFile('references/code.md'), `\`${humanVerbNoTTY('reopen')}\``), 1);
   assert.equal(occurrences(await readSkillFile('references/code.md'), `\`${humanVerbNoTTY('waive')}\``), 1, 'code.md: waive');
-  assert.equal(occurrences(section(await readSkillFile('references/security.md'), 3), `\`${B80_GENERIC}\``), 1);
+  assert.equal(occurrences(section(await readSkillFile('references/security.md'), 3), `\`${humanVerbNoTTY('reopen')}\``), 1);
 });
 
 // ── B96: the close report is built by the tool ──────────────────────────────

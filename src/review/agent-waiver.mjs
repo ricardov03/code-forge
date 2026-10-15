@@ -39,7 +39,7 @@ function existsInTree(root, file) {
 }
 
 /** @param {string} reason @param {string} root @param {Record<string, any>} entry */
-function hasEvidence(reason, root, entry) {
+export function hasEvidence(reason, root, entry) {
   for (const match of reason.matchAll(/\bclause\s+([0-9]+)\b/gi)) {
     const n = Number(match[1]);
     if (n >= 1 && n <= (Array.isArray(entry.acceptance) ? entry.acceptance.length : 0)) return true;
@@ -78,9 +78,9 @@ async function findingText(rows, { root, runId, id, file, finding, key }) {
 
 /** Same fresh, closed-book session runner and L3 resolution as the review engine; never a resume.
  * @typedef {(opts: import('../session/spawn.mjs').SessionOpts) => Promise<Record<string, any>>} WaiverJudge
- * @param {Record<string, any>} packet @param {{record: Record<string, any>, runId: string, id: string, judge?: WaiverJudge}} opts
+ * @param {Record<string, any>} packet @param {{record: Record<string, any>, runId: string, id: string, judge?: WaiverJudge, lens?: string}} opts
  */
-async function judgeWaiver(packet, { record, runId, id, judge }) {
+export async function judgeAgentReview(packet, { record, runId, id, judge, lens = LENS }) {
   let dir;
   try {
     const cfg = configInForce(record);
@@ -92,7 +92,7 @@ async function judgeWaiver(packet, { record, runId, id, judge }) {
     const promptPath = path.join(dir, 'packet.json');
     writeFileSync(promptPath, JSON.stringify(packet), { mode: 0o600 });
     const run = judge ?? ((opts) => spawnSession(opts, { writeRow: async () => {} }));
-    const result = await run({ cfg, level: 'L3', role: 'judge', promptPath, schema: SCHEMA, systemPromptText: LENS, runRoot: root, run: runId, block: id, slug: record.project });
+    const result = await run({ cfg, level: 'L3', role: 'judge', promptPath, schema: SCHEMA, systemPromptText: lens, runRoot: root, run: runId, block: id, slug: record.project });
     const answer = result?.answer;
     if (result?.status !== 'ok' || !answer || !['agree', 'disagree'].includes(answer.verdict) || typeof answer.reason !== 'string' || answer.reason.trim().length === 0 || answer.reason.length > 1000 || Object.keys(answer).some((k) => k !== 'verdict' && k !== 'reason')) {
       return { verdict: 'disagree', reason: 'The judge returned an invalid answer.' };
@@ -124,7 +124,7 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   const bytes = readRegularFileNoFollow(contentRoot, file);
   if (bytes === null) refuse('waive-yes-disagreed', 'The current file cannot be read');
   const text = await findingText(rows, { root, runId, id, file, finding, key });
-  const answer = await judgeWaiver({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') } }, { record, runId, id, judge });
+  const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') } }, { record, runId, id, judge });
   if (answer.verdict !== 'agree') refuse('waive-yes-disagreed', answer.reason);
   return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason } });
 }

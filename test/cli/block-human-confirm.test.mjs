@@ -32,7 +32,7 @@ const C1 = { id: 'C1', file: SRC, line_start: 3, line_end: 3, severity: 'warning
 const VERBS = /** @type {const} */ (['waive', 'reopen']);
 const NO_TTY = (/** @type {string} */ verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)\n'
-  : `block ${verb} needs the human at a terminal to confirm; nothing was recorded (there is no --yes)\n`;
+  : `block ${verb} needs the human at a terminal to confirm; nothing was recorded (--yes works only with evidence and agreement from a fresh judge)\n`;
 
 // The rows today's code writes, captured from the BASE code (c4c310b) in a scratch worktree outside
 // the repo, on this same fixture (run `r-b80-human`): the row without `mac`, `ts`, `tokens_source`
@@ -258,15 +258,13 @@ test('B80 (2): at a terminal, "yes" ⇒ the prompt asked once, then the same sig
   assert.equal(existsSync(f.doneMarker), false);
 });
 
-test('B80 (3): reopen has no --yes; waive --yes needs evidence; no prompt and nothing on disk changed', async () => {
+test('B80 (3): reopen and waive --yes need evidence; no prompt and nothing on disk changed', async () => {
   const f = await fixture('b80-flag');
   for (const verb of VERBS) {
     for (const tty of [{ isTTY: true }, { isTTY: false }]) {
       const before = snapshot();
       const r = await f.block([...f.argsOf[verb], '--yes'], tty);
-      const expected = verb === 'reopen'
-        ? [2, '', 'block reopen: unknown flag "--yes"\n']
-        : [1, '', 'block waive: waive-yes-no-evidence: cite an existing repo path with :line, an existing test file, or a block acceptance clause number; nothing was recorded\n'];
+      const expected = [1, '', `block ${verb}: ${verb}-yes-no-evidence: cite an existing repo path with :line, an existing test file, or a block acceptance clause number; nothing was recorded\n`];
       assert.deepEqual([r.code, r.out, r.err], expected);
       assertUnchanged(before, snapshot());
     }

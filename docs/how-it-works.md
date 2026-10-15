@@ -791,13 +791,25 @@ flowchart TD
   waiver: file, finding, reason and verdict. When there are agent waivers, `--json` adds
   `agent_waivers: [{file, finding, severity, reason, verdict}]`.
 
+  **Agent reopens.** `block reopen <id> --run <r> --file <path> --reason <text> --yes` needs no terminal or prompt.
+  All ordinary reopen checks run first. Evidence follows the agent waiver rule above.
+  Missing evidence refuses `reopen-yes-no-evidence` (exit 1). A second verified agent reopen
+  for the same block and file in a run refuses `reopen-yes-limit` (exit 1). Neither calls the judge.
+  A fresh L3 judge gets the stop reason, last findings, reason and current file bytes.
+  Disagreement or an invalid answer refuses `reopen-yes-disagreed` (exit 1), prints the judge reason,
+  and leaves the file stopped with nothing written. Agreement removes the done marker and writes
+  one signed `review.reopened` row with `by: agent`, the reason and `verdict: {verdict, reason}`.
+  There is no severity restriction. The human path still works after the agent limit.
+  Close prints `agent reopen <file>: <reason> (verdict: agree)` for each agent reopen.
+  JSON adds `agent_reopens: [{file, reason, verdict}]` only when nonempty.
+
   **Human confirmation.** Without `--yes`, `block waive` still asks for confirmation at a terminal
-  and writes `by: human`. For `block reopen` and for `block waive` on a critical or unknown-severity finding,
+  and writes `by: human`. Without `--yes`,
   the orchestrator prints the exact command with the human's reason; you run it in your own terminal.
   The orchestrator never answers a human confirmation prompt. With stdin or stdout not a terminal it exits 2:
   `block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)`.
-  `block reopen` still has no `--yes`. With no terminal it exits 2:
-  `block reopen needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`.
+  `block reopen` without `--yes` also needs human confirmation. With no terminal it exits 2:
+  `block reopen needs the human at a terminal to confirm; nothing was recorded (--yes works only with evidence and agreement from a fresh judge)`.
   Neither refusal writes a row or removes a done marker. Both verbs validate the file and block
   before asking. A waive also checks ownership and that the finding is recorded. A no or cancel
   records nothing. Under an active autopilot grant these human paths still ask. The existing
@@ -830,9 +842,9 @@ flowchart TD
   `review.cap`, reopen accepts only when the current hash has no verified `review.round` of
   this run/block/file. It records `from_hash: null`, and the worker checks the same condition.
   Otherwise change the file and reopen, or the owner can use `block close --no-require-reviews`;
-  waivers at an old hash cannot clear unreviewed current bytes. It is human-only (on the coder forbidden
-  list, and you run it in your own terminal after a yes, as above). It clears the cached result for the current content, then writes one signed
-  `review.reopened` row (`by: human`, naming the file's latest state seq). There is at most one
+  waivers at an old hash cannot clear unreviewed current bytes. It is on the coder forbidden
+  list. Without `--yes` you run it in your own terminal after a yes, as above. It clears the cached result for the current content, then writes one signed
+  `review.reopened` row (`by: human` or `by: agent`, naming the file's latest state seq). There is at most one
   such row per state seq: a retry on the same content finds that row and writes no second one,
   and a reopen on other content at the same seq is refused. The next `review-file` then starts over: round 1, a
   full review, up to `review.max_rounds_per_file` rounds at L2 again. The row works once. The

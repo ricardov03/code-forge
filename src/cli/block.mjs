@@ -11,7 +11,7 @@
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree]
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]   (orchestrator --yes: evidence and a fresh judge)
- *   block reopen <id> --run <r> --file <path> --reason <text>   (human-only, B72; asks at a terminal, B80)
+ *   block reopen <id> --run <r> --file <path> --reason <text> [--yes]   (B124c: evidence and a fresh judge for the agent path)
  *
  * B64a `--json` (every subcommand): on success stdout is exactly ONE JSON line instead of the
  * text — `{"block", "event", …}` with the facts the text prints (open: level, asked, source,
@@ -219,7 +219,7 @@ import { exec } from '../util/exec.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { clearDone, resolveTicket } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
-import { openBlockEntry, reopenFile } from '../review/reopen.mjs';
+import { agentReopens, openBlockEntry, reopenFile } from '../review/reopen.mjs';
 import { checkFileForm, checkFindingId } from '../review/verb-forms.mjs';
 import { runRootPath } from '../util/tmp.mjs';
 import { missingReviewTickets, parseSentinel } from '../engines/sentinel.mjs';
@@ -233,10 +233,14 @@ import { prepareAcceptHit, writeAcceptedHit } from '../review/accept-hit.mjs';
  * B72: `block reopen` — the file's content is read where the block works (its worktree, else the
  * main tree), its state is read (never moved) from the code-forge home or the run's old temp root,
  * the checks, the done marker's removal and then the signed row are `reopenFile`'s.
- * @param {{runId: string, id: string, file: string, reason: string, record: Record<string, any>, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
+ * @param {{runId: string, id: string, file: string, reason: string, record: Record<string, any>, writeRow: (row: Record<string, any>) => Promise<unknown>, agent?: boolean, judge?: import('../review/agent-waiver.mjs').WaiverJudge}} opts
  * @returns {Promise<{row: Record<string, any>, cleared: boolean}>}
  */
-async function reopenBlockFile({ runId, id, file, reason, record, writeRow }) {
+async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agent = false, judge }) {
+  if (agent) {
+    if (!reason.trim()) throw new StateError('usage', 'block reopen needs --reason');
+    checkFileForm(file, { normalized: true });
+  }
   // the stable block codes come first, before any tree, config, key or ledger read
   const entry = openBlockEntry(record, runId, id);
   const real = async (/** @type {string} */ p) => realpath(p).catch(() => path.resolve(p));
@@ -272,6 +276,7 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow }) {
     key,
     writeRow,
     writeSigned,
+    ...(agent ? { agent: { root: contentRoot, judge } } : {}),
     io: {
       owns: ownsAt(wsPrefix),
       loadState: (where) => loadState({ .../** @type {any} */ (where), runRootDir, contentRoot, migrate: false }),
@@ -287,7 +292,7 @@ const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
-  '       code-forge block reopen <id> --run <r> --file <path> --reason <text>\n' +
+  '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block accept-hit <id> --run <r> --rule <rule-id> --line <n> --transcript <path> --reason <text>\n' +
   '       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
   '       code-forge block ack-waivers <id> --run <r>\n' +
@@ -343,7 +348,7 @@ export async function runBlock(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'waive' ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -402,7 +407,7 @@ export async function runBlock(args, deps = {}) {
     }
     // B80: waive and reopen are the human's — asked at a terminal before anything is written (not
     // even the autopilot expiry rows below); no terminal is exit 2, a "no" is exit 1
-    if ((sub === 'waive' && flags.yes !== true) || sub === 'reopen') {
+    if ((sub === 'waive' || sub === 'reopen') && flags.yes !== true) {
       const asked = await confirmHumanVerb(sub, runId, id, { finding: extra, file: /** @type {string} */ (flags.file) }, record, deps);
       if (asked === 'no-tty') {
         err(`${humanVerbNoTTY(sub)}\n`);
@@ -414,7 +419,16 @@ export async function runBlock(args, deps = {}) {
       }
     }
     const writeRow =(/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
+    const reopened = async (/** @type {boolean} */ agent) => {
+      const file = /** @type {string} */ (flags.file);
+      const { row, cleared } = await reopenBlockFile({ runId, id, file, reason: /** @type {string} */ (flags.reason), record, writeRow, agent, judge: deps.waiverJudge });
+      const fromText = row.stop_reason == null ? row.from : `${row.from} ${row.stop_reason}`;
+      say(`block ${id} reopened ${file} (from ${fromText}; by: ${row.by})\n`);
+      if (json) emit({ block: id, event: 'reopened', file, from: row.from, stop_reason: row.stop_reason, at_seq: row.at_seq, from_hash: row.from_hash, to_hash: row.to_hash, ticket_cleared: cleared, by: row.by });
+      return 0;
+    };
     // Agent refusals precede even the lazy expiry checks: no rows on refusal.
+    if (sub === 'reopen' && flags.yes === true) return await reopened(true);
     if (sub === 'waive' && flags.yes === true) {
       await waiveAsAgent({ runId, id, finding: extra, file: /** @type {string} */ (flags.file), reason: /** @type {string} */ (flags.reason), record, writeRow, judge: deps.waiverJudge });
       say(`block ${id} waived ${extra} in ${flags.file} (by: agent)\n`);
@@ -572,12 +586,7 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     if (sub === 'reopen') {
-      const file = /** @type {string} */ (flags.file);
-      const { row, cleared } = await reopenBlockFile({ runId, id, file, reason: /** @type {string} */ (flags.reason), record, writeRow });
-      const fromText = row.stop_reason == null ? row.from : `${row.from} ${row.stop_reason}`;
-      say(`block ${id} reopened ${file} (from ${fromText}; by: human)\n`);
-      if (json) emit({ block: id, event: 'reopened', file, from: row.from, stop_reason: row.stop_reason, at_seq: row.at_seq, from_hash: row.from_hash, to_hash: row.to_hash, ticket_cleared: cleared, by: 'human' });
-      return 0;
+      return await reopened(false);
     }
     if (sub === 'close') {
       const entry = record.blocks?.[id];
@@ -816,6 +825,7 @@ export async function runBlock(args, deps = {}) {
       }
       const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows });
       const agentRows = agentWaivers(rows, id, await loadKey(runId));
+      const reopenedRows = agentReopens(rows.filter((r) => r.run === runId), id, await loadKey(runId));
       // B64b: the block ended (closed, or stopped by a worker pin event or ledger.tamper) — its rows
       // are written and the run lock released; the done file is written before the tree is removed
       // B96: the tool's reviewed lines of a block that closed (also kept in its done file)
@@ -840,6 +850,7 @@ export async function runBlock(args, deps = {}) {
             say(`block ${id}: ${f.file} reviewed_by_waiver (${parts.join('; ')})\n`);
           }
           for (const w of agentRows) say(`block ${id}: agent waiver ${w.file} ${w.finding} reason: ${w.reason}; verdict: ${w.verdict}\n`);
+          for (const r of reopenedRows) say(`agent reopen ${r.file}: ${r.reason} (verdict: ${r.verdict?.verdict})\n`);
           for (const hit of acceptedHits) say(`accepted rule_break ${hit.rule} transcript line ${hit.line}: ${hit.reason} (by: human)\n`);
         }
         (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
@@ -857,6 +868,7 @@ export async function runBlock(args, deps = {}) {
           // B96: only when the tool gave reviewed lines (a waived or external close is unchanged)
           ...(reviewedJson.length > 0 ? { reviewed: reviewedJson } : {}),
           ...(agentRows.length > 0 ? { agent_waivers: agentRows } : {}),
+          ...(reopenedRows.length > 0 ? { agent_reopens: reopenedRows } : {}),
           ...(acceptedHits.length > 0 ? { accepted_hits: acceptedHits } : {}),
         };
         if (!result.ok || !removeTree) {
@@ -950,6 +962,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
+  : verb === 'reopen' ? 'block reopen needs the human at a terminal to confirm; nothing was recorded (--yes works only with evidence and agreement from a fresh judge)'
   : `block ${verb} needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`;
 
 /**
