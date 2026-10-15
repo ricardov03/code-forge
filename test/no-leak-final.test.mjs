@@ -63,7 +63,7 @@ test('B115: final leak failure collects both reports before baseline and marker 
       /** @type {NodeJS.ProcessEnv} */
       const env = { ...process.env, CODE_FORGE_NO_LEAK: 'final', CODE_FORGE_TEST_SUITE: suite };
       delete env.NODE_TEST_CONTEXT;
-      const result = spawnSync(process.execPath, ['--import', new URL('./helpers/isolate.mjs', import.meta.url).href, '--experimental-test-module-mocks', '--import', 'data:text/javascript,' + encodeURIComponent(script), '--test', '--test-isolation=none', '--test-name-pattern=^final step', fileURLToPath(fixtureUrl)], {
+      const result = spawnSync(process.execPath, ['--import', new URL('./helpers/isolate.mjs', import.meta.url).href, '--experimental-test-module-mocks', '--import', 'data:text/javascript,' + encodeURIComponent(script), '--test', '--experimental-test-isolation=none', '--test-name-pattern=^final step', fileURLToPath(fixtureUrl)], {
         cwd: ROOT, encoding: 'utf8', timeout: 20000,
         env,
       });
