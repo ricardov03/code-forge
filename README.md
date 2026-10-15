@@ -8,9 +8,11 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 > `examples/` have all landed (`docs/reference/blocks.json` lists every build block). What changed
 > in each version is in [CHANGELOG.md](CHANGELOG.md).
 
-## What's new in 0.12
+## What's new in 0.13
 
 In the next release:
+
+In 0.13.0:
 
 - **Every block gets the proof rule, with or without a `context` key (B118).** `code-forge context pack` no longer refuses a config with no `context` key. The pack then holds the block header and the proof rule.
 - **Safer block open and close (B118).** `block open` refuses an owned or test path that has spaces and names no file, a common shell quoting slip. `block close` warns when the block has no green gates run.
@@ -23,6 +25,8 @@ In the next release:
 - **The join shows findings before it rechecks (B122).** Sometimes the coder commits again before reading the last review. At `review-file --wait-block`, such a file is not reviewed again yet. The join answers `findings` with the old ticket, so the coder reads and fixes them first. The next join rechecks the latest content once. A blind commit no longer counts as a stall round.
 - **A reopen clears old stop findings (B123).** After `block reopen` and a fresh review of the new content, the close no longer asks you to waive the findings of the old stop. Only the fresh review's findings count.
 - **The test suite passes on machines that use code-forge on itself (B126).** A leak test no longer counts files that were already in the repo's `.code-forge` folder.
+
+## What's new in 0.12
 
 In 0.12.0:
 
