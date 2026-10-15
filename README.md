@@ -157,6 +157,7 @@ See [security details](skill/references/security.md) and [privacy](docs/privacy.
 
 - [Documentation](docs/): setup, concepts, tutorials, and reference pages.
 - [CHANGELOG.md](CHANGELOG.md): all per-version release history.
+- Roadmap: [public feature ideas](https://claude.ai/artifact/BmeWyqRxZYsWr7eH5vBtdF)
 
 ### Development
 
@@ -167,5 +168,3 @@ Record changes with `npm run changelog -- <type> "<text>"`; record fixed error r
 bumps versions, releases the CHANGELOG, updates the optional Latest line, checks, commits, and
 tags. Publish with `npm publish`, then push the tag; CI creates the GitHub release.
 See [releasing](docs/releasing.md).
-
-- Roadmap: [public feature ideas](https://claude.ai/artifact/BmeWyqRxZYsWr7eH5vBtdF)
