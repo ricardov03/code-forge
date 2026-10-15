@@ -12,6 +12,8 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 In the next release:
 
+- **CI is green again on Linux (B128).** The claim tests wrote their result file in two steps, so on Linux a test could read an empty file as 0. They now write it in one step. The no-leak test uses the test isolation flag that Node 22 and Node 24 both accept.
+
 In 0.14.0:
 
 - **A stale review no longer counts as done (B125).** When a file changed during its review and came back to the same content, `review-file --wait-block` now reviews it once more by itself. No `--fresh` by hand.
