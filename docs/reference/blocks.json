@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 129,
+  "block_count": 130,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2200,6 +2200,31 @@
         "B122"
       ],
       "note": "review-file --wait-block: when the ticket of a file's current content is done with a result that never counted (stale, unavailable, round-1 split_required), the join drops that done marker with the --fresh claim and the worker reviews the content once; at most one drop per ticket, kept on disk. Counted results are never dropped."
+    },
+    "B124a": {
+      "title": "block waive --yes: an evidence-backed agent waiver a fresh judge must agree with",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/review.md",
+        "src/cli/block.mjs",
+        "src/review/agent-waiver.mjs",
+        "src/review/gate-check.mjs",
+        "test/cli/block-human-confirm.test.mjs",
+        "test/cli/block-waive-yes.test.mjs",
+        "test/skill/structure.test.mjs"
+      ],
+      "depends_on": [
+        "B80",
+        "B62a",
+        "B90",
+        "B122",
+        "B93",
+        "B47"
+      ],
+      "note": "block waive --yes skips the terminal confirm only for a finding whose signed recorded severity is warning or nit; the reason must cite evidence (path:line, a test file, or an acceptance clause); a fresh L3 judge must agree; then one signed review.waived row by: agent with the verdict. Critical or unknown severity is refused waive-yes-critical; no evidence waive-yes-no-evidence (judge not called); disagree waive-yes-disagreed. The gate counts an agreed agent waiver; block close lists agent waivers and --json adds agent_waivers. block reopen stays human-only with no --yes."
     }
   }
 }
