@@ -1159,14 +1159,17 @@ test('B94 (7): the per-file cap phrase is the same in every file that names it; 
   for (const rel of B94_FILES) assertGone(rel, await b94Read(rel), B94_GONE);
 });
 
-// B80: `block waive` and `block reopen` are run by the human in their own terminal. Skill and docs
+// B80/B124a: the human paths and the orchestrator's evidence-backed waiver path. Skill and docs
 // text only (plus the CLI's exported no-terminal message, so the quoted text is the real one).
 const B80_ONCE = {
   'skill/references/review.md': [
-    'The orchestrator prints the exact command, with the human\'s reason, and never answers the prompt; the human types the command in their own terminal. The rule: a coder or the orchestrator never runs either verb.',
-    'There is no `--yes`: it is an unknown flag (exit 2).',
-    'Under an active autopilot grant both verbs still prompt the same way (only `block close --no-require-reviews` is refused)',
-    'a file the block does not own (`waive-not-owned`) or a finding id that no review row of the block names for that file (`waive-unknown-finding`; the `proof` finding is exempt) — exit 1, nothing asked, nothing written.',
+    'It is human-only and has no `--yes`; see **Human confirmation** below. `block waive` has an agent path through `--yes` for recorded warning or nit findings, with evidence and a fresh judge.',
+    'For `block reopen` and for `block waive` on a critical or unknown-severity finding, the orchestrator prints the exact command with the human\'s reason; the human runs it in their own terminal.',
+    'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding, with evidence, and a fresh judge must agree.',
+    '`block reopen` is human-only and has no `--yes`.',
+    'A coder never runs either verb.',
+    'Under an active autopilot grant these human paths still prompt.',
+    'A waive also checks ownership and that the finding is recorded.',
   ],
   'skill/references/code.md': [
     'You print the exact command; the human runs it in their own terminal. The rule: a coder or the orchestrator never runs it and never answers its prompt. Separately, as a fact of the verb: when stdin or stdout is not a terminal (a pipe, or a process started with no terminal) it exits 2',
@@ -1191,9 +1194,11 @@ const B80_ONCE = {
   ],
   'skill/references/proof.md': ['the orchestrator prints the exact command and the human runs it in their own terminal; there is no `--yes`'],
   'docs/how-it-works.md': [
-    'The orchestrator prints the exact command and never answers the prompt; you type the command in your own terminal. The rule: a coder or the orchestrator never runs either verb.',
-    'Under an active autopilot grant both verbs still ask (only `block close --no-require-reviews` is refused)',
-    'a waive refuses a file the block does not own (`waive-not-owned`) and a finding id no review row of the block names for that file (`waive-unknown-finding`; `proof` is exempt)',
+    'For `block reopen` and for `block waive` on a critical or unknown-severity finding, the orchestrator prints the exact command with the human\'s reason; you run it in your own terminal.',
+    'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding, with evidence, and a fresh judge must agree.',
+    'A coder never runs either verb.',
+    'Under an active autopilot grant these human paths still ask.',
+    'A waive also checks ownership and that the finding is recorded.',
   ],
   'docs/concepts.md': [
     'You run `block waive` (and `block reopen`) in your own terminal: it asks for a yes, has no `--yes`, and with no terminal records nothing; the orchestrator only prints the exact command and never answers the prompt.',
@@ -1250,7 +1255,7 @@ test('B80 ruling 1: the canonical honest-limit sentence is in security.md §3 ex
   assert.equal(occurrences(squash(security), 'it does not prove a human (`'), 0);
 });
 
-test('B80: the skill and docs say the orchestrator prints the command and the human runs it in their own terminal', async () => {
+test('B80/B124a: skill and docs distinguish human commands from evidence-backed orchestrator waivers; coders run neither verb', async () => {
   for (const [rel, needles] of Object.entries(B80_ONCE)) {
     const text = flat(await b94Read(rel));
     for (const needle of needles) assert.equal(occurrences(text, flat(needle)), 1, `${rel}: ${needle}`);

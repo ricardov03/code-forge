@@ -912,7 +912,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
  * @param {'waive' | 'reopen'} verb @returns {string}
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
-  ? 'block waive needs the human at a terminal without --yes; only critical findings require the human terminal path; --yes supports warning/nit findings with evidence and a fresh judge; nothing was recorded'
+  ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
   : `block ${verb} needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`;
 
 /**

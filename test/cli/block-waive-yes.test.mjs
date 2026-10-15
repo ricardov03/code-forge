@@ -81,7 +81,9 @@ test('clause 1: warning and nit --yes need no terminal or prompt and write exact
 
 test('clause 2: critical, unknown and unrecorded severities refuse exactly waive-yes-critical with zero rows and zero judge calls', async () => {
   for (const severity of ['critical', 'unknown', 'missing', 'unsigned', 'tampered']) {
-    const f = await fixture(severity === 'unsigned' || severity === 'tampered' ? 'warning' : severity, severity !== 'missing');
+    // A forged nit row attempts to downgrade a signed critical finding. Trusting that row
+    // would let the valid evidence and agreeing judge waive it; the recorded critical must win.
+    const f = await fixture(severity === 'unsigned' || severity === 'tampered' ? 'critical' : severity, severity !== 'missing');
     if (severity === 'unsigned' || severity === 'tampered') {
       const row = { run: f.runId, block: 'B1', file: FILE, event: 'review.triage', finding: 'W1', severity: 'nit' };
       await f.writeRow(severity === 'unsigned' ? row : { ...row, mac: 'bad' });

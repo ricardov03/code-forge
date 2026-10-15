@@ -772,8 +772,9 @@ flowchart TD
      `code-forge block waive <id> <finding-id> --run <run> --file <path> --reason <text>`.
   4. **Re-decompose.** You split the block or plan the work again.
 
-  **Agent waivers.** The orchestrator may add `--yes` to `block waive`. Coders still cannot run
-  this verb. The signed review rows must record warning or nit. Critical findings stay human-only.
+  **Agent waivers.** The orchestrator may run `block waive --yes` only for a recorded warning or nit finding,
+  with evidence, and a fresh judge must agree. A coder never runs either verb.
+  Critical and unknown-severity findings need the human terminal path.
   Unknown and unrecorded findings also refuse with `waive-yes-critical` (exit 1).
   The reason must cite an existing repo-relative path with `:<line>`, an existing test file, or
   a numbered acceptance clause of this block. Files must exist in the block's tree. The clause
@@ -789,9 +790,10 @@ flowchart TD
   `agent_waivers: [{file, finding, severity, reason, verdict}]`.
 
   **Human confirmation.** Without `--yes`, `block waive` still asks for confirmation at a terminal
-  and writes `by: human`. The orchestrator prints the exact command and never answers the prompt;
-  you type the command in your own terminal. With stdin or stdout not a terminal it exits 2:
-  `block waive needs the human at a terminal without --yes; only critical findings require the human terminal path; --yes supports warning/nit findings with evidence and a fresh judge; nothing was recorded`.
+  and writes `by: human`. For `block reopen` and for `block waive` on a critical or unknown-severity finding,
+  the orchestrator prints the exact command with the human's reason; you run it in your own terminal.
+  The orchestrator never answers a human confirmation prompt. With stdin or stdout not a terminal it exits 2:
+  `block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)`.
   `block reopen` still has no `--yes`. With no terminal it exits 2:
   `block reopen needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`.
   Neither refusal writes a row or removes a done marker. Both verbs validate the file and block
