@@ -12,6 +12,8 @@ for cross-model, parallel, evidence-gated feature delivery — on Claude Code, C
 
 In the next release:
 
+- **A stale review no longer counts as done (B125).** When a file changed during its review and came back to the same content, `review-file --wait-block` now reviews it once more by itself. No `--fresh` by hand.
+
 In 0.13.0:
 
 - **Every block gets the proof rule, with or without a `context` key (B118).** `code-forge context pack` no longer refuses a config with no `context` key. The pack then holds the block header and the proof rule.
