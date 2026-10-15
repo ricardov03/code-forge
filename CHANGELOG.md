@@ -9,6 +9,8 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `review-file --wait-block`: when the current content's ticket is done with a result that never counted (`stale`, `unavailable`, round-1 `split_required`), the join drops that done marker with the `--fresh` claim and the worker reviews the content once; one drop per ticket at most, kept on disk; a counted result is never dropped (B125)
+- `block waive --yes`: a warning or nit finding can be waived without a terminal when the reason cites evidence (path:line, a test file, or an acceptance clause) and a fresh L3 judge agrees; one signed `review.waived {by: agent}` row with the verdict; refusals `waive-yes-critical`, `waive-yes-no-evidence`, `waive-yes-disagreed`; `block close` lists agent waivers and `--json` adds `agent_waivers`; `block reopen` stays human-only (B124a)
+- `block accept-hit <id> --run --rule --line --transcript --reason`: human-only; refuses `accept-hit-no-such-hit` before any prompt; writes a signed `rule_break.accepted {block, rule, line, line_sha256, reason, by: human}` row; `block close` drops a transcript hit only on the same rule and the sha256 of that line, prints each accepted hit, and `--json` adds `accepted_hits`; the verb is on the coder forbidden list (B127)
 
 
 ## [0.13.0] — 2026-10-14

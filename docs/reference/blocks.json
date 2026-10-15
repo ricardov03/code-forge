@@ -2207,8 +2207,15 @@
       "level": "L2",
       "status": "landed",
       "owned": [
+        "docs/concepts.md",
         "docs/how-it-works.md",
+        "skill/references/adapters/claude-code.md",
+        "skill/references/adapters/solo.md",
+        "skill/references/code.md",
+        "skill/references/ledger.md",
+        "skill/references/proof.md",
         "skill/references/review.md",
+        "skill/references/security.md",
         "src/cli/block.mjs",
         "src/review/agent-waiver.mjs",
         "src/review/gate-check.mjs",
@@ -2242,6 +2249,7 @@
         "test/cli/block-accept-hit.test.mjs",
         "test/engines/builders/argv-snapshots.test.mjs",
         "test/engines/builders/forbidden-rendering.test.mjs",
+        "test/engines/codex-home.test.mjs",
         "test/util/forbidden.test.mjs"
       ],
       "depends_on": [
