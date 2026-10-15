@@ -1163,7 +1163,7 @@ test('B94 (7): the per-file cap phrase is the same in every file that names it; 
 // text only (plus the CLI's exported no-terminal message, so the quoted text is the real one).
 const B80_ONCE = {
   'skill/references/review.md': [
-    'Without `--yes` it needs human confirmation; see **Human confirmation** below. Both verbs have evidence-backed agent paths with a fresh judge.',
+    'Without `--yes` it needs human confirmation; see **Human confirmation** below. `block reopen` and `block waive` both have evidence-backed agent paths through `--yes` with a fresh judge.',
     'Without `--yes`, the orchestrator prints the exact command with the human\'s reason; the human runs it in their own terminal.',
     'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding, with evidence, and a fresh judge must agree.',
     '`block reopen --yes` needs evidence and agreement from a fresh judge, at most once per block and file in a run.',
