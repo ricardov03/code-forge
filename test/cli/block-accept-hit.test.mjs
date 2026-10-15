@@ -13,7 +13,7 @@ const { isForbidden, mergeForbidden, scanTranscript } = await import('../../src/
 
 const FILE = 'src/a.mjs';
 const RULE = 'code-forge-block-waive-from-coder';
-const LINE = 'doc text: forge block waive B1 F1';
+const LINE = '  doc text: forge block waive B1 F1  \r';
 const REASON = 'This writes documentation text.';
 const NO_HIT = 'block accept-hit: accept-hit-no-such-hit: the named transcript hit was not found; nothing was recorded\n';
 const hash = (text) => createHash('sha256').update(text).digest('hex');
@@ -167,11 +167,16 @@ test('B127 clause 4 boundary: unused acceptance prints no accepted line and JSON
   }
 });
 
-test('B127 clause 5 and boundary: both command prefixes are coder-forbidden transcript hits; ordinary block status has zero hits', async () => {
+test('B127 clause 5 and boundary: both command prefixes refuse close as rule_break; ordinary block status has zero hits', async () => {
   for (const bin of ['code-forge', 'forge']) {
     const argv = [bin, 'block', 'accept-hit', 'B1'];
     assert.equal(isForbidden(argv, mergeForbidden())?.id, 'code-forge-block-accept-hit-from-coder');
     assert.deepEqual(scanTranscript(argv.join(' '), mergeForbidden()), [{ id: 'code-forge-block-accept-hit-from-coder', line: 1 }]);
     assert.deepEqual(scanTranscript(`${bin} block status`, mergeForbidden()), []);
+    const f = await fixture();
+    f.log(`${argv.join(' ')}\n`);
+    const before = (await f.rows()).length;
+    assert.deepEqual(await f.close(), [1, '', 'block B1 open: rule_break transcript line 1: code-forge-block-accept-hit-from-coder\n']);
+    assert.equal((await f.rows()).length - before, 0, `${bin}: refused close writes zero rows`);
   }
 });
