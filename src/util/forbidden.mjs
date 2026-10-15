@@ -275,6 +275,7 @@ export const FORBIDDEN = Object.freeze(
  * Coder-only entries (B12b, plan §4.9): verbs only a human (through the orchestrator) may run.
  * They are NOT part of `FORBIDDEN` (whose rendered count other blocks pin); `mergeForbidden()`
  * always appends them, so every list built for a coder carries them.
+ *  - `code-forge block accept-hit` (B127) — accepting a false transcript hit is human-only;
  *  - `code-forge block waive` — waiving a review finding is human-only;
  *  - `code-forge block reopen` (B72) — restarting a stopped or lost file's review is human-only;
  *  - `code-forge autopilot` (any subcommand, B45) — the owner's grant to a delegate;

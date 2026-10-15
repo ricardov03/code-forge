@@ -155,14 +155,14 @@ test('B127 clause 4: close prints each used acceptance and JSON gives exactly ru
   }
 });
 
-test('B127 clause 4 boundary: unused acceptance prints no accepted line and JSON has exactly zero accepted hits', async () => {
+test('B127 clause 4 boundary: unused acceptance prints no accepted line and JSON omits accepted_hits', async () => {
   for (const json of [false, true]) {
     const f = await fixture();
     assert.equal((await f.accept())[0], 0);
     f.log('safe\n');
     const [code, out, err] = await f.close(json ? ['--json'] : []);
     assert.deepEqual([code, err], [0, '']);
-    if (json) assert.deepEqual(JSON.parse(out).accepted_hits, []);
+    if (json) assert.equal(Object.hasOwn(JSON.parse(out), 'accepted_hits'), false);
     else assert.equal(out.split('\n').filter((l) => l.startsWith('accepted ')).length, 0);
   }
 });

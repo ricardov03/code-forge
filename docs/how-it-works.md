@@ -811,7 +811,7 @@ flowchart TD
   Close verifies the signature and matches the run, block, rule and SHA-256 of the exact line text.
   A joined log can move the line without changing the match. Other hits and ledger `rule_break` rows still refuse.
   Close prints `accepted rule_break <rule> transcript line <n>: <reason> (by: human)` for each hit it used.
-  Its JSON adds `accepted_hits: [{rule, line, reason}]`, empty when none was used. The verb is coder-forbidden.
+  Its JSON adds `accepted_hits: [{rule, line, reason}]` when a hit was accepted. The verb is coder-forbidden.
 
   When a signed review round on the current bytes left findings and every finding it left open is
   waived or answered, the file counts as reviewed (`reviewed_by_waiver`, never approved) and the

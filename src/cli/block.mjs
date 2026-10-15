@@ -836,7 +836,7 @@ export async function runBlock(args, deps = {}) {
           // B96: only when the tool gave reviewed lines (a waived or external close is unchanged)
           ...(reviewedJson.length > 0 ? { reviewed: reviewedJson } : {}),
           ...(agentRows.length > 0 ? { agent_waivers: agentRows } : {}),
-          accepted_hits: acceptedHits,
+          ...(acceptedHits.length > 0 ? { accepted_hits: acceptedHits } : {}),
         };
         if (!result.ok || !removeTree) {
           if (json && result.ok) emit(closedJson);
