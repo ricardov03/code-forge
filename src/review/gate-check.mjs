@@ -97,7 +97,7 @@ import { stopExitsLine } from './stop-exits.mjs';
 import { checkFileForm, checkFindingId } from './verb-forms.mjs';
 
 /**
- * @typedef {{file: string, content_hash: string, status: 'reviewed_by_waiver', findings: string[], by: 'human' | 'autopilot' | null, answered?: string[]}} WaivedAll
+ * @typedef {{file: string, content_hash: string, status: 'reviewed_by_waiver', findings: string[], by: 'human' | 'autopilot' | 'agent' | null, answered?: string[]}} WaivedAll
  *   B70: a file that counts as reviewed (never approved) because every finding its review left open was waived.
  *   B71: or answered — `findings` are the waived ids, `answered` (present only when there is one)
  *   the ids a signed `review.answered` row clears; `by` is null when every id was answered.
@@ -307,6 +307,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
 
   const signedOf = (/** @type {string} */ event) => mine.filter((r) => r.event === event && ok(r));
   const waivers = signedOf('review.waived').filter((r) => r.by === 'human');
+  const agentWaivers = signedOf('review.waived').filter((r) => r.by === 'agent' && r.verdict === 'agree');
   const autopilotWaivers = mine.filter((r) => r.event === 'review.waived' && r.by === 'autopilot');
   // B71: only the worker's signed rows of THIS run (a row with no run never counts)
   const answers = signedOf(ANSWERED_EVENT).filter((r) => r.run === runId);
@@ -347,11 +348,15 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
    * (default `severity`); the late-finding, cap and proof loops pass the one RECORDED for the id,
    * so an unknown severity is never cleared by an answer even where the autopilot rule reads null.
    * @param {string} file @param {string} finding @param {unknown} severity @param {string | null} [exceptTicket] @param {unknown} [answerSeverity]
-   * @returns {{by: 'human' | 'answer' | 'autopilot' | null, invalid: string | null}}
+   * @returns {{by: 'human' | 'answer' | 'autopilot' | 'agent' | null, invalid: string | null}}
    */
   const waiverOf = (file, finding, severity, exceptTicket = null, answerSeverity = severity) => {
     if (waivers.some((r) => matches(r, file, finding))) return { by: 'human', invalid: null };
     if (answered(file, finding, answerSeverity, exceptTicket)) return { by: 'answer', invalid: null };
+    if (key && verify === undefined && finding !== PROOF_FINDING && delegableSeverity(severity)) {
+      const recorded = recordedSeverity(mine, { block, file, finding, key });
+      if (DELEGABLE_SEVERITIES.includes(recorded.severity) && agentWaivers.some((r) => matches(r, file, finding) && r.severity === recorded.severity)) return { by: 'agent', invalid: null };
+    }
     const named = autopilotWaivers.filter((r) => matches(r, file, finding));
     // the unverified pre-check (`verify` given) reads no autopilot waiver: it cannot check a grant
     if (named.length === 0 || verify !== undefined) return { by: null, invalid: null };
@@ -455,6 +460,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     /** @type {string[]} */
     const answeredIds = [];
     let byHuman = true;
+    let byAgent = false;
     for (const [finding, severity] of named) {
       const w = waiverOf(file, finding, severity);
       if (w.by === null) return null;
@@ -462,10 +468,11 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
       else {
         waived.push(finding);
         if (w.by !== 'human') byHuman = false;
+        if (w.by === 'agent') byAgent = true;
       }
     }
-    /** @type {'human' | 'autopilot' | null} */
-    const by = waived.length === 0 ? null : byHuman ? 'human' : 'autopilot';
+    /** @type {'human' | 'autopilot' | 'agent' | null} */
+    const by = waived.length === 0 ? null : byHuman ? 'human' : byAgent ? 'agent' : 'autopilot';
     return { file, content_hash: hash, status: 'reviewed_by_waiver', findings: waived.sort(), by, ...(answeredIds.length > 0 ? { answered: answeredIds.sort() } : {}) };
   };
 
@@ -1077,17 +1084,17 @@ export function reviewGateCheck(load, { onWaivedAll } = {}) {
 /**
  * `block waive` — a signed `review.waived` row, `by: human`, scoped to ONE file (`file` is
  * required: the gate matches a waiver by `file` + `finding`). The block must exist in the run.
- * @param {{runId: string, id: string, finding: string, reason: string, file: string, writeRow: (row: Record<string, any>) => Promise<unknown>}} opts
+ * @param {{runId: string, id: string, finding: string, reason: string, file: string, writeRow: (row: Record<string, any>) => Promise<unknown>, by?: 'human' | 'agent', extra?: Record<string, any>}} opts
  * @returns {Promise<Record<string, any>>} the signed row.
  */
-export async function waiveFinding({ runId, id, finding, reason, file, writeRow }) {
+export async function waiveFinding({ runId, id, finding, reason, file, writeRow, by = 'human', extra = {} }) {
   checkFindingId(finding);
   if (typeof reason !== 'string' || reason.trim().length === 0) throw new StateError('usage', 'block waive needs --reason');
   if (typeof file !== 'string' || file.length === 0) throw new StateError('usage', 'block waive needs --file <path>');
   checkFileForm(file, { normalized: false });
   const record = await readRun(runId);
   if (!record.blocks?.[id]) throw new StateError('unknown_block', `block ${id} is not in run ${runId}`);
-  const row = { event: 'review.waived', block: id, file, finding, reason: reason.trim(), by: 'human' };
+  const row = { ...extra, event: 'review.waived', block: id, file, finding, reason: reason.trim(), by };
   let written = null;
   await writeSigned(runId, async (signed) => {
     written = signed;

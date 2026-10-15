@@ -772,22 +772,32 @@ flowchart TD
      `code-forge block waive <id> <finding-id> --run <run> --file <path> --reason <text>`.
   4. **Re-decompose.** You split the block or plan the work again.
 
-  **You run `block waive` and `block reopen` yourself, in your own terminal.** Both ask for a yes
-  at a terminal. The orchestrator prints the exact command and never answers the prompt; you type
-  the command in your own terminal. The rule: a coder or the orchestrator never runs either verb. With stdin or
-  stdout not a terminal (a pipe, or a process started with no terminal) a waive exits 2 with
-  `block waive needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`
-  and a reopen with
-  `block reopen needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`;
-  neither writes a row or removes a done marker. Before it asks, both verbs refuse a malformed
-  `--file` or finding id, or one with a control character (exit 2); a reopen refuses a file the
-  block does not own (`reopen-not-owned`); a waive refuses a file the block does not own
-  (`waive-not-owned`) and a finding id no review row of the block names for that file
-  (`waive-unknown-finding`; `proof` is exempt), so you are never asked about a verb that would
-  fail. A "no" prints `block <id> <verb>: cancelled — nothing was recorded` (exit 1); a "yes"
-  writes the same signed row as before. There is no `--yes` (an unknown flag, exit 2). Under an
-  active autopilot grant both verbs still ask (only `block close --no-require-reviews` is refused);
-  the delegate's waivers go through `autopilot waive` (`by: autopilot`), which needs no terminal.
+  **Agent waivers.** The orchestrator may add `--yes` to `block waive`. Coders still cannot run
+  this verb. The signed review rows must record warning or nit. Critical findings stay human-only.
+  Unknown and unrecorded findings also refuse with `waive-yes-critical` (exit 1).
+  The reason must cite an existing repo-relative path with `:<line>`, an existing test file, or
+  a numbered acceptance clause of this block. Files must exist in the block's tree. The clause
+  number must be within its acceptance clause count. Missing evidence refuses with
+  `waive-yes-no-evidence` (exit 1). The judge is not called.
+  One fresh L3 judge gets the recorded finding, reason and current file bytes. It never resumes
+  the file's reviewer session. An `agree` writes one signed `review.waived` row with `by: agent`,
+  the recorded severity, reason, `verdict: agree` and `judge_reason`. A disagreement or broken
+  answer writes no waiver. It exits 1 with `waive-yes-disagreed` and prints the judge's reason.
+  The finding stays open. A signed agent agree counts for `reviewed_by_waiver`, with `by: agent`.
+  Unsigned or tampered agent rows never count. `block close` prints one line per signed agent
+  waiver: file, finding, reason and verdict. When there are agent waivers, `--json` adds
+  `agent_waivers: [{file, finding, severity, reason, verdict}]`.
+
+  **Human confirmation.** Without `--yes`, `block waive` still asks for confirmation at a terminal
+  and writes `by: human`. The orchestrator prints the exact command and never answers the prompt;
+  you type the command in your own terminal. With stdin or stdout not a terminal it exits 2:
+  `block waive needs the human at a terminal without --yes; only critical findings require the human terminal path; --yes supports warning/nit findings with evidence and a fresh judge; nothing was recorded`.
+  `block reopen` still has no `--yes`. With no terminal it exits 2:
+  `block reopen needs the human at a terminal to confirm; nothing was recorded (there is no --yes)`.
+  Neither refusal writes a row or removes a done marker. Both verbs validate the file and block
+  before asking. A waive also checks ownership and that the finding is recorded. A no or cancel
+  records nothing. Under an active autopilot grant these human paths still ask. The existing
+  `autopilot waive` path still writes `by: autopilot`.
   The prompt checks only that stdin and stdout are terminals; a pseudo-terminal passes it, so it does not prove a human (`skill/references/security.md` §3).
 
   When a signed review round on the current bytes left findings and every finding it left open is
@@ -805,7 +815,7 @@ flowchart TD
   `review.cap`, reopen accepts only when the current hash has no verified `review.round` of
   this run/block/file. It records `from_hash: null`, and the worker checks the same condition.
   Otherwise change the file and reopen, or the owner can use `block close --no-require-reviews`;
-  waivers at an old hash cannot clear unreviewed current bytes. It is human-only, like `block waive` (on the coder forbidden
+  waivers at an old hash cannot clear unreviewed current bytes. It is human-only (on the coder forbidden
   list, and you run it in your own terminal after a yes, as above). It clears the cached result for the current content, then writes one signed
   `review.reopened` row (`by: human`, naming the file's latest state seq). There is at most one
   such row per state seq: a retry on the same content finds that row and writes no second one,
@@ -840,7 +850,7 @@ higher, at most L2), and an S2 ruling. A docs or contract block is never coded b
 | Claim | Checked by |
 |---|---|
 | only owned files touched | every changed or new file since the block's base must be in its `owned_files`, unchanged since `block open` recorded the tree, owned by another block of the run that is still open, or still exactly what a closed block's gate approved; anything else refuses `unowned_change <file>` (`block claim` it, or put it back). Only files under the repository top-level `.code-forge/` are not changes (for a workspace in a subdirectory, its own `.code-forge/` counts as source tree except this run's record mirror and the block's default transcript), so keep transcripts and reports there. A file a closed block of the run owns is accounted for while it is exactly the content that block's gate approved. A file an open sibling block owns is left to that block's gate: the close cannot tell which coder wrote it, so it prints a `WARN` line naming each such file |
-| every file reviewed | the files are every owned file changed since the base plus every owned file with any review row for this block (so work committed before `block open` or done in another worktree is still checked, with a WARN naming the likely cause); an owned entry with no glob owns the paths below it; a block with no such file refuses `no_changes`, which only the owner's `--no-require-reviews` (confirmed at a terminal) lifts. Each needs a **signed** `review.approved` row for its current content hash, and no later review of that same content that did not approve it. A later review that left findings open refuses `not_approved <file> <finding>` per finding until it is fixed and approved again or waived; a critical finding only by the human's `block waive`. A file with no approval refuses `unreviewed <file>` unless it is **reviewed by waiver**: a signed `review.round` row exists for its current hash (a session really reviewed these bytes — a repeated stop or an `unavailable` result never counts), the latest refusal row is signed, carries `content_hash` equal to the current hash (a row with no hash never qualifies), and names at least one finding, and every finding it names and every open id of the file's `review.cap` rows is waived or answered (a critical waiver only by the human, an autopilot waiver only when its grant covered it). Such a file is reported `reviewed_by_waiver`, never approved; the close prints `block <id>: <file> reviewed_by_waiver (<ids>; by <human\|autopilot>)`, `--json` adds `reviewed_by_waiver`, and one signed `gate.review_waived_all {file, content_hash, findings, by}` row per such file (`findings`: the sorted ids) is written just before `block.close` — none when the close is refused |
+| every file reviewed | the files are every owned file changed since the base plus every owned file with any review row for this block (so work committed before `block open` or done in another worktree is still checked, with a WARN naming the likely cause); an owned entry with no glob owns the paths below it; a block with no such file refuses `no_changes`, which only the owner's `--no-require-reviews` (confirmed at a terminal) lifts. Each needs a **signed** `review.approved` row for its current content hash, and no later review of that same content that did not approve it. A later review that left findings open refuses `not_approved <file> <finding>` per finding until it is fixed and approved again or waived; a critical finding only by the human's `block waive`. A file with no approval refuses `unreviewed <file>` unless it is **reviewed by waiver**: a signed `review.round` row exists for its current hash (a session really reviewed these bytes — a repeated stop or an `unavailable` result never counts), the latest refusal row is signed, carries `content_hash` equal to the current hash (a row with no hash never qualifies), and names at least one finding, and every finding it names and every open id of the file's `review.cap` rows is waived or answered (a critical waiver only by the human, an autopilot waiver only when its grant covered it, an agent waiver only with a signed `verdict: agree` for warning or nit). Such a file is reported `reviewed_by_waiver`, never approved; the close prints `block <id>: <file> reviewed_by_waiver (<ids>; by <human\|autopilot\|agent>)`, `--json` adds `reviewed_by_waiver`, and one signed `gate.review_waived_all {file, content_hash, findings, by}` row per such file (`findings`: the sorted ids) is written just before `block.close` — none when the close is refused |
 | tests green | the gates, run again |
 | clauses covered | every clause names a test that exists and passed; S1 `scope` on the other hunks |
 | size | net lines against `--lines`: over 1.25 × stops the block and asks for a split |
