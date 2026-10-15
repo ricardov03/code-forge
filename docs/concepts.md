@@ -1,5 +1,7 @@
 # Concepts
 
+The report has 15 sections. Its last section, `agent_waivers`, lists each agent waiver and whether a later human unwaive cancelled it. The human can undo an agent waiver with `block unwaive` and acknowledge the counted set with `block ack-waivers`. Both ask at a terminal and have no `--yes`. Set `review.agent_waivers.require_ack: true` before run start to require that acknowledgement before close. A new or removed waiver needs a new acknowledgement. Human waivers are never undone by this command.
+
 A glossary. Each term links the idea to the command or config key that makes it real.
 
 | Term | Meaning | Where you see it |

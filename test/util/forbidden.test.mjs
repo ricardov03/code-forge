@@ -396,7 +396,7 @@ test('mergeForbidden refuses a bare string instead of iterating it one character
 
 test('mergeForbidden accepts tokens with ( ) * : characters — contains entries are never rendered', () => {
   const merged = mergeForbidden(['db.prod:5432', 'postgres://prod-host', 'weird(*)']);
-  assert.equal(merged.length, FORBIDDEN.length + 6 + 3); // B72: + block reopen; B127: + block accept-hit
+  assert.equal(merged.length, FORBIDDEN.length + 8 + 3); // B72: + block reopen; B127: + block accept-hit
   assert.equal(isForbidden(['psql', '-h', 'db.prod:5432'], merged)?.id, 'production-marker-extra-0');
   assert.equal(isForbidden(['psql', 'postgres://prod-host/db'], merged)?.id, 'production-marker-extra-1');
   assert.equal(isForbidden(['x', 'a-weird(*)-b'], merged)?.id, 'production-marker-extra-2');
@@ -542,7 +542,7 @@ test('a shorter list yields a matching renderer count (renderers are not hardcod
 
 test('mergeForbidden always carries the coder-only entries: `block waive`, `autopilot` (B45), `--no-require-reviews` (B12b), `--remove-worktree` (B62a), `block reopen` (B72) and `block accept-hit` (B127)', () => {
   const merged = mergeForbidden([]);
-  assert.equal(merged.length, FORBIDDEN.length + 6); // B72: + block reopen; B127: + block accept-hit
+  assert.equal(merged.length, FORBIDDEN.length + 8); // B72: + block reopen; B127: + block accept-hit
   assert.equal(isForbidden(['code-forge', 'block', 'close', 'B1', '--remove-worktree'], merged)?.id, 'code-forge-remove-worktree');
   assert.equal(isForbidden(['npx', '@codedology/code-forge', 'block', 'close', 'B1', '--run', 'r1', '--remove-worktree'], merged)?.id, 'code-forge-remove-worktree');
   assert.equal(isForbidden(['code-forge', 'block', 'close', 'B1', '--remove-worktree'], FORBIDDEN), null);
@@ -550,6 +550,19 @@ test('mergeForbidden always carries the coder-only entries: `block waive`, `auto
   assert.equal(isForbidden(['code-forge', 'block', 'close', 'B1', '--no-require-reviews'], merged)?.id, 'code-forge-no-require-reviews');
   assert.equal(isForbidden(['code-forge', 'block', 'close', 'B1'], merged), null);
   assert.equal(isForbidden(['code-forge', 'block', 'waive', 'B1', 'F1'], FORBIDDEN), null);
+});
+
+test('B124b clause 6: both human waiver verbs are forbidden to coders with both prefixes and produce rule_break hits', () => {
+  for (const verb of ['unwaive', 'ack-waivers']) {
+    for (const bin of ['code-forge', 'forge']) {
+      const argv = [bin, 'block', verb, 'B1'];
+      const id = `code-forge-block-${verb}-from-coder`;
+      assert.equal(isForbidden(argv, mergeForbidden())?.id, id);
+      assert.deepEqual(scanTranscript(argv.join(' '), mergeForbidden()), [{ id, line: 1 }]);
+      assert.equal(isForbidden(argv, FORBIDDEN), null);
+    }
+  }
+  assert.deepEqual(scanTranscript('forge block status', mergeForbidden()), []);
 });
 
 test('B45: a coder may not run any autopilot subcommand, under any spelling; the orchestrator list (FORBIDDEN) does not carry it', () => {

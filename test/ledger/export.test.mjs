@@ -9,13 +9,13 @@ import { buildReport, SECTION_NAMES } from '../../src/ledger/report.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { captureStream, withTempHome } from './helpers.mjs';
 
-test('exportReportSections writes exactly the SECTION_NAMES files (14), each byte-for-byte round-tripping its section data', async () => {
+test('exportReportSections writes exactly the SECTION_NAMES files (15), each byte-for-byte round-tripping its section data', async () => {
   await withTempHome(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'code-forge-export-'));
     try {
       const { sections } = buildReport([{ event: 'dispatch', block: 'b1', level: 'L1', lane: 'L1' }]);
-      assert.equal(Object.keys(sections).length, 14);
-      assert.equal(SECTION_NAMES.at(-1), 'outside_review');
+      assert.equal(Object.keys(sections).length, 15);
+      assert.equal(SECTION_NAMES.at(-1), 'agent_waivers');
 
       const paths = await exportReportSections(dir, sections);
 

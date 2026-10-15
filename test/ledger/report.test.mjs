@@ -261,7 +261,7 @@ test('B66 (2): an outside_review row whose rounds or findings are not 0-or-more 
   assert.deepEqual(sections.outside_review, [{ pr: 4, rounds: 1, findings: 1, link: null, blocks: ['B1'], code_forge_usd: 0, unknown_usd_sessions: 0 }]);
 });
 
-test('B66 (2): SECTION_NAMES has 14 sections, in order, with outside_review appended last', () => {
+test('B124b clause 3: SECTION_NAMES has 15 sections, preserving the original 14 in order', () => {
   assert.deepEqual(
     [...SECTION_NAMES],
     [
@@ -279,8 +279,21 @@ test('B66 (2): SECTION_NAMES has 14 sections, in order, with outside_review appe
       'blocks_stopped_at_l3',
       'run_stop_counts',
       'outside_review',
+      'agent_waivers',
     ],
   );
+});
+
+test('B124b report: every agent waiver is audited in ledger order with scoped cancellation and later waivers retained', () => {
+  const waiver = { event: 'review.waived', run: 'r1', block: 'B1', file: 'a.mjs', finding: 'W1', severity: 'warning', reason: 'bounded', verdict: 'agree', by: 'agent' };
+  const undo = { event: 'review.unwaived', run: 'r1', block: 'B1', file: 'a.mjs', finding: 'W1', by: 'human' };
+  const rows = [waiver, { ...waiver }, { ...waiver, by: 'human' }, { ...waiver, run: 'r2' }, { ...waiver, block: 'B2' }, { ...waiver, file: 'b.mjs' }, { ...waiver, finding: 'W2' }, undo, { ...waiver }, { ...waiver, source: 'shadow' }];
+  const entry = (/** @type {Record<string, any>} */ { block, file, finding, severity, reason, verdict }, unwaived) => ({ block, file, finding, severity, reason, verdict, unwaived });
+  assert.deepEqual(buildReport(rows).sections.agent_waivers, [entry(waiver, true), entry(waiver, true), ...rows.slice(3, 7).map((r) => entry(r, false)), entry(waiver, false)]);
+  assert.deepEqual(buildReport([]).sections.agent_waivers, []);
+  const { agent_waivers, ...before } = buildReport([]).sections;
+  const { agent_waivers: audited, ...after } = buildReport(rows).sections;
+  assert.deepEqual(after, before, 'all original sections are unchanged by waiver audit rows');
 });
 
 /**
@@ -308,8 +321,8 @@ test('B66 (3): report --json carries outside_review; --export writes outside_rev
   assert.deepEqual(parsed.outside_review, EXPECTED_OUTSIDE);
 
   const exported = await reportCli('export', outsideReviewLedger(), (slug, dir) => ['--slug', slug, '--export', path.join(dir, 'out')]);
-  assert.deepEqual([exported.code, exported.stdout], [0, `exported 14 section file(s) to ${path.join(exported.dir, 'out')}\n`], exported.stderr);
-  assert.equal((await readdir(path.join(exported.dir, 'out'))).length, 14);
+  assert.deepEqual([exported.code, exported.stdout], [0, `exported 15 section file(s) to ${path.join(exported.dir, 'out')}\n`], exported.stderr);
+  assert.equal((await readdir(path.join(exported.dir, 'out'))).length, 15);
   assert.deepEqual(JSON.parse(await readFile(path.join(exported.dir, 'out', 'outside_review.json'), 'utf8')), EXPECTED_OUTSIDE);
 
   const none = [{ event: 'run.start', run: 'r1' }];
@@ -328,18 +341,18 @@ test('B66 (2): the text report prints outside_review after run_stop_counts — o
   const section = afterStops.slice(afterStops.indexOf('== outside_review ==\n'));
   // the header and its lines exactly: everything from the header up to the spend lines
   assert.equal(
-    section.slice(0, section.indexOf('spend per run')),
+    section.slice(0, section.indexOf('== agent_waivers ==')),
     '== outside_review ==\n' +
       'PR #7 · 1 outside round · 0 findings · code-forge $2.10 (+2 unknown) · B2, B3\n' +
       'PR #12 · 3 outside rounds · 7 findings · code-forge $3.75 (+1 unknown) · B1, B2\n',
   );
-  assert.equal(res.stdout.match(/^== /gm)?.length, 14);
+  assert.equal(res.stdout.match(/^== /gm)?.length, 15);
 
   const none = await reportCli('text-none', [{ event: 'run.start', run: 'r1' }], (slug) => ['--slug', slug]);
   assert.equal(none.code, 0, none.stderr);
-  assert.ok(none.stdout.includes('== run_stop_counts ==\n{\n  "overspend": 0,\n  "l3Fallback": 0,\n  "noEngineStops": 0\n}\n== outside_review ==\noutside review: none\nspend per run'), none.stdout);
+  assert.ok(none.stdout.includes('== run_stop_counts ==\n{\n  "overspend": 0,\n  "l3Fallback": 0,\n  "noEngineStops": 0\n}\n== outside_review ==\noutside review: none\n== agent_waivers ==\n[]\nspend per run'), none.stdout);
   const noneSection = none.stdout.slice(none.stdout.indexOf('== outside_review ==\n'));
-  assert.equal(noneSection.slice(0, noneSection.indexOf('spend per run')), '== outside_review ==\noutside review: none\n');
+  assert.equal(noneSection.slice(0, noneSection.indexOf('== agent_waivers ==')), '== outside_review ==\noutside review: none\n');
 
   // a fully priced PR prints no "(+N unknown)"; a PR with no blocks prints $0.00 and "-"
   const pricedRows = [
@@ -351,7 +364,7 @@ test('B66 (2): the text report prints outside_review after run_stop_counts — o
   assert.equal(priced.code, 0, priced.stderr);
   const pricedSection = priced.stdout.slice(priced.stdout.indexOf('== outside_review ==\n'));
   assert.equal(
-    pricedSection.slice(0, pricedSection.indexOf('spend per run')),
+    pricedSection.slice(0, pricedSection.indexOf('== agent_waivers ==')),
     '== outside_review ==\n' +
       'PR #20 · 2 outside rounds · 1 finding · code-forge $1.75 · B1\n' +
       'PR #21 · 0 outside rounds · 0 findings · code-forge $0.00 · -\n',

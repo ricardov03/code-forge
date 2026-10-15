@@ -246,7 +246,7 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
   });
 
   // 13 sections as landed (B6's report.mjs), plus B66's 14th, outside_review, appended last.
-  test('report --slug prints its 14 sections, in order', () => {
+  test('report --slug prints its 15 sections, in order', () => {
     const headers = res.stdout.split('\n').filter((l) => /^== [a-z0-9_]+ ==$/.test(l)).map((l) => l.slice(3, -3));
     assert.deepEqual(headers, [
       'cost_per_block',
@@ -263,6 +263,7 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
       'blocks_stopped_at_l3',
       'run_stop_counts',
       'outside_review',
+      'agent_waivers',
     ]);
   });
 

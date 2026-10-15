@@ -187,6 +187,14 @@
         "parallel_tickets": { "type": "integer", "minimum": 1, "maximum": 16, "default": 3, "description": "B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap." },
         "fair_share": { "type": "boolean", "default": false, "description": "Give each free ticket slot to the block with the fewest running tickets; ties stay oldest first." },
         "file_loop": { "type": "string", "enum": ["wait", "overlap", "watch"], "default": "wait", "description": "After each green file, enqueue its review. wait (default): wait for its ticket before the next file. overlap: continue coding, then run review-file --wait-block <id> --run <run> before the completion sentinel; inspect findings with --wait <ticket>. watch: commit each green file instead of running review-file. A file's first commit is queued at once. Later commits of a file that already has a ticket of this block are held (a watch.held row) until --wait-block, which queues the latest content once before the sentinel. Older pending tickets are still superseded." },
+        "agent_waivers": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Human acknowledgement of counted agent waivers. Set before run start; run reload refuses to change require_ack.",
+          "properties": {
+            "require_ack": { "type": "boolean", "default": false, "description": "Require a verified human acknowledgement of the current counted agent waiver set before block close. Read only from the run config snapshot. New or removed waivers need a new acknowledgement." }
+          }
+        },
         "external": {
           "type": "object",
           "additionalProperties": false,

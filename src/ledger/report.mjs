@@ -1,5 +1,5 @@
 /**
- * `code-forge report` (plan §6.2, R4): builds the 14 report sections from a run's ledger rows.
+ * `code-forge report` (plan §6.2, R4): builds the 15 report sections from a run's ledger rows.
  * Pure data, no I/O — terminal rendering + `--export` live in `src/cli/report.mjs`.
  *
  * Shadow rows (`row.source === 'shadow'`) are excluded everywhere here (plan §6.3: shadow-sampled
@@ -262,8 +262,8 @@ const runStopCounts = (rows) => ({
   noEngineStops: rows.filter((r) => r.event === 'run.stop' && r.reason === 'no_engine').length,
 });
 
-/** The exact, ordered set of section keys `buildReport` produces (plan §6.2; B66 appended the
- * 14th, `outside_review` — append new sections, never reorder) —
+/** The exact, ordered set of section keys `buildReport` produces (plan §6.2; B66 appended
+ * `outside_review`, then B124b appended `agent_waivers` — append new sections, never reorder) —
  * exported so tests (and `--export`) can assert against ONE source of truth instead of a copy. */
 export const SECTION_NAMES = Object.freeze([
   'cost_per_block',
@@ -280,6 +280,7 @@ export const SECTION_NAMES = Object.freeze([
   'blocks_stopped_at_l3',
   'run_stop_counts',
   'outside_review',
+  'agent_waivers',
 ]);
 
 /**
@@ -307,6 +308,11 @@ export function buildReport(rows) {
     // B66: per PR, the outside review rounds next to the cost of its blocks — the SAME
     // `costPerBlock` entries the `cost_per_block` section shows
     outside_review: (/** @type {any[]} */ r) => buildOutsideReview(r, costs),
+    agent_waivers: (/** @type {any[]} */ r) => r.flatMap((row, i) => row.event === 'review.waived' && row.by === 'agent'
+      ? [{ block: row.block, file: row.file, finding: row.finding, severity: row.severity, reason: row.reason, verdict: row.verdict,
+        unwaived: r.slice(i + 1).some((undo) => undo.event === 'review.unwaived' && undo.by === 'human'
+          && undo.run === row.run && undo.block === row.block && undo.file === row.file && undo.finding === row.finding) }]
+      : []),
   };
   /** @type {Record<string, any>} */
   const sections = {};

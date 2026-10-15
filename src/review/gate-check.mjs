@@ -84,6 +84,7 @@
 import { lstatSync } from 'node:fs';
 import path from 'node:path';
 import { acceptedTranscriptHits } from './accept-hit.mjs';
+import { countedAgentWaivers } from './agent-waiver.mjs';
 import { exec } from '../util/exec.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -306,7 +307,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
 
   const signedOf = (/** @type {string} */ event) => mine.filter((r) => r.event === event && ok(r));
   const waivers = signedOf('review.waived').filter((r) => r.by === 'human');
-  const agentWaivers = signedOf('review.waived').filter((r) => r.by === 'agent' && r.verdict === 'agree');
+  const agentWaivers = key && verify === undefined ? countedAgentWaivers(mine, block, key) : [];
   const autopilotWaivers = mine.filter((r) => r.event === 'review.waived' && r.by === 'autopilot');
   // B71: only the worker's signed rows of THIS run (a row with no run never counts)
   const answers = signedOf(ANSWERED_EVENT).filter((r) => r.run === runId);

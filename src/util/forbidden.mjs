@@ -334,6 +334,18 @@ export const CODER_ONLY_FORBIDDEN = Object.freeze(
       ],
       description: 'Accept a false transcript hit — human-only, confirmed in the human terminal (B127)',
     },
+    {
+      id: 'code-forge-block-unwaive-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [['code-forge', 'block', 'unwaive'], ['forge', 'block', 'unwaive']],
+      description: 'Undo agent waivers — human-only, confirmed in the human terminal (B124b)',
+    },
+    {
+      id: 'code-forge-block-ack-waivers-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [['code-forge', 'block', 'ack-waivers'], ['forge', 'block', 'ack-waivers']],
+      description: 'Acknowledge agent waivers — human-only, confirmed in the human terminal (B124b)',
+    },
   ].map(freezeEntry),
 );
 

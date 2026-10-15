@@ -1,6 +1,7 @@
 /** Evidence-backed orchestrator waivers. Severity and finding text come from signed reviews. */
 import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { createHash } from 'node:crypto';
 import { DELEGABLE_SEVERITIES, ownsAt, recordedSeverity, waiveFinding } from './gate-check.mjs';
 import { checkFileForm, checkFindingId } from './verb-forms.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -128,8 +129,71 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason } });
 }
 
-/** Signed agent rows for the close's audit list. @param {Record<string, any>[]} rows @param {string} block @param {Buffer} key */
+/** Verified ledger-order cancellation, scoped to one run, block, file and finding.
+ * @param {Record<string, any>[]} rows @param {Record<string, any>} waiver @param {Buffer} key
+ */
+export function isUnwaived(rows, waiver, key) {
+  return rows.slice(rows.indexOf(waiver) + 1).some((r) => r.event === 'review.unwaived'
+    && r.run === waiver.run && r.block === waiver.block && r.file === waiver.file && r.finding === waiver.finding
+    && r.by === 'human' && verifyRow(r, key).ok);
+}
+
+/** The verified, agreed agent rows the gate may count, retaining row identity for the ack digest.
+ * @param {Record<string, any>[]} rows @param {string} block @param {Buffer} key
+ */
+export function countedAgentWaivers(rows, block, key) {
+  return rows.filter((r) => r.block === block && r.event === 'review.waived' && r.by === 'agent'
+    && r.verdict === 'agree' && DELEGABLE_SEVERITIES.includes(r.severity) && verifyRow(r, key).ok
+    && !isUnwaived(rows, r, key)
+    && recordedSeverity(rows.filter((other) => other.run === r.run), { block, file: r.file, finding: r.finding, key }).severity === r.severity);
+}
+
+/** Counted agent rows for the close's audit list. @param {Record<string, any>[]} rows @param {string} block @param {Buffer} key */
 export function agentWaivers(rows, block, key) {
-  return rows.filter((r) => r.block === block && r.event === 'review.waived' && r.by === 'agent' && verifyRow(r, key).ok)
+  return countedAgentWaivers(rows, block, key)
     .map(({ file, finding, severity, reason, verdict }) => ({ file, finding, severity, reason, verdict }));
+}
+
+/** Sorted row signatures make a new or removed waiver change the acknowledgement.
+ * @param {Record<string, any>[]} counted
+ */
+export function agentWaiverDigest(counted) {
+  const set = counted.map((r) => [r.file, r.finding, r.mac]).sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+  return createHash('sha256').update(JSON.stringify(set)).digest('hex');
+}
+
+/** @param {Record<string, any>} record @param {Record<string, any>[]} rows @param {string} block @param {Buffer} key */
+export function agentWaiversAcked(record, rows, block, key) {
+  if (configInForce(record)?.review?.agent_waivers?.require_ack !== true) return true;
+  const counted = countedAgentWaivers(rows, block, key);
+  if (counted.length === 0) return true;
+  const digest = agentWaiverDigest(counted);
+  return rows.some((r) => r.event === 'agent_waivers.acked' && r.block === block && r.run === record.run_id
+    && r.by === 'human' && r.digest === digest && verifyRow(r, key).ok);
+}
+
+/** Pre-checks precede the terminal prompt and every write, including expiry checks.
+ * @param {{runId: string, id: string, finding?: string, file?: string, reason?: string, record: Record<string, any>}} req
+ */
+export async function prepareUnwaive({ runId, id, finding, file, reason, record }) {
+  checkFindingId(finding);
+  checkFileForm(file, { normalized: false });
+  if (typeof reason !== 'string' || !reason.trim() || /[\x00-\x1f\x7f]/.test(reason)) throw new StateError('usage', '--reason must be nonblank and contain no control characters');
+  const entry = record.blocks?.[id];
+  if (!entry) refuse('unwaive-no-agent-waiver', 'no verified agent waiver for this block, file and finding');
+  const root = await repoTop(record.workspace);
+  const prefix = path.relative(root, record.workspace).split(path.sep).join('/');
+  if (!ownsAt(prefix)(entry.owned_files ?? [], /** @type {string} */ (file), entry.owned_kinds)) refuse('unwaive-no-agent-waiver', 'no verified agent waiver for this block, file and finding');
+  const rows = (await readAllRows(record.project)).filter((r) => r.run === runId);
+  const key = await loadKey(runId);
+  if (!rows.some((r) => r.block === id && r.file === file && r.finding === finding && r.event === 'review.waived' && r.by === 'agent' && verifyRow(r, key).ok)) refuse('unwaive-no-agent-waiver', 'no verified agent waiver for this block, file and finding');
+  return { event: 'review.unwaived', block: id, file, finding, reason, by: 'human' };
+}
+
+/** @param {Record<string, any>} record @param {string} runId @param {string} id */
+export async function prepareAckWaivers(record, runId, id) {
+  const rows = (await readAllRows(record.project)).filter((r) => r.run === runId);
+  const counted = record.blocks?.[id] ? countedAgentWaivers(rows, id, await loadKey(runId)) : [];
+  if (counted.length === 0) refuse('ack-waivers-none', 'the block has no counted agent waivers');
+  return { counted, row: { event: 'agent_waivers.acked', block: id, digest: agentWaiverDigest(counted), count: counted.length, by: 'human' } };
 }

@@ -208,7 +208,7 @@ import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
 import { PROOF_FINDING, blockFileSet, changedFiles, openFindings, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
-import { agentWaivers, waiveAsAgent } from '../review/agent-waiver.mjs';
+import { agentWaivers, agentWaiversAcked, prepareAckWaivers, prepareUnwaive, waiveAsAgent } from '../review/agent-waiver.mjs';
 import { checkExpiry } from '../autopilot/grant.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { blockTree, prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
@@ -289,9 +289,11 @@ const USAGE =
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text>\n' +
   '       code-forge block accept-hit <id> --run <r> --rule <rule-id> --line <n> --transcript <path> --reason <text>\n' +
+  '       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
+  '       code-forge block ack-waivers <id> --run <r>\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
-const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit'];
+const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers'];
 
 /** Refuse likely shell quoting slips before any row is written.
  * @param {string} workspace @param {string[]} entries @param {string} label
@@ -379,6 +381,21 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     const record = await readRun(runId);
+    if (sub === 'unwaive' || sub === 'ack-waivers') {
+      if (positionals.length !== (sub === 'unwaive' ? 2 : 1)) throw new StateError('usage', `block ${sub} takes ${sub === 'unwaive' ? 'one block id and one finding id' : 'one block id'}`);
+      const prepared = sub === 'unwaive'
+        ? { counted: [], row: await prepareUnwaive({ runId, id, finding: extra, file: /** @type {string} */ (flags.file), reason: /** @type {string} */ (flags.reason), record }) }
+        : await prepareAckWaivers(record, runId, id);
+      const asked = await confirmHumanVerb(sub, runId, id, { finding: extra, file: /** @type {string} */ (flags.file) }, record, deps, () => {
+        for (const w of prepared.counted) (json ? err : say)(`block ${id}: agent waiver ${w.file} ${w.finding} reason: ${w.reason}; verdict: ${w.verdict}\n`);
+      });
+      if (asked === 'no-tty') { err(`${humanVerbNoTTY(sub)}\n`); return 2; }
+      if (asked === 'cancelled') { err(`block ${id} ${sub}: cancelled — nothing was recorded\n`); return 1; }
+      await writeSigned(runId, (row) => appendRow(row, { slug: record.project }), prepared.row);
+      say(sub === 'unwaive' ? `block ${id} unwaived ${extra} in ${flags.file} (by: human)\n` : `block ${id} acknowledged ${prepared.counted.length} agent waiver(s) (by: human)\n`);
+      if (json) emit(prepared.row);
+      return 0;
+    }
     if (sub === 'open') {
       checkWhitespacePaths(record.workspace, /** @type {string[]} */ (flags.owned), 'owned files');
       if (Array.isArray(flags.tests)) checkWhitespacePaths(record.workspace, flags.tests, 'test files');
@@ -772,6 +789,8 @@ export async function runBlock(args, deps = {}) {
       };
       /** @type {Array<() => Promise<{ok: boolean, reason?: string}>>} */
       const extraChecks = [reviews, report];
+      extraChecks.unshift(async () => agentWaiversAcked(record, rows, id, await loadKey(runId))
+        ? { ok: true } : { ok: false, reason: 'agent-waivers-not-acked' });
       // B63b: `context.require_coder_tests` in the run's config snapshot (never the live config)
       // needs the coder's green test run — waived reviews do not lift it. It runs FIRST: it only
       // reads the report, so a refusal here leaves no row (not even the human waiver row the review
@@ -927,7 +946,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
 
 /**
  * B80: the refusal when `block waive` or `block reopen` has no terminal to ask the human at.
- * @param {'waive' | 'reopen' | 'accept-hit'} verb @returns {string}
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers'} verb @returns {string}
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
@@ -986,20 +1005,26 @@ async function confirmNoReviews(runId, id, deps) {
  * autopilot grant changes nothing (autopilot waives through its own path, `by: autopilot`). The
  * pre-checks (`reopenPrecheck`, `waivePrecheck`) run first, at a terminal, so the human is never
  * asked about a waive or reopen the verb would refuse that way.
- * @param {'waive' | 'reopen' | 'accept-hit'} verb @param {string} runId @param {string} id
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers'} verb @param {string} runId @param {string} id
  * @param {{finding?: string, file: string, rule?: string, line?: number}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
+ * @param {() => void} [before]
  * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
  */
-function confirmHumanVerb(verb, runId, id, what, record, deps) {
+function confirmHumanVerb(verb, runId, id, what, record, deps, before) {
   const message =
     verb === 'waive'
       ? `Waive finding ${what.finding} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
+      : verb === 'unwaive'
+        ? `Undo agent waivers for finding ${what.finding} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
+      : verb === 'ack-waivers'
+        ? `Acknowledge the listed agent waivers of block ${id} (run ${runId})? Only the owner may say yes.`
       : verb === 'accept-hit'
         ? `Accept false transcript hit ${what.rule} at line ${what.line} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
         : `Reopen the review of ${what.file} in block ${id} (run ${runId})? Only the owner may say yes.`;
   return confirmAtTerminal(deps, message, async () => {
     if (verb === 'reopen') await reopenPrecheck(record, runId, id, what.file);
     else if (verb === 'waive') await waivePrecheck(record, runId, id, /** @type {string} */ (what.finding), what.file);
+    before?.();
   });
 }
 

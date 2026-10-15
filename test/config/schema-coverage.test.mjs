@@ -416,7 +416,16 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * B100: +1 = review.file_loop ⇒ 212.
  * B101: +1 = review.fair_share ⇒ 213.
  */
-const EXPECTED_SCHEMA_PATH_COUNT = 213;
+// B124b: +2 = review.agent_waivers{,.require_ack}.
+const EXPECTED_SCHEMA_PATH_COUNT = 215;
+
+test('B124b ack policy is an optional boolean schema key', () => {
+  const node = schema.properties.review.properties.agent_waivers;
+  assert.equal(node?.type, 'object');
+  assert.equal(node?.additionalProperties, false);
+  assert.equal(node?.properties.require_ack.type, 'boolean');
+  assert.equal(node?.properties.require_ack.default, false);
+});
 
 test('collectSchemaPaths produces EXACTLY the pinned number of paths and every KNOWN path — so an empty or broken collector fails here', () => {
   const schemaPaths = allSchemaPaths(schema);

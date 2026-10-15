@@ -1,6 +1,6 @@
 /**
  * `code-forge report [--slug <slug>] [--json] [--export <dir>]` (plan §6.2, R4). Terminal output
- * only, plus an optional `--export <dir>` that writes the same 14 sections as JSON files. The
+ * only, plus an optional `--export <dir>` that writes the same 15 sections as JSON files. The
  * terminal output ends with the spend per run (B33) and the mode of each run (B59: brief or plan);
  * both are text only, never in `--json` or `--export`. The 14th section, `outside_review` (B66), is
  * printed as text lines under its header (`outside review: none`, or one line per PR).
@@ -75,7 +75,7 @@ export async function runReport(args, deps = {}) {
 }
 
 /**
- * B33: the running spend per run (open blocks included), after the 14 sections. Unknown-price
+ * B33: the running spend per run (open blocks included), after the 15 sections. Unknown-price
  * sessions are named, never priced.
  * @param {ReturnType<typeof buildSpend>} spend @returns {string}
  */
