@@ -10,7 +10,7 @@
  *   block claim <id> <path> --run <r>
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree]
  *   block stop <id> --run <r> --reason <text>
- *   block waive <id> <finding-id> --run <r> --file <path> --reason <text>   (human-only, §4.9; asks at a terminal, B80)
+ *   block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]   (orchestrator --yes: evidence and a fresh judge)
  *   block reopen <id> --run <r> --file <path> --reason <text>   (human-only, B72; asks at a terminal, B80)
  *
  * B64a `--json` (every subcommand): on success stdout is exactly ONE JSON line instead of the
@@ -172,18 +172,17 @@
  * <from>[ <stop reason>]; by: human)`; `--json`: `{"block", "event": "reopened", "file", "from",
  * "stop_reason", "at_seq", "from_hash", "to_hash", "ticket_cleared", "by"}`.
  *
- * B80 (D1 = a): `block waive` and `block reopen` need the human at a terminal, through the same
+ * B80: without `--yes`, `block waive` and `block reopen` need the human at a terminal, through the same
  * confirm as `--no-require-reviews` (`confirmAtTerminal`). Right after the usage checks and the run
  * record read — before the autopilot expiry checks or anything else is written — stdin or stdout
- * not a TTY prints `block <verb> needs the human at a terminal to confirm; nothing was recorded
- * (there is no --yes)` (exit 2). At a terminal, what the verb would refuse is refused before the
+ * not a TTY prints `humanVerbNoTTY` (exit 2). At a terminal, what the verb would refuse is refused before the
  * question: a `--file` or finding id with a control character or of the wrong form (`usage`, exit
  * 2, `checkFileForm` / `checkFindingId` — the verbs' own checks), an unknown block, for reopen a
  * block that is not open or a file it does not own (`reopen-not-owned`), for waive a file the block
  * does not own (`waive-not-owned`) or a finding id no review row of the block names for the file
  * (`waive-unknown-finding`; `proof` is exempt) — exit 1. A "no" or a cancel prints `block <id>
  * <verb>: cancelled — nothing was recorded` (exit 1); a "yes" runs the verb exactly as before (the
- * same signed row). There is no `--yes` (an unknown flag, exit 2). An active autopilot grant
+ * same signed row). Only `block waive` accepts `--yes` (B124a, evidence and a fresh L3 judge). An active autopilot grant
  * changes nothing here — autopilot waives through its own path (`autopilot waive`, `by:
  * autopilot`). The prompt checks only that stdin and stdout are terminals; a pseudo-terminal
  * passes it, so it does not prove a human. The coder deny-list entries stay.
@@ -339,8 +338,7 @@ export async function runBlock(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json', 'yes'] });
-    if (flags.yes === true && sub !== 'waive') throw new StateError('usage', '--yes is a block waive flag');
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'waive' ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;

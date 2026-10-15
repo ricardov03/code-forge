@@ -76,8 +76,8 @@
  * `autopilot_waiver_invalid` (the detail says why). `by: human` waivers are unchanged.
  *
  * `block waive <id> <finding> --file <path> --reason <text>` (`waiveFinding`) writes a signed
- * `review.waived` row with `by: human`. The orchestrator runs it only after the human said so in chat; the brief
- * never mentions it; for a coder the argv is forbidden (`mergeForbidden()` always carries B12b's
+ * `review.waived` row with `by: human` by default. With `--yes`, the orchestrator needs evidence
+ * and a fresh judge's agreement for a warning or nit (`agent-waiver.mjs`, `by: agent`). For a coder the argv is forbidden (`mergeForbidden()` always carries B12b's
  * coder-only entries, `CODER_ONLY_FORBIDDEN` in `util/forbidden.mjs`).
  */
 
@@ -447,7 +447,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
    * real review of these bytes left open ({@link reviewedOpen}) is cleared by {@link waiverOf} —
    * waived by the human or a covered autopilot grant, or (B71) answered — or null. `findings` are
    * the waived ids, `answered` the answered ones (only when there is one); `by` is `human` when
-   * every clearing waiver is the human's, `autopilot` when one is the autopilot's, and null when
+   * every clearing waiver is the human's, `agent` when one is an agent's, else `autopilot`, and null when
    * every id was answered.
    * @param {string} file @param {string} hash
    * @returns {WaivedAll | null}
