@@ -132,10 +132,10 @@ const GEN_DOC_STALE = "process.stderr.write('gen-config-doc --check: docs/refere
 
 /**
  * A fresh work repo with one pushed commit on main and a bare origin.
- * @param {{ changelog?: string, genDoc?: string | null, lock?: boolean }} [o] - `genDoc: null` writes no
+ * @param {{ changelog?: string, genDoc?: string | null, lock?: boolean, readme?: string }} [o] - `genDoc: null` writes no
  *   scripts/gen-config-doc.mjs; `lock: true` also commits a package-lock.json
  */
-function makeRepo({ changelog = CHANGELOG, genDoc = GEN_DOC_OK, lock = false } = {}) {
+function makeRepo({ changelog = CHANGELOG, genDoc = GEN_DOC_OK, lock = false, readme = README } = {}) {
   counter += 1;
   const dir = path.join(PARENT, `case-${counter}`);
   const origin = path.join(dir, 'origin.git');
@@ -150,7 +150,7 @@ function makeRepo({ changelog = CHANGELOG, genDoc = GEN_DOC_OK, lock = false } =
   writeFileSync(path.join(work, '.claude-plugin', 'plugin.json'), PLUGIN);
   writeFileSync(path.join(work, 'skill', 'scripts', 'forge'), SHIM);
   writeFileSync(path.join(work, 'CHANGELOG.md'), changelog);
-  writeFileSync(path.join(work, 'README.md'), README);
+  writeFileSync(path.join(work, 'README.md'), readme);
   if (lock) writeFileSync(path.join(work, 'package-lock.json'), LOCK);
   if (genDoc !== null) {
     mkdirSync(path.join(work, 'scripts'));
@@ -312,7 +312,8 @@ describe('scripts/release.mjs (B23)', () => {
   });
 
   test('an empty [Unreleased] is refused in preflight: README, CHANGELOG and the package files byte-unchanged; HEAD and tags unchanged', () => {
-    const { work, origin } = makeRepo({ changelog: NO_ENTRIES, lock: true });
+    const readme = README + "\n## What's new in 0.1\n\nIn the next release:\n\n- A pending change.\n";
+    const { work, origin } = makeRepo({ changelog: NO_ENTRIES, lock: true, readme });
     const files = snapshot(work);
     assert.equal(files.filter((b) => b === null).length, 0);
     const st = state(work);
@@ -322,7 +323,7 @@ describe('scripts/release.mjs (B23)', () => {
     assert.equal(r.stderr, '\nREFUSED: CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"\n');
     // all 7 files byte-for-byte as before, and each of the B108 ones against its written-out text
     assert.deepEqual(snapshot(work), files);
-    assert.equal(readFileSync(path.join(work, 'README.md'), 'utf8'), README);
+    assert.equal(readFileSync(path.join(work, 'README.md'), 'utf8'), readme);
     assert.equal(readFileSync(path.join(work, 'CHANGELOG.md'), 'utf8'), NO_ENTRIES);
     assert.equal(readFileSync(path.join(work, 'package.json'), 'utf8'), PKG);
     assert.equal(readFileSync(path.join(work, 'npm-shrinkwrap.json'), 'utf8'), SHRINKWRAP);
