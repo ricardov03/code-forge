@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 130,
+  "block_count": 131,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2225,6 +2225,31 @@
         "B47"
       ],
       "note": "block waive --yes skips the terminal confirm only for a finding whose signed recorded severity is warning or nit; the reason must cite evidence (path:line, a test file, or an acceptance clause); a fresh L3 judge must agree; then one signed review.waived row by: agent with the verdict. Critical or unknown severity is refused waive-yes-critical; no evidence waive-yes-no-evidence (judge not called); disagree waive-yes-disagreed. The gate counts an agreed agent waiver; block close lists agent waivers and --json adds agent_waivers. block reopen stays human-only with no --yes."
+    },
+    "B127": {
+      "title": "block accept-hit: the human accepts one named false transcript hit",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/how-it-works.md",
+        "skill/references/review.md",
+        "skill/references/security.md",
+        "src/cli/block.mjs",
+        "src/review/accept-hit.mjs",
+        "src/review/gate-check.mjs",
+        "src/util/forbidden.mjs",
+        "test/cli/block-accept-hit.test.mjs",
+        "test/engines/builders/argv-snapshots.test.mjs",
+        "test/engines/builders/forbidden-rendering.test.mjs",
+        "test/util/forbidden.test.mjs"
+      ],
+      "depends_on": [
+        "B124a",
+        "B80",
+        "B5"
+      ],
+      "note": "block accept-hit <id> --run --rule --line --transcript --reason: human-only (terminal yes, no --yes); pre-checks refuse accept-hit-no-such-hit before any prompt when the transcript scan does not report that (rule, line); on yes one signed rule_break.accepted row {block, rule, line, line_sha256, reason, by: human}. block close drops a transcript hit only when a verified accepted row of the same run and block has the same rule and the sha256 of that exact line text; a rule_break ledger row is never accepted. close prints each accepted hit; --json adds accepted_hits. The verb is coder-only forbidden."
     }
   }
 }
