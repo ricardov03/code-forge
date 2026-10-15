@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 131,
+  "block_count": 132,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2258,6 +2258,50 @@
         "B5"
       ],
       "note": "block accept-hit <id> --run --rule --line --transcript --reason: human-only (terminal yes, no --yes); pre-checks refuse accept-hit-no-such-hit before any prompt when the transcript scan does not report that (rule, line); on yes one signed rule_break.accepted row {block, rule, line, line_sha256, reason, by: human}. block close drops a transcript hit only when a verified accepted row of the same run and block has the same rule and the sha256 of that exact line text; a rule_break ledger row is never accepted. close prints each accepted hit; --json adds accepted_hits. The verb is coder-only forbidden."
+    },
+    "B124b": {
+      "title": "undo and audit agent waivers: block unwaive, report agent_waivers, require_ack + block ack-waivers",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "docs/concepts.md",
+        "docs/how-it-works.md",
+        "docs/reference/config.md",
+        "docs/tutorial-first-test.md",
+        "schema/code-forge.schema.json",
+        "skill/references/ledger.md",
+        "skill/references/review.md",
+        "skill/references/security.md",
+        "src/cli/block.mjs",
+        "src/cli/report.mjs",
+        "src/ledger/export.mjs",
+        "src/ledger/report.mjs",
+        "src/review/agent-waiver.mjs",
+        "src/review/gate-check.mjs",
+        "src/state/config-snapshot.mjs",
+        "src/util/forbidden.mjs",
+        "test/cli/block-ack-waivers.test.mjs",
+        "test/cli/block-unwaive.test.mjs",
+        "test/config/schema-coverage.test.mjs",
+        "test/engines/builders/argv-snapshots.test.mjs",
+        "test/engines/builders/forbidden-rendering.test.mjs",
+        "test/engines/codex-home.test.mjs",
+        "test/first-use.test.mjs",
+        "test/ledger/cli.test.mjs",
+        "test/ledger/export.test.mjs",
+        "test/ledger/report.test.mjs",
+        "test/skill/structure.test.mjs",
+        "test/state/brief-mode.test.mjs",
+        "test/util/forbidden.test.mjs"
+      ],
+      "depends_on": [
+        "B124a",
+        "B127",
+        "B66",
+        "B58"
+      ],
+      "note": "block unwaive <id> <finding> --run --file --reason: human-only; refuses unwaive-no-agent-waiver before any prompt unless a verified by: agent waiver exists; writes a signed review.unwaived row that cancels earlier agent waivers of that (block, file, finding) on the gate and the review-file pre-check. report gets a 15th section agent_waivers {block, file, finding, severity, reason, verdict, unwaived}. review.agent_waivers.require_ack (frozen at run start): close refuses agent-waivers-not-acked until a human block ack-waivers row matches the digest of the counted agent waivers; ack-waivers-none with none. Both verbs are coder-only forbidden."
     }
   }
 }
