@@ -124,7 +124,8 @@ worker.release();
   const add = (file = 'src/a.mjs') => enqueue({ repoRoot: repo, run: runId, block: BLOCK, file }).ticket;
   const stop = async (handle) => {
     if (handle.child.exitCode !== null || handle.child.signalCode !== null) return;
-    try { process.kill(-handle.child.pid, 'SIGKILL'); } catch (err) { if (err.code !== 'ESRCH') throw err; }
+    // macOS answers EPERM, not ESRCH, when every process in the group has exited but is not reaped yet.
+    try { process.kill(-handle.child.pid, 'SIGKILL'); } catch (err) { if (err.code !== 'ESRCH' && err.code !== 'EPERM') throw err; }
     await handle.exited;
   };
   const close = async () => { for (const handle of children) await stop(handle); };
