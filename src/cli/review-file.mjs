@@ -163,6 +163,56 @@ const FRESH_ATTEMPTS = 3;
 /** B75: the ways out a counted result names (human-only; a coder stops and reports). */
 export const FRESH_EXITS = Object.freeze(['block reopen', 'block waive']);
 
+/** The automatic retry allow-list excludes refused results, even those --fresh can rerun. */
+const RETRY_STATUSES = new Set(['stale', 'unavailable', 'split_required']);
+
+/**
+ * Classify in place and use the same byte-checked claim for fresh and automatic retries.
+ * @param {{repoRoot: string, ticket: string, file: string, dropDone?: typeof dropDoneIf, once?: boolean, statuses?: Set<string>}} opts
+ * @returns {{verdict: 'rerun' | 'tampered' | 'counted', outcome: 'dropped' | 'gone' | 'kept'}}
+ */
+function dropFreshDone({ repoRoot, ticket, file, dropDone = dropDoneIf, once = false, statuses }) {
+  const markerPath = path.join(queueDir(repoRoot), `${ticket}.done`);
+  /** @type {'rerun' | 'tampered' | 'counted'} */
+  let verdict = 'counted';
+  // a marker that changed under the claim is classified again; bounded, then refused (fail closed)
+  for (let attempt = 0; attempt < FRESH_ATTEMPTS; attempt += 1) {
+    /** @type {Buffer | null} */
+    let bytes;
+    try {
+      bytes = readFileSync(markerPath);
+    } catch (err) {
+      // no marker: a normal enqueue; a marker that exists but cannot be read is never dropped
+      bytes = /** @type {{code?: unknown}} */ (err)?.code === 'ENOENT' ? null : Buffer.alloc(0);
+    }
+    if (bytes === null) return { verdict: 'counted', outcome: 'gone' };
+    // classified IN PLACE: a refusal never moves, renames or touches the marker
+    const text = bytes.toString('utf8');
+    const result = resultOfMarker(repoRoot, text);
+    verdict = freshVerdict(text, result);
+    if (statuses && !statuses.has(result?.status)) verdict = 'counted';
+    if (verdict !== 'rerun') break;
+    /** @type {unknown} */
+    let outcome;
+    try {
+      outcome = dropDone(repoRoot, ticket, bytes, once ? { once: true } : {});
+    } catch (err) {
+      // a named refusal passes through; any other throw is named here, never echoed
+      if (err instanceof WorkerError) throw err;
+      throw new WorkerError('fresh-claim-failed', `the claim of the cached result of ${file} failed; nothing was queued`);
+    }
+    if (outcome === 'changed') {
+      verdict = 'counted';
+      continue;
+    }
+    if (outcome === 'kept') break;
+    // an allow-list of outcomes: anything else is refused and nothing is queued
+    if (outcome !== 'dropped' && outcome !== 'gone') throw new WorkerError('fresh-claim-unknown', `the claim of the cached result of ${file} gave an unknown outcome; nothing was queued`);
+    return { verdict, outcome };
+  }
+  return { verdict, outcome: 'kept' };
+}
+
 /**
  * B75: `review-file <path> --block <id> --fresh`. No done marker: a normal enqueue. The marker is
  * read and classified IN PLACE; only a cached result that never counted is then claimed by
@@ -178,44 +228,8 @@ export const FRESH_EXITS = Object.freeze(['block reopen', 'block waive']);
  */
 function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDoneIf, retry = false }) {
   const { ticket } = resolveTicket({ repoRoot, run, block, file, tree: where.tree ?? null });
-  const markerPath = path.join(queueDir(repoRoot), `${ticket}.done`);
-  /** @type {'rerun' | 'tampered' | 'counted'} */
-  let verdict = 'counted';
-  // a marker that changed under the claim is classified again; bounded, then refused (fail closed)
-  for (let attempt = 0; attempt < FRESH_ATTEMPTS; attempt += 1) {
-    /** @type {Buffer | null} */
-    let bytes;
-    try {
-      bytes = readFileSync(markerPath);
-    } catch (err) {
-      // no marker: a normal enqueue; a marker that exists but cannot be read is never dropped
-      bytes = /** @type {{code?: unknown}} */ (err)?.code === 'ENOENT' ? null : Buffer.alloc(0);
-    }
-    if (bytes === null) {
-      say(enqueue({ repoRoot, run, block, file, ...where }));
-      return 0;
-    }
-    // classified IN PLACE: a refusal never moves, renames or touches the marker
-    const text = bytes.toString('utf8');
-    verdict = freshVerdict(text, resultOfMarker(repoRoot, text));
-    if (verdict !== 'rerun') break;
-    /** @type {unknown} */
-    let outcome;
-    try {
-      outcome = dropDone(repoRoot, ticket, bytes);
-    } catch (err) {
-      // a named refusal passes through; any other throw is named here, never echoed
-      if (err instanceof WorkerError) throw err;
-      throw new WorkerError('fresh-claim-failed', `the claim of the cached result of ${file} failed; nothing was queued`);
-    }
-    if (outcome === 'changed') {
-      verdict = 'counted';
-      continue;
-    }
-    // an allow-list of outcomes: anything else is refused and nothing is queued
-    if (outcome !== 'dropped' && outcome !== 'gone') throw new WorkerError('fresh-claim-unknown', `the claim of the cached result of ${file} gave an unknown outcome; nothing was queued`);
-    // dropped: queue it again now (a crash right here leaves a pending ticket with no marker, which
-    // the next review-file queues anyway); gone: another caller took the marker, a normal enqueue
+  const { verdict, outcome } = dropFreshDone({ repoRoot, ticket, file, dropDone });
+  if (outcome === 'dropped' || outcome === 'gone') {
     const queued = enqueue({ repoRoot, run, block, file, ...where });
     say(outcome === 'dropped' ? { ...queued, ...(retry ? { retry: true } : { fresh: true }) } : queued);
     return 0;
@@ -390,7 +404,7 @@ async function waitBlockScope(repoRoot, cwd, run, block) {
   throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
 }
 
-/** A block wait reads only the marker, never review results or the signing key.
+/** Read a completion marker without the signing key.
  * @param {string} repoRoot @param {string} ticket @returns {Record<string, any> | null}
  */
 function blockTicketMarker(repoRoot, ticket) {
@@ -404,12 +418,12 @@ function blockTicketMarker(repoRoot, ticket) {
 }
 
 /**
- * A block wait reads only completion/delivery markers, never review results or the signing key.
+ * A block wait uses unsigned results only to classify retries; it never reads the signing key.
  * Re-scan current content on every poll. Deliver unseen findings of the newest earlier ticket
  * before rechecking a blind edit; the next join queues the fix. Stopped files stay finished.
- * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown}} opts
+ * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf}} opts
  */
-async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say }) {
+async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDone = dropDoneIf }) {
   const { entry, tree } = await waitBlockScope(repoRoot, cwd, run, block);
   const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree: realpathSync(tree) };
   const deadline = Date.now() + maxMs;
@@ -441,7 +455,12 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say }) {
         enqueue(opts);
         present = { ...previous[previous.length - 1], ticket };
       }
-      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : blockTicketMarker(repoRoot, ticket) ? 'done' : 'pending' };
+      let marker = present ? blockTicketMarker(repoRoot, ticket) : null;
+      if (live && marker && RETRY_STATUSES.has(marker.status)) {
+        dropFreshDone({ repoRoot, ticket, file, dropDone, once: true, statuses: RETRY_STATUSES });
+        marker = blockTicketMarker(repoRoot, ticket);
+      }
+      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : marker ? 'done' : 'pending' };
     });
     if (downPolls >= 2) {
       say({ block, files, done: false, status: 'worker_down' });
@@ -478,7 +497,7 @@ export async function runReviewFile(args, deps = {}) {
       if (positionals.length > 0 || flags.block !== undefined || flags.wait !== undefined || flags.answers !== undefined || flags.of !== undefined || flags.fresh === true || typeof flags.run !== 'string') {
         throw new WorkerError('usage', '--wait-block takes a block, --run and --max only');
       }
-      return await waitBlock({ repoRoot, cwd, block: assertBlockId(flags['wait-block']), run: assertRunId(flags.run), maxMs: flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max), pollMs: deps.pollMs ?? POLL_MS, say });
+      return await waitBlock({ repoRoot, cwd, block: assertBlockId(flags['wait-block']), run: assertRunId(flags.run), maxMs: flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max), pollMs: deps.pollMs ?? POLL_MS, say, dropDone: deps.dropDone });
     }
 
     if (typeof flags.wait === 'string') {
@@ -524,15 +543,8 @@ export async function runReviewFile(args, deps = {}) {
     const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree };
     if (flags.fresh === true) return freshTicket({ repoRoot, run: worker.run, block, file, where, say, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
     const queued = enqueue({ repoRoot, run: worker.run, block, file, ...where });
-    if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'split_required') {
+    if (queued.status === 'done' && ['unavailable', 'split_required'].includes(doneResult(repoRoot, queued.ticket)?.status)) {
       return freshTicket({ repoRoot, run: worker.run, block, file, where, say, retry: true, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
-    }
-    if (queued.status === 'done' && doneResult(repoRoot, queued.ticket)?.status === 'unavailable') {
-      // `unavailable` is never approval AND never final: drop the done marker so the worker runs
-      // the ticket again (the fix loop re-runs its pending round); the signed result is replaced.
-      rmSync(path.join(queueDir(repoRoot), `${queued.ticket}.done`), { force: true });
-      say({ ...enqueue({ repoRoot, run: worker.run, block, file, ...where }), retry: true });
-      return 0;
     }
     say(queued);
     return 0;

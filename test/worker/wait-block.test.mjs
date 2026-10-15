@@ -5,7 +5,7 @@ import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync }
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
-const { announceWorker, retractWorker, enqueue, queueDir, readResult, writeResult, enqueueAnswers, blockTickets, resolveTicket } = await import('../../src/worker/queue.mjs');
+const { announceWorker, retractWorker, enqueue, queueDir, readResult, writeResult, enqueueAnswers, blockTickets, resolveTicket, dropDoneIf } = await import('../../src/worker/queue.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 const { validateConfig, reviewFileLoop } = await import('../../src/config/validate.mjs');
 const { loadConfigFile } = await import('../../src/config/load.mjs');
@@ -14,12 +14,12 @@ const { readRun, saveRun, startRun } = await import('../../src/state/run.mjs');
 const { exec } = await import('../../src/util/exec.mjs');
 const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 
-/** @param {string} repo @param {string} runId @param {string[]} [extra] */
-async function waitBlock(repo, runId, extra = []) {
+/** @param {string} repo @param {string} runId @param {string[]} [extra] @param {{dropDone?: typeof dropDoneIf}} [deps] */
+async function waitBlock(repo, runId, extra = [], deps = {}) {
   let out = '';
   let err = '';
   const code = await runReviewFile(['--wait-block', BLOCK, '--run', runId, ...extra], {
-    cwd: repo, pollMs: 1, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } },
+    ...deps, cwd: repo, pollMs: 1, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } },
   });
   assert.equal(err, '');
   assert.equal(out.trim().split('\n').length, 1);
@@ -326,4 +326,127 @@ test('B122 boundary: an unreadable delivered marker refuses instead of queueing'
     const res = await waitBlock(p.repo, p.runId, ['--max', '0ms']);
     assert.deepEqual([res.code, res.json.status, res.json.reason, queued(p.repo, 'json').length], [1, 'refused', 'result-unreadable', 3]);
   } finally { retractWorker(p.repo, process.pid); }
+});
+
+
+test('B125 clause 1: current content returning to a stale ticket stays pending until one real review', async () => {
+  const { repo, runId, sessions, worker, commit } = await scriptedWatch();
+  announceWorker(repo, { pid: process.pid, run: runId });
+  try {
+    const first = await commit('export const a = 1;\n');
+    writeFileSync(path.join(repo, FILE), 'export const a = 2;\n');
+    assert.equal(await worker.drain(), 1, 'one old-content ticket finishes stale');
+    assert.equal(readResult(repo, runId, first.ticket).status, 'stale');
+    writeFileSync(path.join(repo, FILE), 'export const a = 1;\n');
+    assert.deepEqual(sessions, [], 'zero reviewer sessions for content that moved before review');
+    const pending = await waitBlock(repo, runId, ['--max', '0ms']);
+    assert.deepEqual(pending, { code: 0, json: { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'pending' }], done: false, reason: 'wait_timeout' } });
+    assert.deepEqual(queued(repo, 'done'), [], 'the stale current-content marker is dropped');
+    assert.deepEqual([await worker.drain(), await worker.drain()], [1, 0]);
+    assert.deepEqual(sessions, [first.content_hash], 'exactly one session reviews the returned content');
+    assert.equal(readResult(repo, runId, first.ticket).status, 'reviewed');
+    assert.deepEqual((await waitBlock(repo, runId)).json, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done' }], done: true });
+  } finally { retractWorker(repo, process.pid); }
+});
+
+test('B125 clause 2: unavailable and round-1 split retry once; counted and unreadable results stay cached', async () => {
+  const cases = [
+    { result: { status: 'unavailable', reason: 'engine-error' }, retry: true },
+    { result: { status: 'split_required', round: 0, sessions: [] }, retry: true },
+    { result: { status: 'reviewed', approved: false, findings }, retry: false },
+    { result: { status: 'reviewed', approved: true, findings: [] }, retry: false },
+    { result: { status: 'stopped', stopped: 'split_required' }, retry: false },
+    { result: { status: 'refused', reason: 'review-state-lost' }, retry: false },
+    { result: { status: 'refused', reason: 'other-run' }, retry: false },
+    { result: { status: 'unknown' }, retry: false },
+    { result: { status: 'reviewed', approved: true }, corrupt: 'mismatch', retry: false },
+    { result: { status: 'stale' }, corrupt: 'result', retry: false },
+    { result: { status: 'stale' }, corrupt: 'marker', retry: false },
+  ];
+  for (const { result, retry, corrupt } of cases) {
+    const { repo, runId, sessions, worker, commit } = await scriptedWatch();
+    announceWorker(repo, { pid: process.pid, run: runId });
+    try {
+      const first = await commit('export const a = 1;\n');
+      writeResult({ repoRoot: repo, runId, ticket: first.ticket, key: await loadKey(runId), result });
+      const marker = path.join(queueDir(repo), `${first.ticket}.done`);
+      if (corrupt === 'result') {
+        const rel = JSON.parse(readFileSync(marker, 'utf8')).result;
+        writeFileSync(path.join(repo, rel), '{');
+      }
+      if (corrupt === 'mismatch') {
+        const parsed = JSON.parse(readFileSync(marker, 'utf8'));
+        writeFileSync(marker, JSON.stringify({ ...parsed, status: 'stale' }));
+      }
+      if (corrupt === 'marker') writeFileSync(marker, '{');
+      const before = readFileSync(marker);
+      const inode = statSync(marker).ino;
+      const joined = await waitBlock(repo, runId, ['--max', '0ms']);
+      if (corrupt === 'marker') {
+        assert.deepEqual([joined.code, joined.json.reason], [1, 'result-unreadable']);
+      } else {
+        assert.deepEqual([joined.code, joined.json.done, joined.json.files], [0, !retry, [{ file: FILE, ticket: first.ticket, status: retry ? 'pending' : 'done' }]], `${result.status}/${corrupt ?? 'valid'} join`);
+      }
+      if (!retry) {
+        assert.deepEqual([readFileSync(marker), statSync(marker).ino], [before, inode], `${result.status}/${corrupt ?? 'valid'} marker kept without a rename`);
+      }
+      assert.deepEqual([await worker.drain(), await worker.drain()], [retry ? 1 : 0, 0]);
+      assert.deepEqual(sessions, retry ? [first.content_hash] : [], `${result.status}/${corrupt ?? 'valid'} exact sessions for current content`);
+      if (retry) assert.equal((await waitBlock(repo, runId)).json.done, true);
+    } finally { retractWorker(repo, process.pid); }
+  }
+});
+
+test('B125 clause 3: a rerun that goes stale again is done across joins with no second drop', async () => {
+  const { repo, runId, sessions, worker, commit } = await scriptedWatch();
+  announceWorker(repo, { pid: process.pid, run: runId });
+  try {
+    const first = await commit('export const a = 1;\n');
+    const move = () => writeFileSync(path.join(repo, FILE), 'export const a = 2;\n');
+    const restore = () => writeFileSync(path.join(repo, FILE), 'export const a = 1;\n');
+    move();
+    assert.equal(await worker.drain(), 1);
+    restore();
+    const pending = await waitBlock(repo, runId, ['--max', '0ms']);
+    assert.deepEqual([pending.json.done, pending.json.files], [false, [{ file: FILE, ticket: first.ticket, status: 'pending' }]]);
+    move();
+    assert.equal(await worker.drain(), 1, 'the one rerun finishes stale again');
+    restore();
+    const marker = path.join(queueDir(repo), `${first.ticket}.done`);
+    const before = readFileSync(marker);
+    for (let join = 0; join < 2; join += 1) {
+      const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', '0ms'], repo);
+      assert.deepEqual([res.code, res.json], [0, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done' }], done: true }]);
+      assert.equal(await worker.drain(), 0, `join ${join + 2} schedules zero additional reviews`);
+      assert.deepEqual(readFileSync(marker), before, 'second stale result stays byte-for-byte');
+    }
+    assert.equal(readResult(repo, runId, first.ticket).status, 'stale');
+    assert.deepEqual(sessions, [], 'zero sessions for either stale attempt and zero for later joins');
+    assert.deepEqual(queued(repo, 'json'), [first.ticket]);
+  } finally { retractWorker(repo, process.pid); }
+});
+
+test('B125 boundary: a counted result arriving under the claim is restored; concurrent joins rerun only once', async () => {
+  const { repo, runId, sessions, worker, commit } = await scriptedWatch();
+  announceWorker(repo, { pid: process.pid, run: runId });
+  try {
+    const first = await commit('export const a = 1;\n');
+    const cache = async (result) => writeResult({ repoRoot: repo, runId, ticket: first.ticket, key: await loadKey(runId), result });
+    await cache({ status: 'stale' });
+    let claims = 0;
+    const key = await loadKey(runId);
+    const joined = await waitBlock(repo, runId, ['--max', '0ms'], { dropDone: (root, ticket, seen, io) => {
+      claims += 1;
+      writeResult({ repoRoot: repo, runId, ticket, key, result: { status: 'reviewed', approved: true, findings: [] } });
+      return dropDoneIf(root, ticket, seen, io);
+    } });
+    assert.deepEqual([claims, joined.json.done, await worker.drain(), sessions], [1, true, 0, []], 'one changed claim restores approval and starts zero sessions');
+    assert.equal(readResult(repo, runId, first.ticket).approved, true);
+    // A failed byte comparison must not spend the one successful drop.
+    await cache({ status: 'stale' });
+    const joins = await Promise.all([waitBlock(repo, runId, ['--max', '0ms']), waitBlock(repo, runId, ['--max', '0ms'])]);
+    assert.deepEqual(joins.map((r) => [r.json.done, r.json.files[0].status]), [[false, 'pending'], [false, 'pending']]);
+    assert.deepEqual([await worker.drain(), await worker.drain(), sessions], [1, 0, [first.content_hash]], 'two joins produce exactly one reviewer session for current content');
+    assert.equal((await waitBlock(repo, runId)).json.done, true);
+  } finally { retractWorker(repo, process.pid); }
 });

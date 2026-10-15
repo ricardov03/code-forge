@@ -300,11 +300,13 @@ export function clearDone({ repoRoot, run, block, file, tree = null }) {
  * A crash between the drop and the caller's enqueue leaves a re-runnable ticket with no marker:
  * harmless — its ticket file is pending, and the next `review-file` queues it anyway. Synchronous.
  * @param {string} repoRoot @param {string} ticket @param {Buffer} seen
- * @param {{link?: (from: string, to: string) => void, read?: (file: string) => Buffer, rename?: (from: string, to: string) => void, remove?: (file: string) => void, write?: (file: string, text: string) => void}} [io] - for
+ * `once` records the join's one retry before releasing the claim. An existing retry marker
+ * keeps the result, including when another join has already finished the rerun.
+ * @param {{once?: boolean, link?: (from: string, to: string) => void, read?: (file: string) => Buffer, rename?: (from: string, to: string) => void, remove?: (file: string) => void, write?: (file: string, text: string) => void}} [io] - for
  *   tests (default `linkSync`, `readFileSync`, `renameSync`, `rmSync` with force, `writeFileSync`
  *   with flag `wx` and mode 0o600). A claim that cannot be read is restored the same way and
  *   refused `fresh-restore-failed`.
- * @returns {'dropped' | 'gone' | 'changed'}
+ * @returns {'dropped' | 'gone' | 'changed' | 'kept'}
  * @throws {WorkerError} `fresh-claim-failed` (the claim could not be taken, or not removed after
  *   the drop; nothing was queued) or `fresh-restore-failed` (the message says which state was left:
  *   put back, a newer marker, a refused marker, the claim kept, or nothing). A message names an
@@ -312,6 +314,8 @@ export function clearDone({ repoRoot, run, block, file, tree = null }) {
  */
 export function dropDoneIf(repoRoot, ticket, seen, io = {}) {
   const marker = path.join(queueDir(repoRoot), `${assertTicketId(ticket)}.done`);
+  const retried = path.join(queueDir(repoRoot), `${ticket}.retried`);
+  if (io.once && existsSync(retried)) return 'kept';
   const claim = `${marker}.${process.pid}.${randomBytes(4).toString('hex')}.fresh`;
   const remove = io.remove ?? ((/** @type {string} */ file) => rmSync(file, { force: true }));
   try {
@@ -328,6 +332,16 @@ export function dropDoneIf(repoRoot, ticket, seen, io = {}) {
     same = (io.read ?? readFileSync)(claim).equals(seen);
   } catch (err) {
     readFailed = codeOf(err);
+  }
+  let retryFailed = null;
+  if (same && io.once) {
+    try {
+      writeFileSync(retried, `${ticket}\n`, { flag: 'wx', mode: 0o600 });
+    } catch (err) {
+      // Restore the claim before keeping or refusing it. Only one join can spend the retry.
+      retryFailed = codeOf(err);
+      same = false;
+    }
   }
   if (same) {
     try {
@@ -355,6 +369,8 @@ export function dropDoneIf(repoRoot, ticket, seen, io = {}) {
     // the marker is back (or a newer one won), so the ticket is done; `clearDone` removes the claim
   }
   if (readFailed !== null) throw new WorkerError('fresh-restore-failed', `${unread}; ${linkFailed === 'EEXIST' ? 'a newer marker is in place' : 'it was put back'}; nothing was queued`);
+  if (retryFailed === 'EEXIST') return 'kept';
+  if (retryFailed !== null) throw new WorkerError('fresh-claim-failed', `the retry marker of ticket ${ticket} could not be written (${retryFailed}); the done marker was restored; nothing was queued`);
   return 'changed';
 }
 
