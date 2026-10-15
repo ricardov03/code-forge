@@ -764,7 +764,7 @@ test('B90 (8): review.md §3 names review.routes, how a rule is picked, the row 
   assert.equal(occurrences(section(review, 4), 'review.routes'), 0);
 });
 
-test('B90 (9): how-it-works, review-only and the README key table say the routing behaviour; config.md lists the key', async () => {
+test('B90 (9): how-it-works, review-only and README explain routing and link the complete config keys', async () => {
   const howItWorks = await readFile(path.join(ROOT, 'docs', 'how-it-works.md'), 'utf8');
   assert.equal(occurrences(howItWorks, 'A big file can go to another model with a longer timeout, without editing `.code-forge.yml` for\neach file. Set `review.routes` once: in each rule `min_lines` and `model` are required'), 1);
   assert.equal(occurrences(howItWorks, 'The worker writes one signed `review.route` row per routed level'), 1);
@@ -777,7 +777,8 @@ test('B90 (9): how-it-works, review-only and the README key table say the routin
   assert.equal(occurrences(reviewOnly, 'A rule with no `provider` runs on the top-level\n`provider`'), 1);
   assert.equal(occurrences(reviewOnly, 'its `second_model`\nis the rule\'s `second` model when that second is used, else null — always null for an L2 rule\nin consensus mode, because the consensus second reviewer (slot B) stays\n`review.second_levels.L2` and is not the rule\'s.'), 1);
   const readme = await readFile(path.join(ROOT, 'README.md'), 'utf8');
-  assert.equal(occurrences(readme, '| `review.routes` | none | big files go to another model: a file with at least `min_lines` lines is reviewed by the rule\'s `model`, with its own `session_timeout_s` and `second` level |'), 1);
+  assert.equal(occurrences(readme, '`review.routes` sends big files to another model with its own timeout and second level.'), 1);
+  assert.equal(occurrences(readme, '[configuration reference](docs/reference/config.md)'), 1);
   const config = await readFile(path.join(ROOT, 'docs', 'reference', 'config.md'), 'utf8');
   for (const key of ['review.routes', 'review.routes[].min_lines', 'review.routes[].level', 'review.routes[].model', 'review.routes[].session_timeout_s', 'review.routes[].second']) {
     assert.equal(occurrences(config, `| \`${key}\` |`), 1, key);
@@ -1437,6 +1438,22 @@ test('B96: the skill and docs say which files get a reviewed line, the order, wh
     rows.map((r) => r.slice(1)),
     [[B96_REFUSES_WHEN, 'add a `reviewed <path> ticket <id>` line with its `review-file` ticket for each of those files to the report, and close again']],
   );
+});
+
+test('releasing docs record changes only in CHANGELOG and describe the optional Latest update', async () => {
+  const releasing = await readFile(path.join(ROOT, 'docs/releasing.md'), 'utf8');
+  const index = await readFile(path.join(ROOT, 'docs/README.md'), 'utf8');
+  assert.equal(occurrences(releasing, 'Every landed block has a CHANGELOG entry under `## [Unreleased]`.'), 1);
+  assert.equal(occurrences(releasing, '**README.** Only the version in the optional `Latest:` line is updated; all other bytes stay the same.'), 1);
+  assert.equal(occurrences(releasing, 'Without that line, README is unchanged and omitted from the release commit.'), 1);
+  assert.equal(occurrences(releasing, '`## [Unreleased]` in `CHANGELOG.md` has at least one entry'), 1);
+  assert.equal(occurrences(releasing, '`node scripts/gen-config-doc.mjs --check`'), 1);
+  assert.equal(occurrences(index, 'release history lives only in CHANGELOG; releases update the optional README `Latest:` line'), 1);
+  assert.equal(occurrences(index, '[releasing.md](releasing.md)'), 1);
+  for (const [rel, text] of [['docs/releasing.md', releasing], ['docs/README.md', index]]) {
+    assert.equal(occurrences(text, 'In the next release:'), 0, `${rel}: no README bullet anchor`);
+    assert.equal([...text.matchAll(/(?:README bullet|What's new in|In X\.Y\.Z:)/g)].length, 0, `${rel}: no per-block README history instructions`);
+  }
 });
 
 const B117_DEFINITION = "Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.";

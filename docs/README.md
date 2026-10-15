@@ -31,7 +31,7 @@ then 5a. Going away while a run goes on? Read 5b. One small task, no plan? Read 
 | [reference/blocks.json](reference/blocks.json) | the build blocks of this package and what each one owns |
 | [marketing/code-forge-story.md](marketing/code-forge-story.md) | the marketing content bank (copy, lessons, what not to claim) |
 | [privacy.md](privacy.md) | what the local error log holds (errors, warnings, the last command names), every cleaning rule, the AI check, the setup check (`--with-doctor`), known fixes, and how to turn the log off or delete it |
-| [releasing.md](releasing.md) | for maintainers: record changes (`npm run changelog`) and known fixes (`npm run known-fix`), cut a release with one command (`npm run release`), publish by hand, GitHub Releases, the error-triage Action |
+| [releasing.md](releasing.md) | for maintainers: record changes (`npm run changelog`) and known fixes (`npm run known-fix`); release history lives only in CHANGELOG; releases update the optional README `Latest:` line; checks, commit, tag, manual publish, GitHub Releases, and the error-triage Action |
 | [`skill/SKILL.md`](../skill/SKILL.md) and [`skill/references/`](../skill/references/) | the Agent Skill the orchestrator follows. The deepest and most exact description of the rules |
 
 ## Conventions in these pages

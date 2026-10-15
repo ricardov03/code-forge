@@ -1,8 +1,6 @@
 /**
- * B108: the release moves the README's "In the next release:" bullets under "In X.Y.Z:".
- * The rewrite cases pin exact README bytes before and after (the shape of commit 589096f). The
- * end-to-end cases run `scripts/release.mjs` as a child process on a temp git repository with a
- * bare `origin` beside it, never on this repository; `npm` and `claude` are fakes on PATH.
+ * README releases update only the optional Latest line. End-to-end cases use disposable git
+ * repositories with a bare origin and fake npm/claude; no network or models are used.
  */
 
 import assert from 'node:assert/strict';
@@ -21,187 +19,20 @@ const PARENT = mkdtempSync(path.join(os.tmpdir(), 'release-readme-test-'));
 const FAKE_BIN = path.join(PARENT, 'bin');
 let counter = 0;
 
-// ── fixtures (written out, never derived from the code under test) ─────────────────────────
+// A legacy list deliberately remains in the fixture: releasing must never move its bullets.
+const LEGACY = "\n## What's new in 0.10\n\nIn the next release:\n\n- New.\n  Continued.\n\nIn 0.10.0:\n\n- Old.\n";
+const INTRO = '# pkg\n\nA useful tool.\n\n';
+const LATEST = 'Latest: 0.10.0 - see [CHANGELOG.md](CHANGELOG.md)\n';
 
-/** The pre-589096f shape: heading 0.9, the anchor with two bullets (one continued), then In 0.9.0. */
-const PRE_090 = `# pkg
-
-Intro.
-
-## What's new in 0.9
-
-In the next release:
-
-- **Alpha (B1).** One.
-- **Beta (B2).** Two.
-  Continued.
-
-In 0.9.0:
-
-- **Old (B0).** Zero.
-
-## What's new in 0.8
-
-In 0.8.0:
-
-- Older.
-`;
-
-/** The 589096f shape after `release minor` from 0.9.0. */
-const POST_0100 = `# pkg
-
-Intro.
-
-## What's new in 0.10
-
-In the next release:
-
-In 0.10.0:
-
-- **Alpha (B1).** One.
-- **Beta (B2).** Two.
-  Continued.
-
-## What's new in 0.9
-
-In 0.9.0:
-
-- **Old (B0).** Zero.
-
-## What's new in 0.8
-
-In 0.8.0:
-
-- Older.
-`;
-
-/** Package 0.10.0, one bullet waiting. */
-const PRE_0100 = `# pkg
-
-## What's new in 0.10
-
-In the next release:
-
-- **New (B5).** Five.
-
-In 0.10.0:
-
-- **Alpha (B1).** One.
-
-## What's new in 0.9
-
-In 0.9.0:
-
-- Old.
-`;
-
-/** `release patch` (or 0.10.3): the heading stays, the new list goes above In 0.10.0. */
-const samePost = (/** @type {string} */ v) => `# pkg
-
-## What's new in 0.10
-
-In the next release:
-
-In ${v}:
-
-- **New (B5).** Five.
-
-In 0.10.0:
-
-- **Alpha (B1).** One.
-
-## What's new in 0.9
-
-In 0.9.0:
-
-- Old.
-`;
-
-/** A new major.minor: a new heading on top, the 0.10 heading moves above its own In 0.10.0. */
-const newPost = (/** @type {string} */ xy, /** @type {string} */ v) => `# pkg
-
-## What's new in ${xy}
-
-In the next release:
-
-In ${v}:
-
-- **New (B5).** Five.
-
-## What's new in 0.10
-
-In 0.10.0:
-
-- **Alpha (B1).** One.
-
-## What's new in 0.9
-
-In 0.9.0:
-
-- Old.
-`;
-
-/** The land step's README insertion (plans/tools/land-block.mjs step 4), copied for the round trip. */
-function land(/** @type {string} */ text, /** @type {string} */ bullet) {
+test('README has zero version-history lists and one linked Latest line in its first ten lines', () => {
+  const text = readFileSync(path.join(REPO, 'README.md'), 'utf8');
+  assert.equal([...text.matchAll(/^#+ What's new in \d+\.\d+/gm)].length, 0, 'version-history headings');
+  assert.equal([...text.matchAll(/^In (?:\d+\.\d+\.\d+|the next release):/gm)].length, 0, 'release lists');
   const lines = text.split('\n');
-  let i = lines.indexOf('In the next release:');
-  if (i < 0) throw new Error('README anchor missing');
-  i += 1; while (lines[i] === '') i += 1;
-  if (!lines[i]?.startsWith('- ')) lines.splice(i, 0, bullet, '');
-  else { while (lines[i]?.startsWith('- ') || lines[i]?.startsWith('  ')) i += 1; lines.splice(i, 0, bullet); }
-  return lines.join('\n');
-}
-
-describe('releaseReadme (B108)', () => {
-  test('minor 0.9.0 → 0.10.0 writes the 589096f shape byte-for-byte', () => {
-    assert.equal(releaseReadme(PRE_090, '0.9.0', '0.10.0'), POST_0100);
-  });
-
-  test('patch 0.10.0 → 0.10.1 keeps the heading and the anchor; In 0.10.1 goes above an unchanged In 0.10.0', () => {
-    assert.equal(releaseReadme(PRE_0100, '0.10.0', '0.10.1'), samePost('0.10.1'));
-  });
-
-  test('major 0.10.0 → 1.0.0 adds "## What\'s new in 1.0"', () => {
-    assert.equal(releaseReadme(PRE_0100, '0.10.0', '1.0.0'), newPost('1.0', '1.0.0'));
-  });
-
-  test('explicit x.y.z: 0.10.3 follows the patch rule; 0.11.2 adds "## What\'s new in 0.11" with In 0.11.2', () => {
-    assert.equal(releaseReadme(PRE_0100, '0.10.0', '0.10.3'), samePost('0.10.3'));
-    assert.equal(releaseReadme(PRE_0100, '0.10.0', '0.11.2'), newPost('0.11', '0.11.2'));
-  });
-
-  test('a new major.minor over a section with no "In x.y.z:" lists leaves no empty "## What\'s new" heading (list ends at "## " or at the end)', () => {
-    const atHeading = "# pkg\n\n## What's new in 0.1\n\nIn the next release:\n\n- **First (B1).** One.\n\n## Install\n\nRun it.\n";
-    assert.equal(releaseReadme(atHeading, '0.1.0', '0.2.0'),
-      "# pkg\n\n## What's new in 0.2\n\nIn the next release:\n\nIn 0.2.0:\n\n- **First (B1).** One.\n\n## Install\n\nRun it.\n");
-    const atEnd = "# pkg\n\n## What's new in 0.1\n\nIn the next release:\n\n- **First (B1).** One.\n";
-    assert.equal(releaseReadme(atEnd, '0.1.0', '0.2.0'),
-      "# pkg\n\n## What's new in 0.2\n\nIn the next release:\n\nIn 0.2.0:\n\n- **First (B1).** One.\n");
-  });
-
-  test('after every case: exactly 1 anchor, then a blank line and the new In X.Y.Z line; a landed bullet goes above it and moves at the next release', () => {
-    const cases = /** @type {Array<[string, string, string]>} */ ([
-      [PRE_090, '0.9.0', '0.10.0'], [PRE_0100, '0.10.0', '0.10.1'], [PRE_0100, '0.10.0', '1.0.0'],
-      [PRE_0100, '0.10.0', '0.10.3'], [PRE_0100, '0.10.0', '0.11.2'],
-    ]);
-    for (const [text, current, next] of cases) {
-      const out = releaseReadme(text, current, next);
-      const lines = out.split('\n');
-      const at = lines.flatMap((l, i) => (l === 'In the next release:' ? [i] : []));
-      assert.equal(at.length, 1, next);
-      assert.deepEqual(lines.slice(at[0], at[0] + 3), ['In the next release:', '', `In ${next}:`], next);
-
-      const landed = land(out, '- **Later (B9).** Nine.');
-      const ll = landed.split('\n');
-      assert.deepEqual(ll.slice(at[0], at[0] + 5), ['In the next release:', '', '- **Later (B9).** Nine.', '', `In ${next}:`], next);
-      const [M, m, p] = next.split('.').map(Number);
-      const again = releaseReadme(landed, next, `${M}.${m}.${p + 1}`);
-      const al = again.split('\n');
-      const ai = al.indexOf('In the next release:');
-      assert.deepEqual(al.slice(ai, ai + 7),
-        ['In the next release:', '', `In ${M}.${m}.${p + 1}:`, '', '- **Later (B9).** Nine.', '', `In ${next}:`], next);
-    }
-  });
+  const latest = lines.filter((line) => line.startsWith('Latest:'));
+  const version = JSON.parse(readFileSync(path.join(REPO, 'package.json'), 'utf8')).version;
+  assert.deepEqual(latest, [`Latest: ${version} - see [CHANGELOG.md](CHANGELOG.md)`]);
+  assert.ok(lines.indexOf(latest[0]) < 10, 'Latest belongs in the first ten lines');
 });
 
 // ── end to end ─────────────────────────────────────────────────────────────────────────────
@@ -319,43 +150,64 @@ before(() => {
 });
 after(() => rmSync(PARENT, { recursive: true, force: true }));
 
-describe('scripts/release.mjs README step (B108)', () => {
-  test('release minor from 0.9.0 commits the 589096f README shape with the 5 other files', () => {
-    const { work } = makeRepo({ version: '0.9.0', readme: PRE_090 });
-    const r = release(work, ['minor', '--date', '2026-10-13']);
-    assert.equal(r.code, 0, `${r.stdout}\n${r.stderr}`);
-    assert.equal(readFileSync(path.join(work, 'README.md'), 'utf8'), POST_0100);
-    assert.deepEqual(git(work, ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [...FILES].sort());
-    assert.equal(git(work, ['tag', '--list']).trim(), 'v0.10.0');
-    assert.equal(state(work).status, '');
+describe('scripts/release.mjs README step', () => {
+  test('release changes only Latest for patch, minor, major and explicit versions; legacy bullets stay byte-identical', () => {
+    for (const [bump, next] of [['patch', '0.10.1'], ['minor', '0.11.0'], ['major', '1.0.0'], ['0.10.3', '0.10.3'], ['0.11.2', '0.11.2']]) {
+      const readme = INTRO + LATEST + LEGACY;
+      const expected = INTRO + `Latest: ${next} - see [CHANGELOG.md](CHANGELOG.md)\n` + LEGACY;
+      assert.equal(releaseReadme(readme, '0.10.0', next), expected, bump);
+      const { work, origin } = makeRepo({ version: '0.10.0', readme });
+      const files = snapshot(work);
+      const st = state(work);
+      const refs = git(origin, ['for-each-ref', '--format=%(refname) %(objectname)']);
+      const dry = release(work, [bump, '--dry-run', '--date', '2026-10-15']);
+      assert.equal(dry.code, 0, dry.stderr);
+      assert.equal(dry.stdout.split('\n').filter((line) => line === `    + Latest: ${next} - see [CHANGELOG.md](CHANGELOG.md)`).length, 1, 'one Latest diff line');
+      assert.deepEqual(snapshot(work), files, 'dry run changes zero bytes');
+      assert.deepEqual(state(work), st, 'dry run changes zero refs');
+      const r = release(work, [bump, '--date', '2026-10-15']);
+      assert.equal(r.code, 0, `${r.stdout}\n${r.stderr}`);
+      assert.equal(readFileSync(path.join(work, 'README.md'), 'utf8'), expected, bump);
+      assert.deepEqual(git(work, ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [...FILES].sort());
+      assert.equal(state(work).commits, 2, 'exactly one release commit');
+      assert.equal(state(work).tags, `v${next}`);
+      assert.equal(git(work, ['cat-file', '-t', `v${next}`]).trim(), 'tag', 'annotated tag');
+      assert.equal(state(work).status, '');
+      assert.equal(git(origin, ['for-each-ref', '--format=%(refname) %(objectname)']), refs, 'no push');
+    }
   });
 
-  // [name, README (null = none), CHANGELOG, the exact refusal]
-  const NO_ENTRIES = CHANGELOG.replace('### Added\n\n- A new verb.\n\n', '### Added\n\n');
-  const refusals = /** @type {Array<[string, string | null, string, string]>} */ ([
-    ['README missing', null, CHANGELOG,
-      'README.md is missing or unreadable: the release moves its "In the next release:" bullets'],
-    ['no anchor', PRE_0100.replace('In the next release:\n\n', ''), CHANGELOG,
-      'README.md has no "In the next release:" line (the land step adds bullets after it): put it under "## What\'s new in X.Y"'],
-    ['two anchors', PRE_0100.replace('In 0.10.0:', 'In the next release:'), CHANGELOG,
-      'README.md has 2 "In the next release:" lines, expected exactly 1'],
-    ['no What\'s new heading above the anchor', PRE_0100.replace("## What's new in 0.10", '## Usage'), CHANGELOG,
-      'README.md: the nearest "## " heading above "In the next release:" (line 5) is not "## What\'s new in X.Y"'],
-    ['heading 0.9 while the package is 0.10.0', PRE_0100.replace("## What's new in 0.10", "## What's new in 0.9"), CHANGELOG,
-      'README.md: "In the next release:" sits under "## What\'s new in 0.9" but package.json is 0.10.0: expected "## What\'s new in 0.10"'],
-    ['a non-bullet line in the list', PRE_0100.replace('- **New (B5).** Five.\n', '- **New (B5).** Five.\nSome prose.\n'), CHANGELOG,
-      'README.md line 8: the "In the next release:" list may hold only "- " bullets, their "  " continuation lines and blank lines'],
-    ['an empty list while [Unreleased] has entries', PRE_0100.replace('- **New (B5).** Five.\n\n', ''), CHANGELOG,
-      'README.md: the "In the next release:" list is empty while CHANGELOG.md "## [Unreleased]" has entries: add a README bullet for each landed change'],
-    ['an empty [Unreleased] while the list has bullets', PRE_0100, NO_ENTRIES,
-      'CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"; README.md has 1 bullet(s) under "In the next release:" with no CHANGELOG entry'],
-  ]);
+  test('without Latest, anchor-free and legacy READMEs are unchanged and excluded from the release commit', () => {
+    const variants = [
+      INTRO,
+      INTRO + LEGACY,
+      INTRO + LEGACY.replace('In the next release:', 'In the next release:\nIn the next release:'),
+      INTRO + LEGACY.replace("## What's new in 0.10", '## Usage'),
+      INTRO + LEGACY.replace("## What's new in 0.10", "## What's new in 0.9"),
+      INTRO + LEGACY.replace('- New.', 'Some prose.'),
+      INTRO + LEGACY.replace('- New.\n  Continued.\n', ''),
+    ];
+    for (const readme of variants) {
+      const { work } = makeRepo({ version: '0.10.0', readme });
+      const r = release(work, ['patch']);
+      assert.equal(r.code, 0, `${r.stdout}\n${r.stderr}`);
+      assert.equal(readFileSync(path.join(work, 'README.md'), 'utf8'), readme, 'all README bytes preserved');
+      assert.deepEqual(git(work, ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [...VERSION_FILES].sort());
+      assert.equal(state(work).commits, 2);
+      assert.equal(state(work).tags, 'v0.10.1');
+      assert.equal(state(work).status, '');
+    }
+  });
 
-  for (const [name, readme, changelog, reason] of refusals) {
-    test(`refused in preflight, exit 1, all 6 files byte-identical, no commit, no tag; --dry-run lists it too: ${name}`, () => {
+  test('missing README and empty Unreleased still refuse before any writes, including dry runs', () => {
+    const empty = CHANGELOG.replace('### Added\n\n- A new verb.\n\n', '### Added\n\n');
+    for (const [readme, changelog, reason] of [
+      [null, CHANGELOG, 'README.md is missing or unreadable'],
+      [INTRO, empty, 'CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"'],
+      [INTRO + LEGACY, empty, 'CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"'],
+    ]) {
       const { work, origin } = makeRepo({ version: '0.10.0', readme, changelog });
       const files = snapshot(work);
-      assert.equal(files.filter((f) => f === null).length, readme === null ? 1 : 0);
       const st = state(work);
       const refs = git(origin, ['for-each-ref', '--format=%(refname) %(objectname)']);
       for (const args of [['patch'], ['patch', '--dry-run']]) {
@@ -367,6 +219,6 @@ describe('scripts/release.mjs README step (B108)', () => {
         assert.equal(st.tags, '');
         assert.equal(git(origin, ['for-each-ref', '--format=%(refname) %(objectname)']), refs);
       }
-    });
-  }
+    }
+  });
 });

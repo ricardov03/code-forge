@@ -116,12 +116,10 @@ const SHIM = '#!/bin/sh\n# shim: PINNED_VERSION="0.1.0" is set below\nPINNED_VER
 const NOTES_020 = '### Added\n\n- A new verb.\n\nnpm: https://www.npmjs.com/package/@example/pkg/v/0.2.0\n' +
   'Full changelog: https://github.com/example/pkg/blob/v0.2.0/CHANGELOG.md';
 const FILES = ['package.json', 'npm-shrinkwrap.json', '.claude-plugin/plugin.json', 'skill/scripts/forge', 'CHANGELOG.md', 'README.md'];
-const README = "# pkg\n\n## What's new in 0.1\n\nIn the next release:\n\n- A new verb.\n\nIn 0.1.0:\n\n- First.\n";
-/** The README after a 0.1.0 → 0.2.0 release (written out, not derived). */
-const README_020 = "# pkg\n\n## What's new in 0.2\n\nIn the next release:\n\nIn 0.2.0:\n\n- A new verb.\n\n" +
-  "## What's new in 0.1\n\nIn 0.1.0:\n\n- First.\n";
-/** The README after a 0.1.0 → 0.1.1 patch (written out, not derived): the heading stays. */
-const README_011 = "# pkg\n\n## What's new in 0.1\n\nIn the next release:\n\nIn 0.1.1:\n\n- A new verb.\n\nIn 0.1.0:\n\n- First.\n";
+const README = '# pkg\n\nA useful tool.\n\nLatest: 0.1.0 - see [CHANGELOG.md](CHANGELOG.md)\n';
+/** Expected complete README bytes after minor and patch releases. */
+const README_020 = '# pkg\n\nA useful tool.\n\nLatest: 0.2.0 - see [CHANGELOG.md](CHANGELOG.md)\n';
+const README_011 = '# pkg\n\nA useful tool.\n\nLatest: 0.1.1 - see [CHANGELOG.md](CHANGELOG.md)\n';
 const LOCK = JSON.stringify({ name: '@example/pkg', version: '0.1.0', lockfileVersion: 3, requires: true,
   packages: { '': { name: '@example/pkg', version: '0.1.0' } } }, null, 2) + '\n';
 /** `## [Unreleased]` with an empty `### Added`. */
@@ -197,20 +195,15 @@ describe('scripts/release.mjs (B23)', () => {
     assert.match(r.stdout, /0\.1\.0 → 0\.2\.0/);
     assert.match(r.stdout, /\+ ## \[0\.2\.0\] — 2026-09-26/);
     assert.match(r.stdout, /\+ PINNED_VERSION="0\.2\.0"/);
-    // B108: the README entry and its whole diff, line for line, are the last plan entry
+    // The README diff must contain exactly the Latest update and its preceding blank line.
     assert.equal(r.stdout.split('\nREADME.md: ').length - 1, 1, r.stdout);
     assert.equal(r.stdout.slice(r.stdout.indexOf('\nREADME.md: ') + 1, r.stdout.indexOf('\n== plan (dry run) ==\n')), [
-      'README.md: "In the next release:" → "In 0.2.0:"',
-      '      # pkg', '      ',
-      "    - ## What's new in 0.1", '    - ', '    - In the next release:', '    - ', '    - - A new verb.',
-      "    + ## What's new in 0.2", '    + ', '    + In the next release:', '    + ', '    + In 0.2.0:', '    + ',
-      '    + - A new verb.', '    + ', "    + ## What's new in 0.1",
-      '      ', '      In 0.1.0:', '      ', '',
+      'README.md: Latest: 0.1.0 → 0.2.0',
+      '      ',
+      '    - Latest: 0.1.0 - see [CHANGELOG.md](CHANGELOG.md)',
+      '    + Latest: 0.2.0 - see [CHANGELOG.md](CHANGELOG.md)',
+      '',
     ].join('\n'));
-    // the key lines, each exactly once in the whole output
-    for (const key of ["    + ## What's new in 0.2", '    + In 0.2.0:', "    + ## What's new in 0.1", '    + - A new verb.']) {
-      assert.equal(r.stdout.split('\n').filter((l) => l === key).length, 1, key);
-    }
     assert.match(r.stdout, /^would run the checks: gen-config-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate \.$/m);
     assert.match(r.stdout, /^would commit "Release v0\.2\.0" \(6 files\)/m);
     // nothing written: every file byte-equal, no commit, no tag, origin untouched
@@ -225,7 +218,7 @@ describe('scripts/release.mjs (B23)', () => {
     assert.equal(readFileSync(path.join(work, 'README.md'), 'utf8'), README_020);
   });
 
-  test('minor: 0.2.0 in all 4 locations, CHANGELOG and README moved, 1 commit of 6 files, 1 annotated tag, nothing pushed', () => {
+  test('minor: 0.2.0 in all 4 locations, CHANGELOG released and Latest updated, 1 commit of 6 files, 1 annotated tag, nothing pushed', () => {
     const { work, origin } = makeRepo();
     const before = state(work);
     const refs = originRefs(origin);
@@ -326,9 +319,7 @@ describe('scripts/release.mjs (B23)', () => {
     const refs = originRefs(origin);
     const r = release(work, ['patch']);
     assert.equal(r.code, 1);
-    // B108: the README still has its bullet, so the refusal names it too
-    assert.equal(r.stderr, '\nREFUSED: CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"; ' +
-      'README.md has 1 bullet(s) under "In the next release:" with no CHANGELOG entry\n');
+    assert.equal(r.stderr, '\nREFUSED: CHANGELOG.md: "## [Unreleased]" has no entries: add one with npm run changelog -- added "…"\n');
     // all 7 files byte-for-byte as before, and each of the B108 ones against its written-out text
     assert.deepEqual(snapshot(work), files);
     assert.equal(readFileSync(path.join(work, 'README.md'), 'utf8'), README);
@@ -456,7 +447,7 @@ describe('scripts/release.mjs (B23)', () => {
     assert.match(r.stdout, /--no-checks: gen-config-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run/);
   });
 
-  test('B108: patch 0.1.0 → 0.1.1 keeps "## What\'s new in 0.1"; "In 0.1.1:" goes under the kept, empty anchor, above "In 0.1.0:" (exact bytes); 1 commit of 6 files, 1 tag', () => {
+  test('patch updates only Latest in README (exact bytes), releases CHANGELOG, and creates 1 commit of 6 files and 1 tag', () => {
     const { work, origin } = makeRepo();
     const before = state(work);
     const refs = originRefs(origin);

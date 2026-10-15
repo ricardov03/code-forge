@@ -10,7 +10,7 @@
  */
 
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -55,16 +55,44 @@ test('README: installs globally with the scoped name, never the unscoped form', 
   assert.equal(occurrences(readme, 'npx code-forge init'), 0);
 });
 
+test('README guides a new user in order, under 250 lines, with one workflow diagram and resolving documentation links', () => {
+  const lines = readme.trimEnd().split('\n');
+  assert.ok(lines.length < 250, `README has ${lines.length} lines; maximum is 249`);
+  assert.deepEqual(lines.filter((line) => line.startsWith('## ')), [
+    '## The problem', '## Install', '## 5-minute quickstart', '## How it works',
+    '## Key commands', '## Supported agents', '## Security model', '## Links',
+  ]);
+  assert.match(lines[2], /^A CLI .*Agent Skill.*delivery\.$/, 'one-line pitch');
+  const problem = readme.split('## The problem\n\n')[1]?.split('\n\n')[0].split('\n') ?? [];
+  assert.ok(problem.length >= 3 && problem.length <= 5, `problem has ${problem.length} lines; expected 3–5`);
+  const diagrams = [...readme.matchAll(/```(?:text|mermaid)\n([\s\S]*?)```/g)];
+  assert.equal(diagrams.length, 1, 'exactly one workflow diagram');
+  assert.match(diagrams[0][1], /plan -> code -> review -> proof -> land/);
+  const commands = readme.split('## Key commands\n')[1]?.split('\n## ')[0] ?? '';
+  for (const verb of ['init', 'doctor', 'review', 'run', 'block', 'review-file', 'proof', 'gates', 'keys', 'report', 'logs', 'upgrade', '--help']) {
+    const prefix = `| \`code-forge ${verb}`;
+    assert.equal(commands.split('\n').filter((line) => line.startsWith(prefix) && [' ', '`'].includes(line[prefix.length])).length, 1, `one key-command row for ${verb}`);
+  }
+  const agents = readme.split('## Supported agents\n')[1]?.split('\n## ')[0] ?? '';
+  for (const agent of ['Claude Code', 'Codex', 'Grok', 'Solo']) assert.equal(occurrences(agents, agent), 1, agent);
+  for (const heading of ['### What ships', '### Review only', '### Configuration reference', '### Development']) {
+    assert.equal(lines.filter((line) => line === heading).length, 1, heading);
+  }
+  const links = [...readme.matchAll(/\[[^\]]+\]\(([^)]+)\)/g)].map((m) => m[1]);
+  for (const target of ['docs/', 'CHANGELOG.md', 'docs/reference/config.md', 'docs/releasing.md', 'docs/review-only.md']) {
+    assert.ok(links.includes(target), `README links to ${target}`);
+  }
+  for (const target of links.filter((link) => !/^https?:/.test(link))) {
+    assert.ok(existsSync(path.resolve(REPO_ROOT, target.split('#')[0])), `README link resolves: ${target}`);
+  }
+  assert.equal(readme.split('\n').filter((line) => line === '- Roadmap: [public feature ideas](https://claude.ai/artifact/BmeWyqRxZYsWr7eH5vBtdF)').length, 1, 'one exact public Roadmap link');
+});
+
 // --- "README commands run": every command shown in README.md is spawned for real ------------
 
 /**
- * Fix round 1: this used to be a hand-written list of commands that only LOOKED like it came
- * from the README. It now parses the file for real: every ```bash fenced block, split into
- * lines, a trailing ` # comment` stripped, kept only when the line is one of the two forms
- * README.md documents — `npx @codedology/code-forge …` (the one-shot install form) or
- * `code-forge …` (the installed-binary form). A README edit that adds, removes or rewords one of
- * these lines changes what this function returns, and the exact-match test right below the
- * `README_COMMANDS` array below will fail until the test is updated to match.
+ * Every non-comment line in a bash fence is a command, including unfamiliar executables.
+ * Exact membership below prevents a newly documented command from silently escaping execution.
  * @param {string} readmeText
  * @returns {string[]}
  */
@@ -73,7 +101,7 @@ export function extractReadmeCommands(readmeText) {
   return fencedBashBlocks
     .flatMap((block) => block.split('\n'))
     .map((line) => line.replace(/\s+#.*$/, '').trim())
-    .filter((line) => line.startsWith('npx @codedology/code-forge') || line.startsWith('code-forge'));
+    .filter((line) => line.length > 0 && !line.startsWith('#'));
 }
 
 /** `npx @codedology/code-forge init …` / `code-forge …` -> the argv the real CLI receives. */
@@ -167,7 +195,7 @@ const README_COMMANDS = [
 test('README_COMMANDS is exactly the fenced ```bash command set in README.md (count and members)', () => {
   const parsed = extractReadmeCommands(readme);
   const declared = README_COMMANDS.map((c) => c.line);
-  assert.deepEqual([...parsed].sort(), [...declared].sort());
+  assert.deepEqual(parsed, declared, 'all bash commands execute in README order');
   assert.equal(parsed.length, 11);
 });
 
