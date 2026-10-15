@@ -321,6 +321,7 @@ const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', '
  *   removeBlockTree?: typeof removeBlockTree,
  *   resolveTicket?: typeof resolveTicket, reviewedLines?: typeof reviewedLines,
  *   waiverJudge?: import('../review/agent-waiver.mjs').WaiverJudge,
+ *   extraTokens?: string[],
  * }} [deps] - `now` (B48): the clock of the autopilot expiry checks. `stdinIsTTY` / `stdoutIsTTY`
  *   (default `process.stdin.isTTY` / `process.stdout.isTTY`; `isTTY` sets both) and `ui` (default
  *   `@clack/prompts`): the human's confirmation (B52 `--no-require-reviews`, B80 `block waive` and
@@ -331,7 +332,7 @@ const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', '
  * @returns {Promise<number>}
  */
 export async function runBlock(args, deps = {}) {
-  const { stdout = process.stdout, stderr = process.stderr, probe } = deps;
+  const { stdout = process.stdout, stderr = process.stderr, probe, extraTokens = [] } = deps;
   const out = (/** @type {string} */ s) => writeSafe(stdout, s);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
   const [sub, ...rest] = args;
@@ -368,7 +369,7 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'reopen' && typeof flags.file !== 'string') throw new StateError('usage', 'block reopen needs --file <path>');
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     if (sub === 'accept-hit') {
-      const { record, row } = await prepareAcceptHit({ runId, id, flags, positionals });
+      const { record, row } = await prepareAcceptHit({ runId, id, flags, positionals, extraTokens });
       const asked = await confirmHumanVerb(sub, runId, id, { rule: row.rule, line: row.line, file: /** @type {string} */ (flags.transcript) }, record, deps);
       if (asked === 'no-tty') { err(`${humanVerbNoTTY(sub)}\n`); return 2; }
       if (asked === 'cancelled') { err(`block ${id} ${sub}: cancelled — nothing was recorded\n`); return 1; }
@@ -682,6 +683,7 @@ export async function runBlock(args, deps = {}) {
           rows,
           key,
           transcript,
+          extraTokens,
           // B52: a change no block of the run owns is refused — `--no-require-reviews` does not lift it
           unowned: scope?.unowned ?? [],
           // B52: an old ledger's review.result rows are judged by their signed result files

@@ -19,9 +19,9 @@ function noSuchHit() {
 /**
  * Validate forms before reading state, then find the exact pair before the terminal question.
  * The close and this pre-check use the same merged forbidden list.
- * @param {{runId: string, id: string, flags: Record<string, any>, positionals: string[]}} opts
+ * @param {{runId: string, id: string, flags: Record<string, any>, positionals: string[], extraTokens?: string[]}} opts
  */
-export async function prepareAcceptHit({ runId, id, flags, positionals }) {
+export async function prepareAcceptHit({ runId, id, flags, positionals, extraTokens = [] }) {
   if (positionals.length !== 1) throw new StateError('usage', 'block accept-hit takes one block id');
   for (const [name, value] of Object.entries({ block: id, run: runId, rule: flags.rule, line: flags.line, transcript: flags.transcript, reason: flags.reason })) {
     // eslint-disable-next-line no-control-regex
@@ -42,7 +42,7 @@ export async function prepareAcceptHit({ runId, id, flags, positionals }) {
     throw noSuchHit();
   }
   const lines = text.split('\n');
-  if (line < 1 || line > lines.length || !scanTranscript(text, mergeForbidden()).some((hit) => hit.id === flags.rule && hit.line === line)) throw noSuchHit();
+  if (line < 1 || line > lines.length || !scanTranscript(text, mergeForbidden(extraTokens)).some((hit) => hit.id === flags.rule && hit.line === line)) throw noSuchHit();
   return { record, row: { block: id, rule: /** @type {string} */ (flags.rule), line, line_sha256: lineHash(lines[line - 1]), reason: /** @type {string} */ (flags.reason.trim()), by: 'human' } };
 }
 

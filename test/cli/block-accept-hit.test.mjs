@@ -65,6 +65,30 @@ test('B127 clause 1: terminal yes asks once and writes exactly one signed human 
   assert.deepEqual(verifyRow(rows[0], f.key), { ok: true });
 });
 
+test('B127 E1: an extra-token hit uses the same list for acceptance and close', async () => {
+  const f = await fixture();
+  const text = 'documenting private_db_marker';
+  const rule = 'production-marker-extra-0';
+  const deps = { extraTokens: ['private_db_marker'] };
+  f.log(`safe\n${text}\n`);
+  const before = (await f.rows()).length;
+  const closeArgs = ['close', 'B1', '--run', f.runId, '--worker-pid', '4242', '--transcript', f.transcript];
+  assert.deepEqual(await f.invoke(f.args.map((v) => v === RULE ? rule : v), deps), [0, `block B1 accepted ${rule} transcript line 2 (by: human)\n`, '']);
+  assert.equal(f.asked.length, 1);
+  const rows = (await f.rows()).slice(before);
+  assert.equal(rows.length, 1, 'acceptance writes exactly one row');
+  const { mac, ts, tokens_source, cost_source, ...row } = rows[0];
+  assert.deepEqual(row, { run: f.runId, event: 'rule_break.accepted', block: 'B1', rule, line: 2, line_sha256: hash(text), reason: REASON, by: 'human' });
+  assert.deepEqual(verifyRow(rows[0], f.key), { ok: true });
+  f.log(`safe\n${text} different\n`);
+  assert.deepEqual(await f.invoke(closeArgs, deps), [1, '', `block B1 open: rule_break transcript line 2: ${rule}\n`]);
+  assert.equal((await f.rows()).length - before, 1, 'refused close writes zero additional rows');
+  f.log(`safe\n${text}\n`);
+  const [code, out, err] = await f.invoke([...closeArgs, '--json'], deps);
+  assert.deepEqual([code, err], [0, '']);
+  assert.deepEqual(JSON.parse(out).accepted_hits, [{ rule, line: 2, reason: REASON }]);
+});
+
 test('B127 clause 1 boundary: no, cancel, either missing terminal and --yes write exactly zero rows', async () => {
   const f = await fixture();
   const before = (await f.rows()).length;
