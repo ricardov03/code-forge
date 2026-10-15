@@ -130,22 +130,24 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
 }
 
 /** Verified ledger-order cancellation, scoped to one run, block, file and finding.
- * @param {Record<string, any>[]} rows @param {Record<string, any>} waiver @param {Buffer} key
+ * @param {Record<string, any>[]} rows @param {Record<string, any>} waiver @param {Buffer | null} key
+ * @param {(row: Record<string, any>) => boolean} [verify]
  */
-export function isUnwaived(rows, waiver, key) {
+export function isUnwaived(rows, waiver, key, verify = (r) => verifyRow(r, key).ok) {
   return rows.slice(rows.indexOf(waiver) + 1).some((r) => r.event === 'review.unwaived'
     && r.run === waiver.run && r.block === waiver.block && r.file === waiver.file && r.finding === waiver.finding
-    && r.by === 'human' && verifyRow(r, key).ok);
+    && r.by === 'human' && verify(r));
 }
 
 /** The verified, agreed agent rows the gate may count, retaining row identity for the ack digest.
- * @param {Record<string, any>[]} rows @param {string} block @param {Buffer} key
+ * @param {Record<string, any>[]} rows @param {string} block @param {Buffer | null} key
+ * @param {(row: Record<string, any>) => boolean} [verify]
  */
-export function countedAgentWaivers(rows, block, key) {
+export function countedAgentWaivers(rows, block, key, verify = (r) => verifyRow(r, key).ok) {
   return rows.filter((r) => r.block === block && r.event === 'review.waived' && r.by === 'agent'
-    && r.verdict === 'agree' && DELEGABLE_SEVERITIES.includes(r.severity) && verifyRow(r, key).ok
-    && !isUnwaived(rows, r, key)
-    && recordedSeverity(rows.filter((other) => other.run === r.run), { block, file: r.file, finding: r.finding, key }).severity === r.severity);
+    && r.verdict === 'agree' && DELEGABLE_SEVERITIES.includes(r.severity) && verify(r)
+    && !isUnwaived(rows, r, key, verify)
+    && recordedSeverity(rows.filter((other) => other.run === r.run), { block, file: r.file, finding: r.finding, key, verify }).severity === r.severity);
 }
 
 /** Counted agent rows for the close's audit list. @param {Record<string, any>[]} rows @param {string} block @param {Buffer} key */

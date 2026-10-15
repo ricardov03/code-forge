@@ -574,7 +574,7 @@ test('B76 (3): how-it-works.md says where review state lives and that the ledger
 
 test('B76 (4): the forbidden list names block reopen from a coder, and the brief template names --answers but no human-only verb', async () => {
   const security = await readSkillFile('references/security.md');
-  assert.equal(occurrences(security, '`forge worker`, `run start`, `run reload`, `block waive` and `block reopen` from a coder (also via `npx`)'), 1);
+  assert.equal(occurrences(security, '`forge worker`, `run start`, `run reload`, `block waive`, `block reopen`, `block accept-hit`, `block unwaive` and `block ack-waivers` from a coder (also via `npx`)'), 1);
   const brief = await readSkillFile('templates/coder-brief.md');
   assert.equal(occurrences(brief, '`forge review-file <that file> --block <id> --run <r> --answers <ids> --of <source>`'), 1);
   assert.equal(occurrences(brief, 'A fix made in another owned file is sent with `--answers <ids> --of <source>` (The file loop).'), 1);

@@ -9,6 +9,7 @@ const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { contentHash, ticketId } = await import('../../src/worker/ticket.mjs');
 const { writeResult } = await import('../../src/worker/queue.mjs');
+const { answerableFindings, namedOnHash } = await import('../../src/review/gate-check.mjs');
 const FILE = 'src/a.mjs';
 let seq = 0;
 
@@ -44,8 +45,26 @@ async function fixture() {
   const args = ['unwaive', 'B1', 'W1', '--run', runId, '--file', FILE, '--reason', 'Keep this finding open.'];
   const waive = () => invoke(['waive', 'B1', 'W1', '--run', runId, '--file', FILE, '--reason', `${FILE}:1 bounds it`, '--yes']);
   const close = () => invoke(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`]);
-  return { runId, key, args, invoke, waive, close, sign, writeRow, rows, prompts: () => prompts, judges: () => judges };
+  return { runId, key, hash, args, invoke, waive, close, sign, writeRow, rows, prompts: () => prompts, judges: () => judges };
 }
+
+test('B124b round 2: worker and review-file pre-check agree on agent waivers and ledger-order undo', async () => {
+  const f = await fixture();
+  const check = async (expected, stage) => {
+    const opts = { block: 'B1', runId: f.runId, rows: await f.rows(), key: f.key, file: FILE, hash: f.hash, current: new Map([[FILE, f.hash]]) };
+    assert.deepEqual([...answerableFindings(opts)], expected.map((id) => [id, 'warning']), `${stage}: worker findings`);
+    assert.deepEqual([...namedOnHash(opts)], expected, `${stage}: review-file pre-check findings`);
+  };
+  await check(['W1'], 'before waiver');
+  assert.equal((await f.waive())[0], 0);
+  await check([], 'agreed agent waiver');
+  assert.equal((await f.invoke(f.args))[0], 0);
+  await check(['W1'], 'human undo');
+  assert.equal((await f.waive())[0], 0);
+  await check([], 'later agreed agent waiver');
+  assert.equal(f.prompts(), 1);
+  assert.equal(f.judges(), 2);
+});
 
 test('B124b clause 1: yes writes exactly one signed human unwaive row', async () => {
   const f = await fixture();

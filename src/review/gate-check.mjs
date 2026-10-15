@@ -307,7 +307,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
 
   const signedOf = (/** @type {string} */ event) => mine.filter((r) => r.event === event && ok(r));
   const waivers = signedOf('review.waived').filter((r) => r.by === 'human');
-  const agentWaivers = key && verify === undefined ? countedAgentWaivers(mine, block, key) : [];
+  const agentWaivers = countedAgentWaivers(mine, block, key, ok);
   const autopilotWaivers = mine.filter((r) => r.event === 'review.waived' && r.by === 'autopilot');
   // B71: only the worker's signed rows of THIS run (a row with no run never counts)
   const answers = signedOf(ANSWERED_EVENT).filter((r) => r.run === runId);
@@ -353,8 +353,8 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
   const waiverOf = (file, finding, severity, exceptTicket = null, answerSeverity = severity) => {
     if (waivers.some((r) => matches(r, file, finding))) return { by: 'human', invalid: null };
     if (answered(file, finding, answerSeverity, exceptTicket)) return { by: 'answer', invalid: null };
-    if (key && verify === undefined && finding !== PROOF_FINDING && delegableSeverity(severity)) {
-      const recorded = recordedSeverity(mine, { block, file, finding, key });
+    if (finding !== PROOF_FINDING && delegableSeverity(severity)) {
+      const recorded = recordedSeverity(mine, { block, file, finding, key, verify: ok });
       if (DELEGABLE_SEVERITIES.includes(recorded.severity) && agentWaivers.some((r) => matches(r, file, finding) && r.severity === recorded.severity)) return { by: 'agent', invalid: null };
     }
     const named = autopilotWaivers.filter((r) => matches(r, file, finding));
@@ -682,10 +682,10 @@ const SEVERITY_RANK = Object.freeze({ nit: 0, warning: 1, critical: 2, blocker: 
  * `unverified`; a severity outside critical/blocker/warning/nit ⇒ `unknown` — each with
  * `severity: null`.
  * @param {Array<Record<string, any>>} rows - rows of ONE run (other runs filtered out by the caller).
- * @param {{block: string, file: string, finding: string, key: Buffer}} where
+ * @param {{block: string, file: string, finding: string, key: Buffer | null, verify?: (row: Record<string, any>) => boolean}} where
  * @returns {{severity: string, why: null} | {severity: null, why: 'not-recorded' | 'unverified' | 'unknown'}}
  */
-export function recordedSeverity(rows, { block, file, finding, key }) {
+export function recordedSeverity(rows, { block, file, finding, key, verify = (r) => verified(r, key) }) {
   /** @type {Array<{row: Record<string, any>, severity: unknown}>} */
   const named = [];
   for (const r of rows) {
@@ -698,7 +698,7 @@ export function recordedSeverity(rows, { block, file, finding, key }) {
     }
   }
   if (named.length === 0) return { severity: null, why: 'not-recorded' };
-  if (named.some((n) => !verified(n.row, key))) return { severity: null, why: 'unverified' };
+  if (named.some((n) => !verify(n.row))) return { severity: null, why: 'unverified' };
   /** @type {Record<string, number>} */
   const rank = SEVERITY_RANK;
   let worst = '';
