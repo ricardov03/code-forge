@@ -16,6 +16,7 @@ In the next release:
 - **Agent waivers with proof (B124a).** `block waive --yes` now works for a warning or nit finding. The reason must name evidence: a `path:line`, a test file, or an acceptance clause. A fresh judge must agree. The row is marked `by: agent`, and `block close` lists it. A critical finding and `block reopen` stay human-only.
 - **Accept a false rule hit (B127).** `block accept-hit <id> --run <r> --rule <rule-id> --line <n> --transcript <path> --reason <text>` lets a human accept one false transcript hit, after a yes in their own terminal. The close then skips that hit only when the rule and the exact line text match. The close lists each accepted hit, and `--json` adds `accepted_hits`. A coder can never run this verb.
 - **Undo and check agent waivers (B124b).** `block unwaive <id> <finding> --run <r> --file <path> --reason <text>` lets a human undo one agent waiver. The finding is then open again. `code-forge report` has a new `agent_waivers` section. Set `review.agent_waivers.require_ack: true`, and `block close` waits until a human runs `block ack-waivers <id> --run <r>` and says yes to the list. Both verbs are human-only.
+- **Agent reopen with evidence (B124c).** `block reopen <id> --file <path> --reason <text> --yes` lets the orchestrator reopen a stopped file without you. The reason must cite evidence, a fresh judge must agree, and only one agent reopen per block and file is allowed in a run. The row says `by: agent`. `block close --json` lists them in `agent_reopens`. Without `--yes`, a human still confirms.
 
 In 0.13.0:
 
