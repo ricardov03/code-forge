@@ -802,6 +802,17 @@ flowchart TD
   `autopilot waive` path still writes `by: autopilot`.
   The prompt checks only that stdin and stdout are terminals; a pseudo-terminal passes it, so it does not prove a human (`skill/references/security.md` §3).
 
+  **False transcript hits.** The human runs `forge block accept-hit <id> --run <r> --rule <rule-id> --line <n> --transcript <path> --reason <text>`.
+  It checks that the run and block exist and the readable transcript reports that rule on that line before asking.
+  A missing hit is `accept-hit-no-such-hit` (exit 1). Bad forms are exit 2.
+  It uses the same terminal confirmation as the human waiver path and has no `--yes`.
+  No terminal is exit 2. A no or cancel writes nothing. A yes writes one signed
+  `rule_break.accepted {block, rule, line, line_sha256, reason, by: human}` row.
+  Close verifies the signature and matches the run, block, rule and SHA-256 of the exact line text.
+  A joined log can move the line without changing the match. Other hits and ledger `rule_break` rows still refuse.
+  Close prints `accepted rule_break <rule> transcript line <n>: <reason> (by: human)` for each hit it used.
+  Its JSON adds `accepted_hits: [{rule, line, reason}]`, empty when none was used. The verb is coder-forbidden.
+
   When a signed review round on the current bytes left findings and every finding it left open is
   waived or answered, the file counts as reviewed (`reviewed_by_waiver`, never approved) and the
   block can close with a signed `gate.review_waived_all` row (see the next table). Two things are

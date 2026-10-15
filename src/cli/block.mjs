@@ -227,6 +227,7 @@ import { reportMismatches, reviewedLines } from '../review/reviewed-lines.mjs';
 import { blockEndHook, runBlockEndHook, writeDoneFile } from '../state/block-end.mjs';
 import { blockOpenFindings } from '../review/open-findings.mjs';
 import { hookForbidden, scanTranscript } from '../util/forbidden.mjs';
+import { prepareAcceptHit, writeAcceptedHit } from '../review/accept-hit.mjs';
 
 /**
  * B72: `block reopen` — the file's content is read where the block works (its worktree, else the
@@ -287,9 +288,10 @@ const USAGE =
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text>\n' +
+  '       code-forge block accept-hit <id> --run <r> --rule <rule-id> --line <n> --transcript <path> --reason <text>\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
-const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen'];
+const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit'];
 
 /** Refuse likely shell quoting slips before any row is written.
  * @param {string} workspace @param {string[]} entries @param {string} label
@@ -308,7 +310,7 @@ function checkWhitespacePaths(workspace, entries, label) {
     }
   }
 }
-const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report'];
+const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report', 'rule', 'line'];
 
 /**
  * @param {string[]} args
@@ -365,6 +367,16 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'reopen' && positionals.length !== 1) throw new StateError('usage', 'block reopen takes one block id (the file goes in --file)');
     if (sub === 'reopen' && typeof flags.file !== 'string') throw new StateError('usage', 'block reopen needs --file <path>');
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
+    if (sub === 'accept-hit') {
+      const { record, row } = await prepareAcceptHit({ runId, id, flags, positionals });
+      const asked = await confirmHumanVerb(sub, runId, id, { rule: row.rule, line: row.line, file: /** @type {string} */ (flags.transcript) }, record, deps);
+      if (asked === 'no-tty') { err(`${humanVerbNoTTY(sub)}\n`); return 2; }
+      if (asked === 'cancelled') { err(`block ${id} ${sub}: cancelled — nothing was recorded\n`); return 1; }
+      await writeAcceptedHit({ runId, row, writeRow: (signed) => appendRow(signed, { slug: record.project }) });
+      say(`block ${id} accepted ${row.rule} transcript line ${row.line} (by: human)\n`);
+      if (json) emit({ block: id, event: 'rule_break.accepted', rule: row.rule, line: row.line, reason: row.reason, by: 'human' });
+      return 0;
+    }
     const record = await readRun(runId);
     if (sub === 'open') {
       checkWhitespacePaths(record.workspace, /** @type {string[]} */ (flags.owned), 'owned files');
@@ -618,6 +630,8 @@ export async function runBlock(args, deps = {}) {
       const closeRows = external === null ? [] : [{ event: 'gate.reviews_waived', block: id, by: 'config', reviewer: external }];
       /** @type {import('../review/gate-check.mjs').WaivedAll[]} */
       let waivedAll = [];
+      /** @type {import('../review/accept-hit.mjs').AcceptedHit[]} */
+      let acceptedHits = [];
       // B70: a file whose review left only waived findings passes as `reviewed_by_waiver`; its signed
       // `gate.review_waived_all` row joins the close rows (written just before `block.close`, only
       // when the block closes — a refused close writes none)
@@ -680,7 +694,7 @@ export async function runBlock(args, deps = {}) {
           proofFiles: fileSet,
           highPaths,
         };
-      }, { onWaivedAll });
+      }, { onWaivedAll, onAcceptedHits: (hits) => { acceptedHits = hits; } });
       // B96: `reviewsPassed` comes from the gate's own result, not from the onWaivedAll call. Each
       // extra check runs at most once per close (`closeBlock`'s one loop, src/state/block.mjs:562,
       // and `closeBlock` is called once below), so the gate's one pass is its final one.
@@ -805,6 +819,7 @@ export async function runBlock(args, deps = {}) {
             say(`block ${id}: ${f.file} reviewed_by_waiver (${parts.join('; ')})\n`);
           }
           for (const w of agentRows) say(`block ${id}: agent waiver ${w.file} ${w.finding} reason: ${w.reason}; verdict: ${w.verdict}\n`);
+          for (const hit of acceptedHits) say(`accepted rule_break ${hit.rule} transcript line ${hit.line}: ${hit.reason} (by: human)\n`);
         }
         (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
         // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
@@ -821,6 +836,7 @@ export async function runBlock(args, deps = {}) {
           // B96: only when the tool gave reviewed lines (a waived or external close is unchanged)
           ...(reviewedJson.length > 0 ? { reviewed: reviewedJson } : {}),
           ...(agentRows.length > 0 ? { agent_waivers: agentRows } : {}),
+          accepted_hits: acceptedHits,
         };
         if (!result.ok || !removeTree) {
           if (json && result.ok) emit(closedJson);
@@ -909,7 +925,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
 
 /**
  * B80: the refusal when `block waive` or `block reopen` has no terminal to ask the human at.
- * @param {'waive' | 'reopen'} verb @returns {string}
+ * @param {'waive' | 'reopen' | 'accept-hit'} verb @returns {string}
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
@@ -968,18 +984,20 @@ async function confirmNoReviews(runId, id, deps) {
  * autopilot grant changes nothing (autopilot waives through its own path, `by: autopilot`). The
  * pre-checks (`reopenPrecheck`, `waivePrecheck`) run first, at a terminal, so the human is never
  * asked about a waive or reopen the verb would refuse that way.
- * @param {'waive' | 'reopen'} verb @param {string} runId @param {string} id
- * @param {{finding?: string, file: string}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
+ * @param {'waive' | 'reopen' | 'accept-hit'} verb @param {string} runId @param {string} id
+ * @param {{finding?: string, file: string, rule?: string, line?: number}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
  * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
  */
 function confirmHumanVerb(verb, runId, id, what, record, deps) {
   const message =
     verb === 'waive'
       ? `Waive finding ${what.finding} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
-      : `Reopen the review of ${what.file} in block ${id} (run ${runId})? Only the owner may say yes.`;
+      : verb === 'accept-hit'
+        ? `Accept false transcript hit ${what.rule} at line ${what.line} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
+        : `Reopen the review of ${what.file} in block ${id} (run ${runId})? Only the owner may say yes.`;
   return confirmAtTerminal(deps, message, async () => {
     if (verb === 'reopen') await reopenPrecheck(record, runId, id, what.file);
-    else await waivePrecheck(record, runId, id, /** @type {string} */ (what.finding), what.file);
+    else if (verb === 'waive') await waivePrecheck(record, runId, id, /** @type {string} */ (what.finding), what.file);
   });
 }
 

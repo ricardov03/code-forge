@@ -83,7 +83,7 @@
 
 import { lstatSync } from 'node:fs';
 import path from 'node:path';
-import { mergeForbidden, scanTranscript } from '../util/forbidden.mjs';
+import { acceptedTranscriptHits } from './accept-hit.mjs';
 import { exec } from '../util/exec.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -124,7 +124,7 @@ const verified = (row, key) => verifyRow(row, key).ok;
  *   but never the proof check; `highPaths` is `proof.tiers.high.paths`. Both are REQUIRED: a
  *   caller that leaves one out gets a TypeError, never a silent default that skips the proof.
  *   `runId` is required too: the proof check matches its rows on this run only (fix round 4).
- * @returns {{ok: boolean, refusals: Refusal[], waivedAll: WaivedAll[]}} `waivedAll` (B70): the files
+ * @returns {{ok: boolean, refusals: Refusal[], waivedAll: WaivedAll[], acceptedHits: import('./accept-hit.mjs').AcceptedHit[]}} `waivedAll` (B70): the files
  *   that passed as `reviewed_by_waiver` — empty whenever the check refuses.
  * @throws {TypeError} `runId`, `proofFiles` or `highPaths` undefined
  */
@@ -185,9 +185,8 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
   }
 
   for (const r of mine.filter((row) => row.event === 'rule_break')) refusals.push({ code: 'rule_break', detail: `rule_break row: ${String(r.id ?? r.rule ?? 'unnamed')}` });
-  if (typeof transcript === 'string' && transcript.length > 0) {
-    for (const hit of scanTranscript(transcript, mergeForbidden(extraTokens))) refusals.push({ code: 'rule_break', detail: `transcript line ${hit.line}: ${hit.id}` });
-  }
+  const { remaining, accepted: acceptedHits } = acceptedTranscriptHits({ block, runId, rows, key, transcript, extraTokens });
+  for (const hit of remaining) refusals.push({ code: 'rule_break', detail: `transcript line ${hit.line}: ${hit.id}` });
 
   /** B52: a ruling clears a late finding only when it rules `nit` on one recorded warning or nit. @param {Record<string, any>} late */
   const ruledNit = (late) => (late.severity === 'warning' || late.severity === 'nit') && rulings.some((r) => matches(r, late.file, late.finding) && r.ruling === 'nit');
@@ -234,7 +233,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
     const w = waiverFor(/** @type {string} */ (r.file), PROOF_FINDING, 'unknown');
     if (!w.waived) refusals.push(orInvalid(r, PROOF_FINDING, w.invalid));
   }
-  return { ok: refusals.length === 0, refusals, waivedAll: refusals.length === 0 ? waivedAll : [] };
+  return { ok: refusals.length === 0, refusals, waivedAll: refusals.length === 0 ? waivedAll : [], acceptedHits };
 }
 
 /** B71: the signed row the worker writes for a finding a reviewer judged resolved by another owned file. */
@@ -1056,14 +1055,15 @@ function isOnDisk(repoRoot, file) {
  * signed and written by `closeBlock` after EVERY check passed, just before `block.close` — a
  * refused close writes none.
  * @param {() => Promise<Parameters<typeof checkBlockReviews>[0]>} load
- * @param {{onWaivedAll?: (files: WaivedAll[]) => void}} [hooks]
+ * @param {{onWaivedAll?: (files: WaivedAll[]) => void, onAcceptedHits?: (hits: import('./accept-hit.mjs').AcceptedHit[]) => void}} [hooks]
  * @returns {() => Promise<{ok: boolean, reason?: string}>}
  */
-export function reviewGateCheck(load, { onWaivedAll } = {}) {
+export function reviewGateCheck(load, { onWaivedAll, onAcceptedHits } = {}) {
   return async () => {
     const result = checkBlockReviews(await load());
     if (result.ok) {
       onWaivedAll?.(result.waivedAll);
+      onAcceptedHits?.(result.acceptedHits);
       return { ok: true };
     }
     const reasons = [];

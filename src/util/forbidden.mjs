@@ -286,6 +286,15 @@ export const FORBIDDEN = Object.freeze(
 export const CODER_ONLY_FORBIDDEN = Object.freeze(
   [
     {
+      id: 'code-forge-block-accept-hit-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [
+        ['code-forge', 'block', 'accept-hit'],
+        ['forge', 'block', 'accept-hit'],
+      ],
+      description: 'Accept a false transcript hit — human-only, confirmed in the human terminal (B127)',
+    },
+    {
       id: 'code-forge-block-waive-from-coder',
       kind: 'anyPrefix',
       prefixes: [
