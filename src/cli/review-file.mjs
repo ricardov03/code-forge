@@ -417,6 +417,17 @@ function blockTicketMarker(repoRoot, ticket) {
   throw new WorkerError('result-unreadable', 'a ticket completion marker cannot be read');
 }
 
+/** Progress only: legacy reviewed markers encode approval by absence of open_findings.
+ * @param {Record<string, any> | null} marker
+ * @returns {'approved' | 'findings' | 'stopped' | 'split_required' | 'unavailable' | null}
+ */
+function blockTicketOutcome(marker) {
+  if (!marker) return null;
+  if (marker.status === 'reviewed') return marker.open_findings === true || marker.approved === false ? 'findings' : 'approved';
+  if (marker.status === 'stopped' || marker.status === 'split_required') return marker.status;
+  return 'unavailable';
+}
+
 /**
  * A block wait uses unsigned results only to classify retries; it never reads the signing key.
  * Re-scan current content on every poll. Deliver unseen findings of the newest earlier ticket
@@ -443,15 +454,15 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
       if (!present && previous.length > 0) {
         const newest = previous[previous.length - 1];
         const marker = blockTicketMarker(repoRoot, newest.ticket);
-        if (marker?.status === 'stopped') return { file, ticket: newest.ticket, status: 'done' };
+        if (marker?.status === 'stopped') return { file, ticket: newest.ticket, status: 'done', outcome: blockTicketOutcome(marker) };
         if (marker?.status === 'reviewed' && marker.open_findings === true && live) {
           if (deliveredHere.has(newest.ticket) || deliverBlockFindings({ repoRoot, block, file, ticket: newest.ticket })) {
             deliveredHere.add(newest.ticket);
-            return { file, ticket: newest.ticket, status: 'findings' };
+            return { file, ticket: newest.ticket, status: 'findings', outcome: blockTicketOutcome(marker) };
           }
         }
       }
-      if (!present && previous.length > 0 && live) {
+      if (!present && live) {
         enqueue(opts);
         present = { ...previous[previous.length - 1], ticket };
       }
@@ -460,11 +471,16 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
         dropFreshDone({ repoRoot, ticket, file, dropDone, once: true, statuses: RETRY_STATUSES });
         marker = blockTicketMarker(repoRoot, ticket);
       }
-      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : marker ? 'done' : 'pending' };
+      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : marker ? 'done' : 'pending', outcome: blockTicketOutcome(marker) };
     });
     if (downPolls >= 2) {
       say({ block, files, done: false, status: 'worker_down' });
       return 3;
+    }
+    const split = files.find((f) => f.outcome === 'split_required');
+    if (live && split) {
+      say({ block, files, done: false, reason: 'split_required', next: `The owner raises review.budgets for ${split.file}, runs run reload, then review-file ${split.file} --fresh.` });
+      return 0;
     }
     if (live && files.every((f) => f.status === 'done' || f.status === 'findings')) {
       say({ block, files, done: true });
