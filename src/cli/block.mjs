@@ -934,6 +934,12 @@ async function warnMovedBase(cwd, block, id, runId, warn) {
     const opts = { cwd, env: gitChildEnv(), timeoutMs: 10000 };
     const head = await exec(['git', 'rev-parse', '--verify', '--end-of-options', `refs/heads/${block.base_branch}^{commit}`], opts);
     if (head.result !== 'ok' || head.stdout.trim() === block.base_sha) return;
+    const blockHead = await exec(['git', 'rev-parse', '--verify', 'HEAD^{commit}'], { ...opts, cwd: block.worktree?.path ?? cwd });
+    if (blockHead.result !== 'ok') return;
+    // A base advanced by this block's own commits is already incorporated. Only exit 1
+    // means "not an ancestor"; errors and timeouts must not produce an advisory.
+    const ancestor = await exec(['git', 'merge-base', '--is-ancestor', head.stdout.trim(), blockHead.stdout.trim()], { ...opts, okExitCodes: [0, 1] });
+    if (ancestor.result !== 'ok' || ancestor.code !== 1) return;
     const count = await exec(['git', 'rev-list', '--count', `${block.base_sha}..${head.stdout.trim()}`], opts);
     if (count.result !== 'ok' || !/^\d+$/.test(count.stdout.trim())) return;
     warn(`WARN block ${id}: base moved: ${block.base_branch} is ${count.stdout.trim()} commit(s) ahead of the block base; run: code-forge block rebase ${id} --run ${runId}\n`);
