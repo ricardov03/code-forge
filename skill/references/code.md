@@ -17,7 +17,7 @@ with a string `type`, first event `thread.started`) is checked by its commands: 
 Agent messages, reasoning, command output (`aggregated_output`) and non-item events are skipped. Any other log
 is checked line by line, where a mention of a forbidden command or path is a hit.
 
-`block open` refuses a missing `--owned` entry containing commas or whitespace (exit 2: use spaces, not commas); new plain owned paths and globs remain allowed. A missing `--tests` entry also exits 2, except a new `.test.*` or `.spec.*` JS/TS file whose parent directory exists and whose basename has no commas or whitespace. Literal existing file and directory names remain valid.
+`block open` refuses a missing `--owned` or `--tests` entry containing whitespace or a comma outside a `{...}` brace group (exit 2: use spaces, not commas). A glob character does not exempt an outside comma: `src/*,lib` is refused when it is not an existing path. Brace globs like `src/{a,b}`, bracket paths like `app/[id]/page.tsx`, and new plain paths stay allowed under this check. Literal existing file and directory names remain valid.
 
 If `run start` cannot launch because another run still has a live worker, the error names that run, its pid and `code-forge run end --run <other-run>`. Process start-time probes use `/bin/ps` when present, falling back to `ps` on PATH.
 

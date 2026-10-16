@@ -383,6 +383,7 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'reopen' && typeof flags.file !== 'string') throw new StateError('usage', 'block reopen needs --file <path>');
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     if (sub === 'accept-hit') {
+      // prepareAcceptHit (review/accept-hit.mjs) returns every accepted hit as rows (all hits on --line, or only the --rule hit).
       const { record, rows } = await prepareAcceptHit({ runId, id, flags, positionals, extraTokens });
       const asked = await confirmHumanVerb(sub, runId, id, { rule: rows[0].rule, line: rows[0].line, ...(flags.rule === undefined ? { hits: rows } : {}), file: /** @type {string} */ (flags.transcript) }, record, deps);
       if (asked === 'no-tty') { err(`${humanVerbNoTTY(sub)}\n`); return 2; }
