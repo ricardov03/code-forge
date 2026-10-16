@@ -17,6 +17,18 @@ const SKILL_PLUS_CORE_MAX_LINES = 200;
 const RULE_COUNT = 17;
 const SURVIVOR_ROWS = 14;
 
+test('B131: review references and the join guide describe outcomes and the split_required recovery', async () => {
+  const sentences = [
+    "Each file's `outcome` is `approved`, `findings`, `stopped`, `split_required` or `unavailable` from its completion marker, and `null` while `pending` or `not_queued`; a live join queues an owned changed file even if it has no earlier ticket.",
+    'A `split_required` outcome returns `done: false`, `reason: split_required` and `next` naming the file: the owner raises `review.budgets`, runs `run reload`, then runs `review-file <path> --fresh`.',
+  ];
+  for (const rel of ['skill/references/review.md', 'docs/how-it-works.md']) {
+    const text = await readFile(path.join(ROOT, rel), 'utf8');
+    for (const sentence of sentences) assert.equal(occurrences(text, sentence), 1, `${rel} contains exactly one explanation: ${sentence}`);
+    assert.equal(occurrences(text, 'A file with no ticket is `not_queued` with a null ticket: enqueue it.'), 0, `${rel} has no obsolete manual-enqueue guidance`);
+  }
+});
+
 /** The files the B14 row owns under `skill/` — exactly these, no more (a stray file is a finding). */
 const OWNED = [
   'SKILL.md',

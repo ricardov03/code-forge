@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- Review risk counts added and removed lines; oversized quick Markdown packets step up to full before section packing, and the block join exposes per-file outcomes, reports split recovery steps and queues owned changes without earlier tickets (B131)
+
 ## [0.14.1] — 2026-10-15
 
 ### Changed
