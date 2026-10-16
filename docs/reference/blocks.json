@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 138,
+  "block_count": 140,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2430,6 +2430,76 @@
         "B131"
       ],
       "note": "F2: --fresh re-queues a counted split_required stop when its lens budget changed; the stop keeps its real lens (full, recheck or patch_check)."
+    },
+    "B135": {
+      "title": "Small CLI fixes: unknown ledger slugs, comma path lists, competing worker runs, /bin/ps, close needs green gates, accept-hit per line",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/cli/report.mjs",
+        "src/cli/ledger.mjs",
+        "src/cli/block.mjs",
+        "src/worker/loop.mjs",
+        "src/worker/queue.mjs",
+        "src/util/reaper.mjs",
+        "src/state/run.mjs",
+        "src/review/accept-hit.mjs",
+        "skill/references/code.md",
+        "CHANGELOG.md",
+        "test/ledger/report.test.mjs",
+        "test/ledger/cli.test.mjs",
+        "test/ledger/calibration.test.mjs",
+        "test/cli",
+        "test/worker/registry.test.mjs",
+        "test/util/reaper.test.mjs",
+        "test/state/run.test.mjs",
+        "test/review/close-gate.test.mjs",
+        "test/review/close-gate-field.test.mjs",
+        "test/review/gate-check.test.mjs"
+      ],
+      "depends_on": [
+        "B130"
+      ],
+      "note": "Closed after review, then held: the full suite showed regressions. Its changes landed through B135b."
+    },
+    "B135b": {
+      "title": "Finish B135: future test paths and brace globs allowed, first-use runs gates before close",
+      "wave": 14,
+      "level": "L1",
+      "status": "landed",
+      "owned": [
+        "src/cli/report.mjs",
+        "src/cli/ledger.mjs",
+        "src/cli/block.mjs",
+        "src/worker/loop.mjs",
+        "src/util/reaper.mjs",
+        "src/state/run.mjs",
+        "src/review/accept-hit.mjs",
+        "skill/references/code.md",
+        "CHANGELOG.md",
+        "test/ledger/report.test.mjs",
+        "test/ledger/cli.test.mjs",
+        "test/ledger/calibration.test.mjs",
+        "test/cli",
+        "test/worker/registry.test.mjs",
+        "test/util/reaper.test.mjs",
+        "test/state/run.test.mjs",
+        "test/review/close-gate.test.mjs",
+        "test/review/close-gate-field.test.mjs",
+        "test/review/gate-check.test.mjs",
+        "test/docs-marketing.test.mjs",
+        "scripts/first-use.mjs",
+        "test/first-use.test.mjs",
+        "test/gates/placeholders.test.mjs",
+        "test/proof/worktree-flow.test.mjs",
+        "test/review/external.test.mjs"
+      ],
+      "depends_on": [
+        "B135",
+        "B131"
+      ],
+      "note": "Carries the reviewed B135 changes onto the B131 base. A false critical finding was cleared by an answers ticket (B71), not a waiver."
     }
   }
 }
