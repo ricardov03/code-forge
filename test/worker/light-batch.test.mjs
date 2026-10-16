@@ -99,7 +99,7 @@ test('B139: cached light results reject an older ticket hash and still serve the
   assert.equal(f.packets.length, 1);
   const rowsBefore = structuredClone(f.rows);
   const ctx = {
-    repoRoot: f.repo, runId: f.runId, runRootDir: freshDir('light-cache-root'), cfg: {}, key: f.key,
+    repoRoot: f.repo, runId: f.runId, runRootDir: freshDir('light-cache-root'), cfg: {}, key: f.key, jevKey: null,
     readRows: async () => f.rows,
     writeRow: async (row) => { f.rows.push(row); },
     writeBlockRow: async (row) => { f.rows.push(row); },
