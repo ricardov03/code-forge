@@ -6,8 +6,9 @@ import { test } from 'node:test';
 
 const { readRun, saveRun } = await import('../../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
+const { reviewTicket } = await import('../../src/worker/engine.mjs');
 const { createWorker } = await import('../../src/worker/loop.mjs');
-const { enqueue, readResult } = await import('../../src/worker/queue.mjs');
+const { enqueue, enqueueHash, readResult, readTicket } = await import('../../src/worker/queue.mjs');
 const { contentHash } = await import('../../src/worker/ticket.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 const FILES = ['src/a.mjs', 'src/b.mjs', 'src/c.mjs'];
@@ -85,6 +86,39 @@ test('B139: repeated same-content ticket after restart reuses the signed batch a
   assert.deepEqual(results.map((r) => r.approved), [true, true]);
   assert.equal(f.packets.length, 1, 'a restarted worker must reuse the first batch for later file tickets');
   assert.equal(f.rows.filter((r) => r.event === 'review.round').length, 3);
+});
+
+test('B139: cached light results reject an older ticket hash and still serve the current hash without new rows or sessions', async () => {
+  const f = await fixture(), file = FILES[0];
+  const olderHash = contentHash(f.repo, file);
+  appendFileSync(path.join(f.repo, file), 'export const updated = 1;\n');
+  const [reviewed] = await f.round([file]);
+  assert.equal(reviewed.status, 'reviewed');
+  assert.equal(reviewed.approved, true);
+  assert.equal(f.rows.filter((r) => r.event === 'review.light_result').length, 1);
+  assert.equal(f.packets.length, 1);
+  const rowsBefore = structuredClone(f.rows);
+  const ctx = {
+    repoRoot: f.repo, runId: f.runId, runRootDir: freshDir('light-cache-root'), cfg: {}, key: f.key,
+    readRows: async () => f.rows,
+    writeRow: async (row) => { f.rows.push(row); },
+    writeBlockRow: async (row) => { f.rows.push(row); },
+    spawn: async () => assert.fail('cached or stale tickets must not start a session'),
+  };
+  const older = enqueueHash({ repoRoot: f.repo, run: f.runId, block: 'B11', file, content_hash: olderHash });
+  const stale = await reviewTicket(readTicket(f.repo, older.ticket), ctx);
+  assert.equal(stale.status, 'stale');
+  assert.equal(stale.approved, false);
+  assert.deepEqual(stale.sessions, []);
+  assert.deepEqual(f.rows, rowsBefore, 'a stale ticket must not write review rows');
+
+  const current = enqueue({ repoRoot: f.repo, run: f.runId, block: 'B11', file });
+  assert.notEqual(current.content_hash, older.content_hash);
+  const cached = await reviewTicket(readTicket(f.repo, current.ticket), ctx);
+  const batch = f.rows.find((r) => r.event === 'review.light_result');
+  assert.deepEqual(cached, batch.outcomes[file], 'the current hash must reuse the cached outcome');
+  assert.deepEqual(f.rows, rowsBefore, 'cache reuse must not write review rows');
+  assert.equal(f.packets.length, 1);
 });
 
 test('B139: over-budget, short answers and findings naming another file never approve batch files', async () => {

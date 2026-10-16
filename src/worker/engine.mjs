@@ -442,13 +442,13 @@ async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDige
     const root = ctx.contentRoot ?? ctx.repoRoot;
     const files = (await computeFileSet({ cwd: root, base: entry.base ?? 'HEAD' })).all.filter((file) => ownsFile(entry.owned, file, entry.ownedKinds)).sort();
     const hashes = files.map((file) => ({ file, content_hash: contentHash(root, file) }));
+    if (!hashes.some((f) => f.file === ticket.file && f.content_hash === ticket.content_hash)) return { status: 'stale', approved: false, engine: 'adaptive', sessions: [] };
     const signature = JSON.stringify([entry.base, hashes]);
     const rows = (await readRows()).filter((r) => r.run === ctx.runId && r.block === ticket.block && verifyRow(r, key).ok);
     const cached = rows.filter((r) => r.event === 'review.light_result' && r.signature === signature).at(-1)?.outcomes?.[ticket.file];
     if (cached && (cached.status === 'reviewed' || isDone(ctx.repoRoot, ticket.ticket))) return cached;
     const count = rows.filter((r) => r.event === 'review.light_batch').length;
     if (count >= 2) return null;
-    if (!hashes.some((f) => f.file === ticket.file && f.content_hash === ticket.content_hash)) return { status: 'stale', approved: false, engine: 'adaptive', sessions: [] };
     const round = count + 1;
     // Reserve before the session: a crash cannot reset the cap on a worker restart.
     await writeRow({ event: 'review.light_batch', round, signature });
