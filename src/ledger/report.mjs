@@ -6,7 +6,8 @@
  * answers are "never acted on" — must not move a single aggregate).
  *
  * Row conventions read here: `dispatch` {block,level,lane,lines}; `block.close`
- * {block,status,lines_actual} — ANY `block.close` row marks the block completed (a stop is
+ * {block,status,lines_actual} — a `block.close` row marks the block completed unless followed by
+ * `block.awaiting_human_check`; `block.human_pass` completes the waiting block (a stop is
  * `block.stop`; B19); `review.plan` {block,tier,depth_unconstrained,depth_chosen,
  * degrade_step}; `session` {block,role,provider,level,tokens_in,tokens_out,usd,usd_unknown?} — one row per
  * coder/reviewer/judge/s2/author/facts spend (plus `ledger add coder` manual rows and
@@ -81,7 +82,7 @@ export function buildRunModes(rows) {
 
 /**
  * Cost per block — completed AND still open (B33: a running total while the block is open):
- * review $ / coder $ / S1+S2 $ / facts $ / proof ms, `completed` (any `block.close` row) and
+ * review $ / coder $ / S1+S2 $ / facts $ / proof ms, `completed` (code close with no pending human check) and
  * `unknownUsdSessions` (spend rows whose price is unknown, counted 0 in the totals). Grouped by
  * run + block, so a block id reused in a second run is its own entry; a row without a run joins
  * the entry of its block when that block id appears in exactly one run (else a `run: null` entry); shadow rows are dropped here too, exactly as `buildSpend` does. An entry is listed
@@ -92,6 +93,7 @@ function costPerBlock(rows) {
   const byBlock = new Map();
   /** @type {Set<string>} run+block keys with at least one spend row */
   const spent = new Set();
+  const closedKeys = new Set();
   // never split one block: a row without a run joins its block's entry when that block id appears
   // in exactly one run; only a block seen in several runs leaves such a row in a `run: null` entry
   /** @type {Map<string, Set<string>>} */
@@ -133,7 +135,9 @@ function costPerBlock(rows) {
       e.level = row.level ?? e.level;
       e.lane = row.lane ?? e.lane;
     }
-    if (row.event === 'block.close') e.completed = true;
+    if (row.event === 'block.close') { e.completed = true; closedKeys.add(key); }
+    if (row.event === 'block.awaiting_human_check') e.completed = false;
+    if (row.event === 'block.human_pass') e.completed = true;
     if (isSpendRow(row)) {
       spent.add(key);
       const cost = sessionCostUsd(row);
@@ -150,7 +154,7 @@ function costPerBlock(rows) {
     }
     if (row.event === 'proof' && typeof row.duration_ms === 'number') e.proofTimeMs += row.duration_ms;
   }
-  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || spent.has(key)).map(([, e]) => e);
+  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || spent.has(key) || closedKeys.has(key)).map(([, e]) => e);
   for (const e of out) {
     for (const k of ['reviewUsd', 'coderUsd', 's1s2Usd', 'factsUsd', 'otherUsd', 'totalUsd']) e[k] = Math.round(e[k] * 10000) / 10000;
   }
@@ -325,5 +329,15 @@ export function buildReport(rows) {
   /** @type {Record<string, any>} */
   const sections = {};
   for (const name of SECTION_NAMES) sections[name] = builders[name](acted);
+  // Preserve the existing report shape for projects that have no human-check blocks.
+  if (acted.some((r) => r.event === 'block.awaiting_human_check')) {
+    const waiting = new Map();
+    for (const row of acted) {
+      const key = `${row.run ?? ''}\u0000${row.block}`;
+      if (row.event === 'block.awaiting_human_check') waiting.set(key, row.block);
+      if (['block.human_pass', 'block.stop', 'dispatch'].includes(row.event)) waiting.delete(key);
+    }
+    sections.awaiting_human_check = [...new Set(waiting.values())].sort();
+  }
   return { sections };
 }

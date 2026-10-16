@@ -381,6 +381,8 @@ export async function endRun({ runId, writeRow, stopWorker = stopPinnedWorker, p
   return withRunLock(runId, async () => {
     const current = await readRun(runId);
     if (current.status !== 'active') throw new StateError('run-ended', `run ${runId} has already ended`);
+    const awaiting = Object.keys(current.blocks).filter((id) => current.blocks[id].status === 'awaiting_human_check');
+    if (awaiting.length > 0) throw new StateError('awaiting-human-check', `run ${runId} has blocks awaiting human check: ${awaiting.join(', ')}; human-pass or stop them first`);
     const open = Object.keys(current.blocks).filter((id) => current.blocks[id].status === 'open');
     if (open.length > 0) throw new StateError('open-blocks', `run ${runId} still has open blocks: ${open.join(', ')}`);
     const pin = await checkWorkerPin(current, { probe });

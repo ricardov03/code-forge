@@ -287,6 +287,12 @@ export const FORBIDDEN = Object.freeze(
 export const CODER_ONLY_FORBIDDEN = Object.freeze(
   [
     {
+      id: 'code-forge-block-human-pass-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [['code-forge', 'block', 'human-pass'], ['forge', 'block', 'human-pass']],
+      description: 'Pass a human device check — human-only, confirmed in the human terminal (B137)',
+    },
+    {
       id: 'code-forge-block-waive-from-coder',
       kind: 'anyPrefix',
       prefixes: [

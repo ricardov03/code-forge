@@ -187,12 +187,14 @@
  * autopilot`). The prompt checks only that stdin and stdout are terminals; a pseudo-terminal
  * passes it, so it does not prove a human. The coder deny-list entries stay.
  *
- * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}`. `block close` runs B8's
+ * `--acceptance` is a YAML/JSON list of `{clause, tests: [test ids…]}` or `{clause, kind: human_check}`
+ * without tests. Human checks leave a successful close awaiting the human's terminal pass.
+ * `block close` runs B8's
  * rows of the gate (worker pin, MACs, orphans); the gate rows owned by later blocks join it
  * through `closeBlock`'s `extraChecks`.
  */
 
-import { statSync } from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
@@ -200,7 +202,7 @@ import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { fallbackLane } from '../decide/fallback-rules.mjs';
 import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
-import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
+import { attemptBlock, claimPath, closeBlock, humanPassBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -296,9 +298,10 @@ const USAGE =
   '       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n' +
   '       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
   '       code-forge block ack-waivers <id> --run <r>\n' +
+  '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
-const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers'];
+const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers', 'human-pass'];
 
 /** Refuse likely shell quoting slips before any row is written.
  * @param {string} workspace @param {string[]} entries @param {string} label
@@ -324,7 +327,7 @@ function checkWhitespacePaths(workspace, entries, label) {
     }
   }
 }
-const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report', 'rule', 'line'];
+const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report', 'rule', 'line', 'note', 'proof'];
 
 /**
  * @param {string[]} args
@@ -397,6 +400,13 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     const record = await readRun(runId);
+    if (sub === 'human-pass') {
+      if (positionals.length !== 1 || typeof flags.note !== 'string' || flags.note.trim().length === 0) throw new StateError('usage', 'block human-pass needs one block id and --note <text>');
+      if (typeof flags.proof === 'string' && !existsSync(flags.proof)) throw new StateError('usage', '--proof must name an existing directory or file');
+      const asked = await confirmHumanVerb(sub, runId, id, { file: '' }, record, deps);
+      if (asked === 'no-tty') { err(`${humanVerbNoTTY(sub)}\n`); return 2; }
+      if (asked === 'cancelled') { err(`block ${id} ${sub}: cancelled — nothing was recorded\n`); return 1; }
+    }
     if (sub === 'unwaive' || sub === 'ack-waivers') {
       if (positionals.length !== (sub === 'unwaive' ? 2 : 1)) throw new StateError('usage', `block ${sub} takes ${sub === 'unwaive' ? 'one block id and one finding id' : 'one block id'}`);
       const prepared = sub === 'unwaive'
@@ -482,6 +492,15 @@ export async function runBlock(args, deps = {}) {
         },
       };
     };
+    if (sub === 'human-pass') {
+      const row = await humanPassBlock({ runId, id, note: /** @type {string} */ (flags.note), proof: typeof flags.proof === 'string' ? flags.proof : null, writeRow, now: (deps.now ?? (() => new Date()))() });
+      const end = await ended('closed', 'block.human_pass', null);
+      try {
+        say(`block ${id} closed (human check passed)\n`);
+        if (json) emit({ ...row, status: 'closed', ...end.json });
+        return 0;
+      } finally { await end.runHook(); }
+    }
     // B48: every block command runs the lazy autopilot checks (grant expiry, expired approvals);
     // a failed check is a warning, never a reason to stop the block command
     try {
@@ -880,7 +899,10 @@ export async function runBlock(args, deps = {}) {
           for (const r of reopenedRows) say(`agent reopen ${r.file}: ${r.reason} (verdict: ${r.verdict?.verdict})\n`);
           for (const hit of acceptedHits) say(`accepted rule_break ${hit.rule} transcript line ${hit.line}: ${hit.reason} (by: human)\n`);
         }
-        (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
+        if (result.status === 'awaiting_human_check') {
+          for (const check of entry.human_checks) say(`block ${id} awaiting human check: ${check}\n`);
+          say(`next: code-forge block human-pass ${id} --run ${runId} --note "<device check note>" [--proof <dir-or-file>]\n`);
+        } else (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
         // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
         if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null, ...(end?.json ?? {}) });
         const closedJson = {
@@ -889,6 +911,7 @@ export async function runBlock(args, deps = {}) {
           status: result.status,
           reason: result.reason ?? null,
           close_event: result.event ?? null,
+          ...(result.status === 'awaiting_human_check' ? { human_checks: entry.human_checks, next_command: `code-forge block human-pass ${id} --run ${runId} --note "<device check note>"` } : {}),
           ...(end?.json ?? {}),
           // B70: only when a file passed as reviewed_by_waiver (otherwise the output is unchanged)
           ...(result.ok && waivedAll.length > 0 ? { reviewed_by_waiver: waivedAll.map((f) => ({ file: f.file, content_hash: f.content_hash, status: f.status, findings: f.findings, by: f.by, ...(f.answered?.length ? { answered: f.answered } : {}) })) } : {}),
@@ -898,7 +921,7 @@ export async function runBlock(args, deps = {}) {
           ...(reopenedRows.length > 0 ? { agent_reopens: reopenedRows } : {}),
           ...(acceptedHits.length > 0 ? { accepted_hits: acceptedHits } : {}),
         };
-        if (!result.ok || !removeTree) {
+        if (!result.ok || !removeTree || result.status === 'awaiting_human_check') {
           if (json && result.ok) emit(closedJson);
           return result.ok ? 0 : 1;
         }
@@ -1011,7 +1034,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
 
 /**
  * B80: the refusal when `block waive` or `block reopen` has no terminal to ask the human at.
- * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers'} verb @returns {string}
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass'} verb @returns {string}
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
@@ -1068,17 +1091,20 @@ async function confirmNoReviews(runId, id, deps) {
 /**
  * B80: `block waive` and `block reopen` are the human's alone (D1 = a): the human confirms at a
  * terminal through `confirmAtTerminal`, exactly like `--no-require-reviews`, but an active
- * autopilot grant changes nothing (autopilot waives through its own path, `by: autopilot`). The
+ * autopilot grant changes nothing for waive/reopen (autopilot waives through its own path,
+ * `by: autopilot`); human-pass instead refuses an active grant. The
  * pre-checks (`reopenPrecheck`, `waivePrecheck`) run first, at a terminal, so the human is never
  * asked about a waive or reopen the verb would refuse that way.
- * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers'} verb @param {string} runId @param {string} id
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass'} verb @param {string} runId @param {string} id
  * @param {{finding?: string, file: string, rule?: string, line?: number, hits?: {rule: string, line: number}[]}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
  * @param {() => void} [before]
  * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
  */
 function confirmHumanVerb(verb, runId, id, what, record, deps, before) {
   const message =
-    verb === 'waive'
+    verb === 'human-pass'
+      ? `Confirm all device checks of block ${id} (run ${runId}) passed? Only the owner may say yes.`
+      : verb === 'waive'
       ? `Waive finding ${what.finding} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
       : verb === 'unwaive'
         ? `Undo agent waivers for finding ${what.finding} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
@@ -1088,6 +1114,10 @@ function confirmHumanVerb(verb, runId, id, what, record, deps, before) {
         ? `Accept false transcript ${what.hits ? `hits ${what.hits.map((hit) => `${hit.rule} at line ${hit.line}`).join(', ')}` : `hit ${what.rule} at line ${what.line}`} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
         : `Reopen the review of ${what.file} in block ${id} (run ${runId})? Only the owner may say yes.`;
   return confirmAtTerminal(deps, message, async () => {
+    if (verb === 'human-pass') {
+      if (record.blocks?.[id]?.status !== 'awaiting_human_check') throw new StateError('not-awaiting', `block ${id} is not awaiting a human check`);
+      if ((await checkExpiry(runId, (deps.now ?? (() => new Date()))())).state === 'active') throw new StateError('autopilot-active', `block human-pass is refused while an autopilot grant is active on run ${runId}`);
+    }
     if (verb === 'reopen') await reopenPrecheck(record, runId, id, what.file);
     else if (verb === 'waive') await waivePrecheck(record, runId, id, /** @type {string} */ (what.finding), what.file);
     before?.();

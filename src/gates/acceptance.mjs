@@ -1,5 +1,5 @@
 /**
- * Acceptance-clause coverage (plan §4.6 row 4, O17): "every clause names ≥ 1 test id; each named
+ * Acceptance-clause coverage (plan §4.6 row 4, O17): "every code clause names ≥ 1 test id; each named
  * test exists in the tree and passed in this gate run (parsed from the runner output)." This is
  * DETERMINISTIC — S1's `scope` question (§3.2) judges only whether hunks OUTSIDE the named tests
  * are unrelated; whether a named test id actually passed is a fact, never a model's opinion.
@@ -12,7 +12,7 @@
  */
 
 /**
- * @typedef {{clause: string, tests: string[]}} AcceptanceClause
+ * @typedef {{clause: string, kind?: string, tests?: string[]}} AcceptanceClause
  * @typedef {{ok: true} | {ok: false, reason: string, clause: string, test: string}} AcceptanceResult
  */
 
@@ -57,7 +57,7 @@ export function parseTapPassed(output) {
 }
 
 /**
- * @param {ReadonlyArray<AcceptanceClause>} clauses - each must name ≥ 1 test id.
+ * @param {ReadonlyArray<AcceptanceClause>} clauses - code clauses name ≥ 1 test id; human checks name none.
  * @param {Set<string> | ReadonlyArray<string>} passed - test ids that passed in THIS gate run.
  * @param {Set<string> | ReadonlyArray<string>} [failed] - test ids that FAILED in this gate run.
  *   `parseTapPassed` flattens every file's/describe-block's TAP subtests into one global name set,
@@ -77,6 +77,10 @@ export function checkAcceptance(clauses, passed, failed = new Set()) {
   for (const entry of clauses) {
     const clause = entry?.clause;
     const tests = entry?.tests;
+    if (entry?.kind === 'human_check' && typeof clause === 'string' && clause.length > 0) {
+      if (Object.hasOwn(entry, 'tests')) return { ok: false, reason: 'human_check clause must not name tests', clause, test: '' };
+      continue;
+    }
     if (typeof clause !== 'string' || clause.length === 0 || !Array.isArray(tests) || tests.length === 0) {
       return { ok: false, reason: 'clause names no test id', clause: String(clause ?? ''), test: '' };
     }

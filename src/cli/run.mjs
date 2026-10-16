@@ -159,7 +159,8 @@ export async function runRun(args, deps = {}) {
       const record = await readRun(runId);
       const { run_id, status, engine, blocks, orphans } = record;
       const spend = await spendOf(record);
-      out(`${JSON.stringify({ run_id, status, engine, worker_pinned: Boolean(record.worker), blocks, orphans, ...spend }, null, 2)}\n`);
+      const awaiting = Object.keys(blocks).filter((id) => blocks[id].status === 'awaiting_human_check').sort();
+      out(`${JSON.stringify({ run_id, status, engine, worker_pinned: Boolean(record.worker), blocks, orphans, ...spend, ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) }, null, 2)}\n`);
       // on stderr, so stdout stays one JSON document
       const n = spend.unknown_usd_sessions;
       if (n > 0) err(`${n} session${n === 1 ? ' has' : 's have'} no known price; the budget does not count ${n === 1 ? 'it' : 'them'}\n`);

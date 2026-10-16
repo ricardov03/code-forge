@@ -65,7 +65,7 @@ const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
 const STATUS_MAX_LINES = 10;
 
 /**
- * @typedef {import('../state/brief-status.mjs').RunStatus} RunStatus
+ * @typedef {import('../state/brief-status.mjs').RunStatus & {awaiting_human_check?: string[]}} RunStatus
  */
 
 /** @param {string} p @returns {Promise<string>} */
@@ -108,7 +108,9 @@ async function statusOf(record) {
     if (list) list.push(r);
     else byBlock.set(r.block, [r]);
   }
-  return briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) });
+  const awaiting = Object.keys(record.blocks ?? {}).filter((id) => record.blocks[id].status === 'awaiting_human_check').sort();
+  return { ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
+    ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) };
 }
 
 /**
@@ -152,12 +154,14 @@ export function runLines(s) {
   const spent = s.spent_usd === null ? '$?' : `${usd(s.spent_usd)}${(s.unknown_usd_sessions ?? 0) > 0 ? '+?' : ''}`;
   const lines = [`run ${s.run_id} · ${s.status ?? '-'} · ${s.mode} · spent ${spent}${s.budget_usd !== null ? ` of ${usd(s.budget_usd)}` : ''}`];
   const tally = s.closed + s.stopped > 0 ? `closed ${s.closed} · stopped ${s.stopped}` : null;
-  const room = STATUS_MAX_LINES - 1 - (tally === null ? 0 : 1);
+  const awaiting = s.awaiting_human_check?.length ? `awaiting_human_check: ${JSON.stringify(s.awaiting_human_check)}` : null;
+  const room = STATUS_MAX_LINES - 1 - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1);
   const shown = s.blocks.length <= room ? s.blocks : s.blocks.slice(0, room - 1);
   for (const b of shown) {
     lines.push(`${b.id} ${b.state} ${b.level ?? '-'} · ${b.model ?? '-'} · gate ${b.gate.result}${b.gate.name ? ` (${b.gate.name})` : ''} · findings ${b.findings}`);
   }
   if (shown.length < s.blocks.length) lines.push(`… +${s.blocks.length - shown.length} more blocks`);
+  if (awaiting !== null) lines.push(awaiting);
   if (tally !== null) lines.push(tally);
   return lines;
 }

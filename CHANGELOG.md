@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- UI acceptance can require human device checks: code close waits in `awaiting_human_check`, status and report list waiting blocks, and only a terminal-confirmed human pass or stop permits run completion (B137)
 - Opt-in `gates.repeat_new_tests` repeats added or changed block tests after a passing gate, records signed repeat evidence and reports failures as `flaky-test` with the files and failing output (B136)
 - Block open records the base branch; close warns when it moved, and closed worktree blocks can rebase while preserving reviewed file blobs or restoring the old head on refusal (B134)
 - Rechecks include finding evidence, close unsupported current-line claims as stale, and keep repeated claim/evidence findings from escalating the review ladder on their own (B133)

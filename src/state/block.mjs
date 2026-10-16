@@ -216,16 +216,18 @@ export function briefPointer(relPath, content) {
 
 /**
  * @param {unknown} clauses
- * @returns {{clause: string, tests: string[]}[]}
+ * @returns {import('../gates/acceptance.mjs').AcceptanceClause[]}
  */
 function assertAcceptance(clauses) {
   const ok =
     Array.isArray(clauses) &&
     clauses.length > 0 &&
     clauses.every(
-      (c) => typeof c?.clause === 'string' && c.clause.length > 0 && Array.isArray(c.tests) && c.tests.length > 0 && c.tests.every((t) => typeof t === 'string' && t.length > 0),
+      (c) => typeof c?.clause === 'string' && c.clause.length > 0 && (c.kind === 'human_check'
+        ? !Object.hasOwn(c, 'tests')
+        : Array.isArray(c.tests) && c.tests.length > 0 && c.tests.every((t) => typeof t === 'string' && t.length > 0)),
     );
-  if (!ok) throw new StateError('bad-acceptance', 'acceptance: a non-empty list of {clause, tests: [test ids…]} is required');
+  if (!ok) throw new StateError('bad-acceptance', 'acceptance: a non-empty list of {clause, tests: [test ids…]} or {clause, kind: human_check} without tests is required');
   return clauses;
 }
 
@@ -357,6 +359,7 @@ export async function openBlock(opts) {
   if (opts.decision && opts.decision.answer !== level) throw new StateError('bad-decision', `the decision answer ${opts.decision.answer} is not the requested level ${level}`);
   const owned = assertOwned(opts.owned);
   const acceptance = assertAcceptance(opts.acceptance);
+  const humanChecks = acceptance.filter((c) => c.kind === 'human_check').map((c) => c.clause);
   const tests = opts.tests === undefined ? null : [...assertOwned(opts.tests, { label: 'test files', code: 'bad-tests' })];
   const kind = blockKind({ owned, declared: opts.kind });
   const dispatched = dispatchLevel({ lane: level, kind, cfg: opts.cfg });
@@ -385,6 +388,7 @@ export async function openBlock(opts) {
   try {
     const { block, reused } = await mutateRun(runId, null, writeRow, async (record) => {
       if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
+      if (record.blocks[id]?.status === 'awaiting_human_check') throw new StateError('already-open', `block ${id} is awaiting a human check`);
       // B57: what each exact owned entry is on disk, under the lock (as `block claim`) — a regular
       // file owns only itself, here and in every later check
       const kinds = ownedKinds(record.workspace, owned);
@@ -406,6 +410,7 @@ export async function openBlock(opts) {
       made = planned ? await planned.make() : null;
       const tree = made;
       const entry = { block: id, base_sha: baseSha, base_branch: baseBranch, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(tree ? { worktree: tree.worktree } : {}) };
+      if (humanChecks.length > 0) Object.assign(entry, { human_checks: humanChecks });
       record.blocks[id] = entry;
       const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
       const created = tree?.created ? [{ event: 'worktree.created', block: id, path: tree.worktree.path, branch: tree.worktree.branch, base: tree.worktree.base_sha }] : [];
@@ -454,7 +459,7 @@ export async function attemptBlock({ runId, id, writeRow }) {
  * @returns {Promise<{old_base: string, new_base: string}>}
  */
 export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
-  if ((await readRun(runId)).blocks[id]?.status === 'closed') return rebaseClosedBlock({ runId, id, writeRow });
+  if (['closed', 'awaiting_human_check'].includes((await readRun(runId)).blocks[id]?.status)) return rebaseClosedBlock({ runId, id, writeRow });
   return mutateRun(runId, id, writeRow, async (record, block) => {
     // B62a: a worktree block's base is the commit its tree started from; moving it would leave the
     // tree on its old base, so the rebase is refused
@@ -492,7 +497,7 @@ async function committedBlobs(cwd, ref, files) {
 
 /**
  * Closed blocks have a separate mutation path: check their status again under the lock,
- * restore the branch on failure (including a failed signed write), and keep the block closed.
+ * restore the branch on failure (including a failed signed write), and retain closed/awaiting status.
  * @param {{runId: string, id: string, writeRow: WriteRow}} opts
  * @returns {Promise<{old_base: string, new_base: string}>}
  */
@@ -501,7 +506,7 @@ async function rebaseClosedBlock({ runId, id, writeRow }) {
     const record = await readRun(runId);
     if (record.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
     const block = record.blocks[id];
-    if (block?.status !== 'closed' || !block.worktree) throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
+    if (!['closed', 'awaiting_human_check'].includes(block?.status) || !block.worktree) throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
     if (!block.base_branch) throw new StateError('rebase-no-base', `block ${id} has no recorded base branch`);
     const tree = block.worktree.path;
     const branch = await git(['git', 'symbolic-ref', '--quiet', 'HEAD'], tree, [0, 1]);
@@ -588,10 +593,32 @@ export async function checkScope({ runId, id, files, writeRow }) {
 
 /** @param {{runId: string, id: string, reason: string, writeRow: WriteRow, event?: string}} opts */
 export async function stopBlock({ runId, id, reason, writeRow, event = 'block.stop' }) {
-  await mutateRun(runId, id, writeRow, (_record, block) => {
+  await mutateRun(runId, null, writeRow, (record) => {
+    const block = record.blocks[id];
+    if (!['open', 'awaiting_human_check'].includes(block?.status)) throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
     block.status = 'stopped';
     block.stop_reason = reason;
     return { result: undefined, rows: [{ event, block: id, reason }] };
+  });
+}
+
+/**
+ * Called only after the CLI's terminal confirmation; recheck under the lock before signing.
+ * @param {{runId: string, id: string, note: string, proof?: string | null, writeRow: WriteRow, now?: Date}} opts
+ */
+export async function humanPassBlock({ runId, id, note, proof = null, writeRow, now = new Date() }) {
+  return mutateRun(runId, null, writeRow, (record) => {
+    const block = record.blocks[id];
+    if (block?.status !== 'awaiting_human_check') throw new StateError('not-awaiting', `block ${id} is not awaiting a human check`);
+    if (typeof note !== 'string' || note.trim().length === 0) throw new StateError('usage', 'block human-pass needs --note <text>');
+    if (proof !== null && (typeof proof !== 'string' || !existsSync(proof))) throw new StateError('usage', '--proof must name an existing directory or file');
+    const grant = record.autopilot;
+    if (grant && !['stopped', 'expired'].includes(grant.status) && !(now.getTime() >= Date.parse(grant.until))) {
+      throw new StateError('autopilot-active', `block human-pass is refused while an autopilot grant is active on run ${runId}`);
+    }
+    const row = { event: 'block.human_pass', block: id, note, proof, checks: [...block.human_checks], by: 'human' };
+    block.status = 'closed';
+    return { result: row, rows: [row] };
   });
 }
 
@@ -609,7 +636,7 @@ export async function stopBlock({ runId, id, reason, writeRow, event = 'block.st
  *   extraChecks?: Array<() => Promise<{ok: boolean, reason?: string}>>,
  *   closeRows?: Record<string, any>[],
  * }} opts
- * @returns {Promise<{ok: boolean, status: 'closed' | 'stopped' | 'open', reason?: string, event?: string}>}
+ * @returns {Promise<{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string}>}
  */
 export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, extraChecks = [], closeRows = [] }) {
   const record = await readRun(runId);
@@ -639,16 +666,18 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
     if (!result.ok) return { ok: false, status: 'open', reason: result.reason ?? 'check failed' };
   }
 
-  /** @typedef {{ok: boolean, status: 'closed' | 'stopped' | 'open', reason?: string, event?: string}} CloseResult */
+  /** @typedef {{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string}} CloseResult */
   return mutateRun(runId, id, writeRow, (current, block) => {
     if (current.orphans.length > 0) {
       /** @type {CloseResult} */
       const refused = { ok: false, status: 'open', reason: `orphans: ${current.orphans.join(', ')}` };
       return { result: refused, rows: [] };
     }
-    block.status = 'closed';
+    const checks = block.human_checks ?? [];
+    block.status = checks.length > 0 ? 'awaiting_human_check' : 'closed';
     /** @type {CloseResult} */
-    const closed = { ok: true, status: 'closed' };
-    return { result: closed, rows: [...closeRows, { event: 'block.close', block: id, status: 'complete' }] };
+    const closed = { ok: true, status: block.status };
+    return { result: closed, rows: [...closeRows, { event: 'block.close', block: id, status: 'complete' },
+      ...(checks.length > 0 ? [{ event: 'block.awaiting_human_check', block: id, checks }] : [])] };
   });
 }
