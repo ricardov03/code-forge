@@ -619,7 +619,7 @@ export async function runBlock(args, deps = {}) {
         throw thrown;
       });
       // ONE base for the whole close: a worktree block is measured against the commit its tree was
-      // made from (B62a keeps it equal to the block's base_sha: a re-open keeps it, a rebase is refused)
+      // made from (kept equal to base_sha, including after a closed worktree rebase)
       const base = wt !== null ? wt.base_sha : entry.base_sha;
       const reviewsWaived = flags['no-require-reviews'] === true;
       // B52: the human's way out is confirmed by the human, at a terminal, before anything is written
@@ -868,6 +868,7 @@ export async function runBlock(args, deps = {}) {
         // B70: each file that passed as reviewed_by_waiver is named before the closed line
         // B71: an answered finding is named as answered; a file with only answered findings has no `by`
         if (result.ok) {
+          await warnMovedBase(record.workspace, entry, id, runId, err);
           for (const w of lineWarnings) err(w);
           for (const l of reviewedJson) say(`reviewed ${l.file} ticket ${l.ticket}\n`);
           for (const f of waivedAll) {
@@ -919,6 +920,26 @@ export async function runBlock(args, deps = {}) {
   }
   err(USAGE);
   return 2;
+}
+
+/**
+ * Advisory only, after a successful close: missing refs or failed history reads cannot change
+ * the close's exit code. Resolve the recorded branch, regardless of the workspace's checkout.
+ * @param {string} cwd @param {Record<string, any>} block @param {string} id @param {string} runId
+ * @param {(text: string) => unknown} warn
+ */
+async function warnMovedBase(cwd, block, id, runId, warn) {
+  if (!block.base_branch) return;
+  try {
+    const opts = { cwd, env: gitChildEnv(), timeoutMs: 10000 };
+    const head = await exec(['git', 'rev-parse', '--verify', '--end-of-options', `refs/heads/${block.base_branch}^{commit}`], opts);
+    if (head.result !== 'ok' || head.stdout.trim() === block.base_sha) return;
+    const count = await exec(['git', 'rev-list', '--count', `${block.base_sha}..${head.stdout.trim()}`], opts);
+    if (count.result !== 'ok' || !/^\d+$/.test(count.stdout.trim())) return;
+    warn(`WARN block ${id}: base moved: ${block.base_branch} is ${count.stdout.trim()} commit(s) ahead of the block base; run: code-forge block rebase ${id} --run ${runId}\n`);
+  } catch {
+    // The close already succeeded; this warning is best effort.
+  }
 }
 
 /**
