@@ -3,7 +3,7 @@
  * `block open` before every spawn in every engine; it prints the brief pointer (≤ 200 bytes).
  *
  *   block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file>
- *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract]
+ *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract|light]
  *              [--tests <paths…>]
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
@@ -205,6 +205,7 @@ import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { attemptBlock, claimPath, closeBlock, humanPassBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
+import { readFileDiff } from '../review/packet.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
@@ -291,7 +292,7 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agen
 }
 
 const USAGE =
-  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract] [--tests <paths…>]\n' +
+  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
@@ -857,6 +858,18 @@ export async function runBlock(args, deps = {}) {
       };
       /** @type {Array<() => Promise<{ok: boolean, reason?: string}>>} */
       const extraChecks = [reviews, report];
+      if (entry.kind === 'light') extraChecks.unshift(async () => {
+        const { top, changed, owns } = await tree();
+        const files = changed.filter((file) => owns(entry.owned_files, file, entry.owned_kinds));
+        let lines = 0;
+        for (const file of files) {
+          const diff = await readFileDiff({ repoRoot: top, file, base });
+          lines += diff.plusCount + diff.minusCount;
+        }
+        const cfg = configInForce(record);
+        return files.length > (cfg?.light?.max_files ?? 5) || lines > (cfg?.light?.max_lines ?? 300)
+          ? { ok: false, reason: `light-limits ${files.length} files, ${lines} lines` } : { ok: true };
+      });
       if (configInForce(record)?.gates?.test != null) {
         const testGate = async () => {
           const green = rows.filter((row) => row.block === id && row.event === 'gate.done' && row.all_ok === true);

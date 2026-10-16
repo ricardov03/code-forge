@@ -355,13 +355,13 @@ export async function openBlock(opts) {
   if (typeof level !== 'string' || !LEVEL.test(level)) throw new StateError('bad-level', 'level must be L0..L3');
   if (!Number.isInteger(attempt) || attempt < 1) throw new StateError('bad-attempt', 'attempt must be an integer >= 1');
   if (lines !== null && !(Number.isInteger(lines) && lines > 0)) throw new StateError('bad-lines', 'lines forecast must be a positive integer');
-  if (opts.kind !== undefined && !BLOCK_KINDS.includes(opts.kind)) throw new StateError('bad-kind', `kind must be one of ${BLOCK_KINDS.join(', ')}`);
+  if (opts.kind !== undefined && opts.kind !== 'light' && !BLOCK_KINDS.includes(opts.kind)) throw new StateError('bad-kind', `kind must be one of ${[...BLOCK_KINDS, 'light'].join(', ')}`);
   if (opts.decision && opts.decision.answer !== level) throw new StateError('bad-decision', `the decision answer ${opts.decision.answer} is not the requested level ${level}`);
   const owned = assertOwned(opts.owned);
   const acceptance = assertAcceptance(opts.acceptance);
   const humanChecks = acceptance.filter((c) => c.kind === 'human_check').map((c) => c.clause);
   const tests = opts.tests === undefined ? null : [...assertOwned(opts.tests, { label: 'test files', code: 'bad-tests' })];
-  const kind = blockKind({ owned, declared: opts.kind });
+  const kind = opts.kind === 'light' ? 'light' : blockKind({ owned, declared: opts.kind });
   const dispatched = dispatchLevel({ lane: level, kind, cfg: opts.cfg });
   const pointer = opts.brief ? briefPointer(opts.brief.path, opts.brief.content) : null;
 

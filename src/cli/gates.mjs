@@ -39,7 +39,7 @@ import { writeSafe, redactJSON } from '../util/redact.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { detectGates } from '../gates/detect.mjs';
-import { printableGates, scopeFields, thresholdOf } from '../gates/expand.mjs';
+import { printableGates, scopeFields, testScope, thresholdOf } from '../gates/expand.mjs';
 import { runGates } from '../gates/run.mjs';
 import { runGatesGuarded } from '../proof/lock.mjs';
 import { blockTree } from '../proof/worktree.mjs';
@@ -280,7 +280,7 @@ export async function runGatesVerb(args, deps = {}) {
       let ran;
       if (runFlag.value !== undefined && blockFlag.value !== undefined) {
         const threshold = thresholdOf(configured?.full_suite_threshold_files);
-        /** @type {typeof gates & {repeatNewTests?: import('../gates/run.mjs').RepeatNewTests}} */
+        /** @type {typeof gates & {repeatNewTests?: import('../gates/run.mjs').RepeatNewTests, lightTestFiles?: string[]}} */
         let planned = gates;
         if (configured?.repeat_new_tests !== undefined) {
           const record = await readRun(runFlag.value);
@@ -289,7 +289,20 @@ export async function runGatesVerb(args, deps = {}) {
             repeatNewTests: { n: configured.repeat_new_tests, base: block.worktree?.base_sha ?? block.base_sha, owned: block.owned_files, kinds: block.owned_kinds, onSkip: (line) => err(`${line}\n`) },
           };
         }
-        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates: planned, cwd, threshold, changed, slug, ...(timeoutMs ? { timeoutMs } : {}) });
+        // Missing records are diagnosed by the guarded runner, after its lock decision.
+        const block = await readRun(runFlag.value).then((record) => record.blocks?.[blockFlag.value]).catch((error) => {
+          if (error.code === 'no-run') return null;
+          throw error;
+        });
+        const light = block?.kind === 'light';
+        if (light) {
+          const scope = testScope({ testFiles: block.test_files, owned: block.owned_files, threshold: Infinity });
+          const command = planned.test;
+          const argv = Array.isArray(command) ? command : command?.argv;
+          if (scope.scope !== 'related' || !argv?.includes('{test_files}')) throw new StateError('light-tests', 'light-tests: block tests and a gates.test {test_files} item are required');
+          planned = { ...planned, lightTestFiles: scope.files };
+        }
+        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates: planned, cwd, threshold, changed: light ? false : changed, slug, ...(timeoutMs ? { timeoutMs } : {}) });
         if (guarded.result === 'proof.busy') {
           out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
           return 1;

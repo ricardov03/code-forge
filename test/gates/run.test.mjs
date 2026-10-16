@@ -9,6 +9,7 @@ import { runRun } from '../../src/cli/run.mjs';
 import { runBlock } from '../../src/cli/block.mjs';
 import { readAllRows } from '../../src/ledger/write.mjs';
 import { loadKey, verifyRow } from '../../src/state/signer.mjs';
+import { readRun, saveRun } from '../../src/state/run.mjs';
 import { captureStream, git, withTempDir } from './support.mjs';
 
 let repeatSeq = 0;
@@ -78,6 +79,37 @@ console.log('passed ' + log.length);
 }
 
 const REPEATED_FILES = ['test/a.test.mjs', 'test/new.test.mjs'];
+
+test('B139: light block gates use only block tests even above the full-suite threshold and with changed scope', async () => {
+  await withTempDir(async (dir) => {
+    const fx = await repeatFixture(dir, { n: 2 });
+    const record = await readRun(fx.run);
+    record.blocks.B1.kind = 'light';
+    record.blocks.B1.test_files = ['test/a.test.mjs'];
+    await saveRun(record);
+    const ran = await fx.gate();
+    assert.equal(ran.code, 0, ran.err);
+    assert.deepEqual(await fx.calls(), Array.from({ length: 3 }, () => ['test/a.test.mjs']));
+    assert.equal(JSON.parse(ran.out).results[0].scope, 'related');
+    const changed = await repeatCli(runGatesVerb, ['run', '--cwd', dir, '--run', fx.run, '--block', 'B1', '--changed']);
+    assert.equal(changed.code, 0, changed.err);
+    assert.deepEqual(await fx.calls(), Array.from({ length: 6 }, () => ['test/a.test.mjs']));
+  });
+});
+
+test('B139: light gates refuse missing block tests or a test command without test_files instead of running a full suite', async () => {
+  for (const token of [true, false]) await withTempDir(async (dir) => {
+    const fx = await repeatFixture(dir, { n: 0, token });
+    const record = await readRun(fx.run);
+    record.blocks.B1.kind = 'light';
+    if (!token) record.blocks.B1.test_files = ['test/a.test.mjs'];
+    await saveRun(record);
+    const ran = await fx.gate();
+    assert.equal(ran.code, 1, ran.out);
+    assert.match(ran.err, /light-tests/);
+    await assert.rejects(fx.calls, { code: 'ENOENT' });
+  });
+});
 
 test('B136: repeat N additional times only for added or changed block tests, even above the scope threshold', async () => {
   await withTempDir(async (dir) => {

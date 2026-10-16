@@ -60,7 +60,7 @@ function normalizeCommand(command) {
  * item that is exactly `{test_files}` expands to its files, or is dropped for a full run. Left out,
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment; a gate with neither runs exactly as before B60.
- * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, repeatNewTests?: RepeatNewTests}} gates
+ * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, repeatNewTests?: RepeatNewTests, lightTestFiles?: string[]}} gates
  * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
  * @returns {Promise<{results: GateResult[], allOk: boolean, repeats?: Repeats}>}
  */
@@ -69,7 +69,7 @@ export async function runGates(gates, opts) {
     throw new TypeError('runGates: gates must be an object with test/lint/types/format');
   }
   const { cwd, timeoutMs = 300000 } = opts ?? {};
-  const scope = opts?.scope ?? NO_BLOCK_SCOPE; // null falls back too
+  const scope = gates.lightTestFiles ? { scope: /** @type {const} */ ('related'), files: gates.lightTestFiles } : opts?.scope ?? NO_BLOCK_SCOPE;
   if (typeof cwd !== 'string' || cwd.length === 0) {
     throw new TypeError('runGates: opts.cwd must be a non-empty string');
   }
@@ -118,7 +118,7 @@ export async function runGates(gates, opts) {
       if (!command.originalArgv.includes(TEST_FILES_TOKEN)) {
         repeat.onSkip?.('repeat_new_tests: skipped (gates.test has no {test_files})');
       } else {
-        const files = await changedTestFiles({ cwd, ...repeat });
+        const files = (await changedTestFiles({ cwd, ...repeat })).filter((file) => !gates.lightTestFiles || gates.lightTestFiles.includes(file));
         if (files.length > 0) {
           result.repeats = { n: repeat.n, files, failed: false };
           const repeatArgv = expandArgv(command.originalArgv, { scope: 'related', files }).argv;

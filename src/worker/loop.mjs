@@ -382,6 +382,7 @@ export async function createWorker(opts, deps = {}) {
           { env: childEnv, ...(deps.bins ? { bins: deps.bins } : {}), ...(deps.stderr ? { stderr: deps.stderr } : {}) },
         ),
       writeRow: (row) => ledger({ ...row, block: ticket.block, file: ticket.file, content_hash: ticket.content_hash }),
+      writeBlockRow: (row) => ledger({ ...row, block: ticket.block }),
     };
     try {
       const outcome = await review(ticket, ctx);

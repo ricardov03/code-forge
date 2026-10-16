@@ -1,5 +1,7 @@
 # Review — per file, fresh L2 session, bounded rounds
 
+A light block reviews all owned changed files in one packet, with each path heading and its full diff, using `review.budgets.full_in` and one full reviewer session. Findings name their file; each file receives signed `review.round` and, when clean, `review.approved` rows for its own content hash. `review-file --wait-block` joins those file tickets as usual. Open critical/warning findings end the round: fix them, then join again for one new batch of all changed files. At most two batches run per block, including across worker restarts; subsequent changes use the normal per-file loop. Keep large-file routing configured for the long-context reviewer.
+
 ## §1 The trigger is a CLI call or commit watch, and the file set is complete
 
 Each file's `outcome` is `approved`, `findings`, `stopped`, `split_required` or `unavailable` from its completion marker, and `null` while `pending` or `not_queued`; a live join queues an owned changed file even if it has no earlier ticket. A `split_required` outcome returns `done: false`, `reason: split_required` and `next` naming the file: the owner raises `review.budgets`, runs `run reload`, then runs `review-file <path> --fresh`.

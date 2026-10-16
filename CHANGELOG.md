@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Light blocks bound small changes to configurable file and line limits, batch their reviews, and run only block tests (B139)
 - Human decision close combines finding waivers, agent acknowledgement and transcript acceptance in one confirmation; immutable `close.require_human` supports delegated `close:routine` grants for approved blocks without waivers or hits (B138)
 
 - Clarify that human pass requires a note and accepts optional proof; verify an omitted proof is recorded as null and closes the block (B137b)

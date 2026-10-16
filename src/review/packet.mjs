@@ -223,6 +223,32 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   return { status: 'ok', text, hunkHeaders, contextMode: ctx.mode, contextLines: ctx.lineCount, digestLines: digest.length, tokensIn, budget: limit, overBudget: tokensIn > limit };
 }
 
+/** One full-budget packet for a light block; every diff and path heading is retained.
+ * @param {{diffs: FileDiff[], cfg?: Record<string, any>, rulesDigest?: string, factsExcerpt?: string}} opts
+ */
+export function assembleLightPacket({ diffs, cfg, rulesDigest = '', factsExcerpt = '' }) {
+  const lens = `${loadLens('full')}\nReview ALL files below in one round. Findings must name their exact file path. Echo every listed hunk in file order, including duplicates.`;
+  const diffText = diffs.map((diff) => `### ${diff.file}\n${diffSectionOf(diff)}`).join('\n\n');
+  const budget = budgetFor(cfg, 'full_in');
+  let digest = splitLines(rulesDigest).slice(0, DIGEST_MAX_LINES);
+  const context = (mode) => diffs.map((diff) => `### ${diff.file}\n${buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode }).text}`).join('\n\n');
+  let contextMode = 'auto';
+  let ctx = context(contextMode);
+  let text = render(lens, digest, factsExcerpt, ctx, diffText);
+  if (estimateTokens(text) > budget) {
+    contextMode = 'minimal';
+    ctx = context(contextMode);
+    text = render(lens, digest, factsExcerpt, ctx, diffText);
+  }
+  while (estimateTokens(text) > budget && digest.length > 0) {
+    digest = digest.slice(0, -1);
+    text = render(lens, digest, factsExcerpt, ctx, diffText);
+  }
+  const tokensIn = estimateTokens(text);
+  return { status: tokensIn > budget ? 'split_required' : 'ok', text, tokensIn, budget,
+    contextMode, hunkHeaders: diffs.flatMap((diff) => diff.hunks.map((h) => h.header)) };
+}
+
 /** Cap the entire section at full_in / 16 tokens, without cutting a UTF-8 character.
  * @param {string} paired @param {number} fullIn @returns {string}
  */

@@ -65,7 +65,7 @@ import { blockKind, isDocsKind } from '../decide/escalation.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { isMigrationPath, isPolicyPath } from '../decide/lane-facts.mjs';
 import { tierFor } from '../proof/tiers.mjs';
-import { assembleJudgePacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, isSecretLike, readFileDiff } from './packet.mjs';
+import { assembleJudgePacket, assembleLightPacket, assemblePacket, attachFiles, budgetFor, diffOnlyTokens, isSecretLike, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
 import { deletionNote, renderDeletionNote } from './deletion.mjs';
 import { testQualityNote } from './test-quality.mjs';
@@ -439,6 +439,26 @@ export async function reviewFile(input, deps) {
     summaries.push(`S${section.index}: ${part.summary}`);
   }
   return { status: 'reviewed', approved, ...head, summary: summaries.join('\n'), findings, sessions, sections };
+}
+
+/** A light round has one reviewer and no recheck/triage loop.
+ * @param {{repoRoot: string, files: string[], base: string | null, cfg: Record<string, any>, workDir: string, rulesDigest?: string, factsExcerpt?: string}} input
+ * @param {ReviewDeps} deps
+ * @returns {Promise<import('../worker/engine.mjs').ReviewOutcome>}
+ */
+export async function reviewLightBatch(input, deps) {
+  const diffs = await Promise.all(input.files.map((file) => readFileDiff({ repoRoot: input.repoRoot, file, base: input.base })));
+  const packet = assembleLightPacket({ ...input, diffs });
+  const head = { engine: 'adaptive', depth: 'full' };
+  if (packet.status !== 'ok') return { ...head, status: 'split_required', approved: false, tokens_in: packet.tokensIn, budget: packet.budget, sessions: [] };
+  mkdirSync(input.workDir, { recursive: true, mode: 0o700 });
+  const final = await runOne({ lens: 'full', role: 'reviewer', level: 'L2', slot: null }, packet.text, packet,
+    { deps, workDir: input.workDir, min: minTokensOut(input.cfg), cfg: input.cfg, schemaFallback: false });
+  const sessions = [publicSummary(final)];
+  if (final.status !== 'ok') return { ...head, status: 'unavailable', reason: final.reason, approved: false, sessions };
+  if (final.review.findings.some((f) => !input.files.includes(f.file))) return { ...head, status: 'unavailable', reason: 'finding-file', approved: false, sessions };
+  if (final.review.needs_file?.length > 0) return { ...head, status: 'unavailable', reason: 'needs-file', approved: false, sessions };
+  return { ...head, status: 'reviewed', approved: final.review.passed === true, findings: final.review.findings, sessions };
 }
 
 /**

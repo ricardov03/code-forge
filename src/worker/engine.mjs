@@ -95,7 +95,7 @@ import { askJev } from '../decide/jev-client.mjs';
 import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { ContextError, reviewDigest } from '../context/pack.mjs';
-import { reviewFile, rulesRisk } from '../review/engine.mjs';
+import { reviewFile, reviewLightBatch, rulesRisk } from '../review/engine.mjs';
 import { reviewAnswers } from '../review/answers.mjs';
 import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
@@ -109,7 +109,7 @@ import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
 import { withLock } from '../util/file-locks.mjs';
 import { blockAnchors, blockRungUsed, loadState, RESTORED_EVENT, saveState } from './review-state.mjs';
-import { assertAnswers } from './queue.mjs';
+import { assertAnswers, enqueueHash, isDone, writeResult } from './queue.mjs';
 import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } from './ticket.mjs';
 
 /**
@@ -127,6 +127,8 @@ import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } fro
  *   the worker's and a per-call `cfg` wins).
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow] - a signed ledger row
  *   (the worker adds `run`, `block`, `file`, `content_hash`).
+ * @property {(row: Record<string, any>) => Promise<unknown>} [writeBlockRow] - light fanout rows;
+ *   the worker pins run and block, while the batch supplies each file and content hash.
  * @property {Buffer} [key] - the run's HMAC key: signs the fix-loop state. Absent ⇒ engine only.
  * @property {() => Promise<Array<Record<string, any>>>} [readRows] - the run's ledger rows (the
  *   `review.state` anchors the state is checked against); required with `key`.
@@ -197,7 +199,7 @@ export async function blockEntryFor(runId, block) {
       throw new Error('worktree-malformed');
     }
   }
-  return { base: tree ? tree.base_sha : sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, testFiles, acceptance: entry.acceptance, kind: blockKind({ owned, declared: entry.kind }), tree, workspace: typeof record.workspace === 'string' ? record.workspace : null };
+  return { base: tree ? tree.base_sha : sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, testFiles, acceptance: entry.acceptance, kind: entry.kind === 'light' ? 'light' : blockKind({ owned, declared: entry.kind }), tree, workspace: typeof record.workspace === 'string' ? record.workspace : null };
 }
 
 /** @typedef {{path: string, branch: string, base_sha: string}} WorktreeEntry */
@@ -411,6 +413,10 @@ export async function reviewTicket(ticket, ctx) {
       return { status: 'unavailable', reason: 'context-unreadable', approved: false, engine: 'adaptive', sessions: [] };
     }
     const digest = rulesDigest === '' ? {} : { rulesDigest };
+    if (entry.kind === 'light' && ctx.key) {
+      const batch = await lightRound(ticket, tctx, { entry, workDir, factsExcerpt, rulesDigest });
+      if (batch) return batch;
+    }
     if (!ctx.key) {
       return await reviewFile(
         { repoRoot: contentRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt, ...digest, peerDiffs, ...(await fileContext()) },
@@ -421,6 +427,55 @@ export async function reviewTicket(ticket, ctx) {
   } finally {
     rmSync(workDir, { recursive: true, force: true });
   }
+}
+
+/** Serialize a light block across tickets/workers; durable signed rows enforce the two-batch cap.
+ * A batch completes every file's queue ticket, including files queued after this ticket started.
+ * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
+ * @param {{entry: Awaited<ReturnType<typeof blockEntryFor>>, workDir: string, factsExcerpt: string, rulesDigest: string}} input
+ * @returns {Promise<ReviewOutcome | null>} null enters the ordinary per-file loop.
+ */
+async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDigest }) {
+  if (!ctx.key || !ctx.readRows || !ctx.writeBlockRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
+  const key = ctx.key, readRows = ctx.readRows, writeRow = ctx.writeBlockRow;
+  return withLock(`light:${ctx.runId}\0${ticket.block}`, async () => {
+    const root = ctx.contentRoot ?? ctx.repoRoot;
+    const files = (await computeFileSet({ cwd: root, base: entry.base ?? 'HEAD' })).all.filter((file) => ownsFile(entry.owned, file, entry.ownedKinds)).sort();
+    const hashes = files.map((file) => ({ file, content_hash: contentHash(root, file) }));
+    const signature = JSON.stringify([entry.base, hashes]);
+    const rows = (await readRows()).filter((r) => r.run === ctx.runId && r.block === ticket.block && verifyRow(r, key).ok);
+    const cached = rows.filter((r) => r.event === 'review.light_result' && r.signature === signature).at(-1)?.outcomes?.[ticket.file];
+    if (cached && (cached.status === 'reviewed' || isDone(ctx.repoRoot, ticket.ticket))) return cached;
+    const count = rows.filter((r) => r.event === 'review.light_batch').length;
+    if (count >= 2) return null;
+    if (!hashes.some((f) => f.file === ticket.file && f.content_hash === ticket.content_hash)) return { status: 'stale', approved: false, engine: 'adaptive', sessions: [] };
+    const round = count + 1;
+    // Reserve before the session: a crash cannot reset the cap on a worker restart.
+    await writeRow({ event: 'review.light_batch', round, signature });
+    const batch = await reviewLightBatch({ repoRoot: root, files, base: entry.base, cfg: ctx.cfg, workDir, factsExcerpt, rulesDigest }, { spawn: ctx.spawn, writeRow });
+    const moved = hashes.some((f) => contentHash(root, f.file) !== f.content_hash);
+    const findings = batch.findings ?? [];
+    const blocking = findings.some((f) => f.severity === 'critical' || f.severity === 'warning');
+    /** @type {Record<string, ReviewOutcome>} */
+    const outcomes = {};
+    for (const { file, content_hash } of hashes) {
+      const own = findings.filter((f) => f.file === file);
+      const approved = !moved && batch.status === 'reviewed' && (batch.approved || blocking) && own.every((f) => f.severity === 'nit');
+      const outcome = { ...batch, ...(moved ? { status: 'stale' } : {}), approved, findings: own, round, kind: 'full', level: entry.level,
+        next: { action: approved ? 'complete' : 'fix', level: entry.level } };
+      outcomes[file] = outcome;
+      if (batch.status === 'reviewed' && !moved) {
+        await writeRow({ event: 'review.round', file, content_hash, round, kind: 'full', level: entry.level, open_after: own.filter((f) => f.severity !== 'nit').length });
+        if (approved) await writeRow({ event: 'review.approved', file, content_hash });
+      }
+      const queued = enqueueHash({ repoRoot: ctx.repoRoot, run: ctx.runId, block: ticket.block, file, content_hash, ...(ticket.tree ? { tree: ticket.tree } : {}) });
+      const open = approved ? [] : own;
+      await writeRow({ event: 'review.result', ticket: queued.ticket, file, content_hash, status: outcome.status, approved, open });
+      writeResult({ repoRoot: ctx.repoRoot, runId: ctx.runId, ticket: queued.ticket, result: { ...outcome, block: ticket.block, file, content_hash, open }, key });
+    }
+    await writeRow({ event: 'review.light_result', signature, outcomes });
+    return outcomes[ticket.file];
+  });
 }
 
 /**

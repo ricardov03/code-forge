@@ -41,6 +41,14 @@
       }
     },
     "orchestrator": { "$ref": "#/$defs/levelName" },
+    "light": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_files": { "type": "integer", "minimum": 1, "default": 5, "description": "Maximum owned changed files in a light block at close." },
+        "max_lines": { "type": "integer", "minimum": 1, "default": 300, "description": "Maximum added plus removed lines in a light block at close." }
+      }
+    },
     "close": {
       "type": "object",
       "additionalProperties": false,

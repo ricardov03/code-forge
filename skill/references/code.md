@@ -1,5 +1,7 @@
 # Code — brief, dispatch, re-measure, gate
 
+Small changes may use `block open <id> --kind light`. Close allows at most `light.max_files` owned changed files (default 5) and `light.max_lines` added plus removed lines (default 300), including new files. Auto ticket lines are unchanged. `gates run --block` runs the block's tests through `{test_files}`, ignoring the full-suite threshold; supply block tests and a test command containing that item. A close refusal `light-limits <files> files, <lines> lines` means the block outgrew this kind: the orchestrator stops the open attempt, then opens the same id with `block open <id> --kind code --attempt <n+1>` and the original base, ownership and acceptance.
+
 ## §1 The coder's first deliverable is a facts diff
 
 Before any forecast or code, the coder reads the code it will call and reports **every contradiction between the plan and the code** in one message — a signature, a flag, a key, a version. One stop for facts, never one per discovery. Contract corrections (a key, a rule, a signature) are the architect's alone and are recorded, not asked; a ruling reaches the human only when it changes user-visible behaviour, money semantics or an approved decision. A coder that stops three times for three true facts did nothing wrong; the protocol did.
