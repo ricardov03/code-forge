@@ -27,6 +27,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { isExactEntry, ownsFile } from '../state/registry.mjs';
 import { pairsFor } from '../review/paired.mjs';
+import { computeFileSet } from './scope.mjs';
 import { exec } from '../util/exec.mjs';
 import { TEST_FILES_TOKEN, CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
 
@@ -64,6 +65,30 @@ export function isTestPath(p) {
   const name = segments[segments.length - 1];
   if (segments.slice(0, -1).some((s) => TEST_DIRS.has(s))) return true;
   return /\.(test|spec)\.[^/]+$/.test(name) || name.endsWith('Test.php') || name.endsWith('_test.go') || /^test_.*\.py$/.test(name);
+}
+
+/** The changed-test predicate, including Swift's conventional Tests suffix. @param {string} file */
+export function isChangedTest(file) {
+  return isTestPath(file) || file.endsWith('Tests.swift');
+}
+
+/**
+ * Existing block tests added or changed since its base, independent of the last green scope
+ * and its threshold. Deleted tests and unchanged source-paired tests are not repeat candidates.
+ * @param {{cwd: string, base: string, owned: string[], kinds?: Record<string, string>}} opts
+ * @returns {Promise<string[]>}
+ */
+export async function changedTestFiles({ cwd, base, owned, kinds }) {
+  const { all } = await computeFileSet({ cwd, base });
+  const files = all.filter((file) => ownsFile(owned, file, kinds) && isChangedTest(file));
+  const existing = await Promise.all(files.map(async (file) => {
+    const stat = await lstat(path.join(cwd, file)).catch((error) => {
+      if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+      throw error;
+    });
+    return stat?.isFile() === true;
+  }));
+  return files.filter((_, i) => existing[i]);
 }
 
 /**
@@ -186,8 +211,6 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
   const changes = [...new Set([...Object.keys(old), ...Object.keys(current.files)])].filter((file) => old[file] !== current.files[file]).sort();
   if (changes.length > threshold) return { scope: 'changed', files: [], changedFiles: [], reason: 'threshold' };
   const changedFiles = changes.filter((file) => candidates.has(file));
-  // B97 also pairs Swift Tests names outside lowercase test directories.
-  const isChangedTest = (/** @type {string} */ file) => isTestPath(file) || file.endsWith('Tests.swift');
   const tests = new Set(changedFiles.filter(isChangedTest));
   for (const file of changes.filter((f) => !isChangedTest(f))) {
     const pairs = pairsFor(file, current.candidates).filter(isChangedTest);

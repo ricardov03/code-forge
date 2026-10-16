@@ -43,7 +43,7 @@ import { printableGates, scopeFields, thresholdOf } from '../gates/expand.mjs';
 import { runGates } from '../gates/run.mjs';
 import { runGatesGuarded } from '../proof/lock.mjs';
 import { blockTree } from '../proof/worktree.mjs';
-import { readRun } from '../state/run.mjs';
+import { readRun, writeSigned } from '../state/run.mjs';
 import { StateError } from '../state/paths.mjs';
 import { scanFiles } from '../gates/secret-scan.mjs';
 import { checkSafeEdit } from '../gates/safe-edit.mjs';
@@ -279,7 +279,16 @@ export async function runGatesVerb(args, deps = {}) {
       let ran;
       if (runFlag.value !== undefined && blockFlag.value !== undefined) {
         const threshold = thresholdOf(configured?.full_suite_threshold_files);
-        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates, cwd, threshold, changed, slug, ...(timeoutMs ? { timeoutMs } : {}) });
+        /** @type {typeof gates & {repeatNewTests?: import('../gates/run.mjs').RepeatNewTests}} */
+        let planned = gates;
+        if (configured?.repeat_new_tests !== undefined) {
+          const record = await readRun(runFlag.value);
+          const block = record.blocks?.[blockFlag.value];
+          if (block) planned = { ...gates,
+            repeatNewTests: { n: configured.repeat_new_tests, base: block.worktree?.base_sha ?? block.base_sha, owned: block.owned_files, kinds: block.owned_kinds, onSkip: (line) => err(`${line}\n`) },
+          };
+        }
+        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates: planned, cwd, threshold, changed, slug, ...(timeoutMs ? { timeoutMs } : {}) });
         if (guarded.result === 'proof.busy') {
           out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
           return 1;
@@ -289,24 +298,31 @@ export async function runGatesVerb(args, deps = {}) {
         ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
       }
       const { results, allOk } = ran;
+      const repeats = results.find((r) => r.repeats)?.repeats;
 
       const ledgerSlug = slug ?? ran.ledger_slug;
       if (ledgerSlug) {
+        // Preserve the existing rows when off; repeat evidence is covered by the run signature.
+        const writeGateRow = (/** @type {Record<string, any>} */ row) => repeats && runFlag.value !== undefined
+          ? writeSigned(runFlag.value, (signed) => appendRow(signed, { slug: ledgerSlug }), row)
+          : appendRow(row, { slug: ledgerSlug });
         // B60: with --run/--block the rows name the run and the block, so the run's binnacle reads them
         const owner = runFlag.value !== undefined ? { run: runFlag.value, block: blockFlag.value, ...inTree } : {};
         for (const result of results) {
           if (!result.skipped && !result.ok) {
-            await appendRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result) }, { slug: ledgerSlug });
+            await writeGateRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result),
+              ...(result.reason === 'flaky-test' ? { reason: 'flaky-test' } : {}),
+              ...(result.repeats ? { repeats: result.repeats } : {}) });
           }
         }
         // B60: one scope per run (every `{test_files}` gate shares it), named on gate.done too;
         // without --run/--block that is `scope: full, reason: no_tests`
         const scoped = results.find((r) => r.scope !== undefined);
-        await appendRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk,
+        await writeGateRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk,
           ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
-          ...(ran.files ? { files: ran.files } : {}) }, { slug: ledgerSlug });
+          ...(ran.files ? { files: ran.files } : {}), ...(repeats ? { repeats } : {}) });
       }
-      out({ stack: gates.stack, ...inTree, results, allOk });
+      out({ stack: gates.stack, ...inTree, results, allOk, ...(repeats ? { repeats } : {}) });
       return allOk ? 0 : 1;
     }
 
