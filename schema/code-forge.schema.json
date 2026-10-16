@@ -246,6 +246,12 @@
             "invariants": { "type": "string" }
           }
         },
+        "repeat_new_tests": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 10,
+          "description": "After a passing test gate with --run and --block, run its command this many additional times for only tests added or changed against the block base; absent means off. Requires a whole {test_files} argv item; otherwise prints repeat_new_tests: skipped (gates.test has no {test_files}). A failed repeat makes the gate red with reason flaky-test; output and signed gate rows carry repeats {n, files, failed}, and report shows the count."
+        },
         "full_suite_threshold_files": {
           "type": "integer",
           "minimum": 1,

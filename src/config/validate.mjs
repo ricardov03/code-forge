@@ -513,7 +513,12 @@ function gateMessages(key, value) {
 }
 
 function checkGatesNotArgvArray(cfg) {
-  return GATE_KEYS.flatMap((key) => gateMessages(key, cfg?.gates?.[key]).map((message) => ({ rule: 'gates-not-argv-array', severity: 'error', message })));
+  const messages = GATE_KEYS.flatMap((key) => gateMessages(key, cfg?.gates?.[key]));
+  if (Object.hasOwn(cfg?.gates ?? {}, 'repeat_new_tests')) {
+    const n = cfg.gates.repeat_new_tests;
+    if (!Number.isInteger(n) || n < 2 || n > 10) messages.push('gates.repeat_new_tests must be an integer 2..10');
+  }
+  return messages.map((message) => ({ rule: 'gates-not-argv-array', severity: 'error', message }));
 }
 
 // ── 10. secret-looking-value (ERROR) ────────────────────────────────────────

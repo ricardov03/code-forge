@@ -161,6 +161,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `gates.extra.secret_scan` | boolean |  | `true` |  |
 | `gates.extra.safe_edit` | boolean |  | `true` |  |
 | `gates.extra.invariants` | string |  | — |  |
+| `gates.repeat_new_tests` | integer |  | — | min 2; max 10; After a passing test gate with --run and --block, run its command this many additional times for only tests added or changed against the block base; absent means off. Requires a whole {test_files} argv item; otherwise prints repeat_new_tests: skipped (gates.test has no {test_files}). A failed repeat makes the gate red with reason flaky-test; output and signed gate rows carry repeats {n, files, failed}, and report shows the count. |
 | `gates.full_suite_threshold_files` | integer |  | `10` | min 1; A block that owns more files than this runs the full suite for a {test_files} gate (reason threshold), not its related tests. Owned files are counted this way. A glob or a directory counts the tracked and new (not ignored) files it covers. A path not created yet counts as 1. Outside git each entry counts 1. A git failure runs the full suite. block open --tests names the test files precisely. With gates run --changed, the threshold counts changed files since the last green gates run --run --block instead. |
 | `proof` | object |  | — |  |
 | `proof.tiers` | object |  | — |  |

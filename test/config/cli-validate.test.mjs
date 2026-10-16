@@ -1,11 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
-import { stringify as toYAML } from 'yaml';
+import { parse, stringify as toYAML } from 'yaml';
+import { validateConfig } from '../../src/config/validate.mjs';
 import { SECRET_LEAK_CASES } from './secret-leak-cases.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
@@ -75,6 +76,23 @@ function writeConfig(name, cfg) {
   writeFileSync(file, toYAML(cfg), 'utf8');
   return file;
 }
+
+test('B136: gates.repeat_new_tests accepts integers 2..10 and rejects other values naming the key', () => {
+  const base = parse(readFileSync(path.join(FIXTURES, 'valid-full.code-forge.yml'), 'utf8'));
+  for (const n of [2, 5, 10]) {
+    const cfg = { ...base, gates: { ...base.gates, repeat_new_tests: n } };
+    const res = runCli(['validate', '--file', writeConfig(`repeat-${n}.yml`, cfg)]);
+    assert.equal(res.status, 0, `repeat_new_tests=${n}: ${res.stderr}`);
+  }
+  for (const n of [0, 1, 11, 2.5, '2', true, null, [], {}]) {
+    const cfg = { ...base, gates: { ...base.gates, repeat_new_tests: n } };
+    const res = runCli(['validate', '--file', writeConfig('repeat-invalid.yml', cfg)]);
+    assert.equal(res.status, 1, `repeat_new_tests=${JSON.stringify(n)}`);
+    assert.match(res.stderr, /gates[./]repeat_new_tests/);
+    const errors = validateConfig(cfg).errors.filter((e) => e.message.includes('gates.repeat_new_tests'));
+    assert.equal(errors.length, 1, `one domain refusal for repeat_new_tests=${JSON.stringify(n)}`);
+  }
+});
 
 // ── Exact-output assertions ─────────────────────────────────────────────────
 
