@@ -306,8 +306,10 @@ test('B62b (1): a recorded base_sha that is not a full hex id (a dash-prefixed o
   assert.equal(p.seen(), null);
   assert.equal((await readRun(fx.runId)).blocks.B1.status, 'open');
   await editRecord(fx.runId, (b) => void (b.B1.worktree = saved));
-  // no gate run passed (each one above was refused), so close warns once and still closes
-  assert.deepEqual(await fx.close('B1'), [0, 'block B1 closed\n', `WARN block B1: no green gates run for this block; run gates run --run ${fx.runId} --block B1 before close\n`]);
+  // The restored record reaches the gate and closes after a green result.
+  assert.equal((await fx.gate('B1')).code, 0);
+  assert.deepEqual(p.seen(), { cwd: tree, args: [] });
+  assert.deepEqual(await fx.close('B1'), [0, 'block B1 closed\n', '']);
 });
 
 test('B62b (1): with the workspace in a subdirectory, --cwd must name that subdirectory of the tree — the tree\'s top level is refused with exit 2, no gate run, no row', async () => {

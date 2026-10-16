@@ -25,8 +25,9 @@
  *    8 review  `code-forge review-file <file>` + `review-file --wait` per owned file
  *    9 proof   `proof export` (lists the export-ignore paths it restored), the test gate inside the
  *              export, `proof red-green` per test the acceptance names, `proof export --remove`
- *   10 close   `code-forge block close B1` — then the cost of the completed block is printed
- *   11 report  `code-forge report --slug <slug>`
+ *   10 gates   `code-forge gates run --run <run> --block B1` — green before close
+ *   11 close   `code-forge block close B1` — then the cost of the completed block is printed
+ *   12 report  `code-forge report --slug <slug>`
  * then `code-forge run end` (always, once the run started: it stops the worker).
  *
  * Engines: `harness` is the default (R2: the no-Solo default). `subprocess` is OPT-IN: it is
@@ -60,7 +61,7 @@ const DEGRADED_DOC = path.join(PKG, 'skill', 'references', 'degraded.md');
 
 export const BLOCK = 'B1';
 export const OWNED = Object.freeze(['src/math.mjs', 'test/clamp.test.mjs']);
-export const STEPS = Object.freeze(['copy', 'init', 'facts', 'author', 'start', 'open', 'code', 'review', 'proof', 'close', 'report']);
+export const STEPS = Object.freeze(['copy', 'init', 'facts', 'author', 'start', 'open', 'code', 'review', 'proof', 'gates', 'close', 'report']);
 const ENGINES = ['harness', 'subprocess'];
 const CODERS = ['scripted', 'harness', 'spawn'];
 const CLI_TIMEOUT_MS = 30 * 60 * 1000;
@@ -385,7 +386,12 @@ export async function main(argv, io = {}) {
     await cf(['proof', 'export', BLOCK, '--run', run, '--remove']);
     if (done('proof')) return 0;
 
-    // 10 — the gate, then what the completed block cost
+    // 10 — record green gates for this run and block, after the proofs
+    step('gates');
+    say((await cf(['gates', 'run', '--run', run, '--block', BLOCK])).stdout.trimEnd());
+    if (done('gates')) return 0;
+
+    // 11 — the close check, then what the completed block cost
     step('close');
     say((await cf(['block', 'close', BLOCK, '--run', run])).stdout.trimEnd());
     blockOpen = false;
@@ -398,7 +404,7 @@ export async function main(argv, io = {}) {
     );
     if (done('close')) return 0;
 
-    // 11 — the report
+    // 12 — the report
     step('report');
     const report = await cf(['report', '--slug', /** @type {string} */ (summary.slug)]);
     stdout.write(report.stdout);

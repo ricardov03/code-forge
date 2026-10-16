@@ -147,9 +147,9 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
     copy = path.join(TMP_ROOT, 'first-use', RUN);
   });
 
-  test('the run exits 0 through all 11 steps and ends its run', () => {
+  test('the run exits 0 through all 12 steps and ends its run', () => {
     assert.equal(res.code, 0, `${res.stderr}\n${res.stdout}`);
-    assert.deepEqual(res.summary.steps, ['copy', 'init', 'facts', 'author', 'start', 'open', 'code', 'review', 'proof', 'close', 'report']);
+    assert.deepEqual(res.summary.steps, ['copy', 'init', 'facts', 'author', 'start', 'open', 'code', 'review', 'proof', 'gates', 'close', 'report']);
     assert.deepEqual([res.summary.ok, res.summary.run_ended], [true, true]);
   });
 
