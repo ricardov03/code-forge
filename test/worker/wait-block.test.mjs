@@ -412,19 +412,22 @@ test('B125 clause 1: current content returning to a stale ticket stays pending u
 
 test('B125 clause 2: unavailable and round-1 split retry once; counted and unreadable results stay cached', async () => {
   const cases = [
-    { result: { status: 'unavailable', reason: 'engine-error' }, retry: true },
-    { result: { status: 'split_required', round: 0, sessions: [] }, retry: true },
-    { result: { status: 'reviewed', approved: false, findings }, retry: false },
-    { result: { status: 'reviewed', approved: true, findings: [] }, retry: false },
-    { result: { status: 'stopped', stopped: 'split_required' }, retry: false },
-    { result: { status: 'refused', reason: 'review-state-lost' }, retry: false },
-    { result: { status: 'refused', reason: 'other-run' }, retry: false },
-    { result: { status: 'unknown' }, retry: false },
-    { result: { status: 'reviewed', approved: true }, corrupt: 'mismatch', retry: false },
-    { result: { status: 'stale' }, corrupt: 'result', retry: false },
+    { result: { status: 'unavailable', reason: 'engine-error' }, retry: true, outcome: null },
+    { result: { status: 'split_required', round: 0, sessions: [] }, retry: true, outcome: null },
+    { result: { status: 'reviewed', approved: false, findings }, retry: false, outcome: 'findings' },
+    { result: { status: 'reviewed', approved: true, findings: [] }, retry: false, outcome: 'approved' },
+    { result: { status: 'stopped', stopped: 'split_required' }, retry: false, outcome: 'stopped' },
+    { result: { status: 'refused', reason: 'review-state-lost' }, retry: false, outcome: 'unavailable' },
+    { result: { status: 'refused', reason: 'other-run' }, retry: false, outcome: 'unavailable' },
+    { result: { status: 'unknown' }, retry: false, outcome: 'unavailable' },
+    { result: { status: 'reviewed', approved: true, findings: [] }, corrupt: 'result', retry: false, outcome: 'approved' },
+    { result: { status: 'reviewed', approved: false, findings }, corrupt: 'result', retry: false, outcome: 'findings' },
+    { result: { status: 'stopped', stopped: 'split_required' }, corrupt: 'result', retry: false, outcome: 'stopped' },
+    { result: { status: 'reviewed', approved: true }, corrupt: 'mismatch', retry: false, outcome: 'unavailable' },
+    { result: { status: 'stale' }, corrupt: 'result', retry: false, outcome: 'unavailable' },
     { result: { status: 'stale' }, corrupt: 'marker', retry: false },
   ];
-  for (const { result, retry, corrupt } of cases) {
+  for (const { result, retry, corrupt, outcome } of cases) {
     const { repo, runId, sessions, worker, commit } = await scriptedWatch();
     announceWorker(repo, { pid: process.pid, run: runId });
     try {
@@ -446,7 +449,6 @@ test('B125 clause 2: unavailable and round-1 split retry once; counted and unrea
       if (corrupt === 'marker') {
         assert.deepEqual([joined.code, joined.json.reason], [1, 'result-unreadable']);
       } else {
-        const outcome = retry ? null : corrupt || result.status === 'refused' || result.status === 'unknown' ? 'unavailable' : result.status === 'stopped' ? 'stopped' : result.approved ? 'approved' : 'findings';
         assert.deepEqual([joined.code, joined.json.done, joined.json.files], [0, !retry, [{ file: FILE, ticket: first.ticket, status: retry ? 'pending' : 'done', outcome }]], `${result.status}/${corrupt ?? 'valid'} join`);
       }
       if (!retry) {
