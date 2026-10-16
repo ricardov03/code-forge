@@ -8,6 +8,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- `upgrade` ends with an ASCII logo, package version, version change and release-note summary; `--plain` keeps only the install lines, and install records now track their linked package version (B129)
+
 - README: a new-user guide replaces per-version history, which lives only in this CHANGELOG; releases update only the optional `Latest:` line and no longer require a next-release README anchor (B130).
 
 - Tests: the claim fixture in `test/worker/claim.test.mjs` publishes its completion counts with a temp file and rename, so a Linux inotify wake never reads an empty file as 0, and its failure messages print the sessions, rows and claim file; `test/no-leak-final.test.mjs` uses `--experimental-test-isolation=none`, which Node 22 and 24 both accept (B128)

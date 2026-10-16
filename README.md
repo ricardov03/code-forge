@@ -119,7 +119,7 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 
 The skill normally calls `run`, `block`, `worker`, `spawn`, `s2`, `author`, `facts`, and
 `review-file` for you. See the [workflow](docs/how-it-works.md) for these lower-level operations.
-To upgrade, run `npm install -g @codedology/code-forge@latest`, then `code-forge upgrade`.
+To upgrade, run `npm install -g @codedology/code-forge@latest`, then `code-forge upgrade` for a version summary and release notes; add `--plain` for just the install lines.
 
 ### Configuration reference
 

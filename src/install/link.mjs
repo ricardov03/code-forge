@@ -16,11 +16,13 @@
  * harness at the same scope again replaces its record rather than duplicating it.
  */
 
-import { lstatSync, readdirSync, realpathSync } from 'node:fs';
+import { lstatSync, readFileSync, readdirSync, realpathSync } from 'node:fs';
 import { cp, lstat, mkdir, readFile, rename, rm, stat, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { randomUUID } from 'node:crypto';
+
+const PACKAGE_VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
 /** @typedef {"symlink"|"copy"} LinkMethod */
 /** @typedef {"project"|"global"} InstallScope */
@@ -33,6 +35,7 @@ import { randomUUID } from 'node:crypto';
  * @property {string} source - absolute path to the skill directory that was linked/copied.
  * @property {string} target - absolute path to the installed skill directory.
  * @property {string} linked_at - ISO timestamp of the most recent link/upgrade.
+ * @property {string} [version] - package version that last linked this install; absent on legacy records.
  */
 
 /**
@@ -66,7 +69,8 @@ function isValidRecord(value) {
     typeof r.target === 'string' &&
     r.target.length > 0 &&
     path.isAbsolute(r.target) &&
-    typeof r.linked_at === 'string'
+    typeof r.linked_at === 'string' &&
+    (r.version === undefined || (typeof r.version === 'string' && r.version.length > 0))
   );
 }
 
@@ -359,13 +363,14 @@ export async function linkSkill({ source, target, method }) {
  * @param {LinkMethod} opts.method
  * @param {string} opts.source
  * @param {string} opts.target
+ * @param {string} [opts.version] - defaults to the running package version.
  * @returns {Promise<InstallRecord[]>} the full record list after this install.
  */
-export async function install({ installsFile, harness, scope, method, source, target }) {
+export async function install({ installsFile, harness, scope, method, source, target, version = PACKAGE_VERSION }) {
   await linkSkill({ source, target, method });
   const existing = await readInstalls(installsFile);
   const kept = existing.filter((r) => !(r.harness === harness && r.scope === scope));
-  const records = [...kept, { harness, scope, method, source, target, linked_at: new Date().toISOString() }];
+  const records = [...kept, { harness, scope, method, source, target, linked_at: new Date().toISOString(), version }];
   await writeInstallsAtomically(installsFile, records);
   return records;
 }
@@ -379,15 +384,16 @@ export async function install({ installsFile, harness, scope, method, source, ta
  * @param {object} opts
  * @param {string} opts.installsFile
  * @param {string} [opts.source] - overrides every record's source when given.
+ * @param {string} [opts.version] - defaults to the running package version.
  * @returns {Promise<InstallRecord[]>} the updated record list (same length as before).
  */
-export async function upgradeAll({ installsFile, source }) {
+export async function upgradeAll({ installsFile, source, version = PACKAGE_VERSION }) {
   const records = await readInstalls(installsFile);
   const updated = [];
   for (const record of records) {
     const nextSource = source ?? record.source;
     await linkSkill({ source: nextSource, target: record.target, method: record.method });
-    updated.push({ ...record, source: nextSource, linked_at: new Date().toISOString() });
+    updated.push({ ...record, source: nextSource, linked_at: new Date().toISOString(), version });
   }
   await writeInstallsAtomically(installsFile, updated);
   return updated;

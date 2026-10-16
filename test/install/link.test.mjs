@@ -22,6 +22,31 @@ async function freshInstallsFile() {
   return installsPath(home);
 }
 
+test('install and upgradeAll persist the linking package version for symlink and copy records', async () => {
+  const installsFile = await freshInstallsFile();
+  const source = await tempDir('cf-version-src-');
+  const { version } = JSON.parse(await readFile(new URL('../../package.json', import.meta.url), 'utf8'));
+  for (const method of /** @type {const} */ (['symlink', 'copy'])) {
+    const target = path.join(await tempDir('cf-version-target-'), 'skill');
+    await install({ installsFile, harness: method, scope: 'project', method, source, target });
+  }
+  assert.deepEqual((await readInstalls(installsFile)).map((r) => r.version), [version, version]);
+  const updated = await upgradeAll({ installsFile, version: '9.0.0' });
+  assert.deepEqual(updated.map((r) => r.version), ['9.0.0', '9.0.0']);
+  assert.deepEqual((await readInstalls(installsFile)).map((r) => r.version), ['9.0.0', '9.0.0']);
+  await upgradeAll({ installsFile });
+  assert.deepEqual((await readInstalls(installsFile)).map((r) => r.version), [version, version]);
+});
+
+test('optional record version keeps legacy rows valid and rejects non-string or empty versions', async () => {
+  const installsFile = await freshInstallsFile();
+  const source = await tempDir('cf-legacy-src-');
+  const row = { harness: 'legacy', scope: 'project', method: 'copy', source, target: path.join(source, 'unused'), linked_at: '' };
+  await mkdir(path.dirname(installsFile), { recursive: true });
+  await writeFile(installsFile, JSON.stringify([row, { ...row, version: '1.0.0' }, { ...row, version: 7 }, { ...row, version: '' }, { ...row, version: null }]));
+  assert.deepEqual(await readInstalls(installsFile), [row, { ...row, version: '1.0.0' }], 'exactly legacy and string-version records survive');
+});
+
 // ── Acceptance: "symlink and copy modes on a temp HOME (2 tests)" ────────────
 
 test('install() with method "symlink": the target is a real symlink pointing at source, and reads through to source live', async () => {

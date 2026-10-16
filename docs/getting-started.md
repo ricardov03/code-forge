@@ -297,9 +297,11 @@ code-forge version
 code-forge upgrade
 ```
 
-`upgrade` re-copies skill installs made with `--copy`; symlinked installs already point at the
+`upgrade` shows a small ASCII logo, a version summary, and up to five release-note bullets with
+a path to the full changelog. Add `--plain` for only the per-install lines; it also works with
+`--source <path>`. It re-copies skill installs made with `--copy`; symlinked installs already point at the
 new package. With nvm, the global install belongs to one Node version: install again after you
-switch. Your `.code-forge.yml` files and `~/.code-forge` are not changed. To see the settings
+switch. Your `.code-forge.yml` settings are kept; install records track the linked package version. To see the settings
 summary of a newer `init`, run `code-forge init` again in the project; it keeps the values you set
 by hand. What changed in each version is in [CHANGELOG.md](../CHANGELOG.md).
 
