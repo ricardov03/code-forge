@@ -5,7 +5,8 @@ import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 
 const { reviewFile, rulesRisk } = await import('../../src/review/engine.mjs');
-const { assemblePacket, readFileDiff } = await import('../../src/review/packet.mjs');
+const { assemblePacket, diffOnlyTokens, readFileDiff } = await import('../../src/review/packet.mjs');
+const { sectionGroups } = await import('../../src/review/sections.mjs');
 const FILE = 'src/sample.mjs';
 
 /** @param {number} width */
@@ -90,20 +91,44 @@ test('B109 (4): a fitting quick file keeps its packet and exact plan row without
   assert.deepEqual(rows, [{ event: 'review.plan', depth_unconstrained: 'quick', depth_chosen: 'quick', degrade_step: 0, risk: 0, context_mode: 'whole', forecast_tokens: packet.tokensIn }]);
 });
 
-test('B109 (5): Markdown still splits into exactly three quick section sessions without step_up', async () => {
+async function markdownReproduction() {
   const repo = await makeRepo();
   const file = 'docs/sample.md';
-  const content = ['One', 'Two', 'Three'].map((heading) => `## ${heading}\n` + Array.from({ length: 220 }, (_, i) => `${heading} ${i} `.padEnd(52, 'x')).join('\n') + '\n').join('');
+  // Long paragraphs reproduce Markdown rewrites with very few changed lines (rules risk 0).
+  const content = ['One', 'Two', 'Three'].map((heading) => `## ${heading}\n${heading} ${'paragraph '.repeat(3000)}\n`).join('');
   writeFile(repo, file, content);
   const diff = await readFileDiff({ repoRoot: repo, file, base: null });
-  assert.equal(assemblePacket({ diff, lens: 'quick' }).status, 'split_required');
-  const { outcome, calls, rows } = await engineRun(repo, cfgFor(), { file, risk: 0 });
-  assert.deepEqual([outcome.status, outcome.approved, outcome.depth, calls.length, rows.length], ['reviewed', true, 'quick', 3, 3]);
-  assert.deepEqual(outcome.sections.map((s) => s.headings), [['## One'], ['## Two'], ['## Three']]);
-  assert.deepEqual(outcome.sessions.map((s) => [s.lens, s.level, s.section]), [['quick', 'L2', 1], ['quick', 'L2', 2], ['quick', 'L2', 3]]);
-  assert.deepEqual(rows.map((r) => [r.depth_chosen, r.section, r.sections, Object.hasOwn(r, 'step_up')]), [['quick', 1, 3, false], ['quick', 2, 3, false], ['quick', 3, 3, false]]);
-  const packetDiffs = calls.map((c) => c.text.slice(c.text.indexOf('\n## diff\n')));
-  assert.deepEqual(packetDiffs.map((text) => text.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length), [221, 221, 221]);
+  const quick = assemblePacket({ diff, lens: 'quick' });
+  assert.equal(quick.status, 'split_required');
+  const step_up = { from: 'quick', tokens_in: quick.tokensIn, budget: 6000 };
+  const fullSize = diffOnlyTokens({ diff, lens: 'full' });
+  const sectionSize = Math.max(...sectionGroups(diff).map((g) => diffOnlyTokens({ diff: g.diff, lens: 'full' })));
+  assert.equal(sectionSize > 6000 && fullSize < 32000, true, 'each paragraph exceeds quick_in while the whole diff fits full_in');
+  return { repo, file, diff, step_up, sectionSize };
+}
+
+test('B131: Markdown whole files and packed sections over quick_in step up to full_in', async () => {
+  const { repo, file, step_up, sectionSize } = await markdownReproduction();
+  for (const [full_in, count] of [[32000, 1], [sectionSize, 3]]) {
+    const { outcome, calls, rows } = await engineRun(repo, cfgFor({ budgets: { full_in } }), { file });
+    assert.deepEqual([outcome.status, outcome.approved, outcome.risk, outcome.depth, calls.length, rows.length], ['reviewed', true, 0, 'full', count, count]);
+    assert.deepEqual(outcome.step_up, step_up, 'the result names the original quick packet and budget');
+    assert.deepEqual(outcome.sessions.map((s) => [s.lens, s.level]), Array.from({ length: count }, () => ['full', 'L2']));
+    assert.deepEqual(rows.map((r) => r.step_up), Array.from({ length: count }, () => step_up));
+    const packetDiffs = calls.map((c) => c.text.slice(c.text.indexOf('\n## diff\n')));
+    assert.deepEqual(packetDiffs.map((text) => text.split('\n').filter((line) => line.startsWith('+') && !line.startsWith('+++')).length), count === 1 ? [6] : [2, 2, 2], 'every added line is reviewed exactly once');
+    if (count === 3) assert.deepEqual(outcome.sections.map((s) => s.headings), [['## One'], ['## Two'], ['## Three']]);
+  }
+});
+
+test('B131: Markdown split_required uses full_in after step-up and section packing, including the exact-fit boundary', async () => {
+  const { repo, file, diff, step_up, sectionSize } = await markdownReproduction();
+  const heading = sectionGroups(diff).find((g) => diffOnlyTokens({ diff: g.diff, lens: 'full' }) === sectionSize).heading;
+  const over = await engineRun(repo, cfgFor({ budgets: { full_in: sectionSize - 1 } }), { file });
+  assert.deepEqual([over.outcome.status, over.outcome.depth, over.outcome.tokens_in, over.outcome.budget, over.outcome.section, over.calls.length, over.rows.length], ['split_required', 'full', sectionSize, sectionSize - 1, heading, 0, 0], 'a section one token above full_in still stops without a session');
+  assert.deepEqual(over.outcome.step_up, step_up);
+  const fits = await engineRun(repo, cfgFor({ budgets: { full_in: sectionSize } }), { file });
+  assert.deepEqual([fits.outcome.status, fits.outcome.approved, fits.calls.length], ['reviewed', true, 3], 'a section exactly at full_in is reviewed');
 });
 
 test('B109 (6): risk 1 keeps one full L2 session and the same row with no step_up', async () => {

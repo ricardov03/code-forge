@@ -29,7 +29,7 @@
  *     The summary then carries `schema_fallback: {level, provider, model}` (`level`:
  *     `review.second_levels.<level>`), the second level's own provider/model, and `tokens_in` /
  *     `tokens_out` summed over both sessions;
- *  7. a non-Markdown quick packet over budget first steps up to one full L2 session (B109).
+ *  7. a quick packet over budget first steps up to one full L2 session, including Markdown.
  *     A diff alone still over the packet budget is `split_required` (with `tokens_in` and `budget`) —
  *     except a Markdown file (B54), which is reviewed SECTION BY SECTION (`sections.mjs`): every
  *     section packet runs the whole plan above (its own sessions, judge and stub guard, its own
@@ -363,13 +363,13 @@ export async function reviewFile(input, deps) {
   let split = /** @type {{status: 'split_required', tokensIn: number, budget: number} | undefined} */ (packets.find((p) => p.status === 'split_required'));
   /** @type {Record<string, any>} */
   let stepUp = {};
-  if (split && plan.depth === 'quick' && !isMarkdownFile(diff.file)) {
+  if (split && plan.depth === 'quick') {
     const full = planSessions({ risk: 1, cfg, kind });
     // A configured consensus/refusal is not the single full session this step permits.
     if (full.depth === 'full') {
       stepUp = { step_up: { from: 'quick', tokens_in: split.tokensIn, budget: split.budget } };
       plan = full;
-      head = { ...head, engine: plan.mode, depth: plan.depth };
+      head = { ...head, engine: plan.mode, depth: plan.depth, ...stepUp };
       reviewers = plan.sessions.filter((s) => s.role === 'reviewer');
       judgeSpec = plan.sessions.find((s) => s.role === 'judge');
       packets = packetsFor(diff);
@@ -431,7 +431,7 @@ export async function reviewFile(input, deps) {
   const summaries = [];
   let approved = true;
   for (const [i, section] of packed.sections.entries()) {
-    const part = await reviewPart(section.diff, sectionPackets[i], { section: section.index, sections: packed.sections.length }, section.keys);
+    const part = await reviewPart(section.diff, sectionPackets[i], { ...stepUp, section: section.index, sections: packed.sections.length }, section.keys);
     sessions.push(...part.sessions.map((s) => ({ ...s, section: section.index })));
     if (part.status !== 'reviewed') return { status: part.status, reason: part.reason, approved: false, ...head, sections, sessions };
     approved = approved && part.approved;
