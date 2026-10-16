@@ -887,5 +887,9 @@ export async function launchWorker({ runId, workspace, env = process.env, timeou
       // already gone
     }
   }
+  const other = liveWorker(repoRoot);
+  if (other && other.run !== runId) {
+    throw new WorkerError('worker_down', `the worker did not start: run ${other.run} still has a live worker (pid ${other.pid}); end it with: code-forge run end --run ${other.run}`);
+  }
   throw new WorkerError('worker_down', 'the worker did not start (run `code-forge worker --run <id>` by hand to see why)');
 }

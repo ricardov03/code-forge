@@ -14,6 +14,18 @@ import { loadKey, verifyRow } from '../../src/state/signer.mjs';
 
 const ACCEPTANCE = [{ clause: 'c1', tests: ['t1'] }];
 
+test('B135: processStartTime works without ps on PATH, including absent and invalid pids', async () => {
+  const expected = await processStartTime(process.pid);
+  assert.equal(typeof expected, 'string');
+  const oldPath = process.env.PATH;
+  process.env.PATH = '/nonexistent-b135-bin';
+  try {
+    assert.equal(await processStartTime(process.pid), expected);
+    assert.equal(await processStartTime(2 ** 22 + 12345), null);
+    assert.equal(await processStartTime(0), null);
+  } finally { process.env.PATH = oldPath; }
+});
+
 test('`run start` writes the record and the 0600 key under the temp $HOME, and the workspace mirror is the record minus `worker`', async () => {
   await withFixture(async ({ home, ws }) => {
     const stdout = captureStream();

@@ -9,6 +9,7 @@ import { setTimeout as sleep } from 'node:timers/promises';
 import { after, before, mock, test } from 'node:test';
 import {
   isAlive,
+  groupMembers,
   listEntries,
   readStartTime,
   registerPid,
@@ -65,12 +66,16 @@ async function registryDir(name) {
   return mkdtemp(path.join(PARENT, `${name}-`));
 }
 
-test('readStartTime reads this process and returns null for a pid that does not exist', () => {
-  const own = readStartTime(process.pid);
-  assert.equal(typeof own, 'string');
-  assert.match(/** @type {string} */ (own), /\d{4}$/);
-  assert.equal(readStartTime(0), null);
-  assert.equal(readStartTime(2 ** 22 + 12345), null);
+test('B135: readStartTime reads this process without ps on PATH and rejects absent pids', () => {
+  const oldPath = process.env.PATH;
+  process.env.PATH = '/nonexistent-b135-bin';
+  try {
+    const own = readStartTime(process.pid);
+    assert.equal(typeof own, 'string');
+    assert.match(/** @type {string} */ (own), /\d{4}$/);
+    assert.equal(readStartTime(0), null);
+    assert.equal(readStartTime(2 ** 22 + 12345), null);
+  } finally { process.env.PATH = oldPath; }
 });
 
 test('registerPid writes {pid, start_time, argv0} with the live start time', async () => {
@@ -81,6 +86,20 @@ test('registerPid writes {pid, start_time, argv0} with the live start time', asy
   assert.equal(file, path.join(dir, `${pid}.json`));
   assert.deepEqual(listEntries(dir), [{ pid, start_time: readStartTime(pid), argv0: process.execPath }]);
   process.kill(-pid, 'SIGKILL');
+});
+
+test('B135 boundary: group members are found without ps on PATH', async () => {
+  const child = track(spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }));
+  const { execFileSync } = await import('node:child_process');
+  const pgid = Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(child.pid)], { encoding: 'utf8' }).trim());
+  const oldPath = process.env.PATH;
+  process.env.PATH = '/nonexistent-b135-bin';
+  try {
+    const found = groupMembers(pgid);
+    assert.equal(found.has(child.pid), true, 'the child is one member of its actual process group');
+    assert.equal(found.get(child.pid), readStartTime(child.pid));
+    assert.equal(groupMembers(2 ** 22 + 12345).size, 0, 'nonexistent group has zero members');
+  } finally { process.env.PATH = oldPath; child.kill('SIGKILL'); }
 });
 
 test('sweep kills a registered child that TRAPS SIGTERM (SIGKILL after the grace) and clears its entry', { timeout: 8000 }, async () => {

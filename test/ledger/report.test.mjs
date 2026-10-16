@@ -334,6 +334,14 @@ test('B66 (3): report --json carries outside_review; --export writes outside_rev
   assert.equal(await readFile(path.join(emptyExport.dir, 'out', 'outside_review.json'), 'utf8'), '[]\n');
 });
 
+test('B135: report refuses an unknown slug and still renders an existing empty ledger', async () => {
+  const absent = await reportCli('missing', [], () => ['--slug', 'absent']);
+  assert.deepEqual([absent.code, absent.stdout, absent.stderr], [1, '', 'report: no ledger for slug "absent"; known slugs: b66-missing\n']);
+  const empty = await reportCli('empty-ledger', [], (slug) => ['--slug', slug, '--json']);
+  assert.deepEqual([empty.code, empty.stderr], [0, '']);
+  assert.deepEqual(JSON.parse(empty.stdout), buildReport([]).sections);
+});
+
 test('B66 (2): the text report prints outside_review after run_stop_counts — one line per PR, or "outside review: none"', async () => {
   const res = await reportCli('text', outsideReviewLedger(), (slug) => ['--slug', slug]);
   assert.equal(res.code, 0, res.stderr);

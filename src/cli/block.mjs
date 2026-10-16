@@ -201,7 +201,6 @@ import { fallbackLane } from '../decide/fallback-rules.mjs';
 import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { attemptBlock, claimPath, closeBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
-import { lastGate } from '../state/brief-status.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
@@ -294,7 +293,7 @@ const USAGE =
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
-  '       code-forge block accept-hit <id> --run <r> --rule <rule-id> --line <n> --transcript <path> --reason <text>\n' +
+  '       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n' +
   '       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
   '       code-forge block ack-waivers <id> --run <r>\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
@@ -306,7 +305,7 @@ const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'wai
  */
 function checkWhitespacePaths(workspace, entries, label) {
   for (const entry of entries) {
-    if (!/\s/u.test(entry)) continue;
+    if (label === 'owned' && !/[,\s]/u.test(entry)) continue;
     let stat;
     try {
       stat = statSync(path.join(workspace, entry));
@@ -314,7 +313,11 @@ function checkWhitespacePaths(workspace, entries, label) {
       // A missing or unreadable path cannot establish a literal whitespace-containing name.
     }
     if (!stat?.isFile() && !stat?.isDirectory()) {
-      throw new StateError(label === 'owned files' ? 'bad-owned' : 'bad-tests', `${label}: invalid path ${JSON.stringify(entry)}: contains whitespace but names no existing file or directory`);
+      // Blocks may introduce tests, but only under a directory already in the tree.
+      if (label === 'tests' && !/[,\s]/u.test(path.basename(entry)) && /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(entry)) {
+        try { if (statSync(path.dirname(path.join(workspace, entry))).isDirectory()) continue; } catch { /* missing parent */ }
+      }
+      throw new StateError('usage', `${label} entry ${JSON.stringify(entry)} matches no file${label === 'owned' ? '; use spaces, not commas' : ''}`);
     }
   }
 }
@@ -377,13 +380,16 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'reopen' && typeof flags.file !== 'string') throw new StateError('usage', 'block reopen needs --file <path>');
     if (sub === 'waive' && typeof flags.file !== 'string') throw new StateError('usage', 'block waive needs --file <path> (a finding id is scoped to one file)');
     if (sub === 'accept-hit') {
-      const { record, row } = await prepareAcceptHit({ runId, id, flags, positionals, extraTokens });
-      const asked = await confirmHumanVerb(sub, runId, id, { rule: row.rule, line: row.line, file: /** @type {string} */ (flags.transcript) }, record, deps);
+      const { record, rows } = await prepareAcceptHit({ runId, id, flags, positionals, extraTokens });
+      const asked = await confirmHumanVerb(sub, runId, id, { rule: rows[0].rule, line: rows[0].line, ...(flags.rule === undefined ? { hits: rows } : {}), file: /** @type {string} */ (flags.transcript) }, record, deps);
       if (asked === 'no-tty') { err(`${humanVerbNoTTY(sub)}\n`); return 2; }
       if (asked === 'cancelled') { err(`block ${id} ${sub}: cancelled — nothing was recorded\n`); return 1; }
-      await writeAcceptedHit({ runId, row, writeRow: (signed) => appendRow(signed, { slug: record.project }) });
-      say(`block ${id} accepted ${row.rule} transcript line ${row.line} (by: human)\n`);
-      if (json) emit({ block: id, event: 'rule_break.accepted', rule: row.rule, line: row.line, reason: row.reason, by: 'human' });
+      for (const row of rows) {
+        await writeAcceptedHit({ runId, row, writeRow: (signed) => appendRow(signed, { slug: record.project }) });
+        say(`block ${id} accepted ${row.rule} transcript line ${row.line} (by: human)\n`);
+      }
+      const accepted = rows.map(({ rule, line, reason, by }) => ({ rule, line, reason, by }));
+      if (json) emit({ block: id, event: 'rule_break.accepted', ...(flags.rule === undefined ? { accepted_hits: accepted } : accepted[0]) });
       return 0;
     }
     const record = await readRun(runId);
@@ -403,8 +409,9 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     if (sub === 'open') {
-      checkWhitespacePaths(record.workspace, /** @type {string[]} */ (flags.owned), 'owned files');
-      if (Array.isArray(flags.tests)) checkWhitespacePaths(record.workspace, flags.tests, 'test files');
+      const base = record.blocks?.[id]?.worktree?.path ?? record.workspace;
+      checkWhitespacePaths(base, /** @type {string[]} */ (flags.owned), 'owned');
+      if (Array.isArray(flags.tests)) checkWhitespacePaths(base, flags.tests, 'tests');
     }
     // B80: waive and reopen are the human's — asked at a terminal before anything is written (not
     // even the autopilot expiry rows below); no terminal is exit 2, a "no" is exit 1
@@ -799,6 +806,23 @@ export async function runBlock(args, deps = {}) {
       };
       /** @type {Array<() => Promise<{ok: boolean, reason?: string}>>} */
       const extraChecks = [reviews, report];
+      if (configInForce(record)?.gates?.test != null) {
+        const testGate = async () => {
+          const green = rows.filter((row) => row.block === id && row.event === 'gate.done' && row.all_ok === true);
+          // Only commits after the block base that touch its owned paths belong to this block.
+          // Older rows without timestamps remain usable, but a failed history lookup cannot prove freshness.
+          const commit = green.length === 0 ? null : await exec(['git', 'log', '-1', '--format=%ct', `${base}..HEAD`, '--', ...entry.owned_files], {
+            cwd: wt?.workspace ?? record.workspace, env: gitChildEnv(), timeoutMs: 10000,
+          });
+          const committed = commit?.result === 'ok' ? Number.parseInt(commit.stdout.trim(), 10) * 1000 : Number.NaN;
+          const ok = commit?.result === 'ok' && (commit.stdout.trim() === '' || Number.isFinite(committed)) &&
+            green.some((row) => !Number.isFinite(committed) || !Number.isFinite(Date.parse(row.ts)) || Date.parse(row.ts) > committed);
+          return ok ? { ok: true } : { ok: false, reason: `no green gates run; run: code-forge gates run --run ${runId} --block ${id}` };
+        };
+        // Keep human-bypass diagnostics ahead of the test gate; waiving reviews still needs green tests.
+        if (reviewsWaived) extraChecks.push(testGate);
+        else extraChecks.unshift(testGate);
+      }
       extraChecks.unshift(async () => agentWaiversAcked(record, rows, id, await loadKey(runId))
         ? { ok: true } : { ok: false, reason: 'agent-waivers-not-acked' });
       // B63b: `context.require_coder_tests` in the run's config snapshot (never the live config)
@@ -840,9 +864,6 @@ export async function runBlock(args, deps = {}) {
         // B70: each file that passed as reviewed_by_waiver is named before the closed line
         // B71: an answered finding is named as answered; a file with only answered findings has no `by`
         if (result.ok) {
-          if (configInForce(record)?.gates?.test != null && lastGate(rows.filter((row) => row.block === id)).result !== 'pass') {
-            err(`WARN block ${id}: no green gates run for this block; run gates run --run ${runId} --block ${id} before close\n`);
-          }
           for (const w of lineWarnings) err(w);
           for (const l of reviewedJson) say(`reviewed ${l.file} ticket ${l.ticket}\n`);
           for (const f of waivedAll) {
@@ -1020,7 +1041,7 @@ async function confirmNoReviews(runId, id, deps) {
  * pre-checks (`reopenPrecheck`, `waivePrecheck`) run first, at a terminal, so the human is never
  * asked about a waive or reopen the verb would refuse that way.
  * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers'} verb @param {string} runId @param {string} id
- * @param {{finding?: string, file: string, rule?: string, line?: number}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
+ * @param {{finding?: string, file: string, rule?: string, line?: number, hits?: {rule: string, line: number}[]}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
  * @param {() => void} [before]
  * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
  */
@@ -1033,7 +1054,7 @@ function confirmHumanVerb(verb, runId, id, what, record, deps, before) {
       : verb === 'ack-waivers'
         ? `Acknowledge the listed agent waivers of block ${id} (run ${runId})? Only the owner may say yes.`
       : verb === 'accept-hit'
-        ? `Accept false transcript hit ${what.rule} at line ${what.line} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
+        ? `Accept false transcript ${what.hits ? `hits ${what.hits.map((hit) => `${hit.rule} at line ${hit.line}`).join(', ')}` : `hit ${what.rule} at line ${what.line}`} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
         : `Reopen the review of ${what.file} in block ${id} (run ${runId})? Only the owner may say yes.`;
   return confirmAtTerminal(deps, message, async () => {
     if (verb === 'reopen') await reopenPrecheck(record, runId, id, what.file);

@@ -6,7 +6,9 @@
  * printed as text lines under its header (`outside review: none`, or one line per PR).
  */
 
+import { readdir, stat } from 'node:fs/promises';
 import { writeSafe } from '../util/redact.mjs';
+import { ledgerDir, ledgerPath } from '../ledger/paths.mjs';
 import { buildReport, buildRunModes, buildSpend } from '../ledger/report.mjs';
 import { exportReportSections } from '../ledger/export.mjs';
 import { outsideReviewLines } from '../ledger/outside-review.mjs';
@@ -46,6 +48,18 @@ export async function runReport(args, deps = {}) {
   // try/catch below turns that, and any other I/O failure, into a clean CLI message instead of a
   // raw stack trace that skips the `writeSafe` redaction path.
   try {
+    try {
+      await stat(ledgerPath(slug));
+    } catch (error) {
+      if (error.code !== 'ENOENT') throw error;
+      const entries = await readdir(ledgerDir(), { withFileTypes: true }).catch((e) => {
+        if (e.code === 'ENOENT') return [];
+        throw e;
+      });
+      const slugs = [...new Set(entries.filter((e) => e.isFile() && /^[a-z0-9][a-z0-9-]*(?:\.\d+)?\.jsonl$/.test(e.name))
+        .map((e) => e.name.replace(/(?:\.\d+)?\.jsonl$/, '')))].sort();
+      throw new Error(`no ledger for slug "${slug}"; known slugs: ${slugs.join(', ') || 'none'}`);
+    }
     const rows = await readAllRows(slug);
     const { sections } = buildReport(rows);
 

@@ -291,10 +291,10 @@ test('README verb reference: run/block/worker/review-file/proof/gates run for re
     assert.equal(r.code, 0, r.stderr);
     assert.equal(JSON.parse(r.stdout).allOk, true);
 
-    r = cf(['ledger', 'tail', '--slug', 'readme-demo']);
+    r = cf(['ledger', 'tail', '--slug', 'cwd']);
     assert.equal(r.code, 0, r.stderr);
 
-    r = cf(['report', '--slug', 'readme-demo']);
+    r = cf(['report', '--slug', 'cwd']);
     assert.equal(r.code, 0, r.stderr);
     assert.match(r.stdout, /== cost_per_block ==/);
 

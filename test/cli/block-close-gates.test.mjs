@@ -2,7 +2,15 @@ import { cfgFor, freshDir, git, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
 import { realpathSync } from 'node:fs';
 import path from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
+
+const { exec: realExec } = await import('../../src/util/exec.mjs');
+let failGitLog = false;
+mock.module('../../src/util/exec.mjs', { namedExports: {
+  exec: (argv, options) => failGitLog && argv[0] === 'git' && argv[1] === 'log'
+    ? Promise.resolve({ result: 'failed', code: 128, signal: null, stdout: '', stderr: 'git log failed', timedOut: false })
+    : realExec(argv, options),
+} });
 
 const { runBlock } = await import('../../src/cli/block.mjs');
 const { runGatesVerb } = await import('../../src/cli/gates.mjs');
@@ -13,12 +21,12 @@ const { enqueue } = await import('../../src/worker/queue.mjs');
 
 const PROBE = async (/** @type {number} */ pid) => pid === 4242 ? 'start-A' : null;
 
-/** @param {string[]} args @returns {Promise<[number, string, string]>} */
-async function cli(args) {
+/** @param {string[]} args @param {Record<string, any>} [deps] @returns {Promise<[number, string, string]>} */
+async function cli(args, deps = {}) {
   let stdout = '';
   let stderr = '';
   const code = await runBlock(args, {
-    stdout: { write: (s) => { stdout += s; } }, stderr: { write: (s) => { stderr += s; } }, probe: PROBE,
+    stdout: { write: (s) => { stdout += s; } }, stderr: { write: (s) => { stderr += s; } }, probe: PROBE, ...deps,
   });
   return [code, stdout, stderr];
 }
@@ -58,9 +66,9 @@ async function fixture(slug, testGate) {
     repo,
     runId,
     stdout: `reviewed a.mjs ticket ${ticket}\nblock B1 closed\n`,
-    warning: `WARN block B1: no green gates run for this block; run gates run --run ${runId} --block B1 before close\n`,
+    refusal: `block B1 open: no green gates run; run: code-forge gates run --run ${runId} --block B1\n`,
     sign: (/** @type {Record<string, any>} */ row) => writeSigned(runId, writeRow, { block: 'B1', ...row }),
-    close: () => cli(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', path.join(files, 'coder.log')]),
+    close: (extra = [], deps = {}) => cli(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', path.join(files, 'coder.log'), ...extra], deps),
     gates: () => gatesCli(['run', '--cwd', repo, '--run', runId, '--block', 'B1']),
     rows: () => readAllRows(slug),
     gateRows: async () => (await readAllRows(slug)).filter((r) => r.event === 'gate.done' || r.event === 'gate.red')
@@ -68,33 +76,62 @@ async function fixture(slug, testGate) {
   };
 }
 
-test('B118: configured test gate warns exactly once and closes for missing or failed last gates', async () => {
+test('B135: configured test gate refuses missing or failed gates without closing or writing rows', async () => {
   const cases = [[], [{ event: 'gate.done', all_ok: false }], [{ event: 'gate.red', gate: 'test' }]];
   for (const [i, rows] of cases.entries()) {
     const f = await fixture(`b118-close-${i}`, ['node', '--test']);
     for (const row of rows) await f.sign(row);
-    // A green gate for another block or run cannot suppress this block's warning.
+    // A green gate for another block or run cannot satisfy this block's requirement.
     await f.sign({ event: 'gate.done', block: 'B2', all_ok: true });
     await f.sign({ event: 'gate.done', run: 'r-other', all_ok: true });
-    assert.deepEqual(await f.close(), [0, f.stdout, f.warning]);
-    assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
-    assert.equal((await f.rows()).filter((r) => r.event === 'block.close' && r.block === 'B1').length, 1);
+    const before = (await f.rows()).length;
+    assert.deepEqual(await f.close(), [1, '', f.refusal]);
+    assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+    assert.equal((await f.rows()).length, before, 'refused close writes zero rows');
   }
 });
 
-test('B118 boundary: green gates and null test gates stay silent; a later red or failed done warns', async () => {
+test('B135 boundary: any green row suffices without a later commit; null test gates need none', async () => {
   const cases = [
-    { testGate: ['node', '--test'], rows: [{ event: 'gate.red', gate: 'test' }, { event: 'gate.done', all_ok: true }], warn: false },
-    { testGate: null, rows: [], warn: false },
-    { testGate: null, rows: [{ event: 'gate.done', all_ok: false }], warn: false },
-    { testGate: ['node', '--test'], rows: [{ event: 'gate.done', all_ok: true }, { event: 'gate.red', gate: 'test' }], warn: true },
-    { testGate: ['node', '--test'], rows: [{ event: 'gate.done', all_ok: true }, { event: 'gate.done', all_ok: false }], warn: true },
+    { testGate: ['node', '--test'], rows: [{ event: 'gate.red', gate: 'test' }, { event: 'gate.done', all_ok: true }] },
+    { testGate: null, rows: [] },
+    { testGate: null, rows: [{ event: 'gate.done', all_ok: false }] },
+    { testGate: ['node', '--test'], rows: [{ event: 'gate.done', all_ok: true }, { event: 'gate.red', gate: 'test' }] },
+    { testGate: ['node', '--test'], rows: [{ event: 'gate.done', all_ok: true }, { event: 'gate.done', all_ok: false }] },
   ];
   for (const [i, c] of cases.entries()) {
     const f = await fixture(`b118-close-boundary-${i}`, c.testGate);
     for (const row of c.rows) await f.sign(row);
-    assert.deepEqual(await f.close(), [0, f.stdout, c.warn ? f.warning : '']);
+    assert.deepEqual(await f.close(), [0, f.stdout, '']);
     assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
+  }
+});
+
+test('B135: waived reviews still require fresh green gates and keep the human confirmation', async () => {
+  for (const evidence of ['missing', 'failed', 'stale', 'unconfigured']) {
+    const f = await fixture(`b135-waived-gate-${evidence}`, evidence === 'unconfigured' ? null : ['node', '--test']);
+    if (evidence === 'failed') await f.sign({ event: 'gate.done', all_ok: false });
+    if (evidence === 'stale') {
+      await git(['add', 'a.mjs'], f.repo);
+      await git(['commit', '-q', '-m', 'block changes'], f.repo);
+      const committed = Number((await git(['log', '-1', '--format=%ct'], f.repo)).trim()) * 1000;
+      await f.sign({ event: 'gate.done', all_ok: true, ts: new Date(committed - 1000).toISOString() });
+    }
+    let confirms = 0;
+    const close = () => f.close(['--no-require-reviews'], { isTTY: true, ui: {
+      confirm: async () => { confirms++; return true; }, isCancel: () => false,
+    } });
+    if (evidence !== 'unconfigured') {
+      assert.deepEqual(await close(), [1, '', f.refusal], evidence);
+      assert.equal(confirms, 1, 'one confirmation per close attempt');
+      assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+      assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 0);
+      await f.sign({ event: 'gate.done', all_ok: true, ts: new Date(Date.now() + 1000).toISOString() });
+    }
+    assert.deepEqual(await close(), [0, 'block B1 closed\n', '']);
+    assert.equal(confirms, evidence === 'unconfigured' ? 1 : 2);
+    assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
+    assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 1);
   }
 });
 
@@ -115,19 +152,18 @@ test('B120: real plain gates write exactly one done and one red per failure to t
   }
 });
 
-test('B120: close is silent after real green plain gates and warns exactly once after real red gates', async () => {
+test('B135: close succeeds after real green gates and refuses after real red gates', async () => {
   for (const exit of [0, 1]) {
     const f = await fixture(`b120-close-${exit}`, ['node', '-e', `process.exit(${exit})`]);
     const [code, stdout, stderr] = await f.gates();
     assert.deepEqual([code, stderr, JSON.parse(stdout).allOk], [exit, '', exit === 0]);
-    assert.deepEqual(await f.close(), [0, f.stdout, exit === 0 ? '' : f.warning],
-      `plain exit ${exit}: close must print exactly ${exit} gate warnings`);
-    assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
-    assert.equal((await f.rows()).filter((r) => r.event === 'block.close' && r.block === 'B1').length, 1);
+    assert.deepEqual(await f.close(), exit === 0 ? [0, f.stdout, ''] : [1, '', f.refusal]);
+    assert.equal((await readRun(f.runId)).blocks.B1.status, exit === 0 ? 'closed' : 'open');
+    assert.equal((await f.rows()).filter((r) => r.event === 'block.close' && r.block === 'B1').length, exit === 0 ? 1 : 0);
   }
 });
 
-test('B120 boundary: a real red plain run after green records both runs and restores one close warning', async () => {
+test('B135 boundary: a real red plain run after green retains both runs and the green evidence', async () => {
   const f = await fixture('b120-later-red', ['node', '-e', 'process.exit(0)']);
   const green = await f.gates();
   assert.deepEqual([green[0], green[2], JSON.parse(green[1]).allOk], [0, '', true]);
@@ -140,5 +176,39 @@ test('B120 boundary: a real red plain run after green records both runs and rest
     { event: 'gate.red', run: f.runId, block: 'B1', gate: 'test', code: 1 },
     { event: 'gate.done', run: f.runId, block: 'B1', stack: 'unknown', all_ok: false },
   ], 'the later failure must append one red and one failed done after the green done');
-  assert.deepEqual(await f.close(), [0, f.stdout, f.warning]);
+  assert.deepEqual(await f.close(), [0, f.stdout, '']);
+});
+
+test('B135: green evidence older than the last block commit refuses; a newer green row closes', async () => {
+  const f = await fixture('b135-stale-gates', ['node', '--test']);
+  await git(['add', 'a.mjs'], f.repo);
+  await git(['commit', '-q', '-m', 'block changes'], f.repo);
+  const committed = Number((await git(['log', '-1', '--format=%ct'], f.repo)).trim()) * 1000;
+  await f.sign({ event: 'gate.done', all_ok: true, ts: new Date(committed - 1000).toISOString() });
+  assert.deepEqual(await f.close(), [1, '', f.refusal]);
+  assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+  assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 0);
+  await f.sign({ event: 'gate.done', all_ok: true, ts: new Date(committed + 1000).toISOString() });
+  assert.deepEqual(await f.close(), [0, f.stdout, '']);
+  assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
+  assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 1);
+});
+
+test('B135: failed git log refuses green evidence; successful empty log permits closing', async () => {
+  const f = await fixture('b135-gate-log-failure', ['node', '--test']);
+  await f.sign({ event: 'gate.done', all_ok: true });
+  const before = await f.rows();
+  failGitLog = true;
+  try {
+    assert.deepEqual(await f.close(), [1, '', f.refusal]);
+  } finally {
+    failGitLog = false;
+  }
+  assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+  assert.deepEqual(await f.rows(), before, 'a log failure writes zero rows');
+  const base = (await readRun(f.runId)).blocks.B1.base_sha;
+  assert.equal(await git(['log', '-1', '--format=%ct', `${base}..HEAD`, '--', 'a.mjs'], f.repo), '');
+  assert.deepEqual(await f.close(), [0, f.stdout, '']);
+  assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
+  assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 1);
 });

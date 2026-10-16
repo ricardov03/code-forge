@@ -16,6 +16,8 @@ async function fixture(slug) {
   writeFile(repo, 'a.mjs', 'export const a = 1;\n');
   writeFile(repo, 'b.mjs', 'export const b = 1;\n');
   writeFile(repo, 'file with space.mjs', 'export const space = 1;\n');
+  writeFile(repo, 'file [id] with space.mjs', 'export const bracket = 1;\n');
+  mkdirSync(path.join(repo, 'dir [id] with space'));
   mkdirSync(path.join(repo, 'test dir'));
   await git(['add', '-A'], repo);
   await git(['commit', '-q', '-m', 'base'], repo);
@@ -35,31 +37,41 @@ async function fixture(slug) {
   return { repo, runId, open, rows: () => readAllRows(slug) };
 }
 
-test('B118: a whitespace owned entry naming no file or directory refuses without writing', async () => {
+test('B135: comma or whitespace owned entries naming no file refuse with usage and no writes', async () => {
   const f = await fixture('b118-owned');
   const record = readFileSync(runRecordPath(f.runId), 'utf8');
   const rows = await f.rows();
-  for (const entry of ['a.mjs b.mjs', 'a.mjs\tb.mjs', 'a.mjs\nb.mjs']) {
+  for (const entry of ['a.mjs,b.mjs', 'a.mjs b.mjs', 'a.mjs\tb.mjs', 'a.mjs\nb.mjs',
+    'src/*.mjs,other.mjs', 'src/? name.mjs', 'src/{a,b}.mjs', 'app/[id]/missing file.tsx']) {
     assert.deepEqual(await f.open('B1', ['--owned', entry]), {
-      code: 1, stdout: '', stderr: `block open: owned files: invalid path ${JSON.stringify(entry)}: contains whitespace but names no existing file or directory\n`,
+      code: 2, stdout: '', stderr: `block open: owned entry ${JSON.stringify(entry)} matches no file; use spaces, not commas\n`,
     });
     assert.equal(readFileSync(runRecordPath(f.runId), 'utf8'), record);
     assert.deepEqual(await f.rows(), rows);
   }
 });
 
-test('B118 boundary: existing space paths and new plain paths open; whitespace tests share the refusal', async () => {
+test('B135 boundary: literal space paths, new owned files and owned globs open; missing tests refuse', async () => {
   const f = await fixture('b118-owned-boundary');
-  const accepted = await f.open('B1', ['--owned', 'file with space.mjs', 'new.mjs', '--tests', 'test dir']);
+  const owned = ['file with space.mjs', 'file [id] with space.mjs', 'dir [id] with space', 'new.mjs', 'src/glob/**', 'app/[id]/page.tsx'];
+  const accepted = await f.open('B1', ['--owned', ...owned, '--tests', 'test dir']);
   assert.deepEqual([accepted.code, accepted.stderr], [0, '']);
   const block = (await readRun(f.runId)).blocks.B1;
-  assert.deepEqual([block.owned_files, block.test_files], [['file with space.mjs', 'new.mjs'], ['test dir']]);
+  assert.deepEqual([block.owned_files, block.test_files], [owned, ['test dir']]);
   assert.deepEqual(JSON.parse(accepted.stdout).tests, 1);
   const record = readFileSync(runRecordPath(f.runId), 'utf8');
   const rows = await f.rows();
-  assert.deepEqual(await f.open('B2', ['--owned', 'a.mjs', '--tests', 'a.mjs b.mjs']), {
-    code: 1, stdout: '', stderr: 'block open: test files: invalid path "a.mjs b.mjs": contains whitespace but names no existing file or directory\n',
-  });
+  for (const entry of ['missing.mjs', 'a.mjs b.mjs', 'missing/new.test.mjs']) {
+    assert.deepEqual(await f.open('B2', ['--owned', 'a.mjs', '--tests', entry]), {
+      code: 2, stdout: '', stderr: `block open: tests entry ${JSON.stringify(entry)} matches no file\n`,
+    });
+  }
   assert.equal(readFileSync(runRecordPath(f.runId), 'utf8'), record);
   assert.deepEqual(await f.rows(), rows);
+  const newTest = await f.open('B3', ['--owned', 'a.mjs', '--tests', 'test dir/new.test.mjs']);
+  assert.deepEqual([newTest.code, newTest.stderr], [0, '']);
+  assert.deepEqual((await readRun(f.runId)).blocks.B3.test_files, ['test dir/new.test.mjs']);
+  const plainTest = await f.open('B4', ['--owned', 'b.mjs', '--tests', 'new.test.ts']);
+  assert.deepEqual([plainTest.code, plainTest.stderr], [0, '']);
+  assert.deepEqual((await readRun(f.runId)).blocks.B4.test_files, ['new.test.ts']);
 });

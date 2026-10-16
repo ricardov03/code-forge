@@ -20,7 +20,9 @@
  * coder one. A later call for the same PR replaces the earlier row in every reader.
  */
 
+import { readdir, stat } from 'node:fs/promises';
 import { buildCalibration } from '../ledger/calibration.mjs';
+import { ledgerDir, ledgerPath } from '../ledger/paths.mjs';
 import { recordCiOutcome, reviewedEntriesFromRows, scanGitAndRecord } from '../ledger/outcome.mjs';
 import { OUTSIDE_REVIEW_EVENT, OUTSIDE_REVIEW_USAGE, outsideReviewRecordedLine, parseOutsideReviewArgs } from '../ledger/outside-review.mjs';
 import { roundUsd, runSpend } from '../ledger/spend.mjs';
@@ -62,6 +64,23 @@ function parseNonNegativeInt(raw) {
   return Number.parseInt(raw, 10);
 }
 
+/** Readers distinguish an absent ledger from an existing empty file. @param {string} slug */
+async function readExistingRows(slug) {
+  try {
+    await stat(ledgerPath(slug));
+  } catch (error) {
+    if (error.code !== 'ENOENT') throw error;
+    const entries = await readdir(ledgerDir(), { withFileTypes: true }).catch((e) => {
+      if (e.code === 'ENOENT') return [];
+      throw e;
+    });
+    const slugs = [...new Set(entries.filter((e) => e.isFile() && /^[a-z0-9][a-z0-9-]*(?:\.\d+)?\.jsonl$/.test(e.name))
+      .map((e) => e.name.replace(/(?:\.\d+)?\.jsonl$/, '')))].sort();
+    throw new Error(`no ledger for slug "${slug}"; known slugs: ${slugs.join(', ') || 'none'}`);
+  }
+  return readAllRows(slug);
+}
+
 /**
  * @param {string[]} args
  * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}}} [deps]
@@ -89,7 +108,7 @@ export async function runLedger(args, deps = {}) {
         err('ledger calibration: --question requires a value\n');
         return 2;
       }
-      const rows = await readAllRows(slug);
+      const rows = await readExistingRows(slug);
       const answers = rows.filter((r) => r.event === 'decision' && typeof r.confidence === 'number');
       const outcomes = rows.filter((r) => r.event === 'outcome' && r.decision_id);
       const { buckets, unbacked, unmapped } = buildCalibration(answers, outcomes, { questionId: question.value });
@@ -161,7 +180,7 @@ export async function runLedger(args, deps = {}) {
         err(`ledger tail: --n/-n must be a non-negative integer, got "${nArg}"\n`);
         return 2;
       }
-      const rows = await readAllRows(slug);
+      const rows = await readExistingRows(slug);
       for (const row of n === 0 ? [] : rows.slice(-n)) {
         out(`${JSON.stringify(row)}\n`);
       }

@@ -53,6 +53,57 @@ async function fixture() {
   return { runId, key, args, accept, close, invoke, rows, asked, sign, writeRow, log, transcript };
 }
 
+test('B135: line acceptance confirms once and signs every rule on that line and its Codex completion', async () => {
+  const f = await fixture();
+  const item = { id: 'item_1', type: 'command_execution', command: 'git reset --hard; git clean -fd; git clean -fd' };
+  const other = { ...item, id: 'item_2', command: 'git stash' };
+  const lines = [
+    { type: 'thread.started', thread_id: 't' },
+    { type: 'item.started', item },
+    { type: 'item.started', item: other },
+    { type: 'item.completed', item: { ...item, aggregated_output: 'ignored' } },
+    { type: 'item.completed', item: other },
+  ].map((event) => JSON.stringify(event));
+  f.log(`${lines.join('\n')}\n`);
+  const args = f.args.filter((_, i) => i !== f.args.indexOf('--rule') && i !== f.args.indexOf('--rule') + 1);
+  const before = (await f.rows()).length;
+  const [code, out, err] = await f.invoke(args);
+  const expected = [2, 4].flatMap((line) => ['git-reset-hard', 'git-clean'].map((rule) => ({ rule, line })));
+  assert.deepEqual([code, err], [0, '']);
+  assert.equal(f.asked.length, 1, 'all four rule/line pairs share one confirmation');
+  for (const { rule, line } of expected) assert.ok(f.asked[0].message.includes(`${rule} at line ${line}`));
+  assert.equal(f.asked[0].initialValue, false);
+  assert.equal(out, expected.map(({ rule, line }) => `block B1 accepted ${rule} transcript line ${line} (by: human)\n`).join(''));
+  const rows = (await f.rows()).slice(before);
+  assert.equal(rows.length, 4, 'exactly four signed rows; no duplicate rules or other item ids');
+  assert.deepEqual(rows.map(({ event, rule, line, line_sha256, by, reason }) => ({ event, rule, line, line_sha256, by, reason })),
+    expected.map(({ rule, line }) => ({ event: 'rule_break.accepted', rule, line, line_sha256: hash(lines[line - 1]), by: 'human', reason: REASON })));
+  for (const row of rows) {
+    assert.deepEqual([row.run, row.block], [f.runId, 'B1']);
+    assert.deepEqual(verifyRow(row, f.key), { ok: true });
+  }
+});
+
+test('B135 boundary: line acceptance covers plain text only once; cancellation and no-hit requests write nothing', async () => {
+  const f = await fixture();
+  f.log('safe\ngit reset --hard; git clean -fd\n');
+  const args = f.args.filter((_, i) => i !== f.args.indexOf('--rule') && i !== f.args.indexOf('--rule') + 1);
+  const before = (await f.rows()).length;
+  let confirms = 0;
+  assert.deepEqual(await f.invoke(args, { ui: { confirm: async () => { confirms++; return false; }, isCancel: () => false } }),
+    [1, '', 'block B1 accept-hit: cancelled — nothing was recorded\n']);
+  assert.equal(confirms, 1);
+  assert.equal((await f.rows()).length, before, 'cancel writes zero rows');
+  const noHit = args.map((v, i) => i === args.indexOf('--line') + 1 ? '1' : v);
+  assert.deepEqual(await f.invoke(noHit), [1, '', NO_HIT]);
+  assert.equal(f.asked.length, 0, 'no-hit request asks no question');
+  assert.deepEqual(await f.invoke(args, { isTTY: false }), [2, '', 'block accept-hit needs the human at a terminal to confirm; nothing was recorded (there is no --yes)\n']);
+  assert.equal((await f.rows()).length, before, 'refusals write zero rows');
+  const accepted = await f.invoke(args);
+  assert.deepEqual([accepted[0], accepted[2], f.asked.length], [0, '', 1]);
+  assert.deepEqual((await f.rows()).slice(before).map((r) => [r.rule, r.line]), [['git-reset-hard', 2], ['git-clean', 2]]);
+});
+
 test('B127 clause 1: terminal yes asks once and writes exactly one signed human acceptance of the exact line', async () => {
   const f = await fixture();
   const before = (await f.rows()).length;

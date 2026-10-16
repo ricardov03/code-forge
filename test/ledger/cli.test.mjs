@@ -5,8 +5,47 @@ import { test } from 'node:test';
 import { runLedger } from '../../src/cli/ledger.mjs';
 import { runReport } from '../../src/cli/report.mjs';
 import { SECTION_NAMES } from '../../src/ledger/report.mjs';
+import { ledgerDir, ledgerPath } from '../../src/ledger/paths.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { assertCleanError, captureStream, withTempHome } from './helpers.mjs';
+
+test('B135: ledger readers refuse absent slugs with sorted, unique known slugs', async () => {
+  await withTempHome(async () => {
+    await mkdir(ledgerDir(), { recursive: true });
+    for (const name of ['z.jsonl', 'a.jsonl', 'a.1.jsonl', 'z.2.jsonl', 'ignored.txt']) {
+      await writeFile(path.join(ledgerDir(), name), '');
+    }
+    for (const sub of ['tail', 'calibration']) {
+      const stdout = captureStream(), stderr = captureStream();
+      assert.equal(await runLedger([sub, '--slug', 'missing'], { stdout, stderr }), 1, sub);
+      assert.deepEqual([stdout.text, stderr.text], ['', `ledger ${sub}: no ledger for slug "missing"; known slugs: a, z\n`]);
+    }
+  });
+});
+
+test('B135 boundary: no ledger directory names none; existing empty ledgers succeed', async () => {
+  await withTempHome(async () => {
+    for (const sub of ['tail', 'calibration']) {
+      const stdout = captureStream(), stderr = captureStream();
+      assert.equal(await runLedger([sub, '--slug', 'missing'], { stdout, stderr }), 1, sub);
+      assert.equal(stderr.text, `ledger ${sub}: no ledger for slug "missing"; known slugs: none\n`);
+      assert.equal(stdout.text, '');
+    }
+    await mkdir(ledgerDir(), { recursive: true });
+    await writeFile(ledgerPath('empty'), '');
+    for (const sub of ['tail', 'calibration']) {
+      const stdout = captureStream(), stderr = captureStream();
+      assert.equal(await runLedger([sub, '--slug', 'empty'], { stdout, stderr }), 0, sub);
+      assert.equal(stderr.text, '');
+      if (sub === 'tail') assert.equal(stdout.text, '');
+      else assert.deepEqual(JSON.parse(stdout.text), buildEmptyCalibration());
+    }
+  });
+});
+
+function buildEmptyCalibration() {
+  return { buckets: Object.fromEntries(['0.50-0.60', '0.60-0.70', '0.70-0.80', '0.80-0.85', '0.85-0.90', '0.90-0.95', '0.95-0.99', '0.99-1.00'].map((id) => [id, { correct: 0, wrong: 0, unknown: 0 }])), unbacked: 0, unmapped: 0 };
+}
 
 test('ledger tail prints the last N rows, IN ORDER, as one JSON object per line', async () => {
   await withTempHome(async () => {

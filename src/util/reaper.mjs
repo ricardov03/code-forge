@@ -27,7 +27,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -85,7 +85,7 @@ export function isAlive(pid) {
 export function readStartTime(pid) {
   if (!isValidPid(pid)) return null;
   try {
-    const out = execFileSync('ps', ['-o', 'lstart=', '-p', String(pid)], {
+    const out = execFileSync(existsSync('/bin/ps') ? '/bin/ps' : 'ps', ['-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
@@ -165,7 +165,7 @@ export function groupMembers(pgid) {
   const members = new Map();
   let out = '';
   try {
-    out = execFileSync('ps', ['-A', '-o', 'pid=,pgid=,lstart='], {
+    out = execFileSync(existsSync('/bin/ps') ? '/bin/ps' : 'ps', ['-A', '-o', 'pid=,pgid=,lstart='], {
       encoding: 'utf8',
       stdio: ['ignore', 'pipe', 'ignore'],
       env: { ...process.env, LC_ALL: 'C', LANG: 'C' },

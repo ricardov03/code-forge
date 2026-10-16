@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - A changed lens budget after `run reload` refreshes cached `split_required` results and recheck stops on the same content, including with `--fresh`, and reports the old and new budgets (B132)
 - Review risk counts added and removed lines; oversized quick Markdown packets step up to full before section packing, and the block join exposes per-file outcomes, reports split recovery steps and queues owned changes without earlier tickets (B131)
+- CLI: missing ledger slugs name known projects; block open catches malformed path lists; worker startup names competing runs; process probes prefer `/bin/ps`; block close requires green gates when configured; human transcript acceptance can cover all rules on a line and its Codex completion (B135)
 
 ## [0.14.1] — 2026-10-15
 

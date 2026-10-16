@@ -12,6 +12,7 @@
  * parameter; the CLI verb does the static import) and are SIGNED with the run key first.
  */
 
+import { existsSync } from 'node:fs';
 import { mkdir, readFile, rename, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from '../util/exec.mjs';
@@ -31,7 +32,7 @@ const LOCK_POLL_MS = 25;
  */
 export async function processStartTime(pid) {
   if (!Number.isInteger(pid) || pid <= 0) return null;
-  const res = await exec(['ps', '-o', 'lstart=', '-p', String(pid)], {
+  const res = await exec([existsSync('/bin/ps') ? '/bin/ps' : 'ps', '-o', 'lstart=', '-p', String(pid)], {
     env: { ...process.env, LC_ALL: 'C' },
     okExitCodes: [0, 1],
     timeoutMs: 10000,

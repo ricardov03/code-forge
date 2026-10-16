@@ -1,4 +1,4 @@
-import { freshDir, makeRepo } from './helpers.mjs';
+import { childEnv, freshDir, makeRepo } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, readFileSync, readdirSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -7,7 +7,7 @@ import { mock, test } from 'node:test';
 
 const { announceWorker, beatWorker, liveWorker, queueDir, readWorker, retractWorker } = await import('../../src/worker/queue.mjs');
 const { readStartTime, UNKNOWN_START_TIME } = await import('../../src/util/reaper.mjs');
-const { bootWorker } = await import('../../src/worker/loop.mjs');
+const { bootWorker, launchWorker } = await import('../../src/worker/loop.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 const { checkLocks } = await import('../../src/doctor/local.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
@@ -30,6 +30,32 @@ function gate() {
   const promise = new Promise((resolve) => { open = () => resolve(undefined); });
   return { promise, open: () => open() };
 }
+
+test('B135: failed launch names the other run, live pid and end command', async () => {
+  const { repo, runId } = await makeRepo();
+  const owner = announceWorker(repo, { pid: process.pid, run: 'r-other' });
+  try {
+    await assert.rejects(launchWorker({ runId, workspace: repo, env: childEnv(), timeoutMs: 1000 }), {
+      code: 'worker_down',
+      message: `the worker did not start: run r-other still has a live worker (pid ${process.pid}); end it with: code-forge run end --run r-other`,
+    });
+    assert.equal(liveWorker(repo)?.pid, process.pid, 'failed launch leaves the original live worker');
+  } finally { retractWorker(repo, owner.pid, owner.start_time); }
+});
+
+test('B135 boundary: legacy other-run owners are named; unrelated launch failures keep the original message', async () => {
+  const { repo, runId } = await makeRepo();
+  const owner = announceWorker(repo, { pid: process.pid, run: 'r-legacy' });
+  rmSync(fileOf(repo, owner));
+  try {
+    await assert.rejects(launchWorker({ runId, workspace: repo, env: childEnv(), timeoutMs: 1000 }), {
+      message: `the worker did not start: run r-legacy still has a live worker (pid ${process.pid}); end it with: code-forge run end --run r-legacy`,
+    });
+  } finally { retractWorker(repo, owner.pid, owner.start_time); }
+  await assert.rejects(launchWorker({ runId: 'r-absent', workspace: repo, env: childEnv(), timeoutMs: 1000 }), {
+    code: 'worker_down', message: 'the worker did not start (run `code-forge worker --run <id>` by hand to see why)',
+  });
+});
 
 test('clause 1: boot announces one registry entry and legacy file, beats both on its timer, and clean stop removes both', async () => {
   const { repo, runId } = await makeRepo();

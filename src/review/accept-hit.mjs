@@ -1,4 +1,4 @@
-/** Human acceptance of one false transcript hit, bound to its rule and exact line bytes. */
+/** Human acceptance of false transcript hits, bound to each rule and exact line bytes. */
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
 import { StateError } from '../state/paths.mjs';
@@ -27,7 +27,7 @@ export async function prepareAcceptHit({ runId, id, flags, positionals, extraTok
     // eslint-disable-next-line no-control-regex
     if (typeof value === 'string' && /[\x00-\x1f\x7f]/.test(value)) throw new StateError('usage', `${name === 'block' ? 'block id' : `--${name}`} must not contain control characters`);
   }
-  for (const name of ['rule', 'transcript', 'reason']) {
+  for (const name of [...(flags.rule !== undefined ? ['rule'] : []), 'transcript', 'reason']) {
     if (typeof flags[name] !== 'string' || flags[name].trim().length === 0) throw new StateError('usage', `--${name} is required`);
   }
   if (typeof flags.line !== 'string' || !/^-?\d+$/.test(flags.line) || !Number.isSafeInteger(Number(flags.line))) throw new StateError('usage', '--line must be an integer');
@@ -42,8 +42,26 @@ export async function prepareAcceptHit({ runId, id, flags, positionals, extraTok
     throw noSuchHit();
   }
   const lines = text.split('\n');
-  if (line < 1 || line > lines.length || !scanTranscript(text, mergeForbidden(extraTokens)).some((hit) => hit.id === flags.rule && hit.line === line)) throw noSuchHit();
-  return { record, row: { block: id, rule: /** @type {string} */ (flags.rule), line, line_sha256: lineHash(lines[line - 1]), reason: /** @type {string} */ (flags.reason.trim()), by: 'human' } };
+  const hits = scanTranscript(text, mergeForbidden(extraTokens));
+  if (line < 1 || line > lines.length || !hits.some((hit) => hit.line === line && (flags.rule === undefined || hit.id === flags.rule))) throw noSuchHit();
+  const selected = new Set([line]);
+  if (flags.rule === undefined) {
+    // Pair only recognized Codex JSON logs; arbitrary JSON-looking plain text has no item pair.
+    try {
+      const events = lines.map((s) => s.trim() ? JSON.parse(s) : undefined);
+      const nonEmpty = events.filter((event) => event !== undefined);
+      const itemId = events[line - 1]?.item?.id;
+      if (nonEmpty[0]?.type === 'thread.started' && nonEmpty.every((event) => event !== null && typeof event === 'object' && !Array.isArray(event) && typeof event.type === 'string') &&
+          events[line - 1]?.type?.startsWith('item.') && typeof itemId === 'string') {
+        events.forEach((event, index) => {
+          if (event?.type === 'item.completed' && event.item?.id === itemId) selected.add(index + 1);
+        });
+      }
+    } catch { /* plain text: accept only the requested line */ }
+  }
+  const rows = hits.filter((hit) => selected.has(hit.line) && (flags.rule === undefined || hit.id === flags.rule))
+    .map((hit) => ({ block: id, rule: hit.id, line: hit.line, line_sha256: lineHash(lines[hit.line - 1]), reason: /** @type {string} */ (flags.reason.trim()), by: 'human' }));
+  return { record, rows };
 }
 
 /**
