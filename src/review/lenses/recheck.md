@@ -10,6 +10,9 @@ that changed since that round, each with a window of the current file around it.
 - For every open finding, add one entry to `resolved`: `{id, resolved: true|false, why}`
   (`why` ≤ 200 chars). `resolved: true` only when the shown lines fix the problem without
   introducing a new one.
+- For `resolved: false`, you MUST add `current_lines` (≤ 300 chars): quote the exact current
+  line(s) from the packet that still show the problem, without line-number prefixes. Read the
+  changed lines; the old finding's claim and evidence alone cannot keep it open.
 - A new problem goes in `findings` ONLY when its `line_start..line_end` lies inside a shown fix
   hunk. Anything outside the hunks is not yours to report in this round.
 - `passed` is true only when every open finding is resolved and you raised no new `critical`

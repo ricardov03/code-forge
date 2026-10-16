@@ -23,6 +23,21 @@ async function guarded({ env = {}, min = 40, timeoutMs = 20000 }) {
 
 const valid = JSON.stringify(answerFor(HUNKS));
 
+test('recheck current_lines is optional, accepts 300 characters, and rejects oversized or non-string quotes', () => {
+  const entry = { id: 'F1', resolved: false, why: 'still open' };
+  const entries = [entry, { ...entry, current_lines: 'x'.repeat(300) }];
+  const check = (resolved) => validateReview({ status: 'ok', exit_code: 0, answer: answerFor(HUNKS, { resolved }), usage: { tokens_out: 300 } }, { hunkHeaders: HUNKS });
+  for (const resolved of entries) {
+    const verdict = check([resolved]);
+    assert.equal(verdict.ok, true, `accept resolved entry with ${'current_lines' in resolved ? '300-character quote' : 'no quote'}`);
+    assert.deepEqual(verdict.review.resolved, [resolved], 'preserve the single resolved entry');
+  }
+  for (const current_lines of ['x'.repeat(301), 42]) {
+    const verdict = check([{ ...entry, current_lines }]);
+    assert.deepEqual([verdict.ok, verdict.reason], [false, 'schema'], `reject current_lines ${JSON.stringify(current_lines)}`);
+  }
+});
+
 describe('stub guard (O12): one case per unavailable reason, and the passing case', () => {
   test('exit: the CLI exits non-zero after a well-formed answer', async () => {
     const v = await guarded({ env: { FAKE_ANSWER: valid, FAKE_EXIT: '3' } });

@@ -38,7 +38,8 @@
         "properties": {
           "id": { "type": "string" },
           "resolved": { "type": "boolean" },
-          "why": { "type": "string", "maxLength": 200 }
+          "why": { "type": "string", "maxLength": 200 },
+          "current_lines": { "type": "string", "maxLength": 300 }
         }
       }
     },

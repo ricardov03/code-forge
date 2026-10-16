@@ -101,6 +101,8 @@ Only real rechecks count toward the round cap, per-level ladder and stall rules 
 
 Rechecks are never degraded by the budget: a round-2+ packet is already the minimum.
 
+Recheck packets include each open finding's evidence; reviewers keeping one open must supply `current_lines` quoting current file lines (≤ 300 characters): a nonempty quote absent from the current file after whitespace normalisation closes it as stale with a signed `review.stale_finding` row, while missing or empty quotes keep the finding open and count as before. A stale finding does not make the round heavy, and a round whose open findings all close as stale passes. Only new ids in a recheck repeating an earlier round's trimmed claim and evidence for the same file are listed in `review.round.repeated`; rounds containing only repeated or stale findings add no per-level or warning-round weight and cannot trigger escalation on their own.
+
 ## §6 Consensus mode (`review.multimodel` on, risk above `review.single_reviewer_max_risk`, not a docs/contract block unless `review.multimodel_for_docs`)
 
 Two L2 reviewers, one per effective provider (`resolve(L2)` and `review.second_levels`), each a fresh blind session with the `full` lens; then a fresh L3 judge **from the third provider** reads the two reports and returns the findings plus `agreement: both|A-only|B-only`. The judge's `fix_now` list is final. Second provider unavailable at run start ⇒ `consensus unavailable: <reason>`; ask the human once per run whether to continue adaptive, stop when non-interactive. Rechecks run on the provider that raised the finding; §5 applies unchanged.

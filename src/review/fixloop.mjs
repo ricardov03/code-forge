@@ -101,6 +101,7 @@ import { spawnWithTimeoutRetry } from './session-retry.mjs';
 import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallback.mjs';
 
 /** @typedef {import('./triage.mjs').Finding} Finding */
+/** @typedef {Finding & {repeated?: boolean}} LoopFinding */
 /** @typedef {import('./context.mjs').Hunk} Hunk */
 
 /**
@@ -121,8 +122,10 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {number} round - rounds counted so far (patch_check rounds excluded).
  * @property {number} rounds_at_level
  * @property {number} [warn_rounds_at_level] - heavy rounds at the current level (rule 2c, B34); absent in a state saved before B34 ⇒ 0.
- * @property {Finding[]} open - the open `fix_now` set.
+ * @property {LoopFinding[]} open - the open `fix_now` set.
  * @property {Finding[]} late
+ * @property {string[]} [finding_history] - claim/evidence keys from earlier rounds of this file.
+ * @property {string[]} [finding_ids] - ids seen in earlier rounds, including closed findings.
  * @property {string | null} reviewed_content - the content the last counted round reviewed.
  * @property {boolean} l3_rung_used - the block's L3 rung (rule 5 or 6) was used — once per block.
  * @property {'open' | 'complete' | 'stopped'} status
@@ -363,8 +366,18 @@ const OPEN_FINDINGS_HEAD = '## open findings\n';
 /** @param {Finding} f @returns {string} the finding's line in a recheck packet's open-findings list. */
 export const openFindingLine = (f) => `- ${f.id} (${f.severity}, lines ${f.line_start}-${f.line_end}): ${f.claim ?? ''}`;
 
+/** @param {Finding} f @returns {string} compare BOTH fields, ignoring only surrounding whitespace. */
+const findingKey = (f) => JSON.stringify([(f.claim ?? '').trim(), (f.evidence ?? '').trim()]);
+
+/** @param {string} text @returns {string} */
+const normaliseWhitespace = (text) => text.trim().replace(/\s+/g, ' ');
+
 /** @param {ReadonlyArray<Finding>} open @returns {string} the open-findings list a recheck packet ends with. */
-const openFindingsText = (open) => `${OPEN_FINDINGS_HEAD}${open.length > 0 ? open.map(openFindingLine).join('\n') : '(none)'}\n`;
+const openFindingsText = (open) => {
+  // Keep the final id/claim list stable for section readers; evidence is keyed by id just before it.
+  const evidence = open.length > 0 ? `## finding evidence\n${open.map((f) => `${f.id}: ${(f.evidence ?? '').trim().replace(/\s+/g, ' ').slice(0, 300)}`).join('\n')}\n` : '';
+  return `${evidence}${OPEN_FINDINGS_HEAD}${open.length > 0 ? open.map(openFindingLine).join('\n') : '(none)'}\n`;
+};
 
 /**
  * The size a recheck packet is held to (B54): its diff-only `recheck` packet (the measure behind
@@ -676,6 +689,14 @@ export async function runRound(state, deps, opts = {}) {
   let newInHunks = 0;
   /** @type {Array<Record<string, any>>} */
   const lateRows = [];
+  /** @type {Array<Record<string, any>>} */
+  const staleRows = [];
+  const history = new Set([...(state.finding_history ?? []), ...state.open.map(findingKey), ...state.late.map(findingKey)]);
+  const knownIds = new Set([...(state.finding_ids ?? []), ...state.open.map((f) => f.id), ...state.late.map((f) => f.id)]);
+  const roundFindings = new Set();
+  const roundIds = new Set();
+  /** @type {Set<string>} */
+  const repeated = new Set();
   /** @type {number | null} */
   let tokensIn = null;
   /** @type {number | null} */
@@ -686,6 +707,10 @@ export async function runRound(state, deps, opts = {}) {
   if (kind === 'full') {
     const result = await deps.review();
     if (result?.status !== 'reviewed') return retry(state, kind, result?.reason ?? result?.status ?? 'unavailable');
+    for (const finding of result.findings ?? []) {
+      roundFindings.add(findingKey(finding));
+      roundIds.add(finding.id);
+    }
     const triaged = await triageFindings({ file: current.rel, findings: result.findings ?? [], fromJudge: cameFromJudge(result), cfg: deps.cfg, jev: deps.jev, rule: deps.rule, writeRow: deps.writeRow });
     draft.open = triaged.fix_now;
     newInHunks = triaged.fix_now.length;
@@ -742,6 +767,9 @@ export async function runRound(state, deps, opts = {}) {
         }
         /** @type {Set<Finding>} the pending findings a session that LISTED them resolved */
         const resolved = new Set();
+        /** @type {Set<Finding>} */
+        const stale = new Set();
+        const currentText = normaliseWhitespace(current.content);
         /** @type {Finding[]} */
         const inside = [];
         /** @type {Finding[]} */
@@ -757,11 +785,30 @@ export async function runRound(state, deps, opts = {}) {
             return retry(state, kind, session.verdict.reason ?? 'unavailable');
           }
           const review = /** @type {Record<string, any>} */ (session.verdict.review);
-          const resolvedIds = new Set((review.resolved ?? []).filter((/** @type {any} */ r) => r?.resolved === true).map((/** @type {any} */ r) => r.id));
-          // only the findings listed in THIS packet can be resolved by its session
-          for (const f of part.open) if (resolvedIds.has(f.id)) resolved.add(f);
+          // Only this packet's findings can close here. Legacy answers without a quote stay
+          // open; a nonempty quote that no longer exists in the file proves the answer stale.
+          for (const f of part.open) {
+            const answer = (review.resolved ?? []).find((/** @type {any} */ r) => r.id === f.id);
+            if (answer?.resolved === true) {
+              resolved.add(f);
+              continue;
+            }
+            const quote = normaliseWhitespace(answer?.current_lines ?? '');
+            const reason = quote.length > 0 && !currentText.includes(quote) ? 'current_lines_not_found' : null;
+            if (reason) {
+              stale.add(f);
+              staleRows.push({ event: 'review.stale_finding', file: current.rel, round: state.round + 1, finding: f.id, reason });
+            }
+          }
           const found = /** @type {Finding[]} */ (review.findings ?? []);
           for (const f of part.index === null ? found : sectionFindings(found, part.index)) {
+            const key = findingKey(f);
+            roundFindings.add(key);
+            roundIds.add(f.id);
+            if (kind === 'recheck' && !knownIds.has(f.id) && history.has(key)) {
+              Object.assign(f, { repeated: true });
+              repeated.add(f.id);
+            }
             if (insideHunks(f, diff.hunks)) {
               inside.push(f);
               continue;
@@ -771,8 +818,7 @@ export async function runRound(state, deps, opts = {}) {
             if (s.late === 'block' && f.severity !== 'nit') blocking.push(f);
           }
         }
-        // every pending finding stays open unless the session that listed it resolved it
-        const stillOpen = pending.filter((f) => !resolved.has(f));
+        const stillOpen = pending.filter((f) => !resolved.has(f) && !stale.has(f));
         closed += pending.length - stillOpen.length;
         const triaged = await triageFindings({ file: current.rel, findings: inside, fromJudge: false, diffText: diff.diffText, cfg: deps.cfg, jev: deps.jev, rule: deps.rule, writeRow: deps.writeRow });
         newInHunks = triaged.fix_now.length;
@@ -782,11 +828,12 @@ export async function runRound(state, deps, opts = {}) {
     // A patch_check with no fix hunks closed nothing: B73 still stops it.
   }
 
+  const unweighted = kind !== 'full' && (staleRows.length > 0 || repeated.size > 0 || draft.open.some((f) => f.repeated)) && draft.open.every((f) => f.repeated);
   if (kind !== 'patch_check') {
     draft.round += 1;
-    draft.rounds_at_level += 1;
+    if (!unweighted) draft.rounds_at_level += 1;
     // THIS round's open set, after triage: only the warnings still open count
-    if (heavyRound(draft.open, s.warnThreshold)) draft.warn_rounds_at_level = (draft.warn_rounds_at_level ?? 0) + 1;
+    if (!unweighted && heavyRound(draft.open, s.warnThreshold)) draft.warn_rounds_at_level = (draft.warn_rounds_at_level ?? 0) + 1;
   } else {
     // the block continues at L2 after the rung with a fresh round counter (§3.6) — also here, not
     // only in `converge`, because the worker runs the patch_check from its own ticket
@@ -794,6 +841,8 @@ export async function runRound(state, deps, opts = {}) {
     draft.warn_rounds_at_level = 0;
   }
   draft.reviewed_content = current.content;
+  if (history.size > 0 || roundFindings.size > 0) draft.finding_history = [...new Set([...history, ...roundFindings])];
+  if (knownIds.size > 0 || roundIds.size > 0) draft.finding_ids = [...new Set([...knownIds, ...roundIds])];
   draft.last_packet = packetInfo;
   const roundRow = {
     event: 'review.round',
@@ -809,6 +858,7 @@ export async function runRound(state, deps, opts = {}) {
     tokens_in: tokensIn,
     tokens_out: tokensOut,
     ...(packetInfo ? { context_mode: packetInfo.context_mode } : {}),
+    ...(repeated.size > 0 ? { repeated: [...repeated] } : {}),
   };
 
   if (draft.open.length === 0) {
@@ -820,13 +870,13 @@ export async function runRound(state, deps, opts = {}) {
     // closed one is fixed at L2 (B73). Closed = an id open before the round, not open after it.
     const after = new Set(draft.open.map((f) => f.id));
     const closedIds = new Set(state.open.map((f) => f.id).filter((id) => !after.has(id))).size;
-    draft.next = decideNext(draft, openBefore, s, kind, closedIds);
+    draft.next = unweighted && kind !== 'patch_check' ? { action: 'fix', level: draft.level, trigger: null } : decideNext(draft, openBefore, s, kind, closedIds);
     if (draft.next.action === 'stop') {
       draft.status = 'stopped';
       draft.stop_content_hash = current.hash;
     }
   }
-  const rows = [...lateRows, roundRow];
+  const rows = [...staleRows, ...lateRows, roundRow];
   if (draft.status === 'stopped') rows.push({ event: 'review.cap', file: current.rel, round: draft.round, reason: draft.next.reason, open: draft.open.map((f) => f.id) });
   for (const row of rows) {
     if (!(await mustNote(deps, row))) return retry(state, kind, 'ledger_write_failed');

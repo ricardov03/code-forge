@@ -4,7 +4,8 @@ import { readFileSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
-const { buildRecheckPacket, converge, fixHunkDiff, newFileState, runRound } = await import('../../src/review/fixloop.mjs');
+const { buildRecheckPacket, converge, fixHunkDiff, newFileState, recheckTokens, runRound } = await import('../../src/review/fixloop.mjs');
+const { diffOnlyTokens } = await import('../../src/review/packet.mjs');
 
 const FILE = 'src/a.mjs';
 
@@ -68,6 +69,139 @@ function fixture() {
   const base = { repoRoot, cfg: cfgFor(), workDir: path.join(freshDir('work'), 'w'), writeRow: async (/** @type {Record<string, any>} */ r) => void rows.push(r) };
   return { repoRoot, edit, rows, base };
 }
+
+test('recheck lists every open finding with short evidence and measures that same list', async () => {
+  const { repoRoot, edit, base } = fixture();
+  const previous = readFileSync(path.join(repoRoot, FILE), 'utf8');
+  edit(200, 'fixed');
+  const diff = await fixHunkDiff({ file: FILE, previous, current: readFileSync(path.join(repoRoot, FILE), 'utf8'), workDir: base.workDir });
+  const open = [{ ...finding('F1', 200), evidence: 'only the 120 pt state is inspected' }, { ...finding('F2', 201), evidence: 'é'.repeat(300) }];
+  const list = `## finding evidence\nF1: only the 120 pt state is inspected\nF2: ${'é'.repeat(300)}\n## open findings\n- F1 (critical, lines 200-200): claim F1\n- F2 (critical, lines 201-201): claim F2\n`;
+  const packet = /** @type {any} */ (buildRecheckPacket({ diff, open, cfg: base.cfg }));
+  assert.equal(packet.text.slice(packet.text.indexOf('## finding evidence\n')), list, 'both findings carry their own evidence once');
+  assert.equal(recheckTokens(diff, open), diffOnlyTokens({ diff, lens: 'recheck' }) + Math.ceil(Buffer.byteLength(list) / 4), 'budget includes the exact UTF-8 evidence list');
+  const empty = /** @type {any} */ (buildRecheckPacket({ diff, open: [], cfg: base.cfg }));
+  assert.equal(empty.text.slice(empty.text.indexOf('## open findings\n')), '## open findings\n(none)\n', 'empty open set has no evidence rows');
+  assert.equal(packet.tokensIn - empty.tokensIn, Math.ceil(Buffer.byteLength(list) / 4) - Math.ceil(Buffer.byteLength('## open findings\n(none)\n') / 4), 'session estimate measures the same appended list');
+});
+
+test('unsubstantiated recheck findings close as stale, leave signed-row payloads, and an all-stale round passes without weight', async () => {
+  for (const current_lines of ['not in this file', 'export const v200 = 200;']) {
+    const { edit, rows, base } = fixture();
+    const resolved = { id: 'F1', resolved: false, why: 'still open', ...(current_lines === undefined ? {} : { current_lines }) };
+    const { spawn, packets } = stubSpawn(() => ({ resolved: [resolved] }));
+    const deps = { ...base, spawn, review: judgeReview([finding('F1', 200)]), jev: jevResolving(() => new Set()) };
+    const state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+    const before = structuredClone(state);
+    edit(200, 'fixed');
+    await runRound(state, deps);
+    assert.deepEqual([state.open, state.status, state.next, state.round, state.rounds_at_level, state.warn_rounds_at_level], [[], 'complete', { action: 'complete' }, 2, 1, 1], `stale quote ${JSON.stringify(current_lines)} adds no per-level weight`);
+    assert.deepEqual(rows.filter((r) => r.event === 'review.stale_finding'), [{ event: 'review.stale_finding', file: FILE, round: 2, finding: 'F1', reason: 'current_lines_not_found' }], 'one stale row names the file, round, finding and reason');
+    assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.closed, r.open_after]), [[1, 0, 1], [2, 1, 0]], 'stale finding closes exactly once');
+    assert.equal(rows.filter((r) => r.event === 'review.approved').length, 1, 'all-stale round writes one approval');
+    assert.equal(packets.length, 1, 'one fake recheck session');
+    if (current_lines === 'not in this file') {
+      await runRound(before, { ...deps, writeRow: async (row) => { if (row.event === 'review.stale_finding') throw new Error('cannot sign row'); } });
+      assert.deepEqual([before.open.map((f) => f.id), before.round, before.rounds_at_level, before.next], [['F1'], 1, 1, { action: 'retry', reason: 'ledger_write_failed' }], 'a failed stale row cannot close or count the round');
+    }
+  }
+});
+
+test('missing or empty current_lines keeps a finding open and counts toward the stall, patch and stop path', async () => {
+  for (const current_lines of [undefined, '', ' \n\t ']) {
+    const { edit, rows, base } = fixture();
+    const resolved = { id: 'F1', resolved: false, why: 'still open', ...(current_lines === undefined ? {} : { current_lines }) };
+    const { spawn, packets } = stubSpawn(() => ({ resolved: [resolved] }));
+    let patches = 0;
+    const deps = { ...base, spawn, review: judgeReview([finding('F1', 200)]), jev: jevResolving(() => new Set()), patch: async () => { patches += 1; edit(200, 'patched'); } };
+    const state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+    edit(200, 'fixed');
+    await runRound(state, deps);
+    assert.deepEqual([state.open.map((f) => f.id), state.round, state.rounds_at_level, state.warn_rounds_at_level, state.next], [['F1'], 2, 2, 2, { action: 'patch', level: 'L3', trigger: 'review_stall' }], `legacy quote ${JSON.stringify(current_lines)} keeps normal round weight`);
+    await converge(state, deps);
+    assert.deepEqual([patches, packets.length, state.status, state.open.map((f) => f.id), state.next], [1, 2, 'stopped', ['F1'], { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' }]);
+    assert.equal(rows.filter((r) => r.event === 'review.stale_finding').length, 0, 'legacy answers never create a stale row');
+    assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.kind, r.closed]), [['full', 0], ['recheck', 0], ['patch_check', 0]]);
+  }
+});
+
+test('current recheck quotes survive whitespace normalisation and still count as a heavy open round', async () => {
+  const { edit, rows, base } = fixture();
+  const { spawn } = stubSpawn(() => ({ resolved: [{ id: 'F1', resolved: false, why: 'still open', current_lines: ' export\tconst v200 =\n200 + "fixed"; ' }] }));
+  const deps = { ...base, spawn, review: judgeReview([finding('F1', 200)]), jev: jevResolving(() => new Set()) };
+  const state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+  edit(200, 'fixed');
+  await runRound(state, deps);
+  assert.deepEqual([state.open.map((f) => f.id), state.round, state.rounds_at_level, state.warn_rounds_at_level, state.next], [['F1'], 2, 2, 2, { action: 'patch', level: 'L3', trigger: 'review_stall' }], 'one live critical finding retains normal escalation');
+  assert.equal(rows.filter((r) => r.event === 'review.stale_finding').length, 0, 'valid current quote never writes a stale row');
+});
+
+test('new recheck findings repeat earlier trimmed claim AND evidence across rounds without per-level weight', async () => {
+  const { edit, rows, base } = fixture();
+  const originals = [finding('F1', 200), finding('F2', 201), finding('F3', 202)];
+  let round = 2;
+  const { spawn } = stubSpawn(() => ({
+    resolved: (round === 2 ? originals : [finding('R1', 200)]).map((f) => ({ id: f.id, resolved: false, why: 'old claim', current_lines: 'no longer in this file' })),
+    findings: [{ ...originals[round - 2], id: `R${round - 1}`, claim: ` ${originals[round - 2].claim} `, evidence: `\n${originals[round - 2].evidence} ` }],
+  }));
+  const deps = { ...base, cfg: { ...cfgFor(), escalation: { after_rounds_with_warnings: 2 } }, spawn, review: judgeReview(originals), jev: jevResolving(() => new Set()) };
+  let state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+  for (round = 2; round <= 3; round += 1) {
+    state = JSON.parse(JSON.stringify(state));
+    edit(200, `r${round}`);
+    await runRound(state, deps);
+    assert.deepEqual([state.open.map((f) => f.id), state.round, state.rounds_at_level, state.warn_rounds_at_level, state.next], [[`R${round - 1}`], round, 1, 1, { action: 'fix', level: 'L2', trigger: null }], `round ${round} repeats cannot climb or stall`);
+    assert.deepEqual(state.open.map((f) => f.repeated), [true], 'the one repeated finding retains its flag in file state');
+  }
+  assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => r.repeated ?? []), [[], ['R1'], ['R2']], 'each round row lists exactly its new repeated id');
+  assert.deepEqual(rows.filter((r) => r.event === 'review.stale_finding').map((r) => r.finding), ['F1', 'F2', 'F3', 'R1'], 'stale old ids close while new repeated ids stay open');
+});
+
+test('changing either claim or evidence makes a mixed recheck round fresh and preserves per-level escalation', async () => {
+  for (const changed of ['claim', 'evidence']) {
+    const { edit, rows, base } = fixture();
+    const originals = [finding('F1', 200), finding('F2', 201), finding('F3', 202)];
+    const { spawn } = stubSpawn(() => ({ resolved: originals.map((f) => ({ id: f.id, resolved: true, why: 'fixed' })), findings: [{ ...originals[1], id: 'R0' }, { ...originals[0], id: 'R1', [changed]: 'new detail' }] }));
+    const deps = { ...base, cfg: ladderOnly(), spawn, review: judgeReview(originals), jev: jevResolving(() => new Set()) };
+    const state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+    edit(200, 'fixed');
+    await runRound(state, deps);
+    assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => r.repeated ?? []), [[], ['R0']], 'only the identical claim AND evidence repeats');
+    assert.deepEqual([state.open.map((f) => f.id), state.rounds_at_level, state.warn_rounds_at_level, state.next], [['R0', 'R1'], 2, 2, { action: 'patch', level: 'L3', trigger: 'review_rounds' }], `different ${changed} makes a mixed round count as fresh`);
+  }
+});
+
+test('a reused earlier id is fresh even when its claim and evidence match a closed finding', async () => {
+  const { edit, rows, base } = fixture();
+  const original = finding('F1', 200);
+  let round = 2;
+  const { spawn } = stubSpawn(() => ({
+    resolved: (round === 2 ? ['F1', 'F2'] : ['N1']).map((id) => ({ id, resolved: true, why: 'fixed' })),
+    findings: [round === 2 ? finding('N1', 200) : original],
+  }));
+  const deps = { ...base, cfg: { ...ladderOnly(), escalation: { after_rounds_with_warnings: 0, review_rounds_per_level: 10 } }, spawn, review: judgeReview([original, finding('F2', 201)]), jev: jevResolving(() => new Set()) };
+  let state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+  for (round = 2; round <= 3; round += 1) {
+    state = JSON.parse(JSON.stringify(state));
+    edit(200, `r${round}`);
+    await runRound(state, deps);
+  }
+  assert.deepEqual([state.open.map((f) => f.id), state.rounds_at_level, state.warn_rounds_at_level], [['F1'], 3, 3]);
+  assert.equal(state.open[0].repeated, undefined);
+  assert.ok(rows.filter((r) => r.event === 'review.round').every((r) => !r.repeated), 'a reused id never receives the repeated exemption');
+});
+
+test('identical new findings in one recheck do not repeat each other without an earlier-round match', async () => {
+  const { edit, rows, base } = fixture();
+  const fresh = { ...finding('N1', 200), claim: 'new issue', evidence: 'new evidence' };
+  const { spawn } = stubSpawn(() => ({ resolved: [{ id: 'F1', resolved: true, why: 'fixed' }], findings: [fresh, { ...fresh, id: 'N2' }] }));
+  const deps = { ...base, cfg: ladderOnly(), spawn, review: judgeReview([finding('F1', 200)]), jev: jevResolving(() => new Set()) };
+  const state = await runRound(newFileState({ file: FILE, level: 'L2' }), deps);
+  edit(200, 'fixed');
+  await runRound(state, deps);
+  assert.deepEqual([state.open.map((f) => f.id), state.rounds_at_level, state.next], [['N1', 'N2'], 2, { action: 'patch', level: 'L3', trigger: 'review_stall' }]);
+  assert.equal(rows.filter((r) => r.event === 'review.round').at(-1).repeated, undefined);
+});
 
 test('S1 resolved ≥ 0.90 closes the finding with NO recheck session', async () => {
   const { edit, rows, base } = fixture();
@@ -369,9 +503,9 @@ test('fix 2: a fix hunk too large for the budget (non-ok recheck packet) is term
   };
   const state = await converge(newFileState({ file: FILE, level: 'L2' }), deps);
   // B54: the stop (and its review.cap row) says how large the packet was and what the budget is
-  // B98 adds 26 tokens; B117 proof guidance adds 67 more to the B92 packet's 487.
-  assert.deepEqual([state.status, state.next, state.pending_kind, state.round, fixes, packets.length], ['stopped', { action: 'stop', reason: 'split_required', tokens_in: 580, budget: 40 }, null, 1, 1, 0]);
-  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.file, r.round, r.reason, r.open, r.tokens_in, r.budget]), [[FILE, 1, 'split_required', ['F1'], 580, 40]]);
+  // B133's current-lines instruction adds 68 tokens to the previous 580-token lens/diff.
+  assert.deepEqual([state.status, state.next, state.pending_kind, state.round, fixes, packets.length], ['stopped', { action: 'stop', reason: 'split_required', tokens_in: 648, budget: 40 }, null, 1, 1, 0]);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.cap').map((r) => [r.file, r.round, r.reason, r.open, r.tokens_in, r.budget]), [[FILE, 1, 'split_required', ['F1'], 648, 40]]);
   assert.deepEqual(rows.filter((r) => r.event === 'review.round').map((r) => [r.round, r.kind]), [[1, 'full']]);
   await converge(state, deps);
   assert.deepEqual([state.status, fixes, rows.filter((r) => r.event === 'review.cap').length], ['stopped', 1, 1]);
