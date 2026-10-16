@@ -13,6 +13,8 @@ Autopilot lets the owner leave for a set time. A delegate (a fresh L2 or L3 sess
 
 ## §2 During the window
 
+The allowable scope `close:routine` means “close a routine block.” It lets plain `block close` pass `close.require_human` without a terminal when every changed file has a signed approval, a signed green gate row exists, and the block has no waiver rows, transcript hits or accepted hits. Waived or answered-only reviews do not qualify. Refusal is `close-not-routine: <reason>` (exit 1); success signs `autopilot.close {block, grant}` alongside the normal close. It never permits `block close --decide` or critical waivers.
+
 - **Every owner-level question goes to the delegate first**: `forge autopilot ask --run <r> --scope <scope> --question <text> --options <words> [--block <id>] [--file <path>] [--finding <id>]`. Use the fixed option words, or the action will refuse the answer: a waiver `waive,fix` · an extra round `allow,deny` · a coder level the candidate levels, e.g. `L1,L2`.
 - **Act only when it acted** (exit 0): run the action with `--decision <id>` from the answer — `forge autopilot waive|round|level … --decision <id>`. Exit 3 means the question goes to the owner: leave it open, it shows under Open questions. Exit 1 means the grant refused it: also the owner's.
 - **A paused category** (`autopilot paused: … waiting for the owner`): wait. Never raise the cap, never route around it.

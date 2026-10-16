@@ -417,7 +417,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
  * B101: +1 = review.fair_share ⇒ 213.
  */
 // B124b: +2 = review.agent_waivers{,.require_ack}. B136: +1 = gates.repeat_new_tests ⇒ 216.
-const EXPECTED_SCHEMA_PATH_COUNT = 216;
+// B138: close and close.require_human add two schema paths.
+const EXPECTED_SCHEMA_PATH_COUNT = 218;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;

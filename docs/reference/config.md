@@ -55,6 +55,8 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `levels.L3.fallback[].effort` | string |  | — |  |
 | `levels.coder_floor_docs` | enum: `L0`, `L1`, `L2` |  | `"L1"` |  |
 | `orchestrator` | enum: `L0`, `L1`, `L2`, `L3` |  | — |  |
+| `close` | object |  | — |  |
+| `close.require_human` | boolean |  | `false` | B138: require a terminal-confirmed human close, unless an active close:routine grant covers a routine block. Read from the run snapshot; cannot change by run reload. |
 | `system1` | object |  | — |  |
 | `system1.provider` | enum: `anthropic`, `openai`, `xai` |  | — |  |
 | `system1.model` | string |  | — |  |

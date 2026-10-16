@@ -13,7 +13,7 @@
  */
 
 /** Scopes an owner may delegate. */
-export const ALLOWABLE_SCOPES = Object.freeze(['waive:warning', 'waive:nit', 'round:extra', 'model:choose']);
+export const ALLOWABLE_SCOPES = Object.freeze(['waive:warning', 'waive:nit', 'round:extra', 'model:choose', 'close:routine']);
 
 /** What each allowable scope lets the delegate do (status output and docs). */
 export const ALLOWABLE_WHAT = Object.freeze({
@@ -21,6 +21,7 @@ export const ALLOWABLE_WHAT = Object.freeze({
   'waive:nit': 'waive a nit finding',
   'round:extra': 'one fix round past the cap for a file',
   'model:choose': 'choose the coder level for a block',
+  'close:routine': 'close a routine block',
 });
 
 /**

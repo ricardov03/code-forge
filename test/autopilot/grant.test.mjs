@@ -40,8 +40,8 @@ async function newRun(runId) {
 /** @param {() => unknown} fn @param {string} message */
 const refuses = (fn, message) => assert.throws(fn, { name: 'StateError', code: 'usage', message });
 
-test('the vocabulary: 4 allowable scopes, 9 fixed-deny scopes, no overlap', () => {
-  assert.deepEqual([...ALLOWABLE_SCOPES], ['waive:warning', 'waive:nit', 'round:extra', 'model:choose']);
+test('B138: the vocabulary: 5 allowable scopes, 9 fixed-deny scopes, no overlap', () => {
+  assert.deepEqual([...ALLOWABLE_SCOPES], ['waive:warning', 'waive:nit', 'round:extra', 'model:choose', 'close:routine']);
   assert.deepEqual([...FIXED_DENY_SCOPES], ['waive:critical', 'waive:proof', 'reviews:skip', 'limits:change', 'plan:approve', 'design:approve', 'pr:merge', 'destructive', 'budget:raise']);
   assert.equal(ALLOWABLE_SCOPES.filter((s) => FIXED_DENY_SCOPES.includes(s)).length, 0);
   // a limit key, a key under one, and a PARENT of one (replacing `review` replaces its limits) are all covered
@@ -78,12 +78,12 @@ test('every fixed-deny scope in --allow is refused at start, naming the scope (9
 });
 
 test('scope refusals: unknown in --allow or --deny, a scope in both, an empty --allow', () => {
-  const allowable = 'allowable scopes: waive:warning, waive:nit, round:extra, model:choose';
+  const allowable = 'allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine';
   refuses(() => validateGrantInput({ ...BASE, allow: 'waive:nit,waive:all' }, T0), `unknown scope "waive:all" in --allow; ${allowable}`);
   refuses(() => validateGrantInput({ ...BASE, deny: 'nope' }, T0), `unknown scope "nope" in --deny; ${allowable}`);
   refuses(() => validateGrantInput({ ...BASE, deny: 'waive:nit' }, T0), 'scope waive:nit is in both --allow and --deny; name it in one of them');
-  refuses(() => validateGrantInput({ ...BASE, allow: ' , ' }, T0), `--allow is required: one or more of waive:warning, waive:nit, round:extra, model:choose`);
-  refuses(() => validateGrantInput({ ...BASE, allow: undefined }, T0), `--allow is required: one or more of waive:warning, waive:nit, round:extra, model:choose`);
+  refuses(() => validateGrantInput({ ...BASE, allow: ' , ' }, T0), `--allow is required: one or more of waive:warning, waive:nit, round:extra, model:choose, close:routine`);
+  refuses(() => validateGrantInput({ ...BASE, allow: undefined }, T0), `--allow is required: one or more of waive:warning, waive:nit, round:extra, model:choose, close:routine`);
   // a fixed-deny scope in --deny is accepted and changes nothing (it is always denied)
   assert.deepEqual(validateGrantInput({ ...BASE, allow: 'waive:nit', deny: 'model:choose,pr:merge' }, T0).deny, ['model:choose']);
 });

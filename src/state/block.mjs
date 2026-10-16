@@ -635,16 +635,17 @@ export async function humanPassBlock({ runId, id, note, proof = null, writeRow, 
  *   livePid?: number, probe?: import('./run.mjs').StartTimeProbe,
  *   extraChecks?: Array<() => Promise<{ok: boolean, reason?: string}>>,
  *   closeRows?: Record<string, any>[],
+ *   dryRun?: boolean,
  * }} opts
  * @returns {Promise<{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string}>}
  */
-export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, extraChecks = [], closeRows = [] }) {
+export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, extraChecks = [], closeRows = [], dryRun = false }) {
   const record = await readRun(runId);
   if (record.blocks[id]?.status !== 'open') throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
 
   const pin = await checkWorkerPin(record, { livePid, probe });
   if (!pin.ok) {
-    await stopBlock({ runId, id, reason: pin.reason, writeRow, event: pin.event });
+    if (!dryRun) await stopBlock({ runId, id, reason: pin.reason, writeRow, event: pin.event });
     return { ok: false, status: 'stopped', event: pin.event, reason: pin.reason };
   }
 
@@ -657,13 +658,21 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
     const reasons = bad.map((x) => `${x.row.event}: ${x.result.reason}`);
     if (!dispatchOk) reasons.push('no verified dispatch row');
     const reason = reasons.join('; ');
-    await stopBlock({ runId, id, reason, writeRow, event: 'ledger.tamper' });
+    if (!dryRun) await stopBlock({ runId, id, reason, writeRow, event: 'ledger.tamper' });
     return { ok: false, status: 'stopped', event: 'ledger.tamper', reason };
   }
 
+  const failures = [];
   for (const check of extraChecks) {
     const result = await check();
-    if (!result.ok) return { ok: false, status: 'open', reason: result.reason ?? 'check failed' };
+    if (!result.ok) {
+      if (!dryRun) return { ok: false, status: 'open', reason: result.reason ?? 'check failed' };
+      failures.push(result.reason ?? 'check failed');
+    }
+  }
+  if (dryRun) {
+    if (record.orphans.length > 0) failures.push(`orphans: ${record.orphans.join(', ')}`);
+    return { ok: failures.length === 0, status: 'open', ...(failures.length ? { reason: failures.join('; ') } : {}) };
   }
 
   /** @typedef {{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string}} CloseResult */

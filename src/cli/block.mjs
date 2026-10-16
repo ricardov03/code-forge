@@ -208,9 +208,9 @@ import { configInForce, externalReviewer, requireCoderTests } from '../state/con
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
-import { PROOF_FINDING, blockFileSet, changedFiles, openFindings, ownsAt, resultFilesFor, reviewedFiles, reviewGateCheck, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
+import { PROOF_FINDING, blockFileSet, changedFiles, checkBlockReviews, openFindings, ownsAt, recordedSeverity, resultFilesFor, reviewedFiles, reviewGateCheck, routineCloseProblem, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { agentWaivers, agentWaiversAcked, prepareAckWaivers, prepareUnwaive, waiveAsAgent } from '../review/agent-waiver.mjs';
-import { checkExpiry } from '../autopilot/grant.mjs';
+import { checkExpiry, grantFor, grantState } from '../autopilot/grant.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { blockTree, prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
@@ -228,7 +228,7 @@ import { reportMismatches, reviewedLines } from '../review/reviewed-lines.mjs';
 import { blockEndHook, runBlockEndHook, writeDoneFile } from '../state/block-end.mjs';
 import { blockOpenFindings } from '../review/open-findings.mjs';
 import { hookForbidden, scanTranscript } from '../util/forbidden.mjs';
-import { prepareAcceptHit, writeAcceptedHit } from '../review/accept-hit.mjs';
+import { acceptedTranscriptHits, prepareAcceptHit, writeAcceptedHit } from '../review/accept-hit.mjs';
 
 /**
  * B72: `block reopen` — the file's content is read where the block works (its worktree, else the
@@ -358,7 +358,7 @@ export async function runBlock(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -400,6 +400,15 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     const record = await readRun(runId);
+    const deciding = sub === 'close' && flags.decide === true;
+    if (deciding) {
+      if (positionals.length !== 1 || typeof flags.reason !== 'string' || !flags.reason.trim() || /[\x00-\x1f\x7f]/.test(flags.reason)) throw new StateError('usage', '--decide needs one block id and a nonblank --reason without control characters');
+      if (flags['no-require-reviews']) throw new StateError('usage', '--decide cannot skip reviews');
+      if (!(deps.stdinIsTTY ?? deps.isTTY ?? process.stdin.isTTY === true) || !(deps.stdoutIsTTY ?? deps.isTTY ?? process.stdout.isTTY === true)) {
+        err(`${humanVerbNoTTY('close')}\n`); return 2;
+      }
+      if (record.autopilot && grantState(record.autopilot, (deps.now ?? (() => new Date()))()) === 'active') throw new StateError('autopilot-active', 'block close --decide is refused while an autopilot grant is active');
+    }
     if (sub === 'human-pass') {
       if (positionals.length !== 1 || typeof flags.note !== 'string' || flags.note.trim().length === 0) throw new StateError('usage', 'block human-pass needs one block id and --note <text>');
       if (typeof flags.proof === 'string' && !existsSync(flags.proof)) throw new StateError('usage', '--proof must name an existing directory or file');
@@ -503,8 +512,11 @@ export async function runBlock(args, deps = {}) {
     }
     // B48: every block command runs the lazy autopilot checks (grant expiry, expired approvals);
     // a failed check is a warning, never a reason to stop the block command
+    const requireHumanClose = sub === 'close' && configInForce(record)?.close?.require_human === true;
     try {
-      err(approvalCheckText(await expiryChecks(runId, (deps.now ?? (() => new Date()))(), { writeRow })));
+      if (!deciding && !requireHumanClose) {
+        err(approvalCheckText(await expiryChecks(runId, (deps.now ?? (() => new Date()))(), { writeRow })));
+      }
     } catch (thrown) {
       err(`autopilot: WARN the expiry check failed (${thrown?.message ?? String(thrown)})\n`);
     }
@@ -641,6 +653,19 @@ export async function runBlock(args, deps = {}) {
       // made from (kept equal to base_sha, including after a closed worktree rebase)
       const base = wt !== null ? wt.base_sha : entry.base_sha;
       const reviewsWaived = flags['no-require-reviews'] === true;
+      let routineGrant = null;
+      if (!deciding && !reviewsWaived && requireHumanClose) {
+        const active = record.autopilot && grantState(record.autopilot, (deps.now ?? (() => new Date()))()) === 'active';
+        if (active) {
+          const allowed = await grantFor(runId, 'close:routine', (deps.now ?? (() => new Date()))());
+          if (!allowed.ok) throw new StateError('close-not-routine', `close-not-routine: ${allowed.reason}`);
+          routineGrant = allowed.grant;
+        } else {
+          const asked = await confirmAtTerminal(deps, `Close block ${id} of run ${runId}? Only the owner may say yes.`);
+          if (asked === 'no-tty') { err(`${humanVerbNoTTY('close')}\n`); return 2; }
+          if (asked === 'cancelled') { err(`block ${id} close: cancelled — nothing was recorded\n`); return 1; }
+        }
+      }
       // B52: the human's way out is confirmed by the human, at a terminal, before anything is written
       if (reviewsWaived) {
         const asked = await confirmNoReviews(runId, id, deps);
@@ -703,14 +728,16 @@ export async function runBlock(args, deps = {}) {
         const others = closeRows.filter((r) => r.event !== 'gate.review_waived_all');
         closeRows.splice(0, closeRows.length, ...others, ...files.map((f) => ({ event: 'gate.review_waived_all', block: id, file: f.file, content_hash: f.content_hash, findings: f.findings, by: f.by, ...(f.answered?.length ? { answered: f.answered } : {}) })));
       };
-      const gate = reviewGateCheck(async () => {
-        const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
-        if (transcript === null) {
+      let dryRun = deciding || routineGrant !== null;
+      let transcriptFile = '';
+      const loadGate = async () => {
+        const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null, (file) => { transcriptFile = file; });
+        if (transcript === null && !dryRun) {
           await writeSigned(runId, writeRow, { event: 'gate.transcript_missing', block: id });
           err(`WARN block ${id}: no coder transcript found (--transcript, run record, .code-forge/runs/${runId}/${id}.log); the transcript grep did not run\n`);
         }
         // the human's way out of the per-file review check leaves a signed audit row before the close
-        if (reviewsWaived) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
+        if (reviewsWaived && !dryRun) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
         // B20: the high paths come first — a base the workspace does not know refuses the close here
         const highPaths = await highPathsAt(record.workspace, base);
         const { top, mainTop, where, inTree, wsPrefix, owns, changed, fileSet, reviewed } = await tree();
@@ -753,7 +780,8 @@ export async function runBlock(args, deps = {}) {
           proofFiles: fileSet,
           highPaths,
         };
-      }, { onWaivedAll, onAcceptedHits: (hits) => { acceptedHits = hits; } });
+      };
+      const gate = reviewGateCheck(loadGate, { onWaivedAll, onAcceptedHits: (hits) => { acceptedHits = hits; } });
       // B96: `reviewsPassed` comes from the gate's own result, not from the onWaivedAll call. Each
       // extra check runs at most once per close (`closeBlock`'s one loop, src/state/block.mjs:562,
       // and `closeBlock` is called once below), so the gate's one pass is its final one.
@@ -871,7 +899,72 @@ export async function runBlock(args, deps = {}) {
           return hit ? { ok: false, reason: `rule_break transcript line ${hit.line}: ${hit.id}` } : { ok: true };
         });
       }
-      const result = await closeBlock({ runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows });
+      const closeOptions = { runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows };
+      if (deciding) {
+        const data = await loadGate();
+        const initial = checkBlockReviews(data);
+        const descriptions = await resultFilesFor({ repoRoot: (await tree()).mainTop, runId, block: id, rows, includeCurrent: true });
+        const claimOf = (/** @type {string} */ file, /** @type {string} */ finding) => rows
+          .filter((r) => r.block === id && r.file === file && verifyRow(r, data.key).ok).flatMap((r) => {
+            const full = descriptions[r.ticket]?.findings;
+            return [...(r.finding === finding ? [r] : []), ...(Array.isArray(r.open) ? r.open : []), ...(Array.isArray(full) ? full : [])]
+              .filter((f) => (f?.id === finding || f?.finding === finding) && typeof f.claim === 'string');
+          }).at(-1)?.claim;
+        /** @type {Array<{label: string, write: (sink: (row: Record<string, any>) => Promise<unknown>) => Promise<unknown>}>} */
+        const actions = [];
+        const seen = new Set();
+        for (const refusal of initial.refusals) {
+          if (!['not_approved', 'late_unruled', 'review_cap', 'autopilot_waiver_invalid'].includes(refusal.code) || !refusal.file || !refusal.finding || refusal.finding === PROOF_FINDING) continue;
+          const { file, finding } = refusal;
+          const pair = `${file}\0${finding}`;
+          if (seen.has(pair)) continue;
+          seen.add(pair);
+          await waivePrecheck(record, runId, id, finding, file);
+          const severity = recordedSeverity(rows, { block: id, file, finding, key: data.key }).severity ?? 'unknown';
+          actions.push({ label: `${file} ${finding} ${severity}: ${claimOf(file, finding) ?? refusal.detail}`, write: (sink) => waiveFinding({ runId, id, file, finding, reason: /** @type {string} */ (flags.reason), writeRow: sink }) });
+        }
+        if (!agentWaiversAcked(record, rows, id, data.key)) {
+          const ack = await prepareAckWaivers(record, runId, id);
+          actions.push({ label: ack.counted.map((w) => `${w.file} ${w.finding} ${w.severity}: agent-waivers-not-acked ${claimOf(w.file, w.finding) ?? w.reason}; reason: ${w.reason}; verdict: ${w.verdict}`).join('; '), write: (sink) => writeSigned(runId, sink, ack.row) });
+        }
+        const hits = acceptedTranscriptHits(data).remaining;
+        for (const hit of hits) {
+          const prepared = await prepareAcceptHit({ runId, id, flags: { rule: hit.id, line: String(hit.line), transcript: transcriptFile, reason: flags.reason }, positionals: [id], extraTokens });
+          for (const row of prepared.rows) actions.push({ label: `${transcriptFile} ${row.rule} severity rule_break line ${row.line}: ${data.transcript?.split('\n')[row.line - 1]}`, write: (sink) => writeAcceptedHit({ runId, row, writeRow: sink }) });
+        }
+        const count = rows.length;
+        const buffered = async (/** @type {Record<string, any>} */ row) => { rows.push(row); };
+        for (const action of actions) await action.write(buffered);
+        const preview = await closeBlock({ ...closeOptions, dryRun: true });
+        rows.splice(count);
+        // Reset anything buffered by report, proof and review checks before the real pass.
+        closeRows.splice(0, closeRows.length, ...(external === null ? [] : [{ event: 'gate.reviews_waived', block: id, by: 'config', reviewer: external }]));
+        linesOnce = undefined;
+        actions.forEach((action, index) => (json ? err : say)(`${index + 1}. ${action.label}\n`));
+        if (!preview.ok) { err(`cannot decide here: ${preview.reason}\n`); return 1; }
+        const asked = await confirmAtTerminal(deps, `Apply these decisions and close block ${id} of run ${runId}? Only the owner may say yes.`);
+        if (asked === 'no-tty') { err(`${humanVerbNoTTY('close')}\n`); return 2; }
+        if (asked === 'cancelled') { err(`block ${id} close: cancelled — nothing was recorded\n`); return 1; }
+        for (const action of actions) await action.write(writeRow);
+        rows.splice(0, rows.length, ...(await readAllRows(record.project)).filter((row) => row.run === runId));
+      }
+      if (routineGrant !== null) {
+        const data = await loadGate();
+        const problem = external !== null ? 'external reviews' : routineCloseProblem(data);
+        if (problem !== null) { err(`close-not-routine: ${problem}\n`); return 1; }
+        const preview = await closeBlock({ ...closeOptions, dryRun: true });
+        if (!preview.ok) { err(`close-not-routine: ${preview.reason}\n`); return 1; }
+        closeRows.splice(0, closeRows.length, { event: 'autopilot.close', block: id, grant: routineGrant.grant_id });
+        linesOnce = undefined;
+      }
+      dryRun = false;
+      // The confirmation can take arbitrarily long: measure current bytes again at real close.
+      if (deciding || routineGrant !== null) {
+        treeOnce = undefined;
+        linesOnce = undefined;
+        lineWarnings.length = 0;
+      }
+      const result = await closeBlock(closeOptions);
       const agentRows = agentWaivers(rows, id, await loadKey(runId));
       const reopenedRows = agentReopens(rows.filter((r) => r.run === runId), id, await loadKey(runId));
       // B64b: the block ended (closed, or stopped by a worker pin event or ledger.tamper) — its rows
@@ -1034,7 +1127,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
 
 /**
  * B80: the refusal when `block waive` or `block reopen` has no terminal to ask the human at.
- * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass'} verb @returns {string}
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'close'} verb @returns {string}
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
@@ -1230,10 +1323,11 @@ async function openConfig(workspace) {
  * The block's coder transcript: `--transcript`, else the run record's `blocks.<id>.transcript`
  * (workspace-relative), else `.code-forge/runs/<run>/<id>.log`; null when none exists.
  * @param {Record<string, any>} record @param {string} id @param {string | null} given
+ * @param {(file: string) => void} [onFile]
  * @returns {Promise<string | null>}
  */
-async function findTranscript(record, id, given) {
-  if (given !== null) return readFile(given, 'utf8');
+async function findTranscript(record, id, given, onFile) {
+  if (given !== null) { const text = await readFile(given, 'utf8'); onFile?.(given); return text; }
   const recorded = record.blocks?.[id]?.transcript;
   const candidates = [
     ...(typeof recorded === 'string' && recorded.length > 0 ? [path.resolve(record.workspace, recorded)] : []),
@@ -1241,7 +1335,9 @@ async function findTranscript(record, id, given) {
   ];
   for (const file of candidates) {
     try {
-      return await readFile(file, 'utf8');
+      const text = await readFile(file, 'utf8');
+      onFile?.(file);
+      return text;
     } catch (thrown) {
       if (/** @type {any} */ (thrown)?.code !== 'ENOENT') throw thrown;
     }

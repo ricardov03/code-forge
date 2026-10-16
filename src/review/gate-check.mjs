@@ -237,6 +237,24 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
   return { ok: refusals.length === 0, refusals, waivedAll: refusals.length === 0 ? waivedAll : [], ...(acceptedHits.length > 0 ? { acceptedHits } : {}) };
 }
 
+/** B138: delegation never turns a waived or answered file into an approval.
+ * @param {Parameters<typeof checkBlockReviews>[0]} opts
+ * @returns {string | null}
+ */
+export function routineCloseProblem(opts) {
+  const mine = opts.rows.filter((r) => r.block === opts.block && r.run === opts.runId);
+  if (mine.some((r) => typeof r.event === 'string' && r.event.includes('waiv'))) return 'waiver rows for block';
+  if (mine.some((r) => r.event === 'rule_break' || r.event === 'rule_break.accepted')) return 'rule_break or accepted hit for block';
+  const hits = acceptedTranscriptHits({ ...opts, transcript: opts.transcript ?? null, rows: [] }).remaining;
+  if (hits.length > 0) return `rule_break transcript line ${hits[0].line}: ${hits[0].id}`;
+  if (!mine.some((r) => r.event === 'gate.done' && r.all_ok === true && verified(r, opts.key))) return 'no signed green gate row';
+  const result = checkBlockReviews(opts);
+  if (!result.ok) return result.refusals.map((r) => `${r.code}${r.file ? ` ${r.file}` : ''}`).join('; ');
+  if (result.waivedAll.length > 0) return 'reviewed_by_waiver or answered-only file';
+  if (opts.files.length === 0) return 'no approved changed files';
+  return null;
+}
+
 /** B71: the signed row the worker writes for a finding a reviewer judged resolved by another owned file. */
 export const ANSWERED_EVENT = 'review.answered';
 
@@ -639,15 +657,16 @@ export function openFindings(findings) {
  * B52: the signed result files {@link denialOf} needs — one per `review.result` row of the block
  * that has no `approved` field (an old ledger) and is a verdict — keyed by ticket. A file that is
  * missing, unparsable, names another run or ticket, or fails its MAC is null.
- * @param {{repoRoot: string, runId: string, block: string, rows: Array<Record<string, any>>}} opts
+ * @param {{repoRoot: string, runId: string, block: string, rows: Array<Record<string, any>>, includeCurrent?: boolean}} opts
  *   `repoRoot`: the repository root the worker writes `.code-forge/reviews/` under.
+ *   `includeCurrent`: B138 decision lists also need claims from modern signed results.
  * @returns {Promise<Record<string, ResultFile>>}
  */
-export async function resultFilesFor({ repoRoot, runId, block, rows }) {
+export async function resultFilesFor({ repoRoot, runId, block, rows, includeCurrent = false }) {
   /** @type {Record<string, ResultFile>} */
   const out = {};
   for (const r of rows) {
-    if (r?.event !== 'review.result' || r.block !== block || Object.hasOwn(r, 'approved') || neverReviewed(r) || typeof r.ticket !== 'string' || Object.hasOwn(out, r.ticket)) continue;
+    if (r?.event !== 'review.result' || r.block !== block || (!includeCurrent && Object.hasOwn(r, 'approved')) || neverReviewed(r) || typeof r.ticket !== 'string' || Object.hasOwn(out, r.ticket)) continue;
     try {
       const checked = await verifyResult(repoRoot, runId, r.ticket);
       out[r.ticket] = checked.ok && checked.result ? { status: checked.result.status, approved: checked.result.approved, findings: checked.result.findings } : null;

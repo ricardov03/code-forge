@@ -251,6 +251,10 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
     if (oldHash === newHash) return { changed: [], oldHash, newHash, pinned: 0, rowError: null };
     const before = state && Object.hasOwn(stored, state.hash) ? stored[state.hash] : undefined;
     if (state && (before === null || typeof before !== 'object')) throw new StateError('config-snapshot', `run ${runId}: the current config snapshot is missing from the run record`);
+    // B138: close authority belongs to the run-start snapshot, including legacy runs.
+    if (before?.close?.require_human !== config.close?.require_human) {
+      throw new StateError('immutable-key', 'close.require_human cannot change mid-run (fixed by the owner before the run starts)');
+    }
     /** @type {string[]} */
     let frozen;
     if (state) {

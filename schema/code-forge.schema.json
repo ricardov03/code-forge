@@ -41,6 +41,13 @@
       }
     },
     "orchestrator": { "$ref": "#/$defs/levelName" },
+    "close": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "require_human": { "type": "boolean", "default": false, "description": "B138: require a terminal-confirmed human close, unless an active close:routine grant covers a routine block. Read from the run snapshot; cannot change by run reload." }
+      }
+    },
     "system1": {
       "type": "object",
       "additionalProperties": false,
