@@ -282,16 +282,11 @@ export const FORBIDDEN = Object.freeze(
  *  - `--no-require-reviews` — the human's way out of `block close`'s per-file review check;
  *  - `--remove-worktree` (B62a) — `block close` removing the block's worktree, the orchestrator's
  *    alone. `block close` itself is not on this list, so the flag is listed on its own.
+ *  - `code-forge block human-pass` (B137) — passing a human device check is human-only.
  * @type {ReadonlyArray<ForbiddenEntry>}
  */
 export const CODER_ONLY_FORBIDDEN = Object.freeze(
   [
-    {
-      id: 'code-forge-block-human-pass-from-coder',
-      kind: 'anyPrefix',
-      prefixes: [['code-forge', 'block', 'human-pass'], ['forge', 'block', 'human-pass']],
-      description: 'Pass a human device check — human-only, confirmed in the human terminal (B137)',
-    },
     {
       id: 'code-forge-block-waive-from-coder',
       kind: 'anyPrefix',
@@ -351,6 +346,12 @@ export const CODER_ONLY_FORBIDDEN = Object.freeze(
       kind: 'anyPrefix',
       prefixes: [['code-forge', 'block', 'ack-waivers'], ['forge', 'block', 'ack-waivers']],
       description: 'Acknowledge agent waivers — human-only, confirmed in the human terminal (B124b)',
+    },
+    {
+      id: 'code-forge-block-human-pass-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [['code-forge', 'block', 'human-pass'], ['forge', 'block', 'human-pass']],
+      description: 'Pass a human device check — human-only, confirmed in the human terminal (B137)',
     },
   ].map(freezeEntry),
 );
