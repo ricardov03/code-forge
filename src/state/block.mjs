@@ -12,7 +12,7 @@
  */
 
 import { createHash, randomUUID } from 'node:crypto';
-import { createReadStream, existsSync, lstatSync, readlinkSync, realpathSync } from 'node:fs';
+import { createReadStream, existsSync, lstatSync, readFileSync, readdirSync, readlinkSync, realpathSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { BLOCK_KINDS, blockKind, dispatchLevel } from '../decide/escalation.mjs';
@@ -25,6 +25,8 @@ import { StateError } from './paths.mjs';
 import { assertOwned, blocksOverlap, isExactEntry, ownsFile, scopeGate } from './registry.mjs';
 import { checkWorkerPin, readRun, saveRun, withRunLock, writeSigned } from './run.mjs';
 import { verifyRow, loadKey } from './signer.mjs';
+import * as reviewQueue from '../worker/queue.mjs';
+import { repoRootOf } from '../worker/ticket.mjs';
 
 /** @typedef {import('./run.mjs').WriteRow} WriteRow */
 
@@ -643,7 +645,33 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
   const record = await readRun(runId);
   if (record.blocks[id]?.status !== 'open') throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
 
-  const pin = await checkWorkerPin(record, { livePid, probe });
+  let pin = await checkWorkerPin(record, { livePid, probe });
+  const pins = record.workers ?? (record.worker ? [record.worker] : []);
+  const counted = rows.filter((row) => row.block === id && (row.run === undefined || row.run === runId) && row.event === 'review.result' && !['stale', 'unavailable', 'answers'].includes(row.status) && !(row.status === 'refused' && row.reason === 'other-run'));
+  if (counted.some((row) => !pins.some((p) => p.pid === row.worker?.pid && p.started_at === row.worker?.started_at))) {
+    pin = { ok: false, event: 'worker.replaced', reason: 'a counted review result does not name a pinned worker' };
+  }
+  if (pin.ok) {
+    const repoRoot = await repoRootOf(record.workspace);
+    let names;
+    try { names = readdirSync(reviewQueue.queueDir(repoRoot)); }
+    catch (err) { if (err.code !== 'ENOENT') throw err; names = []; }
+    for (const name of names.filter((n) => /^[0-9a-f]{24}\.json$/.test(n))) {
+      const ticket = name.slice(0, 24);
+      const queued = reviewQueue.readTicket(repoRoot, ticket);
+      if (queued.run !== runId || queued.block !== id) continue;
+      const claimKey = `ticket\0${runId}\0${ticket}`;
+      const file = path.join(os.homedir(), '.code-forge', 'locks', `${createHash('sha256').update(claimKey).digest('hex')}.lock`);
+      let claim;
+      try { claim = JSON.parse(readFileSync(file, 'utf8')); }
+      catch (err) { if (err.code === 'ENOENT') continue; throw err; }
+      const owner = pins.find((p) => p.pid === claim.pid && p.started_at === claim.start);
+      if (owner && !(await checkWorkerPin({ worker: owner }, { probe })).ok) {
+        pin = { ok: false, event: 'worker.down', reason: `dead pinned worker pid ${owner.pid} holds ticket ${ticket}` };
+        break;
+      }
+    }
+  }
   if (!pin.ok) {
     if (!dryRun) await stopBlock({ runId, id, reason: pin.reason, writeRow, event: pin.event });
     return { ok: false, status: 'stopped', event: pin.event, reason: pin.reason };

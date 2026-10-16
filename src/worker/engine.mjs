@@ -101,7 +101,7 @@ import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
 import { extraRoundsFor, newFileState, reopenForExtraRound, runRound } from '../review/fixloop.mjs';
 import { reopenRowFor } from '../review/reopen.mjs';
-import { readRun } from '../state/run.mjs';
+import { processStartTime, readRun } from '../state/run.mjs';
 import { StateError } from '../state/paths.mjs';
 import { blockTree, worktreeRecord } from '../proof/worktree.mjs';
 import { ledgerSchemaHistory } from '../review/schema-fallback.mjs';
@@ -438,6 +438,7 @@ export async function reviewTicket(ticket, ctx) {
 async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDigest }) {
   if (!ctx.key || !ctx.readRows || !ctx.writeBlockRow) return { status: 'unavailable', reason: 'no-ledger', approved: false, engine: 'adaptive', sessions: [] };
   const key = ctx.key, readRows = ctx.readRows, writeRow = ctx.writeBlockRow;
+  const worker = { pid: process.pid, started_at: await processStartTime(process.pid) };
   return withLock(`light:${ctx.runId}\0${ticket.block}`, async () => {
     const root = ctx.contentRoot ?? ctx.repoRoot;
     const files = (await computeFileSet({ cwd: root, base: entry.base ?? 'HEAD' })).all.filter((file) => ownsFile(entry.owned, file, entry.ownedKinds)).sort();
@@ -470,8 +471,8 @@ async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDige
       }
       const queued = enqueueHash({ repoRoot: ctx.repoRoot, run: ctx.runId, block: ticket.block, file, content_hash, ...(ticket.tree ? { tree: ticket.tree } : {}) });
       const open = approved ? [] : own;
-      await writeRow({ event: 'review.result', ticket: queued.ticket, file, content_hash, status: outcome.status, approved, open });
-      writeResult({ repoRoot: ctx.repoRoot, runId: ctx.runId, ticket: queued.ticket, result: { ...outcome, block: ticket.block, file, content_hash, open }, key });
+      await writeRow({ event: 'review.result', ticket: queued.ticket, file, content_hash, status: outcome.status, approved, open, worker });
+      writeResult({ repoRoot: ctx.repoRoot, runId: ctx.runId, ticket: queued.ticket, result: { ...outcome, block: ticket.block, file, content_hash, open, worker }, key });
     }
     await writeRow({ event: 'review.light_result', signature, outcomes });
     return outcomes[ticket.file];

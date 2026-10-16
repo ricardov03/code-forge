@@ -119,7 +119,7 @@ test('Claude coder: EVERY forbidden entry is represented in --disallowedTools, e
   // B4.2: the coder's list is mergeForbidden() — FORBIDDEN + the coder-only entries (B45: + autopilot; B62a: + --remove-worktree, 4 in all).
   const fresh = renderForClaude(mergeForbidden());
   assert.equal(fresh.length, FORBIDDEN.length + CODER_ONLY_FORBIDDEN.length); // "count = list length"
-  assert.equal(CODER_ONLY_FORBIDDEN.length, 9); // B127: + human transcript-hit acceptance; B137: + human-pass
+  assert.equal(CODER_ONLY_FORBIDDEN.length, 10); // B107: + add-worker
   const attached = valuesAfterFlag(built.argv, '--disallowedTools');
   const expectedRuleStrings = fresh.flatMap((e) => e.rules);
   assert.equal(attached.length, expectedRuleStrings.length); // exact count IN ARGV, not just the renderer's own output
@@ -287,7 +287,7 @@ test('Codex coder argv: exec + workspace-write + approval_policy="never" (no --a
   const ruleLines = coder.rulesFile.content.split('\n').filter((l) => l.startsWith('prefix_rule('));
   // B4.2: FORBIDDEN's rules + the 4 `block waive` and (B45) 4 `autopilot` patterns (the `contains` entry renders none).
   const expectedCount = renderCodexRules(renderForCodex(FORBIDDEN)).count + renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count;
-  assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 28); // B127: + four acceptance patterns; B137: + four human-pass patterns
+  assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 29); // B107: + one add-worker pattern
   assert.equal(ruleLines.length, expectedCount);
   assert.equal(coder.rulesFile.count, expectedCount);
   assert.deepEqual(ruleLines, expected);

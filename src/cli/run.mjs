@@ -31,14 +31,18 @@
 import path from 'node:path';
 import { reloadFailureText, reloadWorkspace } from '../autopilot/limits.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
+import { reviewWorkers } from '../config/validate.mjs';
 import { budgetUsdOf, runSpend } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
+import { configInForce } from '../state/config-snapshot.mjs';
 import { endRun, processStartTime, readRun, reattachWorker, RUN_MODES, startRun, stopPinnedWorker } from '../state/run.mjs';
 import { writeSafe } from '../util/redact.mjs';
+import { withLock } from '../util/file-locks.mjs';
 import { sweepRoots, tmpBase } from '../util/tmp.mjs';
 import { launchWorker, repinWorker } from '../worker/loop.mjs';
+import { liveWorker, workerRegistry } from '../worker/queue.mjs';
 import { repoRootOf } from '../worker/ticket.mjs';
 
 /**
@@ -107,12 +111,39 @@ export async function runRun(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags } = parseFlags(rest, { values: ['run', 'cwd', 'engine', 'worker-pid', 'mode'], booleans: ['reattach'] });
+    const { flags } = parseFlags(rest, { values: ['run', 'cwd', 'engine', 'worker-pid', 'mode'], booleans: ['reattach', 'add-worker'] });
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     const workerPid = intFlag(flags['worker-pid'], 'worker-pid');
     const mode = typeof flags.mode === 'string' ? flags.mode : undefined;
-    if (mode !== undefined && (sub !== 'start' || flags.reattach)) throw new StateError('usage', '--mode is set once, by a new run start (the mode is fixed for the run)');
+    if (mode !== undefined && (sub !== 'start' || flags.reattach || flags['add-worker'])) throw new StateError('usage', '--mode is set once, by a new run start (the mode is fixed for the run)');
     if (mode !== undefined && !RUN_MODES.includes(mode)) throw new StateError('usage', `--mode must be one of ${RUN_MODES.join(', ')}`);
+
+    if (flags['add-worker']) {
+      if (sub !== 'start' || !runId || flags.reattach || workerPid !== undefined) throw new StateError('usage', 'run start --add-worker needs --run and cannot use --reattach or --worker-pid');
+      if (!startWorker) throw new StateError('usage', 'run start --add-worker needs a worker launcher');
+      return await withLock(`worker-add:${runId}`, async () => {
+        const record = await readRun(runId);
+        if (record.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
+        const repoRoot = await repoRootOf(record.workspace);
+        const loaded = record.config ? { ok: true, config: configInForce(record) } : await loadProjectConfig(record.workspace);
+        if (!loaded.ok) throw new StateError('config', 'the project config cannot be loaded');
+        const limit = reviewWorkers(loaded.config);
+        const entries = workerRegistry(repoRoot, { prune: true });
+        const legacy = liveWorker(repoRoot);
+        const count = entries.filter((e) => e.live).length + (legacy && !entries.some((e) => e.worker?.pid === legacy.pid && e.worker.start_time === legacy.start_time) ? 1 : 0);
+        if (count >= limit) throw new StateError('worker-running', `review.workers limit ${limit} reached`);
+        const launched = await startWorker({ runId, workspace: record.workspace });
+        const startedAt = await (probe ?? processStartTime)(launched.pid);
+        try {
+          await repinWorker({ runId, repoRoot: launched.repoRoot, expectPid: launched.pid, add: true, writeRow: ledgerWriter(record.project), ...(probe ? { probe } : {}) });
+        } catch (thrown) {
+          await stopLaunched({ pid: launched.pid, startedAt }, { stopWorker: stopWorker ?? stopPinnedWorker, probe, err });
+          throw thrown;
+        }
+        out(`run ${runId}: added worker pid ${launched.pid} (review.workers limit ${limit})\n`);
+        return 0;
+      });
+    }
 
     if (sub === 'start' && flags.reattach) {
       if (!runId) throw new StateError('usage', 'run start --reattach needs --run');
@@ -222,7 +253,7 @@ async function reloadVerb(runId, { out, err }) {
 }
 
 const USAGE =
-  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n';
+  'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function run(args) {

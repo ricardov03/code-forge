@@ -178,6 +178,7 @@ export async function startRun(opts) {
     orchestrator_pid: opts.orchestratorPid ?? process.pid,
     solo_pid: opts.soloPid ?? null,
     worker,
+    workers: worker ? [worker] : [],
     status: 'active',
     blocks: {},
     orphans: [],
@@ -314,15 +315,18 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
 
 /**
  * `run start --reattach`: re-pin a restarted worker (the orchestrator only — §4.8).
- * @param {{runId: string, workerPid: number, writeRow: WriteRow, probe?: StartTimeProbe}} opts
+ * @param {{runId: string, workerPid: number, writeRow: WriteRow, probe?: StartTimeProbe, add?: boolean}} opts
  */
-export async function reattachWorker({ runId, workerPid, writeRow, probe = processStartTime }) {
+export async function reattachWorker({ runId, workerPid, writeRow, probe = processStartTime, add = false }) {
   if (!isSignalablePid(workerPid)) throw new StateError('bad-worker-pid', 'worker pid must be an integer > 1');
   return withRunLock(runId, async () => {
     const current = await readRun(runId);
     if (current.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
-    current.worker = await pinWorker(workerPid, probe);
-    await writeSigned(runId, writeRow, { event: 'worker.reattach', pid: workerPid });
+    const pin = await pinWorker(workerPid, probe);
+    const pins = current.workers ?? (current.worker ? [current.worker] : []);
+    current.workers = add ? [...pins, pin] : [pin];
+    current.worker = current.workers[0];
+    await writeSigned(runId, writeRow, { event: add ? 'worker.add' : 'worker.reattach', pid: workerPid });
     await saveRun(current);
     return current;
   });
@@ -336,6 +340,14 @@ export async function reattachWorker({ runId, workerPid, writeRow, probe = proce
  * @returns {Promise<{ok: boolean, event?: 'worker.replaced' | 'worker.down', reason?: string}>}
  */
 export async function checkWorkerPin(record, { livePid, probe = processStartTime } = {}) {
+  if (record.workers?.length > 1) {
+    const pins = record.workers;
+    if (pins.some((p) => !isSignalablePid(p.pid)) || (livePid !== undefined && !pins.some((p) => p.pid === livePid))) {
+      return { ok: false, event: 'worker.replaced', reason: 'the live worker does not match a pinned worker' };
+    }
+    const live = await Promise.all(pins.map(async (p) => (await probe(p.pid)) === p.started_at));
+    return live.some(Boolean) ? { ok: true } : { ok: false, event: 'worker.down', reason: 'no pinned worker is running' };
+  }
   const pin = record.worker;
   if (!pin) return { ok: false, event: 'worker.down', reason: 'no worker is pinned for this run' };
   if (!isSignalablePid(pin.pid)) return { ok: false, event: 'worker.replaced', reason: 'the pinned worker pid is not an integer > 1' };
@@ -391,10 +403,15 @@ export async function endRun({ runId, writeRow, stopWorker = stopPinnedWorker, p
     if (open.length > 0) throw new StateError('open-blocks', `run ${runId} still has open blocks: ${open.join(', ')}`);
     const pin = await checkWorkerPin(current, { probe });
     if (!pin.ok) await writeSigned(runId, writeRow, { event: pin.event, reason: pin.reason });
-    const stop = pin.ok ? await stopWorker(current.worker, { probe }) : { stopped: false };
+    let stopped = false;
+    for (const worker of current.workers ?? (current.worker ? [current.worker] : [])) {
+      if ((await checkWorkerPin({ worker }, { probe })).ok) {
+        stopped = (await stopWorker(worker, { probe })).stopped || stopped;
+      }
+    }
     current.status = 'ended';
     current.ended_at = new Date().toISOString();
-    await writeSigned(runId, writeRow, { event: 'run.end', worker_check: pin.ok ? 'ok' : pin.event, worker_stopped: stop.stopped });
+    await writeSigned(runId, writeRow, { event: 'run.end', worker_check: pin.ok ? 'ok' : pin.event, worker_stopped: stopped });
     await saveRun(current);
     return current;
   });

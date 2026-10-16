@@ -185,6 +185,7 @@
             }
           }
         },
+        "workers": { "type": "integer", "minimum": 1, "maximum": 4, "default": 1, "description": "B107: Maximum live workers serving the queue. The orchestrator adds one with run start --add-worker --run <id>." },
         "max_rounds_per_file": { "type": "integer", "minimum": 2, "maximum": 6, "default": 4 },
         "recheck_scope": { "type": "string", "enum": ["fix_hunks", "file"], "default": "fix_hunks" },
         "late_findings": { "type": "string", "enum": ["sweep", "block"], "default": "sweep" },

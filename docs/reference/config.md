@@ -132,6 +132,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.routes[].second.fallback[].provider` | enum: `anthropic`, `openai`, `xai` | yes | — |  |
 | `review.routes[].second.fallback[].model` | string | yes | — | minLength 1 |
 | `review.routes[].second.fallback[].effort` | string |  | — |  |
+| `review.workers` | integer |  | `1` | min 1; max 4; B107: Maximum live workers serving the queue. The orchestrator adds one with run start --add-worker --run <id>. |
 | `review.max_rounds_per_file` | integer |  | `4` | min 2; max 6 |
 | `review.recheck_scope` | enum: `fix_hunks`, `file` |  | `"fix_hunks"` |  |
 | `review.late_findings` | enum: `sweep`, `block` |  | `"sweep"` |  |

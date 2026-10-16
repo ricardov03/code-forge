@@ -42,12 +42,13 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expiryChecks } from '../autopilot/limits.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
+import { reviewWorkers } from '../config/validate.mjs';
 import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
 import { runRecordPath } from '../state/paths.mjs';
-import { readRun, reattachWorker } from '../state/run.mjs';
+import { processStartTime, readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { logWarning } from '../util/error-log.mjs';
 import { withLock, tryLock } from '../util/file-locks.mjs';
@@ -260,6 +261,7 @@ export function recordedVerdict(result) {
  */
 export async function createWorker(opts, deps = {}) {
   const { runId, repoRoot, cfg, runRootDir, slug, key } = opts;
+  const identity = { pid: process.pid, started_at: await processStartTime(process.pid) };
   const env = deps.env ?? process.env;
   const review = deps.review ?? reviewTicket;
   const spawn = deps.spawn ?? spawnSession;
@@ -485,12 +487,14 @@ export async function createWorker(opts, deps = {}) {
    * @param {string} id @param {Record<string, any>} outcome - recorded through {@link recordedVerdict}.
    */
   async function complete(id, outcome) {
-    const result = recordedVerdict(outcome);
+    /** @type {Record<string, any>} */
+    const result = { ...recordedVerdict(outcome), worker: identity };
     const signed = writeResult({ repoRoot, runId, ticket: id, result, key });
     try {
       await ledger({
         event: 'review.result',
         ticket: id,
+        worker: identity,
         block: result.block ?? null,
         file: result.file ?? null,
         content_hash: result.content_hash ?? null,
@@ -794,9 +798,6 @@ export async function createWorker(opts, deps = {}) {
   return { processTicket, drain, run, once, stop, release, announce, watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
 }
 
-/** This block permits one registered worker per queue. */
-const WORKER_LIMIT = 1;
-
 /**
  * Start-up for the `worker` verb: run record, repo root, config, run temp root (owned by this
  * process), run key; refuses when another live worker already serves this queue.
@@ -832,7 +833,10 @@ export async function bootWorker(opts, deps = {}) {
     const legacy = liveWorker(repoRoot);
     if (legacy && !entries.some((entry) => entry.worker?.pid === legacy.pid && entry.worker.start_time === legacy.start_time)) count++;
     await deps.hooks?.afterCount?.(count);
-    if (count >= WORKER_LIMIT) throw new WorkerError('worker-running', 'a live or unreadable worker entry already serves this queue');
+    const limit = reviewWorkers(cfg);
+    if (entries.some((entry) => entry.live && !entry.worker) || (legacy && legacy.run !== opts.runId) || entries.some((entry) => entry.live && entry.worker?.run !== opts.runId) || count >= limit) {
+      throw new WorkerError('worker-running', `review.workers limit ${limit}: a live or unreadable worker entry already serves this queue`);
+    }
     worker.announce();
   });
   return { ...worker, repoRoot, runRootDir };
@@ -845,10 +849,10 @@ export async function bootWorker(opts, deps = {}) {
  * `expectPid` (a `run start` that just launched a worker) pins ONLY that pid: an older or stale
  * announcement naming another live pid is refused (`worker_mismatch`) instead of being pinned
  * over the new worker.
- * @param {{runId: string, repoRoot: string, writeRow?: (row: Record<string, any>) => Promise<unknown>, probe?: import('../state/run.mjs').StartTimeProbe, expectPid?: number}} opts
+ * @param {{runId: string, repoRoot: string, writeRow?: (row: Record<string, any>) => Promise<unknown>, probe?: import('../state/run.mjs').StartTimeProbe, expectPid?: number, add?: boolean}} opts
  */
-export async function repinWorker({ runId, repoRoot, writeRow, probe, expectPid }) {
-  const live = liveWorker(repoRoot);
+export async function repinWorker({ runId, repoRoot, writeRow, probe, expectPid, add = false }) {
+  const live = (expectPid === undefined ? null : liveWorker(repoRoot, { pid: expectPid, registeredOnly: true })) ?? liveWorker(repoRoot);
   if (!live) throw new WorkerError('worker_down', 'no live worker serves this queue');
   if (live.run !== runId) throw new WorkerError('other-run', `the live worker serves run ${live.run}`);
   if (expectPid !== undefined && live.pid !== expectPid) {
@@ -856,7 +860,7 @@ export async function repinWorker({ runId, repoRoot, writeRow, probe, expectPid 
   }
   const { project } = await readRun(runId);
   const write = writeRow ?? ((/** @type {Record<string, any>} */ row) => appendRow(row, { slug: project }));
-  return reattachWorker({ runId, workerPid: live.pid, writeRow: write, ...(probe ? { probe } : {}) });
+  return reattachWorker({ runId, workerPid: live.pid, writeRow: write, add, ...(probe ? { probe } : {}) });
 }
 
 /** The CLI entry the worker is launched from. */

@@ -11,6 +11,36 @@ const { bootWorker, launchWorker } = await import('../../src/worker/loop.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 const { checkLocks } = await import('../../src/doctor/local.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
+const { validateConfig, configSchema } = await import('../../src/config/validate.mjs');
+
+test('B107: review.workers validates integers 1..4 with default one', () => {
+  const config = (workers) => ({ version: 1, provider: 'anthropic', levels: Object.fromEntries(['L0', 'L1', 'L2', 'L3'].map((level) => [level, { model: 'fixture' }])), review: { workers } });
+  assert.equal(configSchema.properties.review.properties.workers?.default, 1, 'schema defaults to one worker');
+  for (const workers of [1, 2, 3, 4]) {
+    assert.equal(validateConfig(config(workers)).errors.filter((e) => e.rule === 'schema').length, 0, `accept ${workers}`);
+  }
+  for (const workers of [0, 5, 1.5, '2', null]) {
+    assert.equal(validateConfig(config(workers)).errors.filter((e) => e.rule === 'schema').length, 1, `refuse ${workers}`);
+  }
+});
+
+test('B107: boot admits below configured limit and names the limit at capacity', async () => {
+  const { repo, runId } = await makeRepo();
+  const file = path.join(repo, '.code-forge.yml');
+  writeFileSync(file, readFileSync(file, 'utf8').replace('review:', 'review:\n  workers: 2'));
+  const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+  const owner = announceWorker(repo, { pid: child.pid, run: runId });
+  let worker;
+  try {
+    await assert.doesNotReject(async () => { worker = await bootWorker({ runId, cwd: repo }, await deps()); }, 'one live worker is below limit two');
+    assert.equal(entries(repo).length, 2, 'two distinct workers registered');
+    await assert.rejects(bootWorker({ runId, cwd: repo }, await deps()), { code: 'worker-running', message: /review.workers.*2/ });
+    assert.equal(entries(repo).length, 2, 'capacity refusal adds no entry');
+  } finally {
+    worker?.release(); retractWorker(repo, owner.pid, owner.start_time);
+    const exited = new Promise((resolve) => child.once('exit', resolve)); child.kill(); await exited;
+  }
+});
 
 const dir = (repo) => path.join(repo, '.code-forge', 'workers');
 const entries = (repo) => existsSync(dir(repo)) ? readdirSync(dir(repo)).sort() : [];

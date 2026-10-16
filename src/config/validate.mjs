@@ -1174,3 +1174,10 @@ export { schema as configSchema };
 export function reviewFileLoop(cfg) {
   return cfg?.review?.file_loop ?? 'wait';
 }
+
+/** Maximum workers for a validated config (the schema restricts it to 1..4).
+ * @param {Record<string, any>} cfg @returns {number}
+ */
+export function reviewWorkers(cfg) {
+  return cfg?.review?.workers ?? 1;
+}
