@@ -88,23 +88,41 @@ test('`block open` records base = HEAD, level, attempt, acceptance, forecast, an
     await start(ws, 'r-rec', writeRow);
     const { block } = await openBlock({ runId: 'r-rec', id: 'B8', level: 'L2', owned: ['a.txt', 'b.txt'], acceptance: ACCEPTANCE, lines: 640, writeRow });
     assert.deepEqual({ ...block, opened_at: 'x' }, {
-      block: 'B8', base_sha: headSha, owned_files: ['a.txt', 'b.txt'], owned_kinds: { 'a.txt': 'file', 'b.txt': 'file' }, level: 'L2', kind: 'code', attempt: 1, opened_at: 'x', acceptance: ACCEPTANCE, lines_forecast: 640, status: 'open',
+      block: 'B8', base_sha: headSha, base_branch: 'main', owned_files: ['a.txt', 'b.txt'], owned_kinds: { 'a.txt': 'file', 'b.txt': 'file' }, level: 'L2', kind: 'code', attempt: 1, opened_at: 'x', acceptance: ACCEPTANCE, lines_forecast: 640, status: 'open',
       // B52: the fixture's dirty set {a.txt, c.txt, d.txt}, each stamped with its mode (not executable) and its bytes' sha256
       tree_at_open: { 'a.txt': `file:-:${sha256('a.txt dirty\n')}`, 'c.txt': `file:-:${sha256('c.txt dirty\n')}`, 'd.txt': `file:-:${sha256('d.txt untracked\n')}` },
     });
     const dispatch = rows.filter((r) => r.event === 'dispatch');
     assert.equal(dispatch.length, 1);
+    assert.equal(dispatch[0].base_branch, 'main');
+    assert.equal((await readRun('r-rec')).blocks.B8.base_branch, 'main');
     assert.deepEqual(verifyRow(dispatch[0], await loadKey('r-rec')), { ok: true });
     await assert.rejects(() => openBlock({ runId: 'r-rec', id: 'B9', level: 'L1', owned: ['c.txt'], acceptance: [{ clause: 'x', tests: [] }], writeRow }), { code: 'bad-acceptance' });
     await assert.rejects(() => openBlock({ runId: 'r-rec', id: 'B9', level: 'L1', owned: ['../c.txt'], acceptance: ACCEPTANCE, writeRow }), { code: 'bad-owned' });
   });
 });
 
+test('B134: block open records null base_branch in the entry and the single signed dispatch when detached', async () => {
+  await withFixture(async ({ ws, headSha }) => {
+    git(['checkout', '--detach', '-q', headSha], ws);
+    const { rows, writeRow } = rowSink();
+    await start(ws, 'r-detached', writeRow);
+    const { block } = await openBlock({ runId: 'r-detached', id: 'D', level: 'L1', owned: ['a.txt'], acceptance: ACCEPTANCE, writeRow });
+    assert.equal(block.base_branch, null);
+    assert.equal((await readRun('r-detached')).blocks.D.base_branch, null);
+    const dispatch = rows.filter((r) => r.event === 'dispatch');
+    assert.equal(dispatch.length, 1);
+    assert.equal(dispatch[0].base_branch, null);
+    assert.deepEqual(verifyRow(dispatch[0], await loadKey('r-detached')), { ok: true });
+  });
+});
+
 test('`block rebase` refuses a base that is not an ancestor of HEAD, stops on a commit touching an owned file, and moves a clean base', async () => {
-  await withFixture(async ({ ws, baseSha, headSha, sideSha }) => {
-    const { writeRow } = rowSink();
+  await withFixture(async ({ ws, home, baseSha, headSha, sideSha }) => {
+    const { rows, writeRow } = rowSink();
     await start(ws, 'r-reb', writeRow);
     await openBlock({ runId: 'r-reb', id: 'S', level: 'L1', owned: ['b.txt'], acceptance: ACCEPTANCE, base: sideSha, writeRow });
+    assert.equal((await readRun('r-reb')).blocks.S.base_branch, 'main', 'base_branch is the workspace branch even for an explicit base');
     await assert.rejects(() => rebaseBlock({ runId: 'r-reb', id: 'S', writeRow }), { code: 'base-not-ancestor' });
     assert.equal((await readRun('r-reb')).blocks.S.base_sha, sideSha);
 
@@ -116,6 +134,19 @@ test('`block rebase` refuses a base that is not an ancestor of HEAD, stops on a 
     assert.deepEqual(await rebaseBlock({ runId: 'r-reb', id: 'X', writeRow }), { old_base: baseSha, new_base: headSha });
     assert.equal((await readRun('r-reb')).blocks.X.base_sha, headSha);
     await assert.rejects(() => rebaseBlock({ runId: 'r-reb', id: 'X', head: '--output=/tmp/x', writeRow }), { code: 'bad-ref' });
+
+    const treePath = path.join(home, 'tree');
+    await openBlock({ runId: 'r-reb', id: 'W', level: 'L1', owned: ['c.txt'], acceptance: ACCEPTANCE, writeRow,
+      worktree: async ({ baseSha }) => ({ path: treePath, make: async () => {
+        git(['worktree', 'add', '-q', '-b', 'block-w', treePath, baseSha], ws);
+        return { worktree: { path: treePath, branch: 'block-w', base_sha: baseSha }, created: true, rollback: null };
+      } }),
+    });
+    const before = (await readRun('r-reb')).blocks.W;
+    await assert.rejects(() => rebaseBlock({ runId: 'r-reb', id: 'W', writeRow }), { code: 'worktree-rebase' });
+    assert.deepEqual((await readRun('r-reb')).blocks.W, before);
+    assert.equal(git(['rev-parse', 'HEAD'], treePath), headSha);
+    assert.equal(rows.filter((r) => r.event === 'block.rebase' && r.block === 'W').length, 0);
   });
 });
 

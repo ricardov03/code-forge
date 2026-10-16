@@ -315,6 +315,7 @@ function refuseConfigOwner(owned, kinds, guarded) {
  * and the dispatch row carry the floor level, and the row adds `requested_level` and
  * `trigger: 'docs_floor'`. B52: the entry also records `tree_at_open` ({@link treeAtOpen}), the
  * tree's changes at open, which `block close` reads to tell the coder's changes from earlier ones.
+ * B134: `base_branch` is the workspace's current branch, or null when detached.
  * B58: with `review.external.required` set, an owned entry that owns the project's config is
  * refused (`config-owned`, {@link refuseConfigOwner}).
  * B59: `decision` (the rules lane of a brief-mode block) is written as a signed `decision` row
@@ -391,6 +392,8 @@ export async function openBlock(opts) {
       const prior = previousTree(record);
       const baseSha = await resolveCommit(prior ? prior.base_sha : opts.base ?? 'HEAD', record.workspace);
       if (baseSha !== stampedBase || record.workspace !== workspace) throw new StateError('base-moved', `the base moved while block ${id} was being opened; run block open again`);
+      const branch = await git(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'], record.workspace, [0, 1]);
+      const baseBranch = branch.code === 0 ? branch.stdout.trim() : null;
       // B62a: the tree is planned (read-only checks) before the overlap check, which needs its path
       const planned = opts.worktree ? await opts.worktree({ baseSha, previous: prior }) : null;
       const self = { owned_files: owned, owned_kinds: kinds, worktree: planned ? { path: planned.path } : null };
@@ -402,7 +405,7 @@ export async function openBlock(opts) {
       // passed; a tree made here is rolled back below if the rows or the save then fail
       made = planned ? await planned.make() : null;
       const tree = made;
-      const entry = { block: id, base_sha: baseSha, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(tree ? { worktree: tree.worktree } : {}) };
+      const entry = { block: id, base_sha: baseSha, base_branch: baseBranch, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(tree ? { worktree: tree.worktree } : {}) };
       record.blocks[id] = entry;
       const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
       const created = tree?.created ? [{ event: 'worktree.created', block: id, path: tree.worktree.path, branch: tree.worktree.branch, base: tree.worktree.base_sha }] : [];
@@ -411,7 +414,7 @@ export async function openBlock(opts) {
         rows: [
           ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
           ...created,
-          { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}) },
+          { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, base_branch: baseBranch, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}) },
         ],
       };
     });
