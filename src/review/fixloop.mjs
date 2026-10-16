@@ -111,7 +111,6 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {string} [reason] - `review_cap`, `l3_patch_exhausted`, a non-ok packet status (`split_required`), … for `stop`; the stub-guard reason for `retry`.
  * @property {number} [tokens_in] - a `split_required` stop: the estimated tokens of the diff-only packet (B54).
  * @property {number} [budget] - a `split_required` stop: the packet budget it exceeded (B54).
- * @property {string} [lens] - the lens whose packet exceeded that budget.
  * @property {string} [section] - a `split_required` stop of a Markdown recheck: the heading of the section that alone is over (B54).
  */
 
@@ -128,6 +127,7 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {boolean} l3_rung_used - the block's L3 rung (rule 5 or 6) was used — once per block.
  * @property {'open' | 'complete' | 'stopped'} status
  * @property {string} [stop_content_hash] - bytes reviewed by a stop (absent in legacy states).
+ * @property {string} [stop_lens] - the lens whose packet stopped before a round.
  * @property {NextStep | null} next
  * @property {{context_mode: string, context_lines: number} | null} [last_packet] - the last recheck round's context: one packet's, or over a Markdown recheck's section packets the summed lines and the one mode they share, else `mixed` (B54).
  * @property {'full' | 'recheck' | 'patch_check' | null} [pending_kind] - the round to re-run after a `retry`.
@@ -263,19 +263,21 @@ export function extraRoundsFor(rows, { runId, block, file, key }) {
 /**
  * B47: reopen a file stopped at `review_cap` when its raised cap leaves a round: the state goes
  * back to `open` with `next: fix` at its level (`trigger: autopilot_extra_round`); the next round
- * is a recheck. Any other state is left as it is.
+ * is a recheck. B132 also resumes a pre-round split stop when its packet budget changed,
+ * preserving the counted rounds and findings. Any other state is left as it is.
  * @param {FileState} state @param {number} extraRounds @param {Record<string, any> | undefined} cfg
  * @returns {boolean} whether the state was reopened.
  */
 export function reopenForExtraRound(state, extraRounds, cfg) {
   // A packet stopped before spending a round may be measured again under a changed budget.
-  if (state.status === 'stopped' && state.next?.reason === 'split_required' && state.next.lens === 'recheck' &&
+  if (state.status === 'stopped' && state.next?.reason === 'split_required' && state.stop_lens === 'recheck' &&
       typeof state.next.budget === 'number' && Number.isFinite(state.next.budget) && state.next.budget > 0 &&
       state.next.budget !== budgetFor(cfg, 'full_in')) {
     state.status = 'open';
     state.next = { action: 'fix', level: state.level, trigger: null };
     state.pending_kind = null;
     delete state.stop_content_hash;
+    delete state.stop_lens;
     return true;
   }
   if (state.status !== 'stopped' || state.next?.reason !== 'review_cap') return false;
@@ -640,12 +642,13 @@ async function stopBeforeRound(state, deps, kind, file, contentHash, packet) {
   const reason = packet.status;
   const size =
     typeof packet.tokensIn === 'number' && typeof packet.budget === 'number'
-      ? { tokens_in: packet.tokensIn, budget: packet.budget, lens: 'recheck', ...(typeof packet.section === 'string' ? { section: packet.section } : {}) }
+      ? { tokens_in: packet.tokensIn, budget: packet.budget, ...(typeof packet.section === 'string' ? { section: packet.section } : {}) }
       : {};
-  const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id), ...size };
+  const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id), ...size, lens: 'recheck' };
   if (!(await mustNote(deps, row))) return retry(state, kind, 'ledger_write_failed');
   state.status = 'stopped';
   state.stop_content_hash = contentHash;
+  state.stop_lens = 'recheck';
   state.next = { action: 'stop', reason, ...size };
   state.pending_kind = null;
   return state;
