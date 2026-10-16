@@ -38,6 +38,7 @@ scopes, the deny list, the spend per category, and where the log is.
 | `waive:nit` | waive a nit finding |
 | `round:extra` | one fix round past the review cap for a file |
 | `model:choose` | choose the coder level for a block |
+| `close:routine` | close a routine block when `close.require_human` is on: every changed file approved, a green gate row, no waivers, no transcript hits. Never `block close --decide` |
 
 An extra round is a normal fix round. Fix rounds are one per block: wait for every `review-file` ticket of the block and its tests, then send ONE fix message with every failing test and every open finding; a finding that arrives later waits for the next round (`skill/references/code.md` §4).
 The per-file cap still counts per file: one block round is one round for each file it touched.

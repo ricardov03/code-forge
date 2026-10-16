@@ -5,6 +5,8 @@ for you; every step is also a plain CLI verb you can run and inspect by hand.
 
 UI acceptance may include `kind: human_check` clauses without tests, recorded as `human_checks`. After all code gates pass, `block close` leaves such a block `awaiting_human_check`, prints every check and the next command, and delays its done signal. Status and report list the waiting ids, and `run end` refuses until the human checks the device and types `code-forge block human-pass <id> --run <r> --note "<device check note>" [--proof <existing-path>]` in a terminal, or stops the block. The note is required; `--proof` is optional, and when it is given the path must exist. When omitted, the row records `proof: null`. Human pass records a signed human row and closes it; there is no `--yes`, and an active autopilot grant refuses the verb.
 
+Small changes can use `block open <id> --kind light`. A light block may change at most `light.max_files` owned files (default 5) and `light.max_lines` added plus removed lines (default 300). Its reviews go in one batch, and its gate runs only the block tests (`{test_files}` in the test command). If close refuses with `light-limits`, stop the attempt and open the same id again with `--kind code --attempt <n+1>`.
+
 Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
 
 ## The workflow at a glance
@@ -669,6 +671,10 @@ is no batch to wait for.
 More parallel tickets raise the spend rate. With `review.fair_share: true` (default false), each
 free slot goes to the block with the fewest running tickets, with oldest first for ties.
 
+More workers can serve the queue. Set `review.workers` (1 to 4, default 1). The orchestrator adds a
+worker to a live run with `code-forge run start --add-worker --run <id>`. Each worker is pinned by pid and
+start time; close checks that each result came from a pinned worker. If a new worker fails its probe, it is stopped.
+
 Ticket claims and locks for files, blocks and the budget row now hold across processes.
 Lock files live in `~/.code-forge/locks`. A dead owner's lock is broken using its pid and
 process start time, comparing its bytes again under a per-key break mutex before removal.
@@ -819,6 +825,13 @@ flowchart TD
   records nothing. Under an active autopilot grant these human paths still ask. The existing
   `autopilot waive` path still writes `by: autopilot`.
   The prompt checks only that stdin and stdout are terminals; a pseudo-terminal passes it, so it does not prove a human (`skill/references/security.md` §3).
+
+  **One human step per block.** The human can run `forge block close <id> --run <r> --decide --reason <text>`.
+  It shows every waivable finding, unacknowledged agent waiver and acceptable transcript hit in one numbered list.
+  One yes writes the same signed human rows as the single verbs, then runs a normal close. A no writes nothing.
+  It has no `--yes` and is refused while an autopilot grant is active. Set `close.require_human: true` to make every
+  close need this terminal confirmation; an active `close:routine` grant lets a routine block close without it
+  (all files approved, a green gate row, no waivers, no transcript hits). Otherwise close refuses with `close-not-routine: <reason>`.
 
   **False transcript hits.** The human runs `forge block accept-hit <id> --run <r> --rule <rule-id> --line <n> --transcript <path> --reason <text>`.
   It checks that the run and block exist and the readable transcript reports that rule on that line before asking.
