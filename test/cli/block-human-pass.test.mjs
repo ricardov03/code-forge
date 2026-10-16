@@ -101,20 +101,22 @@ test('B137 close boundary: missing green code gates keep a human-check block ope
   assert.deepEqual((await f.rows()).filter((r) => ['block.close', 'block.awaiting_human_check'].includes(r.event)), []);
 });
 
-test('B137 human-pass: terminal yes writes exactly one signed human row with note, proof and checks, then closes', async () => {
-  const f = await fixture('b137-pass');
-  await f.awaiting();
-  const r = await f.pass(['--proof', f.files]);
-  assert.deepEqual([r.code, r.err, f.asked()], [0, '', 1]);
-  assert.equal((await f.entry()).status, 'closed');
-  const rows = (await f.rows()).filter((r) => r.event === 'block.human_pass');
-  assert.equal(rows.length, 1);
-  assert.deepEqual([rows[0].block, rows[0].note, rows[0].proof, rows[0].checks, rows[0].by], ['B1', 'checked on my phone', f.files, CHECKS, 'human']);
-  assert.equal(verifyRow(rows[0], await loadKey(f.runId)).ok, true);
-  assert.equal((await f.pass()).code, 1, 'a second pass must be refused');
+test('B137 human-pass: terminal yes with optional proof writes exactly one signed human row, proof path or null, then closes', async () => {
+  for (const withProof of [true, false]) {
+    const f = await fixture(`b137-pass-${withProof ? 'proof' : 'no-proof'}`);
+    await f.awaiting();
+    const r = await f.pass(withProof ? ['--proof', f.files] : []);
+    assert.deepEqual([r.code, r.err, f.asked()], [0, '', 1]);
+    assert.equal((await f.entry()).status, 'closed');
+    const rows = (await f.rows()).filter((r) => r.event === 'block.human_pass');
+    assert.equal(rows.length, 1);
+    assert.deepEqual([rows[0].block, rows[0].note, rows[0].proof, rows[0].checks, rows[0].by], ['B1', 'checked on my phone', withProof ? f.files : null, CHECKS, 'human']);
+    assert.equal(verifyRow(rows[0], await loadKey(f.runId)).ok, true);
+    assert.equal((await f.pass()).code, 1, 'a second pass must be refused');
+  }
 });
 
-test('B137 human-pass boundary: both TTYs, confirmation, awaiting status, note and existing proof are required; active grant refuses', async () => {
+test('B137 human-pass boundary: both TTYs, confirmation, awaiting status and note are required; supplied proof must exist; active grant refuses', async () => {
   const f = await fixture('b137-pass-refuse');
   const wrong = await f.pass();
   assert.equal(wrong.code, 1);
