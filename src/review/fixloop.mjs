@@ -269,7 +269,8 @@ export function extraRoundsFor(rows, { runId, block, file, key }) {
  * @returns {boolean} whether the state was reopened.
  */
 export function reopenForExtraRound(state, extraRounds, cfg) {
-  // A packet stopped before spending a round may be measured again under a changed budget.
+  // Only a recheck resumes as a fix; full and patch_check stops keep their round kind.
+  // Its packet is measured against full_in, so other lens budgets cannot reopen it.
   if (state.status === 'stopped' && state.next?.reason === 'split_required' && state.stop_lens === 'recheck' &&
       typeof state.next.budget === 'number' && Number.isFinite(state.next.budget) && state.next.budget > 0 &&
       state.next.budget !== budgetFor(cfg, 'full_in')) {
@@ -644,11 +645,11 @@ async function stopBeforeRound(state, deps, kind, file, contentHash, packet) {
     typeof packet.tokensIn === 'number' && typeof packet.budget === 'number'
       ? { tokens_in: packet.tokensIn, budget: packet.budget, ...(typeof packet.section === 'string' ? { section: packet.section } : {}) }
       : {};
-  const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id), ...size, lens: 'recheck' };
+  const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id), ...size, lens: kind };
   if (!(await mustNote(deps, row))) return retry(state, kind, 'ledger_write_failed');
   state.status = 'stopped';
   state.stop_content_hash = contentHash;
-  state.stop_lens = 'recheck';
+  state.stop_lens = kind;
   state.next = { action: 'stop', reason, ...size };
   state.pending_kind = null;
   return state;

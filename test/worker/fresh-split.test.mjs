@@ -12,6 +12,7 @@ const { startRun, reloadRun } = await import('../../src/state/run.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { loadKey } = await import('../../src/state/signer.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
+const { newFileState, reopenForExtraRound, runRound } = await import('../../src/review/fixloop.mjs');
 
 const FILE = 'src/sample.mjs';
 const BLOCK = 'B1';
@@ -250,6 +251,47 @@ test('B132 boundary: only the stopped lens budget matters; a changed budget that
   } finally {
     f.done();
   }
+});
+
+test('B132: split caps retain the measured round kind; only rechecks resume as a fix under their changed budget', async () => {
+  for (const kind of /** @type {const} */ (['recheck', 'patch_check'])) {
+    const repoRoot = freshDir(`split-${kind}`);
+    writeFile(repoRoot, FILE, largeContent());
+    const state = newFileState({ file: FILE, level: 'L2', l3RungUsed: kind === 'patch_check' });
+    state.round = 1;
+    state.reviewed_content = 'export const value = 1;\n';
+    state.open = [{ id: 'W1', file: FILE, line_start: 1, line_end: 1, severity: 'warning', category: 'correctness', claim: 'defect', evidence: 'e', fix: 'f' }];
+    const before = structuredClone(state);
+    /** @type {Array<Record<string, any>>} */
+    const rows = [];
+    let sessions = 0;
+    await runRound(state, {
+      repoRoot, workDir: freshDir('split-packet'), cfg: cfgFor({ budgets: { quick_in: 6000, full_in: 6000 } }),
+      review: async () => { throw new Error('unexpected full review'); },
+      jev: async () => ({ ok: false, reason: 'offline' }),
+      spawn: async () => { sessions += 1; throw new Error('oversized packet spawned'); },
+      writeRow: async (row) => void rows.push(row),
+    }, { kind });
+    assert.deepEqual([state.status, state.next?.reason, state.next?.budget, state.stop_lens, state.round, state.open, state.reviewed_content, sessions],
+      ['stopped', 'split_required', 6000, kind, before.round, before.open, before.reviewed_content, 0]);
+    assert.deepEqual(rows.map((r) => [r.event, r.reason, r.lens, r.budget, r.open]),
+      [['review.cap', 'split_required', kind, 6000, ['W1']]]);
+    const stopped = structuredClone(state);
+    for (const quick_in of [6000, 9000]) {
+      assert.equal(reopenForExtraRound(state, 0, cfgFor({ budgets: { quick_in, full_in: 6000 } })), false);
+      assert.deepEqual(state, stopped);
+    }
+    assert.equal(reopenForExtraRound(state, 0, cfgFor({ budgets: { quick_in: 6000, full_in: 9000 } })), kind === 'recheck');
+    if (kind === 'patch_check') assert.deepEqual(state, stopped);
+    else assert.deepEqual(state, { ...before, next: { action: 'fix', level: 'L2', trigger: null } });
+  }
+  const full = newFileState({ file: FILE, level: 'L2' });
+  full.status = 'stopped';
+  full.stop_lens = 'full';
+  full.next = { action: 'stop', reason: 'split_required', budget: 6000 };
+  const stopped = structuredClone(full);
+  assert.equal(reopenForExtraRound(full, 0, cfgFor({ budgets: { full_in: 9000 } })), false);
+  assert.deepEqual(full, stopped);
 });
 
 test('B110 fail closed: a split claim whose restore fails queues nothing, plain and fresh', { timeout: 20000 }, async () => {
