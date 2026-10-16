@@ -122,6 +122,7 @@ test('B131: outcomes come from completion markers while existing done and pendin
   const tickets = ['src/a.mjs', 'src/b.mjs', 'src/c.mjs'].map((file) => enqueue({ repoRoot: repo, run: runId, block: BLOCK, file }));
   announceWorker(repo, { pid: process.pid, run: runId });
   try {
+    /** @type {Array<[Record<string, any>, string]>} */
     const cases = [
       [{ status: 'reviewed', approved: true }, 'approved'],
       [{ status: 'reviewed', open_findings: true }, 'findings'],
