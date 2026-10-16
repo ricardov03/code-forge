@@ -93,6 +93,8 @@ The coder's report is a claim sheet. The gate reproduces each number in the meas
 
 Without the flag the tree stays. On a block without a worktree the flag is a usage error (exit 2). The flag is forbidden to coders: only you remove a tree.
 
+After close, if the base moved, run `code-forge block rebase <id> --run <r>` before the fast-forward merge.
+
 **When a file stops** (`review_cap`, `l3_patch_exhausted`, `split_required`, …), the block cannot close. The stop's `exits` name the ways out. Take them in this order; `review.md` §5 gives each one's rules and refusals:
 
 1. **Fix, then `block reopen`.** When the fix belongs in the stopped file, have it fixed. Then print the exact command, `forge block reopen <id> --file <path> --run <r> --reason <text>` with the human's reason, and the human runs it in their own terminal, exactly like `block waive`. For this comparison, `block waive` means its human path. Never run it yourself, and never for a coder (it is on the coder forbidden list). After it, send the coder's `review-file` again: the next round is a full round 1 when the content differs from what the stop reviewed; on the stop's own content the stop repeats. For known stop content, `reopen-same-content` means the content is still what the stop reviewed: offer the waive instead. A legacy stop with unknown content accepts a current hash without a verified `review.round` of this run/block/file and records `from_hash: null`. If that hash already has such a round, change the file and reopen, or the owner can use `block close --no-require-reviews`; waivers at an old hash cannot clear the current one.
