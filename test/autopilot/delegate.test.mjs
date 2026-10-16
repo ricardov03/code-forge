@@ -383,7 +383,8 @@ test('autopilot ask: exit 0 acted, 3 to the owner (1 session, 1 row each), 1 ref
 
   // `start` keeps B45's codes: an unknown --allow scope is usage (2), a second active grant is 1
   const badStart = await cli(['--run', 'c-act', '--until', UNTIL, '--delegate', 'L2', '--allow', 'waive:all', '--yes'], {}, a.writeRow, 'start');
-  assert.deepEqual([badStart.code, badStart.err], [2, 'autopilot start: unknown scope "waive:all" in --allow; allowable scopes: waive:warning, waive:nit, round:extra, model:choose\n']);
+  // B138: close:routine is an allowable scope.
+  assert.deepEqual([badStart.code, badStart.err], [2, 'autopilot start: unknown scope "waive:all" in --allow; allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine\n']);
   const second = await cli(['--run', 'c-act', '--until', UNTIL, '--delegate', 'L2', '--allow', 'waive:nit', '--yes'], {}, a.writeRow, 'start');
   assert.equal(second.code, 1);
 });

@@ -153,9 +153,10 @@ test('start refusals: exact message, exit 2, nothing stored and no row (one per 
     [{ '--until': '2026-10-08T00:00:00Z' }, '--until is more than 24 h ahead; a grant lasts at most 24 h'],
     [{ '--until': '2026-10-06T23:00:00' }, '--until must be an ISO-8601 time with an offset (Z or ±hh:mm), e.g. 2026-10-07T07:00:00+02:00'],
     [{ '--delegate': 'L1' }, '--delegate must be L2 or L3'],
-    [{ '--allow': 'waive:nit,waive:everything' }, 'unknown scope "waive:everything" in --allow; allowable scopes: waive:warning, waive:nit, round:extra, model:choose'],
+    // B138: scope diagnostics include close:routine for both --allow and --deny.
+    [{ '--allow': 'waive:nit,waive:everything' }, 'unknown scope "waive:everything" in --allow; allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine'],
     [{ '--allow': 'waive:nit,pr:merge' }, 'scope pr:merge is on the fixed deny list and can never be allowed (merge a pull request)'],
-    [{ '--deny': 'sleep' }, 'unknown scope "sleep" in --deny; allowable scopes: waive:warning, waive:nit, round:extra, model:choose'],
+    [{ '--deny': 'sleep' }, 'unknown scope "sleep" in --deny; allowable scopes: waive:warning, waive:nit, round:extra, model:choose, close:routine'],
     [{ '--budget': 'coding=-1' }, 'budget for coding must be a number of USD above 0, e.g. coding=5'],
     [{ '--budget': 'travel=1' }, 'unknown budget category "travel"; categories: coding, review'],
     [{ '--stop-at': '2' }, '--stop-at must be a number above 0 and at most 1, e.g. 0.9'],

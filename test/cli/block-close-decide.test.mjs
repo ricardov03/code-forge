@@ -88,9 +88,14 @@ test('B138 decide boundary: no, no terminal, yes flag and active grant write not
     const f = await fixture();
     if (kind === 'grant') await startGrant({ runId: f.runId, writeRow: f.writeRow, input: { allow: 'waive:nit', delegate: 'L2', until: new Date(Date.now() + 60000).toISOString() } });
     const before = (await f.rows()).length;
-    const result = await f.invoke(kind === 'yes' ? ['--yes'] : [], kind === 'tty' ? { isTTY: false } : kind === 'no' ? { ui: { confirm: async () => false, isCancel: () => false } } : {});
+    let confirmCalls = 0;
+    const result = await f.invoke(kind === 'yes' ? ['--yes'] : [], kind === 'tty' ? { isTTY: false } : kind === 'no' ? { ui: { confirm: async () => { confirmCalls++; return false; }, isCancel: () => false } } : {});
     assert.equal(result.code, ['tty', 'yes'].includes(kind) ? 2 : 1, result.err);
     assert.equal((await f.rows()).length, before, kind);
+    if (kind === 'no') {
+      assert.equal(confirmCalls, 1);
+      assert.equal(result.err, 'block B1 close: cancelled — nothing was recorded\n');
+    }
     if (kind === 'grant') assert.match(result.err, /active/);
   }
 });
