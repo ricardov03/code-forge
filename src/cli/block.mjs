@@ -305,7 +305,14 @@ const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'wai
  */
 function checkWhitespacePaths(workspace, entries, label) {
   for (const entry of entries) {
-    if (label === 'owned' && !/[,\s]/u.test(entry)) continue;
+    let depth = 0;
+    let separator = /\s/u.test(entry);
+    for (const char of entry) {
+      if (char === '{') depth += 1;
+      else if (char === '}') depth = Math.max(0, depth - 1);
+      else if (char === ',' && depth === 0) separator = true;
+    }
+    if (!separator) continue;
     let stat;
     try {
       stat = statSync(path.join(workspace, entry));
@@ -313,11 +320,7 @@ function checkWhitespacePaths(workspace, entries, label) {
       // A missing or unreadable path cannot establish a literal whitespace-containing name.
     }
     if (!stat?.isFile() && !stat?.isDirectory()) {
-      // Blocks may introduce tests, but only under a directory already in the tree.
-      if (label === 'tests' && !/[,\s]/u.test(path.basename(entry)) && /\.(?:test|spec)\.[cm]?[jt]sx?$/.test(entry)) {
-        try { if (statSync(path.dirname(path.join(workspace, entry))).isDirectory()) continue; } catch { /* missing parent */ }
-      }
-      throw new StateError('usage', `${label} entry ${JSON.stringify(entry)} matches no file${label === 'owned' ? '; use spaces, not commas' : ''}`);
+      throw new StateError('usage', `${label} entry ${JSON.stringify(entry)} matches no file; use spaces, not commas`);
     }
   }
 }

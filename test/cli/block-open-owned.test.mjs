@@ -16,6 +16,7 @@ async function fixture(slug) {
   writeFile(repo, 'a.mjs', 'export const a = 1;\n');
   writeFile(repo, 'b.mjs', 'export const b = 1;\n');
   writeFile(repo, 'file with space.mjs', 'export const space = 1;\n');
+  writeFile(repo, 'file,comma.mjs', 'export const comma = 1;\n');
   writeFile(repo, 'file [id] with space.mjs', 'export const bracket = 1;\n');
   mkdirSync(path.join(repo, 'dir [id] with space'));
   mkdirSync(path.join(repo, 'test dir'));
@@ -37,40 +38,34 @@ async function fixture(slug) {
   return { repo, runId, open, rows: () => readAllRows(slug) };
 }
 
-test('B135: comma or whitespace owned entries naming no file refuse with usage and no writes', async () => {
+test('B135b: commas outside braces or whitespace in missing owned and tests entries refuse without writes', async () => {
   const f = await fixture('b118-owned');
   const record = readFileSync(runRecordPath(f.runId), 'utf8');
   const rows = await f.rows();
-  for (const entry of ['a.mjs,b.mjs', 'a.mjs b.mjs', 'a.mjs\tb.mjs', 'a.mjs\nb.mjs',
-    'src/*.mjs,other.mjs', 'src/? name.mjs', 'src/{a,b}.mjs', 'app/[id]/missing file.tsx']) {
-    assert.deepEqual(await f.open('B1', ['--owned', entry]), {
-      code: 2, stdout: '', stderr: `block open: owned entry ${JSON.stringify(entry)} matches no file; use spaces, not commas\n`,
-    });
-    assert.equal(readFileSync(runRecordPath(f.runId), 'utf8'), record);
-    assert.deepEqual(await f.rows(), rows);
+  for (const label of ['owned', 'tests']) {
+    for (const entry of ['a.mjs,b.mjs', 'a.mjs b.mjs', 'a.mjs\tb.mjs', 'a.mjs\nb.mjs',
+      'src/{a,b}.mjs,other.mjs', 'src/{a,{b,c}}.mjs,other.mjs', 'src/{a, b}.mjs',
+      'app/[id]/missing file.tsx', 'test dir/new.test.mjs',
+      ...(label === 'owned' ? ['src/*.mjs,other.mjs', 'src/? name.mjs'] : [])]) {
+      const flags = label === 'owned' ? ['--owned', entry] : ['--owned', 'a.mjs', '--tests', entry];
+      assert.deepEqual(await f.open('B1', flags), {
+        code: 2, stdout: '', stderr: `block open: ${label} entry ${JSON.stringify(entry)} matches no file; use spaces, not commas\n`,
+      });
+      assert.equal(readFileSync(runRecordPath(f.runId), 'utf8'), record);
+      assert.deepEqual(await f.rows(), rows);
+    }
   }
 });
 
-test('B135 boundary: literal space paths, new owned files and owned globs open; missing tests refuse', async () => {
+test('B135b boundary: literal separator paths, new plain paths, brace globs and bracket paths open', async () => {
   const f = await fixture('b118-owned-boundary');
-  const owned = ['file with space.mjs', 'file [id] with space.mjs', 'dir [id] with space', 'new.mjs', 'src/glob/**', 'app/[id]/page.tsx'];
-  const accepted = await f.open('B1', ['--owned', ...owned, '--tests', 'test dir']);
+  const owned = ['file with space.mjs', 'file,comma.mjs', 'file [id] with space.mjs', 'dir [id] with space', 'new.mjs', 'src/glob/**', 'src/{a,b}.mjs', 'src/{a,{b,c}}.mjs', 'app/[id]/page.tsx'];
+  const tests = ['test dir', 'file,comma.mjs', 'missing.mjs', 'missing/new.test.mjs', 'test/{a,b}.test.mjs', 'app/[id]/page.test.tsx'];
+  const accepted = await f.open('B1', ['--owned', ...owned, '--tests', ...tests]);
   assert.deepEqual([accepted.code, accepted.stderr], [0, '']);
   const block = (await readRun(f.runId)).blocks.B1;
-  assert.deepEqual([block.owned_files, block.test_files], [owned, ['test dir']]);
-  assert.deepEqual(JSON.parse(accepted.stdout).tests, 1);
-  const record = readFileSync(runRecordPath(f.runId), 'utf8');
-  const rows = await f.rows();
-  for (const entry of ['missing.mjs', 'a.mjs b.mjs', 'missing/new.test.mjs']) {
-    assert.deepEqual(await f.open('B2', ['--owned', 'a.mjs', '--tests', entry]), {
-      code: 2, stdout: '', stderr: `block open: tests entry ${JSON.stringify(entry)} matches no file\n`,
-    });
-  }
-  assert.equal(readFileSync(runRecordPath(f.runId), 'utf8'), record);
-  assert.deepEqual(await f.rows(), rows);
-  const newTest = await f.open('B3', ['--owned', 'a.mjs', '--tests', 'test dir/new.test.mjs']);
-  assert.deepEqual([newTest.code, newTest.stderr], [0, '']);
-  assert.deepEqual((await readRun(f.runId)).blocks.B3.test_files, ['test dir/new.test.mjs']);
+  assert.deepEqual([block.owned_files, block.test_files], [owned, tests]);
+  assert.equal(JSON.parse(accepted.stdout).tests, tests.length);
   const plainTest = await f.open('B4', ['--owned', 'b.mjs', '--tests', 'new.test.ts']);
   assert.deepEqual([plainTest.code, plainTest.stderr], [0, '']);
   assert.deepEqual((await readRun(f.runId)).blocks.B4.test_files, ['new.test.ts']);
