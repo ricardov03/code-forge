@@ -244,9 +244,17 @@ function proofTimePerBlock(rows) {
 
 function forecastVsActualLines(rows) {
   const forecasts = new Map(rows.filter((r) => r.event === 'dispatch').map((r) => [r.block, r.lines]));
-  return rows
-    .filter((r) => r.event === 'block.close' && typeof r.lines_actual === 'number')
-    .map((r) => ({ block: r.block, forecast: forecasts.get(r.block) ?? null, actual: r.lines_actual }));
+  const key = (r) => JSON.stringify([r.run ?? null, r.block]);
+  const gates = new Map(rows.filter((r) => r.event === 'gate.done').map((r) => [key(r), r]));
+  const closed = rows.filter((r) => r.event === 'block.close' && typeof r.lines_actual === 'number');
+  const closedKeys = new Set(closed.map(key));
+  const repeatCount = (r) => gates.get(key(r))?.repeats?.n;
+  return [
+    ...closed.map((r) => ({ block: r.block, forecast: forecasts.get(r.block) ?? null, actual: r.lines_actual,
+      ...(repeatCount(r) !== undefined ? { repeats: repeatCount(r) } : {}) })),
+    ...[...gates.values()].filter((r) => r.repeats && !closedKeys.has(key(r)))
+      .map((r) => ({ block: r.block, forecast: forecasts.get(r.block) ?? null, actual: null, repeats: r.repeats.n })),
+  ];
 }
 
 const blocksStoppedAtL3 = (rows) => rows.filter((r) => r.event === 'block.stop' && r.level === 'L3').map((r) => r.block);

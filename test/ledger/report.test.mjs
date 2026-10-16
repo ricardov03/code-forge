@@ -11,6 +11,31 @@ const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..
 const TMP_PARENT = await mkdtemp(path.join(os.tmpdir(), 'cf-b66-report-'));
 after(() => rm(TMP_PARENT, { recursive: true, force: true }));
 
+test('B136: report forecast section shows repeat counts for closed and open gates, scoped to the run', async () => {
+  const rows = [
+    { event: 'dispatch', run: 'r1', block: 'B1', lines: 50 },
+    { event: 'gate.done', run: 'r1', block: 'B1', repeats: { n: 2, files: ['test/a.mjs'], failed: false } },
+    { event: 'block.close', run: 'r1', block: 'B1', lines_actual: 45 },
+    { event: 'block.close', run: 'r2', block: 'B1', lines_actual: 30 },
+    { event: 'gate.done', run: 'r1', block: 'B2', repeats: { n: 10, files: ['test/b.mjs'], failed: true } },
+    { event: 'gate.done', run: 'r1', block: 'B3', repeats: { n: 3, files: ['test/c.mjs'], failed: false } },
+    { event: 'gate.done', run: 'r1', block: 'B3', all_ok: true },
+    { event: 'gate.done', run: 'r1', block: 'B4', source: 'shadow', repeats: { n: 4, files: [], failed: false } },
+  ];
+  const expected = [
+    { block: 'B1', forecast: 50, actual: 45, repeats: 2 },
+    { block: 'B1', forecast: 50, actual: 30 },
+    { block: 'B2', forecast: null, actual: null, repeats: 10 },
+  ];
+  assert.deepEqual(buildReport(rows).sections.forecast_vs_actual_lines, expected);
+  assert.deepEqual(buildReport(rows.filter((r) => r.event !== 'gate.done')).sections.forecast_vs_actual_lines,
+    [{ block: 'B1', forecast: 50, actual: 45 }, { block: 'B1', forecast: 50, actual: 30 }]);
+  const text = await reportCli('repeat-counts', rows, (slug) => ['--slug', slug]);
+  assert.equal(text.code, 0, text.stderr);
+  const section = text.stdout.split('== forecast_vs_actual_lines ==\n')[1].split('== ')[0];
+  assert.deepEqual(JSON.parse(section), expected);
+});
+
 function threeBlockLedger() {
   const rows = [
     { event: 'dispatch', block: 'b1', level: 'L1', lane: 'L1', lines: 500 },

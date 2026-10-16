@@ -68,6 +68,8 @@ Each `review-file` ticket is served by the worker `forge run start` launched: to
 
 ## §5 The block gate is a re-measurement — `forge block close <id> --run <r>`
 
+With `gates.repeat_new_tests: N` (integer 2..10; absent means off), a passing `gates run --run <r> --block <id>` test gate runs N additional times for only the block's added or changed test files against its base, using a whole `{test_files}` argv item; without that item it prints `repeat_new_tests: skipped (gates.test has no {test_files})`, and without changed tests it does no repeats. A failed repeat makes the gate red with `reason: flaky-test`, the file list and failing output; JSON and signed gate rows carry `repeats: {n, files, failed}`, and the report's forecast section shows the count.
+
 With `gates.test` configured, `block close` refuses (exit 1) without a green `gate.done` row for this run and block: `no green gates run; run: code-forge gates run --run <r> --block <id>`. When timestamps allow comparison, the green row must be newer than the last commit touching owned paths after the block base; otherwise any green row suffices. The history lookup must succeed; only a successful empty log means no later commit. Waiving reviews does not lift the test gate; the human confirmation and other bypass diagnostics still apply.
 
 `block accept-hit <id> --run <r> --line <n> --transcript <path> --reason <text>` asks the human once for every rule hit on that line and its paired Codex `item.completed` line (same item id), then signs one acceptance per rule and line. Add `--rule <rule-id>` to keep the single-hit behavior.
