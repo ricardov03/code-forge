@@ -158,17 +158,17 @@ export function planSessions({ risk, cfg, kind = 'code' }) {
 
 /**
  * The rules risk (§3.5 fallback; S1 `risk` without Jev): a `proof.tiers.high.paths` match ⇒ 3,
- * a migration/policy/middleware path ⇒ 2, more than 200 added lines ⇒ 1, else 0.
- * @param {{file: string, plusCount: number, cfg: Record<string, any>}} opts
+ * a migration/policy/middleware path ⇒ 2, more than 200 changed lines ⇒ 1, else 0.
+ * @param {{file: string, plusCount: number, minusCount?: number, cfg: Record<string, any>}} opts
  * @returns {number}
  */
-export function rulesRisk({ file, plusCount, cfg }) {
+export function rulesRisk({ file, plusCount, minusCount = 0, cfg }) {
   const highPaths = cfg?.proof?.tiers?.high?.paths;
   const pathFloorHit = tierFor({ file, risk: 0, highPaths: Array.isArray(highPaths) ? highPaths : [] }).reason === 'path';
   return fallbackRisk({
     pathFloorHit,
     filesChanged: 1,
-    linesAdded: plusCount,
+    linesAdded: plusCount + minusCount,
     touchesMigration: isMigrationPath(file),
     touchesPolicyOrMiddleware: isPolicyPath(file),
   });
@@ -262,7 +262,7 @@ export function pairedContext({ repoRoot, file, peers = [], ownedFiles = [], cha
 export async function reviewFile(input, deps) {
   const { repoRoot, cfg, workDir } = input;
   const diff = await readFileDiff({ repoRoot, file: input.file, base: input.base ?? null });
-  const risk = input.risk ?? rulesRisk({ file: diff.file, plusCount: diff.plusCount, cfg });
+  const risk = input.risk ?? rulesRisk({ file: diff.file, plusCount: diff.plusCount, minusCount: diff.minusCount, cfg });
   // no recorded kind ⇒ the reviewed file's own kind (a lone `.md` is a docs review), never a blind `code`
   const kind = typeof input.kind === 'string' ? input.kind : blockKind({ owned: [diff.file] });
   let plan = planSessions({ risk, cfg, kind });

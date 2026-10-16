@@ -45,22 +45,25 @@ async function engineRun(repo, cfg = cfgFor(), extra = {}) {
   return { ...fake, rows, outcome };
 }
 
-test('B109 (1)(2): deletion-heavy risk-0 file steps from quick to one full L2 session', async () => {
+test('B131: deletion-heavy rules risk counts added and removed lines, with the old-call boundary unchanged', async () => {
   const { repo, diff } = await reproduction();
   const quick = assemblePacket({ diff, lens: 'quick' });
   assert.equal(quick.status, 'split_required');
   assert.equal(quick.budget, 6000);
   assert.equal(quick.tokensIn > 6000 && quick.tokensIn < 32000, true);
+  assert.equal(rulesRisk({ file: FILE, plusCount: 57, minusCount: 462, cfg: {} }), 1, '519 changed lines give risk 1');
+  assert.deepEqual([200, 201].map((changed) => rulesRisk({ file: FILE, plusCount: 57, minusCount: changed - 57, cfg: {} })), [0, 1], 'the changed-line threshold is strictly over 200');
+  assert.deepEqual([57, 200, 201].map((plusCount) => rulesRisk({ file: FILE, plusCount, cfg: {} })), [0, 0, 1], 'omitting removed lines preserves added-only risk');
   const { outcome, calls, rows } = await engineRun(repo);
   assert.equal(outcome.status, 'reviewed', JSON.stringify({ status: outcome.status, budget: outcome.budget, sessions: outcome.sessions.length, spawns: calls.length }));
-  assert.deepEqual([outcome.approved, outcome.risk, outcome.depth, calls.length, outcome.sessions.length], [true, 0, 'full', 1, 1]);
+  assert.deepEqual([outcome.approved, outcome.risk, outcome.depth, calls.length, outcome.sessions.length], [true, 1, 'full', 1, 1]);
   assert.deepEqual(outcome.sessions.map((s) => [s.lens, s.level, s.role, s.status]), [['full', 'L2', 'reviewer', 'ok']]);
   assert.deepEqual(calls.map((s) => [s.rowExtra.lens, s.level]), [['full', 'L2']]);
   const full = assemblePacket({ diff, lens: 'full' });
   assert.equal(full.status, 'ok');
   assert.equal(calls[0].text, 'text' in full ? full.text : '');
   assert.equal(rows.length, 1);
-  assert.deepEqual(rows[0], { event: 'review.plan', depth_unconstrained: 'full', depth_chosen: 'full', degrade_step: 0, risk: 0, context_mode: 'whole', forecast_tokens: full.tokensIn, step_up: { from: 'quick', tokens_in: quick.tokensIn, budget: 6000 } });
+  assert.deepEqual(rows[0], { event: 'review.plan', depth_unconstrained: 'full', depth_chosen: 'full', degrade_step: 0, risk: 1, context_mode: 'whole', forecast_tokens: full.tokensIn });
 });
 
 test('B109 (3): over full_in stops at the full size and budget without a session or row', async () => {
@@ -69,7 +72,7 @@ test('B109 (3): over full_in stops at the full size and budget without a session
   assert.equal(full.status, 'split_required');
   assert.equal(full.tokensIn > 32000, true);
   const { outcome, calls, rows } = await engineRun(repo);
-  assert.deepEqual([outcome.status, outcome.approved, outcome.depth, outcome.risk, outcome.tokens_in, outcome.budget, calls.length, outcome.sessions.length, rows.length], ['split_required', false, 'full', 0, full.tokensIn, 32000, 0, 0, 0]);
+  assert.deepEqual([outcome.status, outcome.approved, outcome.depth, outcome.risk, outcome.tokens_in, outcome.budget, calls.length, outcome.sessions.length, rows.length], ['split_required', false, 'full', 1, full.tokensIn, 32000, 0, 0, 0]);
   const custom = await engineRun(repo, cfgFor({ budgets: { full_in: 31000 } }));
   assert.deepEqual([custom.outcome.tokens_in, custom.outcome.budget, custom.calls.length], [full.tokensIn, 31000, 0]);
 });
@@ -113,11 +116,10 @@ test('B109 (6): risk 1 keeps one full L2 session and the same row with no step_u
   assert.deepEqual(rows, [{ event: 'review.plan', depth_unconstrained: 'full', depth_chosen: 'full', degrade_step: 0, risk: 1, context_mode: 'whole', forecast_tokens: packet.tokensIn }]);
 });
 
-test('B109: a non-full second plan fails closed without spawning consensus', async () => {
+test('B131: deletion-heavy risk respects the configured consensus refusal without spawning', async () => {
   const { repo, diff } = await reproduction();
-  const quick = assemblePacket({ diff, lens: 'quick' });
   const { outcome, calls, rows } = await engineRun(repo, cfgFor({ multimodel: true, single_reviewer_max_risk: 0.5 }));
-  assert.deepEqual([outcome.status, outcome.approved, outcome.depth, outcome.tokens_in, outcome.budget, calls.length, rows.length], ['split_required', false, 'quick', quick.tokensIn, 6000, 0, 0]);
+  assert.deepEqual([outcome.status, outcome.reason, outcome.approved, outcome.risk, outcome.depth, calls.length, rows.length], ['refused', 'consensus-no-second-provider', false, 1, null, 0, 0]);
 });
 
 test('B109 (7): the worker signs a reviewed ticket for the reproduction file', async () => {
@@ -142,6 +144,6 @@ test('B109 (7): the worker signs a reviewed ticket for the reproduction file', a
   assert.deepEqual([result?.status, result?.approved, fake.calls.length], ['reviewed', true, 1]);
   assert.deepEqual(result?.sessions.map((s) => [s.lens, s.level, s.status]), [['full', 'L2', 'ok']]);
   assert.deepEqual(rows.filter((r) => r.event === 'review.result').map((r) => [r.status, r.approved]), [['reviewed', true]]);
-  assert.deepEqual(rows.filter((r) => r.event === 'review.plan').map((r) => [r.depth_chosen, r.step_up?.from, r.step_up?.budget]), [['full', 'quick', 6000]]);
+  assert.deepEqual(rows.filter((r) => r.event === 'review.plan').map((r) => [r.depth_chosen, r.risk, r.step_up ?? null]), [['full', 1, null]]);
   assert.equal(rows.filter((r) => r.event === 'review.approved').length, 1);
 });
