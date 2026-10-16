@@ -648,7 +648,8 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
   let pin = await checkWorkerPin(record, { livePid, probe });
   const pins = record.workers ?? (record.worker ? [record.worker] : []);
   const counted = rows.filter((row) => row.block === id && (row.run === undefined || row.run === runId) && row.event === 'review.result' && !['stale', 'unavailable', 'answers'].includes(row.status) && !(row.status === 'refused' && row.reason === 'other-run'));
-  if (counted.some((row) => !pins.some((p) => p.pid === row.worker?.pid && p.started_at === row.worker?.started_at))) {
+  // Ledgers written before B107 omit worker identity and use the run's pin check above.
+  if (counted.some((row) => row.worker !== undefined && !pins.some((p) => p.pid === row.worker?.pid && p.started_at === row.worker?.started_at))) {
     pin = { ok: false, event: 'worker.replaced', reason: 'a counted review result does not name a pinned worker' };
   }
   if (pin.ok) {

@@ -13,7 +13,7 @@ import { test } from 'node:test';
 // temp repo.
 
 const { loadKey, signRow, verifyRow } = await import('../../src/state/signer.mjs');
-const { startRun, writeSigned } = await import('../../src/state/run.mjs');
+const { processStartTime, startRun, writeSigned } = await import('../../src/state/run.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { runBlock } = await import('../../src/cli/block.mjs');
@@ -64,9 +64,10 @@ async function fixture(slug) {
   writeFile(repo, SRC, 'export const a = 1;\n');
   writeFile(repo, 'coder.log', '$ node --test\n');
   await commitAll(repo);
-  const probe = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
+  // B107: pin the in-process worker whose identity is signed into the results.
+  const probe = processStartTime;
   const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
-  await startRun({ workspace: repo, project: slug, runId, workerPid: 4242, writeRow, probe });
+  await startRun({ workspace: repo, project: slug, runId, workerPid: process.pid, writeRow, probe });
   await openBlock({ runId, id: 'B1', level: 'L2', owned: [SRC, ANS], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
   writeFile(repo, SRC, SRC_V2);
   writeFile(repo, ANS, ANS_V1);
@@ -121,7 +122,7 @@ async function fixture(slug) {
   /** @param {string[]} extra @returns {Promise<[number, string]>} */
   const close = async (extra = []) => {
     const stream = capture();
-    const code = await runBlock(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...extra], { stdout: stream, stderr: stream, probe, now: () => T0 });
+    const code = await runBlock(['close', 'B1', '--run', runId, '--worker-pid', String(process.pid), '--transcript', `${repo}/coder.log`, ...extra], { stdout: stream, stderr: stream, probe, now: () => T0 });
     return [code, stream.text];
   };
   const rows = async () => (await readAllRows(slug)).filter((r) => r.run === runId);

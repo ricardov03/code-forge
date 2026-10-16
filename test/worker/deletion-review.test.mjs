@@ -9,7 +9,7 @@ import { test } from 'node:test';
 // and the real `block close`, in a temp HOME and a temp repo.
 
 const { loadKey } = await import('../../src/state/signer.mjs');
-const { startRun } = await import('../../src/state/run.mjs');
+const { processStartTime, startRun } = await import('../../src/state/run.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { runBlock } = await import('../../src/cli/block.mjs');
@@ -67,9 +67,10 @@ async function fixture(slug, others = {}) {
   writeFile(repo, 'coder.log', '$ node --test\n');
   for (const [rel, text] of Object.entries(others)) writeFile(repo, rel, text);
   await commitAll(repo);
-  const probe = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
+  // B107: pin the in-process worker whose identity is signed into the results.
+  const probe = processStartTime;
   const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
-  await startRun({ workspace: repo, project: slug, runId, workerPid: 4242, writeRow, probe });
+  await startRun({ workspace: repo, project: slug, runId, workerPid: process.pid, writeRow, probe });
   await openBlock({ runId, id: 'B1', level: 'L2', owned: [SRC], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
   await git(['rm', '-q', '--', SRC], repo);
   await git(['commit', '-q', '-m', 'delete'], repo);
@@ -101,7 +102,7 @@ async function fixture(slug, others = {}) {
   const close = async () => {
     const stdout = capture();
     const stderr = capture();
-    const code = await runBlock(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`], { stdout, stderr, probe, now: () => T0 });
+    const code = await runBlock(['close', 'B1', '--run', runId, '--worker-pid', String(process.pid), '--transcript', `${repo}/coder.log`], { stdout, stderr, probe, now: () => T0 });
     return { code, out: stdout.text, err: stderr.text };
   };
   const approvals = async () => (await readAllRows(slug)).filter((r) => r.run === runId && r.event === 'review.approved');

@@ -98,7 +98,7 @@ test('B107: block pin check requires pinned result identities, a live pin and no
   const review = (worker) => signRow({ run: runId, block: BLOCK, event: 'review.result', status: 'reviewed', approved: true, worker }, key);
   const close = (resultRows, probe = async (pid) => pid === live.pid ? live.started_at : null) => closeBlock({ runId, id: BLOCK, rows: [...rows, ...resultRows], writeRow: async () => {}, probe, dryRun: true });
   assert.equal((await close([review(dead)])).ok, true, 'dead pinned result accepted while another pin is live');
-  for (const worker of [undefined, { pid: 9999, started_at: 'foreign' }, { ...live, started_at: 'recycled' }]) {
+  for (const worker of [null, { pid: 9999, started_at: 'foreign' }, { ...live, started_at: 'recycled' }]) {
     assert.equal((await close([review(worker)])).event, 'worker.replaced', `unmatched result ${JSON.stringify(worker)} refuses`);
   }
   assert.equal((await close([review(live)], async () => null)).event, 'worker.down', 'all pins dead refuses');
@@ -116,5 +116,23 @@ test('B107: block pin check requires pinned result identities, a live pin and no
   } finally { rmSync(claim, { force: true }); }
   record.workers = [live]; await saveRun(record);
   assert.equal((await close([review(live)])).ok, true, 'one worker accepts its result');
-  assert.equal((await close([review(undefined)])).event, 'worker.replaced', 'one worker also requires a result identity');
+  assert.equal((await close([review(null)])).event, 'worker.replaced', 'one worker also rejects an invalid result identity');
+});
+
+test('B107: a legacy result without a worker field closes with one live pinned worker', async () => {
+  const { runId } = await makeRepo();
+  const worker = { pid: 4242, started_at: 'live' };
+  const record = await readRun(runId);
+  record.worker = worker; record.workers = [worker]; await saveRun(record);
+  const rows = [];
+  const writeRow = async (row) => { rows.push(row); };
+  await writeSigned(runId, writeRow, { event: 'dispatch', block: BLOCK });
+  await writeSigned(runId, writeRow, { event: 'review.result', block: BLOCK, status: 'reviewed', approved: true });
+  assert.equal(Object.hasOwn(rows.at(-1), 'worker'), false, 'legacy result omits worker');
+  const close = (opts = {}) => closeBlock({ runId, id: BLOCK, rows, writeRow, probe: async (pid) => pid === worker.pid ? worker.started_at : null, ...opts });
+  assert.equal((await close({ livePid: 9999, dryRun: true })).event, 'worker.replaced', 'legacy live-pid mismatch still refuses');
+  assert.equal((await close({ probe: async () => null, dryRun: true })).event, 'worker.down', 'legacy dead pin still refuses');
+  assert.deepEqual(await close(), { ok: true, status: 'closed' });
+  assert.equal((await readRun(runId)).blocks[BLOCK].status, 'closed');
+  assert.equal(rows.at(-1).event, 'block.close');
 });

@@ -16,6 +16,7 @@ const { startRun } = await import('../../src/state/run.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
+const { readStartTime } = await import('../../src/util/reaper.mjs');
 
 const FILE = 'src/big.mjs';
 const PRIMARY = 'claude-opus-5-5';
@@ -431,15 +432,24 @@ describe('B90 (5): no review.routes ⇒ today\'s spawn options and rows', () => 
   };
 
   /** @param {Awaited<ReturnType<typeof wired>>} w @param {Record<string, any>} result */
-  const observed = (w, result) => ({
-    spawnKeys: w.spawned.map((s) => Object.keys(s)),
-    spawned: w.spawned.map((s) => {
-      const { cfg: _c, ...rest } = norm(s);
-      return { ...rest, schema: rest.schema?.$id };
-    }),
-    rows: w.rows.map(norm),
-    result: norm(result),
-  });
+  const observed = (w, result) => {
+    // B107: verify the signed per-process identity before comparing the pre-B107 fields.
+    const resultBody = (/** @type {Record<string, any>} */ row) => {
+      const { worker, ...body } = row;
+      assert.deepEqual(worker, { pid: process.pid, started_at: readStartTime(process.pid) });
+      assert.equal(verifyRow(row, w.key).ok, true, 'worker identity is covered by the signature');
+      return norm(body);
+    };
+    return {
+      spawnKeys: w.spawned.map((s) => Object.keys(s)),
+      spawned: w.spawned.map((s) => {
+        const { cfg: _c, ...rest } = norm(s);
+        return { ...rest, schema: rest.schema?.$id };
+      }),
+      rows: w.rows.map((row) => row.event === 'review.result' ? resultBody(row) : norm(row)),
+      result: resultBody(result),
+    };
+  };
   const BASE = { spawnKeys: [BASE_SPAWN_KEYS], spawned: [BASE_SPAWN], rows: BASE_ROWS, result: BASE_RESULT };
 
   test('no review.routes: the spawn options, rows and result equal the pinned 8fadc12 reference; the session gets the worker\'s config object itself', async () => {
