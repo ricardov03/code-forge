@@ -8,7 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
-- `upgrade` ends with an ASCII logo, package version, version change and release-note summary; `--plain` keeps only the install lines, and install records now track their linked package version (B129)
+- `upgrade` starts with an ASCII logo and package version, followed by the version change, install lines and release-note summary; `--plain` prints only the install lines, and install records now track their linked package version (B129)
 
 - README: a new-user guide replaces per-version history, which lives only in this CHANGELOG; releases update only the optional `Latest:` line and no longer require a next-release README anchor (B130).
 

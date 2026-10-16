@@ -32,7 +32,11 @@ test('successful upgrade starts with a compact ASCII logo and the injected runni
   const versionLine = lines.indexOf('code-forge 2.0.0');
   assert.ok(versionLine >= 1 && versionLine <= 7, `logo has ${versionLine} lines; expected 1–7`);
   const logo = lines.slice(0, versionLine);
-  assert.equal(logo.filter((line) => line.includes('code-forge')).length, 1, 'logo spells code-forge exactly once');
+  assert.deepEqual(logo, [
+    ' ___  __   __   ___       ___  __   __   __   ___',
+    '|    |  | |  \\ |__   __  |__  |  | |__/ | _  |__',
+    '|___ |__| |__/ |___      |    |__| |  \\ |__] |___',
+  ], 'output starts with the exact three-line code-forge wordmark');
   for (const line of logo) {
     assert.ok(line.length <= 60, `logo line has ${line.length} columns`);
     assert.match(line, /^[\x20-\x7e]*$/, 'logo is printable ASCII');
@@ -92,7 +96,7 @@ test('missing, malformed, empty or other-version changelog omits the whole notes
     const stdout = sink();
     const stderr = sink();
     assert.equal(await runUpgrade([], { ...deps, stdout, stderr }), 0);
-    assert.match(stdout.text, /^\+.*\n/, 'successful empty upgrade still starts with its logo');
+    assert.equal(stdout.text.split('\n')[0], ' ___  __   __   ___       ___  __   __   __   ___', 'successful empty upgrade still starts with its logo');
     assert.doesNotMatch(stdout.text, /What's new|Full notes:/);
     assert.equal(stderr.text, '');
   }
@@ -281,7 +285,7 @@ test('runUpgrade on an empty installs.json prints "nothing to upgrade" and exits
   const stdout = sink();
   const code = await runUpgrade([], { stdout, stderr: sink(), home, defaultSource: await tempDir('cf-src-') });
   assert.equal(code, 0);
-  assert.match(stdout.text, /^\+.*\n/);
+  assert.equal(stdout.text.split('\n')[0], ' ___  __   __   ___       ___  __   __   __   ___');
   assert.equal(stdout.text.split('\n').filter((line) => line === 'nothing to upgrade').length, 1);
 });
 

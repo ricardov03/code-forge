@@ -18,7 +18,7 @@ import { writeSafe } from '../util/redact.mjs';
 import { installsPath, readInstalls, upgradeAll } from '../install/link.mjs';
 
 const USAGE = 'usage: code-forge upgrade [--source <path>] [--plain]\n';
-const LOGO = '+------------+\n| code-forge |\n+------------+\n';
+const LOGO = ' ___  __   __   ___       ___  __   __   __   ___\n|    |  | |  \\ |__   __  |__  |  | |__/ | _  |__\n|___ |__| |__/ |___      |    |__| |  \\ |__] |___\n';
 const PACKAGE_VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const CHANGELOG_PATH = fileURLToPath(new URL('../../CHANGELOG.md', import.meta.url));
 
