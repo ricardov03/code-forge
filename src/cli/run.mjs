@@ -73,15 +73,18 @@ const ledgerWriter = (slug) => (/** @type {Record<string, any>} */ row) => appen
  * A worker that `run start` launched but could not pin must not outlive the command as an orphan:
  * stop it through the pinned-worker stopper (pid > 1, start time re-checked right before the
  * signal, so a recycled pid is never signalled) and name the pid on stderr. `startedAt` is the
- * start time read right after the launch; null means the process was already gone.
- * @param {{pid: number, startedAt: string | null}} launched
+ * start time read right after the launch; null means the process was already gone. When that
+ * probe threw (`undefined`), use the OS probe to obtain and re-check the identity for cleanup.
+ * @param {{pid: number, startedAt: string | null | undefined}} launched
  * @param {{stopWorker: StopWorker, probe?: import('../state/run.mjs').StartTimeProbe, err: (s: string) => void}} deps
  */
 async function stopLaunched({ pid, startedAt }, { stopWorker, probe, err }) {
   /** @type {{stopped: boolean, reason?: string}} */
   let outcome;
   try {
-    outcome = startedAt === null ? { stopped: false, reason: 'not running' } : await stopWorker({ pid, started_at: startedAt }, { ...(probe ? { probe } : {}) });
+    const cleanupProbe = startedAt === undefined ? processStartTime : probe;
+    if (startedAt === undefined) startedAt = await processStartTime(pid);
+    outcome = startedAt === null ? { stopped: false, reason: 'not running' } : await stopWorker({ pid, started_at: startedAt }, { ...(cleanupProbe ? { probe: cleanupProbe } : {}) });
   } catch (thrown) {
     outcome = { stopped: false, reason: thrown?.message ?? String(thrown) };
   }
@@ -133,8 +136,10 @@ export async function runRun(args, deps = {}) {
         const count = entries.filter((e) => e.live).length + (legacy && !entries.some((e) => e.worker?.pid === legacy.pid && e.worker.start_time === legacy.start_time) ? 1 : 0);
         if (count >= limit) throw new StateError('worker-running', `review.workers limit ${limit} reached`);
         const launched = await startWorker({ runId, workspace: record.workspace });
-        const startedAt = await (probe ?? processStartTime)(launched.pid);
+        /** @type {string | null | undefined} */
+        let startedAt;
         try {
+          startedAt = await (probe ?? processStartTime)(launched.pid);
           await repinWorker({ runId, repoRoot: launched.repoRoot, expectPid: launched.pid, add: true, writeRow: ledgerWriter(record.project), ...(probe ? { probe } : {}) });
         } catch (thrown) {
           await stopLaunched({ pid: launched.pid, startedAt }, { stopWorker: stopWorker ?? stopPinnedWorker, probe, err });

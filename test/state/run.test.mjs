@@ -125,6 +125,20 @@ test('pinned worker: a different LIVE pid or a changed start time ⇒ worker.rep
   });
 });
 
+for (const [startedAt, event] of [['recycled', 'worker.replaced'], [null, 'worker.down'], ['start-A', undefined]]) {
+  test(`B107: livePid must match its own pin with a live peer (${startedAt ?? 'down'})`, async () => {
+    const a = { pid: 4242, started_at: 'start-A' };
+    const b = { pid: 4243, started_at: 'start-B' };
+    const record = { worker: a, workers: [a, b] };
+    const probe = async (pid) => pid === a.pid ? startedAt : b.started_at;
+    const result = await checkWorkerPin(record, { livePid: a.pid, probe });
+    assert.equal(result.ok, event === undefined);
+    assert.equal(result.event, event);
+    assert.deepEqual(await checkWorkerPin(record, { probe }), { ok: true }, 'without livePid a matching peer suffices');
+    assert.deepEqual(await checkWorkerPin(record, { livePid: b.pid, probe }), { ok: true }, 'the second pin can be the live worker');
+  });
+}
+
 test('`run start` refuses an existing run id and leaves its key and record byte-identical', async () => {
   await withFixture(async ({ home, ws }) => {
     const { writeRow } = rowSink();

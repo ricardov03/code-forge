@@ -340,15 +340,18 @@ export async function reattachWorker({ runId, workerPid, writeRow, probe = proce
  * @returns {Promise<{ok: boolean, event?: 'worker.replaced' | 'worker.down', reason?: string}>}
  */
 export async function checkWorkerPin(record, { livePid, probe = processStartTime } = {}) {
+  let pin = record.worker;
   if (record.workers?.length > 1) {
     const pins = record.workers;
     if (pins.some((p) => !isSignalablePid(p.pid)) || (livePid !== undefined && !pins.some((p) => p.pid === livePid))) {
       return { ok: false, event: 'worker.replaced', reason: 'the live worker does not match a pinned worker' };
     }
-    const live = await Promise.all(pins.map(async (p) => (await probe(p.pid)) === p.started_at));
-    return live.some(Boolean) ? { ok: true } : { ok: false, event: 'worker.down', reason: 'no pinned worker is running' };
+    if (livePid === undefined) {
+      const live = await Promise.all(pins.map(async (p) => (await probe(p.pid)) === p.started_at));
+      return live.some(Boolean) ? { ok: true } : { ok: false, event: 'worker.down', reason: 'no pinned worker is running' };
+    }
+    pin = pins.find((p) => p.pid === livePid);
   }
-  const pin = record.worker;
   if (!pin) return { ok: false, event: 'worker.down', reason: 'no worker is pinned for this run' };
   if (!isSignalablePid(pin.pid)) return { ok: false, event: 'worker.replaced', reason: 'the pinned worker pid is not an integer > 1' };
   if (livePid !== undefined && livePid !== pin.pid) {

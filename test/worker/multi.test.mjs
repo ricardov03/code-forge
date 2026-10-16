@@ -1,13 +1,16 @@
-import { BLOCK, cli, freshDir, makeRepo, stopPidAfter } from './helpers.mjs';
+import { BLOCK, cli, freshDir, makeRepo, stopPidAfter, waitFor } from './helpers.mjs';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createHash } from 'node:crypto';
+import { once } from 'node:events';
 import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { runRun } from '../../src/cli/run.mjs';
 import { createKeyStore } from '../../src/keys/store.mjs';
 import { closeBlock } from '../../src/state/block.mjs';
-import { endRun, readRun, saveRun, writeSigned } from '../../src/state/run.mjs';
+import { endRun, processStartTime, readRun, saveRun, stopPinnedWorker, writeSigned } from '../../src/state/run.mjs';
 import { loadKey, signRow, verifyRow } from '../../src/state/signer.mjs';
 import { createWorker } from '../../src/worker/loop.mjs';
 import { enqueue, readResult, workerRegistry } from '../../src/worker/queue.mjs';
@@ -18,6 +21,46 @@ function gate() {
   const promise = new Promise((resolve) => { open = resolve; });
   return { promise, open: () => open() };
 }
+
+test('B107: add-worker stops its launched child when the initial probe throws and adds no pin', async () => {
+  const { repo, runId } = await makeRepo();
+  const config = path.join(repo, '.code-forge.yml');
+  writeFileSync(config, readFileSync(config, 'utf8').replace('review:', 'review:\n  workers: 2'));
+  const original = await readRun(runId);
+  original.worker = { pid: process.pid, started_at: await processStartTime(process.pid) };
+  original.workers = [original.worker];
+  await saveRun(original);
+  const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 60000)'], { stdio: 'ignore' });
+  const exited = once(child, 'exit');
+  const pid = /** @type {number} */ (child.pid);
+  const stops = [];
+  let launched = false, stderr = '', stdout = '';
+  try {
+    const code = await runRun(['start', '--add-worker', '--run', runId], {
+      stdout: { write: (s) => { stdout += s; } },
+      stderr: { write: (s) => { stderr += s; } },
+      startWorker: async () => { launched = true; return { pid, repoRoot: repo }; },
+      probe: async (probedPid) => {
+        assert.equal(launched, true, 'probe runs after launch');
+        assert.equal(probedPid, pid);
+        throw new Error('initial worker probe failed');
+      },
+      stopWorker: async (pin, opts) => { stops.push(pin.pid); return stopPinnedWorker(pin, opts); },
+    });
+    assert.equal(code, 1);
+    assert.match(stderr, /initial worker probe failed/);
+    assert.equal(stdout, '');
+    const record = await readRun(runId);
+    assert.deepEqual(record.workers, original.workers, 'no new pin is added');
+    assert.deepEqual(record.worker, original.worker, 'the existing pin is preserved');
+    assert.deepEqual(stops, [pid], 'cleanup stops exactly the launched pid');
+    assert.equal(await waitFor(() => child.exitCode !== null || child.signalCode !== null, 3000), true, 'launched child actually exits');
+    assert.match(stderr, /not pinned; stopped it/);
+  } finally {
+    if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');
+    await exited;
+  }
+});
 
 test('B107: add-worker pins another active worker, preserves first pin, and names capacity', async () => {
   const { repo, runId } = await makeRepo({ start: false });
