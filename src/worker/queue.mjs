@@ -516,11 +516,14 @@ export function readTicket(repoRoot, id) {
  * @returns {Record<string, any>} the signed result
  */
 export function writeResult({ repoRoot, runId, ticket, result, key }) {
-  const signed = signRow({ ...result, run: runId, ticket: assertTicketId(ticket) }, key);
+  const split = result.status === 'split_required' || (result.status === 'stopped' && result.stopped === 'split_required');
+  // The engine's depth identifies the round-1 packet; rechecks always use the recheck lens.
+  const measured = split ? { budget: result.budget ?? null, lens: result.lens ?? (result.status === 'stopped' ? 'recheck' : result.depth === 'quick' ? 'quick' : result.depth === 'dual' ? 'A' : 'full') } : {};
+  const signed = signRow({ ...result, ...measured, run: runId, ticket: assertTicketId(ticket) }, key);
   const file = path.join(reviewsDir(repoRoot, runId), `${ticket}.json`);
   writeAtomic(file, `${JSON.stringify(signed)}\n`);
   const openFindings = signed.status === 'reviewed' && signed.approved !== true && Array.isArray(signed.findings) && signed.findings.length > 0;
-  writeAtomic(path.join(queueDir(repoRoot), `${ticket}.done`), `${JSON.stringify({ ticket, status: signed.status, ...(openFindings ? { open_findings: true } : {}), result: path.relative(repoRoot, file) })}\n`);
+  writeAtomic(path.join(queueDir(repoRoot), `${ticket}.done`), `${JSON.stringify({ ticket, status: signed.status, ...measured, ...(openFindings ? { open_findings: true } : {}), result: path.relative(repoRoot, file) })}\n`);
   return signed;
 }
 

@@ -91,7 +91,7 @@ import { verifyRow } from '../state/signer.mjs';
 import { decisionProblem, grantCoverProblem } from './gate-check.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
 import { parseDiff } from './context.mjs';
-import { assemblePacket, assertPacketPath, diffOnlyTokens, readFileDiff } from './packet.mjs';
+import { assemblePacket, assertPacketPath, budgetFor, diffOnlyTokens, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
 import { pairedContext } from './engine.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups, sectionOf } from './sections.mjs';
@@ -111,6 +111,7 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {string} [reason] - `review_cap`, `l3_patch_exhausted`, a non-ok packet status (`split_required`), … for `stop`; the stub-guard reason for `retry`.
  * @property {number} [tokens_in] - a `split_required` stop: the estimated tokens of the diff-only packet (B54).
  * @property {number} [budget] - a `split_required` stop: the packet budget it exceeded (B54).
+ * @property {string} [lens] - the lens whose packet exceeded that budget.
  * @property {string} [section] - a `split_required` stop of a Markdown recheck: the heading of the section that alone is over (B54).
  */
 
@@ -267,6 +268,16 @@ export function extraRoundsFor(rows, { runId, block, file, key }) {
  * @returns {boolean} whether the state was reopened.
  */
 export function reopenForExtraRound(state, extraRounds, cfg) {
+  // A packet stopped before spending a round may be measured again under a changed budget.
+  if (state.status === 'stopped' && state.next?.reason === 'split_required' && state.next.lens === 'recheck' &&
+      typeof state.next.budget === 'number' && Number.isFinite(state.next.budget) && state.next.budget > 0 &&
+      state.next.budget !== budgetFor(cfg, 'full_in')) {
+    state.status = 'open';
+    state.next = { action: 'fix', level: state.level, trigger: null };
+    state.pending_kind = null;
+    delete state.stop_content_hash;
+    return true;
+  }
   if (state.status !== 'stopped' || state.next?.reason !== 'review_cap') return false;
   if (state.round >= roundCap(cfg, extraRounds)) return false;
   state.status = 'open';
@@ -629,7 +640,7 @@ async function stopBeforeRound(state, deps, kind, file, contentHash, packet) {
   const reason = packet.status;
   const size =
     typeof packet.tokensIn === 'number' && typeof packet.budget === 'number'
-      ? { tokens_in: packet.tokensIn, budget: packet.budget, ...(typeof packet.section === 'string' ? { section: packet.section } : {}) }
+      ? { tokens_in: packet.tokensIn, budget: packet.budget, lens: 'recheck', ...(typeof packet.section === 'string' ? { section: packet.section } : {}) }
       : {};
   const row = { event: 'review.cap', file, round: state.round, reason, open: state.open.map((f) => f.id), ...size };
   if (!(await mustNote(deps, row))) return retry(state, kind, 'ledger_write_failed');

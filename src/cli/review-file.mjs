@@ -73,12 +73,14 @@ import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dro
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 import { blockFileSet, namedOnHash } from '../review/gate-check.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
+import { budgetFor } from '../review/packet.mjs';
 import { ownsFile } from '../state/registry.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { assertRunId } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
+import { configInForce } from '../state/config-snapshot.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
@@ -133,6 +135,18 @@ function resultOfMarker(repoRoot, text) {
 const FRESH_REFUSED = new Set(['other-run', 'context-unreadable']);
 
 /**
+ * A split is reusable only under the budget it measured; absent metadata fails closed.
+ * @param {Record<string, any> | null} result @param {Record<string, any> | null} cfg
+ * @returns {{old: number, current: number} | null}
+ */
+function splitBudgetChange(result, cfg) {
+  if (!cfg || !result || (result.status !== 'split_required' && !(result.status === 'stopped' && result.stopped === 'split_required'))) return null;
+  if (!['quick', 'full', 'A', 'B', 'recheck'].includes(result.lens) || !Number.isFinite(result.budget) || result.budget <= 0) return null;
+  const current = budgetFor(cfg, result.lens === 'quick' ? 'quick_in' : 'full_in');
+  return result.budget !== current ? { old: result.budget, current } : null;
+}
+
+/**
  * B75: may `--fresh` drop this cached result? An allow-list, fail closed: `rerun` only for a
  * result that never counted as a review — `stale`, `unavailable`, round-1 `split_required`, or
  * `refused` with a reason that is not a verdict (`other-run`, `context-unreadable`, `worktree-*`)
@@ -141,9 +155,10 @@ const FRESH_REFUSED = new Set(['other-run', 'context-unreadable']);
  * ran, `review-state-lost`, an answers result, an unknown status or reason, an unreadable marker or
  * result).
  * @param {string} text - the done marker's text @param {Record<string, any> | null} result
+ * @param {Record<string, any> | null} [cfg] - the reloaded config, when readable.
  * @returns {'rerun' | 'tampered' | 'counted'}
  */
-export function freshVerdict(text, result) {
+export function freshVerdict(text, result, cfg = null) {
   let marker;
   try {
     marker = JSON.parse(text);
@@ -151,6 +166,7 @@ export function freshVerdict(text, result) {
     return 'counted';
   }
   if (result === null || marker === null || typeof marker !== 'object' || marker.status !== result.status) return 'counted';
+  if (splitBudgetChange(result, cfg)) return 'rerun';
   if (result.status === 'stale' || result.status === 'unavailable' || result.status === 'split_required') return 'rerun';
   if (result.status !== 'refused' || typeof result.reason !== 'string') return 'counted';
   if (result.reason === 'review-state-tampered') return 'tampered';
@@ -168,10 +184,10 @@ const RETRY_STATUSES = new Set(['stale', 'unavailable', 'split_required']);
 
 /**
  * Classify in place and use the same byte-checked claim for fresh and automatic retries.
- * @param {{repoRoot: string, ticket: string, file: string, dropDone?: typeof dropDoneIf, once?: boolean, statuses?: Set<string>}} opts
- * @returns {{verdict: 'rerun' | 'tampered' | 'counted', outcome: 'dropped' | 'gone' | 'kept'}}
+ * @param {{repoRoot: string, ticket: string, file: string, dropDone?: typeof dropDoneIf, once?: boolean, statuses?: Set<string>, cfg?: Record<string, any> | null}} opts
+ * @returns {{verdict: 'rerun' | 'tampered' | 'counted', outcome: 'dropped' | 'gone' | 'kept', budgetChange?: {old: number, current: number} | null}}
  */
-function dropFreshDone({ repoRoot, ticket, file, dropDone = dropDoneIf, once = false, statuses }) {
+function dropFreshDone({ repoRoot, ticket, file, dropDone = dropDoneIf, once = false, statuses, cfg = null }) {
   const markerPath = path.join(queueDir(repoRoot), `${ticket}.done`);
   /** @type {'rerun' | 'tampered' | 'counted'} */
   let verdict = 'counted';
@@ -189,7 +205,7 @@ function dropFreshDone({ repoRoot, ticket, file, dropDone = dropDoneIf, once = f
     // classified IN PLACE: a refusal never moves, renames or touches the marker
     const text = bytes.toString('utf8');
     const result = resultOfMarker(repoRoot, text);
-    verdict = freshVerdict(text, result);
+    verdict = freshVerdict(text, result, cfg);
     if (statuses && !statuses.has(result?.status)) verdict = 'counted';
     if (verdict !== 'rerun') break;
     /** @type {unknown} */
@@ -208,7 +224,7 @@ function dropFreshDone({ repoRoot, ticket, file, dropDone = dropDoneIf, once = f
     if (outcome === 'kept') break;
     // an allow-list of outcomes: anything else is refused and nothing is queued
     if (outcome !== 'dropped' && outcome !== 'gone') throw new WorkerError('fresh-claim-unknown', `the claim of the cached result of ${file} gave an unknown outcome; nothing was queued`);
-    return { verdict, outcome };
+    return { verdict, outcome, budgetChange: outcome === 'dropped' ? splitBudgetChange(result, cfg) : null };
   }
   return { verdict, outcome: 'kept' };
 }
@@ -223,14 +239,15 @@ function dropFreshDone({ repoRoot, ticket, file, dropDone = dropDoneIf, once = f
  * `fresh-needs-reopen` (names `block reopen` and `block waive`) or `fresh-tampered` (names only
  * the owner's `block close --no-require-reviews`; reopen refuses a tampered state).
  * B110: a plain cached round-1 `split_required` uses the same claim, with `retry: true`.
- * @param {{repoRoot: string, run: string, block: string, file: string, where: {tree?: string}, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf, retry?: boolean}} opts
+ * @param {{repoRoot: string, run: string, block: string, file: string, where: {tree?: string}, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf, retry?: boolean, cfg?: Record<string, any> | null, stderr: {write: (s: string) => unknown}}} opts
  * @returns {number} the exit code.
  */
-function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDoneIf, retry = false }) {
+function freshTicket({ repoRoot, run, block, file, where, say, dropDone = dropDoneIf, retry = false, cfg = null, stderr }) {
   const { ticket } = resolveTicket({ repoRoot, run, block, file, tree: where.tree ?? null });
-  const { verdict, outcome } = dropFreshDone({ repoRoot, ticket, file, dropDone });
+  const { verdict, outcome, budgetChange } = dropFreshDone({ repoRoot, ticket, file, dropDone, cfg });
   if (outcome === 'dropped' || outcome === 'gone') {
     const queued = enqueue({ repoRoot, run, block, file, ...where });
+    if (budgetChange) writeSafe(stderr, `split_required at budget ${budgetChange.old}; budget is now ${budgetChange.current}: reviewing again\n`);
     say(outcome === 'dropped' ? { ...queued, ...(retry ? { retry: true } : { fresh: true }) } : queued);
     return 0;
   }
@@ -557,10 +574,17 @@ export async function runReviewFile(args, deps = {}) {
     const tree = recorded === null ? await repoRootOf(cwd) : (recorded.top ?? repoRoot);
     assertInsideRoot(tree, file); // the path, re-checked in the tree its content is read from
     const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree };
-    if (flags.fresh === true) return freshTicket({ repoRoot, run: worker.run, block, file, where, say, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
+    let cfg = null;
+    try {
+      cfg = configInForce(await readRun(worker.run));
+    } catch {
+      // No readable snapshot: retain the existing cache and --fresh rules.
+    }
+    if (flags.fresh === true) return freshTicket({ repoRoot, run: worker.run, block, file, where, say, cfg, stderr, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
     const queued = enqueue({ repoRoot, run: worker.run, block, file, ...where });
-    if (queued.status === 'done' && ['unavailable', 'split_required'].includes(doneResult(repoRoot, queued.ticket)?.status)) {
-      return freshTicket({ repoRoot, run: worker.run, block, file, where, say, retry: true, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
+    const cached = queued.status === 'done' ? doneResult(repoRoot, queued.ticket) : null;
+    if (cached && (['unavailable', 'split_required'].includes(cached.status) || splitBudgetChange(cached, cfg))) {
+      return freshTicket({ repoRoot, run: worker.run, block, file, where, say, retry: true, cfg, stderr, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
     }
     say(queued);
     return 0;
