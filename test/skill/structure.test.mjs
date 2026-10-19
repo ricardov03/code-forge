@@ -1079,13 +1079,41 @@ const B94_FILES = [
 /** @param {string} rel @returns {Promise<string>} */
 const b94Read = (rel) => readFile(path.join(ROOT, rel), 'utf8');
 
-test('B94 (1): code.md §4 carries text A once, with the per-file cap', async () => {
+test('B94/B140: code.md §4 and the fix-round brief list and run block tests and the project build/typecheck', async () => {
   const code = await readSkillFile('references/code.md');
   const s4 = flat(section(code, 4));
-  assert.deepEqual(B104_FIX_RULE.map((pin) => occurrences(s4, flat(pin))), [1, 1, 1, 1]);
+  const rule = [...B104_FIX_RULE.slice(0, 3), "In that round the coder fixes, runs both commands, follows the selected file loop on every changed file, and prints its `TESTS` line."];
+  assert.deepEqual(rule.map((pin) => occurrences(s4, flat(pin))), [1, 1, 1, 1], 'code.md §4: each fix-round step occurs once');
   assert.equal(occurrences(s4, flat(`The per-file cap still counts per file: ${B94_CAP} (\`review.md\` §5).`)), 1);
   // the rule lives in §4 only: the whole file has each sentence once
-  assert.deepEqual(B104_FIX_RULE.map((pin) => occurrences(flat(code), flat(pin))), [1, 1, 1, 1]);
+  assert.deepEqual(rule.map((pin) => occurrences(flat(code), flat(pin))), [1, 1, 1, 1]);
+  const brief = await readSkillFile('templates/coder-brief.md');
+  const fix = brief.split('\n## Fix-round brief')[1]?.split('\n## Context pack')[0] ?? '';
+  const commands = "The message lists the block test command next to the project build/typecheck command from the context pack's `build` field (for example, `npm run typecheck`).";
+  for (const [name, text] of [['code.md §4', s4], ['coder-brief.md Fix-round brief', flat(fix)]]) {
+    assert.equal(occurrences(text, flat(commands)), 1, `${name}: exactly one paired command list with the context build command`);
+  }
+  assertOnceInOrder(fix, [
+    commands,
+    "Run both commands after the fixes and before the round's sentinel.",
+    'Print a fresh `TESTS <command> exit=<n>` line just before the round\'s sentinel',
+  ]);
+});
+
+test('B140: the final report reruns refused EPERM process probes outside the sandbox and names only the final log', async () => {
+  const brief = await readSkillFile('templates/coder-brief.md');
+  const report = brief.split('\n## Final report')[1]?.split('\n## Fix-round brief')[0] ?? '';
+  assertOnceInOrder(report, [
+    'If the sandbox refuses process probes with EPERM errors, rerun the block tests outside the sandbox.',
+    'Keep and report only the final run.',
+    'Name the final log file in the report.',
+  ]);
+});
+
+test('B140 boundary: a saved refused sandbox log proves neither pass nor fail', async () => {
+  const brief = await readSkillFile('templates/coder-brief.md');
+  const report = brief.split('\n## Final report')[1]?.split('\n## Fix-round brief')[0] ?? '';
+  assert.equal(occurrences(report, 'A saved log of a refused sandbox run is not proof either way.'), 1, 'coder-brief.md Final report: exactly one rule rejects the refused log as evidence');
 });
 
 test('B94 (2): solo.md §3 step 7 carries text A once and sends it by send_input', async () => {
