@@ -406,7 +406,7 @@ test('mergeForbidden refuses a bare string instead of iterating it one character
 
 test('mergeForbidden accepts tokens with ( ) * : characters — contains entries are never rendered', () => {
   const merged = mergeForbidden(['db.prod:5432', 'postgres://prod-host', 'weird(*)']);
-  assert.equal(merged.length, FORBIDDEN.length + 10 + 3); // B107: + add-worker
+  assert.equal(merged.length, FORBIDDEN.length + 11 + 3); // B143: + amend verb
   assert.equal(isForbidden(['psql', '-h', 'db.prod:5432'], merged)?.id, 'production-marker-extra-0');
   assert.equal(isForbidden(['psql', 'postgres://prod-host/db'], merged)?.id, 'production-marker-extra-1');
   assert.equal(isForbidden(['x', 'a-weird(*)-b'], merged)?.id, 'production-marker-extra-2');
@@ -552,7 +552,7 @@ test('a shorter list yields a matching renderer count (renderers are not hardcod
 
 test('mergeForbidden always carries the coder-only entries: `block waive`, `autopilot` (B45), `--no-require-reviews` (B12b), `--remove-worktree` (B62a), `block reopen` (B72) and `block accept-hit` (B127)', () => {
   const merged = mergeForbidden([]);
-  assert.equal(merged.length, FORBIDDEN.length + 10); // B107: + add-worker
+  assert.equal(merged.length, FORBIDDEN.length + 11); // B143: + amend verb
   assert.equal(isForbidden(['code-forge', 'block', 'close', 'B1', '--remove-worktree'], merged)?.id, 'code-forge-remove-worktree');
   assert.equal(isForbidden(['npx', '@codedology/code-forge', 'block', 'close', 'B1', '--run', 'r1', '--remove-worktree'], merged)?.id, 'code-forge-remove-worktree');
   assert.equal(isForbidden(['code-forge', 'block', 'close', 'B1', '--remove-worktree'], FORBIDDEN), null);
