@@ -1,10 +1,80 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { scanTranscript } from '../../src/util/forbidden.mjs';
+import { mergeForbidden, scanTranscript } from '../../src/util/forbidden.mjs';
 
 const started = { type: 'thread.started', thread_id: 'thread-119' };
 const event = (item, type = 'item.completed') => ({ type, item });
 const jsonl = (...events) => events.map((e) => JSON.stringify(e)).join('\n');
+const commands = (...texts) => jsonl(started, ...texts.map((command) => event({ type: 'command_execution', command })));
+const coderRules = mergeForbidden(['production-marker']);
+const ruleText = 'forge block accept-hit --no-require-reviews; gh pr ready; git push --force; production-marker';
+const ruleIds = ['gh-pr-ready', 'git-push-force', 'code-forge-no-require-reviews', 'code-forge-block-accept-hit-from-coder', 'production-marker-extra-0'];
+const ruleHits = (line) => ruleIds.map((id) => ({ id, line }));
+
+test('Codex inert interpreter heredocs and quoted eval arguments ignore command and contains rules', () => {
+  const scripts = [
+    `node <<'NODE'\nconst text = '// --no-require-reviews';\ntext.replaceAll('--no-require-reviews', 'review-required');\nNODE`,
+    ...['node', 'python', 'python3', 'ruby', 'perl', 'env node', 'env MODE=test /usr/bin/python3.12', '/usr/bin/ruby', 'node22'].flatMap((interpreter) => [
+      `${interpreter} <<END\nprint('${ruleText}')\nEND`,
+      `${interpreter} <<"END"\nprint('${ruleText}')\nEND`,
+      `${interpreter} <<-'END'\n\tprint('${ruleText}')\n\tEND`,
+    ]),
+    ...['-e', '-c', '--eval', '-p', '--print'].flatMap((flag) => [
+      `node ${flag} 'print("${ruleText}")'`,
+      `python3 ${flag} "print('${ruleText}')"`,
+    ]),
+  ];
+  assert.deepEqual(scripts.map((script) => scanTranscript(commands(script), coderRules)), scripts.map(() => []),
+    'every supported inert script: exactly zero command or contains hits, including the comment replacement');
+});
+
+test('Codex interpreter bodies with process-spawn words still match every command and contains rule', () => {
+  const spawnWords = ['exec', 'execSync', 'execFile', 'execFileSync', 'spawn', 'spawnSync', 'fork', 'system', 'popen',
+    'subprocess', 'child_process', 'os.system', 'Popen', '`', '$(', 'Process.spawn', 'IO.popen', '%x'];
+  const scripts = [
+    ...spawnWords.map((word) => `node <<'NODE'\n${word}('${ruleText}');\nNODE`),
+    `python3 -c "import subprocess; subprocess.run(['${ruleText}'])"`,
+  ];
+  const inert = `python3 -c "print('${ruleText}')"`;
+  assert.deepEqual(scanTranscript(commands(inert, ...scripts), coderRules), scripts.flatMap((_, i) => ruleHits(i + 3)),
+    'inert print: zero hits; each spawn body: exactly the five rule ids at its JSONL line');
+});
+
+test('Codex shell and unterminated heredocs and guarded paths fail closed; plain text stays unchanged', () => {
+  const unsafe = [
+    ...['bash', 'sh', 'zsh', 'dash', 'fish', 'ksh', 'eval', 'xargs', 'unknown'].map((shell) => `${shell} <<'END'\n${ruleText}\nEND`),
+    `node <<'END'\nprint('${ruleText}')`,
+  ];
+  const pathScript = `node <<'NODE'\nrequire('fs').writeFileSync('~/.code-forge/runs/test.key', 'data');\nNODE`;
+  const inert = `node <<'NODE'\nprint('${ruleText}')\nNODE`;
+  assert.deepEqual({
+    unsafe: scanTranscript(commands(...unsafe), coderRules),
+    path: scanTranscript(commands(pathScript), coderRules),
+    plain: scanTranscript(inert, coderRules),
+    inert: scanTranscript(commands(inert), coderRules),
+  }, {
+    unsafe: unsafe.flatMap((_, i) => ruleHits(i + 2)),
+    path: [{ id: 'code-forge-runs-access', line: 2 }],
+    plain: ruleHits(2),
+    inert: [],
+  }, 'each unsafe body and plain-text body: exactly five hits; guarded write: one path hit; Codex inert body: none');
+});
+
+test('Codex body boundaries preserve shell text and do not share spawn words between scripts', () => {
+  const inert = `node -e 'print("${ruleText}")'`;
+  const scripts = [
+    `${inert}; echo '${ruleText}'`,
+    `echo node -e 'print("${ruleText}")'`,
+    `node file.js -e 'print("${ruleText}")'`,
+    `node -e 'print("${ruleText}")`,
+    `bash <<'OUTER'\n${inert}\nOUTER`,
+  ];
+  assert.deepEqual(scanTranscript(commands(...scripts, `${inert}; python3 -c 'import subprocess'`,
+    `node <<'ONE'; python3 <<'TWO'\nprint('${ruleText}')\nONE\nimport subprocess\nTWO`,
+    `node <<'END'\nprint('execution spawning ecosystem')\nprint('${ruleText}')\nEND`), coderRules),
+  scripts.flatMap((_, i) => ruleHits(i + 2)),
+  'shell text, non-command interpreter names, script-file arguments and malformed quotes: five hits each; separate bodies and non-spawn substrings: none');
+});
 
 test('Codex JSON commands give one hit at the JSONL line; output and messages give none', () => {
   const mention = 'cat ~/.code-forge/runs/x.key';

@@ -820,6 +820,132 @@ export function renderForCodex(list = FORBIDDEN) {
 // ── Transcripts ──────────────────────────────────────────────────────────────
 
 /**
+ * Mask inert, non-shell interpreter bodies for command/contains rules only. Walk shell
+ * words and queued heredocs once; unknown commands, malformed quotes and unfinished
+ * heredocs stay fail closed. This deliberately does not evaluate shell expansions.
+ * @param {string} command
+ * @returns {string}
+ */
+function transcriptCommandText(command) {
+  const spawnWord = /\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|system|popen|subprocess|child_process|Popen)\b|`|\$\(|%x/;
+  const interpreter = /^(?:node|python|python3|ruby|perl)(?:\d+(?:\.\d+)*)?$/;
+  const evalFlags = new Set(['-e', '-c', '--eval', '-p', '--print']);
+  /** @type {{start: number, end: number}[]} */
+  const inert = [];
+  /** @type {{delimiter: string, tabs: boolean, script: boolean}[]} */
+  let heredocs = [];
+  let state = 'command';
+  let evalNext = false;
+  let envValue = false;
+  let redirect = '';
+  let i = 0;
+  while (i < command.length) {
+    const char = command[i];
+    if (char === '\n') {
+      i += 1;
+      for (const doc of heredocs) {
+        const start = i;
+        let closed = false;
+        while (i < command.length) {
+          const newline = command.indexOf('\n', i);
+          const end = newline < 0 ? command.length : newline;
+          const line = command.slice(i, end);
+          if ((doc.tabs ? line.replace(/^\t+/, '') : line) === doc.delimiter) {
+            if (doc.script && !spawnWord.test(command.slice(start, i))) inert.push({ start, end: i });
+            i = newline < 0 ? end : end + 1;
+            closed = true;
+            break;
+          }
+          i = newline < 0 ? end : end + 1;
+        }
+        if (!closed) return command;
+      }
+      heredocs = [];
+      state = 'command';
+      evalNext = false;
+      redirect = '';
+      continue;
+    }
+    if (/\s/.test(char)) { i += 1; continue; }
+    if (char === '#') {
+      const newline = command.indexOf('\n', i);
+      i = newline < 0 ? command.length : newline;
+      continue;
+    }
+    if (';|&()'.includes(char)) {
+      state = 'command';
+      evalNext = false;
+      i += 1;
+      continue;
+    }
+    if (char === '<' || char === '>') {
+      redirect = char;
+      i += 1;
+      if (command[i] === char) { redirect += char; i += 1; }
+      if (redirect === '<<' && command[i] === '-') { redirect += '-'; i += 1; }
+      // Here-strings and other uncertain shell syntax are never exempted.
+      if (command[i] === '<') return command;
+      continue;
+    }
+    const start = i;
+    const parts = [];
+    let quotes = 0;
+    let unquoted = false;
+    while (i < command.length && !/[\s;|&()<>]/.test(command[i])) {
+      const next = command[i++];
+      if (next === "'" || next === '"') {
+        quotes += 1;
+        let closed = false;
+        while (i < command.length) {
+          const inside = command[i++];
+          if (inside === next) { closed = true; break; }
+          if (inside === '\\' && next === '"' && i < command.length) parts.push(command[i++]);
+          else parts.push(inside);
+        }
+        if (!closed) return command;
+      } else {
+        unquoted = true;
+        parts.push(next === '\\' && i < command.length ? command[i++] : next);
+      }
+    }
+    const word = parts.join('');
+    if (redirect) {
+      if (redirect.startsWith('<<')) heredocs.push({ delimiter: word, tabs: redirect === '<<-', script: state === 'interpreter' });
+      redirect = '';
+      continue;
+    }
+    if (state === 'env') {
+      if (envValue) { envValue = false; continue; }
+      if (/^[A-Za-z_][A-Za-z_0-9]*=/.test(word) || ['-i', '--ignore-environment'].includes(word)) continue;
+      if (['-u', '--unset', '-C', '--chdir'].includes(word)) { envValue = true; continue; }
+      if (word === '--') { state = 'command'; continue; }
+      if (word.startsWith('-')) { state = 'other'; continue; }
+      state = 'command';
+    }
+    if (state === 'command') {
+      if (/^[A-Za-z_][A-Za-z_0-9]*=/.test(word)) continue;
+      const name = word.slice(word.lastIndexOf('/') + 1);
+      state = name === 'env' ? 'env' : interpreter.test(name) ? 'interpreter' : 'other';
+    } else if (state === 'interpreter') {
+      if (evalNext) {
+        if (quotes === 1 && !unquoted && !spawnWord.test(command.slice(start, i))) inert.push({ start, end: i });
+        evalNext = false;
+      } else if (evalFlags.has(word)) evalNext = true;
+      else if (!word.startsWith('-') || word === '--') state = 'other';
+    }
+  }
+  if (heredocs.length > 0) return command;
+  const chunks = [];
+  let end = 0;
+  for (const span of inert) {
+    chunks.push(command.slice(end, span.start), ' ');
+    end = span.end;
+  }
+  chunks.push(command.slice(end));
+  return chunks.join('');
+}
+
+/**
  * Scan captured coder output (subprocess stdout, Solo `search_output` text, a harness log) for
  * any entry of `list`, line by line: each line is split into shell-ish tokens (whitespace,
  * quotes, `;|&(),{}[]`; `>`/`>>` kept as their own token), so a command anywhere in the line —
@@ -829,7 +955,10 @@ export function renderForCodex(list = FORBIDDEN) {
  * Codex `exec --json` logs (every non-empty line an object with a string `type`, first event
  * `thread.started`) scan command_execution commands and file_change paths as writes. Other
  * items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
- * is never scanned; non-item events are skipped. Any other log uses the plain-text grep above, unchanged.
+ * is never scanned; non-item events are skipped. For string commands, node/python/ruby/perl
+ * heredocs and quoted -e/-c/--eval/-p/--print bodies without a process-spawn word are omitted
+ * from command and contains rules only; path rules still scan the whole command. Shell/unknown
+ * heredocs and unterminated bodies scan whole. Any other log uses the plain-text grep above, unchanged.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated ONCE per line over its
  * tokens (a `write` path entry hits when a write command starts before a token naming the path);
@@ -864,13 +993,17 @@ export function scanTranscript(text, list = FORBIDDEN) {
   const hits = [];
   lines
     .forEach((lineText, index) => {
+      let commandText;
       if (events !== null) {
         const event = events[index];
         if (!event?.type.startsWith('item.') || !event.item) return;
         const item = event.item;
         if (item.type === 'agent_message' || item.type === 'reasoning') return;
         // a command that is not a string is scanned with the rest of its item (fail closed), its output left out
-        if (item.type === 'command_execution') lineText = typeof item.command === 'string' ? item.command : JSON.stringify({ ...item, aggregated_output: undefined });
+        if (item.type === 'command_execution') {
+          lineText = typeof item.command === 'string' ? item.command : JSON.stringify({ ...item, aggregated_output: undefined });
+          if (typeof item.command === 'string') commandText = transcriptCommandText(lineText);
+        }
         else if (item.type === 'file_change') {
           lineText = (Array.isArray(item.changes) ? item.changes : [])
             .filter((change) => typeof change?.path === 'string')
@@ -878,20 +1011,21 @@ export function scanTranscript(text, list = FORBIDDEN) {
         } else lineText = JSON.stringify(item);
       }
       const tokens = lineText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
+      const commandTokens = commandText === undefined ? tokens : commandText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
       const ids = new Set();
       let firstWrite = -1;
       for (let i = 0; i < tokens.length && firstWrite < 0; i += 1) {
         if (writeStarts.has(commandName(tokens[i])) && isWriteCommand(tokens.slice(i, i + TRANSCRIPT_WINDOW))) firstWrite = i;
       }
       for (const entry of list) {
-        if (entry.kind === 'contains' && matchesEntry([], tokens, entry)) ids.add(entry.id);
+        if (entry.kind === 'contains' && matchesEntry([], commandTokens, entry)) ids.add(entry.id);
         if (entry.kind !== 'path') continue;
         const named = tokens.findIndex((t, i) => (entry.access === 'readwrite' || (firstWrite >= 0 && i > firstWrite)) && namesPath(t, entry));
         if (named >= 0) ids.add(entry.id);
       }
-      for (let i = 0; i < tokens.length; i += 1) {
-        if (!firstWords.has(commandName(tokens[i])) && !tokens[i].includes('code-forge')) continue;
-        const window = tokens.slice(i, i + TRANSCRIPT_WINDOW);
+      for (let i = 0; i < commandTokens.length; i += 1) {
+        if (!firstWords.has(commandName(commandTokens[i])) && !commandTokens[i].includes('code-forge')) continue;
+        const window = commandTokens.slice(i, i + TRANSCRIPT_WINDOW);
         for (const entry of commandEntries) {
           if (!ids.has(entry.id) && isForbidden(window, [entry])) ids.add(entry.id);
         }

@@ -10,6 +10,8 @@
 
 Rendered into every coder spawn as the CLI's own deny rules (path rules widen a directory to `<dir>/**`; a read-write path denies read, edit and write); carried verbatim in the brief; refused by the package's own process spawner; and at block close the transcript (captured stdout, the harness log, or the Solo output) is grepped for the forbidden verbs **and paths**. A hit fails the gate as `rule_break`. Only the human can accept a false hit with `block accept-hit`, after terminal confirmation. That verb is also coder-forbidden. It writes one signed `rule_break.accepted` row for the run, block, rule and SHA-256 of the exact transcript line text. Close verifies the signature and matches by line content, so moving the line does not invalidate it. Unsigned, tampered or other-run or other-block rows never count. A ledger `rule_break` row still refuses. Where a CLI cannot load a rules file, `doctor` says so and the transcript grep remains the detector.
 
+In Codex `exec --json` transcripts, node, Python, Ruby and Perl heredoc or quoted inline script bodies without a process-spawn word are not scanned for command or contains rules. Path rules still apply inside those bodies. Shell and unknown-command heredocs, unterminated heredocs and the shell text outside interpreter bodies are scanned whole; the plain-text transcript grep is unchanged.
+
 ## §3 Signed ledger rows — the threat model, stated honestly
 
 `block unwaive` and `block ack-waivers` are human-only and coder-forbidden with both `forge` and `code-forge` prefixes. Both require a yes at a terminal and have no `--yes`. No terminal exits 2 with no row. A no, cancel or pre-check refusal writes nothing. Only verified human undo and acknowledgement rows count at close.
