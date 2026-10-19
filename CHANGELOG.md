@@ -11,6 +11,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The test leak check ignores a lock held by a live process outside the suite (same pid start time), so gates can run while a review worker runs (B142)
 - The coder brief keeps only the final test log after a sandbox EPERM rerun, and fix rounds list the typecheck command next to the block tests (B140)
 - The first-use and brief-mode walkthrough tests no longer fail when a live code-forge run of the developer writes into ~/.code-forge during the suite (B145)
+- Process tests have wider time bounds, so the suite no longer fails from slowness on a busy machine (B144)
 
 ## [0.15.0] — 2026-10-19
 

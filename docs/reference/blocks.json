@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 152,
+  "block_count": 153,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2795,6 +2795,27 @@
         "B142"
       ],
       "note": "F-28, found in the B141 gates during this run. Gates passed on the first run."
+    },
+    "B144": {
+      "title": "Process-spawning tests get per-test bounds of at least 30 s and wider observation deadlines, keeping the timing proofs that matter (SIGKILL at settle)",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "test/util/exec.test.mjs",
+        "test/util/reaper.test.mjs",
+        "test/util/tmp.test.mjs",
+        "test/state/block-end.test.mjs",
+        "test/worker/helpers.mjs",
+        "test/worker/worker.test.mjs",
+        "test/worker/pool.test.mjs",
+        "test/worker/heartbeat.test.mjs",
+        "test/worker/orphan.test.mjs",
+        "test/worker/multi.test.mjs",
+        "test/cli/review.test.mjs"
+      ],
+      "depends_on": [],
+      "note": "F-24. One fix round (2 review warnings). Gates passed on the first run. F-29 (queue enqueue < 1 s) left out: it is a product speed rule."
     }
   }
 }
