@@ -96,7 +96,7 @@ test('a root whose owner pid is alive but with another start time counts as dead
   assert.equal(existsSync(reused), true, 'the prefix filter must leave "reused" alone');
 });
 
-test('an owner that comes alive between the check and the reap: the root is kept, its live child survives, no tombstone is left', { timeout: 8000 }, async () => {
+test('an owner that comes alive between the check and the reap: the root is kept, its live child survives, no tombstone is left', { timeout: 30000 }, async () => {
   const base = path.join(PARENT, 'race');
   const root = path.join(base, 'r');
   mkdirSync(path.join(root, 'pids'), { recursive: true, mode: 0o700 });

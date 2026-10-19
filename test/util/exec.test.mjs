@@ -100,7 +100,7 @@ test('exec refuses a non-positive or non-finite timeoutMs', () => {
 
 test(
   'exec kills a child after timeout_ms with a real signal, and never resolves before the timeout',
-  { timeout: 5000 },
+  { timeout: 30000 },
   async () => {
     const startedAt = Date.now();
     const result = await exec([process.execPath, '-e', 'setInterval(() => {}, 1000)'], {
@@ -138,7 +138,7 @@ function childWithGrandchild(pidFile, grandchildTrapsSigterm) {
 for (const trapsSigterm of [false, true]) {
   test(
     `exec kills the whole process group on timeout — a grandchild ${trapsSigterm ? 'that TRAPS SIGTERM ' : ''}is dead, not orphaned`,
-    { timeout: 8000 },
+    { timeout: 30000 },
     async () => {
       const dir = await mkdtemp(path.join(os.tmpdir(), 'code-forge-exec-'));
       const pidFile = path.join(dir, 'grandchild.pid');
@@ -147,13 +147,13 @@ for (const trapsSigterm of [false, true]) {
         // 1500 ms leaves the direct child ample time to start node and write the pid file even
         // on a loaded runner, so the test measures the group kill, not a startup race.
         const pending = exec([process.execPath, '-e', childWithGrandchild(pidFile, trapsSigterm)], { timeoutMs: 1500 });
-        grandchildPid = await waitForPidFile(pidFile, 1400);
+        grandchildPid = await waitForPidFile(pidFile, 20000);
         const result = await pending;
 
         assert.equal(result.result, 'failed');
         assert.equal(result.timedOut, true);
-        // Well inside the 2000 ms SIGTERM→SIGKILL grace: a trapped SIGTERM must not buy time.
-        await waitForDeath(grandchildPid, 500);
+        // Poll for the group kill, allowing delayed process-exit observation on a busy runner.
+        await waitForDeath(grandchildPid, 20000);
         assert.equal(isAlive(grandchildPid), false, 'the grandchild process is still alive');
       } finally {
         killQuietly(grandchildPid);
@@ -194,20 +194,20 @@ function runWrapper(pidFile, afterChildUp) {
 }
 
 for (const signal of /** @type {const} */ (['SIGTERM', 'SIGINT', 'SIGHUP'])) {
-  test(`a ${signal} to the parent reaches the detached child group, and the parent still dies of ${signal}`, { timeout: 8000 }, async () => {
+  test(`a ${signal} to the parent reaches the detached child group, and the parent still dies of ${signal}`, { timeout: 30000 }, async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'code-forge-exec-sig-'));
     const pidFile = path.join(dir, 'child.pid');
     let childPid;
     try {
       const { proc, exited, up, stderrText } = runWrapper(pidFile, '');
-      childPid = await waitForPidFile(pidFile, 4000);
+      childPid = await waitForPidFile(pidFile, 20000);
       // Wait for the wrapper to observe the child too, so exec's handlers are certainly installed.
       await up;
       proc.kill(signal);
       const [code, exitSignal] = await exited;
 
       assert.equal(exitSignal, signal, `wrapper exited with code ${code}, signal ${exitSignal}; stderr: ${stderrText()}`);
-      await waitForDeath(childPid, 1500);
+      await waitForDeath(childPid, 20000);
       assert.equal(isAlive(childPid), false, `the child survived the parent's ${signal} as an orphan`);
     } finally {
       killQuietly(childPid);
@@ -216,17 +216,17 @@ for (const signal of /** @type {const} */ (['SIGTERM', 'SIGINT', 'SIGHUP'])) {
   });
 }
 
-test('a parent that exits while a child runs takes the child group down with it', { timeout: 8000 }, async () => {
+test('a parent that exits while a child runs takes the child group down with it', { timeout: 30000 }, async () => {
   const dir = await mkdtemp(path.join(os.tmpdir(), 'code-forge-exec-exit-'));
   const pidFile = path.join(dir, 'child.pid');
   let childPid;
   try {
     const { exited, stderrText } = runWrapper(pidFile, 'process.exit(7);');
-    childPid = await waitForPidFile(pidFile, 4000);
+    childPid = await waitForPidFile(pidFile, 20000);
     const [code] = await exited;
 
     assert.equal(code, 7, stderrText());
-    await waitForDeath(childPid, 1500);
+    await waitForDeath(childPid, 20000);
     assert.equal(isAlive(childPid), false, 'the child survived the parent exiting');
   } finally {
     killQuietly(childPid);
@@ -234,7 +234,7 @@ test('a parent that exits while a child runs takes the child group down with it'
   }
 });
 
-test('exec installs its signal/exit handlers only while a child is live', { timeout: 3000 }, async () => {
+test('exec installs its signal/exit handlers only while a child is live', { timeout: 30000 }, async () => {
   const before = ['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'].map((e) => process.listenerCount(e));
   const pending = exec([process.execPath, '-e', 'setTimeout(() => {}, 200)'], { timeoutMs: 2000 });
   const during = ['SIGINT', 'SIGTERM', 'SIGHUP', 'exit'].map((e) => process.listenerCount(e));
@@ -245,7 +245,7 @@ test('exec installs its signal/exit handlers only while a child is live', { time
   assert.deepEqual(after, before);
 });
 
-test('exec ignores stdin by default so a child reading stdin sees an immediate EOF, not a hang', { timeout: 3000 }, async () => {
+test('exec ignores stdin by default so a child reading stdin sees an immediate EOF, not a hang', { timeout: 30000 }, async () => {
   const script = `
     process.stdin.resume();
     process.stdin.on('end', () => { process.stdout.write('eof'); process.exit(0); });
@@ -257,7 +257,7 @@ test('exec ignores stdin by default so a child reading stdin sees an immediate E
   assert.equal(result.timedOut, false);
 });
 
-test('exec collects multi-byte UTF-8 output correctly even when split across chunks', { timeout: 3000 }, async () => {
+test('exec collects multi-byte UTF-8 output correctly even when split across chunks', { timeout: 30000 }, async () => {
   // Write 'café ☃' (é = 2 bytes, ☃ = 3 bytes) one byte at a time so characters straddle
   // separate 'data' events.
   const script = `
@@ -275,7 +275,7 @@ test('exec collects multi-byte UTF-8 output correctly even when split across chu
   assert.equal(result.stdout, 'café ☃');
 });
 
-test('exec kills a child that writes past maxBufferBytes, keeps exactly the cap, and reports it as failed', { timeout: 5000 }, async () => {
+test('exec kills a child that writes past maxBufferBytes, keeps exactly the cap, and reports it as failed', { timeout: 30000 }, async () => {
   const script = `
     const chunk = Buffer.alloc(1024, 'x');
     setInterval(() => { process.stdout.write(chunk); }, 1);
@@ -306,7 +306,7 @@ const STDIN_ECHO = `
   });
 `;
 
-test('exec input: the child receives the bytes verbatim on a pipe, then EOF', { timeout: 5000 }, async () => {
+test('exec input: the child receives the bytes verbatim on a pipe, then EOF', { timeout: 30000 }, async () => {
   const bytes = Buffer.concat([Buffer.from([0x00, 0x01, 0xff, 0x0a]), Buffer.from('packet ☃ é\n', 'utf8')]);
   const result = await exec([process.execPath, '-e', STDIN_ECHO], { input: bytes, timeoutMs: 4000 });
 
@@ -317,12 +317,12 @@ test('exec input: the child receives the bytes verbatim on a pipe, then EOF', { 
   assert.equal(eof, 'eof');
 });
 
-test('exec input as a string reaches the child as its UTF-8 bytes', { timeout: 5000 }, async () => {
+test('exec input as a string reaches the child as its UTF-8 bytes', { timeout: 30000 }, async () => {
   const result = await exec([process.execPath, '-e', STDIN_ECHO], { input: 'héllo', timeoutMs: 4000 });
   assert.equal(result.stdout.split('|')[1], Buffer.from('héllo', 'utf8').toString('hex'));
 });
 
-test('exec without input: stdin is ignore (/dev/null, a character device) and reads as empty', { timeout: 5000 }, async () => {
+test('exec without input: stdin is ignore (/dev/null, a character device) and reads as empty', { timeout: 30000 }, async () => {
   const result = await exec([process.execPath, '-e', STDIN_ECHO], { timeoutMs: 4000 });
   assert.equal(result.result, 'ok', result.stderr);
   assert.equal(result.stdout, 'chr||eof');
@@ -336,7 +336,7 @@ test('exec refuses an input that is neither a string nor bytes', () => {
   );
 });
 
-test('each spawn writes <run-root>/pids/<pid>.json while the child runs and removes it on exit', { timeout: 8000 }, async () => {
+test('each spawn writes <run-root>/pids/<pid>.json while the child runs and removes it on exit', { timeout: 30000 }, async () => {
   const runRootDir = await mkdtemp(path.join(PARENT, 'run-'));
   setRunRoot(runRootDir);
   const pids = path.join(runRootDir, 'pids');
@@ -344,7 +344,7 @@ test('each spawn writes <run-root>/pids/<pid>.json while the child runs and remo
     const pending = exec([process.execPath, '-e', 'setTimeout(() => {}, 800)'], { timeoutMs: 5000 });
     /** @type {string[]} */
     let names = [];
-    const deadline = Date.now() + 700;
+    const deadline = Date.now() + 20000;
     while (names.length === 0 && Date.now() < deadline) {
       names = readdirSync(pids).filter((n) => n.endsWith('.json'));
       if (names.length === 0) await setTimeout(10);

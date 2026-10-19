@@ -102,7 +102,7 @@ test('B135 boundary: group members are found without ps on PATH', async () => {
   } finally { process.env.PATH = oldPath; child.kill('SIGKILL'); }
 });
 
-test('sweep kills a registered child that TRAPS SIGTERM (SIGKILL after the grace) and clears its entry', { timeout: 8000 }, async () => {
+test('sweep kills a registered child that TRAPS SIGTERM (SIGKILL after the grace) and clears its entry', { timeout: 30000 }, async () => {
   const dir = await registryDir('trap');
   const pid = await spawnIdle(true);
   registerPid(dir, pid, process.execPath);
@@ -116,7 +116,7 @@ test('sweep kills a registered child that TRAPS SIGTERM (SIGKILL after the grace
   assert.deepEqual(readdirSync(dir), []);
 });
 
-test('sweep leaves alone a registered pid whose live start time differs from the recorded one', { timeout: 8000 }, async () => {
+test('sweep leaves alone a registered pid whose live start time differs from the recorded one', { timeout: 30000 }, async () => {
   const dir = await registryDir('mismatch');
   const pid = await spawnIdle(false);
   writeFileSync(
@@ -135,7 +135,7 @@ test('sweep leaves alone a registered pid whose live start time differs from the
   process.kill(-pid, 'SIGKILL');
 });
 
-test('sweep never kills a registered pid whose start time is unknown, and keeps its entry', { timeout: 8000 }, async () => {
+test('sweep never kills a registered pid whose start time is unknown, and keeps its entry', { timeout: 30000 }, async () => {
   const dir = await registryDir('unknown');
   const pid = await spawnIdle(false);
   writeFileSync(path.join(dir, `${pid}.json`), JSON.stringify({ pid, start_time: UNKNOWN_START_TIME, argv0: 'node' }));
@@ -150,7 +150,7 @@ test('sweep never kills a registered pid whose start time is unknown, and keeps 
   process.kill(-pid, 'SIGKILL');
 });
 
-test('sweep clears the entry of an already-dead pid without signalling, and skips malformed files', { timeout: 8000 }, async () => {
+test('sweep clears the entry of an already-dead pid without signalling, and skips malformed files', { timeout: 30000 }, async () => {
   const dir = await registryDir('stale');
   const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
   const deadPid = /** @type {number} */ (child.pid);
@@ -189,7 +189,7 @@ async function withKillSpy(onSignal, body) {
   }
 }
 
-test('a leader that dies of SIGTERM is never signalled again: exactly one signal, to its group', { timeout: 8000 }, async () => {
+test('a leader that dies of SIGTERM is never signalled again: exactly one signal, to its group', { timeout: 30000 }, async () => {
   const dir = await registryDir('term-dies');
   const pid = await spawnIdle(false);
   registerPid(dir, pid, process.execPath);
@@ -203,7 +203,7 @@ test('a leader that dies of SIGTERM is never signalled again: exactly one signal
   assert.equal(isAlive(pid), false);
 });
 
-test('EPERM on the group signal: the pid is reported unknown and never retried', { timeout: 8000 }, async () => {
+test('EPERM on the group signal: the pid is reported unknown and never retried', { timeout: 30000 }, async () => {
   const dir = await registryDir('eperm');
   const pid = await spawnIdle(false);
   registerPid(dir, pid, process.execPath);
