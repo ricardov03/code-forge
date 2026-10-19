@@ -822,11 +822,36 @@ export function renderForCodex(list = FORBIDDEN) {
 /**
  * Mask inert, non-shell interpreter bodies for command/contains rules only. Walk shell
  * words and queued heredocs once; unknown commands, malformed quotes and unfinished
- * heredocs stay fail closed. This deliberately does not evaluate shell expansions.
+ * heredocs stay fail closed. Decode at most one shell -c wrapper; deeper wrappers
+ * stay whole. This deliberately does not evaluate shell expansions.
  * @param {string} command
+ * @param {boolean} [unwrapShell]
  * @returns {string}
  */
-function transcriptCommandText(command) {
+function transcriptCommandText(command, unwrapShell = true) {
+  if (unwrapShell) {
+    const wrapper = /^\s*(?:[^\s'"\\;|&()<>`$]+\/)?(?:sh|bash|zsh|dash|ksh)(?:[ \t]+-[li]+)*[ \t]+-[li]*c[ \t]+(['"])/.exec(command);
+    if (wrapper) {
+      const quote = wrapper[1];
+      const parts = [];
+      let i = wrapper[0].length;
+      while (i < command.length) {
+        const char = command[i++];
+        if (char === quote) {
+          if (command.slice(i).trim() !== '') return command;
+          const prefix = command.slice(0, wrapper[0].length - 1);
+          return prefix + transcriptCommandText(parts.join(''), false);
+        }
+        // Within double quotes, other backslashes are literal; single quotes
+        // preserve every character. A backslash-newline pair disappears.
+        if (quote === '"' && char === '\\' && /["\\$`\n]/.test(command[i] ?? '')) {
+          const escaped = command[i++];
+          if (escaped !== '\n') parts.push(escaped);
+        } else parts.push(char);
+      }
+      return command;
+    }
+  }
   const spawnWord = /\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|system|popen|subprocess|child_process|Popen)\b|`|\$\(|%x/;
   const interpreter = /^(?:node|python|python3|ruby|perl)(?:\d+(?:\.\d+)*)?$/;
   const evalFlags = new Set(['-e', '-c', '--eval', '-p', '--print']);
@@ -957,8 +982,10 @@ function transcriptCommandText(command) {
  * items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
  * is never scanned; non-item events are skipped. For string commands, node/python/ruby/perl
  * heredocs and quoted -e/-c/--eval/-p/--print bodies without a process-spawn word are omitted
- * from command and contains rules only; path rules still scan the whole command. Shell/unknown
- * heredocs and unterminated bodies scan whole. Any other log uses the plain-text grep above, unchanged.
+ * from command and contains rules only; path rules still scan the whole command. One sh/bash/zsh/
+ * dash/ksh -c wrapper (including -lc/-ic and -l -c) with a single quoted script is decoded first;
+ * its prefix remains scanned. Nested wrappers, malformed wrappers, shell/unknown heredocs and
+ * unterminated bodies scan whole. Any other log uses the plain-text grep above, unchanged.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated ONCE per line over its
  * tokens (a `write` path entry hits when a write command starts before a token naming the path);

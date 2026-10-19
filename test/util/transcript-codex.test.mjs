@@ -10,8 +10,12 @@ const coderRules = mergeForbidden(['production-marker']);
 const ruleText = 'forge block accept-hit --no-require-reviews; gh pr ready; git push --force; production-marker';
 const ruleIds = ['gh-pr-ready', 'git-push-force', 'code-forge-no-require-reviews', 'code-forge-block-accept-hit-from-coder', 'production-marker-extra-0'];
 const ruleHits = (line) => ruleIds.map((id) => ({ id, line }));
+const doubleQuote = (text) => `"${text.replace(/["\\$`]/g, '\\$&')}"`;
+const wrapped = (script) => `/bin/zsh -lc ${doubleQuote(script)}`;
 
-test('Codex inert interpreter heredocs and quoted eval arguments ignore command and contains rules', () => {
+for (const form of ['bare', 'wrapped']) {
+  const commandForm = form === 'wrapped' ? wrapped : (script) => script;
+test(`Codex ${form} inert interpreter heredocs and quoted eval arguments ignore command and contains rules`, () => {
   const scripts = [
     `node <<'NODE'\nconst text = '// --no-require-reviews';\ntext.replaceAll('--no-require-reviews', 'review-required');\nNODE`,
     ...['node', 'python', 'python3', 'ruby', 'perl', 'env node', 'env MODE=test /usr/bin/python3.12', '/usr/bin/ruby', 'node22'].flatMap((interpreter) => [
@@ -24,11 +28,11 @@ test('Codex inert interpreter heredocs and quoted eval arguments ignore command 
       `python3 ${flag} "print('${ruleText}')"`,
     ]),
   ];
-  assert.deepEqual(scripts.map((script) => scanTranscript(commands(script), coderRules)), scripts.map(() => []),
+  assert.deepEqual(scripts.map((script) => scanTranscript(commands(commandForm(script)), coderRules)), scripts.map(() => []),
     'every supported inert script: exactly zero command or contains hits, including the comment replacement');
 });
 
-test('Codex interpreter bodies with process-spawn words still match every command and contains rule', () => {
+test(`Codex ${form} interpreter bodies with process-spawn words still match every command and contains rule`, () => {
   const spawnWords = ['exec', 'execSync', 'execFile', 'execFileSync', 'spawn', 'spawnSync', 'fork', 'system', 'popen',
     'subprocess', 'child_process', 'os.system', 'Popen', '`', '$(', 'Process.spawn', 'IO.popen', '%x'];
   const scripts = [
@@ -36,11 +40,11 @@ test('Codex interpreter bodies with process-spawn words still match every comman
     `python3 -c "import subprocess; subprocess.run(['${ruleText}'])"`,
   ];
   const inert = `python3 -c "print('${ruleText}')"`;
-  assert.deepEqual(scanTranscript(commands(inert, ...scripts), coderRules), scripts.flatMap((_, i) => ruleHits(i + 3)),
+  assert.deepEqual(scanTranscript(commands(...[inert, ...scripts].map(commandForm)), coderRules), scripts.flatMap((_, i) => ruleHits(i + 3)),
     'inert print: zero hits; each spawn body: exactly the five rule ids at its JSONL line');
 });
 
-test('Codex shell and unterminated heredocs and guarded paths fail closed; plain text stays unchanged', () => {
+test(`Codex ${form} shell and unterminated heredocs and guarded paths fail closed; plain text stays unchanged`, () => {
   const unsafe = [
     ...['bash', 'sh', 'zsh', 'dash', 'fish', 'ksh', 'eval', 'xargs', 'unknown'].map((shell) => `${shell} <<'END'\n${ruleText}\nEND`),
     `node <<'END'\nprint('${ruleText}')`,
@@ -48,10 +52,10 @@ test('Codex shell and unterminated heredocs and guarded paths fail closed; plain
   const pathScript = `node <<'NODE'\nrequire('fs').writeFileSync('~/.code-forge/runs/test.key', 'data');\nNODE`;
   const inert = `node <<'NODE'\nprint('${ruleText}')\nNODE`;
   assert.deepEqual({
-    unsafe: scanTranscript(commands(...unsafe), coderRules),
-    path: scanTranscript(commands(pathScript), coderRules),
+    unsafe: scanTranscript(commands(...unsafe.map(commandForm)), coderRules),
+    path: scanTranscript(commands(commandForm(pathScript)), coderRules),
     plain: scanTranscript(inert, coderRules),
-    inert: scanTranscript(commands(inert), coderRules),
+    inert: scanTranscript(commands(commandForm(inert)), coderRules),
   }, {
     unsafe: unsafe.flatMap((_, i) => ruleHits(i + 2)),
     path: [{ id: 'code-forge-runs-access', line: 2 }],
@@ -60,7 +64,7 @@ test('Codex shell and unterminated heredocs and guarded paths fail closed; plain
   }, 'each unsafe body and plain-text body: exactly five hits; guarded write: one path hit; Codex inert body: none');
 });
 
-test('Codex body boundaries preserve shell text and do not share spawn words between scripts', () => {
+test(`Codex ${form} body boundaries preserve shell text and do not share spawn words between scripts`, () => {
   const inert = `node -e 'print("${ruleText}")'`;
   const scripts = [
     `${inert}; echo '${ruleText}'`,
@@ -69,11 +73,55 @@ test('Codex body boundaries preserve shell text and do not share spawn words bet
     `node -e 'print("${ruleText}")`,
     `bash <<'OUTER'\n${inert}\nOUTER`,
   ];
-  assert.deepEqual(scanTranscript(commands(...scripts, `${inert}; python3 -c 'import subprocess'`,
+  assert.deepEqual(scanTranscript(commands(...[...scripts, `${inert}; python3 -c 'import subprocess'`,
     `node <<'ONE'; python3 <<'TWO'\nprint('${ruleText}')\nONE\nimport subprocess\nTWO`,
-    `node <<'END'\nprint('execution spawning ecosystem')\nprint('${ruleText}')\nEND`), coderRules),
+    `node <<'END'\nprint('execution spawning ecosystem')\nprint('${ruleText}')\nEND`].map(commandForm)), coderRules),
   scripts.flatMap((_, i) => ruleHits(i + 2)),
   'shell text, non-command interpreter names, script-file arguments and malformed quotes: five hits each; separate bodies and non-spawn substrings: none');
+});
+
+test(`Codex ${form} B137b module heredoc ignores replacement text and preserves process and shell hits`, () => {
+  const body = `import { readFileSync, writeFileSync } from 'node:fs';
+const home = 'test/engines/codex-home.test.mjs';
+let text = readFileSync(home, 'utf8');
+text = text.replace("// code-forge block close B137b --remove-worktree", "// close the block");
+text = text.replaceAll("--remove-worktree", "remove the worktree");
+writeFileSync(home, text);`;
+  const scripts = [
+    `node --input-type=module <<'NODE'\n${body}\nNODE`,
+    `node --input-type=module <<'NODE'\n${body}\nexecSync('code-forge block close B137b --remove-worktree');\nNODE`,
+    `bash <<'SH'\ncode-forge block close B137b --remove-worktree\nSH`,
+  ];
+  assert.deepEqual(scripts.map((script) => scanTranscript(commands(commandForm(script)), coderRules)), [
+    [], [{ id: 'code-forge-remove-worktree', line: 2 }], [{ id: 'code-forge-remove-worktree', line: 2 }],
+  ], 'replacement only: zero hits; process call and shell heredoc: exactly one removal-rule hit each');
+});
+}
+
+test('Codex shell wrappers decode one quoted script with shell escape rules', () => {
+  const script = `node <<END\nprint("${ruleText}")\nEND`;
+  const wrappers = ['sh -c', '/bin/bash -lc', 'zsh -ic', '/usr/local/bin/dash -c', 'ksh -l -c', '/bin/zsh -lc'];
+  const scripts = wrappers.flatMap((prefix) => [`${prefix} ${doubleQuote(script)}`, `${prefix} '${script}'`]);
+  // Backslash before an ordinary letter remains in double quotes: the delimiter must agree.
+  scripts.push(`/bin/zsh -lc "node <<'E\\ND'\nprint('${ruleText}')\nE\\ND"`);
+  scripts.push(`/bin/zsh -lc "node <<'END'\nprint('${ruleText}')\nEN\\\nD"`);
+  assert.deepEqual(scripts.map((command) => scanTranscript(commands(command), coderRules)), scripts.map(() => []),
+    'all shell names, paths, flag clusters, quotes, literal backslashes and escaped newlines: zero hits');
+});
+
+test('Codex malformed, unsupported and nested shell wrappers scan whole', () => {
+  const script = `node <<END\nprint("${ruleText}")\nEND`;
+  const scripts = [
+    wrapped(wrapped(script)),
+    `/bin/zsh -lc ${doubleQuote(script)} extra`,
+    `/bin/zsh -lc ${doubleQuote(script).slice(0, -1)}`,
+    `/bin/zsh -lc ${doubleQuote(script)}'suffix'`,
+    `/bin/zsh -lc "node <<'E\\ND'\nprint('${ruleText}')\nEND"`,
+    `/bin/fish -c ${doubleQuote(script)}`,
+    `/bin/zsh -xc ${doubleQuote(script)}`,
+  ];
+  assert.deepEqual(scripts.map((command) => scanTranscript(commands(command), coderRules)), scripts.map(() => ruleHits(2)),
+    'every malformed, unsupported or nested wrapper retains exactly the five rule hits');
 });
 
 test('Codex JSON commands give one hit at the JSONL line; output and messages give none', () => {
