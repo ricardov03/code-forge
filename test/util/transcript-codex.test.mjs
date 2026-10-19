@@ -13,6 +13,19 @@ const ruleHits = (line) => ruleIds.map((id) => ({ id, line }));
 const doubleQuote = (text) => `"${text.replace(/["\\$`]/g, '\\$&')}"`;
 const wrapped = (script) => `/bin/zsh -lc ${doubleQuote(script)}`;
 
+// Verbatim command strings from B137b transcript lines 71 and 72 (started/completed).
+const b137bCommands = [
+  "/bin/zsh -lc \"node --input-type=module <<'NODE'\nimport { readFileSync, writeFileSync } from 'node:fs';\nconst home = 'test/engines/codex-home.test.mjs';\nlet text = readFileSync(home, 'utf8');\ntext = text.replace(\\\"['code-forge-block-ack-waivers-from-coder', 4]]);\\\", \\\"['code-forge-block-ack-waivers-from-coder', 4], ['code-forge-block-human-pass-from-coder', 4]]); // B137: append four human-pass patterns\\\");\nwriteFileSync(home, text);\nconst snapshots = 'test/engines/builders/argv-snapshots.test.mjs';\ntext = readFileSync(snapshots, 'utf8');\ntext = text.replace('assert.equal(CODER_ONLY_FORBIDDEN.length, 8); // B127: + human transcript-hit acceptance', 'assert.equal(CODER_ONLY_FORBIDDEN.length, 9); // B127: + human transcript-hit acceptance; B137: + human-pass');\ntext = text.replace('assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 24); // B127: + four acceptance patterns', 'assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 28); // B127: + four acceptance patterns; B137: + four human-pass patterns');\nwriteFileSync(snapshots, text);\nconst rendering = 'test/engines/builders/forbidden-rendering.test.mjs';\ntext = readFileSync(rendering, 'utf8');\ntext = text.replaceAll('FORBIDDEN.length + 8); // B45: + the autopilot entry; B62a: + --remove-worktree; B72: + block reopen; B127: + block accept-hit', 'FORBIDDEN.length + 9); // B45: + the autopilot entry; B62a: + --remove-worktree; B72: + block reopen; B127: + block accept-hit; B137: + block human-pass');\ntext = text.replace('forbiddenOnly + 24); // B4.2:', 'forbiddenOnly + 28); // B137: + the 4 \"'`block human-pass` spellings; B4.2:'\"');\ntext = text.replace('19 of 24 ids (B127: + block accept-hit).', '22 of 27 ids (B137: + block human-pass).');\ntext = text.replace('assert.equal(ids.size, 21); // B127: + code-forge-block-accept-hit-from-coder', 'assert.equal(ids.size, 22); // B127: + code-forge-block-accept-hit-from-coder; B137: + code-forge-block-human-pass-from-coder');\nwriteFileSync(rendering, text);\nNODE\n git diff --check; git diff --stat; git diff -- src/util/forbidden.mjs test/engines/codex-home.test.mjs test/engines/builders/argv-snapshots.test.mjs test/engines/builders/forbidden-rendering.test.mjs\"",
+  "/bin/zsh -lc \"node --input-type=module <<'NODE'\nimport { readFileSync, writeFileSync } from 'node:fs';\nconst home = 'test/engines/codex-home.test.mjs';\nlet text = readFileSync(home, 'utf8');\ntext = text.replace(\\\"['code-forge-block-ack-waivers-from-coder', 4]]);\\\", \\\"['code-forge-block-ack-waivers-from-coder', 4], ['code-forge-block-human-pass-from-coder', 4]]); // B137: append four human-pass patterns\\\");\nwriteFileSync(home, text);\nconst snapshots = 'test/engines/builders/argv-snapshots.test.mjs';\ntext = readFileSync(snapshots, 'utf8');\ntext = text.replace('assert.equal(CODER_ONLY_FORBIDDEN.length, 8); // B127: + human transcript-hit acceptance', 'assert.equal(CODER_ONLY_FORBIDDEN.length, 9); // B127: + human transcript-hit acceptance; B137: + human-pass');\ntext = text.replace('assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 24); // B127: + four acceptance patterns', 'assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 28); // B127: + four acceptance patterns; B137: + four human-pass patterns');\nwriteFileSync(snapshots, text);\nconst rendering = 'test/engines/builders/forbidden-rendering.test.mjs';\ntext = readFileSync(rendering, 'utf8');\ntext = text.replaceAll('FORBIDDEN.length + 8); // B45: + the autopilot entry; B62a: + --remove-worktree; B72: + block reopen; B127: + block accept-hit', 'FORBIDDEN.length + 9); // B45: + the autopilot entry; B62a: + --remove-worktree; B72: + block reopen; B127: + block accept-hit; B137: + block human-pass');\ntext = text.replace('forbiddenOnly + 24); // B4.2:', 'forbiddenOnly + 28); // B137: + the 4 \"'`block human-pass` spellings; B4.2:'\"');\ntext = text.replace('19 of 24 ids (B127: + block accept-hit).', '22 of 27 ids (B137: + block human-pass).');\ntext = text.replace('assert.equal(ids.size, 21); // B127: + code-forge-block-accept-hit-from-coder', 'assert.equal(ids.size, 22); // B127: + code-forge-block-accept-hit-from-coder; B137: + code-forge-block-human-pass-from-coder');\nwriteFileSync(rendering, text);\nNODE\n git diff --check; git diff --stat; git diff -- src/util/forbidden.mjs test/engines/codex-home.test.mjs test/engines/builders/argv-snapshots.test.mjs test/engines/builders/forbidden-rendering.test.mjs\"",
+];
+
+test('Codex real B137b lines 71 and 72 ignore literal replacement text', () => {
+  const transcript = jsonl(started,
+    event({ type: 'command_execution', command: b137bCommands[0] }, 'item.started'),
+    event({ type: 'command_execution', command: b137bCommands[1] }));
+  assert.deepEqual(scanTranscript(transcript, coderRules), []);
+});
+
 for (const form of ['bare', 'wrapped']) {
   const commandForm = form === 'wrapped' ? wrapped : (script) => script;
 test(`Codex ${form} inert interpreter heredocs and quoted eval arguments ignore command and contains rules`, () => {
@@ -34,7 +47,7 @@ test(`Codex ${form} inert interpreter heredocs and quoted eval arguments ignore 
 
 test(`Codex ${form} interpreter bodies with process-spawn words still match every command and contains rule`, () => {
   const spawnWords = ['exec', 'execSync', 'execFile', 'execFileSync', 'spawn', 'spawnSync', 'fork', 'system', 'popen',
-    'subprocess', 'child_process', 'os.system', 'Popen', '`', '$(', 'Process.spawn', 'IO.popen', '%x'];
+    'subprocess', 'child_process', 'os.system', 'Popen', 'Process.spawn', 'IO.popen'];
   const scripts = [
     ...spawnWords.map((word) => `node <<'NODE'\n${word}('${ruleText}');\nNODE`),
     `python3 -c "import subprocess; subprocess.run(['${ruleText}'])"`,
@@ -42,6 +55,41 @@ test(`Codex ${form} interpreter bodies with process-spawn words still match ever
   const inert = `python3 -c "print('${ruleText}')"`;
   assert.deepEqual(scanTranscript(commands(...[inert, ...scripts].map(commandForm)), coderRules), scripts.flatMap((_, i) => ruleHits(i + 3)),
     'inert print: zero hits; each spawn body: exactly the five rule ids at its JSONL line');
+});
+
+test(`Codex ${form} spawn symbols depend on interpreter and shell quoting`, () => {
+  for (const language of ['node', 'python3', 'ruby', 'perl', 'env /usr/bin/perl5.40']) {
+    const nativeSymbols = language === 'ruby' || language.includes('perl');
+    for (const symbol of ['`echo text`', '$(echo text)', '%x(echo text)', 'qx(echo text)']) {
+      const nativeSpawn = symbol.startsWith('qx') ? language.includes('perl') : nativeSymbols;
+      const shellSpawn = symbol.startsWith('`') || symbol.startsWith('$(');
+      const body = `print("${ruleText}"); ${symbol}`;
+      const scripts = [
+        ...["'END'", '"END"', '\\END', "E'ND'"].map((delimiter) => [`${language} <<${delimiter}\n${body}\nEND`, nativeSpawn]),
+        ...['END', '-END'].map((delimiter) => [`${language} <<${delimiter}\n${body}\nEND`, nativeSpawn || shellSpawn]),
+        [`${language} -e '${body}'`, nativeSpawn],
+        [`${language} -c "${body.replaceAll('"', '\\"')}"`, nativeSpawn || shellSpawn],
+      ];
+      for (const [script, hits] of scripts) {
+        assert.deepEqual(scanTranscript(commands(commandForm(script)), coderRules), hits ? ruleHits(2) : [],
+          `${language}, ${symbol}, ${script}: only executable spawn symbols keep command rules active`);
+      }
+    }
+  }
+});
+
+test(`Codex ${form} node template literals are inert only with a quoted heredoc delimiter`, () => {
+  const body = 'const text = `--remove-worktree`;';
+  assert.deepEqual(scanTranscript(commands(...[
+    `node <<'NODE'\n${body}\nNODE`,
+    `node <<NODE\n${body}\nNODE`,
+    `ruby <<'RUBY'\n${body}\nRUBY`,
+    "perl <<'PERL'\nqx(--remove-worktree);\nPERL",
+  ].map(commandForm)), coderRules), [
+    { id: 'code-forge-remove-worktree', line: 3 },
+    { id: 'code-forge-remove-worktree', line: 4 },
+    { id: 'code-forge-remove-worktree', line: 5 },
+  ], 'quoted node template: no hit; shell expansion, Ruby backticks and Perl qx: one hit each');
 });
 
 test(`Codex ${form} shell and unterminated heredocs and guarded paths fail closed; plain text stays unchanged`, () => {

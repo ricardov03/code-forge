@@ -832,13 +832,20 @@ function transcriptCommandText(command, unwrapShell = true) {
   if (unwrapShell) {
     const wrapper = /^\s*(?:[^\s'"\\;|&()<>`$]+\/)?(?:sh|bash|zsh|dash|ksh)(?:[ \t]+-[li]+)*[ \t]+-[li]*c[ \t]+(['"])/.exec(command);
     if (wrapper) {
-      const quote = wrapper[1];
+      let quote = wrapper[1];
       const parts = [];
       let i = wrapper[0].length;
       while (i < command.length) {
         const char = command[i++];
         if (char === quote) {
-          if (command.slice(i).trim() !== '') return command;
+          // A shell word can splice opposite-quoted text into its enclosing
+          // quotes, as in "script"'literal'"rest". Require the enclosing
+          // quote again at the end; uncertain suffixes still scan whole.
+          if (command[i] === (quote === '"' ? "'" : '"')) {
+            quote = command[i++];
+            continue;
+          }
+          if (quote !== wrapper[1] || command.slice(i).trim() !== '') return command;
           const prefix = command.slice(0, wrapper[0].length - 1);
           return prefix + transcriptCommandText(parts.join(''), false);
         }
@@ -852,14 +859,20 @@ function transcriptCommandText(command, unwrapShell = true) {
       return command;
     }
   }
-  const spawnWord = /\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|system|popen|subprocess|child_process|Popen)\b|`|\$\(|%x/;
-  const interpreter = /^(?:node|python|python3|ruby|perl)(?:\d+(?:\.\d+)*)?$/;
+  const spawnWord = /\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|system|popen|subprocess|child_process|Popen)\b/;
+  const interpreter = /^(node|python|python3|ruby|perl)(?:\d+(?:\.\d+)*)?$/;
+  /** @param {string} body @param {string} language @param {boolean} shellExpands */
+  const hasSpawn = (body, language, shellExpands) => spawnWord.test(body)
+    || (shellExpands && /`|\$\(/.test(body))
+    || ((language === 'ruby' || language === 'perl') && /`|\$\(|%x/.test(body))
+    || (language === 'perl' && /\bqx\b/.test(body));
   const evalFlags = new Set(['-e', '-c', '--eval', '-p', '--print']);
   /** @type {{start: number, end: number}[]} */
   const inert = [];
-  /** @type {{delimiter: string, tabs: boolean, script: boolean}[]} */
+  /** @type {{delimiter: string, tabs: boolean, language: string, shellExpands: boolean}[]} */
   let heredocs = [];
   let state = 'command';
+  let language = '';
   let evalNext = false;
   let envValue = false;
   let redirect = '';
@@ -876,7 +889,7 @@ function transcriptCommandText(command, unwrapShell = true) {
           const end = newline < 0 ? command.length : newline;
           const line = command.slice(i, end);
           if ((doc.tabs ? line.replace(/^\t+/, '') : line) === doc.delimiter) {
-            if (doc.script && !spawnWord.test(command.slice(start, i))) inert.push({ start, end: i });
+            if (doc.language && !hasSpawn(command.slice(start, i), doc.language, doc.shellExpands)) inert.push({ start, end: i });
             i = newline < 0 ? end : end + 1;
             closed = true;
             break;
@@ -915,11 +928,14 @@ function transcriptCommandText(command, unwrapShell = true) {
     const start = i;
     const parts = [];
     let quotes = 0;
+    let quote = '';
+    let escaped = false;
     let unquoted = false;
     while (i < command.length && !/[\s;|&()<>]/.test(command[i])) {
       const next = command[i++];
       if (next === "'" || next === '"') {
         quotes += 1;
+        quote = next;
         let closed = false;
         while (i < command.length) {
           const inside = command[i++];
@@ -930,12 +946,16 @@ function transcriptCommandText(command, unwrapShell = true) {
         if (!closed) return command;
       } else {
         unquoted = true;
+        if (next === '\\') escaped = true;
         parts.push(next === '\\' && i < command.length ? command[i++] : next);
       }
     }
     const word = parts.join('');
     if (redirect) {
-      if (redirect.startsWith('<<')) heredocs.push({ delimiter: word, tabs: redirect === '<<-', script: state === 'interpreter' });
+      if (redirect.startsWith('<<')) heredocs.push({
+        delimiter: word, tabs: redirect === '<<-', language: state === 'interpreter' ? language : '',
+        shellExpands: quotes === 0 && !escaped,
+      });
       redirect = '';
       continue;
     }
@@ -950,10 +970,11 @@ function transcriptCommandText(command, unwrapShell = true) {
     if (state === 'command') {
       if (/^[A-Za-z_][A-Za-z_0-9]*=/.test(word)) continue;
       const name = word.slice(word.lastIndexOf('/') + 1);
-      state = name === 'env' ? 'env' : interpreter.test(name) ? 'interpreter' : 'other';
+      language = interpreter.exec(name)?.[1] ?? '';
+      state = name === 'env' ? 'env' : language ? 'interpreter' : 'other';
     } else if (state === 'interpreter') {
       if (evalNext) {
-        if (quotes === 1 && !unquoted && !spawnWord.test(command.slice(start, i))) inert.push({ start, end: i });
+        if (quotes === 1 && !unquoted && !hasSpawn(command.slice(start, i), language, quote === '"')) inert.push({ start, end: i });
         evalNext = false;
       } else if (evalFlags.has(word)) evalNext = true;
       else if (!word.startsWith('-') || word === '--') state = 'other';
@@ -982,9 +1003,13 @@ function transcriptCommandText(command, unwrapShell = true) {
  * items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
  * is never scanned; non-item events are skipped. For string commands, node/python/ruby/perl
  * heredocs and quoted -e/-c/--eval/-p/--print bodies without a process-spawn word are omitted
- * from command and contains rules only; path rules still scan the whole command. One sh/bash/zsh/
- * dash/ksh -c wrapper (including -lc/-ic and -l -c) with a single quoted script is decoded first;
- * its prefix remains scanned. Nested wrappers, malformed wrappers, shell/unknown heredocs and
+ * from command and contains rules only; path rules still scan the whole command. Backticks and
+ * $( count when the shell expands the body (unquoted heredoc delimiter or double-quoted inline
+ * script), or for Ruby/Perl; %x counts for Ruby/Perl, and qx for Perl. Quoted or backslash-escaped
+ * heredoc delimiters and single-quoted inline scripts prevent shell expansion. One sh/bash/zsh/
+ * dash/ksh -c wrapper (including -lc/-ic and -l -c) with a single quoted script (including
+ * opposite-quoted splices) is decoded first; its prefix remains scanned. Nested wrappers,
+ * malformed wrappers, shell/unknown heredocs and
  * unterminated bodies scan whole. Any other log uses the plain-text grep above, unchanged.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated ONCE per line over its
