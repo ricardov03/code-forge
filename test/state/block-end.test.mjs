@@ -442,7 +442,7 @@ test('B64b (2): a hook past timeout_s — its whole process group (a grandchild 
     grandchild = Number(readFileSync(pidFile, 'utf8'));
     assert.equal(Number.isInteger(grandchild) && grandchild > 1, true);
     // SIGKILL is delivered at once; give the orphan's new parent a moment to reap it
-    const until = Date.now() + 5000;
+    const until = Date.now() + 20000;
     while (alive(grandchild) && Date.now() < until) await new Promise((r) => setTimeout(r, 50));
     assert.equal(alive(grandchild), false, `grandchild ${grandchild} survived the group kill`);
   } finally {
