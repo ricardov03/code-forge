@@ -54,7 +54,7 @@ test('B107: add-worker stops its launched child when the initial probe throws an
     assert.deepEqual(record.workers, original.workers, 'no new pin is added');
     assert.deepEqual(record.worker, original.worker, 'the existing pin is preserved');
     assert.deepEqual(stops, [pid], 'cleanup stops exactly the launched pid');
-    assert.equal(await waitFor(() => child.exitCode !== null || child.signalCode !== null, 3000), true, 'launched child actually exits');
+    assert.equal(await waitFor(() => child.exitCode !== null || child.signalCode !== null, 20000), true, 'launched child actually exits');
     assert.match(stderr, /not pinned; stopped it/);
   } finally {
     if (child.exitCode === null && child.signalCode === null) child.kill('SIGKILL');

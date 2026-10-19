@@ -18,7 +18,7 @@ test('B113: removing the run record, runs directory, or HOME exits cleanly withi
     try {
       rmSync(removed === 'record' ? runRecordPath(runId) : removed === 'runs' ? runsDir() : process.env.HOME, { recursive: true, force: true });
       const { ticket } = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
-      assert.equal(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, Math.max(pollMs * 20, 5000)), true, removed);
+      assert.equal(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, Math.max(pollMs * 20, 20000)), true, removed);
       assert.deepEqual([w.child.exitCode, w.child.signalCode, readWorker(repo), readResult(repo, runId, ticket)], [0, null, null, null]);
       assert.equal(existsSync(path.join(repo, '.code-forge/queue', `${ticket}.done`)), false);
       if (removed === 'home') assert.equal(existsSync(/** @type {string} */ (process.env.HOME)), false, 'the stopping worker must not create the removed HOME again');

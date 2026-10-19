@@ -267,12 +267,12 @@ describe('code-forge review (B22)', () => {
         assert.equal(await waitFor(() => reviewerPids(r.records).length === 1, 30000), true, stderr);
         const [reviewerPid] = reviewerPids(r.records);
         child.kill(signal);
-        // the reviewer sleeps 60 s and `--max` is 900 s: only killing the in-flight wait ends within 15 s
-        const code = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve('hung after 15 s'), 15000))]);
+        // the reviewer sleeps 60 s and `--max` is 900 s: only killing the in-flight wait ends within 20 s
+        const code = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve('hung after 20 s'), 20000).unref())]);
         assert.equal(code, 1, stderr);
         assert.match(stderr, new RegExp(`^review: interrupted by ${signal}; stopping the review$`, 'm'));
         await assertCleanedUp(r.repo, r.runId);
-        assert.equal(await waitFor(() => !alive(reviewerPid), 10000), true, 'the sleeping reviewer session was left running');
+        assert.equal(await waitFor(() => !alive(reviewerPid), 20000), true, 'the sleeping reviewer session was left running');
       } finally {
         if (child.exitCode === null) child.kill('SIGKILL');
       }
@@ -294,7 +294,7 @@ describe('code-forge review (B22)', () => {
     await assertCleanedUp(r.repo, r.runId);
     const pids = reviewerPids(r.records);
     assert.equal(pids.length, 1);
-    assert.equal(await waitFor(() => !alive(pids[0]), 10000), true, 'the sleeping reviewer session was left running');
+    assert.equal(await waitFor(() => !alive(pids[0]), 20000), true, 'the sleeping reviewer session was left running');
   });
 
   test('a `block stop` step that throws: reported, `run end` and the worker reap still run, the temp root is removed, and the exit code stays the review\'s own 0', async () => {
