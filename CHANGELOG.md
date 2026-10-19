@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- Worker claim tests back up file-watch barriers with a short poll, so a busy file-event service no longer fails them
 - Support up to four pinned review workers per run, add workers through run start, and verify result identities and dead ticket claims at block close (B107)
 - Light blocks bound small changes to configurable file and line limits, batch their reviews, and run only block tests (B139)
 - Human decision close combines finding waivers, agent acknowledgement and transcript acceptance in one confirmation; immutable `close.require_human` supports delegated `close:routine` grants for approved blocks without waivers or hits (B138)

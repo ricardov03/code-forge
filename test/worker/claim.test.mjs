@@ -18,11 +18,14 @@ const lockPath = (key) => path.join(os.homedir(), '.code-forge', 'locks', `${cre
 async function reached(dir, names, diagnostic) {
   const found = () => names.find((name) => existsSync(path.join(dir, name)));
   if (found()) return found();
+  // A busy fseventsd can deliver watch events late, so a short poll backs up the watcher.
   return new Promise((resolve, reject) => {
-    const watcher = watch(dir, () => { const name = found(); if (name) { clearTimeout(timer); watcher.close(); resolve(name); } });
-    const timer = setTimeout(() => { watcher.close(); reject(new assert.AssertionError({ message: diagnostic(`no barrier reached: ${names.join(', ')}`), actual: [], expected: names })); }, 10000);
-    const name = found();
-    if (name) { clearTimeout(timer); watcher.close(); resolve(name); }
+    const finish = () => { clearTimeout(timer); clearInterval(poll); watcher.close(); };
+    const check = () => { const name = found(); if (name) { finish(); resolve(name); } };
+    const watcher = watch(dir, check);
+    const poll = setInterval(check, 50);
+    const timer = setTimeout(() => { finish(); reject(new assert.AssertionError({ message: diagnostic(`no barrier reached: ${names.join(', ')}`), actual: [], expected: names })); }, 30000);
+    check();
   });
 }
 
@@ -48,10 +51,10 @@ const signal = (file, value = '') => {
 const wait = async (file) => {
   if (existsSync(path.join(dir, file))) return;
   await new Promise((resolve) => {
-    const watcher = watch(dir, () => {
-      if (existsSync(path.join(dir, file))) { watcher.close(); resolve(); }
-    });
-    if (existsSync(path.join(dir, file))) { watcher.close(); resolve(); }
+    const check = () => { if (existsSync(path.join(dir, file))) { clearInterval(poll); watcher.close(); resolve(); } };
+    const watcher = watch(dir, check);
+    const poll = setInterval(check, 50);
+    check();
   });
 };
 // Observe actual held locks through the public afterRead hook; keep the real implementation.
