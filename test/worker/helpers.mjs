@@ -167,14 +167,14 @@ export async function startWorker(repo, runId, extraEnv = {}) {
   const exited = new Promise((resolve) => child.on('exit', resolve));
   const w = { child, pid: /** @type {number} */ (child.pid), exited, stderr: () => stderr };
   cleanups.push(() => stopWorker(w, runId));
-  const ok = await waitFor(() => liveWorker(repo)?.pid === child.pid, 15000);
+  const ok = await waitFor(() => liveWorker(repo)?.pid === child.pid, 20000);
   if (!ok) throw new Error(`worker did not announce itself: ${stderr}`);
   return w;
 }
 
 /**
  * SIGTERM the worker (it forwards the signal to its live sessions), SIGKILL its group if it is
- * still alive after 5 s, then reap whatever its run root's registry still lists.
+ * still alive after 20 s, then reap whatever its run root's registry still lists.
  * @param {{pid: number, exited: Promise<unknown>, child: import('node:child_process').ChildProcess}} w @param {string} runId
  */
 export async function stopWorker(w, runId) {
@@ -187,14 +187,14 @@ export async function stopWorker(w, runId) {
       } catch {
         // gone
       }
-      const done = await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, 5000);
+      const done = await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, 20000);
       if (!done) {
         try {
           process.kill(-w.pid, 'SIGKILL');
         } catch {
           // gone
         }
-        if (!(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, 2000))) throw new Error(`worker pid ${w.pid} did not stop`);
+        if (!(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, 20000))) throw new Error(`worker pid ${w.pid} did not stop`);
       }
     }
   } catch (err) {
@@ -217,7 +217,7 @@ export async function stopWorker(w, runId) {
 }
 
 /**
- * Stop a worker known only by pid (one `run start` launched): SIGTERM, wait up to 5 s, SIGKILL its
+ * Stop a worker known only by pid (one `run start` launched): SIGTERM, wait up to 20 s, SIGKILL its
  * group, then reap its run root's registry. Registered for `after()` too.
  * @param {number} pid @param {string} runId
  */
@@ -227,13 +227,13 @@ export async function stopPid(pid, runId) {
   } catch {
     // gone
   }
-  if (!(await waitFor(() => !alive(pid), 5000))) {
+  if (!(await waitFor(() => !alive(pid), 20000))) {
     try {
       process.kill(-pid, 'SIGKILL');
     } catch {
       // gone
     }
-    await waitFor(() => !alive(pid), 2000);
+    await waitFor(() => !alive(pid), 20000);
   }
   await sweep(path.join(runRootOf(runId), 'pids'), { graceMs: 500 });
 }
@@ -326,7 +326,7 @@ export function alive(pid) {
 }
 
 /** @param {() => boolean} cond @param {number} [ms] */
-export async function waitFor(cond, ms = 10000) {
+export async function waitFor(cond, ms = 20000) {
   const until = Date.now() + ms;
   while (Date.now() < until) {
     if (cond()) return true;

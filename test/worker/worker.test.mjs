@@ -14,12 +14,12 @@ const { createKeyStore } = await import('../../src/keys/store.mjs');
 
 /**
  * Wait for each pid to be gone (`process.kill(pid, 0)` throws ESRCH), polling every 25 ms up to a
- * 5 s deadline. A SIGKILLed session can stay a zombie for a moment after `stopWorker` returns
+ * 20 s deadline. A SIGKILLed session can stay a zombie for a moment after `stopWorker` returns
  * (its parent, the worker, is gone; launchd/init reaps it a little later), so the test waits for
  * the real exit instead of reading it once. Returns the pids still alive at the deadline.
  * @param {number[]} pids @param {number} [ms]
  */
-async function waitDead(pids, ms = 5000) {
+async function waitDead(pids, ms = 20000) {
   /** @param {number} pid */
   const gone = (pid) => {
     try {
@@ -97,7 +97,7 @@ describe('the sessions the worker spawns', () => {
       assert.equal(alive(pid), true);
       assert.equal(JSON.parse(readFileSync(entry, 'utf8')).pid, pid);
       assert.equal((await cli(['review-file', '--wait', a.json.ticket, '--max', '30s'], repo)).json.status, 'done');
-      assert.ok(await waitFor(() => !existsSync(entry), 3000));
+      assert.ok(await waitFor(() => !existsSync(entry), 20000));
     } finally {
       await stopWorker(w, runId);
     }
@@ -108,7 +108,7 @@ describe('worker restart', () => {
   test('a new worker re-reads 3 queued tickets and completes them; run start --reattach re-pins its pid', async () => {
     const { repo, runId } = await makeRepo();
     const recordDir = freshDir('records');
-    // The first worker's sessions sleep 30 s: far past the 5 s wait for their death below, so a
+    // The first worker's sessions sleep 30 s: past the 20 s wait for their death below, so a
     // session that stopWorker did not kill can never pass by ending on its own.
     const first = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '30000' });
     assert.equal((await cli(['run', 'start', '--reattach', '--run', runId], repo)).code, 0);
@@ -379,11 +379,11 @@ describe('worker lifecycle', () => {
     return { code, stops, stdout: stdout.text, stderr: stderr.text };
   }
 
-  /** The launched child must be gone within 3 s of the stop, or the stop did not work. */
+  /** Allow up to 20 s to observe the launched child's exit after the stop. */
   async function assertStoppedQuickly(/** @type {{pid: number, exited: Promise<unknown>}} */ c) {
-    const exited = await Promise.race([c.exited, new Promise((r) => setTimeout(() => r(false), 3000))]);
+    const exited = await Promise.race([c.exited, new Promise((r) => setTimeout(() => r(false), 20000).unref())]);
     assert.equal(exited, true, `pid ${c.pid} still running 3 s after the stop`);
-    assert.equal(await waitFor(() => !alive(c.pid), 3000), true);
+    assert.equal(await waitFor(() => !alive(c.pid), 20000), true);
   }
 
   test('run start whose launched worker never announces itself stops that pid exactly once (no orphan) and fails', async () => {

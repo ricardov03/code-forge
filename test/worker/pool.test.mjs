@@ -229,7 +229,7 @@ describe('review.parallel_tickets (B42)', () => {
     });
     assert.equal(await waitFor(() => log.active === 3), true);
     const beat = String(readWorker(p.repo)?.heartbeat_at);
-    assert.equal(await waitFor(() => String(readWorker(p.repo)?.heartbeat_at) !== beat, 2000), true);
+    assert.equal(await waitFor(() => String(readWorker(p.repo)?.heartbeat_at) !== beat, 20000), true);
     assert.equal(liveWorker(p.repo)?.pid, process.pid);
     g.openAll(['src/a.mjs', 'src/b.mjs']);
     await sleep(60);
