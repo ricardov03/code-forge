@@ -12,6 +12,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The coder brief keeps only the final test log after a sandbox EPERM rerun, and fix rounds list the typecheck command next to the block tests (B140)
 - The first-use and brief-mode walkthrough tests no longer fail when a live code-forge run of the developer writes into ~/.code-forge during the suite (B145)
 - Process tests have wider time bounds, so the suite no longer fails from slowness on a busy machine (B144)
+- The Codex transcript check ignores rule text inside a node/python/ruby/perl script body that spawns nothing, also inside `zsh -lc` wrappers (B141)
 
 ## [0.15.0] — 2026-10-19
 

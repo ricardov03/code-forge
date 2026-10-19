@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 153,
+  "block_count": 154,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2816,6 +2816,19 @@
       ],
       "depends_on": [],
       "note": "F-24. One fix round (2 review warnings). Gates passed on the first run. F-29 (queue enqueue < 1 s) left out: it is a product speed rule."
+    },
+    "B141": {
+      "title": "The Codex transcript check ignores rule text inside a node/python/ruby/perl script body that spawns nothing, also inside zsh -lc wrappers; parent-shell substitutions in double-quoted wrapper segments still count",
+      "wave": 14,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/util/forbidden.mjs",
+        "test/util/transcript-codex.test.mjs",
+        "skill/references/security.md"
+      ],
+      "depends_on": [],
+      "note": "F-21. Three fix rounds (zsh -lc wrappers, shell quoting, double-quoted substitutions). The real B137b transcript gives no hit. Gates passed on the third run (runs 1-2: load and live-run flakes, fixed by B144/B145)."
     }
   }
 }
