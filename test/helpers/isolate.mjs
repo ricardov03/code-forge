@@ -15,15 +15,14 @@
  *     `HOME`, `TMPDIR` and the cwd at it, and exports it as `CODE_FORGE_TEST_ROOT`;
  *  4. then sweeps stale `code-forge-test-*` roots left by killed runs — their registered children
  *     are reaped (`src/util/reaper.mjs`, start-time checked) and the directories removed;
- *  5. on exit, SIGKILLs any registered child still running (start time checked), fails the
- *     process when the real `~/.code-forge` or `<repo>/.code-forge` gained an
- *     entry during its lifetime, and removes its root.
+ *  5. on exit, reaps registered children, fails on new guarded entries except verified live foreign locks, and removes its root.
  *     (`leakedEntries`: new paths of a run already in the baseline are a live run, not a leak.)
  * `src/**` modules are imported dynamically, AFTER `HOME` is pinned, so no `src` module can ever
  * see the real `HOME` from this process.
  */
 
-import { existsSync, mkdirSync, readdirSync, realpathSync, rmSync } from 'node:fs';
+import { execFileSync } from 'node:child_process';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -79,23 +78,96 @@ function belongsToBaselineRun(dir, p, baseline) {
   return false;
 }
 
+/** @typedef {(pid: number) => {start: string | null, ppid: number} | null} ProcessProbe */
+
+/**
+ * Synchronous because the guard runs during exit. A failed ps leaves the owner unverified.
+ * @type {ProcessProbe}
+ */
+function probeProcess(pid) {
+  try {
+    const text = execFileSync('/bin/ps', ['-o', 'ppid=', '-o', 'lstart=', '-p', String(pid)], {
+      encoding: 'utf8',
+      env: { ...process.env, LC_ALL: 'C' },
+      stdio: ['ignore', 'pipe', 'ignore'],
+      timeout: 5000,
+    }).trim();
+    const match = /^(\d+)\s+(.+)$/.exec(text);
+    return match ? { ppid: Number(match[1]), start: match[2] } : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Verify both the owner identity and its entire ancestry before exempting a lock.
+ * @param {string} p
+ * @param {ProcessProbe} probe
+ * @returns {boolean}
+ */
+function isForeignLock(p, probe) {
+  try {
+    const lock = JSON.parse(readFileSync(p, 'utf8'));
+    if (lock === null || typeof lock !== 'object' || Array.isArray(lock)
+      || typeof lock.key !== 'string' || !Number.isInteger(lock.pid) || lock.pid <= 1
+      || typeof lock.start !== 'string' || lock.start.trim() === '' || lock.start === 'unknown') return false;
+    const owner = probe(lock.pid);
+    if (owner === null || owner.start !== lock.start) return false;
+    const seen = new Set();
+    let pid = lock.pid;
+    let current = owner;
+    while (pid !== 1) {
+      if (pid === process.pid || seen.has(pid) || current === null
+        || !Number.isInteger(current.ppid) || current.ppid < 1) return false;
+      seen.add(pid);
+      pid = current.ppid;
+      if (pid !== 1) current = probe(pid);
+    }
+    return true;
+  } catch {
+    return false;
+  }
+}
+
 /**
  * The new paths under the guarded dirs that count as leaks, sorted. A path not in `baseline` is a
  * leak unless it belongs to a run whose record was already in the baseline (a live run of the
  * developer that started before the tests): `runs/<id>`, `runs/<id>.<anything>`, `runs/<id>/…`.
+ * Verified live foreign `locks/<sha>.lock` owners are also exempt, as is a new locks directory
+ * containing no leaks. Unknown owner identity or ancestry fails closed.
  * @param {Iterable<string>} baseline - the snapshot taken at start.
  * @param {Iterable<string>} now - the snapshot taken at exit.
  * @param {readonly string[]} [dirs] - defaults to the real guarded directories.
+ * @param {ProcessProbe} [probe] - defaults to synchronous /bin/ps.
  * @returns {string[]}
  */
-export function leakedEntries(baseline, now, dirs = GUARDED_DIRS) {
+export function leakedEntries(baseline, now, dirs = GUARDED_DIRS, probe = probeProcess) {
   const before = new Set(baseline);
   const leaked = [];
+  const newLockDirs = [];
   for (const p of new Set(now)) {
     if (before.has(p)) continue;
     const dir = dirs.find((d) => p.startsWith(d + path.sep));
     if (dir !== undefined && belongsToBaselineRun(dir, p, before)) continue;
+    if (dir !== undefined) {
+      const locks = path.join(dir, 'locks');
+      if (p === locks) {
+        try {
+          if (lstatSync(p).isDirectory()) {
+            newLockDirs.push(p);
+            continue;
+          }
+        } catch {
+          // Unreadable entries remain leaks.
+        }
+      }
+      if (path.dirname(p) === locks && /^[a-f\d]{64}\.lock$/i.test(path.basename(p))
+        && isForeignLock(p, probe)) continue;
+    }
     leaked.push(p);
+  }
+  for (const dir of newLockDirs) {
+    if (leaked.some((p) => p.startsWith(dir + path.sep))) leaked.push(dir);
   }
   return leaked.sort();
 }

@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { execFileSync, spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { mkdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
@@ -123,4 +125,80 @@ test('a guarded dir that appears is a leak, and an unchanged snapshot is 0 leaks
   assert.deepEqual(leakedEntries(baseline, baseline, dirs), []);
   mkdirSync(dirs[0]);
   assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs), [dirs[0]]);
+});
+
+const FOREIGN_PID = 2_000_000_001;
+const START = 'Mon Oct 19 08:21:32 2026';
+/** @param {number} n */
+const lockName = (n) => `${n.toString(16).padStart(64, '0')}.lock`;
+/** @param {number} pid */
+const foreignProbe = (pid) => pid === FOREIGN_PID ? { start: START, ppid: 1 } : null;
+
+test('live foreign locks with matching start times are 0 leaks, including a new empty locks directory', () => {
+  const { dirs, home, repo } = fakeDirs('foreign-locks');
+  mkdirSync(path.join(repo, 'locks'));
+  const baseline = snapshotGuarded(dirs);
+  mkdirSync(path.join(home, 'locks'));
+  assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe), [], 'new empty locks directory: 0 leaks');
+  for (const dir of dirs) {
+    writeFileSync(path.join(dir, 'locks', lockName(1)), JSON.stringify({ key: 'foreign', pid: FOREIGN_PID, start: START }));
+  }
+  assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe), [], 'new and existing locks directories with foreign owners: 0 leaks');
+});
+
+test('dead pid, start mismatch, unknown start, malformed, own pid and descendant locks remain exact leaks', () => {
+  const descendant = FOREIGN_PID + 1;
+  const intermediate = FOREIGN_PID + 2;
+  /** @type {Array<{name: string, record?: unknown, raw?: string, filename?: string, directory?: boolean, probe?: (pid: number) => {start: string | null, ppid: number} | null}>} */
+  const cases = [
+    { name: 'dead pid', record: { key: 'dead', pid: FOREIGN_PID + 3, start: START } },
+    { name: 'start mismatch', record: { key: 'reused', pid: FOREIGN_PID, start: 'Sun Oct 18 08:21:32 2026' } },
+    { name: 'unknown live start', probe: (pid) => pid === descendant ? { start: null, ppid: 1 } : foreignProbe(pid) },
+    { name: 'unknown recorded start', record: { key: 'unknown', pid: FOREIGN_PID, start: 'unknown' } },
+    { name: 'unknown matching start', record: { key: 'unknown', pid: descendant, start: 'unknown' }, probe: (pid) => pid === descendant ? { start: 'unknown', ppid: 1 } : foreignProbe(pid) },
+    { name: 'malformed JSON', raw: '{' },
+    { name: 'malformed null', raw: 'null' },
+    { name: 'missing key', record: { pid: FOREIGN_PID, start: START } },
+    { name: 'invalid pid', record: { key: 'bad-pid', pid: 1, start: START } },
+    { name: 'empty start', record: { key: 'empty', pid: FOREIGN_PID, start: '' } },
+    { name: 'wrong name', filename: 'foreign.lock', record: { key: 'name', pid: FOREIGN_PID, start: START } },
+    { name: 'unreadable lock', directory: true },
+    { name: 'own pid', record: { key: 'self', pid: process.pid, start: START }, probe: (pid) => pid === process.pid ? { start: START, ppid: 1 } : foreignProbe(pid) },
+    { name: 'descendant pid', probe: (pid) => pid === descendant ? { start: START, ppid: intermediate } : pid === intermediate ? { start: START, ppid: process.pid } : foreignProbe(pid) },
+    { name: 'unknown ancestry', probe: (pid) => pid === descendant ? { start: START, ppid: intermediate } : foreignProbe(pid) },
+    { name: 'cyclic ancestry', probe: (pid) => pid === descendant ? { start: START, ppid: descendant } : foreignProbe(pid) },
+    { name: 'probe failure', probe: (pid) => { if (pid === descendant) throw new Error('ps unavailable'); return foreignProbe(pid); } },
+  ];
+  for (const fixture of cases) {
+    const { dirs, home } = fakeDirs(`invalid-lock-${fixture.name}`);
+    const baseline = snapshotGuarded(dirs);
+    const locks = path.join(home, 'locks');
+    mkdirSync(locks);
+    writeFileSync(path.join(locks, lockName(1)), JSON.stringify({ key: 'allowed neighbor', pid: FOREIGN_PID, start: START }));
+    const bad = path.join(locks, fixture.filename ?? lockName(2));
+    if (fixture.directory) mkdirSync(bad);
+    else writeFileSync(bad, fixture.raw ?? JSON.stringify(fixture.record ?? { key: 'bad', pid: descendant, start: START }));
+    assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, fixture.probe ?? foreignProbe), [locks, bad], `${fixture.name}: exactly the new locks directory and bad lock leak`);
+  }
+});
+
+test('real ps allows a live foreign parent lock and reports exactly the live child lock and its new directory', async () => {
+  const { dirs, home } = fakeDirs('real-locks');
+  const baseline = snapshotGuarded(dirs);
+  const locks = path.join(home, 'locks');
+  mkdirSync(locks);
+  const child = spawn(process.execPath, ['-e', 'setInterval(()=>{},1000)'], { stdio: 'ignore' });
+  try {
+    await once(child, 'spawn');
+    for (const [index, pid] of [process.ppid, child.pid].entries()) {
+      const start = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } }).trim();
+      assert.notEqual(start, '', `owner ${pid} has a known start time`);
+      writeFileSync(path.join(locks, lockName(index + 1)), JSON.stringify({ key: `real-${pid}`, pid, start }));
+    }
+    assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs), [locks, path.join(locks, lockName(2))], 'exactly 2 leaks: new directory and child lock; foreign parent lock is allowed');
+  } finally {
+    const exited = once(child, 'exit');
+    child.kill('SIGKILL');
+    await exited;
+  }
 });
