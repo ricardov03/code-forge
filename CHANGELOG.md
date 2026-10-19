@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.15.1] — 2026-10-19
+
 ### Changed
 
 - The test leak check ignores a lock held by a live process outside the suite (same pid start time), so gates can run while a review worker runs (B142)
