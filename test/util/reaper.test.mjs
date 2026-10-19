@@ -78,7 +78,7 @@ test('B135: readStartTime reads this process without ps on PATH and rejects abse
   } finally { process.env.PATH = oldPath; }
 });
 
-test('registerPid writes {pid, start_time, argv0} with the live start time', async () => {
+test('registerPid writes {pid, start_time, argv0} with the live start time', { timeout: 30000 }, async () => {
   const dir = await registryDir('reg');
   const pid = await spawnIdle(false);
   const file = registerPid(dir, pid, process.execPath);
@@ -88,7 +88,7 @@ test('registerPid writes {pid, start_time, argv0} with the live start time', asy
   process.kill(-pid, 'SIGKILL');
 });
 
-test('B135 boundary: group members are found without ps on PATH', async () => {
+test('B135 boundary: group members are found without ps on PATH', { timeout: 30000 }, async () => {
   const child = track(spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' }));
   const { execFileSync } = await import('node:child_process');
   const pgid = Number(execFileSync('/bin/ps', ['-o', 'pgid=', '-p', String(child.pid)], { encoding: 'utf8' }).trim());

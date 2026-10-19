@@ -22,6 +22,8 @@ after(async () => {
 });
 
 const EXEC_URL = new URL('../../src/util/exec.mjs', import.meta.url).href;
+// exec's grace period before the fallback group SIGKILL, in milliseconds.
+const KILL_GRACE = 2000;
 
 /** @param {number} pid */
 function isAlive(pid) {
@@ -149,11 +151,15 @@ for (const trapsSigterm of [false, true]) {
         const pending = exec([process.execPath, '-e', childWithGrandchild(pidFile, trapsSigterm)], { timeoutMs: 1500 });
         grandchildPid = await waitForPidFile(pidFile, 20000);
         const result = await pending;
+        const settled = Date.now();
 
         assert.equal(result.result, 'failed');
         assert.equal(result.timedOut, true);
         // Poll for the group kill, allowing delayed process-exit observation on a busy runner.
         await waitForDeath(grandchildPid, 20000);
+        if (trapsSigterm) {
+          assert.ok(Date.now() - settled < KILL_GRACE, 'the grandchild must die from the group SIGKILL at settlement, before the grace timer');
+        }
         assert.equal(isAlive(grandchildPid), false, 'the grandchild process is still alive');
       } finally {
         killQuietly(grandchildPid);
