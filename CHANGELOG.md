@@ -13,6 +13,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The first-use and brief-mode walkthrough tests no longer fail when a live code-forge run of the developer writes into ~/.code-forge during the suite (B145)
 - Process tests have wider time bounds, so the suite no longer fails from slowness on a busy machine (B144)
 - The Codex transcript check ignores rule text inside a node/python/ruby/perl script body that spawns nothing, also inside `zsh -lc` wrappers (B141)
+- New human verb `block amend-acceptance` corrects a wrong acceptance clause of an open block; reviews signed before the change no longer count at close (B143b)
 
 ## [0.15.0] — 2026-10-19
 
