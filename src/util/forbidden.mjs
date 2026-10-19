@@ -854,16 +854,32 @@ function transcriptCommandText(command, unwrapShell = true) {
         if (quote === '"' && char === '\\' && /["\\$`\n]/.test(command[i] ?? '')) {
           const escaped = command[i++];
           if (escaped !== '\n') parts.push(escaped);
-        } else parts.push(char);
+        } else {
+          // Keep the source segment's quote context until after this check:
+          // the parent shell expands these even inside an inner quoted heredoc.
+          // Single-quoted splices and the escaped characters above are literal.
+          // Unquoted splices already fail closed at the closing-quote check.
+          if (quote === '"' && (char === '`' || (char === '$' && command[i] === '('))) return command;
+          parts.push(char);
+        }
       }
       return command;
     }
   }
   const spawnWord = /\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|system|popen|subprocess|child_process|Popen)\b/;
   const interpreter = /^(node|python|python3|ruby|perl)(?:\d+(?:\.\d+)*)?$/;
+  /** @param {string} body */
+  const hasShellSubstitution = (body) => {
+    for (let i = 0; i < body.length; i += 1) {
+      // Skip escaped characters in pairs so even backslash runs still expand.
+      if (body[i] === '\\') { i += 1; continue; }
+      if (body[i] === '`' || (body[i] === '$' && body[i + 1] === '(')) return true;
+    }
+    return false;
+  };
   /** @param {string} body @param {string} language @param {boolean} shellExpands */
   const hasSpawn = (body, language, shellExpands) => spawnWord.test(body)
-    || (shellExpands && /`|\$\(/.test(body))
+    || (shellExpands && hasShellSubstitution(body))
     || ((language === 'ruby' || language === 'perl') && /`|\$\(|%x/.test(body))
     || (language === 'perl' && /\bqx\b/.test(body));
   const evalFlags = new Set(['-e', '-c', '--eval', '-p', '--print']);
@@ -1004,11 +1020,13 @@ function transcriptCommandText(command, unwrapShell = true) {
  * is never scanned; non-item events are skipped. For string commands, node/python/ruby/perl
  * heredocs and quoted -e/-c/--eval/-p/--print bodies without a process-spawn word are omitted
  * from command and contains rules only; path rules still scan the whole command. Backticks and
- * $( count when the shell expands the body (unquoted heredoc delimiter or double-quoted inline
+ * $( count when unescaped and the shell expands the body (unquoted heredoc delimiter or double-quoted inline
  * script), or for Ruby/Perl; %x counts for Ruby/Perl, and qx for Perl. Quoted or backslash-escaped
  * heredoc delimiters and single-quoted inline scripts prevent shell expansion. One sh/bash/zsh/
  * dash/ksh -c wrapper (including -lc/-ic and -l -c) with a single quoted script (including
- * opposite-quoted splices) is decoded first; its prefix remains scanned. Nested wrappers,
+ * opposite-quoted splices) is decoded first; its prefix remains scanned. Unescaped parent-shell
+ * substitutions in double-quoted wrapper segments keep the entire command scanned; single-quoted
+ * splices are literal at that layer. Unquoted splices, nested wrappers,
  * malformed wrappers, shell/unknown heredocs and
  * unterminated bodies scan whole. Any other log uses the plain-text grep above, unchanged.
  *

@@ -92,6 +92,23 @@ test(`Codex ${form} node template literals are inert only with a quoted heredoc 
   ], 'quoted node template: no hit; shell expansion, Ruby backticks and Perl qx: one hit each');
 });
 
+test(`Codex ${form} shell substitutions respect backslash escapes`, () => {
+  for (const symbol of ['`echo text`', '$(echo text)']) {
+    for (const slashes of [0, 1, 2, 3]) {
+      const escaped = symbol.replace(/`|\$\(/g, (match) => '\\'.repeat(slashes) + match);
+      const body = `print('${ruleText}'); ${escaped}`;
+      const scripts = [
+        `node -e "${body}"`,
+        `node <<END\n${body}\nEND`,
+      ];
+      for (const script of scripts) {
+        assert.deepEqual(scanTranscript(commands(commandForm(script)), coderRules), slashes % 2 === 0 ? ruleHits(2) : [],
+          `${script}: only an even number of preceding backslashes permits shell substitution`);
+      }
+    }
+  }
+});
+
 test(`Codex ${form} shell and unterminated heredocs and guarded paths fail closed; plain text stays unchanged`, () => {
   const unsafe = [
     ...['bash', 'sh', 'zsh', 'dash', 'fish', 'ksh', 'eval', 'xargs', 'unknown'].map((shell) => `${shell} <<'END'\n${ruleText}\nEND`),
@@ -155,6 +172,27 @@ test('Codex shell wrappers decode one quoted script with shell escape rules', ()
   scripts.push(`/bin/zsh -lc "node <<'END'\nprint('${ruleText}')\nEN\\\nD"`);
   assert.deepEqual(scripts.map((command) => scanTranscript(commands(command), coderRules)), scripts.map(() => []),
     'all shell names, paths, flag clusters, quotes, literal backslashes and escaped newlines: zero hits');
+});
+
+test('Codex wrapper substitutions retain the parent shell quote context', () => {
+  const before = `node <<'NODE'\nconst text = '${ruleText}';\nconst other = `;
+  const after = ';\nNODE';
+  for (const prefix of ['sh -c', '/bin/zsh -lc']) {
+    for (const symbol of ['`echo text`', '$(echo text)']) {
+      const rawDoubleQuoted = doubleQuote(before + symbol + after).replaceAll('\\`', '`').replaceAll('\\$', '$');
+      const scripts = [
+        `${prefix} ${rawDoubleQuoted}`,
+        `${prefix} ${doubleQuote(before)}'${symbol}'${doubleQuote(after)}`,
+        `${prefix} ${doubleQuote(before + symbol + after)}`,
+        `${prefix} ${doubleQuote(before)}${symbol}${doubleQuote(after)}`,
+      ];
+      assert.deepEqual(scripts.map((script) => scanTranscript(commands(script), coderRules)), [ruleHits(2), [], [], ruleHits(2)],
+        `${prefix}, ${symbol}: parent double-quoted and unquoted substitutions scan whole; single-quoted and escaped ones are literal`);
+    }
+  }
+  // A parent spawn anywhere in the wrapper keeps every interpreter body visible.
+  const separate = `${before}0${after}\necho \`echo text\``;
+  assert.deepEqual(scanTranscript(commands(`/bin/zsh -lc ${doubleQuote(separate).replaceAll('\\`', '`')}`), coderRules), ruleHits(2));
 });
 
 test('Codex malformed, unsupported and nested shell wrappers scan whole', () => {
