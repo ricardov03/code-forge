@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.15.0] — 2026-10-19
+
 ### Changed
 
 - Worker claim tests back up file-watch barriers with a short poll, so a busy file-event service no longer fails them
