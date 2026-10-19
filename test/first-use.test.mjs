@@ -13,7 +13,7 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { spawn } from 'node:child_process';
 import { after, before, describe, test } from 'node:test';
-import { snapshotGuarded } from './helpers/isolate.mjs';
+import { leakedSince, snapshotGuarded } from './helpers/isolate.mjs';
 import { BLOCK, OWNED, StepFailed, blockCost, degradedBanner, parseArgs, waitForSentinel } from '../scripts/first-use.mjs';
 
 const { exec } = await import('../src/util/exec.mjs');
@@ -156,8 +156,8 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
   test('the copy and the run root are under tmp.root, never the package tree; no-leak holds (real dirs + processes)', async () => {
     assert.equal(res.summary.copy, copy);
     assert.deepEqual([copy.startsWith(`${TMP_ROOT}${path.sep}`), copy.startsWith(`${REPO}${path.sep}`), runRootExisted], [true, false, true]);
-    // no-leak: 0 new entries in the real ~/.code-forge and <repo>/.code-forge; 0 live processes left
-    assert.deepEqual([...snapshotGuarded()].filter((p) => !guardedBefore.has(p)), []);
+    // no-leak: 0 leaked entries in the real ~/.code-forge and <repo>/.code-forge; 0 live processes left
+    assert.deepEqual(leakedSince(guardedBefore), []);
     const record = await readRun(RUN);
     const defaultBase = path.join(/** @type {string} */ (process.env.TMPDIR), 'code-forge'); // the CLI verbs' own lazy roots
     assert.deepEqual(

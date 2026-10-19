@@ -7,6 +7,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { leakedEntries, snapshotGuarded } from './helpers/isolate.mjs';
+import * as isolate from './helpers/isolate.mjs';
 
 // B77: the exit guard of the preload ignores new paths of a run that was already in the baseline
 // (the developer's live run), and still reports everything else. All dirs here are fake temp dirs.
@@ -133,6 +134,43 @@ const START = 'Mon Oct 19 08:21:32 2026';
 const lockName = (n) => `${n.toString(16).padStart(64, '0')}.lock`;
 /** @param {number} pid */
 const foreignProbe = (pid) => pid === FOREIGN_PID ? { start: START, ppid: 1 } : null;
+
+// Optional calls keep a missing export on the base an assertion failure, not an import error.
+test('leakedSince ignores a new file under a run whose record was in the baseline: 0 leaks', () => {
+  const { dirs, home } = fakeDirs('since-baseline-run');
+  const before = snapshotGuarded(dirs);
+  const state = path.join(home, 'runs', 'r-1', 'review-state');
+  mkdirSync(state, { recursive: true });
+  writeFileSync(path.join(state, 'ticket.json'), '{}\n');
+  assert.deepEqual(isolate.leakedSince?.(before, dirs, foreignProbe), []);
+});
+
+test('leakedSince reports a new run without a baseline record: exactly its directory and file', () => {
+  const { dirs, home } = fakeDirs('since-new-run');
+  const before = snapshotGuarded(dirs);
+  const run = path.join(home, 'runs', 'r-2');
+  mkdirSync(run);
+  const file = path.join(run, 'state.json');
+  writeFileSync(file, '{}\n');
+  assert.deepEqual(isolate.leakedSince?.(before, dirs, foreignProbe), [run, file]);
+});
+
+test('leakedSince ignores a verified live foreign lock: 0 leaks', () => {
+  const { dirs, home } = fakeDirs('since-foreign-lock');
+  const before = snapshotGuarded(dirs);
+  const locks = path.join(home, 'locks');
+  mkdirSync(locks);
+  writeFileSync(path.join(locks, lockName(1)), JSON.stringify({ key: 'foreign', pid: FOREIGN_PID, start: START }));
+  assert.deepEqual(isolate.leakedSince?.(before, dirs, foreignProbe), []);
+});
+
+test('leakedSince reports a new stray file: exactly that path', () => {
+  const { dirs, home } = fakeDirs('since-stray');
+  const before = snapshotGuarded(dirs);
+  const stray = path.join(home, 'stray.txt');
+  writeFileSync(stray, '');
+  assert.deepEqual(isolate.leakedSince?.(before, dirs, foreignProbe), [stray]);
+});
 
 test('live foreign locks with matching start times are 0 leaks, including a new empty locks directory', () => {
   const { dirs, home, repo } = fakeDirs('foreign-locks');

@@ -172,6 +172,17 @@ export function leakedEntries(baseline, now, dirs = GUARDED_DIRS, probe = probeP
   return leaked.sort();
 }
 
+/**
+ * Snapshot the guarded dirs and apply the suite guard's leak filter synchronously.
+ * @param {Iterable<string>} before - the snapshot taken at start.
+ * @param {readonly string[]} [dirs] - defaults to the real guarded directories.
+ * @param {ProcessProbe} [probe] - defaults to synchronous /bin/ps.
+ * @returns {string[]}
+ */
+export function leakedSince(before, dirs = GUARDED_DIRS, probe = probeProcess) {
+  return leakedEntries(before, snapshotGuarded(dirs), dirs, probe);
+}
+
 const baseline = snapshotGuarded();
 
 // Pin before any src module is loaded. The roots live in a private base (0700, ours) rather than

@@ -19,7 +19,7 @@ import { fileURLToPath } from 'node:url';
 
 const { readAllRows } = await import('../../src/ledger/write.mjs');
 const { doneFilePath } = await import('../../src/state/block-end.mjs');
-const { GUARDED_DIRS, snapshotGuarded } = await import('../helpers/isolate.mjs');
+const { GUARDED_DIRS, leakedSince, snapshotGuarded } = await import('../helpers/isolate.mjs');
 
 const ROOT = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
 const BIN = path.join(ROOT, 'bin', 'code-forge.mjs');
@@ -236,7 +236,7 @@ test('B67 (5): the docs/brief-mode.md walk-through runs as written with the real
   assert.equal(end.code, 0, end.stderr);
   assert.equal(end.stdout, `run ${RUN} ended\n`);
 
-  // Nothing reached the real ~/.code-forge or <repo>/.code-forge.
-  assert.deepEqual([...snapshotGuarded()].filter((p) => !guardedBefore.has(p)), []);
+  // No leaks reached the real ~/.code-forge or <repo>/.code-forge.
+  assert.deepEqual(leakedSince(guardedBefore), []);
   assert.equal(existsSync(path.join(realHome, '.code-forge', 'runs', RUN)), false);
 });
