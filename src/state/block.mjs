@@ -24,7 +24,7 @@ import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
 import { assertOwned, blocksOverlap, isExactEntry, ownsFile, scopeGate } from './registry.mjs';
 import { checkWorkerPin, readRun, saveRun, withRunLock, writeSigned } from './run.mjs';
-import { verifyRow, loadKey } from './signer.mjs';
+import { canonicalJSON, verifyRow, loadKey } from './signer.mjs';
 import * as reviewQueue from '../worker/queue.mjs';
 import { repoRootOf } from '../worker/ticket.mjs';
 
@@ -33,7 +33,7 @@ import { repoRootOf } from '../worker/ticket.mjs';
 export const BRIEF_POINTER_MAX_BYTES = 200;
 
 /** Ledger events the block gate requires to carry a valid MAC (§4.6 row 10). */
-export const GATE_EVENTS = Object.freeze(['dispatch', 'block.attempt', 'block.rebase', 'block.claim', 'review.approved', 'proof']);
+export const GATE_EVENTS = Object.freeze(['dispatch', 'block.attempt', 'block.rebase', 'block.claim', 'block.acceptance_amended', 'review.approved', 'proof']);
 
 const BLOCK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
 const LEVEL = /^L[0-3]$/;
@@ -231,6 +231,38 @@ function assertAcceptance(clauses) {
     );
   if (!ok) throw new StateError('bad-acceptance', 'acceptance: a non-empty list of {clause, tests: [test ids…]} or {clause, kind: human_check} without tests is required');
   return clauses;
+}
+
+/** Validate before the human question, and again under the run lock.
+ * @param {Record<string, any>} record @param {string} id @param {unknown} clauses
+ */
+export function prepareAcceptanceAmendment(record, id, clauses) {
+  const block = record.blocks?.[id];
+  if (!block) throw new StateError('unknown_block', `block ${id} is not in run ${record.run_id}`);
+  if (block.status !== 'open') throw new StateError('not-open', `not-open: block ${id} is not open`);
+  const acceptance = assertAcceptance(clauses);
+  const old_sha256 = sha256(canonicalJSON(block.acceptance));
+  const new_sha256 = sha256(canonicalJSON(acceptance));
+  if (old_sha256 === new_sha256) throw new StateError('acceptance-unchanged', 'acceptance-unchanged: the clause list is unchanged; nothing was recorded');
+  return { acceptance, old_sha256, new_sha256, oldCount: block.acceptance.length };
+}
+
+/** @param {{runId: string, id: string, acceptance: unknown, reason: string, old_sha256: string, writeRow: WriteRow, before: (record: Record<string, any>) => void}} opts */
+export async function amendAcceptanceBlock({ runId, id, acceptance, reason, old_sha256, writeRow, before }) {
+  return mutateRun(runId, null, writeRow, (record) => {
+    before(record);
+    const prepared = prepareAcceptanceAmendment(record, id, acceptance);
+    if (prepared.old_sha256 !== old_sha256) throw new StateError('acceptance-moved', `acceptance changed while confirming block ${id}; confirm again`);
+    const block = record.blocks[id];
+    block.acceptance = prepared.acceptance;
+    const checks = prepared.acceptance.filter((c) => c.kind === 'human_check').map((c) => c.clause);
+    if (checks.length) block.human_checks = checks;
+    else delete block.human_checks;
+    // Unique even when a later amendment restores an earlier list of clauses.
+    block.acceptance_revision = randomUUID();
+    const row = { event: 'block.acceptance_amended', block: id, old_sha256, new_sha256: prepared.new_sha256, clauses: prepared.acceptance.length, reason, by: 'human' };
+    return { result: row, rows: [row] };
+  });
 }
 
 /**

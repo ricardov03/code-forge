@@ -360,6 +360,12 @@ export const CODER_ONLY_FORBIDDEN = Object.freeze(
       groups: [{ anyOf: ['--add-worker'] }],
       description: 'Add a review worker to a run — the orchestrator only (B107)',
     },
+    {
+      id: 'code-forge-block-amend-acceptance-from-coder',
+      kind: 'anyPrefix',
+      prefixes: [['code-forge', 'block', 'amend-acceptance'], ['forge', 'block', 'amend-acceptance']],
+      description: 'Correct a block acceptance list — human-only, confirmed in the human terminal (B143)',
+    },
   ].map(freezeEntry),
 );
 

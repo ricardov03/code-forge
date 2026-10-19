@@ -31,6 +31,7 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { runRecordPath } from '../state/paths.mjs';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
 import { isAlive, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
 import { assertRowPath, assertTicketId, contentHash, ticketId, WorkerError } from './ticket.mjs';
@@ -75,7 +76,7 @@ function readJSON(file) {
 }
 
 /**
- * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string, kind?: 'answers', by_file?: string, by_hash?: string, answers?: string[]}} Ticket
+ * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string, acceptance_revision?: string, kind?: 'answers', by_file?: string, by_hash?: string, answers?: string[]}} Ticket
  *   `tree` (B62b): the block's worktree the content was hashed in. It is part of the ticket id,
  *   and the worker only checks it against the tree it takes from the run record (a ticket whose
  *   tree is not that one is `unavailable`, `worktree-mismatch`); it never reads content there.
@@ -93,7 +94,30 @@ export function resolveTicket({ repoRoot, run, block, file, tree = null }) {
   const rel = assertRowPath(file);
   const root = tree === null ? null : realTree(tree);
   const content_hash = contentHash(root ?? repoRoot, rel);
-  return { rel, root, content_hash, ticket: ticketId({ run, block, file: rel, content_hash, tree: root }) };
+  const revision = acceptanceRevision(repoRoot, run, block);
+  return { rel, root, content_hash, ticket: reviewTicketId({ run, block, file: rel, content_hash, tree: root, acceptance_revision: revision }) };
+}
+
+/** The mirror lets sandboxed callers resolve the same ticket without the private record.
+ * @param {string} repoRoot @param {string} run @param {string} block @returns {string | undefined}
+ */
+function acceptanceRevision(repoRoot, run, block) {
+  const record = readJSON(runRecordPath(run)) ?? readJSON(path.join(repoRoot, '.code-forge', 'runs', `${run}.json`));
+  const revision = record?.blocks?.[block]?.acceptance_revision;
+  return typeof revision === 'string' ? revision : undefined;
+}
+
+/** @param {{run: string, block: string, file: string, content_hash: string, tree?: string | null, acceptance_revision?: string}} parts */
+function reviewTicketId(parts) {
+  const id = ticketId(parts);
+  return parts.acceptance_revision === undefined ? id : createHash('sha256').update(`${id}\0${parts.acceptance_revision}`).digest('hex').slice(0, 24);
+}
+
+/** Reset only the commit-watch cursor; review evidence and results remain intact.
+ * @param {string} repoRoot @param {string} block
+ */
+export function resetAcceptanceWatch(repoRoot, block) {
+  rmSync(path.join(queueDir(repoRoot), 'watch', `${block}.json`), { force: true });
 }
 
 /**
@@ -118,9 +142,10 @@ export function enqueue({ repoRoot, run, block, file, tree = null, now = new Dat
 export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = null, now = new Date() }) {
   const rel = assertRowPath(file);
   const root = tree === null ? null : realTree(tree);
-  const ticket = ticketId({ run, block, file: rel, content_hash, tree: root });
+  const acceptance_revision = acceptanceRevision(repoRoot, run, block);
+  const ticket = reviewTicketId({ run, block, file: rel, content_hash, tree: root, acceptance_revision });
   const target = path.join(queueDir(repoRoot), `${ticket}.json`);
-  const named = root === null ? {} : { tree: root };
+  const named = { ...(root === null ? {} : { tree: root }), ...(acceptance_revision === undefined ? {} : { acceptance_revision }) };
   if (!existsSync(target)) {
     /** @type {Ticket} */
     const body = { ticket, run, block, file: rel, content_hash, enqueued_at: now.toISOString(), ...named };
@@ -444,7 +469,8 @@ export function blockTickets({ repoRoot, run, block, tree = null }) {
     throw new WorkerError('queue-unreadable', 'the review queue cannot be read');
   }
   const tickets = names.filter((n) => /^[0-9a-f]{24}\.json$/.test(n)).map((n) => readTicket(repoRoot, n.slice(0, 24)));
-  return tickets.filter((t) => !t.kind && t.run === run && t.block === block && (t.tree ?? null) === tree)
+  const revision = acceptanceRevision(repoRoot, run, block);
+  return tickets.filter((t) => !t.kind && t.run === run && t.block === block && (t.tree ?? null) === tree && t.acceptance_revision === revision)
     .sort((a, b) => a.enqueued_at.localeCompare(b.enqueued_at) || a.ticket.localeCompare(b.ticket));
 }
 
@@ -505,7 +531,8 @@ export function readTicket(repoRoot, id) {
     if (typeof t.by_hash !== 'string' || ids.join(',') !== t.answers.join(',') || answersTicketId(t) !== id) throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
     return /** @type {Ticket} */ (t);
   }
-  if (ticketId(t) !== id) throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
+  if (t.acceptance_revision !== undefined && typeof t.acceptance_revision !== 'string') throw new WorkerError('bad-ticket', `ticket ${id} has an invalid acceptance revision`);
+  if (reviewTicketId(t) !== id) throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
   return /** @type {Ticket} */ (t);
 }
 

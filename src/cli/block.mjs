@@ -202,7 +202,7 @@ import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { fallbackLane } from '../decide/fallback-rules.mjs';
 import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
-import { attemptBlock, claimPath, closeBlock, humanPassBlock, openBlock, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
+import { amendAcceptanceBlock, attemptBlock, claimPath, closeBlock, humanPassBlock, openBlock, prepareAcceptanceAmendment, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
 import { readFileDiff } from '../review/packet.mjs';
@@ -219,7 +219,7 @@ import { validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
 import { contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
-import { clearDone, resolveTicket } from '../worker/queue.mjs';
+import { clearDone, resetAcceptanceWatch, resolveTicket } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
 import { agentReopens, openBlockEntry, reopenFile } from '../review/reopen.mjs';
 import { checkFileForm, checkFindingId } from '../review/verb-forms.mjs';
@@ -300,9 +300,10 @@ const USAGE =
   '       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>\n' +
   '       code-forge block ack-waivers <id> --run <r>\n' +
   '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]\n' +
+  '       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
-const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers', 'human-pass'];
+const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers', 'human-pass', 'amend-acceptance'];
 
 /** Refuse likely shell quoting slips before any row is written.
  * @param {string} workspace @param {string[]} entries @param {string} label
@@ -376,6 +377,9 @@ export async function runBlock(args, deps = {}) {
     const [id, extra] = positionals;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
+    if (sub === 'amend-acceptance' && (positionals.length !== 1 || typeof flags.acceptance !== 'string' || typeof flags.reason !== 'string' || !flags.reason.trim() || /\p{Cc}/u.test(flags.reason))) {
+      throw new StateError('usage', 'amend-acceptance needs one block id, --acceptance and a nonblank --reason without control characters');
+    }
     if (sub === 'open' && (typeof flags.acceptance !== 'string' || !Array.isArray(flags.owned) || (flags.level !== undefined && typeof flags.level !== 'string'))) {
       throw new StateError('usage', 'block open needs --level, --owned and --acceptance');
     }
@@ -401,6 +405,30 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     const record = await readRun(runId);
+    if (sub === 'amend-acceptance') {
+      /** @type {ReturnType<typeof prepareAcceptanceAmendment> | null} */
+      let prepared = null;
+      const what = { file: '', oldCount: 0, newCount: 0 };
+      const noGrant = (/** @type {Record<string, any>} */ current) => {
+        if (current.autopilot && grantState(current.autopilot, (deps.now ?? (() => new Date()))()) === 'active') throw new StateError('autopilot-active', 'amend-acceptance is refused while an autopilot grant is active');
+      };
+      const asked = await confirmHumanVerb(sub, runId, id, what, record, deps, async () => {
+        noGrant(record);
+        const clauses = parseYAML(await readFile(/** @type {string} */ (flags.acceptance), 'utf8'), { prettyErrors: false });
+        prepared = prepareAcceptanceAmendment(record, id, clauses);
+        what.oldCount = prepared.oldCount;
+        what.newCount = prepared.acceptance.length;
+      });
+      if (asked === 'no-tty') { err(`${humanVerbNoTTY(sub)}\n`); return 2; }
+      if (asked === 'cancelled') { err(`block ${id} ${sub}: cancelled — nothing was recorded\n`); return 1; }
+      if (prepared === null) throw new Error('acceptance was not prepared');
+      const accepted = /** @type {ReturnType<typeof prepareAcceptanceAmendment>} */ (prepared);
+      const row = await amendAcceptanceBlock({ runId, id, acceptance: accepted.acceptance, old_sha256: accepted.old_sha256, reason: /** @type {string} */ (flags.reason), writeRow: (signed) => appendRow(signed, { slug: record.project }), before: noGrant });
+      resetAcceptanceWatch(await repoTop(record.workspace), id);
+      say(`block ${id} acceptance amended (${row.clauses} clauses; by: human)\n`);
+      if (json) emit(row);
+      return 0;
+    }
     const deciding = sub === 'close' && flags.decide === true;
     if (deciding) {
       if (positionals.length !== 1 || typeof flags.reason !== 'string' || !flags.reason.trim() || /[\x00-\x1f\x7f]/.test(flags.reason)) throw new StateError('usage', '--decide needs one block id and a nonblank --reason without control characters');
@@ -1140,7 +1168,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
 
 /**
  * B80: the refusal when `block waive` or `block reopen` has no terminal to ask the human at.
- * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'close'} verb @returns {string}
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'amend-acceptance' | 'close'} verb @returns {string}
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
@@ -1160,7 +1188,7 @@ export const humanVerbNoTTY = (verb) => verb === 'waive'
  * terminal check and the question (a refusal it throws means the human is never asked).
  * `deps.stdinIsTTY` / `deps.stdoutIsTTY` inject each side, `deps.isTTY` both at once, `deps.ui`
  * the prompt (default `@clack/prompts`). A "no" or a cancel (Ctrl-C) is `cancelled`.
- * @param {ConfirmDeps} deps @param {string} message
+ * @param {ConfirmDeps} deps @param {string | (() => string)} message
  * @param {() => Promise<unknown> | unknown} [before]
  * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
  */
@@ -1170,7 +1198,7 @@ async function confirmAtTerminal(deps, message, before) {
   if (!(stdinTTY && stdoutTTY)) return 'no-tty';
   if (before) await before();
   const ui = deps.ui ?? /** @type {any} */ (await import('@clack/prompts'));
-  const go = await ui.confirm({ message, initialValue: false });
+  const go = await ui.confirm({ message: typeof message === 'function' ? message() : message, initialValue: false });
   return ui.isCancel(go) || go !== true ? 'cancelled' : 'confirmed';
 }
 
@@ -1201,14 +1229,16 @@ async function confirmNoReviews(runId, id, deps) {
  * `by: autopilot`); human-pass instead refuses an active grant. The
  * pre-checks (`reopenPrecheck`, `waivePrecheck`) run first, at a terminal, so the human is never
  * asked about a waive or reopen the verb would refuse that way.
- * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass'} verb @param {string} runId @param {string} id
- * @param {{finding?: string, file: string, rule?: string, line?: number, hits?: {rule: string, line: number}[]}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
- * @param {() => void} [before]
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'amend-acceptance'} verb @param {string} runId @param {string} id
+ * @param {{finding?: string, file: string, rule?: string, line?: number, hits?: {rule: string, line: number}[], oldCount?: number, newCount?: number}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
+ * @param {() => Promise<unknown> | unknown} [before]
  * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
  */
 function confirmHumanVerb(verb, runId, id, what, record, deps, before) {
-  const message =
-    verb === 'human-pass'
+  const message = () =>
+    verb === 'amend-acceptance'
+      ? `Amend acceptance of block ${id} (run ${runId}) from ${what.oldCount} clauses to ${what.newCount} clauses? Only the owner may say yes.`
+      : verb === 'human-pass'
       ? `Confirm all device checks of block ${id} (run ${runId}) passed? Only the owner may say yes.`
       : verb === 'waive'
       ? `Waive finding ${what.finding} in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
@@ -1226,7 +1256,7 @@ function confirmHumanVerb(verb, runId, id, what, record, deps, before) {
     }
     if (verb === 'reopen') await reopenPrecheck(record, runId, id, what.file);
     else if (verb === 'waive') await waivePrecheck(record, runId, id, /** @type {string} */ (what.finding), what.file);
-    before?.();
+    await before?.();
   });
 }
 

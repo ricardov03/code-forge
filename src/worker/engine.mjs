@@ -171,7 +171,7 @@ import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } fro
  * `tree` (B62b) is the recorded `worktree` `{path, branch, base_sha}`, null when the block has
  * none; `base` is then the tree's `base_sha`. A recorded worktree that `worktreeRecord` refuses
  * (path, branch, hex base_sha) throws `worktree-malformed`.
- * @returns {Promise<{base: string | null, level: string, owned: string[], ownedKinds: Record<string, string>, testFiles: string[], acceptance?: unknown, kind: string | null, tree: WorktreeEntry | null, workspace: string | null}>}
+ * @returns {Promise<{base: string | null, level: string, owned: string[], ownedKinds: Record<string, string>, testFiles: string[], acceptance?: unknown, acceptance_revision?: string, kind: string | null, tree: WorktreeEntry | null, workspace: string | null}>}
  */
 export async function blockEntryFor(runId, block) {
   let record;
@@ -199,7 +199,7 @@ export async function blockEntryFor(runId, block) {
       throw new Error('worktree-malformed');
     }
   }
-  return { base: tree ? tree.base_sha : sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, testFiles, acceptance: entry.acceptance, kind: entry.kind === 'light' ? 'light' : blockKind({ owned, declared: entry.kind }), tree, workspace: typeof record.workspace === 'string' ? record.workspace : null };
+  return { base: tree ? tree.base_sha : sha, level: typeof entry.level === 'string' && /^L[0-3]$/.test(entry.level) ? entry.level : 'L2', owned, ownedKinds, testFiles, acceptance: entry.acceptance, acceptance_revision: entry.acceptance_revision, kind: entry.kind === 'light' ? 'light' : blockKind({ owned, declared: entry.kind }), tree, workspace: typeof record.workspace === 'string' ? record.workspace : null };
 }
 
 /** @typedef {{path: string, branch: string, base_sha: string}} WorktreeEntry */
@@ -354,6 +354,9 @@ export async function reviewTicket(ticket, ctx) {
     return { status: 'unavailable', reason: err instanceof Error ? err.message : 'run-record-unreadable', approved: false, engine: 'adaptive', sessions: [] };
   }
   if (entry.kind === null) entry = { ...entry, kind: blockKind({ owned: [ticket.file] }) };
+  if (!ticket.kind && ticket.acceptance_revision !== entry.acceptance_revision) {
+    return { status: 'stale', reason: 'acceptance-amended', approved: false, engine: 'adaptive', sessions: [] };
+  }
   // B62b: every content read of this ticket happens in the block's tree (the main tree without
   // one), taken from the SAME entry as the base and the facts. The worker passes the tree it
   // hashed the ticket in as `ctx.contentRoot`; a record that changed since names another tree.
@@ -621,7 +624,16 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
       seq: loaded.seq,
       contentHash: ticket.content_hash,
     };
-    const reopened = reopenRowFor(rows, reopenAt) !== null;
+    let amendedAt = -1;
+    let anchoredAt = -1;
+    rows.forEach((row, i) => {
+      if (row.block !== ticket.block || !verifyRow(row, key).ok) return;
+      if (row.event === 'block.acceptance_amended') amendedAt = i;
+      if (row.event === 'review.state' && row.file === ticket.file) anchoredAt = i;
+    });
+    // A changed review input starts a full round, including previously stopped files. Keep
+    // the anchor sequence and the block's spent L3 rung; tampered state still refuses above.
+    const reopened = amendedAt > anchoredAt || reopenRowFor(rows, reopenAt) !== null;
     if (loaded.status === 'lost' && !reopened) return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-lost', message: LOST_MESSAGE, approved: false, engine: 'adaptive', sessions: [] }) };
     let seq = loaded.seq;
     if (loaded.status === 'restored' && loaded.state !== null && !reopened) {

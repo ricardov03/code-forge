@@ -22,6 +22,8 @@ State lives in the plan file's header — `facts → planned → hardened → co
 
 ## §2 Roles by level (never by model name)
 
+`block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>` is human-only: it corrects an open block's clauses after terminal confirmation, requires a nonblank reason, has no `--yes`, and refuses an active autopilot grant. Earlier reviews become stale and a fresh review uses the new clauses. Coders never run it (`references/code.md` §5).
+
 `block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]` is human-only: the owner checks the listed device checks and confirms in their own terminal, with no `--yes` and no active autopilot grant. The note is required; proof is optional, must name an existing path when given, and is recorded as `proof: null` when omitted. A successful code close with `kind: human_check` acceptance clauses leaves `awaiting_human_check`, which status and report list; it has no fresh done file until the human passes or stops it. Never run this verb for the human, and do not end the run or treat the block as ready to land while it is awaiting a check (`references/code.md` §5).
 
 | role | level | session | who runs it |

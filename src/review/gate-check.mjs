@@ -139,7 +139,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
   /** @type {Map<string, string>} */
   const current = new Map();
   for (const f of [...proofFiles, ...files]) current.set(f.file, f.content_hash);
-  const { mine, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, recordedRefusalSeverity, supersededCap } = reviewRules({ block, runId, rows, key, resultFiles, current });
+  const { mine, acceptanceAmended, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, recordedRefusalSeverity, supersededCap } = reviewRules({ block, runId, rows, key, resultFiles, current });
   /** @type {Refusal[]} */
   const refusals = [];
   const approvedFor = (/** @type {string} */ file, /** @type {string} */ hash) => mine.filter((r) => r.event === 'review.approved' && r.file === file && r.content_hash === hash);
@@ -169,7 +169,7 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
       else {
         // B73: a stopped file (a cap row of the block) names its ways out
         const exits = mine.some((r) => r.event === 'review.cap' && r.file === file) ? `; ${stopExitsLine}` : '';
-        refusals.push({ code: 'unreviewed', file, detail: `no review.approved row for ${file} at its current content${exits}` });
+        refusals.push({ code: 'unreviewed', file, detail: `no review.approved row for ${file} at its current content${acceptanceAmended ? ' (acceptance amended)' : ''}${exits}` });
       }
     } else if (!signedApproval) refusals.push({ code: 'unsigned', file, detail: `the review.approved row for ${file} has no valid MAC` });
     if (signedApproval) {
@@ -279,7 +279,14 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
   // B71: `verify` replaces the MAC check only for `review-file`'s unverified pre-check ({@link
   // namedOnHash}), which has no key and can only refuse; it then reads no autopilot waiver
   const ok = verify ?? ((/** @type {Record<string, any>} */ r) => verified(r, key));
-  const mine = rows.filter((r) => r?.block === block && (runId === undefined || r.run === undefined || r.run === runId));
+  let amendedAt = -1;
+  rows.forEach((r, i) => {
+    if (r?.event === 'block.acceptance_amended' && r.block === block && r.run === runId && ok(r)) amendedAt = i;
+  });
+  const acceptanceAmended = amendedAt >= 0;
+  // Acceptance is a review input. Every older review verdict belongs to the previous input.
+  const mine = rows.filter((r, i) => r?.block === block && (runId === undefined || r.run === undefined || r.run === runId)
+    && !(i < amendedAt && typeof r.event === 'string' && r.event.startsWith('review.')));
   /** A verified human or agreed agent reopen followed by a real review clears older cap ids.
    * @param {Record<string, any>} cap @returns {boolean}
    */
@@ -517,7 +524,7 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     return new Map([...named].filter(([id, severity]) => id !== PROOF_FINDING && answerableSeverity(severity) && waiverOf(file, id, severity, ticket).by === null));
   };
 
-  return { mine, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, openAt, answerRows, recordedRefusalSeverity, supersededCap };
+  return { mine, acceptanceAmended, latestOf, signedOf, matches, waiverOf, waiverFor, waivedAllOf, openAt, answerRows, recordedRefusalSeverity, supersededCap };
 }
 
 /**
