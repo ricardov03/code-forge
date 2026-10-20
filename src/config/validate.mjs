@@ -541,7 +541,7 @@ export function customGateMessages(custom) {
       else for (const [j, pattern] of evidence.entries()) {
         // Backslashes are refused as well so a Windows absolute/traversal path is never
         // interpreted differently by validation and the POSIX evidence matcher.
-        if (typeof pattern !== 'string' || pattern.length === 0 || /^(?:\/|[A-Za-z]:)/.test(pattern) || /[\\\0]/.test(pattern) || pattern.split('/').includes('..')) {
+        if (typeof pattern !== 'string' || pattern.length === 0 || pattern.startsWith('/') || /[\\\0]/.test(pattern) || pattern.split('/').some((segment) => segment === '..' || /^[A-Za-z]:/.test(segment))) {
           messages.push(`gates.${label}.evidence[${j}] must be a non-empty relative path or glob without absolute paths or a .. segment`);
         }
       }

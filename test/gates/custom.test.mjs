@@ -2,6 +2,7 @@ import './support.mjs';
 import assert from 'node:assert/strict';
 import test, { mock } from 'node:test';
 import { createHash } from 'node:crypto';
+import * as fs from 'node:fs/promises';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateConfig } from '../../src/config/validate.mjs';
@@ -29,7 +30,7 @@ test('custom config refuses invalid entries with an entry-specific error', () =>
     [[{ ...entry, argv: 'node' }], 'build'],
     ...[null, [], { '1BAD': 'x' }, { GOOD: 1 }].map((env) => [[{ ...entry, env }], 'build']),
     ...['{test_files}', '{changed_files}'].flatMap((token) => [token, `prefix=${token}`].map((arg) => [[{ ...entry, argv: ['node', arg] }], token])),
-    ...['', '/outside', '../outside', 'reports/../outside', 'C:\\outside', '\\outside'].map((pattern) => [[{ ...entry, evidence: [pattern] }], 'build']),
+    ...['', '/outside', '../outside', 'reports/../outside', 'C:\\outside', '\\outside', './C:/Windows', 'out/C:/secret'].map((pattern) => [[{ ...entry, evidence: [pattern] }], 'build']),
     ...['report.json', [3]].map((evidence) => [[{ ...entry, evidence }], 'build']),
     [Array.from({ length: 21 }, (_, i) => ({ ...entry, name: `gate${i}` })), 'gates.custom'],
   ];
@@ -37,6 +38,14 @@ test('custom config refuses invalid entries with an entry-specific error', () =>
     const errors = gateErrors(custom);
     assert.equal(errors.length, 1, `refuse ${JSON.stringify(custom)} with exactly one gates-not-argv-array error`);
     assert.ok(errors.some((error) => error.message.includes(String(label))), `error must name ${label}: ${JSON.stringify(errors)}`);
+  }
+});
+
+test('config schema and domain validation refuse drive letters in every evidence segment', () => {
+  for (const pattern of ['./C:/Windows', 'out/C:/secret', 'out/c:secret']) {
+    const errors = validateConfig(config([{ ...entry, evidence: [pattern] }])).errors;
+    assert.ok(errors.some((error) => error.rule === 'schema'), `schema refuses ${pattern}`);
+    assert.ok(errors.some((error) => error.rule === 'gates-not-argv-array'), `domain rule refuses ${pattern}`);
   }
 });
 
@@ -123,11 +132,67 @@ test('custom evidence refuses outside paths before running, skips symlinks and c
       assert.equal(ran.results[4].evidence?.length, 200);
       assert.deepEqual(ran.results[4].evidence?.map((item) => item.path), Array.from({ length: 200 }, (_, i) => `reports/${String(i).padStart(3, '0')}.json`));
       assert.deepEqual(ran.results[4].missing, ['linked.json', 'escaped/*.json'], 'a matching file beyond the cap is not missing; symlinks are missing');
-      for (const pattern of ['../secret.json', path.join(outside, 'secret.json')]) {
-        await assert.rejects(runGates({ test: [process.execPath, '-e', "throw new Error('must not run')"], custom: [{ name: 'shots', argv: command, evidence: [pattern] }] }, { cwd }), /gates\.custom\[0\].*shots.*relative/);
+      const markerCommand = [process.execPath, '-e', "require('node:fs').writeFileSync('gate-ran', 'ran')"];
+      for (const pattern of ['../secret.json', path.join(outside, 'secret.json'), './C:/Windows', 'out/C:/secret', 'out/c:secret']) {
+        await assert.rejects(runGates({ test: markerCommand, custom: [{ name: 'shots', argv: markerCommand, evidence: [pattern] }] }, { cwd }), /gates\.custom\[0\].*shots.*relative/);
+        await assert.rejects(readFile(path.join(cwd, 'gate-ran')), { code: 'ENOENT' }, 'neither fixed nor custom argv ran');
       }
     });
   });
+});
+
+test('unreadable or vanished evidence preserves gate results and the next custom gate runs', async (t) => {
+  for (const stage of ['readdir', 'walk-realpath', 'hash-realpath', 'open']) {
+    for (const code of ['ENOENT', 'ENOTDIR', 'EACCES', 'ELOOP']) {
+      await t.test(`${stage}: ${code}`, async () => {
+        await withTempDir(async (cwd) => {
+          await mkdir(path.join(cwd, 'reports'));
+          const unavailable = path.join(cwd, 'reports', 'unavailable.json');
+          await writeFile(unavailable, 'unavailable');
+          await writeFile(path.join(cwd, 'kept.json'), 'kept');
+          let realpathCalls = 0;
+          let attempted = false;
+          const fail = () => { attempted = true; throw Object.assign(new Error('evidence unavailable'), { code }); };
+          const mocked = mock.module('node:fs/promises', { namedExports: {
+            ...fs,
+            readdir: async (file, options) => {
+              if (stage === 'readdir' && file === path.join(cwd, 'reports')) fail();
+              return fs.readdir(file, options);
+            },
+            realpath: async (file, options) => {
+              if (file === unavailable) {
+                realpathCalls++;
+                if ((stage === 'walk-realpath' && realpathCalls === 1) || (stage === 'hash-realpath' && realpathCalls === 2)) {
+                  // Remove a real file after its directory entry was listed, without a timing race.
+                  if (code === 'ENOENT') { attempted = true; await fs.unlink(unavailable); }
+                  else fail();
+                }
+              }
+              return fs.realpath(file, options);
+            },
+            open: async (file, flags, mode) => {
+              if (stage === 'open' && file === unavailable) fail();
+              return fs.open(file, flags, mode);
+            },
+          } });
+          try {
+            const { runGates: runWithErrors } = await import(`../../src/gates/run.mjs?evidence=${stage}-${code}`);
+            const firstCode = stage === 'readdir' ? 0 : 3;
+            const ran = await runWithErrors({ custom: [
+              { name: 'reports', argv: [process.execPath, '-e', `process.exit(${firstCode})`], evidence: ['**/*.json', 'reports/*.json'] },
+              { name: 'next', argv: [process.execPath, '-e', "require('node:fs').writeFileSync('next-ran', 'ran')"] },
+            ] }, { cwd });
+            assert.equal(attempted, true, 'the evidence operation encountered the error');
+            assert.deepEqual(ran.results.slice(4).map(({ gate, ok, code }) => [gate, ok, code]), [['reports', firstCode === 0, firstCode], ['next', true, 0]]);
+            assert.deepEqual(ran.results[4].evidence?.map(({ path }) => path), ['kept.json']);
+            assert.deepEqual(ran.results[4].missing, ['reports/*.json']);
+            assert.equal(ran.allOk, firstCode === 0);
+            assert.equal(await readFile(path.join(cwd, 'next-ran'), 'utf8'), 'ran');
+          } finally { mocked.restore(); }
+        });
+      });
+    }
+  }
 });
 
 // Capture row arguments rather than reading state or ledger files. The guarded runner double

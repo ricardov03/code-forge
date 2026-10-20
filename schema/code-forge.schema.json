@@ -269,7 +269,7 @@
                 "not": { "contains": { "type": "string", "pattern": "\\{(?:test_files|changed_files)\\}" } }
               },
               "env": { "type": "object", "additionalProperties": false, "patternProperties": { "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" } } },
-              "evidence": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^(?!/|[A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\\\u0000]+$" } }
+              "evidence": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)(?:[A-Za-z]:|\\.\\.(?:/|$)))[^\\\\\\u0000]+$" } }
             }
           }
         },

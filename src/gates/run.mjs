@@ -71,59 +71,77 @@ function evidenceMatcher(pattern) {
   return new RegExp(`^${source}$`);
 }
 
+/** Missing, inaccessible or replaced entries are not evidence.
+ * @param {NodeJS.ErrnoException} error @returns {boolean}
+ */
+function evidenceUnavailable(error) {
+  return ['ENOENT', 'ENOTDIR', 'EACCES', 'ELOOP'].includes(error.code);
+}
+
 /** Never traverse symlinks. Hash at most 200 unique files, without retaining their content.
  * @param {string} cwd @param {string[]} patterns
  * @returns {Promise<{evidence: Evidence[], missing?: string[]}>}
  */
 async function collectEvidence(cwd, patterns) {
   if (patterns.length === 0) return { evidence: [] };
-  const root = await realpath(cwd);
+  let root;
+  try { root = await realpath(cwd); }
+  catch (error) {
+    if (evidenceUnavailable(error)) return { evidence: [], missing: patterns };
+    throw error;
+  }
   const matchers = patterns.map(evidenceMatcher);
+  /** @type {Set<string>} */
   const matched = new Set();
-  /** @type {string[]} */
-  const files = [];
   /** @param {string} dir @returns {Promise<void>} */
   async function walk(dir) {
-    for (const entry of await readdir(path.join(root, dir), { withFileTypes: true })) {
+    let entries;
+    try { entries = await readdir(path.join(root, dir), { withFileTypes: true }); }
+    catch (error) {
+      if (evidenceUnavailable(error)) return;
+      throw error;
+    }
+    for (const entry of entries) {
       const file = dir ? `${dir}/${entry.name}` : entry.name;
       if (entry.isSymbolicLink()) continue;
       // Also check the resolved path before descending/opening, in case a parent changed.
       let resolved;
       try { resolved = await realpath(path.join(root, file)); }
-      catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+      catch (error) { if (evidenceUnavailable(error)) continue; throw error; }
       const relative = path.relative(root, resolved);
       if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
       if (entry.isDirectory()) await walk(file);
       else if (entry.isFile()) {
-        const hits = matchers.flatMap((matcher, i) => matcher.test(file) ? [i] : []);
-        if (hits.length > 0) {
-          files.push(file);
-          for (const i of hits) matched.add(i);
-        }
+        if (matchers.some((matcher) => matcher.test(file))) matched.add(file);
       }
     }
   }
   await walk('');
   /** @type {Evidence[]} */
   const evidence = [];
-  for (const file of files.sort().slice(0, 200)) {
-    // Recheck parents at the time of hashing, rather than relying on the earlier walk.
-    const resolved = await realpath(path.join(root, file));
-    const relative = path.relative(root, resolved);
-    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
-    const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+  for (const file of [...matched].sort().slice(0, 200)) {
     try {
-      if (!(await handle.stat()).isFile()) continue;
-      const hash = createHash('sha256');
-      let bytes = 0;
-      for await (const chunk of handle.createReadStream({ autoClose: false })) {
-        bytes += chunk.length;
-        hash.update(chunk);
-      }
-      evidence.push({ path: file, bytes, sha256: hash.digest('hex') });
-    } finally { await handle.close(); }
+      // Recheck parents at the time of hashing, rather than relying on the earlier walk.
+      const resolved = await realpath(path.join(root, file));
+      const relative = path.relative(root, resolved);
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) { matched.delete(file); continue; }
+      const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
+      try {
+        if (!(await handle.stat()).isFile()) { matched.delete(file); continue; }
+        const hash = createHash('sha256');
+        let bytes = 0;
+        for await (const chunk of handle.createReadStream({ autoClose: false })) {
+          bytes += chunk.length;
+          hash.update(chunk);
+        }
+        evidence.push({ path: file, bytes, sha256: hash.digest('hex') });
+      } finally { await handle.close(); }
+    } catch (error) {
+      if (!evidenceUnavailable(error)) throw error;
+      matched.delete(file);
+    }
   }
-  const missing = patterns.filter((_, i) => !matched.has(i));
+  const missing = patterns.filter((_, i) => ![...matched].some((file) => matchers[i].test(file)));
   return { evidence, ...(missing.length ? { missing } : {}) };
 }
 
