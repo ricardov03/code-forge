@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- Named custom gates: `gates.custom` runs named gates after the fixed ones and records evidence files (path, bytes, sha256) on the gate rows (B146)
+
 ## [0.15.1] — 2026-10-19
 
 ### Changed

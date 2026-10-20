@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 156,
+  "block_count": 157,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2883,6 +2883,28 @@
         "B141"
       ],
       "note": "F-17. Took the B143 commit, updated the pinned coder-only counts. Reviews clean on the first join; gates passed on the first run."
+    },
+    "B146": {
+      "title": "Named custom gates with evidence: gates.custom [{name, argv, env?, evidence?}] run after the 4 fixed gates, each on its own; evidence files recorded as path, bytes and sha256",
+      "wave": 15,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/gates/run.mjs",
+        "src/gates/custom.mjs",
+        "src/cli/gates.mjs",
+        "src/config/validate.mjs",
+        "schema/code-forge.schema.json",
+        "test/gates/custom.test.mjs",
+        "test/gates/run.test.mjs",
+        "test/gates/cli.test.mjs",
+        "test/config/cli-validate.test.mjs",
+        "test/config/schema-coverage.test.mjs",
+        "docs/reference/config.md",
+        "skill/references/code.md"
+      ],
+      "depends_on": [],
+      "note": "F006 phase 1 (proof gates for the website skill). One fix round (drive-letter segments in evidence paths, unreadable evidence no longer stops later gates, a stronger no-gate-ran test). Gates passed on the first run."
     }
   }
 }
