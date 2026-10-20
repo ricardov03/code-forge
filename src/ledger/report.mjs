@@ -377,8 +377,26 @@ const runStopCounts = (rows) => ({
   noEngineStops: rows.filter((r) => r.event === 'run.stop' && r.reason === 'no_engine').length,
 });
 
+/** Specialist deliverables are separate from calibration's `outcome` events.
+ * @param {import('./write.mjs').LedgerRow[]} rows
+ */
+function specialistOutcomes(rows) {
+  const outcomes = rows.filter((r) => r.event === 'outcome.recorded').map((r) => ({
+    skill: r.skill, step: r.step ?? null, status: r.status,
+    cost_usd: r.cost_usd ?? null, minutes: r.minutes ?? null,
+  }));
+  return {
+    outcomes,
+    total: {
+      count: outcomes.length,
+      cost_usd: outcomes.reduce((sum, r) => sum + (r.cost_usd ?? 0), 0),
+      minutes: outcomes.reduce((sum, r) => sum + (r.minutes ?? 0), 0),
+    },
+  };
+}
+
 /** The exact, ordered set of section keys `buildReport` produces (plan §6.2; B66 appended
- * `outside_review`, B124b `agent_waivers`, B147 `run_time` — append new sections, never reorder) —
+ * `outside_review`, B124b `agent_waivers`, B147 `run_time`, B154 `specialist_outcomes` — append new sections, never reorder) —
  * exported so tests (and `--export`) can assert against ONE source of truth instead of a copy. */
 export const SECTION_NAMES = Object.freeze([
   'cost_per_block',
@@ -397,6 +415,7 @@ export const SECTION_NAMES = Object.freeze([
   'outside_review',
   'agent_waivers',
   'run_time',
+  'specialist_outcomes',
 ]);
 
 /**
@@ -430,6 +449,7 @@ export function buildReport(rows) {
           && undo.run === row.run && undo.block === row.block && undo.file === row.file && undo.finding === row.finding) }]
       : []),
     run_time: (/** @type {any[]} */ r) => runTime(r, costs),
+    specialist_outcomes: specialistOutcomes,
   };
   /** @type {Record<string, any>} */
   const sections = {};
