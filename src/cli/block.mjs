@@ -4,7 +4,7 @@
  *
  *   block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file>
  *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract|light]
- *              [--tests <paths…>] [--after <ids…>]
+ *              [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
@@ -21,7 +21,7 @@
  * prints it in parentheses, else null), and `worktree {removed, path, branch}` with
  * `--remove-worktree`). On
  * failure the exit code and stderr are unchanged and stdout stays empty, except an open refused
- * for `after-not-done` or `bad-after`, which prints `{"block", "event": "refused", "code", "message"}`,
+ * for `after-not-done`, `bad-after`, `outcome-not-ready` or `bad-after-outcome`, which prints `{"block", "event": "refused", "code", "message"}`,
  * or a close the gate refused (`closeBlock` said no), which also prints `{"block", "ok": false, "reason"}`. A usage
  * error, a thrown refusal, a cancelled `--no-require-reviews`, `block waive` or `block reopen` (or
  * one with no terminal, B80) and a failed `--remove-worktree`
@@ -195,7 +195,8 @@
  * through `closeBlock`'s `extraChecks`.
  */
 
-import { existsSync, statSync } from 'node:fs';
+import { createHash } from 'node:crypto';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
@@ -203,6 +204,8 @@ import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { fallbackLane } from '../decide/fallback-rules.mjs';
 import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
+import { checkOutcome } from '../outcome/outcome.mjs';
+import { loadPipeline } from '../pipeline/pipeline.mjs';
 import { amendAcceptanceBlock, attemptBlock, claimPath, closeBlock, humanPassBlock, openBlock, prepareAcceptanceAmendment, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
@@ -293,7 +296,7 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agen
 }
 
 const USAGE =
-  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>]\n' +
+  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
@@ -332,6 +335,32 @@ function checkWhitespacePaths(workspace, entries, label) {
 }
 const FLAG_VALUES = ['run', 'level', 'acceptance', 'brief', 'attempt', 'base', 'lines', 'head', 'worker-pid', 'reason', 'file', 'transcript', 'kind', 'report', 'rule', 'line', 'note', 'proof'];
 
+/** Check specialist outcomes against the run's project, before state open can write anything.
+ * @param {string} root @param {string} id @param {string[]} ids
+ * @returns {{step: string, sha256: string}[]}
+ */
+function acceptedOutcomes(root, id, ids) {
+  const loaded = loadPipeline(root);
+  const bad = (/** @type {string} */ problem) => new StateError('bad-after-outcome', `block ${id}: --after-outcome: ${problem}`);
+  if (!loaded.exists) throw bad(`no code-forge.pipeline.yml in ${root}`);
+  if (!loaded.ok) throw bad(loaded.problems[0]);
+  const steps = [...new Set(ids)].map((stepId) => {
+    const step = loaded.pipeline.steps.find((candidate) => candidate.id === stepId);
+    if (!step) throw bad(`unknown step ${stepId}`);
+    return step;
+  });
+  return steps.map((step) => {
+    const file = path.resolve(root, step.outcome);
+    const result = existsSync(file) ? checkOutcome(file, { root }) : { ok: false, problems: ['missing outcome'] };
+    if (!result.ok) throw new StateError('outcome-not-ready', `block ${id}: --after-outcome step ${step.id}: ${result.problems[0]}`);
+    try {
+      return { step: step.id, sha256: createHash('sha256').update(readFileSync(file)).digest('hex') };
+    } catch (err) {
+      throw new StateError('outcome-not-ready', `block ${id}: --after-outcome step ${step.id}: cannot read outcome (${err.code ?? 'error'})`);
+    }
+  });
+}
+
 /**
  * @param {string[]} args
  * @param {{
@@ -360,8 +389,9 @@ export async function runBlock(args, deps = {}) {
     err(USAGE);
     return 2;
   }
+  let jsonOpenId;
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'open' ? ['after'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -376,6 +406,7 @@ export async function runBlock(args, deps = {}) {
       if (t.startsWith('-')) throw new StateError('usage', `--tests: a path may not start with "-": ${JSON.stringify(t)}`);
     }
     const [id, extra] = positionals;
+    if (sub === 'open' && json) jsonOpenId = id;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
     if (sub === 'amend-acceptance' && (positionals.length !== 1 || typeof flags.acceptance !== 'string' || typeof flags.reason !== 'string' || !flags.reason.trim() || /\p{Cc}/u.test(flags.reason))) {
@@ -553,7 +584,7 @@ export async function runBlock(args, deps = {}) {
       }
     };
     // B148: a refused dependency must not leave even an expiry row behind.
-    const deferExpiry = sub === 'open' && Array.isArray(flags.after);
+    const deferExpiry = sub === 'open' && (Array.isArray(flags.after) || Array.isArray(flags['after-outcome']));
     if (!deferExpiry) await expire();
 
     if (sub === 'open') {
@@ -587,6 +618,20 @@ export async function runBlock(args, deps = {}) {
       }
       // B62a: the run's isolation, from its config snapshot (fixed for the run)
       const isolated = worktreeSettings(record);
+      // Preserve --after's self-before-unfinished order before examining specialist outcomes.
+      // State open still checks these dependencies under the run lock.
+      let afterOutcome;
+      if (Array.isArray(flags['after-outcome'])) {
+        if (Array.isArray(flags.after)) {
+          if (flags.after.includes(id)) throw new StateError('bad-after', `block ${id} cannot name itself in --after`);
+          const blocking = [...new Set(flags.after)].filter((dependency) => record.blocks[dependency]?.status !== 'closed');
+          if (blocking.length > 0) {
+            const statuses = blocking.map((dependency) => `${dependency} (${record.blocks[dependency]?.status ?? 'not in run'})`);
+            throw new StateError('after-not-done', `block ${id}: --after dependencies not closed: ${statuses.join(', ')}`);
+          }
+        }
+        afterOutcome = acceptedOutcomes(record.workspace, id, flags['after-outcome']);
+      }
       const { block, pointer, worktreeReused } = await openBlock({
         runId,
         id,
@@ -601,14 +646,10 @@ export async function runBlock(args, deps = {}) {
         ...(typeof flags.kind === 'string' ? { kind: flags.kind } : {}),
         ...(Array.isArray(flags.tests) ? { tests: flags.tests } : {}),
         ...(Array.isArray(flags.after) ? { after: flags.after } : {}),
+        ...(afterOutcome ? { after_outcome: afterOutcome } : {}),
         cfg: await openConfig(record.workspace),
         writeRow,
         ...(isolated ? { worktree: (/** @type {{baseSha: string, previous: any}} */ ctx) => prepareWorktree({ cwd: record.workspace, settings: isolated, runId, id, ...ctx }) } : {}),
-      }).catch((thrown) => {
-        if (json && thrown instanceof StateError && ['after-not-done', 'bad-after'].includes(thrown.code)) {
-          emit({ block: id, event: 'refused', code: thrown.code, message: thrown.message });
-        }
-        throw thrown;
       });
       if (deferExpiry) await expire();
       const raised = block.level !== level ? ` (${block.kind} floor, asked ${level})` : '';
@@ -903,7 +944,7 @@ export async function runBlock(args, deps = {}) {
         const { fileSet } = await tree();
         const lines = await toolLines();
         const given = new Set(lines.map((l) => l.file));
-        const missing = missingReviewTickets(text, fileSet.map((f) => f.file)).filter((f) => !given.has(f));
+        const missing = missingReviewTickets(text, fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null).map((f) => f.file)).filter((f) => !given.has(f));
         if (missing.length > 0) return { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
         for (const file of reportMismatches(text, lines)) lineWarnings.push(`WARN report ticket mismatch ${file}\n`);
         return { ok: true };
@@ -1097,6 +1138,9 @@ export async function runBlock(args, deps = {}) {
       }
     }
   } catch (thrown) {
+    if (jsonOpenId && thrown instanceof StateError && ['after-not-done', 'bad-after', 'outcome-not-ready', 'bad-after-outcome'].includes(thrown.code)) {
+      out(`${JSON.stringify({ block: jsonOpenId, event: 'refused', code: thrown.code, message: thrown.message })}\n`);
+    }
     err(`block ${sub ?? ''}: ${thrown?.message ?? String(thrown)}\n`);
     return thrown instanceof StateError && thrown.code === 'usage' ? 2 : 1;
   }
