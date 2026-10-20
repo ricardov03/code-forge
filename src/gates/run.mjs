@@ -107,7 +107,11 @@ async function collectEvidence(cwd, patterns) {
   /** @type {Evidence[]} */
   const evidence = [];
   for (const file of files.sort().slice(0, 200)) {
-    const handle = await open(path.join(root, file), constants.O_RDONLY | constants.O_NOFOLLOW);
+    // Recheck parents at the time of hashing, rather than relying on the earlier walk.
+    const resolved = await realpath(path.join(root, file));
+    const relative = path.relative(root, resolved);
+    if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
+    const handle = await open(resolved, constants.O_RDONLY | constants.O_NOFOLLOW);
     try {
       if (!(await handle.stat()).isFile()) continue;
       const hash = createHash('sha256');

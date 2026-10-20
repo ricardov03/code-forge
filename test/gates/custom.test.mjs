@@ -35,7 +35,7 @@ test('custom config refuses invalid entries with an entry-specific error', () =>
   ];
   for (const [custom, label] of cases) {
     const errors = gateErrors(custom);
-    assert.ok(errors.length > 0, `refuse ${JSON.stringify(custom)} with a gates-not-argv-array error`);
+    assert.equal(errors.length, 1, `refuse ${JSON.stringify(custom)} with exactly one gates-not-argv-array error`);
     assert.ok(errors.some((error) => error.message.includes(String(label))), `error must name ${label}: ${JSON.stringify(errors)}`);
   }
 });
@@ -77,15 +77,17 @@ test('custom gates run after all fixed gates in list order and independently inc
 
 test('custom gates keep timeout, env masking and execution under changed and light scopes', async () => {
   await withTempDir(async (cwd) => {
-    const gates = { lightTestFiles: ['a.test.mjs'], custom: [
+    const gates = { custom: [
       { name: 'slow', argv: [process.execPath, '-e', 'setTimeout(() => {}, 30000)'] },
       { name: 'links', argv: [process.execPath, '-e', 'console.log(process.env.WEB_VALUE)'], env: { WEB_VALUE: 'private-custom-value' } },
     ] };
-    const ran = await runGates(gates, { cwd, timeoutMs: 300, scope: { scope: 'changed', files: [], changedFiles: [] } });
-    assert.deepEqual(ran.results.slice(4).map((result) => [result.gate, result.custom, result.ok, result.scope]), [['slow', true, false, undefined], ['links', true, true, undefined]]);
-    assert.equal(redactJSON(ran).includes('private-custom-value'), false, 'custom env value is masked in printed child output');
-    assert.deepEqual(ran.results[5].env_keys, ['WEB_VALUE']);
-    assert.equal(ran.allOk, false);
+    for (const light of [false, true]) {
+      const ran = await runGates({ ...gates, ...(light ? { lightTestFiles: ['a.test.mjs'] } : {}) }, { cwd, timeoutMs: 300, scope: { scope: 'changed', files: [], changedFiles: [] } });
+      assert.deepEqual(ran.results.slice(4).map((result) => [result.gate, result.custom, result.ok, result.scope]), [['slow', true, false, undefined], ['links', true, true, undefined]]);
+      assert.equal(redactJSON(ran).includes('private-custom-value'), false, 'custom env value is masked in printed child output');
+      assert.deepEqual(ran.results[5].env_keys, ['WEB_VALUE']);
+      assert.equal(ran.allOk, false);
+    }
   });
 });
 
@@ -96,13 +98,13 @@ test('custom evidence hashes sorted regular files after pass or fail, deduplicat
     await writeFile(path.join(cwd, 'reports/nested/a.json'), 'nested');
     const argv = [process.execPath, '-e', "require('node:fs').writeFileSync('reports/a.json', 'é'); process.exit(1)"];
     const patterns = ['reports/**/*.json', 'reports/*.json', 'missing/*.png'];
-    const ran = await runGates({ custom: [{ name: 'lighthouse', argv, evidence: patterns }, { name: 'links', argv: command, evidence: ['absent.json'] }] }, { cwd });
+    const ran = await runGates({ custom: [{ name: 'lighthouse', argv, evidence: patterns }, { name: 'links', argv: command, evidence: ['reports/*.json', 'absent.json'] }] }, { cwd });
     assert.equal(ran.results.length, 6, 'four fixed gates followed by two custom results');
     const expected = [['reports/a.json', 'é'], ['reports/nested/a.json', 'nested'], ['reports/z.json', 'last']].map(([file, contents]) => ({ path: file, bytes: Buffer.byteLength(contents), sha256: createHash('sha256').update(contents).digest('hex') }));
     assert.deepEqual(ran.results[4].evidence, expected, 'red gate hashes three unique files including output created by the command');
     assert.deepEqual(ran.results[4].missing, ['missing/*.png']);
     assert.equal(ran.results[4].ok, false);
-    assert.deepEqual(ran.results[5].evidence, []);
+    assert.deepEqual(ran.results[5].evidence, [expected[0], expected[2]], '* matches only files within one path segment');
     assert.deepEqual(ran.results[5].missing, ['absent.json']);
     assert.equal(ran.results[5].ok, true, 'missing evidence does not fail a passing command');
   });
