@@ -1,6 +1,6 @@
 /**
  * `code-forge report [--slug <slug>] [--json] [--export <dir>]` (plan §6.2, R4). Terminal output
- * only, plus an optional `--export <dir>` that writes the same 15 sections as JSON files. The
+ * only, plus an optional `--export <dir>` that writes the same sections as JSON files. The
  * terminal output ends with the spend per run (B33) and the mode of each run (B59: brief or plan);
  * both are text only, never in `--json` or `--export`. The 14th section, `outside_review` (B66), is
  * printed as text lines under its header (`outside review: none`, or one line per PR).
@@ -76,7 +76,11 @@ export async function runReport(args, deps = {}) {
     }
 
     for (const [name, data] of Object.entries(sections)) {
-      const body = name === 'outside_review' ? outsideReviewLines(data) : `${JSON.stringify(data, null, 2)}\n`;
+      let body;
+      if (name === 'cost_per_block') body = blockTimeLines(data);
+      else if (name === 'run_time') body = runTimeLines(data);
+      else if (name === 'outside_review') body = outsideReviewLines(data);
+      else body = `${JSON.stringify(data, null, 2)}\n`;
       out(`== ${name} ==\n${body}`);
     }
     out(spendLines(buildSpend(rows)));
@@ -88,8 +92,36 @@ export async function runReport(args, deps = {}) {
   }
 }
 
+/** @param {number | null} ms @returns {string} */
+function duration(ms) {
+  if (ms === null) return '-';
+  const seconds = Math.floor(ms / 1000);
+  if (seconds < 60) return `${seconds}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m ${seconds % 60}s`;
+  return `${Math.floor(minutes / 60)}h ${minutes % 60}m ${seconds % 60}s`;
+}
+
+/** @param {any[]} blocks @returns {string} */
+function blockTimeLines(blocks) {
+  const lines = ['run | block | USD | wall | human wait | status'];
+  for (const b of blocks) {
+    lines.push(`${b.run ?? '(none)'} | ${b.block} | $${b.totalUsd.toFixed(4)} | ${duration(b.wallMs)} | ${duration(b.humanWaitMs)} | ${b.completed ? 'completed' : 'open'}`);
+    lines.push(`  level ${b.level ?? '-'} · lane ${b.lane ?? '-'} · coder $${b.coderUsd.toFixed(4)} · review $${b.reviewUsd.toFixed(4)} · S1+S2 $${b.s1s2Usd.toFixed(4)} · facts $${b.factsUsd.toFixed(4)} · other $${b.otherUsd.toFixed(4)} · proof ${duration(b.proofTimeMs)} · ${b.unknownUsdSessions} unknown`);
+  }
+  return `${lines.join('\n')}\n`;
+}
+
+/** @param {{runs: any[], total: {runs: number, wallMs: number, usd: number, blocks_closed: number}}} data @returns {string} */
+function runTimeLines({ runs, total }) {
+  const lines = ['run | started | ended | wall | USD | closed | stopped'];
+  for (const r of runs) lines.push(`${r.run ?? '(none)'} | ${r.started ?? '-'} | ${r.open ? 'open' : r.ended ?? '-'} | ${duration(r.wallMs)} | $${r.usd.toFixed(4)} | ${r.blocks_closed} | ${r.blocks_stopped}`);
+  lines.push(`total (${total.runs} run${total.runs === 1 ? '' : 's'}): ${duration(total.wallMs)} | $${total.usd.toFixed(4)} | ${total.blocks_closed} closed`);
+  return `${lines.join('\n')}\n`;
+}
+
 /**
- * B33: the running spend per run (open blocks included), after the 15 sections. Unknown-price
+ * B33: the running spend per run (open blocks included), after the sections. Unknown-price
  * sessions are named, never priced.
  * @param {ReturnType<typeof buildSpend>} spend @returns {string}
  */

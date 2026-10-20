@@ -9,13 +9,17 @@ import { buildReport, SECTION_NAMES } from '../../src/ledger/report.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { captureStream, withTempHome } from './helpers.mjs';
 
-test('exportReportSections writes exactly the SECTION_NAMES files (15), each byte-for-byte round-tripping its section data', async () => {
+test('exportReportSections writes exactly the SECTION_NAMES files (16), including block times and run_time totals', async () => {
   await withTempHome(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'code-forge-export-'));
     try {
-      const { sections } = buildReport([{ event: 'dispatch', block: 'b1', level: 'L1', lane: 'L1' }]);
-      assert.equal(Object.keys(sections).length, 15);
-      assert.equal(SECTION_NAMES.at(-1), 'agent_waivers');
+      const { sections } = buildReport([
+        { event: 'dispatch', run: 'r1', block: 'b1', ts: '2026-10-20T00:00:00.000Z' },
+        { event: 'session', run: 'r1', block: 'b1', usd: 2 },
+        { event: 'block.close', run: 'r1', block: 'b1', ts: '2026-10-20T00:12:30.000Z' },
+      ]);
+      assert.equal(Object.keys(sections).length, 16);
+      assert.equal(SECTION_NAMES.at(-1), 'run_time');
 
       const paths = await exportReportSections(dir, sections);
 
@@ -32,6 +36,12 @@ test('exportReportSections writes exactly the SECTION_NAMES files (15), each byt
       }
       // B66: the fixture has no outside_review row, so its file is written and holds []
       assert.deepEqual(JSON.parse(await readFile(path.join(dir, 'outside_review.json'), 'utf8')), []);
+      const blocks = JSON.parse(await readFile(path.join(dir, 'cost_per_block.json'), 'utf8'));
+      assert.deepEqual(blocks.map((b) => [b.block, b.wallMs, b.humanWaitMs]), [['b1', 750000, null]]);
+      assert.deepEqual(JSON.parse(await readFile(path.join(dir, 'run_time.json'), 'utf8')), {
+        runs: [{ run: 'r1', started: '2026-10-20T00:00:00.000Z', ended: null, wallMs: 750000, usd: 2, blocks_closed: 1, blocks_stopped: 0, open: true }],
+        total: { runs: 1, wallMs: 750000, usd: 2, blocks_closed: 1 },
+      });
     } finally {
       await rm(dir, { recursive: true, force: true });
     }

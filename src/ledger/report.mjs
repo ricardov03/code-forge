@@ -1,5 +1,5 @@
 /**
- * `code-forge report` (plan §6.2, R4): builds the 15 report sections from a run's ledger rows.
+ * `code-forge report` (plan §6.2, R4): builds the report sections from a project's ledger rows.
  * Pure data, no I/O — terminal rendering + `--export` live in `src/cli/report.mjs`.
  *
  * Shadow rows (`row.source === 'shadow'`) are excluded everywhere here (plan §6.3: shadow-sampled
@@ -80,6 +80,24 @@ export function buildRunModes(rows) {
   return runs.map((run) => ({ run, mode: brief.has(run) ? 'brief' : 'plan' }));
 }
 
+/** A full ISO timestamp with a timezone; reject coerced values and impossible calendar dates.
+ * @param {unknown} ts @returns {string | null} */
+function timestamp(ts) {
+  if (typeof ts !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(ts)
+    || !Number.isFinite(Date.parse(ts))) return null;
+  const day = ts.slice(0, 10);
+  const date = Date.parse(`${day}T00:00:00.000Z`);
+  return Number.isFinite(date) && new Date(date).toISOString().slice(0, 10) === day ? ts : null;
+}
+
+/** Missing or reversed endpoints cannot establish elapsed time.
+ * @param {string | null} start @param {string | null} end @returns {number | null} */
+function elapsed(start, end) {
+  if (start === null || end === null) return null;
+  const ms = Date.parse(end) - Date.parse(start);
+  return ms >= 0 ? ms : null;
+}
+
 /**
  * Cost per block — completed AND still open (B33: a running total while the block is open):
  * review $ / coder $ / S1+S2 $ / facts $ / proof ms, `completed` (code close with no pending human check) and
@@ -91,6 +109,8 @@ export function buildRunModes(rows) {
 function costPerBlock(rows) {
   /** @type {Map<string, any>} */
   const byBlock = new Map();
+  /** @type {Map<string, {firstDispatch: string | null, completion: string | null, awaiting: string | null, humanWait: number | null}>} */
+  const times = new Map();
   /** @type {Set<string>} run+block keys with at least one spend row */
   const spent = new Set();
   const closedKeys = new Set();
@@ -126,18 +146,47 @@ function costPerBlock(rows) {
         factsUsd: 0,
         otherUsd: 0,
         proofTimeMs: 0,
+        wallMs: null,
+        humanWaitMs: null,
         totalUsd: 0,
         unknownUsdSessions: 0,
       });
+      times.set(key, { firstDispatch: null, completion: null, awaiting: null, humanWait: null });
     }
     const e = byBlock.get(key);
     if (row.event === 'dispatch') {
       e.level = row.level ?? e.level;
       e.lane = row.lane ?? e.lane;
+      e.completed = false;
     }
     if (row.event === 'block.close') { e.completed = true; closedKeys.add(key); }
     if (row.event === 'block.awaiting_human_check') e.completed = false;
     if (row.event === 'block.human_pass') e.completed = true;
+    if (row.event === 'block.stop') e.completed = false;
+    // Invalid timestamps have no effect on time; lifecycle and spend still count normally.
+    const ts = timestamp(row.ts);
+    if (ts !== null) {
+      const time = times.get(key);
+      if (row.event === 'dispatch') {
+        time.firstDispatch ??= ts;
+        time.completion = null;
+        time.awaiting = null;
+        time.humanWait = null;
+      }
+      if (row.event === 'block.close') {
+        time.completion = ts;
+        time.humanWait = null;
+      }
+      if (row.event === 'block.awaiting_human_check') {
+        time.awaiting = ts;
+        time.completion = null;
+        time.humanWait = null;
+      }
+      if (row.event === 'block.human_pass') {
+        time.completion = ts;
+        time.humanWait = elapsed(time.awaiting, ts);
+      }
+    }
     if (isSpendRow(row)) {
       spent.add(key);
       const cost = sessionCostUsd(row);
@@ -154,11 +203,55 @@ function costPerBlock(rows) {
     }
     if (row.event === 'proof' && typeof row.duration_ms === 'number') e.proofTimeMs += row.duration_ms;
   }
-  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || spent.has(key) || closedKeys.has(key)).map(([, e]) => e);
+  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || spent.has(key) || closedKeys.has(key)).map(([key, e]) => {
+    const time = times.get(key);
+    if (e.completed) {
+      e.wallMs = elapsed(time.firstDispatch, time.completion);
+      e.humanWaitMs = time.humanWait;
+    }
+    return e;
+  });
   for (const e of out) {
     for (const k of ['reviewUsd', 'coderUsd', 's1s2Usd', 'factsUsd', 'otherUsd', 'totalUsd']) e[k] = Math.round(e[k] * 10000) / 10000;
   }
   return out;
+}
+
+/** Per-run wall time, spend and distinct block counts, plus the ledger/site total.
+ * Rows and costs have already had shadow rows removed. Untimed runs contribute 0 to total wallMs.
+ * @param {Array<Record<string, any>>} rows @param {any[]} costs */
+function runTime(rows, costs) {
+  /** @type {Map<string | null, Array<Record<string, any>>>} */
+  const groups = new Map();
+  for (const row of rows) {
+    const run = typeof row.run === 'string' ? row.run : null;
+    if (!groups.has(run)) groups.set(run, []);
+    groups.get(run).push(row);
+  }
+  const spend = new Map(spendByRun(rows).map((r) => [r.run, r.usd]));
+  const runs = [...groups].map(([run, list]) => {
+    const timed = list.filter((r) => timestamp(r.ts) !== null);
+    const started = timed.find((r) => r.event === 'run.start')?.ts ?? timed[0]?.ts ?? null;
+    const ended = timed.filter((r) => r.event === 'run.end').at(-1)?.ts ?? null;
+    const open = ended === null;
+    return {
+      run, started, ended,
+      wallMs: elapsed(started, open ? timed.at(-1)?.ts ?? null : ended),
+      usd: spend.get(run) ?? 0,
+      blocks_closed: costs.filter((b) => b.run === run && b.completed).length,
+      blocks_stopped: new Set(list.filter((r) => r.event === 'block.stop' && r.block).map((r) => r.block)).size,
+      ...(open ? { open: true } : {}),
+    };
+  });
+  return {
+    runs,
+    total: {
+      runs: runs.length,
+      wallMs: runs.reduce((sum, r) => sum + (r.wallMs ?? 0), 0),
+      usd: sumSpend(rows).usd,
+      blocks_closed: runs.reduce((sum, r) => sum + r.blocks_closed, 0),
+    },
+  };
 }
 
 const laneDistribution = (rows) =>
@@ -275,7 +368,7 @@ const runStopCounts = (rows) => ({
 });
 
 /** The exact, ordered set of section keys `buildReport` produces (plan §6.2; B66 appended
- * `outside_review`, then B124b appended `agent_waivers` — append new sections, never reorder) —
+ * `outside_review`, B124b `agent_waivers`, B147 `run_time` — append new sections, never reorder) —
  * exported so tests (and `--export`) can assert against ONE source of truth instead of a copy. */
 export const SECTION_NAMES = Object.freeze([
   'cost_per_block',
@@ -293,6 +386,7 @@ export const SECTION_NAMES = Object.freeze([
   'run_stop_counts',
   'outside_review',
   'agent_waivers',
+  'run_time',
 ]);
 
 /**
@@ -325,6 +419,7 @@ export function buildReport(rows) {
         unwaived: r.slice(i + 1).some((undo) => undo.event === 'review.unwaived' && undo.by === 'human'
           && undo.run === row.run && undo.block === row.block && undo.file === row.file && undo.finding === row.finding) }]
       : []),
+    run_time: (/** @type {any[]} */ r) => runTime(r, costs),
   };
   /** @type {Record<string, any>} */
   const sections = {};

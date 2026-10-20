@@ -207,14 +207,59 @@ test('ledger outcome --scan-git outside a git repo returns a clean error (exit 1
   });
 });
 
-test('report --json prints exactly the SECTION_NAMES keys (15 of them), sorted, matching the module export', async () => {
+test('report --json prints exactly the SECTION_NAMES keys (16 of them), with run_time appended', async () => {
   await withTempHome(async () => {
-    assert.equal(SECTION_NAMES.length, 15, 'SECTION_NAMES itself must stay pinned at 15 (§6.2 plus B66 outside_review) — not just self-consistency');
+    assert.equal(SECTION_NAMES.length, 16, 'SECTION_NAMES must append run_time to the original 15');
     await appendRow({ event: 'dispatch', block: 'b1', level: 'L1', lane: 'L0' }, { slug: 'report-proj' });
     const stdout = captureStream();
     const code = await runReport(['--slug', 'report-proj', '--json'], { stdout });
     assert.equal(code, 0);
     assert.deepEqual(Object.keys(JSON.parse(stdout.text)).sort(), [...SECTION_NAMES].sort());
+    assert.deepEqual(JSON.parse(stdout.text).run_time.total, { runs: 1, wallMs: 0, usd: 0, blocks_closed: 0 });
+  });
+});
+
+test('B147 text: block dollars have readable wall and human wait times; run table includes totals', async () => {
+  await withTempHome(async () => {
+    const slug = 'report-times';
+    const at = (event, time, extra = {}) => ({ event, run: 'r1', ts: `2026-10-20T${time}.000Z`, ...extra });
+    for (const row of [
+      at('run.start', '00:00:00'),
+      at('dispatch', '00:00:00', { block: 'b1' }),
+      at('session', '00:01:00', { block: 'b1', usd: 2 }),
+      at('block.close', '00:02:00', { block: 'b1' }),
+      at('block.awaiting_human_check', '00:02:30', { block: 'b1' }),
+      at('block.human_pass', '00:12:30', { block: 'b1' }),
+      at('run.end', '00:15:00'),
+    ]) await appendRow(row, { slug });
+    const stdout = captureStream();
+    assert.equal(await runReport(['--slug', slug], { stdout }), 0);
+    assert.equal(stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0],
+      'run | block | USD | wall | human wait | status\nr1 | b1 | $2.0000 | 12m 30s | 10m 0s | completed\n' +
+      '  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $2.0000 · proof 0s · 0 unknown\n');
+    assert.equal(stdout.text.split('== run_time ==\n')[1].split('== ')[0].split('spend per run')[0],
+      'run | started | ended | wall | USD | closed | stopped\n' +
+      'r1 | 2026-10-20T00:00:00.000Z | 2026-10-20T00:15:00.000Z | 15m 0s | $2.0000 | 1 | 0\n' +
+      'total (1 run): 15m 0s | $2.0000 | 1 closed\n');
+  });
+});
+
+test('B147 text boundary: untimed blocks and open runs show unavailable times without crashing', async () => {
+  await withTempHome(async () => {
+    const slug = 'report-times-legacy';
+    await mkdir(ledgerDir(), { recursive: true });
+    await writeFile(ledgerPath(slug), [
+      { event: 'dispatch', run: 'old', block: 'b1', ts: 'bad-ts' },
+      { event: 'session', run: 'old', block: 'b1', usd: 0.25 },
+    ].map((r) => JSON.stringify(r)).join('\n') + '\n');
+    const stdout = captureStream();
+    assert.equal(await runReport(['--slug', slug], { stdout }), 0);
+    assert.equal(stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0],
+      'run | block | USD | wall | human wait | status\nold | b1 | $0.2500 | - | - | open\n' +
+      '  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $0.2500 · proof 0s · 0 unknown\n');
+    assert.equal(stdout.text.split('== run_time ==\n')[1].split('spend per run')[0],
+      'run | started | ended | wall | USD | closed | stopped\nold | - | open | - | $0.2500 | 0 | 0\n' +
+      'total (1 run): 0s | $0.2500 | 0 closed\n');
   });
 });
 

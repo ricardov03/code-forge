@@ -402,9 +402,11 @@ rounds and findings next to `code_forge_usd`, what code-forge spent on the PR's 
 `PR #12 · 3 outside rounds · 7 findings · code-forge $3.75 (+1 unknown) · B1, B2` — or
 `outside review: none`; `--json` and `--export` (`outside_review.json`) carry it as data.
 
+The report adds block wall time and human-check wait beside dollars, and appends `run_time` as its 16th section with each run's elapsed time, spend and block counts plus a whole-repo/site total in text, `--json` and `--export`.
+
 ### Changing the config mid-run
 
-The 15th and last report section, `agent_waivers`, lists each agent waiver and whether a human unwaived it. The human can run `block unwaive` to undo earlier agent waivers for a finding. Human waivers remain in force. `block ack-waivers` lists and acknowledges the counted agent waivers. Both commands ask at a terminal and have no `--yes`. Set `review.agent_waivers.require_ack: true` before run start to require an acknowledgement before close. A new or removed waiver needs a new acknowledgement. Run reload cannot change that policy.
+The 15th report section, `agent_waivers`, lists each agent waiver and whether a human unwaived it. The human can run `block unwaive` to undo earlier agent waivers for a finding. Human waivers remain in force. `block ack-waivers` lists and acknowledges the counted agent waivers. Both commands ask at a terminal and have no `--yes`. Set `review.agent_waivers.require_ack: true` before run start to require an acknowledgement before close. A new or removed waiver needs a new acknowledgement. Run reload cannot change that policy.
 
 `run start` takes a snapshot of `.code-forge.yml` into the run record, and the worker reviews with
 that snapshot. To change the config while blocks are open (a model swap, the review topology),
