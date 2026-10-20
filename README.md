@@ -113,6 +113,8 @@ default. See [the workflow](docs/how-it-works.md) and [concepts](docs/concepts.m
 | `code-forge gates detect\|run` | Discover and run project checks |
 | `code-forge keys list\|set\|test\|remove` | Manage key references without printing secrets |
 | `code-forge report` | Inspect recorded outcomes and costs |
+| `code-forge outcome seal\|check` | Seal a specialist result and check its files before a caller uses it |
+| `code-forge pipeline status\|next` | See specialist step states and the next ready step |
 | `code-forge logs` | Inspect local errors; `logs report` previews a public issue |
 | `code-forge upgrade` | Refresh installed skill copies after upgrading the package |
 | `code-forge --help` | List every verb; each verb prints its own usage on bad arguments |
