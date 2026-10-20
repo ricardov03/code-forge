@@ -3,6 +3,7 @@
 A specialist skill writes its result in `outcome.json`. The caller uses the result only when
 the outcome is approved, its checks allow it, and every listed file matches its saved hash.
 The format is defined in `schema/outcome.schema.json`.
+Use a [pipeline](pipelines.md) to name dependent specialist steps and see which step is ready.
 
 | Field | Meaning |
 |---|---|

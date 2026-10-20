@@ -29,6 +29,7 @@ then 5a. Going away while a run goes on? Read 5b. One small task, no plan? Read 
 | [../CHANGELOG.md](../CHANGELOG.md) | what changed in each version; `## [Unreleased]` is the next one |
 | [reference/config.md](reference/config.md) | every `.code-forge.yml` key, its type and default. Generated from `schema/code-forge.schema.json` |
 | [outcomes.md](outcomes.md) | specialist result fields, approval statuses, and the outcome seal and check commands |
+| [pipelines.md](pipelines.md) | specialist steps, dependencies, and the pipeline status and next commands |
 | [reference/blocks.json](reference/blocks.json) | the build blocks of this package and what each one owns |
 | [marketing/code-forge-story.md](marketing/code-forge-story.md) | the marketing content bank (copy, lessons, what not to claim) |
 | [privacy.md](privacy.md) | what the local error log holds (errors, warnings, the last command names), every cleaning rule, the AI check, the setup check (`--with-doctor`), known fixes, and how to turn the log off or delete it |
