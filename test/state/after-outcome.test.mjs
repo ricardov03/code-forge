@@ -137,6 +137,9 @@ test('recording boundary allows satisfied block dependencies and omits outcome m
   const f = await fixture('outcome-optional');
   assert.equal((await f.open('DESIGN')).code, 0);
   assert.equal((await closeBlock({ runId: f.runId, id: 'DESIGN', rows: await f.rows(), writeRow: f.writeRow, livePid: 4242, probe: PROBE })).status, 'closed');
+  const before = await f.snapshot();
+  refused(await f.open('CODE', ['--after', 'DESIGN', '--after-outcome', 'site', '--json']), 'outcome-not-ready', 'block CODE: --after-outcome step site: missing outcome');
+  await f.unchanged(before);
   f.outcome('logo');
   const result = await f.open('CODE', ['--after', 'DESIGN', '--after-outcome', 'logo', '--json']);
   assert.equal(result.code, 0, result.err);

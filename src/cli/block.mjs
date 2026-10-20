@@ -944,7 +944,7 @@ export async function runBlock(args, deps = {}) {
         const { fileSet } = await tree();
         const lines = await toolLines();
         const given = new Set(lines.map((l) => l.file));
-        const missing = missingReviewTickets(text, fileSet.map((f) => f.file)).filter((f) => !given.has(f));
+        const missing = missingReviewTickets(text, fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null).map((f) => f.file)).filter((f) => !given.has(f));
         if (missing.length > 0) return { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
         for (const file of reportMismatches(text, lines)) lineWarnings.push(`WARN report ticket mismatch ${file}\n`);
         return { ok: true };

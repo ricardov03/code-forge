@@ -15,18 +15,18 @@ mock.module('../../src/review/engine.mjs', { namedExports: { ...realReview,
 const { runBlock } = await import('../../src/cli/block.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
-const { startRun, writeSigned } = await import('../../src/state/run.mjs');
+const { readRun, startRun, writeSigned } = await import('../../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { contentHash } = await import('../../src/worker/ticket.mjs');
-const { announceWorker, blockTickets, enqueue, enqueueAnswers, enqueueHash, writeResult } = await import('../../src/worker/queue.mjs');
+const { announceWorker, blockTickets, enqueue, enqueueAnswers, enqueueHash, resolveTicket, writeResult } = await import('../../src/worker/queue.mjs');
 const { watchTick } = await import('../../src/worker/watch.mjs');
 const { reviewTicket } = await import('../../src/worker/engine.mjs');
 const PROBE = async (pid) => pid === 4242 ? 'start-A' : null;
 let sequence = 0;
 
-async function call(run, args, cwd) {
+async function call(run, args, cwd, deps = {}) {
   let out = '', err = '';
-  const code = await run(args, { cwd, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } }, probe: PROBE, pollMs: 1 });
+  const code = await run(args, { cwd, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } }, probe: PROBE, pollMs: 1, ...deps });
   return { code, out, err };
 }
 
@@ -57,13 +57,19 @@ async function fixture(review = {}, owned = 'a.mjs package-lock.json', file = 'p
   await writeSigned(runId, writeRow, { event: 'review.approved', block: 'B1', file: 'a.mjs', content_hash: contentHash(repo, 'a.mjs'), round: 1 });
   return { repo, runId, config, writeRow, file,
     rows: () => readAllRows(slug),
-    close: () => call(runBlock, ['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', path.join(inputs, 'coder.log')], repo),
+    report: (text) => {
+      writeFile(inputs, 'report.md', text);
+      return path.join(inputs, 'report.md');
+    },
+    close: (extra = [], deps = {}) => call(runBlock, ['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', path.join(inputs, 'coder.log'), ...extra], repo, deps),
   };
 }
 
 test('excluded scaffolding closes with one signed hash-bound row; disabling exclusion refuses unreviewed', async () => {
   const f = await fixture();
-  const closed = await f.close();
+  const ticket = resolveTicket({ repoRoot: f.repo, run: f.runId, block: 'B1', file: 'a.mjs' }).ticket;
+  const report = f.report(`reviewed a.mjs ticket ${ticket}\nTESTS node --test exit=0\n===BLOCK B1 COMPLETE===\n`);
+  const closed = await f.close(['--report', report]);
   assert.equal(closed.code, 0, closed.err);
   assert.match(closed.out, /^not reviewed \(review.exclude \*\*\/package-lock.json\): package-lock.json$/m);
   assert.equal(closed.out.split('\n').filter((l) => l.startsWith('reviewed ')).length, 1, 'only the small source file is reviewed');
@@ -81,6 +87,25 @@ test('excluded scaffolding closes with one signed hash-bound row; disabling excl
   assert.equal(scope.code, 1);
   assert.match(scope.err, /unowned_change package-lock.json/);
   assert.equal((await unowned.rows()).filter((r) => r.event === 'gate.review_excluded').length, 0);
+});
+
+test('report still needs the reviewed source ticket when the tool cannot supply it; excluded locks need none', async () => {
+  const f = await fixture();
+  const ticket = resolveTicket({ repoRoot: f.repo, run: f.runId, block: 'B1', file: 'a.mjs' }).ticket;
+  const deps = { resolveTicket: () => { throw new Error('ticket unavailable'); } };
+  const text = 'TESTS node --test exit=0\n===BLOCK B1 COMPLETE===\n';
+  const report = f.report(text);
+  const before = await f.rows();
+  assert.deepEqual(await f.close(['--report', report], deps), {
+    code: 1, out: '', err: 'block B1 open: coder report FAILED: no review-file ticket id for a.mjs\n',
+  });
+  assert.deepEqual(await f.rows(), before, 'refused close writes no rows, including exclusion audit rows');
+  assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+  f.report(`reviewed a.mjs ticket ${ticket}\n${text}`);
+  const closed = await f.close(['--report', report], deps);
+  assert.equal(closed.code, 0, closed.err);
+  assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
+  assert.equal((await f.rows()).filter((r) => r.event === 'gate.review_excluded').length, 1);
 });
 
 test('npm excluded locks reject insecure URLs, foreign hosts, absent integrity and malformed JSON; allow configured registries and local entries', async () => {
