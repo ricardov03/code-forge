@@ -69,7 +69,7 @@
 
 import { readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket } from '../worker/queue.mjs';
+import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket, reviewExclusionFor } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 import { blockFileSet, namedOnHash } from '../review/gate-check.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
@@ -565,22 +565,23 @@ export async function runReviewFile(args, deps = {}) {
     if (positionals.length !== 1 || typeof flags.block !== 'string' || flags.max !== undefined) throw new WorkerError('usage', 'give one path and --block');
     const block = assertBlockId(flags.block);
     if (flags.fresh === true && (flags.answers !== undefined || flags.of !== undefined)) throw new WorkerError('usage', '--fresh takes no --answers or --of');
-    if (flags.answers !== undefined || flags.of !== undefined) return await enqueueAnswersTicket({ flags, answering: positionals[0], block, cwd, repoRoot, say });
     const file = normalizeRequestPath(positionals[0], cwd, await repoRootOf(cwd));
     const worker = liveWorker(repoRoot);
     let cfg = null;
     const requestedRun = typeof flags.run === 'string' ? flags.run : worker?.run;
     if (requestedRun) {
       try { cfg = configInForce(await readRun(requestedRun)); }
-      catch (err) {
-        if (err?.code !== 'run-not-found') throw err;
+      catch { /* The workspace mirror below also serves sandboxed callers. */ }
+    }
+    const candidates = [file, ...(typeof flags.of === 'string' ? [normalizeRequestPath(flags.of, cwd, await repoRootOf(cwd))] : [])];
+    for (const candidate of candidates) {
+      const rule = requestedRun ? reviewExclusionFor(repoRoot, requestedRun, candidate, cfg) : reviewExcludeRule(cfg, candidate);
+      if (rule !== null) {
+        writeSafe(stdout, `not reviewed (review.exclude ${rule}): ${candidate}\n`);
+        return 0;
       }
     }
-    const rule = reviewExcludeRule(cfg, file);
-    if (rule !== null) {
-      writeSafe(stdout, `not reviewed (review.exclude ${rule}): ${file}\n`);
-      return 0;
-    }
+    if (flags.answers !== undefined || flags.of !== undefined) return await enqueueAnswersTicket({ flags, answering: positionals[0], block, cwd, repoRoot, say });
     if (!worker || (typeof flags.run === 'string' && flags.run !== worker.run)) {
       say({ status: 'worker_down', file });
       return 3;

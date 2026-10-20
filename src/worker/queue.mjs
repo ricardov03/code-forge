@@ -133,7 +133,7 @@ export function resetAcceptanceWatch(repoRoot, block) {
  * @throws {WorkerError} `bad-path` for a relative `tree` or one that cannot be resolved.
  */
 export function enqueue({ repoRoot, run, block, file, tree = null, now = new Date() }) {
-  const rule = excludedRule(repoRoot, run, assertRowPath(file));
+  const rule = reviewExclusionFor(repoRoot, run, assertRowPath(file));
   if (rule !== null) return { status: 'excluded', file, rule };
   const { content_hash } = resolveTicket({ repoRoot, run, block, file, tree });
   return enqueueHash({ repoRoot, run, block, file, tree, content_hash, now });
@@ -145,7 +145,7 @@ export function enqueue({ repoRoot, run, block, file, tree = null, now = new Dat
  */
 export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = null, now = new Date() }) {
   const rel = assertRowPath(file);
-  const rule = excludedRule(repoRoot, run, rel);
+  const rule = reviewExclusionFor(repoRoot, run, rel);
   if (rule !== null) return { status: 'excluded', file: rel, rule };
   const root = tree === null ? null : realTree(tree);
   const acceptance_revision = acceptanceRevision(repoRoot, run, block);
@@ -176,11 +176,11 @@ export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = n
 }
 
 /** Use the current run snapshot, including reloads, just as the watch and close do.
- * @param {string} repoRoot @param {string} run @param {string} file
+ * @param {string} repoRoot @param {string} run @param {string} file @param {Record<string, any> | null} [fallback]
  */
-function excludedRule(repoRoot, run, file) {
+export function reviewExclusionFor(repoRoot, run, file, fallback = null) {
   const record = readJSON(runRecordPath(run)) ?? readJSON(path.join(repoRoot, '.code-forge', 'runs', `${run}.json`));
-  return reviewExcludeRule(record ? configInForce(record) : null, file);
+  return reviewExcludeRule((record ? configInForce(record) : null) ?? fallback, file);
 }
 
 /** Finish only an unstarted, pending review. A superseded marker has no review result.
@@ -236,13 +236,17 @@ export function assertAnswers(answers) {
  * repo-root-relative). Both files are hashed now (under `tree` when given); idempotent like
  * {@link enqueue}. The caller has already refused the same file and the id list.
  * @param {{repoRoot: string, run: string, block: string, file: string, byFile: string, answers: string[], tree?: string | null, now?: Date}} opts
- * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, by_file: string, by_hash: string, answers: string[], tree?: string}}
+ * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, by_file: string, by_hash: string, answers: string[], tree?: string} | {status: 'excluded', file: string, rule: string, ticket?: never, answers?: never}}
  * @throws {WorkerError} `bad-path`, `usage`
  */
 export function enqueueAnswers({ repoRoot, run, block, file, byFile, answers, tree = null, now = new Date() }) {
   const rel = assertRowPath(file);
   const by_file = assertRowPath(byFile);
   const ids = assertAnswers(answers);
+  for (const candidate of [rel, by_file]) {
+    const rule = reviewExclusionFor(repoRoot, run, candidate);
+    if (rule !== null) return { status: 'excluded', file: candidate, rule };
+  }
   const root = tree === null ? null : realTree(tree);
   const content_hash = contentHash(root ?? repoRoot, rel);
   const by_hash = contentHash(root ?? repoRoot, by_file);

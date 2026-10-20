@@ -1,7 +1,16 @@
 import { cfgFor, freshDir, git, harness, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
 import path from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
+
+const realReview = await import('../../src/review/engine.mjs');
+const packets = [];
+mock.module('../../src/review/engine.mjs', { namedExports: { ...realReview,
+  reviewFile: async (input) => {
+    packets.push({ file: input.file, peers: input.peers, diffs: (await input.peerDiffs()).map((d) => d.file) });
+    return { status: 'reviewed', approved: true, engine: 'adaptive', sessions: [] };
+  },
+} });
 
 const { runBlock } = await import('../../src/cli/block.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
@@ -9,7 +18,7 @@ const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { startRun, writeSigned } = await import('../../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { contentHash } = await import('../../src/worker/ticket.mjs');
-const { announceWorker, blockTickets, enqueue, enqueueHash, writeResult } = await import('../../src/worker/queue.mjs');
+const { announceWorker, blockTickets, enqueue, enqueueAnswers, enqueueHash, writeResult } = await import('../../src/worker/queue.mjs');
 const { watchTick } = await import('../../src/worker/watch.mjs');
 const { reviewTicket } = await import('../../src/worker/engine.mjs');
 const PROBE = async (pid) => pid === 4242 ? 'start-A' : null;
@@ -116,4 +125,24 @@ test('watch, enqueue, worker and review-file skip excluded files; wait-block lis
   assert.equal(status.done, true);
   assert.deepEqual(status.files.map(({ file, status, ticket }) => ({ file, status, ticket })), [{ file: 'a.mjs', status: 'done', ticket: tickets[0].ticket }, { file: f.file, status: 'excluded', ticket: null }]);
   assert.equal(blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B1' }).length, 1);
+});
+
+test('excluded content never enters peer packets or answers reviews', async () => {
+  const f = await fixture();
+  const h = harness({ repoRoot: f.repo, runId: f.runId, cfg: f.config });
+  packets.length = 0;
+  const source = enqueue({ repoRoot: f.repo, run: f.runId, block: 'B1', file: 'a.mjs' });
+  if (source.status === 'excluded') assert.fail('the source file must queue');
+  await reviewTicket({ ...source, run: f.runId, block: 'B1', enqueued_at: new Date().toISOString() }, h.ctx);
+  assert.deepEqual(packets, [{ file: 'a.mjs', peers: [], diffs: [] }], 'excluded locks never reach another file review as context');
+  for (const [file, byFile] of [[f.file, 'a.mjs'], ['a.mjs', f.file]]) {
+    const result = enqueueAnswers({ repoRoot: f.repo, run: f.runId, block: 'B1', file, byFile, answers: ['F1'] });
+    assert.equal(result.status, 'excluded', `${file} answered by ${byFile} skips review`);
+    assert.equal(result.ticket, undefined);
+    const skipped = await reviewTicket({ ticket: 'b'.repeat(24), kind: 'answers', run: f.runId, block: 'B1', file, by_file: byFile, content_hash: contentHash(f.repo, file), enqueued_at: new Date().toISOString() }, h.ctx);
+    assert.equal(skipped.status, 'excluded', 'previously queued answers also skip the model');
+    const manual = await call(runReviewFile, [byFile, '--block', 'B1', '--run', f.runId, '--answers', 'F1', '--of', file], f.repo);
+    assert.deepEqual(manual, { code: 0, out: `not reviewed (review.exclude **/package-lock.json): package-lock.json\n`, err: '' });
+  }
+  assert.equal(packets.length, 1, 'only the source review ran');
 });

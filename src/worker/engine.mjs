@@ -96,7 +96,6 @@ import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { ContextError, reviewDigest } from '../context/pack.mjs';
 import { reviewFile, reviewLightBatch, rulesRisk } from '../review/engine.mjs';
-import { reviewExcludeRule } from '../config/validate.mjs';
 import { reviewAnswers } from '../review/answers.mjs';
 import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
@@ -110,7 +109,7 @@ import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
 import { withLock } from '../util/file-locks.mjs';
 import { blockAnchors, blockRungUsed, loadState, RESTORED_EVENT, saveState } from './review-state.mjs';
-import { assertAnswers, enqueueHash, isDone, writeResult } from './queue.mjs';
+import { assertAnswers, enqueueHash, isDone, reviewExclusionFor, writeResult } from './queue.mjs';
 import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } from './ticket.mjs';
 
 /**
@@ -346,7 +345,8 @@ export function packetDirFor(runRootDir, id) {
  * @returns {Promise<ReviewOutcome>}
  */
 export async function reviewTicket(ticket, ctx) {
-  const rule = reviewExcludeRule(ctx.cfg, ticket.file);
+  const excluded = (/** @type {string} */ file) => reviewExclusionFor(ctx.repoRoot, ctx.runId, file, ctx.cfg);
+  const rule = excluded(ticket.file) ?? (ticket.kind === 'answers' ? excluded(ticket.by_file) : null);
   if (rule !== null) return { status: 'excluded', reason: `review.exclude ${rule}`, approved: false, engine: 'adaptive', sessions: [] };
   const workDir = packetDirFor(ctx.runRootDir, ticket.ticket);
   if (workDir === null) return { status: 'unavailable', reason: 'ticket-id-invalid', approved: false, engine: 'adaptive', sessions: [] };
@@ -393,7 +393,7 @@ export async function reviewTicket(ticket, ctx) {
     try {
       // Read the listing directly: blockPeers' [] fallback would hide a git failure and
       // still authorize explicit tests. Context and peer diffs must fail soft together.
-      const peers = entry.base === null || entry.owned.length === 0 ? [] : (await computeFileSet({ cwd: contentRoot, base: entry.base })).all.filter((f) => f !== ticket.file && ownsFile(entry.owned, f, entry.ownedKinds));
+      const peers = entry.base === null || entry.owned.length === 0 ? [] : (await computeFileSet({ cwd: contentRoot, base: entry.base })).all.filter((f) => f !== ticket.file && ownsFile(entry.owned, f, entry.ownedKinds) && excluded(f) === null);
       readDiffs = peerDiffReader({ repoRoot: contentRoot, base: entry.base, file: ticket.file, peers });
       const changedFiles = [...peers, ticket.file].filter((f) => ownsFile(entry.owned, f, entry.ownedKinds));
       return { peers, changedFiles, ownedFiles: [...new Set([...changedFiles, ...entry.testFiles])], testFiles: entry.testFiles };
@@ -447,7 +447,7 @@ async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDige
   const worker = { pid: process.pid, started_at: await processStartTime(process.pid) };
   return withLock(`light:${ctx.runId}\0${ticket.block}`, async () => {
     const root = ctx.contentRoot ?? ctx.repoRoot;
-    const files = (await computeFileSet({ cwd: root, base: entry.base ?? 'HEAD' })).all.filter((file) => ownsFile(entry.owned, file, entry.ownedKinds) && reviewExcludeRule(ctx.cfg, file) === null).sort();
+    const files = (await computeFileSet({ cwd: root, base: entry.base ?? 'HEAD' })).all.filter((file) => ownsFile(entry.owned, file, entry.ownedKinds) && reviewExclusionFor(ctx.repoRoot, ctx.runId, file, ctx.cfg) === null).sort();
     const hashes = files.map((file) => ({ file, content_hash: contentHash(root, file) }));
     if (!hashes.some((f) => f.file === ticket.file && f.content_hash === ticket.content_hash)) return { status: 'stale', approved: false, engine: 'adaptive', sessions: [] };
     const signature = JSON.stringify([entry.base, hashes]);
@@ -476,6 +476,7 @@ async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDige
         if (approved) await writeRow({ event: 'review.approved', file, content_hash });
       }
       const queued = enqueueHash({ repoRoot: ctx.repoRoot, run: ctx.runId, block: ticket.block, file, content_hash, ...(ticket.tree ? { tree: ticket.tree } : {}) });
+      if (queued.status === 'excluded') continue;
       const open = approved ? [] : own;
       await writeRow({ event: 'review.result', ticket: queued.ticket, file, content_hash, status: outcome.status, approved, open, worker });
       writeResult({ repoRoot: ctx.repoRoot, runId: ctx.runId, ticket: queued.ticket, result: { ...outcome, block: ticket.block, file, content_hash, open, worker }, key });
