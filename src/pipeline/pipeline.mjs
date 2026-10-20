@@ -1,7 +1,8 @@
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { parse as parseYAML } from 'yaml';
+import { checkOutcome, loadOutcome, validateOutcome } from '../outcome/outcome.mjs';
 
 const schema = JSON.parse(readFileSync(new URL('../../schema/pipeline.schema.json', import.meta.url), 'utf8'));
 const validate = new Ajv2020({ allErrors: true, useDefaults: true }).compile(schema);
@@ -63,4 +64,49 @@ export function loadPipeline(root) {
   }
   if (problems.length === 0) for (const step of checked.steps) visit(step.id);
   return { exists: true, ok: problems.length === 0, problems, pipeline: checked };
+}
+
+/** @typedef {{id: string, skill: string, state: 'waiting'|'ready'|'draft'|'blocked'|'failed'|'approved'|'invalid', problem?: string}} PipelineRow */
+
+/** Evaluate dependencies before their consumers, then return rows in file order.
+ * Missing pipelines have no rows. Invalid pipelines throw their validation problems.
+ * @param {string} root @returns {PipelineRow[]}
+ */
+export function pipelineStatus(root) {
+  const loaded = loadPipeline(root);
+  if (!loaded.exists) return [];
+  if (!loaded.ok) throw new Error(loaded.problems.join('\n'));
+  const byId = new Map(loaded.pipeline.steps.map((step) => [step.id, step]));
+  /** @type {Map<string, PipelineRow>} */
+  const rows = new Map();
+  /** @param {PipelineStep} step @returns {PipelineRow} */
+  function evaluate(step) {
+    if (rows.has(step.id)) return rows.get(step.id);
+    /** @type {PipelineRow} */
+    const row = { id: step.id, skill: step.skill, state: 'waiting' };
+    if (step.needs.every((id) => evaluate(byId.get(id)).state === 'approved')) {
+      const file = path.resolve(root, step.outcome);
+      if (!existsSync(file)) {
+        row.state = 'ready';
+      } else {
+        try {
+          const outcome = loadOutcome(file);
+          let result = validateOutcome(outcome);
+          if (result.ok && outcome.status === 'approved') result = checkOutcome(file, { root });
+          if (result.ok) {
+            row.state = outcome.status;
+          } else {
+            row.state = 'invalid';
+            row.problem = result.problems[0];
+          }
+        } catch (err) {
+          row.state = 'invalid';
+          row.problem = err.message;
+        }
+      }
+    }
+    rows.set(step.id, row);
+    return row;
+  }
+  return loaded.pipeline.steps.map(evaluate);
 }
