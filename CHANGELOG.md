@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - Named custom gates: `gates.custom` runs named gates after the fixed ones and records evidence files (path, bytes, sha256) on the gate rows (B146)
+- Time in the report: `cost_per_block` shows wall time and human wait per block; a new `run_time` section shows each run's wall time, cost and blocks, plus a total (B147b)
 
 ## [0.15.1] — 2026-10-19
 
