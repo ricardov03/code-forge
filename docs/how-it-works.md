@@ -415,7 +415,7 @@ rounds and findings next to `code_forge_usd`, what code-forge spent on the PR's 
 `PR #12 · 3 outside rounds · 7 findings · code-forge $3.75 (+1 unknown) · B1, B2` — or
 `outside review: none`; `--json` and `--export` (`outside_review.json`) carry it as data.
 
-The report adds block wall time and human-check wait beside dollars, and appends `run_time` as its 16th section with each run's elapsed time, spend and block counts plus a whole-repo/site total in text, `--json` and `--export`.
+The report adds block wall time and human-check wait beside dollars, and appends `run_time` as its 16th section with each run's elapsed time, spend and block counts plus a whole-repo/site total in text, `--json` and `--export`. Stopped blocks have `stopped: true`, wall time from their first dispatch to their stop, and no human wait; a later dispatch clears the stopped status, and a later completion still uses the first dispatch. The block table shows `completed`, `stopped` or `open`. Only string run ids appear in `run_time.runs`. Rows without one are counted in optional `outside_runs: {usd, rows}` (omitted when none); they add no runs or wall time, while `total.usd` includes their spend. The text table prints `outside runs: $<usd> (<rows> rows, no wall time)` before the total when present.
 
 ### Changing the config mid-run
 
