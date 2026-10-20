@@ -253,6 +253,26 @@
         "lint": { "$ref": "#/$defs/argvOrNull" },
         "types": { "$ref": "#/$defs/argvOrNull" },
         "format": { "$ref": "#/$defs/argvOrNull" },
+        "custom": {
+          "type": "array",
+          "maxItems": 20,
+          "description": "Named gates run after test, lint, types and format in list order, independently even after a failure, with the same timeout and env rules. At most 20; names are unique and cannot be fixed gate names (gates-not-argv-array error rule). Custom argv refuses {test_files} and {changed_files}; --changed and light-block narrowing do not apply. Evidence uses safe relative paths or simple globs: * within a segment, ** across segments; absolute paths, backslashes, empty strings and .. segments are refused. After pass or fail, regular files under cwd are hashed (no symlinks followed), sorted by path, deduplicated and capped at 200 per gate as {path, bytes, sha256}; unmatched patterns appear in missing and do not fail the gate. Files are never copied or stored as content. gate.red includes gate and custom: true; gate.done includes custom summaries {name, ok, evidence_count, missing?}, and with --run/--block an evidence map by name. Website example: gates: {custom: [{name: build, argv: [npm, run, build]}, {name: lighthouse, argv: [npm, run, lighthouse], evidence: ['reports/**/*.json']}, {name: links, argv: [npm, run, links]}]}.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "argv"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$", "not": { "enum": ["test", "lint", "types", "format"] } },
+              "argv": {
+                "type": "array", "minItems": 1,
+                "items": { "type": "string", "minLength": 1 },
+                "not": { "contains": { "type": "string", "pattern": "\\{(?:test_files|changed_files)\\}" } }
+              },
+              "env": { "type": "object", "additionalProperties": false, "patternProperties": { "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" } } },
+              "evidence": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^(?!/|[A-Za-z]:)(?!.*(?:^|/)\\.\\.(?:/|$))[^\\\\\\u0000]+$" } }
+            }
+          }
+        },
         "extra": {
           "type": "object",
           "additionalProperties": false,

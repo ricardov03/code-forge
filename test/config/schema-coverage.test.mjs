@@ -334,6 +334,11 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'levels.L3.fallback.provider',
   'proof.tiers.high.paths',
   'gates.extra.secret_scan',
+  'gates.custom',
+  'gates.custom.name',
+  'gates.custom.argv',
+  'gates.custom.env',
+  'gates.custom.evidence',
   'telemetry',
   // v1.3 (B1.1): the six new collector paths behind the 142 -> 148 re-pin.
   'review.max_rounds_per_file',
@@ -420,7 +425,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B138: close and close.require_human add two schema paths.
 // B139: +3 = light, light.max_files, light.max_lines ⇒ 221.
 // B107: +1 = review.workers ⇒ 222.
-const EXPECTED_SCHEMA_PATH_COUNT = 222;
+// B146: +5 = gates.custom{,.name,.argv,.env,.evidence} ⇒ 227.
+const EXPECTED_SCHEMA_PATH_COUNT = 227;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;

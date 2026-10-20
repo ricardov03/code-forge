@@ -512,8 +512,47 @@ function gateMessages(key, value) {
   return messages;
 }
 
+/** Custom gate refusals are also checked before running commands or reading evidence.
+ * @param {unknown} custom @returns {string[]}
+ */
+export function customGateMessages(custom) {
+  if (custom === undefined) return [];
+  if (!Array.isArray(custom)) return ['gates.custom must be an array of at most 20 named object gates'];
+  const messages = custom.length > 20 ? ['gates.custom must contain at most 20 entries'] : [];
+  const names = new Set();
+  for (const [i, value] of custom.entries()) {
+    const key = `custom[${i}]`;
+    if (!value || typeof value !== 'object' || Array.isArray(value)) {
+      messages.push(`gates.${key} must be a named object gate`);
+      continue;
+    }
+    const { name, evidence, ...command } = value;
+    const label = `${key}${typeof name === 'string' ? ` (${safeSegment(name)})` : ''}`;
+    if (typeof name !== 'string' || !/^[a-z][a-z0-9_-]{0,31}$/.test(name)) messages.push(`gates.${label}.name must match ^[a-z][a-z0-9_-]{0,31}$`);
+    if (GATE_KEYS.includes(name)) messages.push(`gates.${label}.name must not be a fixed gate name`);
+    if (names.has(name)) messages.push(`gates.${label}.name must be unique`);
+    names.add(name);
+    messages.push(...gateMessages(label, command));
+    if (Array.isArray(command.argv) && command.argv.some((arg) => typeof arg === 'string' && [TEST_FILES_TOKEN, CHANGED_FILES_TOKEN].some((token) => arg.includes(token)))) {
+      messages.push(`gates.${label}.argv: {test_files} and {changed_files} are refused in custom gates`);
+    }
+    if (evidence !== undefined) {
+      if (!Array.isArray(evidence)) messages.push(`gates.${label}.evidence must be an array of safe relative paths or simple globs`);
+      else for (const [j, pattern] of evidence.entries()) {
+        // Backslashes are refused as well so a Windows absolute/traversal path is never
+        // interpreted differently by validation and the POSIX evidence matcher.
+        if (typeof pattern !== 'string' || pattern.length === 0 || /^(?:\/|[A-Za-z]:)/.test(pattern) || /[\\\0]/.test(pattern) || pattern.split('/').includes('..')) {
+          messages.push(`gates.${label}.evidence[${j}] must be a non-empty relative path or glob without absolute paths or a .. segment`);
+        }
+      }
+    }
+  }
+  return messages;
+}
+
 function checkGatesNotArgvArray(cfg) {
   const messages = GATE_KEYS.flatMap((key) => gateMessages(key, cfg?.gates?.[key]));
+  messages.push(...customGateMessages(cfg?.gates?.custom));
   if (Object.hasOwn(cfg?.gates ?? {}, 'repeat_new_tests')) {
     const n = cfg.gates.repeat_new_tests;
     if (!Number.isInteger(n) || n < 2 || n > 10) messages.push('gates.repeat_new_tests must be an integer 2..10');
