@@ -262,7 +262,7 @@ test('B59 (3): outside brief mode no --level is the same usage error; --lines is
   assert.equal(rows[1].level, 'L1');
 });
 
-test('B59 (4): report shows each run as brief or plan, with the 15 pinned sections unchanged', async () => {
+test('B59 (4): report shows each run as brief or plan, with 16 pinned sections', async () => {
   const slug = 'b59-report';
   /** @param {Record<string, any>} row */
   const add = (row) => appendRow(row, { slug });
@@ -274,13 +274,14 @@ test('B59 (4): report shows each run as brief or plan, with the 15 pinned sectio
     { run: 'r-one', mode: 'brief' },
     { run: 'r-two', mode: 'plan' },
   ]);
-  assert.equal(SECTION_NAMES.length, 15);
+  assert.equal(SECTION_NAMES.length, 16);
+  assert.equal(SECTION_NAMES.at(-1), 'run_time');
   assert.deepEqual(Object.keys(buildReport(rows).sections), [...SECTION_NAMES]);
   const [code, text] = await cli(runReport, ['--slug', slug]);
   assert.equal(code, 0);
   assert.ok(text.endsWith('run mode:\n  run r-one: brief\n  run r-two: plan\n'), text);
-  assert.equal(text.match(/^== /gm)?.length, 15);
-  // the mode is terminal text only: `--json` carries the 15 pinned sections and no mode key
+  assert.equal(text.match(/^== /gm)?.length, 16);
+  // the mode is terminal text only: `--json` carries the 16 pinned sections and no mode key
   const [jsonCode, json] = await cli(runReport, ['--slug', slug, '--json']);
   assert.equal(jsonCode, 0);
   assert.deepEqual(Object.keys(JSON.parse(json)), [...SECTION_NAMES]);
