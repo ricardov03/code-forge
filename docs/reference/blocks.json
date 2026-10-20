@@ -4,7 +4,7 @@
     "plans/code-forge-plan-v1.3.md §10.4",
     "plans/NIGHT-LOG.md"
   ],
-  "block_count": 160,
+  "block_count": 161,
   "baseline_ids": ["B0", "B1", "B2", "B3", "B4", "B5", "B6", "B7", "B8"],
   "baseline_note": "Wave 0-1 blocks, landed before v1.3; depends_on may name them, but they have no entry under blocks.",
   "blocks": {
@@ -2966,6 +2966,24 @@
         "B147b"
       ],
       "note": "F006 phase 1 (design before code). One fix round (doc example flags). Gates passed on the first run."
+    },
+    "B149": {
+      "title": "Report run_time: rows with no run id go to outside_runs {usd, rows} (total.usd still counts them; total.runs and wallMs count real runs only); stopped blocks show stopped: true and the time to the stop",
+      "wave": 15,
+      "level": "L2",
+      "status": "landed",
+      "owned": [
+        "src/ledger/report.mjs",
+        "src/cli/report.mjs",
+        "test/ledger/report-time.test.mjs",
+        "test/ledger/report.test.mjs",
+        "test/ledger/export.test.mjs",
+        "test/ledger/cli.test.mjs",
+        "skill/references/ledger.md",
+        "docs/how-it-works.md"
+      ],
+      "depends_on": [],
+      "note": "Fixes F-30 and F-31 (dogfood findings). No fix round. Gates passed on the first run."
     }
   }
 }

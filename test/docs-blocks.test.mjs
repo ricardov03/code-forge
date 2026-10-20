@@ -74,7 +74,7 @@ const NIGHT_LOG_ADDED_IDS = ['B1.2', 'B4.1', 'B11.1', 'B12c'];
  *   - B58-B67 issue #13 adoption plan (2026-10-11)
  *   - B68-B76 review-exits plan, issues #15 #12 #9 #8 #10 (2026-10-12)
  */
-const ROOT_ADDED_LATER_IDS = ['B22', 'B23', 'B24', 'B25', 'B26', 'B27', 'B28', 'B29', 'B30', 'B31', 'B32', 'B33', 'B34', 'B35', 'B36', 'B37', 'B38', 'B39', 'B40', 'B41', 'B42', 'B43', 'B44', 'B45', 'B46', 'B47', 'B48', 'B49a', 'B49b', 'B50', 'B51', 'B52', 'B53', 'B54', 'B55', 'B56', 'B57', 'B58', 'B59', 'B60', 'B61', 'B62a', 'B62b', 'B63a', 'B63b', 'B64a', 'B64b', 'B65', 'B66', 'B67', 'B68', 'B69', 'B70', 'B77', 'B78', 'B71', 'B72', 'B79', 'B73', 'B81', 'B74', 'B75', 'B82', 'B76', 'B83', 'B84', 'B85', 'B86', 'B87', 'B88', 'B89', 'B102', 'B103', 'B90', 'B91', 'B92', 'B93', 'B94', 'B80', 'B108', 'B96', 'B109', 'B110', 'B111', 'B97', 'B98', 'B112', 'B113', 'B99', 'B100', 'B114', 'B115', 'B104', 'B117', 'B116', 'B118', 'B119', 'B120', 'B101', 'B105', 'B121', 'B106', 'B122', 'B123', 'B126', 'B125', 'B124a', 'B127', 'B124b', 'B124c', 'B128', 'B130', 'B129', 'B131', 'B132', 'B135', 'B135b', 'B133', 'B133b', 'B134', 'B136', 'B137', 'B137b', 'B138', 'B139', 'B107', 'B142', 'B140', 'B145', 'B144', 'B141', 'B143', 'B143b', 'B146', 'B147', 'B147b', 'B148'];
+const ROOT_ADDED_LATER_IDS = ['B22', 'B23', 'B24', 'B25', 'B26', 'B27', 'B28', 'B29', 'B30', 'B31', 'B32', 'B33', 'B34', 'B35', 'B36', 'B37', 'B38', 'B39', 'B40', 'B41', 'B42', 'B43', 'B44', 'B45', 'B46', 'B47', 'B48', 'B49a', 'B49b', 'B50', 'B51', 'B52', 'B53', 'B54', 'B55', 'B56', 'B57', 'B58', 'B59', 'B60', 'B61', 'B62a', 'B62b', 'B63a', 'B63b', 'B64a', 'B64b', 'B65', 'B66', 'B67', 'B68', 'B69', 'B70', 'B77', 'B78', 'B71', 'B72', 'B79', 'B73', 'B81', 'B74', 'B75', 'B82', 'B76', 'B83', 'B84', 'B85', 'B86', 'B87', 'B88', 'B89', 'B102', 'B103', 'B90', 'B91', 'B92', 'B93', 'B94', 'B80', 'B108', 'B96', 'B109', 'B110', 'B111', 'B97', 'B98', 'B112', 'B113', 'B99', 'B100', 'B114', 'B115', 'B104', 'B117', 'B116', 'B118', 'B119', 'B120', 'B101', 'B105', 'B121', 'B106', 'B122', 'B123', 'B126', 'B125', 'B124a', 'B127', 'B124b', 'B124c', 'B128', 'B130', 'B129', 'B131', 'B132', 'B135', 'B135b', 'B133', 'B133b', 'B134', 'B136', 'B137', 'B137b', 'B138', 'B139', 'B107', 'B142', 'B140', 'B145', 'B144', 'B141', 'B143', 'B143b', 'B146', 'B147', 'B147b', 'B148', 'B149'];
 
 // The plan is maintainer-only (not tracked since 2026-09-25): the drift check runs where it exists.
 const HAS_PLAN = existsSync(PLAN_PATH);
@@ -88,8 +88,8 @@ test('blocks.json ids deep-equal §10.4\'s table rows plus the NIGHT-LOG additio
   const expected = [...fromPlan, ...NIGHT_LOG_ADDED_IDS, ...ROOT_ADDED_LATER_IDS].sort();
   const actual = Object.keys(doc.blocks).sort();
   assert.deepEqual(actual, expected);
-  assert.equal(actual.length, 160);
-  assert.equal(doc.block_count, 160);
+  assert.equal(actual.length, 161);
+  assert.equal(doc.block_count, 161);
 });
 
 test('B10c is marked deleted (Q16 = cut) — negative: no other block is', () => {
