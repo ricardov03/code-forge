@@ -928,18 +928,29 @@ export function lockfileProblem(repoRoot, file, cfg) {
     lock = JSON.parse(bytes.toString('utf8'));
   } catch { return 'cannot read valid lock JSON'; }
   if (!lock || typeof lock !== 'object' || Array.isArray(lock)) return 'expected a lock object';
-  const packages = lock.packages ?? {};
-  if (typeof packages !== 'object' || Array.isArray(packages)) return 'packages must be an object';
   const hosts = cfg?.review?.lockfile_registries ?? ['registry.npmjs.org'];
-  for (const [name, pkg] of Object.entries(packages)) {
-    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return `packages.${name} must be an object`;
-    if (pkg.link === true || pkg.resolved === undefined) continue;
-    let url;
-    try { url = new URL(pkg.resolved); } catch { return `packages.${name}.resolved must be an HTTPS URL on an allowed host`; }
-    if (url.protocol !== 'https:' || !hosts.includes(url.host)) return `packages.${name}.resolved must be HTTPS on review.lockfile_registries`;
-    if (typeof pkg.integrity !== 'string' || !pkg.integrity.trim()) return `packages.${name} has no integrity`;
+  /** @param {any} entries @param {string} prefix @param {boolean} recursive @returns {string | null} */
+  function checkEntries(entries, prefix, recursive) {
+    if (!entries || typeof entries !== 'object' || Array.isArray(entries)) return `${prefix} must be an object`;
+    for (const [name, pkg] of Object.entries(entries)) {
+      const entry = `${prefix}.${name}`;
+      if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return `${entry} must be an object`;
+      if (pkg.link !== true && pkg.resolved !== undefined) {
+        let url;
+        try { url = new URL(pkg.resolved); } catch { return `${entry}.resolved must be an HTTPS URL on an allowed host`; }
+        if (url.protocol !== 'https:' || !hosts.includes(url.host)) return `${entry}.resolved must be HTTPS on review.lockfile_registries`;
+        if (typeof pkg.integrity !== 'string' || !pkg.integrity.trim()) return `${entry} has no integrity`;
+      }
+      if (recursive && pkg.dependencies !== undefined) {
+        const problem = checkEntries(pkg.dependencies, `${entry}.dependencies`, true);
+        if (problem) return problem;
+      }
+    }
+    return null;
   }
-  return null;
+  const problem = checkEntries(lock.packages ?? {}, 'packages', false);
+  if (problem) return problem;
+  return lock.dependencies === undefined ? null : checkEntries(lock.dependencies, 'dependencies', true);
 }
 
 /**

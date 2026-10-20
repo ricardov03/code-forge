@@ -102,6 +102,56 @@ test('npm excluded locks reject insecure URLs, foreign hosts, absent integrity a
   assert.equal((await other.close()).code, 0);
 });
 
+test('v1 npm locks refuse nested dependencies resolved on a foreign host', async () => {
+  for (const file of ['package-lock.json', 'npm-shrinkwrap.json']) {
+    for (const packages of [undefined, {}]) {
+      const f = await fixture({}, `a.mjs ${file}`, file);
+      writeFile(f.repo, file, JSON.stringify({ lockfileVersion: 1, packages, dependencies: {
+        local: { dependencies: { parent: { dependencies: {
+          nested: { resolved: 'https://evil.test/nested.tgz', integrity: 'sha512-example' },
+        } } } },
+      } }));
+      const refused = await f.close();
+      assert.equal(refused.code, 1, `${file}: ${refused.out}`);
+      assert.match(refused.err, new RegExp(`lockfile ${file}:.*review.lockfile_registries`));
+      assert.equal((await f.rows()).filter((r) => r.event === 'gate.review_excluded').length, 0);
+    }
+  }
+});
+
+test('v1 npm locks refuse resolved dependencies without integrity at any depth', async () => {
+  for (const file of ['package-lock.json', 'npm-shrinkwrap.json']) {
+    for (const nested of [false, true]) {
+      const dependency = { resolved: 'https://registry.npmjs.org/example/-/example-1.tgz' };
+      const f = await fixture({}, `a.mjs ${file}`, file);
+      writeFile(f.repo, file, JSON.stringify({ lockfileVersion: 1, dependencies: {
+        example: nested ? { dependencies: { nested: dependency } } : dependency,
+      } }));
+      const refused = await f.close();
+      assert.equal(refused.code, 1, `${file}: ${refused.out}`);
+      assert.match(refused.err, new RegExp(`lockfile ${file}:.*has no integrity`));
+      assert.equal((await f.rows()).filter((r) => r.event === 'gate.review_excluded').length, 0);
+    }
+  }
+});
+
+test('clean v1 npm locks close with nested, local and bundled dependencies and configured registries', async () => {
+  for (const file of ['package-lock.json', 'npm-shrinkwrap.json']) {
+    for (const host of ['registry.npmjs.org', 'mirror.example.test']) {
+      const f = await fixture({ lockfile_registries: [host] }, `a.mjs ${file}`, file);
+      writeFile(f.repo, file, JSON.stringify({ lockfileVersion: 1, dependencies: {
+        example: { resolved: `https://${host}/example.tgz`, integrity: 'sha512-example', dependencies: {
+          local: { dependencies: { nested: { resolved: `https://${host}/nested.tgz`, integrity: 'sha512-nested' } } },
+          bundled: { bundled: true },
+        } },
+      } }));
+      const closed = await f.close();
+      assert.equal(closed.code, 0, closed.err);
+      assert.equal((await f.rows()).filter((r) => r.event === 'gate.review_excluded').length, 1);
+    }
+  }
+});
+
 test('watch, enqueue, worker and review-file skip excluded files; wait-block lists excluded and finishes with the reviewed source', async () => {
   const f = await fixture();
   await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow });
