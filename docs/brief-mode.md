@@ -4,6 +4,8 @@ A brief-mode run codes one small task, or a short list of tasks, from briefs alo
 plan document, no `plan check` and no plan approval. Each block is still opened, coded, measured
 and closed by the same gate as in a plan run.
 
+For design first, open code blocks with `--after <design-id>`: the design must be closed, including its owner's `block human-pass` when it has a `human_check` clause.
+
 This page walks one brief-mode run from start to end, in a repository where an outside reviewer
 (a person or a CI review bot) reviews every pull request. Every command and every output on this
 page comes from the CLI as built. When a verb's usage line disagrees with this page, the verb is

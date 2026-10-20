@@ -16,6 +16,19 @@ The coder then forecasts **cases** (tests) and **lines**. Compute the floor your
 
 Acceptance (`block open --acceptance`) is a YAML/JSON list. Code clauses need `tests: [<test ids>]`. A device check instead uses `- clause: "Check the layout on a phone"` with `kind: human_check` on the next indented line and no `tests` key (even an empty list is refused). These texts are recorded as the block's `human_checks` and skipped by test-coverage checks; every other clause still needs tests.
 
+For design first, put `{clause: "Owner approves the design", kind: human_check}` in `design.acc.yml`, then follow this order:
+
+```sh
+code-forge block open DESIGN --run <r> --level L1 --kind docs --owned docs/design.md --acceptance design.acc.yml
+# Finish the design and pass its code gates, then:
+code-forge block close DESIGN --run <r>
+# The owner approves the design in their terminal:
+code-forge block human-pass DESIGN --run <r> --note "Design approved"
+code-forge block open CODE --run <r> --level L2 --owned src/feature.mjs --acceptance code.acc.yml --after DESIGN
+```
+
+`--after <id> [<id> ...]` collects ids like `--owned` and removes duplicates. Every dependency must be `closed` in this run, checked under the same run lock as the other open checks. Open refuses with `after-not-done`, naming every blocker and its status (`open`, `awaiting_human_check`, `stopped`, or `not in run`); no rows or worktree are created. With `--json`, the refusal also prints `{block, event: "refused", code: "after-not-done", message}` (self-dependency uses `bad-after`). Only a supplied flag adds `after: [ids]` to the entry and `dispatch` row. Supply it again on each later attempt that must wait for the design; an attempt without it does not recheck dependencies.
+
 Run a Codex coder with `codex exec --json` in its worktree, save stdout to a log, and pass that
 log to `block close --transcript <file>`. A Codex JSON log (every non-empty line is an object
 with a string `type`, first event `thread.started`) is checked by its commands: command items'

@@ -20,8 +20,9 @@
  * close (`closed`): status, reason, close_event (the close result's own event word, as the text
  * prints it in parentheses, else null), and `worktree {removed, path, branch}` with
  * `--remove-worktree`). On
- * failure the exit code and stderr are unchanged and stdout stays empty, except a close the gate
- * refused (`closeBlock` said no), which also prints `{"block", "ok": false, "reason"}`. A usage
+ * failure the exit code and stderr are unchanged and stdout stays empty, except an open refused
+ * for `after-not-done` or `bad-after`, which prints `{"block", "event": "refused", "code", "message"}`,
+ * or a close the gate refused (`closeBlock` said no), which also prints `{"block", "ok": false, "reason"}`. A usage
  * error, a thrown refusal, a cancelled `--no-require-reviews`, `block waive` or `block reopen` (or
  * one with no terminal, B80) and a failed `--remove-worktree`
  * print nothing on stdout. Without `--json` every output is byte-identical to before.

@@ -7,6 +7,19 @@ The human can correct an open block's snapshotted clauses with `code-forge block
 
 UI acceptance may include `kind: human_check` clauses without tests, recorded as `human_checks`. After all code gates pass, `block close` leaves such a block `awaiting_human_check`, prints every check and the next command, and delays its done signal. Status and report list the waiting ids, and `run end` refuses until the human checks the device and types `code-forge block human-pass <id> --run <r> --note "<device check note>" [--proof <existing-path>]` in a terminal, or stops the block. The note is required; `--proof` is optional, and when it is given the path must exist. When omitted, the row records `proof: null`. Human pass records a signed human row and closes it; there is no `--yes`, and an active autopilot grant refuses the verb.
 
+For design first, give the design block an acceptance clause such as `{clause: "Owner approves the design", kind: human_check}`. Open it, finish its work and pass its code gates, then close it. The owner approves in their terminal before code blocks open:
+
+```sh
+code-forge block open DESIGN --run <r> --level L1 --kind docs --owned docs/design.md --acceptance design.acc.yml
+# Finish the design and pass its code gates, then:
+code-forge block close DESIGN --run <r>
+# The owner checks the design and runs this in their terminal:
+code-forge block human-pass DESIGN --run <r> --note "Design approved"
+code-forge block open CODE --run <r> --level L2 --owned src/feature.mjs --acceptance code.acc.yml --after DESIGN
+```
+
+`--after <id> [<id> ...]` requires every named block in the same run to be `closed`. Under the run lock, open refuses with `after-not-done`, naming every blocker and its status (`open`, `awaiting_human_check`, `stopped`, or `not in run`), and creates no rows or worktree. With `--json`, it also prints `{block, event: "refused", code: "after-not-done", message}`. Naming the new block itself refuses with `bad-after`; duplicate ids are removed. The entry and `dispatch` row record `after: [ids]` only when supplied. A later attempt checks dependencies again only if that call supplies `--after`.
+
 Small changes can use `block open <id> --kind light`. A light block may change at most `light.max_files` owned files (default 5) and `light.max_lines` added plus removed lines (default 300). Its reviews go in one batch, and its gate runs only the block tests (`{test_files}` in the test command). If close refuses with `light-limits`, stop the attempt and open the same id again with `--kind code --attempt <n+1>`.
 
 Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
