@@ -1,8 +1,9 @@
 /**
  * `code-forge report [--slug <slug>] [--json] [--export <dir>]` (plan §6.2, R4). Terminal output
  * only, plus an optional `--export <dir>` that writes the same sections as JSON files. The
- * terminal output ends with the spend per run (B33) and the mode of each run (B59: brief or plan);
- * both are text only, never in `--json` or `--export`. The 14th section, `outside_review` (B66), is
+ * terminal output includes spend per run (B33) and the mode of each run (B59: brief or plan)
+ * before the final specialist_outcomes section. Spend and mode are text only, never in
+ * `--json` or `--export`. The 14th section, `outside_review` (B66), is
  * printed as text lines under its header (`outside review: none`, or one line per PR).
  */
 
@@ -76,6 +77,7 @@ export async function runReport(args, deps = {}) {
     }
 
     for (const [name, data] of Object.entries(sections)) {
+      if (name === 'specialist_outcomes') continue;
       let body;
       if (name === 'cost_per_block') body = blockTimeLines(data);
       else if (name === 'run_time') body = runTimeLines(data);
@@ -85,11 +87,21 @@ export async function runReport(args, deps = {}) {
     }
     out(spendLines(buildSpend(rows)));
     out(modeLines(buildRunModes(rows)));
+    out(`== specialist_outcomes ==\n${specialistOutcomeLines(sections.specialist_outcomes)}`);
     return 0;
   } catch (err_) {
     err(`report: ${err_?.message ?? String(err_)}\n`);
     return 1;
   }
+}
+
+/** @param {{outcomes: any[], total: {count: number, cost_usd: number, minutes: number}}} data */
+function specialistOutcomeLines({ outcomes, total }) {
+  const cost = (/** @type {number | null} */ usd) => usd === null ? '-' : `$${usd.toFixed(4)}`;
+  const lines = ['skill | step | status | cost_usd | minutes'];
+  for (const r of outcomes) lines.push(`${r.skill} | ${r.step ?? '-'} | ${r.status} | ${cost(r.cost_usd)} | ${r.minutes ?? '-'}`);
+  lines.push(`total (${total.count} outcomes): ${cost(total.cost_usd)} | ${total.minutes} minutes`);
+  return `${lines.join('\n')}\n`;
 }
 
 /** @param {number | null} ms @returns {string} */

@@ -67,3 +67,25 @@ exists with the saved SHA-256 hash, and no check is `fail`. A `warn` check is al
 results exit 1 and print one line per problem to stderr. With `--json`, stdout contains
 `{"ok":true,"problems":[]}` or `{"ok":false,"problems":["..."]}`.
 Unknown subcommands or missing arguments print usage to stderr and exit 2.
+
+Run `code-forge outcome record` to check the result and save its cost and time in the project ledger:
+
+```sh
+code-forge outcome record outcome.json --root .
+code-forge outcome record outcome.json --root . --step design --json
+```
+
+Recording runs the same check first. Problems exit 1 and write nothing. A passing outcome adds
+one signed `outcome.recorded` row with `skill`, `step`, `status`, the SHA-256 of the outcome file
+bytes, `cost_usd`, and `minutes`. Missing cost or minutes are stored as null. The command uses
+the project slug from its config (or directory name) and the existing signing key of its latest
+run, so start a project run before recording; no new key is created.
+
+`--step` sets the step id. Otherwise a matching outcome path in `code-forge.pipeline.yml` supplies
+the id; without a match, the step is null. Recording the same bytes for the same step again
+prints `already recorded` and adds no row. `--json` returns `ok`, `problems`, `already_recorded`,
+and the signed `row` when one was added. Check failures use the same JSON as `outcome check`.
+
+`code-forge report --slug <slug>` ends with `specialist_outcomes`: one entry per recorded outcome
+and totals for count, cost, and minutes. The same section is included with `--json` and `--export`.
+Calibration rows named `outcome` are separate and do not enter this section.

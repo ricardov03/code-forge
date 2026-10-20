@@ -245,8 +245,8 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
     assert.equal(line[0].startsWith(`cost per completed block: ${BLOCK} $${usd} (estimated from 4 priced session row(s); facts $`), true, line[0]);
   });
 
-  // B147 appends run_time after the original 15 report sections.
-  test('report --slug prints its 16 sections, in order', () => {
+  // B154 appends specialist_outcomes after run_time.
+  test('report --slug prints its 17 sections, in order', () => {
     const headers = res.stdout.split('\n').filter((l) => /^== [a-z0-9_]+ ==$/.test(l)).map((l) => l.slice(3, -3));
     assert.deepEqual(headers, [
       'cost_per_block',
@@ -265,6 +265,7 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
       'outside_review',
       'agent_waivers',
       'run_time',
+      'specialist_outcomes',
     ]);
   });
 

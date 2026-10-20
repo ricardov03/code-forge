@@ -1,5 +1,5 @@
 /**
- * `report --export <dir>` — writes one JSON file per report section (plan §6.2; 15 sections since B124b).
+ * `report --export <dir>` — writes one JSON file per report section (plan §6.2; 17 sections since B154).
  */
 
 import { mkdir, writeFile } from 'node:fs/promises';

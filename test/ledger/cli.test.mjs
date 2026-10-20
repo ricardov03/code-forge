@@ -207,9 +207,9 @@ test('ledger outcome --scan-git outside a git repo returns a clean error (exit 1
   });
 });
 
-test('report --json prints exactly the SECTION_NAMES keys (16 of them), with run_time appended', async () => {
+test('report --json prints exactly the SECTION_NAMES keys (17 of them), with specialist_outcomes appended', async () => {
   await withTempHome(async () => {
-    assert.equal(SECTION_NAMES.length, 16, 'SECTION_NAMES must append run_time to the original 15');
+    assert.equal(SECTION_NAMES.length, 17, 'SECTION_NAMES must append specialist_outcomes to the original 16');
     await appendRow({ event: 'dispatch', block: 'b1', level: 'L1', lane: 'L0' }, { slug: 'report-proj' });
     const stdout = captureStream();
     const code = await runReport(['--slug', 'report-proj', '--json'], { stdout });
@@ -281,7 +281,8 @@ test('B150 clause 1: spend prints one outside-runs line after real runs and befo
     const stdout = captureStream(), stderr = captureStream();
     assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
     assert.equal(stderr.text, '');
-    assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0],
+    assert.equal(stdout.text.match(/^== /gm)?.length, 17);
+    assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0].split('== specialist_outcomes ==')[0],
       '  run z-run: $2.0000 · 1 session(s)\n' +
       '  run a-run: $0.5000 · 1 session(s)\n' +
       '  outside runs: $1.0836 · 2 session(s)\n' +
@@ -307,7 +308,8 @@ test('B150 clause 1 boundary: outside-only unknown spend keeps the suffix; no ou
       const stdout = captureStream(), stderr = captureStream();
       assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
       assert.equal(stderr.text, '');
-      assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0], expected);
+      assert.equal(stdout.text.match(/^== /gm)?.length, 17);
+      assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0].split('== specialist_outcomes ==')[0], expected);
       assert.equal(stdout.text.split('run (none)').length - 1, 0);
     }
   });

@@ -49,6 +49,7 @@ const SHARED_DIRS = new Set(['cli']);
 const EXEMPT_FILES = new Map([
   ['src/cli/block.mjs', { dirs: ['review', 'pipeline', 'outcome'], reason: 'B12b (commit 4947f30) wired its block-gate review check and `block waive` into the `block` verb; B12b owns src/review/gate-check.mjs. B153 wires --after-outcome to the B152 pipeline and B151 outcome checks before state open.' }],
   ['src/cli/gates.mjs', { dirs: ['proof'], reason: 'B12b (commit 4947f30) wrapped the gate run in the proof lock (runGatesGuarded); B12b reaches src/proof/ through B12a -> B10b -> B10a' }],
+  ['src/cli/outcome.mjs', { dirs: ['pipeline'], reason: 'B151 verb; B154 (commit 535163c) made `outcome record` read the step id from code-forge.pipeline.yml; B152 owns src/pipeline/' }],
   ['src/cli/proof.mjs', { dirs: ['review'], reason: 'B12b (commit 4947f30) made the `proof` verb read the block file set from src/review/gate-check.mjs, which B12b owns' }],
   ['src/cli/run.mjs', { dirs: ['worker'], reason: 'B8 baseline verb; B11 (commit 6b3a68c) wired worker launch/re-pin into `run start`; B11 owns src/worker/**' }],
   ['src/cli/validate.mjs', { dirs: ['pipeline'], reason: 'Baseline verb; B152 (commit 47fb316) wired pipeline validation into `validate`; B152 owns src/pipeline/pipeline.mjs and reaches src/outcome/ through B151' }],
@@ -227,7 +228,7 @@ async function checkImportsOrder({ root, blocksJson, baselineIds, baselineDirs, 
   return violations;
 }
 
-test('every src/<dir>/ import (src/cli/ checked file by file, seven exact file/dir exemptions) resolves to util, outside src/, or a directory reachable through depends_on', async () => {
+test('every src/<dir>/ import (src/cli/ checked file by file, eight exact file/dir exemptions) resolves to util, outside src/, or a directory reachable through depends_on', async () => {
   const blocksJson = JSON.parse(await readFile(BLOCKS_JSON, 'utf8'));
   const baselineIds = new Set(blocksJson.baseline_ids);
   assert.ok(baselineIds.size >= 9, `expected >= 9 baseline ids, found ${baselineIds.size}`);
@@ -235,12 +236,13 @@ test('every src/<dir>/ import (src/cli/ checked file by file, seven exact file/d
   // B5 gates; B6 ledger; B7 install; B8 state) — none of them import each other's directories
   // outside this set (verified below), so this is the whole foundation, not a guess.
   const baselineDirs = new Set(['util', 'config', 'keys', 'decide', 'engines', 'gates', 'ledger', 'install', 'state']);
-  // Exactly these five files carry seven file/directory exemptions, each with a reason.
+  // Exactly these six files carry eight file/directory exemptions, each with a reason.
   assert.deepEqual(
     [...EXEMPT_FILES].map(([file, { dirs, reason }]) => [file, dirs, reason.length > 0]),
     [
       ['src/cli/block.mjs', ['review', 'pipeline', 'outcome'], true],
       ['src/cli/gates.mjs', ['proof'], true],
+      ['src/cli/outcome.mjs', ['pipeline'], true],
       ['src/cli/proof.mjs', ['review'], true],
       ['src/cli/run.mjs', ['worker'], true],
       ['src/cli/validate.mjs', ['pipeline'], true],

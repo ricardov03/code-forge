@@ -17,6 +17,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Specialist outcome file: `code-forge outcome seal|check` and `schema/outcome.schema.json`; a caller uses a specialist result only when it is approved and every file matches its sealed sha256 (B151)
 - Specialist pipelines: validate `code-forge.pipeline.yml` and use `code-forge pipeline status|next` to see step states and ready work (B152)
 - Specialist pipelines: `block open --after-outcome <step ids>` waits until each named step's outcome is approved and passes `outcome check`, and records the accepted outcome hashes; `block close --report` no longer asks for a review ticket for a `review.exclude` file (B153)
+- `code-forge outcome record` writes a signed `outcome.recorded` row for an approved specialist outcome; `report` shows them in a `specialist_outcomes` section (B154)
 
 ## [0.15.1] — 2026-10-19
 

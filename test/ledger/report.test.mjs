@@ -286,7 +286,7 @@ test('B66 (2): an outside_review row whose rounds or findings are not 0-or-more 
   assert.deepEqual(sections.outside_review, [{ pr: 4, rounds: 1, findings: 1, link: null, blocks: ['B1'], code_forge_usd: 0, unknown_usd_sessions: 0 }]);
 });
 
-test('B147: SECTION_NAMES appends run_time, preserving the original 15 in order', () => {
+test('B154: SECTION_NAMES appends specialist_outcomes, preserving the original 16 in order', () => {
   assert.deepEqual(
     [...SECTION_NAMES],
     [
@@ -306,6 +306,7 @@ test('B147: SECTION_NAMES appends run_time, preserving the original 15 in order'
       'outside_review',
       'agent_waivers',
       'run_time',
+      'specialist_outcomes',
     ],
   );
 });
@@ -348,8 +349,8 @@ test('B66 (3): report --json carries outside_review; --export writes outside_rev
   assert.deepEqual(parsed.outside_review, EXPECTED_OUTSIDE);
 
   const exported = await reportCli('export', outsideReviewLedger(), (slug, dir) => ['--slug', slug, '--export', path.join(dir, 'out')]);
-  assert.deepEqual([exported.code, exported.stdout], [0, `exported 16 section file(s) to ${path.join(exported.dir, 'out')}\n`], exported.stderr);
-  assert.equal((await readdir(path.join(exported.dir, 'out'))).length, 16);
+  assert.deepEqual([exported.code, exported.stdout], [0, `exported 17 section file(s) to ${path.join(exported.dir, 'out')}\n`], exported.stderr);
+  assert.equal((await readdir(path.join(exported.dir, 'out'))).length, 17);
   assert.deepEqual(JSON.parse(await readFile(path.join(exported.dir, 'out', 'outside_review.json'), 'utf8')), EXPECTED_OUTSIDE);
 
   const none = [{ event: 'run.start', run: 'r1' }];
@@ -381,7 +382,7 @@ test('B66 (2): the text report prints outside_review after run_stop_counts — o
       'PR #7 · 1 outside round · 0 findings · code-forge $2.10 (+2 unknown) · B2, B3\n' +
       'PR #12 · 3 outside rounds · 7 findings · code-forge $3.75 (+1 unknown) · B1, B2\n',
   );
-  assert.equal(res.stdout.match(/^== /gm)?.length, 16);
+  assert.equal(res.stdout.match(/^== /gm)?.length, 17);
 
   const none = await reportCli('text-none', [{ event: 'run.start', run: 'r1' }], (slug) => ['--slug', slug]);
   assert.equal(none.code, 0, none.stderr);
