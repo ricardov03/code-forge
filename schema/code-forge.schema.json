@@ -262,7 +262,7 @@
             "additionalProperties": false,
             "required": ["name", "argv"],
             "properties": {
-              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$", "not": { "enum": ["test", "lint", "types", "format"] } },
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$", "not": { "enum": ["test", "lint", "types", "format"] }, "description": "Matches ^[a-z][a-z0-9_-]{0,31}$, unique in the list, and not test, lint, types or format." },
               "argv": {
                 "type": "array", "minItems": 1,
                 "items": { "type": "string", "minLength": 1 },

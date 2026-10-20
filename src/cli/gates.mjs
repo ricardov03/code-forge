@@ -38,6 +38,7 @@ import path from 'node:path';
 import { writeSafe, redactJSON } from '../util/redact.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
+import { customGateMessages } from '../config/validate.mjs';
 import { detectGates } from '../gates/detect.mjs';
 import { printableGates, scopeFields, testScope, thresholdOf } from '../gates/expand.mjs';
 import { runGates } from '../gates/run.mjs';
@@ -62,17 +63,20 @@ const GATE_ENV_RULE = 'code-forge never prints or records an env value. Gate env
  * A missing/unparseable config file is not an error here: detection alone is a valid answer.
  * @param {string} cwd
  * @param {Record<string, any> | null} configured - the config's `gates` section ({@link configuredGates}).
- * @returns {import('../gates/detect.mjs').DetectedGates}
+ * @returns {import('../gates/detect.mjs').DetectedGates & {custom?: import('../gates/run.mjs').CustomGate[]}}
  */
 function resolveGates(cwd, configured) {
   const detected = detectGates(cwd);
   if (!configured) return detected;
+  const errors = customGateMessages(configured.custom);
+  if (errors.length > 0) throw new TypeError(errors.join('; '));
   return {
     stack: detected.stack,
     test: 'test' in configured ? configured.test : detected.test,
     lint: 'lint' in configured ? configured.lint : detected.lint,
     types: 'types' in configured ? configured.types : detected.types,
     format: 'format' in configured ? configured.format : detected.format,
+    ...(configured.custom !== undefined ? { custom: configured.custom } : {}),
   };
 }
 
@@ -218,7 +222,7 @@ export async function runGatesVerb(args, deps = {}) {
       if (!cwdArg.ok) return 2;
       const gates = resolveGates(cwdArg.value, await configuredGates(cwdArg.value));
       // B60: a gate given with env is printed with its variable NAMES (`env_keys`), never the values
-      out(printableGates(gates));
+      out(printableGates({ ...gates, ...(gates.custom ? { custom: gates.custom.map((gate) => printableGates({ gate }).gate) } : {}) }));
       return 0;
     }
 
@@ -325,6 +329,7 @@ export async function runGatesVerb(args, deps = {}) {
         for (const result of results) {
           if (!result.skipped && !result.ok) {
             await writeGateRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result),
+              ...(result.custom ? { custom: true } : {}),
               ...(result.reason === 'flaky-test' ? { reason: 'flaky-test' } : {}),
               ...(result.repeats ? { repeats: result.repeats } : {}) });
           }
@@ -332,8 +337,13 @@ export async function runGatesVerb(args, deps = {}) {
         // B60: one scope per run (every `{test_files}` gate shares it), named on gate.done too;
         // without --run/--block that is `scope: full, reason: no_tests`
         const scoped = results.find((r) => r.scope !== undefined);
+        const custom = results.filter((r) => r.custom);
         await writeGateRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk,
           ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
+          ...(custom.length ? {
+            custom: custom.map((r) => ({ name: r.gate, ok: r.ok, evidence_count: r.evidence.length, ...(r.missing ? { missing: r.missing } : {}) })),
+            ...(runFlag.value !== undefined ? { evidence: Object.fromEntries(custom.map((r) => [r.gate, r.evidence])) } : {}),
+          } : {}),
           ...(ran.files ? { files: ran.files } : {}), ...(repeats ? { repeats } : {}) });
       }
       out({ stack: gates.stack, ...inTree, results, allOk, ...(repeats ? { repeats } : {}) });

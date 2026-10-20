@@ -1,13 +1,13 @@
 import './support.mjs';
 import assert from 'node:assert/strict';
-import test from 'node:test';
+import test, { mock } from 'node:test';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { validateConfig } from '../../src/config/validate.mjs';
 import { runGates } from '../../src/gates/run.mjs';
 import { redactJSON } from '../../src/util/redact.mjs';
-import { withTempDir } from './support.mjs';
+import { captureStream, withTempDir } from './support.mjs';
 
 const command = [process.execPath, '-e', 'void 0'];
 const entry = { name: 'build', argv: command };
@@ -125,5 +125,78 @@ test('custom evidence refuses outside paths before running, skips symlinks and c
         await assert.rejects(runGates({ test: [process.execPath, '-e', "throw new Error('must not run')"], custom: [{ name: 'shots', argv: command, evidence: [pattern] }] }, { cwd }), /gates\.custom\[0\].*shots.*relative/);
       }
     });
+  });
+});
+
+// Capture row arguments rather than reading state or ledger files. The guarded runner double
+// retains the actual gate execution and supplies only the unrelated proof-lock context.
+const rows = [];
+let record;
+mock.module('../../src/ledger/write.mjs', { namedExports: { ...await import('../../src/ledger/write.mjs'), appendRow: async (row) => { rows.push(row); } } });
+mock.module('../../src/state/run.mjs', { namedExports: { ...await import('../../src/state/run.mjs'), readRun: async () => record } });
+mock.module('../../src/proof/lock.mjs', { namedExports: { ...await import('../../src/proof/lock.mjs'), runGatesGuarded: async ({ gates, cwd, timeoutMs }) => ({ result: 'ok', value: await runGates(gates, { cwd, timeoutMs }) }) } });
+const { runGatesVerb } = await import('../../src/cli/gates.mjs');
+
+async function cli(args) {
+  const stdout = captureStream(), stderr = captureStream();
+  const code = await runGatesVerb(args, { stdout, stderr });
+  assert.equal(stderr.text, '', 'CLI completes without diagnostics');
+  return { code, output: JSON.parse(stdout.text), text: stdout.text };
+}
+
+async function configure(cwd, gates) {
+  await writeFile(path.join(cwd, '.code-forge.yml'), JSON.stringify({ ...config(undefined), gates }));
+}
+
+test('custom CLI detect and run list named gates; red and done rows include summaries and block evidence', async () => {
+  await withTempDir(async (cwd) => {
+    const custom = [
+      { name: 'build', argv: [process.execPath, '-e', "require('node:fs').writeFileSync('proof.txt', 'web'); process.exit(2)"], evidence: ['proof.txt', 'absent.png'], env: { WEB_TOKEN: 'custom-private-env' } },
+      { name: 'links', argv: command },
+    ];
+    await configure(cwd, { custom });
+    const detected = await cli(['detect', '--cwd', cwd]);
+    assert.equal(detected.code, 0);
+    assert.deepEqual(detected.output.custom, [{ name: 'build', argv: custom[0].argv, evidence: custom[0].evidence, env_keys: ['WEB_TOKEN'] }, custom[1]], 'detect lists both commands and only env names');
+    assert.equal(detected.text.includes('custom-private-env'), false);
+    const evidence = [{ path: 'proof.txt', bytes: 3, sha256: createHash('sha256').update('web').digest('hex') }];
+    for (const block of [false, true]) {
+      rows.length = 0;
+      record = { workspace: cwd, blocks: { WEB: { owned_files: [] } } };
+      const ran = await cli(['run', '--cwd', cwd, '--slug', 'fake-custom-cli', ...(block ? ['--run', 'fake-run', '--block', 'WEB', '--changed'] : [])]);
+      assert.equal(ran.code, 1);
+      assert.equal(ran.output.allOk, false);
+      assert.deepEqual(ran.output.results.slice(4).map((result) => [result.gate, result.custom, result.ok]), [['build', true, false], ['links', true, true]]);
+      assert.deepEqual(ran.output.results[4].evidence, evidence);
+      const owner = block ? { run: 'fake-run', block: 'WEB' } : {};
+      assert.deepEqual(rows, [
+        { ...owner, event: 'gate.red', gate: 'build', custom: true, code: 2 },
+        { ...owner, event: 'gate.done', stack: 'unknown', all_ok: false,
+          custom: [{ name: 'build', ok: false, evidence_count: 1, missing: ['absent.png'] }, { name: 'links', ok: true, evidence_count: 0 }],
+          ...(block ? { evidence: { build: evidence, links: [] } } : {}),
+        },
+      ], 'exactly one red row and one done row; evidence map only with run/block');
+    }
+  });
+});
+
+test('custom CLI boundary keeps legacy row shapes and still runs custom gates in a light block', async () => {
+  await withTempDir(async (cwd) => {
+    rows.length = 0;
+    record = { workspace: cwd, blocks: { WEB: { kind: 'light', test_files: ['a.test.mjs'], owned_files: [] } } };
+    await configure(cwd, { test: [...command, '{test_files}'], custom: [{ name: 'links', argv: command, evidence: ['absent.json'] }] });
+    const light = await cli(['run', '--cwd', cwd, '--run', 'fake-run', '--block', 'WEB', '--changed']);
+    assert.equal(light.output.results.length, 5, 'a light block still runs its custom gate');
+    assert.deepEqual(light.output.results[4].missing, ['absent.json']);
+    assert.equal(light.output.allOk, true);
+    for (const custom of [undefined, []]) {
+      rows.length = 0;
+      await configure(cwd, { test: [process.execPath, '-e', 'process.exit(1)'], ...(custom ? { custom } : {}) });
+      const legacy = await cli(['run', '--cwd', cwd, '--slug', 'fake-legacy-cli']);
+      assert.equal(legacy.code, 1);
+      assert.equal(legacy.output.results.length, 4);
+      assert.equal(Object.hasOwn(legacy.output, 'custom'), false);
+      assert.deepEqual(rows, [{ event: 'gate.red', gate: 'test', code: 1 }, { event: 'gate.done', stack: 'unknown', all_ok: false }], 'no new row keys without custom gates');
+    }
   });
 });
