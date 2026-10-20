@@ -13,6 +13,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Design before code: `block open --after <ids>` refuses until every named block is closed; a block that waits for a human check is not done (B148)
 - Report: spend with no run id is shown as `outside runs`, not as a "(none)" run; stopped blocks show `stopped` and the time to the stop (B149).
 - Report: spend per run and cost per block print `outside runs` instead of a "(none)" run (B150).
+- Specialist outcome file: `code-forge outcome seal|check` and `schema/outcome.schema.json`; a caller uses a specialist result only when it is approved and every file matches its sealed sha256 (B151)
 
 ## [0.15.1] — 2026-10-19
 
