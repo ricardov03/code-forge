@@ -129,7 +129,9 @@ function runTimeLines({ runs, outside_runs, total }) {
 export function spendLines({ runs, total }) {
   const unknown = (/** @type {number} */ n) => (n > 0 ? ` · ${n} with unknown price (not counted)` : '');
   const lines = ['spend per run (estimated USD, open blocks included):'];
-  for (const r of runs) lines.push(`  run ${r.run ?? '(none)'}: $${r.usd.toFixed(4)} · ${r.sessions} session(s)${unknown(r.unknown)}`);
+  for (const r of runs.filter((r) => r.run !== null)) lines.push(`  run ${r.run}: $${r.usd.toFixed(4)} · ${r.sessions} session(s)${unknown(r.unknown)}`);
+  const outside = runs.find((r) => r.run === null);
+  if (outside) lines.push(`  outside runs: $${outside.usd.toFixed(4)} · ${outside.sessions} session(s)${unknown(outside.unknown)}`);
   lines.push(`  total: $${total.usd.toFixed(4)} · ${total.sessions} session(s)${unknown(total.unknown)}`);
   return `${lines.join('\n')}\n`;
 }

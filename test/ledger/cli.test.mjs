@@ -269,6 +269,50 @@ test('B149 clause 3 boundary: untimed stopped blocks and outside-only rows print
   });
 });
 
+test('B150 clause 1: spend prints one outside-runs line after real runs and before the total', async () => {
+  await withTempHome(async () => {
+    const slug = 'report-outside-spend';
+    for (const row of [
+      { event: 'session', usd: 1.0836 },
+      { event: 'session', run: 'z-run', usd: 2 },
+      { event: 'session', run: null, usd: 0 },
+      { event: 'session', run: 'a-run', usd: 0.5 },
+    ]) await appendRow(row, { slug });
+    const stdout = captureStream(), stderr = captureStream();
+    assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
+    assert.equal(stderr.text, '');
+    assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0],
+      '  run z-run: $2.0000 · 1 session(s)\n' +
+      '  run a-run: $0.5000 · 1 session(s)\n' +
+      '  outside runs: $1.0836 · 2 session(s)\n' +
+      '  total: $3.5836 · 4 session(s)\n');
+    assert.equal(stdout.text.split('run (none)').length - 1, 0, 'no fake run name anywhere in the report');
+  });
+});
+
+test('B150 clause 1 boundary: outside-only unknown spend keeps the suffix; no outside spend adds no line', async () => {
+  await withTempHome(async () => {
+    const slug = 'report-outside-boundary';
+    await mkdir(ledgerDir(), { recursive: true });
+    const cases = [
+      { rows: [{ event: 'session.background' }, { event: 'session', run: null, usd: null }],
+        expected: '  outside runs: $0.0000 · 2 session(s) · 2 with unknown price (not counted)\n' +
+          '  total: $0.0000 · 2 session(s) · 2 with unknown price (not counted)\n' },
+      { rows: [], expected: '  total: $0.0000 · 0 session(s)\n' },
+      { rows: [{ event: 'session', run: 'r1', usd: 0 }],
+        expected: '  run r1: $0.0000 · 1 session(s)\n  total: $0.0000 · 1 session(s)\n' },
+    ];
+    for (const { rows, expected } of cases) {
+      await writeFile(ledgerPath(slug), rows.map((r) => JSON.stringify(r)).join('\n'));
+      const stdout = captureStream(), stderr = captureStream();
+      assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
+      assert.equal(stderr.text, '');
+      assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0], expected);
+      assert.equal(stdout.text.split('run (none)').length - 1, 0);
+    }
+  });
+});
+
 test('report with no --slug prints usage and exits 2, under a temp HOME', async () => {
   await withTempHome(async () => {
     const stderr = captureStream();
