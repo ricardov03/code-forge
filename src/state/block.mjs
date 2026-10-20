@@ -365,6 +365,8 @@ function refuseConfigOwner(owned, kinds, guarded) {
  * B148: `after` lists dependencies in this run. Under the same run lock, every dependency must
  * be closed (`after-not-done`); self-dependency is `bad-after`. Unique ids are recorded on the
  * entry and dispatch only when supplied, and a later attempt checks only its own supplied list.
+ * B153: `after_outcome` carries the specialist step ids and outcome byte hashes accepted by
+ * the CLI against the run's project root; it is recorded on the entry and dispatch when supplied.
  * B62a: `worktree` (given by `block open` under `proof.isolation: worktree`, `proof/worktree.mjs`;
  * this module never imports it) plans the block's own worktree, or the reuse of the one an earlier
  * entry of the same id recorded (`previous`); its `make()` makes or reuses it. Both are called
@@ -380,6 +382,7 @@ function refuseConfigOwner(owned, kinds, guarded) {
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
  *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date, tests?: string[], after?: string[],
+ *   after_outcome?: {step: string, sha256: string}[],
  *   decision?: {question: 'lane', answer: string, source: 'rules', facts: Record<string, unknown>}, decisionId?: string,
  *   worktree?: (ctx: {baseSha: string, previous: TreeRecord | null}) => Promise<{path: string, make: () => Promise<OpenTree>}>,
  * }} opts
@@ -455,7 +458,8 @@ export async function openBlock(opts) {
       // passed; a tree made here is rolled back below if the rows or the save then fail
       made = planned ? await planned.make() : null;
       const tree = made;
-      const entry = { block: id, base_sha: baseSha, base_branch: baseBranch, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(after !== null ? { after } : {}), ...(tree ? { worktree: tree.worktree } : {}) };
+      const outcomeDependencies = opts.after_outcome === undefined ? {} : { after_outcome: opts.after_outcome };
+      const entry = { block: id, base_sha: baseSha, base_branch: baseBranch, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(after !== null ? { after } : {}), ...outcomeDependencies, ...(tree ? { worktree: tree.worktree } : {}) };
       if (humanChecks.length > 0) Object.assign(entry, { human_checks: humanChecks });
       record.blocks[id] = entry;
       const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
@@ -465,7 +469,7 @@ export async function openBlock(opts) {
         rows: [
           ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
           ...created,
-          { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, base_branch: baseBranch, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}), ...(after !== null ? { after } : {}) },
+          { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, base_branch: baseBranch, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}), ...(after !== null ? { after } : {}), ...outcomeDependencies },
         ],
       };
     });

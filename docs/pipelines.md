@@ -112,6 +112,29 @@ An invalid pipeline prints one problem per line to stderr and exits 1.
 Unknown subcommands or bad flags print usage to stderr and exit 2.
 Without `--root`, the project folder is the current directory.
 
+## Wait for an outcome before opening a block
+
+Use pipeline step IDs with `block open --after-outcome`:
+
+```sh
+code-forge block open SITE --run <r> --level L2 --owned src/site.mjs --acceptance site.acc.yml --after-outcome logo
+```
+
+The pipeline and its outcomes are read from the run's project root, the main checkout where
+`pipeline status --root <project-root>` runs, even when the block uses its own worktree.
+The `logo` outcome must exist, have status `approved`, and pass `outcome check` against that root.
+Until then, open exits 1 with `outcome-not-ready`, naming the step and its first problem.
+A missing or invalid pipeline, or an unknown step ID, exits 1 with `bad-after-outcome`.
+These refusals create no rows or worktree. With `--json`, they print
+`{"block":"SITE","event":"refused","code":"outcome-not-ready","message":"..."}`
+(or code `bad-after-outcome`).
+
+Supply several IDs or repeat the flag to wait for multiple outcomes; duplicate IDs are removed.
+The block entry and signed `dispatch` row record `after_outcome: [{step, sha256}]`, with the
+SHA-256 of each accepted outcome JSON file's exact bytes. Combine `--after <block ids>` with
+`--after-outcome <step ids>` to require both closed blocks and approved specialist outcomes.
+The existing `--after` refusals take priority. Each open attempt checks the flags supplied on that call.
+
 ## Validate
 
 After the config passes, `code-forge validate` also validates the pipeline beside that config.
