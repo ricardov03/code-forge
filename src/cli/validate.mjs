@@ -11,6 +11,7 @@ import { loadConfigFile, DEFAULT_CONFIG_FILENAME } from '../config/load.mjs';
 import { loadSeenInCache } from '../config/refresh.mjs';
 import { maskSecretTokens } from '../config/secret-patterns.mjs';
 import { validateConfig } from '../config/validate.mjs';
+import { loadPipeline } from '../pipeline/pipeline.mjs';
 import * as log from '../util/log.mjs';
 
 /** Provider -> the CLI binary name `engine: subprocess` would spawn for it. */
@@ -100,6 +101,11 @@ export default async function validate(args) {
   }
 
   if (result.valid) {
+    const pipeline = loadPipeline(path.dirname(parsed.file));
+    if (pipeline.exists && !pipeline.ok) {
+      for (const problem of pipeline.problems) log.error(maskSecretTokens(problem));
+      return 1;
+    }
     log.info(`${parsed.file}: valid (${result.warnings.length} warning${result.warnings.length === 1 ? '' : 's'})`);
     return 0;
   }

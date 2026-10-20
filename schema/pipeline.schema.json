@@ -1,0 +1,30 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://code-forge.dev/schema/pipeline.schema.json",
+  "title": "Specialist skill pipeline",
+  "type": "object",
+  "properties": {
+    "root": { "type": "string" },
+    "steps": {
+      "type": "array",
+      "minItems": 1,
+      "items": {
+        "type": "object",
+        "properties": {
+          "id": { "type": "string", "pattern": "^[a-z0-9][a-z0-9-]*$" },
+          "skill": { "type": "string" },
+          "needs": { "type": "array", "items": { "type": "string" }, "default": [] },
+          "outcome": {
+            "type": "string",
+            "pattern": "^(?![\\\\/])(?![A-Za-z]:)(?!.*(?:^|[\\\\/])\\.\\.(?:[\\\\/]|$)).+$"
+          },
+          "approval": { "enum": ["human", "none"] }
+        },
+        "required": ["id", "skill", "outcome", "approval"],
+        "additionalProperties": false
+      }
+    }
+  },
+  "required": ["root", "steps"],
+  "additionalProperties": false
+}
