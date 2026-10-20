@@ -12,6 +12,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Time in the report: `cost_per_block` shows wall time and human wait per block; a new `run_time` section shows each run's wall time, cost and blocks, plus a total (B147b)
 - Design before code: `block open --after <ids>` refuses until every named block is closed; a block that waits for a human check is not done (B148)
 - Report: spend with no run id is shown as `outside runs`, not as a "(none)" run; stopped blocks show `stopped` and the time to the stop (B149).
+- Report: spend per run and cost per block print `outside runs` instead of a "(none)" run (B150).
 
 ## [0.15.1] — 2026-10-19
 
