@@ -1,4 +1,6 @@
 import assert from 'node:assert/strict';
+import { readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { test } from 'node:test';
 import { buildReport, buildSpend } from '../../src/ledger/report.mjs';
 import { runReport } from '../../src/cli/report.mjs';
@@ -7,6 +9,69 @@ import { captureStream, withTempHome } from './helpers.mjs';
 
 const ts = (minutes) => new Date(Date.UTC(2026, 9, 20) + minutes * 60000).toISOString();
 const row = (event, minutes, extra = {}) => ({ event, run: 'r1', ts: ts(minutes), ...extra });
+
+test('B150 clause 2: block text labels null runs outside runs while JSON and export keep run null', async () => {
+  await withTempHome(async (home) => {
+    const slug = 'report-outside-block';
+    for (const r of [
+      row('session', 0, { run: null, block: 'outside', usd: 0.25 }),
+      row('session', 1, { block: 'inside', usd: 2 }),
+    ]) await appendRow(r, { slug });
+    const stdout = captureStream(), stderr = captureStream();
+    assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
+    assert.equal(stderr.text, '');
+    const blocks = stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0];
+    assert.deepEqual(blocks.split('\n').filter((line) => line.includes(' | ')), [
+      'run | block | USD | wall | human wait | status',
+      'outside runs | outside | $0.2500 | - | - | open',
+      'r1 | inside | $2.0000 | - | - | open',
+    ]);
+    assert.equal(blocks.split('(none)').length - 1, 0, 'no fake run column in cost_per_block');
+    const json = captureStream();
+    assert.equal(await runReport(['--slug', slug, '--json'], { stdout: json, stderr }), 0);
+    const sections = JSON.parse(json.text);
+    assert.deepEqual(sections.cost_per_block.map((b) => [b.run, b.block, b.totalUsd]), [
+      [null, 'outside', 0.25], ['r1', 'inside', 2],
+    ]);
+    assert.deepEqual(sections.cost_per_block[0], {
+      run: null, block: 'outside', level: null, lane: null, completed: false,
+      reviewUsd: 0, coderUsd: 0, s1s2Usd: 0, factsUsd: 0, otherUsd: 0.25,
+      proofTimeMs: 0, wallMs: null, humanWaitMs: null, totalUsd: 0.25, unknownUsdSessions: 0,
+    });
+    const exportDir = path.join(home, 'export');
+    assert.equal(await runReport(['--slug', slug, '--export', exportDir], { stdout: captureStream(), stderr }), 0);
+    assert.deepEqual(JSON.parse(await readFile(path.join(exportDir, 'cost_per_block.json'), 'utf8')), sections.cost_per_block);
+    assert.equal(stderr.text, '');
+  });
+});
+
+test('B150 clause 2 boundary: absent run on a reused block stays outside both real runs', async () => {
+  await withTempHome(async () => {
+    const slug = 'report-outside-reused';
+    for (const r of [
+      { event: 'session', block: 'shared', usd: 0 },
+      row('session', 1, { block: 'shared', usd: 1 }),
+      row('session', 2, { run: 'r2', block: 'shared', usd: 2 }),
+    ]) await appendRow(r, { slug });
+    const stdout = captureStream(), stderr = captureStream();
+    assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
+    assert.equal(stderr.text, '');
+    const blocks = stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0];
+    assert.deepEqual(blocks.split('\n').filter((line) => line.includes(' | ')), [
+      'run | block | USD | wall | human wait | status',
+      'outside runs | shared | $0.0000 | - | - | open',
+      'r1 | shared | $1.0000 | - | - | open',
+      'r2 | shared | $2.0000 | - | - | open',
+    ]);
+    assert.equal(blocks.split('(none)').length - 1, 0);
+    const json = captureStream();
+    assert.equal(await runReport(['--slug', slug, '--json'], { stdout: json, stderr }), 0);
+    assert.deepEqual(JSON.parse(json.text).cost_per_block.map((b) => [b.run, b.block, b.totalUsd]), [
+      [null, 'shared', 0], ['r1', 'shared', 1], ['r2', 'shared', 2],
+    ]);
+    assert.equal(stderr.text, '');
+  });
+});
 
 test('B147 clause 1: block times span first dispatch to final completion, including human wait and attempts', () => {
   const rows = [
