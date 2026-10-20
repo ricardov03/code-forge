@@ -81,6 +81,7 @@ import { StateError } from '../state/paths.mjs';
 import { assertRunId } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
+import { reviewExcludeRule } from '../config/validate.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
@@ -394,7 +395,7 @@ export function fixList(result) {
  * B100: read block scope from the workspace mirror, never the private run record. This is a
  * progress summary, not an approval: block close still verifies the authoritative signed rows.
  * @param {string} repoRoot @param {string} cwd @param {string} run @param {string} block
- * @returns {Promise<{entry: Record<string, any>, tree: string}>}
+ * @returns {Promise<{entry: Record<string, any>, tree: string, cfg: Record<string, any> | null}>}
  */
 async function waitBlockScope(repoRoot, cwd, run, block) {
   const top = await repoRootOf(cwd);
@@ -416,7 +417,7 @@ async function waitBlockScope(repoRoot, cwd, run, block) {
       throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
     }
     const tree = (await blockTree(record.workspace, entry))?.top ?? repoRoot;
-    return { entry, tree };
+    return { entry, tree, cfg: configInForce(record) };
   }
   throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
 }
@@ -463,7 +464,10 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
     downPolls = live ? 0 : downPolls + 1;
     const tickets = blockTickets({ repoRoot, run, block, ...where });
     const current = await blockFileSet({ repoRoot: tree, base: entry.base_sha, owned: entry.owned_files, ownedKinds: entry.owned_kinds });
+    const { cfg } = await waitBlockScope(repoRoot, cwd, run, block);
     const files = current.map(({ file }) => {
+      const rule = reviewExcludeRule(cfg, file);
+      if (rule !== null) return { file, ticket: null, status: 'excluded', outcome: null, rule };
       const opts = { repoRoot, run, block, file, ...where };
       const { ticket } = resolveTicket(opts);
       const previous = tickets.filter((t) => t.file === file);
@@ -499,7 +503,7 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
       say({ block, files, done: false, reason: 'split_required', next: `The owner raises review.budgets for ${split.file}, runs run reload, then review-file ${split.file} --fresh.` });
       return 0;
     }
-    if (live && files.every((f) => f.status === 'done' || f.status === 'findings')) {
+    if (live && files.every((f) => f.status === 'done' || f.status === 'findings' || f.status === 'excluded')) {
       say({ block, files, done: true });
       return 0;
     }
@@ -564,6 +568,19 @@ export async function runReviewFile(args, deps = {}) {
     if (flags.answers !== undefined || flags.of !== undefined) return await enqueueAnswersTicket({ flags, answering: positionals[0], block, cwd, repoRoot, say });
     const file = normalizeRequestPath(positionals[0], cwd, await repoRootOf(cwd));
     const worker = liveWorker(repoRoot);
+    let cfg = null;
+    const requestedRun = typeof flags.run === 'string' ? flags.run : worker?.run;
+    if (requestedRun) {
+      try { cfg = configInForce(await readRun(requestedRun)); }
+      catch (err) {
+        if (err?.code !== 'run-not-found') throw err;
+      }
+    }
+    const rule = reviewExcludeRule(cfg, file);
+    if (rule !== null) {
+      writeSafe(stdout, `not reviewed (review.exclude ${rule}): ${file}\n`);
+      return 0;
+    }
     if (!worker || (typeof flags.run === 'string' && flags.run !== worker.run)) {
       say({ status: 'worker_down', file });
       return 3;
@@ -574,12 +591,6 @@ export async function runReviewFile(args, deps = {}) {
     const tree = recorded === null ? await repoRootOf(cwd) : (recorded.top ?? repoRoot);
     assertInsideRoot(tree, file); // the path, re-checked in the tree its content is read from
     const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree };
-    let cfg = null;
-    try {
-      cfg = configInForce(await readRun(worker.run));
-    } catch {
-      // No readable snapshot: retain the existing cache and --fresh rules.
-    }
     if (flags.fresh === true) return freshTicket({ repoRoot, run: worker.run, block, file, where, say, cfg, stderr, ...(deps.dropDone ? { dropDone: deps.dropDone } : {}) });
     const queued = enqueue({ repoRoot, run: worker.run, block, file, ...where });
     const cached = queued.status === 'done' ? doneResult(repoRoot, queued.ticket) : null;

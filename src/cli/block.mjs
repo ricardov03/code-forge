@@ -210,13 +210,13 @@ import { readFileDiff } from '../review/packet.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
-import { PROOF_FINDING, blockFileSet, changedFiles, checkBlockReviews, openFindings, ownsAt, recordedSeverity, resultFilesFor, reviewedFiles, reviewGateCheck, routineCloseProblem, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
+import { PROOF_FINDING, blockFileSet, changedFiles, checkBlockReviews, lockfileProblem, openFindings, ownsAt, recordedSeverity, resultFilesFor, reviewedFiles, reviewGateCheck, routineCloseProblem, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { agentWaivers, agentWaiversAcked, prepareAckWaivers, prepareUnwaive, waiveAsAgent } from '../review/agent-waiver.mjs';
 import { checkExpiry, grantFor, grantState } from '../autopilot/grant.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { blockTree, prepareWorktree, removeWorktree, worktreeSettings } from '../proof/worktree.mjs';
 import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
-import { validateConfig } from '../config/validate.mjs';
+import { reviewExcludeRule, validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
 import { contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
@@ -719,6 +719,7 @@ export async function runBlock(args, deps = {}) {
       // B58: the owner's other way out — `review.external.required` in the run's config snapshot
       // (set before `run start`, immutable): no TTY, allowed under autopilot, the human flag wins
       const external = reviewsWaived ? null : externalReviewer(record);
+      const reviewConfig = configInForce(record);
       const rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
       // B52: ONE path base and ONE listing, memoised as a promise and shared by every check. The
       // base is the repository top level: the worker signs every review row with a repo-root-
@@ -783,6 +784,16 @@ export async function runBlock(args, deps = {}) {
         // B20: the high paths come first — a base the workspace does not know refuses the close here
         const highPaths = await highPathsAt(record.workspace, base);
         const { top, mainTop, where, inTree, wsPrefix, owns, changed, fileSet, reviewed } = await tree();
+        const excluded = fileSet.flatMap((f) => {
+          const rule = reviewExcludeRule(reviewConfig, f.file);
+          return rule === null ? [] : [{ ...f, rule }];
+        });
+        for (const f of excluded) {
+          const problem = lockfileProblem(top, f.file, reviewConfig);
+          if (problem !== null) throw new StateError('lockfile', `lockfile ${f.file}: ${problem}`);
+        }
+        const otherRows = closeRows.filter((r) => r.event !== 'gate.review_excluded');
+        closeRows.splice(0, closeRows.length, ...otherRows, ...excluded.map((f) => ({ event: 'gate.review_excluded', block: id, ...f })));
         const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f, entry.owned_kinds);
         const key = await loadKey(runId);
         // B52: an empty diff with review rows is never silent — name the likely cause
@@ -814,7 +825,7 @@ export async function runBlock(args, deps = {}) {
           unowned: scope?.unowned ?? [],
           // B52: an old ledger's review.result rows are judged by their signed result files
           resultFiles: await resultFilesFor({ repoRoot: mainTop, runId, block: id, rows }),
-          files: reviewsWaived || external !== null ? [] : fileSet,
+          files: reviewsWaived || external !== null ? [] : fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null),
           // B52: nothing changed and nothing reviewed is never a pass (the owner's way out is
           // --no-require-reviews); B58: `review.external` does not lift it
           noChanges: !reviewsWaived && fileSet.length === 0,
@@ -865,7 +876,7 @@ export async function runBlock(args, deps = {}) {
               }
             };
             return await (deps.reviewedLines ?? reviewedLines)({
-              files: fileSet,
+              files: fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null),
               waivedAll,
               ticketOf,
               onNoTicket: (file) => lineWarnings.push(`WARN no ticket for ${file}\n`),
@@ -1037,6 +1048,7 @@ export async function runBlock(args, deps = {}) {
           await warnMovedBase(record.workspace, entry, id, runId, err);
           for (const w of lineWarnings) err(w);
           for (const l of reviewedJson) say(`reviewed ${l.file} ticket ${l.ticket}\n`);
+          for (const f of closeRows.filter((r) => r.event === 'gate.review_excluded')) say(`not reviewed (review.exclude ${f.rule}): ${f.file}\n`);
           for (const f of waivedAll) {
             const parts = f.findings.length > 0 ? [`${f.findings.join(', ')}; by ${f.by}`] : [];
             if (f.answered?.length) parts.push(`answered ${f.answered.join(', ')}`);

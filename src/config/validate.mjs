@@ -75,6 +75,7 @@ import { isKnownId, resolveLevel } from './known-ids.mjs';
 import { ROUTE_LEVELS, ruleProvider } from '../review/route.mjs';
 import { DEFAULT_SANDBOX_PROFILE, SANDBOX_PROFILES, sandboxDirRefusals, SANDBOX_DIR_REFUSED } from '../engines/sandbox-dirs.mjs';
 import { tmpBase } from '../util/tmp.mjs';
+import { expandBraces, globMatch } from '../state/registry.mjs';
 import { looksLikeSecret, maskSecretTokens, SECRET_MASK, secretTokensIn } from './secret-patterns.mjs';
 
 /**
@@ -1219,4 +1220,19 @@ export function reviewFileLoop(cfg) {
  */
 export function reviewWorkers(cfg) {
   return cfg?.review?.workers ?? 1;
+}
+
+/** Common generated lock files, matched at the root and at any depth. */
+export const DEFAULT_REVIEW_EXCLUDE = Object.freeze([
+  'package-lock.json', 'npm-shrinkwrap.json', 'yarn.lock', 'pnpm-lock.yaml', 'bun.lock', 'bun.lockb',
+  'composer.lock', 'Cargo.lock', 'Gemfile.lock', 'poetry.lock', 'uv.lock', 'go.sum',
+  'Package.resolved', 'Podfile.lock', 'pubspec.lock', 'mix.lock', 'flake.lock',
+].map((name) => `**/${name}`));
+
+/** The first matching repo-relative rule, or null. A supplied list replaces the defaults.
+ * @param {Record<string, any> | null} cfg @param {string} file @returns {string | null}
+ */
+export function reviewExcludeRule(cfg, file) {
+  const rules = cfg?.review?.exclude ?? DEFAULT_REVIEW_EXCLUDE;
+  return rules.find((rule) => expandBraces(rule).some((pattern) => globMatch(file, pattern))) ?? null;
 }

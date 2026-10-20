@@ -2,7 +2,7 @@
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { reviewFileLoop } from '../config/validate.mjs';
+import { reviewExcludeRule, reviewFileLoop } from '../config/validate.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
 import { readRun } from '../state/run.mjs';
 import { ownsAt } from '../review/gate-check.mjs';
@@ -86,7 +86,7 @@ export async function watchTick({ repoRoot, runId, cfg, readRun: loadRun = readR
       // Stage every hash before publishing anything: an unreadable object queues nothing.
       const hashes = [];
       let unreadable = false;
-      for (const raw of owned) {
+      for (const raw of owned.filter((file) => reviewExcludeRule(snapshotFor(record, '')?.config ?? cfg, file) === null)) {
         const file = assertRowPath(raw);
         const listed = await git(['ls-tree', '-z', head, '--', file]);
         if (listed.result !== 'ok') { unreadable = true; break; }

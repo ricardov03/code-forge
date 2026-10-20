@@ -92,7 +92,7 @@ import { ownsFile } from '../state/registry.mjs';
 import { sameStamp, treeStamp } from '../state/block.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { tierFor } from '../proof/tiers.mjs';
-import { DELETED_HASH, contentHash, gitChildEnv } from '../worker/ticket.mjs';
+import { DELETED_HASH, contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
 import { verifyResult } from '../worker/queue.mjs';
 import { stopExitsLine } from './stop-exits.mjs';
 import { checkFileForm, checkFindingId } from './verb-forms.mjs';
@@ -913,6 +913,33 @@ export async function blockFileSet({ repoRoot, base, owned, ownedKinds, matchOwn
   const all = changed ?? (await changedFiles({ repoRoot, base }));
   const isOwned = matchOwned ?? ((/** @type {string} */ f) => ownsFile(owned, f, ownedKinds));
   return all.filter((f) => isOwned(f)).map((file) => ({ file, content_hash: currentHash(repoRoot, file) }));
+}
+
+/** Safety check for npm locks excluded from model review; other formats are not parsed.
+ * @param {string} repoRoot @param {string} file @param {Record<string, any> | null} cfg
+ * @returns {string | null} refusal detail, or null for a safe (or deleted) lock
+ */
+export function lockfileProblem(repoRoot, file, cfg) {
+  if (!['package-lock.json', 'npm-shrinkwrap.json'].includes(path.posix.basename(file))) return null;
+  let lock;
+  try {
+    const bytes = readRegularFileNoFollow(repoRoot, file);
+    if (bytes === null) return null;
+    lock = JSON.parse(bytes.toString('utf8'));
+  } catch { return 'cannot read valid lock JSON'; }
+  if (!lock || typeof lock !== 'object' || Array.isArray(lock)) return 'expected a lock object';
+  const packages = lock.packages ?? {};
+  if (typeof packages !== 'object' || Array.isArray(packages)) return 'packages must be an object';
+  const hosts = cfg?.review?.lockfile_registries ?? ['registry.npmjs.org'];
+  for (const [name, pkg] of Object.entries(packages)) {
+    if (!pkg || typeof pkg !== 'object' || Array.isArray(pkg)) return `packages.${name} must be an object`;
+    if (pkg.link === true || pkg.resolved === undefined) continue;
+    let url;
+    try { url = new URL(pkg.resolved); } catch { return `packages.${name}.resolved must be an HTTPS URL on an allowed host`; }
+    if (url.protocol !== 'https:' || !hosts.includes(url.host)) return `packages.${name}.resolved must be HTTPS on review.lockfile_registries`;
+    if (typeof pkg.integrity !== 'string' || !pkg.integrity.trim()) return `packages.${name} has no integrity`;
+  }
+  return null;
 }
 
 /**

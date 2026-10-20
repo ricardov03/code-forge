@@ -31,6 +31,8 @@
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, realpathSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { reviewExcludeRule } from '../config/validate.mjs';
+import { configInForce } from '../state/config-snapshot.mjs';
 import { runRecordPath } from '../state/paths.mjs';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
 import { isAlive, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
@@ -127,20 +129,24 @@ export function resetAcceptanceWatch(repoRoot, block) {
  * under `repoRoot`. The tree is part of the ticket id, so a main-tree ticket and a tree ticket for
  * the same bytes differ, and the answer names the tree given here, never a stored value.
  * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null, now?: Date}} opts
- * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string}}
+ * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string} | {status: 'excluded', file: string, rule: string, ticket?: never, content_hash?: never, tree?: never}}
  * @throws {WorkerError} `bad-path` for a relative `tree` or one that cannot be resolved.
  */
 export function enqueue({ repoRoot, run, block, file, tree = null, now = new Date() }) {
+  const rule = excludedRule(repoRoot, run, assertRowPath(file));
+  if (rule !== null) return { status: 'excluded', file, rule };
   const { content_hash } = resolveTicket({ repoRoot, run, block, file, tree });
   return enqueueHash({ repoRoot, run, block, file, tree, content_hash, now });
 }
 
 /** Queue proven git-object content through the same identity as a manual review.
  * @param {{repoRoot: string, run: string, block: string, file: string, content_hash: string, tree?: string | null, now?: Date}} opts
- * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string}}
+ * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string} | {status: 'excluded', file: string, rule: string, ticket?: never, content_hash?: never, tree?: never}}
  */
 export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = null, now = new Date() }) {
   const rel = assertRowPath(file);
+  const rule = excludedRule(repoRoot, run, rel);
+  if (rule !== null) return { status: 'excluded', file: rel, rule };
   const root = tree === null ? null : realTree(tree);
   const acceptance_revision = acceptanceRevision(repoRoot, run, block);
   const ticket = reviewTicketId({ run, block, file: rel, content_hash, tree: root, acceptance_revision });
@@ -167,6 +173,14 @@ export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = n
   } catch { /* missing or unreadable markers remain untouched */ }
   if (seen && done?.status === 'refused' && done.reason === 'superseded' && !done.result) dropDoneIf(repoRoot, ticket, seen);
   return { ticket, status: isDone(repoRoot, ticket) ? 'done' : 'queued', file: rel, content_hash, ...named };
+}
+
+/** Use the current run snapshot, including reloads, just as the watch and close do.
+ * @param {string} repoRoot @param {string} run @param {string} file
+ */
+function excludedRule(repoRoot, run, file) {
+  const record = readJSON(runRecordPath(run)) ?? readJSON(path.join(repoRoot, '.code-forge', 'runs', `${run}.json`));
+  return reviewExcludeRule(record ? configInForce(record) : null, file);
 }
 
 /** Finish only an unstarted, pending review. A superseded marker has no review result.

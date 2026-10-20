@@ -96,6 +96,7 @@ import { planAndRecord, tierOf } from '../review/budget.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { ContextError, reviewDigest } from '../context/pack.mjs';
 import { reviewFile, reviewLightBatch, rulesRisk } from '../review/engine.mjs';
+import { reviewExcludeRule } from '../config/validate.mjs';
 import { reviewAnswers } from '../review/answers.mjs';
 import { peerDiffReader } from '../review/moved.mjs';
 import { computeFileSet, ownsFile } from '../gates/scope.mjs';
@@ -345,6 +346,8 @@ export function packetDirFor(runRootDir, id) {
  * @returns {Promise<ReviewOutcome>}
  */
 export async function reviewTicket(ticket, ctx) {
+  const rule = reviewExcludeRule(ctx.cfg, ticket.file);
+  if (rule !== null) return { status: 'excluded', reason: `review.exclude ${rule}`, approved: false, engine: 'adaptive', sessions: [] };
   const workDir = packetDirFor(ctx.runRootDir, ticket.ticket);
   if (workDir === null) return { status: 'unavailable', reason: 'ticket-id-invalid', approved: false, engine: 'adaptive', sessions: [] };
   let entry;
@@ -444,7 +447,7 @@ async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDige
   const worker = { pid: process.pid, started_at: await processStartTime(process.pid) };
   return withLock(`light:${ctx.runId}\0${ticket.block}`, async () => {
     const root = ctx.contentRoot ?? ctx.repoRoot;
-    const files = (await computeFileSet({ cwd: root, base: entry.base ?? 'HEAD' })).all.filter((file) => ownsFile(entry.owned, file, entry.ownedKinds)).sort();
+    const files = (await computeFileSet({ cwd: root, base: entry.base ?? 'HEAD' })).all.filter((file) => ownsFile(entry.owned, file, entry.ownedKinds) && reviewExcludeRule(ctx.cfg, file) === null).sort();
     const hashes = files.map((file) => ({ file, content_hash: contentHash(root, file) }));
     if (!hashes.some((f) => f.file === ticket.file && f.content_hash === ticket.content_hash)) return { status: 'stale', approved: false, engine: 'adaptive', sessions: [] };
     const signature = JSON.stringify([entry.base, hashes]);

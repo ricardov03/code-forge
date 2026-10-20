@@ -110,6 +110,18 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": ["**/package-lock.json", "**/npm-shrinkwrap.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/bun.lock", "**/bun.lockb", "**/composer.lock", "**/Cargo.lock", "**/Gemfile.lock", "**/poetry.lock", "**/uv.lock", "**/go.sum", "**/Package.resolved", "**/Podfile.lock", "**/pubspec.lock", "**/mix.lock", "**/flake.lock"],
+          "description": "Repo-relative globs excluded from model code review, including scaffolding archives. Uses the ownership glob syntax (*, ?, ** and braces). A project list replaces the defaults; [] disables exclusion. Ownership and all other close checks still apply. A passing close signs gate.review_excluded per file."
+        },
+        "lockfile_registries": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": ["registry.npmjs.org"],
+          "description": "Allowed URL hosts for excluded package-lock.json and npm-shrinkwrap.json packages.*.resolved entries. Close requires HTTPS and integrity for each resolved package; link:true and entries without resolved are allowed. Other lock formats receive no safety check."
+        },
         "multimodel": { "type": "boolean", "default": false },
         "multimodel_for_docs": { "type": "boolean", "default": false },
         "single_reviewer_max_risk": { "type": "number", "minimum": 0, "maximum": 3, "default": 1 },
