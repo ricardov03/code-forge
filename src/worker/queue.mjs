@@ -33,7 +33,7 @@ import { chmodSync, existsSync, linkSync, mkdirSync, readdirSync, readFileSync, 
 import path from 'node:path';
 import { reviewExcludeRule } from '../config/validate.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
-import { runRecordPath } from '../state/paths.mjs';
+import { runRecordPath, StateError } from '../state/paths.mjs';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
 import { isAlive, readStartTime, UNKNOWN_START_TIME } from '../util/reaper.mjs';
 import { assertRowPath, assertTicketId, contentHash, ticketId, WorkerError } from './ticket.mjs';
@@ -180,7 +180,16 @@ export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = n
  */
 export function reviewExclusionFor(repoRoot, run, file, fallback = null) {
   const record = readJSON(runRecordPath(run)) ?? readJSON(path.join(repoRoot, '.code-forge', 'runs', `${run}.json`));
-  return reviewExcludeRule((record ? configInForce(record) : null) ?? fallback, file);
+  let cfg;
+  try {
+    cfg = record ? configInForce(record) : null;
+  } catch (err) {
+    if (!(err instanceof StateError) || err.code !== 'config-snapshot') throw err;
+    // Keep the ticket queued so the worker records unavailable/config-snapshot. Never use
+    // exclusions from an untrusted snapshot or the fallback to skip that result.
+    return null;
+  }
+  return reviewExcludeRule(cfg ?? fallback, file);
 }
 
 /** Finish only an unstarted, pending review. A superseded marker has no review result.

@@ -393,6 +393,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'review.file_loop',
   // B101: one path behind the 212 -> 213 re-pin.
   'review.fair_share',
+  // B155: the two paths behind the 227 -> 229 re-pin.
+  'review.exclude',
+  'review.lockfile_registries',
 ]);
 
 /**
@@ -426,7 +429,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B139: +3 = light, light.max_files, light.max_lines ⇒ 221.
 // B107: +1 = review.workers ⇒ 222.
 // B146: +5 = gates.custom{,.name,.argv,.env,.evidence} ⇒ 227.
-const EXPECTED_SCHEMA_PATH_COUNT = 227;
+// B155: +2 = review.{exclude,lockfile_registries} ⇒ 229.
+const EXPECTED_SCHEMA_PATH_COUNT = 229;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;
@@ -458,4 +462,12 @@ test('unreadSchemaPaths(): escalation.stop_at IS a schema path AND is excluded f
   assert.equal(schemaPaths.size, EXPECTED_SCHEMA_PATH_COUNT);
   assert.equal(unread.includes('escalation.stop_at'), false, 'escalation.stop_at IS read by validate.mjs — it must not appear in the unread list');
   assert.ok(unread.length < schemaPaths.size, 'at least one schema path is read by landed code');
+});
+
+test('unreadSchemaPaths(): B155 review exclusion and lockfile registry paths are read by product code', async () => {
+  const { schemaPaths, unread } = await unreadSchemaPaths();
+  for (const p of ['review.exclude', 'review.lockfile_registries']) {
+    assert.equal(schemaPaths.has(p), true, `the collector must produce ${p}`);
+    assert.equal(unread.includes(p), false, `${p} is read by product code`);
+  }
 });
