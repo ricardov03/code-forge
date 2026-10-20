@@ -669,7 +669,8 @@
         "test/autopilot/expiry.test.mjs"
       ],
       "depends_on": [
-        "B47"
+        "B47",
+        "B152"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/grant.mjs, src/autopilot/scopes.mjs, src/cli/autopilot.mjs, src/state/run.mjs (reloadRun guard), src/config/load.mjs (slugFor moved from cli/run.mjs), src/cli/{author,facts,jev,plan,s2,spawn}.mjs (slugFor import), test/cli/autopilot.test.mjs"
     },
