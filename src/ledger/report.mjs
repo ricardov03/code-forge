@@ -104,12 +104,12 @@ function elapsed(start, end) {
  * `unknownUsdSessions` (spend rows whose price is unknown, counted 0 in the totals). Grouped by
  * run + block, so a block id reused in a second run is its own entry; a row without a run joins
  * the entry of its block when that block id appears in exactly one run (else a `run: null` entry); shadow rows are dropped here too, exactly as `buildSpend` does. An entry is listed
- * once it has a spend row or a `block.close` row.
+ * once it has a spend row, a `block.close` row, or is stopped (`stopped: true`, omitted otherwise).
  */
 function costPerBlock(rows) {
   /** @type {Map<string, any>} */
   const byBlock = new Map();
-  /** @type {Map<string, {firstDispatch: string | null, completion: string | null, awaiting: string | null, humanWait: number | null}>} */
+  /** @type {Map<string, {firstDispatch: string | null, completion: string | null, stopped: string | null, awaiting: string | null, humanWait: number | null}>} */
   const times = new Map();
   /** @type {Set<string>} run+block keys with at least one spend row */
   const spent = new Set();
@@ -151,9 +151,14 @@ function costPerBlock(rows) {
         totalUsd: 0,
         unknownUsdSessions: 0,
       });
-      times.set(key, { firstDispatch: null, completion: null, awaiting: null, humanWait: null });
+      times.set(key, { firstDispatch: null, completion: null, stopped: null, awaiting: null, humanWait: null });
     }
     const e = byBlock.get(key);
+    const time = times.get(key);
+    if (['dispatch', 'block.close', 'block.awaiting_human_check', 'block.human_pass'].includes(row.event)) {
+      delete e.stopped;
+      time.stopped = null;
+    }
     if (row.event === 'dispatch') {
       e.level = row.level ?? e.level;
       e.lane = row.lane ?? e.lane;
@@ -162,11 +167,10 @@ function costPerBlock(rows) {
     if (row.event === 'block.close') { e.completed = true; closedKeys.add(key); }
     if (row.event === 'block.awaiting_human_check') e.completed = false;
     if (row.event === 'block.human_pass') e.completed = true;
-    if (row.event === 'block.stop') e.completed = false;
+    if (row.event === 'block.stop') { e.completed = false; e.stopped = true; }
     // Invalid timestamps have no effect on time; lifecycle and spend still count normally.
     const ts = timestamp(row.ts);
     if (ts !== null) {
-      const time = times.get(key);
       if (row.event === 'dispatch') {
         time.firstDispatch ??= ts;
         time.completion = null;
@@ -186,6 +190,7 @@ function costPerBlock(rows) {
         time.completion = ts;
         time.humanWait = elapsed(time.awaiting, ts);
       }
+      if (row.event === 'block.stop') time.stopped = ts;
     }
     if (isSpendRow(row)) {
       spent.add(key);
@@ -203,12 +208,13 @@ function costPerBlock(rows) {
     }
     if (row.event === 'proof' && typeof row.duration_ms === 'number') e.proofTimeMs += row.duration_ms;
   }
-  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || spent.has(key) || closedKeys.has(key)).map(([key, e]) => {
+  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || e.stopped || spent.has(key) || closedKeys.has(key)).map(([key, e]) => {
     const time = times.get(key);
     if (e.completed) {
       e.wallMs = elapsed(time.firstDispatch, time.completion);
       e.humanWaitMs = time.humanWait;
     }
+    if (e.stopped) e.wallMs = elapsed(time.firstDispatch, time.stopped);
     return e;
   });
   for (const e of out) {
@@ -219,12 +225,15 @@ function costPerBlock(rows) {
 
 /** Per-run wall time, spend and distinct block counts, plus the ledger/site total.
  * Rows and costs have already had shadow rows removed. Untimed runs contribute 0 to total wallMs.
+ * Rows without string run ids go to outside_runs; total.usd includes outside_runs.usd.
  * @param {Array<Record<string, any>>} rows @param {any[]} costs */
 function runTime(rows, costs) {
-  /** @type {Map<string | null, Array<Record<string, any>>>} */
+  /** @type {Map<string, Array<Record<string, any>>>} */
   const groups = new Map();
+  const outside = [];
   for (const row of rows) {
-    const run = typeof row.run === 'string' ? row.run : null;
+    if (typeof row.run !== 'string') { outside.push(row); continue; }
+    const run = row.run;
     if (!groups.has(run)) groups.set(run, []);
     groups.get(run).push(row);
   }
@@ -245,6 +254,7 @@ function runTime(rows, costs) {
   });
   return {
     runs,
+    ...(outside.length ? { outside_runs: { usd: sumSpend(outside).usd, rows: outside.length } } : {}),
     total: {
       runs: runs.length,
       wallMs: runs.reduce((sum, r) => sum + (r.wallMs ?? 0), 0),

@@ -1,6 +1,9 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { buildReport, buildSpend } from '../../src/ledger/report.mjs';
+import { runReport } from '../../src/cli/report.mjs';
+import { appendRow } from '../../src/ledger/write.mjs';
+import { captureStream, withTempHome } from './helpers.mjs';
 
 const ts = (minutes) => new Date(Date.UTC(2026, 9, 20) + minutes * 60000).toISOString();
 const row = (event, minutes, extra = {}) => ({ event, run: 'r1', ts: ts(minutes), ...extra });
@@ -29,7 +32,7 @@ test('B147 clause 1: block times span first dispatch to final completion, includ
   ]);
 });
 
-test('B147 clause 1 boundary: open, waiting, stopped and redispatched blocks have null times', () => {
+test('B149 clause 2: stopped blocks have wall time to the stop; open, waiting and redispatched blocks stay untimed', () => {
   const rows = [
     row('dispatch', 0, { block: 'open' }),
     row('session', 1, { block: 'open', usd: 1 }),
@@ -43,12 +46,69 @@ test('B147 clause 1 boundary: open, waiting, stopped and redispatched blocks hav
     row('block.close', 2, { block: 'stopped' }),
     row('block.awaiting_human_check', 3, { block: 'stopped' }),
     row('block.stop', 5, { block: 'stopped' }),
+    row('dispatch', 1, { block: 'stop-only' }),
+    row('block.stop', 7, { block: 'stop-only' }),
+    row('dispatch', 0, { block: 'reopened', attempt: 1 }),
+    row('block.stop', 2, { block: 'reopened' }),
+    row('dispatch', 3, { block: 'reopened', attempt: 2 }),
+    row('session', 4, { block: 'reopened', usd: 1 }),
+    row('dispatch', 0, { block: 'completed', attempt: 1 }),
+    row('block.stop', 2, { block: 'completed' }),
+    row('dispatch', 3, { block: 'completed', attempt: 2 }),
+    row('block.close', 8, { block: 'completed' }),
   ];
   assert.deepEqual(buildReport(rows).sections.cost_per_block.map((b) =>
-    [b.block, b.completed, b.wallMs, b.humanWaitMs]), [
-    ['open', false, null, null], ['waiting', false, null, null],
-    ['retry', false, null, null], ['stopped', false, null, null],
+    [b.block, b.completed, Object.hasOwn(b, 'stopped') ? b.stopped : 'omitted', b.wallMs, b.humanWaitMs]), [
+    ['open', false, 'omitted', null, null], ['waiting', false, 'omitted', null, null],
+    ['retry', false, 'omitted', null, null], ['stopped', false, true, 300000, null],
+    ['stop-only', false, true, 360000, null], ['reopened', false, 'omitted', null, null],
+    ['completed', true, 'omitted', 480000, null],
   ]);
+});
+
+test('B149 clause 2 boundary: stopped blocks ignore invalid timestamps and shadow lifecycle rows', () => {
+  const rows = [
+    row('dispatch', 0, { block: 'valid' }),
+    row('block.close', 1, { block: 'valid' }),
+    row('block.awaiting_human_check', 2, { block: 'valid' }),
+    row('block.human_pass', 3, { block: 'valid' }),
+    row('block.stop', 4, { block: 'valid' }),
+    ...[undefined, null, 123, {}, 'bad-ts', '2026-02-30T00:00:00.000Z'].map((ts) =>
+      ({ event: 'block.stop', run: 'r1', block: 'valid', ts })),
+    row('dispatch', 5, { block: 'valid', source: 'shadow' }),
+    row('block.close', 6, { block: 'valid', source: 'shadow' }),
+    row('dispatch', 0, { block: 'untimed' }),
+    row('block.stop', 4, { block: 'untimed', ts: 'bad-ts' }),
+    row('block.stop', 5, { block: 'no-dispatch' }),
+    row('dispatch', 6, { block: 'reversed' }),
+    row('block.stop', 5, { block: 'reversed' }),
+  ];
+  assert.deepEqual(buildReport(rows).sections.cost_per_block.map((b) =>
+    [b.block, b.completed, b.stopped, b.wallMs, b.humanWaitMs]), [
+    ['valid', false, true, 240000, null], ['untimed', false, true, null, null],
+    ['no-dispatch', false, true, null, null], ['reversed', false, true, null, null],
+  ]);
+});
+
+test('B149 clause 1: rows without string run ids keep spend outside runs without adding runs or wall time', () => {
+  const rows = [
+    row('note', -10000, { run: null }),
+    row('run.start', 0),
+    row('session', 1, { usd: 2 }),
+    row('run.end', 10),
+    row('session', 10000, { run: null, usd: 1.25 }),
+    row('session', 10001, { run: undefined, cost_usd: 0.75 }),
+    row('session', 10002, { run: 42, provider: 'anthropic', level: 'L1', tokens_in: 1000000, tokens_out: 0 }),
+    row('session.background', 10003, { run: null }),
+    row('session', 20000, { run: null, usd: 999, source: 'shadow' }),
+  ];
+  const spend = buildSpend(rows);
+  assert.deepEqual(buildReport(rows).sections.run_time, {
+    runs: [{ run: 'r1', started: ts(0), ended: ts(10), wallMs: 600000, usd: 2, blocks_closed: 0, blocks_stopped: 0 }],
+    outside_runs: { usd: 5, rows: 5 },
+    total: { runs: 1, wallMs: 600000, usd: 7, blocks_closed: 0 },
+  });
+  assert.equal(spend.total.usd, 7, 'full ledger spend includes outside-run explicit, legacy and token-estimated costs');
 });
 
 test('B147 clause 2: run_time includes ended and open runs, existing spend totals, distinct block counts and ledger total', () => {
@@ -86,7 +146,7 @@ test('B147 clause 2: run_time includes ended and open runs, existing spend total
   assert.equal(run_time.total.usd, spend.total.usd);
 });
 
-test('B147 clause 2 boundary: empty and untimed legacy runs retain spend and null times', () => {
+test('B149 clause 1 boundary: empty and all-run ledgers omit outside_runs; outside-only rows have zero run totals', () => {
   assert.deepEqual(buildReport([]).sections.run_time, {
     runs: [], total: { runs: 0, wallMs: 0, usd: 0, blocks_closed: 0 },
   });
@@ -99,12 +159,55 @@ test('B147 clause 2 boundary: empty and untimed legacy runs retain spend and nul
   ];
   assert.deepEqual(buildReport(rows).sections.run_time, {
     runs: [
-      { run: null, started: null, ended: null, wallMs: null, usd: 0.25, blocks_closed: 1, blocks_stopped: 0, open: true },
       { run: 'old', started: null, ended: null, wallMs: null, usd: 0, blocks_closed: 0, blocks_stopped: 0, open: true },
     ],
-    total: { runs: 2, wallMs: 0, usd: 0.25, blocks_closed: 1 },
+    outside_runs: { usd: 0.25, rows: 3 },
+    total: { runs: 1, wallMs: 0, usd: 0.25, blocks_closed: 0 },
+  });
+  assert.equal(Object.hasOwn(buildReport(rows.slice(3)).sections.run_time, 'outside_runs'), false);
+  assert.deepEqual(buildReport(rows.slice(0, 3)).sections.run_time, {
+    runs: [], outside_runs: { usd: 0.25, rows: 3 },
+    total: { runs: 0, wallMs: 0, usd: 0.25, blocks_closed: 0 },
+  });
+  assert.deepEqual(buildReport([row('note', 0, { run: null })]).sections.run_time, {
+    runs: [], outside_runs: { usd: 0, rows: 1 },
+    total: { runs: 0, wallMs: 0, usd: 0, blocks_closed: 0 },
   });
   assert.deepEqual(buildReport(rows).sections.cost_per_block.map((b) => [b.wallMs, b.humanWaitMs]), [[null, null]]);
+});
+
+test('B149 clause 3: CLI text shows completed, stopped and open blocks and outside-run spend before the run total', async () => {
+  await withTempHome(async () => {
+    const slug = 'report-lifecycle';
+    for (const r of [
+      row('note', -10000, { run: null }),
+      row('run.start', 0),
+      row('dispatch', 0, { block: 'stopped' }),
+      row('block.stop', 5, { block: 'stopped' }),
+      row('dispatch', 0, { block: 'completed' }),
+      row('block.close', 10, { block: 'completed' }),
+      row('dispatch', 0, { block: 'open' }),
+      row('session', 1, { block: 'open', usd: 2 }),
+      row('run.end', 15),
+      row('session', 10000, { run: null, usd: 0.25 }),
+    ]) await appendRow(r, { slug });
+    const stdout = captureStream(), stderr = captureStream();
+    assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
+    assert.equal(stderr.text, '');
+    const blocks = stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0];
+    assert.deepEqual(blocks.split('\n').filter((line) => line.startsWith('r1 | ')), [
+      'r1 | stopped | $0.0000 | 5m 0s | - | stopped',
+      'r1 | completed | $0.0000 | 10m 0s | - | completed',
+      'r1 | open | $2.0000 | - | - | open',
+    ]);
+    const runs = stdout.text.split('== run_time ==\n')[1].split('spend per run')[0];
+    assert.equal(runs,
+      'run | started | ended | wall | USD | closed | stopped\n' +
+      `r1 | ${ts(0)} | ${ts(15)} | 15m 0s | $2.0000 | 1 | 1\n` +
+      'outside runs: $0.2500 (2 rows, no wall time)\n' +
+      'total (1 run): 15m 0s | $2.2500 | 1 closed\n');
+    assert.equal(runs.includes('(none)'), false);
+  });
 });
 
 test('B147 clause 3: shadow rows and missing or invalid ISO timestamps do not change valid times', () => {

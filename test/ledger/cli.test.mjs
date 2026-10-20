@@ -215,7 +215,10 @@ test('report --json prints exactly the SECTION_NAMES keys (16 of them), with run
     const code = await runReport(['--slug', 'report-proj', '--json'], { stdout });
     assert.equal(code, 0);
     assert.deepEqual(Object.keys(JSON.parse(stdout.text)).sort(), [...SECTION_NAMES].sort());
-    assert.deepEqual(JSON.parse(stdout.text).run_time.total, { runs: 1, wallMs: 0, usd: 0, blocks_closed: 0 });
+    assert.deepEqual(JSON.parse(stdout.text).run_time, {
+      runs: [], outside_runs: { usd: 0, rows: 1 },
+      total: { runs: 0, wallMs: 0, usd: 0, blocks_closed: 0 },
+    });
   });
 });
 
@@ -244,21 +247,24 @@ test('B147 text: block dollars have readable wall and human wait times; run tabl
   });
 });
 
-test('B147 text boundary: untimed blocks and open runs show unavailable times without crashing', async () => {
+test('B149 clause 3 boundary: untimed stopped blocks and outside-only rows print without a fake run or wall time', async () => {
   await withTempHome(async () => {
     const slug = 'report-times-legacy';
     await mkdir(ledgerDir(), { recursive: true });
     await writeFile(ledgerPath(slug), [
       { event: 'dispatch', run: 'old', block: 'b1', ts: 'bad-ts' },
       { event: 'session', run: 'old', block: 'b1', usd: 0.25 },
+      { event: 'block.stop', run: 'old', block: 'b1', ts: 'bad-ts' },
+      { event: 'note', run: null, ts: 'bad-ts' },
     ].map((r) => JSON.stringify(r)).join('\n') + '\n');
     const stdout = captureStream();
     assert.equal(await runReport(['--slug', slug], { stdout }), 0);
     assert.equal(stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0],
-      'run | block | USD | wall | human wait | status\nold | b1 | $0.2500 | - | - | open\n' +
+      'run | block | USD | wall | human wait | status\nold | b1 | $0.2500 | - | - | stopped\n' +
       '  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $0.2500 · proof 0s · 0 unknown\n');
     assert.equal(stdout.text.split('== run_time ==\n')[1].split('spend per run')[0],
-      'run | started | ended | wall | USD | closed | stopped\nold | - | open | - | $0.2500 | 0 | 0\n' +
+      'run | started | ended | wall | USD | closed | stopped\nold | - | open | - | $0.2500 | 0 | 1\n' +
+      'outside runs: $0.0000 (1 rows, no wall time)\n' +
       'total (1 run): 0s | $0.2500 | 0 closed\n');
   });
 });
