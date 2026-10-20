@@ -362,6 +362,9 @@ function refuseConfigOwner(owned, kinds, guarded) {
  * B60: `tests` (`block open --tests <paths…>`, the same path rules as owned entries, else
  * `bad-tests`) is recorded as the entry's `test_files` and on the dispatch row; a gate argv item
  * `{test_files}` expands to them (`gates/expand.mjs`). Left out, neither carries the key.
+ * B148: `after` lists dependencies in this run. Under the same run lock, every dependency must
+ * be closed (`after-not-done`); self-dependency is `bad-after`. Unique ids are recorded on the
+ * entry and dispatch only when supplied, and a later attempt checks only its own supplied list.
  * B62a: `worktree` (given by `block open` under `proof.isolation: worktree`, `proof/worktree.mjs`;
  * this module never imports it) plans the block's own worktree, or the reuse of the one an earlier
  * entry of the same id recorded (`previous`); its `make()` makes or reuses it. Both are called
@@ -376,7 +379,7 @@ function refuseConfigOwner(owned, kinds, guarded) {
  * @param {{
  *   runId: string, id: string, level: string, owned: string[], acceptance: unknown,
  *   attempt?: number, base?: string, lines?: number, brief?: {path: string, content: Buffer | string},
- *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date, tests?: string[],
+ *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date, tests?: string[], after?: string[],
  *   decision?: {question: 'lane', answer: string, source: 'rules', facts: Record<string, unknown>}, decisionId?: string,
  *   worktree?: (ctx: {baseSha: string, previous: TreeRecord | null}) => Promise<{path: string, make: () => Promise<OpenTree>}>,
  * }} opts
@@ -395,6 +398,7 @@ export async function openBlock(opts) {
   const acceptance = assertAcceptance(opts.acceptance);
   const humanChecks = acceptance.filter((c) => c.kind === 'human_check').map((c) => c.clause);
   const tests = opts.tests === undefined ? null : [...assertOwned(opts.tests, { label: 'test files', code: 'bad-tests' })];
+  const after = opts.after === undefined ? null : [...new Set(opts.after)];
   const kind = opts.kind === 'light' ? 'light' : blockKind({ owned, declared: opts.kind });
   const dispatched = dispatchLevel({ lane: level, kind, cfg: opts.cfg });
   const pointer = opts.brief ? briefPointer(opts.brief.path, opts.brief.content) : null;
@@ -423,6 +427,14 @@ export async function openBlock(opts) {
     const { block, reused } = await mutateRun(runId, null, writeRow, async (record) => {
       if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
       if (record.blocks[id]?.status === 'awaiting_human_check') throw new StateError('already-open', `block ${id} is awaiting a human check`);
+      if (after !== null) {
+        if (after.includes(id)) throw new StateError('bad-after', `block ${id} cannot name itself in --after`);
+        const blocking = after.filter((dependency) => record.blocks[dependency]?.status !== 'closed');
+        if (blocking.length > 0) {
+          const statuses = blocking.map((dependency) => `${dependency} (${record.blocks[dependency]?.status ?? 'not in run'})`);
+          throw new StateError('after-not-done', `block ${id}: --after dependencies not closed: ${statuses.join(', ')}`);
+        }
+      }
       // B57: what each exact owned entry is on disk, under the lock (as `block claim`) — a regular
       // file owns only itself, here and in every later check
       const kinds = ownedKinds(record.workspace, owned);
@@ -443,7 +455,7 @@ export async function openBlock(opts) {
       // passed; a tree made here is rolled back below if the rows or the save then fail
       made = planned ? await planned.make() : null;
       const tree = made;
-      const entry = { block: id, base_sha: baseSha, base_branch: baseBranch, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(tree ? { worktree: tree.worktree } : {}) };
+      const entry = { block: id, base_sha: baseSha, base_branch: baseBranch, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(after !== null ? { after } : {}), ...(tree ? { worktree: tree.worktree } : {}) };
       if (humanChecks.length > 0) Object.assign(entry, { human_checks: humanChecks });
       record.blocks[id] = entry;
       const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
@@ -453,7 +465,7 @@ export async function openBlock(opts) {
         rows: [
           ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
           ...created,
-          { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, base_branch: baseBranch, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}) },
+          { event: 'dispatch', block: id, level: dispatched.level, kind, ...floor, attempt, base_sha: baseSha, base_branch: baseBranch, owned_files: entry.owned_files, lines_forecast: lines, ...(tests ? { test_files: tests } : {}), ...(after !== null ? { after } : {}) },
         ],
       };
     });

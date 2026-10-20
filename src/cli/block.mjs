@@ -4,7 +4,7 @@
  *
  *   block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file>
  *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract|light]
- *              [--tests <paths…>]
+ *              [--tests <paths…>] [--after <ids…>]
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
@@ -292,7 +292,7 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agen
 }
 
 const USAGE =
-  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>]\n' +
+  'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
@@ -360,7 +360,7 @@ export async function runBlock(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests'], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'open' ? ['after'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -542,13 +542,18 @@ export async function runBlock(args, deps = {}) {
     // B48: every block command runs the lazy autopilot checks (grant expiry, expired approvals);
     // a failed check is a warning, never a reason to stop the block command
     const requireHumanClose = sub === 'close' && configInForce(record)?.close?.require_human === true;
-    try {
-      if (!deciding && !requireHumanClose) {
-        err(approvalCheckText(await expiryChecks(runId, (deps.now ?? (() => new Date()))(), { writeRow })));
+    const expire = async () => {
+      try {
+        if (!deciding && !requireHumanClose) {
+          err(approvalCheckText(await expiryChecks(runId, (deps.now ?? (() => new Date()))(), { writeRow })));
+        }
+      } catch (thrown) {
+        err(`autopilot: WARN the expiry check failed (${thrown?.message ?? String(thrown)})\n`);
       }
-    } catch (thrown) {
-      err(`autopilot: WARN the expiry check failed (${thrown?.message ?? String(thrown)})\n`);
-    }
+    };
+    // B148: a refused dependency must not leave even an expiry row behind.
+    const deferExpiry = sub === 'open' && Array.isArray(flags.after);
+    if (!deferExpiry) await expire();
 
     if (sub === 'open') {
       // an explicit --level wins; B59: else in a brief-mode run the rules lane; B47: else the level
@@ -594,10 +599,17 @@ export async function runBlock(args, deps = {}) {
         ...(rules ? { decision: { question: 'lane', answer: rules.lane, source: 'rules', facts: rules.facts } } : {}),
         ...(typeof flags.kind === 'string' ? { kind: flags.kind } : {}),
         ...(Array.isArray(flags.tests) ? { tests: flags.tests } : {}),
+        ...(Array.isArray(flags.after) ? { after: flags.after } : {}),
         cfg: await openConfig(record.workspace),
         writeRow,
         ...(isolated ? { worktree: (/** @type {{baseSha: string, previous: any}} */ ctx) => prepareWorktree({ cwd: record.workspace, settings: isolated, runId, id, ...ctx }) } : {}),
+      }).catch((thrown) => {
+        if (json && thrown instanceof StateError && ['after-not-done', 'bad-after'].includes(thrown.code)) {
+          emit({ block: id, event: 'refused', code: thrown.code, message: thrown.message });
+        }
+        throw thrown;
       });
+      if (deferExpiry) await expire();
       const raised = block.level !== level ? ` (${block.kind} floor, asked ${level})` : '';
       const chosen = typeof flags.level === 'string' ? '' : rules ? ' (rules lane)' : ' (autopilot level)';
       const testCount = Array.isArray(block.test_files) ? block.test_files.length : 0;
