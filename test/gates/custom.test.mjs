@@ -1,7 +1,13 @@
 import './support.mjs';
 import assert from 'node:assert/strict';
 import test from 'node:test';
+import { createHash } from 'node:crypto';
+import { mkdir, readFile, symlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
 import { validateConfig } from '../../src/config/validate.mjs';
+import { runGates } from '../../src/gates/run.mjs';
+import { redactJSON } from '../../src/util/redact.mjs';
+import { withTempDir } from './support.mjs';
 
 const command = [process.execPath, '-e', 'void 0'];
 const entry = { name: 'build', argv: command };
@@ -43,4 +49,81 @@ test('custom config accepts twenty named object gates and safe evidence globs', 
   const schemaErrors = validateConfig(config(custom)).errors.filter((error) => error.rule === 'schema');
   assert.deepEqual(schemaErrors, [], 'custom gates are accepted by the schema');
   assert.deepEqual(gateErrors([]), [], 'an empty custom list is valid');
+});
+
+test('custom gates run after all fixed gates in list order and independently include failures in allOk', async () => {
+  await withTempDir(async (cwd) => {
+    const makeCommand = (name, code = 0) => [process.execPath, '-e', `require('node:fs').appendFileSync('order', '${name}\\n'); console.log(process.env.MODE || '${name}'); console.error('${name} stderr'); process.exit(${code})`];
+    const gates = {
+      test: makeCommand('test'), lint: makeCommand('lint', 1), types: makeCommand('types'), format: makeCommand('format'),
+      custom: [{ name: 'build', argv: makeCommand('build', 2), env: { MODE: 'web' } }, { name: 'links', argv: makeCommand('links') }],
+    };
+    const ran = await runGates(gates, { cwd });
+    assert.deepEqual(ran.results.map((result) => [result.gate, result.ok]), [['test', true], ['lint', false], ['types', true], ['format', true], ['build', false], ['links', true]]);
+    assert.equal(await readFile(path.join(cwd, 'order'), 'utf8'), 'test\nlint\ntypes\nformat\nbuild\nlinks\n');
+    assert.equal(ran.allOk, false);
+    assert.deepEqual(ran.results.slice(4).map((result) => ({ custom: result.custom, code: result.code, stdout: result.stdout, stderr: result.stderr })), [
+      { custom: true, code: 2, stdout: 'web\n', stderr: 'build stderr\n' },
+      { custom: true, code: 0, stdout: 'links\n', stderr: 'links stderr\n' },
+    ]);
+    assert.deepEqual(ran.results[4].env_keys, ['MODE']);
+    const onlyRedCustom = await runGates({ custom: [{ name: 'build', argv: makeCommand('build', 1) }] }, { cwd });
+    assert.equal(onlyRedCustom.allOk, false, 'a custom failure alone makes allOk false');
+    const green = await runGates({ custom: [{ name: 'links', argv: command }] }, { cwd });
+    assert.equal(green.allOk, true, 'all custom gates green makes allOk true');
+    assert.equal(green.results.length, 5, 'four skipped fixed gates and one green custom gate');
+  });
+});
+
+test('custom gates keep timeout, env masking and execution under changed and light scopes', async () => {
+  await withTempDir(async (cwd) => {
+    const gates = { lightTestFiles: ['a.test.mjs'], custom: [
+      { name: 'slow', argv: [process.execPath, '-e', 'setTimeout(() => {}, 30000)'] },
+      { name: 'links', argv: [process.execPath, '-e', 'console.log(process.env.WEB_VALUE)'], env: { WEB_VALUE: 'private-custom-value' } },
+    ] };
+    const ran = await runGates(gates, { cwd, timeoutMs: 300, scope: { scope: 'changed', files: [], changedFiles: [] } });
+    assert.deepEqual(ran.results.slice(4).map((result) => [result.gate, result.custom, result.ok, result.scope]), [['slow', true, false, undefined], ['links', true, true, undefined]]);
+    assert.equal(redactJSON(ran).includes('private-custom-value'), false, 'custom env value is masked in printed child output');
+    assert.deepEqual(ran.results[5].env_keys, ['WEB_VALUE']);
+    assert.equal(ran.allOk, false);
+  });
+});
+
+test('custom evidence hashes sorted regular files after pass or fail, deduplicates patterns and lists missing without failing', async () => {
+  await withTempDir(async (cwd) => {
+    await mkdir(path.join(cwd, 'reports/nested'), { recursive: true });
+    await writeFile(path.join(cwd, 'reports/z.json'), 'last');
+    await writeFile(path.join(cwd, 'reports/nested/a.json'), 'nested');
+    const argv = [process.execPath, '-e', "require('node:fs').writeFileSync('reports/a.json', 'é'); process.exit(1)"];
+    const patterns = ['reports/**/*.json', 'reports/*.json', 'missing/*.png'];
+    const ran = await runGates({ custom: [{ name: 'lighthouse', argv, evidence: patterns }, { name: 'links', argv: command, evidence: ['absent.json'] }] }, { cwd });
+    assert.equal(ran.results.length, 6, 'four fixed gates followed by two custom results');
+    const expected = [['reports/a.json', 'é'], ['reports/nested/a.json', 'nested'], ['reports/z.json', 'last']].map(([file, contents]) => ({ path: file, bytes: Buffer.byteLength(contents), sha256: createHash('sha256').update(contents).digest('hex') }));
+    assert.deepEqual(ran.results[4].evidence, expected, 'red gate hashes three unique files including output created by the command');
+    assert.deepEqual(ran.results[4].missing, ['missing/*.png']);
+    assert.equal(ran.results[4].ok, false);
+    assert.deepEqual(ran.results[5].evidence, []);
+    assert.deepEqual(ran.results[5].missing, ['absent.json']);
+    assert.equal(ran.results[5].ok, true, 'missing evidence does not fail a passing command');
+  });
+});
+
+test('custom evidence refuses outside paths before running, skips symlinks and caps sorted files at 200', async () => {
+  await withTempDir(async (outside) => {
+    await withTempDir(async (cwd) => {
+      await writeFile(path.join(outside, 'secret.json'), 'outside contents');
+      await symlink(outside, path.join(cwd, 'escaped'));
+      await symlink(path.join(outside, 'secret.json'), path.join(cwd, 'linked.json'));
+      await mkdir(path.join(cwd, 'reports'));
+      await Promise.all(Array.from({ length: 201 }, (_, i) => writeFile(path.join(cwd, 'reports', `${String(i).padStart(3, '0')}.json`), String(i))));
+      const ran = await runGates({ custom: [{ name: 'shots', argv: command, evidence: ['**/*.json', 'linked.json', 'escaped/*.json', 'reports/200.json'] }] }, { cwd });
+      assert.equal(ran.results.length, 5);
+      assert.equal(ran.results[4].evidence?.length, 200);
+      assert.deepEqual(ran.results[4].evidence?.map((item) => item.path), Array.from({ length: 200 }, (_, i) => `reports/${String(i).padStart(3, '0')}.json`));
+      assert.deepEqual(ran.results[4].missing, ['linked.json', 'escaped/*.json'], 'a matching file beyond the cap is not missing; symlinks are missing');
+      for (const pattern of ['../secret.json', path.join(outside, 'secret.json')]) {
+        await assert.rejects(runGates({ test: [process.execPath, '-e', "throw new Error('must not run')"], custom: [{ name: 'shots', argv: command, evidence: [pattern] }] }, { cwd }), /gates\.custom\[0\].*shots.*relative/);
+      }
+    });
+  });
 });

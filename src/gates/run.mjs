@@ -6,6 +6,11 @@
  * stops early.
  */
 
+import { createHash } from 'node:crypto';
+import { constants } from 'node:fs';
+import { open, readdir, realpath } from 'node:fs/promises';
+import path from 'node:path';
+import { customGateMessages } from '../config/validate.mjs';
 import { exec } from '../util/exec.mjs';
 import { registerSecret } from '../util/redact.mjs';
 import { CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
@@ -16,6 +21,8 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 /** @typedef {import('./detect.mjs').DetectedGates} DetectedGates */
 /** @typedef {import('./expand.mjs').TestScope} TestScope */
 /** @typedef {{n: number, files: string[], failed: boolean}} Repeats */
+/** @typedef {{name: string, argv: string[], env?: Record<string, string>, evidence?: string[]}} CustomGate */
+/** @typedef {{path: string, bytes: number, sha256: string}} Evidence */
 /**
  * Internal block context carried with the gate plan through the proof lock, so repeats run
  * inside the same slot as the initial commands.
@@ -24,7 +31,10 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 
 /**
  * @typedef {object} GateResult
- * @property {'test'|'lint'|'types'|'format'} gate
+ * @property {string} gate
+ * @property {true} [custom]
+ * @property {Evidence[]} [evidence]
+ * @property {string[]} [missing]
  * @property {string[] | null} argv
  * @property {boolean} skipped - true when the gate has no configured command (argv was null).
  * @property {boolean} ok - true when skipped, or when the command exited with code 0 (and, for a
@@ -43,6 +53,76 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 /** Fixed run order — always all four, regardless of an earlier one's result. */
 const GATE_ORDER = /** @type {const} */ (['test', 'lint', 'types', 'format']);
 
+/** Simple globs only: * stays in one segment; ** can cross segments.
+ * @param {string} pattern @returns {RegExp}
+ */
+function evidenceMatcher(pattern) {
+  const normalized = pattern.split('/').filter((part) => part !== '.' && part !== '').join('/');
+  let source = '';
+  for (let i = 0; i < normalized.length; i++) {
+    const char = normalized[i];
+    if (char === '*' && normalized[i + 1] === '*') {
+      i++;
+      if (normalized[i + 1] === '/') { source += '(?:.*/)?'; i++; }
+      else source += '.*';
+    } else if (char === '*') source += '[^/]*';
+    else source += char.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+  }
+  return new RegExp(`^${source}$`);
+}
+
+/** Never traverse symlinks. Hash at most 200 unique files, without retaining their content.
+ * @param {string} cwd @param {string[]} patterns
+ * @returns {Promise<{evidence: Evidence[], missing?: string[]}>}
+ */
+async function collectEvidence(cwd, patterns) {
+  if (patterns.length === 0) return { evidence: [] };
+  const root = await realpath(cwd);
+  const matchers = patterns.map(evidenceMatcher);
+  const matched = new Set();
+  /** @type {string[]} */
+  const files = [];
+  /** @param {string} dir @returns {Promise<void>} */
+  async function walk(dir) {
+    for (const entry of await readdir(path.join(root, dir), { withFileTypes: true })) {
+      const file = dir ? `${dir}/${entry.name}` : entry.name;
+      if (entry.isSymbolicLink()) continue;
+      // Also check the resolved path before descending/opening, in case a parent changed.
+      let resolved;
+      try { resolved = await realpath(path.join(root, file)); }
+      catch (error) { if (error.code === 'ENOENT') continue; throw error; }
+      const relative = path.relative(root, resolved);
+      if (relative === '..' || relative.startsWith(`..${path.sep}`) || path.isAbsolute(relative)) continue;
+      if (entry.isDirectory()) await walk(file);
+      else if (entry.isFile()) {
+        const hits = matchers.flatMap((matcher, i) => matcher.test(file) ? [i] : []);
+        if (hits.length > 0) {
+          files.push(file);
+          for (const i of hits) matched.add(i);
+        }
+      }
+    }
+  }
+  await walk('');
+  /** @type {Evidence[]} */
+  const evidence = [];
+  for (const file of files.sort().slice(0, 200)) {
+    const handle = await open(path.join(root, file), constants.O_RDONLY | constants.O_NOFOLLOW);
+    try {
+      if (!(await handle.stat()).isFile()) continue;
+      const hash = createHash('sha256');
+      let bytes = 0;
+      for await (const chunk of handle.createReadStream({ autoClose: false })) {
+        bytes += chunk.length;
+        hash.update(chunk);
+      }
+      evidence.push({ path: file, bytes, sha256: hash.digest('hex') });
+    } finally { await handle.close(); }
+  }
+  const missing = patterns.filter((_, i) => !matched.has(i));
+  return { evidence, ...(missing.length ? { missing } : {}) };
+}
+
 /**
  * A gate command is either a plain argv array or `{argv, failOnStdout?, env?}` (detect.mjs's
  * `GateCommand`: `failOnStdout` for `gofmt -l`, which always exits 0; B60 `env` from the config).
@@ -60,7 +140,7 @@ function normalizeCommand(command) {
  * item that is exactly `{test_files}` expands to its files, or is dropped for a full run. Left out,
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment; a gate with neither runs exactly as before B60.
- * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, repeatNewTests?: RepeatNewTests, lightTestFiles?: string[]}} gates
+ * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[]}} gates
  * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
  * @returns {Promise<{results: GateResult[], allOk: boolean, repeats?: Repeats}>}
  */
@@ -73,11 +153,16 @@ export async function runGates(gates, opts) {
   if (typeof cwd !== 'string' || cwd.length === 0) {
     throw new TypeError('runGates: opts.cwd must be a non-empty string');
   }
+  const customErrors = customGateMessages(gates.custom);
+  if (customErrors.length > 0) throw new TypeError(customErrors.join('; '));
 
   // B60: gate env is not a secret store. Its values are never put in a result (only `env_keys`);
   // a value of 8+ characters is also masked in the child's own output (a shorter one would mask
   // unrelated text — `MODE=test` vs `npm test`)
   for (const value of maskableEnvValues(gates)) registerSecret(value);
+  for (const gate of gates.custom ?? []) {
+    for (const value of maskableEnvValues({ gate })) registerSecret(value);
+  }
   // Every gate is normalized and expanded BEFORE any runs, so a bad gate throws with nothing run.
   // B60: config validation refuses a gate whose only item is {test_files}; the empty-argv check
   // is the guard for one that reaches here anyway: it names the gate, not an opaque spawn error.
@@ -135,6 +220,15 @@ export async function runGates(gates, opts) {
       }
     }
     results.push(result);
+  }
+  for (const gate of gates.custom ?? []) {
+    const { argv, env } = normalizeCommand(gate);
+    const res = await exec(argv, env ? { cwd, timeoutMs, env: { ...process.env, ...env } } : { cwd, timeoutMs });
+    results.push({ gate: gate.name, custom: true, argv, skipped: false,
+      ok: res.result === 'ok', code: res.code, stdout: res.stdout, stderr: res.stderr,
+      ...(env ? { env_keys: Object.keys(env).sort() } : {}),
+      ...await collectEvidence(cwd, gate.evidence ?? []),
+    });
   }
   const repeats = results.find((r) => r.repeats)?.repeats;
   return { results, allOk: results.every((r) => r.ok), ...(repeats ? { repeats } : {}) };
