@@ -55,15 +55,16 @@ test('pipeline schema refuses bad approval, unknown fields, missing fields, inva
     ['root key', (p) => { p.unexpected = true; }, /unexpected/],
     ['root required', (p) => { delete p.root; }, /root/],
     ['empty steps', (p) => { p.steps = []; }, /steps/],
-    ['id', (p) => { p.steps[0].id = 'Logo!'; }, /id/],
+    ['id', (p) => { p.steps[0].id = 'Logo!'; }, /\bid\b/],
     ['needs type', (p) => { p.steps[1].needs = [7]; }, /needs/],
     ['absolute outcome', (p) => { p.steps[0].outcome = '/tmp/outcome.json'; }, /outcome/],
     ['Windows outcome', (p) => { p.steps[0].outcome = 'C:\\outcome.json'; }, /outcome/],
     ['parent outcome', (p) => { p.steps[0].outcome = '../outcome.json'; }, /outcome/],
     ...['id', 'skill', 'outcome', 'approval'].map((key) => [
-      `${key} required`, (p) => { delete p.steps[0][key]; }, new RegExp(key),
+      `${key} required`, (p) => { delete p.steps[0][key]; }, new RegExp(`\\b${key}\\b`),
     ]),
   ])) {
+    assert.doesNotMatch('pipeline: invalid configuration', pattern, `${label}: must name the field`);
     const pipeline = example();
     change(pipeline);
     const result = validate(pipeline);

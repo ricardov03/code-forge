@@ -669,8 +669,7 @@
         "test/autopilot/expiry.test.mjs"
       ],
       "depends_on": [
-        "B47",
-        "B152"
+        "B47"
       ],
       "note": "root-added 2026-10-06; plan plans/autopilot (issue #5); also amends src/autopilot/grant.mjs, src/autopilot/scopes.mjs, src/cli/autopilot.mjs, src/state/run.mjs (reloadRun guard), src/config/load.mjs (slugFor moved from cli/run.mjs), src/cli/{author,facts,jev,plan,s2,spawn}.mjs (slugFor import), test/cli/autopilot.test.mjs"
     },
@@ -3026,7 +3025,6 @@
         "schema/pipeline.schema.json",
         "src/pipeline/pipeline.mjs",
         "src/cli/pipeline.mjs",
-        "src/cli/validate.mjs",
         "test/pipeline/config.test.mjs",
         "test/pipeline/cli.test.mjs",
         "docs/pipelines.md",
@@ -3036,7 +3034,8 @@
         "docs/reference/blocks.json",
         "test/docs-blocks.test.mjs"
       ],
-      "depends_on": ["B151"]
+      "depends_on": ["B151"],
+      "note": "F007 step 2; also amends the baseline-owned src/cli/validate.mjs to check the pipeline after config validation. Its pipeline import is recorded as an exact file/directory exemption in test/imports-order.test.mjs, following the existing later-block CLI amendments."
     }
   }
 }

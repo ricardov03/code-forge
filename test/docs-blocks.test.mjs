@@ -109,7 +109,7 @@ test('every depends_on id resolves to a blocks key or a baseline_ids entry (B0-B
   assert.deepEqual(doc.baseline_ids, ['B0', 'B1', 'B2', 'B3', 'B4', 'B5', 'B6', 'B7', 'B8']);
   const known = new Set([...Object.keys(doc.blocks), ...doc.baseline_ids]);
   const allDeps = Object.values(doc.blocks).flatMap((b) => b.depends_on);
-  assert.equal(allDeps.length, 219);
+  assert.equal(allDeps.length, 218);
   const unresolved = Object.entries(doc.blocks).flatMap(([id, b]) =>
     b.depends_on.filter((dep) => !known.has(dep)).map((dep) => `${id} -> ${dep}`),
   );
