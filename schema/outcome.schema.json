@@ -1,0 +1,45 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://code-forge.dev/schema/outcome.schema.json",
+  "title": "Specialist skill outcome",
+  "type": "object",
+  "properties": {
+    "skill": { "type": "string" },
+    "version": { "type": "string" },
+    "request": { "type": "string" },
+    "status": { "enum": ["draft", "approved", "blocked", "failed"] },
+    "approved_by": { "type": ["string", "null"] },
+    "artifact": { "type": ["string", "null"] },
+    "files": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "path": { "type": "string" },
+          "sha256": { "type": "string" }
+        },
+        "required": ["path", "sha256"],
+        "additionalProperties": false
+      }
+    },
+    "decisions": { "type": "array", "items": { "type": "string" } },
+    "checks": {
+      "type": "array",
+      "items": {
+        "type": "object",
+        "properties": {
+          "name": { "type": "string" },
+          "result": { "enum": ["pass", "warn", "fail"] },
+          "detail": { "type": "array", "items": { "type": "string" } },
+          "evidence": { "type": "string" }
+        },
+        "required": ["name", "result"],
+        "additionalProperties": false
+      }
+    },
+    "cost_usd": { "type": ["number", "null"] },
+    "minutes": { "type": ["number", "null"] }
+  },
+  "required": ["skill", "status", "files"],
+  "additionalProperties": false
+}
