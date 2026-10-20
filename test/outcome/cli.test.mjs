@@ -74,8 +74,11 @@ test('outcome check accepts sealed approved outcomes and warn checks in text and
   assert.deepEqual(JSON.parse(json.stdout), { ok: true, problems: [] });
 });
 
-test('outcome check reports one line per changed file, status, failed check and unsafe path', () => {
+test('outcome check reports one line per changed or missing file, status, failed check and unsafe path', () => {
   const { cwd, obj, file } = project();
+  const seal = cli(cwd, 'outcome', 'seal', file);
+  assert.equal(seal.status, 0, seal.stderr);
+  const sealed = readFileSync(file, 'utf8');
   obj.files[0].sha256 = digest('old logo');
   obj.files[1] = { path: '../outside.md', sha256: digest('outside') };
   obj.status = 'draft';
@@ -95,7 +98,43 @@ test('outcome check reports one line per changed file, status, failed check and 
   assert.deepEqual(Object.keys(result).sort(), ['ok', 'problems']);
   assert.equal(result.ok, false);
   assert.deepEqual(result.problems, lines);
+
+  writeFileSync(file, sealed);
+  rmSync(path.join(cwd, 'brand/logo.svg'));
+  const missing = cli(cwd, 'outcome', 'check', file);
+  assert.equal(missing.status, 1, missing.stderr);
+  assert.equal(missing.stdout, '');
+  const missingLines = missing.stderr.trim().split('\n');
+  assert.equal(missingLines.length, 1, 'exactly one problem line for the missing file');
+  assert.match(missingLines[0], /brand\/logo\.svg.*missing file/i);
+  const missingJson = cli(cwd, 'outcome', 'check', file, '--json');
+  assert.equal(missingJson.status, 1, missingJson.stderr);
+  assert.equal(missingJson.stderr, '');
+  assert.deepEqual(JSON.parse(missingJson.stdout), { ok: false, problems: missingLines });
 });
+
+for (const invalid of ['unknown top-level key', 'missing skill']) {
+  test(`outcome check rejects ${invalid} in text and JSON`, () => {
+    const { cwd, file } = project();
+    const seal = cli(cwd, 'outcome', 'seal', file);
+    assert.equal(seal.status, 0, seal.stderr);
+    const obj = JSON.parse(readFileSync(file, 'utf8'));
+    if (invalid === 'unknown top-level key') obj.unexpected = true;
+    else delete obj.skill;
+    writeFileSync(file, JSON.stringify(obj));
+
+    const res = cli(cwd, 'outcome', 'check', file);
+    assert.equal(res.status, 1, res.stderr);
+    assert.equal(res.stdout, '');
+    const lines = res.stderr.trim().split('\n');
+    assert.ok(lines.length > 0 && lines.every((line) => line.length > 0));
+    assert.match(res.stderr, invalid === 'unknown top-level key' ? /unexpected/ : /skill/);
+    const json = cli(cwd, 'outcome', 'check', file, '--json');
+    assert.equal(json.status, 1, json.stderr);
+    assert.equal(json.stderr, '');
+    assert.deepEqual(JSON.parse(json.stdout), { ok: false, problems: lines });
+  });
+}
 
 test('outcome help is discoverable and documentation names both commands', () => {
   const res = cli(TMP, 'help');
