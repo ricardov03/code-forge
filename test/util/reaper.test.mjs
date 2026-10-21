@@ -14,12 +14,27 @@ import {
   readStartTime,
   registerPid,
   sweep,
+  sweepProcesses,
   UNKNOWN_START_TIME,
 } from '../../src/util/reaper.mjs';
 
 let PARENT = '';
 /** Children this file spawned that have not exited yet; each removes itself on 'exit'. */
 const live = new Set();
+
+test('sweep lists orphans of zombie owners even when the recorded start time matches', async () => {
+  const started = 'Wed Oct 21 10:00:00 2026';
+  for (const state of ['S', 'Z', 'Z+']) {
+    const report = await sweepProcesses({
+      psText: `501 810 1 ${state} 0 ${started} node owner
+501 811 1 S 1024 Wed Oct 21 10:00:01 2026 node helper`,
+      uid: 501,
+      orphansOnly: true,
+      readEnv: () => ({ CODE_FORGE_OWNER_PID: '810', CODE_FORGE_OWNER_START_TIME: started }),
+    });
+    assert.deepEqual(report.items.map((p) => [p.kind, p.pid]), state === 'S' ? [] : [['orphan', 811]], state);
+  }
+});
 
 /** @param {import('node:child_process').ChildProcess} child */
 function track(child) {

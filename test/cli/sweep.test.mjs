@@ -1,27 +1,64 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { after, test } from 'node:test';
-import { run } from '../../bin/code-forge.mjs';
+import { fileURLToPath } from 'node:url';
+import runSweep from '../../src/cli/sweep.mjs';
 import * as reaper from '../../src/util/reaper.mjs';
 import { runRecordPath } from '../../src/state/paths.mjs';
 import { checkReviewState } from '../../src/doctor/local.mjs';
 
 const root = path.join(os.tmpdir(), 'sweep-fixtures');
+const previousHome = process.env.HOME;
+process.env.HOME = path.join(root, 'home');
 mkdirSync(root, { recursive: true });
 const script = path.join(root, 'code-forge.mjs');
 writeFileSync(script, "console.log('ready'); setInterval(()=>{},1000);");
 const children = new Set();
 const orphanPids = new Set();
+
+test('sweep fixture run records stay inside the fixture home', () => {
+  for (const id of ['r-closed', 'r-open', 'r-running', 'r-active', 'r-corrupt']) {
+    assert.equal(path.dirname(runRecordPath(id)), path.join(root, 'home', '.code-forge', 'runs'));
+  }
+});
+
+test('a failed sweep import aborts the fixture suite without invoking an unfiltered CLI', () => {
+  // Replace the top-level CLI with a harmless sentinel: the old fallback must never reach
+  // real processes, even while this regression test is red.
+  const sweepURL = new URL('../../src/cli/sweep.mjs', import.meta.url).href;
+  const binURL = new URL('../../bin/code-forge.mjs', import.meta.url).href;
+  const sentinel = path.join(root, 'unfiltered-cli-called');
+  const stub = `import {writeFileSync} from 'node:fs'; export async function run() { writeFileSync(${JSON.stringify(sentinel)}, 'called'); return 0; }`;
+  const loader = `export async function load(url, context, nextLoad) {
+    if (url === ${JSON.stringify(sweepURL)}) throw new Error('forced-sweep-import-failure');
+    if (url === ${JSON.stringify(binURL)}) return {format:'module',shortCircuit:true,
+      source:${JSON.stringify(stub)}};
+    return nextLoad(url, context);
+  }`;
+  const register = `import {register} from 'node:module'; register(${JSON.stringify(`data:text/javascript,${encodeURIComponent(loader)}`)}, import.meta.url);`;
+  const result = spawnSync(process.execPath, [
+    '--import', new URL('../helpers/isolate.mjs', import.meta.url).href,
+    '--import', `data:text/javascript,${encodeURIComponent(register)}`,
+    '--test', '--test-name-pattern=^sweep dry run', fileURLToPath(import.meta.url),
+  ], { encoding: 'utf8', timeout: 15000, env: { ...process.env, NODE_TEST_CONTEXT: undefined } });
+  assert.ifError(result.error);
+  const output = result.stdout + result.stderr;
+  assert.equal(existsSync(sentinel), false, 'no unfiltered fallback is invoked');
+  assert.match(output, /forced-sweep-import-failure/);
+  assert.equal(result.status, 1, 'missing sweep module fails the suite');
+});
 after(async () => {
   for (const child of children) child.kill('SIGKILL');
   for (const pid of orphanPids) { try { process.kill(pid, 'SIGKILL'); } catch { /* gone */ } }
   await sleep(50);
   rmSync(root, { recursive: true, force: true });
+  if (previousHome === undefined) delete process.env.HOME;
+  else process.env.HOME = previousHome;
 });
 
 async function worker(id) {
@@ -38,12 +75,11 @@ async function command(args) {
   process.stdout.write = (chunk) => { out += chunk; return true; };
   let code;
   try {
-    const cli = await import('../../src/cli/sweep.mjs').catch(() => null);
     const ids = new Set([process.pid, ...[...children].map((c) => c.pid), ...orphanPids]);
     // Only our fixtures enter the scan: an apply test must never sweep the developer's workers.
     const psText = execFileSync('/bin/ps', ['-A', '-o', 'uid=,pid=,ppid=,stat=,rss=,lstart=,command='], { encoding: 'utf8' })
       .split('\n').filter((line) => ids.has(Number(line.trim().split(/\s+/)[1]))).join('\n');
-    code = cli ? await cli.default(args, { sweep: (opts) => reaper.sweepProcesses({ ...opts, root, psText }) }) : await run(['sweep', ...args]);
+    code = await runSweep(args, { sweep: (opts) => reaper.sweepProcesses({ ...opts, root, psText }) });
   } finally { process.stdout.write = write; }
   return { code, out, json: out.startsWith('{') ? JSON.parse(out) : null };
 }

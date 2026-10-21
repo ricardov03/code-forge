@@ -234,13 +234,24 @@ export function exec(argv, opts = {}) {
     const stdoutText = () => Buffer.concat(stdoutChunks).toString(opts.stdoutEncoding ?? 'utf8');
     const stderrText = () => Buffer.concat(stderrChunks).toString('utf8');
 
-    /** @param {ExecResult} result */
-    const settle = async (result) => {
+    /** @param {Pick<ExecResult, 'code'|'signal'|'error'>} outcome */
+    const settle = async (outcome) => {
       if (settled) return;
       settled = true;
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
       await remaining;
+      // Pipe data can arrive while the remaining group members are being stopped.
+      // Snapshot the output and buffer-limit state only once that wait is over.
+      /** @type {ExecResult} */
+      const result = {
+        ...outcome,
+        result: !outcome.error && !timedOut && !overBuffer && outcome.code !== null && okExitCodes.includes(outcome.code) ? 'ok' : 'failed',
+        stdout: stdoutText(),
+        stderr: stderrText(),
+        timedOut,
+        ...(overBuffer ? { error: 'exec: maxBufferBytes exceeded' } : {}),
+      };
       if (typeof pid === 'number') {
         untrackChild(pid);
         if (registryDir !== null) {
@@ -296,12 +307,8 @@ export function exec(argv, opts = {}) {
 
     child.on('error', (err) => {
       settle({
-        result: 'failed',
         code: null,
         signal: null,
-        stdout: stdoutText(),
-        stderr: stderrText(),
-        timedOut,
         error: err.message,
       });
     });
@@ -315,21 +322,12 @@ export function exec(argv, opts = {}) {
       if (typeof pid === 'number') untrackChild(pid);
       remaining = stopMembers(members, KILL_GRACE_MS).then(() => {});
       if (timedOut || overBuffer || members.size > 0) {
-        settle({
-          result: !timedOut && !overBuffer && code !== null && okExitCodes.includes(code) ? 'ok' : 'failed',
-          code,
-          signal,
-          stdout: stdoutText(),
-          stderr: stderrText(),
-          timedOut,
-          ...(overBuffer ? { error: 'exec: maxBufferBytes exceeded' } : {}),
-        });
+        settle({ code, signal });
       }
     });
 
     child.on('close', (code, signal) => {
-      const result = !timedOut && !overBuffer && code !== null && okExitCodes.includes(code) ? 'ok' : 'failed';
-      settle({ result, code, signal, stdout: stdoutText(), stderr: stderrText(), timedOut });
+      settle({ code, signal });
     });
   });
 }

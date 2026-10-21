@@ -341,7 +341,8 @@ export async function sweepProcesses(opts = {}) {
     const liveOwner = rows.find((r) => r.pid === +owner);
     const recorded = env.CODE_FORGE_OWNER_START_TIME;
     // A missing row alone is not proof of death when ps was incomplete.
-    const dead = !liveOwner ? !isAlive(+owner) : !!recorded && recorded !== UNKNOWN_START_TIME && liveOwner.start_time !== recorded;
+    const dead = !liveOwner ? !isAlive(+owner) : liveOwner.state.startsWith('Z')
+      || !!recorded && recorded !== UNKNOWN_START_TIME && liveOwner.start_time !== recorded;
     if (dead) items.push({ ...p, kind: 'orphan', ...(env.CODE_FORGE_RUN_ID ? { runId: env.CODE_FORGE_RUN_ID } : {}) });
   }
   const root = tmp.tmpBase(opts.root);

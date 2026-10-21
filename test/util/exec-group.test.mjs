@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
-import { after, test } from 'node:test';
+import childProcess, { execFileSync } from 'node:child_process';
+import { syncBuiltinESMExports } from 'node:module';
+import { after, mock, test } from 'node:test';
 import { exec } from '../../src/util/exec.mjs';
 import { readStartTime } from '../../src/util/reaper.mjs';
 
@@ -38,4 +39,53 @@ test('exec marks children even with a replaced environment, preserving known run
   assert.equal(env.CODE_FORGE_OWNER_PID, String(process.pid));
   assert.equal(env.CODE_FORGE_OWNER_START_TIME, readStartTime(process.pid));
   assert.equal(env.CODE_FORGE_RUN_ID, 'r-fixture');
+});
+
+test('exec drains the full stdout and stderr tail when the leader exits before its grandchild', { timeout: 20000 }, async () => {
+  const bytes = 32 * 1024;
+  const spawn = childProcess.spawn;
+  const spy = mock.method(childProcess, 'spawn', (command, args, options) => {
+    const child = spawn(command, args, options);
+    // Hold the real pipes until exit to deterministically exercise pending output at settlement.
+    child.once('spawn', () => {
+      child.stdout?.pause();
+      child.stderr?.pause();
+      child.once('exit', () => setImmediate(() => {
+        child.stdout?.resume();
+        child.stderr?.resume();
+      }));
+    });
+    return child;
+  });
+  syncBuiltinESMExports();
+  const code = `const {spawn}=require('node:child_process');
+    const {writeSync}=require('node:fs');
+    const c=spawn(process.execPath,['-e',"process.on('SIGTERM',()=>{}); console.log('ready'); setInterval(()=>{},1000)"],{stdio:['ignore','pipe','ignore']});
+    c.stdout.once('data',()=>{
+      writeSync(1, String(c.pid)+'\\n');
+      for (let i=0;i<${bytes / 4096};i++) {
+        writeSync(1, Buffer.alloc(4096, 'o'));
+        writeSync(2, Buffer.alloc(4096, 'e'));
+      }
+      process.exit(0);
+    });`;
+  let result;
+  try {
+    result = await exec([process.execPath, '-e', code], { timeoutMs: 10000 });
+  } finally {
+    spy.mock.restore();
+    syncBuiltinESMExports();
+  }
+  const [pidText] = result.stdout.split('\n');
+  const tail = result.stdout.slice(result.stdout.indexOf('\n') + 1);
+  const pid = Number(pidText);
+  if (pid > 1) children.add(pid);
+  assert.equal(result.result, 'ok');
+  assert.equal(result.code, 0);
+  assert.equal(tail.length, bytes, 'all stdout bytes arrive');
+  assert.equal(result.stderr.length, bytes, 'all stderr bytes arrive');
+  assert.ok(pid > 1);
+  assert.equal(tail, 'o'.repeat(bytes));
+  assert.equal(result.stderr, 'e'.repeat(bytes));
+  assert.equal(running(pid), false, 'grandchild is stopped before exec resolves');
 });
