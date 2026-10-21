@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- The test leak check ignores a live code-forge run of another project (its run record names a workspace outside the temp dir, raw or resolved path) and that project's ledger; test-made runs stay leaks (B158)
 - Two worker tests no longer fail on a busy machine: the orphan test waits on observed worker events, and the enqueue speed test subtracts a cold node start measured in the same test; both keep their checks (B157)
 - Scaffolding lock files skip code review through `review.exclude`; close signs each exclusion and checks excluded npm locks for HTTPS registry URLs and integrity, while other lock formats receive no safety check (B155)
 - Named custom gates: `gates.custom` runs named gates after the fixed ones and records evidence files (path, bytes, sha256) on the gate rows (B146)
