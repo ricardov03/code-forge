@@ -19,6 +19,7 @@ Code or tests beyond what the change needs (unused options, extra layers, specul
 ## Rules for every answer
 
 - Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.
+- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. "assumes no rule in src/styles/base.css".
 - A test named in `## paired` exists; do not report it as unseen; use `needs_file` when its body matters.
 - You have no tools and no project files. The packet is everything you get.
 - `reviewed_hunks`: copy every `@@ … @@` hunk header listed under "hunks" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.

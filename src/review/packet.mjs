@@ -10,7 +10,8 @@
  *   ## project rules   the rules digest (≤ 60 lines)
  *   ## facts           the facts-sheet excerpt
  *   ## context         the current file (whole, or hunk windows — `context.mjs`)
- *   ## paired          optional paired-file names and summary (B97), dropped first over budget
+ *   ## related files (not shown)  optional related paths only, dropped first over budget
+ *   ## paired          optional paired-file names and summary (B97), dropped next over budget
  *   ## moved code      only when code moved to/from another file of the block (`moved.mjs`, B56)
  *   ## diff            `file:`, the `hunks:` list the reviewer must echo, then the diff
  *
@@ -21,7 +22,7 @@
  * Budget (§4.3): `review.budgets.full_in` (`quick_in` for the quick lens), in tokens estimated as
  * bytes / 4. A diff that alone exceeds it ⇒ `split_required` (a Markdown file is then reviewed
  * section by section — `sections.mjs`, B54). Otherwise over budget ⇒ the context shrinks to
- * ± `min_context_lines` (`minimal`) after dropping paired, then the digest is trimmed from the end; the diff is
+ * ± `min_context_lines` (`minimal`) after dropping related files, then paired, then the digest is trimmed from the end; the diff is
  * never cut. The `## moved code` section (B56) is part of that measure: it is counted in the diff-only
  * size (`diffOnlyTokens`, `split_required`) and never trimmed.
  *
@@ -38,6 +39,7 @@ import { fileURLToPath } from 'node:url';
 import { exec } from '../util/exec.mjs';
 import { assertInsideRoot, assertRowPath, gitChildEnv, readRegularFileNoFollow, WorkerError } from '../worker/ticket.mjs';
 import { buildContext, parseDiff, splitLines } from './context.mjs';
+import { relatedFiles } from './related.mjs';
 
 export const LENSES = Object.freeze(['quick', 'full', 'recheck', 'A', 'B', 'judge']);
 
@@ -137,6 +139,7 @@ export function assertPacketPath(repoRoot, file) {
  * @property {import('./context.mjs').Hunk[]} hunks
  * @property {number} plusCount
  * @property {number} minusCount
+ * @property {string[]} [related] - related file names, never their content.
  */
 
 /**
@@ -171,7 +174,19 @@ export async function readFileDiff({ repoRoot, file, base }) {
   const res = await exec(argv, { cwd: repoRoot, env, timeoutMs: GIT_TIMEOUT_MS, ...(kind === 'new' ? { okExitCodes: [0, 1] } : {}) });
   if (res.result !== 'ok') throw new PacketError('git', `git diff failed for ${rel} (exit ${res.code})`);
   const content = onDisk ? readRepoText(repoRoot, rel) : null;
-  return { file: rel, kind, diffText: res.stdout, content, ...parseDiff(res.stdout) };
+  const related = res.stdout.trim().length === 0 ? [] : await relatedFiles({
+    repoRoot, file: rel,
+    listFiles: async () => {
+      const tracked = await exec(['git', 'ls-files', '-z'], { cwd: repoRoot, env, timeoutMs: GIT_TIMEOUT_MS });
+      return tracked.result === 'ok' ? tracked.stdout.split('\0').filter(Boolean) : [];
+    },
+    readFile: (full) => {
+      const candidate = path.relative(repoRoot, full).split(path.sep).join('/');
+      if (isSecretLike(candidate)) return null;
+      return readRepoText(repoRoot, assertPacketPath(repoRoot, candidate));
+    },
+  });
+  return { file: rel, kind, diffText: res.stdout, content, related, ...parseDiff(res.stdout) };
 }
 
 /**
@@ -206,7 +221,13 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   let digest = splitLines(rulesDigest).slice(0, DIGEST_MAX_LINES);
   let ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: contextMode });
   let pairedSection = boundedPaired(paired, budgetFor(cfg, 'full_in'));
-  let text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved, pairedSection);
+  const names = ['quick', 'full'].includes(lens) ? (diff.related ?? []) : [];
+  let relatedSection = names.length > 0 ? `## related files (not shown)\n${names.join('\n')}` : '';
+  let text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved, pairedSection, relatedSection);
+  if (estimateTokens(text) > limit && relatedSection.length > 0) {
+    relatedSection = '';
+    text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved, pairedSection);
+  }
   if (estimateTokens(text) > limit && pairedSection.length > 0) {
     pairedSection = '';
     text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
@@ -293,8 +314,9 @@ function diffSectionOf(diff) {
  * @param {string} lensText @param {string[]} digest @param {string} facts @param {string} context
  * @param {string} diffSection @param {string} [moved] - the `## moved code` section (heading included), '' for none.
  * @param {string} [paired] - the bounded `## paired` section (heading included).
+ * @param {string} [related] - the names-only related files section (heading included).
  */
-function render(lensText, digest, facts, context, diffSection, moved = '', paired = '') {
+function render(lensText, digest, facts, context, diffSection, moved = '', paired = '', related = '') {
   return [
     '# code-forge review packet',
     '## lens',
@@ -305,6 +327,7 @@ function render(lensText, digest, facts, context, diffSection, moved = '', paire
     facts.trim().length > 0 ? facts.trimEnd() : '(none)',
     '## context',
     context.length > 0 ? context : '(none)',
+    ...(related.length > 0 ? [related] : []),
     ...(paired.length > 0 ? [paired] : []),
     ...(moved.length > 0 ? [moved] : []),
     '## diff',
