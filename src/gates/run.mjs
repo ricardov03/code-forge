@@ -44,7 +44,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {string} stderr
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'} [reason] - fallback or repeat failure.
+ * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'} [reason] - fallback or gate failure.
  * @property {Repeats} [repeats]
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
  *   NAMES, sorted (the values are never in a result).
@@ -52,6 +52,9 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 
 /** Fixed run order — always all four, regardless of an earlier one's result. */
 const GATE_ORDER = /** @type {const} */ (['test', 'lint', 'types', 'format']);
+
+/** Unanswered prompt suffixes; inspect only each stream's last non-empty line. */
+export const UNANSWERED_PROMPT_PATTERN = /(?:\?|\(y(?:\/n)?\)|\[y\/n\]|yes\/no)\s*$/i;
 
 /** Simple globs only: * stays in one segment; ** can cross segments.
  * @param {string} pattern @returns {RegExp}
@@ -157,11 +160,35 @@ function normalizeCommand(command) {
   return { argv: command.argv, failOnStdout: command.failOnStdout === true, env: envOf(command) }; // `env: {}` is no env
 }
 
+/** Interpret timeouts and unanswered prompts for every gate, including repeats.
+ * @param {import('../util/exec.mjs').ExecResult} res
+ * @param {number} timeoutMs
+ * @param {boolean} [failOnStdout]
+ * @returns {Pick<GateResult, 'ok'|'code'|'stdout'|'stderr'|'reason'>}
+ */
+function gateOutcome(res, timeoutMs, failOnStdout = false) {
+  const prompt = res.result === 'ok' && [res.stdout, res.stderr].some((stream) =>
+    UNANSWERED_PROMPT_PATTERN.test(stream.trimEnd().split(/\r?\n/).at(-1)));
+  const reason = res.timedOut ? 'timeout' : prompt ? 'prompt' : undefined;
+  const message = res.timedOut
+    ? `gate timeout after ${timeoutMs / 1000} seconds; raise gates.timeout_s (or --timeout-ms)`
+    : prompt ? 'gate ended on an interactive prompt; install the tool or make the command non-interactive' : '';
+  return {
+    ok: res.result === 'ok' && !reason && (!failOnStdout || res.stdout.trim().length === 0),
+    code: res.code,
+    stdout: res.stdout,
+    stderr: message
+      ? `${res.stderr}${res.stderr && !res.stderr.endsWith('\n') ? '\n' : ''}${message}\n`
+      : res.stderr,
+    ...(reason ? { reason } : {}),
+  };
+}
+
 /**
  * B60: `opts.scope` is the block's {@link TestScope} (`testScope`, gates/expand.mjs); a gate argv
  * item that is exactly `{test_files}` expands to its files, or is dropped for a full run. Left out,
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
- * variables added to the inherited environment; a gate with neither runs exactly as before B60.
+ * variables added to the inherited environment, overriding the CI=1/npm_config_yes=false defaults.
  * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[]}} gates
  * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
  * @returns {Promise<{results: GateResult[], allOk: boolean, repeats?: Repeats}>}
@@ -207,21 +234,19 @@ export async function runGates(gates, opts) {
     const { argv, scoped, failOnStdout, env } = command;
     // Each command is run and its exit status read on its own — never `&&`-chained with the
     // next, so a red gate is reported red without swallowing the gates that follow it.
-    const res = await exec(argv, env ? { cwd, timeoutMs, env: { ...process.env, ...env } } : { cwd, timeoutMs });
-    const ok = res.result === 'ok' && (!failOnStdout || res.stdout.trim().length === 0);
+    const execOpts = { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } };
+    const res = await exec(argv, execOpts);
+    const outcome = gateOutcome(res, timeoutMs, failOnStdout);
     const result = /** @type {GateResult} */ ({
       gate,
       argv,
       skipped: false,
-      ok,
-      code: res.code,
-      stdout: res.stdout,
-      stderr: res.stderr,
       ...(scoped ? scopeFields(scope) : {}),
+      ...outcome,
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
     });
     const repeat = gates.repeatNewTests;
-    if (gate === 'test' && ok && repeat) {
+    if (gate === 'test' && outcome.ok && repeat) {
       if (!command.originalArgv.includes(TEST_FILES_TOKEN)) {
         repeat.onSkip?.('repeat_new_tests: skipped (gates.test has no {test_files})');
       } else {
@@ -230,12 +255,12 @@ export async function runGates(gates, opts) {
           result.repeats = { n: repeat.n, files, failed: false };
           const repeatArgv = expandArgv(command.originalArgv, { scope: 'related', files }).argv;
           for (let i = 0; i < repeat.n; i++) {
-            const repeated = await exec(repeatArgv, env ? { cwd, timeoutMs, env: { ...process.env, ...env } } : { cwd, timeoutMs });
-            const passed = repeated.result === 'ok' && (!failOnStdout || repeated.stdout.trim().length === 0);
+            const repeated = await exec(repeatArgv, execOpts);
+            const repeatedOutcome = gateOutcome(repeated, timeoutMs, failOnStdout);
             // Keep the first failed run's output, even when a later repeat passes.
-            if (!passed && !result.repeats.failed) {
+            if (!repeatedOutcome.ok && !result.repeats.failed) {
               result.repeats.failed = true;
-              Object.assign(result, { ok: false, reason: 'flaky-test', argv: repeatArgv, code: repeated.code, stdout: repeated.stdout, stderr: repeated.stderr });
+              Object.assign(result, { reason: 'flaky-test', argv: repeatArgv, ...repeatedOutcome });
             }
           }
         }
@@ -245,9 +270,9 @@ export async function runGates(gates, opts) {
   }
   for (const gate of gates.custom ?? []) {
     const { argv, env } = normalizeCommand(gate);
-    const res = await exec(argv, env ? { cwd, timeoutMs, env: { ...process.env, ...env } } : { cwd, timeoutMs });
+    const res = await exec(argv, { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } });
     results.push({ gate: gate.name, custom: true, argv, skipped: false,
-      ok: res.result === 'ok', code: res.code, stdout: res.stdout, stderr: res.stderr,
+      ...gateOutcome(res, timeoutMs),
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
       ...await collectEvidence(cwd, gate.evidence ?? []),
     });

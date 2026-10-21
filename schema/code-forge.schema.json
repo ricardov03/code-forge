@@ -259,6 +259,7 @@
     },
     "gates": {
       "type": "object",
+      "description": "Every fixed gate, custom gate and repeat inherits CI=1 and npm_config_yes=false; a gate's explicit env wins. These injected defaults are omitted from env_keys. A gate exiting 0 fails with reason prompt if the last non-empty line of either stdout or stderr ends with ?, (y), (y/n), [y/N], [Y/n] or Yes/No (case-insensitive; trailing whitespace ignored). Earlier prompt-like lines followed by normal output do not count. The failure says: gate ended on an interactive prompt; install the tool or make the command non-interactive.",
       "additionalProperties": false,
       "properties": {
         "test": { "$ref": "#/$defs/argvOrNull" },
@@ -299,6 +300,13 @@
           "minimum": 2,
           "maximum": 10,
           "description": "After a passing test gate with --run and --block, run its command this many additional times for only tests added or changed against the block base; absent means off. Requires a whole {test_files} argv item; otherwise prints repeat_new_tests: skipped (gates.test has no {test_files}). A failed repeat makes the gate red with reason flaky-test; output and signed gate rows carry repeats {n, files, failed}, and report shows the count."
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 7200,
+          "default": 300,
+          "description": "Whole seconds, 30..7200, for each fixed gate, custom gate and test repeat. gates run --timeout-ms overrides this value. A timed-out gate fails with reason timeout and stderr naming the timeout in seconds and gates.timeout_s to raise."
         },
         "full_suite_threshold_files": {
           "type": "integer",
