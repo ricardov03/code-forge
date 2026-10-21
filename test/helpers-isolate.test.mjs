@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -91,6 +91,53 @@ test('a new foreign run outside the real temp dir has 0 leaks for its record, ke
   const now = snapshotGuarded(dirs);
   assert.equal(now.size - baseline.size, 12, 'six new paths per foreign run');
   assert.deepEqual(leakedEntries(baseline, now, dirs, foreignProbe, realTemp), [], 'all 12 foreign run paths are exempt');
+});
+
+for (const aliased of ['temp dir', 'workspace']) {
+  test(`inside-temp runs remain leaks when the ${aliased} uses a symlink`, async () => {
+    const { dirs, home } = fakeDirs(`symlink-${aliased}`);
+    // Outside TEST_BASE so its containment check cannot mask a broken temp-dir check.
+    const fixture = realpathSync(await mkdtemp(path.join(process.env.CODE_FORGE_REAL_TMPDIR, 'isolate-alias-')));
+    try {
+      const realTemp = path.join(fixture, 'temp');
+      const alias = path.join(fixture, 'alias');
+      mkdirSync(path.join(realTemp, 'repo'), { recursive: true });
+      symlinkSync(realTemp, alias, 'dir');
+      mkdirSync(path.join(home, 'ledger'));
+      const baseline = snapshotGuarded(dirs);
+      const record = path.join(home, 'runs', 'inside.json');
+      const key = path.join(home, 'runs', 'inside.key');
+      const ledger = path.join(home, 'ledger', 'inside.jsonl');
+      writeFileSync(record, JSON.stringify({
+        workspace: path.join(aliased === 'workspace' ? alias : realTemp, 'repo'),
+        project: 'inside',
+      }));
+      writeFileSync(key, '');
+      writeFileSync(ledger, '');
+      const tempDir = aliased === 'temp dir' ? alias : realTemp;
+      assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe, tempDir),
+        [record, key, ledger].sort(), 'the inside-temp record, key and ledger must all leak');
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+}
+
+test('foreign run sidecars accept any suffix while unmatched and prefix-only ids still leak', () => {
+  const { dirs, home } = fakeDirs('foreign-sidecars');
+  const realTemp = path.join(PARENT, 'foreign-sidecars', 'real-tmp');
+  mkdirSync(realTemp);
+  const baseline = snapshotGuarded(dirs);
+  const runs = path.join(home, 'runs');
+  writeFileSync(path.join(runs, 'r-2.json'), JSON.stringify({ workspace: '/some/other/project' }));
+  for (const name of ['r-2.json.tmp', 'r-2.custom', 'r-20.json.tmp', 'r-2x.json.tmp', 'other.json.tmp']) {
+    writeFileSync(path.join(runs, name), '');
+  }
+  assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe, realTemp), [
+    path.join(runs, 'other.json.tmp'),
+    path.join(runs, 'r-20.json.tmp'),
+    path.join(runs, 'r-2x.json.tmp'),
+  ], 'only the sidecars with no matching run record leak');
 });
 
 test('new ledger files are exempt only for an outside-temp run with the exact project slug in the same guarded dir', () => {

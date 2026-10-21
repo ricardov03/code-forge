@@ -57,19 +57,19 @@ export function snapshotGuarded(dirs = GUARDED_DIRS) {
 }
 
 /**
- * The run id a path under `<dir>/runs/` belongs to, when that run's record `<dir>/runs/<id>.json`
- * is in the baseline: `<id>` (its directory), `<id>.<anything>` or anything under `<id>/`.
+ * Whether a path under `<dir>/runs/` belongs to a verified run: `<id>` (its directory),
+ * `<id>.<anything>` or anything under `<id>/`.
  * The id is matched exactly, never as a prefix (`r-1` does not cover `r-10.lock`).
  * @param {string} dir - a guarded directory.
  * @param {string} p - a path under `dir`.
- * @param {ReadonlySet<string>} baseline
+ * @param {(id: string) => boolean} hasRun
  * @returns {boolean}
  */
-function belongsToBaselineRun(dir, p, baseline) {
+function belongsToRun(dir, p, hasRun) {
   const runs = path.join(dir, 'runs');
   if (!p.startsWith(runs + path.sep)) return false;
   const seg = p.slice(runs.length + 1).split(path.sep)[0];
-  const covered = (/** @type {string} */ id) => id !== '' && baseline.has(path.join(runs, `${id}.json`));
+  const covered = (/** @type {string} */ id) => id !== '' && hasRun(id);
   if (p !== path.join(runs, seg)) return covered(seg);
   if (covered(seg)) return true;
   for (let i = seg.indexOf('.'); i !== -1; i = seg.indexOf('.', i + 1)) {
@@ -96,6 +96,18 @@ function probeProcess(pid) {
     return match ? { ppid: Number(match[1]), start: match[2] } : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * @param {string} p
+ * @returns {string}
+ */
+function realpathOrRaw(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
   }
 }
 
@@ -146,16 +158,18 @@ function foreignRuns(dir, tempDir) {
   } catch {
     return foreign;
   }
+  const testBases = [tempDir, TEST_BASE].flatMap((base) => [base, realpathOrRaw(base)]);
   for (const name of names) {
     if (!name.endsWith('.json') || name.length === 5) continue;
     try {
       const record = JSON.parse(readFileSync(path.join(runs, name), 'utf8'));
       if (record === null || typeof record !== 'object' || Array.isArray(record)
         || typeof record.workspace !== 'string' || !path.isAbsolute(record.workspace)) continue;
-      const insideTests = [tempDir, TEST_BASE].some((base) => {
-        const relative = path.relative(base, record.workspace);
+      const workspaces = [record.workspace, realpathOrRaw(record.workspace)];
+      const insideTests = workspaces.some((workspace) => testBases.some((base) => {
+        const relative = path.relative(base, workspace);
         return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
-      });
+      }));
       if (!insideTests) foreign.set(name.slice(0, -5), typeof record.project === 'string' ? record.project : undefined);
     } catch {
       // Unreadable or invalid run records remain unverified.
@@ -170,7 +184,7 @@ function foreignRuns(dir, tempDir) {
  * developer that started before the tests): `runs/<id>`, `runs/<id>.<anything>`, `runs/<id>/…`.
  * Verified live foreign `locks/<sha>.lock` owners are also exempt, as is a new locks directory
  * containing no leaks. Unknown owner identity or ancestry fails closed.
- * New run records, keys, locks and nested paths, plus matching project ledgers, are also exempt when a current record names an absolute workspace outside the real temp dir and TEST_BASE.
+ * New `runs/<id>`, `runs/<id>.<anything>` and nested paths, plus matching project ledgers, are also exempt when a current record names an absolute workspace outside the raw and resolved real temp dir and TEST_BASE.
  * @param {Iterable<string>} baseline - the snapshot taken at start.
  * @param {Iterable<string>} now - the snapshot taken at exit.
  * @param {readonly string[]} [dirs] - defaults to the real guarded directories.
@@ -187,20 +201,17 @@ export function leakedEntries(baseline, now, dirs = GUARDED_DIRS, probe = probeP
   for (const p of new Set(now)) {
     if (before.has(p)) continue;
     const dir = dirs.find((d) => p.startsWith(d + path.sep));
-    if (dir !== undefined && belongsToBaselineRun(dir, p, before)) continue;
+    if (dir !== undefined && belongsToRun(dir, p, (id) => before.has(path.join(dir, 'runs', `${id}.json`)))) continue;
     if (dir !== undefined) {
       let foreign = foreignByDir.get(dir);
       if (foreign === undefined) {
         foreign = foreignRuns(dir, tempDir);
         foreignByDir.set(dir, foreign);
       }
-      if ([...foreign].some(([id, project]) => {
-        const run = path.join(dir, 'runs', id);
-        return p === run || p.startsWith(run + path.sep)
-          || ['.json', '.key', '.lock'].some((ext) => p === run + ext)
-          || (project !== undefined && path.dirname(p) === path.join(dir, 'ledger')
-            && path.basename(p) === `${project}.jsonl`);
-      })) continue;
+      if (belongsToRun(dir, p, (id) => foreign.has(id))
+        || [...foreign.values()].some((project) => project !== undefined
+          && path.dirname(p) === path.join(dir, 'ledger')
+          && path.basename(p) === `${project}.jsonl`)) continue;
       const locks = path.join(dir, 'locks');
       if (p === locks) {
         try {
