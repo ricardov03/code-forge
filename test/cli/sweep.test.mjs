@@ -9,6 +9,7 @@ import { after, test } from 'node:test';
 import { run } from '../../bin/code-forge.mjs';
 import * as reaper from '../../src/util/reaper.mjs';
 import { runRecordPath } from '../../src/state/paths.mjs';
+import { checkReviewState } from '../../src/doctor/local.mjs';
 
 const root = path.join(os.tmpdir(), 'sweep-fixtures');
 mkdirSync(root, { recursive: true });
@@ -42,7 +43,7 @@ async function command(args) {
     // Only our fixtures enter the scan: an apply test must never sweep the developer's workers.
     const psText = execFileSync('/bin/ps', ['-A', '-o', 'uid=,pid=,ppid=,stat=,rss=,lstart=,command='], { encoding: 'utf8' })
       .split('\n').filter((line) => ids.has(Number(line.trim().split(/\s+/)[1]))).join('\n');
-    code = cli ? await cli.default(args, { sweep: (opts) => reaper.sweepProcesses({ ...opts, psText }) }) : await run(['sweep', ...args]);
+    code = cli ? await cli.default(args, { sweep: (opts) => reaper.sweepProcesses({ ...opts, root, psText }) }) : await run(['sweep', ...args]);
   } finally { process.stdout.write = write; }
   return { code, out, json: out.startsWith('{') ? JSON.parse(out) : null };
 }
@@ -110,12 +111,14 @@ test('sweep lists and stops marked orphans of dead owners, preserving unmarked o
 });
 
 test('zombie ps lines are grouped by parent command and never eligible for a signal', async () => {
-  const lines = `501 810 1 S 2048 Wed Oct 21 10:00:00 2026 node parent.mjs
-501 811 810 Z 0 Wed Oct 21 10:00:01 2026 <defunct>
+  const parentCommand = `node ${script} worker --run r-zombie-parent`;
+  const lines = `501 810 1 S 2048 Wed Oct 21 10:00:00 2026 ${parentCommand}
+501 811 810 Z 0 Wed Oct 21 10:00:01 2026 node ${script} worker --run r-zombie
 501 812 810 Z+ 0 Wed Oct 21 10:00:02 2026 <defunct>
-502 813 810 Z 0 Wed Oct 21 10:00:03 2026 <defunct>`;
-  const report = await reaper.sweepProcesses?.({ psText: lines, uid: 501, apply: true, readEnv: () => null, readRun: async () => ({ status: 'active' }) });
-  assert.deepEqual(report?.zombies ?? [], [{ ppid: 810, command: 'node parent.mjs', count: 2, pids: [811, 812] }]);
+502 813 810 Z 0 Wed Oct 21 10:00:03 2026 <defunct>
+502 814 1 S 2048 Wed Oct 21 10:00:00 2026 node ${script} worker --run r-foreign`;
+  const report = await reaper.sweepProcesses?.({ root, psText: lines, uid: 501, apply: true, readEnv: () => null, readRun: async () => ({ status: 'ended' }) });
+  assert.deepEqual(report?.zombies ?? [], [{ ppid: 810, command: parentCommand, count: 2, pids: [811, 812] }]);
   assert.deepEqual(report.items, [], 'zombies and their parent produce zero signal candidates');
 });
 
@@ -123,8 +126,22 @@ test('unreadable environment and live/reused owners fail closed; own run limits 
   const started = reaper.readStartTime(process.pid);
   const lines = `501 820 1 S 1024 Wed Oct 21 10:00:00 2026 node helper
 501 ${process.pid} 1 S 1024 ${started} node owner`;
-  for (const env of [null, {}, { CODE_FORGE_OWNER_PID: String(process.pid), CODE_FORGE_OWNER_START_TIME: started }, { CODE_FORGE_OWNER_PID: '99999999', CODE_FORGE_RUN_ID: 'r-other' }]) {
+  for (const env of [null, {}, { CODE_FORGE_OWNER_PID: String(process.pid), CODE_FORGE_OWNER_START_TIME: started, CODE_FORGE_RUN_ID: 'r-own' }, { CODE_FORGE_OWNER_PID: '99999999', CODE_FORGE_RUN_ID: 'r-other' }]) {
     const report = await reaper.sweepProcesses?.({ psText: lines, uid: 501, orphansOnly: true, runId: 'r-own', readEnv: () => env });
     assert.deepEqual(report?.items ?? null, [], 'zero candidates without readable proof and matching run');
   }
+  const reused = await reaper.sweepProcesses?.({ root, psText: lines, uid: 501, orphansOnly: true, runId: 'r-own',
+    readEnv: () => ({ CODE_FORGE_OWNER_PID: String(process.pid), CODE_FORGE_OWNER_START_TIME: 'Wed Jan 1 00:00:00 2001', CODE_FORGE_RUN_ID: 'r-own' }) });
+  assert.deepEqual(reused.items.map((p) => [p.kind, p.pid]), [['orphan', 820]], 'one orphan whose recorded owner pid was reused');
+});
+
+test('doctor reports sweep and memory rows without stopping a stale worker', async () => {
+  const child = await worker('r-doctor-missing');
+  const rows = await checkReviewState({ tmp: { root } });
+  assert.equal(rows.filter((r) => r.id === 'sweep').length, 1, 'exactly one sweep row');
+  assert.match(rows.find((r) => r.id === 'sweep').detail, /\d+ stale workers, \d+ orphans, \d+ zombies/);
+  assert.equal(rows.filter((r) => r.id === 'memory').length, 1, 'exactly one memory row');
+  assert.match(rows.find((r) => r.id === 'memory').detail, /code-forge [\d.]+ MB, children [\d.]+ MB, orphans [\d.]+ MB/);
+  assert.equal(reaper.isAlive(child.pid), true, 'doctor never stops stale worker');
+  child.kill('SIGKILL');
 });

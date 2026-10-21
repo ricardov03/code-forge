@@ -222,3 +222,14 @@ test('EPERM on the group signal: the pid is reported unknown and never retried',
   assert.equal(existsSync(path.join(dir, `${pid}.json`)), true);
   process.kill(-pid, 'SIGKILL');
 });
+
+test('registry sweep never signals the current process or its ancestors', async () => {
+  const dir = await registryDir('protected');
+  registerPid(dir, process.pid, 'node');
+  registerPid(dir, process.ppid, 'parent');
+  await withKillSpy(() => {}, async (calls) => {
+    const result = await sweep(dir, { graceMs: 0 });
+    assert.deepEqual(calls, [], 'zero signals to this process or ancestors');
+    assert.deepEqual(result.killed, [], 'zero protected processes killed');
+  });
+});

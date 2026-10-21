@@ -53,6 +53,7 @@ import { loadKey, signRow } from '../state/signer.mjs';
 import { logWarning } from '../util/error-log.mjs';
 import { withLock, tryLock } from '../util/file-locks.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
+import { sweepProcesses } from '../util/reaper.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
 import { countLines, RouteError, routeTicket } from '../review/route.mjs';
@@ -537,6 +538,10 @@ export async function createWorker(opts, deps = {}) {
         poisoned.add(id);
         return 0;
       }
+    } finally {
+      try {
+        await sweepProcesses({ apply: true, orphansOnly: true, runId, zombies: false });
+      } catch { /* process hygiene must never fail a ticket */ }
     }
   }
 

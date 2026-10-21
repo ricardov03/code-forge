@@ -27,7 +27,7 @@
  */
 
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -203,7 +203,7 @@ export function parseProcesses(text) {
 export function readProcesses() {
   try {
     return parseProcesses(execFileSync(existsSync('/bin/ps') ? '/bin/ps' : 'ps',
-      ['-A', '-o', 'uid=,pid=,ppid=,stat=,rss=,lstart=,command='], {
+      ['-A', '-ww', '-o', 'uid=,pid=,ppid=,stat=,rss=,lstart=,command='], {
         encoding: 'utf8', env: { ...process.env, LC_ALL: 'C', LANG: 'C' },
         timeout: 5000, maxBuffer: 16 * 1024 * 1024, stdio: ['ignore', 'pipe', 'ignore'],
       }));
@@ -253,8 +253,13 @@ export async function stopMembers(members, graceMs = DEFAULT_GRACE_MS) {
     await sleep(POLL_MS);
   }
   for (const pid of sent.keys()) if (signalMember(pid, members.get(pid), 'SIGKILL')) sent.set(pid, 'SIGKILL');
-  // Give the OS and Node's child watcher a chance to observe the final signal before resolving.
-  if (sent.size) await sleep(POLL_MS);
+  // Delivery is not exit: wait for SIGKILL to take effect before exec can return to its caller.
+  const killedDeadline = Date.now() + Math.max(graceMs, 1000);
+  while (sent.size && Date.now() < killedDeadline) {
+    await sleep(POLL_MS);
+    const live = readProcesses();
+    if (![...sent.keys()].some((pid) => live.some((p) => p.pid === pid && !p.state.startsWith('Z') && p.start_time === members.get(pid)))) break;
+  }
   return sent;
 }
 
@@ -266,13 +271,17 @@ export function readProcessEnv(p) {
     let text;
     if (process.platform === 'linux') text = readFileSync(`/proc/${p.pid}/environ`, 'utf8');
     else if (process.platform === 'darwin') {
-      const out = execFileSync('/bin/ps', ['-E', '-o', 'pid=,ppid=,lstart=,command=', '-p', String(p.pid)], {
+      const out = execFileSync('/bin/ps', ['-E', '-ww', '-o', 'pid=,ppid=,lstart=,command=', '-p', String(p.pid)], {
         encoding: 'utf8', timeout: 5000, maxBuffer: 8 * 1024 * 1024,
         env: { ...process.env, LC_ALL: 'C', LANG: 'C' }, stdio: ['ignore', 'pipe', 'ignore'],
       });
       const m = /^\s*(\d+)\s+(\d+)\s+(\S+\s+\S+\s+\d+\s+\d+:\d+:\d+\s+\d{4})\s+/.exec(out);
       if (!m || +m[1] !== p.pid || +m[2] !== p.ppid || m[3].replace(/\s+/g, ' ') !== p.start_time) return null;
       text = out.slice(m[0].length);
+      // ps appends the environment to argv. An ownership-looking argument is not an env
+      // marker: strip the independently observed command before parsing the environment.
+      if (!text.startsWith(`${p.command} `)) return null;
+      text = text.slice(p.command.length + 1);
     } else return null;
     /** @type {Record<string,string>} */
     const markers = {};
@@ -340,12 +349,27 @@ export async function sweepProcesses(opts = {}) {
   if (!opts.orphansOnly && tmp.untrustedReason(root) === null) {
     for (const dir of readdirSync(root, { withFileTypes: true })) {
       const full = path.join(root, dir.name);
-      if (!dir.isDirectory() || tmp.untrustedReason(full) !== null || tmp.ownerState(full) !== 'dead') continue;
+      if (!dir.isDirectory() || tmp.untrustedReason(full) !== null) continue;
+      const state = tmp.ownerState(full);
+      let reap = state === 'dead';
+      if (state === 'missing') {
+        // Mirror sweepRoots' ten-minute ownerless grace, including every registry mtime.
+        try {
+          const pids = path.join(full, 'pids');
+          const files = existsSync(pids) ? [pids, ...readdirSync(pids).map((name) => path.join(pids, name))] : [];
+          reap = [full, ...files].every((file) => Date.now() - lstatSync(file).mtimeMs > 600_000);
+        } catch { reap = false; }
+      }
+      if (!reap) continue;
       registryRoots.push(full);
       for (const entry of listEntries(path.join(full, 'pids'))) {
         const p = own.find((p) => p.pid === entry.pid && p.start_time === entry.start_time);
-        if (!p || blocked.has(p.pid) || items.some((i) => i.pid === p.pid)) continue;
-        items.push({ ...p, kind: 'registry' });
+        if (!p || blocked.has(p.pid)) continue;
+        const members = new Map([[p.pid, p.start_time], ...groupMembers(p.pid)]);
+        for (const [pid, started] of members) {
+          const member = own.find((p) => p.pid === pid && p.start_time === started);
+          if (member && !blocked.has(pid) && !items.some((i) => i.pid === pid)) items.push({ ...member, kind: 'registry' });
+        }
       }
     }
   }
@@ -377,6 +401,19 @@ export async function sweepProcesses(opts = {}) {
  * @returns {'sent'|'mismatch'|'eperm'|'gone'}
  */
 function signalIfOurs(pid, recorded, signal) {
+  const rows = readProcesses();
+  const blocked = protectedPids(rows);
+  const leader = rows.find((p) => p.pid === pid);
+  if (!process.getuid || !leader || leader.uid !== process.getuid() || blocked.has(pid)) return 'eperm';
+  const members = groupMembers(pid);
+  const safeGroup = [...members].every(([member, started]) => rows.some((p) => p.pid === member
+    && p.uid === process.getuid() && !blocked.has(member) && p.start_time === started));
+  if (!safeGroup) {
+    if (readStartTime(pid) !== recorded) return 'mismatch';
+    const sent = signalMember(pid, recorded, signal);
+    for (const [member, started] of members) signalMember(member, started, signal);
+    return sent ? 'sent' : 'eperm';
+  }
   if (readStartTime(pid) !== recorded) return 'mismatch';
   try {
     process.kill(-pid, signal);
@@ -415,10 +452,16 @@ export async function sweep(dir, opts = {}) {
   const { graceMs = DEFAULT_GRACE_MS } = opts;
   /** @type {SweepResult} */
   const result = { killed: [], mismatched: [], unknown: [], stale: [] };
+  const rows = readProcesses();
+  const blocked = protectedPids(rows);
 
   for (const entry of listEntries(dir)) {
     const { pid } = entry;
-    if (pid === process.pid) continue;
+    if (blocked.has(pid)) continue;
+    if (isAlive(pid) && !rows.some((p) => p.pid === pid && p.uid === process.getuid?.())) {
+      result.unknown.push(pid);
+      continue;
+    }
 
     if (!isAlive(pid)) {
       unregisterPid(dir, pid);
@@ -459,6 +502,7 @@ export async function sweep(dir, opts = {}) {
         continue;
       }
       await waitForDeath(pid, graceMs);
+      for (const [member, started] of members) signalMemberIfOurs(member, started);
       result.killed.push({ pid, signal: 'SIGKILL' });
     }
     unregisterPid(dir, pid);
@@ -472,10 +516,5 @@ export async function sweep(dir, opts = {}) {
  * @param {number} pid @param {string} started
  */
 function signalMemberIfOurs(pid, started) {
-  if (readStartTime(pid) !== started) return;
-  try {
-    process.kill(pid, 'SIGKILL');
-  } catch {
-    // gone between the check and the kill
-  }
+  signalMember(pid, started, 'SIGKILL');
 }

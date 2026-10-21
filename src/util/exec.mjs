@@ -8,9 +8,9 @@
  *    indefinitely (callers that spawn a reviewer/coder CLI are expected to always pass one —
  *    this module does not impose a default, since a default here would silently apply to every
  *    caller, including ones with a legitimately long-running command).
- *  - On timeout the whole process GROUP is sent SIGTERM, then SIGKILL — the SIGKILL goes to the
- *    group as soon as the direct child exits (or after a grace period), so a grandchild that
- *    traps SIGTERM cannot outlive the call. The result is `failed`, never a partial success.
+ *  - On timeout the process group receives SIGTERM, then SIGKILL after a grace period while
+ *    the leader lives. On every leader exit, remaining members are captured and stopped
+ *    individually after checking their start times. Timeout always resolves `failed`.
  *  - stdin is `ignore`d by default, so a child that reads stdin when it isn't a TTY (`claude -p`,
  *    for one) sees an immediate EOF instead of blocking forever. With `input` (a string or bytes),
  *    stdin is a pipe: the content is written verbatim and then the pipe is closed, so the child
@@ -175,13 +175,15 @@ export function exec(argv, opts = {}) {
   const childEnv = { ...(env ?? process.env), CODE_FORGE_OWNER_PID: String(process.pid) };
   const ownerStart = readStartTime(process.pid);
   if (ownerStart) childEnv.CODE_FORGE_OWNER_START_TIME = ownerStart;
+  else delete childEnv.CODE_FORGE_OWNER_START_TIME;
   let spawnRegistry = null;
   try {
     spawnRegistry = pidsDir();
     const rootId = path.basename(path.dirname(spawnRegistry));
     const runAt = process.argv.indexOf('--run');
+    const inlineRun = process.argv.find((arg) => arg.startsWith('--run='))?.slice('--run='.length);
     const runId = childEnv.CODE_FORGE_RUN_ID ?? process.env.CODE_FORGE_RUN_ID
-      ?? (runAt >= 0 ? process.argv[runAt + 1] : undefined) ?? (/^r-/.test(rootId) ? rootId : undefined);
+      ?? (runAt >= 0 ? process.argv[runAt + 1] : inlineRun) ?? (/^r-/.test(rootId) ? rootId : undefined);
     if (runId) childEnv.CODE_FORGE_RUN_ID = runId;
   } catch { /* registry hygiene must never prevent a spawn */ }
 
@@ -310,6 +312,7 @@ export function exec(argv, opts = {}) {
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
       const members = typeof pid === 'number' ? groupMembers(pid) : new Map();
+      if (typeof pid === 'number') untrackChild(pid);
       remaining = stopMembers(members, KILL_GRACE_MS).then(() => {});
       if (timedOut || overBuffer || members.size > 0) {
         settle({
