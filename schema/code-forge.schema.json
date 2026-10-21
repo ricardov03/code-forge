@@ -300,6 +300,12 @@
           "maximum": 10,
           "description": "After a passing test gate with --run and --block, run its command this many additional times for only tests added or changed against the block base; absent means off. Requires a whole {test_files} argv item; otherwise prints repeat_new_tests: skipped (gates.test has no {test_files}). A failed repeat makes the gate red with reason flaky-test; output and signed gate rows carry repeats {n, files, failed}, and report shows the count."
         },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 7200,
+          "description": "Timeout for each gate in whole seconds; defaults to 300 when absent. --timeout-ms takes precedence."
+        },
         "full_suite_threshold_files": {
           "type": "integer",
           "minimum": 1,

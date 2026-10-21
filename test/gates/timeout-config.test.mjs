@@ -29,14 +29,25 @@ test('configured timeout resolves in seconds, flag wins, and killed fixed/custom
 });
 
 test('timeout validation refuses out-of-range/non-integer values and gates run refuses timeout_s: 5', async () => {
+  const config = {
+    version: 1, provider: 'anthropic',
+    levels: {
+      L0: { model: 'claude-haiku-4-5-20251001' }, L1: { model: 'claude-sonnet-5' },
+      L2: { model: 'claude-opus-5-5' }, L3: { model: 'claude-fable-5-1' },
+    },
+  };
   for (const timeout_s of [5, 29, 7201, 30.5, '30', null]) {
-    const result = validateConfig({ gates: { timeout_s } });
+    const result = validateConfig({ ...config, gates: { timeout_s } });
+    assert.equal(result.valid, false, `invalid timeout_s=${timeout_s} must fail validation`);
+    assert.ok(result.errors.some((issue) => issue.rule === 'schema' && issue.path === '/gates/timeout_s'),
+      `invalid timeout_s=${timeout_s} must fail schema validation`);
     assert.deepEqual(result.errors.filter((issue) => issue.rule === 'gates-not-argv-array').map((issue) => issue.message),
       ['gates.timeout_s must be an integer 30..7200'], `timeout_s=${timeout_s}`);
   }
-  for (const timeout_s of [30, 7200]) {
-    const result = validateConfig({ gates: { timeout_s } });
-    assert.deepEqual(result.errors.filter((issue) => issue.rule === 'gates-not-argv-array'), []);
+  for (const timeout_s of [30, 300, 7200]) {
+    const result = validateConfig({ ...config, gates: { timeout_s } });
+    assert.deepEqual(result.errors, [], `valid timeout_s=${timeout_s} must pass both schema and domain validation`);
+    assert.equal(result.valid, true);
   }
   await withTempDir(async (cwd) => {
     await writeFile(path.join(cwd, '.code-forge.yml'), 'version: 1\ngates:\n  timeout_s: 5\n');
