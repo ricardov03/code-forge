@@ -64,7 +64,7 @@ function notesLabel(nodeIn, defs) {
   if (node.exclusiveMinimum !== undefined) parts.push(`> ${node.exclusiveMinimum}`);
   if (node.minLength !== undefined) parts.push(`minLength ${node.minLength}`);
   if (node.minItems !== undefined) parts.push(`minItems ${node.minItems}`);
-  if (typeof node.description === 'string' && node.type !== 'object') parts.push(node.description);
+  if (typeof node.description === 'string') parts.push(node.description);
   return parts.join('; ');
 }
 
