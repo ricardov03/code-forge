@@ -106,10 +106,12 @@ test('quick and full evidence instruction survives when the unseen names are dro
     const roomy = assemblePacket({ diff, lens });
     assert.equal(roomy.status, 'ok');
     assert.ok('text' in roomy);
+    assert.equal(section(roomy.text, 'related files (not shown)'), 'base.css', `${lens}: roomy packet includes exactly base.css`);
     const without = roomy.text.replace('## related files (not shown)\nbase.css\n', '');
     const tight = assemblePacket({ diff, lens, budget: Math.ceil(Buffer.byteLength(without) / 4) });
     assert.equal(tight.status, 'ok');
     assert.ok('text' in tight);
+    assert.equal(tight.text, without, `${lens}: only related names dropped at budget boundary`);
     assert.equal(tight.text.split(guidance).length - 1, 1, `${lens}: exactly one evidence instruction at budget boundary`);
     assert.equal(section(tight.text, 'related files (not shown)'), null, `${lens}: related section dropped`);
   }
