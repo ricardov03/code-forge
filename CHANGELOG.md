@@ -24,6 +24,8 @@ waits on a second real consumer (plan §10.4, Q17).
   interactive prompt fails with reason `prompt`, and a warning when the checkout has no installed dependencies (B156)
 - Context pack: a `## code-forge` section names the running node, the absolute code-forge bin and its version, and tells
   the coder not to use another code-forge from PATH (B162)
+- `block rebase` works for a block with its own worktree: it rebases the block branch onto main, moves the block base,
+  and earlier green gates stop counting (B159)
 
 ## [0.15.1] — 2026-10-19
 
