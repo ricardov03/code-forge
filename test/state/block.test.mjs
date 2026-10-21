@@ -117,7 +117,7 @@ test('B134: block open records null base_branch in the entry and the single sign
   });
 });
 
-test('`block rebase` refuses a base that is not an ancestor of HEAD, stops on a commit touching an owned file, and moves a clean base', async () => {
+test('`block rebase` refuses non-ancestor bases, owned conflicts and a worktree off its branch, but rebases a clean open worktree', async () => {
   await withFixture(async ({ ws, home, baseSha, headSha, sideSha }) => {
     const { rows, writeRow } = rowSink();
     await start(ws, 'r-reb', writeRow);
@@ -136,17 +136,57 @@ test('`block rebase` refuses a base that is not an ancestor of HEAD, stops on a 
     await assert.rejects(() => rebaseBlock({ runId: 'r-reb', id: 'X', head: '--output=/tmp/x', writeRow }), { code: 'bad-ref' });
 
     const treePath = path.join(home, 'tree');
-    await openBlock({ runId: 'r-reb', id: 'W', level: 'L1', owned: ['c.txt'], acceptance: ACCEPTANCE, writeRow,
+    await openBlock({ runId: 'r-reb', id: 'W', level: 'L1', owned: ['c.txt'], acceptance: ACCEPTANCE, base: baseSha, writeRow,
       worktree: async ({ baseSha }) => ({ path: treePath, make: async () => {
         git(['worktree', 'add', '-q', '-b', 'block-w', treePath, baseSha], ws);
         return { worktree: { path: treePath, branch: 'block-w', base_sha: baseSha }, created: true, rollback: null };
       } }),
     });
     const before = (await readRun('r-reb')).blocks.W;
-    await assert.rejects(() => rebaseBlock({ runId: 'r-reb', id: 'W', writeRow }), { code: 'worktree-rebase' });
+    git(['checkout', '--detach', '-q'], treePath);
+    await assert.rejects(() => rebaseBlock({ runId: 'r-reb', id: 'W', writeRow }), {
+      code: 'worktree-rebase', message: 'block W: its worktree is not on branch block-w',
+    });
     assert.deepEqual((await readRun('r-reb')).blocks.W, before);
-    assert.equal(git(['rev-parse', 'HEAD'], treePath), headSha);
+    assert.equal(git(['rev-parse', 'HEAD'], treePath), baseSha);
     assert.equal(rows.filter((r) => r.event === 'block.rebase' && r.block === 'W').length, 0);
+
+    git(['checkout', '-q', 'block-w'], treePath);
+    assert.deepEqual(await rebaseBlock({ runId: 'r-reb', id: 'W', writeRow }), { old_base: baseSha, new_base: headSha });
+    assert.deepEqual((await readRun('r-reb')).blocks.W, {
+      ...before, base_sha: headSha, worktree: { ...before.worktree, base_sha: headSha },
+    });
+    assert.equal(git(['rev-parse', 'HEAD'], treePath), headSha);
+    assert.equal(git(['symbolic-ref', '--short', 'HEAD'], treePath), 'block-w');
+    assert.equal(git(['status', '--porcelain'], treePath), '');
+    const rebases = rows.filter((r) => r.event === 'block.rebase' && r.block === 'W');
+    assert.equal(rebases.length, 1);
+    assert.deepEqual([rebases[0].old_base, rebases[0].new_base, rebases[0].worktree, rebases[0].closed], [baseSha, headSha, true, undefined]);
+    assert.deepEqual(verifyRow(rebases[0], await loadKey('r-reb')), { ok: true });
+  });
+});
+
+test('B159: an open worktree without a recorded base branch refuses rebase without changing its tree, record or rows', async () => {
+  await withFixture(async ({ ws, home, headSha }) => {
+    const { rows, writeRow } = rowSink();
+    await start(ws, 'r-reb-no-base', writeRow);
+    git(['checkout', '--detach', '-q'], ws);
+    const treePath = path.join(home, 'tree');
+    await openBlock({ runId: 'r-reb-no-base', id: 'W', level: 'L1', owned: ['c.txt'], acceptance: ACCEPTANCE, writeRow,
+      worktree: async ({ baseSha }) => ({ path: treePath, make: async () => {
+        git(['worktree', 'add', '-q', '-b', 'block-w', treePath, baseSha], ws);
+        return { worktree: { path: treePath, branch: 'block-w', base_sha: baseSha }, created: true, rollback: null };
+      } }),
+    });
+    const before = await readRun('r-reb-no-base');
+    const rowsBefore = [...rows];
+    assert.equal(before.blocks.W.base_branch, null);
+    await assert.rejects(() => rebaseBlock({ runId: 'r-reb-no-base', id: 'W', writeRow }), { code: 'rebase-no-base' });
+    assert.deepEqual(await readRun('r-reb-no-base'), before);
+    assert.deepEqual(rows, rowsBefore);
+    assert.equal(git(['rev-parse', 'HEAD'], treePath), headSha);
+    assert.equal(git(['symbolic-ref', '--short', 'HEAD'], treePath), 'block-w');
+    assert.equal(git(['status', '--porcelain'], treePath), '');
   });
 });
 

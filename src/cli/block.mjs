@@ -733,7 +733,7 @@ export async function runBlock(args, deps = {}) {
         throw thrown;
       });
       // ONE base for the whole close: a worktree block is measured against the commit its tree was
-      // made from (kept equal to base_sha, including after a closed worktree rebase)
+      // made from (kept equal to base_sha, including after a worktree rebase)
       const base = wt !== null ? wt.base_sha : entry.base_sha;
       const reviewsWaived = flags['no-require-reviews'] === true;
       let routineGrant = null;
@@ -965,7 +965,9 @@ export async function runBlock(args, deps = {}) {
       });
       if (configInForce(record)?.gates?.test != null) {
         const testGate = async () => {
-          const green = rows.filter((row) => row.block === id && row.event === 'gate.done' && row.all_ok === true);
+          // A rebase changes the tested tree even when owned commit timestamps are preserved.
+          const lastRebase = rows.reduce((last, row, index) => row.block === id && row.event === 'block.rebase' ? index : last, -1);
+          const green = rows.filter((row, index) => index > lastRebase && row.block === id && row.event === 'gate.done' && row.all_ok === true);
           // Only commits after the block base that touch its owned paths belong to this block.
           // Older rows without timestamps remain usable, but a failed history lookup cannot prove freshness.
           const commit = green.length === 0 ? null : await exec(['git', 'log', '-1', '--format=%ct', `${base}..HEAD`, '--', ...entry.owned_files], {

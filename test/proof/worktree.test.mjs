@@ -13,8 +13,8 @@ import { test } from 'node:test';
 
 const { runRun } = await import('../../src/cli/run.mjs');
 const { runBlock } = await import('../../src/cli/block.mjs');
-const { readAllRows } = await import('../../src/ledger/write.mjs');
-const { readRun, reloadRun, saveRun } = await import('../../src/state/run.mjs');
+const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
+const { readRun, reloadRun, saveRun, writeSigned } = await import('../../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { DEFAULT_BRANCH_TEMPLATE, blockTree, prepareWorktree, removeWorktree, worktreeSettings } = await import('../../src/proof/worktree.mjs');
@@ -519,18 +519,55 @@ test('B62a/B62b (4): a tree whose directory was deleted by hand refuses block cl
   assert.equal(await fx.branchSha(branch), fx.head);
 });
 
-test('B62a (2): block rebase refuses a block with its own worktree (exit 1); the base stays the tree\'s', async () => {
-  const fx = await fixture('b62a-norebase', 'r-b62a-norebase');
+test('B159: block rebase moves an open worktree onto main, updates both bases and requires fresh gates', async () => {
+  const slug = 'b159-worktree-rebase';
+  const runId = `r-${slug}`;
+  const fx = await fixture(slug, runId, `${WORKTREE}${EXTERNAL}gates:\n  test: [node, --test]\n`);
+  await git(['branch', '-M', 'main'], fx.repo);
   const tree = `${fx.repo}-worktrees/B1`;
+  const branch = `forge/${runId}/B1`;
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
-  await git(['commit', '-q', '--allow-empty', '-m', 'moved on'], fx.repo);
+  writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
+  await commitAll(tree);
+  // Future timestamps prove that a rebase invalidates gates by row order, not commit time.
+  const green = () => writeSigned(runId, (row) => appendRow(row, { slug }), {
+    event: 'gate.done', block: 'B1', all_ok: true, ts: '2099-01-01T00:00:00.000Z',
+  });
+  await green();
+  writeFile(fx.repo, 'README.md', '# upstream demo\n');
+  await git(['add', 'README.md'], fx.repo);
+  await git(['commit', '-q', '-m', 'moved on'], fx.repo);
+  const main = (await git(['rev-parse', 'main'], fx.repo)).trim();
   const eventsBefore = await fx.events();
-  assert.deepEqual(await cli(runBlock, ['rebase', 'B1', '--run', 'r-b62a-norebase']), [
-    1,
-    `block rebase: block B1 has its own worktree ${tree} on branch forge/r-b62a-norebase/B1; its base is the base of that tree, so block rebase does not apply — work on the branch in the tree instead\n`,
+  assert.deepEqual(await cli(runBlock, ['rebase', 'B1', '--run', runId]), [
+    0,
+    `block B1 rebased ${fx.head.slice(0, 12)} → ${main.slice(0, 12)}\n`,
   ]);
-  assert.equal((await readRun('r-b62a-norebase')).blocks.B1.base_sha, fx.head);
-  assert.deepEqual(await fx.events(), eventsBefore);
+  const block = (await readRun(runId)).blocks.B1;
+  assert.equal(block.status, 'open');
+  assert.equal(block.base_sha, main);
+  assert.equal(block.base_branch, 'main');
+  assert.deepEqual(block.worktree, { path: tree, branch, base_sha: main });
+  assert.equal((await git(['merge-base', 'main', branch], fx.repo)).trim(), main);
+  assert.equal((await git(['rev-parse', 'HEAD^'], tree)).trim(), main);
+  assert.equal(await git(['show', 'HEAD:src/a.mjs'], tree), 'export const a = 2;\n');
+  assert.deepEqual(await fx.events(), [...eventsBefore, 'block.rebase']);
+  const rows = await fx.rows();
+  assert.deepEqual(strip(rows.at(-1)), {
+    run: runId, event: 'block.rebase', block: 'B1', old_base: fx.head, new_base: main,
+    worktree: true, tokens_source: null, cost_source: null,
+  });
+  assert.deepEqual(verifyRow(rows.at(-1), await loadKey(runId)), { ok: true });
+  assert.deepEqual(await fx.close('B1'), [
+    1,
+    `block B1 open: no green gates run; run: code-forge gates run --run ${runId} --block B1\n`,
+  ]);
+  assert.equal((await readRun(runId)).blocks.B1.status, 'open');
+  assert.deepEqual(await fx.rows(), rows);
+  await green();
+  const [code, text] = await fx.close('B1');
+  assert.equal(code, 0, text);
+  assert.equal((await readRun(runId)).blocks.B1.status, 'closed');
 });
 
 test('B62a (2): a re-open keeps the worktree base — the block base is the tree base, and a --base that resolves elsewhere is refused with exit 1 and nothing recorded', async () => {
