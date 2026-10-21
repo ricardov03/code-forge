@@ -54,6 +54,7 @@ test('related packet names imports, importers and cascade siblings once, sorted,
 test('related boundaries ignore bare/missing/self/untracked references, cap at 12, skip scans above 2000 and drop before paired/context/rules', async () => {
   const repo = await makeRepo();
   writeFile(repo, 'src/empty.js', 'import "package"; import("./missing.js"); require("./empty.js");\n');
+  writeFile(repo, 'src/package', '/* A bare JS specifier must ignore even an existing local file. */\n');
   writeFile(repo, 'src/untracked.ts', 'import "./empty.js";\n');
   const empty = await packet(repo, 'src/empty.js');
   assert.equal(section(empty.text, 'related files (not shown)'), null, 'zero related paths omit the section');
