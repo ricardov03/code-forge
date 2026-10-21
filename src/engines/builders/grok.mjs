@@ -17,7 +17,7 @@
  * swallow risk the way `claude.mjs`'s BLOCKER fix had to guard against, since each `--deny`
  * occurrence's value slot is exactly one token wide.
  *
- * **Return contract (fix round 3):** `{cli, role, argv, cwd, forbiddenRendered?}` — never a
+ * **Return contract (fix round 3):** `{cli, role, argv, cwd, env, forbiddenRendered?}` — never a
  * `stdinFile`. Unlike Claude/Codex closed-book runs, Grok's `--prompt-file <PATH>` ("Single-turn
  * prompt from a file", pinned help) makes the CLI itself read the packet and send its CONTENT as
  * the prompt, so even a closed-book run with every tool denied receives the packet text; the
@@ -40,6 +40,12 @@ import { assertEffortForProvider } from '../efforts.mjs';
 import { assertBaseParams } from './validate-params.mjs';
 
 export const CLI = 'grok';
+
+/** Disable automatic loading of Cursor and Claude compatibility MCP servers for every role. */
+export const GROK_NO_COMPAT_MCP_ENV = Object.freeze({
+  GROK_CURSOR_MCPS_ENABLED: 'false',
+  GROK_CLAUDE_MCPS_ENABLED: 'false',
+});
 
 /**
  * Built-in tool names the closed-book command denies wholesale via `--disallowed-tools` (in
@@ -78,7 +84,7 @@ function assertValidEffort(effort) {
 
 /**
  * @param {GrokBuildParams} params
- * @returns {{cli: "grok", role: "coder", argv: string[], cwd: string, forbiddenRendered: ReadonlyArray<RenderedGrokEntry>}}
+ * @returns {{cli: "grok", role: "coder", argv: string[], cwd: string, env: typeof GROK_NO_COMPAT_MCP_ENV, forbiddenRendered: ReadonlyArray<RenderedGrokEntry>}}
  */
 function buildCoderArgv(params) {
   // B4.2: the coder's deny list is `mergeForbidden()` (FORBIDDEN + the coder-only entries). A
@@ -95,12 +101,12 @@ function buildCoderArgv(params) {
   for (const rule of flattenRuleStrings(renderedForbidden)) {
     argv.push('--deny', rule);
   }
-  return { cli: CLI, role: 'coder', argv, cwd, forbiddenRendered: renderedForbidden };
+  return { cli: CLI, role: 'coder', argv, cwd, env: GROK_NO_COMPAT_MCP_ENV, forbiddenRendered: renderedForbidden };
 }
 
 /**
  * @param {GrokBuildParams} params
- * @returns {{cli: "grok", role: "reviewer"|"judge"|"s2"|"author"|"facts"|"delegate", argv: string[], cwd: string}}
+ * @returns {{cli: "grok", role: "reviewer"|"judge"|"s2"|"author"|"facts"|"delegate", argv: string[], cwd: string, env: typeof GROK_NO_COMPAT_MCP_ENV}}
  */
 function buildClosedBookArgv(params) {
   const { model, effort, promptPath, cwd, schema, systemPromptText } = params;
@@ -119,7 +125,7 @@ function buildClosedBookArgv(params) {
   argv.push('--permission-mode', 'dontAsk');
   argv.push('--cwd', cwd);
   if (systemPromptText !== undefined) argv.push('--system-prompt-override', systemPromptText);
-  return { cli: CLI, role, argv, cwd };
+  return { cli: CLI, role, argv, cwd, env: GROK_NO_COMPAT_MCP_ENV };
 }
 
 /**
