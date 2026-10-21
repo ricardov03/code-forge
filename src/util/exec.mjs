@@ -50,7 +50,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { registerPid, unregisterPid } from './reaper.mjs';
+import path from 'node:path';
+import { groupMembers, readStartTime, registerPid, stopMembers, unregisterPid } from './reaper.mjs';
 import { pidsDir } from './tmp.mjs';
 
 /** Grace period after SIGTERM before escalating to SIGKILL, in milliseconds. */
@@ -170,16 +171,30 @@ export function exec(argv, opts = {}) {
   const { cwd, env, timeoutMs, input, okExitCodes = [0], maxBufferBytes = DEFAULT_MAX_BUFFER_BYTES } = opts;
   const [command, ...args] = argv;
 
+  /** @type {NodeJS.ProcessEnv} */
+  const childEnv = { ...(env ?? process.env), CODE_FORGE_OWNER_PID: String(process.pid) };
+  const ownerStart = readStartTime(process.pid);
+  if (ownerStart) childEnv.CODE_FORGE_OWNER_START_TIME = ownerStart;
+  let spawnRegistry = null;
+  try {
+    spawnRegistry = pidsDir();
+    const rootId = path.basename(path.dirname(spawnRegistry));
+    const runAt = process.argv.indexOf('--run');
+    const runId = childEnv.CODE_FORGE_RUN_ID ?? process.env.CODE_FORGE_RUN_ID
+      ?? (runAt >= 0 ? process.argv[runAt + 1] : undefined) ?? (/^r-/.test(rootId) ? rootId : undefined);
+    if (runId) childEnv.CODE_FORGE_RUN_ID = runId;
+  } catch { /* registry hygiene must never prevent a spawn */ }
+
   return new Promise((resolve) => {
     const stdinMode = input === undefined ? 'ignore' : 'pipe';
-    const child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: [stdinMode, 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, env: childEnv, shell: false, detached: true, stdio: [stdinMode, 'pipe', 'pipe'] });
     const pid = child.pid;
     /** @type {string | null} */
     let registryDir = null;
     if (typeof pid === 'number') {
       trackChild(pid);
       try {
-        registryDir = pidsDir();
+        registryDir = spawnRegistry ?? pidsDir();
         registerPid(registryDir, pid, command);
       } catch {
         registryDir = null;
@@ -200,6 +215,7 @@ export function exec(argv, opts = {}) {
     let timedOut = false;
     let overBuffer = false;
     let settled = false;
+    let remaining = Promise.resolve();
     /** @type {NodeJS.Timeout | undefined} */
     let termTimer;
     /** @type {NodeJS.Timeout | undefined} */
@@ -217,11 +233,12 @@ export function exec(argv, opts = {}) {
     const stderrText = () => Buffer.concat(stderrChunks).toString('utf8');
 
     /** @param {ExecResult} result */
-    const settle = (result) => {
+    const settle = async (result) => {
       if (settled) return;
       settled = true;
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
+      await remaining;
       if (typeof pid === 'number') {
         untrackChild(pid);
         if (registryDir !== null) {
@@ -287,17 +304,16 @@ export function exec(argv, opts = {}) {
       });
     });
 
-    // Once we've decided to kill (timeout or over-buffer), don't wait for 'close' — a
-    // grandchild that inherited the pipes can keep them open indefinitely, and 'close' would
-    // then never fire even though the child we care about is dead. 'exit' fires as soon as the
-    // child process itself has terminated, which is what "killed after timeout_ms" means. Before
-    // settling (which cancels the grace timer), SIGKILL the group: a grandchild that trapped the
-    // SIGTERM must not survive just because its parent died first.
+    // Capture the group before unregistering on EVERY leader exit. Never signal the dead
+    // leader/group again: each remaining member has its own synchronous identity check.
     child.on('exit', (code, signal) => {
-      if (timedOut || overBuffer) {
-        killGroup('SIGKILL');
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
+      const members = typeof pid === 'number' ? groupMembers(pid) : new Map();
+      remaining = stopMembers(members, KILL_GRACE_MS).then(() => {});
+      if (timedOut || overBuffer || members.size > 0) {
         settle({
-          result: 'failed',
+          result: !timedOut && !overBuffer && code !== null && okExitCodes.includes(code) ? 'ok' : 'failed',
           code,
           signal,
           stdout: stdoutText(),
