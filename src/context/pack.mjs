@@ -11,7 +11,8 @@
  *     require_coder_tests: false                B63b: close needs the coder's `TESTS … exit=0` line
  *
  * `assemblePack` turns it into ONE pack for a block, in this order: the header (run, block, level,
- * owned files, test files when the block has them, worktree path and branch when it has one), the
+ * owned files, test files when the block has them, worktree path and branch when it has one,
+ * code-forge command and version when supplied), the
  * commands (never run; each argv shown POSIX shell-quoted, so a pasted line expands nothing), the
  * built-in proof rule, each rules file, then the lessons file — every file section headed by its
  * source path (an empty file: the heading alone). Over `max_lines` the lessons are cut first, then the
@@ -246,6 +247,7 @@ export const argvText = (argv) => argv.map(argvToken).join(' ');
  * @property {string[]} [owned]
  * @property {string[] | null} [tests]
  * @property {{path: string, branch: string} | null} [worktree]
+ * @property {{node: string, bin: string, version: string} | null} [codeForge]
  */
 
 /**
@@ -259,6 +261,7 @@ export function assemblePack({ settings, sources, block }) {
   /** @type {Array<[string, unknown]>} */
   const values = [['level', block.level], ...(block.owned ?? []).map((f) => /** @type {[string, unknown]} */ (['owned file', f])), ...(block.tests ?? []).map((f) => /** @type {[string, unknown]} */ (['test file', f]))];
   if (block.worktree) values.push(['worktree path', block.worktree.path], ['worktree branch', block.worktree.branch]);
+  if (block.codeForge) values.push(['code-forge node', block.codeForge.node], ['code-forge bin', block.codeForge.bin], ['code-forge version', block.codeForge.version]);
   for (const [label, v] of values) {
     if (typeof v === 'string' && CONTROL.test(v)) throw new ContextError('control-character', `block ${block.block}: ${label} ${JSON.stringify(v)} contains a control character`);
   }
@@ -269,6 +272,14 @@ export function assemblePack({ settings, sources, block }) {
     for (const f of block.tests) header.push(`- ${f}`);
   }
   if (block.worktree) header.push(`worktree: ${block.worktree.path}`, `branch: ${block.worktree.branch}`);
+  if (block.codeForge) {
+    header.push(
+      '## code-forge',
+      `run code-forge verbs with exactly: ${argvText([block.codeForge.node, block.codeForge.bin])}`,
+      `version: ${block.codeForge.version}`,
+      'do not use another code-forge from PATH',
+    );
+  }
   if (settings !== null) {
     header.push('## commands (never run by code-forge)');
     const keys = COMMAND_KEYS.filter((k) => Object.hasOwn(settings.commands, k));
