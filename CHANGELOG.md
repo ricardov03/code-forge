@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Gate sets per block kind (`gates.kinds`), and unknown config keys now say to upgrade with the running version (B160)
+
 ### Changed
 
 - The test leak check ignores a live code-forge run of another project (its run record names a workspace outside the temp dir, raw or resolved path) and that project's ledger; test-made runs stay leaks (B158)
