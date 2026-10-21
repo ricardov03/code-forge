@@ -327,7 +327,11 @@ open is refused and nothing is recorded:
 If the open fails after the tree was made, the tree and the branch it made are removed again.
 
 A re-open with `--attempt` reuses the same tree and branch, and the block keeps the tree's base; a
-`--base` naming another commit is refused, and so is `block rebase`. A tree that is gone (removed,
+`--base` naming another commit is refused. For an open worktree block, `block rebase <id> --run <run>`
+rebases its branch onto its recorded base branch's head and updates both recorded bases. Commit or
+clean the tree first. Any upstream commit touching an owned file refuses the rebase; a Git conflict
+aborts it and restores the old head. Run the gates again after rebasing: earlier green rows no
+longer satisfy close. A block without a recorded base branch cannot rebase. A tree that is gone (removed,
 or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
 another branch or a detached HEAD refuses the re-open.
 

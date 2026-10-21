@@ -502,18 +502,16 @@ export async function attemptBlock({ runId, id, writeRow }) {
  * in between touched a file this block owns (that is a conflict ⇒ stop). Rename detection is OFF
  * (`--no-renames`): a rename lists both its old and its new path, so moving an owned file away
  * is a conflict too. Never silent. Owned means `ownsFile` (B57: a directory entry owns the files
- * below it). B62a: refused for an open block with its own worktree (`worktree-rebase`).
- * B134: a closed worktree block instead rebases its branch onto its recorded base branch,
- * retaining every changed owned file's blob; a conflict or changed blob restores the old head.
+ * below it). Worktree blocks rebase their branch onto the recorded base branch. Open blocks
+ * refuse upstream commits touching owned files; closed blocks retain every changed owned blob.
+ * A conflict or changed reviewed blob restores the old head.
  * @param {{runId: string, id: string, head?: string, writeRow: WriteRow}} opts
  * @returns {Promise<{old_base: string, new_base: string}>}
  */
 export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
-  if (['closed', 'awaiting_human_check'].includes((await readRun(runId)).blocks[id]?.status)) return rebaseClosedBlock({ runId, id, writeRow });
+  const block = (await readRun(runId)).blocks[id];
+  if (block?.worktree || ['closed', 'awaiting_human_check'].includes(block?.status)) return rebaseWorktreeBlock({ runId, id, writeRow });
   return mutateRun(runId, id, writeRow, async (record, block) => {
-    // B62a: a worktree block's base is the commit its tree started from; moving it would leave the
-    // tree on its old base, so the rebase is refused
-    if (block.worktree) throw new StateError('worktree-rebase', `block ${id} has its own worktree ${block.worktree.path} on branch ${block.worktree.branch}; its base is the base of that tree, so block rebase does not apply — work on the branch in the tree instead`);
     const cwd = record.workspace;
     const newBase = await resolveCommit(head, cwd);
     const ancestor = await git(isAncestorArgv(block.base_sha, newBase), cwd, [0, 1]);
@@ -546,44 +544,56 @@ async function committedBlobs(cwd, ref, files) {
 }
 
 /**
- * Closed blocks have a separate mutation path: check their status again under the lock,
- * restore the branch on failure (including a failed signed write), and retain closed/awaiting status.
+ * Recheck worktree block status under the lock, restore the branch on failure (including a
+ * failed signed write), and retain its open/closed/awaiting status.
  * @param {{runId: string, id: string, writeRow: WriteRow}} opts
  * @returns {Promise<{old_base: string, new_base: string}>}
  */
-async function rebaseClosedBlock({ runId, id, writeRow }) {
+async function rebaseWorktreeBlock({ runId, id, writeRow }) {
   return withRunLock(runId, async () => {
     const record = await readRun(runId);
     if (record.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
     const block = record.blocks[id];
-    if (!['closed', 'awaiting_human_check'].includes(block?.status) || !block.worktree) throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
+    if (!['open', 'closed', 'awaiting_human_check'].includes(block?.status) || !block.worktree) throw new StateError('no-block', `block ${id} is not open in run ${runId}`);
+    const closed = block.status !== 'open';
     if (!block.base_branch) throw new StateError('rebase-no-base', `block ${id} has no recorded base branch`);
     const tree = block.worktree.path;
     const branch = await git(['git', 'symbolic-ref', '--quiet', 'HEAD'], tree, [0, 1]);
     if (branch.stdout.trim() !== `refs/heads/${block.worktree.branch}`) throw new StateError('worktree-rebase', `block ${id}: its worktree is not on branch ${block.worktree.branch}`);
     // A reset must never discard edits made after close, or abort an earlier rebase.
     const status = await git(['git', 'status', '--porcelain'], tree);
-    if (status.stdout.length > 0) throw new StateError('rebase-conflict', 'rebase-conflict');
+    if (status.stdout.length > 0) throw new StateError(closed ? 'rebase-conflict' : 'rebase-dirty', closed ? 'rebase-conflict' : `rebase-dirty: block ${id}: commit or clean first`);
     const oldHead = await resolveCommit('HEAD', tree);
     const newBase = await resolveCommit(`refs/heads/${block.base_branch}`, record.workspace);
     const top = await repoTop(record.workspace);
     const prefix = path.relative(top, realpathSync(record.workspace)).split(path.sep).join('/');
-    const diff = await git(['git', 'diff', '--no-renames', '--name-only', '-z', block.base_sha, oldHead, '--'], tree);
-    const files = diff.stdout.split('\0').filter((file) => file.length > 0 && (
+    const owns = (/** @type {string} */ file) => (
       ownsFile(block.owned_files, file, block.owned_kinds) ||
       (prefix !== '' && file.startsWith(`${prefix}/`) && ownsFile(block.owned_files, file.slice(prefix.length + 1), block.owned_kinds))
-    )).sort();
-    const before = await committedBlobs(tree, oldHead, files);
+    );
+    let files = [];
+    if (closed) {
+      const diff = await git(['git', 'diff', '--no-renames', '--name-only', '-z', block.base_sha, oldHead, '--'], tree);
+      files = diff.stdout.split('\0').filter((file) => file.length > 0 && owns(file)).sort();
+    } else {
+      // Inspect every upstream commit, including changes later reverted and both rename paths.
+      const upstream = await git(['git', 'log', '--format=', '--no-renames', '--name-only', '-z', '-m', `${block.base_sha}..${newBase}`, '--'], tree);
+      const conflicts = [...new Set(upstream.stdout.split('\0').filter((file) => file.length > 0 && owns(file)))].sort();
+      if (conflicts.length > 0) throw new StateError('owned-conflict', `block ${id}: commits since its base changed owned files: ${conflicts.join(', ')}`);
+    }
+    const before = closed ? await committedBlobs(tree, oldHead, files) : null;
     const moved = { old_base: block.base_sha, new_base: newBase };
     try {
       const rebased = await exec(['git', '-C', tree, 'rebase', newBase], { cwd: record.workspace, env: gitEnv(), timeoutMs: 30000 });
       if (rebased.result !== 'ok') throw new StateError('rebase-conflict', 'rebase-conflict');
-      const after = await committedBlobs(tree, 'HEAD', files);
-      const changed = files.filter((file) => before.get(file) !== after.get(file));
-      if (changed.length > 0) throw new StateError('rebase-changed-reviewed', `rebase-changed-reviewed ${changed.join(', ')}`);
+      if (before !== null) {
+        const after = await committedBlobs(tree, 'HEAD', files);
+        const changed = files.filter((file) => before.get(file) !== after.get(file));
+        if (changed.length > 0) throw new StateError('rebase-changed-reviewed', `rebase-changed-reviewed ${changed.join(', ')}`);
+      }
       block.base_sha = newBase;
       block.worktree.base_sha = newBase;
-      await writeSigned(runId, writeRow, { event: 'block.rebase', block: id, ...moved, closed: true });
+      await writeSigned(runId, writeRow, { event: 'block.rebase', block: id, ...moved, ...(closed ? { closed: true } : { worktree: true }) });
       await saveRun(record);
       return moved;
     } catch (err) {
