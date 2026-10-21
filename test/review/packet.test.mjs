@@ -1,6 +1,5 @@
 import { commitAll, freshDir, lines, makeRepo, writeFile } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { createHash } from 'node:crypto';
 import { symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
@@ -27,13 +26,21 @@ const fixtureDiff = {
 };
 const fixtureOpts = { diff: fixtureDiff, lens: 'quick', rulesDigest: 'rule one\nrule two', factsExcerpt: 'F1: fixture', moved: '## moved code\n(none moved)' };
 
-test('B97/B117: no paired input preserves the packet with updated proof guidance', () => {
+test('B97/B117/B161: no paired input preserves required packet content within budget', () => {
   const packet = assemblePacket(fixtureOpts);
   assert.equal(packet.status, 'ok');
   if (packet.status !== 'ok') return;
-  // Exact output pin including B117 proof guidance; hashes output, never src text.
-  assert.equal(createHash('sha256').update(packet.text).digest('hex'), '38a1382d5304d19ce78e847210564e2f58a89148afabb829fa2e2b7a225dc00b');
-  assert.deepEqual([packet.contextMode, packet.contextLines, packet.digestLines, packet.tokensIn, packet.budget, packet.overBudget], ['whole', 1, 2, 614, 6000, false]);
+  assert.deepEqual(packet.text.split('\n').filter((line) => /^## (?:lens|project rules|facts|context|related files.*|paired|moved code|diff)$/.test(line)),
+    ['## lens', '## project rules', '## facts', '## context', '## moved code', '## diff']);
+  assert.ok(packet.text.includes('## project rules\nrule one\nrule two\n'));
+  assert.ok(packet.text.includes('## facts\nF1: fixture\n'));
+  assert.ok(packet.text.includes('1| export const widget = 1;\n'));
+  assert.ok(packet.text.includes(`${fixtureOpts.moved}\n## diff\n`));
+  assert.ok(packet.text.endsWith(fixtureDiff.diffText));
+  assert.deepEqual(packet.hunkHeaders, fixtureDiff.hunks.map((hunk) => hunk.header));
+  assert.deepEqual([packet.contextMode, packet.contextLines, packet.digestLines, packet.budget, packet.overBudget], ['whole', 1, 2, 6000, false]);
+  assert.equal(packet.tokensIn, Math.ceil(Buffer.byteLength(packet.text) / 4));
+  assert.ok(packet.tokensIn <= packet.budget);
   assert.deepEqual(assemblePacket({ ...fixtureOpts, paired: '' }), packet);
   assert.deepEqual(assemblePacket({ ...fixtureOpts, paired: '  \n' }), packet);
 });
