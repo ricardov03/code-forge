@@ -15,7 +15,7 @@
  *     `HOME`, `TMPDIR` and the cwd at it, and exports it as `CODE_FORGE_TEST_ROOT`;
  *  4. then sweeps stale `code-forge-test-*` roots left by killed runs — their registered children
  *     are reaped (`src/util/reaper.mjs`, start-time checked) and the directories removed;
- *  5. on exit, reaps registered children, fails on new guarded entries except verified live foreign locks, and removes its root.
+ *  5. on exit, reaps registered children, fails on new guarded entries except verified live foreign locks and outside-temp runs with their project ledgers, and removes its root.
  *     (`leakedEntries`: new paths of a run already in the baseline are a live run, not a leak.)
  * `src/**` modules are imported dynamically, AFTER `HOME` is pinned, so no `src` module can ever
  * see the real `HOME` from this process.
@@ -57,19 +57,19 @@ export function snapshotGuarded(dirs = GUARDED_DIRS) {
 }
 
 /**
- * The run id a path under `<dir>/runs/` belongs to, when that run's record `<dir>/runs/<id>.json`
- * is in the baseline: `<id>` (its directory), `<id>.<anything>` or anything under `<id>/`.
+ * Whether a path under `<dir>/runs/` belongs to a verified run: `<id>` (its directory),
+ * `<id>.<anything>` or anything under `<id>/`.
  * The id is matched exactly, never as a prefix (`r-1` does not cover `r-10.lock`).
  * @param {string} dir - a guarded directory.
  * @param {string} p - a path under `dir`.
- * @param {ReadonlySet<string>} baseline
+ * @param {(id: string) => boolean} hasRun
  * @returns {boolean}
  */
-function belongsToBaselineRun(dir, p, baseline) {
+function belongsToRun(dir, p, hasRun) {
   const runs = path.join(dir, 'runs');
   if (!p.startsWith(runs + path.sep)) return false;
   const seg = p.slice(runs.length + 1).split(path.sep)[0];
-  const covered = (/** @type {string} */ id) => id !== '' && baseline.has(path.join(runs, `${id}.json`));
+  const covered = (/** @type {string} */ id) => id !== '' && hasRun(id);
   if (p !== path.join(runs, seg)) return covered(seg);
   if (covered(seg)) return true;
   for (let i = seg.indexOf('.'); i !== -1; i = seg.indexOf('.', i + 1)) {
@@ -96,6 +96,18 @@ function probeProcess(pid) {
     return match ? { ppid: Number(match[1]), start: match[2] } : null;
   } catch {
     return null;
+  }
+}
+
+/**
+ * @param {string} p
+ * @returns {string}
+ */
+function realpathOrRaw(p) {
+  try {
+    return realpathSync(p);
+  } catch {
+    return p;
   }
 }
 
@@ -130,26 +142,76 @@ function isForeignLock(p, probe) {
 }
 
 /**
+ * Current run ids and project slugs whose absolute workspaces are outside all test roots.
+ * Missing, unreadable or malformed records cannot establish an exemption.
+ * @param {string} dir
+ * @param {string} tempDir
+ * @returns {Map<string, string | undefined>}
+ */
+function foreignRuns(dir, tempDir) {
+  const runs = path.join(dir, 'runs');
+  /** @type {Map<string, string | undefined>} */
+  const foreign = new Map();
+  let names;
+  try {
+    names = readdirSync(runs);
+  } catch {
+    return foreign;
+  }
+  const testBases = [tempDir, TEST_BASE].flatMap((base) => [base, realpathOrRaw(base)]);
+  for (const name of names) {
+    if (!name.endsWith('.json') || name.length === 5) continue;
+    try {
+      const record = JSON.parse(readFileSync(path.join(runs, name), 'utf8'));
+      if (record === null || typeof record !== 'object' || Array.isArray(record)
+        || typeof record.workspace !== 'string' || !path.isAbsolute(record.workspace)) continue;
+      const workspaces = [record.workspace, realpathOrRaw(record.workspace)];
+      const insideTests = workspaces.some((workspace) => testBases.some((base) => {
+        const relative = path.relative(base, workspace);
+        return relative === '' || (relative !== '..' && !relative.startsWith(`..${path.sep}`) && !path.isAbsolute(relative));
+      }));
+      if (!insideTests) foreign.set(name.slice(0, -5), typeof record.project === 'string' ? record.project : undefined);
+    } catch {
+      // Unreadable or invalid run records remain unverified.
+    }
+  }
+  return foreign;
+}
+
+/**
  * The new paths under the guarded dirs that count as leaks, sorted. A path not in `baseline` is a
  * leak unless it belongs to a run whose record was already in the baseline (a live run of the
  * developer that started before the tests): `runs/<id>`, `runs/<id>.<anything>`, `runs/<id>/…`.
  * Verified live foreign `locks/<sha>.lock` owners are also exempt, as is a new locks directory
  * containing no leaks. Unknown owner identity or ancestry fails closed.
+ * New `runs/<id>`, `runs/<id>.<anything>` and nested paths, plus matching project ledgers, are also exempt when a current record names an absolute workspace outside the raw and resolved real temp dir and TEST_BASE.
  * @param {Iterable<string>} baseline - the snapshot taken at start.
  * @param {Iterable<string>} now - the snapshot taken at exit.
  * @param {readonly string[]} [dirs] - defaults to the real guarded directories.
  * @param {ProcessProbe} [probe] - defaults to synchronous /bin/ps.
+ * @param {string} [tempDir] - defaults to CODE_FORGE_REAL_TMPDIR.
  * @returns {string[]}
  */
-export function leakedEntries(baseline, now, dirs = GUARDED_DIRS, probe = probeProcess) {
+export function leakedEntries(baseline, now, dirs = GUARDED_DIRS, probe = probeProcess, tempDir = realTmp) {
   const before = new Set(baseline);
   const leaked = [];
   const newLockDirs = [];
+  /** @type {Map<string, Map<string, string | undefined>>} */
+  const foreignByDir = new Map();
   for (const p of new Set(now)) {
     if (before.has(p)) continue;
     const dir = dirs.find((d) => p.startsWith(d + path.sep));
-    if (dir !== undefined && belongsToBaselineRun(dir, p, before)) continue;
+    if (dir !== undefined && belongsToRun(dir, p, (id) => before.has(path.join(dir, 'runs', `${id}.json`)))) continue;
     if (dir !== undefined) {
+      let foreign = foreignByDir.get(dir);
+      if (foreign === undefined) {
+        foreign = foreignRuns(dir, tempDir);
+        foreignByDir.set(dir, foreign);
+      }
+      if (belongsToRun(dir, p, (id) => foreign.has(id))
+        || [...foreign.values()].some((project) => project !== undefined
+          && path.dirname(p) === path.join(dir, 'ledger')
+          && path.basename(p) === `${project}.jsonl`)) continue;
       const locks = path.join(dir, 'locks');
       if (p === locks) {
         try {

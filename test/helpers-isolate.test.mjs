@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -73,6 +73,130 @@ test('a new run id (no .json in the baseline) is reported: its .json, .lock and 
     path.join(runs, 'r-2.lock'),
     path.join(runs, 'r-2', 'x'),
   ]);
+});
+
+test('a new foreign run outside the real temp dir has 0 leaks for its record, key, lock and nested paths in both guarded dirs', () => {
+  const { dirs } = fakeDirs('new-foreign-run');
+  const realTemp = path.join(PARENT, 'new-foreign-run', 'real-tmp');
+  mkdirSync(realTemp);
+  const baseline = snapshotGuarded(dirs);
+  for (const dir of dirs) {
+    const runs = path.join(dir, 'runs');
+    writeFileSync(path.join(runs, 'r-2.json'), JSON.stringify({ workspace: '/some/other/project', project: 'other' }));
+    writeFileSync(path.join(runs, 'r-2.key'), '');
+    writeFileSync(path.join(runs, 'r-2.lock'), '');
+    mkdirSync(path.join(runs, 'r-2', 'state'), { recursive: true });
+    writeFileSync(path.join(runs, 'r-2', 'state', 'result.json'), '{}');
+  }
+  const now = snapshotGuarded(dirs);
+  assert.equal(now.size - baseline.size, 12, 'six new paths per foreign run');
+  assert.deepEqual(leakedEntries(baseline, now, dirs, foreignProbe, realTemp), [], 'all 12 foreign run paths are exempt');
+});
+
+for (const aliased of ['temp dir', 'workspace']) {
+  test(`inside-temp runs remain leaks when the ${aliased} uses a symlink`, async () => {
+    const { dirs, home } = fakeDirs(`symlink-${aliased}`);
+    // Outside TEST_BASE so its containment check cannot mask a broken temp-dir check.
+    const fixture = realpathSync(await mkdtemp(path.join(process.env.CODE_FORGE_REAL_TMPDIR, 'isolate-alias-')));
+    try {
+      const realTemp = path.join(fixture, 'temp');
+      const alias = path.join(fixture, 'alias');
+      mkdirSync(path.join(realTemp, 'repo'), { recursive: true });
+      symlinkSync(realTemp, alias, 'dir');
+      mkdirSync(path.join(home, 'ledger'));
+      const baseline = snapshotGuarded(dirs);
+      const record = path.join(home, 'runs', 'inside.json');
+      const key = path.join(home, 'runs', 'inside.key');
+      const ledger = path.join(home, 'ledger', 'inside.jsonl');
+      writeFileSync(record, JSON.stringify({
+        workspace: path.join(aliased === 'workspace' ? alias : realTemp, 'repo'),
+        project: 'inside',
+      }));
+      writeFileSync(key, '');
+      writeFileSync(ledger, '');
+      const tempDir = aliased === 'temp dir' ? alias : realTemp;
+      assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe, tempDir),
+        [record, key, ledger].sort(), 'the inside-temp record, key and ledger must all leak');
+    } finally {
+      await rm(fixture, { recursive: true, force: true });
+    }
+  });
+}
+
+test('foreign run sidecars accept any suffix while unmatched and prefix-only ids still leak', () => {
+  const { dirs, home } = fakeDirs('foreign-sidecars');
+  const realTemp = path.join(PARENT, 'foreign-sidecars', 'real-tmp');
+  mkdirSync(realTemp);
+  const baseline = snapshotGuarded(dirs);
+  const runs = path.join(home, 'runs');
+  writeFileSync(path.join(runs, 'r-2.json'), JSON.stringify({ workspace: '/some/other/project' }));
+  for (const name of ['r-2.json.tmp', 'r-2.custom', 'r-20.json.tmp', 'r-2x.json.tmp', 'other.json.tmp']) {
+    writeFileSync(path.join(runs, name), '');
+  }
+  assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe, realTemp), [
+    path.join(runs, 'other.json.tmp'),
+    path.join(runs, 'r-20.json.tmp'),
+    path.join(runs, 'r-2x.json.tmp'),
+  ], 'only the sidecars with no matching run record leak');
+});
+
+test('new ledger files are exempt only for an outside-temp run with the exact project slug in the same guarded dir', () => {
+  const { dirs, home, repo } = fakeDirs('new-foreign-ledger');
+  const realTemp = path.join(PARENT, 'new-foreign-ledger', 'real-tmp');
+  mkdirSync(realTemp);
+  for (const dir of dirs) mkdirSync(path.join(dir, 'ledger'));
+  // The matching record is already present: ledger matching must inspect current records.
+  writeFileSync(path.join(home, 'runs', 'r-1.json'), JSON.stringify({ workspace: '/some/other/project', project: 'other' }));
+  const baseline = snapshotGuarded(dirs);
+  for (const [dir, slug] of [[home, 'other'], [home, 'other-prefix'], [repo, 'other']]) {
+    writeFileSync(path.join(dir, 'ledger', `${slug}.jsonl`), '');
+  }
+  assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe, realTemp), [
+    path.join(home, 'ledger', 'other-prefix.jsonl'),
+    path.join(repo, 'ledger', 'other.jsonl'),
+  ].sort(), 'exactly two unmatched ledger files leak; the matching foreign ledger is exempt');
+});
+
+test('inside-temp, missing, unreadable and malformed run records fail closed alongside a valid foreign run', () => {
+  const { dirs, home } = fakeDirs('new-invalid-runs');
+  const realTemp = path.join(PARENT, 'new-invalid-runs', 'real-tmp');
+  mkdirSync(realTemp);
+  mkdirSync(path.join(home, 'ledger'));
+  const baseline = snapshotGuarded(dirs);
+  const runs = path.join(home, 'runs');
+  /** @type {string[]} */
+  const expected = [];
+  const cases = [
+    { id: 'inside', workspace: path.join(realTemp, 'repo') },
+    { id: 'temp-root', workspace: realTemp },
+    { id: 'test-base', workspace: path.join(isolate.TEST_BASE, 'repo') },
+    { id: 'relative', workspace: 'some/project' },
+    { id: 'malformed' },
+    { id: 'missing' },
+    { id: 'unreadable' },
+  ];
+  for (const { id, workspace } of cases) {
+    const record = path.join(runs, `${id}.json`);
+    if (id === 'unreadable') mkdirSync(record);
+    else if (id !== 'missing') writeFileSync(record, workspace ? JSON.stringify({ workspace, project: id }) : '{');
+    if (id !== 'missing') expected.push(record);
+    for (const ext of ['key', 'lock']) {
+      const file = path.join(runs, `${id}.${ext}`);
+      writeFileSync(file, '');
+      expected.push(file);
+    }
+    const state = path.join(runs, id);
+    mkdirSync(state);
+    writeFileSync(path.join(state, 'result.json'), '{}');
+    const ledger = path.join(home, 'ledger', `${id}.jsonl`);
+    writeFileSync(ledger, '');
+    expected.push(state, path.join(state, 'result.json'), ledger);
+  }
+  writeFileSync(path.join(runs, 'foreign.json'), JSON.stringify({ workspace: '/some/other/project', project: 'foreign' }));
+  writeFileSync(path.join(home, 'ledger', 'foreign.jsonl'), '');
+  assert.equal(expected.length, 41, 'all paths of the seven invalid runs must leak');
+  assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe, realTemp), expected.sort(),
+    'exactly 41 invalid run and ledger paths leak; the two valid foreign paths are exempt');
 });
 
 test('prefix-only id match is a leak: r-1 in the baseline does not cover r-10.lock, r-10/ or r-1x.lock', () => {
