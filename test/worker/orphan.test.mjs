@@ -36,10 +36,13 @@ test('B113: an open run stays alive for 10 poll ticks and then completes exactly
   const { repo, runId } = await makeRepo();
   const w = await startWorker(repo, runId, { FAKE_ANSWER: VALID_REVIEW });
   try {
+    // Idle polls publish no signal; the heartbeat uses an independent 5 s timer.
+    // Keep the ten-poll sleep fallback and check the worker's observed liveness.
     await new Promise((resolve) => setTimeout(resolve, 10 * pollMs));
     assert.deepEqual([w.child.exitCode, w.child.signalCode, readWorker(repo)?.pid], [null, null, w.pid]);
     const { ticket } = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
-    assert.equal(await waitFor(() => readResult(repo, runId, ticket) !== null), true);
+    // The result is published before its done marker; wait for both under load.
+    assert.equal(await waitFor(() => readResult(repo, runId, ticket) !== null && queued(repo, 'done').includes(ticket), 60000), true);
     assert.equal(readResult(repo, runId, ticket)?.approved, true);
     assert.deepEqual(queued(repo, 'done'), [ticket]);
     assert.deepEqual([w.child.exitCode, w.child.signalCode], [null, null]);
