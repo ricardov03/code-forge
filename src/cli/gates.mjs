@@ -56,6 +56,18 @@ import { checkTranscript } from '../gates/transcript-grep.mjs';
 /** B60: the gate env rule, in the same words as the schema and proof.md. */
 const GATE_ENV_RULE = 'code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.';
 
+/** Per-gate timeout: explicit milliseconds, configured whole seconds, then five minutes.
+ * @param {{flag?: number, config?: Record<string, any> | null}} opts
+ * @returns {number}
+ */
+export function gateTimeoutMs({ flag, config }) {
+  const seconds = config?.gates?.timeout_s;
+  if (config?.gates && Object.hasOwn(config.gates, 'timeout_s') && (!Number.isInteger(seconds) || seconds < 30 || seconds > 7200)) {
+    throw new TypeError('gates.timeout_s must be an integer 30..7200');
+  }
+  return flag ?? (seconds === undefined ? 300000 : seconds * 1000);
+}
+
 /**
  * Auto-detected gates (`detectGates`), overridden per-key by an on-disk `.code-forge.yml`'s
  * `gates.{test,lint,types,format}` when that key is explicitly present — a project that already
@@ -236,8 +248,8 @@ export async function runGatesVerb(args, deps = {}) {
         err('gates run: --timeout-ms requires a value\n');
         return 2;
       }
-      const timeoutMs = timeoutFlag.value !== undefined ? Number(timeoutFlag.value) : undefined;
-      if (timeoutMs !== undefined && !(Number.isFinite(timeoutMs) && timeoutMs > 0)) {
+      const flagTimeoutMs = timeoutFlag.value !== undefined ? Number(timeoutFlag.value) : undefined;
+      if (flagTimeoutMs !== undefined && !(Number.isFinite(flagTimeoutMs) && flagTimeoutMs > 0)) {
         err(`gates run: --timeout-ms must be a finite number > 0, got "${timeoutFlag.value}"\n`);
         return 2;
       }
@@ -279,6 +291,7 @@ export async function runGatesVerb(args, deps = {}) {
         cwd = placed.tree.workspace;
       }
       const configured = await configuredGates(placed ? placed.workspace : cwd); // loaded once: the gates and the threshold
+      const timeoutMs = gateTimeoutMs({ flag: flagTimeoutMs, config: { gates: configured } });
       const gates = resolveGates(cwd, configured);
       const inTree = placed ? { worktree: placed.tree.path } : {};
       let ran;
@@ -306,14 +319,14 @@ export async function runGatesVerb(args, deps = {}) {
           if (scope.scope !== 'related' || !argv?.includes('{test_files}')) throw new StateError('light-tests', 'light-tests: block tests and a gates.test {test_files} item are required');
           planned = { ...planned, lightTestFiles: scope.files };
         }
-        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates: planned, cwd, threshold, changed: light ? false : changed, slug, ...(timeoutMs ? { timeoutMs } : {}) });
+        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates: planned, cwd, threshold, changed: light ? false : changed, slug, timeoutMs });
         if (guarded.result === 'proof.busy') {
           out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
           return 1;
         }
         ran = /** @type {{value: {results: any[], allOk: boolean, ledger_slug?: string, files?: Record<string, string>, changed_scope?: import('../gates/expand.mjs').ChangedScope}}} */ (guarded).value;
       } else {
-        ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+        ran = await runGates(gates, { cwd, timeoutMs });
       }
       const { results, allOk } = ran;
       const repeats = results.find((r) => r.repeats)?.repeats;
@@ -330,7 +343,7 @@ export async function runGatesVerb(args, deps = {}) {
           if (!result.skipped && !result.ok) {
             await writeGateRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result),
               ...(result.custom ? { custom: true } : {}),
-              ...(result.reason === 'flaky-test' ? { reason: 'flaky-test' } : {}),
+              ...(['flaky-test', 'timeout', 'prompt'].includes(result.reason) ? { reason: result.reason } : {}),
               ...(result.repeats ? { repeats: result.repeats } : {}) });
           }
         }

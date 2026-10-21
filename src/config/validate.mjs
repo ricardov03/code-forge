@@ -558,6 +558,10 @@ function checkGatesNotArgvArray(cfg) {
     const n = cfg.gates.repeat_new_tests;
     if (!Number.isInteger(n) || n < 2 || n > 10) messages.push('gates.repeat_new_tests must be an integer 2..10');
   }
+  if (Object.hasOwn(cfg?.gates ?? {}, 'timeout_s')) {
+    const n = cfg.gates.timeout_s;
+    if (!Number.isInteger(n) || n < 30 || n > 7200) messages.push('gates.timeout_s must be an integer 30..7200');
+  }
   return messages.map((message) => ({ rule: 'gates-not-argv-array', severity: 'error', message }));
 }
 
