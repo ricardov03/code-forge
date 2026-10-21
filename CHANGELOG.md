@@ -26,6 +26,8 @@ waits on a second real consumer (plan §10.4, Q17).
   the coder not to use another code-forge from PATH (B162)
 - `block rebase` works for a block with its own worktree: it rebases the block branch onto main, moves the block base,
   and earlier green gates stop counting (B159)
+- Reviews see the sibling test and source files of a changed file, so findings about missing coverage are checked
+  against real related tests (B161)
 
 ### Fixed
 
