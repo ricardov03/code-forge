@@ -266,6 +266,12 @@
         "lint": { "$ref": "#/$defs/argvOrNull" },
         "types": { "$ref": "#/$defs/argvOrNull" },
         "format": { "$ref": "#/$defs/argvOrNull" },
+        "kinds": {
+          "type": "object",
+          "propertyNames": { "enum": ["code", "docs", "contract"] },
+          "additionalProperties": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+          "description": "Optional gate sets for code, docs and contract blocks. Each value is an array of fixed gate names (test, lint, types, format) or gates.custom[].name values. Unknown names and explicitly null fixed gates are refused with the kind and name. With gates run --run R --block B, the declared block kind wins; otherwise the kind is inferred from owned files using block open's rules. An entry runs only its listed gates; every other configured gate is reported skipped with reason not in gates.kinds.<kind>. A missing entry runs all gates as usual. An empty array runs no commands, reports 0 gates for kind <kind>, and writes gate.done with all_ok: true so block close can proceed to its remaining checks. Light blocks keep their light rules and ignore kinds. A gates run without --block ignores kinds. Example: gates: {types: [npm, run, typecheck], kinds: {docs: [types], contract: []}}."
+        },
         "custom": {
           "type": "array",
           "maxItems": 20,

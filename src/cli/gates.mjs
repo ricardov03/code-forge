@@ -39,7 +39,8 @@ import { writeSafe, redactJSON } from '../util/redact.mjs';
 import { exec } from '../util/exec.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
-import { customGateMessages } from '../config/validate.mjs';
+import { customGateMessages, kindGateMessages } from '../config/validate.mjs';
+import { blockKind } from '../decide/escalation.mjs';
 import { detectGates } from '../gates/detect.mjs';
 import { printableGates, scopeFields, testScope, thresholdOf } from '../gates/expand.mjs';
 import { runGates } from '../gates/run.mjs';
@@ -81,7 +82,7 @@ export function gateTimeoutMs({ flag, config }) {
 function resolveGates(cwd, configured) {
   const detected = detectGates(cwd);
   if (!configured) return detected;
-  const errors = customGateMessages(configured.custom);
+  const errors = [...customGateMessages(configured.custom), ...kindGateMessages(configured)];
   if (errors.length > 0) throw new TypeError(errors.join('; '));
   return {
     stack: detected.stack,
@@ -321,9 +322,10 @@ export async function runGatesVerb(args, deps = {}) {
       await warnMissingDependencies(cwd, err);
       const inTree = placed ? { worktree: placed.tree.path } : {};
       let ran;
+      let message;
       if (runFlag.value !== undefined && blockFlag.value !== undefined) {
         const threshold = thresholdOf(configured?.full_suite_threshold_files);
-        /** @type {typeof gates & {repeatNewTests?: import('../gates/run.mjs').RepeatNewTests, lightTestFiles?: string[]}} */
+        /** @type {typeof gates & {repeatNewTests?: import('../gates/run.mjs').RepeatNewTests, lightTestFiles?: string[], kindGates?: import('../gates/run.mjs').KindGates}} */
         let planned = gates;
         if (configured?.repeat_new_tests !== undefined) {
           const record = await readRun(runFlag.value);
@@ -338,6 +340,14 @@ export async function runGatesVerb(args, deps = {}) {
           throw error;
         });
         const light = block?.kind === 'light';
+        if (block && !light) {
+          const kind = blockKind({ declared: block.kind, owned: block.owned_files });
+          const names = configured?.kinds?.[kind];
+          if (Array.isArray(names)) {
+            planned = { ...planned, kindGates: { kind, names } };
+            if (names.length === 0) message = `0 gates for kind ${kind}`;
+          }
+        }
         if (light) {
           const scope = testScope({ testFiles: block.test_files, owned: block.owned_files, threshold: Infinity });
           const command = planned.test;
@@ -385,7 +395,7 @@ export async function runGatesVerb(args, deps = {}) {
           } : {}),
           ...(ran.files ? { files: ran.files } : {}), ...(repeats ? { repeats } : {}) });
       }
-      out({ stack: gates.stack, ...inTree, results, allOk, ...(repeats ? { repeats } : {}) });
+      out({ stack: gates.stack, ...inTree, results, allOk, ...(message ? { message } : {}), ...(repeats ? { repeats } : {}) });
       return allOk ? 0 : 1;
     }
 
