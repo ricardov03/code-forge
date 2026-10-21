@@ -1,8 +1,11 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
 import { PROVIDER_DEFAULTS } from '../../src/config/defaults/index.mjs';
 import { DOMAIN_RULE_IDS, validateConfig } from '../../src/config/validate.mjs';
 import { SECRET_LEAK_CASES } from './secret-leak-cases.mjs';
+
+const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 
 /**
  * A fresh, minimal, fully-valid config — every one of the 14 tests below mutates a clone of this.
@@ -650,7 +653,7 @@ test('proof.js is refused by the schema layer (additionalProperties) with the ex
     result.errors.map((e) => [e.rule, e.path, e.keyword]),
     [['schema', '/proof', 'additionalProperties']],
   );
-  assert.equal(result.errors[0].message, '/proof must NOT have additional property "js"');
+  assert.equal(result.errors[0].message, `/proof must NOT have additional property "js" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge ${VERSION})`);
 });
 
 test('proof.nightly is refused by the schema layer (additionalProperties) with the exact path /proof — B1.2, Q16 cut', () => {
@@ -662,7 +665,7 @@ test('proof.nightly is refused by the schema layer (additionalProperties) with t
     result.errors.map((e) => [e.rule, e.path, e.keyword]),
     [['schema', '/proof', 'additionalProperties']],
   );
-  assert.equal(result.errors[0].message, '/proof must NOT have additional property "nightly"');
+  assert.equal(result.errors[0].message, `/proof must NOT have additional property "nightly" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge ${VERSION})`);
 });
 
 test('proof.tiers.high.tool is refused by the schema layer (additionalProperties) with the exact path /proof/tiers/high — B1.2, Q16 cut', () => {

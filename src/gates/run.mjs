@@ -23,6 +23,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 /** @typedef {{n: number, files: string[], failed: boolean}} Repeats */
 /** @typedef {{name: string, argv: string[], env?: Record<string, string>, evidence?: string[]}} CustomGate */
 /** @typedef {{path: string, bytes: number, sha256: string}} Evidence */
+/** @typedef {{kind: string, names: string[]}} KindGates */
 /**
  * Internal block context carried with the gate plan through the proof lock, so repeats run
  * inside the same slot as the initial commands.
@@ -36,7 +37,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {Evidence[]} [evidence]
  * @property {string[]} [missing]
  * @property {string[] | null} argv
- * @property {boolean} skipped - true when the gate has no configured command (argv was null).
+ * @property {boolean} skipped - true when unconfigured or excluded by the block's kind set.
  * @property {boolean} ok - true when skipped, or when the command exited with code 0 (and, for a
  *   `failOnStdout` gate, its stdout was empty).
  * @property {number | null} code
@@ -44,7 +45,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {string} stderr
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'} [reason] - fallback or gate failure.
+ * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
  * @property {Repeats} [repeats]
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
  *   NAMES, sorted (the values are never in a result).
@@ -189,7 +190,7 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
  * item that is exactly `{test_files}` expands to its files, or is dropped for a full run. Left out,
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment, overriding the CI=1/npm_config_yes=false defaults.
- * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[]}} gates
+ * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[], kindGates?: KindGates}} gates
  * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
  * @returns {Promise<{results: GateResult[], allOk: boolean, repeats?: Repeats}>}
  */
@@ -204,6 +205,9 @@ export async function runGates(gates, opts) {
   }
   const customErrors = customGateMessages(gates.custom);
   if (customErrors.length > 0) throw new TypeError(customErrors.join('; '));
+  const kindSet = gates.lightTestFiles ? undefined : gates.kindGates;
+  const excluded = (/** @type {string} */ name) => kindSet && !kindSet.names.includes(name);
+  const skipReason = () => /** @type {const} */ (`not in gates.kinds.${kindSet.kind}`);
 
   // B60: gate env is not a secret store. Its values are never put in a result (only `env_keys`);
   // a value of 8+ characters is also masked in the child's own output (a shorter one would mask
@@ -217,7 +221,7 @@ export async function runGates(gates, opts) {
   // is the guard for one that reaches here anyway: it names the gate, not an opaque spawn error.
   const planned = GATE_ORDER.map((gate) => {
     const command = gates[gate] ?? null;
-    if (command === null) return { gate, command: null };
+    if (command === null || excluded(gate)) return { gate, command: null };
     const normalized = normalizeCommand(command);
     if (normalized.argv[0] === CHANGED_FILES_TOKEN) throw new TypeError(`gates.${gate}: '{changed_files}' cannot be the command (argv[0])`);
     const { argv, scoped } = expandArgv(normalized.argv, scope);
@@ -228,7 +232,9 @@ export async function runGates(gates, opts) {
   const results = [];
   for (const { gate, command } of planned) {
     if (command === null) {
-      results.push({ gate, argv: null, skipped: true, ok: true, code: null, stdout: '', stderr: '' });
+      results.push({ gate, argv: null, skipped: true, ok: true, code: null, stdout: '', stderr: '',
+        ...(gates[gate] != null && excluded(gate) ? { reason: skipReason() } : {}),
+      });
       continue;
     }
     const { argv, scoped, failOnStdout, env } = command;
@@ -269,6 +275,12 @@ export async function runGates(gates, opts) {
     results.push(result);
   }
   for (const gate of gates.custom ?? []) {
+    if (excluded(gate.name)) {
+      results.push({ gate: gate.name, custom: true, argv: null, skipped: true, ok: true, code: null,
+        stdout: '', stderr: '', reason: skipReason(), evidence: [],
+      });
+      continue;
+    }
     const { argv, env } = normalizeCommand(gate);
     const res = await exec(argv, { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } });
     results.push({ gate: gate.name, custom: true, argv, skipped: false,

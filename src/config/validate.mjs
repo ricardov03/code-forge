@@ -66,7 +66,9 @@
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import schema from '../../schema/code-forge.schema.json' with { type: 'json' };
 import { redact } from '../util/redact.mjs';
+import { packageVersion } from '../util/error-log.mjs';
 import { TEST_FILES_TOKEN, CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
+import { BLOCK_KINDS } from '../decide/escalation.mjs';
 import { checkEffort, displayEffort } from '../engines/efforts.mjs';
 import { CLOSED_BOOK_LEVELS, CODEX_CLOSED_BOOK_REFUSAL, isNoClosedBookProvider, OPEN_BOOK_CODEX_WARNING, openBookCodexAllowed } from './closed-book.mjs';
 import { isKnownId, resolveLevel } from './known-ids.mjs';
@@ -212,7 +214,7 @@ function runSchemaValidation(cfg) {
       if (err.keyword === 'propertyNames' && typeof err.params?.propertyName === 'string') {
         detail = `property name "${safeSegment(err.params.propertyName)}" is not allowed (propertyNames)`;
       } else if (err.keyword === 'additionalProperties' && typeof err.params?.additionalProperty === 'string') {
-        detail = `must NOT have additional property "${safeSegment(err.params.additionalProperty)}"`;
+        detail = `must NOT have additional property "${safeSegment(err.params.additionalProperty)}" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge ${packageVersion()})`;
       }
       return {
         rule: 'schema',
@@ -551,9 +553,30 @@ export function customGateMessages(custom) {
   return messages;
 }
 
+/** Gate names in a kind set must resolve to an available configured or detected gate.
+ * @param {Record<string, any> | undefined} gates @returns {string[]}
+ */
+export function kindGateMessages(gates) {
+  const custom = new Set(Array.isArray(gates?.custom) ? gates.custom.map((gate) => gate?.name) : []);
+  const messages = [];
+  for (const kind of BLOCK_KINDS) {
+    const names = gates?.kinds?.[kind];
+    if (!Array.isArray(names)) continue; // The schema handles invalid shapes.
+    for (const name of names) {
+      if (typeof name !== 'string') continue;
+      const label = `gates.kinds.${kind}: ${safeSegment(name)}`;
+      const fixed = GATE_KEYS.some((key) => key === name);
+      if (!fixed && !custom.has(name)) messages.push(`${label} is an unknown gate name`);
+      else if (fixed && gates[name] === null) messages.push(`${label} is a null fixed gate`);
+    }
+  }
+  return messages;
+}
+
 function checkGatesNotArgvArray(cfg) {
   const messages = GATE_KEYS.flatMap((key) => gateMessages(key, cfg?.gates?.[key]));
   messages.push(...customGateMessages(cfg?.gates?.custom));
+  messages.push(...kindGateMessages(cfg?.gates));
   if (Object.hasOwn(cfg?.gates ?? {}, 'repeat_new_tests')) {
     const n = cfg.gates.repeat_new_tests;
     if (!Number.isInteger(n) || n < 2 || n > 10) messages.push('gates.repeat_new_tests must be an integer 2..10');
