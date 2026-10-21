@@ -27,6 +27,11 @@ waits on a second real consumer (plan §10.4, Q17).
 - `block rebase` works for a block with its own worktree: it rebases the block branch onto main, moves the block base,
   and earlier green gates stop counting (B159)
 
+### Fixed
+
+- Grok runs no longer start the user's Cursor or Claude MCP servers, so no orphan MCP helpers stay behind and use memory
+  (B164)
+
 ## [0.15.1] — 2026-10-19
 
 ### Changed
