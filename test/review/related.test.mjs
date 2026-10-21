@@ -2,7 +2,7 @@ import { commitAll, makeRepo, writeFile } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
-const { assemblePacket, buildPacket, readFileDiff } = await import('../../src/review/packet.mjs');
+const { assembleLightPacket, assemblePacket, buildPacket, readFileDiff } = await import('../../src/review/packet.mjs');
 
 const guidance = 'A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. "assumes no rule in src/styles/base.css".';
 
@@ -43,6 +43,12 @@ test('related packet names imports, importers and cascade siblings once, sorted,
     const js = await packet(repo, 'src/widget.js', lens);
     assert.equal(section(js.text, 'related files (not shown)'), 'src/one.ts\nsrc/script.html\nsrc/three.cjs\nsrc/two.vue', `${lens}: exactly four importers`);
   }
+  const diffs = await Promise.all(['src/home.css', 'src/widget.js'].map((file) => readFileDiff({ repoRoot: repo, file })));
+  const light = assembleLightPacket({ diffs });
+  assert.equal(section(light.text, 'related files (not shown)'), 'src/a.css\nsrc/base.css\nsrc/layout.astro\nsrc/one.ts\nsrc/page.html\nsrc/script.html\nsrc/theme.scss\nsrc/three.cjs\nsrc/two.vue', 'light full packet includes exactly nine unseen related files');
+  const lightWithout = light.text.replace(`## related files (not shown)\n${section(light.text, 'related files (not shown)')}\n`, '');
+  const lightTight = assembleLightPacket({ diffs, cfg: { review: { budgets: { full_in: Math.ceil(Buffer.byteLength(lightWithout) / 4) } } } });
+  assert.equal(lightTight.text, lightWithout, 'light full packet drops only related names before shrinking context');
 });
 
 test('related boundaries ignore bare/missing/self/untracked references, cap at 12, skip scans above 2000 and drop before paired/context/rules', async () => {

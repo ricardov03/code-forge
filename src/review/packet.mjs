@@ -255,7 +255,12 @@ export function assembleLightPacket({ diffs, cfg, rulesDigest = '', factsExcerpt
   const context = (mode) => diffs.map((diff) => `### ${diff.file}\n${buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode }).text}`).join('\n\n');
   let contextMode = 'auto';
   let ctx = context(contextMode);
-  let text = render(lens, digest, factsExcerpt, ctx, diffText);
+  const shown = new Set(diffs.map((diff) => diff.file));
+  const related = [...new Set(diffs.flatMap((diff) => diff.related ?? []))].filter((file) => !shown.has(file)).sort().slice(0, 12);
+  let text = render(lens, digest, factsExcerpt, ctx, diffText, '', '', related.length > 0 ? `## related files (not shown)\n${related.join('\n')}` : '');
+  if (estimateTokens(text) > budget && related.length > 0) {
+    text = render(lens, digest, factsExcerpt, ctx, diffText);
+  }
   if (estimateTokens(text) > budget) {
     contextMode = 'minimal';
     ctx = context(contextMode);
