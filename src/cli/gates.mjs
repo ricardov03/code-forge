@@ -33,9 +33,10 @@
  */
 
 import { realpathSync } from 'node:fs';
-import { readFile } from 'node:fs/promises';
+import { readFile, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { writeSafe, redactJSON } from '../util/redact.mjs';
+import { exec } from '../util/exec.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { customGateMessages } from '../config/validate.mjs';
@@ -199,6 +200,30 @@ function realOrResolved(p) {
   }
 }
 
+/** Warn once per dependency-bearing directory, including a linked worktree's main checkout.
+ * @param {string} cwd @param {(line: string) => void} err
+ * @returns {Promise<void>}
+ */
+async function warnMissingDependencies(cwd, err) {
+  const dirs = new Set([realOrResolved(cwd)]);
+  const git = await exec(['git', 'rev-parse', '--show-toplevel', '--git-common-dir'], { cwd, timeoutMs: 5000 });
+  if (git.result === 'ok') {
+    const [top, common] = git.stdout.trimEnd().split('\n');
+    if (top) dirs.add(realOrResolved(top));
+    if (common) dirs.add(realOrResolved(path.dirname(path.resolve(cwd, common))));
+  }
+  for (const dir of dirs) {
+    let manifest;
+    try { manifest = JSON.parse(await readFile(path.join(dir, 'package.json'), 'utf8')); }
+    catch { continue; }
+    const hasDeps = [manifest?.dependencies, manifest?.devDependencies].some((deps) =>
+      deps && typeof deps === 'object' && !Array.isArray(deps) && Object.keys(deps).length > 0);
+    if (!hasDeps) continue;
+    const installed = await stat(path.join(dir, 'node_modules')).then((entry) => entry.isDirectory(), () => false);
+    if (!installed) err(`warn: ${dir} has package.json but no node_modules; run npm ci there first\n`);
+  }
+}
+
 /**
  * B60: the scope fields of a `{test_files}` gate's result (`scope` with `test_count` or `reason`),
  * or none for any other gate.
@@ -293,6 +318,7 @@ export async function runGatesVerb(args, deps = {}) {
       const configured = await configuredGates(placed ? placed.workspace : cwd); // loaded once: the gates and the threshold
       const timeoutMs = gateTimeoutMs({ flag: flagTimeoutMs, config: { gates: configured } });
       const gates = resolveGates(cwd, configured);
+      await warnMissingDependencies(cwd, err);
       const inTree = placed ? { worktree: placed.tree.path } : {};
       let ran;
       if (runFlag.value !== undefined && blockFlag.value !== undefined) {
