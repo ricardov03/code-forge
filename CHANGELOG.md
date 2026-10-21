@@ -22,6 +22,8 @@ waits on a second real consumer (plan §10.4, Q17).
 - `code-forge outcome record` writes a signed `outcome.recorded` row for an approved specialist outcome; `report` shows them in a `specialist_outcomes` section (B154)
 - Gates: `gates.timeout_s` (30..7200 s), CI=1 and npm_config_yes=false for every gate, a gate that ends on an
   interactive prompt fails with reason `prompt`, and a warning when the checkout has no installed dependencies (B156)
+- Context pack: a `## code-forge` section names the running node, the absolute code-forge bin and its version, and tells
+  the coder not to use another code-forge from PATH (B162)
 
 ## [0.15.1] — 2026-10-19
 
