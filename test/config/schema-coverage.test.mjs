@@ -340,6 +340,11 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'gates.custom.env',
   'gates.custom.evidence',
   'gates.timeout_s',
+  // B160: the four paths behind the 230 -> 234 re-pin.
+  'gates.kinds',
+  'gates.kinds.code',
+  'gates.kinds.docs',
+  'gates.kinds.contract',
   'telemetry',
   // v1.3 (B1.1): the six new collector paths behind the 142 -> 148 re-pin.
   'review.max_rounds_per_file',
@@ -432,7 +437,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B146: +5 = gates.custom{,.name,.argv,.env,.evidence} ⇒ 227.
 // B155: +2 = review.{exclude,lockfile_registries} ⇒ 229.
 // B156: +1 = gates.timeout_s ⇒ 230.
-const EXPECTED_SCHEMA_PATH_COUNT = 230;
+// B160: +4 = gates.kinds{,.code,.docs,.contract} ⇒ 234.
+const EXPECTED_SCHEMA_PATH_COUNT = 234;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;

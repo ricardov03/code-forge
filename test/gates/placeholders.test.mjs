@@ -25,6 +25,7 @@ const { assertOwned } = await import('../../src/state/registry.mjs');
 const { buildBinnacle, buildFullLog } = await import('../../src/autopilot/binnacle.mjs');
 
 const NODE = process.execPath;
+const VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const PROBE_PID = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
 /** An env value the tests look for everywhere it must NOT appear. */
 const VALUE = 'plain-b60-gate-value-q7';
@@ -545,11 +546,11 @@ test('B60 (3): the config accepts {argv, env} beside an argv array and null; eac
     ['gates-not-argv-array', null, null, 'gates.test.env.A must be a string'],
   ]);
   assert.deepEqual(issues({ test: { argv: ['npm'], env: { 'BAD-NAME': 'x' } } }), [
-    ...anyOf([['additionalProperties', ['/gates/test/env', '/gates/test/env must NOT have additional property "BAD-NAME"']]]),
+    ...anyOf([['additionalProperties', ['/gates/test/env', `/gates/test/env must NOT have additional property "BAD-NAME" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge ${VERSION})`]]]),
     ['gates-not-argv-array', null, null, 'gates.test.env: "BAD-NAME" is not a variable name (letters, digits and _, not starting with a digit)'],
   ]);
   assert.deepEqual(issues({ test: { argv: ['npm'], shell: 'npm test' } }), [
-    ...anyOf([['additionalProperties', ['/gates/test', '/gates/test must NOT have additional property "shell"']]]),
+    ...anyOf([['additionalProperties', ['/gates/test', `/gates/test must NOT have additional property "shell" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge ${VERSION})`]]]),
     ['gates-not-argv-array', null, null, 'gates.test: unknown key "shell" (an object gate has only argv and env)'],
   ]);
   assert.deepEqual(issues({ test: { env: { A: 'b' } } }), [
