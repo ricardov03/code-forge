@@ -1,14 +1,14 @@
 /**
  * B92: the `## test-quality` note. A test file that reads a source file and asserts on its text
  * gets a section naming the line numbers (never the file's text) in every packet the fake
- * reviewer receives; the lenses carry one rule about it; with no flag the packet is today's.
+ * reviewer receives; the lenses carry one rule about it; with no flag the required content stays.
  */
 import { answerFor, cfgFor, harness, makeRepo, readRecords, stdinOf, writeFile } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { describe, test } from 'node:test';
 
 const { reviewFile } = await import('../../src/review/engine.mjs');
-const { readFileDiff } = await import('../../src/review/packet.mjs');
+const { budgetFor, estimateTokens, readFileDiff } = await import('../../src/review/packet.mjs');
 const { buildRecheckPacket } = await import('../../src/review/fixloop.mjs');
 const { isCheckedTestFile, renderTestQuality, testQualityLines } = await import('../../src/review/test-quality.mjs');
 
@@ -182,90 +182,34 @@ describe('B92 (4): the budget and the no-flag packet', () => {
     );
   });
 
-  test('with no flag the packet is byte-equal to the base (d60059f) packet, plus only the lens rule line', async () => {
-    const { packets } = await review({
-      file: 'test/doc.test.mjs',
-      content: src([
-        "import assert from 'node:assert/strict';",
-        "import { readFileSync } from 'node:fs';",
-        "import { test } from 'node:test';",
-        '',
-        "test('docs name the verb', () => {",
-        "  const text = readFileSync('docs/guide.md', 'utf8');",
-        "  assert.ok(text.includes('forge review'));",
-        '});',
-      ]),
-    });
-    assert.equal(packets.length, 1);
-    // TODAY: the quick packet captured from the base code (d60059f) for this file, byte for byte
-    const TODAY = [
-      '# code-forge review packet',
-      '## lens',
-      '# Lens: quick',
+  test('with no flag the quick packet omits the hint and preserves the whole context and diff within budget', async () => {
+    const file = 'test/doc.test.mjs';
+    const fileLines = [
+      "import assert from 'node:assert/strict';",
+      "import { readFileSync } from 'node:fs';",
+      "import { test } from 'node:test';",
       '',
-      'You are a code reviewer doing a QUICK pass on one small, low-risk change.',
-      '',
-      '## What to look for',
-      '',
-      '- Obvious bugs in the changed lines: wrong condition, wrong variable, off-by-one, a missing `await`, an unhandled error path.',
-      '- A change that plainly does not do what its own code and names say.',
-      '- Anything that leaks a secret or writes outside the paths the change is about.',
-      '',
-      'Skip style, naming and structure unless it hides a bug. Keep `findings` short.',
-      '',
-      "Never ask for hand mutations or for tests beyond the acceptance clauses.",
-      "The fix for a weak assertion is a stronger assertion.",
-      "Code or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.",
-      '',
-      '## Rules for every answer',
-      '',
-      '- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.',
-      '- You have no tools and no project files. The packet is everything you get.',
-      '- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under "hunks" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.',
-      '- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).',
-      '- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.',
-      '- `passed` is true only when you found no `critical` and no `warning`.',
-      '- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.',
-      '## project rules',
-      '(none)',
-      '## facts',
-      '(none)',
-      '## context',
-      '### test/doc.test.mjs (whole file, 8 lines)',
-      "1| import assert from 'node:assert/strict';",
-      "2| import { readFileSync } from 'node:fs';",
-      "3| import { test } from 'node:test';",
-      '4| ',
-      "5| test('docs name the verb', () => {",
-      "6|   const text = readFileSync('docs/guide.md', 'utf8');",
-      "7|   assert.ok(text.includes('forge review'));",
-      '8| });',
-      '## diff',
-      'file: test/doc.test.mjs',
-      'hunks:',
-      '- @@ -0,0 +1,8 @@',
-      '',
-      'diff --git a/test/doc.test.mjs b/test/doc.test.mjs',
-      'new file mode 100644',
-      'index 0000000..b39a77f',
-      '--- /dev/null',
-      '+++ b/test/doc.test.mjs',
-      '@@ -0,0 +1,8 @@',
-      "+import assert from 'node:assert/strict';",
-      "+import { readFileSync } from 'node:fs';",
-      "+import { test } from 'node:test';",
-      '+',
-      "+test('docs name the verb', () => {",
-      "+  const text = readFileSync('docs/guide.md', 'utf8');",
-      "+  assert.ok(text.includes('forge review'));",
-      '+});',
-      '',
+      "test('docs name the verb', () => {",
+      "  const text = readFileSync('docs/guide.md', 'utf8');",
+      "  assert.ok(text.includes('forge review'));",
+      '});',
     ];
-    // B92 adds the RULE at the end; B117 adds the three proof-guidance lines before the answer rules.
-    const lastRule = TODAY.indexOf('- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.');
-    assert.equal(lastRule, 26);
-    const expected = [...TODAY.slice(0, lastRule + 1), RULE, ...TODAY.slice(lastRule + 1)].join('\n');
-    assert.equal(packets[0], expected);
+    const cfg = cfgFor();
+    const { packets, outcome } = await review({ file, content: src(fileLines), cfg });
+    assert.equal(outcome.status, 'reviewed');
+    assert.equal(packets.length, 1);
+    const packet = packets[0];
+    assert.equal(packet.split('\n')[2], '# Lens: quick');
+    assert.equal(occurrences(packet, HEADING), 0);
+    assert.equal(occurrences(packet, RULE), 1);
+    assert.equal(occurrences(packet, '\n## related files (not shown)\n'), 0, 'no local imports or importers');
+    assert.match(packet, /must say in `evidence` which related file it could not see/);
+    const context = packet.split('\n## context\n')[1].split('\n## diff\n')[0];
+    assert.equal(context, [`### ${file} (whole file, ${fileLines.length} lines)`, ...fileLines.map((line, i) => `${i + 1}| ${line}`)].join('\n'));
+    const diff = packet.split('\n## diff\n')[1];
+    assert.ok(diff.startsWith(`file: ${file}\nhunks:\n- @@ -0,0 +1,${fileLines.length} @@\n`));
+    assert.ok(diff.endsWith(src(fileLines.map((line) => `+${line}`))), 'every added line survives');
+    assert.ok(estimateTokens(packet) <= budgetFor(cfg, 'quick_in'));
   });
 });
 
