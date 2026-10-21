@@ -15,6 +15,10 @@ function safePath(file) {
 function specifiers(text, file) {
   const ext = path.posix.extname(file).toLowerCase();
   const found = [];
+  // CSS and HTML use relative URLs without requiring JS's leading ./ or ../.
+  const url = (value) => {
+    if (!/^(?:[a-z][a-z\d+.-]*:|\/|[?#])/i.test(value)) found.push(/^\.\.?\//.test(value) ? value : `./${value}`);
+  };
   if (!STYLES.has(ext)) {
     // Keep strings as single tokens, discard comments/templates, and never interpret a string's
     // contents as code. This also handles imports in Astro frontmatter and Vue script blocks.
@@ -39,13 +43,13 @@ function specifiers(text, file) {
   if (STYLES.has(ext) || ['.html', '.htm', '.astro', '.vue'].includes(ext)) {
     const markup = text.replace(/\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->/g, '');
     for (const match of markup.matchAll(/@import\s+(?:url\(\s*(?:'([^']+)'|"([^"]+)"|([^\s)]+))\s*\)|'([^']+)'|"([^"]+)")/gi)) {
-      found.push(match.slice(1).find((value) => value !== undefined));
+      url(match.slice(1).find((value) => value !== undefined));
     }
     if (!STYLES.has(ext)) {
       for (const tag of markup.matchAll(/<(link|script)\b[^>]*>/gi)) {
         const attr = tag[1].toLowerCase() === 'link' ? 'href' : 'src';
         const match = tag[0].match(new RegExp(`\\s${attr}\\s*=\\s*(?:"([^"]+)"|'([^']+)'|([^\\s>]+))`, 'i'));
-        if (match) found.push(match[1] ?? match[2] ?? match[3]);
+        if (match) url(match[1] ?? match[2] ?? match[3]);
       }
     }
   }

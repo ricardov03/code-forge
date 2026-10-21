@@ -20,17 +20,17 @@ async function packet(repoRoot, file, lens = 'full', cfg = {}) {
 test('related packet names imports, importers and cascade siblings once, sorted, without their content', async () => {
   const repo = await makeRepo();
   const files = {
-    'src/a.css': '@import "./base.css";\n@import url(./home.css);\n',
+    'src/a.css': '@import "base.css";\n@import url(home.css);\n',
     'src/base.css': '* { animation: none !important; } /* UNSEEN_BASE */\n',
     'src/home.css': '@import url("./theme.scss");\n.home { color: red; }\n',
     'src/theme.scss': '/* UNSEEN_THEME */\n',
     'src/layout.astro': '---\nimport "./base.css";\nimport "./home.css";\n---\n',
-    'src/page.html': '<link href="./home.css" rel="stylesheet"><link href="./base.css">\n',
+    'src/page.html': '<link href="home.css" rel="stylesheet"><link href="base.css">\n',
     'src/widget.js': 'export const widget = 1;\n',
     'src/one.ts': 'import { widget } from "./widget.js";\n',
     'src/two.vue': '<script>const w = import("./widget.js");</script>\n',
     'src/three.cjs': 'const w = require("./widget.js");\n',
-    'src/script.html': '<script src="./widget.js"></script>\n',
+    'src/script.html': '<script src="widget.js"></script>\n',
   };
   for (const [file, text] of Object.entries(files)) writeFile(repo, file, text);
   await commitAll(repo);
