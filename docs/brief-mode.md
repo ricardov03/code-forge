@@ -184,9 +184,12 @@ code-forge context pack --run cart-1 --block B1
 tokens ~125
 ```
 
-The pack holds the block header (run, block, level, owned files, test files, worktree), the
-project's commands, the built-in proof rule, `AGENTS.md` and `docs/lessons.md`. Without a
-`context` key, it holds only the block header and proof rule, with a 300-line cap and no
+The pack holds the block header (run, block, level, owned files, test files, worktree), a
+`## code-forge` section, the project's commands, the built-in proof rule, `AGENTS.md` and
+`docs/lessons.md`. The `## code-forge` section names the exact Node executable, absolute
+code-forge bin path and version of the install that built the pack. Use that exact command for
+code-forge verbs; do not use another code-forge from PATH. Without a
+`context` key, it holds the block header, code-forge section and proof rule, with a 300-line cap and no
 commands, rules or lessons section. A bad `context` value still refuses the pack. It lives in the run's temp folder
 (`tmp.root`, by default under the system temp folder). A signed `context.pack` row records its
 sha and token estimate. Paste the pack's text into the coder's task together with the pointer.

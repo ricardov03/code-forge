@@ -16,15 +16,17 @@
  * `<block>.md`. A row that cannot be appended removes only the temp file, so an earlier pack stays
  * as it was and nothing was written. A rename that fails after the row was appended says so.
  *
- * With no `context` key, the pack holds only the block header and built-in proof rule (300 lines).
+ * The header names this install's exact node/bin command and version. With no `context` key,
+ * the pack holds the block header, code-forge section and built-in proof rule (300 lines).
  * Exit codes: 0 written, 1 refused (a rules or lessons file missing or outside
  * the repository, a bad `context` value, a control character, an unknown run or block, a file or
  * ledger write that fails), 2 usage. Never runs any command it lists.
  */
 
 import { createHash } from 'node:crypto';
-import { mkdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { loadProjectConfig } from '../config/load.mjs';
 import { assemblePack, ContextError, contextSettings, packTokens, readSources } from '../context/pack.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
@@ -107,6 +109,11 @@ export async function runContext(args, deps = {}) {
         owned: Array.isArray(entry.owned_files) ? entry.owned_files : [],
         tests: Array.isArray(entry.test_files) ? entry.test_files : null,
         worktree: entry.worktree && typeof entry.worktree.path === 'string' ? { path: entry.worktree.path, branch: entry.worktree.branch } : null,
+        codeForge: {
+          node: process.execPath,
+          bin: fileURLToPath(new URL('../../bin/code-forge.mjs', import.meta.url)),
+          version: JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version,
+        },
       },
     });
     const sha256 = createHash('sha256').update(text).digest('hex');
