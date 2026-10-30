@@ -395,7 +395,7 @@ export function fixList(result) {
  * B100: read block scope from the workspace mirror, never the private run record. This is a
  * progress summary, not an approval: block close still verifies the authoritative signed rows.
  * @param {string} repoRoot @param {string} cwd @param {string} run @param {string} block
- * @returns {Promise<{entry: Record<string, any>, tree: string, cfg: Record<string, any> | null}>}
+ * @returns {Promise<{entry: Record<string, any>, tree: string, cfg: Record<string, any> | null, project: string}>}
  */
 async function waitBlockScope(repoRoot, cwd, run, block) {
   const top = await repoRootOf(cwd);
@@ -417,7 +417,7 @@ async function waitBlockScope(repoRoot, cwd, run, block) {
       throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
     }
     const tree = (await blockTree(record.workspace, entry))?.top ?? repoRoot;
-    return { entry, tree, cfg: configInForce(record) };
+    return { entry, tree, cfg: configInForce(record), project: record.project };
   }
   throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
 }
@@ -464,13 +464,24 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
     downPolls = live ? 0 : downPolls + 1;
     const tickets = blockTickets({ repoRoot, run, block, ...where });
     const current = await blockFileSet({ repoRoot: tree, base: entry.base_sha, owned: entry.owned_files, ownedKinds: entry.owned_kinds });
-    const { cfg } = await waitBlockScope(repoRoot, cwd, run, block);
+    const { cfg, project } = await waitBlockScope(repoRoot, cwd, run, block);
+    // Progress only, like answersPrecheck: sandboxed callers may not read the private ledger.
+    // Reopens issued here also renew the workspace ticket, which needs no private read to join.
+    let rows = [];
+    try { rows = await readAllRows(project); } catch { /* The worker verifies the signed row. */ }
+    const reopens = new Map();
+    for (const row of rows) {
+      if (row.event !== 'review.reopened' || row.run !== run || row.block !== block || !Number.isFinite(Date.parse(row.ts))) continue;
+      if (row.by !== 'human' && !(row.by === 'agent' && row.verdict?.verdict === 'agree')) continue;
+      if (!reopens.has(row.file) || row.ts > reopens.get(row.file)) reopens.set(row.file, row.ts);
+    }
     const files = current.map(({ file }) => {
       const rule = reviewExcludeRule(cfg, file);
       if (rule !== null) return { file, ticket: null, status: 'excluded', outcome: null, rule };
-      const opts = { repoRoot, run, block, file, ...where };
+      const after = reopens.get(file);
+      const opts = { repoRoot, run, block, file, ...where, after };
       const { ticket } = resolveTicket(opts);
-      const previous = tickets.filter((t) => t.file === file);
+      const previous = tickets.filter((t) => t.file === file && (after === undefined || Date.parse(t.enqueued_at) > Date.parse(after)));
       let present = previous.find((t) => t.ticket === ticket);
       if (!present && previous.length > 0) {
         const newest = previous[previous.length - 1];

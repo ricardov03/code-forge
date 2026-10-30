@@ -223,7 +223,7 @@ import { reviewExcludeRule, validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
 import { contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
-import { clearDone, resetAcceptanceWatch, resolveTicket } from '../worker/queue.mjs';
+import { clearDone, enqueue, resetAcceptanceWatch, resolveTicket } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
 import { agentReopens, openBlockEntry, reopenFile } from '../review/reopen.mjs';
 import { checkFileForm, checkFindingId } from '../review/verb-forms.mjs';
@@ -240,7 +240,7 @@ import { acceptedTranscriptHits, prepareAcceptHit, writeAcceptedHit } from '../r
  * main tree), its state is read (never moved) from the code-forge home or the run's old temp root,
  * the checks, the done marker's removal and then the signed row are `reopenFile`'s.
  * @param {{runId: string, id: string, file: string, reason: string, record: Record<string, any>, writeRow: (row: Record<string, any>) => Promise<unknown>, agent?: boolean, judge?: import('../review/agent-waiver.mjs').WaiverJudge}} opts
- * @returns {Promise<{row: Record<string, any>, cleared: boolean}>}
+ * @returns {Promise<{row: Record<string, any>, cleared: boolean, ticket?: string}>}
  */
 async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agent = false, judge }) {
   if (agent) {
@@ -272,7 +272,7 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agen
   const key = await loadKey(runId);
   const rows = await readAllRows(record.project);
   const tree = contentRoot === mainTop ? {} : { tree: contentRoot };
-  const { row, cleared } = await reopenFile({
+  const { row, cleared, ticket } = await reopenFile({
     runId,
     id,
     file,
@@ -290,9 +290,10 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agen
       readFile: (f) => readRegularFileNoFollow(contentRoot, f),
       // C11 (synchronous): the cached result of the current content's ticket would repeat the stop
       clearDone: (f) => clearDone({ repoRoot: mainTop, run: runId, block: id, file: f, ...tree }).removed,
+      enqueue: (f, reopened) => enqueue({ repoRoot: mainTop, run: runId, block: id, file: f, ...tree, after: reopened.ts }).ticket,
     },
   });
-  return { row, cleared };
+  return { row, cleared, ticket };
 }
 
 const USAGE =
@@ -513,10 +514,11 @@ export async function runBlock(args, deps = {}) {
     const writeRow =(/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
     const reopened = async (/** @type {boolean} */ agent) => {
       const file = /** @type {string} */ (flags.file);
-      const { row, cleared } = await reopenBlockFile({ runId, id, file, reason: /** @type {string} */ (flags.reason), record, writeRow, agent, judge: deps.waiverJudge });
+      const { row, cleared, ticket } = await reopenBlockFile({ runId, id, file, reason: /** @type {string} */ (flags.reason), record, writeRow, agent, judge: deps.waiverJudge });
       const fromText = row.stop_reason == null ? row.from : `${row.from} ${row.stop_reason}`;
       say(`block ${id} reopened ${file} (from ${fromText}; by: ${row.by})\n`);
-      if (json) emit({ block: id, event: 'reopened', file, from: row.from, stop_reason: row.stop_reason, at_seq: row.at_seq, from_hash: row.from_hash, to_hash: row.to_hash, ticket_cleared: cleared, by: row.by });
+      if (ticket) say(`ticket ${ticket}\nnext: code-forge review-file --wait ${ticket}\n`);
+      if (json) emit({ block: id, event: 'reopened', file, from: row.from, stop_reason: row.stop_reason, at_seq: row.at_seq, from_hash: row.from_hash, to_hash: row.to_hash, ticket_cleared: cleared, by: row.by, ticket });
       return 0;
     };
     // Agent refusals precede even the lazy expiry checks: no rows on refusal.

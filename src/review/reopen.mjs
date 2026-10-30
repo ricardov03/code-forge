@@ -192,9 +192,10 @@ export function reopenRowFor(rows, { runId, block, file, key, status, state, seq
  *     contentHash: (file: string) => string,
  *     readFile?: (file: string) => Buffer | null,
  *     clearDone: (file: string) => boolean,
+ *     enqueue?: (file: string, row: Record<string, any>) => string | undefined,
  *   },
  * }} opts
- * @returns {Promise<{row: Record<string, any>, cleared: boolean, existing: boolean}>}
+ * @returns {Promise<{row: Record<string, any>, cleared: boolean, existing: boolean, ticket?: string}>}
  * @throws {StateError} `usage` or a refusal code (see the module doc).
  */
 export async function reopenFile({ runId, id, file, reason, record, rows, key, writeRow, writeSigned, io, agent }) {
@@ -255,7 +256,7 @@ export async function reopenFile({ runId, id, file, reason, record, rows, key, w
   // so a failed row write leaves at worst a re-run that returns the same stop, never a row with a
   // stale marker
   const cleared = io.clearDone(file);
-  if (earlier !== null) return { row: earlier, cleared, existing: true };
+  if (earlier !== null) return { row: earlier, cleared, existing: true, ticket: io.enqueue?.(file, earlier) };
   const row = { event: REOPENED_EVENT, block: id, file, from, stop_reason: stopReason, at_seq: loaded.seq, from_hash: fromHash, to_hash: current, reason: reason.trim(), by: agent ? 'agent' : 'human', ...(agent ? { verdict } : {}) };
   /** @type {Record<string, any> | null} */
   let written = null;
@@ -285,5 +286,5 @@ export async function reopenFile({ runId, id, file, reason, record, rows, key, w
     if (threw) Object.defineProperty(refused, 'cause', { value: failure, enumerable: false, configurable: true, writable: true });
     throw refused;
   }
-  return { row: written, cleared, existing: false };
+  return { row: written, cleared, existing: false, ticket: io.enqueue?.(file, written) };
 }

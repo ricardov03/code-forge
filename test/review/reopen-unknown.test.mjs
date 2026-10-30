@@ -12,7 +12,7 @@ const { runBlock } = await import('../../src/cli/block.mjs');
 const { newFileState, runRound } = await import('../../src/review/fixloop.mjs');
 const { saveState, loadState } = await import('../../src/worker/review-state.mjs');
 const { contentHash } = await import('../../src/worker/ticket.mjs');
-const { enqueue, readResult } = await import('../../src/worker/queue.mjs');
+const { enqueue, pendingTickets, readResult } = await import('../../src/worker/queue.mjs');
 const { createWorker } = await import('../../src/worker/loop.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 
@@ -122,7 +122,9 @@ test('B114: unknown legacy content accepts only a hash without a verified round 
   for (const override of [{ run: 'other' }, { block: 'B2' }, { file: 'src/b.mjs' }, { content_hash: 'old' }, { event: 'review.result' }]) await f.writeRow(signRow({ ...currentRound, ...override }, f.key));
   const accepted = await f.reopen();
   assert.deepEqual([accepted.code, accepted.err], [0, '']);
-  assert.deepEqual(JSON.parse(accepted.out), { block: 'B1', event: 'reopened', file: FILE, from: 'stopped', stop_reason: 'l3_patch_exhausted', at_seq: 1, from_hash: null, to_hash: f.hash(), ticket_cleared: false, by: 'human' });
+  const [ticket] = pendingTickets(f.repo);
+  assert.ok(ticket);
+  assert.deepEqual(JSON.parse(accepted.out), { block: 'B1', event: 'reopened', file: FILE, from: 'stopped', stop_reason: 'l3_patch_exhausted', at_seq: 1, from_hash: null, to_hash: f.hash(), ticket_cleared: false, by: 'human', ticket });
   assert.equal((await f.reopen()).code, 0);
   const reopened = (await f.rows()).filter((r) => r.event === 'review.reopened');
   assert.equal(reopened.length, 1);

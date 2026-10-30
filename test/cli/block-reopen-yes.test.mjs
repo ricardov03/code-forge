@@ -10,7 +10,7 @@ const { openBlock } = await import('../../src/state/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { contentHash, ticketId } = await import('../../src/worker/ticket.mjs');
-const { queueDir, writeResult } = await import('../../src/worker/queue.mjs');
+const { pendingTickets, queueDir, writeResult } = await import('../../src/worker/queue.mjs');
 const { saveState, loadState } = await import('../../src/worker/review-state.mjs');
 const { reopenRowFor } = await import('../../src/review/reopen.mjs');
 const { newFileState } = await import('../../src/review/fixloop.mjs');
@@ -72,7 +72,11 @@ test('clause 1: --yes without a terminal or confirm clears the marker and writes
   const f = await fixture();
   assert.equal(existsSync(f.marker), true);
   const before = (await f.rows()).length;
-  assert.deepEqual(await f.reopen(), [0, `block B1 reopened ${FILE} (from stopped l3_patch_exhausted; by: agent)\n`]);
+  const result = await f.reopen();
+  const [ticket] = pendingTickets(f.repo);
+  assert.ok(ticket);
+  assert.notEqual(ticket, f.ticket);
+  assert.deepEqual(result, [0, `block B1 reopened ${FILE} (from stopped l3_patch_exhausted; by: agent)\nticket ${ticket}\nnext: code-forge review-file --wait ${ticket}\n`]);
   assert.equal((await f.rows()).length - before, 1);
   const rows = await f.reopens();
   assert.equal(rows.length, 1);
@@ -171,7 +175,11 @@ test('clause 4: one agent reopen per run/block/file, even at a new stop; the hum
   assert.equal((await f.reopens()).length, 1);
   assert.equal(f.calls.length, 1);
   assert.equal(f.prompts(), 0);
-  assert.deepEqual(await f.reopen('owner retries', { isTTY: true }, []), [0, `block B1 reopened ${FILE} (from stopped review_stall; by: human)\n`]);
+  const result = await f.reopen('owner retries', { isTTY: true }, []);
+  const ticket = result[1].match(/^ticket ([0-9a-f]{24})$/m)?.[1];
+  assert.ok(ticket);
+  assert.ok(pendingTickets(f.repo).includes(ticket));
+  assert.deepEqual(result, [0, `block B1 reopened ${FILE} (from stopped review_stall; by: human)\nticket ${ticket}\nnext: code-forge review-file --wait ${ticket}\n`]);
   assert.deepEqual((await f.reopens()).map((r) => r.by), ['agent', 'human']);
   assert.equal(f.calls.length, 1);
   assert.equal(f.prompts(), 1);
@@ -195,7 +203,13 @@ test('clause 4 boundary: unsigned, tampered and other run/block/file agent rows 
 test('clause 5: close prints each verified agent reopen and JSON adds only a nonempty agent_reopens list', async () => {
   for (const kind of ['text', 'json', 'none', 'human', 'unsigned', 'tampered', 'other-block', 'other-run']) {
     const f = await fixture();
-    if (kind === 'text' || kind === 'json') assert.equal((await f.reopen())[0], 0);
+    let ticket = f.ticket;
+    if (kind === 'text' || kind === 'json') {
+      assert.equal((await f.reopen())[0], 0);
+      [ticket] = pendingTickets(f.repo);
+      assert.ok(ticket);
+      assert.notEqual(ticket, f.ticket);
+    }
     else if (kind !== 'none') {
       const row = { event: 'review.reopened', reason: REASON, by: kind === 'human' ? 'human' : 'agent', verdict: AGREE.answer };
       if (kind === 'unsigned' || kind === 'tampered') await f.writeRow({ run: f.runId, block: 'B1', file: FILE, ...row, ...(kind === 'tampered' ? { mac: 'bad' } : {}) });
@@ -210,7 +224,7 @@ test('clause 5: close prints each verified agent reopen and JSON adds only a non
       continue;
     }
     assert.equal(code, 0, `${kind}: ${text}`);
-    if (kind === 'text') assert.equal(text, `reviewed ${FILE} ticket ${f.ticket}\nagent reopen ${FILE}: ${REASON} (verdict: agree)\nblock B1 closed\n`);
+    if (kind === 'text') assert.equal(text, `reviewed ${FILE} ticket ${ticket}\nagent reopen ${FILE}: ${REASON} (verdict: agree)\nblock B1 closed\n`);
     else if (kind === 'json') assert.deepEqual(JSON.parse(text).agent_reopens, [{ file: FILE, reason: REASON, verdict: AGREE.answer }]);
     else assert.equal(Object.hasOwn(JSON.parse(text), 'agent_reopens'), false, kind);
   }
