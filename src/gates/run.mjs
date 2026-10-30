@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, readdir, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { customGateMessages } from '../config/validate.mjs';
 import { exec } from '../util/exec.mjs';
@@ -33,6 +33,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 /**
  * @typedef {object} GateResult
  * @property {string} gate
+ * @property {number} duration_ms - wall time including repeats; zero for skipped gates.
  * @property {true} [custom]
  * @property {Evidence[]} [evidence]
  * @property {string[]} [missing]
@@ -43,9 +44,10 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {number | null} code
  * @property {string} stdout
  * @property {string} stderr
+ * @property {string} [message] - termination diagnostic with the last lines of both streams.
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
+ * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
  * @property {Repeats} [repeats]
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
  *   NAMES, sorted (the values are never in a result).
@@ -53,6 +55,82 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 
 /** Fixed run order — always all four, regardless of an earlier one's result. */
 const GATE_ORDER = /** @type {const} */ (['test', 'lint', 'types', 'format']);
+
+/** Leave room below typical ARG_MAX limits for the inherited environment and spawn overhead. */
+const FORMAT_ARGV_BUDGET_BYTES = 100 * 1024;
+
+/** Repeat the executable and flags in every batch; count UTF-8 bytes and NUL terminators.
+ * @param {string[]} prefix @param {string[]} files @param {number} budget
+ * @returns {string[][]}
+ */
+function formatBatches(prefix, files, budget) {
+  if (!Number.isSafeInteger(budget) || budget <= 0) throw new TypeError('format: argv byte budget must be a positive safe integer');
+  const prefixBytes = prefix.reduce((sum, arg) => sum + Buffer.byteLength(arg) + 1, 0);
+  const batches = [];
+  let batch = prefix.slice();
+  let bytes = prefixBytes;
+  for (const file of files) {
+    const size = Buffer.byteLength(file) + 1;
+    if (prefixBytes + size > budget) throw new RangeError(`format: command and file exceed argv byte budget: ${file}`);
+    if (bytes + size > budget) {
+      batches.push(batch);
+      batch = prefix.slice();
+      bytes = prefixBytes;
+    }
+    batch.push(file);
+    bytes += size;
+  }
+  batches.push(batch);
+  return batches;
+}
+
+/** @param {string} stream @returns {string} */
+function outputTail(stream) {
+  const tail = stream.trimEnd().split(/\r?\n/).slice(-10).join('\n');
+  return tail ? `${tail}\n` : '';
+}
+
+/** Existing supported files only, never a directory or glob for the formatter to traverse.
+ * @param {string} cwd @param {'pint'|'prettier'} formatter
+ * @param {TestScope | import('./expand.mjs').ChangedScope} scope
+ * @returns {Promise<string[]>}
+ */
+async function formatFiles(cwd, formatter, scope) {
+  const changed = scope.scope === 'changed';
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  const opts = { cwd, env, timeoutMs: 30000 };
+  const listed = await exec(['git', 'ls-files', '-z', '--cached', ...(changed ? ['--others'] : []), '--exclude-standard'], opts);
+  if (listed.result !== 'ok') throw new Error(`format: cannot list Git files: ${listed.stderr || listed.error || listed.signal || 'git failed'}`);
+  const wanted = changed ? new Set(scope.changedFiles) : null;
+  const files = [...new Set(listed.stdout.split('\0').filter((file) => file && (!wanted || wanted.has(file))))].sort();
+  if (files.length === 0) return [];
+  // --no-index also excludes force-added ignored paths. A cached path alone is not proof
+  // that the current ignore rules permit it.
+  const ignored = await exec(['git', 'check-ignore', '--no-index', '-z', '--stdin'], {
+    ...opts, input: `${files.join('\0')}\0`, okExitCodes: [0, 1],
+  });
+  if (ignored.result !== 'ok') throw new Error(`format: cannot check Git ignores: ${ignored.stderr || ignored.error || ignored.signal || 'git failed'}`);
+  const excluded = new Set(ignored.stdout.split('\0'));
+  const root = await realpath(cwd);
+  const selected = [];
+  for (const file of files) {
+    if (excluded.has(file)) continue;
+    const supported = formatter === 'pint' ? /\.php$/i.test(file)
+      : /\.(?:[cm]?[jt]sx?|json5?|jsonc|css|scss|less|html?|vue|md|mdx|markdown|ya?ml|graphql|gql|hbs|handlebars|mustache|mjml)$/i.test(file)
+        || ['.prettierrc', '.babelrc', '.eslintrc', '.stylelintrc'].includes(path.basename(file));
+    if (!supported) continue;
+    try {
+      const absolute = path.resolve(root, file);
+      if (!(await lstat(absolute)).isFile() || await realpath(absolute) !== absolute) continue;
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) continue;
+      throw error;
+    }
+    // Leading dashes cannot become options, and existing paths are not treated as globs.
+    selected.push(`./${file}`);
+  }
+  return selected;
+}
 
 /** Unanswered prompt suffixes; inspect only each stream's last non-empty line. */
 export const UNANSWERED_PROMPT_PATTERN = /(?:\?|\(y(?:\/n)?\)|\[y\/n\]|yes\/no)\s*$/i;
@@ -165,23 +243,32 @@ function normalizeCommand(command) {
  * @param {import('../util/exec.mjs').ExecResult} res
  * @param {number} timeoutMs
  * @param {boolean} [failOnStdout]
- * @returns {Pick<GateResult, 'ok'|'code'|'stdout'|'stderr'|'reason'>}
+ * @returns {Pick<GateResult, 'ok'|'code'|'stdout'|'stderr'|'reason'|'message'>}
  */
 function gateOutcome(res, timeoutMs, failOnStdout = false) {
   const prompt = res.result === 'ok' && [res.stdout, res.stderr].some((stream) =>
     UNANSWERED_PROMPT_PATTERN.test(stream.trimEnd().split(/\r?\n/).at(-1)));
-  const reason = res.timedOut ? 'timeout' : prompt ? 'prompt' : undefined;
-  const message = res.timedOut
+  const reason = res.timedOut ? 'timeout'
+    : res.code === null ? res.signal ?? (res.error ? 'spawn-error' : 'terminated')
+    : prompt ? 'prompt' : undefined;
+  const diagnostic = res.timedOut
     ? `gate timeout after ${timeoutMs / 1000} seconds; raise gates.timeout_s (or --timeout-ms)`
+    : res.code === null ? `gate terminated: ${res.signal ?? res.error ?? 'no exit status (no signal reported)'}`
     : prompt ? 'gate ended on an interactive prompt; install the tool or make the command non-interactive' : '';
+  const tails = ['stdout', 'stderr'].flatMap((stream) => {
+    const tail = res[stream].trimEnd().split(/\r?\n/).slice(-10).join('\n');
+    return tail ? [`${stream} tail:\n${tail}`] : [];
+  });
+  const message = [diagnostic, ...tails].join('\n');
   return {
     ok: res.result === 'ok' && !reason && (!failOnStdout || res.stdout.trim().length === 0),
     code: res.code,
     stdout: res.stdout,
-    stderr: message
-      ? `${res.stderr}${res.stderr && !res.stderr.endsWith('\n') ? '\n' : ''}${message}\n`
+    stderr: diagnostic
+      ? `${res.stderr}${res.stderr && !res.stderr.endsWith('\n') ? '\n' : ''}${diagnostic}\n`
       : res.stderr,
     ...(reason ? { reason } : {}),
+    ...(diagnostic ? { message } : {}),
   };
 }
 
@@ -191,8 +278,8 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment, overriding the CI=1/npm_config_yes=false defaults.
  * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[], kindGates?: KindGates}} gates
- * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
- * @returns {Promise<{results: GateResult[], allOk: boolean, repeats?: Repeats}>}
+ * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope, formatArgvBudgetBytes?: number}} opts - formatArgvBudgetBytes overrides the detected formatter batch budget (default 100 KiB).
+ * @returns {Promise<{results: GateResult[], allOk: boolean, duration_ms: number, repeats?: Repeats}>}
  */
 export async function runGates(gates, opts) {
   if (!gates || typeof gates !== 'object') {
@@ -219,32 +306,56 @@ export async function runGates(gates, opts) {
   // Every gate is normalized and expanded BEFORE any runs, so a bad gate throws with nothing run.
   // B60: config validation refuses a gate whose only item is {test_files}; the empty-argv check
   // is the guard for one that reaches here anyway: it names the gate, not an opaque spawn error.
-  const planned = GATE_ORDER.map((gate) => {
+  const planned = [];
+  for (const gate of GATE_ORDER) {
     const command = gates[gate] ?? null;
-    if (command === null || excluded(gate)) return { gate, command: null };
+    if (command === null || excluded(gate)) { planned.push({ gate, command: null }); continue; }
     const normalized = normalizeCommand(command);
     if (normalized.argv[0] === CHANGED_FILES_TOKEN) throw new TypeError(`gates.${gate}: '{changed_files}' cannot be the command (argv[0])`);
-    const { argv, scoped } = expandArgv(normalized.argv, scope);
+    let { argv, scoped } = expandArgv(normalized.argv, scope);
     if (argv.length === 0 && normalized.argv.length > 0) throw new TypeError(`gates.${gate}: the argv is empty once ${normalized.argv.map((item) => `'${item}'`).join(' and ')} is dropped for the full suite — put the test command before it`);
-    return { gate, command: { argv, originalArgv: normalized.argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } };
-  });
+    const formatter = gate === 'format' && !Array.isArray(command) ? command.formatter : undefined;
+    let batches;
+    if (formatter) {
+      const files = await formatFiles(cwd, formatter, scope);
+      if (files.length === 0) { planned.push({ gate, command: null, noFiles: true }); continue; }
+      batches = formatBatches(argv, files, opts.formatArgvBudgetBytes ?? FORMAT_ARGV_BUDGET_BYTES);
+      argv = argv.concat(files);
+    }
+    planned.push({ gate, command: { argv, batches, originalArgv: normalized.argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } });
+  }
   /** @type {GateResult[]} */
   const results = [];
-  for (const { gate, command } of planned) {
+  for (const { gate, command, noFiles } of planned) {
     if (command === null) {
-      results.push({ gate, argv: null, skipped: true, ok: true, code: null, stdout: '', stderr: '',
+      results.push({ gate, duration_ms: 0, argv: null, skipped: true, ok: true, code: null, stdout: '', stderr: '',
         ...(gates[gate] != null && excluded(gate) ? { reason: skipReason() } : {}),
+        ...(noFiles ? { reason: 'no_changes' } : {}),
       });
       continue;
     }
-    const { argv, scoped, failOnStdout, env } = command;
+    const { argv, batches = [argv], scoped, failOnStdout, env } = command;
     // Each command is run and its exit status read on its own — never `&&`-chained with the
     // next, so a red gate is reported red without swallowing the gates that follow it.
     const execOpts = { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } };
-    const res = await exec(argv, execOpts);
-    const outcome = gateOutcome(res, timeoutMs, failOnStdout);
+    const started = performance.now();
+    const outcomes = [];
+    for (const batch of batches) {
+      const res = await exec(batch, execOpts);
+      const batchOutcome = gateOutcome(res, timeoutMs, failOnStdout);
+      outcomes.push({ ...batchOutcome, ...(batches.length > 1 ? {
+        stdout: outputTail(batchOutcome.stdout), stderr: outputTail(batchOutcome.stderr),
+      } : {}) });
+    }
+    // Retain the first failure's status and diagnostic even if later batches pass.
+    const outcome = {
+      ...(outcomes.find((entry) => !entry.ok) ?? outcomes[0]),
+      stdout: outcomes.map((entry) => entry.stdout).join(''),
+      stderr: outcomes.map((entry) => entry.stderr).join(''),
+    };
     const result = /** @type {GateResult} */ ({
       gate,
+      duration_ms: 0,
       argv,
       skipped: false,
       ...(scoped ? scopeFields(scope) : {}),
@@ -272,23 +383,27 @@ export async function runGates(gates, opts) {
         }
       }
     }
+    result.duration_ms = Math.round(performance.now() - started);
     results.push(result);
   }
   for (const gate of gates.custom ?? []) {
     if (excluded(gate.name)) {
-      results.push({ gate: gate.name, custom: true, argv: null, skipped: true, ok: true, code: null,
+      results.push({ gate: gate.name, duration_ms: 0, custom: true, argv: null, skipped: true, ok: true, code: null,
         stdout: '', stderr: '', reason: skipReason(), evidence: [],
       });
       continue;
     }
     const { argv, env } = normalizeCommand(gate);
+    const started = performance.now();
     const res = await exec(argv, { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } });
+    const evidence = await collectEvidence(cwd, gate.evidence ?? []);
     results.push({ gate: gate.name, custom: true, argv, skipped: false,
+      duration_ms: Math.round(performance.now() - started),
       ...gateOutcome(res, timeoutMs),
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
-      ...await collectEvidence(cwd, gate.evidence ?? []),
+      ...evidence,
     });
   }
   const repeats = results.find((r) => r.repeats)?.repeats;
-  return { results, allOk: results.every((r) => r.ok), ...(repeats ? { repeats } : {}) };
+  return { results, allOk: results.every((r) => r.ok), duration_ms: results.reduce((sum, r) => sum + r.duration_ms, 0), ...(repeats ? { repeats } : {}) };
 }

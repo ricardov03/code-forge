@@ -365,6 +365,10 @@ export async function runGatesVerb(args, deps = {}) {
         ran = await runGates(gates, { cwd, timeoutMs });
       }
       const { results, allOk } = ran;
+      const durationMs = results.reduce((sum, r) => sum + r.duration_ms, 0);
+      for (const result of results) {
+        if (!result.skipped && result.code === null) err(`${result.gate}: ${result.message}\n`);
+      }
       const repeats = results.find((r) => r.repeats)?.repeats;
 
       const ledgerSlug = slug ?? ran.ledger_slug;
@@ -378,8 +382,9 @@ export async function runGatesVerb(args, deps = {}) {
         for (const result of results) {
           if (!result.skipped && !result.ok) {
             await writeGateRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result),
+              duration_ms: result.duration_ms, total_duration_ms: durationMs,
               ...(result.custom ? { custom: true } : {}),
-              ...(['flaky-test', 'timeout', 'prompt'].includes(result.reason) ? { reason: result.reason } : {}),
+              ...(result.reason ? { reason: result.reason } : {}),
               ...(result.repeats ? { repeats: result.repeats } : {}) });
           }
         }
@@ -388,6 +393,8 @@ export async function runGatesVerb(args, deps = {}) {
         const scoped = results.find((r) => r.scope !== undefined);
         const custom = results.filter((r) => r.custom);
         await writeGateRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk,
+          duration_ms: durationMs,
+          results: results.map(({ gate, ok, skipped, duration_ms }) => ({ gate, ok, skipped, duration_ms })),
           ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
           ...(custom.length ? {
             custom: custom.map((r) => ({ name: r.gate, ok: r.ok, evidence_count: r.evidence.length, ...(r.missing ? { missing: r.missing } : {}) })),
@@ -395,7 +402,7 @@ export async function runGatesVerb(args, deps = {}) {
           } : {}),
           ...(ran.files ? { files: ran.files } : {}), ...(repeats ? { repeats } : {}) });
       }
-      out({ stack: gates.stack, ...inTree, results, allOk, ...(message ? { message } : {}), ...(repeats ? { repeats } : {}) });
+      out({ stack: gates.stack, ...inTree, results, allOk, duration_ms: durationMs, ...(message ? { message } : {}), ...(repeats ? { repeats } : {}) });
       return allOk ? 0 : 1;
     }
 

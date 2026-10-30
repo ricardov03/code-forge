@@ -215,6 +215,19 @@ async function configure(cwd, gates) {
   await writeFile(path.join(cwd, '.code-forge.yml'), JSON.stringify({ ...config(undefined), gates }));
 }
 
+function timingFields(output, gate = undefined) {
+  for (const result of output.results) {
+    assert.equal(typeof result.duration_ms, 'number');
+    assert.ok(Number.isFinite(result.duration_ms) && result.duration_ms >= 0);
+    if (result.skipped) assert.equal(result.duration_ms, 0);
+  }
+  assert.equal(typeof output.duration_ms, 'number');
+  assert.equal(output.duration_ms, output.results.reduce((sum, r) => sum + r.duration_ms, 0));
+  return gate === undefined
+    ? { duration_ms: output.duration_ms, results: output.results.map(({ gate, ok, skipped, duration_ms }) => ({ gate, ok, skipped, duration_ms })) }
+    : { duration_ms: output.results.find((r) => r.gate === gate).duration_ms, total_duration_ms: output.duration_ms };
+}
+
 test('custom CLI detect and run list named gates; red and done rows include summaries and block evidence', async () => {
   await withTempDir(async (cwd) => {
     const custom = [
@@ -237,8 +250,8 @@ test('custom CLI detect and run list named gates; red and done rows include summ
       assert.deepEqual(ran.output.results[4].evidence, evidence);
       const owner = block ? { run: 'fake-run', block: 'WEB' } : {};
       assert.deepEqual(rows, [
-        { ...owner, event: 'gate.red', gate: 'build', custom: true, code: 2 },
-        { ...owner, event: 'gate.done', stack: 'unknown', all_ok: false,
+        { ...owner, event: 'gate.red', gate: 'build', custom: true, code: 2, ...timingFields(ran.output, 'build') },
+        { ...owner, event: 'gate.done', stack: 'unknown', all_ok: false, ...timingFields(ran.output),
           custom: [{ name: 'build', ok: false, evidence_count: 1, missing: ['absent.png'] }, { name: 'links', ok: true, evidence_count: 0 }],
           ...(block ? { evidence: { build: evidence, links: [] } } : {}),
         },
@@ -247,7 +260,7 @@ test('custom CLI detect and run list named gates; red and done rows include summ
   });
 });
 
-test('custom CLI boundary keeps legacy row shapes and still runs custom gates in a light block', async () => {
+test('custom CLI boundary adds timing without custom-only row fields and still runs custom gates in a light block', async () => {
   await withTempDir(async (cwd) => {
     rows.length = 0;
     record = { workspace: cwd, blocks: { WEB: { kind: 'light', test_files: ['a.test.mjs'], owned_files: [] } } };
@@ -263,7 +276,10 @@ test('custom CLI boundary keeps legacy row shapes and still runs custom gates in
       assert.equal(legacy.code, 1);
       assert.equal(legacy.output.results.length, 4);
       assert.equal(Object.hasOwn(legacy.output, 'custom'), false);
-      assert.deepEqual(rows, [{ event: 'gate.red', gate: 'test', code: 1 }, { event: 'gate.done', stack: 'unknown', all_ok: false }], 'no new row keys without custom gates');
+      assert.deepEqual(rows, [
+        { event: 'gate.red', gate: 'test', code: 1, ...timingFields(legacy.output, 'test') },
+        { event: 'gate.done', stack: 'unknown', all_ok: false, ...timingFields(legacy.output) },
+      ], 'timing fields are present without custom-only row fields');
     }
   });
 });
