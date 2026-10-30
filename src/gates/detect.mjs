@@ -20,7 +20,9 @@ import path from 'node:path';
  * `run.mjs` treats non-empty stdout as red too, since a bare exit-code check can never fail.
  * B60: a configured gate may be `{argv, env}` — `env` adds variables to the gate's environment
  * (the values are never printed, `run.mjs`).
- * @typedef {string[] | {argv: string[], failOnStdout?: true, env?: Record<string, string>}} GateCommand
+ * `formatter` marks detected defaults that require an explicit Git file set. Configured
+ * commands have no such marker and retain their own arguments and scope.
+ * @typedef {string[] | {argv: string[], failOnStdout?: true, env?: Record<string, string>, formatter?: 'pint'|'prettier'}} GateCommand
  * @typedef {GateCommand | null} Gate
  */
 /**
@@ -69,7 +71,8 @@ function detectPhp(root) {
   if (runner === null) return null;
   const test = has(root, 'artisan') ? ['php', 'artisan', 'test', '--compact'] : [`vendor/bin/${runner}`];
   const types = has(root, 'phpstan.neon') || has(root, 'phpstan.neon.dist') ? ['vendor/bin/phpstan'] : null;
-  const format = has(root, 'pint.json') || has(root, 'vendor/bin/pint') ? ['vendor/bin/pint', '--test'] : null;
+  const format = has(root, 'pint.json') || has(root, 'vendor/bin/pint')
+    ? { argv: ['vendor/bin/pint', '--test'], formatter: /** @type {const} */ ('pint') } : null;
   return { stack: `php-${runner}`, test, lint: null, types, format };
 }
 
@@ -123,7 +126,7 @@ function detectNode(root) {
   let format = null;
   if (typeof scripts['format:check'] === 'string') format = [pm, 'run', 'format:check'];
   else if (has(root, '.prettierrc') || has(root, '.prettierrc.json') || has(root, '.prettierrc.js') || hasDependency(pkg, 'prettier')) {
-    format = ['npx', 'prettier', '--check', '.'];
+    format = { argv: ['npx', 'prettier', '--check', '--ignore-unknown'], formatter: /** @type {const} */ ('prettier') };
   }
 
   return { stack: 'node', test, lint, types, format };

@@ -8,7 +8,7 @@
 
 import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
-import { open, readdir, realpath } from 'node:fs/promises';
+import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { customGateMessages } from '../config/validate.mjs';
 import { exec } from '../util/exec.mjs';
@@ -54,6 +54,48 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 
 /** Fixed run order — always all four, regardless of an earlier one's result. */
 const GATE_ORDER = /** @type {const} */ (['test', 'lint', 'types', 'format']);
+
+/** Existing supported files only, never a directory or glob for the formatter to traverse.
+ * @param {string} cwd @param {'pint'|'prettier'} formatter
+ * @param {TestScope | import('./expand.mjs').ChangedScope} scope
+ * @returns {Promise<string[]>}
+ */
+async function formatFiles(cwd, formatter, scope) {
+  const changed = scope.scope === 'changed';
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  const opts = { cwd, env, timeoutMs: 30000 };
+  const listed = await exec(['git', 'ls-files', '-z', '--cached', ...(changed ? ['--others'] : []), '--exclude-standard'], opts);
+  if (listed.result !== 'ok') throw new Error(`format: cannot list Git files: ${listed.stderr || listed.error || listed.signal || 'git failed'}`);
+  const wanted = changed ? new Set(scope.changedFiles) : null;
+  const files = [...new Set(listed.stdout.split('\0').filter((file) => file && (!wanted || wanted.has(file))))].sort();
+  if (files.length === 0) return [];
+  // --no-index also excludes force-added ignored paths. A cached path alone is not proof
+  // that the current ignore rules permit it.
+  const ignored = await exec(['git', 'check-ignore', '--no-index', '-z', '--stdin'], {
+    ...opts, input: `${files.join('\0')}\0`, okExitCodes: [0, 1],
+  });
+  if (ignored.result !== 'ok') throw new Error(`format: cannot check Git ignores: ${ignored.stderr || ignored.error || ignored.signal || 'git failed'}`);
+  const excluded = new Set(ignored.stdout.split('\0'));
+  const root = await realpath(cwd);
+  const selected = [];
+  for (const file of files) {
+    if (excluded.has(file)) continue;
+    const supported = formatter === 'pint' ? /\.php$/i.test(file)
+      : /\.(?:[cm]?[jt]sx?|json5?|jsonc|css|scss|less|html?|vue|md|mdx|markdown|ya?ml|graphql|gql|hbs|handlebars|mustache|mjml)$/i.test(file)
+        || ['.prettierrc', '.babelrc', '.eslintrc', '.stylelintrc'].includes(path.basename(file));
+    if (!supported) continue;
+    try {
+      const absolute = path.resolve(root, file);
+      if (!(await lstat(absolute)).isFile() || await realpath(absolute) !== absolute) continue;
+    } catch (error) {
+      if (['ENOENT', 'ENOTDIR'].includes(error.code)) continue;
+      throw error;
+    }
+    // Leading dashes cannot become options, and existing paths are not treated as globs.
+    selected.push(`./${file}`);
+  }
+  return selected;
+}
 
 /** Unanswered prompt suffixes; inspect only each stream's last non-empty line. */
 export const UNANSWERED_PROMPT_PATTERN = /(?:\?|\(y(?:\/n)?\)|\[y\/n\]|yes\/no)\s*$/i;
@@ -229,21 +271,29 @@ export async function runGates(gates, opts) {
   // Every gate is normalized and expanded BEFORE any runs, so a bad gate throws with nothing run.
   // B60: config validation refuses a gate whose only item is {test_files}; the empty-argv check
   // is the guard for one that reaches here anyway: it names the gate, not an opaque spawn error.
-  const planned = GATE_ORDER.map((gate) => {
+  const planned = [];
+  for (const gate of GATE_ORDER) {
     const command = gates[gate] ?? null;
-    if (command === null || excluded(gate)) return { gate, command: null };
+    if (command === null || excluded(gate)) { planned.push({ gate, command: null }); continue; }
     const normalized = normalizeCommand(command);
     if (normalized.argv[0] === CHANGED_FILES_TOKEN) throw new TypeError(`gates.${gate}: '{changed_files}' cannot be the command (argv[0])`);
     const { argv, scoped } = expandArgv(normalized.argv, scope);
     if (argv.length === 0 && normalized.argv.length > 0) throw new TypeError(`gates.${gate}: the argv is empty once ${normalized.argv.map((item) => `'${item}'`).join(' and ')} is dropped for the full suite — put the test command before it`);
-    return { gate, command: { argv, originalArgv: normalized.argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } };
-  });
+    const formatter = gate === 'format' && !Array.isArray(command) ? command.formatter : undefined;
+    if (formatter) {
+      const files = await formatFiles(cwd, formatter, scope);
+      if (files.length === 0) { planned.push({ gate, command: null, noFiles: true }); continue; }
+      argv.push(...files);
+    }
+    planned.push({ gate, command: { argv, originalArgv: normalized.argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } });
+  }
   /** @type {GateResult[]} */
   const results = [];
-  for (const { gate, command } of planned) {
+  for (const { gate, command, noFiles } of planned) {
     if (command === null) {
       results.push({ gate, argv: null, skipped: true, ok: true, code: null, stdout: '', stderr: '',
         ...(gates[gate] != null && excluded(gate) ? { reason: skipReason() } : {}),
+        ...(noFiles ? { reason: 'no_changes' } : {}),
       });
       continue;
     }

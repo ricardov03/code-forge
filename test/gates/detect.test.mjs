@@ -20,7 +20,7 @@ test('laravel-vue: composer.json + vendor/bin/pest + artisan ⇒ php artisan tes
     assert.deepEqual(gates.test, ['php', 'artisan', 'test', '--compact']);
     assert.equal(gates.lint, null);
     assert.deepEqual(gates.types, ['vendor/bin/phpstan']);
-    assert.deepEqual(gates.format, ['vendor/bin/pint', '--test']);
+    assert.deepEqual(gates.format, { argv: ['vendor/bin/pint', '--test'], formatter: 'pint' });
   });
 });
 
@@ -32,7 +32,7 @@ test('node: package.json scripts ⇒ pm from packageManager, lint script, tsconf
     assert.deepEqual(gates.test, ['pnpm', 'test']);
     assert.deepEqual(gates.lint, ['pnpm', 'run', 'lint']);
     assert.deepEqual(gates.types, ['npx', 'tsc', '--noEmit']);
-    assert.deepEqual(gates.format, ['npx', 'prettier', '--check', '.']);
+    assert.deepEqual(gates.format, { argv: ['npx', 'prettier', '--check', '--ignore-unknown'], formatter: 'prettier' });
   });
 });
 
@@ -139,7 +139,7 @@ test('B61 Laravel+PHPUnit: composer.json + artisan + vendor/bin/phpunit, no pest
       test: ['php', 'artisan', 'test', '--compact'],
       lint: null,
       types: ['vendor/bin/phpstan'],
-      format: ['vendor/bin/pint', '--test'],
+      format: { argv: ['vendor/bin/pint', '--test'], formatter: 'pint' },
     });
   });
 });
@@ -160,7 +160,7 @@ test('B61 Laravel+Pest is unchanged: with both vendor/bin/pest and vendor/bin/ph
       test: ['php', 'artisan', 'test', '--compact'],
       lint: null,
       types: ['vendor/bin/phpstan'],
-      format: ['vendor/bin/pint', '--test'],
+      format: { argv: ['vendor/bin/pint', '--test'], formatter: 'pint' },
     });
   });
 });
