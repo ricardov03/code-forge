@@ -72,7 +72,7 @@ test('clause 1: --yes without a terminal or confirm clears the marker and writes
   const f = await fixture();
   assert.equal(existsSync(f.marker), true);
   const before = (await f.rows()).length;
-  assert.deepEqual(await f.reopen(), [0, `block B1 reopened ${FILE} (from stopped l3_patch_exhausted; by: agent)\n`]);
+  assert.deepEqual(await f.reopen(), [0, `block B1 reopened ${FILE} (from stopped l3_patch_exhausted; by: agent)\nticket ${f.ticket}\nnext: code-forge review-file --wait ${f.ticket}\n`]);
   assert.equal((await f.rows()).length - before, 1);
   const rows = await f.reopens();
   assert.equal(rows.length, 1);
@@ -171,7 +171,8 @@ test('clause 4: one agent reopen per run/block/file, even at a new stop; the hum
   assert.equal((await f.reopens()).length, 1);
   assert.equal(f.calls.length, 1);
   assert.equal(f.prompts(), 0);
-  assert.deepEqual(await f.reopen('owner retries', { isTTY: true }, []), [0, `block B1 reopened ${FILE} (from stopped review_stall; by: human)\n`]);
+  const ticket = ticketId({ run: f.runId, block: 'B1', file: FILE, content_hash: contentHash(f.repo, FILE) });
+  assert.deepEqual(await f.reopen('owner retries', { isTTY: true }, []), [0, `block B1 reopened ${FILE} (from stopped review_stall; by: human)\nticket ${ticket}\nnext: code-forge review-file --wait ${ticket}\n`]);
   assert.deepEqual((await f.reopens()).map((r) => r.by), ['agent', 'human']);
   assert.equal(f.calls.length, 1);
   assert.equal(f.prompts(), 1);

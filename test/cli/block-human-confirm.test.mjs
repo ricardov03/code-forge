@@ -46,10 +46,11 @@ const BASE_KEYS = {
   waive: ['run', 'event', 'block', 'file', 'finding', 'reason', 'by', 'ts', 'mac', 'tokens_source', 'cost_source'],
   reopen: ['run', 'event', 'block', 'file', 'from', 'stop_reason', 'at_seq', 'from_hash', 'to_hash', 'reason', 'by', 'ts', 'mac', 'tokens_source', 'cost_source'],
 };
-const BASE_OUT = {
+/** @param {string} ticket */
+const expectedOutput = (ticket) => ({
   waive: 'block B1 waived C1 in src/a.mjs (by: human)\n',
-  reopen: 'block B1 reopened src/a.mjs (from stopped l3_patch_exhausted; by: human)\n',
-};
+  reopen: `block B1 reopened src/a.mjs (from stopped l3_patch_exhausted; by: human)\nticket ${ticket}\nnext: code-forge review-file --wait ${ticket}\n`,
+});
 
 /** @returns {{write: (s: string) => boolean, text: string}} */
 function capture() {
@@ -172,7 +173,7 @@ async function fixture(slug) {
     waive: `Waive finding C1 in ${SRC} of block B1 (run ${runId})? Only the owner may say yes.`,
     reopen: `Reopen the review of ${SRC} in block B1 (run ${runId})? Only the owner may say yes.`,
   };
-  return { runId, slug, repo, key, ui, block, argsOf, humanRows, doneMarker, prompts, writeRow };
+  return { runId, slug, repo, key, ui, block, argsOf, humanRows, doneMarker, ticket, prompts, writeRow };
 }
 
 const CANCEL = Symbol('clack-cancel');
@@ -236,12 +237,12 @@ test('B80 (2): at a terminal, "no" and a cancel ⇒ exit 1, `cancelled`, the pro
   assert.equal(existsSync(f.doneMarker), true);
 });
 
-test('B80 (2): at a terminal, "yes" ⇒ the prompt asked once, then the same signed row and output as the base code', async () => {
+test('B80 (2): at a terminal, "yes" ⇒ the prompt asked once, then the same signed row and the reopen ticket and next command', async () => {
   const f = await fixture('b80-yes');
   for (const verb of VERBS) {
     f.ui.asked = [];
     const r = await f.block(f.argsOf[verb]);
-    assert.deepEqual([r.code, r.out, r.err], [0, BASE_OUT[verb], '']);
+    assert.deepEqual([r.code, r.out, r.err], [0, expectedOutput(f.ticket)[verb], '']);
     assert.deepEqual(f.ui.asked, [{ message: f.prompts[verb], initialValue: false }]);
   }
   const rows = await f.humanRows();
@@ -298,19 +299,19 @@ test('B80 (4): an active autopilot grant changes nothing — no terminal is stil
   for (const verb of VERBS) {
     f.ui.asked = [];
     const r = await f.block(f.argsOf[verb]);
-    assert.deepEqual([r.code, r.out, r.err], [0, BASE_OUT[verb], '']);
+    assert.deepEqual([r.code, r.out, r.err], [0, expectedOutput(f.ticket)[verb], '']);
     assert.deepEqual(f.ui.asked, [{ message: f.prompts[verb], initialValue: false }]);
   }
   const rows = await f.humanRows();
   assert.deepEqual(rows.map((row) => [row.event, row.by]), [['review.waived', 'human'], ['review.reopened', 'human']]);
 });
 
-test('B80 (2): "yes" with stdin and stdout each a TTY (no isTTY given) ⇒ asked once, the base row and output', async () => {
+test('B80 (2): "yes" with stdin and stdout each a TTY (no isTTY given) ⇒ asked once, the base row and the reopen ticket and next command', async () => {
   const f = await fixture('b80-yes-sides');
   for (const verb of VERBS) {
     f.ui.asked = [];
     const r = await f.block(f.argsOf[verb], { stdinIsTTY: true, stdoutIsTTY: true });
-    assert.deepEqual([r.code, r.out, r.err], [0, BASE_OUT[verb], '']);
+    assert.deepEqual([r.code, r.out, r.err], [0, expectedOutput(f.ticket)[verb], '']);
     assert.deepEqual(f.ui.asked, [{ message: f.prompts[verb], initialValue: false }]);
   }
   const rows = await f.humanRows();
