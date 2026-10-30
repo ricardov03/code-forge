@@ -37,6 +37,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Grok runs no longer start the user's Cursor or Claude MCP servers, so no orphan MCP helpers stay behind and use memory
   (B164)
+- An invalid L3 judge answer is now a broken result, not a disagreement: it retries once, then tries the next L3 model;
+  a schema-invalid review answer uses every level fallback even when `second_levels` is empty (#24, #26 item 5, B168)
 
 ## [0.15.2] — 2026-10-30
 
