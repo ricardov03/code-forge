@@ -135,7 +135,7 @@ test('B62a (2): a refused worktree refuses the open with exit 1 and a clear mess
     assert.deepEqual(await fx.events(), ['run.start', 'review.external']);
     return fx;
   };
-  const taken = await refused('b62a-branch', WORKTREE, async (fx) => void (await git(['branch', 'forge/r-b62a-branch/B1'], fx.repo)), () => 'block B1: branch forge/r-b62a-branch/B1 already exists — delete it or change proof.worktree.branch; nothing was recorded');
+  const taken = await refused('b62a-branch', WORKTREE, async (fx) => void (await git(['branch', 'forge/r-b62a-branch/B1', 'HEAD~1'], fx.repo)), (fx) => `block B1: branch forge/r-b62a-branch/B1 does not descend from base ${fx.head} — delete the branch or pick another block id; nothing was recorded`);
   assert.equal(existsSync(`${taken.repo}-worktrees/B1`), false);
 
   const occupied = await refused('b62a-path', WORKTREE, async (fx) => void mkdirSync(`${fx.repo}-worktrees/B1`, { recursive: true }), (fx) => `block B1: ${fx.repo}-worktrees/B1 already exists and is not this block's worktree — move it away or change proof.worktree.dir; nothing was recorded`);
@@ -441,6 +441,38 @@ test('B62a (2): a rollback that cannot remove the tree or the branch throws the 
   assert.deepEqual(await readRun('r-b62a-stuck'), before);
 });
 
+test('B166: a failed open on an existing branch removes its new tree and preserves the branch tip', async () => {
+  const fx = await fixture('b166-kept-branch', 'r-b166-kept-branch');
+  const branch = 'forge/r-b166-kept-branch/B1';
+  const tree = `${fx.repo}-worktrees/B1`;
+  await git(['branch', branch], fx.repo);
+  const before = await readRun('r-b166-kept-branch');
+  const settings = worktreeSettings(before);
+  assert.ok(settings);
+  await assert.rejects(openBlock({
+    runId: 'r-b166-kept-branch', id: 'B1', level: 'L2', owned: ['src/a.mjs'],
+    acceptance: [{ clause: 'c', tests: ['t'] }],
+    writeRow: async (row) => { if (row.event === 'dispatch') throw new Error('ledger unavailable'); },
+    worktree: (ctx) => prepareWorktree({ cwd: fx.repo, settings, runId: 'r-b166-kept-branch', id: 'B1', ...ctx }),
+  }), { message: 'ledger unavailable' });
+  assert.equal(existsSync(tree), false);
+  assert.equal(await fx.branchSha(branch), fx.head);
+  assert.deepEqual(await registered(fx.repo), [fx.repo]);
+  assert.deepEqual(await readRun('r-b166-kept-branch'), before);
+
+  // Git refuses to attach a branch checked out in another tree; that tree and branch survive.
+  const other = `${fx.repo}-worktrees/other`;
+  await git(['worktree', 'add', other, branch], fx.repo);
+  const [code, text] = await fx.open('B1', ['src/a.mjs']);
+  assert.equal(code, 1, text);
+  assert.ok(text.includes('git worktree add failed ('), text);
+  assert.equal(existsSync(tree), false);
+  assert.equal(await fx.branchSha(branch), fx.head);
+  assert.deepEqual(await registered(fx.repo), [fx.repo, other]);
+  assert.deepEqual(await readRun('r-b166-kept-branch'), before);
+  assert.deepEqual(await fx.events(), ['run.start', 'review.external']);
+});
+
 test('B62a (2): a re-open whose tree is registered on another branch or a detached HEAD is refused with exit 1 naming what it is on', async () => {
   const fx = await fixture('b62a-other', 'r-b62a-other');
   const tree = `${fx.repo}-worktrees/B1`;
@@ -496,6 +528,23 @@ test('B62a (2): a branch made between the plan and make() refuses the open with 
   assert.notEqual(theirs, head);
   assert.equal(existsSync(planned.path), false);
   assert.deepEqual(await registered(repo), [repo]);
+});
+
+test('B166: an existing branch moved outside the base ancestry between plan and make is preserved and refused', async () => {
+  const fx = await fixture('b166-moved-branch', 'r-b166-moved-branch');
+  const branch = 'forge/r-b166-moved-branch/B1';
+  const older = (await git(['rev-parse', 'HEAD~1'], fx.repo)).trim();
+  await git(['branch', branch], fx.repo);
+  const settings = { dir: null, branch: DEFAULT_BRANCH_TEMPLATE, base: null };
+  const planned = await prepareWorktree({ cwd: fx.repo, settings, runId: 'r-b166-moved-branch', id: 'B1', baseSha: fx.head, previous: null });
+  await git(['branch', '-f', branch, older], fx.repo);
+  await assert.rejects(planned.make(), {
+    code: 'worktree-failed',
+    message: `block B1: branch ${branch} does not descend from base ${fx.head} — delete the branch or pick another block id; nothing was recorded`,
+  });
+  assert.equal(await fx.branchSha(branch), older);
+  assert.equal(existsSync(planned.path), false);
+  assert.deepEqual(await registered(fx.repo), [fx.repo]);
 });
 
 test('B62a/B62b (4): a tree whose directory was deleted by hand refuses block close (its work cannot be measured; nothing recorded), and removeWorktree prunes such a tree', async () => {
