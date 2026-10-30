@@ -155,11 +155,12 @@ test('clause 3 boundary: disagreement or a failed or invalid judge leaves the fi
     assert.equal(code, 1);
     assert.match(text, /^block reopen: reopen-yes-disagreed:/);
     if (answer?.answer?.verdict === 'disagree') assert.match(text, /The stop is not addressed\./);
+    else assert.match(text, /Judge answer broken: no valid answer after retry and fallback\./);
     assert.equal((await f.rows()).length - before, 0);
     assert.equal((await f.reopens()).length, 0);
     assert.equal((await f.loaded()).state.status, 'stopped');
     assert.equal(existsSync(f.marker), true);
-    assert.equal(calls, 1);
+    assert.equal(calls, answer?.answer?.verdict === 'disagree' ? 1 : 2, 'valid disagreement stops; a broken answer retries once');
     assert.equal(f.prompts(), 0);
   }
 });

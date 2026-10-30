@@ -317,6 +317,11 @@ Tagged but not on npm yet? A maintainer can install the exact release from the r
 
 ## When something fails
 
+Environment notes:
+
+- pnpm 11 refuses a symlinked `node_modules` with `ERR_PNPM_UNSAFE_MODULES_DIR`; use a real directory for the install.
+- `codex exec` waits on stdin unless run with `</dev/null`; enforce timeouts from outside the process.
+
 Every verb that fails (a non-zero exit or a crash) adds one line to
 `~/.code-forge/logs/errors.jsonl`: the time, the versions, the verb and its subcommand, the flag
 names (never their values), the exit code, a kind (`usage`, `crash`, a 1Password kind such as

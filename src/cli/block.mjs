@@ -308,7 +308,34 @@ const USAGE =
   '       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
-const SUBCOMMANDS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers', 'human-pass', 'amend-acceptance'];
+/** @type {Record<string, string>} */
+const VERB_USAGE = {
+  open: '<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]',
+  attempt: '<id> --run <r>',
+  rebase: '<id> --run <r> [--head <ref>]',
+  claim: '<id> <path> --run <r>',
+  close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--decide]',
+  stop: '<id> --run <r> --reason <text>',
+  waive: '<id> <finding-id> --run <r> --file <path> --reason <text> [--yes]',
+  reopen: '<id> --run <r> --file <path> --reason <text> [--yes]',
+  'accept-hit': '<id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>',
+  unwaive: '<id> <finding-id> --run <r> --file <path> --reason <text>',
+  'ack-waivers': '<id> --run <r>',
+  'human-pass': '<id> --run <r> --note <text> [--proof <dir-or-file>]',
+  'amend-acceptance': '<id> --run <r> --acceptance <file> --reason <text>',
+};
+const SUBCOMMANDS = Object.keys(VERB_USAGE);
+
+/** @param {string} sub @returns {string} */
+function verbUsage(sub) {
+  return `usage: code-forge block ${sub} ${VERB_USAGE[sub]} [--json] [--help|-h]\n` +
+    '  --help, -h  Print this usage and exit without changing state.\n' +
+    '  --json      Print one JSON line on success instead of text.\n' +
+    (sub === 'open' || sub === 'amend-acceptance'
+      ? '  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n' +
+        '                       Human checks use {clause, kind: human_check} without tests.\n' : '') +
+    (sub === 'open' ? '  --brief <file>       A file inside the repository, not inline text.\n' : '');
+}
 
 /** Refuse likely shell quoting slips before any row is written.
  * @param {string} workspace @param {string[]} entries @param {string} label
@@ -389,6 +416,10 @@ export async function runBlock(args, deps = {}) {
   if (!SUBCOMMANDS.includes(sub)) {
     err(USAGE);
     return 2;
+  }
+  if (rest.includes('--help') || rest.includes('-h')) {
+    out(verbUsage(sub));
+    return 0;
   }
   let jsonOpenId;
   try {

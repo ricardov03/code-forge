@@ -72,7 +72,8 @@ async function fixture(slug, testGate) {
     gates: () => gatesCli(['run', '--cwd', repo, '--run', runId, '--block', 'B1']),
     rows: () => readAllRows(slug),
     gateRows: async () => (await readAllRows(slug)).filter((r) => r.event === 'gate.done' || r.event === 'gate.red')
-      .map(({ ts: _ts, tokens_source: _tokens, cost_source: _cost, ...row }) => row),
+      .map(({ ts: _ts, tokens_source: _tokens, cost_source: _cost,
+        duration_ms: _duration, total_duration_ms: _total, results: _results, ...row }) => row),
   };
 }
 
