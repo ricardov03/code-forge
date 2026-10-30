@@ -449,8 +449,10 @@ describe('B90 (5): no review.routes ⇒ today\'s spawn options and rows', () => 
     assert.equal(w.events('review.route').length, 0, 'no matching route leaves the primary model and timeout in use');
     // B107: verify the signed per-process identity before comparing the pre-B107 fields.
     const resultBody = (/** @type {Record<string, any>} */ row) => {
-      const { worker, ...body } = row;
+      const { worker, queued_at, started_at, finished_at, duration_ms, ...body } = row;
       assert.deepEqual(worker, { pid: process.pid, started_at: readStartTime(process.pid) });
+      assert.ok(Number.isFinite(Date.parse(queued_at)) && Date.parse(started_at) >= Date.parse(queued_at), 'one queued timestamp precedes the worker start');
+      assert.equal(duration_ms, Date.parse(finished_at) - Date.parse(started_at), 'one worker duration spans start to finish');
       assert.equal(verifyRow(row, w.key).ok, true, 'worker identity is covered by the signature');
       return norm(body);
     };

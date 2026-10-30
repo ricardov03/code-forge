@@ -78,7 +78,7 @@ function readJSON(file) {
 }
 
 /**
- * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string, acceptance_revision?: string, reopened_at?: string, kind?: 'answers', by_file?: string, by_hash?: string, answers?: string[]}} Ticket
+ * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, queued_at?: string | null, started_at?: string | null, finished_at?: string | null, duration_ms?: number | null, tree?: string, acceptance_revision?: string, reopened_at?: string, kind?: 'answers', by_file?: string, by_hash?: string, answers?: string[]}} Ticket
  *   `tree` (B62b): the block's worktree the content was hashed in. It is part of the ticket id,
  *   and the worker only checks it against the tree it takes from the run record (a ticket whose
  *   tree is not that one is `unavailable`, `worktree-mismatch`); it never reads content there.
@@ -200,9 +200,10 @@ export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = n
     }
   }
   if (!existsSync(target)) {
+    const queued_at = new Date(Number.isFinite(reopenedAt) ? Math.max(now.getTime(), reopenedAt + 1) : now.getTime()).toISOString();
     /** @type {Ticket} */
-    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: new Date(Number.isFinite(reopenedAt) ? Math.max(now.getTime(), reopenedAt + 1) : now.getTime()).toISOString(), ...named };
-    // Publish a complete immutable ticket without replacing a concurrent coder's ticket.
+    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: queued_at, queued_at, started_at: null, finished_at: null, duration_ms: null, ...named };
+    // Publish a complete ticket without replacing a concurrent coder's ticket.
     mkdirSync(path.dirname(target), { recursive: true });
     const tmp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
     try {
@@ -311,7 +312,7 @@ export function enqueueAnswers({ repoRoot, run, block, file, byFile, answers, tr
   const named = root === null ? {} : { tree: root };
   if (!existsSync(target)) {
     /** @type {AnswersTicket} */
-    const body = { ticket, kind: 'answers', run, block, file: rel, content_hash, by_file, by_hash, answers: ids, enqueued_at: now.toISOString(), ...named };
+    const body = { ticket, kind: 'answers', run, block, file: rel, content_hash, by_file, by_hash, answers: ids, enqueued_at: now.toISOString(), queued_at: now.toISOString(), started_at: null, finished_at: null, duration_ms: null, ...named };
     writeAtomic(target, `${JSON.stringify(body)}\n`);
   }
   return { ticket, status: isDone(repoRoot, ticket) ? 'done' : 'queued', file: rel, content_hash, by_file, by_hash, answers: ids, ...named };
@@ -625,8 +626,15 @@ export function writeResult({ repoRoot, runId, ticket, result, key }) {
   const file = path.join(reviewsDir(repoRoot, runId), `${ticket}.json`);
   writeAtomic(file, `${JSON.stringify(signed)}\n`);
   const openFindings = signed.status === 'reviewed' && signed.approved !== true && Array.isArray(signed.findings) && signed.findings.length > 0;
-  writeAtomic(path.join(queueDir(repoRoot), `${ticket}.done`), `${JSON.stringify({ ticket, status: signed.status, ...measured, ...(openFindings ? { open_findings: true } : {}), result: path.relative(repoRoot, file) })}\n`);
+  const timings = Object.fromEntries(['queued_at', 'started_at', 'finished_at', 'duration_ms'].filter((field) => Object.hasOwn(signed, field)).map((field) => [field, signed[field]]));
+  writeAtomic(path.join(queueDir(repoRoot), `${ticket}.done`), `${JSON.stringify({ ticket, status: signed.status, ...measured, ...timings, ...(openFindings ? { open_findings: true } : {}), result: path.relative(repoRoot, file) })}\n`);
   return signed;
+}
+
+/** Worker-owned lifecycle metadata; identity and enqueue ordering stay unchanged.
+ * @param {string} repoRoot @param {Ticket} ticket @param {Record<string, any>} timings */
+export function writeTicketTimings(repoRoot, ticket, timings) {
+  writeAtomic(path.join(queueDir(repoRoot), `${assertTicketId(ticket.ticket)}.json`), `${JSON.stringify({ ...ticket, ...timings })}\n`);
 }
 
 /**

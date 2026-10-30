@@ -22,6 +22,10 @@ const FILE = 'src/a.mjs';
 const OLD_TIME = new Date('2020-01-01T00:00:00.000Z');
 let seq = 0;
 const capture = () => ({ text: '', write(s) { this.text += s; } });
+const timingsOf = (f, ticket) => {
+  const result = readResult(f.repo, f.runId, ticket);
+  return Object.fromEntries(['queued_at', 'started_at', 'finished_at', 'duration_ms'].map((key) => [key, result?.[key]]));
+};
 
 async function fixture() {
   const slug = `requeue-${++seq}`;
@@ -100,7 +104,7 @@ test('B169 clause 2: wait-block replaces a pre-reopen done result and waits for 
   assert.deepEqual(pendingTickets(f.repo), [ticket]);
   assert.ok(f.tickets()[0].enqueued_at > OLD_TIME.toISOString(), 'wait-block queues an attempt newer than the stopped result');
   assert.equal(await f.worker.drain(), 1);
-  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket, status: 'done', outcome: 'approved' }], done: true });
+  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket, status: 'done', outcome: 'approved', ...timingsOf(f, ticket) }], done: true });
   const result = readResult(f.repo, f.runId, ticket);
   assert.deepEqual([result.round, result.kind, result.findings], [1, 'full', []]);
 });
@@ -121,7 +125,7 @@ test('B169 clause 2: wait-block leaves the old done ticket unchanged and joins a
   assert.equal(readFileSync(oldDonePath, 'utf8'), oldDone, 'the old done marker is preserved byte for byte');
   assert.deepEqual(readResult(f.repo, f.runId, f.old.ticket).findings, [{ id: 'C1', claim: 'old finding' }]);
   assert.equal(await f.worker.drain(), 1);
-  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket, status: 'done', outcome: 'approved' }], done: true });
+  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket, status: 'done', outcome: 'approved', ...timingsOf(f, ticket) }], done: true });
   const result = readResult(f.repo, f.runId, ticket);
   assert.deepEqual([result.round, result.kind, result.findings], [1, 'full', []]);
 });
@@ -138,7 +142,7 @@ test('B169 boundary: repeat reopen clears a cached stop before reusing the exist
   assert.deepEqual(pendingTickets(f.repo), [first.ticket]);
   assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket: first.ticket, status: 'pending', outcome: null }], done: false, reason: 'wait_timeout' }, 'the cached stop must not finish the join');
   assert.equal(await f.worker.drain(), 1);
-  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'approved' }], done: true });
+  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'approved', ...timingsOf(f, first.ticket) }], done: true });
 });
 
 test('B169 boundary: repeated joins reuse the live attempt and keep its post-reopen completion', async () => {
@@ -173,7 +177,7 @@ test('B169 boundary: a manual review of new content after a reopen is reused by 
   assert.deepEqual(pendingTickets(f.repo), [queued.ticket], 'the join must not duplicate a post-reopen manual review');
   assert.equal(await f.worker.drain(), 1);
   const done = await f.wait();
-  assert.deepEqual(done.files, [{ file: FILE, ticket: queued.ticket, status: 'done', outcome: 'approved' }]);
+  assert.deepEqual(done.files, [{ file: FILE, ticket: queued.ticket, status: 'done', outcome: 'approved', ...timingsOf(f, queued.ticket) }]);
   assert.deepEqual(await f.wait(), done);
   assert.equal(await f.worker.drain(), 0);
 });

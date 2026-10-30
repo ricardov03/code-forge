@@ -58,7 +58,7 @@ import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
 import { countLines, RouteError, routeTicket } from '../review/route.mjs';
 import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
-import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, readTicket, retractWorker, workerRegistry, writeResult } from './queue.mjs';
+import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, readTicket, retractWorker, workerRegistry, writeResult, writeTicketTimings } from './queue.mjs';
 import { DELETED_HASH, hashBytes, readRegularFileNoFollow, repoRootOf, WorkerError } from './ticket.mjs';
 import { watchTick } from './watch.mjs';
 
@@ -410,14 +410,17 @@ export async function createWorker(opts, deps = {}) {
 
   /**
    * @param {string} id
+   * @param {{ticket: import('./queue.mjs').Ticket | null, queued_at: string | null, started_at: string}} [attempt]
    * @returns {Promise<Record<string, any> | null>} the signed result, or null when abandoned.
    */
-  async function processTicket(id) {
+  async function processTicket(id, attempt = { ticket: null, queued_at: null, started_at: new Date().toISOString() }) {
     /** @type {Record<string, any>} */
     let result;
     let ticket = null;
     try {
       ticket = loadTicket(repoRoot, id);
+      attempt.ticket = ticket;
+      attempt.queued_at = ticket.queued_at ?? ticket.enqueued_at ?? null;
     } catch (err) {
       result = { event: 'review.result', status: 'refused', reason: err instanceof WorkerError ? err.code : 'bad-ticket', approved: false };
     }
@@ -426,13 +429,17 @@ export async function createWorker(opts, deps = {}) {
       // read, advanced and saved by one ticket at a time; the later one waits here. The key
       // carries the run so two workers in one process (tests) never share a lock.
       const t = ticket;
-      result = await withLock(`${runId}\0${fileLockKey(t.block, t.file)}`, () => reviewOne(id, t));
+      result = await withLock(`${runId}\0${fileLockKey(t.block, t.file)}`, () => {
+        attempt.started_at = new Date().toISOString();
+        writeTicketTimings(repoRoot, t, { queued_at: attempt.queued_at, started_at: attempt.started_at, finished_at: null, duration_ms: null });
+        return reviewOne(id, t);
+      });
     }
     // Stopping: a ticket whose session our own stop killed ends `unavailable` — leave it queued
     // (no done marker) for the next worker instead of recording the kill as a failure. A ticket
     // that reached a real outcome while the pool drained is recorded as usual.
     if (stopping && result.status === 'unavailable') return null;
-    return complete(id, result);
+    return complete(id, result, attempt);
   }
 
   /**
@@ -488,10 +495,14 @@ export async function createWorker(opts, deps = {}) {
    * Sign and write the result + done marker, then the signed ledger row. A ledger failure does not
    * undo the result: the done marker is what the queue reads.
    * @param {string} id @param {Record<string, any>} outcome - recorded through {@link recordedVerdict}.
+   * @param {{ticket: import('./queue.mjs').Ticket | null, queued_at: string | null, started_at: string}} attempt
    */
-  async function complete(id, outcome) {
+  async function complete(id, outcome, attempt) {
+    const finished_at = new Date().toISOString();
+    const timings = { queued_at: attempt.queued_at, started_at: attempt.started_at, finished_at, duration_ms: Math.max(0, Date.parse(finished_at) - Date.parse(attempt.started_at)) };
+    if (attempt.ticket) writeTicketTimings(repoRoot, attempt.ticket, timings);
     /** @type {Record<string, any>} */
-    const result = { ...recordedVerdict(outcome), worker: identity };
+    const result = { ...(attempt.ticket ? { block: attempt.ticket.block, file: attempt.ticket.file, content_hash: attempt.ticket.content_hash } : {}), ...recordedVerdict(outcome), ...timings, worker: identity };
     const signed = writeResult({ repoRoot, runId, ticket: id, result, key });
     try {
       await ledger({
@@ -502,6 +513,7 @@ export async function createWorker(opts, deps = {}) {
         file: result.file ?? null,
         content_hash: result.content_hash ?? null,
         status: result.status,
+        ...timings,
         // B52: the gate reads the verdict from the ledger, never from the result file
         approved: result.approved,
         open: result.open,
@@ -528,13 +540,14 @@ export async function createWorker(opts, deps = {}) {
    * @param {string} id @returns {Promise<number>} 1 when completed, else 0.
    */
   async function runOne(id) {
+    const attempt = { ticket: /** @type {import('./queue.mjs').Ticket | null} */ (null), queued_at: /** @type {string | null} */ (null), started_at: new Date().toISOString() };
     try {
-      return (await processTicket(id)) !== null ? 1 : 0;
+      return (await processTicket(id, attempt)) !== null ? 1 : 0;
     } catch (err) {
       // B90: a failure a step names (StepError) keeps its step and original text, redacted
       const detail = err instanceof StepError ? { detail: redact(err.message) } : {};
       try {
-        await complete(id, { event: 'review.result', status: 'unavailable', reason: 'worker-error', ...detail, approved: false });
+        await complete(id, { event: 'review.result', status: 'unavailable', reason: 'worker-error', ...detail, approved: false }, attempt);
         return 1;
       } catch {
         poisoned.add(id);
@@ -564,7 +577,7 @@ export async function createWorker(opts, deps = {}) {
 
   /**
    * The block and (block, file) key of each ticket read so far, by id. A written ticket never
-   * changes (its id is its content's hash), so scheduling reads it once across wake-ups.
+   * changes its identity as lifecycle metadata advances, so scheduling reads it once across wake-ups.
    * Dropped once the ticket is done.
    * @type {Map<string, {key: string, block: string}>}
    */

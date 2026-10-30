@@ -100,7 +100,8 @@ function elapsed(start, end) {
 
 /**
  * Cost per block — completed AND still open (B33: a running total while the block is open):
- * review $ / coder $ / S1+S2 $ / facts $ / proof ms, `completed` (code close with no pending human check) and
+ * review $ / coder $ / S1+S2 $ / facts $ / proof ms, measured gate/review ms,
+ * `completed` (code close with no pending human check) and
  * `unknownUsdSessions` (spend rows whose price is unknown, counted 0 in the totals). Grouped by
  * run + block, so a block id reused in a second run is its own entry; a row without a run joins
  * the entry of its block when that block id appears in exactly one run (else a `run: null` entry); shadow rows are dropped here too, exactly as `buildSpend` does. An entry is listed
@@ -114,6 +115,7 @@ function costPerBlock(rows) {
   /** @type {Set<string>} run+block keys with at least one spend row */
   const spent = new Set();
   const gated = new Set();
+  const reviewed = new Set();
   const closedKeys = new Set();
   // never split one block: a row without a run joins its block's entry when that block id appears
   // in exactly one run; only a block seen in several runs leaves such a row in a `run: null` entry
@@ -214,8 +216,12 @@ function costPerBlock(rows) {
       e.gateTimeMs = (e.gateTimeMs ?? 0) + row.duration_ms;
       gated.add(key);
     }
+    if (row.event === 'review.result' && typeof row.duration_ms === 'number' && Number.isFinite(row.duration_ms) && row.duration_ms >= 0) {
+      e.reviewTimeMs = (e.reviewTimeMs ?? 0) + row.duration_ms;
+      reviewed.add(key);
+    }
   }
-  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || e.stopped || spent.has(key) || gated.has(key) || closedKeys.has(key)).map(([key, e]) => {
+  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || e.stopped || spent.has(key) || gated.has(key) || reviewed.has(key) || closedKeys.has(key)).map(([key, e]) => {
     const time = times.get(key);
     if (e.completed) {
       e.wallMs = elapsed(time.firstDispatch, time.completion);

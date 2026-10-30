@@ -71,6 +71,10 @@ async function fixture({ cfg = WATCH, tree = false, review = undefined, deps = {
   return { repo, root, runId, base, rows, sessions, worker, opts, tickets, tick, commit };
 }
 const marker = (p, id) => JSON.parse(readFileSync(path.join(queueDir(p.repo), `${id}.done`), 'utf8'));
+const timingsOf = (p, id) => {
+  const result = readResult(p.repo, p.runId, id);
+  return Object.fromEntries(['queued_at', 'started_at', 'finished_at', 'duration_ms'].map((key) => [key, result?.[key]]));
+};
 const skips = (p) => p.rows.filter((r) => r.event === 'watch.skipped').map(({ block, reason }) => ({ block, reason }));
 const currentId = (p, file) => ticketId({ run: p.runId, block: BLOCK, file, content_hash: contentHash(p.root, file), tree: p.opts.tree ?? null });
 async function cli(p, argv) {
@@ -142,7 +146,7 @@ test('three held fix commits join the latest content once through --wait-block',
     { file: 'src/a.mjs', content_hash: hashBytes(Buffer.from('initial\n')) },
     { file: 'src/a.mjs', content_hash: hashBytes(Buffer.from('fix three\n')) },
   ], 'one initial session and exactly one fix session for this file, none for middle commits');
-  assert.deepEqual(await cli(p, ['--wait-block', BLOCK, '--run', p.runId]), { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: latest, status: 'done', outcome: 'approved' }], done: true } });
+  assert.deepEqual(await cli(p, ['--wait-block', BLOCK, '--run', p.runId]), { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: latest, status: 'done', outcome: 'approved', ...timingsOf(p, latest) }], done: true } });
   assert.equal(await p.worker.drain(), 0);
   assert.deepEqual(p.sessions, [first, latest]);
 });
@@ -312,7 +316,7 @@ test('returning A after held B keeps it superseded until manual enqueue reviews 
   assert.equal(enqueue({ ...p.opts, file: 'src/a.mjs' }).status, 'done');
   assert.deepEqual(marker(p, a), done);
   assert.deepEqual(p.sessions, [a]);
-  assert.deepEqual(await cli(p, ['--wait-block', BLOCK, '--run', p.runId]), { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: a, status: 'done', outcome: 'approved' }], done: true } });
+  assert.deepEqual(await cli(p, ['--wait-block', BLOCK, '--run', p.runId]), { code: 0, json: { block: BLOCK, files: [{ file: 'src/a.mjs', ticket: a, status: 'done', outcome: 'approved', ...timingsOf(p, a) }], done: true } });
 });
 
 test('manual enqueue revives superseded current content and keeps real results', async () => {

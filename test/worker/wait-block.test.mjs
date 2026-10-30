@@ -14,6 +14,12 @@ const { readRun, saveRun, startRun } = await import('../../src/state/run.mjs');
 const { exec } = await import('../../src/util/exec.mjs');
 const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 
+/** Completed joins carry the worker result's four lifecycle measurements. */
+function timingsOf(repo, runId, ticket) {
+  const result = readResult(repo, runId, ticket);
+  return Object.fromEntries(['queued_at', 'started_at', 'finished_at', 'duration_ms'].map((key) => [key, result?.[key]]));
+}
+
 /** @param {string} repo @param {string} runId @param {string[]} [extra] @param {{dropDone?: typeof dropDoneIf}} [deps] */
 async function waitBlock(repo, runId, extra = [], deps = {}) {
   let out = '';
@@ -41,7 +47,7 @@ test('(1) reproduction: three files enqueue without waiting, then one block wait
     const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', '20s'], repo);
     assert.equal(res.code, 0, res.stderr);
     assert.equal(res.stdout.trim().split('\n').length, 1);
-    assert.deepEqual(res.json, { block: BLOCK, files: tickets, done: true });
+    assert.deepEqual(res.json, { block: BLOCK, files: tickets.map((t) => ({ ...t, ...timingsOf(repo, runId, t.ticket) })), done: true });
     assert.equal(queued(repo, 'done').length, 3);
   } finally {
     await stopWorker(worker, runId);
@@ -67,7 +73,7 @@ test('(2) changed content is enqueued with the normal id; the worker finishes th
     const res = await waitBlock(repo, runId, ['--max', '20s']);
     const normal = await cli(['review-file', 'src/a.mjs', '--block', BLOCK, '--run', runId], repo);
     assert.deepEqual([res.code, res.json.done, res.json.files.length], [0, true, 3]);
-    assert.deepEqual(res.json.files[0], { file: 'src/a.mjs', ticket: normal.json.ticket, status: 'done', outcome: 'approved' });
+    assert.deepEqual(res.json.files[0], { file: 'src/a.mjs', ticket: normal.json.ticket, status: 'done', outcome: 'approved', ...timingsOf(repo, runId, normal.json.ticket) });
     assert.equal(readResult(repo, runId, old.ticket).status, 'stale');
     assert.deepEqual([queued(repo, 'json').length, queued(repo, 'done').length], [4, 4]);
   } finally { await stopWorker(worker, runId); }
@@ -329,7 +335,7 @@ test('B122 clause 2: the next join queues one latest-content ticket and runs one
     assert.deepEqual(sessions, [first.content_hash, latest.content_hash], 'one initial session and exactly one recheck session for latest content');
     assert.deepEqual([readResult(repo, runId, latest.ticket).kind, readResult(repo, runId, latest.ticket).approved], ['recheck', true]);
     assert.deepEqual([statSync(deliveredPath(repo, first.ticket)).ino, statSync(deliveredPath(repo, first.ticket)).mtimeMs], [marker.ino, marker.mtimeMs]);
-    assert.deepEqual((await waitBlock(repo, runId)).json.files[0], { file: FILE, ticket: latest.ticket, status: 'done', outcome: 'approved' });
+    assert.deepEqual((await waitBlock(repo, runId)).json.files[0], { file: FILE, ticket: latest.ticket, status: 'done', outcome: 'approved', ...timingsOf(repo, runId, latest.ticket) });
   } finally { retractWorker(repo, process.pid); }
 });
 
@@ -344,7 +350,7 @@ test('B122 clause 3: watch, blind commit, findings join, fix and one approved re
     const blind = await commit('export const a = 2;\n');
     assert.equal(await worker.drain(), 0);
     const joined = await waitBlock(repo, runId, ['--max', '0ms']);
-    assert.deepEqual(joined, { code: 0, json: { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'findings', outcome: 'findings' }], done: true } });
+    assert.deepEqual(joined, { code: 0, json: { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'findings', outcome: 'findings', ...timingsOf(repo, runId, first.ticket) }], done: true } });
     assert.equal(await worker.drain(), 0);
     const read = await cli(['review-file', '--wait', first.ticket], repo);
     assert.deepEqual(read.json.fix_list.map((f) => f.id), ['F1', 'F2', 'F3']);
@@ -406,7 +412,7 @@ test('B125 clause 1: current content returning to a stale ticket stays pending u
     assert.deepEqual([await worker.drain(), await worker.drain()], [1, 0]);
     assert.deepEqual(sessions, [first.content_hash], 'exactly one session reviews the returned content');
     assert.equal(readResult(repo, runId, first.ticket).status, 'reviewed');
-    assert.deepEqual((await waitBlock(repo, runId)).json, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'findings' }], done: true });
+    assert.deepEqual((await waitBlock(repo, runId)).json, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'findings', ...timingsOf(repo, runId, first.ticket) }], done: true });
   } finally { retractWorker(repo, process.pid); }
 });
 
@@ -480,7 +486,7 @@ test('B125 clause 3: a rerun that goes stale again is done across joins with no 
     const before = readFileSync(marker);
     for (let join = 0; join < 2; join += 1) {
       const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', '0ms'], repo);
-      assert.deepEqual([res.code, res.json], [0, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'unavailable' }], done: true }]);
+      assert.deepEqual([res.code, res.json], [0, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'unavailable', ...timingsOf(repo, runId, first.ticket) }], done: true }]);
       assert.equal(await worker.drain(), 0, `join ${join + 2} schedules zero additional reviews`);
       assert.deepEqual(readFileSync(marker), before, 'second stale result stays byte-for-byte');
     }
