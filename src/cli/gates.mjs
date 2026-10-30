@@ -365,6 +365,9 @@ export async function runGatesVerb(args, deps = {}) {
         ran = await runGates(gates, { cwd, timeoutMs });
       }
       const { results, allOk } = ran;
+      for (const result of results) {
+        if (!result.skipped && result.code === null) err(`${result.gate}: ${result.message}\n`);
+      }
       const repeats = results.find((r) => r.repeats)?.repeats;
 
       const ledgerSlug = slug ?? ran.ledger_slug;

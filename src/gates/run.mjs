@@ -43,9 +43,10 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {number | null} code
  * @property {string} stdout
  * @property {string} stderr
+ * @property {string} [message] - termination diagnostic with the last lines of both streams.
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
+ * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
  * @property {Repeats} [repeats]
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
  *   NAMES, sorted (the values are never in a result).
@@ -165,23 +166,32 @@ function normalizeCommand(command) {
  * @param {import('../util/exec.mjs').ExecResult} res
  * @param {number} timeoutMs
  * @param {boolean} [failOnStdout]
- * @returns {Pick<GateResult, 'ok'|'code'|'stdout'|'stderr'|'reason'>}
+ * @returns {Pick<GateResult, 'ok'|'code'|'stdout'|'stderr'|'reason'|'message'>}
  */
 function gateOutcome(res, timeoutMs, failOnStdout = false) {
   const prompt = res.result === 'ok' && [res.stdout, res.stderr].some((stream) =>
     UNANSWERED_PROMPT_PATTERN.test(stream.trimEnd().split(/\r?\n/).at(-1)));
-  const reason = res.timedOut ? 'timeout' : prompt ? 'prompt' : undefined;
-  const message = res.timedOut
+  const reason = res.timedOut ? 'timeout'
+    : res.code === null ? res.signal ?? (res.error ? 'spawn-error' : 'terminated')
+    : prompt ? 'prompt' : undefined;
+  const diagnostic = res.timedOut
     ? `gate timeout after ${timeoutMs / 1000} seconds; raise gates.timeout_s (or --timeout-ms)`
+    : res.code === null ? `gate terminated: ${res.signal ?? res.error ?? 'no exit status (no signal reported)'}`
     : prompt ? 'gate ended on an interactive prompt; install the tool or make the command non-interactive' : '';
+  const tails = ['stdout', 'stderr'].flatMap((stream) => {
+    const tail = res[stream].trimEnd().split(/\r?\n/).slice(-10).join('\n');
+    return tail ? [`${stream} tail:\n${tail}`] : [];
+  });
+  const message = [diagnostic, ...tails].join('\n');
   return {
     ok: res.result === 'ok' && !reason && (!failOnStdout || res.stdout.trim().length === 0),
     code: res.code,
     stdout: res.stdout,
-    stderr: message
-      ? `${res.stderr}${res.stderr && !res.stderr.endsWith('\n') ? '\n' : ''}${message}\n`
+    stderr: diagnostic
+      ? `${res.stderr}${res.stderr && !res.stderr.endsWith('\n') ? '\n' : ''}${diagnostic}\n`
       : res.stderr,
     ...(reason ? { reason } : {}),
+    ...(diagnostic ? { message } : {}),
   };
 }
 
