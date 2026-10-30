@@ -29,6 +29,8 @@
  *     The summary then carries `schema_fallback: {level, provider, model}` (`level`:
  *     `review.second_levels.<level>`), the second level's own provider/model, and `tokens_in` /
  *     `tokens_out` summed over both sessions;
+ *     without a second level, a configured `levels.<level>.fallback` ladder retries schema
+ *     failures once per model in this ticket, then advances to the next runnable model;
  *  7. a quick packet over budget first steps up to one full L2 session, including Markdown.
  *     A diff alone still over the packet budget is `split_required` (with `tokens_in` and `budget`) —
  *     except a Markdown file (B54), which is reviewed SECTION BY SECTION (`sections.mjs`): every
@@ -73,7 +75,7 @@ import { pairsFor, summarize } from './paired.mjs';
 import { redact } from '../util/redact.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
-import { spawnWithTimeoutRetry } from './session-retry.mjs';
+import { spawnWithBrokenFallback, spawnWithTimeoutRetry } from './session-retry.mjs';
 import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallback.mjs';
 import { assertRowPath, readRegularFileNoFollow } from '../worker/ticket.mjs';
 
@@ -486,6 +488,10 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
   // (each helper handles its own failed write)
   const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<ReviewDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
   const hash = packetHash(text);
+  // An explicit second level keeps its signed, once-per-packet protocol. Without one, the
+  // level's own fallback ladder must also recover broken answers in this ticket.
+  const levelRecovery = schemaFallback && !spec.cfg && !cfg.review?.second_levels?.[spec.level]
+    && cfg.levels?.[spec.level]?.fallback?.length > 0;
   /** @type {{level: string, provider: string, model: string} | null} the second level once its try started */
   let tried = null;
   /** @param {Record<string, any> | null} missed @param {'schema' | 'timeout'} trigger */
@@ -540,6 +546,20 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
     let first = null;
     try {
       first = await attempt(spec.cfg, 0);
+      if (levelRecovery && validateReview(first.res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min }).reason === 'schema') {
+        const recovered = await spawnWithBrokenFallback(
+          (opts) => attempt(opts.cfg, attempts),
+          { cfg, level: spec.level, role: spec.role },
+          (result) => validateReview(result, { hunkHeaders: packet.hunkHeaders, minTokensOut: min }).reason === 'schema',
+          (result, sessionCfg) => afterSchemaMiss({ res: result, session, packetText: text, cfg: sessionCfg,
+            allowed: false, history: undefined, writeRow: write, spawnAt: async () => ({ res: null, attempts: 0 }) }),
+          first,
+        );
+        first = recovered;
+        fellBackTo = recovered.to ?? null;
+        tokensIn = recovered.usage.tokens_in;
+        tokensOut = recovered.usage.tokens_out;
+      }
       ({ res, attempts } = first);
     } catch {
       // defensive only: the helpers never throw. If they ever did, it is still an `exit` failure,
@@ -549,7 +569,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
       attempts = Math.max(attempts, 1);
       fellBackTo = tried;
     }
-    if (first?.to) {
+    if (first?.to && !levelRecovery) {
       // B91: a timed-out attempt was the packet's second broken result; the second level ran and
       // `attempts` already counts its spawns. The verdict is set first: whatever throws after it
       // leaves that verdict (a failed one stays a non-approval), never an exception
@@ -564,11 +584,11 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
         // defensive only, as on the schema path below
       }
     } else {
-      tokensIn = res?.usage?.tokens_in ?? null;
-      tokensOut = res?.usage?.tokens_out ?? null;
+      tokensIn = tokensIn ?? res?.usage?.tokens_in ?? null;
+      tokensOut = tokensOut ?? res?.usage?.tokens_out ?? null;
       verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
     }
-    if (!fellBackTo && !verdict.ok && verdict.reason === 'schema') {
+    if (!levelRecovery && !fellBackTo && !verdict.ok && verdict.reason === 'schema') {
       try {
         const done = attempts;
         const second = await tryNext(res, 'schema');

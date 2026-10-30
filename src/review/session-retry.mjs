@@ -32,9 +32,68 @@
  */
 
 import { logWarning } from '../util/error-log.mjs';
+import { resolveLevel } from '../config/known-ids.mjs';
+import { closedBookRefused, openBookCodexAllowed } from '../config/closed-book.mjs';
 
 /** How many times a timed-out session is spawned again. */
 export const TIMEOUT_RETRIES = 1;
+
+/**
+ * A broken answer gets one retry on its model, then the next distinct, runnable model of the
+ * level's ladder. Pin each retry to one model so provider-error fallback cannot consume the
+ * ladder before the same-model retry. A valid negative answer stops just like a valid positive.
+ * The packet and the original config are unchanged throughout.
+ * @param {(opts: Record<string, any>) => Promise<{res: Record<string, any> | null, attempts: number}>} spawn
+ * @param {Record<string, any>} opts
+ * @param {(res: Record<string, any> | null) => boolean} isBroken
+ * @param {(res: Record<string, any> | null, cfg: Record<string, any>) => Promise<unknown>} [onBroken]
+ * @param {{res: Record<string, any> | null, attempts: number}} [initial] - reuse a completed
+ *   attempt, including any provider fallback it already took, rather than spawning it again.
+ * @returns {Promise<{res: Record<string, any> | null, attempts: number, to?: BrokenTry['to'], usage: {tokens_in: number | null, tokens_out: number | null}}>}
+ */
+export async function spawnWithBrokenFallback(spawn, opts, isBroken, onBroken = async () => {}, initial) {
+  const resolved = resolveLevel(opts.cfg, opts.level);
+  const models = [resolved, ...resolved.fallback];
+  const startAt = initial ? Math.max(0, models.findIndex((entry) => entry.model === initial.res?.model
+    && (entry.provider ?? resolved.provider) === initial.res?.provider)) : 0;
+  let pending = initial;
+  const seen = new Set();
+  let attempts = 0;
+  /** @type {Record<string, any> | null} */
+  let res = null;
+  /** @type {BrokenTry['to'] | undefined} */
+  let to;
+  /** @type {{tokens_in: number | null, tokens_out: number | null}} */
+  const usage = { tokens_in: null, tokens_out: null };
+  for (const [index, entry] of models.entries()) {
+    if (index < startAt) continue;
+    const provider = entry.provider ?? resolved.provider;
+    const key = `${provider}\0${entry.model}`;
+    if (seen.has(key) || closedBookRefused(provider, opts.role, openBookCodexAllowed(opts.cfg))) continue;
+    seen.add(key);
+    const cfg = { ...opts.cfg, levels: { ...opts.cfg.levels, [opts.level]: {
+      provider, model: entry.model, ...(entry.effort !== undefined ? { effort: entry.effort } : {}), fallback: [],
+    } } };
+    if (index > 0) to = { level: `levels.${opts.level}.fallback`, provider, model: entry.model };
+    for (let n = 0; n < 2; n++) {
+      try {
+        const out = pending ?? await spawn({ ...opts, cfg });
+        pending = undefined;
+        res = out.res;
+        attempts += out.attempts;
+      } catch {
+        res = null;
+        attempts++;
+      }
+      for (const field of /** @type {const} */ (['tokens_in', 'tokens_out'])) {
+        if (typeof res?.usage?.[field] === 'number') usage[field] = (usage[field] ?? 0) + res.usage[field];
+      }
+      if (!isBroken(res)) return { res, attempts, ...(to ? { to } : {}), usage };
+      await onBroken(res, cfg);
+    }
+  }
+  return { res, attempts, ...(to ? { to } : {}), usage };
+}
 
 /**
  * @typedef {{res: Record<string, any> | null, attempts: number, to: {level: string, provider: string, model: string}}} BrokenTry -
