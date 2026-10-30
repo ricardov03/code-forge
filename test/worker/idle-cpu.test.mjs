@@ -16,16 +16,18 @@ const { createKeyStore } = await import('../../src/keys/store.mjs');
 function counters(t) {
   const counts = { hashes: 0, git: 0 };
   const read = fs.readFileSync;
-  const spawn = childProcess.spawn;
   t.mock.method(fs, 'readFileSync', (file, ...args) => {
     const bytes = read(file, ...args);
     if (typeof file === 'number' && bytes.toString().startsWith('export const')) counts.hashes += 1;
     return bytes;
   });
-  t.mock.method(childProcess, 'spawn', (command, ...args) => {
-    if (command === 'git') counts.git += 1;
-    return spawn(command, ...args);
-  });
+  for (const method of /** @type {const} */ (['spawn', 'execFile', 'spawnSync', 'execFileSync'])) {
+    const original = childProcess[method];
+    t.mock.method(childProcess, method, (command, ...args) => {
+      if (command === 'git') counts.git += 1;
+      return Reflect.apply(original, childProcess, [command, ...args]);
+    });
+  }
   syncBuiltinESMExports();
   t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   return counts;
@@ -99,15 +101,22 @@ test('idle block polls add zero hashes or Git calls; mtime and size independentl
     if (poll === 1) baseline = { ...activeCounts };
     if (poll === 8) {
       const file = path.join(repo, 'src/a.mjs');
-      const stat = fs.statSync(file);
+      const stat = fs.statSync(file, { bigint: true });
       fs.writeFileSync(file, 'export const a = 2;\n');
-      fs.utimesSync(file, stat.atime, new Date(stat.mtimeMs + 2000));
+      // Whole seconds remain exactly representable when restored on the next poll.
+      fs.utimesSync(file, stat.atime, Number(stat.mtimeNs / 1_000_000_000n) + 2);
+      const edited = fs.statSync(file, { bigint: true });
+      assert.equal(edited.size, stat.size, 'mtime-only edit preserves file size');
+      assert.notEqual(edited.mtimeNs, stat.mtimeNs, 'mtime-only edit changes mtime');
     }
     if (poll === 9) {
       const file = path.join(repo, 'src/a.mjs');
-      const stat = fs.statSync(file);
+      const stat = fs.statSync(file, { bigint: true });
       fs.appendFileSync(file, '// larger\n');
-      fs.utimesSync(file, stat.atime, stat.mtime);
+      fs.utimesSync(file, stat.atime, Number(stat.mtimeNs) / 1_000_000_000);
+      const edited = fs.statSync(file, { bigint: true });
+      assert.equal(edited.mtimeNs, stat.mtimeNs, 'size-only edit preserves nanosecond mtime');
+      assert.ok(edited.size > stat.size, 'size-only edit increases file size');
     }
     if (poll === 10) {
       const key = await loadKey(runId);
@@ -118,6 +127,7 @@ test('idle block polls add zero hashes or Git calls; mtime and size independentl
   });
   assert.equal(snapshots.length, 10, 'ten polls were observed');
   assert.equal(baseline.hashes, 3, 'initial join hashes each of three files exactly once');
+  assert.ok(baseline.git > 0, 'initial join records Git calls through the live counter');
   assert.deepEqual(snapshots.slice(0, 8), Array(8).fill(baseline), 'eight idle polls add zero hashes and zero Git calls');
   assert.deepEqual(snapshots.slice(8).map((s) => s.hashes), [4, 5], 'mtime-only and size-only edits each add exactly one hash');
   assert.deepEqual(joined.sleeps.slice(8), [200, 200], 'each metadata change resets the wait');
