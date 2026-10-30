@@ -40,7 +40,8 @@ import { configInForce } from '../state/config-snapshot.mjs';
 import { endRun, processStartTime, readRun, reattachWorker, RUN_MODES, startRun, stopPinnedWorker } from '../state/run.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { withLock } from '../util/file-locks.mjs';
-import { sweepRoots, tmpBase } from '../util/tmp.mjs';
+import { sweepProcesses } from '../util/reaper.mjs';
+import { tmpBase } from '../util/tmp.mjs';
 import { launchWorker, repinWorker } from '../worker/loop.mjs';
 import { liveWorker, workerRegistry } from '../worker/queue.mjs';
 import { repoRootOf } from '../worker/ticket.mjs';
@@ -173,7 +174,7 @@ export async function runRun(args, deps = {}) {
       const project = slugFor(loaded.config, workspace);
       const engine = typeof flags.engine === 'string' ? flags.engine : undefined;
       const tmpRoot = typeof loaded.config?.tmp?.root === 'string' ? loaded.config.tmp.root : undefined;
-      await sweepRoots({ root: tmpBase(tmpRoot) }); // dead runs' temp roots and orphans (§9.6, V12)
+      await sweepProcesses({ apply: true, root: tmpBase(tmpRoot), zombies: false });
       let record = await startRun({ workspace, project, config: loaded.config, engine, mode, runId, workerPid, writeRow: ledgerWriter(project), probe });
       if (!record.worker && startWorker) {
         const launched = await startWorker({ runId: record.run_id, workspace });

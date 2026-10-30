@@ -24,7 +24,7 @@ import { snapshotFor } from '../state/config-snapshot.mjs';
 import { assertRunId, runsDir } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { loadKey } from '../state/signer.mjs';
-import { listEntries } from '../util/reaper.mjs';
+import { listEntries, sweepProcesses } from '../util/reaper.mjs';
 import { listBadLocks } from '../util/file-locks.mjs';
 import { ownerState, runRootPath, tmpBase } from '../util/tmp.mjs';
 import { parallelTickets } from '../worker/loop.mjs';
@@ -257,14 +257,15 @@ export const LISTED_MAX = 10;
  * @returns {Promise<Row[]>}
  */
 export async function checkReviewState(cfg) {
+  // This awaited local-check slot also supplies process hygiene and memory rows. All are
+  // observational; doctor never applies a sweep.
+  const rows = await checkSweep(cfg);
   let names = [];
   try {
     names = readdirSync(runsDir()).filter((n) => n.endsWith('.json'));
   } catch {
-    return [];
+    return rows;
   }
-  /** @type {Row[]} */
-  const rows = [];
   /** @type {Map<string, Array<Record<string, any>>>} the ledger rows per project, read once */
   const ledgers = new Map();
   for (const name of names.sort()) {
@@ -317,6 +318,23 @@ export async function checkReviewState(cfg) {
     }
   }
   return rows;
+}
+
+/** Read-only process hygiene and RSS rows. @param {Record<string,any>|null} cfg @returns {Promise<Row[]>} */
+export async function checkSweep(cfg) {
+  try {
+    const report = await sweepProcesses({ root: typeof cfg?.tmp?.root === 'string' ? cfg.tmp.root : undefined });
+    const workers = report.items.filter((p) => p.kind === 'worker').length;
+    const orphans = report.items.filter((p) => p.kind === 'orphan').length;
+    const zombies = report.zombies.reduce((n, group) => n + group.count, 0);
+    const parents = report.zombies.map((group) => `parent ${group.ppid} ${group.command}`).join('; ');
+    const memory = report.memory;
+    return [row('sweep', workers + orphans + zombies ? 'WARN' : 'OK', 'sweep',
+      `${workers} stale workers, ${orphans} orphans, ${zombies} zombies${parents ? ` (${parents})` : ''}`),
+    row('memory', 'INFO', 'memory', `code-forge ${memory.codeForgeMb.toFixed(1)} MB, children ${memory.childrenMb.toFixed(1)} MB, orphans ${memory.orphansMb.toFixed(1)} MB`)];
+  } catch {
+    return [row('sweep', 'WARN', 'sweep', 'process inspection unavailable'), row('memory', 'INFO', 'memory', 'process inspection unavailable')];
+  }
 }
 
 /**

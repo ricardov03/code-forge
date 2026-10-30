@@ -8,9 +8,9 @@
  *    indefinitely (callers that spawn a reviewer/coder CLI are expected to always pass one —
  *    this module does not impose a default, since a default here would silently apply to every
  *    caller, including ones with a legitimately long-running command).
- *  - On timeout the whole process GROUP is sent SIGTERM, then SIGKILL — the SIGKILL goes to the
- *    group as soon as the direct child exits (or after a grace period), so a grandchild that
- *    traps SIGTERM cannot outlive the call. The result is `failed`, never a partial success.
+ *  - On timeout the process group receives SIGTERM, then SIGKILL after a grace period while
+ *    the leader lives. On every leader exit, remaining members are captured and stopped
+ *    individually after checking their start times. Timeout always resolves `failed`.
  *  - stdin is `ignore`d by default, so a child that reads stdin when it isn't a TTY (`claude -p`,
  *    for one) sees an immediate EOF instead of blocking forever. With `input` (a string or bytes),
  *    stdin is a pipe: the content is written verbatim and then the pipe is closed, so the child
@@ -50,7 +50,8 @@
  */
 
 import { spawn } from 'node:child_process';
-import { registerPid, unregisterPid } from './reaper.mjs';
+import path from 'node:path';
+import { groupMembers, readStartTime, registerPid, stopMembers, unregisterPid } from './reaper.mjs';
 import { pidsDir } from './tmp.mjs';
 
 /** Grace period after SIGTERM before escalating to SIGKILL, in milliseconds. */
@@ -170,16 +171,32 @@ export function exec(argv, opts = {}) {
   const { cwd, env, timeoutMs, input, okExitCodes = [0], maxBufferBytes = DEFAULT_MAX_BUFFER_BYTES } = opts;
   const [command, ...args] = argv;
 
+  /** @type {NodeJS.ProcessEnv} */
+  const childEnv = { ...(env ?? process.env), CODE_FORGE_OWNER_PID: String(process.pid) };
+  const ownerStart = readStartTime(process.pid);
+  if (ownerStart) childEnv.CODE_FORGE_OWNER_START_TIME = ownerStart;
+  else delete childEnv.CODE_FORGE_OWNER_START_TIME;
+  let spawnRegistry = null;
+  try {
+    spawnRegistry = pidsDir();
+    const rootId = path.basename(path.dirname(spawnRegistry));
+    const runAt = process.argv.indexOf('--run');
+    const inlineRun = process.argv.find((arg) => arg.startsWith('--run='))?.slice('--run='.length);
+    const runId = childEnv.CODE_FORGE_RUN_ID ?? process.env.CODE_FORGE_RUN_ID
+      ?? (runAt >= 0 ? process.argv[runAt + 1] : inlineRun) ?? (/^r-/.test(rootId) ? rootId : undefined);
+    if (runId) childEnv.CODE_FORGE_RUN_ID = runId;
+  } catch { /* registry hygiene must never prevent a spawn */ }
+
   return new Promise((resolve) => {
     const stdinMode = input === undefined ? 'ignore' : 'pipe';
-    const child = spawn(command, args, { cwd, env, shell: false, detached: true, stdio: [stdinMode, 'pipe', 'pipe'] });
+    const child = spawn(command, args, { cwd, env: childEnv, shell: false, detached: true, stdio: [stdinMode, 'pipe', 'pipe'] });
     const pid = child.pid;
     /** @type {string | null} */
     let registryDir = null;
     if (typeof pid === 'number') {
       trackChild(pid);
       try {
-        registryDir = pidsDir();
+        registryDir = spawnRegistry ?? pidsDir();
         registerPid(registryDir, pid, command);
       } catch {
         registryDir = null;
@@ -200,6 +217,7 @@ export function exec(argv, opts = {}) {
     let timedOut = false;
     let overBuffer = false;
     let settled = false;
+    let remaining = Promise.resolve();
     /** @type {NodeJS.Timeout | undefined} */
     let termTimer;
     /** @type {NodeJS.Timeout | undefined} */
@@ -216,12 +234,24 @@ export function exec(argv, opts = {}) {
     const stdoutText = () => Buffer.concat(stdoutChunks).toString(opts.stdoutEncoding ?? 'utf8');
     const stderrText = () => Buffer.concat(stderrChunks).toString('utf8');
 
-    /** @param {ExecResult} result */
-    const settle = (result) => {
+    /** @param {Pick<ExecResult, 'code'|'signal'|'error'>} outcome */
+    const settle = async (outcome) => {
       if (settled) return;
       settled = true;
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
+      await remaining;
+      // Pipe data can arrive while the remaining group members are being stopped.
+      // Snapshot the output and buffer-limit state only once that wait is over.
+      /** @type {ExecResult} */
+      const result = {
+        ...outcome,
+        result: !outcome.error && !timedOut && !overBuffer && outcome.code !== null && okExitCodes.includes(outcome.code) ? 'ok' : 'failed',
+        stdout: stdoutText(),
+        stderr: stderrText(),
+        timedOut,
+        ...(overBuffer ? { error: 'exec: maxBufferBytes exceeded' } : {}),
+      };
       if (typeof pid === 'number') {
         untrackChild(pid);
         if (registryDir !== null) {
@@ -277,40 +307,27 @@ export function exec(argv, opts = {}) {
 
     child.on('error', (err) => {
       settle({
-        result: 'failed',
         code: null,
         signal: null,
-        stdout: stdoutText(),
-        stderr: stderrText(),
-        timedOut,
         error: err.message,
       });
     });
 
-    // Once we've decided to kill (timeout or over-buffer), don't wait for 'close' — a
-    // grandchild that inherited the pipes can keep them open indefinitely, and 'close' would
-    // then never fire even though the child we care about is dead. 'exit' fires as soon as the
-    // child process itself has terminated, which is what "killed after timeout_ms" means. Before
-    // settling (which cancels the grace timer), SIGKILL the group: a grandchild that trapped the
-    // SIGTERM must not survive just because its parent died first.
+    // Capture the group before unregistering on EVERY leader exit. Never signal the dead
+    // leader/group again: each remaining member has its own synchronous identity check.
     child.on('exit', (code, signal) => {
-      if (timedOut || overBuffer) {
-        killGroup('SIGKILL');
-        settle({
-          result: 'failed',
-          code,
-          signal,
-          stdout: stdoutText(),
-          stderr: stderrText(),
-          timedOut,
-          ...(overBuffer ? { error: 'exec: maxBufferBytes exceeded' } : {}),
-        });
+      if (termTimer) clearTimeout(termTimer);
+      if (killTimer) clearTimeout(killTimer);
+      const members = typeof pid === 'number' ? groupMembers(pid) : new Map();
+      if (typeof pid === 'number') untrackChild(pid);
+      remaining = stopMembers(members, KILL_GRACE_MS).then(() => {});
+      if (timedOut || overBuffer || members.size > 0) {
+        settle({ code, signal });
       }
     });
 
     child.on('close', (code, signal) => {
-      const result = !timedOut && !overBuffer && code !== null && okExitCodes.includes(code) ? 'ok' : 'failed';
-      settle({ result, code, signal, stdout: stdoutText(), stderr: stderrText(), timedOut });
+      settle({ code, signal });
     });
   });
 }
