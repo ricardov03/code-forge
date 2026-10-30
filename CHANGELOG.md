@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- OpenAI strict schemas make only optional keys nullable, so `forge facts` no longer refuses an answer with null on a required field; a facts row with a null command or excerpt is downgraded to UNVERIFIABLE on its own (issue #27, B165)
+
 ## [0.15.1] — 2026-10-19
 
 ### Changed

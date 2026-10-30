@@ -31,34 +31,39 @@ function children(node) {
 
 /**
  * Recursively counts every `properties` entry reachable from `node`, and how many of those are
- * BOTH listed in their parent's `required` AND structurally nullable. `onPath` tracks only the
+ * listed in their parent's `required`, nullable, and expected to be nullable after compilation.
+ * `onPath` tracks only the
  * CURRENT recursion path, so a sub-schema legitimately appearing twice in unrelated branches is
  * counted twice (a global set would hide a defect at its second occurrence).
  * @param {Record<string, any>} node
  * @param {Set<object>} onPath
- * @returns {{total: number, requiredAndNullable: number}}
+ * @returns {{total: number, required: number, nullable: number, expectedNullable: number}}
  */
 function countCoverage(node, onPath = new Set()) {
   let total = 0;
-  let requiredAndNullable = 0;
+  let requiredCount = 0;
+  let nullable = 0;
+  let expectedNullable = 0;
   if (!node || typeof node !== 'object' || onPath.has(node)) {
-    return { total, requiredAndNullable };
+    return { total, required: requiredCount, nullable, expectedNullable };
   }
   onPath.add(node);
   try {
     const required = new Set(node.required ?? []);
     for (const [key, propSchema] of Object.entries(node.properties ?? {})) {
       total += 1;
-      if (required.has(key) && acceptsNull(propSchema)) {
-        requiredAndNullable += 1;
-      }
+      if (required.has(key)) requiredCount += 1;
+      if (acceptsNull(propSchema)) nullable += 1;
+      if (!required.has(key) || acceptsNull(propSchema)) expectedNullable += 1;
     }
     for (const [, child] of children(node)) {
       const nested = countCoverage(child, onPath);
       total += nested.total;
-      requiredAndNullable += nested.requiredAndNullable;
+      requiredCount += nested.required;
+      nullable += nested.nullable;
+      expectedNullable += nested.expectedNullable;
     }
-    return { total, requiredAndNullable };
+    return { total, required: requiredCount, nullable, expectedNullable };
   } finally {
     onPath.delete(node);
   }
@@ -84,7 +89,7 @@ function acceptsNull(propSchema) {
 }
 
 /**
- * A required property is wrapped `{anyOf: [original, {type: "null"}]}` — unwrap to inspect the
+ * An optional property is wrapped `{anyOf: [original, {type: "null"}]}` — unwrap to inspect the
  * ORIGINAL sub-schema's own shape.
  * @param {Record<string, any>} node
  * @returns {Record<string, any>}
@@ -119,7 +124,7 @@ test('compileSchema for claude/grok (non-openai) returns the source schema uncha
 
 // ── The "100%" clause tied to the SOURCE schema's own property count ──────────
 
-test('compileSchema for openai keeps the EXACT SAME property count as the source schema, all required+nullable', () => {
+test('compileSchema for openai keeps the EXACT SAME property count, all required and exactly source-optional keys made nullable', () => {
   const sourceCoverage = countCoverage(schema);
   const compiled = compileSchema(schema, 'openai');
   const compiledCoverage = countCoverage(compiled);
@@ -127,10 +132,9 @@ test('compileSchema for openai keeps the EXACT SAME property count as the source
   assert.ok(sourceCoverage.total > 30, `expected a substantial source property count, got ${sourceCoverage.total}`);
   assert.equal(compiledCoverage.total, sourceCoverage.total, 'compiling must never drop or add a property');
   assert.equal(
-    compiledCoverage.requiredAndNullable,
-    compiledCoverage.total,
-    `${compiledCoverage.requiredAndNullable}/${compiledCoverage.total} properties are required+nullable`,
+    compiledCoverage.required, compiledCoverage.total, 'every compiled property is required',
   );
+  assert.equal(compiledCoverage.nullable, sourceCoverage.expectedNullable, 'only optional keys gain nullability');
 });
 
 test('mutation: a compiled openai schema missing nullability on one property is caught (proves the count can fail)', () => {
@@ -139,8 +143,10 @@ test('mutation: a compiled openai schema missing nullability on one property is 
   assert.ok(Array.isArray(capsProps.coders.anyOf) && capsProps.coders.anyOf.some((b) => b.type === 'null'));
   capsProps.coders.anyOf = capsProps.coders.anyOf.filter((b) => b.type !== 'null');
 
-  const { total, requiredAndNullable } = countCoverage(compiled);
-  assert.equal(requiredAndNullable, total - 1, 'the mutated property must be the only one now failing the count');
+  const { total, required, nullable } = countCoverage(compiled);
+  assert.equal(total, countCoverage(schema).total);
+  assert.equal(required, total);
+  assert.equal(nullable, countCoverage(schema).expectedNullable - 1, 'the mutated optional property must be the only one now failing the count');
 });
 
 test("openai's required list for a compiled object contains every one of its own property keys", () => {
@@ -149,14 +155,15 @@ test("openai's required list for a compiled object contains every one of its own
   assert.deepEqual([...capsSchema.required].sort(), Object.keys(capsSchema.properties).sort());
 });
 
-test('a $ref property (e.g. levels.L0) is wrapped in anyOf[ref, null] rather than dropping the ref', () => {
+test('an optional $ref property (level.provider) is wrapped in anyOf[ref, null] rather than dropping the ref', () => {
   const compiled = compileSchema(schema, 'openai');
-  const levels = unwrapNullable(compiled.properties.levels);
-  const l0 = levels.properties.L0;
+  const l0 = compiled.$defs.level.properties.provider;
   assert.equal(l0.$ref, undefined, 'the bare $ref must be replaced, not left dangling alongside anyOf');
   assert.ok(Array.isArray(l0.anyOf) && l0.anyOf.length === 2);
-  assert.ok(l0.anyOf.some((b) => b.$ref === '#/$defs/level'));
+  assert.ok(l0.anyOf.some((b) => b.$ref === '#/$defs/provider'));
   assert.ok(l0.anyOf.some((b) => b.type === 'null'));
+  const requiredL0 = compiled.properties.levels.anyOf?.[0]?.properties.L0 ?? compiled.properties.levels.properties.L0;
+  assert.equal(new Ajv2020({ strict: false }).compile({ ...requiredL0, $defs: compiled.$defs })(null), false, 'required levels.L0 keeps its non-null $ref');
 });
 
 // ── additionalProperties: false on EVERY compiled object node (counted) ───────
@@ -268,18 +275,20 @@ test('a node with a typed (open-ended) additionalProperties keeps it — never s
 // ── Nullability is REAL: production compileSchema, checked by ajv ─────────────
 
 /**
- * Wraps `fixture` as the single required property `x` of an object, compiles it through the REAL
+ * Wraps `fixture` as the single optional property `x` of an object, compiles it through the REAL
  * `compileSchema(…, 'openai')`, and asks ajv whether the compiled `x` accepts null AND whether the
  * whole compiled document accepts `{x: null}`.
  * @param {Record<string, any>} fixture
- * @returns {{propertyAcceptsNull: boolean, documentAcceptsNull: boolean}}
+ * @returns {{propertyAcceptsNull: boolean, documentAcceptsNull: boolean, requiredAcceptsNull: boolean}}
  */
 function compiledNullability(fixture) {
-  const compiled = compileSchema({ type: 'object', properties: { x: fixture }, required: ['x'] }, 'openai');
+  const compiled = compileSchema({ type: 'object', properties: { x: fixture } }, 'openai');
   const ajv = new Ajv2020({ strict: false });
+  const required = compileSchema({ type: 'object', properties: { x: fixture }, required: ['x'] }, 'openai');
   return {
     propertyAcceptsNull: ajv.compile(compiled.properties.x)(null),
     documentAcceptsNull: ajv.compile(compiled)({ x: null }),
+    requiredAcceptsNull: ajv.compile(required)({ x: null }),
   };
 }
 
@@ -297,46 +306,57 @@ for (const [label, fixture] of NULLABILITY_FIXTURES) {
   test(`ajv red test: ${label} — the source rejects null; production compileSchema makes it accept null`, () => {
     const ajv = new Ajv2020({ strict: false });
     assert.equal(ajv.compile(fixture)(null), false, 'precondition: the SOURCE sub-schema rejects null');
-    assert.deepEqual(compiledNullability(fixture), { propertyAcceptsNull: true, documentAcceptsNull: true });
+    assert.deepEqual(compiledNullability(fixture), { propertyAcceptsNull: true, documentAcceptsNull: true, requiredAcceptsNull: false });
   });
 }
 
-// ── End-to-end: EVERY required property, at EVERY depth, validates null through ajv ─────────
+// ── End-to-end: every property follows SOURCE nullability through ajv ─────────
 
 /**
- * Checks, through ajv, that every REQUIRED property reachable anywhere in `root` (the same full
- * traversal as `countCoverage` — union branches, items, map values, `$defs`, …) accepts null.
+ * Checks every compiled property is required and accepts null exactly when it was optional or
+ * already nullable in the source (union branches, items, map values, `$defs`, …).
  * Each property is compiled standalone with the root's `$defs` embedded so a `$ref` resolves.
  * @param {Record<string, any>} root
+ * @param {Record<string, any>} source
  * @returns {{checked: number, failures: string[]}}
  */
-function checkEveryPropertyNullable(root) {
+function checkEveryPropertyNullable(root, source = schema) {
   let checked = 0;
   /** @type {string[]} */
   const failures = [];
-  const walk = (/** @type {Record<string, any>} */ node, /** @type {string} */ pointer, /** @type {Set<object>} */ onPath) => {
-    if (onPath.has(node)) return;
-    onPath.add(node);
+  const walk = (/** @type {Record<string, any>} */ node, /** @type {Record<string, any>} */ original, /** @type {string} */ pointer) => {
     const required = new Set(node.required ?? []);
-    for (const [key, propSchema] of Object.entries(node.properties ?? {})) {
+    for (const [key, propSchema] of Object.entries(original.properties ?? {})) {
       checked += 1;
       const ajv = new Ajv2020({ strict: false });
-      const standalone = { ...structuredClone(propSchema), $defs: root.$defs };
-      if (!required.has(key) || !ajv.compile(standalone)(null)) {
+      const sourceNullable = ajv.compile({ ...structuredClone(propSchema), $defs: source.$defs })(null);
+      const expected = !(original.required ?? []).includes(key) || sourceNullable;
+      const actual = new Ajv2020({ strict: false }).compile({ ...node.properties[key], $defs: root.$defs })(null);
+      if (!required.has(key) || actual !== expected) {
         failures.push(`${pointer}/properties/${key}`);
       }
     }
-    for (const [suffix, child] of children(node)) walk(child, `${pointer}${suffix}`, onPath);
-    onPath.delete(node);
+    for (const [suffix, child] of children(original)) {
+      let compiledChild = suffix.slice(1).split('/').reduce((n, key) => n[key], node);
+      let childPointer = `${pointer}${suffix}`;
+      if (suffix.startsWith('/properties/')) {
+        const sourceNullable = new Ajv2020({ strict: false }).compile({ ...child, $defs: source.$defs })(null);
+        if (!sourceNullable && compiledChild.anyOf?.[1]?.type === 'null') {
+          compiledChild = compiledChild.anyOf[0];
+          childPointer += '/anyOf/0';
+        }
+      }
+      walk(compiledChild, child, childPointer);
+    }
   };
-  walk(root, '#', new Set());
+  walk(root, source, '#');
   return { checked, failures };
 }
 
-test('every OpenAI-compiled property at EVERY depth validates null through ajv — and the walk checks exactly countCoverage(compiled).total properties', () => {
+test('every OpenAI-compiled property at EVERY depth follows source nullability through ajv and the count is unchanged', () => {
   const compiled = compileSchema(schema, 'openai');
   const { checked, failures } = checkEveryPropertyNullable(compiled);
-  assert.deepEqual(failures, [], `properties that do NOT validate null: ${failures.join(', ')}`);
+  assert.deepEqual(failures, [], `properties with incorrect requiredness or nullability: ${failures.join(', ')}`);
   assert.equal(checked, countCoverage(compiled).total, 'the ajv walk must visit every property the coverage count sees');
   assert.equal(checked, countCoverage(schema).total, 'and that is every property of the SOURCE schema');
 });

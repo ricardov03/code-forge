@@ -4,7 +4,7 @@
  *
  * OpenAI's structured-output "strict" mode has three rules a hand-written schema violates by
  * default: (1) every property under an object must be listed in `required` (optional fields are
- * instead modeled as **nullable** required fields), (2) every object must set
+ * instead modeled as **nullable** required fields; source-required keys stay as they are), (2) every object must set
  * `additionalProperties: false`, (3) nothing may be missing from `required`. Claude and Grok take
  * the source schema unchanged (they support ordinary JSON Schema `required`/optional).
  *
@@ -149,8 +149,9 @@ function childSchemas(node) {
 }
 
 /**
- * Recursively rewrites every object node: a `properties` map makes every property `required` and
- * nullable and closes the node (unless it already has an open-ended `additionalProperties`); a
+ * Recursively rewrites every object node: a `properties` map makes every property `required`;
+ * optional keys become nullable; required keys stay as they are. It closes the node (unless it
+ * already has an open-ended `additionalProperties`); a
  * bare `{type: 'object'}` is closed to an empty strict object. `visited` guards against revisiting
  * the same shared node twice — not against a genuine schema cycle, which this project's schema
  * does not have.
@@ -165,12 +166,13 @@ function compileForOpenAI(node, visited) {
 
   if (node.properties && typeof node.properties === 'object') {
     const keys = Object.keys(node.properties);
+    const wasRequired = new Set(Array.isArray(node.required) ? node.required : []);
     node.required = keys;
     if (node.additionalProperties === undefined) {
       node.additionalProperties = false;
     }
     for (const key of keys) {
-      makeNullable(node.properties[key]);
+      if (!wasRequired.has(key)) makeNullable(node.properties[key]);
     }
   } else if (isObjectTyped(node) && node.additionalProperties === undefined && node.patternProperties === undefined) {
     node.properties = {};
