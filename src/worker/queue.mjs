@@ -128,22 +128,24 @@ export function resetAcceptanceWatch(repoRoot, block) {
  * content is hashed under `tree` when given (B62b: the block's worktree, realpath'd here), else
  * under `repoRoot`. The tree is part of the ticket id, so a main-tree ticket and a tree ticket for
  * the same bytes differ, and the answer names the tree given here, never a stored value.
- * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null, now?: Date}} opts
+ * `after` renews a pre-reopen attempt while retaining the content-based ticket identity.
+ * A ticket already queued after that row is reused, including its eventual completion.
+ * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null, now?: Date, after?: string}} opts
  * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string} | {status: 'excluded', file: string, rule: string, ticket?: never, content_hash?: never, tree?: never}}
  * @throws {WorkerError} `bad-path` for a relative `tree` or one that cannot be resolved.
  */
-export function enqueue({ repoRoot, run, block, file, tree = null, now = new Date() }) {
+export function enqueue({ repoRoot, run, block, file, tree = null, now = new Date(), after }) {
   const rule = reviewExclusionFor(repoRoot, run, assertRowPath(file));
   if (rule !== null) return { status: 'excluded', file, rule };
   const { content_hash } = resolveTicket({ repoRoot, run, block, file, tree });
-  return enqueueHash({ repoRoot, run, block, file, tree, content_hash, now });
+  return enqueueHash({ repoRoot, run, block, file, tree, content_hash, now, after });
 }
 
 /** Queue proven git-object content through the same identity as a manual review.
- * @param {{repoRoot: string, run: string, block: string, file: string, content_hash: string, tree?: string | null, now?: Date}} opts
+ * @param {{repoRoot: string, run: string, block: string, file: string, content_hash: string, tree?: string | null, now?: Date, after?: string}} opts
  * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string} | {status: 'excluded', file: string, rule: string, ticket?: never, content_hash?: never, tree?: never}}
  */
-export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = null, now = new Date() }) {
+export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = null, now = new Date(), after }) {
   const rel = assertRowPath(file);
   const rule = reviewExclusionFor(repoRoot, run, rel);
   if (rule !== null) return { status: 'excluded', file: rel, rule };
@@ -152,6 +154,15 @@ export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = n
   const ticket = reviewTicketId({ run, block, file: rel, content_hash, tree: root, acceptance_revision });
   const target = path.join(queueDir(repoRoot), `${ticket}.json`);
   const named = { ...(root === null ? {} : { tree: root }), ...(acceptance_revision === undefined ? {} : { acceptance_revision }) };
+  const reopenedAt = Date.parse(after ?? '');
+  const previous = after === undefined ? null : readJSON(target);
+  if (Number.isFinite(reopenedAt) && (!previous || !(Date.parse(previous.enqueued_at) > reopenedAt))) {
+    // Drop the old result before publishing the renewed attempt. Strictly later even when the
+    // enqueue and signed row share a millisecond, so repeated joins never restart live work.
+    clearDone({ repoRoot, run, block, file: rel, tree: root });
+    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: new Date(Math.max(now.getTime(), reopenedAt + 1)).toISOString(), ...named };
+    writeAtomic(target, `${JSON.stringify(body)}\n`);
+  }
   if (!existsSync(target)) {
     /** @type {Ticket} */
     const body = { ticket, run, block, file: rel, content_hash, enqueued_at: now.toISOString(), ...named };

@@ -164,7 +164,7 @@ test('B72 (1)(2)(3)(8): stopped ⇒ same content refused ⇒ attempt keeps the s
   // (1) reopened on changed content: one signed human row, the cached stop cleared
   const ok = await f.reopen(['--json']);
   assert.deepEqual([ok.code, ok.err], [0, '']);
-  assert.deepEqual(JSON.parse(ok.out), { block: 'B1', event: 'reopened', file: SRC, from: 'stopped', stop_reason: 'l3_patch_exhausted', at_seq: 2, from_hash: stopHash, to_hash: f.hashOf(), ticket_cleared: true, by: 'human' });
+  assert.deepEqual(JSON.parse(ok.out), { block: 'B1', event: 'reopened', file: SRC, from: 'stopped', stop_reason: 'l3_patch_exhausted', at_seq: 2, from_hash: stopHash, to_hash: f.hashOf(), ticket_cleared: true, by: 'human', ticket: again.out.ticket });
   const reopened = await f.reopenedRows();
   assert.equal(reopened.length, 1);
   assert.equal(verifyRow(reopened[0], f.key).ok, true);
@@ -174,7 +174,7 @@ test('B72 (1)(2)(3)(8): stopped ⇒ same content refused ⇒ attempt keeps the s
   // a retry on the same seq and content finds the row: no second row, nothing left to clear
   const retry = await f.reopen(['--json']);
   assert.deepEqual([retry.code, retry.err], [0, '']);
-  assert.deepEqual(JSON.parse(retry.out), { block: 'B1', event: 'reopened', file: SRC, from: 'stopped', stop_reason: 'l3_patch_exhausted', at_seq: 2, from_hash: stopHash, to_hash: f.hashOf(), ticket_cleared: false, by: 'human' });
+  assert.deepEqual(JSON.parse(retry.out), { block: 'B1', event: 'reopened', file: SRC, from: 'stopped', stop_reason: 'l3_patch_exhausted', at_seq: 2, from_hash: stopHash, to_hash: f.hashOf(), ticket_cleared: false, by: 'human', ticket: again.out.ticket });
   assert.equal((await f.reopenedRows()).length, 1);
   // other content at the same seq: refused, still one row; V(4) back and the row stands
   writeFile(f.repo, SRC, V(5));
@@ -262,7 +262,7 @@ test('B72 (4): a lost state is refused until the human reopens it; then round 1 
   const sessionsBefore = f.sessions.length;
 
   const ok = await f.reopen();
-  assert.deepEqual([ok.code, ok.out, ok.err], [0, `block B1 reopened ${SRC} (from lost; by: human)\n`, '']);
+  assert.deepEqual([ok.code, ok.out, ok.err], [0, `block B1 reopened ${SRC} (from lost; by: human)\nticket ${lost.out.ticket}\nnext: code-forge review-file --wait ${lost.out.ticket}\n`, '']);
   const rows = await f.reopenedRows();
   assert.equal(rows.length, 1);
   assert.deepEqual(fieldsOf(rows[0]), { run: f.runId, event: 'review.reopened', block: 'B1', file: SRC, from: 'lost', stop_reason: null, at_seq: 2, from_hash: null, to_hash: f.hashOf(), reason: 'the owner split the fix', by: 'human' });
