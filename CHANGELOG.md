@@ -41,6 +41,8 @@ waits on a second real consumer (plan §10.4, Q17).
   a schema-invalid review answer uses every level fallback even when `second_levels` is empty (#24, #26 item 5, B168)
 - Codex `spawn --background` keeps its CODEX_HOME after the parent exits, and a Codex coder in a linked worktree can commit:
   it gets write access only to the worktree git dir and the shared objects, refs and logs, never to config or hooks (#26 items 3-4, B167)
+- `block open --base <sha>` uses the given commit (also for the proof worktree), and reuses an existing block branch that
+  descends from that base instead of refusing it (#26 item 1, B166)
 
 ## [0.15.2] — 2026-10-30
 
