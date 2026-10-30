@@ -51,6 +51,7 @@ waits on a second real consumer (plan §10.4, Q17).
   Pest `expect()` (#26 items 6-8, B171)
 - Coder context: `context pack` includes the block brief and acceptance and prints the pack itself; `spawn` for a coder
   appends them; the sentinel and TESTS line are found in a JSON-escaped coder answer (#26 items 9-10, B172)
+- `block reopen` now restarts the review: it clears the cached done result, queues a fresh ticket, and `review-file --wait-block` waits for the new result instead of returning the old one (#25, B169)
 
 ## [0.15.2] — 2026-10-30
 
