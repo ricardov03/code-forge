@@ -239,7 +239,7 @@ test('B147 text: block dollars have readable wall and human wait times; run tabl
     assert.equal(await runReport(['--slug', slug], { stdout }), 0);
     assert.equal(stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0],
       'run | block | USD | wall | human wait | status\nr1 | b1 | $2.0000 | 12m 30s | 10m 0s | completed\n' +
-      '  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $2.0000 · proof 0s · 0 unknown\n');
+      '  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $2.0000 · gates - · proof 0s · 0 unknown\n');
     assert.equal(stdout.text.split('== run_time ==\n')[1].split('== ')[0].split('spend per run')[0],
       'run | started | ended | wall | USD | closed | stopped\n' +
       'r1 | 2026-10-20T00:00:00.000Z | 2026-10-20T00:15:00.000Z | 15m 0s | $2.0000 | 1 | 0\n' +
@@ -261,7 +261,7 @@ test('B149 clause 3 boundary: untimed stopped blocks and outside-only rows print
     assert.equal(await runReport(['--slug', slug], { stdout }), 0);
     assert.equal(stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0],
       'run | block | USD | wall | human wait | status\nold | b1 | $0.2500 | - | - | stopped\n' +
-      '  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $0.2500 · proof 0s · 0 unknown\n');
+      '  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $0.2500 · gates - · proof 0s · 0 unknown\n');
     assert.equal(stdout.text.split('== run_time ==\n')[1].split('spend per run')[0],
       'run | started | ended | wall | USD | closed | stopped\nold | - | open | - | $0.2500 | 0 | 1\n' +
       'outside runs: $0.0000 (1 rows, no wall time)\n' +

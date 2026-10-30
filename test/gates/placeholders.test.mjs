@@ -92,6 +92,20 @@ const strip = ({ mac: _m, ts: _t, ...rest }) => rest;
 /** What every gate row also carries (the ledger writer's usage sources). */
 const SRC = { tokens_source: null, cost_source: null };
 
+/** @param {any} output @param {string} [gate] */
+function timingFields(output, gate) {
+  for (const result of output.results) {
+    assert.equal(typeof result.duration_ms, 'number');
+    assert.ok(Number.isFinite(result.duration_ms) && result.duration_ms >= 0);
+    if (result.skipped) assert.equal(result.duration_ms, 0);
+  }
+  assert.equal(typeof output.duration_ms, 'number');
+  assert.equal(output.duration_ms, output.results.reduce((sum, r) => sum + r.duration_ms, 0));
+  return gate === undefined
+    ? { duration_ms: output.duration_ms, results: output.results.map(({ gate, ok, skipped, duration_ms }) => ({ gate, ok, skipped, duration_ms })) }
+    : { duration_ms: output.results.find((r) => r.gate === gate).duration_ms, total_duration_ms: output.duration_ms };
+}
+
 /**
  * A committed repo whose `.code-forge.yml` sets `gates` (YAML lines, indented under `gates:`), a
  * started run, and helpers to open blocks and run the gates through the CLI.
@@ -221,7 +235,9 @@ test('B60 (1)(3): runGates passes the expanded argv and the gate env (added to t
   );
   assert.equal(allOk, true);
   assert.deepEqual(p.seen(), { args: ['--run', 'test/a.test.mjs', 'test/b.test.mjs'], value: VALUE, inherited: true });
-  const { stdout: _o, stderr: _e, ...rest } = results[0];
+  const { stdout: _o, stderr: _e, duration_ms, ...rest } = results[0];
+  assert.equal(typeof duration_ms, 'number');
+  assert.ok(Number.isFinite(duration_ms) && duration_ms >= 0);
   assert.deepEqual(rest, { gate: 'test', argv: [NODE, p.script, '--run', 'test/a.test.mjs', 'test/b.test.mjs'], skipped: false, ok: true, code: 0, scope: 'related', test_count: 2, env_keys: ['B60_GATE_VALUE'] });
 });
 
@@ -229,7 +245,9 @@ test('B60 (3): a {argv, env: {}} gate is a gate with no env — no env_keys key 
   const p = probe();
   const { results } = await runGates({ test: { argv: [NODE, p.script, 'x'], env: {} }, lint: null, types: null, format: null }, { cwd: freshDir('emptyenv') });
   assert.deepEqual(p.seen(), { args: ['x'], value: null, inherited: true });
-  assert.deepEqual(Object.keys(results[0]).sort(), ['argv', 'code', 'gate', 'ok', 'skipped', 'stderr', 'stdout']);
+  assert.deepEqual(Object.keys(results[0]).sort(), ['argv', 'code', 'duration_ms', 'gate', 'ok', 'skipped', 'stderr', 'stdout']);
+  assert.equal(typeof results[0].duration_ms, 'number');
+  assert.ok(Number.isFinite(results[0].duration_ms) && results[0].duration_ms >= 0);
 });
 
 test('B60 (2): runGates with no scope (no block) drops the item — the full suite, reason no_tests', async () => {
@@ -243,7 +261,9 @@ test('B60 (4): a gate without the token and without env runs exactly as before �
   const p = probe();
   const { results } = await runGates({ test: [NODE, p.script, 'x'], lint: null, types: null, format: null }, { cwd: freshDir('plain'), scope: { scope: 'related', files: ['test/a.test.mjs'] } });
   assert.deepEqual(p.seen(), { args: ['x'], value: null, inherited: true });
-  assert.deepEqual(Object.keys(results[0]).sort(), ['argv', 'code', 'gate', 'ok', 'skipped', 'stderr', 'stdout']);
+  assert.deepEqual(Object.keys(results[0]).sort(), ['argv', 'code', 'duration_ms', 'gate', 'ok', 'skipped', 'stderr', 'stdout']);
+  assert.equal(typeof results[0].duration_ms, 'number');
+  assert.ok(Number.isFinite(results[0].duration_ms) && results[0].duration_ms >= 0);
 });
 
 test('B60 (1)(4): runGatesInExport runs the token gate on the scope it is given, inside the export dir; without a scope, full', async () => {
@@ -279,7 +299,7 @@ test('B60 (1)(2): block open --tests records test_files on the block and the dis
   assert.deepEqual(p.seen().args, ['--run', 'test/a.test.mjs', 'test/b.test.mjs']);
   assert.deepEqual([ran.json.results[0].scope, ran.json.results[0].test_count], ['related', 2]);
   const hash = createHash('sha256').update(readFileSync(path.join(fx.repo, 'src/a.mjs'))).digest('hex');
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'related', test_count: 2, files: { 'src/a.mjs': hash }, ...SRC }]);
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'related', test_count: 2, files: { 'src/a.mjs': hash }, ...SRC, ...timingFields(ran.json) }]);
 });
 
 test('B60 (1): with no --tests the gate takes the owned files that look like tests; one file prints "1 test file" only when --tests was given', async () => {
@@ -356,7 +376,7 @@ test('B60 (2): over gates.full_suite_threshold_files owned files the item is dro
   assert.deepEqual(p.seen().args, ['--run']);
   assert.equal(ran.code, 0, ran.err);
   const hash = createHash('sha256').update(readFileSync(path.join(fx.repo, 'src/a.mjs'))).digest('hex');
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'threshold', files: { 'src/a.mjs': hash }, ...SRC }]);
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'threshold', files: { 'src/a.mjs': hash }, ...SRC, ...timingFields(ran.json) }]);
 
   // at the threshold (1 owned entry) the related red test runs: gate.red carries the scope too
   assert.equal((await fx.open('B2', ['--owned', 'lib/**', '--tests', 'test/red.test.mjs']))[0], 0);
@@ -364,8 +384,8 @@ test('B60 (2): over gates.full_suite_threshold_files owned files the item is dro
   assert.equal(red.code, 1);
   assert.deepEqual(p.seen().args, ['--run', 'test/red.test.mjs']);
   assert.deepEqual((await fx.gateRows()).slice(1), [
-    { event: 'gate.red', run: fx.runId, block: 'B2', gate: 'test', code: 3, scope: 'related', test_count: 1, ...SRC },
-    { event: 'gate.done', run: fx.runId, block: 'B2', stack: 'unknown', all_ok: false, scope: 'related', test_count: 1, ...SRC },
+    { event: 'gate.red', run: fx.runId, block: 'B2', gate: 'test', code: 3, scope: 'related', test_count: 1, ...SRC, ...timingFields(red.json, 'test') },
+    { event: 'gate.done', run: fx.runId, block: 'B2', stack: 'unknown', all_ok: false, scope: 'related', test_count: 1, ...SRC, ...timingFields(red.json) },
   ]);
 });
 
@@ -378,7 +398,7 @@ test('B60 (2): no test file known (no --tests, no test-looking owned entry) ⇒ 
   assert.deepEqual(p.seen().args, ['--run']);
   assert.deepEqual([ran.json.results[0].scope, ran.json.results[0].reason], ['full', 'no_tests']);
   const hash = createHash('sha256').update(readFileSync(path.join(fx.repo, 'src/a.mjs'))).digest('hex');
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'no_tests', files: { 'src/a.mjs': hash }, ...SRC }]);
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, scope: 'full', reason: 'no_tests', files: { 'src/a.mjs': hash }, ...SRC, ...timingFields(ran.json) }]);
 });
 
 test('B60 (2): gates run without --run/--block has no block to scope to — the full suite, gate.done says full / no_tests and names no run or block', async () => {
@@ -388,7 +408,7 @@ test('B60 (2): gates run without --run/--block has no block to scope to — the 
   assert.equal(ran.code, 0, ran.err);
   assert.deepEqual(p.seen().args, ['--run']);
   assert.deepEqual([ran.json.results[0].scope, ran.json.results[0].reason], ['full', 'no_tests']);
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', stack: 'unknown', all_ok: true, scope: 'full', reason: 'no_tests', ...SRC }]);
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', stack: 'unknown', all_ok: true, scope: 'full', reason: 'no_tests', ...SRC, ...timingFields(ran.json) }]);
 });
 
 test('B60 (3): a {argv, env} gate runs with the variable set; the value never reaches stdout, stderr, the rows — the key is named', async () => {
@@ -405,8 +425,8 @@ test('B60 (3): a {argv, env} gate runs with the variable set; the value never re
   const rows = await readAllRows('b60-env');
   assert.equal(JSON.stringify(rows).includes(VALUE), false);
   assert.deepEqual(await fx.gateRows(), [
-    { event: 'gate.red', run: fx.runId, block: 'B1', gate: 'test', code: 3, scope: 'related', test_count: 1, ...SRC },
-    { event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: false, scope: 'related', test_count: 1, ...SRC },
+    { event: 'gate.red', run: fx.runId, block: 'B1', gate: 'test', code: 3, scope: 'related', test_count: 1, ...SRC, ...timingFields(ran.json, 'test') },
+    { event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: false, scope: 'related', test_count: 1, ...SRC, ...timingFields(ran.json) },
   ]);
 
   const [code, out] = await cli(runGatesVerb, ['detect', '--cwd', fx.repo]);
@@ -435,7 +455,7 @@ test('B60 (3): a SHORT env value (MODE=test) is not masked — `npm test` in the
   assert.deepEqual([ran.json.results[0].stdout, ran.json.results[0].stderr, ran.json.results[0].env_keys], ['value=test\n', 'value=test\n', ['B60_GATE_VALUE']]);
   const rows = JSON.stringify(await readAllRows('b60-short'));
   assert.equal(rows.includes('[REDACTED]') || rows.includes('"B60_GATE_VALUE":"test"'), false);
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, ...SRC }]);
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, ...SRC, ...timingFields(ran.json) }]);
   const [, detected] = await cli(runGatesVerb, ['detect', '--cwd', fx.repo]);
   assert.deepEqual(JSON.parse(detected).test, { argv: [NODE, p.script, 'npm', 'test'], env_keys: ['B60_GATE_VALUE'] });
 });
@@ -447,8 +467,8 @@ test('B60 (4): with --run --block a plain gate (no token, no env) runs as today:
   const ran = await fx.gate('B1');
   assert.equal(ran.code, 0, ran.err);
   assert.deepEqual(p.seen(), { args: ['all'], value: null, inherited: true });
-  assert.deepEqual(Object.keys(ran.json.results[0]).sort(), ['argv', 'code', 'gate', 'ok', 'skipped', 'stderr', 'stdout']);
-  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, ...SRC }]);
+  assert.deepEqual(Object.keys(ran.json.results[0]).sort(), ['argv', 'code', 'duration_ms', 'gate', 'ok', 'skipped', 'stderr', 'stdout']);
+  assert.deepEqual(await fx.gateRows(), [{ event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: true, ...SRC, ...timingFields(ran.json) }]);
 });
 
 test('B60 (1): runGatesGuarded on a block the run does not have — StateError no-block naming the block and the run, no gate run', async () => {
@@ -581,11 +601,12 @@ test('B60 (4): with --run --block in a cwd that is not a git repo, a plain gate 
   const [code, out, err] = await cli(runGatesVerb, ['run', '--cwd', nonGit, '--slug', 'b60-plain-nogit', '--run', fx.runId, '--block', 'B1']);
   assert.deepEqual([code, err], [1, '']);
   assert.deepEqual(p.seen(), { args: ['red', 'x'], value: null, inherited: true });
-  const result = JSON.parse(out).results[0];
-  assert.deepEqual([result.argv, result.code, Object.keys(result).sort()], [[NODE, p.script, 'red', 'x'], 3, ['argv', 'code', 'gate', 'ok', 'skipped', 'stderr', 'stdout']]);
+  const output = JSON.parse(out);
+  const result = output.results[0];
+  assert.deepEqual([result.argv, result.code, Object.keys(result).sort()], [[NODE, p.script, 'red', 'x'], 3, ['argv', 'code', 'duration_ms', 'gate', 'ok', 'skipped', 'stderr', 'stdout']]);
   assert.deepEqual(await fx.gateRows(), [
-    { event: 'gate.red', run: fx.runId, block: 'B1', gate: 'test', code: 3, ...SRC },
-    { event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: false, ...SRC },
+    { event: 'gate.red', run: fx.runId, block: 'B1', gate: 'test', code: 3, ...SRC, ...timingFields(output, 'test') },
+    { event: 'gate.done', run: fx.runId, block: 'B1', stack: 'unknown', all_ok: false, ...SRC, ...timingFields(output) },
   ]);
 });
 

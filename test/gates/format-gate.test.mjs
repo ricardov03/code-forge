@@ -6,6 +6,9 @@ import test from 'node:test';
 import { runGates } from '../../src/gates/run.mjs';
 import { detectGates } from '../../src/gates/detect.mjs';
 import { runGatesVerb } from '../../src/cli/gates.mjs';
+import { runReport } from '../../src/cli/report.mjs';
+import { buildReport } from '../../src/ledger/report.mjs';
+import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { captureStream, git, withTempDir } from './support.mjs';
 
 async function cli(args) {
@@ -124,4 +127,82 @@ test('an empty detected format scope skips the command while configured commands
     assert.equal(configuredResult.skipped, false);
     assert.deepEqual(JSON.parse(configuredResult.stdout), ['--test'], 'user-configured Pint argv is unchanged');
   });
+});
+
+test('gate results, red and done rows retain wall milliseconds and totals, and report sums gate time per block', async () => {
+  await withTempDir(async (dir) => {
+    const rows = [];
+    for (const exit of [1, 0]) {
+      const slug = `format-timing-${exit}`;
+      await writeFile(path.join(dir, '.code-forge.yml'), [
+        'version: 1', `project: {slug: ${slug}}`, 'provider: anthropic', 'gates:',
+        `  test: ${JSON.stringify([process.execPath, '-e', 'setTimeout(() => {}, 30)'])}`,
+        `  format: ${JSON.stringify([process.execPath, '-e', `setTimeout(() => process.exit(${exit}), 60)`])}`,
+        `  custom: [{name: audit, argv: ${JSON.stringify([process.execPath, '-e', 'setTimeout(() => {}, 20)'])}}]`, '',
+      ].join('\n'));
+      const ran = await cli(['run', '--cwd', dir, '--slug', slug]);
+      assert.equal(ran.code, exit, ran.stderr);
+      const parsed = JSON.parse(ran.stdout);
+      assert.equal(parsed.results.length, 5, 'four fixed gates and one custom gate');
+      for (const result of parsed.results) {
+        assert.equal(Number.isInteger(result.duration_ms), true, `${result.gate} has integer milliseconds`);
+        if (result.skipped) assert.equal(result.duration_ms, 0, `${result.gate} was not run`);
+        else assert.ok(result.duration_ms >= ({ test: 30, format: 60, audit: 20 })[result.gate], `${result.gate} includes the command wall time`);
+      }
+      const total = parsed.results.reduce((sum, r) => sum + r.duration_ms, 0);
+      assert.equal(parsed.duration_ms, total, 'CLI total equals all per-gate durations');
+      const written = (await readAllRows(slug)).filter((r) => r.event.startsWith('gate.'));
+      const done = written.filter((r) => r.event === 'gate.done');
+      const red = written.filter((r) => r.event === 'gate.red');
+      assert.equal(done.length, 1, 'one completion row per invocation');
+      assert.equal(done[0].duration_ms, total);
+      assert.deepEqual(done[0].results, parsed.results.map(({ gate, ok, skipped, duration_ms }) => ({ gate, ok, skipped, duration_ms })));
+      assert.equal(red.length, exit, 'only the failed format gate produces a red row');
+      if (exit) {
+        assert.equal(red[0].gate, 'format');
+        assert.equal(red[0].duration_ms, parsed.results.find((r) => r.gate === 'format').duration_ms);
+        assert.equal(red[0].total_duration_ms, total);
+      }
+      rows.push(...written.map((r) => ({ ...r, run: 'timing-run', block: 'B1' })));
+    }
+    const blocks = buildReport(rows).sections.cost_per_block;
+    assert.equal(blocks.length, 1, 'a block with gate activity appears before spending or close');
+    assert.equal(blocks[0].gateTimeMs, rows.filter((r) => r.event === 'gate.done').reduce((sum, r) => sum + r.duration_ms, 0), 'red rows do not double count completed gate runs');
+  });
+});
+
+test('skipped gates take zero milliseconds and report gate timing excludes shadow, invalid and legacy rows across runs', async () => {
+  await withTempDir(async (dir) => {
+    const skipped = await runGates({}, { cwd: dir });
+    assert.deepEqual(skipped.results.map((r) => [r.gate, r.duration_ms]), [['test', 0], ['lint', 0], ['types', 0], ['format', 0]]);
+    assert.equal(skipped.duration_ms, 0);
+    const row = (event, run, duration_ms, extra = {}) => ({ event, run, block: 'same', duration_ms, ...extra });
+    const blocks = buildReport([
+      row('gate.done', 'first', 12), row('gate.red', 'first', 5),
+      row('gate.done', 'first', 900, { source: 'shadow' }), row('gate.done', 'first', -1),
+      row('gate.done', 'first', Infinity), row('gate.done', 'first', '20'),
+      row('gate.done', 'second', 7), row('gate.done', 'second', 0),
+      row('block.close', 'legacy', undefined),
+    ]).sections.cost_per_block;
+    assert.deepEqual(blocks.map((b) => [b.run, b.block, b.gateTimeMs]),
+      [['first', 'same', 12], ['second', 'same', 7], ['legacy', 'same', undefined]]);
+  });
+});
+
+test('report prints summed gate time per block, including zero and unavailable legacy timing', async () => {
+  const slug = 'format-timing-report';
+  for (const row of [
+    { event: 'gate.done', block: 'measured', duration_ms: 2300 },
+    { event: 'gate.red', block: 'measured', duration_ms: 1000 },
+    { event: 'gate.done', block: 'measured', duration_ms: 1700 },
+    { event: 'gate.done', block: 'skipped', duration_ms: 0 },
+    { event: 'block.close', block: 'legacy' },
+  ]) await appendRow({ ...row, run: 'timing-run' }, { slug });
+  const stdout = captureStream(), stderr = captureStream();
+  assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
+  assert.equal(stderr.text, '');
+  const blocks = stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0];
+  const details = blocks.split('\n').filter((line) => line.startsWith('  level '));
+  assert.deepEqual(details, ['4s', '0s', '-'].map((time) =>
+    `  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $0.0000 · gates ${time} · proof 0s · 0 unknown`));
 });

@@ -279,7 +279,18 @@ test('B99 gates without tokens keep identical results; --changed requires a bloc
   const plain = { test: [process.execPath, probe, 'all'] };
   const full = await runGates(plain, { cwd: fx.repo, timeoutMs: 5000 });
   const narrowed = await runGates(plain, { cwd: fx.repo, timeoutMs: 5000, scope: { scope: 'changed', files: ['test/a.test.mjs'], changedFiles: ['src/a.mjs'] } });
-  assert.deepEqual(narrowed, full);
+  const withoutTiming = ({ results, duration_ms, ...rest }) => {
+    const untimed = results.map(({ duration_ms, ...result }) => {
+      assert.equal(typeof duration_ms, 'number');
+      assert.ok(Number.isFinite(duration_ms) && duration_ms >= 0);
+      if (result.skipped) assert.equal(duration_ms, 0);
+      return result;
+    });
+    assert.equal(typeof duration_ms, 'number');
+    assert.equal(duration_ms, results.reduce((sum, r) => sum + r.duration_ms, 0));
+    return { ...rest, results: untimed };
+  };
+  assert.deepEqual(withoutTiming(narrowed), withoutTiming(full));
   assert.equal(full.results.length, 4);
   const refused = await cli(runGatesVerb, ['run', '--cwd', fx.repo, '--changed']);
   assert.deepEqual(refused, { code: 2, out: '', err: 'gates run: --changed needs --run <id> and --block <id>\n', json: null });

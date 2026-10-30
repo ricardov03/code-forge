@@ -170,7 +170,7 @@ test('B136: missing test_files prints one skip line; unchanged tests and initial
   });
 });
 
-test('B136: absent repeat_new_tests keeps the previous output, unsigned rows and exit codes', async () => {
+test('B136: absent repeat_new_tests keeps gate behaviour and unsigned rows with numeric timing', async () => {
   await withTempDir(async (dir) => {
     const fx = await repeatFixture(dir);
     assert.deepEqual(JSON.parse((await fx.gate()).out).repeats, { n: 2, files: REPEATED_FILES, failed: false });
@@ -178,16 +178,26 @@ test('B136: absent repeat_new_tests keeps the previous output, unsigned rows and
     await rm(path.join(dir, 'calls.json'));
     const ran = await fx.gate(), json = JSON.parse(ran.out);
     assert.deepEqual([ran.code, ran.err, json.allOk], [0, '', true]);
-    assert.deepEqual(Object.keys(json), ['stack', 'results', 'allOk']);
+    assert.deepEqual(Object.keys(json), ['stack', 'results', 'allOk', 'duration_ms']);
+    for (const result of json.results) {
+      assert.equal(typeof result.duration_ms, 'number');
+      assert.ok(Number.isFinite(result.duration_ms) && result.duration_ms >= 0);
+      if (result.skipped) assert.equal(result.duration_ms, 0);
+    }
+    assert.equal(typeof json.duration_ms, 'number');
+    assert.equal(json.duration_ms, json.results.reduce((sum, r) => sum + r.duration_ms, 0));
     assert.deepEqual(json.results[0], {
       gate: 'test', argv: [process.execPath, path.join(dir, 'fake.mjs')], skipped: false, ok: true,
       code: 0, stdout: 'passed 1\n', stderr: '', scope: 'full', reason: 'threshold',
+      duration_ms: json.results[0].duration_ms,
     });
     assert.deepEqual(await fx.calls(), [[]]);
     const row = (await fx.rows()).at(-1);
     assert.equal(Object.hasOwn(row, 'repeats'), false);
     assert.equal(Object.hasOwn(row, 'mac'), false);
     assert.equal(row.all_ok, true);
+    assert.equal(row.duration_ms, json.duration_ms);
+    assert.deepEqual(row.results, json.results.map(({ gate, ok, skipped, duration_ms }) => ({ gate, ok, skipped, duration_ms })));
   });
 });
 

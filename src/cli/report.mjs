@@ -119,7 +119,7 @@ function blockTimeLines(blocks) {
   const lines = ['run | block | USD | wall | human wait | status'];
   for (const b of blocks) {
     lines.push(`${b.run ?? 'outside runs'} | ${b.block} | $${b.totalUsd.toFixed(4)} | ${duration(b.wallMs)} | ${duration(b.humanWaitMs)} | ${b.completed ? 'completed' : b.stopped ? 'stopped' : 'open'}`);
-    lines.push(`  level ${b.level ?? '-'} · lane ${b.lane ?? '-'} · coder $${b.coderUsd.toFixed(4)} · review $${b.reviewUsd.toFixed(4)} · S1+S2 $${b.s1s2Usd.toFixed(4)} · facts $${b.factsUsd.toFixed(4)} · other $${b.otherUsd.toFixed(4)} · proof ${duration(b.proofTimeMs)} · ${b.unknownUsdSessions} unknown`);
+    lines.push(`  level ${b.level ?? '-'} · lane ${b.lane ?? '-'} · coder $${b.coderUsd.toFixed(4)} · review $${b.reviewUsd.toFixed(4)} · S1+S2 $${b.s1s2Usd.toFixed(4)} · facts $${b.factsUsd.toFixed(4)} · other $${b.otherUsd.toFixed(4)} · gates ${duration(b.gateTimeMs ?? null)} · proof ${duration(b.proofTimeMs)} · ${b.unknownUsdSessions} unknown`);
   }
   return `${lines.join('\n')}\n`;
 }

@@ -33,6 +33,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 /**
  * @typedef {object} GateResult
  * @property {string} gate
+ * @property {number} duration_ms - wall time including repeats; zero for skipped gates.
  * @property {true} [custom]
  * @property {Evidence[]} [evidence]
  * @property {string[]} [missing]
@@ -244,7 +245,7 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
  * variables added to the inherited environment, overriding the CI=1/npm_config_yes=false defaults.
  * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[], kindGates?: KindGates}} gates
  * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
- * @returns {Promise<{results: GateResult[], allOk: boolean, repeats?: Repeats}>}
+ * @returns {Promise<{results: GateResult[], allOk: boolean, duration_ms: number, repeats?: Repeats}>}
  */
 export async function runGates(gates, opts) {
   if (!gates || typeof gates !== 'object') {
@@ -291,7 +292,7 @@ export async function runGates(gates, opts) {
   const results = [];
   for (const { gate, command, noFiles } of planned) {
     if (command === null) {
-      results.push({ gate, argv: null, skipped: true, ok: true, code: null, stdout: '', stderr: '',
+      results.push({ gate, duration_ms: 0, argv: null, skipped: true, ok: true, code: null, stdout: '', stderr: '',
         ...(gates[gate] != null && excluded(gate) ? { reason: skipReason() } : {}),
         ...(noFiles ? { reason: 'no_changes' } : {}),
       });
@@ -301,10 +302,12 @@ export async function runGates(gates, opts) {
     // Each command is run and its exit status read on its own — never `&&`-chained with the
     // next, so a red gate is reported red without swallowing the gates that follow it.
     const execOpts = { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } };
+    const started = performance.now();
     const res = await exec(argv, execOpts);
     const outcome = gateOutcome(res, timeoutMs, failOnStdout);
     const result = /** @type {GateResult} */ ({
       gate,
+      duration_ms: 0,
       argv,
       skipped: false,
       ...(scoped ? scopeFields(scope) : {}),
@@ -332,23 +335,27 @@ export async function runGates(gates, opts) {
         }
       }
     }
+    result.duration_ms = Math.round(performance.now() - started);
     results.push(result);
   }
   for (const gate of gates.custom ?? []) {
     if (excluded(gate.name)) {
-      results.push({ gate: gate.name, custom: true, argv: null, skipped: true, ok: true, code: null,
+      results.push({ gate: gate.name, duration_ms: 0, custom: true, argv: null, skipped: true, ok: true, code: null,
         stdout: '', stderr: '', reason: skipReason(), evidence: [],
       });
       continue;
     }
     const { argv, env } = normalizeCommand(gate);
+    const started = performance.now();
     const res = await exec(argv, { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } });
+    const evidence = await collectEvidence(cwd, gate.evidence ?? []);
     results.push({ gate: gate.name, custom: true, argv, skipped: false,
+      duration_ms: Math.round(performance.now() - started),
       ...gateOutcome(res, timeoutMs),
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
-      ...await collectEvidence(cwd, gate.evidence ?? []),
+      ...evidence,
     });
   }
   const repeats = results.find((r) => r.repeats)?.repeats;
-  return { results, allOk: results.every((r) => r.ok), ...(repeats ? { repeats } : {}) };
+  return { results, allOk: results.every((r) => r.ok), duration_ms: results.reduce((sum, r) => sum + r.duration_ms, 0), ...(repeats ? { repeats } : {}) };
 }

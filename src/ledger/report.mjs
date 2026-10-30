@@ -113,6 +113,7 @@ function costPerBlock(rows) {
   const times = new Map();
   /** @type {Set<string>} run+block keys with at least one spend row */
   const spent = new Set();
+  const gated = new Set();
   const closedKeys = new Set();
   // never split one block: a row without a run joins its block's entry when that block id appears
   // in exactly one run; only a block seen in several runs leaves such a row in a `run: null` entry
@@ -207,8 +208,14 @@ function costPerBlock(rows) {
       }
     }
     if (row.event === 'proof' && typeof row.duration_ms === 'number') e.proofTimeMs += row.duration_ms;
+    // gate.red is a diagnostic for a command already included in gate.done's total.
+    // Leave legacy entries without a gateTimeMs field when no measured run is available.
+    if (row.event === 'gate.done' && typeof row.duration_ms === 'number' && Number.isFinite(row.duration_ms) && row.duration_ms >= 0) {
+      e.gateTimeMs = (e.gateTimeMs ?? 0) + row.duration_ms;
+      gated.add(key);
+    }
   }
-  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || e.stopped || spent.has(key) || closedKeys.has(key)).map(([key, e]) => {
+  const out = [...byBlock.entries()].filter(([key, e]) => e.completed || e.stopped || spent.has(key) || gated.has(key) || closedKeys.has(key)).map(([key, e]) => {
     const time = times.get(key);
     if (e.completed) {
       e.wallMs = elapsed(time.firstDispatch, time.completion);
