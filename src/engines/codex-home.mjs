@@ -30,7 +30,8 @@
  * under the run temp root; the builder runs the coder with `-s workspace-write` PLUS
  * `-c sandbox_workspace_write.exclude_tmpdir_env_var=true` and
  * `-c sandbox_workspace_write.exclude_slash_tmp=true` (both keys are in the 0.155.1 binary), so the
- * only writable root is the project `-C <cwd>` — and a home inside that cwd is refused. On top, the
+ * writable roots are the project `-C <cwd>` and added sandbox directories (including a linked
+ * worktree's common Git directory) — and a home inside that cwd is refused. On top, the
  * rules file is 0444. The directories stay 0700, not 0555: a 0555 directory makes the run-root
  * sweep's `rmSync(…, {recursive, force})` fail (ENOTEMPTY, checked on this Mac), which would leave
  * the whole run root — the auth copy included — behind. Tradeoff of the tmp exclusion: the coder's
@@ -113,29 +114,30 @@ export function renderCodexRules(rendered) {
 /** The name of the run-root directory every session home lives in. */
 export const CODEX_HOMES_DIR_NAME = 'codex-homes';
 
-/** @returns {string} `<currentRunRoot()>/codex-homes`, the one parent of every session home. */
-export function sessionCodexHomesDir() {
-  return path.join(currentRunRoot(), CODEX_HOMES_DIR_NAME);
+/** @param {string} [runRoot] @returns {string} `<runRoot>/codex-homes`, the parent of the run's session homes. */
+export function sessionCodexHomesDir(runRoot = currentRunRoot()) {
+  return path.join(runRoot, CODEX_HOMES_DIR_NAME);
 }
 
 /**
- * Whether `candidate` is STRICTLY inside `<currentRunRoot()>/codex-homes/` (both sides
+ * Whether `candidate` is STRICTLY inside `<runRoot>/codex-homes/` (both sides
  * symlink-resolved through their nearest existing ancestor). The directory itself, the run root,
  * the real Codex home, `$HOME` and any sibling are all outside.
- * @param {string} candidate @returns {boolean}
+ * @param {string} candidate @param {string} [runRoot] @returns {boolean}
  */
-export function isSessionCodexHome(candidate) {
+export function isSessionCodexHome(candidate, runRoot = currentRunRoot()) {
   if (typeof candidate !== 'string' || !path.isAbsolute(candidate)) return false;
-  const rel = path.relative(resolveExisting(sessionCodexHomesDir()), resolveExisting(candidate));
+  const rel = path.relative(resolveExisting(sessionCodexHomesDir(runRoot)), resolveExisting(candidate));
   return rel !== '' && !rel.startsWith('..') && !path.isAbsolute(rel);
 }
 
 /**
  * A fresh per-session Codex home path under the run temp root.
+ * @param {string} [runRoot]
  * @returns {string}
  */
-export function defaultCodexHome() {
-  return path.join(sessionCodexHomesDir(), `coder-${randomBytes(6).toString('hex')}`);
+export function defaultCodexHome(runRoot = currentRunRoot()) {
+  return path.join(sessionCodexHomesDir(runRoot), `coder-${randomBytes(6).toString('hex')}`);
 }
 
 /**
@@ -143,7 +145,7 @@ export function defaultCodexHome() {
  * `auth.json` (0600) when it exists.
  * @param {string} codexHome - absolute; never the real Codex home or inside it.
  * @param {ReadonlyArray<CodexRenderedEntry>} rendered
- * @param {{env?: NodeJS.ProcessEnv}} [opts]
+ * @param {{env?: NodeJS.ProcessEnv, runRoot?: string}} [opts]
  * @returns {{codexHome: string, rulesPath: string, count: number, content: string}}
  * @throws {Error} when `codexHome` is relative, is (or is inside) the real Codex home, or the
  *   render yields 0 rules.
@@ -159,7 +161,7 @@ export function prepareCodexHome(codexHome, rendered, opts = {}) {
   // Fix round 4: an ANCESTOR of the real home (`$HOME`, `/`) is not "inside" it, yet a home there
   // would put `rules/` and an auth copy where the user lives. The only place a session home may be
   // is strictly inside `<run root>/codex-homes/` — the same confinement `removeCodexHome` enforces.
-  if (!isSessionCodexHome(codexHome)) {
+  if (!isSessionCodexHome(codexHome, opts.runRoot)) {
     throw new Error(`prepareCodexHome: codexHome must be strictly inside <run root>/${CODEX_HOMES_DIR_NAME}/`);
   }
   const { content, count } = renderCodexRules(rendered);
@@ -215,15 +217,16 @@ function writeFreshFile(dest, bytes, mode) {
 
 /**
  * Remove a session home (the auth copy with it). The ONLY recursive delete of this module, and it
- * is confined (fix round 3): `codexHome` must be strictly inside `<currentRunRoot()>/codex-homes/`
+ * is confined (fix round 3): `codexHome` must be strictly inside `<runRoot>/codex-homes/`
  * after realpath resolution, or this throws and deletes nothing — the real `~/.codex`, `$HOME`,
  * the run root itself and any sibling directory are refused. No-op when the (confined) path does
  * not exist.
  * @param {string} codexHome
+ * @param {string} [runRoot] - the same run root used to prepare the home.
  * @throws {Error} when `codexHome` is not strictly inside the run root's `codex-homes/`.
  */
-export function removeCodexHome(codexHome) {
-  if (!isSessionCodexHome(codexHome)) {
+export function removeCodexHome(codexHome, runRoot = currentRunRoot()) {
+  if (!isSessionCodexHome(codexHome, runRoot)) {
     throw new Error(`removeCodexHome: refusing to delete a path outside <run root>/${CODEX_HOMES_DIR_NAME}/`);
   }
   rmSync(resolveExisting(codexHome), { recursive: true, force: true });

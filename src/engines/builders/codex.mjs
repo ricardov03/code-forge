@@ -60,6 +60,7 @@
 import os from 'node:os';
 import path from 'node:path';
 import { randomBytes } from 'node:crypto';
+import { execFileSync } from 'node:child_process';
 import { mergeForbidden, renderForCodex } from '../../util/forbidden.mjs';
 import { CODEX_RULES_FILE_NAME, defaultCodexHome, isInside, prepareCodexHome } from '../codex-home.mjs';
 import { hasAnyRenderedRule } from '../render-rules.mjs';
@@ -129,7 +130,7 @@ export const VALID_EFFORTS = PROVIDER_EFFORTS.openai;
  *   `coder.sandbox` config value. Absent ⇒ today's argv. `toolchain` adds one `--add-dir <abs>`
  *   per checked `add_dirs` entry; `full` builds `-s danger-full-access`. A refused entry throws
  *   a `SandboxDirError` (code `sandbox-dir-refused`) naming the key path, never the value.
- * @property {string} [runRoot] - B93, coder role only: the run temp root, refused as an `add_dirs` tree.
+ * @property {string} [runRoot] - coder role only: owns the session home and is refused as an `add_dirs` tree.
  */
 
 /**
@@ -166,7 +167,8 @@ function assertValidEffort(effort) {
  * The Codex coder argv itself — pure, no I/O, no rules file (B4.2). `buildCoderArgv` uses it, and
  * the doctor's flags probe builds it with placeholder values for its static conflict check.
  * B93: `profile` `full` swaps `-s workspace-write` for `-s danger-full-access`; `addDirs` (already
- * checked and resolved, `toolchain` only) follow `-s workspace-write` as `--add-dir <abs>` pairs.
+ * checked and resolved) follow `-s workspace-write` as `--add-dir <abs>` pairs, including the
+ * common Git directory needed to commit from a linked worktree.
  * The tmp exclusions stay in every profile: under `danger-full-access` Codex ignores the
  * `sandbox_workspace_write.*` keys, and one argv shape keeps the forbidden-list check the same.
  * @param {{model: string, effort?: string, cwd: string, outPath: string, promptPath: string, profile?: string, addDirs?: ReadonlyArray<string>}} p
@@ -180,11 +182,11 @@ export function coderFlagArgv({ model, effort, cwd, outPath, promptPath, profile
     argv.push('-s', 'danger-full-access');
   } else {
     argv.push('-s', 'workspace-write');
-    if (profile === 'toolchain') for (const dir of addDirs) argv.push('--add-dir', dir);
+    for (const dir of addDirs) argv.push('--add-dir', dir);
   }
   // INVARIANT (B4.1 fix round 1): the session CODEX_HOME lives under the run temp root, so the
-  // sandbox must not make $TMPDIR or /tmp writable — the project cwd is then the only writable
-  // root, and a home inside the cwd is refused below. See `../codex-home.mjs`.
+  // sandbox must not make $TMPDIR or /tmp writable. The project cwd and added directories are
+  // writable roots; a home inside the cwd is refused below. See `../codex-home.mjs`.
   argv.push(...SANDBOX_TMP_EXCLUSIONS);
   // B4.2: NO `--approve-for-me` (Codex 0.155.1 refuses it next to `-s`); see CODER_APPROVAL_POLICY.
   argv.push(...CODER_APPROVAL_POLICY);
@@ -216,6 +218,22 @@ function coderSandbox(sandbox, extra) {
 }
 
 /**
+ * A linked worktree's common dir holds both its private gitdir and the shared objects/refs.
+ * Normal checkouts (equal Git dirs), non-repositories and placeholder cwds need no extra root.
+ * @param {string} cwd @returns {string[]}
+ */
+function worktreeGitDirs(cwd) {
+  try {
+    const [gitDir, commonDir] = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], {
+      cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
+    }).trim().split('\n');
+    return gitDir !== commonDir ? [commonDir] : [];
+  } catch {
+    return [];
+  }
+}
+
+/**
  * @param {CodexBuildParams} params
  * @returns {{cli: "codex", role: "coder", argv: string[], cwd: string, outPath: string, env: {CODEX_HOME: string}, forbiddenRendered: ReadonlyArray<RenderedCodexEntry>, rulesFile: {fileName: string, path: string, content: string, count: number}}}
  */
@@ -226,7 +244,7 @@ function buildCoderArgv(params) {
   if (!hasAnyRenderedRule(renderedForbidden)) {
     throw new Error('buildCodexArgv: coder role requires a non-empty forbidden-list render (got 0 usable patterns)');
   }
-  const codexHome = params.codexHome ?? defaultCodexHome();
+  const codexHome = params.codexHome ?? defaultCodexHome(params.runRoot);
   // Fix round 4: a non-absolute home is refused here, before any I/O, and the containment check
   // below then runs EVERY time (no `isAbsolute` short-circuit that could skip it).
   if (typeof codexHome !== 'string' || !path.isAbsolute(codexHome)) {
@@ -241,8 +259,9 @@ function buildCoderArgv(params) {
   // B93 (fix round 1): the sandbox dirs are checked only after the home is known to be absolute
   // and outside the cwd, so the home they are checked against is the one the session will use.
   const sandbox = coderSandbox(params.sandbox, [codexHome, params.runRoot, tmpBase()]);
+  if (sandbox.profile !== 'full') sandbox.addDirs = [...new Set([...sandbox.addDirs, ...worktreeGitDirs(cwd)])];
   const argv = coderFlagArgv({ model, effort, cwd, outPath, promptPath, ...sandbox });
-  const home = prepareCodexHome(codexHome, renderedForbidden);
+  const home = prepareCodexHome(codexHome, renderedForbidden, { runRoot: params.runRoot });
   return {
     cli: CLI,
     role: 'coder',

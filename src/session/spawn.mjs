@@ -828,6 +828,8 @@ function buildStep(opts, step, sessionDir, openBook) {
   if (cli === 'claude' && opts.maxBudgetUsd !== undefined) params.maxBudgetUsd = opts.maxBudgetUsd;
   if (closedBook && opts.systemPromptText !== undefined && cli !== 'codex') params.systemPromptText = opts.systemPromptText;
   if (cli === 'codex') params.outPath = path.join(sessionDir, 'out.json');
+  // The session owns this home: a named run must not use the spawning process's lazy root.
+  if (cli === 'codex' && !closedBook) params.runRoot = opts.runRoot ?? currentRunRoot();
   // B32 opt-in: only a no-tools role needs it; coder and facts build exactly as without it
   if (cli === 'codex' && openBook && isNoToolRole(opts.role)) params.allowOpenBook = true;
   // B93: the Codex coder's sandbox profile; no `coder.sandbox` key builds exactly today's argv
@@ -903,7 +905,7 @@ async function runForeground(built, opts, deps) {
     });
   } finally {
     // B4.1: the Codex coder's per-session CODEX_HOME (rules + auth copy) dies with the session.
-    if (built.env?.CODEX_HOME) removeCodexHome(built.env.CODEX_HOME);
+    if (built.env?.CODEX_HOME) removeCodexHome(built.env.CODEX_HOME, opts.runRoot);
   }
   const duration_ms = Date.now() - started;
   /** @type {string | null} */
