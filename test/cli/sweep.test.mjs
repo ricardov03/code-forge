@@ -155,7 +155,7 @@ test('zombie ps lines are grouped by parent command and never eligible for a sig
 502 814 1 S 2048 Wed Oct 21 10:00:00 2026 node ${script} worker --run r-foreign`;
   const report = await reaper.sweepProcesses?.({ root, psText: lines, uid: 501, apply: true, readEnv: () => null, readRun: async () => ({ status: 'ended' }) });
   assert.deepEqual(report?.zombies ?? [], [{ ppid: 810, command: parentCommand, count: 2, pids: [811, 812] }]);
-  assert.deepEqual(report.items, [], 'zombies and their parent produce zero signal candidates');
+  assert.deepEqual(report.items.map((p) => [p.kind, p.pid]), [['worker', 810]], 'only the stale parent is a candidate; zombies and other users are excluded');
 });
 
 test('unreadable environment and live/reused owners fail closed; own run limits orphan cleanup', async () => {

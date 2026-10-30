@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
-import { spawn } from 'node:child_process';
+import childProcess, { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, readdirSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, readdirSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
+import { syncBuiltinESMExports } from 'node:module';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -80,6 +81,110 @@ async function spawnIdle(trapSigterm) {
 async function registryDir(name) {
   return mkdtemp(path.join(PARENT, `${name}-`));
 }
+
+const STARTED = 'Wed Oct 21 10:00:00 2026';
+
+/**
+ * Model the OS boundaries, recording signals without sending any to real processes.
+ * @param {{pid:number,ppid:number,pgid:number,state:string,command:string}[]} rows
+ * @param {(os: {psText:string, alive:Set<number>, starts:Map<number,string|null>, calls:[number,string|number][]}) => Promise<void>} body
+ */
+async function withProcessTable(rows, body) {
+  const alive = new Set(rows.map((p) => p.pid));
+  const starts = new Map(rows.map((p) => [p.pid, /** @type {string|null} */ (STARTED)]));
+  /** @type {[number,string|number][]} */
+  const calls = [];
+  const psText = rows.map((p) => `${process.getuid()} ${p.pid} ${p.ppid} ${p.state} 1024 ${STARTED} ${p.command}`).join('\n');
+  const ps = mock.method(childProcess, 'execFileSync', /** @type {typeof childProcess.execFileSync} */ ((file, args) => {
+    assert.ok(String(file).endsWith('ps'), 'only ps is invoked');
+    if (args.includes('lstart=')) return starts.get(Number(args.at(-1))) ?? '';
+    const current = rows.filter((p) => alive.has(p.pid));
+    if (args.includes('pid=,pgid=,lstart=')) return current.map((p) => `${p.pid} ${p.pgid} ${STARTED}`).join('\n');
+    assert.ok(args.includes('uid=,pid=,ppid=,stat=,rss=,lstart=,command='));
+    return psText.split('\n').filter((line) => alive.has(Number(line.split(' ')[1]))).join('\n');
+  }));
+  const kill = mock.method(process, 'kill', (/** @type {number} */ pid, /** @type {string|number} */ signal) => {
+    if (signal === 0) {
+      if (alive.has(pid)) return true;
+      throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+    }
+    calls.push([pid, signal]);
+    for (const p of rows) {
+      if ((p.pid === pid || p.pgid === -pid) && !p.state.startsWith('Z')) alive.delete(p.pid);
+    }
+    return true;
+  });
+  syncBuiltinESMExports();
+  try { await body({ psText, alive, starts, calls }); }
+  finally { ps.mock.restore(); kill.mock.restore(); syncBuiltinESMExports(); }
+}
+
+test('zombie parents remain eligible workers, orphans and registry leaders; protected pids never receive signals', async () => {
+  const root = await registryDir('zombie-parents');
+  const run = path.join(root, 'dead-run');
+  const pids = path.join(run, 'pids');
+  mkdirSync(pids, { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(run, 'owner.json'), JSON.stringify({ pid: 90000010, start_time: STARTED }));
+  const worker = 'node /fixture/code-forge.mjs worker --run r-ended';
+  const rows = [
+    { pid: 90000020, ppid: 1, pgid: 90000020, state: 'S', command: worker },
+    { pid: 90000030, ppid: 1, pgid: 90000030, state: 'S', command: 'node helper' },
+    { pid: 90000040, ppid: 1, pgid: 90000040, state: 'S', command: 'node server' },
+    ...[90000020, 90000030, 90000040].map((pid) => ({ pid: pid + 1, ppid: pid, pgid: pid, state: 'Z+', command: worker })),
+    { pid: 1, ppid: 0, pgid: 1, state: 'S', command: worker },
+    { pid: process.pid, ppid: process.ppid, pgid: process.pid, state: 'S', command: worker },
+    { pid: process.ppid, ppid: 90000001, pgid: process.ppid, state: 'S', command: worker },
+    { pid: 90000001, ppid: 1, pgid: 90000001, state: 'S', command: worker },
+  ];
+  for (const p of rows.filter((p) => p.pid > 1)) {
+    writeFileSync(path.join(pids, `${p.pid}.json`), JSON.stringify({ pid: p.pid, start_time: STARTED, argv0: 'node' }));
+  }
+  await withProcessTable(rows, async ({ psText, alive, calls }) => {
+    const opts = { root, psText, graceMs: 0, readRun: async () => ({ status: 'ended' }),
+      readEnv: (p) => p.pid === 90000030 ? { CODE_FORGE_OWNER_PID: '90000010' } : null };
+    const expected = [['worker', 90000020], ['orphan', 90000030], ['registry', 90000040]];
+    const dry = await sweepProcesses(opts);
+    assert.deepEqual(dry.items.map((p) => [p.kind, p.pid]), expected);
+    assert.equal(dry.zombies.length, 3);
+    assert.deepEqual(calls, [], 'dry run sends no signals');
+    const applied = await sweepProcesses({ ...opts, apply: true });
+    assert.deepEqual(applied.items.map((p) => [p.kind, p.pid, p.action]), expected.map((p) => [...p, 'stopped']));
+    assert.deepEqual(calls, [[90000020, 'SIGTERM'], [90000030, 'SIGTERM'], [90000040, 'SIGTERM']], 'only verified parents receive bare-pid signals');
+    assert.deepEqual([90000020, 90000030, 90000040].map((pid) => alive.has(pid)), [false, false, false]);
+    assert.ok(rows.filter((p) => ![90000020, 90000030, 90000040].includes(p.pid)).every((p) => alive.has(p.pid)), 'zombies, pid 1, self and ancestors survive');
+  });
+});
+
+test('registry apply skips a live pid with an unreadable start time and reports stopped only on death or known reuse', async () => {
+  for (const state of ['unreadable', 'matching', 'reused', 'dead']) {
+    const root = await registryDir(`registry-${state}`);
+    const run = path.join(root, 'dead-run');
+    const pids = path.join(run, 'pids');
+    mkdirSync(pids, { recursive: true, mode: 0o700 });
+    const pid = 90000040;
+    writeFileSync(path.join(run, 'owner.json'), JSON.stringify({ pid: 90000010, start_time: STARTED }));
+    writeFileSync(path.join(pids, `${pid}.json`), JSON.stringify({ pid, start_time: STARTED, argv0: 'node' }));
+    await withProcessTable([{ pid, ppid: 1, pgid: pid, state: 'S', command: 'node server' }], async ({ psText, alive, starts, calls }) => {
+      starts.set(pid, state === 'unreadable' || state === 'dead' ? null : state === 'reused' ? 'Wed Oct 21 10:00:01 2026' : STARTED);
+      if (state === 'dead') alive.delete(pid);
+      // Deny delivery to the matching live process; successful cleanup is tested above.
+      const denied = mock.method(process, 'kill', (target, signal) => {
+        if (signal === 0) {
+          if (alive.has(target)) return true;
+          throw Object.assign(new Error('no such process'), { code: 'ESRCH' });
+        }
+        calls.push([target, signal]);
+        throw Object.assign(new Error('permission denied'), { code: 'EPERM' });
+      });
+      try {
+        const report = await sweepProcesses({ root, psText, apply: true, graceMs: 0, readEnv: () => null });
+        assert.deepEqual(report.items.map((p) => [p.kind, p.pid, p.action]), [['registry', pid, ['dead', 'reused'].includes(state) ? 'stopped' : 'skipped']], state);
+        assert.equal(alive.has(pid), state !== 'dead', `${state}: live process is preserved`);
+        if (state !== 'matching') assert.deepEqual(calls, [], `${state}: no signals sent`);
+      } finally { denied.mock.restore(); }
+    });
+  }
+});
 
 test('B135: readStartTime reads this process without ps on PATH and rejects absent pids', () => {
   const oldPath = process.env.PATH;

@@ -210,7 +210,7 @@ export function readProcesses() {
   } catch { return []; }
 }
 
-/** Current process, ancestors, zombies and their parents are never signal targets.
+/** Current process, ancestors and zombies are never signal targets.
  * @param {ProcessInfo[]} rows @returns {Set<number>}
  */
 function protectedPids(rows) {
@@ -223,7 +223,7 @@ function protectedPids(rows) {
     blocked.add(pid);
     pid = byPid.get(pid)?.ppid ?? 1;
   }
-  for (const p of rows) if (p.state.startsWith('Z')) { blocked.add(p.pid); blocked.add(p.ppid); }
+  for (const p of rows) if (p.state.startsWith('Z')) blocked.add(p.pid);
   return blocked;
 }
 
@@ -387,7 +387,10 @@ export async function sweepProcesses(opts = {}) {
       item.action = stopped.has(item.pid) ? 'stopped' : 'skipped';
     }
     if (!opts.orphansOnly) await tmp.sweepRoots({ root, graceMs: opts.graceMs });
-    for (const item of items.filter((p) => p.kind === 'registry')) item.action = readStartTime(item.pid) === item.start_time ? 'skipped' : 'stopped';
+    for (const item of items.filter((p) => p.kind === 'registry')) {
+      const started = readStartTime(item.pid);
+      item.action = !isAlive(item.pid) || (started !== null && started !== item.start_time) ? 'stopped' : 'skipped';
+    }
   }
   return { apply: opts.apply === true, items, registryRoots, zombies, totalRssMb: sum(items), memory };
 }
