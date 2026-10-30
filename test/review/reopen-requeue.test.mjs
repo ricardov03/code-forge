@@ -87,10 +87,12 @@ test('B169 clause 1: reopening queues round 1 and prints its ticket, next comman
 
 test('B169 clause 2: wait-block replaces a pre-reopen done result and waits for fresh round 1', async () => {
   const f = await fixture();
+  rmSync(path.join(queueDir(f.repo), `${f.old.ticket}.json`));
   await f.legacyReopen();
   const waiting = await f.wait();
   assert.deepEqual(waiting, { block: 'B1', files: [{ file: FILE, ticket: f.old.ticket, status: 'pending', outcome: null }], done: false, reason: 'wait_timeout' }, 'the old finding must not finish the join');
   assert.deepEqual(pendingTickets(f.repo), [f.old.ticket]);
+  assert.ok(f.tickets()[0].enqueued_at > OLD_TIME.toISOString(), 'wait-block queues an attempt newer than the stopped result');
   assert.equal(await f.worker.drain(), 1);
   assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket: f.old.ticket, status: 'done', outcome: 'approved' }], done: true });
   const result = readResult(f.repo, f.runId, f.old.ticket);
@@ -99,9 +101,11 @@ test('B169 clause 2: wait-block replaces a pre-reopen done result and waits for 
 
 test('B169 boundary: repeated joins reuse the live attempt and keep its post-reopen completion', async () => {
   const f = await fixture();
+  rmSync(path.join(queueDir(f.repo), `${f.old.ticket}.json`));
   await f.legacyReopen();
   const first = await f.wait();
   assert.deepEqual([first.done, first.files[0].status], [false, 'pending']);
+  assert.ok(f.tickets()[0].enqueued_at > OLD_TIME.toISOString(), 'wait-block queues an attempt newer than the stopped result');
   const ticket = readFileSync(path.join(queueDir(f.repo), `${f.old.ticket}.json`), 'utf8');
   assert.deepEqual(await f.wait(), first);
   assert.equal(f.tickets().length, 1, 'zero duplicate live tickets');
