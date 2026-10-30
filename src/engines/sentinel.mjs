@@ -53,6 +53,17 @@ export function parseSentinel(output, blockId) {
   if (typeof output !== 'string') {
     throw new TypeError('parseSentinel: output must be a string');
   }
+  // CLI reports can contain the answer as a JSON string or as a string field in an envelope.
+  // Decode real JSON only: replacing literal \\n would also change ordinary prose and paths.
+  try {
+    const decoded = JSON.parse(output);
+    if (typeof decoded === 'string') output = decoded;
+    else if (decoded !== null && typeof decoded === 'object' && !Array.isArray(decoded)) {
+      output = Object.values(decoded).filter((value) => typeof value === 'string').join('\n');
+    }
+  } catch {
+    // A plain transcript (or malformed JSON) keeps the existing whole-line parser.
+  }
   /** @type {SentinelResult | null} */
   let last = null;
   /** @type {TestsLine | null} */
