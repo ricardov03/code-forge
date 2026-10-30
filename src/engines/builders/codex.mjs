@@ -168,7 +168,7 @@ function assertValidEffort(effort) {
  * the doctor's flags probe builds it with placeholder values for its static conflict check.
  * B93: `profile` `full` swaps `-s workspace-write` for `-s danger-full-access`; `addDirs` (already
  * checked and resolved) follow `-s workspace-write` as `--add-dir <abs>` pairs, including the
- * common Git directory needed to commit from a linked worktree.
+ * private Git directory and shared objects/refs/logs needed to commit from a linked worktree.
  * The tmp exclusions stay in every profile: under `danger-full-access` Codex ignores the
  * `sandbox_workspace_write.*` keys, and one argv shape keeps the forbidden-list check the same.
  * @param {{model: string, effort?: string, cwd: string, outPath: string, promptPath: string, profile?: string, addDirs?: ReadonlyArray<string>}} p
@@ -218,7 +218,8 @@ function coderSandbox(sandbox, extra) {
 }
 
 /**
- * A linked worktree's common dir holds both its private gitdir and the shared objects/refs.
+ * A linked worktree needs its private gitdir and the shared objects/refs/logs writable.
+ * Never grant the common dir itself: its config and hooks can execute code on the host.
  * Normal checkouts (equal Git dirs), non-repositories and placeholder cwds need no extra root.
  * @param {string} cwd @returns {string[]}
  */
@@ -227,7 +228,7 @@ function worktreeGitDirs(cwd) {
     const [gitDir, commonDir] = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-dir', '--git-common-dir'], {
       cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'ignore'], timeout: 5000,
     }).trim().split('\n');
-    return gitDir !== commonDir ? [commonDir] : [];
+    return gitDir !== commonDir ? [gitDir, ...['objects', 'refs', 'logs'].map((name) => path.join(commonDir, name))] : [];
   } catch {
     return [];
   }

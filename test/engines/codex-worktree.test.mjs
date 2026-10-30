@@ -1,7 +1,7 @@
 import { alive, cfgWith, freshDir, sink, waitFor, writeIn } from '../session/helpers.mjs';
 import assert from 'node:assert/strict';
 import { execFileSync, spawnSync } from 'node:child_process';
-import { chmodSync, existsSync, mkdirSync, readFileSync, realpathSync } from 'node:fs';
+import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, realpathSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -87,7 +87,7 @@ test('foreground Codex uses an explicit session run root and removes its home af
   ]);
 });
 
-test('Codex linked-worktree argv grants exactly the common git dir; normal checkouts and facts get none', () => {
+test('Codex linked-worktree argv grants only private gitdir and shared objects/refs/logs; normal checkouts and facts get none', () => {
   const repo = freshDir('git-main');
   const linked = path.join(freshDir('git-linked'), 'coder');
   const git = (...args) => execFileSync('git', args, { cwd: repo, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
@@ -101,7 +101,13 @@ test('Codex linked-worktree argv grants exactly the common git dir; normal check
   for (const cwd of [repo, linked, subdir]) {
     const built = buildCodexArgv({ role: 'coder', model: 'fake-gpt', promptPath: '/brief.md', cwd, outPath: '/out.json' });
     try {
-      const extra = cwd === repo ? [] : ['--add-dir', common];
+      const dirs = cwd === repo ? [] : [gitdir, ...['objects', 'refs', 'logs'].map((name) => path.join(common, name))];
+      const extra = dirs.flatMap((dir) => ['--add-dir', dir]);
+      const granted = built.argv.flatMap((arg, i) => arg === '--add-dir' ? [built.argv[i + 1]] : []);
+      assert.deepEqual(granted, dirs);
+      for (const denied of [common, path.join(common, 'config'), path.join(common, 'hooks'), path.join(common, 'packed-refs')]) {
+        assert.equal(granted.some((dir) => denied === dir || denied.startsWith(dir + path.sep)), false, `${denied} must not be writable`);
+      }
       assert.deepEqual(built.argv, [
         'codex', 'exec', '-m', 'fake-gpt', '-s', 'workspace-write', ...extra,
         '-c', 'sandbox_workspace_write.exclude_tmpdir_env_var=true',
@@ -109,8 +115,7 @@ test('Codex linked-worktree argv grants exactly the common git dir; normal check
         '-c', 'approval_policy="never"', '-C', cwd, '--json', '-o', '/out.json', '/brief.md',
       ]);
       if (cwd !== repo) {
-        assert.equal(existsSync(gitdir), true, 'common dir includes this linked worktree gitdir');
-        assert.deepEqual(['objects', 'refs'].map((name) => existsSync(path.join(common, name))), [true, true]);
+        assert.equal(dirs.every((dir) => existsSync(dir)), true, 'all four writable Git directories exist');
       }
     } finally {
       if (built.role === 'coder') removeCodexHome(built.env.CODEX_HOME);
@@ -118,4 +123,50 @@ test('Codex linked-worktree argv grants exactly the common git dir; normal check
   }
   const facts = buildCodexArgv({ role: 'facts', model: 'fake-gpt', promptPath: '/brief.md', cwd: linked, outPath: '/out.json' });
   assert.equal(facts.argv.filter((arg) => arg === '--add-dir').length, 0, 'read-only facts never gain a writable git dir');
+});
+
+test('linked-worktree git add and commit work with only the granted Git directories writable, including packed refs', {
+  skip: process.platform === 'win32' || process.getuid?.() === 0 ? 'requires enforced POSIX write permissions' : false,
+}, () => {
+  const repo = freshDir('commit-main');
+  const linked = path.join(freshDir('commit-linked'), 'coder');
+  const git = (cwd, ...args) => execFileSync('git', args, { cwd, encoding: 'utf8', stdio: ['ignore', 'pipe', 'pipe'] }).trim();
+  git(repo, 'init', '-q');
+  git(repo, 'config', 'user.name', 'fixture');
+  git(repo, 'config', 'user.email', 'fixture@example.invalid');
+  git(repo, 'commit', '--allow-empty', '-qm', 'fixture');
+  git(repo, 'worktree', 'add', '-qb', 'coder-fixture', linked);
+  git(repo, 'pack-refs', '--all', '--prune');
+  const common = realpathSync(path.join(repo, '.git'));
+  const packedRefs = readFileSync(path.join(common, 'packed-refs'), 'utf8');
+  assert.equal(existsSync(path.join(common, 'refs', 'heads', 'coder-fixture')), false, 'branch starts as a packed ref');
+  const before = git(linked, 'rev-parse', 'HEAD');
+  const built = buildCodexArgv({ role: 'coder', model: 'fake-gpt', promptPath: '/brief.md', cwd: linked, outPath: '/out.json' });
+  const granted = built.argv.flatMap((arg, i) => arg === '--add-dir' ? [built.argv[i + 1]] : []);
+  const modes = new Map();
+  try {
+    // Protect every other Git path, including the common root (no config/packed-refs locks).
+    // This exercises actual Git I/O without requiring a platform-specific sandbox executable.
+    for (const file of [common, ...readdirSync(common, { recursive: true }).map((name) => path.join(common, String(name)))]) {
+      if (granted.some((dir) => file === dir || file.startsWith(dir + path.sep))) continue;
+      const mode = statSync(file).mode & 0o777;
+      modes.set(file, mode);
+      chmodSync(file, mode & ~0o222);
+    }
+    assert.throws(() => appendFileSync(path.join(common, 'config'), '\n'), { code: 'EACCES' });
+    assert.throws(() => writeIn(path.join(common, 'hooks'), 'pre-commit', '#!/bin/sh\n'), { code: 'EACCES' });
+    assert.throws(() => writeIn(common, 'packed-refs.lock', ''), { code: 'EACCES' });
+    writeIn(linked, 'committed.txt', 'sandboxed commit\n');
+    git(linked, 'add', 'committed.txt');
+    git(linked, 'commit', '-qm', 'restricted worktree commit');
+    assert.notEqual(git(linked, 'rev-parse', 'HEAD'), before);
+    assert.equal(git(linked, 'rev-parse', 'HEAD^'), before);
+    assert.equal(git(linked, 'show', 'HEAD:committed.txt'), 'sandboxed commit');
+    assert.equal(git(repo, 'rev-parse', 'HEAD'), before, 'main checkout stays on its original commit');
+    assert.equal(readFileSync(path.join(common, 'packed-refs'), 'utf8'), packedRefs, 'commit does not rewrite packed-refs');
+    assert.equal(git(linked, 'status', '--porcelain'), '');
+  } finally {
+    for (const [file, mode] of modes) chmodSync(file, mode);
+    if (built.role === 'coder') removeCodexHome(built.env.CODEX_HOME);
+  }
 });
