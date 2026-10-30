@@ -353,7 +353,12 @@
           "properties": {
             "dir": { "type": "string", "minLength": 1, "default": "../<repo-name>-worktrees", "description": "Where the trees go, relative to the repository top level (not the workspace). In the default, <repo-name> is replaced with the basename of the repository top level; the default text is never used as is. The default sits beside the repository, so the main tree never lists the trees as untracked." },
             "branch": { "type": "string", "minLength": 1, "default": "forge/{run}/{block}", "description": "The branch template: only {run} and {block} are substituted; the result must pass git check-ref-format --branch." },
-            "base": { "type": "string", "minLength": 1, "description": "The commit-ish the tree starts from; default the block's base (block open --base, else HEAD)." }
+            "base": { "type": "string", "minLength": 1, "description": "The commit-ish the tree starts from; default the block's base (block open --base, else HEAD)." },
+            "setup": {
+              "type": "array",
+              "description": "Argv commands run sequentially in the proof export after export and before RED. A command failure stops proof with reason setup and its output tail. Never run during block worktree creation or under proof lock.",
+              "items": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "pattern": "^[^\\u0000]*$" } }
+            }
           }
         },
         "export": {
@@ -375,7 +380,7 @@
         "runners": {
           "type": "array",
           "minItems": 1,
-          "description": "B87: how proof red-green runs a test file that is not a node:test file. proof red-green uses the first entry whose match covers the --test file (list order). With no match, a .mjs/.cjs/.js file uses the built-in node:test command and any other file is refused. Fixed for the run: run start copies the list into the run snapshot, run reload refuses to change it, and with it set no block may own .code-forge.yml. An empty list is refused: leave the key out for no runner.",
+          "description": "How proof red-green runs tests. The first matching entry wins. With no match, Node files use node:test and PHP tests in Pest/Laravel projects use a default JUnit runner. run reload may append runners but cannot change, reorder or remove existing entries. With runners set no block may own .code-forge.yml. An empty list is refused: leave the key out for defaults.",
           "items": {
             "type": "object",
             "additionalProperties": false,

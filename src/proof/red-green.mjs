@@ -14,7 +14,7 @@
  *        with a temporary index + `checkout-index`, never `git stash`/`checkout --`; binary-safe);
  *        a file absent at base is removed;
  *        mechanism `assertion-deletion` — for a `characterization` test (behaviour that already
- *        exists at base) or a test with no source change: every single-line assertion statement
+ *        exists at base) or a test with no source change: every supported assertion statement
  *        of the test file is deleted and replaced by a forced failure of the same assertion
  *        library (`assert.fail(…)` / `$this->fail(…)`). RED then proves the test's assertions are
  *        reached by the filtered run and decide its outcome; a test whose assertions never run
@@ -223,7 +223,7 @@ async function readBaseFiles(repoDir, base, files) {
  *   (a) the innermost open bracket at the line's start is a `{` block (or none), and the code
  *       token before the line is `;`, `{`, `}` or the start of the file — never an arrow body
  *       (`() =>` + newline), an array element or a call argument;
- *   (b) the statement closes on that line, at the same bracket depth it started;
+ *   (b) the statement closes at the same bracket depth it started (PHP expect chains may span lines);
  *   (c) the next code token starts a new statement (no leading `)`, `]`, `,`, `.`, `?`, operator).
  * Otherwise the forced failure would land in an expression (`assert.fail(…);` followed by `)`),
  * a syntax error that yields RED_INVALID instead of RED. Any other line that mentions an
@@ -388,7 +388,7 @@ function oneStatement(code, lang) {
 
 /**
  * The test file with every assertion statement deleted and replaced by a forced failure. Fail
- * closed: any assertion mention that is not provably one whole single-line statement refuses the
+ * closed: any assertion mention that is not provably one whole statement refuses the
  * file before the tree is touched.
  * @param {string} file - repo-relative, picks the language rule
  * @param {Buffer} bytes
@@ -406,27 +406,41 @@ export function deleteAssertions(file, bytes) {
     throw new StateError('unclassified-assertion', `assertion deletion: the assertion at line ${i + 1} is not one whole single-line statement at statement position`);
   };
   let deleted = 0;
-  const out = lines.map((line, i) => {
-    const { masked, start, end: lineEnd, complex, openAtStart, openAtEnd, prev } = lexed[i];
-    if (start !== 'code') return line; // inside a comment/string/heredoc: not code
+  const out = [...lines];
+  for (let i = 0; i < lines.length; i += 1) {
+    const { masked, start, end: lineEnd, complex, openAtStart, prev } = lexed[i];
+    if (start !== 'code') continue; // inside a comment/string/heredoc: not code
     const m = rule.statement.exec(masked);
     if (!m) {
       if (rule.token.test(masked) && !rule.exempt.test(masked)) refuse(i);
-      return line;
+      continue;
     }
     if (complex || lineEnd !== 'code') refuse(i);
     // (a) statement position: innermost open bracket is a `{` block (or none), after `;` `{` `}` or the file start
     if ((openAtStart.length > 0 && !openAtStart.endsWith('{')) || !STATEMENT_BEFORE.has(prev)) refuse(i);
-    // (b) exactly one statement, closed on this line at the depth it started
-    if (oneStatement(masked, rule.lang) === null || openAtEnd !== openAtStart) refuse(i);
+    // (b) PHP expect chains may span lines, but must terminate at a semicolon. At the
+    // original bracket depth only a member continuation is allowed, never another statement.
+    let last = i;
+    let statement = masked;
+    if (rule.lang === 'php' && m[3] === 'expect' && oneStatement(statement, rule.lang) === null) {
+      while (last + 1 < lines.length && !statement.includes(';')) {
+        const nextLine = lexed[++last];
+        if (nextLine.start !== 'code' || nextLine.end !== 'code' || nextLine.complex) refuse(i);
+        if (nextLine.masked.trim() && nextLine.openAtStart === openAtStart && !/^\s*->\w/.test(nextLine.masked)) refuse(i);
+        statement += `\n${nextLine.masked}`;
+      }
+    }
+    if (oneStatement(statement, rule.lang) === null || lexed[last].openAtEnd !== openAtStart) refuse(i);
     // (c) the next code token starts a new statement (a bare `)` ending is an ASI hazard otherwise)
-    const next = lexed.slice(i + 1).find((l) => l.masked.trim().length > 0);
+    const next = lexed.slice(last + 1).find((l) => l.masked.trim().length > 0);
     if (next && CONTINUES_EXPRESSION.test(next.masked.trim())) refuse(i);
     const replacement = rule.replace(m);
     if (replacement === null) refuse(i);
     deleted += 1;
-    return replacement;
-  });
+    out[i] = replacement;
+    for (let j = i + 1; j <= last; j += 1) out[j] = '';
+    i = last;
+  }
   if (deleted === 0) throw new StateError('no-assertions', `assertion deletion: ${file} has no single-line assertion statement`);
   return { bytes: Buffer.from(out.join('\n'), 'utf8'), deleted };
 }
@@ -463,12 +477,13 @@ function isRunnerHook(runner) {
  * @property {{runId: string, blockId: string, writeRow: import('../state/run.mjs').WriteRow}} [record]
  * @property {import('./runners.mjs').RunnerHook} [runner] - B87: a `proof.runners` entry runs both
  *   steps in place of `argv` (a fresh report per step) and classifies them from its JUnit report
+ * @property {string[][]} [setup] - argv commands run sequentially before RED in the proof export
  */
 
 /**
  * Run one red→green proof. See the module comment for the steps.
  * @param {RedGreenOptions} opts
- * @returns {Promise<{label: string, mechanism: 'revert' | 'assertion-deletion', red: import('./red-parse.mjs').RedParse | import('./junit.mjs').JUnitRedParse, green: 'GREEN' | 'NOT_GREEN' | null, proven: boolean}>}
+ * @returns {Promise<{label: string, mechanism: 'revert' | 'assertion-deletion', red: import('./red-parse.mjs').RedParse | import('./junit.mjs').JUnitRedParse | null, green: 'GREEN' | 'NOT_GREEN' | null, proven: boolean, reason?: 'setup', output_tail?: string}>}
  * @throws {StateError} `journal-present`, `bad-path`, `bad-isolation`, `bad-ref`, and the assertion-deletion refusals
  */
 export async function runRedGreen(opts) {
@@ -491,6 +506,19 @@ export async function runRedGreen(opts) {
   const mechanism = test.characterization === true || sources.length === 0 ? 'assertion-deletion' : 'revert';
   if ((await readJournal(workDir)) !== null) {
     throw new StateError('journal-present', `a red→green journal exists in ${workDir} — an earlier run was interrupted; run code-forge proof restore first`);
+  }
+
+  // Setup is preparation, never a RED result. Fail before journaling or reverting any file.
+  for (const argv of opts.setup ?? []) {
+    const setup = await exec(argv, { cwd: workDir, env: testEnv(), timeoutMs });
+    if (setup.result === 'ok') continue;
+    const output_tail = `${setup.stdout}\n${setup.stderr}\n${setup.error ?? ''}`.trim().slice(-4000);
+    print(`SETUP_FAILED ${label}\n${output_tail}`);
+    if (record) await recordProof({ runId: record.runId, writeRow: record.writeRow, row: {
+      block: record.blockId, isolation, step: 'red-green', test: label, mechanism,
+      reason: 'setup', output_tail, red: null, red_kind: null, green: null, proven: false, failed: null,
+    } });
+    return { label, mechanism, red: null, green: null, proven: false, reason: 'setup', output_tail };
   }
 
   // Compute the red state BEFORE touching the tree, so a refusal changes nothing.

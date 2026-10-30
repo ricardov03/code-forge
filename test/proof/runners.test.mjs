@@ -277,12 +277,10 @@ test('(4) the runner comes from the snapshot: a live argv edit changes nothing, 
   }
 });
 
-test('(4) a run started without a snapshot cannot gain proof.runners at its first reload', async () => {
+test('(4) a run started without a snapshot may add proof.runners at its first reload', async () => {
   await startRun({ workspace: REPO, project: SLUG, runId: BARE_RUN, writeRow });
-  await assert.rejects(reloadRun({ runId: BARE_RUN, config: { proof: { runners: RUNNERS } }, writeRow }), {
-    code: 'immutable-key',
-    message: 'proof.runners cannot change mid-run (the commands that prove a block are fixed by the owner before the run starts) — put it back, or end the run and start a new one',
-  });
+  await reloadRun({ runId: BARE_RUN, config: { proof: { runners: RUNNERS } }, writeRow });
+  assert.deepEqual(proofRunners(await readRun(BARE_RUN)), RUNNERS);
 });
 
 test('(5) validate refuses each bad runner with a message that names the key path', () => {
@@ -467,7 +465,7 @@ test('proofRunners: null without the key or a snapshot, runner-invalid for a non
 
   assert.equal(proofRunners({ run_id: 'r-x', config: initialConfigState({ ...BASE_CONFIG }) }), null);
   assert.equal(proofRunners({ run_id: 'r-x' }), null);
-  assert.equal(proofRunners(await readRun(BARE_RUN)), null);
+  assert.deepEqual(proofRunners(await readRun(BARE_RUN)), RUNNERS);
   for (const [value, what] of /** @type {[unknown, string][]} */ ([[{ a: 1 }, 'is not a list'], ['FAKE', 'is not a list'], [[], 'is an empty list']])) {
     const bad = { run_id: 'r-x', config: initialConfigState({ ...BASE_CONFIG, proof: { runners: value } }) };
     assert.throws(() => proofRunners(bad), { code: 'runner-invalid', message: `run r-x: proof.runners in the run snapshot ${what}` });

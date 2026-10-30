@@ -333,6 +333,7 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'levels.L3.fallback',
   'levels.L3.fallback.provider',
   'proof.tiers.high.paths',
+  'proof.worktree.setup',
   'gates.extra.secret_scan',
   'gates.custom',
   'gates.custom.name',
@@ -438,7 +439,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B155: +2 = review.{exclude,lockfile_registries} ⇒ 229.
 // B156: +1 = gates.timeout_s ⇒ 230.
 // B160: +4 = gates.kinds{,.code,.docs,.contract} ⇒ 234.
-const EXPECTED_SCHEMA_PATH_COUNT = 234;
+// B171: +1 = proof.worktree.setup ⇒ 235.
+const EXPECTED_SCHEMA_PATH_COUNT = 235;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;
