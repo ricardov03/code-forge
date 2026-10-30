@@ -67,11 +67,11 @@
  * needs its own review.
  */
 
-import { readFileSync, realpathSync, rmSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import path from 'node:path';
-import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveTicket, reviewExclusionFor } from '../worker/queue.mjs';
+import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, enqueueHash, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveHashTicket, resolveTicket, reviewExclusionFor } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
-import { blockFileSet, namedOnHash } from '../review/gate-check.mjs';
+import { changedFiles, namedOnHash } from '../review/gate-check.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { ownsFile } from '../state/registry.mjs';
@@ -92,6 +92,57 @@ const USAGE =
 
 export const DEFAULT_WAIT_MS = 90_000;
 const POLL_MS = 200;
+const MAX_IDLE_MS = 5000;
+
+/** Metadata only: never open file content during an idle poll.
+ * @param {string} file @returns {string}
+ */
+function fileStamp(file) {
+  try {
+    const s = lstatSync(file);
+    return `${s.mtimeMs}:${s.size}:${s.mode}:${s.ino}`;
+  } catch (err) {
+    if (err.code === 'ENOENT' || err.code === 'ENOTDIR') return 'missing';
+    throw err;
+  }
+}
+
+/** Scan literal ownership prefixes, including directory entries so new files are noticed.
+ * @param {string} tree @param {string[]} owned @param {string[]} gitPaths
+ */
+function waitTreeStamp(tree, owned, gitPaths) {
+  const entries = new Map();
+  /** @param {string} full */
+  function visit(full) {
+    if (entries.has(full)) return;
+    const stamp = fileStamp(full);
+    entries.set(full, stamp);
+    if (stamp !== 'missing' && lstatSync(full).isDirectory()) {
+      for (const name of readdirSync(full).sort()) {
+        if (name !== '.git' && name !== '.code-forge') visit(path.join(full, name));
+      }
+    }
+  }
+  for (const pattern of owned) {
+    const segments = pattern.split('/');
+    const glob = segments.findIndex((s) => /[*?{]/.test(s));
+    visit(path.join(tree, ...(glob < 0 ? segments : segments.slice(0, glob))));
+  }
+  for (const full of gitPaths) visit(full);
+  return JSON.stringify([...entries].sort(([a], [b]) => a.localeCompare(b)));
+}
+
+/** Git may store worktree metadata outside the content tree.
+ * @param {string} tree @returns {string[]}
+ */
+function waitGitPaths(tree) {
+  let gitDir = path.join(tree, '.git');
+  if (lstatSync(gitDir).isFile()) gitDir = path.resolve(tree, readFileSync(gitDir, 'utf8').trim().replace(/^gitdir: /, ''));
+  let common = gitDir;
+  try { common = path.resolve(gitDir, readFileSync(path.join(gitDir, 'commondir'), 'utf8').trim()); }
+  catch (err) { if (err.code !== 'ENOENT') throw err; }
+  return [path.join(tree, '.gitignore'), ...new Set([gitDir, common])].flatMap((dir, i) => i === 0 ? [dir] : ['HEAD', 'index', 'packed-refs', 'refs', 'info/exclude'].map((f) => path.join(dir, f)));
+}
 
 /**
  * `90s`, `90`, `1500ms` → milliseconds.
@@ -395,9 +446,11 @@ export function fixList(result) {
  * B100: read block scope from the workspace mirror, never the private run record. This is a
  * progress summary, not an approval: block close still verifies the authoritative signed rows.
  * @param {string} repoRoot @param {string} cwd @param {string} run @param {string} block
- * @returns {Promise<{entry: Record<string, any>, tree: string, cfg: Record<string, any> | null, project: string}>}
+ * @param {{scopeFile: string, stamp: string, entry: Record<string, any>, tree: string, cfg: Record<string, any> | null, project: string} | null} [cached]
+ * @returns {Promise<{scopeFile: string, stamp: string, entry: Record<string, any>, tree: string, cfg: Record<string, any> | null, project: string}>}
  */
-async function waitBlockScope(repoRoot, cwd, run, block) {
+async function waitBlockScope(repoRoot, cwd, run, block, cached = null) {
+  if (cached && fileStamp(cached.scopeFile) === cached.stamp) return cached;
   const top = await repoRootOf(cwd);
   const candidates = new Set([repoRoot]);
   for (let dir = realpathSync(cwd); ; dir = path.dirname(dir)) {
@@ -417,7 +470,8 @@ async function waitBlockScope(repoRoot, cwd, run, block) {
       throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
     }
     const tree = (await blockTree(record.workspace, entry))?.top ?? repoRoot;
-    return { entry, tree, cfg: configInForce(record), project: record.project };
+    const scopeFile = path.join(dir, '.code-forge', 'runs', `${run}.json`);
+    return { entry, tree, cfg: configInForce(record), project: record.project, scopeFile, stamp: fileStamp(scopeFile) };
   }
   throw new WorkerError('block-scope-unreadable', 'the block scope cannot be read');
 }
@@ -448,14 +502,23 @@ function blockTicketOutcome(marker) {
 
 /**
  * A block wait uses unsigned results only to classify retries; it never reads the signing key.
- * Re-scan current content on every poll. Deliver unseen findings of the newest earlier ticket
+ * Re-scan metadata each poll and read content only after its stamp changes. Deliver unseen findings of the newest earlier ticket
  * before rechecking a blind edit; the next join queues the fix. Stopped files stay finished.
- * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf}} opts
+ * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number) => Promise<unknown>}} opts
  */
-async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDone = dropDoneIf }) {
-  const { entry, tree } = await waitBlockScope(repoRoot, cwd, run, block);
+async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDone = dropDoneIf, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+  let scope = await waitBlockScope(repoRoot, cwd, run, block);
+  const { tree } = scope;
+  const gitPaths = waitGitPaths(tree);
   const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree: realpathSync(tree) };
-  const deadline = Date.now() + maxMs;
+  const deadline = now() + maxMs;
+  let interval = pollMs;
+  let seen = '';
+  let treeStamp = '';
+  /** @type {string[]} */
+  let current = [];
+  /** @type {Map<string, {stamp: string, content_hash: string}>} */
+  const hashes = new Map();
   let downPolls = 0;
   const deliveredHere = new Set();
   for (;;) {
@@ -463,8 +526,13 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
     const live = worker?.run === run;
     downPolls = live ? 0 : downPolls + 1;
     const tickets = blockTickets({ repoRoot, run, block, ...where });
-    const current = await blockFileSet({ repoRoot: tree, base: entry.base_sha, owned: entry.owned_files, ownedKinds: entry.owned_kinds });
-    const { cfg, project } = await waitBlockScope(repoRoot, cwd, run, block);
+    scope = await waitBlockScope(repoRoot, cwd, run, block, scope);
+    const { entry, cfg, project } = scope;
+    const stamp = waitTreeStamp(tree, entry.owned_files, gitPaths) + scope.stamp;
+    if (stamp !== treeStamp) {
+      current = (await changedFiles({ repoRoot: tree, base: entry.base_sha })).filter((file) => ownsFile(entry.owned_files, file, entry.owned_kinds));
+      treeStamp = stamp;
+    }
     // Progress only, like answersPrecheck: sandboxed callers may not read the private ledger.
     // Reopens issued here also renew the workspace ticket, which needs no private read to join.
     let rows = [];
@@ -475,12 +543,14 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
       if (row.by !== 'human' && !(row.by === 'agent' && row.verdict?.verdict === 'agree')) continue;
       if (!reopens.has(row.file) || row.ts > reopens.get(row.file)) reopens.set(row.file, row.ts);
     }
-    const files = current.map(({ file }) => {
+    const files = current.map((file) => {
       const rule = reviewExcludeRule(cfg, file);
       if (rule !== null) return { file, ticket: null, status: 'excluded', outcome: null, rule };
       const after = reopens.get(file);
-      const opts = { repoRoot, run, block, file, ...where, after };
-      const { ticket } = resolveTicket(opts);
+      const stamp = fileStamp(path.join(tree, file));
+      if (hashes.get(file)?.stamp !== stamp) hashes.set(file, { stamp, content_hash: contentHash(tree, file) });
+      const opts = { repoRoot, run, block, file, ...where, after, content_hash: hashes.get(file).content_hash };
+      const { ticket } = resolveHashTicket(opts);
       const previous = tickets.filter((t) => t.file === file && (after === undefined || Date.parse(t.enqueued_at) > Date.parse(after)));
       let present = previous.find((t) => t.ticket === ticket);
       if (!present && previous.length > 0) {
@@ -495,7 +565,7 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
         }
       }
       if (!present && live) {
-        enqueue(opts);
+        enqueueHash(opts);
         present = { ...previous[previous.length - 1], ticket };
       }
       let marker = present ? blockTicketMarker(repoRoot, ticket) : null;
@@ -518,17 +588,21 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
       say({ block, files, done: true });
       return 0;
     }
-    if (live && (files.some((f) => f.status === 'not_queued') || Date.now() >= deadline)) {
+    if (live && (files.some((f) => f.status === 'not_queued') || now() >= deadline)) {
       say({ block, files, done: false, reason: files.some((f) => f.status === 'not_queued') ? 'not_queued' : 'wait_timeout' });
       return 0;
     }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    const ticketIds = [...new Set([...tickets.map((t) => t.ticket), ...files.map((f) => f.ticket).filter(Boolean)])].sort();
+    const state = JSON.stringify([stamp, live, ticketIds, files]);
+    interval = seen === state ? Math.min(MAX_IDLE_MS, interval * 2) : pollMs;
+    seen = state;
+    await sleep(Math.min(interval, Math.max(0, deadline - now())));
   }
 }
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number, dropDone?: typeof dropDoneIf}} [deps] - `dropDone`: B75's claim, for tests.
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number) => Promise<unknown>}} [deps] - `dropDone`: B75's claim, for tests.
  * @returns {Promise<number>}
  */
 export async function runReviewFile(args, deps = {}) {
@@ -545,7 +619,7 @@ export async function runReviewFile(args, deps = {}) {
       if (positionals.length > 0 || flags.block !== undefined || flags.wait !== undefined || flags.answers !== undefined || flags.of !== undefined || flags.fresh === true || typeof flags.run !== 'string') {
         throw new WorkerError('usage', '--wait-block takes a block, --run and --max only');
       }
-      return await waitBlock({ repoRoot, cwd, block: assertBlockId(flags['wait-block']), run: assertRunId(flags.run), maxMs: flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max), pollMs: deps.pollMs ?? POLL_MS, say, dropDone: deps.dropDone });
+      return await waitBlock({ repoRoot, cwd, block: assertBlockId(flags['wait-block']), run: assertRunId(flags.run), maxMs: flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max), pollMs: deps.pollMs ?? POLL_MS, say, dropDone: deps.dropDone, now: deps.now, sleep: deps.sleep });
     }
 
     if (typeof flags.wait === 'string') {
