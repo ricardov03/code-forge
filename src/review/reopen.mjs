@@ -255,8 +255,8 @@ export async function reopenFile({ runId, id, file, reason, record, rows, key, w
   // C11: the cached result of the current content's ticket would repeat the stop — dropped FIRST,
   // so a failed row write leaves at worst a re-run that returns the same stop, never a row with a
   // stale marker
-  if (earlier !== null) return { row: earlier, cleared: false, existing: true, ticket: io.enqueue?.(file, earlier) };
   const cleared = io.clearDone(file);
+  if (earlier !== null) return { row: earlier, cleared, existing: true, ticket: io.enqueue?.(file, earlier) };
   const row = { event: REOPENED_EVENT, block: id, file, from, stop_reason: stopReason, at_seq: loaded.seq, from_hash: fromHash, to_hash: current, reason: reason.trim(), by: agent ? 'agent' : 'human', ...(agent ? { verdict } : {}) };
   /** @type {Record<string, any> | null} */
   let written = null;

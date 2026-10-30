@@ -105,6 +105,42 @@ test('B169 clause 2: wait-block replaces a pre-reopen done result and waits for 
   assert.deepEqual([result.round, result.kind, result.findings], [1, 'full', []]);
 });
 
+test('B169 clause 2: wait-block leaves the old done ticket unchanged and joins a new pending ticket', async () => {
+  const f = await fixture();
+  const oldTicketPath = path.join(queueDir(f.repo), `${f.old.ticket}.json`);
+  const oldDonePath = path.join(queueDir(f.repo), `${f.old.ticket}.done`);
+  const oldTicket = readFileSync(oldTicketPath, 'utf8');
+  const oldDone = readFileSync(oldDonePath, 'utf8');
+  await f.legacyReopen();
+  const waiting = await f.wait();
+  const ticket = waiting.files[0].ticket;
+  assert.notEqual(ticket, f.old.ticket, 'unchanged content must get a new attempt');
+  assert.deepEqual(waiting, { block: 'B1', files: [{ file: FILE, ticket, status: 'pending', outcome: null }], done: false, reason: 'wait_timeout' }, 'the old finding must not finish the join');
+  assert.deepEqual(pendingTickets(f.repo), [ticket]);
+  assert.equal(readFileSync(oldTicketPath, 'utf8'), oldTicket, 'the old ticket is preserved byte for byte');
+  assert.equal(readFileSync(oldDonePath, 'utf8'), oldDone, 'the old done marker is preserved byte for byte');
+  assert.deepEqual(readResult(f.repo, f.runId, f.old.ticket).findings, [{ id: 'C1', claim: 'old finding' }]);
+  assert.equal(await f.worker.drain(), 1);
+  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket, status: 'done', outcome: 'approved' }], done: true });
+  const result = readResult(f.repo, f.runId, ticket);
+  assert.deepEqual([result.round, result.kind, result.findings], [1, 'full', []]);
+});
+
+test('B169 boundary: repeat reopen clears a cached stop before reusing the existing row and ticket', async () => {
+  const f = await fixture();
+  const first = JSON.parse(await f.reopen(['--json']));
+  // A stale worker result arrives after the row is written, without advancing its anchor.
+  writeResult({ repoRoot: f.repo, runId: f.runId, ticket: first.ticket, key: f.key, result: { status: 'stopped', stopped: 'l3_patch_exhausted', approved: false, round: 2, findings: [{ id: 'C1', claim: 'old finding' }] } });
+  const repeated = JSON.parse(await f.reopen(['--json']));
+  assert.equal(repeated.ticket_cleared, true, 'a repeat reopen must clear the cached stop');
+  assert.equal(repeated.ticket, first.ticket, 'the live attempt keeps its identity');
+  assert.equal((await f.readRows()).filter((row) => row.event === 'review.reopened').length, 1, 'the existing signed row is reused');
+  assert.deepEqual(pendingTickets(f.repo), [first.ticket]);
+  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket: first.ticket, status: 'pending', outcome: null }], done: false, reason: 'wait_timeout' }, 'the cached stop must not finish the join');
+  assert.equal(await f.worker.drain(), 1);
+  assert.deepEqual(await f.wait(), { block: 'B1', files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'approved' }], done: true });
+});
+
 test('B169 boundary: repeated joins reuse the live attempt and keep its post-reopen completion', async () => {
   const f = await fixture();
   rmSync(path.join(queueDir(f.repo), `${f.old.ticket}.json`));
