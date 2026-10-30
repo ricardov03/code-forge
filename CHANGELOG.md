@@ -43,6 +43,7 @@ waits on a second real consumer (plan §10.4, Q17).
   it gets write access only to the worktree git dir and the shared objects, refs and logs, never to config or hooks (#26 items 3-4, B167)
 - `block open --base <sha>` uses the given commit (also for the proof worktree), and reuses an existing block branch that
   descends from that base instead of refusing it (#26 item 1, B166)
+- `block close` accepts review results from a worker that was pinned for the same run before `run start --reattach`; a worker never pinned for the run still stops the block (B176)
 
 ## [0.15.2] — 2026-10-30
 
