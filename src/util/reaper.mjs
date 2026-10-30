@@ -28,6 +28,7 @@
 
 import { execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 
@@ -285,7 +286,7 @@ export function readProcessEnv(p) {
     } else return null;
     /** @type {Record<string,string>} */
     const markers = {};
-    for (const name of ['CODE_FORGE_OWNER_PID', 'CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_START_TIME']) {
+    for (const name of ['HOME', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_START_TIME']) {
       const match = process.platform === 'linux'
         ? text.split('\0').find((entry) => entry.startsWith(`${name}=`))?.slice(name.length + 1)
         : new RegExp(`(?:^|\\s)${name}=(.*?)(?=\\s+[A-Za-z_][A-Za-z0-9_]*=|$)`).exec(text)?.[1];
@@ -327,6 +328,9 @@ export async function sweepProcesses(opts = {}) {
     // Exactly node + a code-forge entry point + worker, never an argv substring in a shell/-e.
     const worker = /^(?:\S*\/)?node(?:js)?\s+(?:\S*\/)?code-forge\.mjs\s+worker\s+--run(?:=|\s+)([a-z0-9][a-z0-9-]{0,63})(?:\s|$)/.exec(p.command);
     if (worker && !opts.orphansOnly) {
+      // Run records only authorize worker cleanup inside their own code-forge home.
+      // Unreadable environments and workers from another HOME supply no such authority.
+      if (envFor(p)?.HOME !== os.homedir()) continue;
       try {
         const record = await loadRun(worker[1]);
         if (typeof record.status === 'string' && !['open', 'running', 'active'].includes(record.status)) items.push({ ...p, kind: 'worker', runId: worker[1] });

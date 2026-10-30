@@ -130,7 +130,7 @@ test('sweep never lists or stops reparented live or unreadable-run workers with 
         if (id === 'r-unreadable') throw new Error('unreadable run record');
         return { status: id.slice(2) };
       },
-      readEnv: () => ({ CODE_FORGE_OWNER_PID: '90000010' }),
+      readEnv: () => ({ HOME: os.homedir(), CODE_FORGE_OWNER_PID: '90000010' }),
     };
     assert.deepEqual((await sweepProcesses(opts)).items, [], 'dry run lists no live or unreadable worker');
     assert.deepEqual((await sweepProcesses({ ...opts, apply: true })).items, [], 'apply lists no live or unreadable worker');
@@ -161,7 +161,7 @@ test('zombie parents remain eligible workers, orphans and registry leaders; prot
   }
   await withProcessTable(rows, async ({ psText, alive, calls }) => {
     const opts = { root, psText, graceMs: 0, readRun: async () => ({ status: 'ended' }),
-      readEnv: (p) => p.pid === 90000030 ? { CODE_FORGE_OWNER_PID: '90000010' } : null };
+      readEnv: (p) => p.pid === 90000030 ? { CODE_FORGE_OWNER_PID: '90000010' } : { HOME: os.homedir() } };
     const expected = [['worker', 90000020], ['orphan', 90000030], ['registry', 90000040]];
     const dry = await sweepProcesses(opts);
     assert.deepEqual(dry.items.map((p) => [p.kind, p.pid]), expected);
