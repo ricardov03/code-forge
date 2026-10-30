@@ -24,9 +24,10 @@ import { isAncestorArgv, revParseArgv } from '../util/git.mjs';
 import { StateError } from './paths.mjs';
 import { assertOwned, blocksOverlap, isExactEntry, ownsFile, scopeGate } from './registry.mjs';
 import { checkWorkerPin, readRun, saveRun, withRunLock, writeSigned } from './run.mjs';
-import { canonicalJSON, verifyRow, loadKey } from './signer.mjs';
+import { canonicalJSON, verifyRow, loadKey, signRow } from './signer.mjs';
+import { readAllRows } from '../ledger/write.mjs';
 import * as reviewQueue from '../worker/queue.mjs';
-import { repoRootOf } from '../worker/ticket.mjs';
+import { contentHash, repoRootOf } from '../worker/ticket.mjs';
 
 /** @typedef {import('./run.mjs').WriteRow} WriteRow */
 
@@ -505,13 +506,16 @@ export async function attemptBlock({ runId, id, writeRow }) {
  * is a conflict too. Never silent. Owned means `ownsFile` (B57: a directory entry owns the files
  * below it). Worktree blocks rebase their branch onto the recorded base branch. Open blocks
  * refuse upstream commits touching owned files; closed blocks retain every changed owned blob.
- * A conflict or changed reviewed blob restores the old head.
- * @param {{runId: string, id: string, head?: string, writeRow: WriteRow}} opts
- * @returns {Promise<{old_base: string, new_base: string}>}
+ * A refusal restores the head at entry. A rebase check keeps the candidate content available
+ * to the worker, with a signed checkpoint; the recorded base moves only after clearance.
+ * @param {{runId: string, id: string, head?: string, writeRow: WriteRow, acceptChanged?: string[], reason?: string, rebaseCheck?: boolean}} opts
+ * @returns {Promise<{old_base: string, new_base: string, files?: ReturnType<typeof reviewQueue.enqueue>[], pending?: boolean}>}
  */
-export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
+export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow, acceptChanged = [], reason, rebaseCheck = false }) {
+  if (acceptChanged.length && (typeof reason !== 'string' || !reason.trim())) throw new StateError('usage', '--accept-changed needs a nonblank --reason');
   const block = (await readRun(runId)).blocks[id];
-  if (block?.worktree || ['closed', 'awaiting_human_check'].includes(block?.status)) return rebaseWorktreeBlock({ runId, id, writeRow });
+  if (block?.worktree || ['closed', 'awaiting_human_check'].includes(block?.status)) return rebaseWorktreeBlock({ runId, id, writeRow, acceptChanged, reason, rebaseCheck });
+  if (rebaseCheck || acceptChanged.length) throw new StateError('usage', 'rebase clearance requires a worktree block');
   return mutateRun(runId, id, writeRow, async (record, block) => {
     const cwd = record.workspace;
     const newBase = await resolveCommit(head, cwd);
@@ -522,7 +526,7 @@ export async function rebaseBlock({ runId, id, head = 'HEAD', writeRow }) {
     if (conflicts.length > 0) throw new StateError('owned-conflict', `block ${id}: commits since its base changed owned files: ${conflicts.join(', ')}`);
     const moved = { old_base: block.base_sha, new_base: newBase };
     block.base_sha = newBase;
-    return { result: moved, rows: [{ event: 'block.rebase', block: id, ...moved }] };
+    return { result: moved, rows: [{ event: 'block.rebase', block: id, ...moved, changed_reviewed: [], cleared: [] }] };
   });
 }
 
@@ -547,10 +551,10 @@ async function committedBlobs(cwd, ref, files) {
 /**
  * Recheck worktree block status under the lock, restore the branch on failure (including a
  * failed signed write), and retain its open/closed/awaiting status.
- * @param {{runId: string, id: string, writeRow: WriteRow}} opts
- * @returns {Promise<{old_base: string, new_base: string}>}
+ * @param {{runId: string, id: string, writeRow: WriteRow, acceptChanged: string[], reason?: string, rebaseCheck: boolean}} opts
+ * @returns {Promise<{old_base: string, new_base: string, files?: ReturnType<typeof reviewQueue.enqueue>[], pending?: boolean}>}
  */
-async function rebaseWorktreeBlock({ runId, id, writeRow }) {
+async function rebaseWorktreeBlock({ runId, id, writeRow, acceptChanged, reason, rebaseCheck }) {
   return withRunLock(runId, async () => {
     const record = await readRun(runId);
     if (record.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
@@ -565,6 +569,15 @@ async function rebaseWorktreeBlock({ runId, id, writeRow }) {
     const status = await git(['git', 'status', '--porcelain'], tree);
     if (status.stdout.length > 0) throw new StateError(closed ? 'rebase-conflict' : 'rebase-dirty', closed ? 'rebase-conflict' : `rebase-dirty: block ${id}: commit or clean first`);
     const oldHead = await resolveCommit('HEAD', tree);
+    const key = await loadKey(runId);
+    const pending = block.rebase_check;
+    if (pending && (!verifyRow(pending, key).ok || pending.run !== runId || pending.block !== id || pending.old_base !== block.base_sha)) {
+      throw new StateError('rebase-check-invalid', 'the pending rebase checkpoint is invalid');
+    }
+    if (pending && (await git(isAncestorArgv(pending.head, oldHead), tree, [0, 1])).code !== 0) {
+      throw new StateError('rebase-check-invalid', 'the worktree no longer contains the pending rebase');
+    }
+    const reviewedHead = pending?.old_head ?? oldHead;
     const newBase = await resolveCommit(`refs/heads/${block.base_branch}`, record.workspace);
     const top = await repoTop(record.workspace);
     const prefix = path.relative(top, realpathSync(record.workspace)).split(path.sep).join('/');
@@ -574,7 +587,7 @@ async function rebaseWorktreeBlock({ runId, id, writeRow }) {
     );
     let files = [];
     if (closed) {
-      const diff = await git(['git', 'diff', '--no-renames', '--name-only', '-z', block.base_sha, oldHead, '--'], tree);
+      const diff = await git(['git', 'diff', '--no-renames', '--name-only', '-z', block.base_sha, reviewedHead, '--'], tree);
       files = diff.stdout.split('\0').filter((file) => file.length > 0 && owns(file)).sort();
     } else {
       // Inspect every upstream commit, including changes later reverted and both rename paths.
@@ -582,19 +595,45 @@ async function rebaseWorktreeBlock({ runId, id, writeRow }) {
       const conflicts = [...new Set(upstream.stdout.split('\0').filter((file) => file.length > 0 && owns(file)))].sort();
       if (conflicts.length > 0) throw new StateError('owned-conflict', `block ${id}: commits since its base changed owned files: ${conflicts.join(', ')}`);
     }
-    const before = closed ? await committedBlobs(tree, oldHead, files) : null;
+    const before = closed ? await committedBlobs(tree, reviewedHead, files) : null;
     const moved = { old_base: block.base_sha, new_base: newBase };
     try {
       const rebased = await exec(['git', '-C', tree, 'rebase', newBase], { cwd: record.workspace, env: gitEnv(), timeoutMs: 30000 });
       if (rebased.result !== 'ok') throw new StateError('rebase-conflict', 'rebase-conflict');
-      if (before !== null) {
-        const after = await committedBlobs(tree, 'HEAD', files);
-        const changed = files.filter((file) => before.get(file) !== after.get(file));
-        if (changed.length > 0) throw new StateError('rebase-changed-reviewed', `rebase-changed-reviewed ${changed.join(', ')}`);
+      const after = before === null ? null : await committedBlobs(tree, 'HEAD', files);
+      const changed = after === null ? [] : files.filter((file) => before.get(file) !== after.get(file));
+      const repoRoot = await repoRootOf(record.workspace);
+      if (rebaseCheck) {
+        // The worker reviews the authoritative worktree, so retain this candidate while leaving
+        // both bases untouched. Sign the original head so a later retry cannot forget changes.
+        block.rebase_check = signRow({ event: 'block.rebase_check', run: runId, block: id, ...moved, old_head: reviewedHead, head: await resolveCommit('HEAD', tree), started_at: pending?.started_at ?? new Date().toISOString() }, key);
+        const queued = changed.map((file) => reviewQueue.enqueue({ repoRoot, run: runId, block: id, file, tree, after: block.rebase_check.started_at }));
+        await saveRun(record);
+        return { ...moved, files: queued, pending: true };
       }
+      const invalidAccepted = acceptChanged.filter((file) => !changed.includes(file));
+      if (invalidAccepted.length) throw new StateError('usage', `--accept-changed names files not changed by this rebase: ${invalidAccepted.join(', ')}`);
+      const rows = pending ? (await readAllRows(record.project)).filter((row) => row.run === runId && row.block === id && verifyRow(row, key).ok && Date.parse(row.ts) >= Date.parse(pending.started_at)) : [];
+      /** @type {Array<{file: string, via: string, ticket?: string, reason?: string}>} */
+      const cleared = [];
+      for (const file of changed) {
+        if (acceptChanged.includes(file)) {
+          cleared.push({ file, via: 'human', reason });
+          continue;
+        }
+        const hash = contentHash(tree, file);
+        const ticket = reviewQueue.resolveTicket({ repoRoot, run: runId, block: id, file, tree, after: pending?.started_at }).ticket;
+        const relevant = rows.filter((row) => row.file === file && row.content_hash === hash);
+        const approval = relevant.reduce((last, row, index) => row.event === 'review.approved' && (row.ticket === undefined || row.ticket === ticket) ? index : last, -1);
+        const denied = relevant.slice(approval + 1).some((row) => row.event === 'review.cap' || (row.event === 'review.result' && row.approved === false) || (row.event === 'review.round' && row.open_after > 0));
+        if (approval >= 0 && !denied) cleared.push({ file, via: 'review', ticket });
+      }
+      const uncleared = changed.filter((file) => !cleared.some((entry) => entry.file === file));
+      if (uncleared.length) throw new StateError('rebase-changed-reviewed', `rebase-changed-reviewed ${uncleared.join(', ')}\nRe-review: code-forge review-file --rebase-check --block ${id} --run ${runId}\nHuman accept (repeat --accept-changed for each file): code-forge block rebase ${id} --run ${runId} --accept-changed <file> --reason <text>`);
       block.base_sha = newBase;
       block.worktree.base_sha = newBase;
-      await writeSigned(runId, writeRow, { event: 'block.rebase', block: id, ...moved, ...(closed ? { closed: true } : { worktree: true }) });
+      delete block.rebase_check;
+      await writeSigned(runId, writeRow, { event: 'block.rebase', block: id, ...moved, changed_reviewed: changed, cleared, ...(closed ? { closed: true } : { worktree: true }) });
       await saveRun(record);
       return moved;
     } catch (err) {

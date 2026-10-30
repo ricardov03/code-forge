@@ -75,11 +75,12 @@ import { changedFiles, namedOnHash } from '../review/gate-check.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { ownsFile } from '../state/registry.mjs';
-import { readAllRows } from '../ledger/write.mjs';
+import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { assertRunId } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
+import { rebaseBlock } from '../state/block.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
 import { reviewExcludeRule } from '../config/validate.mjs';
 import { blockTree } from '../proof/worktree.mjs';
@@ -88,6 +89,7 @@ import { writeSafe } from '../util/redact.mjs';
 const USAGE =
   'usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n' +
   '       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n' +
+  '       code-forge review-file --rebase-check --block <id> --run <id>\n' +
   '       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n' +
   '       --cwd <dir> applies to queueing and both wait modes\n';
 
@@ -618,7 +620,7 @@ export async function runReviewFile(args, deps = {}) {
   const stderr = deps.stderr ?? process.stderr;
   const say = (/** @type {Record<string, any>} */ obj) => writeSafe(stdout, `${JSON.stringify(obj)}\n`);
   try {
-    const { flags, positionals } = parseFlags(args, { values: ['cwd', 'block', 'run', 'wait', 'wait-block', 'max', 'answers', 'of'], booleans: ['fresh'] });
+    const { flags, positionals } = parseFlags(args, { values: ['cwd', 'block', 'run', 'wait', 'wait-block', 'max', 'answers', 'of'], booleans: ['fresh', 'rebase-check'] });
     let cwd = deps.cwd ?? process.cwd();
     if (typeof flags.cwd === 'string') {
       cwd = path.resolve(cwd, flags.cwd);
@@ -630,6 +632,21 @@ export async function runReviewFile(args, deps = {}) {
     }
     // the queue and the worker: the main tree, also from inside a block's worktree
     const repoRoot = await mainRootOf(cwd);
+
+    if (flags['rebase-check'] === true) {
+      if (positionals.length || typeof flags.block !== 'string' || typeof flags.run !== 'string' || ['wait', 'wait-block', 'max', 'answers', 'of', 'fresh'].some((key) => flags[key] !== undefined)) {
+        throw new WorkerError('usage', '--rebase-check takes --block and --run only');
+      }
+      const block = assertBlockId(flags.block);
+      const runId = assertRunId(flags.run);
+      const worker = liveWorker(repoRoot);
+      if (!worker || worker.run !== runId) { say({ status: 'worker_down', block }); return 3; }
+      const record = await readRun(runId);
+      if (await mainRootOf(record.workspace) !== repoRoot) throw new WorkerError('other-workspace', 'the run belongs to another workspace');
+      const result = await rebaseBlock({ runId, id: block, rebaseCheck: true, writeRow: (row) => appendRow(row, { slug: record.project }) });
+      say({ block, status: 'queued', ...result, next: `code-forge block rebase ${block} --run ${runId}` });
+      return 0;
+    }
 
     if (flags['wait-block'] !== undefined) {
       if (positionals.length > 0 || flags.block !== undefined || flags.wait !== undefined || flags.answers !== undefined || flags.of !== undefined || flags.fresh === true || typeof flags.run !== 'string') {

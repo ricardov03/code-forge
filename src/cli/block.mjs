@@ -312,7 +312,7 @@ const USAGE =
 const VERB_USAGE = {
   open: '<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]',
   attempt: '<id> --run <r>',
-  rebase: '<id> --run <r> [--head <ref>]',
+  rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>]',
   claim: '<id> <path> --run <r>',
   close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--decide]',
   stop: '<id> --run <r> --reason <text>',
@@ -423,7 +423,7 @@ export async function runBlock(args, deps = {}) {
   }
   let jsonOpenId;
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -716,7 +716,17 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     if (sub === 'rebase') {
-      const moved = await rebaseBlock({ runId, id, head: typeof flags.head === 'string' ? flags.head : undefined, writeRow });
+      const acceptChanged = Array.isArray(flags['accept-changed']) ? [...new Set(flags['accept-changed'])] : [];
+      if (acceptChanged.length) {
+        if (positionals.length !== 1 || typeof flags.reason !== 'string' || !flags.reason.trim() || /\p{Cc}/u.test(flags.reason)) throw new StateError('usage', '--accept-changed needs one block id and a nonblank --reason without control characters');
+        for (const file of acceptChanged) checkFileForm(file, { normalized: true });
+        const asked = await confirmHumanVerb('rebase', runId, id, { file: acceptChanged.join(', ') }, record, deps, async () => {
+          if ((await checkExpiry(runId, (deps.now ?? (() => new Date()))())).state === 'active') throw new StateError('autopilot-active', 'block rebase --accept-changed is refused while an autopilot grant is active');
+        });
+        if (asked === 'no-tty') { err(`${humanVerbNoTTY('rebase')}\n`); return 2; }
+        if (asked === 'cancelled') { err(`block ${id} rebase: cancelled — nothing was recorded\n`); return 1; }
+      }
+      const moved = await rebaseBlock({ runId, id, head: typeof flags.head === 'string' ? flags.head : undefined, writeRow, acceptChanged, reason: typeof flags.reason === 'string' ? flags.reason : undefined });
       say(`block ${id} rebased ${moved.old_base.slice(0, 12)} → ${moved.new_base.slice(0, 12)}\n`);
       if (json) emit({ block: id, event: 'rebased', old_base: moved.old_base, new_base: moved.new_base });
       return 0;
@@ -1272,7 +1282,7 @@ export const NO_REVIEWS_NO_TTY = '--no-require-reviews needs the human at a term
 
 /**
  * B80: the refusal when `block waive` or `block reopen` has no terminal to ask the human at.
- * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'amend-acceptance' | 'close'} verb @returns {string}
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'amend-acceptance' | 'close' | 'rebase'} verb @returns {string}
  */
 export const humanVerbNoTTY = (verb) => verb === 'waive'
   ? 'block waive needs the human at a terminal to confirm; nothing was recorded (--yes works only for a recorded warning or nit finding, with evidence)'
@@ -1333,14 +1343,16 @@ async function confirmNoReviews(runId, id, deps) {
  * `by: autopilot`); human-pass instead refuses an active grant. The
  * pre-checks (`reopenPrecheck`, `waivePrecheck`) run first, at a terminal, so the human is never
  * asked about a waive or reopen the verb would refuse that way.
- * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'amend-acceptance'} verb @param {string} runId @param {string} id
+ * @param {'waive' | 'reopen' | 'accept-hit' | 'unwaive' | 'ack-waivers' | 'human-pass' | 'amend-acceptance' | 'rebase'} verb @param {string} runId @param {string} id
  * @param {{finding?: string, file: string, rule?: string, line?: number, hits?: {rule: string, line: number}[], oldCount?: number, newCount?: number}} what @param {Record<string, any>} record @param {ConfirmDeps} deps
  * @param {() => Promise<unknown> | unknown} [before]
  * @returns {Promise<'no-tty' | 'confirmed' | 'cancelled'>}
  */
 function confirmHumanVerb(verb, runId, id, what, record, deps, before) {
   const message = () =>
-    verb === 'amend-acceptance'
+    verb === 'rebase'
+      ? `Accept rebased changes in ${what.file} of block ${id} (run ${runId})? Only the owner may say yes.`
+      : verb === 'amend-acceptance'
       ? `Amend acceptance of block ${id} (run ${runId}) from ${what.oldCount} clauses to ${what.newCount} clauses? Only the owner may say yes.`
       : verb === 'human-pass'
       ? `Confirm all device checks of block ${id} (run ${runId}) passed? Only the owner may say yes.`

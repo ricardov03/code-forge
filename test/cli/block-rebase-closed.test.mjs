@@ -137,7 +137,7 @@ for (const kind of ['changed', 'conflict']) {
     const entry = await f.entry();
     const rows = await f.rows();
     const newBase = await f.move(kind);
-    const reason = kind === 'changed' ? 'rebase-changed-reviewed a.mjs, b.mjs' : 'rebase-conflict';
+    const reason = kind === 'changed' ? `rebase-changed-reviewed a.mjs, b.mjs\nRe-review: code-forge review-file --rebase-check --block B1 --run ${f.runId}\nHuman accept (repeat --accept-changed for each file): code-forge block rebase B1 --run ${f.runId} --accept-changed <file> --reason <text>` : 'rebase-conflict';
     assert.deepEqual(await f.rebase(), [1, '', `block rebase: ${reason}\n`]);
     assert.equal((await git(['rev-parse', 'HEAD'], f.tree.path)).trim(), oldHead);
     assert.equal((await git(['rev-parse', `refs/heads/${f.tree.branch}`], f.repo)).trim(), oldHead);
