@@ -54,6 +54,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `block reopen` now restarts the review: it clears the cached done result, queues a fresh ticket, and `review-file --wait-block` waits for the new result instead of returning the old one (#25, B169)
 - Process cleanup: `sweep` never stops a worker of an open run or a run it cannot read; zombie parents are cleaned up and an unreadable registry status is reported, not guessed (B163)
 - Idle CPU: `review-file --wait-block` and the worker back off from 200/250 ms up to 5 s while nothing changes, and a block file is re-hashed only when its mtime or size changes (B177)
+- Process sweep (`sweep`, `run start`, `doctor`) never lists or stops a worker of another code-forge home, or one whose environment cannot be read; before, tests with an isolated HOME stopped the live review worker (B178)
 
 ## [0.15.2] — 2026-10-30
 
