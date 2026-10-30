@@ -1,4 +1,7 @@
 import assert from 'node:assert/strict';
+import { mkdtempSync, readdirSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
 import { mock, test } from 'node:test';
 import * as realRun from '../../src/state/run.mjs';
 
@@ -12,15 +15,28 @@ const { runBlock } = await import('../../src/cli/block.mjs');
 const VERBS = ['open', 'attempt', 'rebase', 'claim', 'close', 'stop', 'waive', 'reopen', 'accept-hit', 'unwaive', 'ack-waivers', 'human-pass', 'amend-acceptance'];
 
 async function help(args) {
-  let out = ''; let err = ''; let effects = 0;
-  const code = await runBlock(args, {
-    stdout: { write: (s) => { out += s; } },
-    stderr: { write: (s) => { err += s; } },
-    isTTY: true,
-    ui: { confirm: async () => { effects += 1; return true; }, isCancel: () => false },
-    removeBlockTree: async () => { effects += 1; throw new Error('help must not remove a worktree'); },
-  });
-  return { code, out, err, effects };
+  const dir = mkdtempSync(path.join(tmpdir(), 'verb-help-'));
+  const previousHome = process.env.HOME;
+  const previousCwd = process.cwd();
+  try {
+    process.env.HOME = dir;
+    process.chdir(dir);
+    let out = ''; let err = ''; let effects = 0;
+    const code = await runBlock(args, {
+      stdout: { write: (s) => { out += s; } },
+      stderr: { write: (s) => { err += s; } },
+      isTTY: true,
+      ui: { confirm: async () => { effects += 1; return true; }, isCancel: () => false },
+      removeBlockTree: async () => { effects += 1; throw new Error('help must not remove a worktree'); },
+    });
+    assert.deepEqual(readdirSync(dir, { recursive: true }), [], `${args.join(' ')} must leave HOME and cwd empty`);
+    return { code, out, err, effects };
+  } finally {
+    process.chdir(previousCwd);
+    if (previousHome === undefined) delete process.env.HOME;
+    else process.env.HOME = previousHome;
+    rmSync(dir, { recursive: true, force: true });
+  }
 }
 
 function result(verb, flag, response) {
@@ -43,7 +59,7 @@ test('every block verb accepts both help flags, prints its own usage and accesse
     }
   }
   assert.deepEqual(actual, expected, 'all 26 verb/flag pairs must print exactly one matching usage and exit 0');
-  assert.equal(stateReads, 0, 'all 26 help requests must perform zero run reads, before any writes');
+  assert.equal(stateReads, 0, 'all 26 help requests must perform zero run reads');
 });
 
 test('help takes precedence over supplied operation arguments, JSON output and missing flag values', async () => {
@@ -57,5 +73,5 @@ test('help takes precedence over supplied operation arguments, JSON output and m
     }
   }
   assert.deepEqual(actual, expected, 'all 26 argument-bearing requests must bypass validation, prompts and operations');
-  assert.equal(stateReads, 0, 'argument-bearing help must perform zero run reads, before any writes');
+  assert.equal(stateReads, 0, 'argument-bearing help must perform zero run reads');
 });
