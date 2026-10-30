@@ -39,6 +39,8 @@ waits on a second real consumer (plan §10.4, Q17).
   (B164)
 - An invalid L3 judge answer is now a broken result, not a disagreement: it retries once, then tries the next L3 model;
   a schema-invalid review answer uses every level fallback even when `second_levels` is empty (#24, #26 item 5, B168)
+- Codex `spawn --background` keeps its CODEX_HOME after the parent exits, and a Codex coder in a linked worktree can commit:
+  it gets write access only to the worktree git dir and the shared objects, refs and logs, never to config or hooks (#26 items 3-4, B167)
 
 ## [0.15.2] — 2026-10-30
 
