@@ -108,6 +108,52 @@ test('detected Pint and Prettier check tracked files, or only supported changed 
   });
 });
 
+test('detected formatters batch argv by bytes and retain a middle batch failure, output and total time', async () => {
+  for (const tool of ['pint', 'prettier']) await withTempDir(async (dir) => {
+    const { ext, tracked, binary } = await formatterFixture(dir, tool);
+    const unicode = `unicode-🧪.${ext}`;
+    await writeFile(path.join(dir, unicode), 'fixture');
+    git(['add', '--', unicode], dir);
+    const oldPath = process.env.PATH;
+    process.env.PATH = `${path.join(dir, 'fake-bin')}${path.delimiter}${oldPath}`;
+    try {
+      const format = detectGates(dir).format;
+      assert.ok(format && !Array.isArray(format));
+      const prefix = format.argv;
+      const files = [...tracked, unicode, ...(tool === 'prettier' ? ['package.json'] : [])].sort().map((f) => `./${f}`);
+      const argvBytes = (argv) => argv.reduce((sum, arg) => sum + Buffer.byteLength(arg) + 1, 0);
+      // Exactly enough for the prefix plus the longest UTF-8 path: one file per batch.
+      const formatArgvBudgetBytes = argvBytes(prefix) + Math.max(...files.map((f) => argvBytes([f])));
+      for (const changed of [false, true]) for (const fail of [false, true]) {
+        await writeFile(binary, `#!${process.execPath}
+const args = process.argv.slice(2);
+console.log(JSON.stringify(args));
+console.error('checked ' + args.at(-1));
+setTimeout(() => process.exit(${fail ? "args.includes('./space name." + ext + "') ? 2 : 0" : '0'}), 30);
+`);
+        const ran = await runGates({ format }, {
+          cwd: dir, formatArgvBudgetBytes,
+          ...(changed ? { scope: { scope: 'changed', files: [], changedFiles: files.map((f) => f.slice(2)) } } : {}),
+        });
+        const result = ran.results.find((r) => r.gate === 'format');
+        const calls = result.stdout.trim().split('\n').map((line) => JSON.parse(line));
+        assert.equal(calls.length, files.length, `${tool}: multiple formatter processes ran`);
+        assert.deepEqual(calls.flatMap((args) => args.slice(prefix.length - 1)), files, 'every file checked once in order, including after failure');
+        for (const args of calls) {
+          assert.deepEqual(args.slice(0, prefix.length - 1), prefix.slice(1), 'every batch repeats the formatter flags');
+          assert.ok(argvBytes([prefix[0], ...args]) <= formatArgvBudgetBytes, 'full argv respects the byte budget');
+        }
+        assert.equal(result.ok, !fail);
+        assert.equal(ran.allOk, !fail, 'a later successful batch cannot hide a failure');
+        assert.equal(result.code, fail ? 2 : 0, 'retain the failed batch exit status');
+        for (const file of files) assert.ok(result.stderr.includes(`checked ${file}\n`), 'stderr tails from every batch are merged');
+        assert.ok(result.duration_ms >= 30 * calls.length, 'duration includes every batch');
+        assert.equal(ran.duration_ms, result.duration_ms);
+      }
+    } finally { process.env.PATH = oldPath; }
+  });
+});
+
 test('an empty detected format scope skips the command while configured commands retain their exact argv', async () => {
   await withTempDir(async (dir) => {
     await formatterFixture(dir, 'pint');

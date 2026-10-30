@@ -56,6 +56,40 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
 /** Fixed run order — always all four, regardless of an earlier one's result. */
 const GATE_ORDER = /** @type {const} */ (['test', 'lint', 'types', 'format']);
 
+/** Leave room below typical ARG_MAX limits for the inherited environment and spawn overhead. */
+const FORMAT_ARGV_BUDGET_BYTES = 100 * 1024;
+
+/** Repeat the executable and flags in every batch; count UTF-8 bytes and NUL terminators.
+ * @param {string[]} prefix @param {string[]} files @param {number} budget
+ * @returns {string[][]}
+ */
+function formatBatches(prefix, files, budget) {
+  if (!Number.isSafeInteger(budget) || budget <= 0) throw new TypeError('format: argv byte budget must be a positive safe integer');
+  const prefixBytes = prefix.reduce((sum, arg) => sum + Buffer.byteLength(arg) + 1, 0);
+  const batches = [];
+  let batch = prefix.slice();
+  let bytes = prefixBytes;
+  for (const file of files) {
+    const size = Buffer.byteLength(file) + 1;
+    if (prefixBytes + size > budget) throw new RangeError(`format: command and file exceed argv byte budget: ${file}`);
+    if (bytes + size > budget) {
+      batches.push(batch);
+      batch = prefix.slice();
+      bytes = prefixBytes;
+    }
+    batch.push(file);
+    bytes += size;
+  }
+  batches.push(batch);
+  return batches;
+}
+
+/** @param {string} stream @returns {string} */
+function outputTail(stream) {
+  const tail = stream.trimEnd().split(/\r?\n/).slice(-10).join('\n');
+  return tail ? `${tail}\n` : '';
+}
+
 /** Existing supported files only, never a directory or glob for the formatter to traverse.
  * @param {string} cwd @param {'pint'|'prettier'} formatter
  * @param {TestScope | import('./expand.mjs').ChangedScope} scope
@@ -244,7 +278,7 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment, overriding the CI=1/npm_config_yes=false defaults.
  * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[], kindGates?: KindGates}} gates
- * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope}} opts
+ * @param {{cwd: string, timeoutMs?: number, scope?: TestScope | import('./expand.mjs').ChangedScope, formatArgvBudgetBytes?: number}} opts - formatArgvBudgetBytes overrides the detected formatter batch budget (default 100 KiB).
  * @returns {Promise<{results: GateResult[], allOk: boolean, duration_ms: number, repeats?: Repeats}>}
  */
 export async function runGates(gates, opts) {
@@ -278,15 +312,17 @@ export async function runGates(gates, opts) {
     if (command === null || excluded(gate)) { planned.push({ gate, command: null }); continue; }
     const normalized = normalizeCommand(command);
     if (normalized.argv[0] === CHANGED_FILES_TOKEN) throw new TypeError(`gates.${gate}: '{changed_files}' cannot be the command (argv[0])`);
-    const { argv, scoped } = expandArgv(normalized.argv, scope);
+    let { argv, scoped } = expandArgv(normalized.argv, scope);
     if (argv.length === 0 && normalized.argv.length > 0) throw new TypeError(`gates.${gate}: the argv is empty once ${normalized.argv.map((item) => `'${item}'`).join(' and ')} is dropped for the full suite — put the test command before it`);
     const formatter = gate === 'format' && !Array.isArray(command) ? command.formatter : undefined;
+    let batches;
     if (formatter) {
       const files = await formatFiles(cwd, formatter, scope);
       if (files.length === 0) { planned.push({ gate, command: null, noFiles: true }); continue; }
-      argv.push(...files);
+      batches = formatBatches(argv, files, opts.formatArgvBudgetBytes ?? FORMAT_ARGV_BUDGET_BYTES);
+      argv = argv.concat(files);
     }
-    planned.push({ gate, command: { argv, originalArgv: normalized.argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } });
+    planned.push({ gate, command: { argv, batches, originalArgv: normalized.argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } });
   }
   /** @type {GateResult[]} */
   const results = [];
@@ -298,13 +334,25 @@ export async function runGates(gates, opts) {
       });
       continue;
     }
-    const { argv, scoped, failOnStdout, env } = command;
+    const { argv, batches = [argv], scoped, failOnStdout, env } = command;
     // Each command is run and its exit status read on its own — never `&&`-chained with the
     // next, so a red gate is reported red without swallowing the gates that follow it.
     const execOpts = { cwd, timeoutMs, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } };
     const started = performance.now();
-    const res = await exec(argv, execOpts);
-    const outcome = gateOutcome(res, timeoutMs, failOnStdout);
+    const outcomes = [];
+    for (const batch of batches) {
+      const res = await exec(batch, execOpts);
+      const batchOutcome = gateOutcome(res, timeoutMs, failOnStdout);
+      outcomes.push({ ...batchOutcome, ...(batches.length > 1 ? {
+        stdout: outputTail(batchOutcome.stdout), stderr: outputTail(batchOutcome.stderr),
+      } : {}) });
+    }
+    // Retain the first failure's status and diagnostic even if later batches pass.
+    const outcome = {
+      ...(outcomes.find((entry) => !entry.ok) ?? outcomes[0]),
+      stdout: outcomes.map((entry) => entry.stdout).join(''),
+      stderr: outcomes.map((entry) => entry.stderr).join(''),
+    };
     const result = /** @type {GateResult} */ ({
       gate,
       duration_ms: 0,
