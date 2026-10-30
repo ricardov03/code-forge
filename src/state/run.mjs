@@ -324,6 +324,8 @@ export async function reattachWorker({ runId, workerPid, writeRow, probe = proce
     if (current.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
     const pin = await pinWorker(workerPid, probe);
     const pins = current.workers ?? (current.worker ? [current.worker] : []);
+    // Retired pins still authorize completed reviews, but never live-worker checks or signals.
+    if (!add) current.worker_history = [...(current.worker_history ?? []), ...pins];
     current.workers = add ? [...pins, pin] : [pin];
     current.worker = current.workers[0];
     await writeSigned(runId, writeRow, { event: add ? 'worker.add' : 'worker.reattach', pid: workerPid });
