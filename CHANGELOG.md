@@ -46,6 +46,11 @@ waits on a second real consumer (plan §10.4, Q17).
 - `block close` accepts review results from a worker that was pinned for the same run before `run start --reattach`; a worker never pinned for the run still stops the block (B176)
 - Gates: a gate that ends with no exit code (signal or timeout) now says why and shows the output tail; the detected Pint and
   Prettier format gates check only git-tracked files, in batches; gate rows store `duration_ms` and `report` shows gate time per block (#26 items 11, 14, B173)
+- Proof: Pest/Laravel projects get a default junit runner, `run reload` may add new proof runners, a `proof.worktree.setup`
+  hook runs before RED (a failing setup fails with reason `setup`), and assertion deletion removes a multi-line chained
+  Pest `expect()` (#26 items 6-8, B171)
+- Coder context: `context pack` includes the block brief and acceptance and prints the pack itself; `spawn` for a coder
+  appends them; the sentinel and TESTS line are found in a JSON-escaped coder answer (#26 items 9-10, B172)
 
 ## [0.15.2] — 2026-10-30
 
