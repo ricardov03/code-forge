@@ -146,7 +146,9 @@ test('sweep lists and stops marked orphans of dead owners, preserving unmarked o
   assert.equal(reaper.isAlive(unmarked), true, 'unmarked orphan preserved');
 });
 
-test('zombie ps lines are grouped by parent command and never eligible for a signal', async () => {
+test('zombie ps lines are grouped by parent command and never eligible for a signal', async (t) => {
+  // Synthetic PIDs must never reach the OS, even when applying the sweep.
+  const kill = t.mock.method(process, 'kill', () => true);
   const parentCommand = `node ${script} worker --run r-zombie-parent`;
   const lines = `501 810 1 S 2048 Wed Oct 21 10:00:00 2026 ${parentCommand}
 501 811 810 Z 0 Wed Oct 21 10:00:01 2026 node ${script} worker --run r-zombie
@@ -156,6 +158,7 @@ test('zombie ps lines are grouped by parent command and never eligible for a sig
   const report = await reaper.sweepProcesses?.({ root, psText: lines, uid: 501, apply: true, readEnv: () => null, readRun: async () => ({ status: 'ended' }) });
   assert.deepEqual(report?.zombies ?? [], [{ ppid: 810, command: parentCommand, count: 2, pids: [811, 812] }]);
   assert.deepEqual(report.items.map((p) => [p.kind, p.pid]), [['worker', 810]], 'only the stale parent is a candidate; zombies and other users are excluded');
+  assert.equal(kill.mock.calls.some(({ arguments: [pid] }) => [811, 812, 813].includes(pid)), false, 'zombie PIDs never reach kill');
 });
 
 test('unreadable environment and live/reused owners fail closed; own run limits orphan cleanup', async () => {
