@@ -96,6 +96,15 @@ export function resolveTicket({ repoRoot, run, block, file, tree = null, after }
   const rel = assertRowPath(file);
   const root = tree === null ? null : realTree(tree);
   const content_hash = contentHash(root ?? repoRoot, rel);
+  return resolveHashTicket({ repoRoot, run, block, file: rel, tree: root, after, content_hash });
+}
+
+/** Resolve already measured content through the same acceptance/reopen identity.
+ * @param {{repoRoot: string, run: string, block: string, file: string, content_hash: string, tree?: string | null, after?: string}} opts
+ */
+export function resolveHashTicket({ repoRoot, run, block, file, content_hash, tree = null, after }) {
+  const rel = assertRowPath(file);
+  const root = tree === null ? null : realTree(tree);
   const { ticket } = reviewIdentity({ repoRoot, run, block, file: rel, content_hash, tree: root, after });
   return { rel, root, content_hash, ticket };
 }

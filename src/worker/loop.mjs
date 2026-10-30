@@ -237,6 +237,7 @@ export function recordedVerdict(result) {
  * @property {typeof reviewTicket} [review] - the engine hook (default `./engine.mjs`).
  * @property {typeof spawnSession} [spawn]
  * @property {typeof readRun} [readRun] - the run-record read behind the per-ticket config (a test seam).
+ * @property {(ms: number) => Promise<unknown>} [sleep] - idle scheduler wait (a test seam).
  * @property {{beforeLock?: () => void, afterCount?: (count: number) => Promise<unknown>}} [hooks] - deterministic boot races.
  * @property {typeof readTicket} [readTicket] - the ticket read (a test seam).
  * @property {typeof import('../util/exec.mjs').exec} [watchExec] - watch git exec seam.
@@ -288,6 +289,7 @@ export async function createWorker(opts, deps = {}) {
   let wake = null;
   /** @type {(() => void) | null} wakes the pool's wait in `drain` (stop) */
   let poolWake = null;
+  let activity = 0;
 
   /** @param {Record<string, any>} row */
   const ledger = (row) => writeRow(signRow({ run: runId, ...row }, key));
@@ -648,6 +650,7 @@ export async function createWorker(opts, deps = {}) {
           try { await logWarning({ warning: 'watch_tick_failed', message: text }); } catch { /* a log failure never stops dispatch */ }
         }
         const pending = pendingTickets(repoRoot).filter((id) => !poisoned.has(id) && !started.has(id));
+        if (pending.length > 0 || running.size > 0) activity += 1;
         if (pending.length > 0 && limit === null) ({ limit, fairShare } = await poolSettings());
         // Cache even unreadable hints for this tick: ranking never reads a ticket twice.
         /** @type {Map<string, ReturnType<typeof fileKeyOf>>} */
@@ -753,16 +756,23 @@ export async function createWorker(opts, deps = {}) {
   /** Serve the queue until `stop()`. */
   async function run() {
     announce();
+    let interval = pollMs;
+    let polled = false;
     try {
       while (!stopping) {
+        const before = activity;
         try {
           await drain();
         } catch {
           // the queue directory itself failed to read: try again on the next poll
         }
         if (stopping) break;
-        await new Promise((resolve) => {
-          const timer = setTimeout(resolve, pollMs);
+        const unchanged = before === activity;
+        interval = polled && unchanged ? Math.min(5000, interval * 2) : pollMs;
+        polled = true;
+        if (deps.sleep) await deps.sleep(interval);
+        else await new Promise((resolve) => {
+          const timer = setTimeout(resolve, interval);
           wake = () => {
             clearTimeout(timer);
             resolve(undefined);
