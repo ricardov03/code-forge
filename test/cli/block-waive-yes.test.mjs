@@ -154,9 +154,11 @@ test('clause 4 boundary: disagreement, broken shape, failed session and thrown j
     const before = (await f.rows()).length;
     const [code, text] = await f.waive(REASON, { waiverJudge: async () => { calls++; if (result === null) throw new Error('failed'); return result; } });
     assert.equal(code, 1);
-    assert.match(text, /^block waive: waive-yes-disagreed:/);
+    assert.match(text, result?.answer?.verdict === 'disagree'
+      ? /^block waive: waive-yes-disagreed:/ : /^block waive: waive-yes-broken:/);
     if (result?.answer?.verdict === 'disagree') assert.match(text, /The boundary is not covered\./);
-    assert.equal(calls, 1);
+    else assert.match(text, /Judge answer broken: no valid answer after retry and fallback\./);
+    assert.equal(calls, result?.answer?.verdict === 'disagree' ? 1 : 2, 'valid disagreement stops; a broken answer retries once');
     assert.equal((await f.rows()).length - before, 0);
     assert.equal((await f.waivers()).length, 0);
     const [closed, why] = await f.close();

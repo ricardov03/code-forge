@@ -3,6 +3,22 @@
 This page follows one feature from a written brief to a closed block. The skill runs these steps
 for you; every step is also a plain CLI verb you can run and inspect by hand.
 
+Every `block <verb>` accepts `--help` or `-h`, prints that verb's usage and exits 0 without
+reading run state, prompting or writing anything, even when other required arguments are absent.
+
+For `block open` and `block amend-acceptance`, `--acceptance <file>` reads a JSON/YAML list of
+`{clause, tests}` objects. `tests` is a nonempty list of test ids, for example:
+
+```yaml
+- clause: The command prints its usage and exits successfully
+  tests: [test/cli/verb-help.test.mjs]
+```
+
+The equivalent JSON is `[{"clause":"The command prints its usage and exits successfully","tests":["test/cli/verb-help.test.mjs"]}]`.
+Device checks may instead use `{clause, kind: human_check}` without `tests`.
+For `block open`, `--brief <file>` must name a file inside the repository; it cannot be inline
+brief text or a file outside the repo.
+
 The human can correct an open block's snapshotted clauses with `code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>`. Both terminals and confirmation are required; there is no `--yes`, and an active autopilot grant refuses it. The file follows the same rules as `block open`; invalid or unchanged lists write nothing. One signed `block.acceptance_amended` row records the old and new hashes and the reason. Earlier reviews no longer count, and the next review request or watch tick reviews the new clauses. Coders never run this verb.
 
 UI acceptance may include `kind: human_check` clauses without tests, recorded as `human_checks`. After all code gates pass, `block close` leaves such a block `awaiting_human_check`, prints every check and the next command, and delays its done signal. Status and report list the waiting ids, and `run end` refuses until the human checks the device and types `code-forge block human-pass <id> --run <r> --note "<device check note>" [--proof <existing-path>]` in a terminal, or stops the block. The note is required; `--proof` is optional, and when it is given the path must exist. When omitted, the row records `proof: null`. Human pass records a signed human row and closes it; there is no `--yes`, and an active autopilot grant refuses the verb.
@@ -605,7 +621,15 @@ ticket is done with that signed result. Running `review-file` on the same conten
 fresh attempt (`retry: true`) every time, with no cap, so once the file is back the file is
 reviewed normally.
 
-An answer that does not match the finding schema is `unavailable: schema`. The ledger keeps a
+An invalid JSON or schema answer from a reviewer or judge is a **broken answer**, not a
+disagreement or a negative verdict. With fallback models configured on the level and no explicit
+second-level rule, the same packet retries once on that model, then falls back to the next
+distinct runnable model in the level's configured fallback ladder (B168). Each model gets at
+most two attempts; a valid answer, including a valid negative answer, ends this recovery.
+When the ladder is exhausted, the result stays unavailable. An explicit second-level rule uses
+the policy described below.
+
+An answer that still does not match the finding schema is `unavailable: schema`. The ledger keeps a
 structural diagnosis of that answer (`review.schema_invalid`: its keys, their types and the schema
 errors, or where it stopped being JSON), never its text, so the miss can be explained. A schema
 miss and a timed-out attempt are both broken results, counted together per packet, level and role:
@@ -654,6 +678,33 @@ session, and never twice for one ticket. The second model is null when the rule'
 not used, which includes an L2 rule in consensus mode, because slot B is not the rule's.
 A deleted file is never routed. With no `review.routes`, or no rule that matches, the
 review runs exactly as before. `run reload` accepts a change to the key.
+
+For example, send files over 400 lines to a long-context reviewer, leaving files of exactly
+400 lines on the normal reviewer. `min_lines` is inclusive, so the threshold is 401:
+
+```yaml
+review:
+  routes:
+    - min_lines: 401
+      level: L2
+      provider: anthropic
+      model: claude-opus-5-5
+      session_timeout_s: 600
+```
+
+Choose the long-context model available to your project. Fallback lists in `levels.L<n>`,
+`review.routes` and a route's `second` must contain `{provider, model}` objects, with optional
+`effort`, rather than model-name strings. For example:
+
+```yaml
+levels:
+  L2:
+    provider: anthropic
+    model: claude-sonnet-5
+    fallback:
+      - provider: xai
+        model: grok-4.7
+```
 
 A cached round-1 `split_required` ran no session and counted no round. Plain `review-file`
 re-queues it with `retry: true`, and `review-file --fresh` re-queues it too (B110), keeping the
