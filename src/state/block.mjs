@@ -384,7 +384,7 @@ function refuseConfigOwner(owned, kinds, guarded) {
  *   kind?: string, cfg?: Record<string, any>, writeRow: WriteRow, now?: Date, tests?: string[], after?: string[],
  *   after_outcome?: {step: string, sha256: string}[],
  *   decision?: {question: 'lane', answer: string, source: 'rules', facts: Record<string, unknown>}, decisionId?: string,
- *   worktree?: (ctx: {baseSha: string, previous: TreeRecord | null}) => Promise<{path: string, make: () => Promise<OpenTree>}>,
+ *   worktree?: (ctx: {baseSha: string, baseExplicit: boolean, previous: TreeRecord | null}) => Promise<{path: string, make: () => Promise<OpenTree>}>,
  * }} opts
  * @returns {Promise<{block: Record<string, any>, pointer: string | null, worktreeReused: boolean}>} `worktreeReused`:
  *   the block took an earlier attempt's worktree as it was.
@@ -448,7 +448,7 @@ export async function openBlock(opts) {
       const branch = await git(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'], record.workspace, [0, 1]);
       const baseBranch = branch.code === 0 ? branch.stdout.trim() : null;
       // B62a: the tree is planned (read-only checks) before the overlap check, which needs its path
-      const planned = opts.worktree ? await opts.worktree({ baseSha, previous: prior }) : null;
+      const planned = opts.worktree ? await opts.worktree({ baseSha, baseExplicit: opts.base !== undefined, previous: prior }) : null;
       const self = { owned_files: owned, owned_kinds: kinds, worktree: planned ? { path: planned.path } : null };
       for (const [otherId, other] of Object.entries(activeBlocks(record))) {
         const pair = blocksOverlap(self, other);

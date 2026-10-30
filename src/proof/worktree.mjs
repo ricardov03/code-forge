@@ -15,8 +15,8 @@
  *                          never lists a tree as untracked. The block's tree is `<dir>/<block>`.
  *   proof.worktree.branch  a template; only `{run}` and `{block}` are substituted, and the result
  *                          must pass `git check-ref-format --branch`. Default `forge/{run}/{block}`.
- *   proof.worktree.base    the commit-ish the tree starts from; default the block's base (the
- *                          `--base` flag of `block open`, else HEAD).
+ *   proof.worktree.base    the commit-ish the tree starts from when `block open --base` is absent;
+ *                          default the block's base (HEAD).
  *
  * Every git call is an argv array (never a shell) with the inherited `GIT_*` environment stripped
  * (`gitEnv`), like the other git calls of the package. It never leaves half a tree behind: a
@@ -260,13 +260,14 @@ async function commitOf(ref, top, id) {
  * Plan the block's worktree, then make it (or reuse the one an earlier attempt of the same block
  * made) with `make()`. Both run in `block open` under the run lock BEFORE anything is recorded: the
  * plan first (read-only checks; its `path` feeds the overlap rule), `make()` after the open's
- * other checks. A refusal in either leaves no block, no row, no dispatch, no tree and no branch.
+ * other checks. A refusal in either records no block, row or dispatch and leaves no new tree or branch.
  *
  * Fresh (no `previous`): the branch is `proof.worktree.branch` for this run and block; the tree is
  * `<dir>/<block>` (`dir` resolved from the repository top level); the base is
- * `proof.worktree.base`, else `baseSha`. A block id that is not one path segment, a branch name git
- * refuses, a branch that already exists, something already at the path, a base that is not a
- * commit, or a failing `git worktree add <path> -b <branch> <base>` refuses the open
+ * `baseSha` when explicitly requested, else `proof.worktree.base` or `baseSha`. An existing branch
+ * is attached without resetting its tip when it descends from the base. A block id that is not one
+ * path segment, a branch name git refuses, a branch outside the base's ancestry, something already
+ * at the path, a base that is not a commit, or a failing `git worktree add` refuses the open
  * (`worktree-failed`); a failed add deletes the branch it made.
  *
  * Re-open (`previous`, the worktree an earlier entry of the same block recorded): the same path,
@@ -282,11 +283,11 @@ async function commitOf(ref, top, id) {
  * `git worktree remove --force <path>`, and `git branch -D <branch>` only when this call made the
  * branch (a branch kept from an earlier attempt is kept). Both results are checked: it resolves to
  * a sentence naming what is left behind, or null.
- * @param {{cwd: string, settings: WorktreeSettings, runId: string, id: string, baseSha: string, previous: WorktreeRecord | null}} opts
+ * @param {{cwd: string, settings: WorktreeSettings, runId: string, id: string, baseSha: string, baseExplicit?: boolean, previous: WorktreeRecord | null}} opts
  * @returns {Promise<PlannedWorktree>} the tree's `path` is absolute (a realpath once made).
  * @throws {StateError} `worktree-failed`, `git-failed`
  */
-export async function prepareWorktree({ cwd, settings, runId, id, baseSha, previous }) {
+export async function prepareWorktree({ cwd, settings, runId, id, baseSha, baseExplicit = false, previous }) {
   assertSegment(id);
   const top = await repoTopOf(cwd);
   const refuseOccupied = (/** @type {string} */ p) => {
@@ -322,20 +323,29 @@ export async function prepareWorktree({ cwd, settings, runId, id, baseSha, previ
 
   const branch = branchName(settings.branch, { run: runId, block: id });
   await assertBranchName(branch, top, id);
+  const attach = await branchExists(branch, top);
   const refuseBranch = async () => {
     if (await branchExists(branch, top)) throw new StateError('worktree-failed', `block ${id}: branch ${branch} already exists — delete it or change proof.worktree.branch; nothing was recorded`);
   };
-  await refuseBranch();
   // spelled as the realpath it will have, so the planned path (the overlap rule) equals the recorded one
   const dir = realAsFarAsExists(path.resolve(top, settings.dir ?? path.join('..', `${path.basename(top)}-worktrees`)));
-  const want = { path: path.join(dir, id), branch, base_sha: settings.base === null ? baseSha : await commitOf(settings.base, top, id) };
+  const want = { path: path.join(dir, id), branch, base_sha: baseExplicit || settings.base === null ? baseSha : await commitOf(settings.base, top, id) };
+  const assertDescendant = async () => {
+    const res = await git(['git', 'merge-base', '--is-ancestor', want.base_sha, `refs/heads/${branch}`], top);
+    if (res.result === 'ok') return;
+    if (res.code === 1) throw new StateError('worktree-failed', `block ${id}: branch ${branch} does not descend from base ${want.base_sha} — delete the branch or pick another block id; nothing was recorded`);
+    throw new StateError('worktree-failed', `block ${id}: cannot check branch ${branch} against base ${want.base_sha} (${gitReason(res)}); nothing was recorded`);
+  };
+  if (attach) await assertDescendant();
   refuseOccupied(want.path);
   const make = async () => {
-    // checked again: a branch made between the plan and now is someone else's, so the add must not
-    // run (its failure would delete that branch)
-    await refuseBranch();
-    await addTree(['git', 'worktree', 'add', want.path, '-b', want.branch, want.base_sha], want.path, top, id, want.branch);
-    return made(want, want.branch);
+    // Recheck ancestry before attaching, and never delete a branch that existed before the plan.
+    // A branch that appeared after the plan still refuses the add: it belongs to someone else.
+    if (attach) await assertDescendant();
+    else await refuseBranch();
+    const newBranch = attach ? null : want.branch;
+    await addTree(attach ? ['git', 'worktree', 'add', want.path, want.branch] : ['git', 'worktree', 'add', want.path, '-b', want.branch, want.base_sha], want.path, top, id, newBranch);
+    return made(want, newBranch);
   };
   return { path: want.path, make };
 }
