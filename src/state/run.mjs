@@ -275,8 +275,7 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
       if (config.context?.require_coder_tests === true) frozen.push('context.require_coder_tests');
       // B64b: and never had a block-end hook
       if (config.hooks?.on_block_end !== undefined) frozen.push('hooks.on_block_end');
-      // B87: and never had a proof runner
-      if (config.proof?.runners !== undefined) frozen.push('proof.runners');
+      // B171: a legacy run has no existing runners; adding its first list is safe.
       // B93: and never had a coder sandbox profile
       if (config.coder?.sandbox !== undefined) frozen.push('coder.sandbox');
     }

@@ -4,11 +4,11 @@
  * console text.
  *
  * The list comes from the run snapshot only (`proofRunners`, never the live `.code-forge.yml`):
- * `run start` freezes it, `run reload` refuses to change it, and with it set no block may own
- * `.code-forge.yml`. A coder cannot change the command that proves its own work.
+ * `run reload` may append entries but cannot change, reorder or remove existing entries. With
+ * it set no block may own `.code-forge.yml`.
  *
  *   - Selection: the first entry whose `match` covers the `--test` file, in list order. No entry ⇒
- *     the caller uses the built-in node:test command, or refuses (`unsupported-test`).
+ *     the caller uses the built-in node:test command, the Pest default, or refuses (`unsupported-test`).
  *   - Tokens: an argv item that is exactly `{test_file}`, `{test_id}`, `{test_filter}` or
  *     `{report}` is replaced; nothing else is (no shell, no substring expansion).
  *   - Each step (RED, GREEN) gets a fresh report dir under the run temp root, outside the work dir;
@@ -48,7 +48,7 @@
  *     under `<test_target>/<Suite>/`.
  */
 
-import { mkdtemp, readdir, rm } from 'node:fs/promises';
+import { mkdtemp, readFile, readdir, rm, stat } from 'node:fs/promises';
 import path from 'node:path';
 import { RUNNER_ADAPTER_TOKENS, runnerMessages } from '../config/validate.mjs';
 import { MASK_MIN_LENGTH } from '../gates/expand.mjs';
@@ -133,6 +133,30 @@ function checkedRunners(runners) {
 export function selectRunner(runners, file) {
   if (runners === null) return null;
   return checkedRunners(runners).find((entry) => entry.match.some((glob) => globMatch(file, glob))) ?? null;
+}
+
+/**
+ * Default JUnit command for a PHP test in a Laravel/Pest project. Explicit runners win.
+ * Detect in the source tree, before export, where the project's dependencies are present.
+ * @param {string} cwd @param {string} file @param {string | undefined} testCase
+ * @returns {Promise<RunnerEntry | null>}
+ */
+export async function defaultPestRunner(cwd, file, testCase) {
+  if (!file.endsWith('.php')) return null;
+  const isFile = async (/** @type {string} */ rel) => (await stat(path.join(cwd, rel)).catch(() => null))?.isFile() === true;
+  const hasPest = async () => {
+    if (await isFile('vendor/bin/pest')) return true;
+    // A block worktree may have no vendor yet; its setup can install/copy dependencies.
+    try {
+      const composer = JSON.parse(await readFile(path.join(cwd, 'composer.json'), 'utf8'));
+      return typeof composer?.require?.['pestphp/pest'] === 'string' || typeof composer?.['require-dev']?.['pestphp/pest'] === 'string';
+    } catch {
+      return false;
+    }
+  };
+  const command = await isFile('artisan') ? ['php', 'artisan', 'test'] : await hasPest() ? ['vendor/bin/pest'] : null;
+  if (command === null) return null;
+  return { match: [file], adapter: 'junit', argv: [...command, '{test_file}', '--log-junit', '{report}', ...(testCase === undefined ? [] : ['--filter', '{test_filter}'])] };
 }
 
 /**

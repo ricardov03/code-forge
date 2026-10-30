@@ -45,7 +45,7 @@ export const IMMUTABLE_KEYS = Object.freeze({
   // B64b: the block-end hook runs a command on the owner's machine at every block end, so only
   // the owner sets it, before the run starts
   'hooks.on_block_end': 'it runs a command on the owner\'s machine at every block end; fixed by the owner before the run starts',
-  // B87: the runner argv proves the coder's own work, so only the owner sets it, before the run starts
+  // B171: existing runner entries stay fixed; immutableChanges permits append-only additions.
   'proof.runners': 'the commands that prove a block are fixed by the owner before the run starts',
   // B93: the coder sandbox profile widens what the coder may write, so only the owner sets it,
   // before the run starts (a coder can never own `.code-forge.yml`)
@@ -138,7 +138,17 @@ function valueAt(cfg, dotted) {
  * @returns {string[]}
  */
 export function immutableChanges(before, after) {
-  return Object.keys(IMMUTABLE_KEYS).filter((k) => canonicalJSON(valueAt(before, k) ?? null) !== canonicalJSON(valueAt(after, k) ?? null));
+  return Object.keys(IMMUTABLE_KEYS).filter((k) => {
+    const oldValue = valueAt(before, k);
+    const newValue = valueAt(after, k);
+    // Additions go at the end: prepending could replace the first match of an existing runner.
+    if (k === 'proof.runners' && Array.isArray(newValue)) {
+      const oldRunners = oldValue ?? [];
+      if (Array.isArray(oldRunners) && newValue.length >= oldRunners.length
+        && oldRunners.every((entry, i) => canonicalJSON(entry) === canonicalJSON(newValue[i]))) return false;
+    }
+    return canonicalJSON(oldValue ?? null) !== canonicalJSON(newValue ?? null);
+  });
 }
 
 /**
@@ -243,7 +253,7 @@ export function blockEndHook(record) {
 }
 
 /**
- * B87: `proof.runners` of the run-start config snapshot (never the live config), as a deep copy
+ * B87: `proof.runners` of the snapshot in force (never the live config), as a deep copy
  * (entries and argv arrays), or null when the key is absent or the record is from before
  * snapshots. `proof/runners.mjs` checks each entry again before it runs one (fail closed).
  * @param {Record<string, any>} record

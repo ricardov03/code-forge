@@ -45,7 +45,7 @@ import { redactJSON, writeSafe } from '../util/redact.mjs';
 import { DEFAULT_COPY_UNTRACKED, DEFAULT_LINK_DIRS, buildExport, exportDirFor, recordProof, removeExport } from '../proof/export.mjs';
 import { acquireProofLock, lockHolder, releaseProofLock } from '../proof/lock.mjs';
 import { MECHANISMS, readJournal, restoreJournal, runRedGreen } from '../proof/red-green.mjs';
-import { adapterPrecheck, runnerCovers, runnerHook, runnerTimeoutMs, selectRunner } from '../proof/runners.mjs';
+import { adapterPrecheck, defaultPestRunner, runnerCovers, runnerHook, runnerTimeoutMs, selectRunner } from '../proof/runners.mjs';
 import { tierFor } from '../proof/tiers.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { blockFileSet, repoRelativePath } from '../review/gate-check.mjs';
@@ -282,18 +282,17 @@ export async function runProof(args, deps = {}) {
       const file = normalizeTestPath(sep < 0 ? flags.test : flags.test.slice(0, sep));
       const runId = flags.run;
       const record = await readRun(runId);
-      // B87: the runner comes from the run snapshot only, never the live file; no entry matches ⇒
-      // the built-in node:test command, or the refusal
+      const block = record.blocks?.[blockId];
+      if (block?.status !== 'open') throw new StateError('no-block', `block ${blockId} is not open in run ${runId}`);
+      const place = await proofPlace(runId, record, blockId, block);
+      // Explicit commands come from the snapshot; unmatched PHP tests get the Pest default.
       const runners = proofRunners(record);
-      const entry = selectRunner(runners, file);
+      const entry = selectRunner(runners, file) ?? await defaultPestRunner(place.dir, file, testCase);
       const runner = entry === null ? null : (hook(entry, { file, testCase }) ?? null);
       // a matched entry is run by its hook or not at all: never a node:test fallback (no row, no precheck)
       if (entry !== null && runner === null) throw new StateError('usage', `the ${entry.adapter} runner for ${file} has no hook; no proof was run`);
       // exactly one of the two: the built-in argv without a runner, the runner (its own argv) with one
       const how = runner === null || entry === null ? { argv: filteredTestArgv(file, testCase) } : { runner, timeoutMs: runnerTimeoutMs(entry) };
-      const block = record.blocks?.[blockId];
-      if (block?.status !== 'open') throw new StateError('no-block', `block ${blockId} is not open in run ${runId}`);
-      const place = await proofPlace(runId, record, blockId, block);
       await assertTestFile(place.dir, file);
       const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project });
       const config = await configAt(record.workspace);
@@ -327,6 +326,7 @@ export async function runProof(args, deps = {}) {
         test: { file, ...(testCase === undefined ? {} : { case: testCase }), characterization: mechanism === 'assertion-deletion' },
         sources,
         isolation,
+        setup: exp ? config?.proof?.worktree?.setup ?? [] : [],
         print: (line) => err(`${line}\n`),
       });
       // B20: the signed row names what the proof covers — the block gate reads `covers` per
@@ -343,6 +343,7 @@ export async function runProof(args, deps = {}) {
       // values are never shown
       const runnerFields =
         runner === null ? {} : { runner: runner.adapter, failed_tests: red !== null && 'failed_tests' in red ? red.failed_tests : [], env_keys: [...runner.env_keys] };
+      const setupFields = result.reason === 'setup' ? { reason: result.reason, output_tail: result.output_tail } : {};
       await recordProof({
         runId,
         writeRow,
@@ -359,6 +360,7 @@ export async function runProof(args, deps = {}) {
           failed: red?.failed ?? null,
           covers,
           ...runnerFields,
+          ...setupFields,
         },
       });
       out({
@@ -371,6 +373,7 @@ export async function runProof(args, deps = {}) {
         green: result.green ?? null,
         proven,
         ...runnerFields,
+        ...setupFields,
         ...(exp ? { export: { dir: exp.dir, restored: exp.restored, untracked: exp.untracked } } : {}),
       });
       return proven ? 0 : 1;
