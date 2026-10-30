@@ -777,7 +777,8 @@ function ruleBroken(row, claim, ctx) {
 }
 
 /**
- * Validate the delegate's answer (step 3). Only a schema-invalid answer is refused. A row answers
+ * Validate the delegate's answer (step 3). Null commands/excerpts are normalized on a copy and
+ * their matched claims downgraded; every other schema-invalid answer is refused. A row answers
  * claim `F<n>` when its fact_id is `F<n>` and its kind is the claim's kind (the id is the anchor,
  * the claim text may be reworded); failing that, when its echoed claim ({@link echoedClaim})
  * equals the claim token and its fact_id is `F<n>` or its kind is the claim's kind. Claims the
@@ -794,11 +795,23 @@ function ruleBroken(row, claim, ctx) {
  * @throws {FactsError} `refused` when the answer does not match the schema.
  */
 export function validateFacts(answer, claims, opts = {}) {
-  if (!validateFile(answer)) {
+  const normalized = structuredClone(answer);
+  /** @type {Map<object, string[]>} */
+  const nullFields = new Map();
+  if (normalized && typeof normalized === 'object' && 'facts' in normalized && Array.isArray(normalized.facts)) {
+    for (const row of normalized.facts) {
+      if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
+      const fields = ['command', 'output_excerpt'].filter((field) => row[field] === null);
+      if (fields.length === 0) continue;
+      for (const field of fields) row[field] = '';
+      nullFields.set(row, fields);
+    }
+  }
+  if (!validateFile(normalized)) {
     const where = (validateFile.errors ?? []).map((e) => `${e.instancePath || '/'} ${e.message}`).slice(0, 5);
     throw new FactsError('refused', `facts answer does not match facts.schema.json: ${where.join('; ')}`);
   }
-  const rows = /** @type {{facts: Fact[]}} */ (answer).facts;
+  const rows = /** @type {{facts: Fact[]}} */ (normalized).facts;
   /** @type {Fact[]} */
   const facts = [];
   /** @type {Downgrade[]} */
@@ -828,7 +841,8 @@ export function validateFacts(answer, claims, opts = {}) {
       return;
     }
     const base = { fact_id: id, claim: redact(claim.token), kind: claim.kind, command: redact(row.command), output_excerpt: claim.kind === 'env' ? '' : redact(row.output_excerpt) };
-    const broken = ruleBroken(row, claim, opts);
+    const fields = nullFields.get(row);
+    const broken = fields ? `delegate returned null ${fields.join(', ')}` : ruleBroken(row, claim, opts);
     if (broken) {
       const reason = redact(broken);
       downgraded.push({ fact_id: id, reason });

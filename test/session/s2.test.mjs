@@ -31,11 +31,11 @@ const SOURCE_SNAPSHOT = {
 const OPENAI_SNAPSHOT = {
   type: 'object',
   properties: {
-    decision: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    confidence: { anyOf: [{ type: 'number', minimum: 0, maximum: 1 }, { type: 'null' }] },
-    reason: { anyOf: [{ type: 'string' }, { type: 'null' }] },
-    overrule: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
-    ask_human: { anyOf: [{ type: 'boolean' }, { type: 'null' }] },
+    decision: { type: 'string' },
+    confidence: { type: 'number', minimum: 0, maximum: 1 },
+    reason: { type: 'string' },
+    overrule: { type: 'boolean' },
+    ask_human: { type: 'boolean' },
     human_question: { type: ['string', 'null'] },
   },
   required: ['decision', 'confidence', 'reason', 'overrule', 'ask_human', 'human_question'],
