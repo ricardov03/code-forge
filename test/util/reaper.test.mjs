@@ -119,6 +119,26 @@ async function withProcessTable(rows, body) {
   finally { ps.mock.restore(); kill.mock.restore(); syncBuiltinESMExports(); }
 }
 
+test('sweep never lists or stops reparented live or unreadable-run workers with dead owners', async () => {
+  const root = await registryDir('live-orphan-workers');
+  const states = ['open', 'running', 'active', 'unreadable'];
+  const rows = states.map((status, i) => ({ pid: 90000050 + i, ppid: 1, pgid: 90000050 + i,
+    state: 'S', command: `node /fixture/code-forge.mjs worker --run r-${status}` }));
+  await withProcessTable(rows, async ({ psText, alive, calls }) => {
+    const opts = { root, psText, graceMs: 0,
+      readRun: async (id) => {
+        if (id === 'r-unreadable') throw new Error('unreadable run record');
+        return { status: id.slice(2) };
+      },
+      readEnv: () => ({ CODE_FORGE_OWNER_PID: '90000010' }),
+    };
+    assert.deepEqual((await sweepProcesses(opts)).items, [], 'dry run lists no live or unreadable worker');
+    assert.deepEqual((await sweepProcesses({ ...opts, apply: true })).items, [], 'apply lists no live or unreadable worker');
+    assert.deepEqual(calls, [], 'apply sends no signals');
+    assert.deepEqual([...alive], rows.map((p) => p.pid), 'every worker survives');
+  });
+});
+
 test('zombie parents remain eligible workers, orphans and registry leaders; protected pids never receive signals', async () => {
   const root = await registryDir('zombie-parents');
   const run = path.join(root, 'dead-run');
@@ -325,22 +345,26 @@ test('a leader that dies of SIGTERM is never signalled again: exactly one signal
 
 test('EPERM on the group signal: the pid is reported unknown and never retried', { timeout: 30000 }, async () => {
   const dir = await registryDir('eperm');
-  const pid = await spawnIdle(false);
-  registerPid(dir, pid, process.execPath);
-
-  await withKillSpy(
-    () => {
-      throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
-    },
-    async (calls) => {
-      const result = await sweep(dir, { graceMs: 200 });
-      assert.deepEqual(result, { killed: [], mismatched: [], unknown: [pid], stale: [] });
-      assert.deepEqual(calls, [[-pid, 'SIGTERM']]);
-    },
-  );
-  assert.equal(isAlive(pid), true);
-  assert.equal(existsSync(path.join(dir, `${pid}.json`)), true);
-  process.kill(-pid, 'SIGKILL');
+  const pid = 90000050;
+  // A real ps timeout also reports unknown, but never attempts a signal. Model a readable
+  // owned leader so this test specifically reaches the OS's EPERM response to kill(-pid).
+  await withProcessTable([{ pid, ppid: 1, pgid: pid, state: 'S', command: 'node idle' }], async ({ calls: delivered }) => {
+    registerPid(dir, pid, process.execPath);
+    assert.equal(listEntries(dir)[0].start_time, STARTED, 'the registered identity is readable');
+    await withKillSpy(
+      () => {
+        throw Object.assign(new Error('EPERM'), { code: 'EPERM' });
+      },
+      async (calls) => {
+        const result = await sweep(dir, { graceMs: 200 });
+        assert.deepEqual(result, { killed: [], mismatched: [], unknown: [pid], stale: [] });
+        assert.deepEqual(calls, [[-pid, 'SIGTERM']], 'exactly one group attempt, no fallback or retry');
+      },
+    );
+    assert.deepEqual(delivered, [], 'permission denial delivers no signal');
+    assert.equal(isAlive(pid), true);
+    assert.equal(existsSync(path.join(dir, `${pid}.json`)), true);
+  });
 });
 
 test('registry sweep never signals the current process or its ancestors', async () => {

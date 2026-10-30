@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync, mkdirSync, writeFileSync, rmSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, writeFileSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -12,7 +12,7 @@ import * as reaper from '../../src/util/reaper.mjs';
 import { runRecordPath } from '../../src/state/paths.mjs';
 import { checkReviewState } from '../../src/doctor/local.mjs';
 
-const root = path.join(os.tmpdir(), 'sweep-fixtures');
+const root = mkdtempSync(path.join(os.tmpdir(), 'sweep-fixtures-'));
 const previousHome = process.env.HOME;
 process.env.HOME = path.join(root, 'home');
 mkdirSync(root, { recursive: true });

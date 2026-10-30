@@ -333,6 +333,8 @@ export async function sweepProcesses(opts = {}) {
       } catch (err) {
         if (err?.code === 'no-run') items.push({ ...p, kind: 'worker', runId: worker[1] });
       }
+      // The run record is authoritative for workers, including when it cannot be read.
+      continue;
     }
     if (p.ppid !== 1 || items.some((item) => item.pid === p.pid)) continue;
     const env = envFor(p);
