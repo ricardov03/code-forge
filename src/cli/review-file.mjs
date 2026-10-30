@@ -67,7 +67,7 @@
  * needs its own review.
  */
 
-import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, enqueueHash, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveHashTicket, resolveTicket, reviewExclusionFor } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
@@ -86,9 +86,10 @@ import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
 const USAGE =
-  'usage: code-forge review-file <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n' +
+  'usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n' +
   '       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n' +
-  '       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n';
+  '       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n' +
+  '       --cwd <dir> applies to queueing and both wait modes\n';
 
 export const DEFAULT_WAIT_MS = 90_000;
 const POLL_MS = 200;
@@ -500,6 +501,13 @@ function blockTicketOutcome(marker) {
   return 'unavailable';
 }
 
+/** Completion timings are progress metadata; old markers remain readable.
+ * @param {Record<string, any> | null} value @returns {Record<string, any>} */
+function ticketTimings(value) {
+  return Object.fromEntries(['queued_at', 'started_at', 'finished_at', 'duration_ms']
+    .filter((key) => value && Object.hasOwn(value, key)).map((key) => [key, value[key]]));
+}
+
 /**
  * A block wait uses unsigned results only to classify retries; it never reads the signing key.
  * Re-scan metadata each poll and read content only after its stamp changes. Deliver unseen findings of the newest earlier ticket
@@ -556,11 +564,11 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
       if (!present && previous.length > 0) {
         const newest = previous[previous.length - 1];
         const marker = blockTicketMarker(repoRoot, newest.ticket);
-        if (marker?.status === 'stopped') return { file, ticket: newest.ticket, status: 'done', outcome: blockTicketOutcome(marker) };
+        if (marker?.status === 'stopped') return { file, ticket: newest.ticket, status: 'done', outcome: blockTicketOutcome(marker), ...ticketTimings(marker) };
         if (marker?.status === 'reviewed' && marker.open_findings === true && live) {
           if (deliveredHere.has(newest.ticket) || deliverBlockFindings({ repoRoot, block, file, ticket: newest.ticket })) {
             deliveredHere.add(newest.ticket);
-            return { file, ticket: newest.ticket, status: 'findings', outcome: blockTicketOutcome(marker) };
+            return { file, ticket: newest.ticket, status: 'findings', outcome: blockTicketOutcome(marker), ...ticketTimings(marker) };
           }
         }
       }
@@ -573,7 +581,7 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
         dropFreshDone({ repoRoot, ticket, file, dropDone, once: true, statuses: RETRY_STATUSES });
         marker = blockTicketMarker(repoRoot, ticket);
       }
-      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : marker ? 'done' : 'pending', outcome: blockTicketOutcome(marker) };
+      return { file, ticket: present ? ticket : null, status: !present ? 'not_queued' : marker ? 'done' : 'pending', outcome: blockTicketOutcome(marker), ...ticketTimings(marker) };
     });
     if (downPolls >= 2) {
       say({ block, files, done: false, status: 'worker_down' });
@@ -609,9 +617,17 @@ export async function runReviewFile(args, deps = {}) {
   const stdout = deps.stdout ?? process.stdout;
   const stderr = deps.stderr ?? process.stderr;
   const say = (/** @type {Record<string, any>} */ obj) => writeSafe(stdout, `${JSON.stringify(obj)}\n`);
-  const cwd = deps.cwd ?? process.cwd();
   try {
-    const { flags, positionals } = parseFlags(args, { values: ['block', 'run', 'wait', 'wait-block', 'max', 'answers', 'of'], booleans: ['fresh'] });
+    const { flags, positionals } = parseFlags(args, { values: ['cwd', 'block', 'run', 'wait', 'wait-block', 'max', 'answers', 'of'], booleans: ['fresh'] });
+    let cwd = deps.cwd ?? process.cwd();
+    if (typeof flags.cwd === 'string') {
+      cwd = path.resolve(cwd, flags.cwd);
+      try {
+        if (!statSync(cwd).isDirectory()) throw new Error('not a directory');
+      } catch {
+        throw new WorkerError('usage', '--cwd must name an existing directory');
+      }
+    }
     // the queue and the worker: the main tree, also from inside a block's worktree
     const repoRoot = await mainRootOf(cwd);
 
@@ -631,7 +647,7 @@ export async function runReviewFile(args, deps = {}) {
       for (;;) {
         if (isDone(repoRoot, ticket)) {
           const result = doneResult(repoRoot, ticket);
-          say({ ticket, status: 'done', result, ...fixList(result) });
+          say({ ticket, status: 'done', result, ...ticketTimings(result), ...fixList(result) });
           return 0;
         }
         downPolls = liveWorker(repoRoot) ? 0 : downPolls + 1;

@@ -75,8 +75,8 @@ describe('the sessions the worker spawns', () => {
       const recs = records(recordDir);
       assert.equal(recs.length, 1);
       const names = recs[0].env_keys;
-      const keyVars = names.filter((/** @type {string} */ n) => /^(CODE_FORGE_|JEV_)/.test(n) || /(_TOKEN|_KEY|_SECRET)$/.test(n));
-      assert.deepEqual(keyVars, []);
+      const internalVars = names.filter((/** @type {string} */ n) => /^(CODE_FORGE_|JEV_)/.test(n) || /(_TOKEN|_KEY|_SECRET)$/.test(n));
+      assert.deepEqual(internalVars, ['CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN_ID'], 'only the three process ownership markers added by exec reach the session');
       assert.equal(names.includes('SNEAKY_TOKEN'), false);
       assert.deepEqual(recs[0].fake_valued_keys, []); // no variable, whatever its name, carries a fake secret
       assert.equal(names.includes('FAKE_RECORD'), true); // the env did reach the fake
