@@ -19,7 +19,7 @@ const { openBlock } = await import('../../src/state/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { runBlock } = await import('../../src/cli/block.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
-const { announceWorker, queueDir } = await import('../../src/worker/queue.mjs');
+const { announceWorker, pendingTickets, queueDir, readTicket } = await import('../../src/worker/queue.mjs');
 const { createWorker } = await import('../../src/worker/loop.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 const { startGrant } = await import('../../src/autopilot/grant.mjs');
@@ -51,6 +51,21 @@ const expectedOutput = (ticket) => ({
   waive: 'block B1 waived C1 in src/a.mjs (by: human)\n',
   reopen: `block B1 reopened src/a.mjs (from stopped l3_patch_exhausted; by: human)\nticket ${ticket}\nnext: code-forge review-file --wait ${ticket}\n`,
 });
+
+/** @param {Awaited<ReturnType<typeof fixture>>} f @param {'waive' | 'reopen'} verb @param {{code: number, out: string, err: string}} result */
+function assertHumanOutput(f, verb, result) {
+  let ticket = '';
+  if (verb === 'reopen') {
+    const printed = result.out.match(/^ticket ([0-9a-f]{24})$/m);
+    assert.ok(printed, 'reopen prints a ticket id');
+    ticket = printed[1];
+    assert.notEqual(ticket, f.ticket, 'reopen queues a new ticket instead of reusing the completed ticket');
+    assert.deepEqual(pendingTickets(f.repo), [ticket], 'only the printed ticket is queued');
+    const queued = readTicket(f.repo, ticket);
+    assert.deepEqual([queued.run, queued.block, queued.file], [f.runId, 'B1', SRC]);
+  }
+  assert.deepEqual([result.code, result.out, result.err], [0, expectedOutput(ticket)[verb], '']);
+}
 
 /** @returns {{write: (s: string) => boolean, text: string}} */
 function capture() {
@@ -242,7 +257,7 @@ test('B80 (2): at a terminal, "yes" ⇒ the prompt asked once, then the same sig
   for (const verb of VERBS) {
     f.ui.asked = [];
     const r = await f.block(f.argsOf[verb]);
-    assert.deepEqual([r.code, r.out, r.err], [0, expectedOutput(f.ticket)[verb], '']);
+    assertHumanOutput(f, verb, r);
     assert.deepEqual(f.ui.asked, [{ message: f.prompts[verb], initialValue: false }]);
   }
   const rows = await f.humanRows();
@@ -255,8 +270,8 @@ test('B80 (2): at a terminal, "yes" ⇒ the prompt asked once, then the same sig
     const { mac: _m, ts: _t, tokens_source: _ts, cost_source: _cs, ...rest } = row;
     assert.equal(JSON.stringify({ ...rest, run: BASE_RUN }), BASE_ROW[verb]);
   }
-  // the reopen cleared the cached stop, as before
-  assert.equal(existsSync(f.doneMarker), false);
+  // The cached stop is retired and cannot run alongside the new ticket.
+  assert.equal(JSON.parse(readFileSync(f.doneMarker, 'utf8')).reason, 'superseded');
 });
 
 test('B80 (3): reopen and waive --yes need evidence; no prompt and nothing on disk changed', async () => {
@@ -299,7 +314,7 @@ test('B80 (4): an active autopilot grant changes nothing — no terminal is stil
   for (const verb of VERBS) {
     f.ui.asked = [];
     const r = await f.block(f.argsOf[verb]);
-    assert.deepEqual([r.code, r.out, r.err], [0, expectedOutput(f.ticket)[verb], '']);
+    assertHumanOutput(f, verb, r);
     assert.deepEqual(f.ui.asked, [{ message: f.prompts[verb], initialValue: false }]);
   }
   const rows = await f.humanRows();
@@ -311,7 +326,7 @@ test('B80 (2): "yes" with stdin and stdout each a TTY (no isTTY given) ⇒ asked
   for (const verb of VERBS) {
     f.ui.asked = [];
     const r = await f.block(f.argsOf[verb], { stdinIsTTY: true, stdoutIsTTY: true });
-    assert.deepEqual([r.code, r.out, r.err], [0, expectedOutput(f.ticket)[verb], '']);
+    assertHumanOutput(f, verb, r);
     assert.deepEqual(f.ui.asked, [{ message: f.prompts[verb], initialValue: false }]);
   }
   const rows = await f.humanRows();

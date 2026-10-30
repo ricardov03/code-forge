@@ -78,7 +78,7 @@ function readJSON(file) {
 }
 
 /**
- * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string, acceptance_revision?: string, kind?: 'answers', by_file?: string, by_hash?: string, answers?: string[]}} Ticket
+ * @typedef {{ticket: string, run: string, block: string, file: string, content_hash: string, enqueued_at: string, tree?: string, acceptance_revision?: string, reopened_at?: string, kind?: 'answers', by_file?: string, by_hash?: string, answers?: string[]}} Ticket
  *   `tree` (B62b): the block's worktree the content was hashed in. It is part of the ticket id,
  *   and the worker only checks it against the tree it takes from the run record (a ticket whose
  *   tree is not that one is `unavailable`, `worktree-mismatch`); it never reads content there.
@@ -88,16 +88,16 @@ function readJSON(file) {
  * The review ticket for `file`'s CURRENT content: the one rule `enqueue` and `clearDone` (B72)
  * share — the repo-relative path, the realpath'd tree (or null), the content hash taken under the
  * tree when given (else under `repoRoot`) and the ticket id over all of them.
- * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null}} opts
+ * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null, after?: string}} opts
  * @returns {{rel: string, root: string | null, content_hash: string, ticket: string}}
  * @throws {WorkerError} `bad-path` for a bad file path or a tree that cannot be resolved.
  */
-export function resolveTicket({ repoRoot, run, block, file, tree = null }) {
+export function resolveTicket({ repoRoot, run, block, file, tree = null, after }) {
   const rel = assertRowPath(file);
   const root = tree === null ? null : realTree(tree);
   const content_hash = contentHash(root ?? repoRoot, rel);
-  const revision = acceptanceRevision(repoRoot, run, block);
-  return { rel, root, content_hash, ticket: reviewTicketId({ run, block, file: rel, content_hash, tree: root, acceptance_revision: revision }) };
+  const { ticket } = reviewIdentity({ repoRoot, run, block, file: rel, content_hash, tree: root, after });
+  return { rel, root, content_hash, ticket };
 }
 
 /** The mirror lets sandboxed callers resolve the same ticket without the private record.
@@ -109,10 +109,39 @@ function acceptanceRevision(repoRoot, run, block) {
   return typeof revision === 'string' ? revision : undefined;
 }
 
-/** @param {{run: string, block: string, file: string, content_hash: string, tree?: string | null, acceptance_revision?: string}} parts */
+/** @param {{run: string, block: string, file: string, content_hash: string, tree?: string | null, acceptance_revision?: string, reopened_at?: string}} parts */
 function reviewTicketId(parts) {
   const id = ticketId(parts);
-  return parts.acceptance_revision === undefined ? id : createHash('sha256').update(`${id}\0${parts.acceptance_revision}`).digest('hex').slice(0, 24);
+  const revisionId = parts.acceptance_revision === undefined ? id : createHash('sha256').update(`${id}\0${parts.acceptance_revision}`).digest('hex').slice(0, 24);
+  return parts.reopened_at === undefined ? revisionId : createHash('sha256').update(`${revisionId}\0reopen\0${parts.reopened_at}`).digest('hex').slice(0, 24);
+}
+
+/** Reopens get their own identity; ordinary enqueues keep using that attempt afterwards.
+ * @param {{repoRoot: string, run: string, block: string, file: string, content_hash: string, tree: string | null, after?: string}} opts
+ */
+function reviewIdentity({ repoRoot, run, block, file, content_hash, tree, after }) {
+  const acceptance_revision = acceptanceRevision(repoRoot, run, block);
+  let names;
+  try { names = readdirSync(queueDir(repoRoot)); } catch (err) {
+    if (err.code !== 'ENOENT') throw new WorkerError('queue-unreadable', 'the review queue cannot be read');
+    names = [];
+  }
+  const matching = [];
+  for (const name of names) {
+    if (!/^[0-9a-f]{24}\.json$/.test(name)) continue;
+    const t = readJSON(path.join(queueDir(repoRoot), name));
+    // Scope before validation: a stored tree from another ticket must never select this tree.
+    if (t && !t.kind && t.run === run && t.block === block && t.file === file && t.content_hash === content_hash && (t.tree ?? null) === tree && t.acceptance_revision === acceptance_revision) {
+      matching.push(readTicket(repoRoot, name.slice(0, 24)));
+    }
+  }
+  matching.sort((a, b) => a.enqueued_at.localeCompare(b.enqueued_at) || a.ticket.localeCompare(b.ticket));
+  const latest = matching.filter((t) => t.reopened_at !== undefined).at(-1);
+  const afterTime = Date.parse(after ?? '');
+  const fresh = matching.filter((t) => Date.parse(t.enqueued_at) > afterTime).at(-1);
+  const reopened_at = fresh ? fresh.reopened_at : Number.isFinite(afterTime) ? after : latest?.reopened_at;
+  const ticket = reviewTicketId({ run, block, file, content_hash, tree, acceptance_revision, reopened_at });
+  return { ticket, acceptance_revision, reopened_at, matching };
 }
 
 /** Reset only the commit-watch cursor; review evidence and results remain intact.
@@ -128,8 +157,9 @@ export function resetAcceptanceWatch(repoRoot, block) {
  * content is hashed under `tree` when given (B62b: the block's worktree, realpath'd here), else
  * under `repoRoot`. The tree is part of the ticket id, so a main-tree ticket and a tree ticket for
  * the same bytes differ, and the answer names the tree given here, never a stored value.
- * `after` renews a pre-reopen attempt while retaining the content-based ticket identity.
- * A ticket already queued after that row is reused, including its eventual completion.
+ * `after` creates a new identity for a reopen. Repeated calls for that row reuse the ticket,
+ * including its eventual completion; ordinary enqueues also reuse the latest reopened attempt.
+ * A manual review queued after the row already counts as fresh and keeps its identity.
  * @param {{repoRoot: string, run: string, block: string, file: string, tree?: string | null, now?: Date, after?: string}} opts
  * @returns {{ticket: string, status: 'queued' | 'done', file: string, content_hash: string, tree?: string} | {status: 'excluded', file: string, rule: string, ticket?: never, content_hash?: never, tree?: never}}
  * @throws {WorkerError} `bad-path` for a relative `tree` or one that cannot be resolved.
@@ -150,22 +180,19 @@ export function enqueueHash({ repoRoot, run, block, file, content_hash, tree = n
   const rule = reviewExclusionFor(repoRoot, run, rel);
   if (rule !== null) return { status: 'excluded', file: rel, rule };
   const root = tree === null ? null : realTree(tree);
-  const acceptance_revision = acceptanceRevision(repoRoot, run, block);
-  const ticket = reviewTicketId({ run, block, file: rel, content_hash, tree: root, acceptance_revision });
+  const { ticket, acceptance_revision, reopened_at, matching } = reviewIdentity({ repoRoot, run, block, file: rel, content_hash, tree: root, after });
   const target = path.join(queueDir(repoRoot), `${ticket}.json`);
-  const named = { ...(root === null ? {} : { tree: root }), ...(acceptance_revision === undefined ? {} : { acceptance_revision }) };
-  const reopenedAt = Date.parse(after ?? '');
-  const previous = after === undefined ? null : readJSON(target);
-  if (Number.isFinite(reopenedAt) && (!previous || !(Date.parse(previous.enqueued_at) > reopenedAt))) {
-    // Drop the old result before publishing the renewed attempt. Strictly later even when the
-    // enqueue and signed row share a millisecond, so repeated joins never restart live work.
-    clearDone({ repoRoot, run, block, file: rel, tree: root });
-    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: new Date(Math.max(now.getTime(), reopenedAt + 1)).toISOString(), ...named };
-    writeAtomic(target, `${JSON.stringify(body)}\n`);
+  const named = { ...(root === null ? {} : { tree: root }), ...(acceptance_revision === undefined ? {} : { acceptance_revision }), ...(reopened_at === undefined ? {} : { reopened_at }) };
+  const reopenedAt = Date.parse(reopened_at ?? '');
+  if (Number.isFinite(reopenedAt)) {
+    // clearDone may have made the old ticket pending. Retire it before publishing its successor.
+    for (const previous of matching) {
+      if (previous.ticket !== ticket && Date.parse(previous.enqueued_at) <= reopenedAt) supersedeTicket(repoRoot, previous.ticket);
+    }
   }
   if (!existsSync(target)) {
     /** @type {Ticket} */
-    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: now.toISOString(), ...named };
+    const body = { ticket, run, block, file: rel, content_hash, enqueued_at: new Date(Number.isFinite(reopenedAt) ? Math.max(now.getTime(), reopenedAt + 1) : now.getTime()).toISOString(), ...named };
     // Publish a complete immutable ticket without replacing a concurrent coder's ticket.
     mkdirSync(path.dirname(target), { recursive: true });
     const tmp = `${target}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
@@ -570,6 +597,7 @@ export function readTicket(repoRoot, id) {
     return /** @type {Ticket} */ (t);
   }
   if (t.acceptance_revision !== undefined && typeof t.acceptance_revision !== 'string') throw new WorkerError('bad-ticket', `ticket ${id} has an invalid acceptance revision`);
+  if (t.reopened_at !== undefined && (typeof t.reopened_at !== 'string' || !Number.isFinite(Date.parse(t.reopened_at)))) throw new WorkerError('bad-ticket', `ticket ${id} has an invalid reopen timestamp`);
   if (reviewTicketId(t) !== id) throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
   return /** @type {Ticket} */ (t);
 }
