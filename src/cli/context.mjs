@@ -7,7 +7,7 @@
  * (`tmp.root` is fixed for the run), as for the worker. The orchestrator sends the pack's text with
  * every coder task.
  *
- * Prints two lines: the path, then `tokens ~<n>` (the review packets' bytes / 4 estimate); with
+ * Prints the pack text; --path-only prints the path then `tokens ~<n>` for legacy callers; with
  * `--json` one line `{"path":…,"tokens":…,"lines":…,"cut":…,"sha256":…}`. Each pack written
  * appends a signed `context.pack {block, path, sha256, tokens, lines, cut}` ledger row — unless
  * the block's last verified `context.pack` row has the same sha256 and path (same pack: no row,
@@ -28,7 +28,7 @@ import { mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { loadProjectConfig } from '../config/load.mjs';
-import { assemblePack, ContextError, contextSettings, packTokens, readSources } from '../context/pack.mjs';
+import { assemblePack, ContextError, contextSettings, packTokens, readBlockBrief, readSources } from '../context/pack.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { runRootFor } from '../session/spawn.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
@@ -39,7 +39,7 @@ import { loadKey, verifyRow } from '../state/signer.mjs';
 import { assertBlockId, mainRootOf, WorkerError } from '../worker/ticket.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
-const USAGE = 'usage: code-forge context pack --run <id> --block <id> [--json]\n';
+const USAGE = 'usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]\n';
 
 /** @param {unknown} err @returns {string} the fs error's code (or message) for a one-line refusal. */
 const fsCode = (err) => /** @type {NodeJS.ErrnoException} */ (err)?.code ?? (err instanceof Error ? err.message : 'error');
@@ -78,7 +78,7 @@ export async function runContext(args, deps = {}) {
     return 2;
   }
   try {
-    const { flags, positionals } = parseFlags(rest, { values: ['run', 'block'], booleans: ['json'] });
+    const { flags, positionals } = parseFlags(rest, { values: ['run', 'block'], booleans: ['json', 'path-only'] });
     if (positionals.length > 0 || typeof flags.run !== 'string' || typeof flags.block !== 'string') throw new StateError('usage', 'context pack needs --run and --block');
     const runId = flags.run;
     let block;
@@ -108,6 +108,8 @@ export async function runContext(args, deps = {}) {
         level: entry.level ?? null,
         owned: Array.isArray(entry.owned_files) ? entry.owned_files : [],
         tests: Array.isArray(entry.test_files) ? entry.test_files : null,
+        brief: readBlockBrief(repoRoot, entry),
+        acceptance: entry.acceptance,
         worktree: entry.worktree && typeof entry.worktree.path === 'string' ? { path: entry.worktree.path, branch: entry.worktree.branch } : null,
         codeForge: {
           node: process.execPath,
@@ -162,7 +164,8 @@ export async function runContext(args, deps = {}) {
       return 1;
     }
     if (flags.json === true) writeSafe(stdout, `${JSON.stringify({ path: file, tokens, lines, cut, sha256 })}\n`);
-    else writeSafe(stdout, `${file}\ntokens ~${tokens}\n`);
+    else if (flags['path-only'] === true) writeSafe(stdout, `${file}\ntokens ~${tokens}\n`);
+    else writeSafe(stdout, text);
     return 0;
   } catch (thrown) {
     if (thrown instanceof StateError && thrown.code === 'usage') {

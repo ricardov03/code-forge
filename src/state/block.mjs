@@ -461,6 +461,7 @@ export async function openBlock(opts) {
       const outcomeDependencies = opts.after_outcome === undefined ? {} : { after_outcome: opts.after_outcome };
       const entry = { block: id, base_sha: baseSha, base_branch: baseBranch, owned_files: [...owned], owned_kinds: { ...kinds }, level: dispatched.level, kind, attempt, opened_at: now.toISOString(), acceptance, lines_forecast: lines, status: 'open', tree_at_open: treeOpen, ...(tests ? { test_files: tests } : {}), ...(after !== null ? { after } : {}), ...outcomeDependencies, ...(tree ? { worktree: tree.worktree } : {}) };
       if (humanChecks.length > 0) Object.assign(entry, { human_checks: humanChecks });
+      if (opts.brief) Object.assign(entry, { brief: { path: opts.brief.path } });
       record.blocks[id] = entry;
       const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
       const created = tree?.created ? [{ event: 'worktree.created', block: id, path: tree.worktree.path, branch: tree.worktree.branch, base: tree.worktree.base_sha }] : [];

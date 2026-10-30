@@ -14,10 +14,10 @@
  * owned files, test files when the block has them, worktree path and branch when it has one,
  * code-forge command and version when supplied), the
  * commands (never run; each argv shown POSIX shell-quoted, so a pasted line expands nothing), the
- * built-in proof rule, each rules file, then the lessons file — every file section headed by its
+ * built-in proof rule, block brief and acceptance, each rules file, then the lessons file — every file section headed by its
  * source path (an empty file: the heading alone). Over `max_lines` the lessons are cut first, then the
  * rules from the last file backwards, each cut section ending in `[cut: N lines dropped]`; the
- * header, commands and proof rule are never cut; all count toward the budget.
+ * header, commands, proof rule, brief and acceptance are never cut; all count toward the budget.
  *
  * `reviewDigest` is the ONE builder of the review packets' rules digest (`## project rules`, ≤ 60
  * lines, `packet.mjs`): the rules files' text, then a `### lessons` subheading and the lessons.
@@ -240,6 +240,41 @@ const argvToken = (token) => (/^[A-Za-z0-9_@%+=:,./-]+$/.test(token) ? token : `
 export const argvText = (argv) => argv.map(argvToken).join(' ');
 
 /**
+ * Read a block's saved brief from the main tree with the same path checks as other context.
+ * Older blocks and blocks opened without --brief have no brief.
+ * @param {string} repoRoot @param {Record<string, any>} block
+ * @returns {{path: string, text: string} | null}
+ */
+export function readBlockBrief(repoRoot, block) {
+  if (typeof block.brief?.path !== 'string') return null;
+  return { path: block.brief.path, text: readLines(repoRoot, block.brief.path, 'block.brief').join('\n') };
+}
+
+/**
+ * The task sections shared by packs and coder prompts. A supplied prompt suppresses sections
+ * whose contents it already carries, independently of their Markdown formatting.
+ * @param {{brief?: {path: string, text: string} | null, acceptance?: import('../gates/acceptance.mjs').AcceptanceClause[]}} block
+ * @param {string} [prompt]
+ * @returns {string[]}
+ */
+export function blockTaskLines(block, prompt = '') {
+  const normalized = prompt.replace(/\s+/g, ' ').trim();
+  const contains = (/** @type {string} */ text) => normalized.includes(text.replace(/\s+/g, ' ').trim());
+  const lines = [];
+  if (block.brief && (!prompt || !contains(block.brief.text))) lines.push(`## brief: ${block.brief.path}`, ...splitLines(block.brief.text));
+  const missing = (block.acceptance ?? []).filter((clause) => !prompt || !contains(clause.clause)
+    || (clause.kind === 'human_check' ? !contains('human_check') : !clause.tests.every(contains)));
+  if (missing.length > 0) {
+    lines.push('## acceptance');
+    for (const clause of missing) {
+      lines.push(`- ${clause.clause}`);
+      lines.push(clause.kind === 'human_check' ? '  kind: human_check' : `  tests: ${clause.tests.join(', ')}`);
+    }
+  }
+  return lines.length === 0 ? [] : splitLines(/** @type {string} */ (redact(lines.join('\n'))));
+}
+
+/**
  * @typedef {object} PackBlock
  * @property {string} run
  * @property {string} block
@@ -248,6 +283,8 @@ export const argvText = (argv) => argv.map(argvToken).join(' ');
  * @property {string[] | null} [tests]
  * @property {{path: string, branch: string} | null} [worktree]
  * @property {{node: string, bin: string, version: string} | null} [codeForge]
+ * @property {{path: string, text: string} | null} [brief]
+ * @property {import('../gates/acceptance.mjs').AcceptanceClause[]} [acceptance]
  */
 
 /**
@@ -289,6 +326,8 @@ export function assemblePack({ settings, sources, block }) {
   }
 
   header.push(...splitLines(PROOF_RULE));
+  // The actual task is protected from the optional rules/lessons line budget too.
+  header.push(...blockTaskLines(block));
 
   /** @type {Array<{heading: string, body: string[], dropped: number}>} */
   const sections = sources.rules.map((r) => ({ heading: `## rules: ${r.path}`, body: [...r.lines], dropped: 0 }));

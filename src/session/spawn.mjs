@@ -51,6 +51,7 @@ import { Ajv2020 } from 'ajv/dist/2020.js';
 import { CODEX_CLOSED_BOOK_REFUSAL, closedBookRefused, isNoToolRole, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { compileSchema } from '../config/schema-compile.mjs';
+import { blockTaskLines, ContextError, readBlockBrief } from '../context/pack.mjs';
 import { buildArgv } from '../engines/builders/index.mjs';
 import { removeCodexHome } from '../engines/codex-home.mjs';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
@@ -61,6 +62,7 @@ import { budgetUsdOf, checkBudget, estimateSessionUsd, priceSession, reservedUsd
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { categoryGate, categoryPlan, RECORD_UNKNOWN_MESSAGE } from '../autopilot/limits.mjs';
 import { StateError } from '../state/paths.mjs';
+import { readRun } from '../state/run.mjs';
 import { exec } from '../util/exec.mjs';
 import { isForbidden, mergeForbidden } from '../util/forbidden.mjs';
 import { semaphore } from '../util/locks.mjs';
@@ -68,6 +70,7 @@ import { readStartTime, registerPid, UNKNOWN_START_TIME } from '../util/reaper.m
 import { asText, stderrTail } from '../util/diagnostic-tail.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { currentRunRoot, pidsDir, runRoot, tmpBase, untrustedReason } from '../util/tmp.mjs';
+import { assertBlockId, mainRootOf } from '../worker/ticket.mjs';
 
 export const ROLES = Object.freeze(['coder', 'reviewer', 'judge', 's2', 'author', 'facts', 'delegate']);
 export const LEVELS = Object.freeze(['L0', 'L1', 'L2', 'L3']);
@@ -538,6 +541,7 @@ export async function spawnSession(opts, deps = {}) {
   if (!LEVELS.includes(level)) throw new SessionError('usage', `level must be one of ${LEVELS.join(', ')}`);
   if (!ROLES.includes(role)) throw new SessionError('usage', `role must be one of ${ROLES.join(', ')}`);
   if (typeof promptPath !== 'string' || !path.isAbsolute(promptPath)) throw new SessionError('usage', 'promptPath must be an absolute path');
+  const coderPrompt = role === 'coder' && opts.block ? await coderPromptFor(opts) : null;
   const stderr = deps.stderr ?? process.stderr;
   const runRootDir = opts.runRoot ?? currentRunRoot();
   if (role === 'facts' && opts.cwd !== undefined) assertFactsCwd(opts.cwd, runRootDir);
@@ -602,7 +606,7 @@ export async function spawnSession(opts, deps = {}) {
     mkdirSync(sessionDir, { recursive: true, mode: 0o700 });
     let keep = false;
     try {
-      const built = buildStep(opts, step, sessionDir, openBook);
+      const built = buildStep(opts, step, sessionDir, openBook, coderPrompt);
       const cli = built.cli;
       built.argv[0] = deps.bins?.[cli] ?? built.argv[0];
       if (role === 'coder') {
@@ -657,6 +661,42 @@ export async function spawnSession(opts, deps = {}) {
       if (!keep) rmSync(sessionDir, { recursive: true, force: true });
     }
   }
+}
+
+/**
+ * Add the recorded task and completion contract without overwriting the caller's brief.
+ * @param {SessionOpts} opts @returns {Promise<string>}
+ */
+async function coderPromptFor(opts) {
+  let blockId;
+  let original;
+  try {
+    blockId = assertBlockId(opts.block);
+    original = readFileSync(opts.promptPath, 'utf8');
+  } catch (err) {
+    throw new SessionError('usage', err instanceof Error ? err.message : 'the coder brief cannot be read');
+  }
+  let task = [];
+  if (opts.run) {
+    let record;
+    try {
+      record = await readRun(opts.run);
+    } catch (err) {
+      if (!(err instanceof StateError && err.code === 'no-run')) throw err;
+    }
+    if (record) {
+      const block = record.blocks?.[blockId];
+      if (!block) throw new SessionError('usage', `run ${opts.run} has no block ${blockId}`);
+      try {
+        const repoRoot = await mainRootOf(record.workspace);
+        task = blockTaskLines({ brief: readBlockBrief(repoRoot, block), acceptance: block.acceptance }, original);
+      } catch (err) {
+        if (err instanceof ContextError) throw new SessionError('usage', err.message);
+        throw err;
+      }
+    }
+  }
+  return `${original.trimEnd()}\n\n${task.length ? `${task.join('\n')}\n\n` : ''}Report the changed files and pass/fail counts. Print TESTS <command> exit=<n> on its own line before the sentinel. On success, print this exact sentinel as your last line:\n===BLOCK ${blockId} COMPLETE===\n`;
 }
 
 /**
@@ -812,8 +852,9 @@ async function checkGate(opts, deps, writeRow, stderr, budget, estimate) {
  * @param {{provider: string, model: string, effort?: string, flagFallback?: {provider: string, model: string}}} step
  * @param {string} sessionDir
  * @param {boolean} openBook - B32: `review.allow_open_book_codex`, read once by `spawnSession`.
+ * @param {string | null} [coderPrompt]
  */
-function buildStep(opts, step, sessionDir, openBook) {
+function buildStep(opts, step, sessionDir, openBook, coderPrompt = null) {
   const closedBook = opts.role !== 'coder';
   // B9b.1: the facts delegate may run in the caller's read-only project snapshot; nobody else may
   const snapshot = opts.role === 'facts' && opts.cwd !== undefined ? realpathSync(path.resolve(opts.cwd)) : null; // validated by assertFactsCwd
@@ -823,6 +864,10 @@ function buildStep(opts, step, sessionDir, openBook) {
   if (cli === undefined) throw new SessionError('usage', `provider "${step.provider}" has no CLI mapping`);
   /** @type {Record<string, any>} */
   const params = { provider: step.provider, role: opts.role, model: step.model, promptPath: opts.promptPath, cwd };
+  if (coderPrompt !== null) {
+    params.promptPath = path.join(sessionDir, 'coder-brief.md');
+    writeFileSync(params.promptPath, coderPrompt, { mode: 0o600 });
+  }
   if (step.effort) params.effort = step.effort;
   if (step.flagFallback) params.fallback = [step.flagFallback];
   if (cli === 'claude' && opts.maxBudgetUsd !== undefined) params.maxBudgetUsd = opts.maxBudgetUsd;
