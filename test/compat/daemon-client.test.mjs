@@ -31,7 +31,7 @@ mock.module('../../src/ledger/write.mjs', { namedExports: { ...ledger, readAllRo
   return ledger.readAllRows(slug);
 } } });
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
-const { default: status } = await import('../../src/cli/status.mjs');
+const { default: status, statusOf } = await import('../../src/cli/status.mjs');
 const { loadProjectConfig } = await import('../../src/config/load.mjs');
 const native = await import('../../src/util/native.mjs');
 const { startRun, readRun } = await import('../../src/state/run.mjs');
@@ -176,6 +176,7 @@ test('live daemon gives byte-identical wait and status payloads without client l
   ledgerReads = 0;
   const json = await f.show();
   assert.ok(ledgerReads > 0, 'Node-only JSON status exercises the client ledger reader');
+  assert.equal(json, `${JSON.stringify({ runs: [await statusOf(await readRun(f.run))] })}\n`, 'JSON contains exactly the Node run summary, without daemon metadata');
   ledgerReads = 0;
   const text = await f.show(false);
   assert.ok(ledgerReads > 0, 'Node-only human status exercises the client ledger reader');
@@ -268,7 +269,8 @@ test('broken project config without a snapshot still returns the Node status ans
   const loaded = await loadProjectConfig(f.repo);
   assert.equal(loaded.ok, false, 'broken config returns a failed load rather than throwing');
   assert.equal(loaded.config, undefined, 'failed load has no config for the daemon client');
-  const expected = await f.show();
+  const expected = `${JSON.stringify({ runs: [await statusOf(record)] })}\n`;
+  assert.equal(await f.show(), expected, 'disabled daemon returns the complete Node answer despite broken config');
   assert.equal(JSON.parse(expected).runs[0].budget_usd, null, 'Node still renders status when the budget config cannot be loaded');
   await f.start();
   delete process.env.CODE_FORGE_NATIVE;
