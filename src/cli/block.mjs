@@ -361,7 +361,7 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
   const stop = (/** @type {string} */ reason) => {
     if (step === 'join' && reason === 'wait_timeout') {
       next = landCommand(['code-forge', 'block', 'land', id, '--run', runId, '--report', report, '--transcript', transcript,
-        '--max', `${Math.max(1800, Math.ceil(maxMs / 500))}s`, ...(merge ? ['--merge'] : []), ...(json ? ['--json'] : [])]);
+        '--max', `${Math.max(1800, Math.ceil(maxMs / 500))}s`, ...(merge ? ['--merge'] : []), ...(noMergeGate ? ['--no-merge-gate'] : []), ...(json ? ['--json'] : [])]);
     }
     writeSafe(stderr, `block ${id} land stopped at ${step}: ${reason.trim()}\nnext: ${next}\n`);
     if (json) emit({ block: id, event: 'refused', step, reason: reason.trim(), next });
@@ -472,6 +472,7 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
       let added = false;
       let failure = '';
       try {
+        // mkdtemp gives an empty directory; git worktree add accepts an existing empty path.
         const created = await exec(['git', 'worktree', 'add', '--detach', temporary, mainHead.stdout.trim()], gitOptions);
         added = created.result === 'ok';
         if (!added) throw new Error(created.stderr || 'cannot create merge-gate worktree');
