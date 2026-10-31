@@ -258,7 +258,7 @@ export async function reopenFile({ runId, id, file, reason, record, rows, key, w
     if (agentReopens(runRows, id, key).some((r) => r.file === file)) throw new StateError('reopen-yes-limit', `reopen-yes-limit: ${file} already has an agent reopen in this run; nothing was recorded`);
     const bytes = io.readFile?.(file) ?? null;
     if (bytes === null) throw new StateError('reopen-yes-disagreed', 'reopen-yes-disagreed: The current file cannot be read; nothing was recorded');
-    verdict = await judgeAgentReview({ stop_reason: stopReason, findings: loaded.state?.open ?? [], reason, file: { path: file, content: bytes.toString('utf8') }, evidence }, { record, runId, id, judge: agent.judge, lens: REOPEN_LENS });
+    verdict = await judgeAgentReview({ stop_reason: stopReason, findings: loaded.state?.open ?? [], reason, file: { path: file, content: bytes.toString('utf8') }, ...(evidence.length > 0 ? { evidence } : {}) }, { record, runId, id, judge: agent.judge, lens: REOPEN_LENS });
     if (verdict.verdict !== 'agree') throw new StateError('reopen-yes-disagreed', `reopen-yes-disagreed: ${verdict.reason}; nothing was recorded`);
   }
   // C11: the cached result of the current content's ticket would repeat the stop — dropped FIRST,

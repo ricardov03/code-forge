@@ -170,7 +170,8 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   const bytes = readRegularFileNoFollow(contentRoot, file);
   if (bytes === null) refuse('waive-yes-disagreed', 'The current file cannot be read');
   const text = await findingText(rows, { root, runId, id, file, finding, key });
-  const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') }, evidence: citedEvidence(reason, contentRoot) }, { record, runId, id, judge });
+  const evidence = citedEvidence(reason, contentRoot);
+  const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') }, ...(evidence.length > 0 ? { evidence } : {}) }, { record, runId, id, judge });
   if (answer.verdict === 'broken') refuse('waive-yes-broken', answer.reason);
   if (answer.verdict !== 'agree') refuse('waive-yes-disagreed', answer.reason);
   return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason } });
