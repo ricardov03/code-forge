@@ -36,7 +36,7 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
-import { existsSync, statSync } from 'node:fs';
+import { existsSync, statSync, watch } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -58,7 +58,7 @@ import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
 import { countLines, RouteError, routeTicket } from '../review/route.mjs';
 import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
-import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, readTicket, retractWorker, workerRegistry, writeResult, writeTicketTimings } from './queue.mjs';
+import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, queueDir, readTicket, retractWorker, workerRegistry, writeResult, writeTicketTimings } from './queue.mjs';
 import { DELETED_HASH, hashBytes, readRegularFileNoFollow, repoRootOf, WorkerError } from './ticket.mjs';
 import { watchTick } from './watch.mjs';
 
@@ -553,10 +553,6 @@ export async function createWorker(opts, deps = {}) {
         poisoned.add(id);
         return 0;
       }
-    } finally {
-      try {
-        await sweepProcesses({ apply: true, orphansOnly: true, runId, zombies: false });
-      } catch { /* process hygiene must never fail a ticket */ }
     }
   }
 
@@ -721,6 +717,13 @@ export async function createWorker(opts, deps = {}) {
     return done;
   }
 
+  /** Process inspection belongs to the worker lifecycle, outside ticket dispatch and draining. */
+  async function cleanOrphans() {
+    try {
+      await sweepProcesses({ apply: true, orphansOnly: true, runId, zombies: false });
+    } catch { /* process hygiene must never fail the worker */ }
+  }
+
   /**
    * Resolve when one of `slots` settles, `pollMs` passes, or `stop()` is called.
    * @param {Array<Promise<void>>} slots
@@ -771,29 +774,49 @@ export async function createWorker(opts, deps = {}) {
     announce();
     let interval = pollMs;
     let polled = false;
+    /** @type {import('node:fs').FSWatcher | null} */
+    let queueWatch = null;
     try {
+      // Enqueue publishes a ticket by rename. Wake even during the longest idle back-off;
+      // heartbeat and temporary files do not wake an idle worker.
+      try {
+        queueWatch = watch(queueDir(repoRoot), (_event, file) => {
+          if (!file || !/^[a-f0-9]{24}\.json$/.test(String(file))) return;
+          activity += 1;
+          wake?.();
+          poolWake?.();
+        });
+        queueWatch.on('error', () => {
+          queueWatch?.close();
+          queueWatch = null;
+          wake?.();
+        });
+      } catch { /* without filesystem notifications, keep polling at the fast interval */ }
       while (!stopping) {
         const before = activity;
         try {
-          await drain();
+          if (await drain() > 0) await cleanOrphans();
         } catch {
           // the queue directory itself failed to read: try again on the next poll
         }
         if (stopping) break;
         const unchanged = before === activity;
         interval = polled && unchanged ? Math.min(5000, interval * 2) : pollMs;
+        if (queueWatch === null && !deps.sleep) interval = pollMs;
         polled = true;
-        if (deps.sleep) await deps.sleep(interval);
-        else await new Promise((resolve) => {
-          const timer = setTimeout(resolve, interval);
+        await new Promise((resolve, reject) => {
+          let timer;
           wake = () => {
             clearTimeout(timer);
             resolve(undefined);
           };
+          if (deps.sleep) deps.sleep(interval).then(resolve, reject);
+          else timer = setTimeout(resolve, interval);
         });
         wake = null;
       }
     } finally {
+      queueWatch?.close();
       release();
     }
   }
@@ -802,7 +825,9 @@ export async function createWorker(opts, deps = {}) {
   async function once() {
     announce();
     try {
-      return await drain();
+      const done = await drain();
+      if (done > 0) await cleanOrphans();
+      return done;
     } finally {
       stop();
       release();
