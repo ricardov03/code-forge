@@ -96,7 +96,7 @@ test('auto-claim refuses another open owner, including its claims and separate w
       assert.match(result.stderr, /unowned_change.*extra\.mjs/s);
       if (mode !== 'plain') assert.match(result.stderr, /B2/);
       assert.equal((await f.rows()).filter((r) => r.event === 'block.claim').length, before, 'zero new claims after refusal');
-      assert.equal(blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B1' }).length, 0, 'zero reviews queued for refused path');
+      assert.equal(blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B1', ...(f.tree === f.repo ? {} : { tree: f.tree }) }).length, 0, 'zero reviews queued for refused path');
       assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
     } finally { f.cleanup(); }
   }
