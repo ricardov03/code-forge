@@ -73,22 +73,22 @@ test('a null verdict without findings is unavailable and only a fallback verdict
     ok: false, reason: 'schema', detail: 'the answer does not validate against the finding schema',
   });
   for (const strict of [false, true]) {
+    const primary = strict ? 'gpt-6-astra' : PRIMARY;
     const { outcome, calls } = await review({ strict, answer });
     assert.deepEqual([outcome.status, outcome.reason, outcome.approved], ['unavailable', 'schema', false]);
-    assert.deepEqual(calls, [strict ? 'gpt-6-astra' : PRIMARY]);
+    assert.deepEqual(calls, [primary]);
     for (const fallbackAnswer of [answerFor(HUNKS), answerFor(HUNKS, { passed: false, findings: [FINDING] })]) {
       const recovered = await review({ strict, ladder: true, answer, fallbackAnswer });
-      const primary = strict ? 'gpt-6-astra' : PRIMARY;
       assert.deepEqual(recovered.calls, [primary, primary, FALLBACK]);
       assert.deepEqual([recovered.outcome.status, recovered.outcome.approved, recovered.outcome.findings],
         ['reviewed', fallbackAnswer.passed, fallbackAnswer.findings]);
       assert.equal(recovered.outcome.sessions[0].model, FALLBACK);
       assert.equal(recovered.outcome.sessions[0].passed_coerced, undefined);
     }
+    const exhausted = await review({ strict, ladder: true, answer });
+    assert.deepEqual(exhausted.calls, [primary, primary, FALLBACK, FALLBACK]);
+    assert.deepEqual([exhausted.outcome.status, exhausted.outcome.reason, exhausted.outcome.approved], ['unavailable', 'schema', false]);
   }
-  const exhausted = await review({ ladder: true, answer });
-  assert.deepEqual(exhausted.calls, [PRIMARY, PRIMARY, FALLBACK, FALLBACK]);
-  assert.deepEqual([exhausted.outcome.status, exhausted.outcome.reason, exhausted.outcome.approved], ['unavailable', 'schema', false]);
 });
 
 test('null verdict coercion never hides other schema or stub failures', async () => {
@@ -105,7 +105,7 @@ test('null verdict coercion never hides other schema or stub failures', async ()
 });
 
 test('a silent reviewer is killed at one second and the fallback answers immediately', async () => {
-  const { outcome, calls, results, rows, elapsed } = await review({ ladder: true, silence: 1, mode: 'silent' });
+  const { outcome, calls, results, rows, elapsed } = await review({ ladder: true, silence: 1, timeoutMs: 5000, mode: 'silent' });
   assert.deepEqual(calls, [PRIMARY, FALLBACK]);
   assert.deepEqual([outcome.status, outcome.approved, outcome.sessions[0].model], ['reviewed', true, FALLBACK]);
   assert.deepEqual(results.map((r) => [r.model, r.timedOut, r.stdout.length, r.stderr.length]), [[PRIMARY, true, 0, 0], [FALLBACK, false, results[1].stdout.length, 0]]);
