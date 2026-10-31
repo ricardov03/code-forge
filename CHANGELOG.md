@@ -13,6 +13,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The npm package ships a prebuilt Go helper (`code-forge-native`, darwin/linux, arm64/x64; built at release) with `version` and `verify-ledger`; `doctor` shows it, and Node is used when it is missing or `CODE_FORGE_NATIVE=0` (B181)
 - `block land` and `block close --auto-claim` claim and review a file changed outside the owned list (unless another open block owns it), and claims are kept when a block is reopened with `--attempt N` (B186)
 - Review packets always keep the file's import header, the judge packet shows the cited `path:line` windows (ranges like `a-b` too), and `block reopen --yes` works on an open file with findings when the judge agrees (B192)
+- `block land --max <dur>` (default 30m) waits for reviews, retries the join up to 3 times while a findings round is open, and on timeout stops with `wait_timeout` and a next line that names a larger `--max` (B190)
 
 ## [0.15.3] — 2026-10-30
 
