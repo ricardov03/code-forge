@@ -80,13 +80,13 @@ test('cold start keeps configured order, shipped defaults have no size route, ex
 });
 
 test('exploration is deterministic for a ticket and gives an under-measured model a turn', () => {
-  const rows = [...history(A), ...history(B, { n: 1 })];
+  const rows = [...history(A, { waived: 8 }), ...history(B, { n: 1, seconds: 1 })];
   const cfg = config({ adaptive: { explore: 1 } });
   const first = choose(rows, cfg, 'repeatable-ticket');
   assert.equal(first.cfg.levels.L2.model, B);
   assert.equal(first.rows[0].reason, 'explore');
   assert.deepEqual(choose(rows, cfg, 'repeatable-ticket'), first);
-  assert.equal(choose(rows).cfg.levels.L2.model, A, 'below min_sessions a fast candidate cannot jump the configured order');
+  assert.equal(choose(rows).cfg.levels.L2.model, A, 'below min_sessions a faster, more accurate candidate cannot jump the configured order');
 });
 
 test('a retried ticket reuses its recorded choice even after performance history changes', () => {
