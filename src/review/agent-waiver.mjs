@@ -166,7 +166,7 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   if (!DELEGABLE_SEVERITIES.includes(recorded.severity)) refuse('waive-yes-critical', `finding ${finding} is ${recorded.severity ?? recorded.why}; only warning or nit findings may use --yes`);
   const tree = await blockTree(record.workspace, entry);
   const contentRoot = tree?.top ?? root;
-  if (!hasEvidence(reason, contentRoot, entry)) refuse('waive-yes-no-evidence', 'cite an existing repo path with :line, an existing test file, or a block acceptance clause number');
+  if (!hasEvidence(reason, contentRoot, entry)) refuse('waive-yes-no-evidence', 'cite an existing repo path with :line or :start-end, an existing test file, or a block acceptance clause number');
   const bytes = readRegularFileNoFollow(contentRoot, file);
   if (bytes === null) refuse('waive-yes-disagreed', 'The current file cannot be read');
   const text = await findingText(rows, { root, runId, id, file, finding, key });

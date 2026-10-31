@@ -1,4 +1,4 @@
-import { commitAll, makeRepo, writeFile, freshDir, PARENT } from '../review/helpers.mjs';
+import { cfgFor, commitAll, makeRepo, writeFile, freshDir, PARENT } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
 import { execFile } from 'node:child_process';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
@@ -121,8 +121,9 @@ function assertUnchanged(before, after) {
  * again (stopped `l3_patch_exhausted`); after an attempt, V(4) is reviewed and the stop is cached
  * (its done marker is on disk).
  * @param {string} slug
+ * @param {Record<string, any>} [config]
  */
-async function fixture(slug) {
+async function fixture(slug, config) {
   const runId = `r-${slug}`;
   const repo = await makeRepo();
   writeFile(repo, SRC, V(1));
@@ -130,7 +131,7 @@ async function fixture(slug) {
   await commitAll(repo);
   const probe = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
   const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
-  await startRun({ workspace: repo, project: slug, runId, workerPid: 4242, writeRow, probe });
+  await startRun({ workspace: repo, project: slug, runId, workerPid: 4242, writeRow, probe, config });
   await openBlock({ runId, id: 'B1', level: 'L2', owned: [SRC], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
   writeFile(repo, SRC, V(2));
   const key = await loadKey(runId);
@@ -280,13 +281,37 @@ test('B80 (3): reopen and waive --yes need evidence; no prompt and nothing on di
     for (const tty of [{ isTTY: true }, { isTTY: false }]) {
       const before = snapshot();
       const r = await f.block([...f.argsOf[verb], '--yes'], tty);
-      const expected = [1, '', `block ${verb}: ${verb}-yes-no-evidence: cite an existing repo path with ${verb === 'reopen' ? ':line or :start-end' : ':line'}, an existing test file, or a block acceptance clause number; nothing was recorded\n`];
+      const expected = [1, '', `block ${verb}: ${verb}-yes-no-evidence: cite an existing repo path with :line or :start-end, an existing test file, or a block acceptance clause number; nothing was recorded\n`];
       assert.deepEqual([r.code, r.out, r.err], expected);
       assertUnchanged(before, snapshot());
     }
   }
   assert.equal(f.ui.asked.length, 0);
   assert.deepEqual(await f.humanRows(), []);
+});
+
+test('B193: waive --yes advertises and accepts an existing repo path range', async () => {
+  const f = await fixture('b193-range', cfgFor());
+  const refused = await f.block([...f.argsOf.waive, '--yes'], { isTTY: false });
+  const reason = `The owner accepts the behavior shown in ${SRC}:2-4`;
+  let judgeCalls = 0;
+  const accepted = await f.block([...f.argsOf.waive.slice(0, -1), reason, '--yes'], {
+    isTTY: false,
+    waiverJudge: async () => {
+      judgeCalls += 1;
+      return { status: 'ok', answer: { verdict: 'agree', reason: 'The cited range supports the waiver.' } };
+    },
+  });
+  assert.deepEqual([accepted.code, accepted.out, accepted.err], [0, `block B1 waived C1 in ${SRC} (by: agent)\n`, '']);
+  assert.equal(judgeCalls, 1, 'the range citation reaches the judge exactly once');
+  assert.equal(f.ui.asked.length, 0, 'neither --yes call prompts');
+  const rows = await f.humanRows();
+  assert.deepEqual(rows.map(({ event, file, finding, by, reason: recordedReason, verdict }) =>
+    ({ event, file, finding, by, reason: recordedReason, verdict })),
+  [{ event: 'review.waived', file: SRC, finding: 'C1', by: 'agent', reason, verdict: 'agree' }]);
+  assert.equal(verifyRow(rows[0], f.key).ok, true, 'the single agent waiver is signed');
+  assert.deepEqual([refused.code, refused.out, refused.err], [1, '',
+    'block waive: waive-yes-no-evidence: cite an existing repo path with :line or :start-end, an existing test file, or a block acceptance clause number; nothing was recorded\n']);
 });
 
 test('B80: an unknown block at a terminal is refused before the question; nothing is asked', async () => {
