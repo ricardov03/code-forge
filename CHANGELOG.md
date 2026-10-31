@@ -11,6 +11,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Go core, step 1: `native/` Go library (canonical JSON, row signing, ticket ids, ledger read) and a golden compat kit made from the Node functions; Go tests prove byte-equal output (B180)
 - `block land <id>` runs review join, changed-file gates and close in one step, stopping at the first failure with the next command; `--merge` also merges the block branch into its base (B185)
 - The npm package ships a prebuilt Go helper (`code-forge-native`, darwin/linux, arm64/x64; built at release) with `version` and `verify-ledger`; `doctor` shows it, and Node is used when it is missing or `CODE_FORGE_NATIVE=0` (B181)
+- `block land` and `block close --auto-claim` claim and review a file changed outside the owned list (unless another open block owns it), and claims are kept when a block is reopened with `--attempt N` (B186)
 
 ## [0.15.3] — 2026-10-30
 
