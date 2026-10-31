@@ -52,9 +52,12 @@ func TestOwnsKeepsNodeGlobSpelling(t *testing.T) {
 	}{
 		{"./**/*.go", "a.go", false},
 		{"./**/*.go", "src/a.go", false},
+		{"./**/*.go/", "src/a.go", false},
 		{"**/*.go/", "src/a.go", false},
 		{"**/*.go", "a.go", true},
 		{"**/*.go", "src/a.go", true},
+		{"src/", "src/a.go", true},
+		{"src/a.go/", "src/a.go", true},
 	} {
 		t.Run(tc.pattern+"/"+tc.file, func(t *testing.T) {
 			if got := owns([]any{tc.pattern}, nil, tc.file); got != tc.want {

@@ -130,12 +130,19 @@ test('daemon preserves Node text ordering for reopen timestamps with different f
   const { repo, run, key, socket } = f;
   announceWorker(repo, { pid: process.pid, run });
   // The future date prevents an ordinary queued ticket from masking reopen selection.
-  for (const ts of ['2100-01-01T00:00:00Z', '2100-01-01T00:00:00.001Z']) {
-    await appendRow(signRow({ event: 'review.reopened', run, block: 'B1', file: 'src/a.mjs', by: 'human', ts }, key), { slug: 'daemon-test' });
+  for (const [file, timestamps] of [
+    ['src/a.mjs', ['2100-01-01T00:00:00Z', '2100-01-01T00:00:00.001Z']],
+    ['src/b.mjs', ['2100-01-01T00:00:00.001Z', '2100-01-01T00:00:00Z']],
+  ]) {
+    for (const ts of timestamps) {
+      await appendRow(signRow({ event: 'review.reopened', run, block: 'B1', file, by: 'human', ts }, key), { slug: 'daemon-test' });
+    }
   }
   const expected = await f.reference();
-  const current = readTicket(repo, expected.files.find((file) => file.file === 'src/a.mjs').ticket);
-  assert.equal(current.reopened_at, '2100-01-01T00:00:00Z', 'Node shares the text ordering bug');
+  for (const file of ['src/a.mjs', 'src/b.mjs']) {
+    const current = readTicket(repo, expected.files.find((state) => state.file === file).ticket);
+    assert.equal(current.reopened_at, '2100-01-01T00:00:00Z', 'Node shares the text ordering bug in either row order');
+  }
   await f.ready(f.start());
   assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), expected);
 });
@@ -145,16 +152,19 @@ test('daemon preserves Node matching for dot-prefixed and trailing-slash ownersh
   const f = await fixture(t);
   const { repo, run, socket } = f;
   announceWorker(repo, { pid: process.pid, run });
+  writeFileSync(path.join(repo, 'a.go'), 'package fixture\n');
   writeFileSync(path.join(repo, 'src/a.go'), 'package fixture\n');
   await f.ready(f.start());
   const { readRun, saveRun } = await import('../../src/state/run.mjs');
   const record = await readRun(run);
-  for (const pattern of ['./**/*.go', '**/*.go/', '**/*.go']) {
+  for (const pattern of ['./**/*.go', './**/*.go/', '**/*.go/', '**/*.go', 'src/a.go/']) {
     record.blocks.B1.owned_files = [pattern];
     await saveRun(record);
     const expected = await f.reference();
-    assert.equal(ownsFile([pattern], 'src/a.go'), pattern === '**/*.go');
-    assert.equal(expected.files.length, pattern === '**/*.go' ? 1 : 0, 'Node leaves glob spelling unchanged');
+    const files = pattern === '**/*.go' ? ['a.go', 'src/a.go'] : pattern === 'src/a.go/' ? ['src/a.go'] : [];
+    assert.equal(ownsFile([pattern], 'src/a.go'), files.includes('src/a.go'));
+    assert.equal(ownsFile([pattern], 'a.go'), files.includes('a.go'));
+    assert.deepEqual(expected.files.map((file) => file.file), files, 'Node normalizes literals but leaves glob spelling unchanged');
     assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), expected);
   }
 });
@@ -183,6 +193,20 @@ test('daemon preserves Node worker_down for pending, terminal, and unchanged blo
     assert.equal(files.length, 3);
     assert.ok(files.every((file) => file.status === 'done' || file.status === 'excluded'));
   });
+  await t.test('only excluded files', async () => {
+    const { readRun, saveRun } = await import('../../src/state/run.mjs');
+    const record = await readRun(run);
+    record.blocks.B1.owned_files = ['src/skip.md'];
+    await saveRun(record);
+    try {
+      const files = await check();
+      assert.equal(files.length, 1);
+      assert.equal(files[0].status, 'excluded');
+    } finally {
+      record.blocks.B1.owned_files = ['src/**'];
+      await saveRun(record);
+    }
+  });
   await t.test('nothing changed', async () => {
     for (const args of [['add', 'src'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'unchanged scope']]) {
       const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
@@ -204,21 +228,22 @@ test('daemon and Node both visit outside ownership prefixes in a malformed scope
   announceWorker(repo, { pid: process.pid, run });
   const outside = path.join(path.dirname(repo), 'outside');
   mkdirSync(outside);
-  const pattern = '../outside/**';
-  assert.throws(() => assertOwned([pattern]), { code: 'bad-owned' }, 'ordinary Node block open refuses traversal');
   const { readRun, saveRun } = await import('../../src/state/run.mjs');
   const record = await readRun(run);
-  record.blocks.B1.owned_files = [pattern];
-  await saveRun(record);
   await f.ready(f.start());
   chmodSync(outside, 0);
   try {
-    const expected = await f.reference(1);
-    assert.equal(expected.status, 'refused');
-    assert.ok(expected.message.includes(outside), 'Node waitTreeStamp tries to read the outside directory');
-    const actual = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
-    assert.equal(actual.ok, false);
-    assert.ok(actual.error.includes(outside), 'Go treeStamp visits the same outside prefix');
+    for (const pattern of ['../outside', '../outside/**', 'src/../../outside/**']) {
+      assert.throws(() => assertOwned([pattern]), { code: 'bad-owned' }, 'ordinary Node block open refuses traversal');
+      record.blocks.B1.owned_files = [pattern];
+      await saveRun(record);
+      const expected = await f.reference(1);
+      assert.equal(expected.status, 'refused');
+      assert.ok(expected.message.includes(outside), 'Node waitTreeStamp tries to read the outside directory');
+      const actual = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
+      assert.equal(actual.ok, false);
+      assert.ok(actual.error.includes(outside), 'Go treeStamp visits the same outside prefix');
+    }
   } finally {
     chmodSync(outside, 0o700);
   }

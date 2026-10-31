@@ -443,6 +443,8 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 		states = append(states, state)
 	}
 	result := object{"block": req.Block, "files": states, "done": false}
+	// Node waitBlock checks worker_down before completion and requires live
+	// even for terminal or empty file sets. Preserve that shared bug for B182.
 	if *down >= 2 {
 		result["status"] = "worker_down"
 		return result, true
@@ -513,6 +515,8 @@ func (s *server) reopened(block, file string) string {
 			continue
 		}
 		ts := text(row, "ts")
+		// Node waitBlock validates Date.parse but selects row.ts lexically.
+		// Keep its fractional-precision ordering bug so reopen ticket IDs agree.
 		if _, err := time.Parse(time.RFC3339Nano, ts); err == nil && ts > after {
 			after = ts
 		}
@@ -634,6 +638,8 @@ func treeStamp(tree string, owned []any) (string, error) {
 			}
 			prefix = append(prefix, part)
 		}
+		// Node waitTreeStamp also joins unchecked prefixes from the scope mirror.
+		// Traversal is a shared bug; assertOwned rejects it at normal block open.
 		paths = append(paths, filepath.Join(prefix...))
 	}
 	gitDir, common, err := gitDirs(tree)
@@ -812,6 +818,8 @@ func owns(owned []any, kinds object, file string) bool {
 			continue
 		}
 		if strings.ContainsAny(entry, "*?{") {
+			// Node ownsFile trims trailing slashes only from exact entries,
+			// leaving glob spelling intact. Preserve the same matching here.
 			if glob(file, entry) {
 				return true
 			}
