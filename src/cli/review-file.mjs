@@ -69,9 +69,11 @@
 
 import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
 import path from 'node:path';
-import { answersTicketId, assertAnswers, blockTickets, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, enqueueHash, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveHashTicket, resolveTicket, reviewExclusionFor } from '../worker/queue.mjs';
+import { answersTicketId, assertAnswers, blockTickets, clearDone, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, enqueueHash, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveHashTicket, resolveTicket, reviewExclusionFor } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
-import { changedFiles, namedOnHash } from '../review/gate-check.mjs';
+import { changedFiles, checkBlockReviews, namedOnHash, ownsAt } from '../review/gate-check.mjs';
+import { AUTO_REQUEUE_REASON, isAutomaticReopen, reopenFile, stopContentHash } from '../review/reopen.mjs';
+import { loadState } from '../worker/review-state.mjs';
 import { STOP_EXITS } from '../review/stop-exits.mjs';
 import { budgetFor } from '../review/packet.mjs';
 import { ownsFile } from '../state/registry.mjs';
@@ -79,12 +81,14 @@ import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { assertRunId } from '../state/paths.mjs';
-import { readRun } from '../state/run.mjs';
+import { readRun, writeSigned } from '../state/run.mjs';
+import { loadKey } from '../state/signer.mjs';
 import { rebaseBlock } from '../state/block.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
 import { reviewExcludeRule } from '../config/validate.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
+import { runRootPath } from '../util/tmp.mjs';
 
 const USAGE =
   'usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n' +
@@ -510,13 +514,64 @@ function ticketTimings(value) {
     .filter((key) => value && Object.hasOwn(value, key)).map((key) => [key, value[key]]));
 }
 
-/**
- * A block wait uses unsigned results only to classify retries; it never reads the signing key.
- * Re-scan metadata each poll and read content only after its stamp changes. Deliver unseen findings of the newest earlier ticket
- * before rechecking a blind edit; the next join queues the fix. Stopped files stay finished.
- * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number) => Promise<unknown>}} opts
+/** Restart only verified stopped reviews whose findings were not waived and whose bytes changed.
+ * Shared by the join and close; ordinary progress polling needs no signing key.
+ * @param {{repoRoot: string, run: string, block: string, tree: string, files: string[], print: (line: string) => unknown}} opts
+ * @returns {Promise<Map<string, string>>} restart timestamp by file
  */
-async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDone = dropDoneIf, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+export async function requeueStoppedFiles({ repoRoot, run, block, tree, files, print }) {
+  const restarted = new Map();
+  if (files.length === 0) return restarted;
+  const record = await readRun(run);
+  const entry = record.blocks?.[block];
+  if (entry?.status !== 'open') return restarted;
+  if (realpathSync(await mainRootOf(record.workspace)) !== realpathSync(repoRoot)) throw new WorkerError('other-workspace', 'the run belongs to another workspace');
+  const recordedTree = (await blockTree(record.workspace, entry))?.top ?? repoRoot;
+  if (realpathSync(recordedTree) !== realpathSync(tree)) throw new WorkerError('worktree-mismatch', 'the block scope does not match the recorded content tree');
+  const owns = ownsAt(path.relative(realpathSync(repoRoot), realpathSync(record.workspace)).split(path.sep).join('/'));
+  const key = await loadKey(run);
+  const rows = (await readAllRows(record.project)).filter((row) => row.run === run);
+  const root = configInForce(record)?.tmp?.root;
+  const runRootDir = runRootPath(run, root == null ? {} : { root });
+  const where = realpathSync(tree) === realpathSync(repoRoot) ? {} : { tree: realpathSync(tree) };
+  const writeRow = (row) => appendRow(row, { slug: record.project });
+  for (const file of files) {
+    if (!owns(entry.owned_files, file, entry.owned_kinds) || reviewExcludeRule(configInForce(record), file) !== null) continue;
+    if (Object.entries(record.blocks).some(([id, other]) => id !== block && other.status === 'open' && owns(other.owned_files, file, other.owned_kinds))) continue;
+    const loaded = loadState({ runId: run, block, file, key, rows, runRootDir, contentRoot: tree, migrate: false });
+    if (!['ok', 'restored'].includes(loaded.status) || loaded.state?.status !== 'stopped' || !loaded.state.open?.length) continue;
+    const fromHash = stopContentHash(loaded.state, rows, { runId: run, block, file, key });
+    const currentHash = contentHash(tree, file);
+    if (fromHash === null || fromHash === currentHash) continue;
+    // A newer accepted review wins over a stopped snapshot. At the stopped hash, use the
+    // same waiver rules as the gate, including severity and signature checks.
+    const needsReview = (hash) => checkBlockReviews({ runId: run, block, key,
+      rows: rows.filter((row) => row.file === undefined || row.file === file),
+      files: [{ file, content_hash: hash }], proofFiles: [], highPaths: [],
+    }).refusals.some((value) => value.file === file && ['unreviewed', 'unsigned', 'not_approved', 'review_cap', 'autopilot_waiver_invalid'].includes(value.code));
+    if (!needsReview(currentHash) || !needsReview(fromHash)) continue;
+    const result = await reopenFile({ runId: run, id: block, file, reason: AUTO_REQUEUE_REASON,
+      record, rows, key, writeRow, writeSigned, automatic: true,
+      io: {
+        owns, loadState: () => loaded, contentHash: (f) => contentHash(tree, f),
+        clearDone: (f) => clearDone({ repoRoot, run, block, file: f, ...where }).removed,
+        enqueue: (f, row) => enqueue({ repoRoot, run, block, file: f, ...where, after: row.ts }).ticket,
+      },
+    });
+    restarted.set(file, result.row.ts);
+    if (!result.existing) print(`auto-requeue ${file}: content changed after stopped review (ticket ${result.ticket})\n`);
+  }
+  return restarted;
+}
+
+/**
+ * Ordinary block progress uses unsigned results. Restarting changed stopped findings verifies
+ * the durable state and writes a signed restart before queuing the new attempt.
+ * Re-scan metadata each poll and read content only after its stamp changes. Deliver unseen findings of the newest earlier ticket
+ * before rechecking a blind edit; the next join queues the fix. Changed stopped findings restart.
+ * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown, print: (line: string) => unknown, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number) => Promise<unknown>}} opts
+ */
+async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, print, dropDone = dropDoneIf, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
   let scope = await waitBlockScope(repoRoot, cwd, run, block);
   const { tree } = scope;
   const gitPaths = waitGitPaths(tree);
@@ -543,6 +598,12 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
       current = (await changedFiles({ repoRoot: tree, base: entry.base_sha })).filter((file) => ownsFile(entry.owned_files, file, entry.owned_kinds));
       treeStamp = stamp;
     }
+    const stopped = current.filter((file) => {
+      const latest = tickets.filter((ticket) => ticket.file === file).at(-1);
+      return latest && blockTicketMarker(repoRoot, latest.ticket)?.status === 'stopped'
+        && doneResult(repoRoot, latest.ticket)?.findings?.length > 0;
+    });
+    const restarted = live ? await requeueStoppedFiles({ repoRoot, run, block, tree, files: stopped, print }) : new Map();
     // Progress only, like answersPrecheck: sandboxed callers may not read the private ledger.
     // Reopens issued here also renew the workspace ticket, which needs no private read to join.
     let rows = [];
@@ -550,9 +611,10 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, dropDo
     const reopens = new Map();
     for (const row of rows) {
       if (row.event !== 'review.reopened' || row.run !== run || row.block !== block || !Number.isFinite(Date.parse(row.ts))) continue;
-      if (row.by !== 'human' && !(row.by === 'agent' && row.verdict?.verdict === 'agree')) continue;
+      if (row.by !== 'human' && !(row.by === 'agent' && row.verdict?.verdict === 'agree') && !isAutomaticReopen(row)) continue;
       if (!reopens.has(row.file) || row.ts > reopens.get(row.file)) reopens.set(row.file, row.ts);
     }
+    for (const [file, ts] of restarted) reopens.set(file, ts);
     const files = current.map((file) => {
       const rule = reviewExcludeRule(cfg, file);
       if (rule !== null) return { file, ticket: null, status: 'excluded', outcome: null, rule };
@@ -652,7 +714,7 @@ export async function runReviewFile(args, deps = {}) {
       if (positionals.length > 0 || flags.block !== undefined || flags.wait !== undefined || flags.answers !== undefined || flags.of !== undefined || flags.fresh === true || typeof flags.run !== 'string') {
         throw new WorkerError('usage', '--wait-block takes a block, --run and --max only');
       }
-      return await waitBlock({ repoRoot, cwd, block: assertBlockId(flags['wait-block']), run: assertRunId(flags.run), maxMs: flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max), pollMs: deps.pollMs ?? POLL_MS, say, dropDone: deps.dropDone, now: deps.now, sleep: deps.sleep });
+      return await waitBlock({ repoRoot, cwd, block: assertBlockId(flags['wait-block']), run: assertRunId(flags.run), maxMs: flags.max === undefined ? DEFAULT_WAIT_MS : parseMax(flags.max), pollMs: deps.pollMs ?? POLL_MS, say, print: (line) => writeSafe(stderr, line), dropDone: deps.dropDone, now: deps.now, sleep: deps.sleep });
     }
 
     if (typeof flags.wait === 'string') {

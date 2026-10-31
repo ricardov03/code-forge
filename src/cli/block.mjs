@@ -203,7 +203,7 @@ import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { runGatesVerb } from './gates.mjs';
 import { parseTapPassed } from '../gates/acceptance.mjs';
-import { parseMax, runReviewFile } from './review-file.mjs';
+import { parseMax, requeueStoppedFiles, runReviewFile } from './review-file.mjs';
 import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { fallbackLane } from '../decide/fallback-rules.mjs';
 import { laneFacts } from '../decide/lane-facts.mjs';
@@ -392,6 +392,7 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
       if (remaining === 0) return stop('wait_timeout');
       const duration = remaining > 9_999_999 ? `${Math.floor(remaining / 1000)}s` : `${remaining}ms`;
       joined = await capture((streams) => runReviewFile(['--wait-block', id, '--run', runId, '--max', duration], { ...streams, cwd: tree.workspace }));
+      for (const line of joined.error.split('\n')) if (line.startsWith('auto-requeue ')) writeSafe(stderr, `${line}\n`);
       if (joined.code !== 0 || !joined.data?.done || !joined.data.files.some((file) => file.status === 'findings')) break;
     }
     if (joined.code !== 0 || !joined.data?.done) {
@@ -1058,7 +1059,25 @@ export async function runBlock(args, deps = {}) {
       if (flags['auto-claim'] === true) await autoClaimChanges({ record, runId, id, writeRow, print: json ? err : say });
       const external = reviewsWaived ? null : externalReviewer(record);
       const reviewConfig = configInForce(record);
-      const rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
+      let rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
+      // Restart changed stopped findings before entering closeBlock's run lock: the worker
+      // needs that lock to publish its fresh review. Refresh rows after the join finishes.
+      if (!reviewsWaived && external === null && !deciding && routineGrant === null) {
+        const mainTop = await repoTop(record.workspace);
+        const restarted = await requeueStoppedFiles({ repoRoot: mainTop, run: runId, block: id,
+          tree: wt?.top ?? mainTop, files: reviewedFiles(rows, id), print: err });
+        if (restarted.size > 0) {
+          let output = '';
+          const code = await runReviewFile(['--wait-block', id, '--run', runId], {
+            cwd: wt?.workspace ?? record.workspace, stdout: { write: (text) => { output += text; } }, stderr: { write: err },
+          });
+          if (code !== 0 || JSON.parse(output).done !== true) {
+            err(`block ${id} open: automatic requeue did not finish\n`);
+            return code || 1;
+          }
+          rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
+        }
+      }
       // B52: ONE path base and ONE listing, memoised as a promise and shared by every check. The
       // base is the repository top level: the worker signs every review row with a repo-root-
       // relative `file` and keeps its queue and signed result files under `<top>/.code-forge/`
