@@ -100,20 +100,20 @@ test('changed stopped content: join queues one signed restart, waits for approva
     const f = await fixture({ worktree });
     try {
       const joined = await f.join(true);
-      assert.deepEqual([joined.code, joined.result.done, joined.result.files.map((file) => [file.file, file.status, file.outcome])],
-        [0, true, [[FILE, 'done', 'approved']]], 'one changed stopped file must finish with a fresh approval');
+      assert.deepEqual([joined.code, joined.result.done, joined.result.files.map((file) => [file.file, file.status, file.outcome])], [0, true, [[FILE, 'done', 'approved']]], 'one changed stopped file must finish with a fresh approval');
       const ticket = joined.result.files[0].ticket;
       assert.notEqual(ticket, f.old.ticket, 'the old findings ticket must be replaced');
       assert.equal(joined.lines.length, 1, 'exactly one auto-requeue line per changed stopped file');
       assert.match(joined.lines[0], /auto-requeue.*src\/a\.mjs/);
       const rows = (await f.rows()).filter((row) => row.event === 'review.reopened');
-      assert.deepEqual(rows.map((row) => [row.reason, row.from_hash, row.to_hash, verifyRow(row, f.key).ok]),
-        [[REASON, f.old.content_hash, contentHash(f.tree, FILE), true]], 'one signed restart records the old and current content');
+      assert.deepEqual(rows.map((row) => [row.reason, row.from_hash, row.to_hash, verifyRow(row, f.key).ok]), [[REASON, f.old.content_hash, contentHash(f.tree, FILE), true]], 'one signed restart records the old and current content');
       assert.deepEqual([f.tickets().length, f.sessions(), readResult(f.repo, f.runId, ticket).round], [2, 1, 1], 'one fresh ticket starts a full review at round 1');
       assert.equal((await f.join()).lines.length, 0, 'a repeated join prints no duplicate restart');
       const closed = await f.close();
       assert.deepEqual([closed.code, closed.stderr, (await readRun(f.runId)).blocks.B1.status], [0, '', 'closed']);
-      if (worktree) assert.equal(readFileSync(path.join(f.repo, FILE), 'utf8'), 'export const a = 0;\n', 'the main tree stays unchanged while the block tree is reviewed');
+      if (worktree) {
+        assert.equal(readFileSync(path.join(f.repo, FILE), 'utf8'), 'export const a = 0;\n', 'the main tree stays unchanged while the block tree is reviewed');
+      }
     } finally { f.cleanup(); }
   }
 });
@@ -136,12 +136,13 @@ test('direct close requeues changed stopped content and waits for the fake revie
     const serving = f.worker.run();
     try {
       const closed = await f.close();
-      assert.deepEqual([closed.code, (await readRun(f.runId)).blocks.B1.status, f.sessions()], [0, 'closed', 1],
-        'direct close must wait for exactly one fresh approval instead of refusing unreviewed content');
+      assert.deepEqual([closed.code, (await readRun(f.runId)).blocks.B1.status, f.sessions()], [0, 'closed', 1], 'direct close must wait for exactly one fresh approval instead of refusing unreviewed content');
       assert.equal(closed.stderr.trim().split('\n').length, 1, 'direct close prints one requeue line');
       assert.match(closed.stderr, /auto-requeue.*src\/a\.mjs/);
       assert.deepEqual([f.tickets().length, (await f.rows()).filter((row) => row.event === 'review.reopened').length], [2, 1]);
-      if (worktree) assert.equal(readFileSync(path.join(f.repo, FILE), 'utf8'), 'export const a = 0;\n', 'direct close reviews the block tree without changing the main tree');
+      if (worktree) {
+        assert.equal(readFileSync(path.join(f.repo, FILE), 'utf8'), 'export const a = 0;\n', 'direct close reviews the block tree without changing the main tree');
+      }
     } finally { f.worker.stop(); await serving; f.cleanup(); }
   }
 });
