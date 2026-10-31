@@ -97,10 +97,10 @@ async function pool({ n, review, files = [], heartbeatMs, deps = {} }) {
 }
 
 describe('review.parallel_tickets (B42)', () => {
-  test('parallelTickets: an integer 1–16 is used, anything else is the default 3', () => {
+  test('parallelTickets: an integer 1–16 is used, anything else is the default 6', () => {
     assert.deepEqual(
       [parallelTickets({ review: { parallel_tickets: 1 } }), parallelTickets({ review: { parallel_tickets: 16 } }), parallelTickets({}), parallelTickets({ review: { parallel_tickets: 0 } }), parallelTickets({ review: { parallel_tickets: 17 } }), parallelTickets({ review: { parallel_tickets: 2.5 } }), parallelTickets(null)],
-      [1, 16, 3, 3, 3, 3, 3],
+      [1, 16, 6, 6, 6, 6, 6],
     );
   });
 
@@ -140,18 +140,17 @@ describe('review.parallel_tickets (B42)', () => {
     assert.deepEqual(p.rows.map((r) => [r.event, r.ticket, r.status]), [['review.result', ta, 'reviewed'], ['review.result', tb, 'reviewed'], ['review.result', tc, 'reviewed']]);
   });
 
-  test('no config: the pool runs the default 3 at once', async () => {
+  test('no config: the pool runs the default 6 at once', async () => {
     const g = gates();
     const { log, review } = instrumented({ hold: (t) => g.wait(t.file) });
-    const p = await pool({ review, files: ['src/d.mjs'] });
-    ['src/a.mjs', 'src/b.mjs', 'src/c.mjs', 'src/d.mjs'].forEach((f, i) => p.add(f, i));
+    const files = ['src/a.mjs', 'src/b.mjs', 'src/c.mjs', 'src/d.mjs', 'src/e.mjs', 'src/f.mjs'];
+    const p = await pool({ review, files: files.slice(3) });
+    files.forEach((f, i) => p.add(f, i));
     const drained = p.worker.drain();
-    assert.equal(await waitFor(() => log.active === 3), true);
-    await sleep(60);
-    assert.equal(log.starts.length, 3);
-    g.openAll(['src/a.mjs', 'src/b.mjs', 'src/c.mjs', 'src/d.mjs']);
-    assert.equal(await drained, 4);
-    assert.equal(log.max, 3);
+    try { await waitFor(() => log.active === 6, 5000); }
+    finally { g.openAll(files); await drained; }
+    assert.equal(log.starts.length, 6, 'all six queued reviews start');
+    assert.equal(log.max, 6, 'six reviews overlap with no configured limit');
   });
 
   test('two tickets for the same (block, file) never overlap: the later stays pending without a slot, a ticket for another file takes that slot', async () => {

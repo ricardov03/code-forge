@@ -145,7 +145,8 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `review.provider_concurrency.anthropic` | integer |  | `4` | min 1 |
 | `review.provider_concurrency.openai` | integer |  | `2` | min 1 |
 | `review.provider_concurrency.xai` | integer |  | `2` | min 1 |
-| `review.parallel_tickets` | integer |  | `3` | min 1; max 16; B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap. |
+| `review.parallel_tickets` | integer |  | `6` | min 1; max 16; B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap. |
+| `review.provider_parallel` | integer |  | `4` | min 1; max 16; Maximum simultaneous review sessions per provider in the worker. Sessions waiting for this cap leave room in the ticket pool for other providers; stricter provider_concurrency limits still apply. |
 | `review.fair_share` | boolean |  | `false` | Give each free ticket slot to the block with the fewest running tickets; ties stay oldest first. |
 | `review.file_loop` | enum: `wait`, `overlap`, `watch` |  | `"wait"` | After each green file, enqueue its review. wait (default): wait for its ticket before the next file. overlap: continue coding, then run review-file --wait-block <id> --run <run> before the completion sentinel; inspect findings with --wait <ticket>. watch: commit each green file instead of running review-file. A file's first commit is queued at once. Later commits of a file that already has a ticket of this block are held (a watch.held row) until --wait-block, which queues the latest content once before the sentinel. Older pending tickets are still superseded. |
 | `review.agent_waivers` | object |  | — | Human acknowledgement of counted agent waivers. Set before run start; run reload refuses to change require_ack. |

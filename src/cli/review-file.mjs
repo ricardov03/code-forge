@@ -67,8 +67,9 @@
  * needs its own review.
  */
 
-import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, statSync } from 'node:fs';
+import { lstatSync, readdirSync, readFileSync, realpathSync, rmSync, statSync, watch } from 'node:fs';
 import path from 'node:path';
+import { setTimeout as delay } from 'node:timers/promises';
 import { answersTicketId, assertAnswers, blockTickets, clearDone, deliverBlockFindings, dropDoneIf, enqueue, enqueueAnswers, enqueueHash, isDone, liveWorker, MAX_ANSWERS, queueDir, resolveHashTicket, resolveTicket, reviewExclusionFor } from '../worker/queue.mjs';
 import { assertBlockId, assertInsideRoot, assertTicketId, contentHash, mainRootOf, normalizeRequestPath, repoRootOf, WorkerError } from '../worker/ticket.mjs';
 import { changedFiles, checkBlockReviews, namedOnHash, ownsAt } from '../review/gate-check.mjs';
@@ -570,9 +571,9 @@ export async function requeueStoppedFiles({ repoRoot, run, block, tree, files, p
  * the durable state and writes a signed restart before queuing the new attempt.
  * Re-scan metadata each poll and read content only after its stamp changes. Deliver unseen findings of the newest earlier ticket
  * before rechecking a blind edit; the next join queues the fix. Changed stopped findings restart.
- * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown, print: (line: string) => unknown, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number) => Promise<unknown>}} opts
+ * @param {{repoRoot: string, cwd: string, block: string, run: string, maxMs: number, pollMs: number, say: (obj: Record<string, any>) => unknown, print: (line: string) => unknown, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number, signal?: AbortSignal) => Promise<unknown>}} opts
  */
-async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, print, dropDone = dropDoneIf, now = Date.now, sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms)) }) {
+async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, print, dropDone = dropDoneIf, now = Date.now, sleep = (ms, signal) => delay(ms, undefined, { signal }).catch((err) => { if (err.name !== 'AbortError') throw err; }) }) {
   let scope = await waitBlockScope(repoRoot, cwd, run, block);
   const { tree } = scope;
   const gitPaths = waitGitPaths(tree);
@@ -587,7 +588,23 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, print,
   const hashes = new Map();
   let downPolls = 0;
   const deliveredHere = new Set();
+  let changed = false;
+  /** @type {(() => void) | null} */
+  let wake = null;
+  /** @type {import('node:fs').FSWatcher | undefined} */
+  let watcher;
+  const notify = () => { changed = true; wake?.(); };
+  // Install before scanning so a completion between the scan and the wait is retained.
+  // Queue .done markers are already published after their results, on macOS and Linux.
+  try {
+    watcher = watch(queueDir(repoRoot), (_event, name) => {
+      if (name === null || String(name).endsWith('.done')) notify();
+    });
+    watcher.on('error', () => { watcher.close(); notify(); });
+  } catch { /* unavailable watches retain the existing backoff polling */ }
+  try {
   for (;;) {
+    changed = false;
     scope = await waitBlockScope(repoRoot, cwd, run, block, scope);
     // Keep one daemon join for the remaining deadline: it retains findings already
     // delivered while other files are pending, just like deliveredHere below.
@@ -687,15 +704,22 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, print,
     }
     const ticketIds = [...new Set([...tickets.map((t) => t.ticket), ...files.map((f) => f.ticket).filter(Boolean)])].sort();
     const state = JSON.stringify([stamp, live, ticketIds, files]);
-    interval = seen === state ? Math.min(MAX_IDLE_MS, interval * 2) : pollMs;
-    seen = state;
-    await sleep(Math.min(interval, Math.max(0, deadline - now())));
+    if (!changed) {
+      interval = seen === state ? Math.min(MAX_IDLE_MS, interval * 2) : pollMs;
+      seen = state;
+      const abort = new AbortController();
+      try {
+        const event = new Promise((resolve) => { wake = () => resolve(undefined); });
+        await Promise.race([event, sleep(Math.min(interval, Math.max(0, deadline - now())), abort.signal)]);
+      } finally { wake = null; abort.abort(); }
+    }
   }
+  } finally { watcher?.close(); }
 }
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number) => Promise<unknown>}} [deps] - `dropDone`: B75's claim, for tests.
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, pollMs?: number, dropDone?: typeof dropDoneIf, now?: () => number, sleep?: (ms: number, signal?: AbortSignal) => Promise<unknown>}} [deps] - `dropDone`: B75's claim, for tests.
  * @returns {Promise<number>}
  */
 export async function runReviewFile(args, deps = {}) {
