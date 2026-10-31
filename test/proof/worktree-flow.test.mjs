@@ -131,7 +131,19 @@ async function fixture(slug, extra) {
     return { code, json: out ? JSON.parse(out) : null, err };
   };
   const rows = async () => readAllRows(slug);
-  const gateRows = async () => (await rows()).filter((r) => r.event.startsWith('gate.r') || r.event === 'gate.done').map(({ mac: _m, ts: _t, ...r }) => r);
+  const gateRows = async () => (await rows()).filter((r) => r.event.startsWith('gate.r') || r.event === 'gate.done').map(({ mac: _m, ts: _t, duration_ms, total_duration_ms, results, ...r }) => {
+    assert.ok(Number.isFinite(duration_ms) && duration_ms >= 0, `${r.event} has nonnegative wall milliseconds`);
+    if (r.event === 'gate.red') assert.ok(total_duration_ms >= duration_ms, 'total gate time includes the red gate');
+    else {
+      assert.deepEqual(results.map(({ gate, ok, skipped }) => ({ gate, ok, skipped })), [
+        { gate: 'test', ok: r.all_ok, skipped: false },
+        ...['lint', 'types', 'format'].map((gate) => ({ gate, ok: true, skipped: true })),
+      ]);
+      for (const result of results) assert.ok(Number.isFinite(result.duration_ms) && result.duration_ms >= 0, `${result.gate} has nonnegative wall milliseconds`);
+      assert.equal(duration_ms, results.reduce((sum, result) => sum + result.duration_ms, 0));
+    }
+    return r;
+  });
   return { repo, origin, runId, head, open, close, gate, rows, gateRows, tree: (/** @type {string} */ id) => `${repo}-worktrees/${id}` };
 }
 
@@ -541,6 +553,14 @@ async function withWorker(name, body) {
 /** @param {string} root @param {string} file @returns {string} the sha256 of the file's bytes. */
 const sha = (root, file) => createHash('sha256').update(readFileSync(path.join(root, file))).digest('hex');
 
+/** Lifecycle metadata may advance while the worker claims a queued ticket. @param {Record<string, any>} ticket */
+function ticketIdentity({ queued_at, started_at, finished_at, duration_ms, ...ticket }) {
+  assert.equal(queued_at, ticket.enqueued_at);
+  for (const value of [started_at, finished_at]) assert.ok(value === null || Number.isFinite(Date.parse(value)), 'ticket lifecycle time is null or an ISO date');
+  assert.ok(duration_ms === null || (Number.isFinite(duration_ms) && duration_ms >= 0), 'ticket duration is null or nonnegative milliseconds');
+  return { ...ticket, enqueued_at: 'x' };
+}
+
 test('B62b (2): review-file in the tree queues in the main tree, hashes the tree\'s content and names the tree; the worker reviews exactly that content and the packet names the tree', async () => {
   await withWorker('b62b-review', async ({ repo, origin, tree, runId, env, records }) => {
     const lines = LINES.split('\n');
@@ -557,7 +577,7 @@ test('B62b (2): review-file in the tree queues in the main tree, hashes the tree
     assert.deepEqual(enq.json, { ticket: enq.json.ticket, status: 'queued', file: 'src/a.mjs', content_hash: hash, tree });
     // the ticket is in the main tree's queue (where the worker is), naming the tree; none in the tree
     const ticket = JSON.parse(readFileSync(path.join(repo, '.code-forge', 'queue', `${enq.json.ticket}.json`), 'utf8'));
-    assert.deepEqual({ ...ticket, enqueued_at: 'x' }, { ticket: enq.json.ticket, run: runId, block: 'B1', file: 'src/a.mjs', content_hash: hash, enqueued_at: 'x', tree });
+    assert.deepEqual(ticketIdentity(ticket), { ticket: enq.json.ticket, run: runId, block: 'B1', file: 'src/a.mjs', content_hash: hash, enqueued_at: 'x', tree });
     assert.equal(existsSync(path.join(tree, '.code-forge')), false);
 
     const waited = await cliProc(['review-file', '--wait', enq.json.ticket, '--max', '30s'], tree, env);
@@ -694,7 +714,7 @@ test('B62b (2): review-file for a block the record gives no worktree hashes the 
     assert.equal(enq.code, 0, enq.stdout + enq.stderr);
     assert.deepEqual(enq.json, { ticket: enq.json.ticket, status: 'queued', file: 'src/b.mjs', content_hash: hash });
     const ticket = JSON.parse(readFileSync(path.join(repo, '.code-forge', 'queue', `${enq.json.ticket}.json`), 'utf8'));
-    assert.deepEqual({ ...ticket, enqueued_at: 'x' }, { ticket: enq.json.ticket, run: runId, block: 'B2', file: 'src/b.mjs', content_hash: hash, enqueued_at: 'x' });
+    assert.deepEqual(ticketIdentity(ticket), { ticket: enq.json.ticket, run: runId, block: 'B2', file: 'src/b.mjs', content_hash: hash, enqueued_at: 'x' });
   });
 });
 
