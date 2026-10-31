@@ -1,0 +1,243 @@
+[
+  {
+    "name": "rotation-and-torn-tail",
+    "slug": "compat",
+    "files": {
+      "compat.1.jsonl": "{\"event\":\"run.start\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"label\":\"é😀\",\"mac\":\"7bedf9d3a05b209cc23acf1a4cf9e313059a90c63e82a97262895c4635dcb5e8\",\"tokens_source\":null,\"cost_source\":null}\n",
+      "compat.jsonl": "{\"event\":\"session\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"tokens_in\":7,\"cost_usd\":0.03,\"mac\":\"8ad7fea64747698a7b2594d96bac23d332e7e254baecadd159849ab0513c59a5\",\"tokens_source\":\"estimated\",\"cost_source\":\"estimated\"}\n{\"event\":\"run.end\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"mac\":\"7d1c716ee9355849ecb77069e3419142f5699e76c0d64157bb1694d992ad3f7d\",\"tokens_source\":null,\"cost_source\":null}\n{\"event\":\"torn é😀"
+    },
+    "current": [
+      {
+        "event": "session",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "tokens_in": 7,
+        "cost_usd": 0.03,
+        "mac": "8ad7fea64747698a7b2594d96bac23d332e7e254baecadd159849ab0513c59a5",
+        "tokens_source": "estimated",
+        "cost_source": "estimated"
+      },
+      {
+        "event": "run.end",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "mac": "7d1c716ee9355849ecb77069e3419142f5699e76c0d64157bb1694d992ad3f7d",
+        "tokens_source": null,
+        "cost_source": null
+      }
+    ],
+    "all": [
+      {
+        "event": "run.start",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "label": "é😀",
+        "mac": "7bedf9d3a05b209cc23acf1a4cf9e313059a90c63e82a97262895c4635dcb5e8",
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "session",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "tokens_in": 7,
+        "cost_usd": 0.03,
+        "mac": "8ad7fea64747698a7b2594d96bac23d332e7e254baecadd159849ab0513c59a5",
+        "tokens_source": "estimated",
+        "cost_source": "estimated"
+      },
+      {
+        "event": "run.end",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "mac": "7d1c716ee9355849ecb77069e3419142f5699e76c0d64157bb1694d992ad3f7d",
+        "tokens_source": null,
+        "cost_source": null
+      }
+    ],
+    "error": false
+  },
+  {
+    "name": "numeric-rotation-order-and-exact-names",
+    "slug": "ordered",
+    "files": {
+      "ordered-other.99.jsonl": "unrelated corrupt data\n",
+      "ordered.1.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":0,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.10.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":9,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.2.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":1,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.3.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":2,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.3.jsonl.bak": "unrelated corrupt data\n",
+      "ordered.4.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":3,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.5.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":4,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.6.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":5,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.7.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":6,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.8.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":7,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.9.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":8,\"tokens_source\":null,\"cost_source\":null}\n",
+      "ordered.jsonl": "{\"event\":\"row\",\"ts\":\"2026-01-02T03:04:05.006Z\",\"i\":10,\"tokens_source\":null,\"cost_source\":null}\n"
+    },
+    "current": [
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 10,
+        "tokens_source": null,
+        "cost_source": null
+      }
+    ],
+    "all": [
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 0,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 1,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 2,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 3,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 4,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 5,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 6,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 7,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 8,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 9,
+        "tokens_source": null,
+        "cost_source": null
+      },
+      {
+        "event": "row",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "i": 10,
+        "tokens_source": null,
+        "cost_source": null
+      }
+    ],
+    "error": false
+  },
+  {
+    "name": "complete-no-newline",
+    "slug": "complete-no-newline",
+    "files": {
+      "complete-no-newline.jsonl": "{\"event\":\"complete\"}"
+    },
+    "current": [
+      {
+        "event": "complete"
+      }
+    ],
+    "all": [
+      {
+        "event": "complete"
+      }
+    ],
+    "error": false
+  },
+  {
+    "name": "only-torn",
+    "slug": "only-torn",
+    "files": {
+      "only-torn.jsonl": "{\"event\":"
+    },
+    "current": [],
+    "all": [],
+    "error": false
+  },
+  {
+    "name": "blank-lines",
+    "slug": "blank-lines",
+    "files": {
+      "blank-lines.jsonl": "\n{\"event\":\"good\"}\n\n"
+    },
+    "current": [
+      {
+        "event": "good"
+      }
+    ],
+    "all": [
+      {
+        "event": "good"
+      }
+    ],
+    "error": false
+  },
+  {
+    "name": "invalid-final-with-newline",
+    "slug": "invalid-final-with-newline",
+    "files": {
+      "invalid-final-with-newline.jsonl": "{\"event\":\"good\"}\nbroken\n"
+    },
+    "current": [
+      {
+        "event": "good"
+      }
+    ],
+    "all": [
+      {
+        "event": "good"
+      }
+    ],
+    "error": false
+  },
+  {
+    "name": "interior-corruption",
+    "slug": "interior-corruption",
+    "files": {
+      "interior-corruption.jsonl": "broken\n{\"event\":\"good\"}\n"
+    },
+    "error": true
+  },
+  {
+    "name": "missing",
+    "slug": "missing",
+    "files": {},
+    "current": [],
+    "all": [],
+    "error": false
+  }
+]

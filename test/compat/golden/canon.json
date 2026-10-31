@@ -1,0 +1,102 @@
+[
+  {
+    "name": "unicode",
+    "input": "{\"text\":\"é 😀 𝄞    <>&\",\"escaped\":\"\\u0000\\b\\t\\n\\f\\r\\u001f\\\"\\\\\"}",
+    "expected": "{\"escaped\":\"\\u0000\\b\\t\\n\\f\\r\\u001f\\\"\\\\\",\"text\":\"é 😀 𝄞    <>&\"}"
+  },
+  {
+    "name": "utf16-order",
+    "input": "{\"\":1,\"😀\":2,\"é\":3,\"a\":4,\"𝄞\":5}",
+    "expected": "{\"a\":4,\"é\":3,\"𝄞\":5,\"😀\":2,\"\":1}"
+  },
+  {
+    "name": "numeric-keys",
+    "input": "{\"1\":\"one\",\"2\":\"two\",\"10\":\"ten\",\"01\":\"leading\"}",
+    "expected": "{\"01\":\"leading\",\"1\":\"one\",\"10\":\"ten\",\"2\":\"two\"}"
+  },
+  {
+    "name": "nested",
+    "input": "[{\"z\":[null,true,false,{\"b\":2,\"a\":1}],\"a\":{}},[]]",
+    "expected": "[{\"a\":{},\"z\":[null,true,false,{\"a\":1,\"b\":2}]},[]]"
+  },
+  {
+    "name": "zero",
+    "input": "0",
+    "expected": "0"
+  },
+  {
+    "name": "negative-zero",
+    "input": "-0",
+    "expected": "0"
+  },
+  {
+    "name": "exponent-large",
+    "input": "1e+21",
+    "expected": "1e+21"
+  },
+  {
+    "name": "exponent-small",
+    "input": "1e-7",
+    "expected": "1e-7"
+  },
+  {
+    "name": "decimal-threshold",
+    "input": "0.000001",
+    "expected": "0.000001"
+  },
+  {
+    "name": "large-decimal",
+    "input": "100000000000000000000",
+    "expected": "100000000000000000000"
+  },
+  {
+    "name": "sum",
+    "input": "0.30000000000000004",
+    "expected": "0.30000000000000004"
+  },
+  {
+    "name": "safe-int",
+    "input": "9007199254740991",
+    "expected": "9007199254740991"
+  },
+  {
+    "name": "rounded-int",
+    "input": "9007199254740992",
+    "expected": "9007199254740992"
+  },
+  {
+    "name": "rounded-large-int",
+    "input": "1000000000000000100",
+    "expected": "1000000000000000100"
+  },
+  {
+    "name": "subnormal",
+    "input": "5e-324",
+    "expected": "5e-324"
+  },
+  {
+    "name": "max-finite",
+    "input": "1.7976931348623157e+308",
+    "expected": "1.7976931348623157e+308"
+  },
+  {
+    "name": "negative-exponent",
+    "input": "-1.2345e-7",
+    "expected": "-1.2345e-7"
+  },
+  {
+    "name": "true",
+    "input": "true",
+    "expected": "true"
+  },
+  {
+    "name": "false",
+    "input": "false",
+    "expected": "false"
+  },
+  {
+    "name": "null",
+    "input": "null",
+    "expected": "null"
+  }
+]
