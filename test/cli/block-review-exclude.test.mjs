@@ -179,7 +179,9 @@ test('clean v1 npm locks close with nested, local and bundled dependencies and c
 
 test('watch, enqueue, worker and review-file skip excluded files; wait-block lists excluded and finishes with the reviewed source', async () => {
   const f = await fixture();
-  await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow });
+  const observed = Date.now() - 15000;
+  await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow, now: () => observed });
+  await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow, now: () => observed + 15000 });
   const tickets = blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B1' });
   assert.deepEqual(tickets.map((t) => t.file), ['a.mjs'], 'watch queues only source');
   for (const queued of [enqueue({ repoRoot: f.repo, run: f.runId, block: 'B1', file: f.file }), enqueueHash({ repoRoot: f.repo, run: f.runId, block: 'B1', file: f.file, content_hash: contentHash(f.repo, f.file) })]) {

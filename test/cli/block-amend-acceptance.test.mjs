@@ -157,7 +157,9 @@ test('B143 clause 3 boundary: direct requests, block waits and unchanged watch c
   for (const mode of ['direct', 'wait', 'watch']) {
     const f = await fixture(`amend-queue-${mode}`);
     await git(['add', 'a.mjs'], f.repo); await git(['commit', '-q', '-m', 'change'], f.repo);
-    await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow });
+    const observed = Date.now() - 15000;
+    await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow, now: () => observed });
+    await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow, now: () => observed + 15000 });
     const old = enqueue({ repoRoot: f.repo, run: f.runId, block: 'B1', file: 'a.mjs' });
     writeResult({ repoRoot: f.repo, runId: f.runId, ticket: old.ticket, key: await loadKey(f.runId), result: { status: 'stopped', stopped: 'review_cap', approved: false } });
     const workerRow = (row) => f.sign({ file: 'a.mjs', content_hash: old.content_hash, ...row });
@@ -171,7 +173,8 @@ test('B143 clause 3 boundary: direct requests, block waits and unchanged watch c
     try {
       let ticket;
       if (mode === 'watch') {
-        await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow });
+        await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow, now: () => observed + 15000 });
+        await watchTick({ repoRoot: f.repo, runId: f.runId, cfg: f.config, writeRow: f.writeRow, now: () => observed + 30000 });
         const { blockTickets } = await import('../../src/worker/queue.mjs');
         const pending = blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B1' });
         assert.equal(pending.length, 1); ticket = pending[0].ticket;
