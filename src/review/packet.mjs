@@ -80,6 +80,57 @@ export class PacketError extends Error {
 /** @param {string} text @returns {number} estimated tokens (bytes / 4, rounded up). */
 export const estimateTokens = (text) => Math.ceil(Buffer.byteLength(text) / 4);
 
+/** Last line of a top-level import/require in the languages whose imports we recognize.
+ * Strings and comments are opaque; nested requires and dynamic imports are not a header.
+ * @param {string} file @param {string | null} content
+ */
+function importHeaderEnd(file, content) {
+  if (!content || !/\.(?:[cm]?[jt]sx?|css|scss|html?|astro|vue)$/i.test(file)) return 0;
+  const tokens = [...content.matchAll(/\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|<!--[\s\S]*?-->|`(?:\\[\s\S]|[^`\\])*`|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*"|[\w$]+|[^\s]/g)]
+    .filter((m) => !/^(?:\/\/|\/\*|<!--)/.test(m[0]));
+  let depth = 0;
+  let importing = false;
+  let importSource = false;
+  let requiring = false;
+  let end = 0;
+  for (let i = 0; i < tokens.length; i++) {
+    const token = tokens[i][0];
+    const next = tokens[i + 1]?.[0];
+    const prev = tokens[i - 1]?.[0];
+    if (depth === 0 && token === 'import' && next !== '(' && next !== '.' && prev !== '.') {
+      importing = true;
+      importSource = false;
+    }
+    if (depth === 0 && token === 'require' && next === '(' && prev !== '.') requiring = true;
+    if (['{', '(', '['].includes(token)) depth++;
+    if (['}', ')', ']'].includes(token)) depth = Math.max(0, depth - 1);
+    if (depth === 0 && ((importing && (/^['"]/.test(token) || (importSource && token === '}') || token === ';')) || (requiring && token === ')'))) {
+      end = tokens[i].index + token.length;
+      importSource = true;
+      // Import attributes can continue on later lines after the module specifier.
+      if (!(['with', 'assert'].includes(next) && tokens[i + 2]?.[0] === '{')) importing = false;
+      requiring = false;
+    }
+  }
+  return end === 0 ? 0 : content.slice(0, end).split('\n').length;
+}
+
+/** Keep header context through budget shrinking, without repeating already shown lines.
+ * @param {Parameters<typeof buildContext>[0]} opts @returns {import('./context.mjs').Context}
+ */
+function packetContext(opts) {
+  const ctx = buildContext(opts);
+  const end = importHeaderEnd(opts.file, opts.content);
+  const lines = splitLines(opts.content);
+  const missing = [];
+  for (let n = 1; n <= end; n++) {
+    if (!ctx.windows.some((w) => w.start <= n && n <= w.end)) missing.push(`${n}| ${lines[n - 1]}`);
+  }
+  if (missing.length === 0) return ctx;
+  return { ...ctx, lineCount: ctx.lineCount + missing.length,
+    text: [`### ${opts.file} (import header context, lines 1-${end})`, ...missing, ctx.text].join('\n') };
+}
+
 /** @param {string} name @returns {string} the lens text. */
 export function loadLens(name) {
   if (!LENSES.includes(name)) throw new PacketError('bad-lens', `unknown lens ${JSON.stringify(name)}`);
@@ -219,7 +270,7 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   if (bare > limit) return { status: 'split_required', tokensIn: bare, budget: limit };
 
   let digest = splitLines(rulesDigest).slice(0, DIGEST_MAX_LINES);
-  let ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: contextMode });
+  let ctx = packetContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: contextMode });
   let pairedSection = boundedPaired(paired, budgetFor(cfg, 'full_in'));
   const names = ['quick', 'full'].includes(lens) ? (diff.related ?? []) : [];
   let relatedSection = names.length > 0 ? `## related files (not shown)\n${names.join('\n')}` : '';
@@ -233,7 +284,7 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
     text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
   }
   if (estimateTokens(text) > limit) {
-    ctx = buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: 'minimal' });
+    ctx = packetContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: 'minimal' });
     text = render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved);
   }
   while (estimateTokens(text) > limit && digest.length > 0) {
@@ -252,7 +303,7 @@ export function assembleLightPacket({ diffs, cfg, rulesDigest = '', factsExcerpt
   const diffText = diffs.map((diff) => `### ${diff.file}\n${diffSectionOf(diff)}`).join('\n\n');
   const budget = budgetFor(cfg, 'full_in');
   let digest = splitLines(rulesDigest).slice(0, DIGEST_MAX_LINES);
-  const context = (mode) => diffs.map((diff) => `### ${diff.file}\n${buildContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode }).text}`).join('\n\n');
+  const context = (mode) => diffs.map((diff) => `### ${diff.file}\n${packetContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode }).text}`).join('\n\n');
   let contextMode = 'auto';
   let ctx = context(contextMode);
   const shown = new Set(diffs.map((diff) => diff.file));

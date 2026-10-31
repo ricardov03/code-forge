@@ -15,6 +15,7 @@ import { verifyResult } from '../worker/queue.mjs';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { runRootFor, spawnSession } from '../session/spawn.mjs';
 import { spawnWithBrokenFallback } from './session-retry.mjs';
+import { splitLines } from './context.mjs';
 
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['verdict', 'reason'],
@@ -47,16 +48,48 @@ function existsInTree(root, file) {
   }
 }
 
+/** @param {string} reason */
+const evidenceTokens = (reason) => reason.split(/[\s"'`()[\]{},;<>]+/u).filter(Boolean);
+
+/** Numbered windows for the first ten readable repo citations, never following a link out.
+ * Each window includes ten lines either side, clipped to the file and eighty lines total.
+ * @param {string} reason @param {string} root
+ */
+export function citedEvidence(reason, root) {
+  const evidence = [];
+  for (const token of evidenceTokens(reason)) {
+    const match = /^(.+):([1-9][0-9]*)(?:-([1-9][0-9]*))?[.!?]?$/.exec(token);
+    if (!match) continue;
+    const first = Number(match[2]);
+    const last = Number(match[3] ?? match[2]);
+    if (!Number.isSafeInteger(first) || !Number.isSafeInteger(last) || last < first) continue;
+    try {
+      const file = assertRowPath(match[1]);
+      const bytes = readRegularFileNoFollow(root, file);
+      if (bytes === null) continue;
+      const lines = splitLines(bytes.toString('utf8'));
+      if (first > lines.length) continue;
+      const start = Math.max(1, first - 10);
+      const end = Math.min(lines.length, last + 10, start + 79);
+      const content = lines.slice(start - 1, end).map((line, i) => `${start + i}| ${line}`).join('\n');
+      evidence.push({ path: file, start, end, content });
+      if (evidence.length === 10) break;
+    } catch {
+      // Invalid, missing, unreadable and escaping citations never become packet content.
+    }
+  }
+  return evidence;
+}
+
 /** @param {string} reason @param {string} root @param {Record<string, any>} entry */
 export function hasEvidence(reason, root, entry) {
+  if (citedEvidence(reason, root).length > 0) return true;
   for (const match of reason.matchAll(/\bclause\s+([0-9]+)\b/gi)) {
     const n = Number(match[1]);
     if (n >= 1 && n <= (Array.isArray(entry.acceptance) ? entry.acceptance.length : 0)) return true;
   }
-  const tokens = reason.split(/[\s"'`()[\]{},;<>]+/u).filter(Boolean);
+  const tokens = evidenceTokens(reason);
   for (const token of tokens) {
-    const line = /^(.+):([1-9][0-9]*)[.!?]?$/.exec(token);
-    if (line && existsInTree(root, line[1])) return true;
     const file = token.replace(/[.!?]+$/, '');
     const testFile = /(^|\/)(?:test|tests|__tests__)\//.test(file) || /(?:^|[./_-])(?:test|spec)\.[^/]+$/.test(file) || entry.test_files?.includes(file);
     if (testFile && existsInTree(root, file)) return true;
@@ -137,7 +170,8 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   const bytes = readRegularFileNoFollow(contentRoot, file);
   if (bytes === null) refuse('waive-yes-disagreed', 'The current file cannot be read');
   const text = await findingText(rows, { root, runId, id, file, finding, key });
-  const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') } }, { record, runId, id, judge });
+  const evidence = citedEvidence(reason, contentRoot);
+  const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') }, ...(evidence.length > 0 ? { evidence } : {}) }, { record, runId, id, judge });
   if (answer.verdict === 'broken') refuse('waive-yes-broken', answer.reason);
   if (answer.verdict !== 'agree') refuse('waive-yes-disagreed', answer.reason);
   return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason } });
