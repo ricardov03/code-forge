@@ -364,6 +364,49 @@ function preflight(root, p, fail) {
 
 // ── checks ──────────────────────────────────────────────────────────────────────────────────
 
+/** Build before any pack or publish, including releases that skip the optional checks.
+ * Repositories using this release tool without a native module need no Go toolchain.
+ * @param {string} root @returns {string | null}
+ */
+function buildNative(root) {
+  if (!existsSync(path.join(root, 'native', 'go.mod'))) return null;
+  const r = run(process.execPath, [path.join(root, 'scripts', 'build-native.mjs')], { cwd: root });
+  if (r.code !== 0) return `build-native failed (exit ${r.code}): ${(r.stderr || r.stdout).trim()}`;
+  process.stdout.write(r.stdout);
+  ok('build-native: all four release targets');
+  return null;
+}
+
+/** @param {string} root @param {string} name @param {string} version @returns {string | null} */
+function checkPack(root, name, version) {
+  const r = run('npm', ['pack', '--dry-run', '--json'], { cwd: root });
+  if (r.code !== 0) return `npm pack --dry-run failed (exit ${r.code}): ${(r.stderr || r.stdout).trim()}`;
+  let pack;
+  try {
+    pack = JSON.parse(r.stdout)[0];
+  } catch {
+    return 'npm pack --dry-run --json printed no JSON';
+  }
+  if (pack?.name !== name || pack?.version !== version) {
+    return `npm pack --dry-run: the tarball is ${pack?.name}@${pack?.version}, expected ${name}@${version}`;
+  }
+  const native = existsSync(path.join(root, 'native', 'go.mod'));
+  if (native && (!Number.isFinite(pack.size) || pack.size < 0)) return 'npm pack --dry-run: missing package size';
+  if (Number.isFinite(pack.size)) {
+    ok(`package size: ${pack.size} bytes (${(pack.size / 1_000_000).toFixed(2)} MB; limit <20 MB)`);
+    if (pack.size >= 20_000_000) return 'published package must be under 20 MB';
+  }
+  if (native) {
+    for (const target of ['darwin-arm64', 'darwin-x64', 'linux-x64', 'linux-arm64']) {
+      if (!pack.files?.some((f) => f.path === `native/bin/${target}/code-forge-native`)) {
+        return `npm pack --dry-run: missing native binary ${target}`;
+      }
+    }
+  }
+  ok(`npm pack --dry-run: ${name}@${version}, ${pack.entryCount ?? pack.files?.length} files`);
+  return null;
+}
+
 /** @param {string} root @param {string} name @param {string} version @returns {string | null} a failure, or null */
 function runChecks(root, name, version) {
   /** @param {string} label @param {ReturnType<typeof run>} r */
@@ -386,18 +429,8 @@ function runChecks(root, name, version) {
   if (r.code !== 0) return failed('npm run typecheck', r);
   ok('npm run typecheck');
 
-  r = run('npm', ['pack', '--dry-run', '--json'], { cwd: root });
-  if (r.code !== 0) return failed('npm pack --dry-run', r);
-  let pack;
-  try {
-    pack = JSON.parse(r.stdout)[0];
-  } catch {
-    return 'npm pack --dry-run --json printed no JSON';
-  }
-  if (pack?.name !== name || pack?.version !== version) {
-    return `npm pack --dry-run: the tarball is ${pack?.name}@${pack?.version}, expected ${name}@${version}`;
-  }
-  ok(`npm pack --dry-run: ${name}@${version}, ${pack.entryCount ?? pack.files?.length} files`);
+  const packFailure = checkPack(root, name, version);
+  if (packFailure) return packFailure;
 
   r = run('npm', ['ls', '--json'], { cwd: root });
   let tree;
@@ -577,6 +610,12 @@ export function main(argv, root = process.cwd()) {
     }
 
     process.stdout.write('\n== 4. checks ==\n');
+    const nativeFailure = buildNative(root);
+    if (nativeFailure) {
+      restore();
+      process.stderr.write(`\nFAILED: ${nativeFailure}\nrolled back ${written.length} files; nothing was committed or tagged\n`);
+      return 1;
+    }
     if (opts.checks) {
       const failure = runChecks(root, name, next);
       if (failure) {
@@ -585,6 +624,14 @@ export function main(argv, root = process.cwd()) {
         return 1;
       }
     } else {
+      if (existsSync(path.join(root, 'native', 'go.mod'))) {
+        const packFailure = checkPack(root, name, next);
+        if (packFailure) {
+          restore();
+          process.stderr.write(`\nFAILED: ${packFailure}\nrolled back ${written.length} files; nothing was committed or tagged\n`);
+          return 1;
+        }
+      }
       warn('!!! --no-checks: gen-config-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!');
     }
 
