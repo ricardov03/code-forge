@@ -25,6 +25,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The native daemon status helper now lives with the other command files, so the import-order rule passes again. (B218)
 - Commit watch waits until a burst of commits ends (15 s quiet, 120 s at most) and reviews only the last commit, so a coder making several quick commits no longer starts extra reviews. (B211)
 - The worker and `status` use the native Go daemon when it runs and fall back to Node when it does not; status output is the same in every mode, and `doctor` shows the daemon state. (B183)
+- Two block tests now give the commit watch its second quiet tick, so they pass with the B211 debounce. (B219)
 
 ## [0.15.3] — 2026-10-30
 
