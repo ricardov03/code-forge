@@ -85,6 +85,10 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 
 ## Releasing checklist
 
+Build the optional native binaries with `node scripts/build-native.mjs` (`--host` for local
+testing). The native code is pure Go and standard library only; builds and compatibility tests
+force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller configuration.
+
 1. Every landed block has a CHANGELOG entry under `## [Unreleased]`.
 2. `npm run known-fix -- check` when the release fixes reported errors.
 3. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
