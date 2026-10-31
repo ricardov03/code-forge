@@ -15,6 +15,7 @@ coverage/
 reports/
 package-lock.json
 *.tsbuildinfo
+native/bin/
 
 # macOS
 .DS_Store

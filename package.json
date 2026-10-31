@@ -23,6 +23,7 @@
   },
   "files": [
     "bin",
+    "native/bin",
     "src",
     "schema",
     "skill",
@@ -33,6 +34,8 @@
     "!scripts/changelog.mjs",
     "!scripts/known-fix.mjs",
     "!scripts/bench-review.mjs",
+    "!scripts/build-native.mjs",
+    "!scripts/compat-golden.mjs",
     "README.md",
     "CHANGELOG.md",
     "LICENSE"
