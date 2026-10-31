@@ -49,15 +49,14 @@ export function schemaErrorsOf(value) {
 }
 
 /**
- * Recover only a null verdict on an otherwise valid review. Keep the original answer intact;
- * every other schema error (including a clean answer without a summary) remains an error.
+ * Recover a null verdict as failure only when an otherwise valid review has findings.
+ * Keep the original answer intact; a null verdict without findings remains a schema error.
  * @param {any} answer @returns {any}
  */
 export function coerceReviewPassed(answer) {
   if (!answer || typeof answer !== 'object' || Array.isArray(answer) || answer.passed !== null
-    || !Array.isArray(answer.findings)) return answer;
-  if (answer.findings.length === 0 && !(typeof answer.summary === 'string' && answer.summary.trim().length > 0)) return answer;
-  const candidate = { ...answer, passed: answer.findings.length === 0 };
+    || !Array.isArray(answer.findings) || answer.findings.length === 0) return answer;
+  const candidate = { ...answer, passed: false };
   return validateSchema(candidate) === true ? candidate : answer;
 }
 

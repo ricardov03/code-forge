@@ -13,8 +13,8 @@ const PRIMARY = 'claude-opus-5-5';
 const FALLBACK = 'claude-sonnet-5';
 const FINDING = { id: 'F1', file: FILE, line_start: 1, line_end: 1, severity: 'warning', category: 'correctness', claim: 'Missing boundary check', evidence: 'The input can be empty', fix: 'Check the input' };
 
-/** @param {{answer?: any, strict?: boolean, ladder?: boolean, silence?: number, timeoutMs?: number, mode?: 'silent' | 'timeout' | 'capacity'}} [options] */
-async function review({ answer = answerFor(HUNKS), strict = false, ladder = false, silence = 60, timeoutMs = 5000, mode } = {}) {
+/** @param {{answer?: any, fallbackAnswer?: any, strict?: boolean, ladder?: boolean, silence?: number, timeoutMs?: number, mode?: 'silent' | 'timeout' | 'capacity'}} [options] */
+async function review({ answer = answerFor(HUNKS), fallbackAnswer = answer, strict = false, ladder = false, silence = 60, timeoutMs = 5000, mode } = {}) {
   const repo = await makeRepo();
   writeFile(repo, FILE, lines(12));
   const cfg = /** @type {Record<string, any>} */ (cfgFor({ silence_timeout_s: silence }));
@@ -40,7 +40,10 @@ async function review({ answer = answerFor(HUNKS), strict = false, ladder = fals
           stdout: JSON.stringify({ type: 'result', is_error: true, api_error_status: 529, result: 'API Error: at capacity' }) };
       }
       const sleeping = model === PRIMARY && (mode === 'silent' || mode === 'timeout');
-      const result = await exec(argv, { ...options, env: { ...options?.env, ...(sleeping ? { FAKE_SLEEP_MS: '10000' } : {}) } });
+      const result = await exec(argv, { ...options, env: { ...options?.env,
+        ...(model === FALLBACK ? { FAKE_ANSWER: JSON.stringify(fallbackAnswer) } : {}),
+        ...(sleeping ? { FAKE_SLEEP_MS: '10000' } : {}),
+      } });
       results.push({ model, ...result });
       return result;
     },
@@ -63,16 +66,40 @@ test('passed null with one finding is a failing review, with its finding and coe
   }
 });
 
-test('null clean passes require a summary, and coercion never hides other schema or stub failures', async () => {
-  const { outcome } = await review({ answer: answerFor(HUNKS, { passed: null }) });
-  assert.deepEqual([outcome.status, outcome.approved, outcome.findings], ['reviewed', true, []]);
-  assert.deepEqual(outcome.sessions.map((s) => [s.passed, s.passed_coerced]), [[true, true]]);
+test('a null verdict without findings is unavailable and only a fallback verdict can approve', async () => {
+  const answer = answerFor(HUNKS, { passed: null });
+  const session = { status: 'ok', exit_code: 0, answer, usage: { tokens_out: 120 } };
+  assert.deepEqual(validateReview(session, { hunkHeaders: HUNKS }), {
+    ok: false, reason: 'schema', detail: 'the answer does not validate against the finding schema',
+  });
+  for (const strict of [false, true]) {
+    const { outcome, calls } = await review({ strict, answer });
+    assert.deepEqual([outcome.status, outcome.reason, outcome.approved], ['unavailable', 'schema', false]);
+    assert.deepEqual(calls, [strict ? 'gpt-6-astra' : PRIMARY]);
+    for (const fallbackAnswer of [answerFor(HUNKS), answerFor(HUNKS, { passed: false, findings: [FINDING] })]) {
+      const recovered = await review({ strict, ladder: true, answer, fallbackAnswer });
+      const primary = strict ? 'gpt-6-astra' : PRIMARY;
+      assert.deepEqual(recovered.calls, [primary, primary, FALLBACK]);
+      assert.deepEqual([recovered.outcome.status, recovered.outcome.approved, recovered.outcome.findings],
+        ['reviewed', fallbackAnswer.passed, fallbackAnswer.findings]);
+      assert.equal(recovered.outcome.sessions[0].model, FALLBACK);
+      assert.equal(recovered.outcome.sessions[0].passed_coerced, undefined);
+    }
+  }
+  const exhausted = await review({ ladder: true, answer });
+  assert.deepEqual(exhausted.calls, [PRIMARY, PRIMARY, FALLBACK, FALLBACK]);
+  assert.deepEqual([exhausted.outcome.status, exhausted.outcome.reason, exhausted.outcome.approved], ['unavailable', 'schema', false]);
+});
+
+test('null verdict coercion never hides other schema or stub failures', async () => {
   for (const extra of [{ summary: ' ' }, { summary: 3 }, { findings: [{}] }, { unexpected: true }]) {
     const bad = await review({ answer: answerFor(HUNKS, { passed: null, ...extra }) });
     assert.deepEqual([bad.outcome.status, bad.outcome.reason, bad.outcome.approved], ['unavailable', 'schema', false]);
     assert.deepEqual(bad.calls, [PRIMARY]);
   }
-  const session = { status: 'ok', exit_code: 0, answer: answerFor(HUNKS, { passed: null }), usage: { tokens_out: 39 } };
+  const malformed = await review({ answer: answerFor(HUNKS, { passed: null, findings: [FINDING], unexpected: true }) });
+  assert.deepEqual([malformed.outcome.status, malformed.outcome.reason, malformed.outcome.approved], ['unavailable', 'schema', false]);
+  const session = { status: 'ok', exit_code: 0, answer: answerFor(HUNKS, { passed: null, findings: [FINDING] }), usage: { tokens_out: 119 } };
   assert.equal(validateReview(session, { hunkHeaders: HUNKS }).reason, 'too_short');
   assert.equal(validateReview({ ...session, usage: { tokens_out: 120 } }, { hunkHeaders: [] }).reason, 'hunks_mismatch');
 });
@@ -84,6 +111,7 @@ test('a silent reviewer is killed at one second and the fallback answers immedia
   assert.deepEqual(results.map((r) => [r.model, r.timedOut, r.stdout.length, r.stderr.length]), [[PRIMARY, true, 0, 0], [FALLBACK, false, results[1].stdout.length, 0]]);
   assert.ok(results[0].signal, 'the silent process was terminated by a signal');
   assert.ok(elapsed >= 900, `silence fallback took ${elapsed} ms`);
+  assert.ok(elapsed < 4000, `silence fallback took ${elapsed} ms`);
   assert.equal(results[0].silenceTimedOut, true, 'the startup deadline, rather than the full session timeout, killed the process');
   assert.deepEqual(rows.filter((r) => r.event === 'session').map((r) => [r.model, r.status]), [[PRIMARY, 'timeout'], [FALLBACK, 'ok']]);
   assert.equal(rows.find((r) => r.event === 'session' && r.model === PRIMARY).reason, 'killed after 1000 ms without output');
