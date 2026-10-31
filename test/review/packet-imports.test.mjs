@@ -3,6 +3,7 @@ import assert from 'node:assert/strict';
 import { test } from 'node:test';
 
 const { reviewFile } = await import('../../src/review/engine.mjs');
+const { assemblePacket } = await import('../../src/review/packet.mjs');
 
 async function packet(review = {}) {
   const repo = await makeRepo();
@@ -34,4 +35,24 @@ test('a minimal-budget packet retains the full header once, including multiline 
   const context = text.split('## context\n')[1].split('## diff\n')[0];
   for (const [i, line] of header.entries()) assert.equal(context.split('\n').filter((value) => value === `${i + 1}| ${line}`).length, 1, `header line ${i + 1} appears once`);
   assert.equal(context.includes('560| '), false, 'the ordinary 40-line window was shrunk');
+});
+
+test('a statement after a semicolon-free import can be dropped when the budget shrinks', () => {
+  for (const statement of ['assert(cond)', 'with (scope) {}']) {
+    const content = lines(100, (n) => n === 1 ? "import x from 'y'" : n === 2 ? statement : n === 99 ? 'function tail() {' : n === 100 ? '}' : `const value${n} = ${n}`);
+    const diff = { file: 'src/a.mjs', kind: /** @type {const} */ ('tracked'), content,
+      diffText: '@@ -25 +25 @@\n-const value25 = 24\n+const value25 = 25\n',
+      hunks: [{ header: '@@ -25 +25 @@', oldStart: 25, oldLines: 1, newStart: 25, newLines: 1 }], plusCount: 1, minusCount: 1 };
+    const full = assemblePacket({ diff, lens: 'quick' });
+    assert.equal(full.status, 'ok');
+    assert.ok(full.text.includes(`2| ${statement}`), 'the full packet includes the statement');
+    const shrunk = assemblePacket({ diff, lens: 'quick', budget: full.tokensIn - 1 });
+    assert.equal(shrunk.status, 'ok');
+    assert.equal(shrunk.contextMode, 'minimal');
+    assert.equal(shrunk.overBudget, false);
+    const context = shrunk.text.split('## context\n')[1].split('## diff\n')[0];
+    assert.ok(context.includes("1| import x from 'y'"), 'the import remains visible');
+    assert.match(context, /import header context, lines 1-1\)/);
+    assert.equal(context.includes(`2| ${statement}`), false, 'the next statement is droppable');
+  }
 });

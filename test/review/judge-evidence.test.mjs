@@ -12,6 +12,7 @@ const { loadKey } = await import('../../src/state/signer.mjs');
 const { saveState } = await import('../../src/worker/review-state.mjs');
 const { newFileState } = await import('../../src/review/fixloop.mjs');
 const { contentHash } = await import('../../src/worker/ticket.mjs');
+const { blockTickets, pendingTickets } = await import('../../src/worker/queue.mjs');
 
 let seq = 0;
 async function fixture(verb) {
@@ -31,10 +32,11 @@ async function fixture(verb) {
   await openBlock({ runId, id: 'B1', level: 'L2', owned: ['src/a.mjs'], acceptance: [{ clause: 'works', tests: ['t'] }], writeRow });
   const key = await loadKey(runId);
   const sign = (row) => writeSigned(runId, writeRow, { block: 'B1', file: 'src/a.mjs', ...row });
-  await sign({ event: 'review.result', open: [{ id: 'W1', severity: 'warning', claim: 'bounded', evidence: 'src/a.mjs:1' }] });
-  const state = { ...newFileState({ file: 'src/a.mjs', level: 'L2' }), status: 'stopped', stop_content_hash: contentHash(repo, 'src/a.mjs'), next: { action: 'stop', reason: 'review_stall' } };
+  const findings = [{ id: 'W1', severity: 'warning', claim: 'bounded', evidence: 'src/a.mjs:1' }];
+  await sign({ event: 'review.result', open: findings });
+  const state = { ...newFileState({ file: 'src/a.mjs', level: 'L2' }), status: verb === 'reopen' ? 'open' : 'stopped', open: findings, stop_content_hash: contentHash(repo, 'src/a.mjs'), next: { action: 'stop', reason: 'review_stall' } };
   await saveState({ runId, block: 'B1', file: 'src/a.mjs', key, state: /** @type {any} */ (state), seq: 0, writeRow: sign, runRootDir: freshDir('runroot'), rows: [] });
-  writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
+  if (verb !== 'reopen') writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
   const packets = [];
   const invoke = async (reason) => {
     let text = '';
@@ -48,6 +50,11 @@ async function fixture(verb) {
     });
     assert.equal(code, 0, text);
     assert.equal(packets.length, 1, 'one fresh judge receives the packet');
+    if (verb === 'reopen') {
+      const tickets = blockTickets({ repoRoot: repo, run: runId, block: 'B1' }).filter((ticket) => ticket.file === 'src/a.mjs');
+      assert.equal(tickets.length, 1, 'the open file with findings has a fresh review ticket');
+      assert.ok(pendingTickets(repo).includes(tickets[0].ticket), 'the file is queued for review');
+    }
     return packets[0];
   };
   return { repo, outside, invoke };

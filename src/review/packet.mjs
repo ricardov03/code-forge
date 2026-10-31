@@ -108,7 +108,7 @@ function importHeaderEnd(file, content) {
       end = tokens[i].index + token.length;
       importSource = true;
       // Import attributes can continue on later lines after the module specifier.
-      if (!['with', 'assert'].includes(next)) importing = false;
+      if (!(['with', 'assert'].includes(next) && tokens[i + 2]?.[0] === '{')) importing = false;
       requiring = false;
     }
   }
