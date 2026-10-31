@@ -151,7 +151,7 @@ async function reviewWith(recover) {
       packets.push(readFileSync(opts.promptPath, 'utf8'));
       return { status: 'ok', exit_code: 0, provider: entry.provider ?? cfg.provider, model: entry.model,
         usage: { tokens_in: 100, tokens_out: 100 },
-        answer: answerFor(['@@ -0,0 +1,2 @@'], { passed: recover && entry.model === LAST.model ? true : null }) };
+        answer: answerFor(['@@ -0,0 +1,2 @@'], { passed: recover && entry.model === LAST.model ? true : 'invalid' }) };
     },
     writeRow: async (row) => { rows.push(row); },
   });
@@ -159,7 +159,7 @@ async function reviewWith(recover) {
   return { outcome, models, packets, rows, cfg };
 }
 
-test('clause 3: passed:null retries once then uses every level fallback even with empty second_levels', async () => {
+test('clause 3: an invalid verdict retries once then uses every level fallback even with empty second_levels', async () => {
   const { outcome, models, packets, rows, cfg } = await reviewWith(true);
   assert.deepEqual([outcome.status, outcome.approved], ['reviewed', true]);
   assert.deepEqual(models, [cfg.levels.L2.model, cfg.levels.L2.model, NEXT.model, NEXT.model, LAST.model]);

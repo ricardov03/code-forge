@@ -534,7 +534,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
         promptPath,
         schema: FINDING_SCHEMA,
         rowExtra: { lens: spec.lens, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn },
-        ...(sessionCfg ? { cfg: sessionCfg } : {}),
+        cfg: sessionCfg ?? cfg,
       },
       (row) => note(deps, row),
       (n) => {
@@ -667,6 +667,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
     fallback_step: res?.fallback_step ?? 0,
     attempts,
     ...(res?.truncated_fields?.length > 0 ? { truncated_fields: res.truncated_fields } : {}),
+    ...(verdict.passed_coerced ? { passed_coerced: true } : {}),
     ...(fellBackTo ? { schema_fallback: fellBackTo } : {}),
     tokens_in: tokensIn,
     tokens_out: tokensOut,

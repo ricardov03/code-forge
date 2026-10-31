@@ -48,6 +48,19 @@ export function schemaErrorsOf(value) {
   return [...(validateSchema.errors ?? [])];
 }
 
+/**
+ * Recover only a null verdict on an otherwise valid review. Keep the original answer intact;
+ * every other schema error (including a clean answer without a summary) remains an error.
+ * @param {any} answer @returns {any}
+ */
+export function coerceReviewPassed(answer) {
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer) || answer.passed !== null
+    || !Array.isArray(answer.findings)) return answer;
+  if (answer.findings.length === 0 && !(typeof answer.summary === 'string' && answer.summary.trim().length > 0)) return answer;
+  const candidate = { ...answer, passed: answer.findings.length === 0 };
+  return validateSchema(candidate) === true ? candidate : answer;
+}
+
 /** @param {Record<string, any> | undefined} cfg @returns {number} */
 export function minTokensOut(cfg) {
   const v = cfg?.review?.min_tokens_out;
@@ -62,6 +75,7 @@ export function minTokensOut(cfg) {
  * @property {number} [tokens_out]
  * @property {'exit' | 'schema' | 'hunks_mismatch' | 'too_short' | 'timeout' | 'budget'} [reason]
  * @property {string} [detail]
+ * @property {boolean} [passed_coerced]
  */
 
 /**
@@ -79,18 +93,19 @@ export function validateReview(session, { hunkHeaders, minTokensOut: min = DEFAU
     return { ok: false, reason: 'exit', detail: `session ${session.status}${exitCode === undefined ? '' : ` (exit ${exitCode})`}` };
   }
   /** @type {any} */
-  const answer = session.answer;
+  const answer = coerceReviewPassed(session.answer);
   if (session.status !== 'ok' || answer === null || typeof answer !== 'object' || Array.isArray(answer) || validateSchema(answer) !== true) {
     return { ok: false, reason: 'schema', detail: 'the answer does not validate against the finding schema' };
   }
-  const got = /** @type {string[]} */ (session.answer.reviewed_hunks);
+  const review = /** @type {{passed: boolean, summary: string, reviewed_hunks: string[], findings: unknown[]}} */ (answer);
+  const got = review.reviewed_hunks;
   if (got.length !== hunkHeaders.length || got.some((h, i) => h !== hunkHeaders[i])) {
     return { ok: false, reason: 'hunks_mismatch', detail: `reviewed_hunks has ${got.length} entries; the packet has ${hunkHeaders.length} hunks` };
   }
   const tokensOut = Number(session.usage?.tokens_out ?? session.row?.tokens_out ?? 0);
-  const review = /** @type {{passed: boolean, summary: string, findings: unknown[]}} */ (session.answer);
   const cleanPass = review.passed === true && Array.isArray(review.findings) && review.findings.length === 0 && review.summary.trim().length > 0;
   const floor = cleanPass ? Math.min(min, CLEAN_PASS_MIN_TOKENS_OUT) : min;
   if (!(tokensOut >= floor)) return { ok: false, reason: 'too_short', detail: `tokens_out ${tokensOut} < ${floor}` };
-  return { ok: true, review: session.answer, tokens_out: tokensOut };
+  return { ok: true, review: answer, tokens_out: tokensOut,
+    ...(answer !== session.answer || session.passed_coerced === true ? { passed_coerced: true } : {}) };
 }

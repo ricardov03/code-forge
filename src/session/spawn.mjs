@@ -61,6 +61,7 @@ import { parseSentinel } from '../engines/sentinel.mjs';
 import { parseUsage } from '../engines/usage-parse.mjs';
 import { budgetUsdOf, checkBudget, estimateSessionUsd, priceSession, reservedUsd, reserveBudget, SPEND_UNREADABLE_MESSAGE, withBudgetLock } from '../ledger/spend.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
+import { coerceReviewPassed, FINDING_SCHEMA } from '../review/validate-review.mjs';
 import { categoryGate, categoryPlan, RECORD_UNKNOWN_MESSAGE } from '../autopilot/limits.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
@@ -80,7 +81,7 @@ export const LEVELS = Object.freeze(['L0', 'L1', 'L2', 'L3']);
 export const DEFAULT_TIMEOUT_MS = 15 * 60 * 1000;
 
 /** Unavailability reasons that move the ladder to the next step (§5.6). */
-export const UNAVAILABLE_REASONS = Object.freeze(['cli-missing', 'login-expired', 'http-402', 'rate-limited']);
+export const UNAVAILABLE_REASONS = Object.freeze(['cli-missing', 'login-expired', 'http-402', 'rate-limited', 'at-capacity']);
 
 /** B40: concurrent sessions per provider when `review.provider_concurrency` does not say. */
 export const DEFAULT_PROVIDER_CONCURRENCY = Object.freeze({ anthropic: 4, openai: 2, xai: 2 });
@@ -235,12 +236,12 @@ export function ladderFor(resolved, role) {
 }
 
 /** HTTP statuses that mean "this model is unavailable" (§5.6). */
-const STATUS_REASONS = Object.freeze({ 401: 'login-expired', 402: 'http-402', 403: 'login-expired', 429: 'rate-limited' });
+const STATUS_REASONS = Object.freeze({ 401: 'login-expired', 402: 'http-402', 403: 'login-expired', 429: 'rate-limited', 503: 'at-capacity', 529: 'at-capacity' });
 
 /** @param {unknown} code @returns {string | null} */
 function reasonForStatus(code) {
   const n = typeof code === 'string' && /^\d{3}$/.test(code) ? Number(code) : code;
-  return Number.isInteger(n) && Object.hasOwn(STATUS_REASONS, /** @type {number} */ (n)) ? STATUS_REASONS[/** @type {401|402|403|429} */ (n)] : null;
+  return Number.isInteger(n) && Object.hasOwn(STATUS_REASONS, /** @type {number} */ (n)) ? STATUS_REASONS[/** @type {keyof typeof STATUS_REASONS} */ (n)] : null;
 }
 
 /**
@@ -260,6 +261,8 @@ export function classifyUnavailable(res, parsed) {
     if (reason) return reason;
   }
   const message = typeof parsed?.message === 'string' ? parsed.message : typeof parsed?.error?.message === 'string' ? parsed.error.message : '';
+  if (parsed?.error?.type === 'overloaded_error' || /\b(?:at[ -]capacity|overloaded)\b/i.test(message)
+    || (parsed?.is_error === true && typeof parsed?.result === 'string' && /\b(?:at[ -]capacity|overloaded)\b/i.test(parsed.result))) return 'at-capacity';
   const codex = /^unexpected status (\d{3})\b/.exec(message);
   if (codex && reasonForStatus(codex[1])) return reasonForStatus(codex[1]);
   for (const raw of res.stderr.split('\n')) {
@@ -268,6 +271,7 @@ export function classifyUnavailable(res, parsed) {
     if (coded && reasonForStatus(coded[1])) return reasonForStatus(coded[1]);
     if (/^(?:API )?Error:.*\b(?:not logged in|login (?:expired|required))/i.test(line)) return 'login-expired';
     if (/^(?:API )?Error:.*\brate.?limit/i.test(line)) return 'rate-limited';
+    if (/^(?:API )?Error:.*\b(?:at[ -]capacity|overloaded)\b/i.test(line)) return 'at-capacity';
   }
   return null;
 }
@@ -994,6 +998,8 @@ async function runForeground(built, opts, deps) {
   const input = built.stdinFile ? readFileSync(built.stdinFile) : undefined;
   const started = Date.now();
   const run = deps.exec ?? exec;
+  const silence = opts.cfg?.review?.silence_timeout_s;
+  const silenceMs = (Number.isInteger(silence) && silence > 0 ? silence : 60) * 1000;
   /** @type {import('../util/exec.mjs').ExecResult} */
   let res;
   try {
@@ -1001,6 +1007,7 @@ async function runForeground(built, opts, deps) {
       cwd: built.cwd,
       env: { ...childEnv(deps.env ?? process.env), ...(built.env ?? {}) },
       timeoutMs: opts.timeoutMs ?? DEFAULT_TIMEOUT_MS,
+      ...(['reviewer', 'judge'].includes(opts.role) ? { silenceTimeoutMs: silenceMs } : {}),
       ...(input !== undefined ? { input } : {}),
     });
   } finally {
@@ -1038,16 +1045,24 @@ async function runForeground(built, opts, deps) {
     }
     const err = stderrTail(res.stderr, packetText);
     const tails = { stderr_tail: err.tail, ...(err.note ? { tail_note: err.note } : {}), ...stdoutEvents(res.stdout) };
-    return { status: 'timeout', reason: `killed after ${opts.timeoutMs ?? DEFAULT_TIMEOUT_MS} ms`, answer: null, ...common, ...tails };
+    const reason = res.silenceTimedOut ? `killed after ${silenceMs} ms without output` : `killed after ${opts.timeoutMs ?? DEFAULT_TIMEOUT_MS} ms`;
+    return { status: 'timeout', reason, answer: null, ...common, ...tails };
   }
   if (res.result !== 'ok' || read.parsed?.is_error === true) return { status: 'failed', reason: `exit ${res.code}`, answer: null, ...common };
   if (built.compiled) {
+    // Coerce only the review schema, before the provider-schema guard can discard the answer.
+    // Strict providers keep their optional nulls for compiled validation, then return the
+    // source shape; the shared helper checks every other source-schema constraint first.
+    const sourceAnswer = built.strict ? dropStrictNulls(structuredClone(read.answer), opts.schema) : read.answer;
+    const answer = opts.schema?.$id === FINDING_SCHEMA.$id ? coerceReviewPassed(sourceAnswer) : sourceAnswer;
+    const coerced = answer !== sourceAnswer;
+    const providerAnswer = coerced ? { ...read.answer, passed: answer.passed } : read.answer;
     // validate against the schema the provider was actually given (the cached variant, stable across attempts)
-    if (!matchesSchema(built.compiled, read.answer)) {
+    if (!matchesSchema(built.compiled, providerAnswer)) {
       return { status: 'invalid-output', reason: 'answer does not match the schema', answer: null, ...common };
     }
     // a strict answer says `null` where the source schema says "optional"; callers get the source shape
-    return { status: 'ok', answer: built.strict ? dropStrictNulls(read.answer, opts.schema) : read.answer, ...common };
+    return { status: 'ok', answer, ...common, ...(coerced ? { passed_coerced: true } : {}) };
   }
   return { status: 'ok', answer: read.answer ?? read.text, ...(opts.role === 'coder' ? { sentinel: parseSentinel(read.text) } : {}), ...common };
 }
