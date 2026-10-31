@@ -211,6 +211,17 @@ test('daemon and Node accept null-tree tickets and agree on worker liveness', as
   });
   const start = readStartTime(process.pid);
   assert.equal(typeof start, 'string', 'current process start time must be readable');
+  writeFileSync(path.join(queueDir(repo), 'worker.json'), JSON.stringify({
+    pid: process.pid, run, start_time: start, heartbeat_at: new Date().toISOString(),
+  }));
+  for (let i = 0; i < 3; i++) {
+    for (const method of ['wait-block', 'status']) {
+      const response = await request(socket, { method, block: 'B1', max_ms: 0 });
+      assert.equal(response.stats.ps_processes, 0, `${method} with a fresh heartbeat must not spawn ps`);
+      assert.deepEqual(withoutStats(response), method === 'status' ? f.referenceStatus() : await f.reference());
+    }
+  }
+  assert.equal((await request(socket, { method: 'ping' })).stats.ps_processes, 0);
   const cases = [
     { name: 'unknown stale', start_time: 'unknown', heartbeat_at: stale, live: true },
     { name: 'mismatch stale', start_time: 'wrong start', heartbeat_at: stale, live: false },
@@ -222,7 +233,11 @@ test('daemon and Node accept null-tree tickets and agree on worker liveness', as
   async function check(c) {
     writeFileSync(path.join(queueDir(repo), 'worker.json'), JSON.stringify({ pid: process.pid, run, started_at: stale, ...c }));
     assert.equal(liveWorker(repo) !== null, c.live, 'Node liveness');
-    const result = withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 }));
+    const before = (await request(socket, { method: 'ping' })).stats.ps_processes;
+    const response = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
+    if (c.name === 'unknown stale') assert.equal(response.stats.ps_processes, before, 'unknown identity does not need ps');
+    if (c.name === 'match stale') assert.ok(response.stats.ps_processes > before, 'stale heartbeat with a known identity counts spawned ps');
+    const result = withoutStats(response);
     assert.equal(result.status === 'worker_down', !c.live, 'daemon liveness');
     assert.deepEqual(result, await f.reference(c.live ? 0 : 3), 'wait-block must match Node');
   }

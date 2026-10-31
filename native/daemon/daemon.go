@@ -42,6 +42,7 @@ type server struct {
 	recordStamp                                  string
 	trees                                        map[string]*treeState
 	statusProcess                                *statusProcess
+	psProcesses                                  int64
 }
 
 type treeState struct {
@@ -223,7 +224,7 @@ func (s *server) refresh() error {
 }
 
 func (s *server) stats(result object) object {
-	result["stats"] = object{"bytes_read": s.ledger.BytesRead, "tickets_parsed": s.queue.TicketsParsed, "rows": len(s.rows)}
+	result["stats"] = object{"bytes_read": s.ledger.BytesRead, "tickets_parsed": s.queue.TicketsParsed, "rows": len(s.rows), "ps_processes": s.psProcesses}
 	return result
 }
 
@@ -551,6 +552,9 @@ func (s *server) workerLive() bool {
 	cmd := exec.CommandContext(ctx, ps, "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
 	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
 	out, err := cmd.Output()
+	if cmd.Process != nil {
+		s.psProcesses++
+	}
 	start := strings.Join(strings.Fields(string(out)), " ")
 	return err == nil && start != "" && start == text(w, "start_time")
 }

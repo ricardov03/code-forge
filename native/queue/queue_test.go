@@ -4,10 +4,133 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"reflect"
 	"testing"
+	"time"
 
 	"github.com/ricardov03/code-forge/native/ticket"
 )
+
+func retryFixture(t *testing.T) (*Index, string, string, Object) {
+	t.Helper()
+	repo := t.TempDir()
+	dir := filepath.Join(repo, ".code-forge", "queue")
+	result := ".code-forge/reviews/result.json"
+	for _, name := range []string{dir, filepath.Dir(filepath.Join(repo, result))} {
+		if err := os.MkdirAll(name, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := os.WriteFile(filepath.Join(repo, result), []byte(`{"status":"stale"}`), 0600); err != nil {
+		t.Fatal(err)
+	}
+	id := "0123456789abcdef01234567"
+	idx := &Index{Dir: dir}
+	if err := idx.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	return idx, repo, id, Object{"ticket": id, "status": "stale", "result": result}
+}
+
+func TestRetryOnceRejectsInvalidTicketID(t *testing.T) {
+	idx, repo, _, marker := retryFixture(t)
+	outside := filepath.Join(filepath.Dir(idx.Dir), "x.done")
+	data := []byte(`{"status":"stale"}`)
+	if err := os.WriteFile(outside, data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, status := range []string{"stale", "reviewed"} {
+		marker["status"] = status
+		got, err := idx.RetryOnce(repo, "../x", marker)
+		if got != nil || err == nil || err.Error() != "bad-ticket" {
+			t.Fatalf("status %s: RetryOnce = %v, %v; want bad-ticket", status, got, err)
+		}
+	}
+	if got, err := os.ReadFile(outside); err != nil || string(got) != string(data) {
+		t.Fatalf("outside marker changed: %q, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(filepath.Dir(idx.Dir), "x.retried")); !os.IsNotExist(err) {
+		t.Fatalf("outside retry marker must not be created: %v", err)
+	}
+}
+
+func TestRetryOnceRestoresEmptyMarkerWithoutCachedBytes(t *testing.T) {
+	for _, cachedEntry := range []bool{false, true} {
+		name := "absent entry"
+		if cachedEntry {
+			name = "nil bytes"
+		}
+		t.Run(name, func(t *testing.T) {
+			idx, repo, id, marker := retryFixture(t)
+			file := filepath.Join(idx.Dir, id+".done")
+			if err := os.WriteFile(file, []byte{}, 0600); err != nil {
+				t.Fatal(err)
+			}
+			if cachedEntry {
+				info, err := os.Stat(file)
+				if err != nil {
+					t.Fatal(err)
+				}
+				idx.entries[id+".done"] = cached{info: info, value: marker}
+			}
+			got, err := idx.RetryOnce(repo, id, marker)
+			if got != nil || err == nil || err.Error() != "result-unreadable" {
+				t.Fatalf("RetryOnce = %v, %v; want result-unreadable", got, err)
+			}
+			if data, err := os.ReadFile(file); err != nil || len(data) != 0 {
+				t.Fatalf("empty marker must be restored: %q, %v", data, err)
+			}
+			if _, err := os.Stat(filepath.Join(idx.Dir, id+".retried")); !os.IsNotExist(err) {
+				t.Fatalf("retry must remain unused: %v", err)
+			}
+		})
+	}
+}
+
+func TestRetryOnceReloadsChangedMarkerWithSameStat(t *testing.T) {
+	idx, repo, id, marker := retryFixture(t)
+	file := filepath.Join(idx.Dir, id+".done")
+	write := func(value Object) {
+		t.Helper()
+		data, err := json.Marshal(value)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if err := os.WriteFile(file, data, 0600); err != nil {
+			t.Fatal(err)
+		}
+		stamp := time.Unix(1700000000, 0)
+		if err := os.Chtimes(file, stamp, stamp); err != nil {
+			t.Fatal(err)
+		}
+	}
+	marker["reason"] = "older"
+	write(marker)
+	seen, err := idx.Marker(id)
+	if err != nil {
+		t.Fatal(err)
+	}
+	marker["reason"] = "newer"
+	write(marker)
+	info, err := os.Stat(file)
+	if err != nil {
+		t.Fatal(err)
+	}
+	prev := idx.entries[id+".done"].info
+	if !os.SameFile(prev, info) || prev.Size() != info.Size() || !prev.ModTime().Equal(info.ModTime()) {
+		t.Fatal("fixture must preserve inode, size and mtime")
+	}
+	got, err := idx.RetryOnce(repo, id, seen)
+	if err != nil || !reflect.DeepEqual(got, marker) {
+		t.Fatalf("RetryOnce = %v, %v; want replaced marker %v", got, err, marker)
+	}
+	if got, err := idx.Marker(id); err != nil || !reflect.DeepEqual(got, marker) {
+		t.Fatalf("Marker retained stale cache: %v, %v", got, err)
+	}
+	if _, err := os.Stat(filepath.Join(idx.Dir, id+".retried")); !os.IsNotExist(err) {
+		t.Fatalf("changed marker must not spend the retry: %v", err)
+	}
+}
 
 func TestNullTreeTicket(t *testing.T) {
 	idx := &Index{Dir: t.TempDir()}

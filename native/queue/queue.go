@@ -124,6 +124,9 @@ func (idx *Index) read(name string, isTicket bool) (Object, error) {
 // authorize a retry: its result must be readable and have the same status.
 // The byte-checked rename claim preserves results replaced by a concurrent worker.
 func (idx *Index) RetryOnce(repo, id string, marker Object) (Object, error) {
+	if !ticketID.MatchString(id) {
+		return nil, fmt.Errorf("bad-ticket")
+	}
 	status := text(marker, "status")
 	if status != "stale" && status != "unavailable" && status != "split_required" {
 		return marker, nil
@@ -160,7 +163,7 @@ func (idx *Index) RetryOnce(repo, id string, marker Object) (Object, error) {
 		return nil, fmt.Errorf("fresh-claim-failed")
 	}
 	claimed, readErr := os.ReadFile(claim)
-	same := readErr == nil && bytes.Equal(seen, claimed)
+	same := readErr == nil && seen != nil && bytes.Equal(seen, claimed)
 	var retryErr error
 	if same {
 		var f *os.File
@@ -200,6 +203,7 @@ func (idx *Index) RetryOnce(repo, id string, marker Object) (Object, error) {
 	if retryErr != nil && !os.IsExist(retryErr) {
 		return nil, fmt.Errorf("fresh-claim-failed")
 	}
+	delete(idx.entries, id+".done")
 	return idx.Marker(id)
 }
 
