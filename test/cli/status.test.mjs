@@ -28,6 +28,7 @@ const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..
 const WORKER = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore' });
 after(() => WORKER.kill('SIGKILL'));
 const PID = String(WORKER.pid);
+const NATIVE_DAEMON = process.env.CODE_FORGE_NATIVE === '0' ? 'off' : 'fallback';
 /** @returns {string} the pid of a fresh stand-in, for a run that `run end` will stop */
 function ownWorker() {
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore' });
@@ -161,7 +162,7 @@ test('B64a (1)(2)(3): status prints the run line, one line per open block (state
   ok(await fx.block(['close', 'B4', '--worker-pid', PID]), 'block B4 closed\n');
   for (const [id, file] of [['B1', 'src/b1.mjs'], ['B2', 'src/b2.mjs'], ['B10', 'src/b10.mjs'], ['B3', 'src/b3.mjs']]) assert.equal((await fx.open(id, [file])).code, 0);
   ok(await fx.block(['stop', 'B3', '--reason', 'not needed']), 'block B3 stopped\n');
-  ok(await fx.block(['attempt', 'B10']), 'block B10 attempt 2\n');
+  ok(await fx.block(['attempt', 'B10']), 'block B10 attempt 2\nkept claims: 0\n');
   // the ledger: a priced coder session for B1, a red lint gate then a failed gate run for B1, a
   // passing gate for B2, a review leaving F1 and F2 open on B1 (F2 then waived by the human) and
   // an unruled late finding on B2
@@ -209,6 +210,7 @@ test('B64a (1)(2)(3): status prints the run line, one line per open block (state
         more: 0,
         closed: 1,
         stopped: 1,
+        native_daemon: NATIVE_DAEMON,
       },
     ],
   });
@@ -229,7 +231,7 @@ test('B64a (2): an unknown session price shows as `+?` after the spend; no budge
   await appendRow({ run: 'r-b64a-brief', event: 'session', role: 'coder', provider: 'openai', model: 'gpt-5-codex', usd_unknown: true }, { slug: 'b64a-brief' });
   ok(await cf(['status'], repo), 'run r-b64a-brief · active · brief · spent $0.50+?\n');
   /** @param {Record<string, unknown>} money */
-  const run = (money) => ({ runs: [{ run_id: 'r-b64a-brief', status: 'active', mode: 'brief', ...money, budget_usd: null, blocks: [], more: 0, closed: 0, stopped: 0 }] });
+  const run = (money) => ({ runs: [{ run_id: 'r-b64a-brief', status: 'active', mode: 'brief', ...money, budget_usd: null, blocks: [], more: 0, closed: 0, stopped: 0, native_daemon: NATIVE_DAEMON }] });
   ok(await cf(['status', '--json'], repo), `${JSON.stringify(run({ spent_usd: 0.5, unknown_usd_sessions: 1 }))}\n`);
   assert.deepEqual(JSON.parse((await cf(['status', '--json'], repo)).stdout), run({ spent_usd: 0.5, unknown_usd_sessions: 1 }));
   // the ledger cannot be read (a rotated ledger file that is a directory): the amount is `$?` and
@@ -250,7 +252,7 @@ test('B64a (2)(3): every session without a known price: `$0.00+?` with a budget,
   await fx.row({ event: 'session', role: 'reviewer', provider: 'anthropic', model: 'claude-opus-5-5', usd_unknown: true });
   ok(await cf(['status'], fx.repo), 'run r-b64a-unpriced · active · plan · spent $0.00+? of $5.00\n');
   assert.deepEqual(JSON.parse((await cf(['status', '--json'], fx.repo)).stdout), {
-    runs: [{ run_id: 'r-b64a-unpriced', status: 'active', mode: 'plan', spent_usd: 0, unknown_usd_sessions: 2, budget_usd: 5, blocks: [], more: 0, closed: 0, stopped: 0 }],
+    runs: [{ run_id: 'r-b64a-unpriced', status: 'active', mode: 'plan', spent_usd: 0, unknown_usd_sessions: 2, budget_usd: 5, blocks: [], more: 0, closed: 0, stopped: 0, native_daemon: NATIVE_DAEMON }],
   });
 });
 
@@ -417,8 +419,8 @@ test('B64a (4): every block verb prints one JSON line with --json, and exactly i
   const jOpen2 = await j.fx.open('B2', ['src/b.mjs'], ['--kind', 'contract', '--brief', path.join(j.fx.repo, 'brief.md'), '--json']);
   one(jOpen2, { block: 'B2', event: 'open', level: 'L1', asked: 'L1', source: 'flag', kind: 'contract', attempt: 1, base_sha: jBrief, tests: 0, worktree: null, brief: pointer });
   // attempt
-  ok(await t.fx.block(['attempt', 'B1']), 'block B1 attempt 2\n');
-  one(await j.fx.block(['attempt', 'B1', '--json']), { block: 'B1', event: 'attempt', attempt: 2 });
+  ok(await t.fx.block(['attempt', 'B1']), 'block B1 attempt 2\nkept claims: 0\n');
+  one(await j.fx.block(['attempt', 'B1', '--json']), { block: 'B1', event: 'attempt', attempt: 2, kept_claims: 0 });
   // rebase onto a new unrelated commit
   for (const fx of [t.fx, j.fx]) {
     writeFile(fx.repo, 'docs/note.md', 'note\n');

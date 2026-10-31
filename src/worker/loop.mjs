@@ -52,6 +52,7 @@ import { processStartTime, readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { logWarning } from '../util/error-log.mjs';
 import { withLock, tryLock } from '../util/file-locks.mjs';
+import { startNativeDaemon } from '../util/native.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
 import { sweepProcesses } from '../util/reaper.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
@@ -281,6 +282,8 @@ export async function createWorker(opts, deps = {}) {
   const pollMs = opts.pollMs ?? DEFAULT_POLL_MS;
   const heartbeatMs = Number.isInteger(opts.heartbeatMs) && /** @type {number} */ (opts.heartbeatMs) >= MIN_HEARTBEAT_MS ? /** @type {number} */ (opts.heartbeatMs) : HEARTBEAT_MS;
   let stopping = false;
+  let stopDaemon = async () => {};
+  let daemonStarted = false;
   /** @type {ReturnType<typeof setInterval> | null} */
   let heartbeat = null;
   /** @type {ReturnType<typeof announceWorker> | null} */
@@ -769,8 +772,16 @@ export async function createWorker(opts, deps = {}) {
     heartbeat = null;
   }
 
+  async function startDaemon() {
+    if (daemonStarted) return;
+    daemonStarted = true;
+    stopDaemon = await startNativeDaemon(runId, cfg, env);
+    if (stopping) await stopDaemon();
+  }
+
   /** Serve the queue until `stop()`. */
   async function run() {
+    await startDaemon();
     announce();
     let interval = pollMs;
     let polled = false;
@@ -818,37 +829,42 @@ export async function createWorker(opts, deps = {}) {
     } finally {
       queueWatch?.close();
       release();
+      await stopDaemon();
     }
   }
 
   /** Drain the queue once while announced, then release (`worker --once`). */
   async function once() {
-    announce();
     try {
+      await startDaemon();
+      announce();
       const done = await drain();
       if (done > 0) await cleanOrphans();
       return done;
     } finally {
       stop();
       release();
+      await stopDaemon();
     }
   }
 
   /** Stop taking tickets; the running ones are awaited (a killed one is abandoned, see `processTicket`). */
   function stop() {
     stopping = true;
+    void stopDaemon();
     wake?.();
     poolWake?.();
   }
 
   /** Withdraw this process's announcement (`worker.json`) if it is still ours. */
   function release() {
+    void stopDaemon();
     stopBeating();
     if (self !== null) retractWorker(repoRoot, self.pid, self.start_time);
     self = null;
   }
 
-  return { processTicket, drain, run, once, stop, release, announce, watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
+  return { processTicket, drain, run, once, stop, release, announce, startDaemon, watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
 }
 
 /**
@@ -890,6 +906,9 @@ export async function bootWorker(opts, deps = {}) {
     if (entries.some((entry) => entry.live && !entry.worker) || (legacy && legacy.run !== opts.runId) || entries.some((entry) => entry.live && entry.worker?.run !== opts.runId) || count >= limit) {
       throw new WorkerError('worker-running', `review.workers limit ${limit}: a live or unreadable worker entry already serves this queue`);
     }
+    // Startup must finish before worker.json signals readiness: an owner may
+    // remove HOME immediately after that announcement to stop an orphan worker.
+    await worker.startDaemon();
     worker.announce();
   });
   return { ...worker, repoRoot, runRootDir };

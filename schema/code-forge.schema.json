@@ -9,6 +9,13 @@
   "$comment": "version/provider/levels are REQUIRED with NO schema-level default (a config omitting them is refused here) — `migrate.mjs` fills a MISSING `version` to CURRENT_VERSION before this schema ever runs (so an on-disk file may omit `version`), but `provider` has no such auto-fill anywhere and must be present in the loaded document.",
   "properties": {
     "version": { "type": "integer", "const": 1 },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daemon": { "type": "boolean", "default": true, "description": "Use the optional native daemon for run status and block waits. False uses Node only; CODE_FORGE_NATIVE=0 also disables it." }
+      }
+    },
     "project": {
       "type": "object",
       "additionalProperties": false,

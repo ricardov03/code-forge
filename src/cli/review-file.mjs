@@ -88,6 +88,7 @@ import { configInForce } from '../state/config-snapshot.mjs';
 import { reviewExcludeRule } from '../config/validate.mjs';
 import { blockTree } from '../proof/worktree.mjs';
 import { writeSafe } from '../util/redact.mjs';
+import { daemonRequest } from '../util/native.mjs';
 import { runRootPath } from '../util/tmp.mjs';
 
 const USAGE =
@@ -587,6 +588,26 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, print,
   let downPolls = 0;
   const deliveredHere = new Set();
   for (;;) {
+    scope = await waitBlockScope(repoRoot, cwd, run, block, scope);
+    // Keep one daemon join for the remaining deadline: it retains findings already
+    // delivered while other files are pending, just like deliveredHere below.
+    const answer = await daemonRequest(run, { method: 'wait-block', block, max_ms: Math.max(0, deadline - now()) }, { config: scope.cfg });
+    // A stopped review may need a signed automatic reopen. Keep that mutation
+    // on the existing Node path; ordinary pending/completed polls stay read-free.
+    if (answer && !answer.files.some((/** @type {Record<string, any>} */ file) => file.outcome === 'stopped')) {
+      if (answer.reason === 'wait_timeout' && now() < deadline) continue;
+      // Go serializes map keys alphabetically; retain the CLI's byte order.
+      const files = answer.files.map((/** @type {Record<string, any>} */ f) => ({
+        file: f.file, ticket: f.ticket, status: f.status, outcome: f.outcome,
+        ...(f.rule !== undefined ? { rule: f.rule } : {}), ...ticketTimings(f),
+      }));
+      say({ block, files, done: answer.done,
+        ...(answer.status !== undefined ? { status: answer.status } : {}),
+        ...(answer.reason !== undefined ? { reason: answer.reason } : {}),
+        ...(answer.next !== undefined ? { next: answer.next } : {}),
+      });
+      return answer.status === 'worker_down' ? 3 : 0;
+    }
     const worker = liveWorker(repoRoot);
     const live = worker?.run === run;
     downPolls = live ? 0 : downPolls + 1;

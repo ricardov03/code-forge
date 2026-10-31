@@ -25,7 +25,7 @@
  * cannot be read. A run record with no status shows `-`.
  *
  * `--json`: exactly one line, `{"runs":[{run_id, status, mode, spent_usd, unknown_usd_sessions,
- * budget_usd, blocks, more, closed, stopped}]}` — every block that is neither closed nor stopped
+ * budget_usd, blocks, more, closed, stopped, native_daemon}]}` — every block that is neither closed nor stopped
  * (no cap), `more` always 0, `spent_usd` and `unknown_usd_sessions` null when the ledger cannot be
  * read, `status` null when the record has none.
  *
@@ -54,9 +54,11 @@ import { budgetUsdOf } from '../ledger/spend.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { findingsKey, openFindingsOf } from '../review/open-findings.mjs';
 import { briefStatus } from '../state/brief-status.mjs';
+import { configInForce } from '../state/config-snapshot.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { runsDir, StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
+import { daemonEnabled, daemonRequest } from '../util/native.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
 const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
@@ -114,6 +116,22 @@ export async function statusOf(record, cachedRows) {
   const awaiting = Object.keys(record.blocks ?? {}).filter((id) => record.blocks[id].status === 'awaiting_human_check').sort();
   return { ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
     ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) };
+}
+
+/** Restore the Node renderer's insertion order after Go's sorted JSON map encoding.
+ * @param {Record<string, any>} s @returns {RunStatus}
+ */
+function daemonStatus(s) {
+  return {
+    run_id: s.run_id, status: s.status, mode: s.mode, spent_usd: s.spent_usd,
+    unknown_usd_sessions: s.unknown_usd_sessions, budget_usd: s.budget_usd,
+    blocks: s.blocks.map((/** @type {Record<string, any>} */ b) => ({
+      id: b.id, state: b.state, level: b.level, model: b.model,
+      gate: { result: b.gate.result, name: b.gate.name }, findings: b.findings,
+    })),
+    more: s.more, closed: s.closed, stopped: s.stopped,
+    ...(s.awaiting_human_check ? { awaiting_human_check: s.awaiting_human_check } : {}),
+  };
 }
 
 /**
@@ -201,9 +219,18 @@ export default async function status(args) {
       records = await activeRunsFor(projectRootFor(process.cwd()));
     }
     const shown = [];
-    for (const record of records) shown.push(await statusOf(record));
+    for (const record of records) {
+      let config;
+      try {
+        config = configInForce(record) ?? (await loadProjectConfig(record.workspace)).config;
+      } catch { config = { native: { daemon: false } }; }
+      const answer = await daemonRequest(String(record.run_id), { method: 'status' }, { config });
+      let summary;
+      try { summary = answer ? daemonStatus(answer.runs[0]) : null; } catch { summary = null; }
+      shown.push({ ...(summary ?? await statusOf(record)), native_daemon: summary ? 'live' : daemonEnabled(config) ? 'fallback' : 'off' });
+    }
     if (json) {
-      out(`${JSON.stringify({ runs: shown })}\n`); // briefStatus builds exactly the clause-3 run object
+      out(`${JSON.stringify({ runs: shown })}\n`);
       return 0;
     }
     if (shown.length === 0) {

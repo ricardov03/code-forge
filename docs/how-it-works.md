@@ -3,6 +3,18 @@
 This page follows one feature from a written brief to a closed block. The skill runs these steps
 for you; every step is also a plain CLI verb you can run and inspect by hand.
 
+## Native daemon
+
+When the optional native binary is installed, the review worker starts one Go daemon for its
+run and stops the daemon it started when it exits. The private `native.sock` Unix socket serves
+block waits and status from cached ledger and queue data, avoiding repeated reads in Node
+clients. Another worker can share an existing daemon. A missing, crashed or incompatible daemon
+automatically falls back to Node with the same answers. `status --json` adds `native_daemon`:
+`live`, `off` or `fallback` for each run.
+
+Set `CODE_FORGE_NATIVE=0` or `native.daemon: false` in the project config to use Node only.
+The config switch takes effect for workers at startup; clients use the run's current snapshot.
+
 Every `block <verb>` accepts `--help` or `-h`, prints that verb's usage and exits 0 without
 reading run state, prompting or writing anything, even when other required arguments are absent.
 
