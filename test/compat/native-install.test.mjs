@@ -15,6 +15,11 @@ import { generateKey, signRow, verifyRows } from '../../src/state/signer.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const build = path.join(root, 'scripts/build-native.mjs');
+// The test preload moves HOME into a temporary directory; keep Go's cache outside it.
+const goEnv = {
+  ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off',
+  GOCACHE: path.join(process.env.CODE_FORGE_REAL_HOME ?? os.homedir(), process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build'),
+};
 
 async function doctorNative() {
   let output = '';
@@ -32,12 +37,12 @@ test('npm installation ships a working host binary, reports its version, and ver
   assert.ok(process.env.CODE_FORGE_TEST_ROOT, isolationMessage);
   const relativeHome = path.relative(await realpath(process.env.CODE_FORGE_TEST_ROOT), await realpath(os.homedir()));
   assert.ok(relativeHome !== '..' && !relativeHome.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeHome), isolationMessage);
-  const go = spawnSync('go', ['version'], { encoding: 'utf8' });
+  const go = spawnSync('go', ['version'], { encoding: 'utf8', env: goEnv });
   if (go.error?.['code'] === 'ENOENT') return t.skip('native installation skipped: go is not on PATH');
   assert.equal(go.status, 0, go.stderr);
   // The optional accelerator must be visible in doctor even before the release build.
   await doctorNative();
-  const built = spawnSync(process.execPath, [build, '--host'], { cwd: root, encoding: 'utf8', timeout: 120_000 });
+  const built = spawnSync(process.execPath, [build, '--host'], { cwd: root, encoding: 'utf8', timeout: 120_000, env: goEnv });
   assert.equal(built.status, 0, `host native build: ${built.stderr}`);
   const { nativePath, runNative } = await import('../../src/util/native.mjs');
   const disabled = process.env.CODE_FORGE_NATIVE;
