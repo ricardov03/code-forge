@@ -32,6 +32,7 @@ mock.module('../../src/ledger/write.mjs', { namedExports: { ...ledger, readAllRo
 } } });
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 const { default: status } = await import('../../src/cli/status.mjs');
+const { loadProjectConfig } = await import('../../src/config/load.mjs');
 const native = await import('../../src/util/native.mjs');
 const { startRun, readRun } = await import('../../src/state/run.mjs');
 const { runRecordPath } = await import('../../src/state/paths.mjs');
@@ -174,8 +175,10 @@ test('live daemon gives byte-identical wait and status payloads without client l
   const done = await f.wait();
   ledgerReads = 0;
   const json = await f.show();
+  assert.ok(ledgerReads > 0, 'Node-only JSON status exercises the client ledger reader');
+  ledgerReads = 0;
   const text = await f.show(false);
-  assert.ok(ledgerReads > 0, 'Node-only status renders exercise the client ledger reader');
+  assert.ok(ledgerReads > 0, 'Node-only human status exercises the client ledger reader');
   assert.match(text, /\nnative daemon: off\n/);
   assert.equal(await f.doctor(), 'off');
   delete process.env.CODE_FORGE_NATIVE;
@@ -258,10 +261,16 @@ test('broken project config without a snapshot still returns the Node status ans
   const record = await readRun(f.run);
   delete record.config; // A run created before config snapshots must load the project file.
   writeFileSync(runRecordPath(f.run), JSON.stringify(record));
+  writeFileSync(path.join(f.repo, '.code-forge.yml'), 'version: 1\nbudget:\n  usd: 5\n');
   process.env.CODE_FORGE_NATIVE = '0';
-  const expected = await f.show();
-  await f.start();
+  assert.equal(JSON.parse(await f.show()).runs[0].budget_usd, 5, 'valid project config contributes the status budget');
   writeFileSync(path.join(f.repo, '.code-forge.yml'), 'version: [broken\n');
+  const loaded = await loadProjectConfig(f.repo);
+  assert.equal(loaded.ok, false, 'broken config returns a failed load rather than throwing');
+  assert.equal(loaded.config, undefined, 'failed load has no config for the daemon client');
+  const expected = await f.show();
+  assert.equal(JSON.parse(expected).runs[0].budget_usd, null, 'Node still renders status when the budget config cannot be loaded');
+  await f.start();
   delete process.env.CODE_FORGE_NATIVE;
   ledgerReads = 0;
   assert.equal(await f.show(), expected, 'invalid config uses the same complete Node status JSON');
@@ -269,18 +278,18 @@ test('broken project config without a snapshot still returns the Node status ans
   assert.match(await f.show(false), /\nnative daemon: off\n/);
 });
 
-for (const mode of ['run', 'boot']) {
+for (const mode of ['run', 'once', 'boot']) {
   test(`${mode}: an announcement failure reaps the daemon process and removes its socket before rejecting`, async (t) => {
     const f = await fixture(t);
     retractWorker(f.repo, process.pid);
     const failure = new Error('announcement failed');
     const beforeSpawns = daemonSpawns;
     announceFailure = { error: failure, socket: path.join(f.home, '.code-forge', 'runs', f.run, 'native.sock') };
-    if (mode === 'run') {
+    if (mode !== 'boot') {
       const worker = await createWorker({ runId: f.run, repoRoot: f.repo, cfg: f.config,
         runRootDir: path.join(f.home, 'worker-tmp'), slug: 'daemon-client-test', key: f.key,
       }, { writeRow: async () => {} });
-      await assert.rejects(worker.run(), (error) => error === failure);
+      await assert.rejects(worker[mode](), (error) => error === failure);
     } else {
       await assert.rejects(bootWorker({ runId: f.run, cwd: f.repo }, { writeRow: async () => {} }), (error) => error === failure);
     }
