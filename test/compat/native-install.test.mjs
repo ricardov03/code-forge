@@ -1,6 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmod, mkdtemp, readFile, rename, rm, writeFile } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { chmod, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -8,7 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { runDoctorCli } from '../../src/cli/doctor.mjs';
 import { ledgerPath } from '../../src/ledger/paths.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
-import { runRecordPath } from '../../src/state/paths.mjs';
+import { runKeyPath, runRecordPath } from '../../src/state/paths.mjs';
 import { generateKey, signRow, verifyRows } from '../../src/state/signer.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -27,6 +28,10 @@ async function doctorNative() {
 }
 
 test('npm installation ships a working host binary, reports its version, and verifies Node signed rows', async (t) => {
+  const isolationMessage = 'refusing to write to a real home: run with --import ./test/helpers/isolate.mjs and keep os.homedir() inside CODE_FORGE_TEST_ROOT';
+  assert.ok(process.env.CODE_FORGE_TEST_ROOT, isolationMessage);
+  const relativeHome = path.relative(await realpath(process.env.CODE_FORGE_TEST_ROOT), await realpath(os.homedir()));
+  assert.ok(relativeHome !== '..' && !relativeHome.startsWith(`..${path.sep}`) && !path.isAbsolute(relativeHome), isolationMessage);
   const go = spawnSync('go', ['version'], { encoding: 'utf8' });
   if (go.error?.['code'] === 'ENOENT') return t.skip('native installation skipped: go is not on PATH');
   assert.equal(go.status, 0, go.stderr);
@@ -36,6 +41,10 @@ test('npm installation ships a working host binary, reports its version, and ver
   assert.equal(built.status, 0, `host native build: ${built.stderr}`);
   const { nativePath, runNative } = await import('../../src/util/native.mjs');
   const disabled = process.env.CODE_FORGE_NATIVE;
+  const suffix = randomUUID();
+  const run = `native-install-${suffix}`;
+  const slug = `native-project-${suffix}`;
+  const file = ledgerPath(slug);
   delete process.env.CODE_FORGE_NATIVE;
   try {
     assert.equal(nativePath(), binary, 'nativePath must resolve the one executable for this host');
@@ -48,8 +57,6 @@ test('npm installation ships a working host binary, reports its version, and ver
     assert.ok(row.detail.includes(binary), 'doctor must name the resolved binary');
     assert.ok(row.detail.includes(pkg.version), 'doctor must name the package version');
 
-    const run = 'native-install';
-    const slug = 'native-project';
     const key = await generateKey(run);
     await writeFile(runRecordPath(run), JSON.stringify({ project: slug }));
     await appendRow(signRow({ event: 'run.start', run, note: 'alpha' }, key), { slug });
@@ -64,7 +71,6 @@ test('npm installation ships a working host binary, reports its version, and ver
       return JSON.parse(result.stdout);
     };
     assert.deepEqual(await verify(), { rows: 2, ok: true, bad: [] });
-    const file = ledgerPath(slug);
     const original = await readFile(file, 'utf8');
     await writeFile(file, original.replace('session', 'sessioN'));
     assert.deepEqual(await verify(), { rows: 2, ok: false, bad: [{ index: 1, event: 'sessioN', reason: 'mismatch' }] });
@@ -77,6 +83,18 @@ test('npm installation ships a working host binary, reports its version, and ver
   } finally {
     if (disabled === undefined) delete process.env.CODE_FORGE_NATIVE;
     else process.env.CODE_FORGE_NATIVE = disabled;
+    // Remove both the live ledger and every rotation belonging to this unique fixture.
+    const ledgerFiles = await readdir(path.dirname(file)).catch((err) => {
+      if (err.code === 'ENOENT') return [];
+      throw err;
+    });
+    const ownedLedger = new RegExp(`^${slug}(?:\\.\\d+)?\\.jsonl$`);
+    await Promise.all([
+      rm(runKeyPath(run), { force: true }),
+      rm(runRecordPath(run), { force: true }),
+      ...ledgerFiles.filter((name) => ownedLedger.test(name))
+        .map((name) => rm(path.join(path.dirname(file), name), { force: true })),
+    ]);
   }
 });
 
