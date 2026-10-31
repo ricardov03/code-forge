@@ -17,7 +17,7 @@ const build = path.join(root, 'scripts/build-native.mjs');
 
 async function doctorNative() {
   let output = '';
-  await runDoctorCli(['--quick', '--json', '--cwd', os.homedir()], {
+  await runDoctorCli(['--json', '--cwd', os.homedir()], {
     stdout: { write: (s) => { output += s; } }, stderr: { write: () => {} },
     env: { ...process.env, CODE_FORGE_KEY_BACKEND: 'file' },
   });

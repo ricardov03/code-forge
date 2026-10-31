@@ -57,20 +57,22 @@ export async function runDoctorCli(args, deps = {}, adopt = false) {
   }
   try {
     const rows = await runDoctor({ cwd, quick: flags.quick === true, ...(root ? { runRootDir: root } : {}) }, deps);
-    const binary = nativePath();
-    let nativeDetail = 'not found, using Node';
-    let nativeOK = false;
-    if (binary) {
-      const result = await runNative(['version']);
-      try {
-        const version = result?.code === 0 ? JSON.parse(result.stdout) : null;
-        if (typeof version?.version === 'string') {
-          nativeOK = true;
-          nativeDetail = `${binary}, version ${version.version}`;
-        } else nativeDetail = `${binary}: unavailable, using Node`;
-      } catch { nativeDetail = `${binary}: unavailable, using Node`; }
+    if (!flags.quick) {
+      const binary = nativePath();
+      let nativeDetail = 'not found, using Node';
+      let nativeOK = false;
+      if (binary) {
+        const result = await runNative(['version']);
+        try {
+          const version = result?.code === 0 ? JSON.parse(result.stdout) : null;
+          if (typeof version?.version === 'string') {
+            nativeOK = true;
+            nativeDetail = `${binary}, version ${version.version}`;
+          } else nativeDetail = `${binary}: unavailable, using Node`;
+        } catch { nativeDetail = `${binary}: unavailable, using Node`; }
+      }
+      rows.push({ id: 'native', status: nativeOK ? 'OK' : 'INFO', label: 'native binary', detail: nativeDetail });
     }
-    rows.push({ id: 'native', status: nativeOK ? 'OK' : 'INFO', label: 'native binary', detail: nativeDetail });
     writeSafe(stdout, flags.json ? renderJSON(rows) : renderText(rows));
     const c = counts(rows);
     writeSafe(stderr, `doctor: ${c.OK} ok, ${c.WARN} warn, ${c.FAIL} fail\n`);

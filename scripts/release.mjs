@@ -593,6 +593,7 @@ export function main(argv, root = process.cwd()) {
 
     if (opts.dryRun) {
       process.stdout.write('\n== plan (dry run) ==\n');
+      if (existsSync(path.join(root, 'native', 'go.mod'))) process.stdout.write('would build-native: four release targets; package size must be under 20 MB\n');
       process.stdout.write(`would run the checks: ${opts.checks ? 'gen-config-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate .' : 'none (--no-checks)'}\n`);
       process.stdout.write(`would commit "Release ${tag}" (${plan.length} files) and create the annotated tag ${tag}\n`);
       process.stdout.write(`would print: git push origin ${branch} --follow-tags\n`);
@@ -632,7 +633,9 @@ export function main(argv, root = process.cwd()) {
           return 1;
         }
       }
-      warn('!!! --no-checks: gen-config-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!');
+      warn(existsSync(path.join(root, 'native', 'go.mod'))
+        ? '!!! --no-checks: gen-config-doc --check, npm test, typecheck, npm ls and plugin validate were NOT run; native build and package size checked !!!'
+        : '!!! --no-checks: gen-config-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!');
     }
 
     process.stdout.write('\n== 5. commit + tag ==\n');
