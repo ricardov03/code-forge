@@ -5,6 +5,7 @@ import { createHash } from 'node:crypto';
 import { DELEGABLE_SEVERITIES, ownsAt, recordedSeverity, waiveFinding } from './gate-check.mjs';
 import { checkFileForm, checkFindingId } from './verb-forms.mjs';
 import { StateError } from '../state/paths.mjs';
+import { readRun } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
 import { readAllRows } from '../ledger/write.mjs';
@@ -16,6 +17,9 @@ import { resolveLevel } from '../config/known-ids.mjs';
 import { runRootFor, spawnSession } from '../session/spawn.mjs';
 import { spawnWithBrokenFallback } from './session-retry.mjs';
 import { splitLines } from './context.mjs';
+import { grantState } from '../autopilot/grant.mjs';
+import { lastGate } from '../state/brief-status.mjs';
+import { fileBaseline, testScope } from '../gates/expand.mjs';
 
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['verdict', 'reason'],
@@ -34,6 +38,15 @@ function brokenJudgeAnswer(result) {
 /** @param {string} code @param {string} detail */
 function refuse(code, detail) {
   throw new StateError(code, `${code}: ${detail}; nothing was recorded`);
+}
+
+/** The checkExpiry grant rule, without lazy expiry writes on a refused waiver.
+ * @param {Record<string, any>} record
+ */
+function activeGrant(record) {
+  const grant = record.autopilot;
+  return record.status === 'active' && grant?.status === 'active'
+    && Number.isFinite(Date.parse(grant.until)) && grantState(grant, new Date()) === 'active';
 }
 
 /** A citation must name a real regular file inside this tree, without following symlinks.
@@ -95,6 +108,37 @@ export function hasEvidence(reason, root, entry) {
     if (testFile && existsInTree(root, file)) return true;
   }
   return false;
+}
+
+/** Require a cited acceptance test measured by the latest signed gate at these exact bytes.
+ * Gate rows summarize test success, not individual assertions; only full or known related
+ * scopes prove that the cited file ran. A changed scope does not record its file list.
+ * @param {string} reason @param {string} root @param {Record<string, any>} entry
+ * @param {Record<string, any>[]} rows @param {string} id @param {Buffer} key
+ */
+async function passingAcceptanceTest(reason, root, entry, rows, id, key) {
+  const named = new Set((entry.acceptance ?? []).flatMap((clause) => clause.tests ?? []));
+  const cited = evidenceTokens(reason).map((token) => token.replace(/:[1-9][0-9]*(?:-[1-9][0-9]*)?[.!?]?$/, '').replace(/[.!?]+$/, ''))
+    .filter((file) => named.has(file) && existsInTree(root, file));
+  if (cited.length === 0) refuse('waive-yes-critical-no-test', 'cite an existing test file named in this block\'s acceptance tests');
+  const mine = rows.filter((row) => row.block === id);
+  const latest = mine.filter((row) => row.event === 'gate.done' || row.event === 'gate.red').at(-1);
+  if (!latest || !verifyRow(latest, key).ok || lastGate(mine).result !== 'pass'
+    || latest.worktree !== entry.worktree?.path
+    || !Array.isArray(latest.results)
+    || !latest.results.some((result) => result.gate === 'test' && result.ok === true && result.skipped === false)) {
+    refuse('waive-yes-critical-no-test', 'the cited acceptance test needs a passing test result in this block\'s latest signed gate record');
+  }
+  const current = await fileBaseline(root, entry.owned_files ?? [], entry.owned_kinds);
+  if (!current || !latest.files || Object.keys(current.files).length !== Object.keys(latest.files).length
+    || Object.entries(current.files).some(([file, hash]) => latest.files[file] !== hash)) {
+    refuse('waive-yes-critical-no-test', 'rerun the acceptance test: the latest gate record does not cover the current block content');
+  }
+  const scope = testScope({ testFiles: entry.test_files, owned: entry.owned_files ?? [] });
+  const test = cited.find((file) => latest.files[file] && (latest.scope === 'full'
+    || (latest.scope === 'related' && scope.scope === 'related' && scope.files.includes(file))));
+  if (!test) refuse('waive-yes-critical-no-test', 'the latest passing gate record must cover the cited acceptance test file and its current content');
+  return test;
 }
 
 /** The full finding is normally in the signed worker result; older rows may carry it directly.
@@ -163,10 +207,17 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   const rows = (await readAllRows(record.project)).filter((r) => r.run === runId);
   const key = await loadKey(runId);
   const recorded = recordedSeverity(rows, { block: id, file, finding, key });
-  if (!DELEGABLE_SEVERITIES.includes(recorded.severity)) refuse('waive-yes-critical', `finding ${finding} is ${recorded.severity ?? recorded.why}; only warning or nit findings may use --yes`);
+  const critical = recorded.severity === 'critical';
+  if (!DELEGABLE_SEVERITIES.includes(recorded.severity) && !(critical && activeGrant(record))) {
+    refuse('waive-yes-critical', `finding ${finding} is ${recorded.severity ?? recorded.why}; a critical finding needs an active autopilot grant; otherwise only warning or nit findings may use --yes`);
+  }
   const tree = await blockTree(record.workspace, entry);
   const contentRoot = tree?.top ?? root;
-  if (!hasEvidence(reason, contentRoot, entry)) refuse('waive-yes-no-evidence', 'cite an existing repo path with :line or :start-end, an existing test file, or a block acceptance clause number');
+  const test = critical ? await passingAcceptanceTest(reason, contentRoot, entry, rows, id, key) : null;
+  if (critical ? !citedEvidence(reason, contentRoot).some((item) => item.path === file) : !hasEvidence(reason, contentRoot, entry)) {
+    refuse('waive-yes-no-evidence', critical ? `cite the finding's path ${file} with :line or :start-end`
+      : 'cite an existing repo path with :line or :start-end, an existing test file, or a block acceptance clause number');
+  }
   const bytes = readRegularFileNoFollow(contentRoot, file);
   if (bytes === null) refuse('waive-yes-disagreed', 'The current file cannot be read');
   const text = await findingText(rows, { root, runId, id, file, finding, key });
@@ -174,7 +225,8 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') }, ...(evidence.length > 0 ? { evidence } : {}) }, { record, runId, id, judge });
   if (answer.verdict === 'broken') refuse('waive-yes-broken', answer.reason);
   if (answer.verdict !== 'agree') refuse('waive-yes-disagreed', answer.reason);
-  return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason } });
+  if (critical && !activeGrant(await readRun(runId))) refuse('waive-yes-critical', 'the critical finding still needs an active autopilot grant after the judge returns');
+  return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason, ...(critical ? { autopilot: true, test } : {}) } });
 }
 
 /** Verified ledger-order cancellation, scoped to one run, block, file and finding.
@@ -193,7 +245,8 @@ export function isUnwaived(rows, waiver, key, verify = (r) => verifyRow(r, key).
  */
 export function countedAgentWaivers(rows, block, key, verify = (r) => verifyRow(r, key).ok) {
   return rows.filter((r) => r.block === block && r.event === 'review.waived' && r.by === 'agent'
-    && r.verdict === 'agree' && DELEGABLE_SEVERITIES.includes(r.severity) && verify(r)
+    && r.verdict === 'agree' && (DELEGABLE_SEVERITIES.includes(r.severity)
+      || (r.severity === 'critical' && r.autopilot === true && typeof r.test === 'string' && r.test.length > 0)) && verify(r)
     && !isUnwaived(rows, r, key, verify)
     && recordedSeverity(rows.filter((other) => other.run === r.run), { block, file: r.file, finding: r.finding, key, verify }).severity === r.severity);
 }

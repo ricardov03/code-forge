@@ -17,7 +17,7 @@
  *    the latest refusal row for the hash is signed, carries `content_hash` (a hash-less one does
  *    not qualify, though it still refuses) and names at least one finding, and every finding it
  *    names and every open id of the file's unsuperseded `review.cap` rows is cleared by a waiver the gate
- *    accepts (the same rule as below: a critical only by `by: human`). Such a file is never
+ *    accepts (a critical needs a human or an agreed agent waiver issued in autopilot). Such a file is never
  *    approved; the close writes one signed `gate.review_waived_all` row for it ({@link reviewGateCheck});
  *  - `unsigned`:   the file's approvals for that hash exist but none carries a valid MAC;
  *  - `not_approved`: (B52) the file's signed approval for its current hash is STALE — a later row of
@@ -26,8 +26,8 @@
  *    reviewed the content, {@link neverReviewed}; a `review.round` with `open_after` not 0; a
  *    `review.cap`; a refusal row with no `content_hash` counts for every hash of its file). One
  *    refusal per open finding the latest such row names, each cleared only by a valid waiver for
- *    the severity that row RECORDS (anything but warning/nit — a critical — only by a signed
- *    `by: human` waiver); a row that names no finding is one `not_approved <file>` that only a
+ *    the severity that row RECORDS (a critical needs a signed human waiver or an agreed agent
+ *    waiver issued in autopilot); a row that names no finding is one `not_approved <file>` that only a
  *    fresh approval clears. An old ledger's `review.result` row has no `approved` field and is
  *    trusted neither way: the ticket's signed result file decides ({@link resultFilesFor}); a
  *    file that is missing or fails its MAC refuses `not_approved <file>`. Refusal rows count
@@ -369,7 +369,8 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
    * row RECORDS for it — REQUIRED: only an explicit null (none recorded there; the signed review
    * rows decide, {@link autopilotWaiverProblem}) or warning/nit may be delegated; anything else
    * (`undefined`, a critical, an unknown value) is the human's alone ({@link delegableSeverity}),
-   * except that an answer also clears a critical. `invalid`: why the autopilot waivers naming it do
+   * except that an answer or a counted agent waiver issued in autopilot also clears a critical.
+   * `invalid`: why the autopilot waivers naming it do
    * not count (null when none names it).
    * `exceptTicket`: see {@link answered}. `answerSeverity`: the severity the answer rule reads
    * (default `severity`); the late-finding, cap and proof loops pass the one RECORDED for the id,
@@ -380,9 +381,11 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
   const waiverOf = (file, finding, severity, exceptTicket = null, answerSeverity = severity) => {
     if (waivers.some((r) => matches(r, file, finding))) return { by: 'human', invalid: null };
     if (answered(file, finding, answerSeverity, exceptTicket)) return { by: 'answer', invalid: null };
-    if (finding !== PROOF_FINDING && delegableSeverity(severity)) {
+    if (finding !== PROOF_FINDING && (delegableSeverity(severity) || severity === 'critical')) {
       const recorded = recordedSeverity(mine, { block, file, finding, key, verify: ok });
-      if (DELEGABLE_SEVERITIES.includes(recorded.severity) && agentWaivers.some((r) => matches(r, file, finding) && r.severity === recorded.severity)) return { by: 'agent', invalid: null };
+      const agentMayWaive = (delegableSeverity(severity) && DELEGABLE_SEVERITIES.includes(recorded.severity))
+        || (severity === 'critical' && recorded.severity === 'critical');
+      if (agentMayWaive && agentWaivers.some((r) => matches(r, file, finding) && r.severity === recorded.severity)) return { by: 'agent', invalid: null };
     }
     const named = autopilotWaivers.filter((r) => matches(r, file, finding));
     // the unverified pre-check (`verify` given) reads no autopilot waiver: it cannot check a grant

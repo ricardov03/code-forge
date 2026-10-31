@@ -13,6 +13,11 @@ Autopilot lets the owner leave for a set time. A delegate (a fresh L2 or L3 sess
 
 ## §2 During the window
 
+`block waive --yes` may waive a critical only while the run's autopilot grant is active; otherwise `waive-yes-critical`.
+Cite a test file named in the block's acceptance `tests:` and passed in its latest signed gate record for the current content; otherwise `waive-yes-critical-no-test`.
+Also cite the finding's path with `:line` or `:start-end`, and obtain agreement from the fresh L3 judge. Refusals write nothing.
+The signed waiver records `by: agent`, `autopilot: true` and the cited `test` path; the human can undo it with `block unwaive`. Warning/nit waivers are unchanged.
+
 The allowable scope `close:routine` means “close a routine block.” It lets plain `block close` pass `close.require_human` without a terminal when every changed file has a signed approval, a signed green gate row exists, and the block has no waiver rows, transcript hits or accepted hits. Waived or answered-only reviews do not qualify. Refusal is `close-not-routine: <reason>` (exit 1); success signs `autopilot.close {block, grant}` alongside the normal close. It never permits `block close --decide` or critical waivers.
 
 - **Every owner-level question goes to the delegate first**: `forge autopilot ask --run <r> --scope <scope> --question <text> --options <words> [--block <id>] [--file <path>] [--finding <id>]`. Use the fixed option words, or the action will refuse the answer: a waiver `waive,fix` · an extra round `allow,deny` · a coder level the candidate levels, e.g. `L1,L2`.
@@ -44,7 +49,7 @@ These never go to the delegate, whatever the grant says (the CLI's fixed deny li
 - plan approval (`plan.md` §4.1) and design approval;
 - a budget raise (`code.md` §6, `review.md` §7);
 - a threshold edit or any other limit or rule change — only the owner's own `forge autopilot approve` at a terminal;
-- a critical waiver, a proof waiver, or closing a block without its reviews;
+- a critical waiver through the delegate's `autopilot waive` action (the evidence-backed agent exception is in §2), a proof waiver, or closing a block without its reviews;
 - merges and destructive actions.
 
 When one of these comes up during the window: stop that line of work, add it to Actions only you can take, and wait. The delegate never relaxes a rule or a limit to keep work moving (`rules-core.md` R17).
