@@ -714,14 +714,14 @@ export async function createWorker(opts, deps = {}) {
       if (running.size === 0) break;
       await nextEvent([...running.values()]);
     }
-    // Process inspection can be slow and synchronous. Keep it outside pool slots so finishing
-    // a ticket immediately frees its slot, and coalesce it once after the active queue drains.
-    if (started.size > 0) {
-      try {
-        await sweepProcesses({ apply: true, orphansOnly: true, runId, zombies: false });
-      } catch { /* process hygiene must never fail a drain */ }
-    }
     return done;
+  }
+
+  /** Process inspection belongs to the worker lifecycle, outside ticket dispatch and draining. */
+  async function cleanOrphans() {
+    try {
+      await sweepProcesses({ apply: true, orphansOnly: true, runId, zombies: false });
+    } catch { /* process hygiene must never fail the worker */ }
   }
 
   /**
@@ -795,7 +795,7 @@ export async function createWorker(opts, deps = {}) {
       while (!stopping) {
         const before = activity;
         try {
-          await drain();
+          if (await drain() > 0) await cleanOrphans();
         } catch {
           // the queue directory itself failed to read: try again on the next poll
         }
@@ -825,7 +825,9 @@ export async function createWorker(opts, deps = {}) {
   async function once() {
     announce();
     try {
-      return await drain();
+      const done = await drain();
+      if (done > 0) await cleanOrphans();
+      return done;
     } finally {
       stop();
       release();
