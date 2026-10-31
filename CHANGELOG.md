@@ -27,7 +27,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The worker and `status` use the native Go daemon when it runs and fall back to Node when it does not; status output is the same in every mode, and `doctor` shows the daemon state. (B183)
 - Two block tests now give the commit watch its second quiet tick, so they pass with the B211 debounce. (B219)
 - The worker runs up to 6 review tickets at once (was 3), with at most 4 sessions per provider (`review.provider_parallel`); tickets waiting for a provider still count toward the limit. (B208)
-- Reviews no longer go to Grok by file size. code-forge picks the reviewer from measured speed and accuracy (`review.adaptive`), can pin a route (`review.routes.pin`), and falls back at once when a reviewer times out. (B207)
+- code-forge picks the primary reviewer from this project's measured speed, availability and accuracy (`review.adaptive`, on by default). A matching route still competes on performance unless it has `pin: true`. (B207)
 
 ## [0.15.3] — 2026-10-30
 
