@@ -176,13 +176,18 @@ Add `--json` to any `block` verb for one JSON line instead of the text.
 ## Step 4: build the context pack
 
 ```text
-code-forge context pack --run cart-1 --block B1
+code-forge context pack --run cart-1 --block B1 --path-only
 ```
 
 ```text
 /tmp/code-forge/cart-1/context/B1.md
 tokens ~125
 ```
+
+The path and token count above are examples; they depend on the temp folder and pack contents.
+`--path-only` prints the saved pack's path and token estimate for callers that need a pointer.
+Without `--path-only`, the command prints the pack's text. `--json` prints metadata including
+the path, token estimate and hash.
 
 The pack holds the block header (run, block, level, owned files, test files, worktree), a
 `## code-forge` section, the project's commands, the built-in proof rule, `AGENTS.md` and

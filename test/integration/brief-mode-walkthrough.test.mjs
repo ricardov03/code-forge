@@ -128,7 +128,7 @@ test('B67 (5): the docs/brief-mode.md walk-through runs as written with the real
   assert.equal(existsSync(tree), true);
 
   // Step 4: the context pack, in the run's temp folder.
-  const pack = await cf(['context', 'pack', '--run', RUN, '--block', 'B1'], repo);
+  const pack = await cf(['context', 'pack', '--run', RUN, '--block', 'B1', '--path-only'], repo);
   assert.equal(pack.code, 0, pack.stderr);
   const [packPath, tokens, rest] = pack.stdout.split('\n');
   assert.equal(packPath, path.join(CHILD_TMP, 'code-forge', RUN, 'context', 'B1.md'));

@@ -250,5 +250,5 @@ test('report prints summed gate time per block, including zero and unavailable l
   const blocks = stdout.text.split('== cost_per_block ==\n')[1].split('== ')[0];
   const details = blocks.split('\n').filter((line) => line.startsWith('  level '));
   assert.deepEqual(details, ['4s', '0s', '-'].map((time) =>
-    `  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $0.0000 · gates ${time} · proof 0s · 0 unknown`));
+    `  level - · lane - · coder $0.0000 · review $0.0000 · S1+S2 $0.0000 · facts $0.0000 · other $0.0000 · gates ${time} · review time - · proof 0s · 0 unknown`));
 });

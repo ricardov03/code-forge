@@ -67,7 +67,7 @@ const REMOVED = ['Gate ', 'High-risk paths', 'Proof isolation', 'Export: directo
 const EDIT_LATER = 'settings: edit .code-forge.yml later: gates.types, proof.tiers.high.paths — then run `code-forge validate`';
 
 const DETECTED_NO_TYPES = {
-  gates: { test: ['npm', 'test'], lint: ['npm', 'run', 'lint'], types: null, format: ['npx', 'prettier', '--check', '.'] },
+  gates: { test: ['npm', 'test'], lint: ['npm', 'run', 'lint'], types: null, format: ['npx', 'prettier', '--check', '--ignore-unknown'] },
   proof: { tiers: { high: { paths: [] } }, isolation: 'export', export: { link_dirs: ['node_modules'], copy_untracked: ['.env'] } },
 };
 
@@ -91,7 +91,7 @@ const NO_TYPES_SUMMARY = [
   '  test: npm test (from package.json)',
   '  lint: npm run lint (from package.json)',
   '  types: blank — no type checker found',
-  '  format: npx prettier --check . (from package.json)',
+  '  format: npx prettier --check --ignore-unknown (from package.json)',
   '  high-risk paths: blank — none set (all files light tier by path)',
   '  isolation: export (from default)',
   '  link dirs: node_modules (from package.json)',
@@ -171,7 +171,7 @@ test('"Customize now" asks the 8 questions in order, pre-filled with the detecte
   const r = await run(buildNodeNoTypes, ALL_OTHER_ANSWERS, { ui });
   assert.equal(r.code, 0, r.stderr);
   assert.deepEqual(ui.calls.map(firstLine), ['Gates and proof settings:', ...CUSTOMIZE]);
-  assert.deepEqual(ui.calls.slice(1).map((c) => c.initialValue), ['npm test', 'npm run lint', '', 'npx prettier --check .', '', 'export', 'node_modules', '.env']);
+  assert.deepEqual(ui.calls.slice(1).map((c) => c.initialValue), ['npm test', 'npm run lint', '', 'npx prettier --check --ignore-unknown', '', 'export', 'node_modules', '.env']);
   const written = r.read();
   assert.deepEqual(written.gates, { ...DETECTED_NO_TYPES.gates, types: ['tsc', '--noEmit'] });
   assert.deepEqual(written.proof, { tiers: { high: { paths: ['app/{auth,billing}/**', 'src/money/**'] } }, isolation: 'lock', export: { link_dirs: ['node_modules'], copy_untracked: ['.env'] } });
@@ -219,7 +219,7 @@ test('agent mode: exactly 1 JSON line with settings (value + source per key) and
     'gates.test': { value: ['npm', 'test'], source: 'detected', note: 'package.json' },
     'gates.lint': { value: ['npm', 'run', 'lint'], source: 'detected', note: 'package.json' },
     'gates.types': { value: null, source: 'detected', note: 'no type checker found' },
-    'gates.format': { value: ['npx', 'prettier', '--check', '.'], source: 'detected', note: 'package.json' },
+    'gates.format': { value: ['npx', 'prettier', '--check', '--ignore-unknown'], source: 'detected', note: 'package.json' },
     'proof.tiers.high.paths': { value: [], source: 'default', note: 'none set (all files light tier by path)' },
     'proof.isolation': { value: 'export', source: 'default', note: 'default' },
     'proof.export.link_dirs': { value: ['node_modules'], source: 'detected', note: 'package.json' },
@@ -254,7 +254,7 @@ test('--gate and --proof override the detected values, and the summary says so',
   const r = await run(buildNodeNoTypes, args, { isTTY: false, agent: true });
   assert.equal(r.code, 0, r.stderr);
   const written = r.read();
-  assert.deepEqual(written.gates, { test: ['npm', 'test'], lint: null, types: ['tsc', '--noEmit'], format: ['npx', 'prettier', '--check', '.'] });
+  assert.deepEqual(written.gates, { test: ['npm', 'test'], lint: null, types: ['tsc', '--noEmit'], format: ['npx', 'prettier', '--check', '--ignore-unknown'] });
   assert.deepEqual(written.proof, { tiers: { high: { paths: ['src/billing/**'] } }, isolation: 'lock', export: { link_dirs: ['node_modules'], copy_untracked: ['.env.ci'] } });
   const json = oneJsonLine(r.stdout);
   assert.deepEqual(json.settings['gates.types'], { value: ['tsc', '--noEmit'], source: 'flag', note: '--gate' });
