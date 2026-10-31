@@ -78,6 +78,10 @@ test('category stop: review spend 0.80 of 1.00 at stop 0.8 ⇒ reviewer and s2 r
     { event: 'session', role: 'coder', usd: 3, ts: at(3).toISOString() },
     { event: 'session', role: 'reviewer', usd: 10, ts: at(-60).toISOString() }, // before the grant: not counted
   ]);
+  // Coder context now loads the recorded task: a successful coder needs an open block.
+  const record = await readRun('e-cap');
+  await buildTwoBlocksRepo(record.workspace);
+  await openBlock({ runId: 'e-cap', id: 'B1', level: 'L1', owned: ['src/**'], acceptance: [{ clause: 'coding stays within its category budget', tests: ['category-stop'] }], writeRow: async () => {} });
   // another run, inside the window: only the run filter leaves it out
   await appendRow({ event: 'session', run: 'other-run', role: 'reviewer', usd: 10, ts: at(1).toISOString() }, { slug: 'e-cap' });
   const message = 'autopilot paused: review spend 0.80 of 1.00 reached the stop at 0.8; waiting for the owner';
@@ -121,6 +125,16 @@ test('category stop: review spend 0.80 of 1.00 at stop 0.8 ⇒ reviewer and s2 r
   const out = { text: '', write(/** @type {string} */ s) { this.text += s; return true; } };
   assert.equal(await runAutopilot(['status', '--run', 'e-cap'], { stdout: out, stderr: out, now: () => at(13) }), 0);
   assert.match(out.text, /\n {2}spend {5}coding \d+\.\d{2} of 5\.00 USD, review 0\.80 of 1\.00 USD · paused coding, review\n/);
+});
+
+test('a stopped coding budget refuses before loading context for a block absent from the run', async () => {
+  resetBudgetReservations();
+  await cappedRun('e-no-block', [{ event: 'session', role: 'coder', usd: 4, ts: at(1).toISOString() }]);
+  const fake = fakeDeps();
+  const res = await session('e-no-block', 'coder', fake).catch((err) => ({ status: 'error', reason: err.code, message: err.message }));
+  assert.deepEqual([res.status, res.reason, res.message], ['unavailable', 'autopilot-paused', pausedMessage('coding', 4, 5, 0.8)]);
+  assert.equal(readRecords(fake.records).length, 0, 'the refused coder spawns zero sessions');
+  assert.equal((await rowsOf('e-no-block', 'autopilot.pause')).length, 1, 'one category pause is recorded');
 });
 
 test('reservations count: spent 0.50 + 0.30 reserved by a running review session reaches 0.8 × 1.00; the pause row carries reserved_usd 0.3', async () => {

@@ -541,7 +541,8 @@ export async function spawnSession(opts, deps = {}) {
   if (!LEVELS.includes(level)) throw new SessionError('usage', `level must be one of ${LEVELS.join(', ')}`);
   if (!ROLES.includes(role)) throw new SessionError('usage', `role must be one of ${ROLES.join(', ')}`);
   if (typeof promptPath !== 'string' || !path.isAbsolute(promptPath)) throw new SessionError('usage', 'promptPath must be an absolute path');
-  const coderPrompt = role === 'coder' && opts.block ? await coderPromptFor(opts) : null;
+  /** @type {string | null} */
+  let coderPrompt = null;
   const stderr = deps.stderr ?? process.stderr;
   const runRootDir = opts.runRoot ?? currentRunRoot();
   if (role === 'facts' && opts.cwd !== undefined) assertFactsCwd(opts.cwd, runRootDir);
@@ -574,6 +575,9 @@ export async function spawnSession(opts, deps = {}) {
       // in the `finally` below on every other exit path (a throw, a background start)
       const releaseReservation = gate.release;
       try {
+        // Budget refusals take precedence over task loading, including legacy runs without
+        // this block. A failed context load must still release the accepted reservation.
+        if (role === 'coder' && opts.block && coderPrompt === null) coderPrompt = await coderPromptFor(opts);
         const outcome = await runAttempt(step, i + 1 === steps.length, releaseReservation);
         if (outcome.result) return outcome.result;
         waitMs = outcome.waitMs;
