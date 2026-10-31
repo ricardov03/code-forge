@@ -248,6 +248,52 @@ func (idx *Index) Marker(id string) (Object, error) {
 	return v, nil
 }
 
+// Deliver records the first findings handoff without reading a signed result.
+func (idx *Index) Deliver(block, file, id string) (bool, error) {
+	if !ticketID.MatchString(id) {
+		return false, fmt.Errorf("bad-ticket")
+	}
+	name := filepath.Join(idx.Dir, id+".delivered")
+	valid := func() (bool, error) {
+		data, err := os.ReadFile(name)
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		var value Object
+		if err != nil || json.Unmarshal(data, &value) != nil || value["block"] != block || value["file"] != file || value["ticket"] != id {
+			return false, fmt.Errorf("result-unreadable")
+		}
+		return true, nil
+	}
+	if exists, err := valid(); exists || err != nil {
+		return false, err
+	}
+	f, err := os.CreateTemp(idx.Dir, ".delivery-*.tmp")
+	if err != nil {
+		return false, err
+	}
+	defer os.Remove(f.Name())
+	err = json.NewEncoder(f).Encode(Object{"block": block, "file": file, "ticket": id})
+	closeErr := f.Close()
+	if err != nil {
+		return false, err
+	}
+	if closeErr != nil {
+		return false, closeErr
+	}
+	if err := os.Link(f.Name(), name); err != nil {
+		if !os.IsExist(err) {
+			return false, err
+		}
+		exists, err := valid()
+		if !exists && err == nil {
+			err = fmt.Errorf("result-unreadable")
+		}
+		return false, err
+	}
+	return true, nil
+}
+
 // Ensure publishes a missing current-content review without replacing a
 // concurrent enqueue. The daemon never calls a separate Node process to queue it.
 func (idx *Index) Ensure(p ticket.Parts) error {

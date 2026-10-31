@@ -145,12 +145,23 @@ test('daemon hot reads match Node, incrementally tail and index, long-poll, and 
   const completed = await waiting;
   assert.deepEqual(withoutStats(completed), await f.reference());
   assert.equal(completed.done, true, 'both current tickets finish and excluded Markdown does not block');
+  writeFileSync(path.join(repo, 'src/b.mjs'), 'fixture blind edit\n');
+  const handoff = await f.reference();
+  rmSync(path.join(queueDir(repo), `${tickets[1].ticket}.delivered`));
+  assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), handoff, 'deliver earlier findings before queuing a blind edit');
+  const requeued = await f.reference();
+  assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), requeued, 'the next join reviews the edited content');
+  tickets[1] = enqueue({ repoRoot: repo, run, block: 'B1', file: 'src/b.mjs' });
+  writeResult({ repoRoot: repo, runId: run, ticket: tickets[1].ticket, key, result: { status: 'reviewed', approved: true } });
   writeResult({ repoRoot: repo, runId: run, ticket: tickets[0].ticket, key, result: { status: 'unavailable' } });
   const retry = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
   assert.deepEqual(withoutStats(retry), await f.reference(), 'the first unavailable result spends the same single automatic retry as Node');
   assert.equal(retry.files[0].status, 'pending', 'only the unavailable current ticket is retried');
   writeResult({ repoRoot: repo, runId: run, ticket: tickets[0].ticket, key, result: { status: 'unavailable' } });
   assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), await f.reference(), 'a repeated unavailable result stays finished after the single retry');
+  appendFileSync(path.join(repo, '.git/info/exclude'), '\nsrc/a.mjs\n');
+  assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), await f.reference(), 'Git metadata changes invalidate the stat-based changed-file cache');
+  writeFileSync(path.join(repo, '.git/info/exclude'), '');
   for (const args of [['add', 'src/a.mjs'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'track reviewed file']]) {
     assert.equal(spawnSync('git', args, { cwd: repo }).status, 0);
   }
@@ -165,7 +176,7 @@ test('daemon hot reads match Node, incrementally tail and index, long-poll, and 
   assert.equal((await request(socket, { method: 'prune', block: 'B1' })).error, 'block-open', 'unsigned close cannot authorize deletion');
   await appendRow(signRow({ event: 'block.close', run, block: 'B1', status: 'complete' }, key), { slug: 'daemon-test' });
   const pruned = await request(socket, { method: 'prune', block: 'B1' });
-  assert.deepEqual(withoutStats(pruned), { ok: true, block: 'B1', tickets: 3, markers: 3 });
+  assert.deepEqual(withoutStats(pruned), { ok: true, block: 'B1', tickets: 4, markers: 5 });
   assert.deepEqual((await request(socket, { method: 'block-tickets', block: 'B1' })).tickets, []);
   assert.equal(blockTickets({ repoRoot: repo, run, block: 'Other' }).length, 1, 'other block ticket survives pruning');
 });

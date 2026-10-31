@@ -236,9 +236,10 @@ func (s *server) handle(ctx context.Context, req request) object {
 		deadline = time.Now().Add(time.Duration(*req.MaxMS) * time.Millisecond)
 	}
 	down := 0
+	delivered := make(map[string]bool)
 	for {
 		s.mu.Lock()
-		result, finished := s.step(req, deadline, &down)
+		result, finished := s.step(req, deadline, &down, delivered)
 		if finished {
 			result = s.stats(result)
 		}
@@ -260,7 +261,7 @@ func (s *server) handle(ctx context.Context, req request) object {
 	}
 }
 
-func (s *server) step(req request, deadline time.Time, down *int) (object, bool) {
+func (s *server) step(req request, deadline time.Time, down *int, delivered map[string]bool) (object, bool) {
 	if err := s.refresh(); err != nil {
 		return failure(err.Error()), true
 	}
@@ -307,7 +308,7 @@ func (s *server) step(req request, deadline time.Time, down *int) (object, bool)
 	if err != nil {
 		return failure("config-snapshot"), true
 	}
-	files, err := s.changed(tree, text(entry, "base_sha"))
+	files, err := s.changed(tree, text(entry, "base_sha"), owned)
 	if err != nil {
 		return failure(err.Error()), true
 	}
@@ -384,6 +385,23 @@ func (s *server) step(req request, deadline time.Time, down *int) (object, bool)
 				timings(state, marker)
 				states = append(states, state)
 				continue
+			}
+			if live && marker["status"] == "reviewed" && marker["open_findings"] == true {
+				previousID := text(newest, "ticket")
+				handoff := delivered[previousID]
+				if !handoff {
+					handoff, err = s.queue.Deliver(req.Block, file, previousID)
+					if err != nil {
+						return failure(err.Error()), true
+					}
+				}
+				if handoff {
+					delivered[previousID] = true
+					state["ticket"], state["status"], state["outcome"] = previousID, "findings", outcome(marker)
+					timings(state, marker)
+					states = append(states, state)
+					continue
+				}
 			}
 		}
 		if !present && live {
@@ -539,7 +557,7 @@ func timings(state, marker object) {
 	}
 }
 
-func (s *server) changed(tree, base string) ([]string, error) {
+func (s *server) changed(tree, base string, owned []any) ([]string, error) {
 	if !regexp.MustCompile(`^[0-9a-f]{7,64}$`).MatchString(base) {
 		return nil, fmt.Errorf("bad-ref")
 	}
@@ -548,7 +566,7 @@ func (s *server) changed(tree, base string) ([]string, error) {
 		state = &treeState{hashes: make(map[string]fileHash)}
 		s.trees[tree] = state
 	}
-	stamp, err := treeStamp(tree)
+	stamp, err := treeStamp(tree, owned)
 	if err != nil {
 		return nil, err
 	}
@@ -578,19 +596,89 @@ func (s *server) changed(tree, base string) ([]string, error) {
 	return files, nil
 }
 
-func treeStamp(tree string) (string, error) {
-	hash := sha256.New()
-	err := filepath.WalkDir(tree, func(file string, entry fs.DirEntry, err error) error {
+func treeStamp(tree string, owned []any) (string, error) {
+	paths := []string{filepath.Join(tree, ".gitignore")}
+	for _, value := range owned {
+		pattern, ok := value.(string)
+		if !ok {
+			continue
+		}
+		prefix := []string{tree}
+		for _, part := range strings.Split(pattern, "/") {
+			if strings.ContainsAny(part, "*?{") {
+				break
+			}
+			prefix = append(prefix, part)
+		}
+		paths = append(paths, filepath.Join(prefix...))
+	}
+	gitDir, common, err := gitDirs(tree)
+	if err != nil {
+		return "", err
+	}
+	for _, dir := range []string{gitDir, common} {
+		for _, name := range []string{"HEAD", "index", "packed-refs", "refs", "info/exclude"} {
+			paths = append(paths, filepath.Join(dir, name))
+		}
+	}
+	entries := make(map[string]string)
+	for _, root := range paths {
+		err := filepath.WalkDir(root, func(file string, entry fs.DirEntry, err error) error {
+			if os.IsNotExist(err) || errors.Is(err, syscall.ENOTDIR) {
+				entries[file] = "missing"
+				return nil
+			}
+			if err != nil {
+				return err
+			}
+			if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".code-forge") {
+				return filepath.SkipDir
+			}
+			entries[file] = fileStamp(file)
+			return nil
+		})
 		if err != nil {
-			return err
+			return "", err
 		}
-		if entry.IsDir() && (entry.Name() == ".git" || entry.Name() == ".code-forge" || entry.Name() == "node_modules") {
-			return filepath.SkipDir
+	}
+	keys := make([]string, 0, len(entries))
+	for file := range entries {
+		keys = append(keys, file)
+	}
+	sort.Strings(keys)
+	hash := sha256.New()
+	for _, file := range keys {
+		fmt.Fprintln(hash, file, entries[file])
+	}
+	return hex.EncodeToString(hash.Sum(nil)), nil
+}
+
+func gitDirs(tree string) (string, string, error) {
+	dir := filepath.Join(tree, ".git")
+	info, err := os.Lstat(dir)
+	if err != nil {
+		return "", "", err
+	}
+	if info.Mode().IsRegular() {
+		data, err := os.ReadFile(dir)
+		if err != nil {
+			return "", "", err
 		}
-		fmt.Fprintln(hash, file, fileStamp(file))
-		return nil
-	})
-	return hex.EncodeToString(hash.Sum(nil)), err
+		dir = strings.TrimPrefix(strings.TrimSpace(string(data)), "gitdir: ")
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(tree, dir)
+		}
+	}
+	common := dir
+	if data, err := os.ReadFile(filepath.Join(dir, "commondir")); err == nil {
+		common = strings.TrimSpace(string(data))
+		if !filepath.IsAbs(common) {
+			common = filepath.Join(dir, common)
+		}
+	} else if !os.IsNotExist(err) {
+		return "", "", err
+	}
+	return filepath.Clean(dir), filepath.Clean(common), nil
 }
 
 func (s *server) contentHash(tree, file string) (string, error) {
