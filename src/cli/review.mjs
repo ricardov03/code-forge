@@ -333,9 +333,10 @@ const messageOf = (err) => (err instanceof Error ? err.message : String(err));
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, exec?: typeof exec}} [deps] -
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, cwd?: string, exec?: typeof exec, now?: () => number}} [deps] -
  *   `exec` runs every `code-forge` child of this command (the flow steps, the cleanup and the
- *   second-signal exit); a test seam, the real `exec` otherwise.
+ *   second-signal exit); a test seam, the real `exec` otherwise. `now` supplies the wait deadline
+ *   clock in milliseconds (defaults to Date.now).
  * @returns {Promise<number>}
  */
 export async function runReview(args, deps = {}) {
@@ -345,6 +346,7 @@ export async function runReview(args, deps = {}) {
   const note = (/** @type {string} */ s) => writeSafe(stderr, `review: ${s}\n`);
   const cwd = deps.cwd ?? process.cwd();
   const execChild = deps.exec ?? exec;
+  const now = deps.now ?? Date.now;
 
   /** @type {Record<string, any>} */
   let flags;
@@ -531,7 +533,7 @@ export async function runReview(args, deps = {}) {
     // At most MAX_WAITERS `review-file --wait` children at once (a review of many files must not
     // start one Node process per file); a wait that starts late still counts down to the same
     // deadline, and one that starts after it is reported pending without a child.
-    const deadline = Date.now() + maxS * 1000;
+    const deadline = now() + maxS * 1000;
     const waiters = semaphore(MAX_WAITERS);
     /** @type {Array<FileOutcome | undefined>} */
     const byIndex = new Array(queued.length);
@@ -546,7 +548,7 @@ export async function runReview(args, deps = {}) {
           return;
         }
         await waiters.run(async () => {
-          const left = deadline - Date.now();
+          const left = deadline - now();
           if (left <= 0) {
             finish(i, classify(q.file, { status: 'pending' }));
             return;

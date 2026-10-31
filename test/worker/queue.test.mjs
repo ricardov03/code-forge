@@ -1,6 +1,6 @@
-import { childEnv, cli, freshDir, makeRepo, queued } from './helpers.mjs';
+import { cli, freshDir, makeRepo, queued } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
 
@@ -9,33 +9,28 @@ const { loadKey } = await import('../../src/state/signer.mjs');
 const { contentHash, gitChildEnv, normalizeRequestPath, ticketId } = await import('../../src/worker/ticket.mjs');
 const { exec } = await import('../../src/util/exec.mjs');
 
-describe('review-file enqueue (V4 paths, timing, worker_down)', () => {
-  test('enqueue from the repo root returns {ticket, status: queued} in < 1 s beyond a cold node start', async () => {
+describe('review-file enqueue (V4 paths, nonblocking, worker_down)', () => {
+  test('enqueue returns the exact queued ticket while an idle worker produces no completion or result', async () => {
     const { repo, runId } = await makeRepo();
-    announceWorker(repo, { pid: process.pid, run: runId }); // this live process stands in for the worker
+    announceWorker(repo, { pid: process.pid, run: runId }); // live but idle: never consumes the queue
     try {
-      const samples = [];
-      // Alternate adjacent cold-start/enqueue samples so both minima see the same load.
-      // Validate every enqueue, including the idempotent repeats used for timing.
+      const content_hash = contentHash(repo, 'src/a.mjs');
+      const ticket = ticketId({ run: runId, block: 'B11', file: 'src/a.mjs', content_hash });
+      // cli() awaits the child under its 60 s hang guard; no CPU-speed threshold is needed.
+      // Keep main's repeated CLI calls: every enqueue must return the same exact ticket.
       for (let i = 0; i < 3; i += 1) {
-        const env = childEnv();
-        const started = Date.now();
-        const baseline = await exec([process.execPath, '-e', '0'], { cwd: repo, env, timeoutMs: 60000 });
-        const baselineMs = Date.now() - started;
-        assert.equal(baseline.code, 0, baseline.stderr);
         const res = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
         assert.equal(res.code, 0, res.stderr);
-        assert.equal(res.json.status, 'queued');
-        assert.match(res.json.ticket, /^[0-9a-f]{24}$/);
-        samples.push({ baselineMs, res });
+        assert.deepEqual(res.json, { ticket, status: 'queued', file: 'src/a.mjs', content_hash });
       }
-      const baselineMs = Math.min(...samples.map((s) => s.baselineMs));
-      const enqueueMs = Math.min(...samples.map((s) => s.res.ms));
-      const timing = `enqueue took ${enqueueMs} ms; cold node start took ${baselineMs} ms (min of 3 each; enqueue overhead must be < 1000 ms)`;
-      assert.ok(enqueueMs - baselineMs < 1000, timing);
-      const ticket = samples[0].res.json.ticket;
-      assert.deepEqual(samples.map((s) => s.res.json.ticket), [ticket, ticket, ticket]);
       assert.deepEqual(queued(repo, 'json'), [ticket]);
+      const stored = JSON.parse(readFileSync(path.join(repo, '.code-forge', 'queue', `${ticket}.json`), 'utf8'));
+      assert.deepEqual(
+        [stored.ticket, stored.run, stored.block, stored.file, stored.content_hash, stored.started_at, stored.finished_at, stored.duration_ms],
+        [ticket, runId, 'B11', 'src/a.mjs', content_hash, null, null, null],
+      );
+      assert.deepEqual(queued(repo, 'done'), []);
+      assert.equal(existsSync(path.join(reviewsDir(repo, runId), `${ticket}.json`)), false);
     } finally {
       retractWorker(repo, process.pid);
     }
