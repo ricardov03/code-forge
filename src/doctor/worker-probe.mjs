@@ -69,7 +69,7 @@ function removeRun(runId) {
   } catch {
     return;
   }
-  for (const name of names) if (name === `${runId}.json` || name === `${runId}.key` || name === `${runId}.lock` || name.startsWith(`${runId}.json.`)) rmSync(path.join(runsDir(), name), { recursive: true, force: true });
+  for (const name of names) if (name === runId || name === `${runId}.json` || name === `${runId}.key` || name === `${runId}.lock` || name.startsWith(`${runId}.json.`)) rmSync(path.join(runsDir(), name), { recursive: true, force: true });
 }
 
 /**

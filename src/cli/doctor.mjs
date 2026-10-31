@@ -10,13 +10,16 @@
 import { randomBytes } from 'node:crypto';
 import { rmSync } from 'node:fs';
 import path from 'node:path';
-import { loadProjectConfig } from '../config/load.mjs';
+import { loadProjectConfig, projectRootFor } from '../config/load.mjs';
 import { runDoctor } from '../doctor/index.mjs';
 import { counts, exitCode, renderJSON, renderText } from '../doctor/rows.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
-import { nativePath, runNative } from '../util/native.mjs';
+import { configInForce } from '../state/config-snapshot.mjs';
+import { readRun } from '../state/run.mjs';
+import { daemonEnabled, daemonRequest, nativePath, runNative } from '../util/native.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
+import { liveWorker } from '../worker/queue.mjs';
 
 const USAGE = 'usage: code-forge doctor [--quick] [--json] [--cwd <dir>]\n';
 
@@ -72,6 +75,17 @@ export async function runDoctorCli(args, deps = {}, adopt = false) {
         } catch { nativeDetail = `${binary}: unavailable, using Node`; }
       }
       rows.push({ id: 'native', status: nativeOK ? 'OK' : 'INFO', label: 'native binary', detail: nativeDetail });
+      let daemon = 'off';
+      try {
+        const loaded = await loadProjectConfig(cwd);
+        const worker = liveWorker(projectRootFor(cwd));
+        const config = (worker ? configInForce(await readRun(worker.run)) : null)
+          ?? (loaded.ok ? loaded.config : { native: { daemon: false } });
+        if (daemonEnabled(config)) {
+          daemon = worker && await daemonRequest(worker.run, { method: 'ping' }, { config }) ? 'live' : 'fallback';
+        }
+      } catch { /* an unreadable config or worker leaves native acceleration off */ }
+      rows.push({ id: 'native_daemon', status: 'INFO', label: 'native daemon', detail: daemon });
     }
     writeSafe(stdout, flags.json ? renderJSON(rows) : renderText(rows));
     const c = counts(rows);

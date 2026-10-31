@@ -88,15 +88,21 @@ async function fixture(t) {
   const reference = async (expectedCode = 0) => {
     let text = '';
     let error = '';
-    const code = await runReviewFile(['--wait-block', 'B1', '--run', run, '--max', '0ms'], {
-      cwd: repo, pollMs: 1, stdout: { write: (s) => { text += s; } }, stderr: { write: (s) => { error += s; } },
-    });
-    assert.equal(code, expectedCode, error);
+    const saved = process.env.CODE_FORGE_NATIVE;
+    process.env.CODE_FORGE_NATIVE = '0';
+    try {
+      const code = await runReviewFile(['--wait-block', 'B1', '--run', run, '--max', '0ms'], {
+        cwd: repo, pollMs: 1, stdout: { write: (s) => { text += s; } }, stderr: { write: (s) => { error += s; } },
+      });
+      assert.equal(code, expectedCode, error);
+    } finally {
+      if (saved === undefined) delete process.env.CODE_FORGE_NATIVE; else process.env.CODE_FORGE_NATIVE = saved;
+    }
     return JSON.parse(text);
   };
   const referenceStatus = () => {
     const result = spawnSync(process.execPath, [path.join(root, 'bin/code-forge.mjs'), 'status', '--run', run, '--json'], {
-      cwd: repo, env: process.env, encoding: 'utf8', timeout: 10000,
+      cwd: repo, env: { ...process.env, CODE_FORGE_NATIVE: '0' }, encoding: 'utf8', timeout: 10000,
     });
     assert.equal(result.status, 0, result.stderr);
     return JSON.parse(result.stdout);

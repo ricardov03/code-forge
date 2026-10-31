@@ -11,6 +11,8 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `version` | const `1` | yes | — |  |
+| `native` | object |  | — |  |
+| `native.daemon` | boolean |  | `true` | Use the optional native daemon for run status and block waits. False uses Node only; CODE_FORGE_NATIVE=0 also disables it. |
 | `project` | object |  | — |  |
 | `project.name` | string |  | — |  |
 | `project.slug` | string |  | — | B50: the ledger name. Default: the project root's folder name (the nearest .code-forge.yml up to the git top level, else the git top level), so every verb run from a subfolder writes to the same ledger. |
