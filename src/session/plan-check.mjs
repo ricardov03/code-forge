@@ -358,7 +358,10 @@ export function checkPlan(text, opts = {}) {
   const projectBins = () => (binsCache ??= typeof given === 'function' ? given() : given ?? []);
   for (const b of blocks) {
     for (const clause of splitClauses(b.acceptance)) {
-      const unbacked = extractClaims(clause).filter((c) => !isVerified(c, verified, projectBins));
+      // A trailing parenthesized test citation names planned coverage, not a fact about
+      // an existing file. Paths in the clause itself still need facts or tolerances.
+      const factualClause = clause.replace(/\((?:\s*`(?:\.\/)?(?:test|tests|spec)\/[^`\n]+\.[\w]+`[\s,]*)+\)\s*$/, '');
+      const unbacked = extractClaims(factualClause).filter((c) => !isVerified(c, verified, projectBins));
       if (unbacked.every((c) => tolerances.some((t) => t.includes(c.token) && idRe(b.id).test(t)))) continue;
       errors.push(`unbackable clause without tolerance: ${b.id} ${clause}`);
     }
