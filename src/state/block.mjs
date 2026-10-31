@@ -293,6 +293,16 @@ function activeBlocks(record) {
   return Object.fromEntries(Object.entries(record.blocks).filter(([, b]) => b.status === 'open'));
 }
 
+/** Earlier claims are authoritative only when their run, block and MAC match.
+ * @param {Record<string, any>} record @param {string} id @returns {Promise<string[]>}
+ */
+async function signedClaims(record, id) {
+  const key = await loadKey(record.run_id);
+  const rows = await readAllRows(record.project);
+  return [...new Set(rows.filter((row) => row.event === 'block.claim' && row.run === record.run_id && row.block === id && verifyRow(row, key).ok)
+    .map((row) => assertOwned([row.path])[0]))];
+}
+
 /**
  * B58: with `review.external.required` set in the run's snapshot, the project's `.code-forge.yml`
  * is the owner's switch past the local per-file review, so no block may own it. These are the
@@ -387,7 +397,7 @@ function refuseConfigOwner(owned, kinds, guarded) {
  *   decision?: {question: 'lane', answer: string, source: 'rules', facts: Record<string, unknown>}, decisionId?: string,
  *   worktree?: (ctx: {baseSha: string, baseExplicit: boolean, previous: TreeRecord | null}) => Promise<{path: string, make: () => Promise<OpenTree>}>,
  * }} opts
- * @returns {Promise<{block: Record<string, any>, pointer: string | null, worktreeReused: boolean}>} `worktreeReused`:
+ * @returns {Promise<{block: Record<string, any>, pointer: string | null, worktreeReused: boolean, keptClaims: number}>} `worktreeReused`:
  *   the block took an earlier attempt's worktree as it was.
  */
 export async function openBlock(opts) {
@@ -398,12 +408,12 @@ export async function openBlock(opts) {
   if (lines !== null && !(Number.isInteger(lines) && lines > 0)) throw new StateError('bad-lines', 'lines forecast must be a positive integer');
   if (opts.kind !== undefined && opts.kind !== 'light' && !BLOCK_KINDS.includes(opts.kind)) throw new StateError('bad-kind', `kind must be one of ${[...BLOCK_KINDS, 'light'].join(', ')}`);
   if (opts.decision && opts.decision.answer !== level) throw new StateError('bad-decision', `the decision answer ${opts.decision.answer} is not the requested level ${level}`);
-  const owned = assertOwned(opts.owned);
+  const declaredOwned = assertOwned(opts.owned);
   const acceptance = assertAcceptance(opts.acceptance);
   const humanChecks = acceptance.filter((c) => c.kind === 'human_check').map((c) => c.clause);
   const tests = opts.tests === undefined ? null : [...assertOwned(opts.tests, { label: 'test files', code: 'bad-tests' })];
   const after = opts.after === undefined ? null : [...new Set(opts.after)];
-  const kind = opts.kind === 'light' ? 'light' : blockKind({ owned, declared: opts.kind });
+  const kind = opts.kind === 'light' ? 'light' : blockKind({ owned: declaredOwned, declared: opts.kind });
   const dispatched = dispatchLevel({ lane: level, kind, cfg: opts.cfg });
   const pointer = opts.brief ? briefPointer(opts.brief.path, opts.brief.content) : null;
 
@@ -428,7 +438,7 @@ export async function openBlock(opts) {
   /** @type {OpenTree | null} */
   let made = null;
   try {
-    const { block, reused } = await mutateRun(runId, null, writeRow, async (record) => {
+    const { block, reused, keptClaims } = await mutateRun(runId, null, writeRow, async (record) => {
       if (record.blocks[id]?.status === 'open') throw new StateError('already-open', `block ${id} is already open`);
       if (record.blocks[id]?.status === 'awaiting_human_check') throw new StateError('already-open', `block ${id} is awaiting a human check`);
       if (after !== null) {
@@ -441,6 +451,8 @@ export async function openBlock(opts) {
       }
       // B57: what each exact owned entry is on disk, under the lock (as `block claim`) — a regular
       // file owns only itself, here and in every later check
+      const claims = attempt > 1 ? await signedClaims(record, id) : [];
+      const owned = [...new Set([...declaredOwned, ...claims])];
       const kinds = ownedKinds(record.workspace, owned);
       refuseConfigOwner(owned, kinds, guarded);
       const prior = previousTree(record);
@@ -467,7 +479,7 @@ export async function openBlock(opts) {
       const floor = dispatched.trigger === 'docs_floor' ? { requested_level: level, trigger: 'docs_floor' } : {};
       const created = tree?.created ? [{ event: 'worktree.created', block: id, path: tree.worktree.path, branch: tree.worktree.branch, base: tree.worktree.base_sha }] : [];
       return {
-        result: { block: entry, reused: tree !== null && !tree.created },
+        result: { block: entry, reused: tree !== null && !tree.created, keptClaims: claims.length },
         rows: [
           ...(opts.decision ? [{ ...opts.decision, event: 'decision', decision_id: opts.decisionId ?? randomUUID(), block: id }] : []),
           ...created,
@@ -475,7 +487,7 @@ export async function openBlock(opts) {
         ],
       };
     });
-    return { block, pointer, worktreeReused: reused };
+    return { block, pointer, worktreeReused: reused, keptClaims };
   } catch (err) {
     // B62a: nothing was recorded, so a tree this open made must not outlive it
     if (made?.created && made.rollback) {
@@ -493,9 +505,12 @@ export async function openBlock(opts) {
 
 /** @param {{runId: string, id: string, writeRow: WriteRow}} opts */
 export async function attemptBlock({ runId, id, writeRow }) {
-  return mutateRun(runId, id, writeRow, (_record, block) => {
+  return mutateRun(runId, id, writeRow, async (record, block) => {
+    const claims = await signedClaims(record, id);
+    block.owned_files = [...new Set([...block.owned_files, ...claims])];
+    block.owned_kinds = { ...ownedKinds(record.workspace, claims), ...block.owned_kinds };
     block.attempt += 1;
-    return { result: block.attempt, rows: [{ event: 'block.attempt', block: id, attempt: block.attempt }] };
+    return { result: { attempt: block.attempt, keptClaims: claims.length }, rows: [{ event: 'block.attempt', block: id, attempt: block.attempt }] };
   });
 }
 

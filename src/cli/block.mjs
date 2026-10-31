@@ -789,7 +789,7 @@ export async function runBlock(args, deps = {}) {
         }
         afterOutcome = acceptedOutcomes(record.workspace, id, flags['after-outcome']);
       }
-      const { block, pointer, worktreeReused } = await openBlock({
+      const { block, pointer, worktreeReused, keptClaims } = await openBlock({
         runId,
         id,
         level,
@@ -814,6 +814,7 @@ export async function runBlock(args, deps = {}) {
       const testCount = Array.isArray(block.test_files) ? block.test_files.length : 0;
       const tests = testCount > 0 ? ` · ${testCount} test file${testCount === 1 ? '' : 's'}` : '';
       say(`block ${id} open · ${block.level}${raised}${chosen} · ${block.kind} · attempt ${block.attempt} · base ${block.base_sha.slice(0, 12)}${tests}\n`);
+      if (block.attempt > 1) say(`kept claims: ${keptClaims}\n`);
       if (block.worktree) say(`worktree ${block.worktree.path} · branch ${block.worktree.branch}${worktreeReused ? ' · reused' : ''}\n`);
       say(`${pointer ?? 'brief: none given (--brief <file>)'}\n`);
       if (json) {
@@ -825,6 +826,7 @@ export async function runBlock(args, deps = {}) {
           source: typeof flags.level === 'string' ? 'flag' : rules ? 'rules' : 'autopilot',
           kind: block.kind,
           attempt: block.attempt,
+          ...(block.attempt > 1 ? { kept_claims: keptClaims } : {}),
           base_sha: block.base_sha,
           tests: testCount,
           worktree: block.worktree ? { path: block.worktree.path, branch: block.worktree.branch, reused: Boolean(worktreeReused) } : null,
@@ -834,9 +836,10 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     if (sub === 'attempt') {
-      const n = await attemptBlock({ runId, id, writeRow });
+      const { attempt: n, keptClaims } = await attemptBlock({ runId, id, writeRow });
       say(`block ${id} attempt ${n}\n`);
-      if (json) emit({ block: id, event: 'attempt', attempt: n });
+      say(`kept claims: ${keptClaims}\n`);
+      if (json) emit({ block: id, event: 'attempt', attempt: n, kept_claims: keptClaims });
       return 0;
     }
     if (sub === 'rebase') {

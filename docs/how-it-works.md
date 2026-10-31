@@ -351,6 +351,10 @@ longer satisfy close. A block without a recorded base branch cannot rebase. A tr
 or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
 another branch or a detached HEAD refuses the re-open.
 
+`block open <id> --attempt N` (N > 1) restores paths from the block's earlier signed
+`block claim` rows alongside `--owned`. `block attempt` keeps those claims too. Both print
+`kept claims: <n>`; a retry does not require claiming those paths again.
+
 Two open blocks that each have a worktree, at different paths, may own the same path. A block without one is checked
 against every other open block as before. `block close <id> --run <run> --remove-worktree` removes
 the tree after a successful close with `git worktree remove` (never `--force`) and keeps the branch.

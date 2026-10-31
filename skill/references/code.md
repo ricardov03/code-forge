@@ -87,6 +87,10 @@ Each `review-file` ticket is served by the worker `forge run start` launched: to
 
 ## §5 The block gate is a re-measurement — `forge block close <id> --run <r>`
 
+Paths added by `block claim` survive retries: `block open <id> --attempt N` (N > 1)
+restores earlier signed claims alongside `--owned`, and `block attempt` keeps them too.
+Both print `kept claims: <n>`. Do not claim the same paths again after a retry.
+
 The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]`
 to join reviews, run changed gates in the recorded block worktree, then run the normal close checks.
 The first failure exits 1 and names the step, findings, gate output or close refusal, and the next
