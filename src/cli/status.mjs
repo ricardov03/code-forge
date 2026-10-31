@@ -15,7 +15,6 @@
  *
  * Text: at most {@link STATUS_MAX_LINES} lines per run, runs separated by one blank line:
  *   run <id> · <status> · <plan|brief> · spent $<x>[ of $<budget>]
- *   native daemon: <live|fallback|off>
  *   <id> <state> <level> · <model or -> · gate <pass|fail|none>[ (<gate>)] · findings <n>
  *   … +<k> more blocks                  (only when the open blocks do not fit)
  *   closed <a> · stopped <b>            (only when any exist; printed last, but block lines are
@@ -59,7 +58,7 @@ import { configInForce } from '../state/config-snapshot.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { runsDir, StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
-import { daemonEnabled, daemonRequest } from '../util/native.mjs';
+import { daemonRequest } from '../util/native.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
 const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
@@ -170,12 +169,11 @@ const usd = (n) => `$${n.toFixed(2)}`;
 
 /**
  * The text lines of one run, at most {@link STATUS_MAX_LINES}.
- * @param {RunStatus} s @param {string} [daemon] @returns {string[]}
+ * @param {RunStatus} s @returns {string[]}
  */
-export function runLines(s, daemon) {
+export function runLines(s) {
   const spent = s.spent_usd === null ? '$?' : `${usd(s.spent_usd)}${(s.unknown_usd_sessions ?? 0) > 0 ? '+?' : ''}`;
   const lines = [`run ${s.run_id} · ${s.status ?? '-'} · ${s.mode} · spent ${spent}${s.budget_usd !== null ? ` of ${usd(s.budget_usd)}` : ''}`];
-  if (daemon !== undefined) lines.push(`native daemon: ${daemon}`);
   const tally = s.closed + s.stopped > 0 ? `closed ${s.closed} · stopped ${s.stopped}` : null;
   const awaiting = s.awaiting_human_check?.length ? `awaiting_human_check: ${JSON.stringify(s.awaiting_human_check)}` : null;
   const room = STATUS_MAX_LINES - lines.length - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1);
@@ -221,7 +219,6 @@ export default async function status(args) {
       records = await activeRunsFor(projectRootFor(process.cwd()));
     }
     const shown = [];
-    const daemons = [];
     for (const record of records) {
       let config;
       try {
@@ -235,7 +232,6 @@ export default async function status(args) {
       let summary;
       try { summary = answer ? daemonStatus(answer.runs[0]) : null; } catch { summary = null; }
       shown.push(summary ?? await statusOf(record));
-      daemons.push(summary ? 'live' : daemonEnabled(config) ? 'fallback' : 'off');
     }
     if (json) {
       out(`${JSON.stringify({ runs: shown })}\n`);
@@ -245,7 +241,7 @@ export default async function status(args) {
       out('no active run\n');
       return 0;
     }
-    out(`${shown.map((s, i) => runLines(s, daemons[i]).join('\n')).join('\n\n')}\n`);
+    out(`${shown.map((s) => runLines(s).join('\n')).join('\n\n')}\n`);
     return 0;
   } catch (thrown) {
     err(`status: ${thrown?.message ?? String(thrown)}\n`);

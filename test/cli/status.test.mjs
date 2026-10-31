@@ -28,8 +28,6 @@ const BIN = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..
 const WORKER = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore' });
 after(() => WORKER.kill('SIGKILL'));
 const PID = String(WORKER.pid);
-const NATIVE_DAEMON = process.env.CODE_FORGE_NATIVE === '0' ? 'off' : 'fallback';
-const statusText = (text) => text.replace(/^(run [^\n]*)\n/gm, `$1\nnative daemon: ${NATIVE_DAEMON}\n`);
 /** @returns {string} the pid of a fresh stand-in, for a run that `run end` will stop */
 function ownWorker() {
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore' });
@@ -119,7 +117,7 @@ async function fixture(slug, runId, { extra = EXTERNAL, files = [], pid = PID } 
 /** @param {{code: number, stdout: string, stderr: string}} res @param {string} stdout */
 const ok = (res, stdout) => assert.deepEqual({ code: res.code, stdout: res.stdout }, { code: 0, stdout }, res.stderr);
 /** @param {{code: number, stdout: string, stderr: string}} res @param {string} stdout */
-const okStatus = (res, stdout) => ok(res, statusText(stdout));
+const okStatus = (res, stdout) => ok(res, stdout);
 
 /**
  * A snapshot of everything status could write for ONE fixture: its slug's ledger files, its run's
@@ -285,22 +283,21 @@ test('B64a (1): status never waits on the run lock — with the lock held (as a 
 test('B64a (2)(3): the 10-line cap — the last block line is `… +k more blocks`, the closed/stopped tally keeps its line; JSON lists every open block with more 0', async () => {
   const files = Array.from({ length: 12 }, (_, i) => `src/f${i + 1}.mjs`);
   const fx = await fixture('b64a-cap', 'r-b64a-cap', { files });
-  // 8 open blocks: header + daemon diagnostic + 8 = exactly 10 lines, nothing hidden
-  for (let i = 1; i <= 8; i += 1) assert.equal((await fx.open(`B${i}`, [`src/f${i}.mjs`])).code, 0);
+  // 9 open blocks: header + 9 = exactly 10 lines, nothing hidden
+  for (let i = 1; i <= 9; i += 1) assert.equal((await fx.open(`B${i}`, [`src/f${i}.mjs`])).code, 0);
   const line = (/** @type {number} */ i) => `B${i} open L1 · - · gate none · findings 0`;
   const header = 'run r-b64a-cap · active · plan · spent $0.00';
-  okStatus(await cf(['status'], fx.repo), `${[header, ...[1, 2, 3, 4, 5, 6, 7, 8].map(line)].join('\n')}\n`);
-  // 10 open blocks: 7 shown, the 10th line says the rest
-  assert.equal((await fx.open('B9', ['src/f9.mjs'])).code, 0);
+  okStatus(await cf(['status'], fx.repo), `${[header, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(line)].join('\n')}\n`);
+  // 10 open blocks: 8 shown, the 10th line says the rest
   assert.equal((await fx.open('B10', ['src/f10.mjs'])).code, 0);
   const capped = (await cf(['status'], fx.repo)).stdout;
-  assert.equal(capped, statusText(`${[header, ...[1, 2, 3, 4, 5, 6, 7].map(line), '… +3 more blocks'].join('\n')}\n`));
+  assert.equal(capped, `${[header, ...[1, 2, 3, 4, 5, 6, 7, 8].map(line), '… +2 more blocks'].join('\n')}\n`);
   assert.equal(capped.split('\n').length - 1, 10);
-  // 11 opened, one stopped: 10 open + the tally — 6 shown, `… +4 more blocks`, then the tally
+  // 11 opened, one stopped: 10 open + the tally — 7 shown, `… +3 more blocks`, then the tally
   assert.equal((await fx.open('B11', ['src/f11.mjs'])).code, 0);
   ok(await fx.block(['stop', 'B11', '--reason', 'dropped']), 'block B11 stopped\n');
   const tallied = (await cf(['status'], fx.repo)).stdout;
-  assert.equal(tallied, statusText(`${[header, ...[1, 2, 3, 4, 5, 6].map(line), '… +4 more blocks', 'closed 0 · stopped 1'].join('\n')}\n`));
+  assert.equal(tallied, `${[header, ...[1, 2, 3, 4, 5, 6, 7].map(line), '… +3 more blocks', 'closed 0 · stopped 1'].join('\n')}\n`);
   assert.equal(tallied.split('\n').length - 1, 10);
   const json = JSON.parse((await cf(['status', '--json'], fx.repo)).stdout);
   assert.deepEqual(
@@ -382,7 +379,7 @@ test('B64a (5): neither status nor block --json ever prints transcript or diff t
     assert.equal(res.stdout.includes(MARKER), false, res.stdout);
   }
   for (const res of opened) assert.equal(res.stdout.includes(MARKER), false, res.stdout);
-  assert.equal(outputs[0].stdout, statusText('run r-b64a-marker · active · plan · spent $0.10\nB1 open L1 · - · gate none · findings 0\nB2 open L1 · openai/gpt-5-codex · gate fail (test) · findings 1\n'));
+  assert.equal(outputs[0].stdout, 'run r-b64a-marker · active · plan · spent $0.10\nB1 open L1 · - · gate none · findings 0\nB2 open L1 · openai/gpt-5-codex · gate fail (test) · findings 1\n');
   assert.equal(outputs[4].stdout, `${JSON.stringify({ block: 'B1', event: 'closed', status: 'closed', reason: null, close_event: null })}\n`);
 });
 

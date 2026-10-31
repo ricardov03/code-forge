@@ -9,8 +9,8 @@ When the optional native binary is installed, the review worker starts one Go da
 run and stops the daemon it started when it exits. The private `native.sock` Unix socket serves
 block waits and status from cached ledger and queue data, avoiding repeated reads in Node
 clients. Another worker can share an existing daemon. A missing, crashed or incompatible daemon
-automatically falls back to Node with the same answers. Human `status` output and `doctor` show `native daemon`:
-`live`, `off` or `fallback`. `status --json` keeps the same payload on the daemon and Node paths.
+automatically falls back to Node with the same answers. `doctor` shows `native daemon`:
+`live`, `off` or `fallback`. Both text and JSON `status` output are byte-identical on the daemon and Node paths.
 
 Set `CODE_FORGE_NATIVE=0` or `native.daemon: false` in the project config to use Node only.
 The config switch takes effect for workers at startup; clients use the run's current snapshot.

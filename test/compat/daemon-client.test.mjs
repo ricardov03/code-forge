@@ -156,6 +156,22 @@ function ping(home, run) {
   });
 }
 
+test('status text with a live daemon equals CODE_FORGE_NATIVE=0 for the same run', async (t) => {
+  const f = await fixture(t);
+  await f.start();
+  ledgerReads = 0;
+  const live = await f.show(false);
+  assert.equal(ledgerReads, 0, 'live status uses the daemon');
+  assert.equal(await f.doctor(), 'live');
+  process.env.CODE_FORGE_NATIVE = '0';
+  ledgerReads = 0;
+  const node = await f.show(false);
+  assert.ok(ledgerReads > 0, 'disabled daemon uses the Node status path');
+  assert.equal(live, node, 'the complete stdout text is byte-identical');
+  assert.doesNotMatch(node, /native daemon:/);
+  assert.equal(await f.doctor(), 'off');
+});
+
 test('live daemon gives byte-identical wait and status payloads without client ledger reads', async (t) => {
   const f = await fixture(t);
   process.env.CODE_FORGE_NATIVE = '0';
@@ -180,12 +196,12 @@ test('live daemon gives byte-identical wait and status payloads without client l
   ledgerReads = 0;
   const text = await f.show(false);
   assert.ok(ledgerReads > 0, 'Node-only human status exercises the client ledger reader');
-  assert.match(text, /\nnative daemon: off\n/);
+  assert.doesNotMatch(text, /native daemon:/);
   assert.equal(await f.doctor(), 'off');
   delete process.env.CODE_FORGE_NATIVE;
   ledgerReads = 0;
   assert.equal(await f.wait(), done, 'done wait bytes preserve file and timing key order');
-  assert.equal(await f.show(false), text.replace('native daemon: off', 'native daemon: live'), 'human status differs only in daemon diagnostic');
+  assert.equal(await f.show(false), text, 'full human status bytes equal Node with CODE_FORGE_NATIVE=0');
   assert.equal(await f.show(), json, 'full JSON status bytes equal Node without removing any key');
   assert.equal(ledgerReads, 0, 'live wait and both status renders call the client ledger reader zero times');
   assert.equal(await f.doctor(), 'live');
@@ -230,11 +246,13 @@ test('dead or missing daemon falls back mid-wait; kill switches never touch a so
   const actual = await waiting;
   assert.ok(ledgerReads > 0, 'killed daemon causes the pending wait to read through Node');
   const fallbackStatus = await f.show();
-  assert.match(await f.show(false), /\nnative daemon: fallback\n/, 'dead daemon reports fallback in human text');
+  const fallbackText = await f.show(false);
+  assert.doesNotMatch(fallbackText, /native daemon:/);
   assert.equal(await f.doctor(), 'fallback');
   process.env.CODE_FORGE_NATIVE = '0';
   assert.equal(actual, await f.wait(), 'mid-wait fallback finishes with identical bytes');
   assert.equal(fallbackStatus, await f.show(), 'full fallback JSON status bytes equal Node without removing any key');
+  assert.equal(fallbackText, await f.show(false), 'full fallback human status bytes equal Node');
   delete process.env.CODE_FORGE_NATIVE;
   assert.equal(await f.wait(), actual, 'missing socket uses the identical Node answer');
 
@@ -277,7 +295,7 @@ test('broken project config without a snapshot still returns the Node status ans
   ledgerReads = 0;
   assert.equal(await f.show(), expected, 'invalid config uses the same complete Node status JSON');
   assert.ok(ledgerReads > 0, 'invalid config disables the live daemon and reads through Node');
-  assert.match(await f.show(false), /\nnative daemon: off\n/);
+  assert.doesNotMatch(await f.show(false), /native daemon:/);
 });
 
 for (const mode of ['run', 'once', 'boot']) {
