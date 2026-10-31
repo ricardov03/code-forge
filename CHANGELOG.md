@@ -17,6 +17,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Merge gate: `block land --merge` runs the full suite on the merged result in a temporary worktree first; a red suite or a conflict leaves main unchanged. Skip with `--no-merge-gate` or `gates.merge_gate: false` (B189)
 - A file whose review stopped with findings is reviewed again automatically when a fix changes its content; unchanged or waived files are not re-queued (B194)
 - Every Go command the tests run sets `CGO_ENABLED=0`, so `go test` passes on macOS without extra setup; `native/README.md` says how to test the Go code (B195)
+- `block waive --yes` now says the evidence may cite `:line or :start-end`, the same as `block reopen --yes`; a range citation is accepted (B193)
 
 ## [0.15.3] — 2026-10-30
 
