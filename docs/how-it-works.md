@@ -357,8 +357,22 @@ the tree after a successful close with `git worktree remove` (never `--force`) a
 It writes a signed `worktree.removed` row. A tree whose directory was already deleted by hand
 refuses the close itself (see below). A tree with uncommitted or untracked files stays where it
 is, with a `worktree.remove_failed` row and exit 1, and the block stays closed. Without the flag the
-tree stays. Coders may not use the flag. code-forge never pushes or merges, and never deletes a
+tree stays. Coders may not use the flag. code-forge never pushes, and never deletes a
 branch except one a failed open made itself.
+
+`code-forge block land <id> --run <run> --report <file> --transcript <file> [--merge] [--json]`
+joins the block's reviews, runs `gates run --run <run> --block <id> --changed` in its recorded
+worktree, then runs the normal close checks with the report and transcript. It stops at the first
+failure with exit 1, the step, findings or gate output or close refusal, and the next command.
+A close awaiting a human check also stops before merging.
+
+With `--merge`, only after the block closes, it merges the block branch with `git merge --no-ff`
+in the main checkout. The main checkout must be clean and on the recorded base branch; the block
+worktree must be clean too. It never forces or switches branches. Success ends with
+`block <id> landed`. Without `--merge`, it closes and prints `block <id> closed; merge: <cmd>`
+without changing the base branch. A merge refusal leaves the block closed; correct the checkout
+and use the displayed next command. `--json` emits one JSON line: `event: landed` or `closed`
+and the merge command, or `event: refused` with `step`, `reason` and `next`.
 
 Gates, reviews and the close check of a worktree block run in its tree (B62b):
 
