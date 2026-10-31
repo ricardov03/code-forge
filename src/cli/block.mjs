@@ -9,7 +9,7 @@
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree] [--auto-claim]
- *   block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--json]
+ *   block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]   (orchestrator --yes: evidence and a fresh judge)
  *   block reopen <id> --run <r> --file <path> --reason <text> [--yes]   (B124c: evidence and a fresh judge for the agent path)
@@ -198,10 +198,11 @@
 
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
-import { readFile, realpath } from 'node:fs/promises';
+import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { runGatesVerb } from './gates.mjs';
+import { parseTapPassed } from '../gates/acceptance.mjs';
 import { parseMax, runReviewFile } from './review-file.mjs';
 import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { fallbackLane } from '../decide/fallback-rules.mjs';
@@ -347,11 +348,11 @@ async function autoClaimChanges({ record, runId, id, writeRow, print, join = tru
 }
 
 /** Join, gates and close share their existing CLI handlers, without spawning the CLI.
- * @param {{id: string, runId: string, record: Record<string, any>, report: string, transcript: string, maxMs: number, merge: boolean, json: boolean}} options
+ * @param {{id: string, runId: string, record: Record<string, any>, report: string, transcript: string, maxMs: number, merge: boolean, noMergeGate: boolean, json: boolean}} options
  * @param {NonNullable<Parameters<typeof runBlock>[1]>} deps
  * @returns {Promise<number>}
  */
-async function landBlock({ id, runId, record, report, transcript, maxMs, merge, json }, deps) {
+async function landBlock({ id, runId, record, report, transcript, maxMs, merge, noMergeGate, json }, deps) {
   const stdout = deps.stdout ?? process.stdout;
   const stderr = deps.stderr ?? process.stderr;
   const emit = (/** @type {Record<string, any>} */ value) => writeSafe(stdout, `${JSON.stringify(value)}\n`);
@@ -434,6 +435,7 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
     const command = landCommand(mergeArgs);
     next = command;
     if (!merge) {
+      writeSafe(json ? stderr : stdout, 'hint: the merge gate runs only with --merge\n');
       if (json) emit({ block: id, event: 'closed', merge: command });
       else writeSafe(stdout, `block ${id} closed; merge: ${command}\n`);
       return 0;
@@ -456,6 +458,60 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
       next = landCommand(['git', '-C', tree.top, 'status', '--short']);
       return stop('block worktree is dirty or unreadable; commit and review its changes before merging');
     }
+    if (noMergeGate || configInForce(record)?.gates?.merge_gate === false) {
+      writeSafe(stderr, 'warning: merge gate skipped; merged full suite was not checked\n');
+    } else {
+      step = 'merge-gate';
+      next = landCommand(['code-forge', 'gates', 'run', '--cwd', tree.workspace]);
+      const mainHead = await exec(['git', 'rev-parse', '--verify', 'HEAD'], gitOptions);
+      const blockHead = await exec(['git', 'rev-parse', '--verify', `refs/heads/${tree.branch}`], gitOptions);
+      if (mainHead.result !== 'ok' || blockHead.result !== 'ok') return stop('cannot resolve merge parents');
+      const started = Date.now();
+      // A sibling of this run's block worktree, never the process temp directory.
+      const temporary = await mkdtemp(path.join(path.dirname(tree.path), '.merge-gate-'));
+      let added = false;
+      let failure = '';
+      try {
+        const created = await exec(['git', 'worktree', 'add', '--detach', temporary, mainHead.stdout.trim()], gitOptions);
+        added = created.result === 'ok';
+        if (!added) throw new Error(created.stderr || 'cannot create merge-gate worktree');
+        const merged = await exec(['git', 'merge', '--no-ff', '--no-edit', '--', blockHead.stdout.trim()], { ...gitOptions, cwd: temporary });
+        if (merged.result !== 'ok') {
+          const conflicts = await exec(['git', 'diff', '--name-only', '--diff-filter=U'], { ...gitOptions, cwd: temporary });
+          failure = conflicts.stdout.trim() ? `merge conflict:\n${conflicts.stdout.trim()}` : merged.stderr || merged.stdout || 'trial merge failed';
+        } else {
+          const workspace = path.join(temporary, path.relative(main, record.workspace));
+          // No block scope: the shared gate runner drops scope tokens and runs the full suite.
+          const suite = await capture((streams) => runGatesVerb(['run', '--cwd', workspace], streams));
+          if (suite.code !== 0 || suite.data?.allOk !== true) {
+            const results = suite.data?.results ?? [];
+            const output = results.filter((r) => !r.ok).map((r) => `${r.stdout}\n${r.stderr}`).join('\n');
+            const failed = [...parseTapPassed(output).failed].slice(0, 10);
+            failure = failed.length ? `full suite failed:\n${failed.join('\n')}`
+              : `full suite failed:\n${(suite.error || output || suite.output).trim().split('\n').slice(-20).join('\n')}`;
+          } else if (!suite.data.results.some((r) => r.gate === 'test' && !r.skipped)) {
+            failure = 'full suite unavailable: configure gates.test before merging';
+          }
+        }
+      } finally {
+        const removed = await exec(['git', 'worktree', 'remove', '--force', temporary], gitOptions);
+        if (added && removed.result !== 'ok') throw new Error(`cannot remove merge-gate worktree ${temporary}: ${removed.stderr}`);
+        await rm(temporary, { recursive: true, force: true });
+      }
+      if (failure) return stop(failure);
+      // Refuse a moving target: only merge the same parents whose combined suite passed.
+      const currentMain = await exec(['git', 'rev-parse', '--verify', 'HEAD'], gitOptions);
+      const currentBlock = await exec(['git', 'rev-parse', '--verify', `refs/heads/${tree.branch}`], gitOptions);
+      const currentBranch = await exec(['git', 'symbolic-ref', '-q', 'HEAD'], gitOptions);
+      const currentStatus = await exec(['git', 'status', '--porcelain', '--untracked-files=all'], gitOptions);
+      if (currentMain.result !== 'ok' || currentBlock.result !== 'ok' || currentBranch.result !== 'ok' || currentStatus.result !== 'ok'
+        || currentMain.stdout !== mainHead.stdout || currentBlock.stdout !== blockHead.stdout || currentBranch.stdout !== branch.stdout || currentStatus.stdout) {
+        return stop('merge parents or main checkout changed during the full suite; check the checkout and rerun the merge gate');
+      }
+      writeSafe(json ? stderr : stdout, `merge gate: full suite passed (${((Date.now() - started) / 1000).toFixed(1)}s)\n`);
+    }
+    step = 'merge';
+    next = command;
     const merged = await exec(mergeArgs, gitOptions);
     if (merged.result !== 'ok') {
       next = landCommand(['git', '-C', main, 'status']);
@@ -479,7 +535,7 @@ const USAGE =
   '       code-forge block ack-waivers <id> --run <r>\n' +
   '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]\n' +
   '       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n' +
-  '       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge]\n' +
+  '       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate]\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
 /** @type {Record<string, string>} */
@@ -489,7 +545,7 @@ const VERB_USAGE = {
   rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>]',
   claim: '<id> <path> --run <r>',
   close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]',
-  land: '<id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge]',
+  land: '<id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate]',
   stop: '<id> --run <r> --reason <text>',
   waive: '<id> <finding-id> --run <r> --file <path> --reason <text> [--yes]',
   reopen: '<id> --run <r> --file <path> --reason <text> [--yes]',
@@ -512,7 +568,8 @@ function verbUsage(sub) {
     (sub === 'open' ? '  --brief <file>       A file inside the repository, not inline text.\n' : '') +
     (sub === 'land' ? '  Join block reviews, run changed gates in its worktree, then close.\n' +
       '  --max <dur>  Total review wait (default 30m); accepts 90s, 30m or 1500ms.\n' +
-      '  --merge     Merge with --no-ff in the clean main checkout on the recorded base branch.\n' : '');
+      '  --merge     Check the merged full suite, then merge with --no-ff in the clean main checkout.\n' +
+      '  --no-merge-gate  Skip the merged full suite with a warning.\n' : '');
 }
 
 /** Refuse likely shell quoting slips before any row is written.
@@ -601,7 +658,7 @@ export async function runBlock(args, deps = {}) {
   }
   let jsonOpenId;
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'land' ? ['merge'] : []), ...(sub === 'close' ? ['decide', 'auto-claim'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'land' ? ['merge', 'no-merge-gate'] : []), ...(sub === 'close' ? ['decide', 'auto-claim'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -619,8 +676,8 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'open' && json) jsonOpenId = id;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
-    if (sub === 'land' && (positionals.length !== 1 || typeof flags.report !== 'string' || typeof flags.transcript !== 'string' || Object.keys(flags).some((key) => !['run', 'report', 'transcript', 'max', 'merge', 'json'].includes(key)))) {
-      throw new StateError('usage', 'block land takes one block id, --run, --report, --transcript and optional --max/--merge/--json');
+    if (sub === 'land' && (positionals.length !== 1 || typeof flags.report !== 'string' || typeof flags.transcript !== 'string' || Object.keys(flags).some((key) => !['run', 'report', 'transcript', 'max', 'merge', 'no-merge-gate', 'json'].includes(key)))) {
+      throw new StateError('usage', 'block land takes one block id, --run, --report, --transcript and optional --max/--merge/--no-merge-gate/--json');
     }
     let landMaxMs = 30 * 60_000;
     if (sub === 'land' && flags.max !== undefined) {
@@ -660,7 +717,7 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     const record = await readRun(runId);
-    if (sub === 'land') return await landBlock({ id, runId, record, report: /** @type {string} */ (flags.report), transcript: /** @type {string} */ (flags.transcript), maxMs: landMaxMs, merge: flags.merge === true, json }, deps);
+    if (sub === 'land') return await landBlock({ id, runId, record, report: /** @type {string} */ (flags.report), transcript: /** @type {string} */ (flags.transcript), maxMs: landMaxMs, merge: flags.merge === true, noMergeGate: flags['no-merge-gate'] === true, json }, deps);
     if (sub === 'amend-acceptance') {
       /** @type {ReturnType<typeof prepareAcceptanceAmendment> | null} */
       let prepared = null;

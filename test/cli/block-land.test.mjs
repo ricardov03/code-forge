@@ -1,6 +1,6 @@
 import { cfgFor, freshDir, git, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { mock, test } from 'node:test';
 
@@ -115,7 +115,9 @@ test('B185: clean land joins, gates, closes and merges; a finding stops before g
       } else {
         assert.equal(result.stdout.trim().split('\n').at(-1), 'block B1 landed');
         assert.deepEqual((await git(['rev-list', '--parents', '-n', '1', 'main'], f.repo)).trim().split(' ').slice(1), [f.base, f.head], 'base has exactly the two parents of a no-ff merge');
-        assert.equal(readFileSync(f.gateOutput, 'utf8'), f.worktree.path, 'gates ran in the block worktree');
+        const gateTree = readFileSync(f.gateOutput, 'utf8');
+        assert.equal(path.dirname(gateTree), path.dirname(f.worktree.path), 'last full gate ran under the run worktree root');
+        assert.equal(existsSync(gateTree), false, 'last full gate worktree was removed before landing');
         assert.ok(rows.findIndex((r) => r.event === 'gate.done') < rows.findIndex((r) => r.event === 'block.close'), 'gate completion precedes close');
       }
     } finally { f.cleanup(); }

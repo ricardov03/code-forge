@@ -341,6 +341,7 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'gates.custom.env',
   'gates.custom.evidence',
   'gates.timeout_s',
+  'gates.merge_gate',
   // B160: the four paths behind the 230 -> 234 re-pin.
   'gates.kinds',
   'gates.kinds.code',
@@ -440,7 +441,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B156: +1 = gates.timeout_s ⇒ 230.
 // B160: +4 = gates.kinds{,.code,.docs,.contract} ⇒ 234.
 // B171: +1 = proof.worktree.setup ⇒ 235.
-const EXPECTED_SCHEMA_PATH_COUNT = 235;
+// B189: +1 = gates.merge_gate ⇒ 236.
+const EXPECTED_SCHEMA_PATH_COUNT = 236;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;
