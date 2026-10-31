@@ -37,7 +37,7 @@ func (s *server) status() object {
 			return failure("status-unreadable")
 		}
 		// Release binaries live at <package>/native/bin/<platform>/.
-		helper := filepath.Join(filepath.Dir(executable), "..", "..", "..", "src", "state", "native-status.mjs")
+		helper := filepath.Join(filepath.Dir(executable), "..", "..", "..", "src", "cli", "native-status.mjs")
 		cmd := exec.Command("node", helper)
 		cmd.Dir = s.workspace
 		for _, env := range os.Environ() {
