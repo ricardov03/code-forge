@@ -19,6 +19,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Every Go command the tests run sets `CGO_ENABLED=0`, so `go test` passes on macOS without extra setup; `native/README.md` says how to test the Go code (B195)
 - `block waive --yes` now says the evidence may cite `:line or :start-end`, the same as `block reopen --yes`; a range citation is accepted (B193)
 - `forge facts` cuts an excerpt over 200 characters (ending with `…`) instead of refusing the whole sheet; repo-relative paths with an extension or a top-level folder, and absolute paths, are now path claims; `§ 12.1` is no longer a version claim; a long brief with almost no claims prints a warning (#29, B197)
+- Critical findings still need a human waiver by default; under an active autopilot grant, `block waive --yes` may waive a critical when the reason cites a passing acceptance test and the finding's lines and the judge agrees; the row records `by: agent` and `autopilot: true` (B196)
 
 ## [0.15.3] — 2026-10-30
 
