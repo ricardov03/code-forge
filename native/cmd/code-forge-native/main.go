@@ -9,7 +9,9 @@ import (
 	"path/filepath"
 	"regexp"
 	"runtime"
+	"time"
 
+	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/sign"
 )
@@ -41,17 +43,30 @@ func run(args []string) (int, error) {
 	if len(args) == 1 && args[0] == "version" {
 		return 0, json.NewEncoder(os.Stdout).Encode(map[string]string{"version": version, "goVersion": runtime.Version()})
 	}
-	if len(args) == 0 || args[0] != "verify-ledger" {
-		return 2, fmt.Errorf("usage: code-forge-native version | verify-ledger --home <dir> --run <id>")
+	if len(args) == 0 || (args[0] != "verify-ledger" && args[0] != "serve") {
+		return 2, fmt.Errorf("usage: code-forge-native version | verify-ledger | serve --home <dir> --run <id>")
 	}
-	flags := flag.NewFlagSet("verify-ledger", flag.ContinueOnError)
+	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	home := flags.String("home", "", "home directory containing .code-forge")
 	runID := flags.String("run", "", "run ID")
+	var idle *time.Duration
+	if args[0] == "serve" {
+		idle = flags.Duration("idle", 30*time.Minute, "exit after this duration without requests")
+	}
 	if err := flags.Parse(args[1:]); err != nil {
 		return 2, err
 	}
 	if *home == "" || !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`).MatchString(*runID) || flags.NArg() != 0 {
-		return 2, fmt.Errorf("verify-ledger requires --home <dir> and a valid --run <id>")
+		return 2, fmt.Errorf("%s requires --home <dir> and a valid --run <id>", args[0])
+	}
+	if args[0] == "serve" {
+		if *idle <= 0 {
+			return 2, fmt.Errorf("idle duration must be positive")
+		}
+		if err := daemon.Serve(*home, *runID, version, *idle); err != nil {
+			return 1, err
+		}
+		return 0, nil
 	}
 	result, err := verifyLedger(*home, *runID)
 	if err != nil {

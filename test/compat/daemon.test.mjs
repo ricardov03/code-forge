@@ -1,0 +1,203 @@
+import assert from 'node:assert/strict';
+import { spawn, spawnSync } from 'node:child_process';
+import { once } from 'node:events';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import net from 'node:net';
+import path from 'node:path';
+import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+import { runReviewFile } from '../../src/cli/review-file.mjs';
+import { ledgerPath } from '../../src/ledger/paths.mjs';
+import { appendRow } from '../../src/ledger/write.mjs';
+import { openBlock } from '../../src/state/block.mjs';
+import { startRun } from '../../src/state/run.mjs';
+import { loadKey, signRow } from '../../src/state/signer.mjs';
+import { announceWorker, blockTickets, enqueue, enqueueAnswers, queueDir, retractWorker, writeResult, writeTicketTimings } from '../../src/worker/queue.mjs';
+
+const root = fileURLToPath(new URL('../../', import.meta.url));
+const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+let built = false;
+function build(t) {
+  if (spawnSync('go', ['version']).error?.['code'] === 'ENOENT') {
+    t.skip('Go daemon compatibility skipped: go is not on PATH');
+    return false;
+  }
+  if (!built) {
+    const result = spawnSync(process.execPath, ['scripts/build-native.mjs', '--host'], { cwd: root, encoding: 'utf8', timeout: 120_000 });
+    assert.equal(result.status, 0, result.stderr);
+    built = true;
+  }
+  return true;
+}
+
+async function fixture(t) {
+  const dir = mkdtempSync('/tmp/cfd-');
+  const oldHome = process.env.HOME;
+  const oldBackend = process.env.CODE_FORGE_KEY_BACKEND;
+  process.env.HOME = path.join(dir, 'h');
+  process.env.CODE_FORGE_KEY_BACKEND = 'file';
+  const home = process.env.HOME;
+  const repo = path.join(dir, 'repo');
+  mkdirSync(repo);
+  for (const args of [['init', '-q'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'base']]) {
+    const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+    assert.equal(result.status, 0, result.stderr);
+  }
+  writeFileSync(path.join(repo, '.code-forge.yml'), 'version: 1\nproject:\n  slug: daemon-test\nprovider: anthropic\nlevels:\n  L2:\n    model: claude-opus-5-5\nreview:\n  exclude: ["**/*.md"]\n');
+  mkdirSync(path.join(repo, 'src'));
+  for (const name of ['a.mjs', 'b.mjs', 'skip.md']) writeFileSync(path.join(repo, 'src', name), `fixture ${name}\n`);
+  const run = 'r-daemon-test';
+  await startRun({ workspace: repo, project: 'daemon-test', runId: run, config: { review: { exclude: ['**/*.md'] } }, writeRow: async () => {} });
+  await openBlock({ runId: run, id: 'B1', level: 'L2', owned: ['src/**'], acceptance: [{ clause: 'fixture', tests: ['fixture'] }], writeRow: async () => {} });
+  const key = await loadKey(run);
+  await appendRow(signRow({ event: 'block.open', run, block: 'B1' }, key), { slug: 'daemon-test' });
+  const socket = path.join(home, '.code-forge', 'runs', run, 'native.sock');
+  const children = [];
+  t.after(async () => {
+    retractWorker(repo, process.pid);
+    for (const child of children) {
+      if (child.exitCode === null && child.signalCode === null) {
+        const exited = once(child, 'exit');
+        child.kill('SIGTERM');
+        await exited;
+      }
+    }
+    if (oldHome === undefined) delete process.env.HOME; else process.env.HOME = oldHome;
+    if (oldBackend === undefined) delete process.env.CODE_FORGE_KEY_BACKEND; else process.env.CODE_FORGE_KEY_BACKEND = oldBackend;
+    rmSync(dir, { recursive: true, force: true });
+  });
+  function start(idle = '30m') {
+    const child = spawn(binary, ['serve', '--home', home, '--run', run, '--idle', idle], { stdio: ['ignore', 'ignore', 'pipe'] });
+    children.push(child);
+    return child;
+  }
+  async function ready(child) {
+    let stderr = '';
+    child.stderr.on('data', (s) => { stderr += s; });
+    for (let i = 0; i < 100 && child.exitCode === null; i++) {
+      try { return await request(socket, { method: 'ping' }); } catch { await new Promise((resolve) => setTimeout(resolve, 20)); }
+    }
+    assert.fail(`serve must answer ping on the run socket; exit=${child.exitCode}: ${stderr}`);
+  }
+  const reference = async () => {
+    let text = '';
+    let error = '';
+    const code = await runReviewFile(['--wait-block', 'B1', '--run', run, '--max', '0ms'], {
+      cwd: repo, pollMs: 1, stdout: { write: (s) => { text += s; } }, stderr: { write: (s) => { error += s; } },
+    });
+    assert.equal(code, 0, error);
+    return JSON.parse(text);
+  };
+  return { home, repo, run, key, socket, start, ready, reference };
+}
+
+function request(socket, body) {
+  return new Promise((resolve, reject) => {
+    const client = net.createConnection(socket);
+    client.setTimeout(5000, () => client.destroy(new Error('daemon request timed out')));
+    let text = '';
+    client.on('error', reject);
+    client.on('connect', () => client.write(`${JSON.stringify(body)}\n`));
+    client.on('data', (chunk) => {
+      text += chunk;
+      if (text.includes('\n')) {
+        client.destroy();
+        try { resolve(JSON.parse(text.split('\n')[0])); } catch (err) { reject(err); }
+      }
+    });
+    client.on('end', () => { if (!text.includes('\n')) reject(new Error('daemon closed without a response')); });
+  });
+}
+
+const withoutStats = ({ stats, ...result }) => result;
+
+test('daemon hot reads match Node, incrementally tail and index, long-poll, and prune only signed closed blocks', async (t) => {
+  if (!build(t)) return;
+  const f = await fixture(t);
+  const { repo, run, key, socket } = f;
+  announceWorker(repo, { pid: process.pid, run });
+  const tickets = ['a', 'b'].map((name) => enqueue({ repoRoot: repo, run, block: 'B1', file: `src/${name}.mjs` }));
+  enqueue({ repoRoot: repo, run, block: 'Other', file: 'src/a.mjs' });
+  enqueueAnswers({ repoRoot: repo, run, block: 'B1', file: 'src/a.mjs', byFile: 'src/b.mjs', answers: ['F1'] });
+  const child = f.start();
+  const ping = await f.ready(child);
+  assert.deepEqual([ping.ok, ping.run, ping.pid], [true, run, child.pid]);
+  assert.equal(typeof ping.version, 'string');
+  assert.equal(statSync(socket).mode & 0o777, 0o600, 'socket must be private');
+  const listed = await request(socket, { method: 'block-tickets', block: 'B1' });
+  assert.deepEqual(withoutStats(listed), { block: 'B1', tickets: blockTickets({ repoRoot: repo, run, block: 'B1' }) });
+  assert.equal(listed.stats.tickets_parsed, 4, 'parse each of four ticket files exactly once');
+  const initial = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
+  assert.deepEqual(withoutStats(initial), await f.reference());
+  assert.equal(initial.stats.tickets_parsed, 4, 'unchanged tickets are not reparsed by another request');
+  const bytes = Array.from({ length: 7 }, (_, n) => JSON.stringify(signRow({ event: 'session', run, n }, key)) + '\n').join('');
+  appendFileSync(ledgerPath('daemon-test'), bytes);
+  const after = await request(socket, { method: 'ping' });
+  assert.equal(after.stats.bytes_read - initial.stats.bytes_read, Buffer.byteLength(bytes), 'read exactly seven appended rows, zero old bytes');
+  writeTicketTimings(repo, blockTickets({ repoRoot: repo, run, block: 'B1' })[0], { duration_ms: 17 });
+  const changed = await request(socket, { method: 'block-tickets', block: 'B1' });
+  assert.equal(changed.stats.tickets_parsed - after.stats.tickets_parsed, 1, 'only one modified ticket is reparsed');
+  assert.deepEqual(changed.tickets, blockTickets({ repoRoot: repo, run, block: 'B1' }));
+  const waiting = request(socket, { method: 'wait-block', block: 'B1', max_ms: 3000 });
+  await new Promise((resolve) => setTimeout(resolve, 250));
+  assert.equal((await request(socket, { method: 'ping' })).pid, child.pid, 'long-poll does not block other clients or spawn a replacement daemon');
+  for (const [i, ticket] of tickets.entries()) writeResult({ repoRoot: repo, runId: run, ticket: ticket.ticket, key, result: { status: 'reviewed', approved: i === 0, findings: i === 0 ? [] : [{ id: 'F1' }], duration_ms: 31 } });
+  const completed = await waiting;
+  assert.deepEqual(withoutStats(completed), await f.reference());
+  assert.equal(completed.done, true, 'both current tickets finish and excluded Markdown does not block');
+  assert.deepEqual(withoutStats(await request(socket, { method: 'prune', block: 'B1' })), { ok: false, error: 'block-open' });
+  await appendRow({ event: 'block.close', run, block: 'B1', status: 'complete' }, { slug: 'daemon-test' });
+  assert.equal((await request(socket, { method: 'prune', block: 'B1' })).error, 'block-open', 'unsigned close cannot authorize deletion');
+  await appendRow(signRow({ event: 'block.close', run, block: 'B1', status: 'complete' }, key), { slug: 'daemon-test' });
+  const pruned = await request(socket, { method: 'prune', block: 'B1' });
+  assert.deepEqual(withoutStats(pruned), { ok: true, block: 'B1', tickets: 3, markers: 2 });
+  assert.deepEqual((await request(socket, { method: 'block-tickets', block: 'B1' })).tickets, []);
+  assert.equal(blockTickets({ repoRoot: repo, run, block: 'Other' }).length, 1, 'other block ticket survives pruning');
+});
+
+test('daemon refuses a live duplicate, replaces a stale socket, handles rotations and torn tails, and exits idle or on SIGTERM', async (t) => {
+  if (!build(t)) return;
+  const f = await fixture(t);
+  const child = f.start();
+  await f.ready(child);
+  const duplicate = f.start();
+  const [code] = await once(duplicate, 'exit');
+  assert.equal(code, 1, 'second daemon refuses the live listener');
+  assert.equal((await request(f.socket, { method: 'ping' })).pid, child.pid, 'duplicate cannot unlink the original socket');
+  const file = ledgerPath('daemon-test');
+  const before = await request(f.socket, { method: 'ping' });
+  const partial = '{"event":"session"';
+  appendFileSync(file, partial);
+  const torn = await request(f.socket, { method: 'ping' });
+  assert.equal(torn.stats.bytes_read - before.stats.bytes_read, Buffer.byteLength(partial));
+  const suffix = ',"n":1}\n';
+  appendFileSync(file, suffix);
+  const fixed = await request(f.socket, { method: 'ping' });
+  assert.equal(fixed.stats.bytes_read - torn.stats.bytes_read, Buffer.byteLength(suffix), 'torn prefix is cached while reading only new bytes');
+  assert.equal(fixed.stats.rows - before.stats.rows, 1, 'completed tail appears exactly once');
+  renameSync(file, file.replace('.jsonl', '.1.jsonl'));
+  const next = '{"event":"session","n":2}\n';
+  writeFileSync(file, next);
+  const rotated = await request(f.socket, { method: 'ping' });
+  assert.equal(rotated.stats.bytes_read - fixed.stats.bytes_read, Buffer.byteLength(next), 'renamed inode is reused without rereading rotated bytes');
+  assert.equal(rotated.stats.rows - fixed.stats.rows, 1, 'rotation retains old rows without duplicates');
+  appendFileSync(file, '{bad}\n{"valid":true}\n');
+  assert.equal((await request(f.socket, { method: 'ping' })).ok, false, 'malformed interior row is refused');
+  const exited = once(child, 'exit');
+  child.kill('SIGTERM');
+  assert.deepEqual(await exited, [0, null]);
+  // A leftover socket inode, as after a crash, must be recoverable.
+  const stale = net.createServer();
+  await new Promise((resolve) => stale.listen(f.socket, () => resolve(undefined)));
+  const leftover = `${f.socket}.leftover`;
+  renameSync(f.socket, leftover);
+  await new Promise((resolve) => stale.close(() => resolve(undefined)));
+  renameSync(leftover, f.socket);
+  // Restore a clean ledger for the new daemon.
+  writeFileSync(file, next);
+  const idle = f.start('400ms');
+  const idleExit = once(idle, 'exit');
+  await f.ready(idle);
+  assert.deepEqual(await idleExit, [0, null], 'short idle timeout terminates cleanly');
+  assert.throws(() => statSync(f.socket), { code: 'ENOENT' }, 'idle exit removes the socket');
+});
