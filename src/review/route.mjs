@@ -68,11 +68,12 @@ const isText = (v) => typeof v === 'string' && v.length > 0;
 const optString = (v) => v === undefined || typeof v === 'string';
 
 /**
- * A fallback item (`$defs/level` fallback): an object with a model and a provider, and an
- * `effort` string when present.
+ * A fallback item: an object with a model, an optional provider (inherited from its entry),
+ * and an `effort` string when present.
  * @param {unknown} v @returns {boolean}
  */
-const isFallbackItem = (v) => isObject(v) && isText(v.model) && isText(v.provider) && optString(v.effort);
+const isFallbackItem = (v) => isObject(v) && isText(v.model)
+  && (v.provider === undefined || isText(v.provider)) && optString(v.effort);
 
 /**
  * A `$defs/level`-shaped entry: a model string, `provider` and `effort` strings when present, and
@@ -244,7 +245,8 @@ function adaptiveTicket(cfg, file, performance, picked) {
   /** @type {Array<Record<string, any>>} */
   const entries = [
     ...(rule ? [{ ...entryOf(rule), provider: providerOf(cfg, rule) }] : []),
-    { ...primary }, ...primary.fallback, ...(rule?.fallback ?? []),
+    { ...primary }, ...primary.fallback,
+    ...(rule?.fallback ?? []).map((f) => ({ ...f, provider: f.provider ?? providerOf(cfg, rule) })),
   ];
   const secondProvider = cfg.review?.multimodel === true
     ? cfg.review.second_levels?.L2?.provider ?? cfg.review.second_provider : undefined;

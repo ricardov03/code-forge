@@ -162,6 +162,54 @@ test('worker signs its measured choice and reason before invoking a fake reviewe
   assert.deepEqual(verifyRow(routes[0], key), { ok: true });
 });
 
+test('worker resolves route fallback providers before choosing and deduping provider/model pairs', async () => {
+  for (const [index, { ruleProvider, entryProvider, expected }] of [
+    { ruleProvider: undefined, entryProvider: undefined, expected: 'anthropic' },
+    { ruleProvider: 'xai', entryProvider: undefined, expected: 'xai' },
+    { ruleProvider: 'xai', entryProvider: 'anthropic', expected: 'anthropic' },
+  ].entries()) {
+    const repo = await makeRepo();
+    const runId = `r-fallback-provider-${process.pid}-${index}`;
+    await startRun({ workspace: repo, project: 'performance', runId, writeRow: async () => {} });
+    await openBlock({ runId, id: 'B1', level: 'L2', owned: ['src/**'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow: async () => {} });
+    writeFile(repo, 'src/example.mjs', 'export const value = 1;\n');
+    const otherProvider = expected === 'anthropic' ? 'xai' : 'anthropic';
+    const cfg = config({ routes: [{ min_lines: 0, model: A, provider: ruleProvider, fallback: [
+      { model: B, ...(entryProvider === undefined ? {} : { provider: entryProvider }) },
+      { model: A },
+      { model: A, provider: ruleProvider ?? 'anthropic' },
+      { model: B, provider: otherProvider },
+    ] }] });
+    cfg.levels.L2 = { model: A };
+    const key = await loadKey(runId);
+    const rows = [...history(A, { seconds: 100, ts: new Date().toISOString() }), ...history(B, { ts: new Date().toISOString() })];
+    const spawned = [];
+    const worker = await createWorker({ runId, repoRoot: repo, cfg, runRootDir: freshDir('worker'), slug: 'performance', key }, {
+      store: await createKeyStore({ backends: [], dir: freshDir('keys') }), env: {}, expiryCheck: async () => {},
+      readRows: async () => rows, writeRow: async (row) => { rows.push(row); },
+      spawn: async (opts) => {
+        const entry = opts.cfg.levels.L2;
+        spawned.push([entry.provider, entry.model]);
+        assert.equal(rows.filter((r) => r.event === 'review.route').length, 1, 'choice row precedes the session');
+        assert.deepEqual(entry.fallback.filter((f) => f.model === B), [{ model: B, provider: otherProvider }],
+          'the same model on another provider remains');
+        const pairs = entry.fallback.map((f) => `${f.provider}/${f.model}`);
+        assert.equal(new Set(pairs).size, pairs.length, 'resolved provider/model duplicates are removed');
+        const text = readFileSync(opts.promptPath, 'utf8');
+        const hunks = text.split('\n').filter((s) => s.startsWith('- @@')).map((s) => s.slice(2));
+        return { status: 'ok', provider: entry.provider, model: entry.model, exit_code: 0, usage: { tokens_in: 900, tokens_out: 300 }, answer: { passed: true, summary: 'ok', reviewed_hunks: hunks, findings: [], resolved: [], needs_file: [] } };
+      },
+    });
+    const queued = enqueue({ repoRoot: repo, run: runId, block: 'B1', file: 'src/example.mjs' });
+    assert.equal(await worker.drain(), 1);
+    assert.equal(readResult(repo, runId, queued.ticket).approved, true);
+    assert.deepEqual(spawned, [[expected, B]]);
+    const routes = rows.filter((r) => r.event === 'review.route');
+    assert.deepEqual(routes.map((r) => [r.provider, r.model, r.ticket]), [[expected, B, queued.ticket]]);
+    assert.deepEqual(verifyRow(routes[0], key), { ok: true });
+  }
+});
+
 test('status human text and doctor show measured models; status JSON stays unchanged', async (t) => {
   const repo = await makeRepo();
   const slug = `performance-status-${process.pid}`;
