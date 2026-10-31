@@ -2,6 +2,8 @@
 package queue
 
 import (
+	"bytes"
+	"crypto/rand"
 	"crypto/sha256"
 	"encoding/hex"
 	"encoding/json"
@@ -22,6 +24,7 @@ type cached struct {
 	info  os.FileInfo
 	value Object
 	err   error
+	data  []byte
 }
 
 // Index caches parsed tickets by filename and indexes valid entries by block/file.
@@ -113,8 +116,91 @@ func (idx *Index) read(name string, isTicket bool) (Object, error) {
 		}
 		err = fmt.Errorf("%s", code)
 	}
-	idx.entries[name] = cached{info, value, err}
+	idx.entries[name] = cached{info: info, value: value, err: err, data: data}
 	return value, err
+}
+
+// RetryOnce mirrors the join's one automatic retry. A marker alone cannot
+// authorize a retry: its result must be readable and have the same status.
+// The byte-checked rename claim preserves results replaced by a concurrent worker.
+func (idx *Index) RetryOnce(repo, id string, marker Object) (Object, error) {
+	status := text(marker, "status")
+	if status != "stale" && status != "unavailable" && status != "split_required" {
+		return marker, nil
+	}
+	if _, err := os.Stat(filepath.Join(idx.Dir, id+".retried")); err == nil {
+		return marker, nil
+	} else if !os.IsNotExist(err) {
+		return nil, err
+	}
+	rel := text(marker, "result")
+	if !strings.HasPrefix(rel, ".code-forge/reviews/") {
+		return marker, nil
+	}
+	for _, part := range strings.Split(rel, "/") {
+		if part == ".." {
+			return marker, nil
+		}
+	}
+	data, err := os.ReadFile(filepath.Join(repo, rel))
+	var result Object
+	if err != nil || json.Unmarshal(data, &result) != nil || result["status"] != status {
+		return marker, nil
+	}
+	seen := idx.entries[id+".done"].data
+	var random [4]byte
+	if _, err := rand.Read(random[:]); err != nil {
+		return nil, err
+	}
+	file := filepath.Join(idx.Dir, id+".done")
+	claim := fmt.Sprintf("%s.%d.%x.fresh", file, os.Getpid(), random)
+	if err := os.Rename(file, claim); os.IsNotExist(err) {
+		return nil, nil
+	} else if err != nil {
+		return nil, fmt.Errorf("fresh-claim-failed")
+	}
+	claimed, readErr := os.ReadFile(claim)
+	same := readErr == nil && bytes.Equal(seen, claimed)
+	var retryErr error
+	if same {
+		var f *os.File
+		f, retryErr = os.OpenFile(filepath.Join(idx.Dir, id+".retried"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if retryErr == nil {
+			_, retryErr = f.WriteString(id + "\n")
+			closeErr := f.Close()
+			if retryErr == nil {
+				retryErr = closeErr
+			}
+		}
+		if retryErr == nil {
+			if err := os.Remove(claim); err != nil {
+				return nil, fmt.Errorf("fresh-claim-failed")
+			}
+			delete(idx.entries, id+".done")
+			return idx.Marker(id)
+		}
+	}
+	if err := os.Link(claim, file); err != nil && !os.IsExist(err) {
+		// Preserve the claim if a refusal cannot be published: Node's pending
+		// scanner treats this filename as done, preventing an unintended rerun.
+		f, createErr := os.OpenFile(file, os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0600)
+		if createErr == nil {
+			encodeErr := json.NewEncoder(f).Encode(Object{"ticket": id, "status": "refused", "reason": "fresh-restore-failed"})
+			closeErr := f.Close()
+			if encodeErr == nil && closeErr == nil {
+				os.Remove(claim)
+			}
+		}
+		return nil, fmt.Errorf("fresh-restore-failed")
+	}
+	os.Remove(claim)
+	if readErr != nil {
+		return nil, fmt.Errorf("fresh-restore-failed")
+	}
+	if retryErr != nil && !os.IsExist(retryErr) {
+		return nil, fmt.Errorf("fresh-claim-failed")
+	}
+	return idx.Marker(id)
 }
 
 // Block returns the same review-ticket list as Node blockTickets. A nil tree or
@@ -216,7 +302,7 @@ func (idx *Index) Prune(run, block string) (tickets, markers int, err error) {
 			continue
 		}
 		id := name[:24]
-		for _, suffix := range []string{".done", ".delivered", ".json"} {
+		for _, suffix := range []string{".done", ".delivered", ".retried", ".json"} {
 			err = os.Remove(filepath.Join(idx.Dir, id+suffix))
 			if os.IsNotExist(err) {
 				continue

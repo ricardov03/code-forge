@@ -298,6 +298,11 @@ func (s *server) step(req request, deadline time.Time, down *int) (object, bool)
 	if req.Method == "block-tickets" {
 		return object{"block": req.Block, "tickets": tickets}, true
 	}
+	byFile := make(map[string][]object)
+	for _, t := range tickets {
+		file := text(t, "file")
+		byFile[file] = append(byFile[file], t)
+	}
 	cfg, err := config(s.record)
 	if err != nil {
 		return failure("config-snapshot"), true
@@ -334,10 +339,7 @@ func (s *server) step(req request, deadline time.Time, down *int) (object, bool)
 		after := s.reopened(req.Block, file)
 		matching := []object{}
 		previous := []object{}
-		for _, t := range tickets {
-			if t["file"] != file {
-				continue
-			}
+		for _, t := range byFile[file] {
 			if after == "" || later(text(t, "enqueued_at"), after) {
 				previous = append(previous, t)
 			}
@@ -395,6 +397,12 @@ func (s *server) step(req request, deadline time.Time, down *int) (object, bool)
 			marker, err := s.queue.Marker(id)
 			if err != nil {
 				return failure(err.Error()), true
+			}
+			if live && marker != nil {
+				marker, err = s.queue.RetryOnce(s.repo, id, marker)
+				if err != nil {
+					return failure(err.Error()), true
+				}
 			}
 			if marker != nil {
 				state["status"], state["outcome"] = "done", outcome(marker)
