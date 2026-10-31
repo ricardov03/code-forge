@@ -20,7 +20,7 @@
  * restarted worker boots on the snapshot, not on whatever the file says now. A record from before
  * snapshots (or none) keeps the config the worker booted with.
  *
- * Ticket pool (B42): the worker runs up to `review.parallel_tickets` (default 3, 1–16) tickets at
+ * Ticket pool (B42): the worker runs up to `review.parallel_tickets` (default 6, 1–16) tickets at
  * once, oldest first (or fewest running per block with `review.fair_share`); when one ends the
  * next pending one starts. Two tickets for the same (block, file) never overlap (a file lock;
  * the later one stays pending without taking a slot),
@@ -45,7 +45,7 @@ import { loadProjectConfig } from '../config/load.mjs';
 import { reviewWorkers } from '../config/validate.mjs';
 import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
-import { spawnSession } from '../session/spawn.mjs';
+import { providerLimit, spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
 import { runRecordPath } from '../state/paths.mjs';
 import { processStartTime, readRun, reattachWorker } from '../state/run.mjs';
@@ -70,7 +70,8 @@ export const DEFAULT_POLL_MS = 250;
 export const DEFAULT_SESSION_TIMEOUT_S = 300;
 
 /** B42: `review.parallel_tickets` when the config does not set a valid one. */
-export const DEFAULT_PARALLEL_TICKETS = 3;
+export const DEFAULT_PARALLEL_TICKETS = 6;
+export const DEFAULT_PROVIDER_PARALLEL = 4;
 
 /** B48: the fixed text of a failed autopilot expiry check in a drain (stderr and the warning log). */
 export const EXPIRY_CHECK_FAILED = 'the autopilot expiry check failed in a worker drain; it runs again at the next drain';
@@ -294,6 +295,64 @@ export async function createWorker(opts, deps = {}) {
   let poolWake = null;
   let activity = 0;
 
+  // Sessions waiting for a provider stay in the pool without preventing tickets for another
+  // provider from starting. Resolve the provider at spawn time, after routing and second-level
+  // overrides, rather than guessing it from the ticket's original config.
+  let ticketLimit = parallelTickets(cfg);
+  let providerParallel = DEFAULT_PROVIDER_PARALLEL;
+  /** @type {Map<string, {active: number, pending: number}>} */
+  const ticketSessions = new Map();
+  /** @type {Map<string, number>} */
+  const providerActive = new Map();
+  /** @type {Array<{id: string, provider: string, start: () => void}>} */
+  const sessionQueue = [];
+
+  function dispatchSessions() {
+    for (let i = 0; i < sessionQueue.length;) {
+      const next = sessionQueue[i];
+      const state = ticketSessions.get(next.id);
+      const liveTickets = [...ticketSessions.values()].filter((s) => s.active > 0).length;
+      if ((providerActive.get(next.provider) ?? 0) >= providerParallel || (state.active === 0 && liveTickets >= ticketLimit)) {
+        i += 1;
+        continue;
+      }
+      sessionQueue.splice(i, 1);
+      state.pending -= 1;
+      state.active += 1;
+      providerActive.set(next.provider, (providerActive.get(next.provider) ?? 0) + 1);
+      next.start();
+    }
+  }
+
+  /** @param {string} id @param {Parameters<typeof spawnSession>[0]} opts @returns {ReturnType<typeof spawnSession>} */
+  function spawnPooled(id, opts) {
+    // Match the spawner's per-level override and top-level fallback; validation stays there.
+    const provider = opts.cfg?.levels?.[opts.level]?.provider ?? opts.cfg?.provider ?? 'unresolved';
+    const state = ticketSessions.get(id) ?? { active: 0, pending: 0 };
+    ticketSessions.set(id, state);
+    state.pending += 1;
+    // The spawner's existing per-attempt semaphores also cover fallback providers. Retain
+    // stricter provider_concurrency settings while applying this cap to fallback attempts.
+    const providerConcurrency = Object.fromEntries(['anthropic', 'openai', 'xai'].map((p) => [p, Math.min(providerParallel, providerLimit(opts.cfg, p))]));
+    const needsCap = Object.entries(providerConcurrency).some(([p, limit]) => limit < providerLimit(opts.cfg, p));
+    const sessionCfg = needsCap ? { ...opts.cfg, review: { ...opts.cfg.review, provider_concurrency: providerConcurrency } } : opts.cfg;
+    return new Promise((resolve, reject) => {
+      sessionQueue.push({ id, provider, start: () => {
+        Promise.resolve().then(() => spawn({ ...opts, cfg: sessionCfg },
+          { env: childEnv, ...(deps.bins ? { bins: deps.bins } : {}), ...(deps.stderr ? { stderr: deps.stderr } : {}) },
+        )).then(resolve, reject).finally(() => {
+          state.active -= 1;
+          providerActive.set(provider, providerActive.get(provider) - 1);
+          if (state.active === 0 && state.pending === 0) ticketSessions.delete(id);
+          dispatchSessions();
+          poolWake?.();
+        });
+      } });
+      dispatchSessions();
+      poolWake?.();
+    });
+  }
+
   /** @param {Record<string, any>} row */
   const ledger = (row) => writeRow(signRow({ run: runId, ...row }, key));
   // Shared across direct ticks and the scheduler, so running tickets are never superseded.
@@ -385,9 +444,8 @@ export async function createWorker(opts, deps = {}) {
       // `sessionOpts.cfg` (a per-call config, e.g. the consensus second reviewer's level) wins
       // over the ticket's; everything else the worker pins.
       spawn: (sessionOpts) =>
-        spawn(
+        spawnPooled(id,
           /** @type {any} */ ({ cfg: tcfg, ...sessionOpts, runRoot: runRootDir, run: runId, block: ticket.block, slug, timeoutMs: timeoutS * 1000 }),
-          { env: childEnv, ...(deps.bins ? { bins: deps.bins } : {}), ...(deps.stderr ? { stderr: deps.stderr } : {}) },
         ),
       writeRow: (row) => ledger({ ...row, block: ticket.block, file: ticket.file, content_hash: ticket.content_hash }),
       writeBlockRow: (row) => ledger({ ...row, block: ticket.block }),
@@ -571,6 +629,9 @@ export async function createWorker(opts, deps = {}) {
     } catch {
       // an unreadable record: the boot settings (each ticket still fails closed on its own)
     }
+    ticketLimit = parallelTickets(current);
+    const cap = current?.review?.provider_parallel;
+    providerParallel = Number.isInteger(cap) && cap >= 1 && cap <= MAX_PARALLEL_TICKETS ? cap : DEFAULT_PROVIDER_PARALLEL;
     return { limit: parallelTickets(current), fairShare: current?.review?.fair_share === true };
   }
 
@@ -667,7 +728,8 @@ export async function createWorker(opts, deps = {}) {
         // Cache even unreadable hints for this tick: ranking never reads a ticket twice.
         /** @type {Map<string, ReturnType<typeof fileKeyOf>>} */
         const hints = new Map();
-        while (pending.length > 0 && running.size < limit && !stopping) {
+        const runnableCount = () => running.size - [...ticketSessions.values()].filter((s) => s.pending > 0 && s.active === 0).length;
+        while (pending.length > 0 && runnableCount() < limit && !stopping) {
           let next = -1;
           let fewest = Infinity;
           for (let i = 0; i < pending.length; i += 1) {

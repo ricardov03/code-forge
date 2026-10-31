@@ -1,0 +1,161 @@
+import { BLOCK, freshDir, makeRepo, waitFor } from './helpers.mjs';
+import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+import path from 'node:path';
+import { test } from 'node:test';
+
+const { createWorker } = await import('../../src/worker/loop.mjs');
+const { announceWorker, enqueue, pendingTickets, retractWorker } = await import('../../src/worker/queue.mjs');
+const { runReviewFile } = await import('../../src/cli/review-file.mjs');
+const { loadKey } = await import('../../src/state/signer.mjs');
+const { createKeyStore } = await import('../../src/keys/store.mjs');
+
+const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+
+/** Fake sessions retain their start/end times and stay live until the test opens the gate. */
+async function fixture(providers, review = {}) {
+  const { repo, runId } = await makeRepo();
+  let release;
+  const gate = new Promise((resolve) => { release = resolve; });
+  const records = [];
+  const files = providers.map((provider, i) => `src/${String.fromCharCode(97 + i)}.mjs`);
+  for (const file of files) fs.writeFileSync(path.join(repo, file), `export const x = 1;\n`);
+  const worker = await createWorker({
+    runId, repoRoot: repo, cfg: { review }, runRootDir: freshDir('runroot'),
+    slug: 'worker-test', key: await loadKey(runId), pollMs: 10,
+  }, {
+    store: await createKeyStore({ backends: [], dir: freshDir('store') }), env: {},
+    writeRow: async () => {}, readRows: async () => [],
+    review: async (ticket, ctx) => {
+      const provider = providers[files.indexOf(ticket.file)];
+      await ctx.spawn({ level: 'L2', role: 'reviewer', cfg: {
+        provider, levels: { L2: { model: 'fake-reviewer' } }, review,
+      } });
+      return { status: 'reviewed', approved: true, engine: 'fake', sessions: [] };
+    },
+    spawn: async (opts) => {
+      const record = { provider: opts.cfg.provider, start: performance.now(), end: null };
+      records.push(record);
+      await gate;
+      record.end = performance.now();
+      return /** @type {any} */ ({ result: 'ok' });
+    },
+  });
+  for (const [i, file] of files.entries()) enqueue({
+    repoRoot: repo, run: runId, block: BLOCK, file, now: new Date(1_700_000_000_000 + i),
+  });
+  return { repo, runId, worker, records, release: () => release(), files };
+}
+
+function peak(records, provider) {
+  const events = records.filter((r) => !provider || r.provider === provider)
+    .flatMap((r) => [[r.start, 1], [r.end, -1]])
+    .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
+  let active = 0;
+  let max = 0;
+  for (const [, delta] of events) max = Math.max(max, active += delta);
+  return max;
+}
+
+test('default parallel_tickets runs six queued reviews simultaneously', async () => {
+  const p = await fixture(['anthropic', 'openai', 'anthropic', 'openai', 'anthropic', 'anthropic']);
+  const drained = p.worker.drain();
+  try { await waitFor(() => p.records.length === 6, 5000); }
+  finally { p.release(); await drained; }
+  assert.equal(p.records.length, 6, 'all six fake reviewer sessions finish');
+  assert.equal(peak(p.records), 6, 'six review intervals overlap with default configuration');
+  assert.equal(pendingTickets(p.repo).length, 0, 'zero tickets remain pending');
+});
+
+test('provider_parallel 2 runs at most two of four same-provider sessions', async () => {
+  const p = await fixture(Array(4).fill('anthropic'), { provider_parallel: 2 });
+  const drained = p.worker.drain();
+  try {
+    await waitFor(() => p.records.length >= 2, 5000);
+    await sleep(100);
+  } finally { p.release(); await drained; }
+  assert.equal(p.records.length, 4, 'all four reviews finish after waiting for provider slots');
+  assert.equal(peak(p.records, 'anthropic'), 2, 'exactly two anthropic sessions overlap');
+});
+
+test('default provider cap leaves other providers runnable behind saturated tickets', async () => {
+  const p = await fixture([...Array(6).fill('anthropic'), 'openai']);
+  const drained = p.worker.drain();
+  let otherStarted;
+  try {
+    otherStarted = await waitFor(() => p.records.some((r) => r.provider === 'openai'), 5000);
+  } finally { p.release(); await drained; }
+  assert.equal(otherStarted, true, 'openai starts while anthropic sessions are held');
+  assert.equal(peak(p.records, 'anthropic'), 4, 'default provider cap permits exactly four anthropic sessions');
+  assert.equal(p.records.length, 7, 'all seven sessions eventually finish');
+  assert.ok(peak(p.records) <= 6, 'no more than six sessions overlap across providers');
+});
+
+async function join(p, deps = {}) {
+  let stdout = '';
+  let stderr = '';
+  const code = await runReviewFile(['--wait-block', BLOCK, '--run', p.runId, '--max', '60s'], {
+    cwd: p.repo, stdout: { write: (s) => { stdout += s; } },
+    stderr: { write: (s) => { stderr += s; } }, ...deps,
+  });
+  assert.equal(code, 0, stderr);
+  assert.equal(stderr, '', 'watching adds zero stderr bytes');
+  return stdout;
+}
+
+test('wait-block wakes within one second of the last completion at the five-second backoff', async () => {
+  const p = await fixture(['anthropic', 'openai', 'anthropic']);
+  announceWorker(p.repo, { pid: process.pid, run: p.runId });
+  let time = 0;
+  let finished = 0;
+  let drained;
+  try {
+    const output = await join(p, {
+      now: () => time,
+      sleep: async (ms, signal) => {
+        time += ms;
+        if (ms < 5000) return;
+        if (!drained) {
+          drained = p.worker.drain().then(() => { finished = performance.now(); });
+          setTimeout(p.release, 50);
+        }
+        await new Promise((resolve) => {
+          const timer = setTimeout(resolve, ms);
+          signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(undefined); }, { once: true });
+        });
+      },
+    });
+    const returned = performance.now();
+    await drained;
+    assert.ok(finished > 0, 'all fake reviews completed during the capped wait');
+    assert.ok(returned - finished < 1000, `join returned ${returned - finished} ms after completion; limit is 1000 ms`);
+    assert.deepEqual(JSON.parse(output).files.map((f) => f.status), ['done', 'done', 'done']);
+    assert.equal(output, await join(p), 'completion output is byte-identical to an immediate join');
+  } finally { p.release(); if (drained) await drained; retractWorker(p.repo, process.pid); }
+});
+
+test('wait-block falls back to polling when the done watch cannot start', async (t) => {
+  const p = await fixture(['anthropic', 'openai', 'anthropic']);
+  announceWorker(p.repo, { pid: process.pid, run: p.runId });
+  let attempts = 0;
+  t.mock.method(fs, 'watch', () => { attempts += 1; throw new Error('watch unavailable'); });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+  let polls = 0;
+  let time = 0;
+  try {
+    const output = await join(p, {
+      now: () => time,
+      sleep: async (ms) => {
+        time += ms;
+        polls += 1;
+        if (polls === 3) { p.release(); await p.worker.drain(); }
+      },
+    });
+    assert.equal(attempts, 1, 'one failed watch setup falls back without retrying each poll');
+    assert.equal(polls, 3, 'three fallback polls observe the completed reviews');
+    assert.deepEqual(JSON.parse(output).files.map((f) => f.status), ['done', 'done', 'done']);
+    assert.equal(JSON.parse(output).done, true, 'polling joins all three completed tickets');
+  } finally { p.release(); retractWorker(p.repo, process.pid); }
+});
