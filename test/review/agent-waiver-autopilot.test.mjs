@@ -59,7 +59,7 @@ async function fixture({ grant = 'active', severity = 'critical' } = {}) {
     results: [{ gate: 'test', ok: true, skipped: false }],
     files: (await fileBaseline(repo, [FILE, TEST])).files, ...extra });
   const key = await loadKey(runId);
-  const gate = async () => checkBlockReviews({ block: 'B1', runId, key, rows: await rows(),
+  const gate = async (resultFiles = {}) => checkBlockReviews({ block: 'B1', runId, key, rows: await rows(), resultFiles,
     files: [{ file: FILE, content_hash: hash }], proofFiles: [], highPaths: [] });
   return { repo, runId, rows, sign, writeRow, calls, invoke, waive, green, key, gate };
 }
@@ -74,6 +74,31 @@ test('without an active grant critical --yes refuses and records zero rows', asy
     assert.match(result.output, /waive-yes-critical:.*active autopilot grant/, grant);
     assert.deepEqual(await f.rows(), before, `${grant}: zero rows, including expiry rows`);
     assert.equal(f.calls.length, 0, `${grant}: zero judge calls`);
+  }
+});
+
+test('a critical refusal stays open when the ledger and agent waiver record warning or nit', async () => {
+  for (const severity of ['warning', 'nit']) {
+    const f = await fixture({ grant: 'none', severity });
+    assert.equal((await f.waive(`${FILE}:1`)).code, 0);
+    await f.sign({ event: 'review.result', file: FILE, status: 'reviewed', ticket: 'legacy' });
+    const result = await f.gate({ legacy: { status: 'reviewed', approved: false,
+      findings: [{ id: 'C1', severity: 'critical' }] } });
+    assert.equal(result.ok, false, severity);
+    assert.ok(result.refusals.some((row) => row.code === 'not_approved' && row.file === FILE && row.finding === 'C1'), severity);
+    assert.deepEqual(result.waivedAll, []);
+  }
+});
+
+test('an unknown recorded severity stays refused despite a signed agreeing agent waiver', async () => {
+  for (const severity of ['unknown', 'unexpected']) {
+    const f = await fixture({ severity });
+    await f.sign({ event: 'review.waived', file: FILE, finding: 'C1', by: 'agent', severity: 'warning',
+      verdict: 'agree', reason: REASON });
+    const result = await f.gate();
+    assert.equal(result.ok, false, severity);
+    assert.ok(result.refusals.some((row) => row.code === 'not_approved' && row.file === FILE && row.finding === 'C1'), severity);
+    assert.deepEqual(result.waivedAll, []);
   }
 });
 

@@ -383,7 +383,9 @@ function reviewRules({ block, runId, rows, key, resultFiles = {}, current, verif
     if (answered(file, finding, answerSeverity, exceptTicket)) return { by: 'answer', invalid: null };
     if (finding !== PROOF_FINDING && (delegableSeverity(severity) || severity === 'critical')) {
       const recorded = recordedSeverity(mine, { block, file, finding, key, verify: ok });
-      if (agentWaivers.some((r) => matches(r, file, finding) && r.severity === recorded.severity)) return { by: 'agent', invalid: null };
+      const agentMayWaive = (delegableSeverity(severity) && DELEGABLE_SEVERITIES.includes(recorded.severity))
+        || (severity === 'critical' && recorded.severity === 'critical');
+      if (agentMayWaive && agentWaivers.some((r) => matches(r, file, finding) && r.severity === recorded.severity)) return { by: 'agent', invalid: null };
     }
     const named = autopilotWaivers.filter((r) => matches(r, file, finding));
     // the unverified pre-check (`verify` given) reads no autopilot waiver: it cannot check a grant
