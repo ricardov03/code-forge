@@ -73,7 +73,7 @@ describe('doctor full run', () => {
     const { proj } = makeProject();
     const def = await runJSON(['--cwd', proj], doctorDeps());
     const rows = def.doc.rows.filter((/** @type {any} */ r) => r.id === 'review-concurrency');
-    assert.deepEqual(rows, [{ id: 'review-concurrency', status: 'INFO', label: 'review concurrency', detail: '3 tickets at once; provider slots anthropic 4 · openai 2 · xai 2' }]);
+    assert.deepEqual(rows, [{ id: 'review-concurrency', status: 'INFO', label: 'review concurrency', detail: '6 tickets at once; provider slots anthropic 4 · openai 2 · xai 2' }]);
 
     const file = path.join(proj, '.code-forge.yml');
     writeFileSync(file, `${readFileSync(file, 'utf8')}review:\n  parallel_tickets: 1\n  provider_concurrency:\n    anthropic: 6\n`);
