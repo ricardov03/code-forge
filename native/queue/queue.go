@@ -403,6 +403,9 @@ func validate(id string, t Object) error {
 		}
 	}
 	tree, ok := optional(t, "tree")
+	if t["tree"] == nil {
+		tree, ok = nil, true
+	}
 	if !ok || tree != nil && !filepath.IsAbs(*tree) {
 		return bad
 	}

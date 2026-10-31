@@ -1,10 +1,10 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runReviewFile } from '../../src/cli/review-file.mjs';
 import { ledgerPath } from '../../src/ledger/paths.mjs';
@@ -12,10 +12,13 @@ import { appendRow } from '../../src/ledger/write.mjs';
 import { openBlock } from '../../src/state/block.mjs';
 import { startRun } from '../../src/state/run.mjs';
 import { loadKey, signRow } from '../../src/state/signer.mjs';
-import { announceWorker, blockTickets, enqueue, enqueueAnswers, queueDir, retractWorker, writeResult, writeTicketTimings } from '../../src/worker/queue.mjs';
+import { announceWorker, blockTickets, enqueue, enqueueAnswers, liveWorker, queueDir, readTicket, retractWorker, writeResult, writeTicketTimings } from '../../src/worker/queue.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+// Installation tests temporarily rename/chmod the release binary in parallel.
+const daemonBinary = `${binary}-daemon-test-${process.pid}`;
+after(() => rmSync(daemonBinary, { force: true }));
 let built = false;
 function build(t) {
   if (spawnSync('go', ['version']).error?.['code'] === 'ENOENT') {
@@ -25,6 +28,7 @@ function build(t) {
   if (!built) {
     const result = spawnSync(process.execPath, ['scripts/build-native.mjs', '--host'], { cwd: root, encoding: 'utf8', timeout: 120_000 });
     assert.equal(result.status, 0, result.stderr);
+    copyFileSync(binary, daemonBinary);
     built = true;
   }
   return true;
@@ -67,7 +71,7 @@ async function fixture(t) {
     rmSync(dir, { recursive: true, force: true });
   });
   function start(idle = '30m') {
-    const child = spawn(binary, ['serve', '--home', home, '--run', run, '--idle', idle], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(daemonBinary, ['serve', '--home', home, '--run', run, '--idle', idle], { stdio: ['ignore', 'ignore', 'pipe'] });
     children.push(child);
     return child;
   }
@@ -88,7 +92,14 @@ async function fixture(t) {
     assert.equal(code, 0, error);
     return JSON.parse(text);
   };
-  return { home, repo, run, key, socket, start, ready, reference };
+  const referenceStatus = () => {
+    const result = spawnSync(process.execPath, [path.join(root, 'bin/code-forge.mjs'), 'status', '--run', run, '--json'], {
+      cwd: repo, env: process.env, encoding: 'utf8', timeout: 10000,
+    });
+    assert.equal(result.status, 0, result.stderr);
+    return JSON.parse(result.stdout);
+  };
+  return { home, repo, run, key, socket, start, ready, reference, referenceStatus };
 }
 
 function request(socket, body) {
@@ -129,6 +140,7 @@ test('daemon hot reads match Node, incrementally tail and index, long-poll, and 
   assert.equal(listed.stats.tickets_parsed, 4, 'parse each of four ticket files exactly once');
   const initial = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
   assert.deepEqual(withoutStats(initial), await f.reference());
+  assert.deepEqual(withoutStats(await request(socket, { method: 'status' })), f.referenceStatus());
   assert.equal(initial.stats.tickets_parsed, 4, 'unchanged tickets are not reparsed by another request');
   const bytes = Array.from({ length: 7 }, (_, n) => JSON.stringify(signRow({ event: 'session', run, n }, key)) + '\n').join('');
   appendFileSync(ledgerPath('daemon-test'), bytes);
@@ -144,6 +156,7 @@ test('daemon hot reads match Node, incrementally tail and index, long-poll, and 
   for (const [i, ticket] of tickets.entries()) writeResult({ repoRoot: repo, runId: run, ticket: ticket.ticket, key, result: { status: 'reviewed', approved: i === 0, findings: i === 0 ? [] : [{ id: 'F1' }], duration_ms: 31 } });
   const completed = await waiting;
   assert.deepEqual(withoutStats(completed), await f.reference());
+  assert.deepEqual(withoutStats(await request(socket, { method: 'status' })), f.referenceStatus());
   assert.equal(completed.done, true, 'both current tickets finish and excluded Markdown does not block');
   writeFileSync(path.join(repo, 'src/b.mjs'), 'fixture blind edit\n');
   const handoff = await f.reference();
@@ -179,6 +192,67 @@ test('daemon hot reads match Node, incrementally tail and index, long-poll, and 
   assert.deepEqual(withoutStats(pruned), { ok: true, block: 'B1', tickets: 4, markers: 5 });
   assert.deepEqual((await request(socket, { method: 'block-tickets', block: 'B1' })).tickets, []);
   assert.equal(blockTickets({ repoRoot: repo, run, block: 'Other' }).length, 1, 'other block ticket survives pruning');
+});
+
+test('daemon and Node accept null-tree tickets and reject stale unknown workers', async (t) => {
+  if (!build(t)) return;
+  const f = await fixture(t);
+  const { repo, run, socket } = f;
+  const ticket = enqueue({ repoRoot: repo, run, block: 'B1', file: 'src/a.mjs' });
+  const file = path.join(queueDir(repo), `${ticket.ticket}.json`);
+  writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), tree: null }));
+  assert.equal(readTicket(repo, ticket.ticket).tree, null);
+  // Use the legacy announcement alone so no registry entry can rescue this worker.
+  const stale = new Date(Date.now() - 120000).toISOString();
+  writeFileSync(path.join(queueDir(repo), 'worker.json'), JSON.stringify({
+    pid: process.pid, run, start_time: 'unknown', started_at: stale, heartbeat_at: stale,
+  }));
+  assert.equal(liveWorker(repo), null);
+  await f.ready(f.start());
+  assert.deepEqual(withoutStats(await request(socket, { method: 'block-tickets', block: 'B1' })), {
+    block: 'B1', tickets: blockTickets({ repoRoot: repo, run, block: 'B1' }),
+  });
+  const result = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
+  assert.equal(result.status, 'worker_down');
+  assert.deepEqual(withoutStats(await request(socket, { method: 'status' })), f.referenceStatus());
+});
+
+test('daemon status refreshes cached ledger, run state, config, and signed finding decisions', async (t) => {
+  if (!build(t)) return;
+  const f = await fixture(t);
+  const { repo, run, key, socket } = f;
+  const child = f.start();
+  await f.ready(child);
+  const check = async () => {
+    const result = withoutStats(await request(socket, { method: 'status' }));
+    assert.deepEqual(result, f.referenceStatus());
+    return result.runs[0];
+  };
+  assert.equal((await check()).blocks[0].findings, 0);
+  for (const row of [
+    { event: 'session', run, block: 'B1', role: 'coder', provider: 'anthropic', model: 'fixture-model', usd: 1.25 },
+    { event: 'session.background', run, block: 'B1' },
+    { event: 'gate.red', run, block: 'B1', gate: 'fixture-gate' },
+    { event: 'review.late_finding', run, block: 'B1', file: 'src/a.mjs', finding: 'F1', severity: 'critical' },
+  ]) await appendRow(signRow(row, key), { slug: 'daemon-test' });
+  const pending = await check();
+  assert.equal(pending.spent_usd, 1.25);
+  assert.equal(pending.unknown_usd_sessions, 1);
+  assert.deepEqual(pending.blocks[0].gate, { result: 'fail', name: 'fixture-gate' });
+  assert.equal(pending.blocks[0].model, 'anthropic/fixture-model');
+  assert.equal(pending.blocks[0].findings, 1);
+  await appendRow(signRow({ event: 'review.waived', run, block: 'B1', file: 'src/a.mjs', finding: 'F1', by: 'human' }, key), { slug: 'daemon-test' });
+  await appendRow({ event: 'gate.done', run, block: 'B1', all_ok: true }, { slug: 'daemon-test' });
+  const { readRun, saveRun } = await import('../../src/state/run.mjs');
+  const record = await readRun(run);
+  record.blocks.B1.status = 'awaiting_human_check';
+  await saveRun(record);
+  appendFileSync(path.join(repo, '.code-forge.yml'), 'budget:\n  usd: 5\n');
+  const cleared = await check();
+  assert.equal(cleared.blocks[0].findings, 0);
+  assert.deepEqual(cleared.blocks[0].gate, { result: 'pass', name: null });
+  assert.deepEqual(cleared.awaiting_human_check, ['B1']);
+  assert.equal(cleared.budget_usd, 5);
 });
 
 test('daemon refuses a live duplicate, replaces a stale socket, handles rotations and torn tails, and exits idle or on SIGTERM', async (t) => {

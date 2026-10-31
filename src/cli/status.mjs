@@ -80,15 +80,18 @@ async function realOr(p) {
 /**
  * The status data of one run.
  * @param {Record<string, any>} record
+ * @param {Array<Record<string, any>> | null | undefined} [cachedRows] - daemon's incrementally read ledger
  * @returns {Promise<RunStatus>}
  */
-async function statusOf(record) {
+export async function statusOf(record, cachedRows) {
   /** @type {Array<Record<string, any>> | null} null: the ledger cannot be read */
-  let rows = null;
-  try {
-    rows = await readAllRows(record.project);
-  } catch {
-    rows = null;
+  let rows = cachedRows ?? null;
+  if (cachedRows === undefined) {
+    try {
+      rows = await readAllRows(record.project);
+    } catch {
+      rows = null;
+    }
   }
   let budget = null;
   try {

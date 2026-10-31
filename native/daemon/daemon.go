@@ -40,6 +40,7 @@ type server struct {
 	record                                       object
 	recordStamp                                  string
 	trees                                        map[string]*treeState
+	statusProcess                                *statusProcess
 }
 
 type treeState struct {
@@ -64,6 +65,7 @@ func Serve(home, run, version string, idle time.Duration) error {
 		return fmt.Errorf("idle duration must be positive")
 	}
 	s := &server{home: home, run: run, version: version, trees: make(map[string]*treeState)}
+	defer s.closeStatus()
 	record, err := readObject(filepath.Join(home, ".code-forge", "runs", run+".json"))
 	if err != nil {
 		return fmt.Errorf("read run record: %w", err)
@@ -206,13 +208,10 @@ func (s *server) refresh() error {
 	stamp := fileStamp(file)
 	if s.record == nil || stamp != s.recordStamp {
 		record, err := readObject(file)
-		if err != nil || record["run_id"] != s.run {
+		if err != nil || record["run_id"] != s.run || text(record, "project") != s.project {
 			return fmt.Errorf("block-scope-unreadable")
 		}
 		s.record, s.recordStamp = record, stamp
-		if text(record, "project") != s.project {
-			return fmt.Errorf("block-scope-unreadable")
-		}
 	}
 	rows, err := s.ledger.Refresh(filepath.Join(s.home, ".code-forge", "ledger"), s.project)
 	if err != nil {
@@ -267,6 +266,9 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	}
 	if req.Method == "ping" {
 		return object{"ok": true, "version": s.version, "pid": os.Getpid(), "run": s.run}, true
+	}
+	if req.Method == "status" {
+		return s.status(), true
 	}
 	if req.Method != "block-tickets" && req.Method != "wait-block" && req.Method != "prune" {
 		return failure("unknown-method"), true
@@ -528,11 +530,11 @@ func (s *server) workerLive() bool {
 		return false
 	}
 	err = syscall.Kill(int(pid), 0)
-	if err != nil && err != syscall.EPERM {
+	if err != nil {
 		return false
 	}
 	beat, err := time.Parse(time.RFC3339Nano, text(w, "heartbeat_at"))
-	return err == nil && time.Since(beat) <= time.Minute || w["start_time"] == "unknown"
+	return err == nil && time.Since(beat) <= time.Minute
 }
 
 func outcome(marker object) any {
