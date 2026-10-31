@@ -726,7 +726,7 @@ runs from the last `review.adaptive.window_days` (14): availability × (1 − wa
 ÷ median session seconds. Timeouts, schema errors, exits and silence kills lower availability.
 Models below `min_sessions` (10) keep their configured order; with no history the configured
 reviewer is used. An `explore` share (0.1) gives a less-measured candidate a turn, deterministically
-from the ticket id. `status` (human text) and `doctor` show each model's session count, median,
+from the ticket id. `doctor` shows each model's session count, median,
 availability and waived share. The worker signs the chosen model and reason in `review.route`.
 `review.adaptive.enabled: false` restores legacy routing exactly. There is no default size route;
 review packets are capped at 32k tokens.

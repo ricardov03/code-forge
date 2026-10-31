@@ -53,7 +53,6 @@ import { loadProjectConfig, projectRootFor } from '../config/load.mjs';
 import { budgetUsdOf } from '../ledger/spend.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { findingsKey, openFindingsOf } from '../review/open-findings.mjs';
-import { modelStats, reviewerLines } from '../review/model-stats.mjs';
 import { briefStatus } from '../state/brief-status.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
@@ -240,23 +239,9 @@ export default async function status(args) {
     }
     if (shown.length === 0) {
       out('no active run\n');
-    } else {
-      out(`${shown.map((s) => runLines(s).join('\n')).join('\n\n')}\n`);
+      return 0;
     }
-    // Project-wide numbers are human text only, including when run summaries came from Go.
-    const projects = new Set();
-    const sources = records.length ? records : [{ workspace: projectRootFor(process.cwd()) }];
-    for (const record of sources) {
-      try {
-        const loaded = await loadProjectConfig(record.workspace);
-        const cfg = configInForce(record) ?? (loaded.ok ? loaded.config : {});
-        const project = record.project ?? cfg?.project?.slug;
-        if (!project || projects.has(project)) continue;
-        projects.add(project);
-        const lines = reviewerLines(modelStats(await readAllRows(project), cfg?.review?.adaptive));
-        if (lines.length) out(`${lines.join('\n')}\n`);
-      } catch { /* status remains useful when the ledger is unavailable */ }
-    }
+    out(`${shown.map((s) => runLines(s).join('\n')).join('\n\n')}\n`);
     return 0;
   } catch (thrown) {
     err(`status: ${thrown?.message ?? String(thrown)}\n`);

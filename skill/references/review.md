@@ -72,7 +72,7 @@ session seconds, measured across this project's runs over `review.adaptive.windo
 Timeouts, schema errors, exits and silence kills count as unavailable. Models below
 `min_sessions` (10) keep configured order; no history uses the configured reviewer. An `explore`
 share (0.1), hashed from the ticket id, gives a less-measured model a reproducible turn.
-Human `status` and `doctor` show the model's sessions, median seconds, ok percentage and waived
+`doctor` shows the model's sessions, median seconds, ok percentage and waived
 percentage. The worker writes its chosen model and reason in a signed `review.route` row before
 the first session. `review.adaptive.enabled: false` gives legacy routing exactly. There is no
 default file-size route; packets are capped at 32k tokens.

@@ -210,7 +210,7 @@ test('worker resolves route fallback providers before choosing and deduping prov
   }
 });
 
-test('status human text and doctor show measured models; status JSON stays unchanged', async (t) => {
+test('doctor shows measured models; status reads no ledger and prints no reviewer lines', async (t) => {
   const repo = await makeRepo();
   const slug = `performance-status-${process.pid}`;
   const runId = `r-performance-status-${process.pid}`;
@@ -221,21 +221,8 @@ test('status human text and doctor show measured models; status JSON stays uncha
   let output = '';
   t.mock.method(process.stdout, 'write', (s) => { output += s; return true; });
   assert.equal(await status(['--run', runId]), 0);
+  assert.equal(output.includes('reviewer '), false, 'status stays a cheap run view (B183 daemon rule)');
   const expected = `reviewer ${A}: 10 sessions, median 10 s, ok 100%, waived 30%`;
-  assert.deepEqual(output.split('\n').filter((s) => s.startsWith('reviewer ')), [expected]);
-  output = '';
-  assert.equal(await status(['--run', runId, '--json']), 0);
-  assert.equal(output.includes('reviewer '), false);
-  assert.deepEqual(Object.keys(JSON.parse(output)), ['runs']);
   const doctor = await runDoctor({ cwd: repo, quick: true }, { store: await createKeyStore({ backends: [], dir: freshDir('doctor-keys') }) });
   assert.deepEqual(renderText(doctor).split('\n').filter((s) => s.includes('reviewer ')).map((s) => s.trim().replace(/^INFO +/, '')), [expected]);
-  const idle = await makeRepo();
-  writeFile(idle, '.code-forge.yml', stringify(cfg));
-  const before = process.cwd();
-  process.chdir(idle);
-  try {
-    output = '';
-    assert.equal(await status([]), 0);
-    assert.deepEqual(output.split('\n').filter((s) => s.startsWith('reviewer ')), [expected], 'project history stays visible without an active run');
-  } finally { process.chdir(before); }
 });
