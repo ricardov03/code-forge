@@ -104,9 +104,9 @@ export class FactsError extends Error {
 const PATTERNS = /** @type {ReadonlyArray<[ClaimKind, RegExp]>} */ ([
   ['endpoint', /https?:\/\/[^\s`'"<>)\]|]+/g],
   ['package', /(?<![\w./@-])@[a-z0-9][a-z0-9._-]*\/[a-z0-9][a-z0-9._-]*/g],
-  ['path', /(?<![\w/.~-])(?:~|\.{1,2})\/[^\s`'"<>)\]|,;]*/g],
+  ['path', /(?<![\w/.~-])(?:~|\.{1,2}|[\w.-]+)?\/[^\s`'"<>)\]|,;]*/g],
   ['flag', /(?<![\w-])--[a-z][a-z0-9-]*/g],
-  ['version', /(?<![\w.§])\d+\.\d+(?:\.\d+)*/g],
+  ['version', /(?<![\w.§])(?<!§ )\d+\.\d+(?:\.\d+)*/g],
   ['env', /(?<![\w])\$?[A-Z][A-Z0-9]*(?:_[A-Z0-9]+)+(?![\w])/g],
 ]);
 
@@ -122,6 +122,7 @@ const trimTail = (token) => token.replace(/[.,:;]+$/, '');
  *   `bin` keys, {@link readProjectBins}); none ⇒ command claims are kept as written.
  * @property {string} [briefText] - the brief alone (no sources): only IT can name the project CLI
  *   that a command claim gets prefixed with (default: the whole text).
+ * @property {string} [projectDir] - project root whose top-level folders admit extensionless paths.
  */
 
 /**
@@ -205,6 +206,8 @@ export function readProjectBins(projectDir) {
  */
 export function extractClaims(text, opts = {}) {
   let masked = String(text);
+  const topLevelFolders = new Set(opts.projectDir === undefined ? [] : readdirSync(opts.projectDir, { withFileTypes: true })
+    .filter((entry) => entry.isDirectory()).map((entry) => entry.name));
   /** @type {Array<{index: number, token: string, kind: ClaimKind}>} */
   const found = [];
   /** @param {number} start @param {number} length */
@@ -215,7 +218,9 @@ export function extractClaims(text, opts = {}) {
   const scan = (kind, re) => {
     for (const m of [...masked.matchAll(re)]) {
       const token = trimTail(kind === 'env' ? m[0].replace(/^\$/, '') : m[0]);
-      if (token.length === 0 || (kind === 'path' && /^(~|\.{1,2})\/$/.test(token))) continue;
+      if (token.length === 0 || (kind === 'path' && /^(~|\.{1,2})?\/$/.test(token))) continue;
+      if (kind === 'path' && !/^(~|\.{1,2})?\//.test(token)
+        && !/\.[a-zA-Z0-9][\w-]*$/.test(token) && !topLevelFolders.has(token.split('/')[0])) continue;
       found.push({ index: /** @type {number} */ (m.index), token, kind });
       mask(/** @type {number} */ (m.index), m[0].length);
     }
@@ -778,7 +783,8 @@ function ruleBroken(row, claim, ctx) {
 
 /**
  * Validate the delegate's answer (step 3). Null commands/excerpts are normalized on a copy and
- * their matched claims downgraded; every other schema-invalid answer is refused. A row answers
+ * their matched claims downgraded; long excerpts are capped without changing the tag. Every other
+ * schema-invalid answer is refused. A row answers
  * claim `F<n>` when its fact_id is `F<n>` and its kind is the claim's kind (the id is the anchor,
  * the claim text may be reworded); failing that, when its echoed claim ({@link echoedClaim})
  * equals the claim token and its fact_id is `F<n>` or its kind is the claim's kind. Claims the
@@ -802,9 +808,11 @@ export function validateFacts(answer, claims, opts = {}) {
     for (const row of normalized.facts) {
       if (!row || typeof row !== 'object' || Array.isArray(row)) continue;
       const fields = ['command', 'output_excerpt'].filter((field) => row[field] === null);
-      if (fields.length === 0) continue;
       for (const field of fields) row[field] = '';
-      nullFields.set(row, fields);
+      if (fields.length > 0) nullFields.set(row, fields);
+      if (typeof row.output_excerpt === 'string' && row.output_excerpt.length > EXCERPT_MAX) {
+        row.output_excerpt = `${row.output_excerpt.slice(0, EXCERPT_MAX - 1)}…`;
+      }
     }
   }
   if (!validateFile(normalized)) {
@@ -1194,8 +1202,12 @@ export async function buildFacts(opts, deps = {}) {
   if (opts.projectDir !== undefined) {
     try { projectBins = readProjectBins(opts.projectDir); } catch { projectBins = []; }
   }
-  const extractOpts = opts.projectDir === undefined ? {} : { projectBins, briefText };
+  const extractOpts = opts.projectDir === undefined ? {} : { projectBins, briefText, projectDir: opts.projectDir };
   const claims = extractClaims([briefText, ...readSourcesText(opts.sources ?? [])].join('\n'), extractOpts);
+  const lines = briefText.split(/\r?\n/).length - Number(briefText.endsWith('\n'));
+  if (lines > 40 && claims.length < 5) {
+    (deps.stderr ?? process.stderr).write(`forge facts: the brief has ${lines} lines but only ${claims.length} claims; the sheet checks almost nothing\n`);
+  }
   const root = opts.runRoot ?? currentRunRoot();
   // B9b.1: a run root inside a git work tree (`tmp.root` configured in the project) cannot hold
   // the snapshot — git and the harness would walk up into the live repo — so the facts area moves

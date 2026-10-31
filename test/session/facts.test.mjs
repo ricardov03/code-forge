@@ -516,11 +516,11 @@ test('a VERIFIED test -e row is downgraded as silent (exact reason, 1 downgrade)
   assert.deepEqual([facts[0].tag, facts[0].why, downgraded], ['UNVERIFIABLE', why, [{ fact_id: 'F1', reason: why }]]);
 });
 
-test('an answer over the 200-character excerpt cap fails the schema', () => {
+test('an answer with a tag outside the enum still fails the schema (B197 cuts long excerpts instead)', () => {
   const claims = extractClaims(readFileSync(BRIEF, 'utf8'));
   assert.throws(
-    () => validateFacts(answerWith(1, { output_excerpt: 'x'.repeat(201) }), claims),
-    (err) => err instanceof FactsError && err.message === 'facts answer does not match facts.schema.json: /facts/1/output_excerpt must NOT have more than 200 characters',
+    () => validateFacts(answerWith(1, { tag: 'MAYBE' }), claims),
+    (err) => err instanceof FactsError && err.message.startsWith('facts answer does not match facts.schema.json: /facts/1/tag must be equal to one of the allowed values'),
   );
 });
 
