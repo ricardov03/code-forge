@@ -23,6 +23,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Go core, step 3: `code-forge-native daemon` serves `wait-block`, `block-tickets` and `status` over a Unix socket with a ledger tail index, a queue index and a cached worker start time; answers match the Node commands (compat tests). Not used by the CLI yet (B182)
 - The full test suite is green again: reopen output keeps its old text when no claims are kept, the config doc is current, and a plan clause that only cites a planned test file is no longer refused. (B204)
 - The native daemon status helper now lives with the other command files, so the import-order rule passes again. (B218)
+- Commit watch waits until a burst of commits ends (15 s quiet, 120 s at most) and reviews only the last commit, so a coder making several quick commits no longer starts extra reviews. (B211)
 
 ## [0.15.3] — 2026-10-30
 
