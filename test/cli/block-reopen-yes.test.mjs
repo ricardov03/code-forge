@@ -140,7 +140,7 @@ test('clause 3: a fresh L3 reopen judge receives the stop, last findings, reason
   const call = f.calls[0];
   assert.deepEqual([call.level, call.role, call.resume, call.sessionId, call.cwd], ['L3', 'judge', undefined, undefined, undefined]);
   assert.match(call.systemPromptText, /reopen/i);
-  assert.deepEqual(call.packet, { stop_reason: 'l3_patch_exhausted', findings: [FINDING], reason: REASON, file: { path: FILE, content: CURRENT } });
+  assert.deepEqual(call.packet, { stop_reason: 'l3_patch_exhausted', findings: [FINDING], reason: REASON, file: { path: FILE, content: CURRENT }, evidence: [{ path: FILE, start: 1, end: 1, content: `1| ${CURRENT.trimEnd()}` }] });
   assert.equal(existsSync(call.promptPath), false);
   assert.equal((await f.reopens()).length, 1);
   assert.equal(f.prompts(), 0);

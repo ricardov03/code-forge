@@ -134,7 +134,7 @@ test('clause 4: one fresh L3 judge gets recorded finding, reason and current fil
   assert.equal(f.calls.length, 1);
   const call = f.calls[0];
   assert.deepEqual([call.level, call.role, call.resume, call.sessionId, call.cwd], ['L3', 'judge', undefined, undefined, undefined]);
-  assert.deepEqual(call.packet, { finding: { id: 'W1', severity: 'warning', claim: f.finding.claim, evidence: f.finding.evidence }, reason: REASON, file: { path: FILE, content: CURRENT } });
+  assert.deepEqual(call.packet, { finding: { id: 'W1', severity: 'warning', claim: f.finding.claim, evidence: f.finding.evidence }, reason: REASON, file: { path: FILE, content: CURRENT }, evidence: [{ path: FILE, start: 1, end: 1, content: `1| ${CURRENT.trimEnd()}` }] });
   assert.equal(existsSync(call.promptPath), false, 'packet removed after judge');
   assert.equal((await f.waivers()).length, 1);
 });
