@@ -1,0 +1,124 @@
+{
+  "ids": [
+    {
+      "name": "base",
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "expected": "31d43d0ef8f515172baafbd7"
+    },
+    {
+      "name": "null-tree",
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "tree": null
+      },
+      "expected": "31d43d0ef8f515172baafbd7"
+    },
+    {
+      "name": "tree",
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "tree": "/compat/tree"
+      },
+      "expected": "71ac541e12d3b084b8257c03"
+    },
+    {
+      "name": "empty-tree",
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "tree": ""
+      },
+      "expected": "1def6599e2bdb7e43d850b51"
+    }
+  ],
+  "review": [
+    {
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef"
+      },
+      "expected": "31d43d0ef8f515172baafbd7"
+    },
+    {
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "reopened_at": "2026-02-03T04:05:06.007Z"
+      },
+      "expected": "4fd75b46dfea6687bb1333a3"
+    },
+    {
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "acceptance_revision": ""
+      },
+      "expected": "875fd3ce94d55c9ebb7f9bc9"
+    },
+    {
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "acceptance_revision": "",
+        "reopened_at": "2026-02-03T04:05:06.007Z"
+      },
+      "expected": "106d9988423fca659bb25c92"
+    },
+    {
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "acceptance_revision": "acceptance-v2"
+      },
+      "expected": "f2c1a16111f5dee895a6ed3c"
+    },
+    {
+      "parts": {
+        "run": "compat-run",
+        "block": "B1",
+        "file": "src/é😀.mjs",
+        "content_hash": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+        "acceptance_revision": "acceptance-v2",
+        "reopened_at": "2026-02-03T04:05:06.007Z"
+      },
+      "expected": "74b78def348bb7fe1183260b"
+    }
+  ],
+  "states": [
+    {
+      "file": "src/é😀.mjs",
+      "expected": "69be704ece9c5e6f88c6a6dd.json"
+    },
+    {
+      "file": "a.mjs",
+      "expected": "69951206221023816b031d07.json"
+    },
+    {
+      "file": "nested/quote\".mjs",
+      "expected": "bfaae56b9812317e956f0e3d.json"
+    }
+  ]
+}

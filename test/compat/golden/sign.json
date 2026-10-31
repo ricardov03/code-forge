@@ -1,0 +1,242 @@
+{
+  "key_hex": "000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f",
+  "unsigned_fields": [
+    "mac",
+    "tokens_source",
+    "cost_source"
+  ],
+  "cases": [
+    {
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        }
+      },
+      "mac": "00f3405728860d5ee1fa2456248c854af925100ec577843241cf309bb99d400b",
+      "signed": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": "00f3405728860d5ee1fa2456248c854af925100ec577843241cf309bb99d400b"
+      }
+    },
+    {
+      "row": {
+        "event": "session",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "tokens_in": 12,
+        "cost_usd": 0.03,
+        "mac": "discard me",
+        "tokens_source": "reported",
+        "cost_source": "estimated"
+      },
+      "mac": "cb4c06ff0a3d363d5c188f94d2ac26f2b5a281f2ec821b644a26319da9fa427d",
+      "signed": {
+        "event": "session",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "tokens_in": 12,
+        "cost_usd": 0.03,
+        "tokens_source": "reported",
+        "cost_source": "estimated",
+        "mac": "cb4c06ff0a3d363d5c188f94d2ac26f2b5a281f2ec821b644a26319da9fa427d"
+      }
+    },
+    {
+      "row": {
+        "event": "nested",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "state": {
+          "mac": "covered",
+          "tokens_source": "covered",
+          "cost_source": "covered"
+        }
+      },
+      "mac": "20e99a87a4c3cfc1e091deacc53a5f48e26726455bdc8e376de9e56ec32529f2",
+      "signed": {
+        "event": "nested",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "state": {
+          "mac": "covered",
+          "tokens_source": "covered",
+          "cost_source": "covered"
+        },
+        "mac": "20e99a87a4c3cfc1e091deacc53a5f48e26726455bdc8e376de9e56ec32529f2"
+      }
+    }
+  ],
+  "verify": [
+    {
+      "name": "valid",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": "00f3405728860d5ee1fa2456248c854af925100ec577843241cf309bb99d400b"
+      },
+      "expected": {
+        "ok": true
+      }
+    },
+    {
+      "name": "unsigned-edits",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": "00f3405728860d5ee1fa2456248c854af925100ec577843241cf309bb99d400b",
+        "tokens_source": "changed",
+        "cost_source": 99
+      },
+      "expected": {
+        "ok": true
+      }
+    },
+    {
+      "name": "covered-edit",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/changed.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": "00f3405728860d5ee1fa2456248c854af925100ec577843241cf309bb99d400b"
+      },
+      "expected": {
+        "ok": false,
+        "reason": "mismatch"
+      }
+    },
+    {
+      "name": "timestamp-edit",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.007Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": "00f3405728860d5ee1fa2456248c854af925100ec577843241cf309bb99d400b"
+      },
+      "expected": {
+        "ok": false,
+        "reason": "mismatch"
+      }
+    },
+    {
+      "name": "missing-mac",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        }
+      },
+      "expected": {
+        "ok": false,
+        "reason": "unsigned"
+      }
+    },
+    {
+      "name": "empty-mac",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": ""
+      },
+      "expected": {
+        "ok": false,
+        "reason": "unsigned"
+      }
+    },
+    {
+      "name": "uppercase-mac",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": "00F3405728860D5EE1FA2456248C854AF925100EC577843241CF309BB99D400B"
+      },
+      "expected": {
+        "ok": false,
+        "reason": "mismatch"
+      }
+    },
+    {
+      "name": "short-mac",
+      "row": {
+        "event": "review.done",
+        "ts": "2026-01-02T03:04:05.006Z",
+        "file": "src/é😀.mjs",
+        "result": {
+          "z": "<>&",
+          "a": [
+            0.30000000000000004,
+            5e-324
+          ]
+        },
+        "mac": "00"
+      },
+      "expected": {
+        "ok": false,
+        "reason": "mismatch"
+      }
+    }
+  ]
+}
