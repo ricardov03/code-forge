@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Added
 
 - Go core, step 1: `native/` Go library (canonical JSON, row signing, ticket ids, ledger read) and a golden compat kit made from the Node functions; Go tests prove byte-equal output (B180)
+- `block land <id>` runs review join, changed-file gates and close in one step, stopping at the first failure with the next command; `--merge` also merges the block branch into its base (B185)
 
 ## [0.15.3] — 2026-10-30
 
