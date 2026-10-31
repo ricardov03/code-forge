@@ -50,7 +50,9 @@ import { fileURLToPath } from 'node:url';
 import { parse as parseYAML, parseDocument } from 'yaml';
 import { readAllRows } from '../src/ledger/write.mjs';
 import { estimateCostUsd } from '../src/ledger/prices.mjs';
+import { readRun } from '../src/state/run.mjs';
 import { exec } from '../src/util/exec.mjs';
+import { stopMembers } from '../src/util/reaper.mjs';
 import { runRoot, setRunRoot, tmpBase } from '../src/util/tmp.mjs';
 
 const PKG = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
@@ -435,6 +437,12 @@ export async function main(argv, io = {}) {
       const ended = await exec([process.execPath, BIN, 'run', 'end', '--run', run], { cwd: copy, env: scrubbedEnv(), timeoutMs: 60000 });
       say(`run end · exit ${ended.code} · ${ended.stdout.trimEnd() || ended.stderr.trimEnd()}`);
       summary.run_ended = ended.code === 0;
+      if (summary.run_ended) {
+        // `run end` sends SIGTERM; delivery is not exit. Wait for the pinned worker's
+        // cleanup before this script reports completion, rechecking identity before signals.
+        const record = await readRun(run);
+        await stopMembers(new Map((record.workers ?? (record.worker ? [record.worker] : [])).map((worker) => [worker.pid, worker.started_at])));
+      }
     }
     process.off('SIGINT', onSignal);
     process.off('SIGTERM', onSignal);
