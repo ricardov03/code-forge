@@ -131,16 +131,19 @@ test('unchanged stopped content retains its findings and queues zero reviews', a
 });
 
 test('direct close requeues changed stopped content and waits for the fake reviewer', async () => {
-  const f = await fixture();
-  const serving = f.worker.run();
-  try {
-    const closed = await f.close();
-    assert.deepEqual([closed.code, (await readRun(f.runId)).blocks.B1.status, f.sessions()], [0, 'closed', 1],
-      'direct close must wait for exactly one fresh approval instead of refusing unreviewed content');
-    assert.equal(closed.stderr.trim().split('\n').length, 1, 'direct close prints one requeue line');
-    assert.match(closed.stderr, /auto-requeue.*src\/a\.mjs/);
-    assert.deepEqual([f.tickets().length, (await f.rows()).filter((row) => row.event === 'review.reopened').length], [2, 1]);
-  } finally { f.worker.stop(); await serving; f.cleanup(); }
+  for (const worktree of [false, true]) {
+    const f = await fixture({ worktree });
+    const serving = f.worker.run();
+    try {
+      const closed = await f.close();
+      assert.deepEqual([closed.code, (await readRun(f.runId)).blocks.B1.status, f.sessions()], [0, 'closed', 1],
+        'direct close must wait for exactly one fresh approval instead of refusing unreviewed content');
+      assert.equal(closed.stderr.trim().split('\n').length, 1, 'direct close prints one requeue line');
+      assert.match(closed.stderr, /auto-requeue.*src\/a\.mjs/);
+      assert.deepEqual([f.tickets().length, (await f.rows()).filter((row) => row.event === 'review.reopened').length], [2, 1]);
+      if (worktree) assert.equal(readFileSync(path.join(f.repo, FILE), 'utf8'), 'export const a = 0;\n', 'direct close reviews the block tree without changing the main tree');
+    } finally { f.worker.stop(); await serving; f.cleanup(); }
+  }
 });
 
 test('waived stopped findings on changed content queue zero reviews', async () => {
