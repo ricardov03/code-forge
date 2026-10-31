@@ -87,6 +87,10 @@ Each `review-file` ticket is served by the worker `forge run start` launched: to
 
 ## §5 The block gate is a re-measurement — `forge block close <id> --run <r>`
 
+Paths added by `block claim` survive retries: `block open <id> --attempt N` (N > 1)
+restores earlier signed claims alongside `--owned`, and `block attempt` keeps them too.
+Both print `kept claims: <n>`. Do not claim the same paths again after a retry.
+
 The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]`
 to join reviews, run changed gates in the recorded block worktree, then run the normal close checks.
 The first failure exits 1 and names the step, findings, gate output or close refusal, and the next
@@ -96,6 +100,15 @@ be clean. It never forces or switches branches. Success prints `block <id> lande
 `--merge`, it prints `block <id> closed; merge: <cmd>` and leaves the base unchanged. A merge refusal
 leaves the block closed; use the displayed next command after correcting the checkout. `--json`
 prints one object with `block`, `event` and `merge`, or a refusal with `step`, `reason` and `next`.
+
+Land automatically claims changed files outside the owned set before joining reviews.
+`block close --auto-claim` also claims, queues reviews in the block worktree, waits, and
+continues only after approval. Each file prints an auto-claim line and gets the same signed
+`block claim` row with `auto: true` and reason `auto-claim: changed outside owned files`.
+Findings stop the operation. A file owned or claimed by another open block still refuses
+`unowned_change`, naming that block, including separate worktrees. `.git/`, `.code-forge/`
+and paths outside the repository are never auto-claimed. Plain close keeps refusing
+unowned files; manual `block claim` remains available.
 
 To correct an open block's snapshotted clauses, the human uses `code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>` with a nonblank reason and the same acceptance format as `block open`. Both terminals and confirmation are required, with no `--yes` and no active autopilot grant. Invalid or unchanged lists write nothing; a successful amendment updates the human checks and signs one `block.acceptance_amended` row with both clause-list hashes. Earlier reviews no longer count at close; review requests, block waits and watch ticks queue a fresh review with the new clauses. Coders must never run this human verb.
 

@@ -351,6 +351,10 @@ longer satisfy close. A block without a recorded base branch cannot rebase. A tr
 or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
 another branch or a detached HEAD refuses the re-open.
 
+`block open <id> --attempt N` (N > 1) restores paths from the block's earlier signed
+`block claim` rows alongside `--owned`. `block attempt` keeps those claims too. Both print
+`kept claims: <n>`; a retry does not require claiming those paths again.
+
 Two open blocks that each have a worktree, at different paths, may own the same path. A block without one is checked
 against every other open block as before. `block close <id> --run <run> --remove-worktree` removes
 the tree after a successful close with `git worktree remove` (never `--force`) and keeps the branch.
@@ -365,6 +369,14 @@ joins the block's reviews, runs `gates run --run <run> --block <id> --changed` i
 worktree, then runs the normal close checks with the report and transcript. It stops at the first
 failure with exit 1, the step, findings or gate output or close refusal, and the next command.
 A close awaiting a human check also stops before merging.
+
+Before joining, land automatically claims changed paths outside the block's ownership, queues
+their reviews in the block worktree, and waits. `block close --auto-claim` does the same;
+plain close still refuses unowned changes. Each auto-claim prints one line and writes the
+normal signed claim row with `auto: true` and reason `auto-claim: changed outside owned files`.
+Findings stop the operation. A path owned or claimed by another open block refuses with
+`unowned_change` naming that block, even when the blocks have separate worktrees.
+Paths under `.git/` or `.code-forge/`, and paths outside the repository, are never auto-claimed.
 
 With `--merge`, only after the block closes, it merges the block branch with `git merge --no-ff`
 in the main checkout. The main checkout must be clean and on the recorded base branch; the block
