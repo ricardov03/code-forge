@@ -163,7 +163,7 @@ test('B64a (1)(2)(3): status prints the run line, one line per open block (state
   ok(await fx.block(['close', 'B4', '--worker-pid', PID]), 'block B4 closed\n');
   for (const [id, file] of [['B1', 'src/b1.mjs'], ['B2', 'src/b2.mjs'], ['B10', 'src/b10.mjs'], ['B3', 'src/b3.mjs']]) assert.equal((await fx.open(id, [file])).code, 0);
   ok(await fx.block(['stop', 'B3', '--reason', 'not needed']), 'block B3 stopped\n');
-  ok(await fx.block(['attempt', 'B10']), 'block B10 attempt 2\nkept claims: 0\n');
+  ok(await fx.block(['attempt', 'B10']), 'block B10 attempt 2\n');
   // the ledger: a priced coder session for B1, a red lint gate then a failed gate run for B1, a
   // passing gate for B2, a review leaving F1 and F2 open on B1 (F2 then waived by the human) and
   // an unruled late finding on B2
@@ -419,8 +419,8 @@ test('B64a (4): every block verb prints one JSON line with --json, and exactly i
   const jOpen2 = await j.fx.open('B2', ['src/b.mjs'], ['--kind', 'contract', '--brief', path.join(j.fx.repo, 'brief.md'), '--json']);
   one(jOpen2, { block: 'B2', event: 'open', level: 'L1', asked: 'L1', source: 'flag', kind: 'contract', attempt: 1, base_sha: jBrief, tests: 0, worktree: null, brief: pointer });
   // attempt
-  ok(await t.fx.block(['attempt', 'B1']), 'block B1 attempt 2\nkept claims: 0\n');
-  one(await j.fx.block(['attempt', 'B1', '--json']), { block: 'B1', event: 'attempt', attempt: 2, kept_claims: 0 });
+  ok(await t.fx.block(['attempt', 'B1']), 'block B1 attempt 2\n');
+  one(await j.fx.block(['attempt', 'B1', '--json']), { block: 'B1', event: 'attempt', attempt: 2 });
   // rebase onto a new unrelated commit
   for (const fx of [t.fx, j.fx]) {
     writeFile(fx.repo, 'docs/note.md', 'note\n');
