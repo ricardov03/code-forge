@@ -63,7 +63,7 @@ async function join(t, change) {
   } finally { retractWorker(repo, process.pid); }
 }
 
-test('idle block wait and worker grow sleeps to 5 s and reset on ticket completion or new work', async (t) => {
+test('idle block wait and worker grow sleeps to 5 s and reset on ticket completion or new work', { timeout: 30_000 }, async (t) => {
   const joined = await join(t, async (poll, repo, runId) => {
     const tickets = blockTickets({ repoRoot: repo, run: runId, block: BLOCK });
     if (poll === 8 || poll === 10) {

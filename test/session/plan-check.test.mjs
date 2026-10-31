@@ -233,6 +233,24 @@ test('B50 clauses split on ` · (n) ` markers and on `;`: a `(1) … · (2) …`
   assert.deepEqual([r.code, r.errors], [1, ['unbackable clause without tolerance: B2 (2) the reviewer argv never carries `--max-turns`']]);
 });
 
+test('acceptance test citations need no fact, while source citations and factual test paths still do', async () => {
+  const clauses = [
+    'an empty brief is refused (`test/b2.test.mjs`)',
+    'an empty brief is refused (`src/input.mjs`)',
+    'an empty brief is refused using `test/b2.test.mjs`',
+  ];
+  const results = [];
+  for (const clause of clauses) {
+    const r = await checkVariant('the reviewer argv never carries `--max-turns` (1); an empty brief is refused (1)', clause);
+    results.push([r.code, r.errors]);
+  }
+  assert.deepEqual(results, [
+    [0, []],
+    [1, [`unbackable clause without tolerance: B2 ${clauses[1]}`]],
+    [1, [`unbackable clause without tolerance: B2 ${clauses[2]}`]],
+  ]);
+});
+
 test('B50 tolerance tables: only a table\'s FIRST row can be its header; 7 placeholder cells count as empty', async () => {
   const head = (/** @type {string} */ cell) => `${OLD_TABLE_HEAD}\n| B2 | the argv never carries it | \`--max-turns\` | NOT-FOUND | ${cell} |\n${OLD_TABLE_B1}`;
   const placeholders = ['', '–', '-', '--', '...', 'n/a', 'N/A'];

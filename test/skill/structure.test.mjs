@@ -265,7 +265,7 @@ test('B49b: the never-delegated list in references/autopilot.md §5 has its 5 it
     'plan approval (`plan.md` §4.1) and design approval;',
     'a budget raise (`code.md` §6, `review.md` §7);',
     'a threshold edit or any other limit or rule change — only the owner\'s own `forge autopilot approve` at a terminal;',
-    'a critical waiver, a proof waiver, or closing a block without its reviews;',
+    'a critical waiver through the delegate\'s `autopilot waive` action (the evidence-backed agent exception is in §2), a proof waiver, or closing a block without its reviews;',
     'merges and destructive actions.',
   ]);
 });
@@ -1206,7 +1206,7 @@ const B80_ONCE = {
   'skill/references/review.md': [
     'Without `--yes` it needs human confirmation; see **Human confirmation** below. `block reopen` and `block waive` both have evidence-backed agent paths through `--yes` with a fresh judge.',
     'Without `--yes`, the orchestrator prints the exact command with the human\'s reason; the human runs it in their own terminal.',
-    'The orchestrator may run `block waive --yes` only for a recorded warning or nit finding, with evidence, and a fresh judge must agree.',
+    'The orchestrator may run `block waive --yes` for a recorded warning or nit finding, or for a recorded critical under an active autopilot grant with a cited acceptance test that passed its latest signed gate for the current content; evidence and agreement from a fresh L3 judge are required.',
     '`block reopen --yes` needs evidence and agreement from a fresh judge, at most once per block and file in a run.',
     'A coder never runs either verb.',
     'Under an active autopilot grant these human paths still prompt.',

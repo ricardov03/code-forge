@@ -21,6 +21,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `forge facts` cuts an excerpt over 200 characters (ending with `…`) instead of refusing the whole sheet; repo-relative paths with an extension or a top-level folder, and absolute paths, are now path claims; `§ 12.1` is no longer a version claim; a long brief with almost no claims prints a warning (#29, B197)
 - Critical findings still need a human waiver by default; under an active autopilot grant, `block waive --yes` may waive a critical when the reason cites a passing acceptance test and the finding's lines and the judge agrees; the row records `by: agent` and `autopilot: true` (B196)
 - Go core, step 3: `code-forge-native daemon` serves `wait-block`, `block-tickets` and `status` over a Unix socket with a ledger tail index, a queue index and a cached worker start time; answers match the Node commands (compat tests). Not used by the CLI yet (B182)
+- The full test suite is green again: reopen output keeps its old text when no claims are kept, the config doc is current, and a plan clause that only cites a planned test file is no longer refused. (B204)
 
 ## [0.15.3] — 2026-10-30
 
