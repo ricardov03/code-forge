@@ -892,11 +892,14 @@ flowchart TD
   with evidence, and a fresh judge must agree. A coder never runs either verb.
   Critical and unknown-severity findings need the human terminal path.
   Unknown and unrecorded findings also refuse with `waive-yes-critical` (exit 1).
-  The reason must cite an existing repo-relative path with `:<line>`, an existing test file, or
+  The reason must cite an existing repo-relative path with `:<line>` or `:<start>-<end>`, an existing test file, or
   a numbered acceptance clause of this block. Files must exist in the block's tree. The clause
   number must be within its acceptance clause count. Missing evidence refuses with
   `waive-yes-no-evidence` (exit 1). The judge is not called.
-  One fresh L3 judge gets the recorded finding, reason and current file bytes. It never resumes
+  One fresh L3 judge gets the recorded finding, reason and current file bytes, plus numbered
+  windows for the reason's line citations. Up to 10 valid citations are attached in reason order,
+  with ±10 lines of context and at most 80 lines each, clipped to the file. Missing files and
+  paths outside the repository (including symlinks out) are omitted. It never resumes
   the file's reviewer session. An `agree` writes one signed `review.waived` row with `by: agent`,
   the recorded severity, reason, `verdict: agree` and `judge_reason`. A disagreement or broken
   answer writes no waiver. It exits 1 with `waive-yes-disagreed` and prints the judge's reason.
@@ -906,12 +909,17 @@ flowchart TD
   `agent_waivers: [{file, finding, severity, reason, verdict}]`.
 
   **Agent reopens.** `block reopen <id> --run <r> --file <path> --reason <text> --yes` needs no terminal or prompt.
-  All ordinary reopen checks run first. Evidence follows the agent waiver rule above.
+  All ordinary reopen checks run first. Evidence follows the agent waiver rule above, including
+  the numbered citation windows. An open review with findings can also be reopened by an agent:
+  its reason must cite an existing repo path with a line or line range. A bare test file or
+  acceptance clause alone does not suffice for an open review. The file may have unchanged
+  content, and critical findings are eligible for the judge's decision. Agreement queues a fresh
+  full review and records `from: open`, `by: agent`; it does not approve or waive the findings.
   Missing evidence refuses `reopen-yes-no-evidence` (exit 1). A second verified agent reopen
   for the same block and file in a run refuses `reopen-yes-limit` (exit 1). Neither calls the judge.
   A fresh L3 judge gets the stop reason, last findings, reason and current file bytes.
   Disagreement or an invalid answer refuses `reopen-yes-disagreed` (exit 1), prints the judge reason,
-  and leaves the file stopped with nothing written. Agreement removes the done marker and writes
+  and leaves the review unchanged with nothing written. Agreement removes the done marker and writes
   one signed `review.reopened` row with `by: agent`, the reason and `verdict: {verdict, reason}`.
   There is no severity restriction. The human path still works after the agent limit.
   Close prints `agent reopen <file>: <reason> (verdict: agree)` for each agent reopen.

@@ -250,3 +250,46 @@ test('an agreed agent reopen and fresh clean review let close supersede old cap 
   assert.equal(f.calls.length, 1);
   assert.equal(f.prompts(), 0);
 });
+
+test('an agreeing fresh judge requeues an open review with critical findings on the same content', async () => {
+  const f = await fixture();
+  await f.stop('review_findings', 'open');
+  const before = (await f.rows()).length;
+  const [code, text] = await f.reopen('src/a.mjs:1-1 contradicts the finding', {}, ['--yes', '--json']);
+  assert.equal(code, 0, text);
+  const result = JSON.parse(text);
+  assert.deepEqual([result.from, result.by, result.from_hash, result.to_hash], ['open', 'agent', f.hash, f.hash]);
+  assert.deepEqual(pendingTickets(f.repo), [result.ticket], 'exactly one fresh ticket is queued');
+  assert.notEqual(result.ticket, f.ticket, 'the old result is not reused');
+  assert.equal(existsSync(f.marker), false);
+  assert.equal((await f.rows()).length - before, 1, 'one signed reopen row');
+  const [row] = await f.reopens();
+  assert.deepEqual(verifyRow(row, f.key), { ok: true });
+  const loaded = await f.loaded();
+  assert.deepEqual(reopenRowFor(await f.rows(), { runId: f.runId, block: 'B1', file: FILE, key: f.key, ...loaded, contentHash: f.hash }), row, 'the worker recognizes the row to restart at a full review');
+  assert.equal(f.calls.length, 1);
+  assert.deepEqual(f.calls[0].packet.findings, [FINDING], 'the judge decides about the critical finding');
+  assert.deepEqual(f.calls[0].packet.evidence, [{ path: FILE, start: 1, end: 1, content: `1| ${CURRENT.trimEnd()}` }]);
+  assert.equal(f.prompts(), 0);
+});
+
+test('an open review stays unchanged when its fresh judge disagrees or its reason lacks a line citation', async () => {
+  for (const reason of [REASON, 'test/a.test.mjs covers it', 'clause 1']) {
+    const f = await fixture();
+    await f.stop('review_findings', 'open');
+    const before = await f.rows();
+    const state = await f.loaded();
+    let judges = 0;
+    const [code, text] = await f.reopen(reason, { waiverJudge: async () => {
+      judges++;
+      return { status: 'ok', answer: { verdict: 'disagree', reason: 'The finding remains valid.' } };
+    } });
+    assert.equal(code, 1);
+    assert.match(text, reason === REASON ? /reopen-yes-disagreed:.*The finding remains valid/ : /reopen-yes-no-evidence:/);
+    assert.equal(judges, reason === REASON ? 1 : 0);
+    assert.deepEqual(await f.rows(), before, 'no row is recorded');
+    assert.deepEqual(await f.loaded(), state, 'the open review state is unchanged');
+    assert.deepEqual(pendingTickets(f.repo), [], 'no ticket is queued');
+    assert.equal(existsSync(f.marker), true, 'the old result is preserved');
+  }
+});
