@@ -12,15 +12,18 @@ import { assertRowPath, DELETED_HASH, gitChildEnv, hashBytes } from './ticket.mj
 
 const SHA = /^[0-9a-f]{40,64}$/;
 const BLOCK = /^[A-Za-z0-9][A-Za-z0-9._-]*$/;
+const QUIET_MS = 15000;
+const MAX_BURST_MS = 120000;
 
 /**
  * One scheduler tick, also exposed directly for deterministic race tests.
  * The boot config gates ALL watch work; absent/wait/overlap never reads the run or spawns git.
  * @param {{repoRoot: string, runId: string, cfg: Record<string, any>, readRun?: typeof readRun,
  *   writeRow: (row: Record<string, any>) => Promise<unknown>, exec?: typeof exec,
- *   running?: ReadonlySet<string>, hooks?: {afterHead?: (head: string) => Promise<unknown>, beforeQueue?: () => Promise<unknown>}}} opts
+ *   running?: ReadonlySet<string>, now?: () => number,
+ *   hooks?: {afterHead?: (head: string) => Promise<unknown>, beforeQueue?: () => Promise<unknown>}}} opts
  */
-export async function watchTick({ repoRoot, runId, cfg, readRun: loadRun = readRun, writeRow, exec: execute = exec, running = new Set(), hooks = {} }) {
+export async function watchTick({ repoRoot, runId, cfg, readRun: loadRun = readRun, writeRow, exec: execute = exec, running = new Set(), now = Date.now, hooks = {} }) {
   if (reviewFileLoop(cfg) !== 'watch') return;
   const record = await loadRun(runId);
   if (record.status !== 'active' || reviewFileLoop(snapshotFor(record, '')?.config ?? cfg) !== 'watch') return;
@@ -68,15 +71,22 @@ export async function watchTick({ repoRoot, runId, cfg, readRun: loadRun = readR
         await skip('not_descendant'); continue;
       }
       const last = typeof state.sha === 'string' && SHA.test(state.sha) ? state.sha : base;
-      if (last !== base && (await git(['merge-base', '--is-ancestor', last, head])).result !== 'ok') {
+      const previous = typeof state.pending?.sha === 'string' && SHA.test(state.pending.sha) ? state.pending.sha : last;
+      if (previous !== base && (await git(['merge-base', '--is-ancestor', previous, head])).result !== 'ok') {
         await skip('rewound');
-        const { sha: _sha, ...restart } = state;
+        const { sha: _sha, pending: _pending, burst_started_at: _burst, ...restart } = state;
         save(restart);
         continue;
       }
       // A healthy tick ends the skip streak: no new commit here, or a queued commit below. An
       // unreadable commit keeps the streak, so it writes one watch.skipped row, not one per tick.
       if (last === head) { if (state.skipped?.length) save({ ...state, skipped: [] }); continue; }
+      const time = now();
+      if (state.pending?.sha !== head) {
+        // A new HEAD restarts the quiet wait, but keeps the burst's original deadline.
+        save({ ...state, pending: { sha: head, seen_at: time }, burst_started_at: state.burst_started_at ?? time });
+      }
+      if (time - state.pending.seen_at < QUIET_MS && time - state.burst_started_at < MAX_BURST_MS) continue;
       const diff = await git(['diff', '--name-only', '-z', '--no-renames', last, head, '--']);
       if (diff.result !== 'ok') { await skip('unreadable_head'); continue; }
       const owns = ownsAt(tree ? '' : path.relative(repoRoot, record.workspace).split(path.sep).join('/'));
@@ -106,7 +116,8 @@ export async function watchTick({ repoRoot, runId, cfg, readRun: loadRun = readR
         }
         if (held) await writeRow({ event: 'watch.held', block, file, content_hash });
       }
-      save({ ...state, run: runId, base, tree, sha: head, skipped: [] });
+      const { pending: _pending, burst_started_at: _burst, ...queued } = state;
+      save({ ...queued, run: runId, base, tree, sha: head, skipped: [] });
     } catch {
       // A bad path, missing tree or failed git read is a skip, never a block failure.
       await skip('unreadable_head');
