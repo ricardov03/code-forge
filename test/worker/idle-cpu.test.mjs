@@ -85,7 +85,8 @@ test('idle block wait and worker grow sleeps to 5 s and reset on ticket completi
       if (sleeps.length === 10) worker.stop();
     },
   });
-  const legacyStop = setTimeout(() => worker.stop(), 100);
+  // Injected polls stop at ten; the real timer only guards against a hung loop.
+  const legacyStop = setTimeout(() => worker.stop(), 30_000);
   try { await worker.run(); } finally { clearTimeout(legacyStop); }
   assert.deepEqual(sleeps, [250, 500, 1000, 2000, 4000, 5000, 5000, 5000, 250, 500], 'empty worker caps at 5000 ms and a new ticket resets to 250 ms');
   assert.deepEqual(joined.sleeps, [200, 400, 800, 1600, 3200, 5000, 5000, 5000, 200, 400], 'block wait caps at 5000 ms and completion resets to 200 ms');

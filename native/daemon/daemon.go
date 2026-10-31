@@ -17,6 +17,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"sort"
+	"strconv"
 	"strings"
 	"sync"
 	"syscall"
@@ -519,8 +520,8 @@ func (s *server) reopened(block, file string) string {
 }
 
 func (s *server) workerLive() bool {
-	// Use the kernel's signal-zero probe; never launch ps for a hot read.
-	// A fresh heartbeat is Node's preferred worker identity evidence.
+	// Match Node: a live pid plus a fresh heartbeat, unknown start time,
+	// or matching process start time. Only the last fallback launches ps.
 	w, err := readObject(filepath.Join(s.queue.Dir, "worker.json"))
 	if err != nil || w["run"] != s.run {
 		return false
@@ -530,11 +531,28 @@ func (s *server) workerLive() bool {
 		return false
 	}
 	err = syscall.Kill(int(pid), 0)
-	if err != nil {
+	if err != nil && !errors.Is(err, syscall.EPERM) {
 		return false
 	}
 	beat, err := time.Parse(time.RFC3339Nano, text(w, "heartbeat_at"))
-	return err == nil && time.Since(beat) <= time.Minute
+	age := time.Since(beat)
+	if err == nil && age <= time.Minute && age >= -5*time.Second {
+		return true
+	}
+	if w["start_time"] == "unknown" {
+		return true
+	}
+	ps := "/bin/ps"
+	if _, err := os.Stat(ps); err != nil {
+		ps = "ps"
+	}
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, ps, "-o", "lstart=", "-p", strconv.Itoa(int(pid)))
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	out, err := cmd.Output()
+	start := strings.Join(strings.Fields(string(out)), " ")
+	return err == nil && start != "" && start == text(w, "start_time")
 }
 
 func outcome(marker object) any {

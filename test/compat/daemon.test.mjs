@@ -12,6 +12,7 @@ import { appendRow } from '../../src/ledger/write.mjs';
 import { openBlock } from '../../src/state/block.mjs';
 import { startRun } from '../../src/state/run.mjs';
 import { loadKey, signRow } from '../../src/state/signer.mjs';
+import { readStartTime } from '../../src/util/reaper.mjs';
 import { announceWorker, blockTickets, enqueue, enqueueAnswers, liveWorker, queueDir, readTicket, retractWorker, writeResult, writeTicketTimings } from '../../src/worker/queue.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
@@ -83,13 +84,13 @@ async function fixture(t) {
     }
     assert.fail(`serve must answer ping on the run socket; exit=${child.exitCode}: ${stderr}`);
   }
-  const reference = async () => {
+  const reference = async (expectedCode = 0) => {
     let text = '';
     let error = '';
     const code = await runReviewFile(['--wait-block', 'B1', '--run', run, '--max', '0ms'], {
       cwd: repo, pollMs: 1, stdout: { write: (s) => { text += s; } }, stderr: { write: (s) => { error += s; } },
     });
-    assert.equal(code, 0, error);
+    assert.equal(code, expectedCode, error);
     return JSON.parse(text);
   };
   const referenceStatus = () => {
@@ -194,7 +195,7 @@ test('daemon hot reads match Node, incrementally tail and index, long-poll, and 
   assert.equal(blockTickets({ repoRoot: repo, run, block: 'Other' }).length, 1, 'other block ticket survives pruning');
 });
 
-test('daemon and Node accept null-tree tickets and reject stale unknown workers', async (t) => {
+test('daemon and Node accept null-tree tickets and agree on worker liveness', async (t) => {
   if (!build(t)) return;
   const f = await fixture(t);
   const { repo, run, socket } = f;
@@ -202,18 +203,41 @@ test('daemon and Node accept null-tree tickets and reject stale unknown workers'
   const file = path.join(queueDir(repo), `${ticket.ticket}.json`);
   writeFileSync(file, JSON.stringify({ ...JSON.parse(readFileSync(file, 'utf8')), tree: null }));
   assert.equal(readTicket(repo, ticket.ticket).tree, null);
-  // Use the legacy announcement alone so no registry entry can rescue this worker.
+  // Use the legacy announcement alone so the same identity is checked on both sides.
   const stale = new Date(Date.now() - 120000).toISOString();
-  writeFileSync(path.join(queueDir(repo), 'worker.json'), JSON.stringify({
-    pid: process.pid, run, start_time: 'unknown', started_at: stale, heartbeat_at: stale,
-  }));
-  assert.equal(liveWorker(repo), null);
   await f.ready(f.start());
   assert.deepEqual(withoutStats(await request(socket, { method: 'block-tickets', block: 'B1' })), {
     block: 'B1', tickets: blockTickets({ repoRoot: repo, run, block: 'B1' }),
   });
-  const result = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
-  assert.equal(result.status, 'worker_down');
+  const start = readStartTime(process.pid);
+  assert.equal(typeof start, 'string', 'current process start time must be readable');
+  const cases = [
+    { name: 'unknown stale', start_time: 'unknown', heartbeat_at: stale, live: true },
+    { name: 'mismatch stale', start_time: 'wrong start', heartbeat_at: stale, live: false },
+    { name: 'match stale', start_time: start, heartbeat_at: stale, live: true },
+    { name: 'mismatch fresh', start_time: 'wrong start', heartbeat_at: new Date().toISOString(), live: true },
+    { name: 'mismatch far future', start_time: 'wrong start', heartbeat_at: new Date(Date.now() + 60000).toISOString(), live: false },
+    { name: 'dead fresh', pid: 2 ** 30, start_time: 'unknown', heartbeat_at: new Date().toISOString(), live: false },
+  ];
+  async function check(c) {
+    writeFileSync(path.join(queueDir(repo), 'worker.json'), JSON.stringify({ pid: process.pid, run, started_at: stale, ...c }));
+    assert.equal(liveWorker(repo) !== null, c.live, 'Node liveness');
+    const result = withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 }));
+    assert.equal(result.status === 'worker_down', !c.live, 'daemon liveness');
+    assert.deepEqual(result, await f.reference(c.live ? 0 : 3), 'wait-block must match Node');
+  }
+  for (const c of cases) await t.test(c.name, () => check(c));
+  await t.test('EPERM fresh', async (t) => {
+    const processes = spawnSync('/bin/ps', ['-axo', 'pid='], { encoding: 'utf8' });
+    assert.equal(processes.status, 0, processes.stderr);
+    const pid = processes.stdout.trim().split(/\s+/).map(Number).find((pid) => {
+      if (pid <= 1) return false;
+      try { process.kill(pid, 0); } catch (err) { return err.code === 'EPERM'; }
+      return false;
+    });
+    if (pid === undefined) return t.skip('no live pid greater than 1 returns EPERM on this host');
+    await check({ name: 'system process', pid, start_time: 'wrong start', heartbeat_at: new Date().toISOString(), live: true });
+  });
   assert.deepEqual(withoutStats(await request(socket, { method: 'status' })), f.referenceStatus());
 });
 

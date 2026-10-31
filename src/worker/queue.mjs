@@ -753,7 +753,7 @@ function workerShape(w) {
 function workerLive(w, nowMs) {
   if (!isAlive(w.pid)) return false;
   if (heartbeatFresh(w, nowMs)) return true;
-  return w.start_time !== UNKNOWN_START_TIME && readStartTime(w.pid) === w.start_time;
+  return w.start_time === UNKNOWN_START_TIME || readStartTime(w.pid) === w.start_time;
 }
 
 /** @param {{pid: number, start_time: string, heartbeat_at?: string}} w @param {number} [nowMs] */
