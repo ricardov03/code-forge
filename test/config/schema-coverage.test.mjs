@@ -442,7 +442,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B160: +4 = gates.kinds{,.code,.docs,.contract} ⇒ 234.
 // B171: +1 = proof.worktree.setup ⇒ 235.
 // B189: +1 = gates.merge_gate ⇒ 236.
-const EXPECTED_SCHEMA_PATH_COUNT = 236;
+// Baseline also includes native{,.daemon}: 238 paths. B207 adds
+// review.adaptive{,.enabled,.window_days,.min_sessions,.explore} and review.routes.pin: 244.
+const EXPECTED_SCHEMA_PATH_COUNT = 244;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;

@@ -21,6 +21,9 @@
  */
 
 import { resolveLevel } from '../config/known-ids.mjs';
+import { modelStats, pickReviewer } from './model-stats.mjs';
+
+export { modelStats, pickReviewer } from './model-stats.mjs';
 
 /** The levels a rule may replace: the reviewers (L2) and the judge (L3). */
 export const ROUTE_LEVELS = Object.freeze(['L2', 'L3']);
@@ -93,6 +96,7 @@ function usable(rule) {
   if (r.level !== undefined && !ROUTE_LEVELS.includes(r.level)) return false;
   if (r.session_timeout_s !== undefined && !isPositiveInt(r.session_timeout_s)) return false;
   if (r.second !== undefined && !isEntry(r.second)) return false;
+  if (r.pin !== undefined && typeof r.pin !== 'boolean') return false;
   return true;
 }
 
@@ -178,11 +182,16 @@ export function pickRoutes(cfg, lines, { deleted = false } = {}) {
  * The ticket's routed config, timeout and `review.route` rows.
  * @param {Record<string, any>} cfg - the ticket's config snapshot.
  * @param {{lines: number, deleted?: boolean, timeoutS: number}} file - `timeoutS`: the unrouted timeout.
+ * @param {{rows: Array<Record<string, any>>, now?: number, ticketId: string, runId?: string}} [performance] - the
+ *   worker's project ledger; omitted by callers that only derive the legacy explicit routes.
  * @returns {RoutedTicket}
  * @throws {RouteError}
  */
-export function routeTicket(cfg, { lines, deleted = false, timeoutS }) {
+export function routeTicket(cfg, { lines, deleted = false, timeoutS }, performance) {
   const picked = pickRoutes(cfg, lines, { deleted });
+  if (performance && cfg.review?.adaptive?.enabled !== false) {
+    return adaptiveTicket(cfg, { lines, deleted, timeoutS }, performance, picked);
+  }
   if (picked.length === 0) return { cfg, timeoutS, rows: [] };
   const given = picked.map(({ rule }) => rule.session_timeout_s).filter((t) => t !== undefined);
   const routedTimeout = given.length > 0 ? Math.max(...given) : timeoutS;
@@ -216,6 +225,49 @@ export function routeTicket(cfg, { lines, deleted = false, timeoutS }) {
     second_model: second ? rule.second.model : null,
   }));
   return { cfg: routed, timeoutS: routedTimeout, rows };
+}
+
+/**
+ * Preserve the explicit route's timeout/second-level settings, then choose its primary reviewer
+ * from the resolved default, fallback ladder and matched route. At cold start the explicit
+ * route has configured priority. Judges retain their explicit L3 routing.
+ * @param {Record<string, any>} cfg
+ * @param {{lines: number, deleted: boolean, timeoutS: number}} file
+ * @param {{rows: Array<Record<string, any>>, now?: number, ticketId: string, runId?: string}} performance
+ * @param {ReturnType<typeof pickRoutes>} picked
+ * @returns {RoutedTicket}
+ */
+function adaptiveTicket(cfg, file, performance, picked) {
+  const legacy = routeTicket(cfg, file);
+  const rule = picked.find((p) => p.level === 'L2')?.rule;
+  const primary = resolveLevel(cfg, 'L2');
+  /** @type {Array<Record<string, any>>} */
+  const entries = [
+    ...(rule ? [{ ...entryOf(rule), provider: providerOf(cfg, rule) }] : []),
+    { ...primary }, ...primary.fallback, ...(rule?.fallback ?? []),
+  ];
+  const secondProvider = cfg.review?.multimodel === true
+    ? cfg.review.second_levels?.L2?.provider ?? cfg.review.second_provider : undefined;
+  const candidates = entries.filter((c, i, all) => c.provider !== secondProvider
+    && all.findIndex((other) => other.model === c.model && other.provider === c.provider) === i);
+  if (candidates.length === 0 || (rule?.pin === true && candidates[0].model !== rule.model)) throw new RouteError();
+  const stats = modelStats(performance.rows, { ...cfg.review?.adaptive, now: performance.now });
+  const previous = performance.rows.find((r) => r.event === 'review.route' && r.level === 'L2'
+    && r.ticket === performance.ticketId && (performance.runId === undefined || r.run === performance.runId));
+  const prior = previous && candidates.find((c) => c.model === previous.model && c.provider === previous.provider);
+  if (previous && !prior) throw new RouteError();
+  const choice = prior ? { candidate: prior, reason: previous.reason ?? 'configured-order' }
+    : rule?.pin === true ? { candidate: candidates[0], reason: 'pinned' }
+    : pickReviewer(candidates, stats, { ...cfg.review?.adaptive, ticketId: performance.ticketId });
+  const chosen = choice.candidate;
+  // The selected primary retains recovery through the remaining configured candidates.
+  const entry = { model: chosen.model, provider: chosen.provider, ...(chosen.effort !== undefined ? { effort: chosen.effort } : {}),
+    fallback: candidates.filter((c) => c !== chosen).map((c) => ({ model: c.model, provider: c.provider, ...(c.effort !== undefined ? { effort: c.effort } : {}) })) };
+  const row = { event: 'review.route', level: 'L2', min_lines: rule?.min_lines ?? null, lines: file.lines,
+    provider: chosen.provider, model: chosen.model, reason: choice.reason, session_timeout_s: legacy.timeoutS,
+    second_model: legacy.rows.find((r) => r.level === 'L2')?.second_model ?? null };
+  return { cfg: { ...legacy.cfg, levels: { ...legacy.cfg.levels, L2: entry } }, timeoutS: legacy.timeoutS,
+    rows: [row, ...legacy.rows.filter((r) => r.level !== 'L2')] };
 }
 
 /**

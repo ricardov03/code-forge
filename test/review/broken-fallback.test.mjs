@@ -39,7 +39,7 @@ function hunksOf(text) {
 const cfgWith = (review = {}) => ({
   provider: 'anthropic',
   levels: { L0: { model: 'claude-haiku-4-5-20251001' }, L1: { model: 'claude-sonnet-5' }, L2: { model: PRIMARY }, L3: { model: 'claude-fable-5-1' } },
-  review: { min_tokens_out: 40, ...review },
+  review: { min_tokens_out: 40, adaptive: { enabled: false }, ...review },
 });
 
 const WITH_SECOND = { second_levels: { L2: { provider: 'xai', model: SECOND } } };

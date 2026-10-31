@@ -42,7 +42,7 @@ function hunksOf(text) {
 const cfgWith = (review = {}) => ({
   provider: 'anthropic',
   levels: { L0: { model: 'claude-haiku-4-5-20251001' }, L1: { model: 'claude-sonnet-5' }, L2: { model: PRIMARY }, L3: { model: 'claude-fable-5-1' } },
-  review: { min_tokens_out: 40, ...review },
+  review: { min_tokens_out: 40, adaptive: { enabled: false }, ...review },
 });
 
 const ROUTE_400 = { min_lines: 400, model: ROUTED, session_timeout_s: 900 };
