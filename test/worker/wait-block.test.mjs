@@ -311,7 +311,9 @@ async function scriptedWatch() {
     for (const args of [['add', '--', FILE], ['-c', 'user.name=Fake', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'content']]) {
       assert.equal((await exec(['git', ...args], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 })).code, 0);
     }
-    await watchTick({ repoRoot: repo, runId, cfg, writeRow });
+    const observed = Date.now() - 15000;
+    await watchTick({ repoRoot: repo, runId, cfg, writeRow, now: () => observed });
+    await watchTick({ repoRoot: repo, runId, cfg, writeRow, now: () => observed + 15000 });
     return resolveTicket({ repoRoot: repo, run: runId, block: BLOCK, file: FILE });
   };
   return { repo, runId, rows, sessions, worker, commit };
