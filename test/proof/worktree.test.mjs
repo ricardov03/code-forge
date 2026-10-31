@@ -604,6 +604,7 @@ test('B159: block rebase moves an open worktree onto main, updates both bases an
   const rows = await fx.rows();
   assert.deepEqual(strip(rows.at(-1)), {
     run: runId, event: 'block.rebase', block: 'B1', old_base: fx.head, new_base: main,
+    changed_reviewed: [], cleared: [],
     worktree: true, tokens_source: null, cost_source: null,
   });
   assert.deepEqual(verifyRow(rows.at(-1), await loadKey(runId)), { ok: true });
