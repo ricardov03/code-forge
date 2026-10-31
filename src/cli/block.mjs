@@ -9,6 +9,7 @@
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree]
+ *   block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]   (orchestrator --yes: evidence and a fresh judge)
  *   block reopen <id> --run <r> --file <path> --reason <text> [--yes]   (B124c: evidence and a fresh judge for the agent path)
@@ -200,6 +201,8 @@ import { existsSync, readFileSync, statSync } from 'node:fs';
 import { readFile, realpath } from 'node:fs/promises';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
+import { runGatesVerb } from './gates.mjs';
+import { runReviewFile } from './review-file.mjs';
 import { approvalCheckText, expiryChecks } from '../autopilot/limits.mjs';
 import { fallbackLane } from '../decide/fallback-rules.mjs';
 import { laneFacts } from '../decide/lane-facts.mjs';
@@ -296,6 +299,119 @@ async function reopenBlockFile({ runId, id, file, reason, record, writeRow, agen
   return { row, cleared, ticket };
 }
 
+/** Quote a displayed command for a POSIX shell; execution always uses argv.
+ * @param {string[]} argv @returns {string}
+ */
+function landCommand(argv) {
+  return argv.map((arg) => /^[\w./:@=-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`).join(' ');
+}
+
+/** Join, gates and close share their existing CLI handlers, without spawning the CLI.
+ * @param {{id: string, runId: string, record: Record<string, any>, report: string, transcript: string, merge: boolean, json: boolean}} options
+ * @param {NonNullable<Parameters<typeof runBlock>[1]>} deps
+ * @returns {Promise<number>}
+ */
+async function landBlock({ id, runId, record, report, transcript, merge, json }, deps) {
+  const stdout = deps.stdout ?? process.stdout;
+  const stderr = deps.stderr ?? process.stderr;
+  const emit = (/** @type {Record<string, any>} */ value) => writeSafe(stdout, `${JSON.stringify(value)}\n`);
+  let step = 'join';
+  let next = landCommand(['code-forge', 'review-file', '--wait-block', id, '--run', runId]);
+  const stop = (/** @type {string} */ reason) => {
+    writeSafe(stderr, `block ${id} land stopped at ${step}: ${reason.trim()}\nnext: ${next}\n`);
+    if (json) emit({ block: id, event: 'refused', step, reason: reason.trim(), next });
+    return 1;
+  };
+  /** @param {(streams: {stdout: {write: (s: string) => void}, stderr: {write: (s: string) => void}}) => Promise<number>} run */
+  const capture = async (run) => {
+    let output = '';
+    let error = '';
+    const code = await run({ stdout: { write: (s) => { output += s; } }, stderr: { write: (s) => { error += s; } } });
+    /** @type {Record<string, any> | null} */
+    let data = null;
+    try { data = JSON.parse(output); } catch { /* A thrown refusal may only write stderr. */ }
+    return { code, output, error, data };
+  };
+  try {
+    const entry = record.blocks?.[id];
+    if (!entry) return stop(`unknown block in run ${runId}`);
+    if (entry.status !== 'open') return stop(`block is ${entry.status}, not open`);
+    const tree = await blockTree(record.workspace, entry);
+    if (!tree) return stop('block has no recorded worktree and branch');
+    const joined = await capture((streams) => runReviewFile(['--wait-block', id, '--run', runId], { ...streams, cwd: tree.workspace }));
+    if (joined.code !== 0 || !joined.data?.done) return stop(joined.error || joined.data?.message || joined.data?.reason || joined.data?.status || 'reviews did not finish');
+    const problems = joined.data.files.filter((/** @type {Record<string, any>} */ file) => file.status !== 'excluded' && file.outcome !== 'approved');
+    if (problems.length > 0) {
+      const details = [];
+      for (const file of problems) {
+        details.push(`${file.file}: ${file.outcome ?? file.status}`);
+        if (file.ticket) {
+          const result = await capture((streams) => runReviewFile(['--wait', file.ticket], { ...streams, cwd: tree.workspace }));
+          details.push(result.output.trim() || result.error.trim());
+        }
+      }
+      next = landCommand(['code-forge', 'review-file', '--wait', problems[0].ticket]);
+      return stop(details.join('\n'));
+    }
+
+    step = 'gates';
+    next = landCommand(['code-forge', 'gates', 'run', '--run', runId, '--block', id, '--changed']);
+    const gates = await capture((streams) => runGatesVerb(['run', '--run', runId, '--block', id, '--changed', '--cwd', tree.workspace], streams));
+    if (gates.code !== 0 || gates.data?.allOk !== true) return stop(gates.error + (gates.output || 'gates did not pass'));
+    if (gates.error) writeSafe(stderr, gates.error);
+
+    step = 'close';
+    const closeArgs = ['close', id, '--run', runId, '--report', report, '--transcript', transcript];
+    next = landCommand(['code-forge', 'block', ...closeArgs]);
+    const closed = await capture((streams) => runBlock([...closeArgs, '--json'], { ...deps, ...streams }));
+    if (closed.code !== 0 || closed.data?.status !== 'closed') {
+      if (typeof closed.data?.next_command === 'string') next = closed.data.next_command;
+      return stop(closed.error || closed.data?.reason || closed.data?.status || 'close refused');
+    }
+    if (closed.error) writeSafe(stderr, closed.error);
+
+    step = 'merge';
+    const main = await repoTop(record.workspace);
+    if (typeof entry.base_branch !== 'string' || !entry.base_branch) return stop('block has no recorded base branch');
+    const mergeArgs = ['git', '-C', main, 'merge', '--no-ff', '--no-edit', '--', tree.branch];
+    const command = landCommand(mergeArgs);
+    next = command;
+    if (!merge) {
+      if (json) emit({ block: id, event: 'closed', merge: command });
+      else writeSafe(stdout, `block ${id} closed; merge: ${command}\n`);
+      return 0;
+    }
+    const gitOptions = { cwd: main, env: gitChildEnv(), timeoutMs: 120000 };
+    const branch = await exec(['git', 'symbolic-ref', '-q', 'HEAD'], gitOptions);
+    if (branch.result !== 'ok' || branch.stdout.trim() !== `refs/heads/${entry.base_branch}`) {
+      next = `${landCommand(['git', '-C', main, 'checkout', entry.base_branch])} && ${command}`;
+      return stop(`main checkout must be on recorded base branch ${entry.base_branch}`);
+    }
+    const status = await exec(['git', 'status', '--porcelain', '--untracked-files=all'], gitOptions);
+    if (status.result !== 'ok') return stop(status.stderr || 'cannot check main checkout');
+    if (status.stdout) {
+      next = landCommand(['git', '-C', main, 'status', '--short']);
+      return stop('main checkout is dirty; commit or stash its changes before merging');
+    }
+    // Close measures uncommitted content too; never call that content landed if git cannot merge it.
+    const blockStatus = await exec(['git', 'status', '--porcelain', '--untracked-files=all'], { ...gitOptions, cwd: tree.top });
+    if (blockStatus.result !== 'ok' || blockStatus.stdout) {
+      next = landCommand(['git', '-C', tree.top, 'status', '--short']);
+      return stop('block worktree is dirty or unreadable; commit and review its changes before merging');
+    }
+    const merged = await exec(mergeArgs, gitOptions);
+    if (merged.result !== 'ok') {
+      next = landCommand(['git', '-C', main, 'status']);
+      return stop(merged.stderr || merged.stdout || 'git merge failed; resolve the merge before continuing');
+    }
+    if (json) emit({ block: id, event: 'landed', merge: command });
+    else writeSafe(stdout, `block ${id} landed\n`);
+    return 0;
+  } catch (thrown) {
+    return stop(thrown?.message ?? String(thrown));
+  }
+}
+
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
@@ -306,6 +422,7 @@ const USAGE =
   '       code-forge block ack-waivers <id> --run <r>\n' +
   '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]\n' +
   '       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n' +
+  '       code-forge block land <id> --run <r> --report <file> --transcript <file> [--merge]\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
 /** @type {Record<string, string>} */
@@ -315,6 +432,7 @@ const VERB_USAGE = {
   rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>]',
   claim: '<id> <path> --run <r>',
   close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--decide]',
+  land: '<id> --run <r> --report <file> --transcript <file> [--merge]',
   stop: '<id> --run <r> --reason <text>',
   waive: '<id> <finding-id> --run <r> --file <path> --reason <text> [--yes]',
   reopen: '<id> --run <r> --file <path> --reason <text> [--yes]',
@@ -334,7 +452,9 @@ function verbUsage(sub) {
     (sub === 'open' || sub === 'amend-acceptance'
       ? '  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n' +
         '                       Human checks use {clause, kind: human_check} without tests.\n' : '') +
-    (sub === 'open' ? '  --brief <file>       A file inside the repository, not inline text.\n' : '');
+    (sub === 'open' ? '  --brief <file>       A file inside the repository, not inline text.\n' : '') +
+    (sub === 'land' ? '  Join block reviews, run changed gates in its worktree, then close.\n' +
+      '  --merge     Merge with --no-ff in the clean main checkout on the recorded base branch.\n' : '');
 }
 
 /** Refuse likely shell quoting slips before any row is written.
@@ -423,7 +543,7 @@ export async function runBlock(args, deps = {}) {
   }
   let jsonOpenId;
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'land' ? ['merge'] : []), ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -441,6 +561,9 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'open' && json) jsonOpenId = id;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
+    if (sub === 'land' && (positionals.length !== 1 || typeof flags.report !== 'string' || typeof flags.transcript !== 'string' || Object.keys(flags).some((key) => !['run', 'report', 'transcript', 'merge', 'json'].includes(key)))) {
+      throw new StateError('usage', 'block land takes one block id, --run, --report, --transcript and optional --merge/--json');
+    }
     if (sub === 'amend-acceptance' && (positionals.length !== 1 || typeof flags.acceptance !== 'string' || typeof flags.reason !== 'string' || !flags.reason.trim() || /\p{Cc}/u.test(flags.reason))) {
       throw new StateError('usage', 'amend-acceptance needs one block id, --acceptance and a nonblank --reason without control characters');
     }
@@ -469,6 +592,7 @@ export async function runBlock(args, deps = {}) {
       return 0;
     }
     const record = await readRun(runId);
+    if (sub === 'land') return await landBlock({ id, runId, record, report: /** @type {string} */ (flags.report), transcript: /** @type {string} */ (flags.transcript), merge: flags.merge === true, json }, deps);
     if (sub === 'amend-acceptance') {
       /** @type {ReturnType<typeof prepareAcceptanceAmendment> | null} */
       let prepared = null;

@@ -87,6 +87,16 @@ Each `review-file` ticket is served by the worker `forge run start` launched: to
 
 ## §5 The block gate is a re-measurement — `forge block close <id> --run <r>`
 
+The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]`
+to join reviews, run changed gates in the recorded block worktree, then run the normal close checks.
+The first failure exits 1 and names the step, findings, gate output or close refusal, and the next
+command. Human checks must finish before a merge. With `--merge`, a closed block's branch is merged
+with `--no-ff` in the clean main checkout on the recorded base branch; the block worktree must also
+be clean. It never forces or switches branches. Success prints `block <id> landed`; without
+`--merge`, it prints `block <id> closed; merge: <cmd>` and leaves the base unchanged. A merge refusal
+leaves the block closed; use the displayed next command after correcting the checkout. `--json`
+prints one object with `block`, `event` and `merge`, or a refusal with `step`, `reason` and `next`.
+
 To correct an open block's snapshotted clauses, the human uses `code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>` with a nonblank reason and the same acceptance format as `block open`. Both terminals and confirmation are required, with no `--yes` and no active autopilot grant. Invalid or unchanged lists write nothing; a successful amendment updates the human checks and signs one `block.acceptance_amended` row with both clause-list hashes. Earlier reviews no longer count at close; review requests, block waits and watch ticks queue a fresh review with the new clauses. Coders must never run this human verb.
 
 The human can use `block close <id> --run <r> --decide --reason <text>` to see all waivable findings, unacknowledged agent waivers and acceptable transcript hits in one numbered list, then confirm once. Yes writes the same signed human rows as the individual verbs, with the shared reason for findings and hits, then runs normal close. No writes nothing. Unreviewed or stopped content needing a new review, failed gates, unowned changes and missing proof print `cannot decide here:` and write nothing. Both terminal streams are required; no `--yes`; an active autopilot grant refuses decision close. Coders must leave this step to the human.

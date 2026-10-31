@@ -47,6 +47,7 @@ export default async function help(_args, context = {}) {
   process.stdout.write('\nBlock usage: code-forge block <verb> --help (or -h).\n');
   process.stdout.write('  block open --acceptance <file>: JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n');
   process.stdout.write('  block open --brief <file>: a file inside the repository, not inline text.\n');
+  process.stdout.write('  block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]: join reviews, run changed gates, close, then optionally merge with --no-ff.\n');
   process.stdout.write('  Configuration fallback entries must be {provider, model} objects, not model-name strings (optional effort).\n');
   return 0;
 }
