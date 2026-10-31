@@ -254,14 +254,28 @@ test('dead or missing daemon falls back mid-wait; kill switches never touch a so
   assert.equal(fallbackStatus, await f.show(), 'full fallback JSON status bytes equal Node without removing any key');
   assert.equal(fallbackText, await f.show(false), 'full fallback human status bytes equal Node');
   delete process.env.CODE_FORGE_NATIVE;
-  assert.equal(await f.wait(), actual, 'missing socket uses the identical Node answer');
+  const socketPath = path.join(f.home, '.code-forge', 'runs', f.run, 'native.sock');
+  assert.equal(existsSync(socketPath), true, 'SIGKILL leaves a stale socket file');
+  assert.equal(await f.wait(), actual, 'stale socket uses the identical Node wait answer');
+  assert.equal(await f.show(), fallbackStatus, 'stale socket uses the identical Node JSON status answer');
+  assert.equal(await f.show(false), fallbackText, 'stale socket uses the identical Node human status answer');
+
+  rmSync(socketPath);
+  assert.equal(existsSync(socketPath), false, 'missing-socket checks run without a socket file');
+  ledgerReads = 0;
+  assert.equal(await f.wait(), actual, 'missing socket uses the identical Node wait answer');
+  assert.ok(ledgerReads > 0, 'missing socket makes wait read through Node');
+  ledgerReads = 0;
+  assert.equal(await f.show(), fallbackStatus, 'missing socket uses the identical Node JSON status answer');
+  assert.ok(ledgerReads > 0, 'missing socket makes JSON status read through Node');
+  ledgerReads = 0;
+  assert.equal(await f.show(false), fallbackText, 'missing socket uses the identical Node human status answer');
+  assert.ok(ledgerReads > 0, 'missing socket makes human status read through Node');
 
   assert.equal(typeof native.startNativeDaemon, 'function', 'worker lifecycle helper is available');
   let connections = 0;
   const server = net.createServer((socket) => { connections++; socket.destroy(); });
-  // SIGKILL leaves the old socket behind; replace it with a connection counter.
-  const socketPath = path.join(f.home, '.code-forge', 'runs', f.run, 'native.sock');
-  rmSync(socketPath, { force: true });
+  // Replace the removed stale socket with a connection counter.
   await new Promise((resolve) => server.listen(socketPath, () => resolve(undefined)));
   t.after(() => server.close());
   const beforeSpawns = daemonSpawns;
