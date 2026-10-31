@@ -404,7 +404,9 @@ export async function createWorker(opts, deps = {}) {
     // A route list that cannot be used is `unavailable` — never a review on a model it did not name.
     let routed;
     try {
-      routed = routeTicket(snapshotCfg, { lines: size.lines, deleted: size.deleted, timeoutS: baseTimeoutS });
+      routed = routeTicket(snapshotCfg, { lines: size.lines, deleted: size.deleted, timeoutS: baseTimeoutS },
+        snapshotCfg.review?.adaptive?.enabled === false || !snapshotCfg.levels?.L2?.model
+          ? undefined : { rows: await readRows(), ticketId: id, runId });
     } catch (err) {
       // only a route list that cannot be used is `route-invalid`; anything else is a real failure
       // and goes to runOne (`worker-error`), named as a routing-step failure with its own text

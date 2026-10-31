@@ -719,6 +719,23 @@ level's own notes are never counted. While a long session runs, the worker keeps
 heartbeat, so `review-file --wait` never reports a live worker as `worker_down`.
 At each poll tick the worker checks that its authoritative run record still exists; removing the record or its HOME stops it cleanly without taking another ticket.
 
+### How code-forge picks the reviewer
+
+By default, code-forge scores the L2 model and its fallbacks using this project's ledger across
+runs from the last `review.adaptive.window_days` (14): availability × (1 − waived finding share)
+÷ median session seconds. Timeouts, schema errors, exits and silence kills lower availability.
+Models below `min_sessions` (10) keep their configured order; with no history the configured
+reviewer is used. An `explore` share (0.1) gives a less-measured candidate a turn, deterministically
+from the ticket id. `status` (human text) and `doctor` show each model's session count, median,
+availability and waived share. The worker signs the chosen model and reason in `review.route`.
+`review.adaptive.enabled: false` restores legacy routing exactly. There is no default size route;
+review packets are capped at 32k tokens.
+
+A matching explicit L2 route joins the candidates with configured priority at cold start;
+`pin: true` forces it. The following routing details describe legacy mode with adaptive selection
+disabled. With adaptive selection on, L2 routes contribute candidates and each primary choice
+gets a signed row with its reason.
+
 A big file can go to another model with a longer timeout, without editing `.code-forge.yml` for
 each file. Set `review.routes` once: in each rule `min_lines` and `model` are required, and it may
 set `level`, `provider`, `effort`, `fallback`, `session_timeout_s` and `second`. A rule's level

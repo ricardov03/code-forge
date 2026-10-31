@@ -11,6 +11,8 @@ import { mkdirSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { cliNameForProvider } from '../engines/provider-cli.mjs';
+import { readAllRows } from '../ledger/write.mjs';
+import { modelStats, reviewerLines } from '../review/model-stats.mjs';
 import { newRunId } from '../state/paths.mjs';
 import { runRoot } from '../util/tmp.mjs';
 import { checkCommands, checkConfig, checkJev, checkKeys, checkLedger, checkLinks, checkLocks, checkReviewConcurrency, checkReviewState, checkTmp, checkTools } from './local.mjs';
@@ -53,6 +55,15 @@ export async function runDoctor(opts = {}, deps = {}) {
   const keys = await checkKeys(cfg, { env, store: deps.store, opRead: deps.opRead });
   /** @type {Row[]} */
   const rows = [...checked.rows, ...links, ...keys.rows];
+  if (cfg?.project?.slug) {
+    try {
+      const lines = reviewerLines(modelStats(await readAllRows(cfg.project.slug), cfg.review?.adaptive));
+      rows.push(...lines.map((line, i) => {
+        const at = line.indexOf(': ');
+        return row(`reviewer.${i}`, 'INFO', line.slice(0, at), line.slice(at + 2));
+      }));
+    } catch { /* a corrupt ledger is diagnosed by the existing ledger check */ }
+  }
   if (opts.quick) return rows;
 
   if (cfg) {
