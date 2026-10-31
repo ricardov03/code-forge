@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { appendFileSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { appendFileSync, chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -10,6 +10,7 @@ import { runReviewFile } from '../../src/cli/review-file.mjs';
 import { ledgerPath } from '../../src/ledger/paths.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { openBlock } from '../../src/state/block.mjs';
+import { assertOwned, ownsFile } from '../../src/state/registry.mjs';
 import { startRun } from '../../src/state/run.mjs';
 import { loadKey, signRow } from '../../src/state/signer.mjs';
 import { readStartTime } from '../../src/util/reaper.mjs';
@@ -122,6 +123,106 @@ function request(socket, body) {
 }
 
 const withoutStats = ({ stats, ...result }) => result;
+
+test('daemon preserves Node text ordering for reopen timestamps with different fractional precision', async (t) => {
+  if (!build(t)) return;
+  const f = await fixture(t);
+  const { repo, run, key, socket } = f;
+  announceWorker(repo, { pid: process.pid, run });
+  // The future date prevents an ordinary queued ticket from masking reopen selection.
+  for (const ts of ['2100-01-01T00:00:00Z', '2100-01-01T00:00:00.001Z']) {
+    await appendRow(signRow({ event: 'review.reopened', run, block: 'B1', file: 'src/a.mjs', by: 'human', ts }, key), { slug: 'daemon-test' });
+  }
+  const expected = await f.reference();
+  const current = readTicket(repo, expected.files.find((file) => file.file === 'src/a.mjs').ticket);
+  assert.equal(current.reopened_at, '2100-01-01T00:00:00Z', 'Node shares the text ordering bug');
+  await f.ready(f.start());
+  assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), expected);
+});
+
+test('daemon preserves Node matching for dot-prefixed and trailing-slash ownership globs', async (t) => {
+  if (!build(t)) return;
+  const f = await fixture(t);
+  const { repo, run, socket } = f;
+  announceWorker(repo, { pid: process.pid, run });
+  writeFileSync(path.join(repo, 'src/a.go'), 'package fixture\n');
+  await f.ready(f.start());
+  const { readRun, saveRun } = await import('../../src/state/run.mjs');
+  const record = await readRun(run);
+  for (const pattern of ['./**/*.go', '**/*.go/', '**/*.go']) {
+    record.blocks.B1.owned_files = [pattern];
+    await saveRun(record);
+    const expected = await f.reference();
+    assert.equal(ownsFile([pattern], 'src/a.go'), pattern === '**/*.go');
+    assert.equal(expected.files.length, pattern === '**/*.go' ? 1 : 0, 'Node leaves glob spelling unchanged');
+    assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), expected);
+  }
+});
+
+test('daemon preserves Node worker_down for pending, terminal, and unchanged block waits', async (t) => {
+  if (!build(t)) return;
+  const f = await fixture(t);
+  const { repo, run, key, socket } = f;
+  await f.ready(f.start());
+  const check = async () => {
+    const expected = await f.reference(3);
+    assert.equal(expected.done, false, 'Node requires a live worker even when the file set is terminal');
+    assert.equal(expected.status, 'worker_down');
+    assert.deepEqual(withoutStats(await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 })), expected);
+    return expected.files;
+  };
+  await t.test('pending files', async () => {
+    assert.ok((await check()).some((file) => file.status === 'not_queued'));
+  });
+  await t.test('all files terminal', async () => {
+    for (const file of ['src/a.mjs', 'src/b.mjs']) {
+      const queued = enqueue({ repoRoot: repo, run, block: 'B1', file });
+      writeResult({ repoRoot: repo, runId: run, ticket: queued.ticket, key, result: { status: 'reviewed', approved: true } });
+    }
+    const files = await check();
+    assert.equal(files.length, 3);
+    assert.ok(files.every((file) => file.status === 'done' || file.status === 'excluded'));
+  });
+  await t.test('nothing changed', async () => {
+    for (const args of [['add', 'src'], ['-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '-m', 'unchanged scope']]) {
+      const result = spawnSync('git', args, { cwd: repo, encoding: 'utf8' });
+      assert.equal(result.status, 0, result.stderr);
+    }
+    const { readRun, saveRun } = await import('../../src/state/run.mjs');
+    const record = await readRun(run);
+    record.blocks.B1.base_sha = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: repo, encoding: 'utf8' }).stdout.trim();
+    await saveRun(record);
+    assert.deepEqual(await check(), []);
+  });
+});
+
+test('daemon and Node both visit outside ownership prefixes in a malformed scope mirror', async (t) => {
+  if (!build(t)) return;
+  if (process.getuid?.() === 0) return t.skip('root bypasses the unreadable outside-directory fixture');
+  const f = await fixture(t);
+  const { repo, run, socket } = f;
+  announceWorker(repo, { pid: process.pid, run });
+  const outside = path.join(path.dirname(repo), 'outside');
+  mkdirSync(outside);
+  const pattern = '../outside/**';
+  assert.throws(() => assertOwned([pattern]), { code: 'bad-owned' }, 'ordinary Node block open refuses traversal');
+  const { readRun, saveRun } = await import('../../src/state/run.mjs');
+  const record = await readRun(run);
+  record.blocks.B1.owned_files = [pattern];
+  await saveRun(record);
+  await f.ready(f.start());
+  chmodSync(outside, 0);
+  try {
+    const expected = await f.reference(1);
+    assert.equal(expected.status, 'refused');
+    assert.ok(expected.message.includes(outside), 'Node waitTreeStamp tries to read the outside directory');
+    const actual = await request(socket, { method: 'wait-block', block: 'B1', max_ms: 0 });
+    assert.equal(actual.ok, false);
+    assert.ok(actual.error.includes(outside), 'Go treeStamp visits the same outside prefix');
+  } finally {
+    chmodSync(outside, 0o700);
+  }
+});
 
 test('daemon hot reads match Node, incrementally tail and index, long-poll, and prune only signed closed blocks', async (t) => {
   if (!build(t)) return;

@@ -27,6 +27,79 @@ func writeObject(t *testing.T, file string, value object) {
 	}
 }
 
+// These shared Node bugs remain compatibility requirements for B182. Change
+// them together with the Node wait-block implementation in a later block.
+func TestReopenedKeepsNodeTextOrdering(t *testing.T) {
+	for _, timestamps := range [][]string{
+		{"2100-01-01T00:00:00Z", "2100-01-01T00:00:00.001Z"},
+		{"2100-01-01T00:00:00.001Z", "2100-01-01T00:00:00Z"},
+	} {
+		s := &server{run: "r-test"}
+		for _, ts := range timestamps {
+			s.rows = append(s.rows, object{"event": "review.reopened", "run": s.run, "block": "B1", "file": "a.go", "by": "human", "ts": ts})
+		}
+		if got := s.reopened("B1", "a.go"); got != "2100-01-01T00:00:00Z" {
+			t.Fatalf("reopened = %q; Node wait-block chooses the lexically greatest timestamp", got)
+		}
+	}
+}
+
+func TestOwnsKeepsNodeGlobSpelling(t *testing.T) {
+	for _, tc := range []struct {
+		pattern string
+		file    string
+		want    bool
+	}{
+		{"./**/*.go", "a.go", false},
+		{"./**/*.go", "src/a.go", false},
+		{"**/*.go/", "src/a.go", false},
+		{"**/*.go", "a.go", true},
+		{"**/*.go", "src/a.go", true},
+	} {
+		t.Run(tc.pattern+"/"+tc.file, func(t *testing.T) {
+			if got := owns([]any{tc.pattern}, nil, tc.file); got != tc.want {
+				t.Fatalf("owns(%q, %q) = %v, want Node's %v", tc.pattern, tc.file, got, tc.want)
+			}
+		})
+	}
+}
+
+func TestTreeStampKeepsNodeOutsideOwnershipPrefix(t *testing.T) {
+	root := t.TempDir()
+	tree := filepath.Join(root, "repo")
+	for _, dir := range []string{filepath.Join(tree, ".git"), filepath.Join(tree, "src"), filepath.Join(root, "outside")} {
+		if err := os.MkdirAll(dir, 0700); err != nil {
+			t.Fatal(err)
+		}
+	}
+	file := filepath.Join(root, "outside", "a.go")
+	if err := os.WriteFile(file, []byte("before"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	stamp := func(owned string) string {
+		t.Helper()
+		got, err := treeStamp(tree, []any{owned})
+		if err != nil {
+			t.Fatal(err)
+		}
+		return got
+	}
+	for _, pattern := range []string{"../outside", "../outside/**", "src/../../outside/**"} {
+		t.Run(pattern, func(t *testing.T) {
+			before, confined := stamp(pattern), stamp("src/**")
+			if err := os.WriteFile(file, []byte("after "+pattern), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if stamp(pattern) == before {
+				t.Fatal("Node waitTreeStamp visits outside ownership prefixes; daemon must retain parity")
+			}
+			if stamp("src/**") != confined {
+				t.Fatal("an unrelated outside edit changed the stamp for valid ownership")
+			}
+		})
+	}
+}
+
 func TestRefreshRejectsScopeMismatchRepeatedly(t *testing.T) {
 	for _, field := range []string{"project", "run_id"} {
 		for _, cached := range []bool{false, true} {
