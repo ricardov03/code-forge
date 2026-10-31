@@ -27,7 +27,7 @@ import { checkWorkerPin, readRun, saveRun, withRunLock, writeSigned } from './ru
 import { canonicalJSON, verifyRow, loadKey, signRow } from './signer.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import * as reviewQueue from '../worker/queue.mjs';
-import { contentHash, repoRootOf } from '../worker/ticket.mjs';
+import { assertInsideRoot, contentHash, repoRootOf } from '../worker/ticket.mjs';
 
 /** @typedef {import('./run.mjs').WriteRow} WriteRow */
 
@@ -669,25 +669,33 @@ async function rebaseWorktreeBlock({ runId, id, writeRow, acceptChanged, reason,
  * B58: with `review.external.required` set, a path that owns the project's config is refused
  * (`config-owned`), as at `block open`. B62a: two blocks that each have their own worktree may
  * own the same path (`blocksOverlap`).
- * @param {{runId: string, id: string, file: string, writeRow: WriteRow}} opts
+ * @param {{runId: string, id: string, file: string, writeRow: WriteRow, auto?: boolean}} opts
  */
-export async function claimPath({ runId, id, file, writeRow }) {
+export async function claimPath({ runId, id, file, writeRow, auto = false }) {
   assertOwned([file]);
   if (!isExactEntry(file)) throw new StateError('bad-owned', `block claim takes one exact path, not a glob (${JSON.stringify(file)})`);
   const guarded = await guardedConfigPaths(await readRun(runId));
-  await mutateRun(runId, id, writeRow, (record, block) => {
-    const kinds = { [file]: pathKind(record.workspace, file) };
+  await mutateRun(runId, id, writeRow, async (record, block) => {
+    const root = auto ? await repoTop(block.worktree?.path ?? record.workspace) : record.workspace;
+    if (auto) {
+      if (file.split('/').some((part) => ['.git', '.code-forge'].includes(part.toLowerCase()))) throw new StateError('unowned_change', `unowned_change ${file}: cannot auto-claim repository state`);
+      try { assertInsideRoot(root, file); }
+      catch { throw new StateError('unowned_change', `unowned_change ${file}: cannot auto-claim a path outside the repository or a symlink`); }
+    }
+    const kinds = { [file]: pathKind(root, file) };
     refuseConfigOwner([file], kinds, guarded);
+    const prefix = auto ? path.relative(await repoTop(record.workspace), realpathSync(record.workspace)).split(path.sep).join('/') : '';
     for (const [otherId, other] of Object.entries(activeBlocks(record))) {
-      const pair = otherId === id ? null : blocksOverlap({ owned_files: [file], owned_kinds: kinds, worktree: block.worktree ?? null }, other);
-      if (pair) throw new StateError('overlap', `${file} overlaps ${pair[1]} owned by open block ${otherId}`);
+      const pair = otherId === id ? null : blocksOverlap({ owned_files: [file], owned_kinds: kinds, worktree: auto ? null : block.worktree ?? null }, other);
+      const relativeOwner = auto && otherId !== id && prefix !== '' && file.startsWith(`${prefix}/`) && ownsFile(other.owned_files, file.slice(prefix.length + 1), other.owned_kinds);
+      if (pair || relativeOwner) throw new StateError(auto ? 'unowned_change' : 'overlap', `${auto ? 'unowned_change ' : ''}${file} overlaps ${pair?.[1] ?? file} owned by open block ${otherId}`);
     }
     if (!block.owned_files.includes(file)) {
       block.owned_files.push(file);
       block.owned_kinds = { ...block.owned_kinds, ...kinds };
     }
     record.orphans = record.orphans.filter((/** @type {string} */ o) => !ownsFile([file], o, kinds));
-    return { result: undefined, rows: [{ event: 'block.claim', block: id, path: file }] };
+    return { result: undefined, rows: [{ event: 'block.claim', block: id, path: file, ...(auto ? { auto: true, reason: 'auto-claim: changed outside owned files' } : {}) }] };
   });
 }
 

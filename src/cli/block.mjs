@@ -8,7 +8,7 @@
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
- *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree]
+ *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree] [--auto-claim]
  *   block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]   (orchestrator --yes: evidence and a fresh judge)
@@ -306,6 +306,45 @@ function landCommand(argv) {
   return argv.map((arg) => /^[\w./:@=-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`).join(' ');
 }
 
+/** Claim only changes the normal scope check cannot account for, then join real review tickets.
+ * @param {{record: Record<string, any>, runId: string, id: string, writeRow: import('../state/run.mjs').WriteRow, print: (line: string) => void}} opts
+ */
+async function autoClaimChanges({ record, runId, id, writeRow, print }) {
+  const entry = record.blocks[id];
+  const wt = await blockTree(record.workspace, entry);
+  const mainTop = await repoTop(record.workspace);
+  const top = wt?.top ?? mainTop;
+  const prefix = path.relative(mainTop, await realpath(record.workspace)).split(path.sep).join('/');
+  const owns = ownsAt(prefix);
+  const ownState = new Set([path.posix.join(prefix, `.code-forge/runs/${runId}.json`), path.posix.join(prefix, `.code-forge/runs/${runId}/${id}.log`)]);
+  const changed = (await changedFiles({ repoRoot: top, base: wt?.base_sha ?? entry.base_sha })).filter((f) => !ownState.has(f));
+  const scope = await unownedChanges({ top, changed, id, blocks: record.blocks, rows: (await readAllRows(record.project)).filter((r) => r.run === runId), key: await loadKey(runId),
+    isMine: (file) => owns(entry.owned_files, file, entry.owned_kinds), owns, ownTree: wt !== null });
+  const files = [...new Set([...(scope?.unowned ?? []), ...(scope?.siblings.map((s) => s.file) ?? [])])].sort();
+  if (files.length === 0) return;
+  const invoke = async (/** @type {string[]} */ args) => {
+    let output = '', error = '';
+    const code = await runReviewFile(args, { cwd: top, stdout: { write: (s) => { output += s; } }, stderr: { write: (s) => { error += s; } } });
+    let data;
+    try { data = JSON.parse(output); } catch { /* Excluded files print a text line. */ }
+    if (code !== 0) throw new StateError('auto-claim-review', error || output || 'auto-claim review failed');
+    return { data, output };
+  };
+  for (const file of files) {
+    await claimPath({ runId, id, file, writeRow, auto: true });
+    Object.assign(entry, (await readRun(runId)).blocks[id]);
+    print(`block ${id} auto-claimed ${file}\n`);
+    await invoke([file, '--block', id, '--run', runId]);
+  }
+  const joined = await invoke(['--wait-block', id, '--run', runId]);
+  if (joined.data?.done !== true) throw new StateError('auto-claim-review', `auto-claim reviews did not finish: ${joined.output.trim()}`);
+  for (const file of joined.data.files) {
+    if (file.status === 'excluded' || file.outcome === 'approved') continue;
+    const detail = file.ticket ? (await invoke(['--wait', file.ticket])).output : file.outcome ?? file.status;
+    throw new StateError('auto-claim-review', `auto-claim review refused ${file.file}: ${detail}`);
+  }
+}
+
 /** Join, gates and close share their existing CLI handlers, without spawning the CLI.
  * @param {{id: string, runId: string, record: Record<string, any>, report: string, transcript: string, merge: boolean, json: boolean}} options
  * @param {NonNullable<Parameters<typeof runBlock>[1]>} deps
@@ -338,6 +377,7 @@ async function landBlock({ id, runId, record, report, transcript, merge, json },
     if (entry.status !== 'open') return stop(`block is ${entry.status}, not open`);
     const tree = await blockTree(record.workspace, entry);
     if (!tree) return stop('block has no recorded worktree and branch');
+    await autoClaimChanges({ record, runId, id, writeRow: (row) => appendRow(row, { slug: record.project }), print: (line) => writeSafe(json ? stderr : stdout, line) });
     const joined = await capture((streams) => runReviewFile(['--wait-block', id, '--run', runId], { ...streams, cwd: tree.workspace }));
     if (joined.code !== 0 || !joined.data?.done) return stop(joined.error || joined.data?.message || joined.data?.reason || joined.data?.status || 'reviews did not finish');
     const problems = joined.data.files.filter((/** @type {Record<string, any>} */ file) => file.status !== 'excluded' && file.outcome !== 'approved');
@@ -414,7 +454,7 @@ async function landBlock({ id, runId, record, report, transcript, merge, json },
 
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n' +
-  '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
+  '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>\n' +
@@ -431,7 +471,7 @@ const VERB_USAGE = {
   attempt: '<id> --run <r>',
   rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>]',
   claim: '<id> <path> --run <r>',
-  close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--decide]',
+  close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]',
   land: '<id> --run <r> --report <file> --transcript <file> [--merge]',
   stop: '<id> --run <r> --reason <text>',
   waive: '<id> <finding-id> --run <r> --file <path> --reason <text> [--yes]',
@@ -543,7 +583,7 @@ export async function runBlock(args, deps = {}) {
   }
   let jsonOpenId;
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'land' ? ['merge'] : []), ...(sub === 'close' ? ['decide'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'land' ? ['merge'] : []), ...(sub === 'close' ? ['decide', 'auto-claim'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -929,6 +969,7 @@ export async function runBlock(args, deps = {}) {
       }
       // B58: the owner's other way out — `review.external.required` in the run's config snapshot
       // (set before `run start`, immutable): no TTY, allowed under autopilot, the human flag wins
+      if (flags['auto-claim'] === true) await autoClaimChanges({ record, runId, id, writeRow, print: json ? err : say });
       const external = reviewsWaived ? null : externalReviewer(record);
       const reviewConfig = configInForce(record);
       const rows = (await readAllRows(record.project)).filter((row) => row.run === runId);

@@ -370,6 +370,14 @@ worktree, then runs the normal close checks with the report and transcript. It s
 failure with exit 1, the step, findings or gate output or close refusal, and the next command.
 A close awaiting a human check also stops before merging.
 
+Before joining, land automatically claims changed paths outside the block's ownership, queues
+their reviews in the block worktree, and waits. `block close --auto-claim` does the same;
+plain close still refuses unowned changes. Each auto-claim prints one line and writes the
+normal signed claim row with `auto: true` and reason `auto-claim: changed outside owned files`.
+Findings stop the operation. A path owned or claimed by another open block refuses with
+`unowned_change` naming that block, even when the blocks have separate worktrees.
+Paths under `.git/` or `.code-forge/`, and paths outside the repository, are never auto-claimed.
+
 With `--merge`, only after the block closes, it merges the block branch with `git merge --no-ff`
 in the main checkout. The main checkout must be clean and on the recorded base branch; the block
 worktree must be clean too. It never forces or switches branches. Success ends with
