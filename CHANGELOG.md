@@ -58,6 +58,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `--help` and `-h` work on every `block` verb and write nothing; docs explain `review.routes` for files over 400 lines, the L3 judge fallback, the pnpm 11 symlink note and `codex exec </dev/null` (#26 items 12, 15-16, #24, B175)
 - Review timing: `review-file --cwd <dir>` runs from any folder; each ticket records queued, started and finished times and `duration_ms`, and `report` shows review time per block (#26 items 13-14, B174)
 - A `block close` refused because main moved now prints its exits: `review-file --rebase-check` and the human-only `block rebase --accept-changed <file> --reason`; each rebase writes a signed `block.rebase` row (#23, B170)
+- The suite is green again after the B163–B178 merges; the review worker now starts a waiting ticket at once instead of after its idle back-off, so parallel reviews keep their speedup (B179)
 
 ## [0.15.2] — 2026-10-30
 
