@@ -91,7 +91,7 @@ Paths added by `block claim` survive retries: `block open <id> --attempt N` (N >
 restores earlier signed claims alongside `--owned`, and `block attempt` keeps them too.
 Both print `kept claims: <n>`. Do not claim the same paths again after a retry.
 
-The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]`
+The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--json]`
 to join reviews, run changed gates in the recorded block worktree, then run the normal close checks.
 The first failure exits 1 and names the step, findings, gate output or close refusal, and the next
 command. Human checks must finish before a merge. With `--merge`, a closed block's branch is merged
@@ -100,6 +100,11 @@ be clean. It never forces or switches branches. Success prints `block <id> lande
 `--merge`, it prints `block <id> closed; merge: <cmd>` and leaves the base unchanged. A merge refusal
 leaves the block closed; use the displayed next command after correcting the checkout. `--json`
 prints one object with `block`, `event` and `merge`, or a refusal with `step`, `reason` and `next`.
+
+`--max` defaults to `30m`; durations also accept seconds (`90s`) and milliseconds (`1500ms`).
+Land makes up to three join attempts while a held findings round remains open, all within one
+wait budget. Completed findings stop it. An exhausted wait stops at `join` with `wait_timeout`
+and prints a `next:` land command with a larger `--max`, preserving the report and transcript.
 
 Land automatically claims changed files outside the owned set before joining reviews.
 `block close --auto-claim` also claims, queues reviews in the block worktree, waits, and

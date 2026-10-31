@@ -2,14 +2,34 @@ import { cfgFor, freshDir, git, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import path from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
+
+const realReview = await import('../../src/cli/review-file.mjs');
+/** @type {{now: number, finishAt: number, finish: () => Promise<void>, stderr?: string} | null} */
+let slowReview = null;
+// Keep the real join, queue, and results; control its polling clock and optional stderr.
+mock.module('../../src/cli/review-file.mjs', { namedExports: { ...realReview,
+  runReviewFile: (args, deps) => {
+    if (slowReview?.stderr) deps.stderr.write(slowReview.stderr);
+    return realReview.runReviewFile(args, slowReview ? { ...deps,
+      now: () => slowReview.now,
+      sleep: async (ms) => {
+        slowReview.now += ms;
+        if (slowReview.now >= slowReview.finishAt) {
+          slowReview.finishAt = Infinity;
+          await slowReview.finish();
+        }
+      },
+    } : deps);
+  },
+} });
 
 const { runBlock } = await import('../../src/cli/block.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { readRun, startRun, writeSigned } = await import('../../src/state/run.mjs');
 const { loadKey } = await import('../../src/state/signer.mjs');
 const { contentHash } = await import('../../src/worker/ticket.mjs');
-const { announceWorker, enqueue, retractWorker, writeResult } = await import('../../src/worker/queue.mjs');
+const { announceWorker, clearDone, enqueue, retractWorker, writeResult } = await import('../../src/worker/queue.mjs');
 
 const PROBE = async (/** @type {number} */ pid) => pid === process.pid ? 'test-worker' : null;
 
@@ -168,5 +188,79 @@ test('B185: close refusal names its reason and retry command and never merges', 
     assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 0);
     assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
     assert.equal((await git(['rev-parse', 'main'], f.repo)).trim(), f.base);
+  } finally { f.cleanup(); }
+});
+
+test('B190: slow reviews close within the default or explicit max, including a held findings round', async (t) => {
+  for (const [index, extra] of [[], ['--max', '120s'], ['--max', '2m']].entries()) {
+    const f = await fixture(`b190-slow-${index}`, { finding: index === 2 });
+    const start = Date.now();
+    try {
+      if (index === 2) {
+        writeFile(f.worktree.path, 'a.mjs', 'export const a = 3;\n');
+        await git(['add', 'a.mjs'], f.worktree.path);
+        await git(['commit', '-q', '-m', 'fix the finding'], f.worktree.path);
+      } else clearDone({ repoRoot: f.repo, tree: f.worktree.path, run: f.runId, block: 'B1', file: 'a.mjs' });
+      slowReview = { now: start, finishAt: start + 95_000, finish: async () => {
+        const ticket = enqueue({ repoRoot: f.repo, tree: f.worktree.path, run: f.runId, block: 'B1', file: 'a.mjs' }).ticket;
+        writeResult({ repoRoot: f.repo, runId: f.runId, ticket, key: await loadKey(f.runId), result: { status: 'reviewed', approved: true, findings: [] } });
+        await writeSigned(f.runId, (row) => appendRow(row, { slug: `b190-slow-${index}` }), {
+          event: 'review.approved', block: 'B1', file: 'a.mjs', content_hash: contentHash(f.worktree.path, 'a.mjs'), round: 2,
+        });
+      } };
+      t.mock.method(Date, 'now', () => slowReview.now);
+      const result = await f.land(extra);
+      assert.equal(result.code, 0, `slow review must close: ${result.stderr}`);
+      assert.ok(slowReview.now - start >= 95_000, 'review finishes after the old 90s default');
+      assert.equal((await readRun(f.runId)).blocks.B1.status, 'closed');
+      const rows = await f.rows();
+      assert.equal(rows.filter((r) => r.event === 'gate.done').length, 1, 'exactly one gate run');
+      assert.equal(rows.filter((r) => r.event === 'block.close').length, 1, 'exactly one close after review approval');
+    } finally { t.mock.restoreAll(); slowReview = null; f.cleanup(); }
+  }
+});
+
+test('B190: max 1s times out at join and names a larger max in the land retry', async (t) => {
+  for (const stderr of ['', 'review polling diagnostic\n']) {
+    const f = await fixture(`b190-timeout-${stderr ? 'stderr' : 'quiet'}`);
+    const start = Date.now();
+    try {
+      clearDone({ repoRoot: f.repo, tree: f.worktree.path, run: f.runId, block: 'B1', file: 'a.mjs' });
+      slowReview = { now: start, finishAt: Infinity, finish: async () => {}, stderr };
+      t.mock.method(Date, 'now', () => slowReview.now);
+      const result = await f.land(['--max', '1s', '--merge', '--json']);
+      assert.equal(result.code, 1, result.stderr);
+      const refused = JSON.parse(result.stdout);
+      assert.deepEqual([refused.step, refused.reason], ['join', 'wait_timeout']);
+      assert.equal(result.stderr.split('\n')[0], 'block B1 land stopped at join: wait_timeout');
+      const nextLines = result.stderr.split('\n').filter((line) => line.startsWith('next: '));
+      assert.equal(nextLines.length, 1, 'exactly one next line');
+      assert.equal(nextLines[0], `next: ${refused.next}`, 'text and JSON name the same retry');
+      assert.match(nextLines[0], /--max /);
+      assert.ok(nextLines[0].includes(`block land B1 --run ${f.runId}`), 'retry repeats land for the same run');
+      assert.ok(nextLines[0].includes(`--report ${path.join(f.files, 'report.txt')} --transcript ${path.join(f.files, 'coder.log')}`), 'retry preserves report and transcript');
+      assert.match(nextLines[0], /--merge.*--json/);
+      const duration = /--max (\d+(?:ms|s|m)?)/.exec(refused.next)?.[1];
+      assert.ok(duration, 'retry names --max');
+      const retryMs = duration.endsWith('m') ? Number(duration.slice(0, -1)) * 60_000 : realReview.parseMax(duration);
+      assert.ok(retryMs > 1000, 'retry gives a larger wait budget');
+      assert.equal(slowReview.now - start, 1000, 'total polling wait is exactly the shared 1s budget');
+      assert.equal((await f.rows()).filter((r) => ['gate.done', 'block.close'].includes(r.event)).length, 0, 'no gates or closes on timeout');
+      assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+    } finally { t.mock.restoreAll(); slowReview = null; f.cleanup(); }
+  }
+});
+
+test('B190: malformed max is a duration usage error before landing', async () => {
+  const f = await fixture('b190-bad-max');
+  try {
+    for (const value of ['soon', '-1s', '1.5m']) {
+      const result = await f.land(['--max', value]);
+      assert.equal(result.code, 2, result.stderr);
+      assert.match(result.stderr, /--max must look like/);
+      assert.equal(result.stdout, '', 'usage errors have no success output');
+    }
+    assert.equal((await f.rows()).filter((r) => ['gate.done', 'block.close'].includes(r.event)).length, 0);
+    assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
   } finally { f.cleanup(); }
 });
