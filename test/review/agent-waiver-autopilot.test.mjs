@@ -140,7 +140,7 @@ test('active grant with passing acceptance evidence and L3 agreement writes one 
 test('critical boundaries refuse missing or stale passing acceptance evidence, missing finding citation, and judge disagreement without writes', async () => {
   for (const kind of ['no-record', 'failed', 'skipped', 'stale-source', 'stale-test', 'latest-red', 'unsigned', 'wrong-block', 'no-test-citation', 'not-acceptance', 'no-path', 'other-path', 'disagree', 'grant-stopped-in-judge']) {
     const f = await fixture();
-    if (kind !== 'no-record') await f.green();
+    if (!['no-record', 'unsigned'].includes(kind)) await f.green();
     if (kind === 'failed') await f.green({ all_ok: false, results: [{ gate: 'test', ok: false, skipped: false }] });
     if (kind === 'skipped') await f.green({ results: [{ gate: 'test', ok: true, skipped: true }] });
     if (kind === 'stale-source') writeFile(f.repo, FILE, 'export const a = 3;\n');
