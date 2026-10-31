@@ -1,6 +1,6 @@
 import { cfgFor, freshDir, git, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { mock, test } from 'node:test';
 
@@ -115,7 +115,9 @@ test('B185: clean land joins, gates, closes and merges; a finding stops before g
       } else {
         assert.equal(result.stdout.trim().split('\n').at(-1), 'block B1 landed');
         assert.deepEqual((await git(['rev-list', '--parents', '-n', '1', 'main'], f.repo)).trim().split(' ').slice(1), [f.base, f.head], 'base has exactly the two parents of a no-ff merge');
-        assert.equal(readFileSync(f.gateOutput, 'utf8'), f.worktree.path, 'gates ran in the block worktree');
+        const gateTree = readFileSync(f.gateOutput, 'utf8');
+        assert.equal(path.dirname(gateTree), path.dirname(f.worktree.path), 'last full gate ran under the run worktree root');
+        assert.equal(existsSync(gateTree), false, 'last full gate worktree was removed before landing');
         assert.ok(rows.findIndex((r) => r.event === 'gate.done') < rows.findIndex((r) => r.event === 'block.close'), 'gate completion precedes close');
       }
     } finally { f.cleanup(); }
@@ -221,14 +223,19 @@ test('B190: slow reviews close within the default or explicit max, including a h
 });
 
 test('B190: max 1s times out at join and names a larger max in the land retry', async (t) => {
-  for (const stderr of ['', 'review polling diagnostic\n']) {
-    const f = await fixture(`b190-timeout-${stderr ? 'stderr' : 'quiet'}`);
+  for (const { stderr, noMergeGate } of [
+    { stderr: '', noMergeGate: false },
+    { stderr: 'review polling diagnostic\n', noMergeGate: false },
+    { stderr: '', noMergeGate: true },
+    { stderr: 'review polling diagnostic\n', noMergeGate: true },
+  ]) {
+    const f = await fixture(`b190-timeout-${stderr ? 'stderr' : 'quiet'}-${noMergeGate}`);
     const start = Date.now();
     try {
       clearDone({ repoRoot: f.repo, tree: f.worktree.path, run: f.runId, block: 'B1', file: 'a.mjs' });
       slowReview = { now: start, finishAt: Infinity, finish: async () => {}, stderr };
       t.mock.method(Date, 'now', () => slowReview.now);
-      const result = await f.land(['--max', '1s', '--merge', '--json']);
+      const result = await f.land(['--max', '1s', '--merge', ...(noMergeGate ? ['--no-merge-gate'] : []), '--json']);
       assert.equal(result.code, 1, result.stderr);
       const refused = JSON.parse(result.stdout);
       assert.deepEqual([refused.step, refused.reason], ['join', 'wait_timeout']);
@@ -240,6 +247,7 @@ test('B190: max 1s times out at join and names a larger max in the land retry', 
       assert.ok(nextLines[0].includes(`block land B1 --run ${f.runId}`), 'retry repeats land for the same run');
       assert.ok(nextLines[0].includes(`--report ${path.join(f.files, 'report.txt')} --transcript ${path.join(f.files, 'coder.log')}`), 'retry preserves report and transcript');
       assert.match(nextLines[0], /--merge.*--json/);
+      assert.equal(refused.next.split(' ').includes('--no-merge-gate'), noMergeGate, 'retry preserves the merge-gate override only when requested');
       const duration = /--max (\d+(?:ms|s|m)?)/.exec(refused.next)?.[1];
       assert.ok(duration, 'retry names --max');
       const retryMs = duration.endsWith('m') ? Number(duration.slice(0, -1)) * 60_000 : realReview.parseMax(duration);

@@ -364,7 +364,7 @@ is, with a `worktree.remove_failed` row and exit 1, and the block stays closed. 
 tree stays. Coders may not use the flag. code-forge never pushes, and never deletes a
 branch except one a failed open made itself.
 
-`code-forge block land <id> --run <run> --report <file> --transcript <file> [--max <dur>] [--merge] [--json]`
+`code-forge block land <id> --run <run> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]`
 joins the block's reviews, runs `gates run --run <run> --block <id> --changed` in its recorded
 worktree, then runs the normal close checks with the report and transcript. It stops at the first
 failure with exit 1, the step, findings or gate output or close refusal, and the next command.
@@ -383,11 +383,21 @@ Findings stop the operation. A path owned or claimed by another open block refus
 `unowned_change` naming that block, even when the blocks have separate worktrees.
 Paths under `.git/` or `.code-forge/`, and paths outside the repository, are never auto-claimed.
 
-With `--merge`, only after the block closes, it merges the block branch with `git merge --no-ff`
-in the main checkout. The main checkout must be clean and on the recorded base branch; the block
-worktree must be clean too. It never forces or switches branches. Success ends with
+With `--merge`, after the block closes, land creates a temporary detached worktree at the current
+base branch HEAD under the run's worktree root, merges the block branch there with
+`git merge --no-ff --no-edit`, and runs the configured full gates through the shared gate runner
+without block scope or `--changed`. The main checkout must be clean and on the recorded base
+branch; the block worktree must be clean too. Only a green full suite permits the real merge.
+Land removes the temporary worktree before merging and prints
+`merge gate: full suite passed (<n>s)`. A red suite or conflict stops at `merge-gate`, names the
+first ten failing TAP tests (or gate diagnostics) or the conflict files, and prints a `next:`
+action. The temporary worktree is removed on failure too; main stays at the same HEAD and clean.
+`gates.merge_gate` defaults to `true` in the run config. Setting it to `false`, or passing
+`--no-merge-gate`, skips the merged-suite check and prints a warning.
+It never forces or switches main's branch. Success ends with
 `block <id> landed`. Without `--merge`, it closes and prints `block <id> closed; merge: <cmd>`
-without changing the base branch. A merge refusal leaves the block closed; correct the checkout
+without changing the base branch, plus a hint that the merge gate runs only with `--merge`.
+A merge refusal leaves the block closed; correct the checkout
 and use the displayed next command. `--json` emits one JSON line: `event: landed` or `closed`
 and the merge command, or `event: refused` with `step`, `reason` and `next`.
 

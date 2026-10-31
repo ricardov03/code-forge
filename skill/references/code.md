@@ -91,13 +91,22 @@ Paths added by `block claim` survive retries: `block open <id> --attempt N` (N >
 restores earlier signed claims alongside `--owned`, and `block attempt` keeps them too.
 Both print `kept claims: <n>`. Do not claim the same paths again after a retry.
 
-The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--json]`
+The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]`
 to join reviews, run changed gates in the recorded block worktree, then run the normal close checks.
 The first failure exits 1 and names the step, findings, gate output or close refusal, and the next
 command. Human checks must finish before a merge. With `--merge`, a closed block's branch is merged
 with `--no-ff` in the clean main checkout on the recorded base branch; the block worktree must also
-be clean. It never forces or switches branches. Success prints `block <id> landed`; without
-`--merge`, it prints `block <id> closed; merge: <cmd>` and leaves the base unchanged. A merge refusal
+be clean. Before the real merge, land merges the current base branch HEAD and block branch in a
+temporary detached worktree under the run's worktree root and runs the configured full gates
+without block scope or `--changed`, using the shared gate runner. A green suite removes the
+temporary tree, prints `merge gate: full suite passed (<n>s)`, and permits the real merge.
+A red suite or conflict stops at `merge-gate` with the first ten failing TAP test names (or gate
+diagnostics) or conflict files and a `next:` action. Every outcome removes the temporary tree;
+a refusal leaves main clean and its HEAD unchanged. `gates.merge_gate` defaults to `true` in
+the run config; `false` or `--no-merge-gate` skips the check with a warning.
+It never forces or switches branches. Success prints `block <id> landed`; without
+`--merge`, it prints `block <id> closed; merge: <cmd>` and a hint that the merge gate runs only
+with `--merge`, and leaves the base unchanged. A merge refusal
 leaves the block closed; use the displayed next command after correcting the checkout. `--json`
 prints one object with `block`, `event` and `merge`, or a refusal with `step`, `reason` and `next`.
 
