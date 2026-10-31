@@ -280,7 +280,7 @@ test('B80 (3): reopen and waive --yes need evidence; no prompt and nothing on di
     for (const tty of [{ isTTY: true }, { isTTY: false }]) {
       const before = snapshot();
       const r = await f.block([...f.argsOf[verb], '--yes'], tty);
-      const expected = [1, '', `block ${verb}: ${verb}-yes-no-evidence: cite an existing repo path with :line, an existing test file, or a block acceptance clause number; nothing was recorded\n`];
+      const expected = [1, '', `block ${verb}: ${verb}-yes-no-evidence: cite an existing repo path with ${verb === 'reopen' ? ':line or :start-end' : ':line'}, an existing test file, or a block acceptance clause number; nothing was recorded\n`];
       assert.deepEqual([r.code, r.out, r.err], expected);
       assertUnchanged(before, snapshot());
     }

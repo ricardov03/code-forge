@@ -364,11 +364,16 @@ is, with a `worktree.remove_failed` row and exit 1, and the block stays closed. 
 tree stays. Coders may not use the flag. code-forge never pushes, and never deletes a
 branch except one a failed open made itself.
 
-`code-forge block land <id> --run <run> --report <file> --transcript <file> [--merge] [--json]`
+`code-forge block land <id> --run <run> --report <file> --transcript <file> [--max <dur>] [--merge] [--json]`
 joins the block's reviews, runs `gates run --run <run> --block <id> --changed` in its recorded
 worktree, then runs the normal close checks with the report and transcript. It stops at the first
 failure with exit 1, the step, findings or gate output or close refusal, and the next command.
 A close awaiting a human check also stops before merging.
+
+`--max` sets the total review wait, defaulting to `30m` (also accepts `90s` or `1500ms`).
+Land makes up to three join attempts while a held findings round remains open, sharing that
+deadline across attempts. Completed findings stop the land. When the wait expires, land stops
+at `join` with `wait_timeout` and a `next:` land command with a larger `--max`.
 
 Before joining, land automatically claims changed paths outside the block's ownership, queues
 their reviews in the block worktree, and waits. `block close --auto-claim` does the same;
