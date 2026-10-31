@@ -105,8 +105,7 @@ async function fixture(t) {
       cwd: repo, env: { ...process.env, CODE_FORGE_NATIVE: '0' }, encoding: 'utf8', timeout: 10000,
     });
     assert.equal(result.status, 0, result.stderr);
-    const answer = JSON.parse(result.stdout);
-    return { runs: answer.runs.map(({ native_daemon, ...summary }) => summary) };
+    return JSON.parse(result.stdout);
   };
   return { home, repo, run, key, socket, start, ready, reference, referenceStatus };
 }

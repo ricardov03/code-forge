@@ -781,13 +781,13 @@ export async function createWorker(opts, deps = {}) {
 
   /** Serve the queue until `stop()`. */
   async function run() {
-    await startDaemon();
-    announce();
     let interval = pollMs;
     let polled = false;
     /** @type {import('node:fs').FSWatcher | null} */
     let queueWatch = null;
     try {
+      await startDaemon();
+      announce();
       // Enqueue publishes a ticket by rename. Wake even during the longest idle back-off;
       // heartbeat and temporary files do not wake an idle worker.
       try {
@@ -864,7 +864,7 @@ export async function createWorker(opts, deps = {}) {
     self = null;
   }
 
-  return { processTicket, drain, run, once, stop, release, announce, startDaemon, watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
+  return { processTicket, drain, run, once, stop, release, announce, startDaemon, stopDaemon: () => stopDaemon(), watchTick: tickWatch, jevKeyResolved: jevKey !== null, sessionEnv: childEnv };
 }
 
 /**
@@ -908,8 +908,15 @@ export async function bootWorker(opts, deps = {}) {
     }
     // Startup must finish before worker.json signals readiness: an owner may
     // remove HOME immediately after that announcement to stop an orphan worker.
-    await worker.startDaemon();
-    worker.announce();
+    try {
+      await worker.startDaemon();
+      worker.announce();
+    } catch (error) {
+      worker.stop();
+      worker.release();
+      await worker.stopDaemon();
+      throw error;
+    }
   });
   return { ...worker, repoRoot, runRootDir };
 }

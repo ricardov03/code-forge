@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import childProcess, { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import fs, { copyFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import fs, { copyFileSync, existsSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
 import net from 'node:net';
 import path from 'node:path';
 import { after, mock, test } from 'node:test';
@@ -11,9 +11,12 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const daemonBinary = `${binary}-client-test-${process.pid}`;
 let daemonSpawns = 0;
+const daemonChildren = [];
 mock.module('node:child_process', { defaultExport: childProcess, namedExports: { ...childProcess, spawn: (file, args, options) => {
   if (args?.[0] === 'serve') daemonSpawns++;
-  return spawn(file === binary ? daemonBinary : file, args, options);
+  const child = spawn(file === binary ? daemonBinary : file, args, options);
+  if (args?.[0] === 'serve') daemonChildren.push(child);
+  return child;
 } } });
 // Installation tests rename/chmod the release binary in parallel. The lifecycle
 // still uses the real client and worker, resolving only that binary to our copy.
@@ -30,11 +33,24 @@ mock.module('../../src/ledger/write.mjs', { namedExports: { ...ledger, readAllRo
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
 const { default: status } = await import('../../src/cli/status.mjs');
 const native = await import('../../src/util/native.mjs');
-const { startRun } = await import('../../src/state/run.mjs');
+const { startRun, readRun } = await import('../../src/state/run.mjs');
+const { runRecordPath } = await import('../../src/state/paths.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { loadKey } = await import('../../src/state/signer.mjs');
-const { announceWorker, blockTickets, queueDir, retractWorker, writeResult } = await import('../../src/worker/queue.mjs');
-const { bootWorker } = await import('../../src/worker/loop.mjs');
+const queue = await import('../../src/worker/queue.mjs');
+const { announceWorker, blockTickets, queueDir, retractWorker, writeResult } = queue;
+let announceFailure = null;
+mock.module('../../src/worker/queue.mjs', { namedExports: { ...queue, announceWorker: (repo, who) => {
+  if (announceFailure) {
+    assert.equal(existsSync(announceFailure.socket), true, 'daemon socket exists before announcement fails');
+    assert.equal(daemonChildren.at(-1).exitCode, null, 'daemon is running before announcement fails');
+    throw announceFailure.error;
+  }
+  return queue.announceWorker(repo, who);
+} } });
+const { bootWorker, createWorker } = await import('../../src/worker/loop.mjs');
+mock.module('../../src/doctor/index.mjs', { namedExports: { runDoctor: async () => [] } });
+const { runDoctorCli } = await import('../../src/cli/doctor.mjs');
 
 after(() => rmSync(daemonBinary, { force: true }));
 let built = false;
@@ -71,9 +87,11 @@ async function fixture(t, config = { review: { exclude: ['**/*.md'] } }) {
   await ledger.appendRow({ event: 'block.open', run, block: 'B1' }, { slug: 'daemon-client-test' });
   announceWorker(repo, { pid: process.pid, run });
   const children = [];
+  const firstDaemon = daemonChildren.length;
   t.after(async () => {
+    announceFailure = null;
     retractWorker(repo, process.pid);
-    for (const child of children) {
+    for (const child of [...children, ...daemonChildren.slice(firstDaemon)]) {
       if (child.exitCode === null && child.signalCode === null) {
         const exited = once(child, 'exit');
         child.kill('SIGTERM');
@@ -113,7 +131,17 @@ async function fixture(t, config = { review: { exclude: ['**/*.md'] } }) {
     finally { process.stdout.write = oldWrite; }
     return text;
   }
-  return { home, run, repo, start, wait, show, config, key: await loadKey(run) };
+  async function doctor() {
+    let text = '';
+    await runDoctorCli(['--json', '--cwd', repo], {
+      stdout: { write: (s) => { text += s; } }, stderr: { write: () => {} },
+    });
+    const rows = JSON.parse(text).rows.filter((row) => row.id === 'native_daemon');
+    assert.equal(rows.length, 1, 'doctor reports exactly one daemon diagnostic');
+    assert.equal(rows[0].label, 'native daemon');
+    return rows[0].detail;
+  }
+  return { home, run, repo, start, wait, show, doctor, config, key: await loadKey(run) };
 }
 
 function ping(home, run) {
@@ -144,15 +172,19 @@ test('live daemon gives byte-identical wait and status payloads without client l
     started_at: '2026-01-01T00:00:01Z', finished_at: '2026-01-01T00:00:02Z', duration_ms: 1000,
   } });
   const done = await f.wait();
+  ledgerReads = 0;
   const json = await f.show();
   const text = await f.show(false);
-  assert.equal(JSON.parse(json).runs[0].native_daemon, 'off', 'Node-only status reports off');
+  assert.ok(ledgerReads > 0, 'Node-only status renders exercise the client ledger reader');
+  assert.match(text, /\nnative daemon: off\n/);
+  assert.equal(await f.doctor(), 'off');
   delete process.env.CODE_FORGE_NATIVE;
   ledgerReads = 0;
   assert.equal(await f.wait(), done, 'done wait bytes preserve file and timing key order');
-  assert.equal(await f.show(false), text, 'text status bytes equal Node');
-  assert.equal(await f.show(), json.replace('"native_daemon":"off"', '"native_daemon":"live"'), 'JSON differs only in daemon diagnostic');
+  assert.equal(await f.show(false), text.replace('native daemon: off', 'native daemon: live'), 'human status differs only in daemon diagnostic');
+  assert.equal(await f.show(), json, 'full JSON status bytes equal Node without removing any key');
   assert.equal(ledgerReads, 0, 'live wait and both status renders call the client ledger reader zero times');
+  assert.equal(await f.doctor(), 'live');
   assert.equal(JSON.parse(pending).reason, 'wait_timeout', 'pending fixture exercises timeout');
 
   // Findings delivered while another file is pending must survive the whole join.
@@ -194,10 +226,11 @@ test('dead or missing daemon falls back mid-wait; kill switches never touch a so
   const actual = await waiting;
   assert.ok(ledgerReads > 0, 'killed daemon causes the pending wait to read through Node');
   const fallbackStatus = await f.show();
-  assert.equal(JSON.parse(fallbackStatus).runs[0].native_daemon, 'fallback', 'dead daemon reports fallback');
+  assert.match(await f.show(false), /\nnative daemon: fallback\n/, 'dead daemon reports fallback in human text');
+  assert.equal(await f.doctor(), 'fallback');
   process.env.CODE_FORGE_NATIVE = '0';
   assert.equal(actual, await f.wait(), 'mid-wait fallback finishes with identical bytes');
-  assert.equal(fallbackStatus, (await f.show()).replace('"native_daemon":"off"', '"native_daemon":"fallback"'), 'fallback status preserves all Node payload bytes');
+  assert.equal(fallbackStatus, await f.show(), 'full fallback JSON status bytes equal Node without removing any key');
   delete process.env.CODE_FORGE_NATIVE;
   assert.equal(await f.wait(), actual, 'missing socket uses the identical Node answer');
 
@@ -219,6 +252,48 @@ test('dead or missing daemon falls back mid-wait; kill switches never touch a so
   assert.equal(connections, 0, 'both kill switches make zero socket connections');
   assert.equal(daemonSpawns - beforeSpawns, 0, 'both kill switches spawn zero daemons');
 });
+
+test('broken project config without a snapshot still returns the Node status answer', async (t) => {
+  const f = await fixture(t);
+  const record = await readRun(f.run);
+  delete record.config; // A run created before config snapshots must load the project file.
+  writeFileSync(runRecordPath(f.run), JSON.stringify(record));
+  process.env.CODE_FORGE_NATIVE = '0';
+  const expected = await f.show();
+  await f.start();
+  writeFileSync(path.join(f.repo, '.code-forge.yml'), 'version: [broken\n');
+  delete process.env.CODE_FORGE_NATIVE;
+  ledgerReads = 0;
+  assert.equal(await f.show(), expected, 'invalid config uses the same complete Node status JSON');
+  assert.ok(ledgerReads > 0, 'invalid config disables the live daemon and reads through Node');
+  assert.match(await f.show(false), /\nnative daemon: off\n/);
+});
+
+for (const mode of ['run', 'boot']) {
+  test(`${mode}: an announcement failure reaps the daemon process and removes its socket before rejecting`, async (t) => {
+    const f = await fixture(t);
+    retractWorker(f.repo, process.pid);
+    const failure = new Error('announcement failed');
+    const beforeSpawns = daemonSpawns;
+    announceFailure = { error: failure, socket: path.join(f.home, '.code-forge', 'runs', f.run, 'native.sock') };
+    if (mode === 'run') {
+      const worker = await createWorker({ runId: f.run, repoRoot: f.repo, cfg: f.config,
+        runRootDir: path.join(f.home, 'worker-tmp'), slug: 'daemon-client-test', key: f.key,
+      }, { writeRow: async () => {} });
+      await assert.rejects(worker.run(), (error) => error === failure);
+    } else {
+      await assert.rejects(bootWorker({ runId: f.run, cwd: f.repo }, { writeRow: async () => {} }), (error) => error === failure);
+    }
+    announceFailure = null;
+    assert.equal(daemonSpawns - beforeSpawns, 1, 'failure occurs after starting a real daemon');
+    const child = daemonChildren.at(-1);
+    assert.ok(child.exitCode !== null || child.signalCode !== null, 'owned daemon child has exited before rejection');
+    assert.throws(() => process.kill(child.pid, 0), { code: 'ESRCH' }, 'daemon pid no longer exists');
+    assert.equal(await ping(f.home, f.run), false, 'no daemon answers after rejection');
+    assert.equal(existsSync(path.join(f.home, '.code-forge', 'runs', f.run, 'native.sock')), false, 'daemon socket is removed');
+    assert.equal(queue.liveWorker(f.repo), null, 'no worker announcement is left');
+  });
+}
 
 test('worker owns daemon lifetime and protocol errors return null within a bounded timeout', async (t) => {
   const f = await fixture(t);

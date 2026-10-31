@@ -15,6 +15,7 @@
  *
  * Text: at most {@link STATUS_MAX_LINES} lines per run, runs separated by one blank line:
  *   run <id> · <status> · <plan|brief> · spent $<x>[ of $<budget>]
+ *   native daemon: <live|fallback|off>
  *   <id> <state> <level> · <model or -> · gate <pass|fail|none>[ (<gate>)] · findings <n>
  *   … +<k> more blocks                  (only when the open blocks do not fit)
  *   closed <a> · stopped <b>            (only when any exist; printed last, but block lines are
@@ -25,7 +26,7 @@
  * cannot be read. A run record with no status shows `-`.
  *
  * `--json`: exactly one line, `{"runs":[{run_id, status, mode, spent_usd, unknown_usd_sessions,
- * budget_usd, blocks, more, closed, stopped, native_daemon}]}` — every block that is neither closed nor stopped
+ * budget_usd, blocks, more, closed, stopped}]}` — every block that is neither closed nor stopped
  * (no cap), `more` always 0, `spent_usd` and `unknown_usd_sessions` null when the ledger cannot be
  * read, `status` null when the record has none.
  *
@@ -169,14 +170,15 @@ const usd = (n) => `$${n.toFixed(2)}`;
 
 /**
  * The text lines of one run, at most {@link STATUS_MAX_LINES}.
- * @param {RunStatus} s @returns {string[]}
+ * @param {RunStatus} s @param {string} [daemon] @returns {string[]}
  */
-export function runLines(s) {
+export function runLines(s, daemon) {
   const spent = s.spent_usd === null ? '$?' : `${usd(s.spent_usd)}${(s.unknown_usd_sessions ?? 0) > 0 ? '+?' : ''}`;
   const lines = [`run ${s.run_id} · ${s.status ?? '-'} · ${s.mode} · spent ${spent}${s.budget_usd !== null ? ` of ${usd(s.budget_usd)}` : ''}`];
+  if (daemon !== undefined) lines.push(`native daemon: ${daemon}`);
   const tally = s.closed + s.stopped > 0 ? `closed ${s.closed} · stopped ${s.stopped}` : null;
   const awaiting = s.awaiting_human_check?.length ? `awaiting_human_check: ${JSON.stringify(s.awaiting_human_check)}` : null;
-  const room = STATUS_MAX_LINES - 1 - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1);
+  const room = STATUS_MAX_LINES - lines.length - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1);
   const shown = s.blocks.length <= room ? s.blocks : s.blocks.slice(0, room - 1);
   for (const b of shown) {
     lines.push(`${b.id} ${b.state} ${b.level ?? '-'} · ${b.model ?? '-'} · gate ${b.gate.result}${b.gate.name ? ` (${b.gate.name})` : ''} · findings ${b.findings}`);
@@ -219,15 +221,21 @@ export default async function status(args) {
       records = await activeRunsFor(projectRootFor(process.cwd()));
     }
     const shown = [];
+    const daemons = [];
     for (const record of records) {
       let config;
       try {
-        config = configInForce(record) ?? (await loadProjectConfig(record.workspace)).config;
+        config = configInForce(record);
+        if (!config) {
+          const loaded = await loadProjectConfig(record.workspace);
+          config = loaded.ok ? loaded.config : { native: { daemon: false } };
+        }
       } catch { config = { native: { daemon: false } }; }
       const answer = await daemonRequest(String(record.run_id), { method: 'status' }, { config });
       let summary;
       try { summary = answer ? daemonStatus(answer.runs[0]) : null; } catch { summary = null; }
-      shown.push({ ...(summary ?? await statusOf(record)), native_daemon: summary ? 'live' : daemonEnabled(config) ? 'fallback' : 'off' });
+      shown.push(summary ?? await statusOf(record));
+      daemons.push(summary ? 'live' : daemonEnabled(config) ? 'fallback' : 'off');
     }
     if (json) {
       out(`${JSON.stringify({ runs: shown })}\n`);
@@ -237,7 +245,7 @@ export default async function status(args) {
       out('no active run\n');
       return 0;
     }
-    out(`${shown.map((s) => runLines(s).join('\n')).join('\n\n')}\n`);
+    out(`${shown.map((s, i) => runLines(s, daemons[i]).join('\n')).join('\n\n')}\n`);
     return 0;
   } catch (thrown) {
     err(`status: ${thrown?.message ?? String(thrown)}\n`);

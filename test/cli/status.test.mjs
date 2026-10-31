@@ -29,6 +29,7 @@ const WORKER = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], {
 after(() => WORKER.kill('SIGKILL'));
 const PID = String(WORKER.pid);
 const NATIVE_DAEMON = process.env.CODE_FORGE_NATIVE === '0' ? 'off' : 'fallback';
+const statusText = (text) => text.replace(/^(run [^\n]*)\n/gm, `$1\nnative daemon: ${NATIVE_DAEMON}\n`);
 /** @returns {string} the pid of a fresh stand-in, for a run that `run end` will stop */
 function ownWorker() {
   const child = spawn(process.execPath, ['-e', 'setTimeout(() => {}, 600000)'], { stdio: 'ignore' });
@@ -117,6 +118,8 @@ async function fixture(slug, runId, { extra = EXTERNAL, files = [], pid = PID } 
 
 /** @param {{code: number, stdout: string, stderr: string}} res @param {string} stdout */
 const ok = (res, stdout) => assert.deepEqual({ code: res.code, stdout: res.stdout }, { code: 0, stdout }, res.stderr);
+/** @param {{code: number, stdout: string, stderr: string}} res @param {string} stdout */
+const okStatus = (res, stdout) => ok(res, statusText(stdout));
 
 /**
  * A snapshot of everything status could write for ONE fixture: its slug's ledger files, its run's
@@ -186,9 +189,9 @@ test('B64a (1)(2)(3): status prints the run line, one line per open block (state
   // the snapshot holds this fixture's ledger and run record (so a write to either would show)
   assert.ok(Object.keys(files).some((f) => f.endsWith(`${fx.slug}.jsonl`)) && Object.keys(files).some((f) => f.endsWith(`${fx.runId}.json`)));
   // with --run, from the repository, and from a subfolder of it
-  ok(await cf(['status', '--run', 'r-b64a-main']), text);
-  ok(await cf(['status'], fx.repo), text);
-  ok(await cf(['status'], path.join(fx.repo, 'src')), text);
+  okStatus(await cf(['status', '--run', 'r-b64a-main']), text);
+  okStatus(await cf(['status'], fx.repo), text);
+  okStatus(await cf(['status'], path.join(fx.repo, 'src')), text);
   const json = await cf(['status', '--json'], fx.repo);
   assert.equal(json.code, 0);
   assert.equal(json.stdout.split('\n').length, 2, 'exactly one line');
@@ -210,7 +213,6 @@ test('B64a (1)(2)(3): status prints the run line, one line per open block (state
         more: 0,
         closed: 1,
         stopped: 1,
-        native_daemon: NATIVE_DAEMON,
       },
     ],
   });
@@ -226,12 +228,12 @@ test('B64a (2): an unknown session price shows as `+?` after the spend; no budge
   writeFile(repo, 'src/a.mjs', 'export const a = 1;\n');
   await commitAll(repo);
   assert.equal((await cf(['run', 'start', '--cwd', repo, '--run', 'r-b64a-brief', '--worker-pid', PID, '--mode', 'brief'])).code, 0);
-  ok(await cf(['status'], repo), 'run r-b64a-brief · active · brief · spent $0.00\n');
+  okStatus(await cf(['status'], repo), 'run r-b64a-brief · active · brief · spent $0.00\n');
   await appendRow({ run: 'r-b64a-brief', event: 'session', role: 'coder', provider: 'openai', model: 'gpt-5-codex', usd: 0.5 }, { slug: 'b64a-brief' });
   await appendRow({ run: 'r-b64a-brief', event: 'session', role: 'coder', provider: 'openai', model: 'gpt-5-codex', usd_unknown: true }, { slug: 'b64a-brief' });
-  ok(await cf(['status'], repo), 'run r-b64a-brief · active · brief · spent $0.50+?\n');
+  okStatus(await cf(['status'], repo), 'run r-b64a-brief · active · brief · spent $0.50+?\n');
   /** @param {Record<string, unknown>} money */
-  const run = (money) => ({ runs: [{ run_id: 'r-b64a-brief', status: 'active', mode: 'brief', ...money, budget_usd: null, blocks: [], more: 0, closed: 0, stopped: 0, native_daemon: NATIVE_DAEMON }] });
+  const run = (money) => ({ runs: [{ run_id: 'r-b64a-brief', status: 'active', mode: 'brief', ...money, budget_usd: null, blocks: [], more: 0, closed: 0, stopped: 0 }] });
   ok(await cf(['status', '--json'], repo), `${JSON.stringify(run({ spent_usd: 0.5, unknown_usd_sessions: 1 }))}\n`);
   assert.deepEqual(JSON.parse((await cf(['status', '--json'], repo)).stdout), run({ spent_usd: 0.5, unknown_usd_sessions: 1 }));
   // the ledger cannot be read (a rotated ledger file that is a directory): the amount is `$?` and
@@ -239,7 +241,7 @@ test('B64a (2): an unknown session price shows as `+?` after the spend; no budge
   const broken = path.join(ledgerDir(), 'b64a-brief.1.jsonl');
   mkdirSync(broken);
   try {
-    ok(await cf(['status'], repo), 'run r-b64a-brief · active · brief · spent $?\n');
+    okStatus(await cf(['status'], repo), 'run r-b64a-brief · active · brief · spent $?\n');
     assert.deepEqual(JSON.parse((await cf(['status', '--json'], repo)).stdout), run({ spent_usd: null, unknown_usd_sessions: null }));
   } finally {
     rmdirSync(broken);
@@ -250,9 +252,9 @@ test('B64a (2)(3): every session without a known price: `$0.00+?` with a budget,
   const fx = await fixture('b64a-unpriced', 'r-b64a-unpriced', { extra: `${EXTERNAL}${BUDGET}` });
   await fx.row({ event: 'session', role: 'coder', provider: 'openai', model: 'gpt-5-codex', usd_unknown: true });
   await fx.row({ event: 'session', role: 'reviewer', provider: 'anthropic', model: 'claude-opus-5-5', usd_unknown: true });
-  ok(await cf(['status'], fx.repo), 'run r-b64a-unpriced · active · plan · spent $0.00+? of $5.00\n');
+  okStatus(await cf(['status'], fx.repo), 'run r-b64a-unpriced · active · plan · spent $0.00+? of $5.00\n');
   assert.deepEqual(JSON.parse((await cf(['status', '--json'], fx.repo)).stdout), {
-    runs: [{ run_id: 'r-b64a-unpriced', status: 'active', mode: 'plan', spent_usd: 0, unknown_usd_sessions: 2, budget_usd: 5, blocks: [], more: 0, closed: 0, stopped: 0, native_daemon: NATIVE_DAEMON }],
+    runs: [{ run_id: 'r-b64a-unpriced', status: 'active', mode: 'plan', spent_usd: 0, unknown_usd_sessions: 2, budget_usd: 5, blocks: [], more: 0, closed: 0, stopped: 0 }],
   });
 });
 
@@ -268,7 +270,7 @@ test('B64a (1): status never waits on the run lock — with the lock held (as a 
     const calls = [{ args: ['status'], cwd: fx.repo }, { args: ['status', '--run', fx.runId] }];
     for (const { args, cwd } of calls) {
       const started = Date.now();
-      ok(await cf(args, cwd), 'run r-b64a-locked · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 0\n');
+      okStatus(await cf(args, cwd), 'run r-b64a-locked · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 0\n');
       assert.ok(Date.now() - started < 4500, `no wait on the lock: ${args.join(' ')}`);
     }
     // a block verb, by contrast, cannot get the lock while it is held
@@ -283,21 +285,22 @@ test('B64a (1): status never waits on the run lock — with the lock held (as a 
 test('B64a (2)(3): the 10-line cap — the last block line is `… +k more blocks`, the closed/stopped tally keeps its line; JSON lists every open block with more 0', async () => {
   const files = Array.from({ length: 12 }, (_, i) => `src/f${i + 1}.mjs`);
   const fx = await fixture('b64a-cap', 'r-b64a-cap', { files });
-  // 9 open blocks: header + 9 = exactly 10 lines, nothing hidden
-  for (let i = 1; i <= 9; i += 1) assert.equal((await fx.open(`B${i}`, [`src/f${i}.mjs`])).code, 0);
+  // 8 open blocks: header + daemon diagnostic + 8 = exactly 10 lines, nothing hidden
+  for (let i = 1; i <= 8; i += 1) assert.equal((await fx.open(`B${i}`, [`src/f${i}.mjs`])).code, 0);
   const line = (/** @type {number} */ i) => `B${i} open L1 · - · gate none · findings 0`;
   const header = 'run r-b64a-cap · active · plan · spent $0.00';
-  ok(await cf(['status'], fx.repo), `${[header, ...[1, 2, 3, 4, 5, 6, 7, 8, 9].map(line)].join('\n')}\n`);
-  // 10 open blocks: 8 shown, the 10th line says the rest
+  okStatus(await cf(['status'], fx.repo), `${[header, ...[1, 2, 3, 4, 5, 6, 7, 8].map(line)].join('\n')}\n`);
+  // 10 open blocks: 7 shown, the 10th line says the rest
+  assert.equal((await fx.open('B9', ['src/f9.mjs'])).code, 0);
   assert.equal((await fx.open('B10', ['src/f10.mjs'])).code, 0);
   const capped = (await cf(['status'], fx.repo)).stdout;
-  assert.equal(capped, `${[header, ...[1, 2, 3, 4, 5, 6, 7, 8].map(line), '… +2 more blocks'].join('\n')}\n`);
+  assert.equal(capped, statusText(`${[header, ...[1, 2, 3, 4, 5, 6, 7].map(line), '… +3 more blocks'].join('\n')}\n`));
   assert.equal(capped.split('\n').length - 1, 10);
-  // 11 opened, one stopped: 10 open + the tally — 7 shown, `… +3 more blocks`, then the tally
+  // 11 opened, one stopped: 10 open + the tally — 6 shown, `… +4 more blocks`, then the tally
   assert.equal((await fx.open('B11', ['src/f11.mjs'])).code, 0);
   ok(await fx.block(['stop', 'B11', '--reason', 'dropped']), 'block B11 stopped\n');
   const tallied = (await cf(['status'], fx.repo)).stdout;
-  assert.equal(tallied, `${[header, ...[1, 2, 3, 4, 5, 6, 7].map(line), '… +3 more blocks', 'closed 0 · stopped 1'].join('\n')}\n`);
+  assert.equal(tallied, statusText(`${[header, ...[1, 2, 3, 4, 5, 6].map(line), '… +4 more blocks', 'closed 0 · stopped 1'].join('\n')}\n`));
   assert.equal(tallied.split('\n').length - 1, 10);
   const json = JSON.parse((await cf(['status', '--json'], fx.repo)).stdout);
   assert.deepEqual(
@@ -314,10 +317,10 @@ test('B64a (1): no run, an ended run, another repository\'s run: `no active run`
   const lone = await makeRepo();
   ok(await cf(['status'], lone), 'no active run\n');
   ok(await cf(['status', '--json'], lone), '{"runs":[]}\n');
-  ok(await cf(['status'], other.repo), 'run r-b64a-other · active · plan · spent $0.00\n');
+  okStatus(await cf(['status'], other.repo), 'run r-b64a-other · active · plan · spent $0.00\n');
   // a second run of the same repository, started later
   assert.equal((await cf(['run', 'start', '--cwd', fx.repo, '--run', 'r-b64a-many-b', '--worker-pid', ownWorker()])).code, 0);
-  ok(await cf(['status'], fx.repo), 'run r-b64a-many-b · active · plan · spent $0.00\n\nrun r-b64a-many-a · active · plan · spent $0.00\n');
+  okStatus(await cf(['status'], fx.repo), 'run r-b64a-many-b · active · plan · spent $0.00\n\nrun r-b64a-many-a · active · plan · spent $0.00\n');
   assert.deepEqual(
     JSON.parse((await cf(['status', '--json'], fx.repo)).stdout).runs.map((/** @type {{run_id: string}} */ r) => r.run_id),
     ['r-b64a-many-b', 'r-b64a-many-a'],
@@ -327,7 +330,7 @@ test('B64a (1): no run, an ended run, another repository\'s run: `no active run`
   ok(await cf(['run', 'end', '--run', 'r-b64a-many-a']), 'run r-b64a-many-a ended\n');
   ok(await cf(['status'], fx.repo), 'no active run\n');
   // --run still shows an ended run
-  ok(await cf(['status', '--run', 'r-b64a-many-a']), 'run r-b64a-many-a · ended · plan · spent $0.00\n');
+  okStatus(await cf(['status', '--run', 'r-b64a-many-a']), 'run r-b64a-many-a · ended · plan · spent $0.00\n');
 });
 
 test('B64a (1): an unknown --run exits 1 with a clear message; a usage error exits 2; neither prints on stdout', async () => {
@@ -379,7 +382,7 @@ test('B64a (5): neither status nor block --json ever prints transcript or diff t
     assert.equal(res.stdout.includes(MARKER), false, res.stdout);
   }
   for (const res of opened) assert.equal(res.stdout.includes(MARKER), false, res.stdout);
-  assert.equal(outputs[0].stdout, 'run r-b64a-marker · active · plan · spent $0.10\nB1 open L1 · - · gate none · findings 0\nB2 open L1 · openai/gpt-5-codex · gate fail (test) · findings 1\n');
+  assert.equal(outputs[0].stdout, statusText('run r-b64a-marker · active · plan · spent $0.10\nB1 open L1 · - · gate none · findings 0\nB2 open L1 · openai/gpt-5-codex · gate fail (test) · findings 1\n'));
   assert.equal(outputs[4].stdout, `${JSON.stringify({ block: 'B1', event: 'closed', status: 'closed', reason: null, close_event: null })}\n`);
 });
 
@@ -539,7 +542,7 @@ test('B64a (4): close --remove-worktree --json on a block with no worktree: the 
   assert.deepEqual(await fx.block(['close', 'B1', '--worker-pid', PID, '--remove-worktree', '--json']), { code: 2, stdout: '', stderr });
   assert.deepEqual(await fx.block(['close', 'B1', '--worker-pid', PID, '--remove-worktree']), { code: 2, stdout: '', stderr });
   assert.deepEqual(await fx.rows(), before);
-  ok(await cf(['status', '--run', fx.runId]), 'run r-b64a-nowt · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 0\n');
+  okStatus(await cf(['status', '--run', fx.runId]), 'run r-b64a-nowt · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 0\n');
 });
 
 test('B64a (4): a --json close through the review gate (a signed approval of the changed file, no external reviewer) prints exactly one JSON line', async () => {
@@ -599,7 +602,7 @@ test('B64a (1): status on a run whose key file is missing creates no key and cha
     const names = listing();
     assert.equal(names.includes(`${fx.runId}.key`), false);
     const files = snapshot(fx);
-    ok(await cf(['status', '--run', fx.runId]), 'run r-b64a-nokey · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 1\n');
+    okStatus(await cf(['status', '--run', fx.runId]), 'run r-b64a-nokey · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 1\n');
     assert.equal(JSON.parse((await cf(['status', '--json'], fx.repo)).stdout).runs[0].blocks[0].findings, 1);
     assert.deepEqual(listing(), names);
     assert.deepEqual(snapshot(fx), files);
@@ -612,7 +615,7 @@ test('B64a (2)(3): a review row with no content_hash leaves its open finding cou
   const fx = await fixture('b64a-hashless', 'r-b64a-hashless', { files: ['src/a.mjs'] });
   assert.equal((await fx.open('B1', ['src/a.mjs'])).code, 0);
   await fx.row({ event: 'review.result', block: 'B1', file: 'src/a.mjs', status: 'reviewed', approved: false, open: [{ id: 'F1', severity: 'warning' }] });
-  ok(await cf(['status', '--run', fx.runId]), 'run r-b64a-hashless · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 1\n');
+  okStatus(await cf(['status', '--run', fx.runId]), 'run r-b64a-hashless · active · plan · spent $0.00\nB1 open L1 · - · gate none · findings 1\n');
 });
 
 test('B64a (2)(3): the model is the provider/model of the latest coder session row that names one — a real spawn-shaped row; a later `ledger add coder` row (no model) does not hide it', async () => {
@@ -625,6 +628,6 @@ test('B64a (2)(3): the model is the provider/model of the latest coder session r
   assert.equal(added.code, 0, added.stderr);
   const last = (await fx.rows()).at(-1);
   assert.deepEqual([last?.event, last?.role, last?.manual, last?.model], ['session', 'coder', true, undefined]);
-  ok(await cf(['status', '--run', fx.runId]), 'run r-b64a-model · active · plan · spent $1.00\nB1 open L1 · openai/gpt-5-codex · gate none · findings 0\n');
+  okStatus(await cf(['status', '--run', fx.runId]), 'run r-b64a-model · active · plan · spent $1.00\nB1 open L1 · openai/gpt-5-codex · gate none · findings 0\n');
   assert.equal(JSON.parse((await cf(['status', '--run', fx.runId, '--json'])).stdout).runs[0].blocks[0].model, 'openai/gpt-5-codex');
 });
