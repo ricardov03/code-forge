@@ -57,7 +57,7 @@ async function fixture(providers, review = {}, providerHints = false) {
 
 function peak(records, provider) {
   const events = records.filter((r) => !provider || r.provider === provider)
-    .flatMap((r) => [[r.start, 1], [r.end, -1]])
+    .flatMap((r) => [[r.start, 1], [r.end ?? Infinity, -1]])
     .sort((a, b) => a[0] - b[0] || a[1] - b[1]);
   let active = 0;
   let max = 0;
@@ -65,12 +65,18 @@ function peak(records, provider) {
   return max;
 }
 
-test('default parallel_tickets runs six queued reviews simultaneously', async () => {
-  const p = await fixture(['anthropic', 'openai', 'anthropic', 'openai', 'anthropic', 'anthropic']);
+test('default parallel_tickets caps seven queued reviews at six without binding provider caps', async () => {
+  const p = await fixture(['anthropic', 'openai', 'anthropic', 'openai', 'anthropic', 'anthropic', 'openai'], {}, true);
   const drained = p.worker.drain();
-  try { await waitFor(() => p.records.length === 6, 5000); }
-  finally { p.release(); await drained; }
-  assert.equal(p.records.length, 6, 'all six fake reviewer sessions finish');
+  try {
+    assert.equal(await waitFor(() => p.records.length >= 6, 5000), true, 'six reviewer sessions start');
+    await sleep(100); // allow multiple drain ticks to try admitting the seventh ticket
+    assert.equal(peak(p.records), 6, 'exactly six sessions overlap while the gate is held');
+    assert.equal(p.tickets.max, 6, 'the default ticket pool admits at most six tickets');
+  } finally { p.release(); await drained; }
+  assert.equal(p.records.length, 7, 'all seven fake reviewer sessions finish');
+  assert.ok(p.records.every((r) => r.end !== null), 'every reviewer session finishes after release');
+  assert.equal(p.tickets.started, 7, 'all seven tickets run');
   assert.equal(peak(p.records), 6, 'six review intervals overlap with default configuration');
   assert.equal(pendingTickets(p.repo).length, 0, 'zero tickets remain pending');
 });
