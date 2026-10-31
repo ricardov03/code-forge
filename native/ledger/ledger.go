@@ -2,8 +2,10 @@
 package ledger
 
 import (
+	"bytes"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -11,6 +13,117 @@ import (
 	"strconv"
 	"strings"
 )
+
+// Index retains each inode's parsed lines and physical read offset. An unfinished
+// line is kept in memory, including valid JSON without a trailing newline: Node
+// exposes that value now, but a later append can still change its meaning.
+type Index struct {
+	files     map[string]*tail
+	BytesRead int64
+}
+
+type parsedLine struct {
+	row Row
+	err error
+}
+
+type tail struct {
+	info    os.FileInfo
+	offset  int64
+	lines   []parsedLine
+	partial []byte
+}
+
+// Refresh reads only appended bytes. Renames reuse the inode's cached rows;
+// replacements and truncations start a new tail. Its ordering and tolerated last
+// malformed nonempty line are the same as ReadAllRows.
+func (idx *Index) Refresh(dir, slug string) ([]Row, error) {
+	names, err := ledgerNames(dir, slug)
+	if err != nil {
+		return nil, err
+	}
+	next := make(map[string]*tail)
+	used := make(map[*tail]bool)
+	rows := []Row{}
+	for _, name := range names {
+		file := filepath.Join(dir, name)
+		info, err := os.Stat(file)
+		if os.IsNotExist(err) {
+			continue
+		}
+		if err != nil {
+			return nil, err
+		}
+		if !info.Mode().IsRegular() {
+			return nil, fmt.Errorf("ledger is not a regular file")
+		}
+		var state *tail
+		for _, old := range idx.files {
+			if !used[old] && os.SameFile(old.info, info) {
+				state = old
+				break
+			}
+		}
+		if state == nil || info.Size() < state.offset || (info.Size() == state.offset && !info.ModTime().Equal(state.info.ModTime())) {
+			state = &tail{info: info}
+		}
+		used[state] = true
+		next[file] = state
+		if info.Size() > state.offset {
+			f, err := os.Open(file)
+			if err != nil {
+				return nil, err
+			}
+			_, err = f.Seek(state.offset, io.SeekStart)
+			var data []byte
+			if err == nil {
+				data, err = io.ReadAll(io.LimitReader(f, info.Size()-state.offset))
+			}
+			f.Close()
+			if err != nil {
+				return nil, err
+			}
+			idx.BytesRead += int64(len(data))
+			state.offset += int64(len(data))
+			data = append(state.partial, data...)
+			parts := bytes.Split(data, []byte{'\n'})
+			for _, line := range parts[:len(parts)-1] {
+				if len(line) != 0 {
+					state.lines = append(state.lines, parseLine(line))
+				}
+			}
+			state.partial = bytes.Clone(parts[len(parts)-1])
+		}
+		state.info = info
+		count := len(state.lines)
+		if len(state.partial) > 0 {
+			count++
+		}
+		for i, line := range state.lines {
+			if line.err != nil {
+				if i != count-1 {
+					return nil, fmt.Errorf("%s: line %d: %w", file, i+1, line.err)
+				}
+			} else {
+				rows = append(rows, line.row)
+			}
+		}
+		if len(state.partial) > 0 {
+			line := parseLine(state.partial)
+			if line.err == nil {
+				rows = append(rows, line.row)
+			}
+		}
+	}
+	idx.files = next
+	return rows, nil
+}
+
+func parseLine(data []byte) parsedLine {
+	var row Row
+	err := json.Unmarshal(data, &row)
+	return parsedLine{row: row, err: err}
+}
 
 var slugPattern = regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`)
 
@@ -28,12 +141,28 @@ func ReadRows(dir, slug string) ([]Row, error) {
 
 // ReadAllRows reads rotations in numeric order, followed by the current file.
 func ReadAllRows(dir, slug string) ([]Row, error) {
+	names, err := ledgerNames(dir, slug)
+	if err != nil {
+		return nil, err
+	}
+	rows := []Row{}
+	for _, name := range names {
+		part, err := readFile(filepath.Join(dir, name))
+		if err != nil {
+			return nil, err
+		}
+		rows = append(rows, part...)
+	}
+	return rows, nil
+}
+
+func ledgerNames(dir, slug string) ([]string, error) {
 	if !slugPattern.MatchString(slug) {
 		return nil, fmt.Errorf("invalid ledger slug %q", slug)
 	}
 	entries, err := os.ReadDir(dir)
 	if os.IsNotExist(err) {
-		return []Row{}, nil
+		return []string{}, nil
 	}
 	if err != nil {
 		return nil, err
@@ -55,15 +184,11 @@ func ReadAllRows(dir, slug string) ([]Row, error) {
 	}
 	sort.SliceStable(rotated, func(i, j int) bool { return rotated[i].n < rotated[j].n })
 	rotated = append(rotated, rotation{name: slug + ".jsonl"})
-	rows := []Row{}
+	names := []string{}
 	for _, file := range rotated {
-		part, err := readFile(filepath.Join(dir, file.name))
-		if err != nil {
-			return nil, err
-		}
-		rows = append(rows, part...)
+		names = append(names, file.name)
 	}
-	return rows, nil
+	return names, nil
 }
 
 func readFile(file string) ([]Row, error) {

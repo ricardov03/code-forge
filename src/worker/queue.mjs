@@ -589,7 +589,7 @@ export function readTicket(repoRoot, id) {
   const t = readJSON(path.join(queueDir(repoRoot), `${assertTicketId(id)}.json`));
   if (!t || typeof t !== 'object') throw new WorkerError('bad-ticket', `ticket ${id} is not readable JSON`);
   assertRowPath(t.file);
-  if (t.tree !== undefined && (typeof t.tree !== 'string' || !path.isAbsolute(t.tree))) throw new WorkerError('bad-ticket', `ticket ${id} names a tree that is not an absolute path`);
+  if (t.tree != null && (typeof t.tree !== 'string' || !path.isAbsolute(t.tree))) throw new WorkerError('bad-ticket', `ticket ${id} names a tree that is not an absolute path`);
   if (typeof t.run !== 'string' || typeof t.block !== 'string' || typeof t.content_hash !== 'string') {
     throw new WorkerError('bad-ticket', `ticket ${id} does not match its id`);
   }
