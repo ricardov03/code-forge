@@ -14,25 +14,32 @@ const { createKeyStore } = await import('../../src/keys/store.mjs');
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
 /** Fake sessions retain their start/end times and stay live until the test opens the gate. */
-async function fixture(providers, review = {}) {
+async function fixture(providers, review = {}, providerHints = false) {
   const { repo, runId } = await makeRepo();
   let release;
   const gate = new Promise((resolve) => { release = resolve; });
   const records = [];
+  const tickets = { active: 0, max: 0, started: 0 };
   const files = providers.map((provider, i) => `src/${String.fromCharCode(97 + i)}.mjs`);
-  for (const file of files) fs.writeFileSync(path.join(repo, file), `export const x = 1;\n`);
+  for (const [i, file] of files.entries()) fs.writeFileSync(path.join(repo, file), `export const x = 1;\n${'// line\n'.repeat(i)}`);
+  const cfg = providerHints ? { provider: providers[0], review: { ...review, routes: providers.map((provider, i) => ({ min_lines: i + 1, model: 'fake-reviewer', provider })) } } : { review };
   const worker = await createWorker({
-    runId, repoRoot: repo, cfg: { review }, runRootDir: freshDir('runroot'),
+    runId, repoRoot: repo, cfg, runRootDir: freshDir('runroot'),
     slug: 'worker-test', key: await loadKey(runId), pollMs: 10,
   }, {
     store: await createKeyStore({ backends: [], dir: freshDir('store') }), env: {},
     writeRow: async () => {}, readRows: async () => [],
     review: async (ticket, ctx) => {
-      const provider = providers[files.indexOf(ticket.file)];
-      await ctx.spawn({ level: 'L2', role: 'reviewer', cfg: {
-        provider, levels: { L2: { model: 'fake-reviewer' } }, review,
-      } });
-      return { status: 'reviewed', approved: true, engine: 'fake', sessions: [] };
+      tickets.active += 1;
+      tickets.started += 1;
+      tickets.max = Math.max(tickets.max, tickets.active);
+      try {
+        const provider = providers[files.indexOf(ticket.file)];
+        await ctx.spawn({ level: 'L2', role: 'reviewer', cfg: {
+          provider, levels: { L2: { model: 'fake-reviewer' } }, review,
+        } });
+        return { status: 'reviewed', approved: true, engine: 'fake', sessions: [] };
+      } finally { tickets.active -= 1; }
     },
     spawn: async (opts) => {
       const record = { provider: opts.cfg.provider, start: performance.now(), end: null };
@@ -45,7 +52,7 @@ async function fixture(providers, review = {}) {
   for (const [i, file] of files.entries()) enqueue({
     repoRoot: repo, run: runId, block: BLOCK, file, now: new Date(1_700_000_000_000 + i),
   });
-  return { repo, runId, worker, records, release: () => release(), files };
+  return { repo, runId, worker, records, tickets, release: () => release(), files };
 }
 
 function peak(records, provider) {
@@ -79,8 +86,23 @@ test('provider_parallel 2 runs at most two of four same-provider sessions', asyn
   assert.equal(peak(p.records, 'anthropic'), 2, 'exactly two anthropic sessions overlap');
 });
 
+test('provider-waiting tickets count toward parallel_tickets 2 with four pending tickets', async () => {
+  const p = await fixture(Array(4).fill('anthropic'), { parallel_tickets: 2, provider_parallel: 1 });
+  const drained = p.worker.drain();
+  try {
+    assert.equal(await waitFor(() => p.tickets.started >= 2, 5000), true, 'two tickets enter the pool');
+    await sleep(100); // multiple drain ticks with one active session and one provider waiter
+    assert.equal(p.records.length, 1, 'the provider stays at its one-session cap');
+    assert.equal(p.tickets.active, 2, 'the active session and provider waiter fill both ticket slots');
+    assert.equal(p.tickets.started, 2, 'the other two tickets stay pending');
+  } finally { p.release(); await drained; }
+  assert.equal(p.tickets.max, 2, 'at most two tickets overlap throughout the drain');
+  assert.equal(p.tickets.started, 4, 'all four tickets eventually run');
+  assert.equal(pendingTickets(p.repo).length, 0, 'all four tickets complete');
+});
+
 test('default provider cap leaves other providers runnable behind saturated tickets', async () => {
-  const p = await fixture([...Array(6).fill('anthropic'), 'openai']);
+  const p = await fixture([...Array(6).fill('anthropic'), 'openai'], {}, true);
   const drained = p.worker.drain();
   let otherStarted;
   try {
@@ -90,6 +112,7 @@ test('default provider cap leaves other providers runnable behind saturated tick
   assert.equal(peak(p.records, 'anthropic'), 4, 'default provider cap permits exactly four anthropic sessions');
   assert.equal(p.records.length, 7, 'all seven sessions eventually finish');
   assert.ok(peak(p.records) <= 6, 'no more than six sessions overlap across providers');
+  assert.ok(p.tickets.max <= 6, 'no more than six tickets overlap across providers');
 });
 
 async function join(p, deps = {}) {

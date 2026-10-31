@@ -295,9 +295,8 @@ export async function createWorker(opts, deps = {}) {
   let poolWake = null;
   let activity = 0;
 
-  // Sessions waiting for a provider stay in the pool without preventing tickets for another
-  // provider from starting. Resolve the provider at spawn time, after routing and second-level
-  // overrides, rather than guessing it from the ticket's original config.
+  // Sessions waiting for a provider retain their ticket's pool slot. Resolve the actual provider
+  // at spawn time, after routing and second-level overrides; admission hints never bypass caps.
   let ticketLimit = parallelTickets(cfg);
   let providerParallel = DEFAULT_PROVIDER_PARALLEL;
   /** @type {Map<string, {active: number, pending: number}>} */
@@ -367,6 +366,11 @@ export async function createWorker(opts, deps = {}) {
    * @throws {Error} `config-snapshot` — a record that cannot be read, or a missing/altered snapshot.
    */
   async function configFor(id) {
+    return snapshotFor(await configRecord(), id)?.config ?? cfg;
+  }
+
+  /** Read once for pool admission hints; ticket processing still re-reads its own snapshot. */
+  async function configRecord() {
     // The Jev key and the run root were settled at boot from `cfg`; a reload can never change
     // them, because `keys`, `system1.key` and `tmp.root` are fixed keys `run reload` refuses.
     let record;
@@ -375,13 +379,13 @@ export async function createWorker(opts, deps = {}) {
         record = await loadRun(runId);
         break;
       } catch (err) {
-        if (/** @type {any} */ (err)?.code === 'no-run') return cfg;
+        if (/** @type {any} */ (err)?.code === 'no-run') return null;
         // a transient read error (e.g. the record caught mid-replace) gets ONE retry
         if (attempt >= 2) throw new Error('config-snapshot');
         await new Promise((resolve) => setTimeout(resolve, CONFIG_RETRY_MS));
       }
     }
-    return snapshotFor(record, id)?.config ?? cfg;
+    return record;
   }
 
   /**
@@ -620,19 +624,21 @@ export async function createWorker(opts, deps = {}) {
   /**
    * Pool settings from the snapshot in force, else the boot config. A run reload applies at the
    * next drain; anything but an integer 1–16 uses the default size.
-   * @returns {Promise<{limit: number, fairShare: boolean}>}
+   * @returns {Promise<{limit: number, fairShare: boolean, record: Record<string, any> | null}>}
    */
   async function poolSettings() {
     let current = cfg;
+    let record = null;
     try {
-      current = await configFor('');
+      record = await configRecord();
+      current = snapshotFor(record, '')?.config ?? cfg;
     } catch {
       // an unreadable record: the boot settings (each ticket still fails closed on its own)
     }
     ticketLimit = parallelTickets(current);
     const cap = current?.review?.provider_parallel;
     providerParallel = Number.isInteger(cap) && cap >= 1 && cap <= MAX_PARALLEL_TICKETS ? cap : DEFAULT_PROVIDER_PARALLEL;
-    return { limit: parallelTickets(current), fairShare: current?.review?.fair_share === true };
+    return { limit: parallelTickets(current), fairShare: current?.review?.fair_share === true, record };
   }
 
   /**
@@ -657,6 +663,27 @@ export async function createWorker(opts, deps = {}) {
       const file = { key: fileLockKey(t.block, t.file), block: t.block };
       fileKeys.set(id, file);
       return file;
+    } catch {
+      return null;
+    }
+  }
+
+  /**
+   * The initial reviewer's provider is an admission hint, including snapshot and size routing.
+   * Unknown or invalid hints still enter the bounded pool so the normal checks can refuse them.
+   * Later sessions may use another provider; `spawnPooled` enforces their actual session caps.
+   * @param {string} id @param {Record<string, any> | null} record @returns {Promise<string | null>}
+   */
+  async function providerHint(id, record) {
+    try {
+      let current = snapshotFor(record, id)?.config ?? cfg;
+      if (current?.review?.routes?.length) {
+        const ticket = loadTicket(repoRoot, id);
+        const root = await contentRootFor(runId, ticket.block, repoRoot);
+        const bytes = readRegularFileNoFollow(root, ticket.file);
+        current = routeTicket(current, { lines: countLines(bytes), deleted: bytes === null, timeoutS: DEFAULT_SESSION_TIMEOUT_S }).cfg;
+      }
+      return current?.levels?.L2?.provider ?? current?.provider ?? null;
     } catch {
       return null;
     }
@@ -689,6 +716,8 @@ export async function createWorker(opts, deps = {}) {
     }
     /** @type {number | null} */
     let limit = null;
+    /** @type {Record<string, any> | null} */
+    let record = null;
     let fairShare = false;
     let done = 0;
     /** @type {Map<string, Promise<void>>} */
@@ -697,6 +726,8 @@ export async function createWorker(opts, deps = {}) {
     const busy = new Set();
     /** @type {Map<string, number>} running tickets per block */
     const runningByBlock = new Map();
+    /** @type {Map<string, number>} reserve provider capacity while admitted tickets prepare */
+    const admittedByProvider = new Map();
     /** @type {Set<string>} */
     const started = new Set();
     for (;;) {
@@ -724,12 +755,13 @@ export async function createWorker(opts, deps = {}) {
         }
         const pending = pendingTickets(repoRoot).filter((id) => !poisoned.has(id) && !started.has(id));
         if (pending.length > 0 || running.size > 0) activity += 1;
-        if (pending.length > 0 && limit === null) ({ limit, fairShare } = await poolSettings());
+        if (pending.length > 0 && limit === null) ({ limit, fairShare, record } = await poolSettings());
         // Cache even unreadable hints for this tick: ranking never reads a ticket twice.
         /** @type {Map<string, ReturnType<typeof fileKeyOf>>} */
         const hints = new Map();
-        const runnableCount = () => running.size - [...ticketSessions.values()].filter((s) => s.pending > 0 && s.active === 0).length;
-        while (pending.length > 0 && runnableCount() < limit && !stopping) {
+        /** @type {Map<string, string | null>} */
+        const providers = new Map();
+        while (pending.length > 0 && running.size < limit && !stopping) {
           let next = -1;
           let fewest = Infinity;
           for (let i = 0; i < pending.length; i += 1) {
@@ -737,6 +769,9 @@ export async function createWorker(opts, deps = {}) {
             if (!hints.has(id)) hints.set(id, fileKeyOf(id));
             const file = hints.get(id);
             if (file && busy.has(file.key)) continue; // waits without a slot
+            if (!providers.has(id)) providers.set(id, await providerHint(id, record));
+            const provider = providers.get(id);
+            if (provider && Math.max(admittedByProvider.get(provider) ?? 0, providerActive.get(provider) ?? 0) >= providerParallel) continue;
             const count = fairShare && file ? runningByBlock.get(file.block) ?? 0 : 0;
             if (count < fewest) {
               next = i;
@@ -756,10 +791,12 @@ export async function createWorker(opts, deps = {}) {
           }
           const file = hints.get(id);
           const fileKey = file?.key ?? null;
+          const provider = providers.get(id);
           started.add(id);
           activeTickets.add(id);
           if (fileKey !== null) busy.add(fileKey);
           if (file) runningByBlock.set(file.block, (runningByBlock.get(file.block) ?? 0) + 1);
+          if (provider) admittedByProvider.set(provider, (admittedByProvider.get(provider) ?? 0) + 1);
           const slot = runOne(id)
             .then((n) => {
               done += n;
@@ -772,6 +809,7 @@ export async function createWorker(opts, deps = {}) {
               fileKeys.delete(id);
               if (fileKey !== null) busy.delete(fileKey);
               if (file) runningByBlock.set(file.block, runningByBlock.get(file.block) - 1);
+              if (provider) admittedByProvider.set(provider, admittedByProvider.get(provider) - 1);
             });
           running.set(id, slot);
         }
