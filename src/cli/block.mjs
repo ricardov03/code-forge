@@ -385,6 +385,7 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
     const deadline = Date.now() + maxMs;
     await autoClaimChanges({ record, runId, id, writeRow: (row) => appendRow(row, { slug: record.project }), print: (line) => writeSafe(json ? stderr : stdout, line), join: false });
     let joined;
+    // Findings are usually final; cap retries so land does not wait the full --max on them.
     for (let attempt = 0; attempt < 3; attempt += 1) {
       const remaining = Math.max(0, deadline - Date.now());
       if (remaining === 0) return stop('wait_timeout');
@@ -392,7 +393,10 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
       joined = await capture((streams) => runReviewFile(['--wait-block', id, '--run', runId, '--max', duration], { ...streams, cwd: tree.workspace }));
       if (joined.code !== 0 || !joined.data?.done || !joined.data.files.some((file) => file.status === 'findings')) break;
     }
-    if (joined.code !== 0 || !joined.data?.done) return stop(joined.error || joined.data?.message || joined.data?.reason || joined.data?.status || 'reviews did not finish');
+    if (joined.code !== 0 || !joined.data?.done) {
+      if (joined.data?.status === 'wait_timeout' || joined.data?.reason === 'wait_timeout' || Date.now() >= deadline) return stop('wait_timeout');
+      return stop(joined.error || joined.data?.message || joined.data?.reason || joined.data?.status || 'reviews did not finish');
+    }
     const problems = joined.data.files.filter((/** @type {Record<string, any>} */ file) => file.status !== 'excluded' && file.outcome !== 'approved');
     if (problems.length > 0) {
       const details = [];
