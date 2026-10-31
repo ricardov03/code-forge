@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.15.3] — 2026-10-30
+
 ### Added
 
 - Gate sets per block kind (`gates.kinds`), and unknown config keys now say to upgrade with the running version (B160)
