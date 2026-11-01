@@ -694,6 +694,11 @@ async function waitBlock({ repoRoot, cwd, block, run, maxMs, pollMs, say, print,
       say({ block, files, done: false, reason: 'split_required', next: `The owner raises review.budgets for ${split.file}, runs run reload, then review-file ${split.file} --fresh.` });
       return 0;
     }
+    const unavailable = files.find((f) => f.outcome === 'unavailable');
+    if (live && unavailable) {
+      say({ block, files, done: false, reason: 'review_unavailable', next: `review-file ${unavailable.file} --fresh re-runs it; if --fresh refuses, block reopen ${block} --run ${run} --file ${unavailable.file} --reason <text>` });
+      return 0;
+    }
     if (live && files.every((f) => f.status === 'done' || f.status === 'findings' || f.status === 'excluded')) {
       say({ block, files, done: true });
       return 0;

@@ -457,7 +457,8 @@ test('B125 clause 2: unavailable and round-1 split retry once; counted and unrea
       if (corrupt === 'marker') {
         assert.deepEqual([joined.code, joined.json.reason], [1, 'result-unreadable']);
       } else {
-        assert.deepEqual([joined.code, joined.json.done, joined.json.files], [0, !retry, [{ file: FILE, ticket: first.ticket, status: retry ? 'pending' : 'done', outcome }]], `${result.status}/${corrupt ?? 'valid'} join`);
+        assert.deepEqual([joined.code, joined.json.done, joined.json.files], [0, !retry && outcome !== 'unavailable', [{ file: FILE, ticket: first.ticket, status: retry ? 'pending' : 'done', outcome }]], `${result.status}/${corrupt ?? 'valid'} join`);
+        if (outcome === 'unavailable') assert.equal(joined.json.reason, 'review_unavailable', `${result.status}/${corrupt ?? 'valid'} reason`);
       }
       if (!retry) {
         assert.deepEqual([readFileSync(marker), statSync(marker).ino], [before, inode], `${result.status}/${corrupt ?? 'valid'} marker kept without a rename`);
@@ -469,7 +470,7 @@ test('B125 clause 2: unavailable and round-1 split retry once; counted and unrea
   }
 });
 
-test('B125 clause 3: a rerun that goes stale again is done across joins with no second drop', async () => {
+test('B125 clause 3: a rerun that goes stale again reports unavailable across joins with no second drop', async () => {
   const { repo, runId, sessions, worker, commit } = await scriptedWatch();
   announceWorker(repo, { pid: process.pid, run: runId });
   try {
@@ -488,7 +489,7 @@ test('B125 clause 3: a rerun that goes stale again is done across joins with no 
     const before = readFileSync(marker);
     for (let join = 0; join < 2; join += 1) {
       const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', '0ms'], repo);
-      assert.deepEqual([res.code, res.json], [0, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'unavailable', ...timingsOf(repo, runId, first.ticket) }], done: true }]);
+      assert.deepEqual([res.code, res.json], [0, { block: BLOCK, files: [{ file: FILE, ticket: first.ticket, status: 'done', outcome: 'unavailable', ...timingsOf(repo, runId, first.ticket) }], done: false, reason: 'review_unavailable', next: `review-file ${FILE} --fresh re-runs it; if --fresh refuses, block reopen ${BLOCK} --run ${runId} --file ${FILE} --reason <text>` }]);
       assert.equal(await worker.drain(), 0, `join ${join + 2} schedules zero additional reviews`);
       assert.deepEqual(readFileSync(marker), before, 'second stale result stays byte-for-byte');
     }

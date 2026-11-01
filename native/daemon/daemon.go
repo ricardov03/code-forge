@@ -325,7 +325,7 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	states := []object{}
 	done := true
 	notQueued := false
-	var split string
+	var split, unavailable string
 	for _, file := range files {
 		if !owns(owned, mapping(entry["owned_kinds"]), file) {
 			continue
@@ -440,6 +440,9 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 		if state["outcome"] == "split_required" && split == "" {
 			split = file
 		}
+		if state["outcome"] == "unavailable" && unavailable == "" {
+			unavailable = file
+		}
 		states = append(states, state)
 	}
 	result := object{"block": req.Block, "files": states, "done": false}
@@ -451,6 +454,10 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	}
 	if live && split != "" {
 		result["reason"], result["next"] = "split_required", fmt.Sprintf("The owner raises review.budgets for %s, runs run reload, then review-file %s --fresh.", split, split)
+		return result, true
+	}
+	if live && unavailable != "" {
+		result["reason"], result["next"] = "review_unavailable", fmt.Sprintf("review-file %s --fresh re-runs it; if --fresh refuses, block reopen %s --run %s --file %s --reason <text>", unavailable, req.Block, s.run, unavailable)
 		return result, true
 	}
 	if live && done {
