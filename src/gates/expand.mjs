@@ -74,6 +74,29 @@ export function isChangedTest(file) {
 }
 
 /**
+ * Keep test files supported by the executable's runner family. Wrappers in the JS family
+ * still accept JS tests; unknown executables retain the caller's complete file list.
+ * @param {ReadonlyArray<string>} argv @param {ReadonlyArray<string>} files
+ * @returns {string[]}
+ */
+export function testsForRunner(argv, files) {
+  let extensions;
+  switch (path.basename(argv[0] ?? '')) {
+    case 'node': case 'bun': case 'deno': case 'npm': case 'npx': case 'pnpm':
+    case 'yarn': case 'bunx': case 'vitest': case 'jest': case 'mocha':
+      extensions = /\.(?:js|mjs|cjs|jsx|ts|mts|cts|tsx)$/;
+      break;
+    case 'go': extensions = /\.go$/; break;
+    case 'php': case 'pest': case 'phpunit': extensions = /\.php$/; break;
+    case 'pytest': case 'python': case 'python3': extensions = /\.py$/; break;
+    case 'cargo': extensions = /\.rs$/; break;
+    case 'swift': case 'xcodebuild': extensions = /\.swift$/; break;
+    default: return [...files];
+  }
+  return files.filter((file) => extensions.test(file));
+}
+
+/**
  * Existing owned changed tests plus every test importing an owned changed source since base.
  * Deleted tests are omitted; ownership limits changed inputs, not their test callers.
  * @param {{cwd: string, base: string, owned: string[], kinds?: Record<string, string>}} opts
@@ -102,7 +125,7 @@ export async function changedTestFiles({ cwd, base, owned, kinds }) {
 const isConcreteFile = (p) => typeof p === 'string' && p.length > 0 && isExactEntry(p) && !p.endsWith('/');
 
 /**
- * @typedef {{scope: 'related', files: string[]} | {scope: 'full', reason: 'threshold' | 'no_tests'}} TestScope
+ * @typedef {{scope: 'related', files: string[]} | {scope: 'full', files?: string[], reason: 'threshold' | 'no_tests' | 'runner-filter'}} TestScope
  * @typedef {{scope: 'changed', files: string[], changedFiles: string[], dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'}} ChangedScope
  */
 
@@ -253,10 +276,10 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
 
 /**
  * One gate argv with every item that is exactly {@link TEST_FILES_TOKEN} replaced by the related
- * test files, or dropped for a full run. Always a new array; `scoped` is false (and the items
- * unchanged) when the gate has no such item.
+ * test files, or dropped for a full run. Always a new array; `scoped` records whether a scope
+ * placeholder was handled, including full runs. `full` signals a runner-filter fallback.
  * @param {ReadonlyArray<string>} argv @param {TestScope | ChangedScope} scope
- * @returns {{argv: string[], scoped: boolean}}
+ * @returns {{argv: string[], scoped: boolean, full?: true, reason?: 'runner-filter'}}
  * @throws {TypeError} a test path that starts with `-` (it would be read as an option; `block
  *   open --tests` refuses one too).
  */
@@ -267,14 +290,18 @@ export function expandArgv(argv, scope) {
   if (changed.some((file) => !safeFile(file))) throw new TypeError('expandArgv: unsafe changed path');
   const dashed = files.find((f) => f.startsWith('-'));
   if (dashed !== undefined) throw new TypeError(`expandArgv: test path ${JSON.stringify(dashed)} starts with "-"`);
-  return { argv: argv.flatMap((item) => item === TEST_FILES_TOKEN ? files : item === CHANGED_FILES_TOKEN ? changed : [item]), scoped: true };
+  const runnerFiles = testsForRunner(argv, files);
+  const full = argv.includes(TEST_FILES_TOKEN) && files.length > 0 && runnerFiles.length === 0;
+  return { argv: argv.flatMap((item) => item === TEST_FILES_TOKEN ? runnerFiles : item === CHANGED_FILES_TOKEN ? changed : [item]), scoped: true,
+    ...(full ? { full: /** @type {const} */ (true), reason: /** @type {const} */ ('runner-filter') } : {}),
+  };
 }
 
 /**
  * The fields a scoped gate's result and ledger row carry: `scope`, plus `test_count` when related
  * or `reason` when full.
  * @param {TestScope | ChangedScope} scope
- * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'}}
+ * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'|'runner-filter'}}
  */
 export function scopeFields(scope) {
   if (scope.scope === 'changed') return { scope: 'changed', test_count: scope.files.length, ...(scope.dependents ? { dependents: scope.dependents } : {}), ...(scope.reason ? { reason: scope.reason } : {}) };
