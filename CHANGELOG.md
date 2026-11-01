@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.16.0] — 2026-11-01
+
 ### Added
 
 - `forge spawn --print-argv` prints the exact command it would run and runs nothing; the Solo adapter guide step 2 now uses it (B229)
