@@ -285,12 +285,13 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
  */
 export function expandArgv(argv, scope) {
   if (!argv.includes(TEST_FILES_TOKEN) && !argv.includes(CHANGED_FILES_TOKEN)) return { argv: [...argv], scoped: false };
-  const files = scope.scope === 'full' ? [] : testsForRunner(argv, scope.files);
+  const files = scope.scope === 'full' ? [] : scope.files;
   const changed = scope.scope === 'changed' ? scope.changedFiles : [];
   if (changed.some((file) => !safeFile(file))) throw new TypeError('expandArgv: unsafe changed path');
   const dashed = files.find((f) => f.startsWith('-'));
   if (dashed !== undefined) throw new TypeError(`expandArgv: test path ${JSON.stringify(dashed)} starts with "-"`);
-  return { argv: argv.flatMap((item) => item === TEST_FILES_TOKEN ? files : item === CHANGED_FILES_TOKEN ? changed : [item]), scoped: true };
+  const runnerFiles = testsForRunner(argv, files);
+  return { argv: argv.flatMap((item) => item === TEST_FILES_TOKEN ? runnerFiles : item === CHANGED_FILES_TOKEN ? changed : [item]), scoped: true };
 }
 
 /**

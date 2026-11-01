@@ -35,7 +35,7 @@ test('testsForRunner selects each runner family by executable basename and prese
 
 test('expandArgv filters test_files while changed_files retains every changed path', () => {
   const changedFiles = [...MIXED, 'src/x.mjs'];
-  const scope = { scope: 'changed', files: MIXED, changedFiles };
+  const scope = { scope: /** @type {const} */ ('changed'), files: MIXED, changedFiles };
   assert.deepEqual(expand.expandArgv(['node', '--test', '{test_files}'], scope),
     { argv: ['node', '--test', MIXED[1]], scoped: true });
   assert.deepEqual(expand.expandArgv(['node', '{test_files}', '--changed', '{changed_files}'], scope),
@@ -46,8 +46,8 @@ test('expandArgv filters test_files while changed_files retains every changed pa
 
 test('expandArgv drops test_files for a full run when only foreign tests remain', () => {
   for (const scope of [
-    { scope: 'changed', files: [MIXED[0]], changedFiles: [MIXED[0]] },
-    { scope: 'related', files: [MIXED[0]] },
+    { scope: /** @type {const} */ ('changed'), files: [MIXED[0]], changedFiles: [MIXED[0]] },
+    { scope: /** @type {const} */ ('related'), files: [MIXED[0]] },
   ]) assert.deepEqual(expand.expandArgv(['node', '--test', '{test_files}'], scope),
     { argv: ['node', '--test'], scoped: true });
 });
