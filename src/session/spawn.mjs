@@ -45,7 +45,8 @@
 
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { closeSync, existsSync, lstatSync, mkdirSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, lstatSync, mkdirSync, mkdtempSync, openSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { Ajv2020 } from 'ajv/dist/2020.js';
 import { CODEX_CLOSED_BOOK_REFUSAL, closedBookRefused, isNoToolRole, openBookCodexAllowed } from '../config/closed-book.mjs';
@@ -531,22 +532,17 @@ function assertFactsCwd(cwd, runRootDir) {
   if (workTree !== null) throw refuse(`inside a git work tree (${workTree})`);
 }
 
-/**
- * @param {SessionOpts} opts
- * @param {SessionDeps} [deps]
- * @returns {Promise<SessionResult>}
- */
-export async function spawnSession(opts, deps = {}) {
-  const { cfg, level, role, promptPath } = opts;
+/** @param {SessionOpts} opts */
+function validateSessionOpts(opts) {
+  const { level, role, promptPath } = opts;
   if (!LEVELS.includes(level)) throw new SessionError('usage', `level must be one of ${LEVELS.join(', ')}`);
   if (!ROLES.includes(role)) throw new SessionError('usage', `role must be one of ${ROLES.join(', ')}`);
   if (typeof promptPath !== 'string' || !path.isAbsolute(promptPath)) throw new SessionError('usage', 'promptPath must be an absolute path');
-  /** @type {string | null} */
-  let coderPrompt = null;
-  const stderr = deps.stderr ?? process.stderr;
-  const runRootDir = opts.runRoot ?? currentRunRoot();
-  if (role === 'facts' && opts.cwd !== undefined) assertFactsCwd(opts.cwd, runRootDir);
-  const writeRow = deps.writeRow ?? (opts.slug ? (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: /** @type {string} */ (opts.slug) }) : null);
+}
+
+/** @param {SessionOpts} opts @param {{write: (s: string) => unknown}} stderr */
+function sessionSteps(opts, stderr) {
+  const { cfg, level, role } = opts;
   const ladder = ladderFor(resolveLevel(cfg, level), role);
   // B32: Codex has no no-tools mode, so it runs no reviewer/judge/S2/author session unless the
   // config opts in (`review.allow_open_book_codex: true`). Without it, step 0 on openai refuses the
@@ -556,6 +552,53 @@ export async function spawnSession(opts, deps = {}) {
   const steps = ladder.filter((step) => !closedBookRefused(step.provider, role, openBook));
   if (steps.length < ladder.length) writeSafe(stderr, `fallback skipped: ${ladder.length - steps.length} openai step(s) — ${CODEX_CLOSED_BOOK_REFUSAL}\n`);
   if (opts.background) steps.length = 1;
+  return { steps, openBook };
+}
+
+/**
+ * Build the first runnable step without entering the budget gate or provider semaphore.
+ * All session artifacts are temporary; argv paths use the stable <session> placeholder.
+ * @param {SessionOpts} opts @param {SessionDeps} [deps]
+ * @returns {Promise<{argv: string[], cwd: string, provider: string, model: string, effort: string | null, fallback_step: number}>}
+ */
+export async function previewArgv(opts, deps = {}) {
+  validateSessionOpts(opts);
+  if (opts.role === 'facts' && opts.cwd !== undefined) assertFactsCwd(opts.cwd, opts.runRoot ?? currentRunRoot());
+  const { steps, openBook } = sessionSteps(opts, deps.stderr ?? process.stderr);
+  const step = steps[0];
+  const sessionDir = mkdtempSync(path.join(os.tmpdir(), 'code-forge-preview-'));
+  try {
+    const coderPrompt = opts.role === 'coder' && opts.block ? await coderPromptFor(opts) : null;
+    const built = buildStep({ ...opts, runRoot: sessionDir }, step, sessionDir, openBook, coderPrompt);
+    checkBuiltArgv(built, opts, deps);
+    return {
+      argv: built.argv.map((arg) => arg.replaceAll(sessionDir, '<session>')),
+      cwd: built.cwd.replaceAll(sessionDir, '<session>'),
+      provider: step.provider,
+      model: step.model,
+      effort: step.effort ?? null,
+      fallback_step: step.fallback_step,
+    };
+  } finally {
+    rmSync(sessionDir, { recursive: true, force: true });
+  }
+}
+
+/**
+ * @param {SessionOpts} opts
+ * @param {SessionDeps} [deps]
+ * @returns {Promise<SessionResult>}
+ */
+export async function spawnSession(opts, deps = {}) {
+  const { cfg, level, role } = opts;
+  validateSessionOpts(opts);
+  /** @type {string | null} */
+  let coderPrompt = null;
+  const stderr = deps.stderr ?? process.stderr;
+  const runRootDir = opts.runRoot ?? currentRunRoot();
+  if (role === 'facts' && opts.cwd !== undefined) assertFactsCwd(opts.cwd, runRootDir);
+  const writeRow = deps.writeRow ?? (opts.slug ? (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: /** @type {string} */ (opts.slug) }) : null);
+  const { steps, openBook } = sessionSteps(opts, stderr);
 
   const attempts = [];
   const sleep = deps.sleep ?? realSleep;
@@ -612,11 +655,7 @@ export async function spawnSession(opts, deps = {}) {
     try {
       const built = buildStep(opts, step, sessionDir, openBook, coderPrompt);
       const cli = built.cli;
-      built.argv[0] = deps.bins?.[cli] ?? built.argv[0];
-      if (role === 'coder') {
-        const hit = isForbidden(built.argv, opts.forbidden ?? mergeForbidden());
-        if (hit) throw new SessionError('forbidden', `coder argv refused before spawn: forbidden entry ${hit.id}`);
-      }
+      checkBuiltArgv(built, opts, deps);
       writeSafe(stderr, `level=${level} provider=${step.provider} model=${step.model} effort=${step.effort ?? 'none'} fallback_step=${step.fallback_step}\n`);
       const base = { role, level, provider: step.provider, model: step.model, effort: step.effort ?? null, fallback_step: step.fallback_step, run: opts.run ?? null, block: opts.block ?? null, ...(role === 's2' ? { source: step.fallback_step > 0 ? 's2-fallback' : 's2' } : {}), ...sandboxRowField(opts, cli), ...(opts.rowExtra ?? {}) };
 
@@ -908,6 +947,18 @@ function buildStep(opts, step, sessionDir, openBook, coderPrompt = null) {
     throw err;
   }
   return { ...built, argv: [...built.argv], compiled, strict };
+}
+
+/**
+ * Apply the binary override before the coder's forbidden-argv check, in both launch modes.
+ * @param {{cli: string, argv: string[]}} built @param {SessionOpts} opts @param {SessionDeps} deps
+ */
+function checkBuiltArgv(built, opts, deps) {
+  built.argv[0] = deps.bins?.[built.cli] ?? built.argv[0];
+  if (opts.role === 'coder') {
+    const hit = isForbidden(built.argv, opts.forbidden ?? mergeForbidden());
+    if (hit) throw new SessionError('forbidden', `coder argv refused before spawn: forbidden entry ${hit.id}`);
+  }
 }
 
 /**

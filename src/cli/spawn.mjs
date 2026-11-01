@@ -1,9 +1,10 @@
 /**
  * `code-forge spawn --level L<n> --role <role> --brief <file> [--schema <file>] [--cwd <dir>]
- *   [--run <id>] [--block <id>] [--timeout <s>] [--background]` (plan §5.2; block B9a).
+ *   [--run <id>] [--block <id>] [--timeout <s>] [--background] [--print-argv]` (plan §5.2; block B9a).
  *
  * Runs one isolated session through `src/session/spawn.mjs` and prints its result as one JSON line
  * on stdout; the `level=… provider=… model=… effort=… fallback_step=…` line goes to stderr.
+ * With `--print-argv`, prints the first step's argv and metadata instead of launching a session.
  * Exit codes: 0 ok / started, 1 failed (timeout, bad output, refused), 2 usage, 3 unavailable
  * (every step of the ladder reported unavailability).
  *
@@ -17,7 +18,7 @@
 import { readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { loadProjectConfig, projectRootFor, slugFor } from '../config/load.mjs';
-import { ROLES, runRootFor, SessionError, spawnSession } from '../session/spawn.mjs';
+import { previewArgv, ROLES, runRootFor, SessionError, spawnSession } from '../session/spawn.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
@@ -43,7 +44,7 @@ async function readJSONFlag(file, flag) {
   }
 }
 
-const USAGE = `usage: code-forge spawn --level L0|L1|L2|L3 --role ${ROLES.join('|')} --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <seconds>] [--background]\n`;
+const USAGE = `usage: code-forge spawn --level L0|L1|L2|L3 --role ${ROLES.join('|')} --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <seconds>] [--background] [--print-argv]\n`;
 
 /**
  * @param {{status: string}} result
@@ -93,8 +94,8 @@ export async function runSpawn(args, deps = {}) {
   const stdout = deps.stdout ?? process.stdout;
   const stderr = deps.stderr ?? process.stderr;
   try {
-    const { flags, positionals } = parseFlags(args, { values: ['level', 'role', 'brief', 'schema', 'cwd', 'run', 'block', 'timeout'], booleans: ['background'] });
-    if (positionals.length > 0 || typeof flags.level !== 'string' || typeof flags.role !== 'string' || typeof flags.brief !== 'string') {
+    const { flags, positionals } = parseFlags(args, { values: ['level', 'role', 'brief', 'schema', 'cwd', 'run', 'block', 'timeout'], booleans: ['background', 'print-argv'] });
+    if (positionals.length > 0 || typeof flags.level !== 'string' || typeof flags.role !== 'string' || typeof flags.brief !== 'string' || (flags['print-argv'] && flags.background)) {
       writeSafe(stderr, USAGE);
       return 2;
     }
@@ -111,23 +112,26 @@ export async function runSpawn(args, deps = {}) {
     const runRootDir = typeof flags.run === 'string' ? runRootFor(flags.run, loaded.config?.tmp?.root) : undefined;
     // B93: only a coder reads coder.sandbox, so only a coder session is held to the run-start value
     const cfg = typeof flags.run === 'string' && flags.role === 'coder' ? await checkRunSandbox(loaded.config, flags.run) : loaded.config;
-    const result = await spawnSession(
-      {
-        cfg,
-        level: /** @type {any} */ (flags.level),
-        role: /** @type {any} */ (flags.role),
-        promptPath: path.resolve(flags.brief),
-        cwd: typeof flags.cwd === 'string' ? path.resolve(flags.cwd) : undefined,
-        schema,
-        timeoutMs: timeout === undefined ? undefined : timeout * 1000,
-        background: flags.background === true,
-        runRoot: runRootDir,
-        run: typeof flags.run === 'string' ? flags.run : undefined,
-        block: typeof flags.block === 'string' ? flags.block : undefined,
-        slug: slugFor(cfg, root),
-      },
-      { ...deps, stderr },
-    );
+    const opts = {
+      cfg,
+      level: /** @type {any} */ (flags.level),
+      role: /** @type {any} */ (flags.role),
+      promptPath: path.resolve(flags.brief),
+      cwd: typeof flags.cwd === 'string' ? path.resolve(flags.cwd) : undefined,
+      schema,
+      timeoutMs: timeout === undefined ? undefined : timeout * 1000,
+      background: flags.background === true,
+      runRoot: runRootDir,
+      run: typeof flags.run === 'string' ? flags.run : undefined,
+      block: typeof flags.block === 'string' ? flags.block : undefined,
+      slug: slugFor(cfg, root),
+    };
+    if (flags['print-argv']) {
+      const preview = await previewArgv(opts, { ...deps, stderr });
+      writeSafe(stdout, `${JSON.stringify(preview)}\n`);
+      return 0;
+    }
+    const result = await spawnSession(opts, { ...deps, stderr });
     const { text: _text, ...shown } = /** @type {Record<string, any>} */ (result);
     writeSafe(stdout, `${JSON.stringify(shown)}\n`);
     return exitCodeFor(result);
