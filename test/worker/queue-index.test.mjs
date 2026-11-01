@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import fsSync, { appendFileSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import fs from 'node:fs/promises';
 import net from 'node:net';
 import path from 'node:path';
@@ -17,7 +17,7 @@ function count(file, bytes, full = false) {
   value.full += Number(full);
   reads.set(name, value);
 }
-mock.module('node:fs/promises', { namedExports: { ...fs,
+const countedPromises = { ...fs,
   readFile: async (file, ...args) => {
     const data = await fs.readFile(file, ...args);
     count(file, Buffer.byteLength(data), true);
@@ -33,7 +33,26 @@ mock.module('node:fs/promises', { namedExports: { ...fs,
     };
     return handle;
   },
-} });
+};
+const countedFs = { ...fsSync,
+  promises: countedPromises,
+  readFileSync: (file, ...args) => {
+    const data = fsSync.readFileSync(file, ...args);
+    count(file, Buffer.byteLength(data), true);
+    return data;
+  },
+  createReadStream: (file, ...args) => {
+    const stream = fsSync.createReadStream(file, ...args);
+    const push = stream.push.bind(stream);
+    stream.push = (chunk, encoding) => {
+      if (chunk !== null) count(file, Buffer.byteLength(chunk, encoding));
+      return push(chunk, encoding);
+    };
+    return stream;
+  },
+};
+mock.module('node:fs/promises', { namedExports: countedPromises, defaultExport: countedPromises });
+mock.module('node:fs', { namedExports: countedFs, defaultExport: countedFs });
 
 const { ledgerPath } = await import('../../src/ledger/paths.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
@@ -149,6 +168,39 @@ function queuePair(f) {
   });
 }
 
+test('ledger byte counter observes promise, synchronous and stream reads', async (t) => {
+  const dir = mkdtempSync(path.join(scratch, 'queue-index-counter-'));
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const file = path.join(dir, 'counter.jsonl');
+  const text = '{"event":"session","text":"á😀"}\n';
+  writeFileSync(file, text);
+  const promises = await import('node:fs/promises');
+  const sync = await import('node:fs');
+  for (const { name, api } of [
+    { name: 'named', api: promises }, { name: 'default', api: promises.default },
+    { name: 'fs.promises', api: sync.promises }, { name: 'default fs.promises', api: sync.default.promises },
+  ]) {
+    reads.delete(file);
+    assert.equal(await api.readFile(file, 'utf8'), text);
+    assert.equal(reads.get(file)?.bytes, Buffer.byteLength(text), `${name} readFile is counted`);
+    reads.delete(file);
+    const handle = await api.open(file, 'r');
+    try { await handle.read(Buffer.alloc(Buffer.byteLength(text)), 0, Buffer.byteLength(text), 0); }
+    finally { await handle.close(); }
+    assert.equal(reads.get(file)?.bytes, Buffer.byteLength(text), `${name} handle.read is counted`);
+  }
+  for (const { name, api } of [{ name: 'named', api: sync }, { name: 'default', api: sync.default }]) {
+    reads.delete(file);
+    assert.equal(api.readFileSync(file, 'utf8'), text);
+    assert.equal(reads.get(file)?.bytes, Buffer.byteLength(text), `${name} readFileSync is counted`);
+    reads.delete(file);
+    const chunks = [];
+    for await (const chunk of api.createReadStream(file)) chunks.push(chunk);
+    assert.equal(Buffer.concat(chunks).toString('utf8'), text);
+    assert.equal(reads.get(file)?.bytes, Buffer.byteLength(text), `${name} createReadStream is counted`);
+  }
+});
+
 test('Done tickets are pruned and wait-block output stays the same', async (t) => {
   if (!build(t)) return;
   const f = await fixture(t);
@@ -201,22 +253,27 @@ test('A wait or close reads only new ledger rows, not the full ledger', async (t
   const initial = await f.start();
   const extra = [1, 2, 3].map((n) => JSON.stringify({ event: 'session', run: f.run, block: 'B2', n, cost_usd: 0.2 }) + '\n').join('');
   appendFileSync(file, extra);
+  reads.delete(file);
   await f.wait(true);
+  assert.equal(reads.has(file), false, 'daemon wait reads zero ledger bytes in Node');
   const reply = await request(f.socket, { method: 'rows', block: 'B2' });
   assert.deepEqual(reply.rows, extra.trim().split('\n').map((line) => JSON.parse(line)), 'exactly three B2 rows in ledger order');
   assert.equal(reply.stats.bytes_read - initial.stats.bytes_read, Buffer.byteLength(extra));
+  assert.equal(reply.stats.rows - initial.stats.rows, 3, 'exactly three new rows read by the daemon');
   const all = await request(f.socket, { method: 'rows' });
   assert.equal(all.rows.length, 5003, 'unfiltered rows include both blocks');
   /** @type {Parameters<typeof writeDoneFile>[0]} */
   const options = { record: await readRun(f.run), id: 'B2', status: 'closed', event: 'block.close', now: new Date('2026-01-01'), openFindings: async (rows) => rows.filter((r) => r.block === 'B2').length, err: assert.fail };
   process.env.CODE_FORGE_NATIVE = '0';
+  reads.delete(file);
   const done = await writeDoneFile(options);
+  assert.ok(reads.get(file)?.bytes > 0, 'Node close positively counts ledger reads');
   const expected = readFileSync(done, 'utf8');
   reads.delete(file);
   process.env.CODE_FORGE_NATIVE = '1';
   await writeDoneFile(options);
   assert.equal(readFileSync(done, 'utf8'), expected, 'done file is byte-identical');
-  assert.equal(reads.get(file)?.bytes ?? 0, 0, 'daemon close reads zero ledger bytes in Node');
+  assert.equal(reads.has(file), false, 'daemon close reads zero ledger bytes in Node');
 });
 
 test('tail reads only appended bytes, preserves cross-run rows, and leaves pending queue order unchanged', async (t) => {
@@ -252,11 +309,16 @@ test('tail holds a complete JSON value without newline; rotation, replacement an
   assert.deepEqual(await reader.read(), [{ event: 'one' }], 'unterminated JSON waits for newline');
   appendFileSync(file, '\n');
   assert.deepEqual(await reader.read(), await readAllRows('queue-index'));
-  renameSync(file, file.replace('.jsonl', '.1.jsonl'));
+  const rotated = file.replace('.jsonl', '.1.jsonl');
+  renameSync(file, rotated);
   writeFileSync(file, '{"event":"three"}\n');
   reads.delete(file);
-  assert.deepEqual(await reader.read(), await readAllRows('queue-index'));
-  assert.ok(reads.get(file.replace('.jsonl', '.1.jsonl'))?.bytes > 0, 'rotation rereads history');
+  reads.delete(rotated);
+  const got = await reader.read();
+  assert.equal(reads.get(rotated)?.bytes, Buffer.byteLength('{"event":"one"}\n{"event":"two"}\n'), 'rotation rereads exactly the historical bytes');
+  assert.equal(reads.get(file)?.bytes, Buffer.byteLength('{"event":"three"}\n'), 'rotation reads the new current file');
+  assert.deepEqual(got, [{ event: 'one' }, { event: 'two' }, { event: 'three' }]);
+  assert.deepEqual(got, await readAllRows('queue-index'));
   writeFileSync(file, '{}\n');
   assert.deepEqual(await reader.read(), await readAllRows('queue-index'));
   renameSync(file, `${file}.old`);
