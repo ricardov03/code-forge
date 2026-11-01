@@ -28,6 +28,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `wait-block` no longer reports done while a file's last review was unavailable; it re-queues the file or names it, so `block close` does not refuse it later as unreviewed (B217)
 - `block close` no longer refuses a file that the block's own commits created and then deleted; a missing file with no such history still needs review (B230)
 - `status` warns when a live worker of the run is not the pinned one and names `run start --reattach`, before `block close` can stop blocks it served (B224)
+- CI is green again on Linux: `block rebase` works when git has no user name or email and keeps each commit's committer, and overlapping `watch` ticks for one block no longer lose state (B231)
 
 ## [0.15.4] — 2026-10-31
 
