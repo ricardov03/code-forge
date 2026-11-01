@@ -341,22 +341,62 @@ test('worker and manual watch ticks share the quiet deadline before superseding 
   assert.deepEqual(p.rows.filter(({ event }) => event === 'watch.held').map(({ file, content_hash }) => ({ file, content_hash })),
     [{ file: 'src/a.mjs', content_hash: hashBytes(Buffer.from('second\n')) }], 'exactly one held observation at the shared quiet deadline');
 });
+test('overlapping watch ticks preserve the same state and queue as two serial ticks', async () => {
+  const exercise = async (overlap) => {
+    const p = await fixture();
+    const head = await p.commit({ 'src/a.mjs': 'first\n' });
+    let calls = 0; let reads = 0;
+    // Resolve the initial reads immediately so the unprotected second tick deterministically
+    // saves its pending state while the first is paused. Object reads still use real git.
+    const execute = async (argv, options) => {
+      calls++;
+      if (argv[1] === 'rev-parse') return { result: 'ok', stdout: `${head}\n`, stderr: '', code: 0 };
+      if (argv[1] === 'merge-base') return { result: 'ok', stdout: '', stderr: '', code: 0 };
+      return exec(argv, options);
+    };
+    let started;
+    const secondStarted = new Promise((resolve) => { started = resolve; });
+    const loadRun = async (id) => {
+      const record = await readRun(id);
+      if (++reads === 2) started();
+      return record;
+    };
+    const tick = (time, hooks = {}) => p.tick({ now: () => time, exec: execute, readRun: loadRun, hooks });
+    if (overlap) {
+      let entered; let release;
+      const firstEntered = new Promise((resolve) => { entered = resolve; });
+      const held = new Promise((resolve) => { release = resolve; });
+      const first = tick(0, { afterHead: async () => { entered(); await held; } });
+      await firstEntered;
+      const second = tick(15000);
+      try {
+        await secondStarted;
+        await new Promise((resolve) => setImmediate(resolve));
+      } finally { release(); }
+      await Promise.all([first, second]);
+    } else {
+      await tick(0);
+      await tick(15000);
+    }
+    const state = JSON.parse(readFileSync(path.join(queueDir(p.repo), 'watch', `${BLOCK}.json`), 'utf8'));
+    return { p, head, state, calls, reads };
+  };
+  const serial = await exercise(false);
+  const overlap = await exercise(true);
+  assert.deepEqual(overlap.state, { ...serial.state, run: overlap.p.runId, base: overlap.p.base, sha: overlap.head });
+  const queue = (p) => p.tickets().map(({ file, content_hash, ticket }) => ({ file, content_hash, pending: pendingTickets(p.repo).includes(ticket) }));
+  assert.equal(queue(serial.p).length, 1);
+  assert.deepEqual(queue(overlap.p), queue(serial.p));
+  assert.deepEqual([overlap.calls, overlap.reads], [serial.calls, 2], 'serialization adds no git calls or run-record reads');
+});
 test('held commits preserve running and done tickets while superseding a later pending ticket', async () => {
   let p; let completed;
   let now = 0;
   const tick = async (extra = {}) => { now += 15000; await p.tick({ ...extra, now: () => now }); };
   let reviewFailure;
-  let reviewing = false;
-  let releaseWatch;
-  const reviewed = new Promise((resolve) => { releaseWatch = resolve; });
-  // Manual ticks below own the commit sequence. Pause a concurrent scheduler observation
-  // before it can overwrite their pending state; no elapsed wall time controls this ordering.
-  p = await fixture({ deps: { watchNow: () => now, watchHooks: { afterHead: async () => {
-    if (reviewing) await reviewed;
-  } } }, review: async (ticket) => {
+  p = await fixture({ deps: { watchNow: () => now }, review: async (ticket) => {
     try {
       if (ticket.file === 'src/a.mjs') {
-        reviewing = true;
         await p.commit({ 'src/a.mjs': 'second\n', 'src/b.mjs': 'second\n' });
         await tick({ running: new Set([ticket.ticket]) });
         await tick({ running: new Set([ticket.ticket]) });
@@ -372,7 +412,6 @@ test('held commits preserve running and done tickets while superseding a later p
       }
       return { status: 'reviewed', approved: true, sessions: [] };
     } catch (err) { reviewFailure = err; throw err; }
-    finally { if (reviewing) { reviewing = false; releaseWatch(); } }
   } });
   await p.commit({ 'src/a.mjs': 'first\n', 'src/b.mjs': 'first\n' }); await tick(); await tick();
   const first = currentId(p, 'src/a.mjs');

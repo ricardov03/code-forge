@@ -612,13 +612,21 @@ async function rebaseWorktreeBlock({ runId, id, writeRow, acceptChanged, reason,
     }
     const before = closed ? await committedBlobs(tree, reviewedHead, files) : null;
     const moved = { old_base: block.base_sha, new_base: newBase };
-    // Global config and inherited GIT_* stay scrubbed. Replay with the block's own committer,
-    // rather than guessing an identity or silently substituting the repository's local user.
-    const identity = await git(['git', 'log', '-1', '--format=%cn%x00%ce', oldHead], tree);
-    const [committerName, committerEmail] = identity.stdout.trimEnd().split('\0');
     try {
-      const rebased = await exec(['git', '-C', tree, 'rebase', newBase], { cwd: record.workspace, env: { ...gitEnv(), GIT_COMMITTER_NAME: committerName, GIT_COMMITTER_EMAIL: committerEmail }, timeoutMs: 30000 });
-      if (rebased.result !== 'ok') throw new StateError('rebase-conflict', 'rebase-conflict');
+      try {
+        // Read every original identity once. Exclude commits already in the new base, including
+        // upstream commits retained by a pending rebase check. Global config and GIT_* stay scrubbed.
+        const commits = await git(['git', 'log', '--format=%H%x00%cn%x00%ce', '--reverse', `${block.base_sha}..${oldHead}`, '--not', newBase], tree);
+        await git(['git', 'reset', '--hard', newBase], tree);
+        for (const commit of commits.stdout.trimEnd().split('\n').filter(Boolean)) {
+          const [sha, committerName, committerEmail] = commit.split('\0');
+          // No -m: cherry-pick refuses merge commits. An original empty commit is still a commit.
+          const replayed = await exec(['git', '-C', tree, 'cherry-pick', '--allow-empty', sha], { cwd: record.workspace, env: { ...gitEnv(), GIT_COMMITTER_NAME: committerName, GIT_COMMITTER_EMAIL: committerEmail }, timeoutMs: 30000 });
+          if (replayed.result !== 'ok') throw new StateError('rebase-conflict', 'rebase-conflict');
+        }
+      } catch {
+        throw new StateError('rebase-conflict', 'rebase-conflict');
+      }
       const after = before === null ? null : await committedBlobs(tree, 'HEAD', files);
       const changed = after === null ? [] : files.filter((file) => before.get(file) !== after.get(file));
       const repoRoot = await repoRootOf(record.workspace);
@@ -656,9 +664,9 @@ async function rebaseWorktreeBlock({ runId, id, writeRow, acceptChanged, reason,
       await saveRun(record);
       return moved;
     } catch (err) {
-      // --abort restores a conflicted rebase; after a completed rebase there is nothing to
-      // abort, and reset restores the old branch head. The tree was clean before either.
-      await exec(['git', '-C', tree, 'rebase', '--abort'], { cwd: record.workspace, env: gitEnv(), timeoutMs: 30000 });
+      // Abort a conflicted replay; after a completed replay there is nothing to abort.
+      // Reset restores the exact old branch head. The tree was clean before either.
+      await exec(['git', '-C', tree, 'cherry-pick', '--abort'], { cwd: record.workspace, env: gitEnv(), timeoutMs: 30000 });
       await git(['git', 'reset', '--hard', oldHead], tree);
       throw err;
     }

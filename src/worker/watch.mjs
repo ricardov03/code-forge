@@ -7,6 +7,7 @@ import { snapshotFor } from '../state/config-snapshot.mjs';
 import { readRun } from '../state/run.mjs';
 import { ownsAt } from '../review/gate-check.mjs';
 import { exec } from '../util/exec.mjs';
+import { withLock } from '../util/file-locks.mjs';
 import { blockTickets, enqueueHash, isDone, queueDir, supersedeTicket } from './queue.mjs';
 import { assertRowPath, DELETED_HASH, gitChildEnv, hashBytes } from './ticket.mjs';
 
@@ -30,97 +31,99 @@ export async function watchTick({ repoRoot, runId, cfg, readRun: loadRun = readR
   const env = gitChildEnv();
   for (const [block, entry] of Object.entries(record.blocks ?? {})) {
     if (entry.status !== 'open' || !BLOCK.test(block)) continue;
-    const stateFile = path.join(queueDir(repoRoot), 'watch', `${block}.json`);
-    let tree = null;
-    let root = repoRoot;
-    let state = {};
-    try { state = JSON.parse(readFileSync(stateFile, 'utf8')) ?? {}; } catch { /* restart at base */ }
-    const base = entry.base_sha;
-    /** @param {Record<string, any>} next */
-    const save = (next) => {
-      mkdirSync(path.dirname(stateFile), { recursive: true });
-      const tmp = `${stateFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
-      try {
-        writeFileSync(tmp, `${JSON.stringify(next)}\n`, { mode: 0o600 });
-        renameSync(tmp, stateFile);
-        state = next;
-      } finally { rmSync(tmp, { force: true }); }
-    };
-    /** @param {string} reason */
-    const skip = async (reason) => {
-      const skipped = Array.isArray(state.skipped) ? state.skipped : [];
-      if (!skipped.includes(reason)) {
-        await writeRow({ event: 'watch.skipped', block, reason });
-        save({ ...state, skipped: [...skipped, reason] });
-      }
-    };
-    try {
-      if (entry.worktree) {
-        root = realpathSync(entry.worktree.path);
-        tree = root;
-      }
-      if (state.run !== runId || state.base !== base || state.tree !== tree) state = { run: runId, base, tree, skipped: [] };
-      /** @param {string[]} argv */
-      const git = (argv) => execute(['git', ...argv], { cwd: root, env, timeoutMs: 10000 });
-      const headResult = await git(['rev-parse', '--verify', 'HEAD^{commit}']);
-      const head = headResult.stdout.trim();
-      if (headResult.result !== 'ok' || !SHA.test(head)) { await skip('unreadable_head'); continue; }
-      const earlier = blockTickets({ repoRoot, run: runId, block, tree });
-      await hooks.afterHead?.(head);
-      if (typeof base !== 'string' || !SHA.test(base) || (await git(['merge-base', '--is-ancestor', base, head])).result !== 'ok') {
-        await skip('not_descendant'); continue;
-      }
-      const last = typeof state.sha === 'string' && SHA.test(state.sha) ? state.sha : base;
-      const previous = typeof state.pending?.sha === 'string' && SHA.test(state.pending.sha) ? state.pending.sha : last;
-      if (previous !== base && (await git(['merge-base', '--is-ancestor', previous, head])).result !== 'ok') {
-        await skip('rewound');
-        const { sha: _sha, pending: _pending, burst_started_at: _burst, ...restart } = state;
-        save(restart);
-        continue;
-      }
-      // A healthy tick ends the skip streak: no new commit here, or a queued commit below. An
-      // unreadable commit keeps the streak, so it writes one watch.skipped row, not one per tick.
-      if (last === head) { if (state.skipped?.length) save({ ...state, skipped: [] }); continue; }
-      const time = now();
-      if (state.pending?.sha !== head) {
-        // A new HEAD restarts the quiet wait, but keeps the burst's original deadline.
-        save({ ...state, pending: { sha: head, seen_at: time }, burst_started_at: state.burst_started_at ?? time });
-      }
-      if (time - state.pending.seen_at < QUIET_MS && time - state.burst_started_at < MAX_BURST_MS) continue;
-      const diff = await git(['diff', '--name-only', '-z', '--no-renames', last, head, '--']);
-      if (diff.result !== 'ok') { await skip('unreadable_head'); continue; }
-      const owns = ownsAt(tree ? '' : path.relative(repoRoot, record.workspace).split(path.sep).join('/'));
-      const files = diff.stdout.split('\0').filter(Boolean);
-      const owned = files.filter((file) => owns(entry.owned_files, file, entry.owned_kinds));
-      if (owned.length !== files.length) await skip('unowned_path');
-      // Stage every hash before publishing anything: an unreadable object queues nothing.
-      const hashes = [];
-      let unreadable = false;
-      for (const raw of owned.filter((file) => reviewExcludeRule(snapshotFor(record, '')?.config ?? cfg, file) === null)) {
-        const file = assertRowPath(raw);
-        const listed = await git(['ls-tree', '-z', head, '--', file]);
-        if (listed.result !== 'ok') { unreadable = true; break; }
-        if (!listed.stdout) { hashes.push({ file, content_hash: DELETED_HASH }); continue; }
-        if (!/^100(?:644|755) blob /.test(listed.stdout)) { unreadable = true; break; }
-        const shown = await execute(['git', 'show', `${head}:${file}`], { cwd: root, env, timeoutMs: 10000, stdoutEncoding: 'base64' });
-        if (shown.result !== 'ok') { unreadable = true; break; }
-        hashes.push({ file, content_hash: hashBytes(Buffer.from(shown.stdout, 'base64')) });
-      }
-      if (unreadable) { await skip('unreadable_head'); continue; }
-      await hooks.beforeQueue?.();
-      for (const { file, content_hash } of hashes) {
-        const held = earlier.some((old) => old.file === file);
-        if (!held) enqueueHash({ repoRoot, run: runId, block, file, content_hash, tree });
-        for (const old of earlier) {
-          if (old.file === file && old.content_hash !== content_hash && !running.has(old.ticket) && !isDone(repoRoot, old.ticket)) supersedeTicket(repoRoot, old.ticket);
+    await withLock(`watch:${realpathSync(repoRoot)}\0${block}`, async () => {
+      const stateFile = path.join(queueDir(repoRoot), 'watch', `${block}.json`);
+      let tree = null;
+      let root = repoRoot;
+      let state = {};
+      try { state = JSON.parse(readFileSync(stateFile, 'utf8')) ?? {}; } catch { /* restart at base */ }
+      const base = entry.base_sha;
+      /** @param {Record<string, any>} next */
+      const save = (next) => {
+        mkdirSync(path.dirname(stateFile), { recursive: true });
+        const tmp = `${stateFile}.${process.pid}.${randomBytes(4).toString('hex')}.tmp`;
+        try {
+          writeFileSync(tmp, `${JSON.stringify(next)}\n`, { mode: 0o600 });
+          renameSync(tmp, stateFile);
+          state = next;
+        } finally { rmSync(tmp, { force: true }); }
+      };
+      /** @param {string} reason */
+      const skip = async (reason) => {
+        const skipped = Array.isArray(state.skipped) ? state.skipped : [];
+        if (!skipped.includes(reason)) {
+          await writeRow({ event: 'watch.skipped', block, reason });
+          save({ ...state, skipped: [...skipped, reason] });
         }
-        if (held) await writeRow({ event: 'watch.held', block, file, content_hash });
+      };
+      try {
+        if (entry.worktree) {
+          root = realpathSync(entry.worktree.path);
+          tree = root;
+        }
+        if (state.run !== runId || state.base !== base || state.tree !== tree) state = { run: runId, base, tree, skipped: [] };
+        /** @param {string[]} argv */
+        const git = (argv) => execute(['git', ...argv], { cwd: root, env, timeoutMs: 10000 });
+        const headResult = await git(['rev-parse', '--verify', 'HEAD^{commit}']);
+        const head = headResult.stdout.trim();
+        if (headResult.result !== 'ok' || !SHA.test(head)) { await skip('unreadable_head'); return; }
+        const earlier = blockTickets({ repoRoot, run: runId, block, tree });
+        await hooks.afterHead?.(head);
+        if (typeof base !== 'string' || !SHA.test(base) || (await git(['merge-base', '--is-ancestor', base, head])).result !== 'ok') {
+          await skip('not_descendant'); return;
+        }
+        const last = typeof state.sha === 'string' && SHA.test(state.sha) ? state.sha : base;
+        const previous = typeof state.pending?.sha === 'string' && SHA.test(state.pending.sha) ? state.pending.sha : last;
+        if (previous !== base && (await git(['merge-base', '--is-ancestor', previous, head])).result !== 'ok') {
+          await skip('rewound');
+          const { sha: _sha, pending: _pending, burst_started_at: _burst, ...restart } = state;
+          save(restart);
+          return;
+        }
+        // A healthy tick ends the skip streak: no new commit here, or a queued commit below. An
+        // unreadable commit keeps the streak, so it writes one watch.skipped row, not one per tick.
+        if (last === head) { if (state.skipped?.length) save({ ...state, skipped: [] }); return; }
+        const time = now();
+        if (state.pending?.sha !== head) {
+          // A new HEAD restarts the quiet wait, but keeps the burst's original deadline.
+          save({ ...state, pending: { sha: head, seen_at: time }, burst_started_at: state.burst_started_at ?? time });
+        }
+        if (time - state.pending.seen_at < QUIET_MS && time - state.burst_started_at < MAX_BURST_MS) return;
+        const diff = await git(['diff', '--name-only', '-z', '--no-renames', last, head, '--']);
+        if (diff.result !== 'ok') { await skip('unreadable_head'); return; }
+        const owns = ownsAt(tree ? '' : path.relative(repoRoot, record.workspace).split(path.sep).join('/'));
+        const files = diff.stdout.split('\0').filter(Boolean);
+        const owned = files.filter((file) => owns(entry.owned_files, file, entry.owned_kinds));
+        if (owned.length !== files.length) await skip('unowned_path');
+        // Stage every hash before publishing anything: an unreadable object queues nothing.
+        const hashes = [];
+        let unreadable = false;
+        for (const raw of owned.filter((file) => reviewExcludeRule(snapshotFor(record, '')?.config ?? cfg, file) === null)) {
+          const file = assertRowPath(raw);
+          const listed = await git(['ls-tree', '-z', head, '--', file]);
+          if (listed.result !== 'ok') { unreadable = true; break; }
+          if (!listed.stdout) { hashes.push({ file, content_hash: DELETED_HASH }); continue; }
+          if (!/^100(?:644|755) blob /.test(listed.stdout)) { unreadable = true; break; }
+          const shown = await execute(['git', 'show', `${head}:${file}`], { cwd: root, env, timeoutMs: 10000, stdoutEncoding: 'base64' });
+          if (shown.result !== 'ok') { unreadable = true; break; }
+          hashes.push({ file, content_hash: hashBytes(Buffer.from(shown.stdout, 'base64')) });
+        }
+        if (unreadable) { await skip('unreadable_head'); return; }
+        await hooks.beforeQueue?.();
+        for (const { file, content_hash } of hashes) {
+          const held = earlier.some((old) => old.file === file);
+          if (!held) enqueueHash({ repoRoot, run: runId, block, file, content_hash, tree });
+          for (const old of earlier) {
+            if (old.file === file && old.content_hash !== content_hash && !running.has(old.ticket) && !isDone(repoRoot, old.ticket)) supersedeTicket(repoRoot, old.ticket);
+          }
+          if (held) await writeRow({ event: 'watch.held', block, file, content_hash });
+        }
+        const { pending: _pending, burst_started_at: _burst, ...queued } = state;
+        save({ ...queued, run: runId, base, tree, sha: head, skipped: [] });
+      } catch {
+        // A bad path, missing tree or failed git read is a skip, never a block failure.
+        await skip('unreadable_head');
       }
-      const { pending: _pending, burst_started_at: _burst, ...queued } = state;
-      save({ ...queued, run: runId, base, tree, sha: head, skipped: [] });
-    } catch {
-      // A bad path, missing tree or failed git read is a skip, never a block failure.
-      await skip('unreadable_head');
-    }
+    });
   }
 }
