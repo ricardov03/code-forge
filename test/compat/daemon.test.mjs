@@ -15,6 +15,7 @@ import { startRun } from '../../src/state/run.mjs';
 import { loadKey, signRow } from '../../src/state/signer.mjs';
 import { readStartTime } from '../../src/util/reaper.mjs';
 import { announceWorker, blockTickets, enqueue, enqueueAnswers, liveWorker, queueDir, readTicket, retractWorker, writeResult, writeTicketTimings } from '../../src/worker/queue.mjs';
+import { waitReady } from '../helpers/wait-ready.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
@@ -80,10 +81,11 @@ async function fixture(t) {
   async function ready(child) {
     let stderr = '';
     child.stderr.on('data', (s) => { stderr += s; });
-    for (let i = 0; i < 100 && child.exitCode === null; i++) {
-      try { return await request(socket, { method: 'ping' }); } catch { await new Promise((resolve) => setTimeout(resolve, 20)); }
+    try {
+      return await waitReady(() => request(socket, { method: 'ping' }), { stop: () => child.exitCode !== null });
+    } catch (err) {
+      assert.fail(`serve must answer ping on the run socket within 15 seconds; ${err.message}; exit=${child.exitCode}: ${stderr}`);
     }
-    assert.fail(`serve must answer ping on the run socket; exit=${child.exitCode}: ${stderr}`);
   }
   const reference = async (expectedCode = 0) => {
     let text = '';
