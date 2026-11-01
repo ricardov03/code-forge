@@ -157,7 +157,7 @@ A run with ten open blocks, two closed and one stopped:
 
 ```
 run <run> · active · plan · spent $1.20+? of $5.00
-B1 open L1 · openai/<model> · gate fail (test) · findings 1
+B1 open L1 · openai/<model> · gate timeout (test) · findings 1
 B2 attempt-2 L2 · - · gate pass · findings 0
 B3 open L1 · - · gate none · findings 0
 B4 open L1 · - · gate none · findings 0
@@ -176,7 +176,8 @@ closed 2 · stopped 1
   `attempt-<n>`), its level, the model of its latest coder session row (`-` when the ledger names
   none), its last gate run and its open findings — the number of review findings the close gate
   (`checkBlockReviews`) would refuse today. The gate field is printed as `gate pass`, `gate fail
-  (<gate>)` (the failing gate named by the last `gate.red` of that run), `gate fail` (a failed run
+  (<gate>)` (the failing gate named by the last `gate.red` of that run), `gate timeout (<gate>)`
+  (that gate exceeded its time limit; rerun with a higher timeout), `gate fail` (a failed run
   with no named gate) or `gate none` (no gate ran yet).
 - **`… +<k> more blocks`** is the last block line when the blocks do not fit.
 - **`closed <a> · stopped <b>`** shows only when either is non-zero. It is printed LAST, but it

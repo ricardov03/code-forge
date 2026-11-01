@@ -42,6 +42,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {boolean} ok - true when skipped, or when the command exited with code 0 (and, for a
  *   `failOnStdout` gate, its stdout was empty).
  * @property {number | null} code
+ * @property {true} [timed_out] - the command exceeded its gate deadline, not a test failure.
  * @property {string} stdout
  * @property {string} stderr
  * @property {string} [message] - termination diagnostic with the last lines of both streams.
@@ -239,11 +240,57 @@ function normalizeCommand(command) {
   return { argv: command.argv, failOnStdout: command.failOnStdout === true, env: envOf(command) }; // `env: {}` is no env
 }
 
+/** Node reports cancelled tests as failures after a timeout. Keep their diagnostics, but
+ * remove the failure markers consumed by TAP lists and shown by the spec reporter.
+ * @param {string} output @returns {string}
+ */
+function unfinishedOutput(output) {
+  const lines = output.split('\n');
+  /** @type {Map<number, {indent: number, tap: boolean, diagnostic: string}>} */
+  const failures = new Map();
+  for (let i = 0; i < lines.length; i++) {
+    const tap = /^([ \t]*)not ok\s+\d+\s+- /.exec(lines[i]);
+    const spec = /^([ \t]*)✖ /.exec(lines[i]);
+    if (!tap && !spec) continue;
+    let diagnostic = lines[i];
+    const indent = (tap ?? spec)[1].length;
+    for (let j = i + 1; j < lines.length; j++) {
+      if (lines[j].trim() && lines[j].search(/\S/) <= indent) break;
+      if (/^\s*(?:not ok\s+\d+\s+- |✖ |# Subtest: |▶ )/.test(lines[j])) break;
+      diagnostic += `\n${lines[j]}`;
+      if (tap && lines[j].trim() === '...') break;
+    }
+    failures.set(i, { indent, tap: !!tap, diagnostic });
+  }
+  /** @type {Set<number>} */
+  const unfinished = new Set();
+  // Reporters normally close a suite after its children; also accept a parent-first list.
+  // Visit deeper entries first so unfinished status propagates through every ancestor.
+  for (const [i, { indent, diagnostic }] of [...failures].sort((a, b) => b[1].indent - a[1].indent)) {
+    const children = [];
+    for (const direction of [-1, 1]) {
+      for (let j = i + direction; j >= 0 && j < lines.length; j += direction) {
+        if (lines[j].trim() && lines[j].search(/\S/) <= indent) break;
+        if (failures.has(j)) children.push(j);
+      }
+    }
+    const pending = diagnostic.includes('Promise resolution is still pending but the event loop has already resolved');
+    const parent = /subtestsFailed|\b\d+ subtests? failed\b/.test(diagnostic) || diagnostic.trimEnd() === lines[i].trimEnd();
+    const allUnfinished = children.length > 0 && children.every((j) => unfinished.has(j));
+    if (children.length ? !allUnfinished || !(pending || parent) : !pending) continue;
+    unfinished.add(i);
+  }
+  for (const i of unfinished) {
+    lines[i] = failures.get(i).tap ? lines[i].replace('not ok', '# unfinished') : lines[i].replace('✖', 'ℹ unfinished:');
+  }
+  return lines.join('\n');
+}
+
 /** Interpret timeouts and unanswered prompts for every gate, including repeats.
  * @param {import('../util/exec.mjs').ExecResult} res
  * @param {number} timeoutMs
  * @param {boolean} [failOnStdout]
- * @returns {Pick<GateResult, 'ok'|'code'|'stdout'|'stderr'|'reason'|'message'>}
+ * @returns {Pick<GateResult, 'ok'|'code'|'stdout'|'stderr'|'reason'|'message'|'timed_out'>}
  */
 function gateOutcome(res, timeoutMs, failOnStdout = false) {
   const prompt = res.result === 'ok' && [res.stdout, res.stderr].some((stream) =>
@@ -255,18 +302,24 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
     ? `gate timeout after ${timeoutMs / 1000} seconds; raise gates.timeout_s (or --timeout-ms)`
     : res.code === null ? `gate terminated: ${res.signal ?? res.error ?? 'no exit status (no signal reported)'}`
     : prompt ? 'gate ended on an interactive prompt; install the tool or make the command non-interactive' : '';
-  const tails = ['stdout', 'stderr'].flatMap((stream) => {
-    const tail = res[stream].trimEnd().split(/\r?\n/).slice(-10).join('\n');
+  const stdout = res.timedOut ? unfinishedOutput(res.stdout) : res.stdout;
+  const stderr = res.timedOut ? unfinishedOutput(res.stderr) : res.stderr;
+  const tails = [stdout, stderr].flatMap((output, index) => {
+    const stream = index === 0 ? 'stdout' : 'stderr';
+    const tail = output.trimEnd().split(/\r?\n/).slice(-10).join('\n');
     return tail ? [`${stream} tail:\n${tail}`] : [];
   });
-  const message = [diagnostic, ...tails].join('\n');
+  const message = [res.timedOut
+    ? `TIMEOUT after ${timeoutMs / 1000} s (not a test failure); rerun with --timeout-ms ${timeoutMs * 2} or raise gates.timeout_s`
+    : diagnostic, ...tails].join('\n');
   return {
     ok: res.result === 'ok' && !reason && (!failOnStdout || res.stdout.trim().length === 0),
     code: res.code,
-    stdout: res.stdout,
+    stdout,
     stderr: diagnostic
-      ? `${res.stderr}${res.stderr && !res.stderr.endsWith('\n') ? '\n' : ''}${diagnostic}\n`
-      : res.stderr,
+      ? `${stderr}${stderr && !stderr.endsWith('\n') ? '\n' : ''}${diagnostic}\n`
+      : stderr,
+    ...(res.timedOut ? { timed_out: /** @type {const} */ (true) } : {}),
     ...(reason ? { reason } : {}),
     ...(diagnostic ? { message } : {}),
   };
@@ -352,7 +405,7 @@ export async function runGates(gates, opts) {
     }
     // Retain the first failure's status and diagnostic even if later batches pass.
     const outcome = {
-      ...(outcomes.find((entry) => !entry.ok) ?? outcomes[0]),
+      ...(outcomes.find((entry) => entry.timed_out) ?? outcomes.find((entry) => !entry.ok) ?? outcomes[0]),
       stdout: outcomes.map((entry) => entry.stdout).join(''),
       stderr: outcomes.map((entry) => entry.stderr).join(''),
     };
