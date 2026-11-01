@@ -26,6 +26,11 @@ import { generateKey, loadKey, signRow } from './signer.mjs';
 const LOCK_TIMEOUT_MS = 5000;
 const LOCK_POLL_MS = 25;
 
+/** @param {string} text @returns {string | null} */
+export function normalizeStartTime(text) {
+  return text.trim().replace(/\s+/g, ' ') || null;
+}
+
 /**
  * The process start time of `pid` (`ps -o lstart=`), or null when no such process exists.
  * @type {StartTimeProbe}
@@ -37,8 +42,7 @@ export async function processStartTime(pid) {
     okExitCodes: [0, 1],
     timeoutMs: 10000,
   });
-  const text = res.stdout.trim();
-  return res.result === 'ok' && res.code === 0 && text.length > 0 ? text : null;
+  return res.result === 'ok' && res.code === 0 ? normalizeStartTime(res.stdout) : null;
 }
 
 /** @param {unknown} value @returns {string} */
@@ -348,7 +352,10 @@ export async function checkWorkerPin(record, { livePid, probe = processStartTime
       return { ok: false, event: 'worker.replaced', reason: 'the live worker does not match a pinned worker' };
     }
     if (livePid === undefined) {
-      const live = await Promise.all(pins.map(async (p) => (await probe(p.pid)) === p.started_at));
+      const live = await Promise.all(pins.map(async (p) => {
+        const startedAt = await probe(p.pid);
+        return startedAt !== null && startedAt === normalizeStartTime(p.started_at);
+      }));
       return live.some(Boolean) ? { ok: true } : { ok: false, event: 'worker.down', reason: 'no pinned worker is running' };
     }
     pin = pins.find((p) => p.pid === livePid);
@@ -360,7 +367,7 @@ export async function checkWorkerPin(record, { livePid, probe = processStartTime
   }
   const startedAt = await probe(pin.pid);
   if (startedAt === null) return { ok: false, event: 'worker.down', reason: `pinned worker pid ${pin.pid} is not running` };
-  if (startedAt !== pin.started_at) {
+  if (startedAt !== normalizeStartTime(pin.started_at)) {
     return { ok: false, event: 'worker.replaced', reason: `pid ${pin.pid} was restarted (start time differs from the pin)` };
   }
   return { ok: true };
@@ -378,7 +385,7 @@ export async function stopPinnedWorker(pin, { probe = processStartTime, kill = (
   if (!pin || !isSignalablePid(pin.pid)) return { stopped: false, reason: 'invalid pid' };
   const startedAt = await probe(pin.pid);
   if (startedAt === null) return { stopped: false, reason: 'not running' };
-  if (startedAt !== pin.started_at) return { stopped: false, reason: 'pid reused' };
+  if (startedAt !== normalizeStartTime(pin.started_at)) return { stopped: false, reason: 'pid reused' };
   try {
     kill(pin.pid, 'SIGTERM');
   } catch (err) {
