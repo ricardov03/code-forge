@@ -1,10 +1,87 @@
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
+import { once } from 'node:events';
 import { access, appendFile, link, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { readStartTime } from '../../src/util/reaper.mjs';
 import { ledgerDir, ledgerPath } from '../../src/ledger/paths.mjs';
 import { appendRow, claimRotatedName, readAllRows, readRows } from '../../src/ledger/write.mjs';
 import { withTempHome } from './helpers.mjs';
+
+test('appendRow takes over a dead foreign lock and a reused pid start time', async () => {
+  await withTempHome(async () => {
+    const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+    await once(child, 'exit');
+    await mkdir(ledgerDir(), { recursive: true });
+    for (const owner of [
+      { pid: child.pid, started_at: 'dead holder' },
+      { pid: process.pid, started_at: 'previous process start' },
+    ]) {
+      const file = path.join(ledgerDir(), 'stale.append.lock');
+      await writeFile(file, JSON.stringify(owner));
+      await appendRow({ event: 'after-stale' }, { slug: 'stale' });
+      await assert.rejects(access(file), { code: 'ENOENT' });
+    }
+    assert.equal((await readRows('stale')).length, 2);
+    assert.deepEqual(await readdir(ledgerDir()), ['stale.jsonl']);
+  });
+});
+
+test('a live foreign lock delays recovery and append until released, preserving every complete row', async (t) => {
+  await withTempHome(async () => {
+    const child = spawn(process.execPath, ['-e', 'setInterval(() => {}, 1000)'], { stdio: 'ignore' });
+    t.after(() => child.kill());
+    const started = readStartTime(child.pid);
+    assert.ok(started);
+    await mkdir(ledgerDir(), { recursive: true });
+    const file = ledgerPath('held');
+    const lock = path.join(ledgerDir(), 'held.append.lock');
+    const prefix = '{"event":"complete","note":"información 🚀"}\n';
+    await writeFile(file, `${prefix}{"event":"torn`);
+    // Deliberately use ps-style padding: both runtimes compare collapsed values.
+    await writeFile(lock, JSON.stringify({ pid: child.pid, started_at: `  ${started.replaceAll(' ', '  ')}  ` }));
+    let finished = false;
+    const pending = appendRow({ event: 'after' }, { slug: 'held' }).then(() => { finished = true; });
+    await sleep(125);
+    assert.equal(finished, false);
+    assert.equal(await readFile(file, 'utf8'), `${prefix}{"event":"torn`);
+    await unlink(lock);
+    await pending;
+    assert.deepEqual((await readRows('held')).map((row) => row.event), ['complete', 'after']);
+    assert.ok((await readFile(file, 'utf8')).startsWith(prefix));
+    await assert.rejects(access(lock), { code: 'ENOENT' });
+  });
+});
+
+test('concurrent Node processes recover a torn tail under the lock without losing complete rows', async () => {
+  await withTempHome(async () => {
+    await mkdir(ledgerDir(), { recursive: true });
+    await writeFile(ledgerPath('race'), '{"event":"before","note":"é🚀"}\n{"event":"torn');
+    // Contending reapers must re-check ownership after taking .reap. Also
+    // exercise recovery when a previous reaper itself died holding that lock.
+    const stale = JSON.stringify({ pid: process.pid, started_at: 'previous lifetime' });
+    await writeFile(path.join(ledgerDir(), 'race.append.lock'), stale);
+    await writeFile(path.join(ledgerDir(), 'race.append.lock.reap'), stale);
+    const module = new URL('../../src/ledger/write.mjs', import.meta.url).href;
+    await Promise.all(Array.from({ length: 3 }, async (_, writer) => {
+      const child = spawn(process.execPath, ['--input-type=module', '-e', `
+        import { appendRow } from ${JSON.stringify(module)};
+        for (let i = 0; i < 25; i++) await appendRow({event:'node', id:${writer} + ':' + i}, {slug:'race'});
+      `], { env: { ...process.env }, stdio: ['ignore', 'ignore', 'pipe'] });
+      let stderr = '';
+      child.stderr.on('data', (data) => { stderr += data; });
+      const [code] = await once(child, 'exit');
+      assert.equal(code, 0, stderr);
+    }));
+    const rows = await readRows('race');
+    assert.equal(rows.length, 76);
+    assert.equal(rows[0].event, 'before');
+    assert.equal(new Set(rows.slice(1).map((row) => row.id)).size, 75);
+    assert.deepEqual(await readdir(ledgerDir()), ['race.jsonl']);
+  });
+});
 
 test('appendRow writes one JSON line under a temp HOME at ~/.code-forge/ledger/<slug>.jsonl, with the exact fields written', async () => {
   await withTempHome(async (home) => {

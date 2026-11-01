@@ -15,13 +15,81 @@
  * twice) — see `claimRotatedName`'s second `catch`.
  */
 
-import { appendFile, link, mkdir, open, readdir, readFile, stat, unlink } from 'node:fs/promises';
+import { randomUUID } from 'node:crypto';
+import { appendFile, link, mkdir, open, readdir, readFile, rename, stat, unlink } from 'node:fs/promises';
 import path from 'node:path';
+import { setTimeout as sleep } from 'node:timers/promises';
+import { readStartTime } from '../util/reaper.mjs';
 import { ledgerDir, ledgerPath } from './paths.mjs';
 
 /** @typedef {Record<string, any>} LedgerRow - a ledger row is intentionally schema-free in 0.1. */
 
 const DEFAULT_ROTATE_AT_BYTES = 10 * 1024 * 1024;
+/** @type {string | null | undefined} */
+let selfStart;
+
+/** @param {string} file */
+async function staleAppendLock(file) {
+  let owner;
+  try { owner = JSON.parse(await readFile(file, 'utf8')); }
+  catch (err) {
+    if (err.code === 'ENOENT' || err instanceof SyntaxError) return false;
+    throw err;
+  }
+  // An empty/partial record may belong to a creator still writing its identity.
+  if (!Number.isInteger(owner?.pid) || owner.pid <= 0 || typeof owner.started_at !== 'string' || !owner.started_at.trim()) return false;
+  try { process.kill(owner.pid, 0); }
+  catch (err) {
+    if (err.code === 'ESRCH') return true;
+    if (err.code !== 'EPERM') throw err;
+  }
+  const actual = readStartTime(owner.pid);
+  return actual !== null && actual !== owner.started_at.trim().replace(/\s+/g, ' ');
+}
+
+/**
+ * The same exclusive-create JSON protocol is used by Go. The .reap lock only
+ * serializes stale verification + rename: two reapers must never rename a new
+ * live owner's lock using an old snapshot. Killed reapers are recovered with
+ * this same protocol recursively, sharing the original bounded deadline.
+ * @param {string} file @param {string} slug @param {number} deadline
+ * @returns {Promise<() => Promise<void>>}
+ */
+async function lockAppend(file, slug, deadline) {
+  selfStart ??= readStartTime(process.pid);
+  if (!selfStart) throw new Error('cannot determine ledger lock owner process start time');
+  const bytes = JSON.stringify({ pid: process.pid, started_at: selfStart });
+  for (;;) {
+    let handle;
+    try { handle = await open(file, 'wx', 0o600); }
+    catch (err) { if (err.code !== 'EEXIST') throw err; }
+    if (handle) {
+      try {
+        await handle.writeFile(bytes);
+        await handle.close();
+      }
+      catch (err) {
+        await handle.close().catch(() => {});
+        await unlink(file);
+        throw err;
+      }
+      return () => unlink(file);
+    }
+    if (Date.now() > deadline) throw new Error(`ledger ${slug} is locked (${file})`);
+    if (await staleAppendLock(file)) {
+      const release = await lockAppend(`${file}.reap`, slug, deadline);
+      try {
+        // Re-read and re-probe after acquiring the reclamation lock.
+        if (await staleAppendLock(file)) {
+          const stale = `${file}.stale.${randomUUID()}`;
+          await rename(file, stale);
+          await unlink(stale);
+        }
+      } finally { await release(); }
+    }
+    await sleep(25);
+  }
+}
 
 const hasTokens = (row) => typeof row.tokens_in === 'number' || typeof row.tokens_out === 'number';
 const hasCost = (row) => typeof row.cost_usd === 'number';
@@ -126,9 +194,7 @@ async function rotateIfNeeded(file, rotateAtBytes) {
  * left mid-file. The common case (file ends in `\n`) now reads ONE byte, not the whole file; the
  * full read happens only when the file really ends mid-line.
  *
- * Single-writer recovery: the per-slug chain serializes this process only. If the size changes
- * between the read and the truncate (another process appended), the truncate is skipped rather
- * than cutting that process's row; the next append retries the recovery.
+ * The caller holds the shared Node/Go append lock through recovery and append.
  * @param {string} file
  */
 async function truncateTornTail(file) {
@@ -148,7 +214,6 @@ async function truncateTornTail(file) {
     const buf = Buffer.alloc(size);
     const { bytesRead } = await handle.read(buf, 0, size, 0);
     const cleanBytes = buf.subarray(0, bytesRead).lastIndexOf(0x0a) + 1; // 0 when no complete line
-    if ((await handle.stat()).size !== size) return; // a concurrent writer moved the tail — leave it
     await handle.truncate(cleanBytes);
   } finally {
     await handle.close();
@@ -156,8 +221,8 @@ async function truncateTornTail(file) {
 }
 
 /**
- * Per-slug promise chain (in-process only — `claimRotatedName`'s `link`/`unlink` pair is what
- * protects against a SECOND process). A failed task never wedges the chain: the stored promise
+ * Per-slug promise chain, in addition to the cross-process append lock.
+ * A failed task never wedges the chain: the stored promise
  * always resolves, while the caller's own promise still rejects with the task's real error.
  * @type {Map<string, Promise<any>>}
  */
@@ -191,10 +256,13 @@ export async function appendRow(row, opts) {
   return enqueue(slug, async () => {
     await mkdir(ledgerDir(), { recursive: true });
     const file = ledgerPath(slug);
-    await rotateIfNeeded(file, rotateAtBytes);
-    await truncateTornTail(file);
-    await appendFile(file, `${JSON.stringify(normalized)}\n`, 'utf8');
-    return normalized;
+    const release = await lockAppend(path.join(ledgerDir(), `${slug}.append.lock`), slug, Date.now() + 5000);
+    try {
+      await rotateIfNeeded(file, rotateAtBytes);
+      await truncateTornTail(file);
+      await appendFile(file, `${JSON.stringify(normalized)}\n`, 'utf8');
+      return normalized;
+    } finally { await release(); }
   });
 }
 

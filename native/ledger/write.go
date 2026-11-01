@@ -65,19 +65,14 @@ func AppendObject(dir, slug string, row Object, rotateAtBytes int64) (Object, er
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-	// Serialize Go rotation/recovery across processes. Node's existing writer
-	// does not take this lock; its append uses the same atomic O_APPEND write.
+	// Node and Go hold the same exclusive-create lock across rotation, torn-tail
+	// recovery and the append, so recovery cannot truncate another writer's row.
 	lock := filepath.Join(dir, slug+".append.lock")
-	lockFile, err := os.OpenFile(lock, os.O_CREATE|os.O_RDWR, 0666)
+	release, err := lockAppend(lock, slug, time.Now().Add(5*time.Second))
 	if err != nil {
 		return nil, err
 	}
-	// Closing releases the kernel lock even on process exit. Keep the file in
-	// place so all waiters lock the same inode; its existence never blocks us.
-	defer lockFile.Close()
-	if err := lockAppend(lockFile, slug); err != nil {
-		return nil, err
-	}
+	defer release()
 	file := filepath.Join(dir, slug+".jsonl")
 	info, err := os.Stat(file)
 	if err != nil && !os.IsNotExist(err) {
@@ -165,13 +160,6 @@ func truncateTornTail(file string) error {
 	n, err := f.ReadAt(data, 0)
 	if err != nil && err != io.EOF {
 		return err
-	}
-	current, err := f.Stat()
-	if err != nil {
-		return err
-	}
-	if current.Size() != info.Size() {
-		return nil
 	}
 	return f.Truncate(int64(bytes.LastIndexByte(data[:n], '\n') + 1))
 }
