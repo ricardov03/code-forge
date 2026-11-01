@@ -19,6 +19,16 @@ test('processStartTime matches readStartTime for the live test process', async (
   const expected = readStartTime(process.pid);
   assert.equal(typeof expected, 'string', 'the live test process has a readable start time');
   assert.equal(await run.processStartTime(process.pid), expected, 'both probes return the same normalized identity');
+  assert.doesNotMatch(await run.processStartTime(process.pid), /\s{2,}/, 'the live probe has no padded whitespace');
+});
+
+test('processStartTime normalizes raw padded ps stdout regardless of the current date', async (t) => {
+  t.mock.module('../../src/util/exec.mjs', { namedExports: {
+    exec: async () => ({ result: 'ok', code: 0, stdout: 'Sun Nov  1 00:06:44 2026\n' }),
+  } });
+  // Re-import so the probe binds to the mocked exec while the live test keeps its real exec.
+  const probe = await import(new URL('../../src/state/run.mjs?padded-ps', import.meta.url).href);
+  assert.equal(await probe.processStartTime(process.pid), NORMALIZED, 'the probe collapses padding in raw ps output');
 });
 
 test('legacy padded worker pins match live workers while different identities remain refused', async () => {
