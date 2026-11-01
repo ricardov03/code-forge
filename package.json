@@ -34,6 +34,7 @@
     "!scripts/changelog.mjs",
     "!scripts/known-fix.mjs",
     "!scripts/bench-review.mjs",
+    "!scripts/bench-block.mjs",
     "!scripts/build-native.mjs",
     "!scripts/compat-golden.mjs",
     "README.md",
@@ -46,7 +47,8 @@
     "release": "node scripts/release.mjs",
     "changelog": "node scripts/changelog.mjs",
     "known-fix": "node scripts/known-fix.mjs",
-    "bench:review": "node scripts/bench-review.mjs"
+    "bench:review": "node scripts/bench-review.mjs",
+    "bench:block": "node scripts/bench-block.mjs"
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",
