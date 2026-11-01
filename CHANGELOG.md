@@ -19,6 +19,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `forge spawn --print-argv` prints the exact command it would run and runs nothing; the Solo adapter guide step 2 now uses it (B229)
 - `npm run bench:block` measures one block flow under Node and under the Go daemon (process count, peak memory, wall time); each pass runs in its own child process (B184)
 - Forge facts checks the code names in a brief, marks ignored or outside-snapshot paths UNVERIFIABLE (never NOT-FOUND), takes claims from the brief only, maps absolute paths inside any `--sources` root to that source, and handles globs, `/dev/null` and route patterns (B227)
+- The worker prunes done queue tickets and keeps an index; worker polls and done checks read only new ledger rows instead of the whole ledger each time (B214)
 
 ## [0.15.4] — 2026-10-31
 
