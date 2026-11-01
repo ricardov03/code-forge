@@ -25,7 +25,7 @@
  * (the engine saves it as a new seq and writes `review.state_restored`); an anchor with no body
  * makes a missing file `lost` (refused, never a round 1). A
  * `review.state` row of the run whose MAC does not verify is `tampered` for every block and file
- * of it (`blockAnchors`). Whether the block's one L3 rung was used comes from the anchors, never
+ * of it (`blockAnchors`). Whether a file's one L3 rung was used comes from the anchors, never
  * from the state files.
  *
  * B78: the reviewed text itself is kept as a git blob in the content root's object store
@@ -427,8 +427,8 @@ export async function saveState({ runId, block, file, key, state, seq, writeRow,
 }
 
 /**
- * Whether the block's one L3 rung (§3.6 rules 5/6) was already used on ANY of its files — the
- * rung is once per block. Derived from the ledger anchors only; fails closed: a block anchor that
+ * Whether any file of the block has used its L3 rung (§3.6 rules 5/6).
+ * Derived from the ledger anchors only; fails closed: a block anchor that
  * does not verify is `tampered`.
  * @param {{runId: string, block: string, key: Buffer, rows: Array<Record<string, any>>}} opts
  * @returns {{status: 'ok' | 'tampered', used: boolean}}
@@ -437,4 +437,16 @@ export function blockRungUsed(opts) {
   const anchors = blockAnchors(opts);
   if (anchors === null) return { status: 'tampered', used: true };
   return { status: 'ok', used: anchors.some((a) => a.l3_rung_used === true) };
+}
+
+/**
+ * Whether this file has used its L3 rung, once per file across all its anchors.
+ * Verify the run's anchors before filtering by file, preserving fail-closed tamper detection.
+ * @param {{runId: string, block: string, file: string, key: Buffer, rows: Array<Record<string, any>>}} opts
+ * @returns {{status: 'ok' | 'tampered', used: boolean}}
+ */
+export function fileRungUsed(opts) {
+  const anchors = blockAnchors(opts);
+  if (anchors === null) return { status: 'tampered', used: true };
+  return { status: 'ok', used: anchors.some((a) => a.file === opts.file && a.l3_rung_used === true) };
 }
