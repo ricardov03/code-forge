@@ -1,5 +1,6 @@
 import { BLOCK, makeRepo, freshDir, cli } from './helpers.mjs';
 import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
 import { test } from 'node:test';
 import { mkdtempSync, rmSync } from 'node:fs';
 
@@ -71,6 +72,10 @@ test('B217: a refused lost review is reported without retry; findings still comp
 });
 
 test('B217: the live daemon and CODE_FORGE_NATIVE=0 report the same repeated unavailability', async (t) => {
+  const build = spawnSync(process.execPath, ['scripts/build-native.mjs', '--host'], {
+    cwd: new URL('../../', import.meta.url), encoding: 'utf8', timeout: 120_000,
+  });
+  assert.equal(build.status, 0, build.stderr);
   // Darwin Unix socket paths must fit in 104 bytes, including the run name.
   const savedHome = process.env.HOME;
   const home = mkdtempSync('/tmp/cf217-');
