@@ -246,6 +246,8 @@ function normalizeCommand(command) {
  */
 function unfinishedOutput(output) {
   const lines = output.split('\n');
+  /** @type {Map<number, {indent: number, tap: boolean, diagnostic: string}>} */
+  const failures = new Map();
   for (let i = 0; i < lines.length; i++) {
     const tap = /^([ \t]*)not ok\s+\d+\s+- /.exec(lines[i]);
     const spec = /^([ \t]*)✖ /.exec(lines[i]);
@@ -254,11 +256,32 @@ function unfinishedOutput(output) {
     const indent = (tap ?? spec)[1].length;
     for (let j = i + 1; j < lines.length; j++) {
       if (lines[j].trim() && lines[j].search(/\S/) <= indent) break;
+      if (/^\s*(?:not ok\s+\d+\s+- |✖ |# Subtest: |▶ )/.test(lines[j])) break;
       diagnostic += `\n${lines[j]}`;
       if (tap && lines[j].trim() === '...') break;
     }
-    if (!diagnostic.includes('Promise resolution is still pending but the event loop has already resolved')) continue;
-    lines[i] = tap ? lines[i].replace('not ok', '# unfinished') : lines[i].replace('✖', 'ℹ unfinished:');
+    failures.set(i, { indent, tap: !!tap, diagnostic });
+  }
+  /** @type {Set<number>} */
+  const unfinished = new Set();
+  // Reporters normally close a suite after its children; also accept a parent-first list.
+  // Visit deeper entries first so unfinished status propagates through every ancestor.
+  for (const [i, { indent, diagnostic }] of [...failures].sort((a, b) => b[1].indent - a[1].indent)) {
+    const children = [];
+    for (const direction of [-1, 1]) {
+      for (let j = i + direction; j >= 0 && j < lines.length; j += direction) {
+        if (lines[j].trim() && lines[j].search(/\S/) <= indent) break;
+        if (failures.has(j)) children.push(j);
+      }
+    }
+    const pending = diagnostic.includes('Promise resolution is still pending but the event loop has already resolved');
+    const parent = /subtestsFailed|\b\d+ subtests? failed\b/.test(diagnostic) || diagnostic.trimEnd() === lines[i].trimEnd();
+    const allUnfinished = children.length > 0 && children.every((j) => unfinished.has(j));
+    if (children.length ? !allUnfinished || !(pending || parent) : !pending) continue;
+    unfinished.add(i);
+  }
+  for (const i of unfinished) {
+    lines[i] = failures.get(i).tap ? lines[i].replace('not ok', '# unfinished') : lines[i].replace('✖', 'ℹ unfinished:');
   }
   return lines.join('\n');
 }
