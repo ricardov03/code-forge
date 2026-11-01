@@ -6,7 +6,6 @@ import (
 	"io"
 	"os"
 	"path/filepath"
-	"syscall"
 	"time"
 )
 
@@ -76,19 +75,8 @@ func AppendObject(dir, slug string, row Object, rotateAtBytes int64) (Object, er
 	// Closing releases the kernel lock even on process exit. Keep the file in
 	// place so all waiters lock the same inode; its existence never blocks us.
 	defer lockFile.Close()
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
-		if err == nil {
-			break
-		}
-		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN && err != syscall.EINTR {
-			return nil, err
-		}
-		if time.Now().After(deadline) {
-			return nil, fmt.Errorf("ledger %s is locked (%s)", slug, lock)
-		}
-		time.Sleep(25 * time.Millisecond)
+	if err := lockAppend(lockFile, slug); err != nil {
+		return nil, err
 	}
 	file := filepath.Join(dir, slug+".jsonl")
 	info, err := os.Stat(file)

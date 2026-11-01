@@ -1,3 +1,5 @@
+//go:build unix
+
 // Package daemon serves the run's hot progress reads over a private Unix socket.
 package daemon
 

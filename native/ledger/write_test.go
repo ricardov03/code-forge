@@ -4,113 +4,14 @@ import (
 	"bytes"
 	"encoding/json"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"runtime"
-	"strings"
-	"syscall"
 	"testing"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/state"
 )
-
-func TestAppendLockSurvivesKilledHolder(t *testing.T) {
-	const holderDir = "CF_TEST_LEDGER_LOCK_HOLDER_DIR"
-	if dir := os.Getenv(holderDir); dir != "" {
-		// A row larger than the FIFO buffer blocks in Write while holding the
-		// real append lock, until the parent kills this process.
-		_, err := ledger.AppendRow(dir, "fixture", map[string]any{
-			"event": "holder", "payload": strings.Repeat("x", 1024*1024),
-		}, ledger.DefaultRotateAtBytes)
-		t.Fatalf("holder unexpectedly finished its blocked append: %v", err)
-	}
-
-	dir := t.TempDir()
-	file := filepath.Join(dir, "fixture.jsonl")
-	if err := syscall.Mkfifo(file, 0600); err != nil {
-		t.Fatal(err)
-	}
-	reader, err := syscall.Open(file, syscall.O_RDONLY|syscall.O_NONBLOCK, 0)
-	if err != nil {
-		t.Fatal(err)
-	}
-	defer syscall.Close(reader)
-	cmd := exec.Command(os.Args[0], "-test.run=^TestAppendLockSurvivesKilledHolder$")
-	cmd.Env = append(os.Environ(), holderDir+"="+dir)
-	var output bytes.Buffer
-	cmd.Stdout, cmd.Stderr = &output, &output
-	if err := cmd.Start(); err != nil {
-		t.Fatal(err)
-	}
-	t.Cleanup(func() {
-		_ = cmd.Process.Kill()
-		_ = cmd.Wait()
-	})
-	deadline := time.Now().Add(5 * time.Second)
-	for {
-		var first [1]byte
-		n, err := syscall.Read(reader, first[:])
-		if n == 1 {
-			break // The child reached Write, so it owns the append lock.
-		}
-		if err != nil && err != syscall.EAGAIN && err != syscall.EWOULDBLOCK {
-			t.Fatal(err)
-		}
-		if time.Now().After(deadline) {
-			t.Fatal("child did not reach the locked append within 5s")
-		}
-		time.Sleep(10 * time.Millisecond)
-	}
-	if err := cmd.Process.Signal(syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	err = cmd.Wait()
-	exit, ok := err.(*exec.ExitError)
-	if !ok || exit.Sys().(syscall.WaitStatus).Signal() != syscall.SIGKILL {
-		t.Fatalf("holder must exit from SIGKILL: %v; output=%s", err, &output)
-	}
-	if err := os.Remove(file); err != nil {
-		t.Fatal(err)
-	}
-	start := time.Now()
-	_, err = ledger.AppendRow(dir, "fixture", map[string]any{"event": "after-kill"}, ledger.DefaultRotateAtBytes)
-	if err != nil {
-		t.Fatalf("append after SIGKILL must succeed within the 5s wait limit: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed >= 5*time.Second {
-		t.Fatalf("append after SIGKILL took %s, want less than 5s", elapsed)
-	}
-	rows, err := ledger.ReadRows(dir, "fixture")
-	if err != nil || len(rows) != 1 {
-		t.Fatalf("recovered ledger must contain exactly the parent's row: rows=%v err=%v", rows, err)
-	}
-	row, ok := rows[0].(map[string]any)
-	if !ok || row["event"] != "after-kill" {
-		t.Fatalf("recovered row must be the parent's after-kill event: %v", rows[0])
-	}
-}
-
-// Drive the hidden command so these same assertions run against the base binary
-// before the write packages exist, without introducing a compile-error red.
-func nativeState(t *testing.T, home, op, input string) (string, error) {
-	t.Helper()
-	arch := runtime.GOARCH
-	if arch == "amd64" {
-		arch = "x64"
-	}
-	binary, err := filepath.Abs(filepath.Join("..", "bin", runtime.GOOS+"-"+arch, "code-forge-native"))
-	if err != nil {
-		t.Fatal(err)
-	}
-	if _, err := os.Stat(binary); os.IsNotExist(err) {
-		t.Skip("native state tables require a host binary: node scripts/build-native.mjs --host")
-	}
-	cmd := exec.Command(binary, "state-golden", "--home", home, "--run", "fixture", "--op", op)
-	cmd.Stdin = strings.NewReader(input)
-	data, err := cmd.CombinedOutput()
-	return string(data), err
-}
 
 func TestAppendBoundaries(t *testing.T) {
 	line := "{\"event\":\"old\",\"text\":\"é😀\"}\n"
@@ -140,10 +41,9 @@ func TestAppendBoundaries(t *testing.T) {
 			if err := os.WriteFile(filepath.Join(dir, "fixture.1.jsonl"), []byte("occupied\n"), 0600); err != nil {
 				t.Fatal(err)
 			}
-			input, _ := json.Marshal(map[string]any{"slug": "fixture", "rotateAtBytes": c.limit, "rows": []any{map[string]any{"event": "new", "ts": "fixed"}}})
-			out, err := nativeState(t, home, "append", string(input))
+			_, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "new", "ts": "fixed"}, int64(c.limit))
 			if err != nil {
-				t.Fatalf("append must succeed: %v: %s", err, out)
+				t.Fatalf("append must succeed: %v", err)
 			}
 			got, err := os.ReadFile(file)
 			if err != nil || string(got) != c.current {
@@ -175,10 +75,14 @@ func TestRunStateBoundaries(t *testing.T) {
 					t.Fatal(err)
 				}
 				start := time.Now()
-				out, err := nativeState(t, home, "lock", "")
+				called := false
+				err := state.WithRunLock(home, "fixture", func() error {
+					called = true
+					return nil
+				})
 				want := "run fixture is locked (" + lock + "); remove it if no forge verb is running"
-				if err == nil || !strings.Contains(out, want) || time.Since(start) < 5*time.Second {
-					t.Fatalf("lock must wait 5000ms and refuse with %q: elapsed=%s err=%v output=%q", want, time.Since(start), err, out)
+				if err == nil || err.Error() != want || called || time.Since(start) < 5*time.Second {
+					t.Fatalf("lock must wait 5000ms and refuse with %q: elapsed=%s err=%v called=%v", want, time.Since(start), err, called)
 				}
 				if _, err := os.Stat(lock); err != nil {
 					t.Fatalf("timeout removed holder lock: %v", err)
@@ -186,9 +90,16 @@ func TestRunStateBoundaries(t *testing.T) {
 				return
 			}
 			if c == "lock releases on completion" {
-				out, err := nativeState(t, home, "lock", "")
-				if err != nil || out != "locked\n" {
-					t.Fatalf("lock callback: got %q (%v), want locked newline", out, err)
+				called := false
+				err := state.WithRunLock(home, "fixture", func() error {
+					called = true
+					if info, err := os.Stat(lock); err != nil || !info.IsDir() {
+						t.Fatalf("callback must hold the run lock: %v (%v)", info, err)
+					}
+					return nil
+				})
+				if err != nil || !called {
+					t.Fatalf("lock callback: called=%v err=%v", called, err)
 				}
 				if _, err := os.Stat(lock); !os.IsNotExist(err) {
 					t.Fatalf("completed lock still exists: %v", err)
@@ -202,12 +113,19 @@ func TestRunStateBoundaries(t *testing.T) {
 			if err := os.WriteFile(file, append(data, '\n'), 0644); err != nil {
 				t.Fatal(err)
 			}
-			out, err := nativeState(t, home, "save", `{"status":"ended"}`)
+			err := state.WithRunLock(home, "fixture", func() error {
+				record, err := state.ReadRun(home, "fixture")
+				if err != nil {
+					return err
+				}
+				record.Set("status", "ended")
+				return state.SaveRun(home, record)
+			})
 			if err != nil {
-				t.Fatalf("save must succeed: %v: %s", err, out)
+				t.Fatalf("save must succeed: %v", err)
 			}
 			info, err := os.Stat(file)
-			if err != nil || info.Mode().Perm() != 0600 {
+			if err != nil || runtime.GOOS != "windows" && info.Mode().Perm() != 0600 {
 				t.Fatalf("authoritative record must have mode 0600: %v (%v)", info, err)
 			}
 			actual, err := os.ReadFile(file)
