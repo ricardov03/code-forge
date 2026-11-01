@@ -28,6 +28,7 @@ import path from 'node:path';
 import { isExactEntry, ownsFile } from '../state/registry.mjs';
 import { pairsFor } from '../review/paired.mjs';
 import { computeFileSet } from './scope.mjs';
+import { dependentTests, testDependents } from './dependents.mjs';
 import { exec } from '../util/exec.mjs';
 import { TEST_FILES_TOKEN, CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
 
@@ -73,14 +74,15 @@ export function isChangedTest(file) {
 }
 
 /**
- * Existing block tests added or changed since its base, independent of the last green scope
- * and its threshold. Deleted tests and unchanged source-paired tests are not repeat candidates.
+ * Existing owned changed tests plus every test importing an owned changed source since base.
+ * Deleted tests are omitted; ownership limits changed inputs, not their test callers.
  * @param {{cwd: string, base: string, owned: string[], kinds?: Record<string, string>}} opts
  * @returns {Promise<string[]>}
  */
 export async function changedTestFiles({ cwd, base, owned, kinds }) {
   const { all } = await computeFileSet({ cwd, base });
-  const files = all.filter((file) => ownsFile(owned, file, kinds) && isChangedTest(file));
+  const changed = all.filter((file) => ownsFile(owned, file, kinds));
+  const files = changed.filter(isChangedTest);
   const existing = await Promise.all(files.map(async (file) => {
     const stat = await lstat(path.join(cwd, file)).catch((error) => {
       if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
@@ -88,7 +90,9 @@ export async function changedTestFiles({ cwd, base, owned, kinds }) {
     });
     return stat?.isFile() === true;
   }));
-  return files.filter((_, i) => existing[i]);
+  const testFiles = (await repositoryFiles(cwd) ?? []).filter(isChangedTest);
+  const dependents = await dependentTests({ cwd, changed: changed.filter((file) => !isChangedTest(file)), testFiles });
+  return [...new Set([...files.filter((_, i) => existing[i]), ...dependents])].sort();
 }
 
 /**
@@ -99,7 +103,7 @@ const isConcreteFile = (p) => typeof p === 'string' && p.length > 0 && isExactEn
 
 /**
  * @typedef {{scope: 'related', files: string[]} | {scope: 'full', reason: 'threshold' | 'no_tests'}} TestScope
- * @typedef {{scope: 'changed', files: string[], changedFiles: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'}} ChangedScope
+ * @typedef {{scope: 'changed', files: string[], changedFiles: string[], dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'}} ChangedScope
  */
 
 /** A gate run with no block: no test file is known. */
@@ -151,21 +155,28 @@ function safeFile(file) {
   return file.length > 0 && !file.startsWith('-') && !path.isAbsolute(file) && !/[\\\x00-\x1f]/.test(file) && !file.split('/').some((s) => s === '' || s === '.' || s === '..');
 }
 
+/** Tracked and new, non-ignored repo files in an isolated git environment.
+ * @param {string} cwd @returns {Promise<string[] | null>}
+ */
+async function repositoryFiles(cwd) {
+  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+  env.GIT_CONFIG_NOSYSTEM = '1';
+  env.GIT_CONFIG_GLOBAL = os.devNull;
+  const listed = await exec(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd, env, timeoutMs: 30000 });
+  return listed.result === 'ok' ? [...new Set(listed.stdout.split('\0').filter(Boolean))].sort() : null;
+}
+
 /**
  * Bounded content baseline. Missing listed files are omitted from hashes and candidates; an
  * owned entry with no current file has no hash. More than 200 owned files, a symlink, a
  * non-regular owned file, a path outside the root or another read error means no record;
  * callers retain the old scope. Git sees only argv and an isolated git environment.
  * @param {string} cwd @param {string[]} owned @param {Record<string, string>} [kinds]
- * @returns {Promise<{files: Record<string, string>, candidates: string[]} | null>}
+ * @returns {Promise<{files: Record<string, string>, candidates: string[], dependents?: Record<string, string[]>} | null>}
  */
 export async function fileBaseline(cwd, owned, kinds) {
-  const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-  env.GIT_CONFIG_NOSYSTEM = '1';
-  env.GIT_CONFIG_GLOBAL = os.devNull;
-  const listed = await exec(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd, env, timeoutMs: 30000 });
-  if (listed.result !== 'ok') return null;
-  const listedFiles = [...new Set(listed.stdout.split('\0').filter(Boolean))].sort();
+  const listedFiles = await repositoryFiles(cwd);
+  if (!listedFiles) return null;
   const candidates = [];
   const files = /** @type {Record<string, string>} */ (Object.create(null));
   try {
@@ -192,11 +203,13 @@ export async function fileBaseline(cwd, owned, kinds) {
       files[file] = createHash('sha256').update(await readFile(absolute)).digest('hex');
     }
   } catch { return null; }
-  return { files, candidates };
+  const dependents = await testDependents({ cwd, testFiles: candidates.filter(isChangedTest) });
+  // The graph is transient: keep the baseline's public/serialized hash-and-candidate shape.
+  return Object.defineProperty({ files, candidates }, 'dependents', { value: dependents });
 }
 
 /**
- * Compare the last green record. A source without a stem pair cannot narrow the test gate.
+ * Compare the last green record, adding importers and retaining stem pairs as a fallback.
  * @param {{baseline: unknown, current: Awaited<ReturnType<typeof fileBaseline>>, fallback: TestScope, threshold?: number, owned?: string[], kinds?: Record<string, string>}} opts
  * @returns {ChangedScope}
  */
@@ -204,21 +217,36 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
   const old = /** @type {Record<string, string> | null} */ (baseline);
   const candidates = new Set(current?.candidates);
   const fallbackFiles = fallback.scope === 'related' ? fallback.files.filter((file) => !current || candidates.has(file)) : [];
+  /** Merge callers while preserving the legacy fallback for sources with no known callers.
+   * @param {string[]} files @param {string[]} sources @param {string[]} changedFiles
+   * @param {ChangedScope['reason']} [reason] @returns {ChangedScope}
+   */
+  function withDependents(files, sources, changedFiles, reason) {
+    const dependents = [...new Set(sources.filter((file) => !isChangedTest(file)).flatMap((file) => current?.dependents?.[file] ?? []))]
+      .filter((file) => !files.includes(file)).sort();
+    const union = [...new Set([...files, ...dependents])].sort();
+    const overThreshold = union.length > threshold || reason === 'threshold';
+    return { scope: 'changed', files: overThreshold ? [] : union, changedFiles,
+      ...(current?.dependents || current === null ? { dependents } : {}),
+      ...(overThreshold ? { reason: /** @type {const} */ ('threshold') } : reason ? { reason } : {}),
+    };
+  }
   if (!current || !old || typeof old !== 'object' || Array.isArray(old) || Object.keys(old).length > 200 ||
       Object.entries(old).some(([file, hash]) => !safeFile(file) || (owned && !ownsFile(owned, file, kinds)) || typeof hash !== 'string' || !/^[a-f0-9]{64}$/.test(hash))) {
-    return { scope: 'changed', files: fallbackFiles, changedFiles: [], reason: 'no_baseline' };
+    return withDependents(fallbackFiles, Object.keys(current?.files ?? {}), [], fallback.scope === 'full' && fallback.reason === 'threshold' ? 'threshold' : 'no_baseline');
   }
   const changes = [...new Set([...Object.keys(old), ...Object.keys(current.files)])].filter((file) => old[file] !== current.files[file]).sort();
-  if (changes.length > threshold) return { scope: 'changed', files: [], changedFiles: [], reason: 'threshold' };
+  if (changes.length > threshold) return withDependents([], changes, [], 'threshold');
   const changedFiles = changes.filter((file) => candidates.has(file));
   const tests = new Set(changedFiles.filter(isChangedTest));
   for (const file of changes.filter((f) => !isChangedTest(f))) {
+    if (current.dependents?.[file]?.length) continue;
     const pairs = pairsFor(file, current.candidates).filter(isChangedTest);
-    if (pairs.length === 0) return { scope: 'changed', files: fallbackFiles, changedFiles, reason: 'unpaired' };
+    if (pairs.length === 0) return withDependents(fallbackFiles, changes, changedFiles, 'unpaired');
     for (const paired of pairs) tests.add(paired);
   }
-  if (tests.size === 0) return { scope: 'changed', files: fallbackFiles, changedFiles, reason: 'no_changes' };
-  return { scope: 'changed', files: [...tests].sort(), changedFiles };
+  if (tests.size === 0 && !changes.some((file) => current.dependents?.[file]?.length)) return withDependents(fallbackFiles, changes, changedFiles, 'no_changes');
+  return withDependents([...tests].sort(), changes, changedFiles);
 }
 
 /**
@@ -244,10 +272,10 @@ export function expandArgv(argv, scope) {
  * The fields a scoped gate's result and ledger row carry: `scope`, plus `test_count` when related
  * or `reason` when full.
  * @param {TestScope | ChangedScope} scope
- * @returns {{scope: 'changed', test_count: number, reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'}}
+ * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'}}
  */
 export function scopeFields(scope) {
-  if (scope.scope === 'changed') return { scope: 'changed', test_count: scope.files.length, ...(scope.reason ? { reason: scope.reason } : {}) };
+  if (scope.scope === 'changed') return { scope: 'changed', test_count: scope.files.length, ...(scope.dependents ? { dependents: scope.dependents } : {}), ...(scope.reason ? { reason: scope.reason } : {}) };
   return scope.scope === 'related' ? { scope: 'related', test_count: scope.files.length } : { scope: 'full', reason: scope.reason };
 }
 
