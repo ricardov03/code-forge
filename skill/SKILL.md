@@ -32,7 +32,7 @@ State lives in the plan file's header — `facts → planned → hardened → co
 | coder | the lane S1 picks (L0–L2); climbs one rung per escalation | the project tree | the engine adapter |
 | reviewer, recheck | L2 | closed-book, empty cwd, packet on stdin | the worker |
 | judge, S2, author | L3 | closed-book, one turn (never Codex: `references/security.md` §4) | the worker, `forge s2`, `forge author` |
-| L3 rung | L3 | a patch ≤ 80 lines, once per block | `forge spawn --level L3 --role coder` |
+| L3 rung | L3 | a patch ≤ 80 lines, once per file | `forge spawn --level L3 --role coder` |
 
 `forge resolve L<n>` prints what a level resolves to (provider, model, effort, fallback); `forge models` lists the catalog. With `review.multimodel` on, the second reviewer is another provider's L2 and the judge comes from a third provider.
 
