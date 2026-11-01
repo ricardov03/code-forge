@@ -125,7 +125,7 @@ export async function changedTestFiles({ cwd, base, owned, kinds }) {
 const isConcreteFile = (p) => typeof p === 'string' && p.length > 0 && isExactEntry(p) && !p.endsWith('/');
 
 /**
- * @typedef {{scope: 'related', files: string[]} | {scope: 'full', reason: 'threshold' | 'no_tests'}} TestScope
+ * @typedef {{scope: 'related', files: string[]} | {scope: 'full', files?: string[], reason: 'threshold' | 'no_tests' | 'runner-filter'}} TestScope
  * @typedef {{scope: 'changed', files: string[], changedFiles: string[], dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'}} ChangedScope
  */
 
@@ -276,10 +276,10 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
 
 /**
  * One gate argv with every item that is exactly {@link TEST_FILES_TOKEN} replaced by the related
- * test files, or dropped for a full run. Always a new array; `scoped` is false (and the items
- * unchanged) when the gate has no such item.
+ * test files, or dropped for a full run. Always a new array; `scoped` records whether a scope
+ * placeholder was handled, including full runs. `full` signals a runner-filter fallback.
  * @param {ReadonlyArray<string>} argv @param {TestScope | ChangedScope} scope
- * @returns {{argv: string[], scoped: boolean}}
+ * @returns {{argv: string[], scoped: boolean, full?: true, reason?: 'runner-filter'}}
  * @throws {TypeError} a test path that starts with `-` (it would be read as an option; `block
  *   open --tests` refuses one too).
  */
@@ -291,14 +291,17 @@ export function expandArgv(argv, scope) {
   const dashed = files.find((f) => f.startsWith('-'));
   if (dashed !== undefined) throw new TypeError(`expandArgv: test path ${JSON.stringify(dashed)} starts with "-"`);
   const runnerFiles = testsForRunner(argv, files);
-  return { argv: argv.flatMap((item) => item === TEST_FILES_TOKEN ? runnerFiles : item === CHANGED_FILES_TOKEN ? changed : [item]), scoped: true };
+  const full = argv.includes(TEST_FILES_TOKEN) && files.length > 0 && runnerFiles.length === 0;
+  return { argv: argv.flatMap((item) => item === TEST_FILES_TOKEN ? runnerFiles : item === CHANGED_FILES_TOKEN ? changed : [item]), scoped: true,
+    ...(full ? { full: /** @type {const} */ (true), reason: /** @type {const} */ ('runner-filter') } : {}),
+  };
 }
 
 /**
  * The fields a scoped gate's result and ledger row carry: `scope`, plus `test_count` when related
  * or `reason` when full.
  * @param {TestScope | ChangedScope} scope
- * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'}}
+ * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'|'runner-filter'}}
  */
 export function scopeFields(scope) {
   if (scope.scope === 'changed') return { scope: 'changed', test_count: scope.files.length, ...(scope.dependents ? { dependents: scope.dependents } : {}), ...(scope.reason ? { reason: scope.reason } : {}) };

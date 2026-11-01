@@ -47,7 +47,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {string} [message] - termination diagnostic with the last lines of both streams.
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
+ * @property {'threshold'|'no_tests'|'runner-filter'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
  * @property {Repeats} [repeats]
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
  *   NAMES, sorted (the values are never in a result).
@@ -312,7 +312,10 @@ export async function runGates(gates, opts) {
     if (command === null || excluded(gate)) { planned.push({ gate, command: null }); continue; }
     const normalized = normalizeCommand(command);
     if (normalized.argv[0] === CHANGED_FILES_TOKEN) throw new TypeError(`gates.${gate}: '{changed_files}' cannot be the command (argv[0])`);
-    let { argv, scoped } = expandArgv(normalized.argv, scope);
+    let { argv, scoped, full, reason } = expandArgv(normalized.argv, scope);
+    const commandScope = full ? { scope: /** @type {const} */ ('full'), files: [], reason }
+      : scope.scope !== 'full' && normalized.argv.includes(TEST_FILES_TOKEN)
+        ? { ...scope, files: testsForRunner(normalized.argv, scope.files) } : scope;
     if (argv.length === 0 && normalized.argv.length > 0) throw new TypeError(`gates.${gate}: the argv is empty once ${normalized.argv.map((item) => `'${item}'`).join(' and ')} is dropped for the full suite — put the test command before it`);
     const formatter = gate === 'format' && !Array.isArray(command) ? command.formatter : undefined;
     let batches;
@@ -322,7 +325,7 @@ export async function runGates(gates, opts) {
       batches = formatBatches(argv, files, opts.formatArgvBudgetBytes ?? FORMAT_ARGV_BUDGET_BYTES);
       argv = argv.concat(files);
     }
-    planned.push({ gate, command: { argv, batches, originalArgv: normalized.argv, scoped, failOnStdout: normalized.failOnStdout, env: normalized.env } });
+    planned.push({ gate, command: { argv, batches, originalArgv: normalized.argv, scoped, full, scope: commandScope, failOnStdout: normalized.failOnStdout, env: normalized.env } });
   }
   /** @type {GateResult[]} */
   const results = [];
@@ -358,8 +361,7 @@ export async function runGates(gates, opts) {
       duration_ms: 0,
       argv,
       skipped: false,
-      ...(scoped ? scopeFields(scope.scope !== 'full' && command.originalArgv.includes(TEST_FILES_TOKEN)
-        ? { ...scope, files: testsForRunner(command.originalArgv, scope.files) } : scope) : {}),
+      ...(scoped ? scopeFields(command.scope) : {}),
       ...outcome,
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
     });
@@ -367,6 +369,8 @@ export async function runGates(gates, opts) {
     if (gate === 'test' && outcome.ok && repeat) {
       if (!command.originalArgv.includes(TEST_FILES_TOKEN)) {
         repeat.onSkip?.('repeat_new_tests: skipped (gates.test has no {test_files})');
+      } else if (command.full) {
+        repeat.onSkip?.('repeat_new_tests: skipped (no changed tests for this runner)');
       } else {
         const changedFiles = (await changedTestFiles({ cwd, ...repeat })).filter((file) => !gates.lightTestFiles || gates.lightTestFiles.includes(file));
         const files = testsForRunner(command.originalArgv, changedFiles);

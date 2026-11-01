@@ -49,7 +49,8 @@ test('expandArgv drops test_files for a full run when only foreign tests remain'
     { scope: /** @type {const} */ ('changed'), files: [MIXED[0]], changedFiles: [MIXED[0]] },
     { scope: /** @type {const} */ ('related'), files: [MIXED[0]] },
   ]) assert.deepEqual(expand.expandArgv(['node', '--test', '{test_files}'], scope),
-    { argv: ['node', '--test'], scoped: true });
+    // scoped records placeholder handling; full identifies the suite fallback.
+    { argv: ['node', '--test'], scoped: true, full: true, reason: 'runner-filter' });
 });
 
 async function recorder(dir) {
@@ -67,12 +68,40 @@ test('runGates passes only runner tests and reports the number actually passed, 
   await withTempDir(async (dir) => {
     git(['init', '-q'], dir);
     const fake = await recorder(dir);
-    for (const files of [MIXED, [MIXED[0]]]) {
-      const ran = await runGates({ test: fake.argv }, { cwd: dir, scope: { scope: 'changed', files, changedFiles: files } });
+    for (const scope of ['related', 'changed']) for (const files of [MIXED, [MIXED[0]]]) {
+      const ran = await runGates({ test: fake.argv }, { cwd: dir, scope: scope === 'changed'
+        ? { scope, files, changedFiles: files } : { scope: 'related', files } });
       assert.equal(ran.allOk, true);
-      assert.deepEqual([ran.results[0].skipped, ran.results[0].test_count], [false, files.length === 2 ? 1 : 0]);
+      const result = ran.results[0];
+      assert.equal(result.skipped, false);
+      assert.deepEqual([result.scope, result.reason, result.test_count],
+        files.length === 2 ? [scope, undefined, 1] : ['full', 'runner-filter', undefined]);
+      if (files.length === 1) assert.equal(Object.hasOwn(result, 'test_count'), false);
     }
-    assert.deepEqual(await fake.calls(), [[MIXED[1]], []]);
+    assert.deepEqual(await fake.calls(), [[MIXED[1]], [], [MIXED[1]], []]);
+  });
+});
+
+test('a runner-filter full fallback skips repeats even when a compatible changed test exists', async () => {
+  await withTempDir(async (dir) => {
+    git(['init', '-q'], dir);
+    const fake = await recorder(dir);
+    await mkdir(path.join(dir, 'test'));
+    await writeFile(path.join(dir, MIXED[1]), 'export {};\n');
+    git(['add', '-A'], dir);
+    git(['-c', 'commit.gpgsign=false', 'commit', '-qm', 'base'], dir);
+    const base = git(['rev-parse', 'HEAD'], dir);
+    await writeFile(path.join(dir, MIXED[1]), 'export const changed = true;\n');
+    const skipped = [];
+    const ran = await runGates({ test: fake.argv,
+      repeatNewTests: { n: 2, base, owned: [MIXED[1]], onSkip: (line) => skipped.push(line) },
+    }, { cwd: dir, scope: { scope: 'related', files: [MIXED[0]] } });
+    assert.equal(ran.allOk, true);
+    assert.deepEqual([ran.results[0].scope, ran.results[0].reason], ['full', 'runner-filter']);
+    assert.deepEqual(await fake.calls(), [[]]);
+    assert.deepEqual(skipped, ['repeat_new_tests: skipped (no changed tests for this runner)']);
+    assert.equal(Object.hasOwn(ran, 'repeats'), false);
+    assert.equal(Object.hasOwn(ran.results[0], 'repeats'), false);
   });
 });
 

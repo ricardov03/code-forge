@@ -278,7 +278,8 @@ test('B60 (1)(4), B203: runGatesInExport gives node only JS/TS tests; Go-only or
   const goOnly = await runGatesInExport({ gates, exportDir, mainTree, scope: { scope: 'related', files: ['tests/one_test.go'] } });
   assert.equal(goOnly.allOk, true);
   assert.deepEqual(p.seen(), { args: [], value: null, inherited: true });
-  assert.deepEqual([goOnly.results[0].argv, goOnly.results[0].scope, goOnly.results[0].test_count], [[NODE, p.script], 'related', 0]);
+  assert.deepEqual([goOnly.results[0].argv, goOnly.results[0].scope, goOnly.results[0].reason, goOnly.results[0].test_count], [[NODE, p.script], 'full', 'runner-filter', undefined]);
+  assert.equal(Object.hasOwn(goOnly.results[0], 'test_count'), false);
   const plain = await runGatesInExport({ gates, exportDir, mainTree });
   assert.deepEqual([p.seen().args, plain.results[0].scope, plain.results[0].reason], [[], 'full', 'no_tests']);
   // a plain gate (no token, no env) inside the export: the exact argv, no scope or env_keys keys
