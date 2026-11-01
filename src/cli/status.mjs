@@ -58,6 +58,7 @@ import { configInForce } from '../state/config-snapshot.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { runsDir, StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
+import { unpinnedWorkerWarnings } from '../state/worker-warning.mjs';
 import { daemonRequest } from '../util/native.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
@@ -232,6 +233,7 @@ export default async function status(args) {
       let summary;
       try { summary = answer ? daemonStatus(answer.runs[0]) : null; } catch { summary = null; }
       shown.push(summary ?? await statusOf(record));
+      for (const warning of await unpinnedWorkerWarnings(record)) err(`${warning}\n`);
     }
     if (json) {
       out(`${JSON.stringify({ runs: shown })}\n`);
