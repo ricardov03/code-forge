@@ -427,8 +427,8 @@ function hunksOf(text) {
   return listed.slice(0, listed.findIndex((l) => !l.startsWith('- @@'))).map((l) => l.slice(2));
 }
 
-describe('the block lock (B42): budget row and L3 rung with two files of one block in parallel', () => {
-  test('round 1 of a.mjs and b.mjs runs together; the budget row is written once; at round 2 only ONE file takes the L3 rung, the other stops (l3_patch_exhausted)', async () => {
+describe('the block lock (B42): one budget row and an L3 rung per file with two files of one block in parallel', () => {
+  test('round 1 of a.mjs and b.mjs runs together; the budget row is written once; at round 2 EACH file takes its own L3 rung and neither stops with l3_patch_exhausted', async () => {
     const { repo, runId } = await makeRepo();
     const key = await loadKey(runId);
     const FILES = ['src/a.mjs', 'src/b.mjs'];
@@ -488,12 +488,11 @@ describe('the block lock (B42): budget row and L3 rung with two files of one blo
     sessions.max = 0;
     const r2 = await round();
     assert.equal(sessions.max, 1); // the rechecks could take the rung: one at a time under the block lock
-    const outcomes = r2.map((r) => [r.next?.action ?? null, r.stopped ?? null]).sort();
-    assert.deepEqual(outcomes, [['patch', null], ['stop', 'l3_patch_exhausted']]);
-    const caps = rows.filter((r) => r.event === 'review.cap');
-    assert.equal(caps.length, 1);
-    assert.equal(caps[0].reason, 'l3_patch_exhausted');
-    assert.equal(caps[0].file, r2.find((r) => r.stopped)?.file);
+    assert.deepEqual(r2.map((r) => [r.file, r.next?.action, r.next?.level, r.stopped ?? null]), [
+      ['src/a.mjs', 'patch', 'L3', null],
+      ['src/b.mjs', 'patch', 'L3', null],
+    ]);
+    assert.deepEqual(rows.filter((r) => r.event === 'review.cap'), []);
     assert.equal(rows.filter((r) => r.event === 'review.budget' && r.block === BLOCK).length, 1);
   });
 });
