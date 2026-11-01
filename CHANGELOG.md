@@ -12,6 +12,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `gates run --changed` also runs the tests of files that import a changed file, so a change cannot break callers in other folders unseen (B221)
 - Daemon tests wait for readiness against a deadline instead of fixed sleeps, so they do not fail on a busy machine (B226)
 - `gates run --changed` gives each test runner only its own test files (no more `.go` files passed to `node --test`); when none fit, the gate runs the full suite and reports scope `full` (B203)
+- A gate that hits its time limit now says `TIMEOUT after <n> s (not a test failure)` with the flag to raise it, and test files left unfinished by the timeout are no longer listed as failed tests (B223)
 
 ## [0.15.4] — 2026-10-31
 
