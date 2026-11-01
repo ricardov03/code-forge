@@ -43,7 +43,7 @@ test('a lone unpinned live worker warns with its run and dead or replaced pin; e
   announceWorker(fx.repo, { pid: process.pid, run: fx.run });
   // This public behavior assertion also runs at base, before the new helper exists.
   assert.equal((await status(fx)).stderr, `${deadWarning(fx.run)}\n`, 'exactly one warning names the live worker, run and dead pin');
-  const { unpinnedWorkerWarnings } = await import('../../src/state/worker-warning.mjs');
+  const { unpinnedWorkerWarnings } = await import('../../src/worker/worker-warning.mjs');
   assert.deepEqual(await unpinnedWorkerWarnings(fx.record), [deadWarning(fx.run)], 'default repo discovery finds the live registry worker');
   const replaced = { ...fx.record, workers: undefined, worker: { pid: process.pid, started_at: 'old identity' } };
   assert.deepEqual(await unpinnedWorkerWarnings(replaced), [
@@ -74,7 +74,7 @@ test('two unpinned workers each get a pid hint; matching single and pool pins an
   for (const pid of [process.pid, child.pid]) announceWorker(fx.repo, { pid, run: fx.run });
   const expected = [process.pid, child.pid].map((pid) => `${hint(fx.run, pid)} --worker-pid ${pid}`).sort();
   assert.deepEqual((await status(fx)).stderr.trim().split('\n').sort(), expected, 'exactly two lines each select their own live pid');
-  const { unpinnedWorkerWarnings } = await import('../../src/state/worker-warning.mjs');
+  const { unpinnedWorkerWarnings } = await import('../../src/worker/worker-warning.mjs');
   assert.deepEqual((await unpinnedWorkerWarnings(fx.record)).sort(), expected, 'unit result contains exactly the same two pid hints');
 
   const pinned = await fixture({ livePin: true });

@@ -1,6 +1,6 @@
-import { workerRegistry } from '../worker/queue.mjs';
-import { repoRootOf } from '../worker/ticket.mjs';
-import { checkWorkerPin, normalizeStartTime, processStartTime } from './run.mjs';
+import { workerRegistry } from './queue.mjs';
+import { repoRootOf } from './ticket.mjs';
+import { checkWorkerPin, normalizeStartTime, processStartTime } from '../state/run.mjs';
 
 /** @typedef {{pid: number, start_time: string, run: string}} WarningWorker */
 /** @typedef {{live: boolean, worker: WarningWorker | null}} RegistryEntry */
@@ -9,7 +9,7 @@ import { checkWorkerPin, normalizeStartTime, processStartTime } from './run.mjs'
  * Read-only advice about live workers serving a run without a matching process identity pin.
  * Failure to discover the repository, read its registry or probe a pin never breaks status.
  * @param {Record<string, any>} record
- * @param {{repoRoot?: string, registry?: (root: string) => RegistryEntry[] | Promise<RegistryEntry[]>, probe?: import('./run.mjs').StartTimeProbe}} [opts]
+ * @param {{repoRoot?: string, registry?: (root: string) => RegistryEntry[] | Promise<RegistryEntry[]>, probe?: import('../state/run.mjs').StartTimeProbe}} [opts]
  * @returns {Promise<string[]>}
  */
 export async function unpinnedWorkerWarnings(record, { repoRoot, registry = workerRegistry, probe = processStartTime } = {}) {

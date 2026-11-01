@@ -58,7 +58,7 @@ import { configInForce } from '../state/config-snapshot.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { runsDir, StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
-import { unpinnedWorkerWarnings } from '../state/worker-warning.mjs';
+import { unpinnedWorkerWarnings } from '../worker/worker-warning.mjs';
 import { daemonRequest } from '../util/native.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
