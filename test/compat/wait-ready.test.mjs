@@ -39,6 +39,16 @@ test('waitReady times out at the wall-clock deadline when no probe answers', asy
   assert.ok(elapsed < 1000, 'an unanswered probe stops within one second');
 });
 
+test('waitReady times out when a probe never settles', { timeout: 1000 }, async () => {
+  const started = Date.now();
+  await assert.rejects(
+    waitReady(() => new Promise(() => {}), { timeoutMs: 200 }),
+    /waitReady timeout/,
+  );
+  const elapsed = Date.now() - started;
+  assert.ok(elapsed >= 200 && elapsed < 1000, 'a pending probe times out within one second');
+});
+
 test('waitReady counts slow probes toward the deadline rather than counting tries', async () => {
   const started = Date.now();
   let calls = 0;

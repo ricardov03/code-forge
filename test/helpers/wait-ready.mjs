@@ -14,10 +14,16 @@ export async function waitReady(probe, { timeoutMs = 15000, intervalMs = 20, sto
       reason = 'stopped';
       break;
     }
+    const controller = new AbortController();
     try {
-      const answer = await probe();
+      const answer = await Promise.race([
+        Promise.resolve(probe()).catch(() => undefined),
+        delay(Math.max(0, deadline - Date.now()), undefined, { signal: controller.signal }),
+      ]);
       if (answer !== false && answer !== undefined) return answer;
-    } catch {}
+    } catch {} finally {
+      controller.abort();
+    }
     if (stop?.()) {
       reason = 'stopped';
       break;
