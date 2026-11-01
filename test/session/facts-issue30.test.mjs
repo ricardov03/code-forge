@@ -257,7 +257,7 @@ test('outside git subfolder roots include only their HEAD subtree, without untra
 
 async function customerCase() {
   const aFiles = {
-    'CLAUDE.md': '--diff --database --force https://condomera.com/modules /a /p /h1 /b 4.3 8.1 0.13',
+    'CLAUDE.md': '--diff --database --force https://acme-app.example/modules /a /p /h1 /b 4.3 8.1 0.13',
     '.gitignore': 'vendor/\n.claude/plans/\n',
     'app/Services/SigmaClient.php': 'class SigmaClient\n',
     'app/Models/TenantSubscription.php': 'class TenantSubscription\n',
@@ -301,7 +301,7 @@ test('customer case: brief-only facts across two repos, real symbol presence, ig
   // 2 absolute roots + 1 absolute file + 10 symbols * 2 + 3 ignored paths * 2 +
   // 2 globs * 2 + 8 filler paths * 2 + 1 flag * 2 + version + package.
   assert.equal(result.claims.length, 53, 'only the mapped brief claims');
-  const pollution = ['--diff', '--database', '--force', 'https://condomera.com/modules', '/a', '/p', '/h1', '/b', '4.3', '8.1', '0.13', '/dev/null', '/api/v1/*', '/portal/*'];
+  const pollution = ['--diff', '--database', '--force', 'https://acme-app.example/modules', '/a', '/p', '/h1', '/b', '4.3', '8.1', '0.13', '/dev/null', '/api/v1/*', '/portal/*'];
   assert.deepEqual(result.claims.filter((c) => pollution.includes(c.token)), []);
   assert.equal(result.facts.filter((f) => f.kind === 'symbol').length, 20);
   for (const symbol of symbols) {
