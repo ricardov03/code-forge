@@ -48,8 +48,8 @@ async function sheet(projectDir, text, sources = [], answer = () => ({}), probe 
     packet = String(opts.input);
     probe(opts.cwd);
     const facts = [...packet.matchAll(/^- (F\d+) (\w+): (.*)$/gm)].map((m) => {
-      const body = m[3].replace(/ \[check with find .*\]$/, '');
-      const suffix = /^(.*?) \(source (.*?), check at (.*?)\)$/.exec(body);
+      const body = m[3].replace(/ \[check with (?:find|ls -d) .*\]$/, '');
+      const suffix = /^(.*?) \((?:source (.*?), )?check at (.*?)\)$/.exec(body);
       const claim = suffix?.[1] ?? body;
       const source = suffix?.[2];
       const check = suffix?.[3] ?? claim;
@@ -173,6 +173,46 @@ test('single-root rows and rendering stay byte-identical without source metadata
   const rendered = renderSheet({ briefRef: 'b', briefSha: 's', briefMtime: 'm', builtAt: 't', facts: result.facts });
   assert.equal(rendered, '# Facts sheet\n\n- brief: `b`\n- brief_sha256: `s`\n- brief_mtime: `m`\n- built_at: `t`\n- claims: 1 (VERIFIED 1 · NOT-FOUND 0 · UNVERIFIABLE 0)\n\n| fact_id | tag | kind | claim | command | output | why |\n|---|---|---|---|---|---|---|\n| F1 | VERIFIED | path | `app/base.php` | `ls app/base.php` | app/base.php | — |\n\n<!-- facts-json\n[\n' + JSON.stringify(result.facts[0]) + '\n]\n-->\n');
   assert.equal(result.markdown.includes('| source |'), false);
+});
+
+test('single-root absolute project paths keep check locations without source metadata', async () => {
+  const dir = repo();
+  const token = path.join(dir, 'app/base.php');
+  const result = await sheet(dir, '`' + token + '`', [], ({ check }) => ({ command: `ls ${check}`, output_excerpt: check, tag: 'VERIFIED' }));
+  assert.equal(result.claims.length, 1);
+  assert.equal(result.claims[0].checkPath, 'app/base.php');
+  assert.equal(result.claims[0].root.dir, dir);
+  assert.equal(Object.hasOwn(result.claims[0], 'source'), false);
+  assert.equal(Object.hasOwn(result.facts[0], 'source'), false);
+  assert.equal(result.facts[0].tag, 'VERIFIED');
+  assert.equal(result.facts[0].command, 'ls app/base.php');
+  assert.equal(result.markdown.includes('| source |'), false);
+  assert.deepEqual(result.downgraded, []);
+});
+
+test('directory globs reject literal find errors as NOT-FOUND', async () => {
+  const dir = repo({ 'src/x/a.mjs': 'export {};\n' });
+  const result = await sheet(dir, '`src/*/a.mjs`', [], () => ({ command: "find 'src/*' -name 'a.mjs'", output_excerpt: 'find: src/*: No such file or directory', tag: 'NOT-FOUND' }));
+  assert.deepEqual(result.facts.map((f) => f.tag), ['UNVERIFIABLE']);
+  assert.equal(result.downgraded.length, 1);
+  for (const glob of ['*', '?', '[x]', '{x,y}']) {
+    const token = `src/${glob}/a.mjs`;
+    const checked = validateFacts({ facts: [{ fact_id: 'F1', claim: token, kind: 'path', command: `find 'src/${glob}' -name 'a.mjs'`, output_excerpt: `find: src/${glob}: No such file or directory`, tag: 'NOT-FOUND', why: null }] }, [{ token, kind: 'path' }]);
+    assert.equal(checked.facts[0].tag, 'UNVERIFIABLE', token);
+  }
+});
+
+test('directory glob packets suggest exact ls -d and matching output is FOUND', async () => {
+  const dir = repo({ 'src/x/a.mjs': 'export {};\n' });
+  for (const command of ['ls -d src/*/a.mjs', "ls -d 'src/*/a.mjs'"]) {
+    const result = await sheet(dir, '`src/*/a.mjs`', [], () => ({ command, output_excerpt: 'src/x/a.mjs', tag: 'VERIFIED' }));
+    assert.deepEqual(result.claims.map((c) => c.token), ['src/*/a.mjs']);
+    const claimLine = result.packet.split('\n').find((line) => line.startsWith('- F1 '));
+    assert.doesNotMatch(claimLine, /check with find/);
+    assert.match(claimLine, /\[check with ls -d 'src\/\*\/a\.mjs'\]/);
+    assert.deepEqual(result.facts.map((f) => f.tag), ['VERIFIED'], command);
+    assert.deepEqual(result.downgraded, []);
+  }
 });
 
 test('root boundaries: unrelated absolute paths are unavailable; duplicate labels, non-git sources and source files are sealed', async () => {

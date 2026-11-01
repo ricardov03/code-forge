@@ -755,7 +755,8 @@ function globRule(row, claim) {
   const { segments, separators, refused } = splitCommand(row.command, true);
   const argv = segments[0] ?? [];
   const ls = argv.length === 3 && argv[0] === 'ls' && argv[1] === '-d' && argv[2] === token;
-  const find = argv.length === 4 && argv[0] === 'find' && argv[1] === path.posix.dirname(token)
+  const find = !/[*?\[\]{}]/.test(path.posix.dirname(token))
+    && argv.length === 4 && argv[0] === 'find' && argv[1] === path.posix.dirname(token)
     && argv[2] === '-name' && argv[3] === path.posix.basename(token) && readOnlyViolation(row.command) === null
     && /-name (['"])[^'"]+\1$/.test(row.command);
   if (refused || separators.length || segments.length !== 1 || (!ls && !find) || segmentViolation(argv)) return 'a glob needs find <literal dir> -name <quoted pattern> or ls -d <exact glob>; not counted';
@@ -1000,7 +1001,8 @@ const RULE = [
   'Quote the pattern. Keywords: class interface trait enum struct type function func def.',
   'VERIFIED needs a file:line: hit in a source file holding the whole token; NOT-FOUND needs a whole top-level source folder.',
   'A file-name symbol needs `find <root> -name <token>`; VERIFIED needs an output path ending in /<token>.',
-  'For a glob path use the per-claim find command with its pattern quoted. Only for that claim,',
+  'For a glob path use the per-claim check command. A find directory must be literal and its pattern quoted.',
+  'If a directory segment has glob characters, only `ls -d <exact glob token>` is accepted. For any glob claim,',
   '`ls -d <exact glob token>` is also accepted, quoted or unquoted. VERIFIED needs a matching output path;',
   'NOT-FOUND needs No such file output. Use the check path given for a source, never its live absolute path.',
   'No `$`, no backticks, no redirection, no unquoted glob except the exact ls -d form above, no `~`, no absolute path outside /usr, /opt/homebrew or',
@@ -1024,8 +1026,13 @@ export function buildFactsPacket(claims) {
   return `${RULE}${claims.flatMap((c, i) => {
     if (c.unavailable) return [];
     const token = c.checkPath ?? c.token;
-    const hint = c.kind === 'path' && /[*?\[\]{}]/.test(c.token)
-      ? ` [check with find ${shellQuote(path.posix.dirname(token))} -name ${shellQuote(path.posix.basename(token), true)}]` : '';
+    let hint = '';
+    if (c.kind === 'path' && /[*?\[\]{}]/.test(c.token)) {
+      const dir = path.posix.dirname(token);
+      hint = /[*?\[\]{}]/.test(dir)
+        ? ` [check with ls -d ${shellQuote(token)}]`
+        : ` [check with find ${shellQuote(dir)} -name ${shellQuote(path.posix.basename(token), true)}]`;
+    }
     return [`- F${i + 1} ${c.kind}: ${c.token}${c.source === undefined ? (c.checkPath ? ` (check at ${c.checkPath})` : '') : ` (source ${c.source}, check at ${c.checkPath})`}${hint}`];
   }).join('\n')}\n`;
 }
@@ -1230,7 +1237,7 @@ function mapClaims(claims, roots) {
       if (claim.token === '/dev' || claim.token.startsWith('/dev/')) return [];
       // A nested source is the most specific root for an absolute path.
       const root = [...roots].sort((a, b) => b.dir.length - a.dir.length).find((r) => belowRoot(r.dir, claim.token) && (!r.file || r.file === claim.token));
-      if (root) return [{ ...claim, source: root.label, root, checkPath: path.posix.join(root.prefix, path.relative(root.dir, claim.token).split(path.sep).join('/')) || '.' }];
+      if (root) return [{ ...claim, ...(roots.length > 1 || root.prefix !== '' ? { source: root.label } : {}), root, checkPath: path.posix.join(root.prefix, path.relative(root.dir, claim.token).split(path.sep).join('/')) || '.' }];
       if (TOOL_ROOTS.some((r) => belowRoot(r, claim.token))) return [claim];
       try {
         if (!statSync('/' + claim.token.split('/')[1]).isDirectory()) return [];
