@@ -19,7 +19,7 @@
  *     ≥ `escalation.warning_threshold` (2) warnings or any `critical` — climb at once (rule 2c,
  *     B34: `trigger: review_warnings`); `warn_rounds_at_level` counts them and resets on a climb.
  *  5. Cap: `review.max_rounds_per_file` (4) reached with an open finding ⇒ the L3 patch rung
- *     (rule 6; once per block — shared with rule 5's ceiling), whose `patch_check` round is
+ *     (rule 6; once per file — shared with rule 5's ceiling), whose `patch_check` round is
  *     OUTSIDE the cap. The rung is also rule 5: rule 2/2b at the running ceiling (L2 — L3 is never
  *     a coding level, R1) takes it, so for an L2 block the rung IS the +1 at round 2. After the
  *     patch the block continues at L2 (§3.6, Fable ruling A): `l3_rung_used = true`,
@@ -127,7 +127,7 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {string[]} [finding_history] - claim/evidence keys from earlier rounds of this file.
  * @property {string[]} [finding_ids] - ids seen in earlier rounds, including closed findings.
  * @property {string | null} reviewed_content - the content the last counted round reviewed.
- * @property {boolean} l3_rung_used - the block's L3 rung (rule 5 or 6) was used — once per block.
+ * @property {boolean} l3_rung_used - the file's L3 rung (rule 5 or 6) was used — once per file.
  * @property {'open' | 'complete' | 'stopped'} status
  * @property {string} [stop_content_hash] - bytes reviewed by a stop (absent in legacy states).
  * @property {string} [stop_lens] - the lens whose packet stopped before a round.
@@ -146,7 +146,7 @@ import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallba
  * @property {import('./triage.mjs').JevAsk} [jev]
  * @property {import('./triage.mjs').RuleFn} [rule]
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow]
- * @property {(req: {file: string, round: number, level: string, open: Finding[], l3_patch: boolean}) => Promise<unknown>} [fix] - a fresh coder session at `level`; `l3_patch` = the block's L3 patch is in the tree (§3.6).
+ * @property {(req: {file: string, round: number, level: string, open: Finding[], l3_patch: boolean}) => Promise<unknown>} [fix] - a fresh coder session at `level`; `l3_patch` = the file's L3 patch is in the tree (§3.6).
  * @property {(req: {file: string, level: 'L3', open: Finding[]}) => Promise<unknown>} [patch] - the L3 patch rung (≤ 80 lines, owned files only).
  * @property {string | null} [base] - the block base (`recheck_scope: file`, and the B56 moved-code diff).
  * @property {ReadonlyArray<string>} [peers] - B56: the block's other changed files (moved-code hints).
@@ -582,7 +582,7 @@ async function recheckSession(packet, deps, open) {
 function decideNext(state, openBefore, s, kind, closedIds) {
   if (state.open.length === 0) return { action: 'complete' };
   if (kind === 'patch_check') {
-    // the block's one rung is spent: a patch that closed no old finding stops FIRST — even when
+    // the file's one rung is spent: a patch that closed no old finding stops FIRST — even when
     // the rung was taken at the cap — then the cap; else (B73: ≥ 1 old id closed is progress,
     // whatever new findings its fix hunks brought) the block continues at L2: a fix, no stall
     if (closedIds === 0) return { action: 'stop', reason: 'l3_patch_exhausted', trigger: 'review_stall' };

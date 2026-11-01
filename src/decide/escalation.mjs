@@ -220,13 +220,13 @@ export function runningCeiling(stopAt = 'L3') {
 
 /**
  * Rules 1, 2b and 2 share this: below the running ceiling ⇒ +1 level (never to L3); at the
- * running ceiling ⇒ rule 5, the block's one L3 rung (R1), then `stop`.
+ * running ceiling ⇒ rule 5, the file's one L3 rung (R1), then `stop`.
  * @param {'retries'|'review_rounds'|'review_stall'|'review_warnings'} trigger
  * @param {string} currentLevel
  * @param {string} stopAt
  * @param {'patch'|'code'} l3Mode
- * @param {boolean} l3RungAlreadyUsed - the L3 rung was already used once on THIS block, in
- *   EITHER mode and from either rule 5 or rule 6 (one rung per block, not per trigger). A second
+ * @param {boolean} l3RungAlreadyUsed - the L3 rung was already used once on THIS file, in
+ *   EITHER mode and from either rule 5 or rule 6 (one rung per file, not per trigger). A second
  *   hit always stops.
  * @returns {EscalationResult}
  */
@@ -270,8 +270,8 @@ function finalizeEscalate(trigger, currentLevel, stopAt, l3Mode, l3RungAlreadyUs
  * @property {string} [stopAt] - `escalation.stop_at`, default `'L3'`.
  * @property {'patch'|'code'} [l3Mode] - `escalation.l3_mode`, default `'patch'` (R1).
  * @property {boolean} [l3RungAlreadyUsed] - the L3 rung (ceiling, rule 5, OR the file's review
- *   cap, rule 6) was already used once before on THIS block, from either source. A second hit
- *   always `stop`s — the plan's L3 rung is one per block, not one per trigger.
+ *   cap, rule 6) was already used once before on THIS file, from either source. A second hit
+ *   always `stop`s — the plan's L3 rung is one per file, not one per trigger.
  * @property {number} [roundsAtFile] - rule 6 (v1.3, §4.11): total review rounds run on this file
  *   so far, counted across every level — unlike `reviewRoundsAtLevel`, this is never reset by a
  *   level escalation.

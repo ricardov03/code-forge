@@ -108,7 +108,7 @@ import { ledgerSchemaHistory } from '../review/schema-fallback.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { redact } from '../util/redact.mjs';
 import { withLock } from '../util/file-locks.mjs';
-import { blockAnchors, blockRungUsed, loadState, RESTORED_EVENT, saveState } from './review-state.mjs';
+import { fileRungUsed, loadState, RESTORED_EVENT, saveState } from './review-state.mjs';
 import { assertAnswers, enqueueHash, isDone, reviewExclusionFor, writeResult } from './queue.mjs';
 import { assertTicketId, contentHash, readRegularFileNoFollow, WorkerError } from './ticket.mjs';
 
@@ -527,7 +527,7 @@ export function blockPeerDiffs(repoRoot, { base, owned, ownedKinds, file }) {
 }
 
 /**
- * The key of a block's lock (B42): the block's budget row and its L3 rung are taken under it.
+ * The key of a block's lock (B42): the budget row and each file's L3 rung are taken under it.
  * It carries the run, so two runs in one process never share a lock.
  * @param {string} runId @param {string} block @returns {string}
  */
@@ -537,33 +537,18 @@ export const blockLockKey = (runId, block) => `block:${runId}\0${block}`;
 export const LOST_MESSAGE = 'the review state file is gone and the ledger cannot rebuild it (its anchor carries no state_body); the file is not reviewed again from round 1 — the owner can run `code-forge block reopen`';
 
 /**
- * Whether the block's one L3 rung is taken: a verified anchor says so (`blockRungUsed`), OR another
- * file of the block has a saved state whose round decided `next: patch` — that round took the rung,
- * but its anchor records `l3_rung_used` only once the patch_check ticket saves. A sibling state that
- * does not load is counted as taken (fail closed; its own ticket refuses it).
+ * Whether this file's L3 rung is taken, derived from its verified anchors (`fileRungUsed`).
+ * A pending `next: patch` on this file is handled by its patch_check ticket; sibling files
+ * have their own rungs.
  * @param {import('./review-state.mjs').Where} where
  * @returns {{status: 'ok' | 'tampered', used: boolean}}
  */
 export function rungTaken(where) {
-  const rung = blockRungUsed(where);
-  if (rung.status === 'tampered' || rung.used) return rung;
-  const anchors = blockAnchors(where) ?? [];
-  const siblings = new Set(anchors.map((a) => a.file).filter((f) => typeof f === 'string' && f !== where.file));
-  for (const file of siblings) {
-    let other;
-    try {
-      other = loadState({ ...where, file, migrate: false }); // B69: a sibling's old file is read, never moved here
-    } catch {
-      return { status: 'ok', used: true };
-    }
-    // a sibling that would be restored (B68) counts by its rebuilt state; lost or tampered fails closed
-    if ((other.status !== 'ok' && other.status !== 'restored') || other.state?.next?.action === 'patch') return { status: 'ok', used: true };
-  }
-  return rung;
+  return fileRungUsed(where);
 }
 
 /**
- * Whether this round could take the block's L3 rung (so it must run under the block lock): never
+ * Whether this round could take the file's L3 rung (so it must run under the block lock): never
  * when the rung is taken or the round is the patch_check (the rung is already this file's); never
  * for a file's first full round while the cap and the per-level ladder are both above 1 (round 1
  * cannot stall, reach the cap or exhaust the ladder); else conservatively yes.
@@ -586,9 +571,9 @@ export function mayTakeRung(state, kind, cfg, rungUsed) {
  * Concurrency (B42): the worker runs several tickets at once but never two for the same
  * (block, file) (its file lock, `loop.mjs`), so this file's state `seq` is read and saved by one
  * ticket at a time. What the files of a BLOCK share is taken under the block lock
- * (`blockLockKey`): the budget row's check-then-write (written once per block) and the L3 rung —
+ * (`blockLockKey`): the budget row's check-then-write (written once per block) and each file's L3 rung —
  * the rung read and, for a round that could take the rung (`mayTakeRung`), the whole round and its
- * state save, so two files of one block never both take it. A round that cannot take the rung (a
+ * state save, so workers cannot take the same file's rung twice. A round that cannot take the rung (a
  * first full round, or any round once the rung is gone) runs outside the block lock, in parallel
  * with the block's other files.
  * @param {import('./queue.mjs').Ticket} ticket @param {ReviewContext} ctx
@@ -636,7 +621,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
       if (row.event === 'review.state' && row.file === ticket.file) anchoredAt = i;
     });
     // A changed review input starts a full round, including previously stopped files. Keep
-    // the anchor sequence and the block's spent L3 rung; tampered state still refuses above.
+    // the anchor sequence and the file's spent L3 rung; tampered state still refuses above.
     const reopened = amendedAt > anchoredAt || reopenRowFor(rows, reopenAt) !== null;
     if (loaded.status === 'lost' && !reopened) return { outcome: /** @type {ReviewOutcome} */ ({ status: 'refused', reason: 'review-state-lost', message: LOST_MESSAGE, approved: false, engine: 'adaptive', sessions: [] }) };
     let seq = loaded.seq;
@@ -664,7 +649,7 @@ async function fixLoopRound(ticket, ctx, { base, level, owned, ownedKinds, block
     if (state.next?.action === 'retry') kind = state.pending_kind ?? kind;
     else if (state.next?.action === 'patch') {
       kind = 'patch_check';
-      state.l3_rung_used = true; // the orchestrator ran the block's one L3 patch before this ticket
+      state.l3_rung_used = true; // the orchestrator ran this file's one L3 patch before this ticket
     }
     const fixed = state;
     const round = () => playRound(ticket, ctx, { state: fixed, kind, where, seq, base, blockKindOf, workDir, factsExcerpt, rulesDigest, extraRounds, peerDiffs, fileContext });

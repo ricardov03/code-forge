@@ -845,8 +845,8 @@ A break mutex left by a crashed process blocks its key until a human removes it,
 - **Same-file rule.** The same file (in the same block) is never reviewed twice at once. If the
   coder edits a file while its review runs, the new ticket waits. A ticket for another file takes
   the free slot.
-- **Block lock.** Two shared steps run one at a time per block: the budget row and the block's
-  one L3 rung. So two files of one block can never both take the rung.
+- **Block lock.** Two steps run one at a time per block: the budget row and taking a file's
+  L3 rung, once per file. Two workers cannot take the same file's rung twice.
 - **Provider limits.** Every provider has a session limit, `review.provider_concurrency`
   (defaults: anthropic 4, openai 2, xai 2). A session waits for a free slot of its provider. A
   big pool never opens more sessions than the provider allows.
@@ -874,7 +874,7 @@ flowchart TD
   rn["Round 2+<br/>fix hunks only"] --> done
   done -- yes --> approved["review.approved (signed)"]
   done -- no --> cap{"round ≥ 4<br/>(review cap)?"}
-  cap -- "yes, rung unused" --> rung["L3 rung, once per block<br/>patch ≤ 80 lines, owned files"]
+  cap -- "yes, rung unused" --> rung["L3 rung, once per file<br/>patch ≤ 80 lines, owned files"]
   cap -- "yes, rung already used" --> stopcap["stopped: review_cap<br/>the human decides"]
   cap -- no --> trig{"heavy round, stall,<br/>or 2 rounds at this level?"}
   trig -- no --> rn
@@ -915,8 +915,8 @@ flowchart TD
   `null` with no reason.
 - After each round with findings still open, the **cap is checked first**
   (`review.max_rounds_per_file`, default 4):
-  - round 4 still open and the block has **not** used its L3 rung ⇒ the rung fires;
-  - round 4 still open and the rung is **already used** ⇒ `stopped: review_cap`.
+  - round 4 still open and the file has **not** used its L3 rung ⇒ the rung fires;
+  - round 4 still open and the file's rung is **already used** ⇒ `stopped: review_cap`.
 - **A heavy round climbs at once.** Below L2, a round that leaves 2 or more open warnings (or any
   critical) moves the next fix one level up (`escalation.after_rounds_with_warnings`, default 1;
   `escalation.warning_threshold`, default 2).
@@ -925,7 +925,7 @@ flowchart TD
   (`escalation.review_rounds_per_level`) also climb.
 - **L2 is the highest running level for a coder.** A coder never climbs past L2. At L2 the next
   step is the **L3 rung**: one fresh L3 session writes a patch of at most 80 lines inside the owned
-  files. The rung fires **once per block**; a later trigger in that block stops instead.
+  files. The rung fires **once per file**; a later trigger in that file stops instead.
 - **After the patch** comes a `patch_check` review: clean ⇒ the file is approved; the patch
   closed none of the findings that were open before it ⇒ `stopped: l3_patch_exhausted`; round at
   or over the cap ⇒ `stopped: review_cap`; otherwise the fixes continue at L2. A patch that closed
@@ -1164,7 +1164,7 @@ These come from real runs. The skill states each one (`skill/references/`):
 | Judge | L3 (a third provider in multimodel mode) | closed book, one turn | the worker |
 | System 2 | L3 | closed book, one turn | the worker, `code-forge s2` |
 | Plan author | L3 | closed book, one turn | `code-forge author` |
-| L3 rung | L3 | a patch ≤ 80 lines, once per block | `code-forge spawn --level L3 --role coder` |
+| L3 rung | L3 | a patch ≤ 80 lines, once per file | `code-forge spawn --level L3 --role coder` |
 | System 1 | Jev, a small fast classifier model from TypeSafe (outside the ladder) | an API call, typed answer + probability | the worker or the orchestrator's own CLI call, never a coder |
 
 Closed book means an empty folder, the packet on stdin and no tools. Codex (provider `openai`) always

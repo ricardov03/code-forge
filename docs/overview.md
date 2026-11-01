@@ -29,7 +29,7 @@ Coding agents are good at writing code. The workflow around them is where things
   level to a provider, model and effort. Change one line of config, not the workflow.
 - **Coders run at most at L2.** A coder starts at L0, L1 or L2 and climbs one level at a time,
   never past L2. L3 is used only for planning and hardening (the plan author), System 2, the
-  review judge, and a one-time coder patch rung: at most 80 lines, once per block, when a block
+  review judge, and a one-time coder patch rung: at most 80 lines, once per file, when a file
   is stuck at L2. (`escalation.l3_mode: code` lets L3 code a block; it is opt-in, not the default.)
 - **Tools first, then a fast decision model, then a slow one.** Tests, types, lint and `git diff`
   answer facts. A fast decision model (System 1: Jev, a small fast classifier model from TypeSafe) answers small typed questions with a
