@@ -4,6 +4,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -17,6 +18,9 @@ type appendOwner struct {
 	PID       int    `json:"pid"`
 	StartedAt string `json:"started_at"`
 }
+
+// Shared with Node: older writers may still be publishing their identity.
+const unidentifiedLockGrace = 30 * time.Second
 
 var appendSelf struct {
 	sync.Once
@@ -37,8 +41,8 @@ func appendStartTime(pid int) (string, error) {
 	return strings.Join(strings.Fields(string(out)), " "), err
 }
 
-// Only an identified dead/reused pid is stale. Partial or unreadable records
-// fail closed: a live creator may still be publishing its owner record.
+// Identified dead/reused pids are stale. Unidentified records need a grace
+// period for legacy writers; age never overrides a valid live identity.
 func staleAppendLock(file string) (bool, error) {
 	data, err := os.ReadFile(file)
 	if os.IsNotExist(err) {
@@ -49,7 +53,14 @@ func staleAppendLock(file string) (bool, error) {
 	}
 	var owner appendOwner
 	if json.Unmarshal(data, &owner) != nil || owner.PID <= 0 || strings.TrimSpace(owner.StartedAt) == "" {
-		return false, nil
+		info, err := os.Stat(file)
+		if os.IsNotExist(err) {
+			return false, nil
+		}
+		if err != nil {
+			return false, err
+		}
+		return time.Since(info.ModTime()) > unidentifiedLockGrace, nil
 	}
 	alive, err := appendOwnerAlive(owner.PID)
 	if err != nil || !alive {
@@ -59,7 +70,7 @@ func staleAppendLock(file string) (bool, error) {
 	return err == nil && start != "" && start != strings.Join(strings.Fields(owner.StartedAt), " "), nil
 }
 
-// Reclamation uses this SAME exclusive-create protocol on file+".reap".
+// Reclamation uses this SAME link-published protocol on file+".reap".
 // Serializing stale checks and rename prevents two reapers from moving a new
 // live owner's lock after one has already replaced the stale inode. A killed
 // reaper is itself recoverable by the same protocol, with the same deadline.
@@ -75,18 +86,26 @@ func lockAppend(file, slug string, deadline time.Time) (func(), error) {
 	if appendSelf.err != nil {
 		return nil, appendSelf.err
 	}
+	f, err := os.CreateTemp(filepath.Dir(file), filepath.Base(file)+".tmp.")
+	if err != nil {
+		return nil, err
+	}
+	defer os.Remove(f.Name())
+	n, writeErr := f.Write(appendSelf.data)
+	closeErr := f.Close()
+	if writeErr != nil {
+		return nil, writeErr
+	}
+	if n != len(appendSelf.data) {
+		return nil, io.ErrShortWrite
+	}
+	if closeErr != nil {
+		return nil, closeErr
+	}
 	for {
-		f, err := os.OpenFile(file, os.O_WRONLY|os.O_CREATE|os.O_EXCL, 0600)
+		// Only the complete identity is visible at the shared lock path.
+		err := os.Link(f.Name(), file)
 		if err == nil {
-			_, writeErr := f.Write(appendSelf.data)
-			closeErr := f.Close()
-			if writeErr != nil || closeErr != nil {
-				_ = os.Remove(file) // still our live owner's exclusive creation
-				if writeErr != nil {
-					return nil, writeErr
-				}
-				return nil, closeErr
-			}
 			return func() { _ = os.Remove(file) }, nil
 		}
 		if !os.IsExist(err) {

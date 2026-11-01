@@ -25,6 +25,8 @@ import { ledgerDir, ledgerPath } from './paths.mjs';
 /** @typedef {Record<string, any>} LedgerRow - a ledger row is intentionally schema-free in 0.1. */
 
 const DEFAULT_ROTATE_AT_BYTES = 10 * 1024 * 1024;
+// Shared with Go: allow older writers ample time to finish publishing identity.
+const UNIDENTIFIED_LOCK_GRACE_MS = 30_000;
 /** @type {string | null | undefined} */
 let selfStart;
 
@@ -33,11 +35,18 @@ async function staleAppendLock(file) {
   let owner;
   try { owner = JSON.parse(await readFile(file, 'utf8')); }
   catch (err) {
-    if (err.code === 'ENOENT' || err instanceof SyntaxError) return false;
-    throw err;
+    if (err.code === 'ENOENT') return false;
+    if (!(err instanceof SyntaxError)) throw err;
   }
-  // An empty/partial record may belong to a creator still writing its identity.
-  if (!Number.isInteger(owner?.pid) || owner.pid <= 0 || typeof owner.started_at !== 'string' || !owner.started_at.trim()) return false;
+  // Legacy/foreign creators may still be writing. Only reclaim unidentified
+  // records after the grace period; age never overrides a valid live identity.
+  if (!Number.isInteger(owner?.pid) || owner.pid <= 0 || typeof owner.started_at !== 'string' || !owner.started_at.trim()) {
+    try { return Date.now() - (await stat(file)).mtimeMs > UNIDENTIFIED_LOCK_GRACE_MS; }
+    catch (err) {
+      if (err.code === 'ENOENT') return false;
+      throw err;
+    }
+  }
   try { process.kill(owner.pid, 0); }
   catch (err) {
     if (err.code === 'ESRCH') return true;
@@ -48,7 +57,7 @@ async function staleAppendLock(file) {
 }
 
 /**
- * The same exclusive-create JSON protocol is used by Go. The .reap lock only
+ * The same link-published JSON protocol is used by Go. The .reap lock only
  * serializes stale verification + rename: two reapers must never rename a new
  * live owner's lock using an old snapshot. Killed reapers are recovered with
  * this same protocol recursively, sharing the original bounded deadline.
@@ -59,36 +68,32 @@ async function lockAppend(file, slug, deadline) {
   selfStart ??= readStartTime(process.pid);
   if (!selfStart) throw new Error('cannot determine ledger lock owner process start time');
   const bytes = JSON.stringify({ pid: process.pid, started_at: selfStart });
-  for (;;) {
-    let handle;
-    try { handle = await open(file, 'wx', 0o600); }
-    catch (err) { if (err.code !== 'EEXIST') throw err; }
-    if (handle) {
+  const temp = `${file}.tmp.${randomUUID()}`;
+  const handle = await open(temp, 'wx', 0o600);
+  try {
+    try { await handle.writeFile(bytes); }
+    finally { await handle.close(); }
+    for (;;) {
+      // Publish only the complete identity; EEXIST leaves the holder untouched.
       try {
-        await handle.writeFile(bytes);
-        await handle.close();
+        await link(temp, file);
+        return () => unlink(file);
+      } catch (err) { if (err.code !== 'EEXIST') throw err; }
+      if (Date.now() > deadline) throw new Error(`ledger ${slug} is locked (${file})`);
+      if (await staleAppendLock(file)) {
+        const release = await lockAppend(`${file}.reap`, slug, deadline);
+        try {
+          // Re-read and re-probe after acquiring the reclamation lock.
+          if (await staleAppendLock(file)) {
+            const stale = `${file}.stale.${randomUUID()}`;
+            await rename(file, stale);
+            await unlink(stale);
+          }
+        } finally { await release(); }
       }
-      catch (err) {
-        await handle.close().catch(() => {});
-        await unlink(file);
-        throw err;
-      }
-      return () => unlink(file);
+      await sleep(25);
     }
-    if (Date.now() > deadline) throw new Error(`ledger ${slug} is locked (${file})`);
-    if (await staleAppendLock(file)) {
-      const release = await lockAppend(`${file}.reap`, slug, deadline);
-      try {
-        // Re-read and re-probe after acquiring the reclamation lock.
-        if (await staleAppendLock(file)) {
-          const stale = `${file}.stale.${randomUUID()}`;
-          await rename(file, stale);
-          await unlink(stale);
-        }
-      } finally { await release(); }
-    }
-    await sleep(25);
-  }
+  } finally { await unlink(temp); }
 }
 
 const hasTokens = (row) => typeof row.tokens_in === 'number' || typeof row.tokens_out === 'number';

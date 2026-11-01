@@ -65,7 +65,7 @@ func AppendObject(dir, slug string, row Object, rotateAtBytes int64) (Object, er
 	if err := os.MkdirAll(dir, 0755); err != nil {
 		return nil, err
 	}
-	// Node and Go hold the same exclusive-create lock across rotation, torn-tail
+	// Node and Go hold the same link-published identity lock across rotation, torn-tail
 	// recovery and the append, so recovery cannot truncate another writer's row.
 	lock := filepath.Join(dir, slug+".append.lock")
 	release, err := lockAppend(lock, slug, time.Now().Add(5*time.Second))

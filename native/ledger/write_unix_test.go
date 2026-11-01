@@ -6,6 +6,7 @@ import (
 	"bufio"
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"os"
 	"os/exec"
@@ -17,6 +18,107 @@ import (
 
 	"github.com/ricardov03/code-forge/native/ledger"
 )
+
+func TestAppendRecoversOldUnidentifiedLocks(t *testing.T) {
+	for _, contents := range []string{"", `{"pid":`, "null", "{}", `{"pid":1}`, `{"pid":"foreign","started_at":"unknown"}`} {
+		t.Run(fmt.Sprintf("%q", contents), func(t *testing.T) {
+			dir := t.TempDir()
+			lock := filepath.Join(dir, "fixture.append.lock")
+			if err := os.WriteFile(lock, []byte(contents), 0600); err != nil {
+				t.Fatal(err)
+			}
+			old := time.Now().Add(-time.Minute)
+			if err := os.Chtimes(lock, old, old); err != nil {
+				t.Fatal(err)
+			}
+			if _, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "after-old-lock"}, ledger.DefaultRotateAtBytes); err != nil {
+				t.Fatal(err)
+			}
+			rows, err := ledger.ReadRows(dir, "fixture")
+			if err != nil || len(rows) != 1 || rows[0].(map[string]any)["event"] != "after-old-lock" {
+				t.Fatalf("want one recovered append, got %v (%v)", rows, err)
+			}
+			entries, err := os.ReadDir(dir)
+			if err != nil || len(entries) != 1 || entries[0].Name() != "fixture.jsonl" {
+				t.Fatalf("lock artifacts remain: %v (%v)", entries, err)
+			}
+		})
+	}
+}
+
+func TestAppendWaitsForFreshOrLiveLock(t *testing.T) {
+	cmd := exec.Command("ps", "-o", "lstart=", "-p", fmt.Sprint(os.Getpid()))
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	start, err := cmd.Output()
+	if err != nil || strings.TrimSpace(string(start)) == "" {
+		t.Fatalf("read own process identity: %q (%v)", start, err)
+	}
+	live, err := json.Marshal(map[string]any{"pid": os.Getpid(), "started_at": string(start)})
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, c := range []struct {
+		name, contents string
+		old            bool
+	}{
+		{"fresh empty", "", false},
+		{"fresh partial", `{"pid":`, false},
+		{"fresh unidentified", "{}", false},
+		{"old live identity", string(live), true},
+	} {
+		t.Run(c.name, func(t *testing.T) {
+			dir := t.TempDir()
+			lock := filepath.Join(dir, "fixture.append.lock")
+			if err := os.WriteFile(lock, []byte(c.contents), 0600); err != nil {
+				t.Fatal(err)
+			}
+			if c.old {
+				old := time.Now().Add(-time.Minute)
+				if err := os.Chtimes(lock, old, old); err != nil {
+					t.Fatal(err)
+				}
+			}
+			done := make(chan error, 1)
+			waited := false
+			go func() {
+				_, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "after-release"}, ledger.DefaultRotateAtBytes)
+				done <- err
+			}()
+			t.Cleanup(func() {
+				_ = os.Remove(lock)
+				if !waited {
+					if err := <-done; err != nil {
+						t.Errorf("append after release: %v", err)
+					}
+				}
+			})
+			select {
+			case err := <-done:
+				waited = true
+				t.Fatalf("writer did not wait for held lock: %v", err)
+			case <-time.After(125 * time.Millisecond):
+			}
+			if contents, err := os.ReadFile(lock); err != nil || string(contents) != c.contents {
+				t.Fatalf("holder lock changed: %q (%v)", contents, err)
+			}
+			if _, err := os.Stat(filepath.Join(dir, "fixture.jsonl")); !os.IsNotExist(err) {
+				t.Fatalf("writer touched ledger while lock held: %v", err)
+			}
+			if err := os.Remove(lock); err != nil {
+				t.Fatal(err)
+			}
+			err := <-done
+			waited = true
+			if err != nil {
+				t.Fatalf("append after release: %v", err)
+			}
+			rows, err := ledger.ReadRows(dir, "fixture")
+			if err != nil || len(rows) != 1 || rows[0].(map[string]any)["event"] != "after-release" {
+				t.Fatalf("want one append after release, got %v (%v)", rows, err)
+			}
+		})
+	}
+}
 
 func TestNodeAppendDuringGoTornTailRecovery(t *testing.T) {
 	node, err := exec.LookPath("node")

@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { access, appendFile, link, mkdir, readFile, readdir, unlink, writeFile } from 'node:fs/promises';
+import { access, appendFile, link, mkdir, readFile, readdir, unlink, utimes, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { setTimeout as sleep } from 'node:timers/promises';
@@ -9,6 +9,48 @@ import { readStartTime } from '../../src/util/reaper.mjs';
 import { ledgerDir, ledgerPath } from '../../src/ledger/paths.mjs';
 import { appendRow, claimRotatedName, readAllRows, readRows } from '../../src/ledger/write.mjs';
 import { withTempHome } from './helpers.mjs';
+
+test('appendRow recovers old empty, partial, and unidentified lock files', async (t) => {
+  for (const contents of ['', '{"pid":', 'null', '{}', '{"pid":1}', '{"pid":"foreign","started_at":"unknown"}']) {
+    await t.test(JSON.stringify(contents), async () => {
+      await withTempHome(async () => {
+        await mkdir(ledgerDir(), { recursive: true });
+        const lock = path.join(ledgerDir(), 'old.append.lock');
+        await writeFile(lock, contents);
+        const old = new Date(Date.now() - 60_000);
+        await utimes(lock, old, old);
+        await appendRow({ event: 'after-old-lock' }, { slug: 'old' });
+        assert.deepEqual((await readRows('old')).map((row) => row.event), ['after-old-lock']);
+        assert.deepEqual(await readdir(ledgerDir()), ['old.jsonl']);
+      });
+    });
+  }
+});
+
+test('appendRow waits for fresh empty and partial lock files until removed', async (t) => {
+  for (const contents of ['', '{"pid":', '{}']) {
+    await t.test(JSON.stringify(contents), async () => {
+      await withTempHome(async () => {
+        await mkdir(ledgerDir(), { recursive: true });
+        const lock = path.join(ledgerDir(), 'fresh.append.lock');
+        await writeFile(lock, contents);
+        let finished = false;
+        const pending = appendRow({ event: 'after-release' }, { slug: 'fresh' }).then(() => { finished = true; });
+        try {
+          await sleep(125);
+          assert.equal(finished, false);
+          assert.equal(await readFile(lock, 'utf8'), contents);
+          await assert.rejects(access(ledgerPath('fresh')), { code: 'ENOENT' });
+        } finally {
+          await unlink(lock);
+          await pending;
+        }
+        assert.deepEqual((await readRows('fresh')).map((row) => row.event), ['after-release']);
+        assert.deepEqual(await readdir(ledgerDir()), ['fresh.jsonl']);
+      });
+    });
+  }
+});
 
 test('appendRow takes over a dead foreign lock and a reused pid start time', async () => {
   await withTempHome(async () => {
@@ -42,6 +84,8 @@ test('a live foreign lock delays recovery and append until released, preserving 
     await writeFile(file, `${prefix}{"event":"torn`);
     // Deliberately use ps-style padding: both runtimes compare collapsed values.
     await writeFile(lock, JSON.stringify({ pid: child.pid, started_at: `  ${started.replaceAll(' ', '  ')}  ` }));
+    const old = new Date(Date.now() - 60_000);
+    await utimes(lock, old, old); // Age alone must never evict an identified live owner.
     let finished = false;
     const pending = appendRow({ event: 'after' }, { slug: 'held' }).then(() => { finished = true; });
     await sleep(125);
