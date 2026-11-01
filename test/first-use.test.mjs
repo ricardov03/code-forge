@@ -44,7 +44,8 @@ after(async () => {
   rmSync(PARENT, { recursive: true, force: true });
 });
 
-/** The facts delegate answers 5 of the brief's 7 claims; its 2 repo-relative owned paths are unanswered. */
+/** The facts delegate answers 5 of the brief's 9 claims; 2 repo-relative owned paths and the
+ * `RangeError` and `TypeError` symbols are unanswered. */
 const FACTS_ANSWER = {
   facts: [
     { fact_id: 'F1', claim: './src/math.mjs', kind: 'path', command: 'ls ./src/math.mjs', output_excerpt: './src/math.mjs', tag: 'VERIFIED', why: null },
@@ -186,7 +187,7 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
     const author = rows.filter((r) => r.event === 'session' && r.role === 'author');
     assert.deepEqual([facts.length, author.length], [1, 1]);
     assert.equal(rows.indexOf(facts[0]) < rows.indexOf(author[0]), true);
-    assert.deepEqual([facts[0].claims, facts[0].verified], [7, 2]);
+    assert.deepEqual([facts[0].claims, facts[0].verified], [9, 2]);
   });
 
   test('exactly one signed review.approved per changed or new file (2 files: 1 changed, 1 new)', async () => {
