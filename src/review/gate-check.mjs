@@ -908,7 +908,8 @@ export function repoRelativePath(raw) {
 /**
  * The block's file set (§4.1): changed tracked files since `base` (deletions included, hashed
  * `DELETED_HASH`) ∪ untracked files, filtered to `owned` (`matchOwned`, default the registry's `ownsFile` with `ownedKinds`: an exact entry owns its path and the paths below it unless recorded as a regular file, B57), each with its content hash.
- * Every path goes through `repoRelativePath`.
+ * Every path goes through `repoRelativePath`; files deleted now get one git base-existence check
+ * and are omitted if absent at base too. Other files need no extra git call.
  * @param {{repoRoot: string, base: string, owned: string[], ownedKinds?: Record<string, string>, matchOwned?: (file: string) => boolean, changed?: string[]}} opts
  *   `changed`: the tree's changed files when the caller already listed them ({@link changedFiles}).
  * @returns {Promise<Array<{file: string, content_hash: string}>>}
@@ -916,7 +917,16 @@ export function repoRelativePath(raw) {
 export async function blockFileSet({ repoRoot, base, owned, ownedKinds, matchOwned, changed }) {
   const all = changed ?? (await changedFiles({ repoRoot, base }));
   const isOwned = matchOwned ?? ((/** @type {string} */ f) => ownsFile(owned, f, ownedKinds));
-  return all.filter((f) => isOwned(f)).map((file) => ({ file, content_hash: currentHash(repoRoot, file) }));
+  const files = [];
+  for (const file of all.filter((f) => isOwned(f))) {
+    const content_hash = currentHash(repoRoot, file);
+    if (content_hash === DELETED_HASH) {
+      const atBase = await exec(['git', 'cat-file', '-e', `${base}:${file}`], { cwd: repoRoot, env: gitChildEnv(), timeoutMs: 30000 });
+      if (atBase.result !== 'ok') continue;
+    }
+    files.push({ file, content_hash });
+  }
+  return files;
 }
 
 /** Safety check for npm locks excluded from model review; other formats are not parsed.
