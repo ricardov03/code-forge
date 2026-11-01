@@ -12,7 +12,7 @@
         "properties": {
           "fact_id": { "type": "string", "pattern": "^F[0-9]+$" },
           "claim": { "type": "string", "minLength": 1 },
-          "kind": { "type": "string", "enum": ["flag", "command", "path", "version", "endpoint", "package", "env"] },
+          "kind": { "type": "string", "enum": ["flag", "command", "path", "version", "endpoint", "package", "env", "symbol"] },
           "command": { "type": "string" },
           "output_excerpt": { "type": "string", "maxLength": 200 },
           "tag": { "type": "string", "enum": ["VERIFIED", "NOT-FOUND", "UNVERIFIABLE"] },

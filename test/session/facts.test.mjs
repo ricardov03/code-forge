@@ -692,7 +692,7 @@ test('the facts delegate runs in a read-only snapshot of HEAD + sources: ./src/a
   symlinkSync('extra.md', path.join(repo, 'notes', 'inside-link'));
   symlinkSync(outside, path.join(repo, 'notes', 'outside-link'));
   writeFileSync(path.join(repo, 'scratch.txt'), 'untracked, not a source\n');
-  const brief = writeIn(repo, 'brief.md', 'Read ./src/a.mjs first.\n');
+  const brief = writeIn(repo, 'brief.md', 'Read ./src/a.mjs first, then ./notes/extra.md.\n');
   const statusBefore = gitIn(['status', '--porcelain'], repo);
   const root = freshDir('facts-snap-root');
   const probe = ['src/a.mjs', 'notes/extra.md', 'scratch.txt', 'brief.md', '.env', 'tracked-link', 'notes/id_rsa', 'notes/.env', 'notes/inside-link', 'notes/outside-link'];
@@ -712,7 +712,7 @@ test('the facts delegate runs in a read-only snapshot of HEAD + sources: ./src/a
   assert.deepEqual([gitIn(['status', '--porcelain'], repo), readFileSync(path.join(repo, 'src', 'a.mjs'), 'utf8')], [statusBefore, 'export const a = 1;\n']);
 });
 
-test('a project in a subdirectory of the repo: the session runs in that subdirectory, ./file is VERIFIED, a sibling source is not copied', async () => {
+test('a project in a subdirectory of the repo: ./file is VERIFIED there, a sibling source is copied only under _sources', async () => {
   const repo = freshDir('facts-mono');
   mkdirSync(path.join(repo, 'pkg'));
   mkdirSync(path.join(repo, 'other'));
@@ -726,12 +726,12 @@ test('a project in a subdirectory of the repo: the session runs in that subdirec
   writeFileSync(path.join(repo, 'pkg', 'docs', 'own.md'), 'own\n');
   const brief = writeIn(repo, 'brief.md', 'The entry is ./file.mjs.\n');
   const root = freshDir('facts-mono-root');
-  const { exec, state } = snapshotProbe(['file.mjs', 'docs/own.md', '../other/sibling.md', '../top.md'], ['./file.mjs']);
+  const { exec, state } = snapshotProbe(['file.mjs', 'docs/own.md', '../other/sibling.md', '../top.md', '_sources/other/sibling.md'], ['./file.mjs']);
   const { deps } = fakeDeps();
   const sources = [path.join(repo, 'other', 'sibling.md'), path.join(repo, 'pkg', 'docs')];
   const result = await buildFacts({ cfg: CFG, briefPath: brief, sources, outPath: path.join(root, 'b.facts.md'), runRoot: root, projectDir: path.join(repo, 'pkg') }, { ...deps, exec });
   assert.deepEqual(result.facts?.map((f) => [f.claim, f.tag]), [['./file.mjs', 'VERIFIED']]);
-  assert.deepEqual(state.seen, [['file.mjs', true], ['docs/own.md', true], ['../other/sibling.md', false], ['../top.md', true]]);
+  assert.deepEqual(state.seen, [['file.mjs', true], ['docs/own.md', true], ['../other/sibling.md', false], ['../top.md', true], ['_sources/other/sibling.md', true]]);
   assert.equal(path.basename(state.cwd), 'pkg');
   assert.equal(present(path.dirname(state.cwd)), false);
 });

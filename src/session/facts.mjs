@@ -2,14 +2,13 @@
  * The facts rule (plan §3.8, C16; block B9b): `forge facts` builds the facts sheet a Plan job
  * must read before it designs anything.
  *
- * Step 1 (deterministic): {@link extractClaims} lists every claim token of the brief and the
- * sources it names — CLI flags, `<cli> <verb>` commands (inside code spans), `~/…` and `./…`
- * paths, versions, http(s) endpoints, `@scope/name` packages and environment variables.
+ * Step 1 (deterministic): {@link extractClaims} lists claim tokens from the brief alone — flags,
+ * commands, paths, versions, endpoints, packages, environment variables and opt-in code symbols.
  * Step 2: ONE L0 `facts` session (closed-book; Claude gets `--tools "Bash"` with the forbidden list
  * rendered, §5.2) whose packet is the claim list and the rule "run the cheapest read-only check,
  * quote the command and the output line, tag it, never infer". B9b.1: when the caller names the
  * project (`projectDir`), the session runs in a READ-ONLY SNAPSHOT of it ({@link buildSnapshot}:
- * `git archive HEAD` plus the `--sources` inside the project, symlinks and secret-looking files
+ * `git archive HEAD` plus in-project sources and outside roots under `_sources/<label>`, symlinks and secret-looking files
  * dropped, every file 0444 and directory 0555) so `./…` path claims can be checked; the snapshot
  * lives under the run root — or, when that root itself sits inside a git work tree, under a
  * private B0.1 root in `os.tmpdir()` (`factsTmpRoot`) — and is removed when the verb ends;
@@ -43,13 +42,15 @@ import { redact } from '../util/redact.mjs';
 import { currentRunRoot } from '../util/tmp.mjs';
 import { factsTmpRoot, gitWorkTreeAncestor, spawnSession } from './spawn.mjs';
 
-/** @typedef {'flag'|'command'|'path'|'version'|'endpoint'|'package'|'env'} ClaimKind */
-/** @typedef {{token: string, kind: ClaimKind}} Claim */
+/** @typedef {'flag'|'command'|'path'|'version'|'endpoint'|'package'|'env'|'symbol'} ClaimKind */
+/** @typedef {{dir: string, label: string, prefix: string, file?: string}} SourceRoot */
+/** @typedef {{token: string, kind: ClaimKind, source?: string, checkPath?: string, root?: SourceRoot, unavailable?: string}} Claim */
 /**
  * @typedef {object} Fact
  * @property {string} fact_id @property {string} claim @property {ClaimKind} kind
  * @property {string} command @property {string} output_excerpt
  * @property {'VERIFIED'|'NOT-FOUND'|'UNVERIFIABLE'} tag @property {string | null} why
+ * @property {string} [source]
  */
 
 export const FACTS_SCHEMA_PATH = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..', 'schema', 'facts.schema.json');
@@ -123,6 +124,8 @@ const trimTail = (token) => token.replace(/[.,:;]+$/, '');
  * @property {string} [briefText] - the brief alone (no sources): only IT can name the project CLI
  *   that a command claim gets prefixed with (default: the whole text).
  * @property {string} [projectDir] - project root whose top-level folders admit extensionless paths.
+ * @property {boolean} [symbols] - whole code spans naming code identifiers or code file names.
+ * @property {boolean} [globPaths] - keep shell glob characters in path tokens (facts only).
  */
 
 /**
@@ -220,6 +223,7 @@ export function extractClaims(text, opts = {}) {
       const token = trimTail(kind === 'env' ? m[0].replace(/^\$/, '') : m[0]);
       if (token.length === 0 || (kind === 'path' && /^(~|\.{1,2})?\/$/.test(token))) continue;
       if (kind === 'path' && !/^(~|\.{1,2})?\//.test(token)
+        && !(opts.globPaths && /[*?\[\]{}]/.test(token))
         && !/\.[a-zA-Z0-9][\w-]*$/.test(token) && !topLevelFolders.has(token.split('/')[0])) continue;
       found.push({ index: /** @type {number} */ (m.index), token, kind });
       mask(/** @type {number} */ (m.index), m[0].length);
@@ -227,8 +231,14 @@ export function extractClaims(text, opts = {}) {
   };
   scan(...PATTERNS[0]);
   scan(...PATTERNS[1]);
-  scan(...PATTERNS[2]);
+  scan('path', opts.globPaths ? /(?<![\w/.~-])(?:~|\.{1,2}|[\w.-]+)?\/[^\s`'"<>)|;]*/g : PATTERNS[2][1]);
   for (const m of [...masked.matchAll(/`([^`\n]+)`/g)]) {
+    const symbol = m[1].trim();
+    if (opts.symbols && (IDENTIFIER_SYMBOL.test(symbol) || FILE_SYMBOL.test(symbol))) {
+      found.push({ index: /** @type {number} */ (m.index) + 1, token: symbol, kind: 'symbol' });
+      mask(/** @type {number} */ (m.index) + 1, m[1].length);
+      continue;
+    }
     const cmd = COMMAND_IN_SPAN.exec(m[1]);
     if (!cmd) continue;
     const start = /** @type {number} */ (m.index) + 1;
@@ -249,35 +259,8 @@ export function extractClaims(text, opts = {}) {
   return claims;
 }
 
-/**
- * The text of every source: a file as is, a directory's top-level `.md`/`.txt` files in name order.
- * @param {ReadonlyArray<string>} sources
- * @returns {string[]}
- */
-function readSourcesText(sources) {
-  /** @type {string[]} */
-  const parts = [];
-  for (const source of sources) {
-    const st = statSync(source);
-    if (st.isDirectory()) {
-      for (const name of readdirSync(source).filter((n) => /\.(md|txt)$/.test(n)).sort()) {
-        parts.push(readFileSync(path.join(source, name), 'utf8'));
-      }
-    } else {
-      parts.push(readFileSync(source, 'utf8'));
-    }
-  }
-  return parts;
-}
-
-/**
- * The brief's text plus every source it names ({@link readSourcesText}).
- * @param {string} briefPath @param {ReadonlyArray<string>} [sources]
- * @returns {string}
- */
-export function readClaimText(briefPath, sources = []) {
-  return [readFileSync(briefPath, 'utf8'), ...readSourcesText(sources)].join('\n');
-}
+const IDENTIFIER_SYMBOL = /^(?:(?:[A-Z][a-z0-9]+|[A-Z]+(?=[A-Z][a-z]|$)){2,}|[a-z][a-z0-9]*(?:_[a-z0-9]+)+)$/;
+const FILE_SYMBOL = /^[\w.-]+\.(?:php|mjs|cjs|js|ts|tsx|jsx|go|py|rb|swift|kt|java|rs|cs|vue|svelte|sql)$/;
 
 /**
  * The brief, read ONCE: its bytes (sha256 and claim text) and its mtime from the same open file.
@@ -309,12 +292,12 @@ const GLOB_CHARS = new Set(['*', '?', '[', ']', '{', '}']);
  * reported instead of parsed, and so is an unquoted `* ? [ ] { }` (a glob expands AFTER the
  * secret-path check and could name what the check never saw): the allow-list never needs one
  * (fail closed).
- * @param {string} command
+ * @param {string} command @param {boolean} [allowGlob] - only the exact glob ls proof uses this.
  * @returns {{segments: string[][], separators: string[], pipedOut?: boolean[], refused: string | null}}
  *   `separators`: every separator met, in order (`|`, `||`, `&&`, `;`, `&`, newline, CR);
  *   `pipedOut[i]`: segment i feeds a single `|` (its output is not the command's output).
  */
-function splitCommand(command) {
+function splitCommand(command, allowGlob = false) {
   if (/[`]/.test(command)) return { segments: [], separators: [], refused: 'backticks are not allowed' };
   if (/\$/.test(command)) return { segments: [], separators: [], refused: '$ expansion is not allowed' };
   if (/[<>]/.test(command)) return { segments: [], separators: [], refused: 'redirection is not allowed' };
@@ -358,7 +341,7 @@ function splitCommand(command) {
     } else if (c === ' ' || c === '\t') {
       flush();
     } else {
-      if (GLOB_CHARS.has(c)) return { segments: [], separators: [], refused: 'unquoted glob characters (* ? [ ] { }) are not allowed' };
+      if (!allowGlob && GLOB_CHARS.has(c)) return { segments: [], separators: [], refused: 'unquoted glob characters (* ? [ ] { }) are not allowed' };
       word += c;
       inWord = true;
     }
@@ -583,7 +566,8 @@ function isSubPath(where) {
 function sourceGrep(rest) {
   if (rest.length !== 4 || !GREP_RECURSIVE.has(rest[0]) || rest[1] !== '--') return null;
   const [, , pattern, where] = rest;
-  return SOURCE_GREP_FLAG.test(pattern) && isSubPath(where) ? { pattern, path: where } : null;
+  return (SOURCE_GREP_FLAG.test(pattern) || /^(?:(?:class|interface|trait|enum|struct|type|function|func|def) )?[A-Za-z_][A-Za-z0-9_]*$/.test(pattern))
+    && isSubPath(where) ? { pattern, path: where } : null;
 }
 
 /**
@@ -625,16 +609,18 @@ function isSourceFile(file, briefRel) {
  * path, is a source file ({@link isSourceFile}) and whose text holds `flag` as a whole token
  * ({@link holdsFlag})? A hit line without the `file:line:` prefix never counts.
  * @param {string} excerpt @param {string} flag @param {string} under - the grep's path.
- * @param {string | undefined} briefRel
+ * @param {string | undefined} briefRel @param {boolean} [symbol] @param {string} [prefix]
  * @returns {boolean}
  */
-function sourceHit(excerpt, flag, under, briefRel) {
+function sourceHit(excerpt, flag, under, briefRel, symbol = false, prefix = '') {
   const scope = relPosix(under);
   return excerpt.split(/\r?\n/).some((line) => {
     const hit = /^([^:\n]+):(\d+):(.*)$/.exec(line.trim());
     if (hit === null) return false;
     const file = relPosix(hit[1]);
-    return (file === scope || file.startsWith(`${scope}/`)) && isSourceFile(file, briefRel) && holdsFlag(hit[3], flag);
+    const sourceFile = prefix ? file.slice(prefix.length + 1) : file;
+    return (file === scope || file.startsWith(`${scope}/`)) && file !== briefRel && isSourceFile(sourceFile, prefix ? undefined : briefRel)
+      && (symbol ? new RegExp(`\\b${flag}\\b`).test(hit[3]) : holdsFlag(hit[3], flag));
   });
 }
 
@@ -643,14 +629,15 @@ function sourceHit(excerpt, flag, under, briefRel) {
  * hidden (`.x`) or one of {@link NON_SOURCE_FOLDERS}, and — with `topLevel` — one single name (a
  * NOT-FOUND proves absence only over a whole top-level folder). A file (`package.json`,
  * `src/a.mjs`) never counts; with no known cwd nothing can be checked, so nothing counts.
- * @param {string} where @param {string | undefined} cwd @param {boolean} topLevel
+ * @param {string} where @param {string | undefined} cwd @param {boolean} topLevel @param {string} [prefix]
  * @returns {boolean}
  */
-function isSourceFolder(where, cwd, topLevel) {
+function isSourceFolder(where, cwd, topLevel, prefix = '') {
   const rel = relPosix(where);
-  const segs = rel.split('/');
+  if (prefix && !rel.startsWith(`${prefix}/`)) return false;
+  const segs = (prefix ? rel.slice(prefix.length + 1) : rel).split('/');
   if (cwd === undefined || rel.length === 0 || rel === '.' || (topLevel && segs.length !== 1)) return false;
-  if (segs.some((seg) => seg.startsWith('.') || NON_SOURCE_FOLDERS.has(seg))) return false;
+  if (segs.some((seg) => seg === '_sources' || seg.startsWith('.') || NON_SOURCE_FOLDERS.has(seg))) return false;
   try {
     return statSync(path.join(cwd, rel)).isDirectory();
   } catch {
@@ -738,6 +725,44 @@ const SOURCE_GREP_CLAIM_MESSAGE = 'a source grep counts only for a flag claim, w
 const SOURCE_GREP_HIT_MESSAGE = 'VERIFIED source grep without a file:line: hit in a source file naming the claimed flag (docs, plans, tests, fixtures, text files and the brief do not count); not counted';
 const SOURCE_GREP_SCOPE_MESSAGE = 'NOT-FOUND source grep must search one whole top-level source folder (not docs, plans, test, tests, fixtures or node_modules); not counted';
 const FLAG_PROOF_MESSAGE = 'a flag claim is proved only by grep -rn -- <flag> <source folder>; not counted';
+const SYMBOL_PROOF_MESSAGE = 'a symbol claim needs grep -rn -- <quoted token or keyword token> <top-level source folder> with a file:line: source hit, or find <root> -name <file name>; not counted';
+
+/** @param {Fact} row @param {Claim} claim @param {{briefRel?: string, cwd?: string}} ctx */
+function symbolRule(row, claim, ctx) {
+  if (readOnlyViolation(row.command)) return SYMBOL_PROOF_MESSAGE;
+  const prefix = claim.root?.prefix ?? '';
+  if (FILE_SYMBOL.test(claim.token)) {
+    const { segments } = splitCommand(row.command);
+    const argv = segments[0] ?? [];
+    if (argv.length !== 4 || argv[0] !== 'find' || argv[1] !== (prefix || '.') || argv[2] !== '-name' || argv[3] !== claim.token) return SYMBOL_PROOF_MESSAGE;
+    if (row.tag === 'VERIFIED' && !row.output_excerpt.split(/\r?\n/).some((line) => {
+      const file = relPosix(line.trim());
+      return line.trim().endsWith(`/${claim.token}`) && (prefix ? file.startsWith(`${prefix}/`) : !file.startsWith('_sources/')) && isSubPath(file);
+    })) return SYMBOL_PROOF_MESSAGE;
+    return null;
+  }
+  const grep = sourceGrepOf(row.command);
+  if (!grep || !/^grep -rn -- (['"])[^'"]+\1(?:\s|$)/.test(row.command)
+    || !(grep.pattern === claim.token || /^(class|interface|trait|enum|struct|type|function|func|def) /.test(grep.pattern) && grep.pattern.split(' ')[1] === claim.token)
+    || !isSourceFolder(grep.path, ctx.cwd, true, prefix)) return SYMBOL_PROOF_MESSAGE;
+  if (row.tag === 'VERIFIED' && !sourceHit(row.output_excerpt, claim.token, grep.path, ctx.briefRel, true, prefix)) return SYMBOL_PROOF_MESSAGE;
+  return null;
+}
+
+/** @param {Fact} row @param {Claim} claim */
+function globRule(row, claim) {
+  const token = claim.checkPath ?? claim.token;
+  const { segments, separators, refused } = splitCommand(row.command, true);
+  const argv = segments[0] ?? [];
+  const ls = argv.length === 3 && argv[0] === 'ls' && argv[1] === '-d' && argv[2] === token;
+  const find = argv.length === 4 && argv[0] === 'find' && argv[1] === path.posix.dirname(token)
+    && argv[2] === '-name' && argv[3] === path.posix.basename(token) && readOnlyViolation(row.command) === null
+    && /-name (['"])[^'"]+\1$/.test(row.command);
+  if (refused || separators.length || segments.length !== 1 || (!ls && !find) || segmentViolation(argv)) return 'a glob needs find <literal dir> -name <quoted pattern> or ls -d <exact glob>; not counted';
+  if (row.tag === 'NOT-FOUND') return /No such file/i.test(row.output_excerpt) ? null : 'a NOT-FOUND glob needs No such file output; not counted';
+  return row.output_excerpt.split(/\r?\n/).some((line) => path.matchesGlob(relPosix(line.trim()), relPosix(token)))
+    ? null : 'VERIFIED glob without a matching output path; not counted';
+}
 
 /**
  * Does a grep hit line hold `flag` as a whole token — not preceded by a word character or `-`, not
@@ -759,6 +784,11 @@ function holdsFlag(excerpt, flag) {
 function ruleBroken(row, claim, ctx) {
   if (row.tag === 'UNVERIFIABLE') return null;
   if (row.command.trim().length === 0) return `${row.tag} without a check command; not counted`;
+  if (claim.kind === 'path' && (claim.token.startsWith('~') || /(^|\/)\.\.(\/|$)/.test(claim.token))) {
+    return `check command not allowed: ${pathViolation(claim.token)}; not counted`;
+  }
+  if (claim.kind === 'symbol') return symbolRule(row, claim, ctx);
+  if (claim.kind === 'path' && /[*?\[\]{}]/.test(claim.token)) return globRule(row, claim);
   if (claim.kind === 'env') {
     const env = ENV_CHECK.exec(row.command);
     if (!env || env[1] !== claim.token) return `an env claim may only be checked with printenv ${claim.token} >/dev/null; not counted`;
@@ -773,9 +803,9 @@ function ruleBroken(row, claim, ctx) {
     // prove itself); a NOT-FOUND one needs one whole top-level source folder
     const grep = sourceGrepOf(row.command);
     if (grep !== null && (claim.kind !== 'flag' || grep.pattern !== claim.token)) return SOURCE_GREP_CLAIM_MESSAGE;
-    if (claim.kind === 'flag' && (grep === null || !isSourceFolder(grep.path, ctx.cwd, false))) return FLAG_PROOF_MESSAGE;
-    if (grep !== null && row.tag === 'VERIFIED' && !sourceHit(row.output_excerpt, grep.pattern, grep.path, ctx.briefRel)) return SOURCE_GREP_HIT_MESSAGE;
-    if (grep !== null && row.tag === 'NOT-FOUND' && !isSourceFolder(grep.path, ctx.cwd, true)) return SOURCE_GREP_SCOPE_MESSAGE;
+    if (claim.kind === 'flag' && (grep === null || !isSourceFolder(grep.path, ctx.cwd, false, claim.root?.prefix))) return FLAG_PROOF_MESSAGE;
+    if (grep !== null && row.tag === 'VERIFIED' && !sourceHit(row.output_excerpt, grep.pattern, grep.path, ctx.briefRel, false, claim.root?.prefix)) return SOURCE_GREP_HIT_MESSAGE;
+    if (grep !== null && row.tag === 'NOT-FOUND' && !isSourceFolder(grep.path, ctx.cwd, true, claim.root?.prefix)) return SOURCE_GREP_SCOPE_MESSAGE;
   }
   if (row.tag === 'VERIFIED' && row.output_excerpt.trim().length === 0) return 'VERIFIED with an empty output excerpt; not counted';
   return null;
@@ -837,6 +867,7 @@ export function validateFacts(answer, claims, opts = {}) {
   });
   claims.forEach((claim, i) => {
     if (chosen[i]) return;
+    if (claims.filter((c) => c.token === claim.token).length > 1) return;
     const row = rows.find((r) => !taken.has(r) && r.kind === claim.kind && echoedClaim(r.claim, claim.kind) === claim.token);
     if (row) taken.add(row);
     chosen[i] = row;
@@ -844,11 +875,12 @@ export function validateFacts(answer, claims, opts = {}) {
   claims.forEach((claim, i) => {
     const id = `F${i + 1}`;
     const row = chosen[i];
-    if (!row) {
-      facts.push({ fact_id: id, claim: redact(claim.token), kind: claim.kind, command: '', output_excerpt: '', tag: 'UNVERIFIABLE', why: 'no answer from the delegate' });
+    const source = claim.source === undefined ? {} : { source: redact(claim.source) };
+    if (claim.unavailable || !row) {
+      facts.push({ fact_id: id, claim: redact(claim.token), kind: claim.kind, ...source, command: '', output_excerpt: '', tag: 'UNVERIFIABLE', why: redact(claim.unavailable ?? 'no answer from the delegate') });
       return;
     }
-    const base = { fact_id: id, claim: redact(claim.token), kind: claim.kind, command: redact(row.command), output_excerpt: claim.kind === 'env' ? '' : redact(row.output_excerpt) };
+    const base = { fact_id: id, claim: redact(claim.token), kind: claim.kind, ...source, command: redact(row.command), output_excerpt: claim.kind === 'env' ? '' : redact(row.output_excerpt) };
     const fields = nullFields.get(row);
     const broken = fields ? `delegate returned null ${fields.join(', ')}` : ruleBroken(row, claim, opts);
     if (broken) {
@@ -881,6 +913,7 @@ const code = (text) => (text.length === 0 ? '—' : text.includes('`') ? `\`\` $
  */
 export function renderSheet({ briefRef, briefSha, briefMtime, builtAt, facts }) {
   const count = (/** @type {string} */ tag) => facts.filter((f) => f.tag === tag).length;
+  const sources = facts.some((f) => f.source !== undefined);
   const lines = [
     '# Facts sheet',
     '',
@@ -890,9 +923,9 @@ export function renderSheet({ briefRef, briefSha, briefMtime, builtAt, facts }) 
     `- built_at: \`${builtAt}\``,
     `- claims: ${facts.length} (VERIFIED ${count('VERIFIED')} · NOT-FOUND ${count('NOT-FOUND')} · UNVERIFIABLE ${count('UNVERIFIABLE')})`,
     '',
-    '| fact_id | tag | kind | claim | command | output | why |',
-    '|---|---|---|---|---|---|---|',
-    ...facts.map((f) => `| ${f.fact_id} | ${f.tag} | ${f.kind} | ${cell(code(f.claim))} | ${cell(code(f.command))} | ${cell(f.output_excerpt || '—')} | ${cell(f.why ?? '—')} |`),
+    `| fact_id | tag | kind |${sources ? ' source |' : ''} claim | command | output | why |`,
+    `|---|---|---|---|---|---|---|${sources ? '---|' : ''}`,
+    ...facts.map((f) => `| ${f.fact_id} | ${f.tag} | ${f.kind} |${sources ? ` ${cell(f.source ?? '—')} |` : ''} ${cell(code(f.claim))} | ${cell(code(f.command))} | ${cell(f.output_excerpt || '—')} | ${cell(f.why ?? '—')} |`),
     '',
     '<!-- facts-json',
     `[\n${facts.map((f) => JSON.stringify(f)).join(',\n')}\n]`.replace(/</g, '\\u003c').replace(/>/g, '\\u003e'),
@@ -961,13 +994,23 @@ const RULE = [
   '-not ! -a -o -and -or, plus paths), stat, file, uname, sw_vers, jq, git',
   'log|show|status|rev-parse|ls-files|cat-file, npm view|ls, test -e|-f|-d|-n, `curl -sI <one URL>`.',
   'A check that breaks these rules is not counted.',
-  'No `$`, no backticks, no redirection, no unquoted glob, no `~`, no absolute path outside /usr, /opt/homebrew or',
+  'A source root is the project (`.`) or `_sources/<label>`. A top-level source folder is directly',
+  'under that root: `src` or `_sources/<label>/app`. `_sources` itself is never a source folder.',
+  'An identifier symbol needs `grep -rn -- <quoted token or keyword token> <top-level source folder>`.',
+  'Quote the pattern. Keywords: class interface trait enum struct type function func def.',
+  'VERIFIED needs a file:line: hit in a source file holding the whole token; NOT-FOUND needs a whole top-level source folder.',
+  'A file-name symbol needs `find <root> -name <token>`; VERIFIED needs an output path ending in /<token>.',
+  'For a glob path use the per-claim find command with its pattern quoted. Only for that claim,',
+  '`ls -d <exact glob token>` is also accepted, quoted or unquoted. VERIFIED needs a matching output path;',
+  'NOT-FOUND needs No such file output. Use the check path given for a source, never its live absolute path.',
+  'No `$`, no backticks, no redirection, no unquoted glob except the exact ls -d form above, no `~`, no absolute path outside /usr, /opt/homebrew or',
   '/bin, no secret files.',
   'An env claim is checked ONLY with `printenv NAME >/dev/null` (quote its exit status; the value is never shown).',
   '',
   'Reply with ONE JSON object: {"facts": [{"fact_id", "claim", "kind", "command", "output_excerpt", "tag", "why"}]} —',
   'one row per claim: `fact_id` (F<n>) and `kind` copied from the list, `claim` = the token alone (the text after',
   '`<kind>: `), `why` null unless UNVERIFIABLE.',
+  'The claim is the token alone, without source/check annotations or the bracketed glob check hint.',
   '',
   '## Claims',
   '',
@@ -978,7 +1021,18 @@ const RULE = [
  * @returns {string} the delegate's packet.
  */
 export function buildFactsPacket(claims) {
-  return `${RULE}${claims.map((c, i) => `- F${i + 1} ${c.kind}: ${c.token}`).join('\n')}\n`;
+  return `${RULE}${claims.flatMap((c, i) => {
+    if (c.unavailable) return [];
+    const token = c.checkPath ?? c.token;
+    const hint = c.kind === 'path' && /[*?\[\]{}]/.test(c.token)
+      ? ` [check with find ${shellQuote(path.posix.dirname(token))} -name ${shellQuote(path.posix.basename(token), true)}]` : '';
+    return [`- F${i + 1} ${c.kind}: ${c.token}${c.source === undefined ? (c.checkPath ? ` (check at ${c.checkPath})` : '') : ` (source ${c.source}, check at ${c.checkPath})`}${hint}`];
+  }).join('\n')}\n`;
+}
+
+/** @param {string} value @param {boolean} [always] */
+function shellQuote(value, always = false) {
+  return !always && /^[\w./-]+$/.test(value) ? value : "'" + value.replace(/'/g, "'\\''") + "'";
 }
 
 /**
@@ -992,6 +1046,7 @@ export function buildFactsPacket(claims) {
  * @property {string} [projectDir] - the project (the verb's cwd): the delegate runs in a read-only
  *   snapshot of its git HEAD plus the in-project `sources`; absent ⇒ an empty cwd.
  * @property {() => Date} [now]
+ * @property {typeof exec} [gitRun] - real git runner seam for the batched availability check.
  */
 
 // ---------------------------------------------------------------------------------------------
@@ -1136,13 +1191,91 @@ function copyNoFollow(src, dst, snapDir) {
   }
 }
 
+/** @param {string} root @param {string} file */
+function belowRoot(root, file) {
+  const rel = path.relative(root, file);
+  return rel === '' || (!rel.startsWith(`..${path.sep}`) && rel !== '..' && !path.isAbsolute(rel));
+}
+
+/** @param {string | undefined} projectDir @param {ReadonlyArray<string>} sources @returns {SourceRoot[]} */
+function sourceRoots(projectDir, sources) {
+  /** @type {SourceRoot[]} */
+  const roots = [];
+  const project = projectDir === undefined ? undefined : realpathSync(projectDir);
+  /** @param {string} dir @param {string} [file] */
+  const add = (dir, file) => {
+    const existing = roots.find((r) => r.dir === dir);
+    if (existing && (!existing.file || existing.file === file)) return;
+    const base = path.basename(dir);
+    let label = base;
+    for (let n = 2; roots.some((r) => r.label === label); n += 1) label = `${base}-${n}`;
+    roots.push({ dir, label, prefix: dir === project ? '' : `_sources/${label}`, ...(file ? { file } : {}) });
+  };
+  if (project !== undefined) add(project);
+  for (const source of sources) {
+    const real = realpathSync(source);
+    if (project !== undefined && belowRoot(project, real)) continue;
+    if (statSync(real).isDirectory()) add(real);
+    else add(path.dirname(real), real);
+  }
+  return roots;
+}
+
+/** @param {ReadonlyArray<Claim>} claims @param {SourceRoot[]} roots @returns {Claim[]} */
+function mapClaims(claims, roots) {
+  // An explicitly named outside file is mounted, but only directories multiply relative claims.
+  const directories = roots.filter((r) => !r.file);
+  return claims.flatMap((claim) => {
+    if (claim.kind === 'path' && path.isAbsolute(claim.token)) {
+      if (claim.token === '/dev' || claim.token.startsWith('/dev/')) return [];
+      // A nested source is the most specific root for an absolute path.
+      const root = [...roots].sort((a, b) => b.dir.length - a.dir.length).find((r) => belowRoot(r.dir, claim.token) && (!r.file || r.file === claim.token));
+      if (root) return [{ ...claim, source: root.label, root, checkPath: path.posix.join(root.prefix, path.relative(root.dir, claim.token).split(path.sep).join('/')) || '.' }];
+      if (TOOL_ROOTS.some((r) => belowRoot(r, claim.token))) return [claim];
+      try {
+        if (!statSync('/' + claim.token.split('/')[1]).isDirectory()) return [];
+      } catch { return []; }
+      return [{ ...claim, unavailable: 'outside every --sources root and the snapshot' }];
+    }
+    if (directories.length < 2 || !['path', 'symbol', 'flag'].includes(claim.kind)) return [claim];
+    return directories.map((root) => ({ ...claim, source: root.label, root,
+      checkPath: claim.kind === 'path' ? (root.prefix ? `${root.prefix}/${claim.token}` : claim.token) : root.prefix || '.',
+    }));
+  });
+}
+
+/**
+ * One git process per root, never per claim. Only lstat checks working-tree presence; Node never
+ * searches source text. A path omitted by the snapshot cannot become a delegate NOT-FOUND.
+ * @param {Claim[]} claims @param {SourceRoot[]} roots @param {string} cwd @param {typeof exec} run
+ */
+async function markUnavailable(claims, roots, cwd, run) {
+  const directories = roots.filter((r) => !r.file);
+  for (const root of roots) {
+    const paths = claims.filter((c) => c.kind === 'path' && !c.unavailable && (c.root === root || !c.root && directories.length === 1 && root === directories[0] && !path.isAbsolute(c.token))
+      && pathViolation(c.checkPath ?? c.token) === null);
+    const relatives = paths.map((c) => path.isAbsolute(c.token) ? path.relative(root.dir, c.token) || '.' : c.token);
+    const checked = await run(['git', 'check-ignore', '-z', '--stdin'], {
+      cwd: root.dir, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS, input: relatives.map((p) => `${p}\0`).join(''), okExitCodes: [0, 1],
+    });
+    if (checked.result !== 'ok' && !(checked.code === 128 && /not a git repository/i.test(checked.stderr))) throw new FactsError('snapshot', 'git check-ignore could not check the source paths');
+    const ignored = new Set(checked.stdout.split('\0').filter(Boolean));
+    paths.forEach((claim, i) => {
+      if (ignored.has(relatives[i])) claim.unavailable = `git-ignored in ${root.label}: the snapshot leaves ignored paths out`;
+      else if (lstatOrNull(path.join(root.dir, relatives[i])) && !lstatOrNull(path.join(cwd, claim.checkPath ?? claim.token))) {
+        claim.unavailable = `not at HEAD in ${root.label}: outside the snapshot`;
+      }
+    });
+  }
+}
+
 /**
  * Build the facts delegate's read-only view of the project at `snapDir`: the tracked tree at HEAD
  * (`git archive` + `tar -x`, binary-safe, the real index and tree never touched; every symlink and
  * special entry dropped right after extraction) plus every `source` inside the project at its
- * current content ({@link copyNoFollow}; untracked sources included; a source outside `projectDir`
- * — a sibling directory of the repo included — is left out: it could only be reached through
- * `..`). Not a git repo, or no commit yet (`git rev-parse --verify HEAD` fails) ⇒ the sources
+ * current content ({@link copyNoFollow}; untracked sources included). Outside source roots live
+ * under `_sources/<label>`: their HEAD subtree, or a no-follow copy for non-git sources and files.
+ * Not a git repo, or no commit yet (`git rev-parse --verify HEAD` fails) ⇒ the sources
  * alone; HEAD resolves but the archive or the extraction fails ⇒ `FactsError('snapshot')`. The
  * tar file never outlives the call.
  * @param {string} projectDir @param {ReadonlyArray<string>} sources - absolute.
@@ -1183,6 +1316,34 @@ export async function buildSnapshot(projectDir, sources, snapDir, workDir, run =
     if (inProject === '' || inProject.startsWith('..') || path.isAbsolute(inProject)) continue;
     copyNoFollow(real, path.join(sessionCwd, inProject), snapDir);
   }
+  for (const source of sourceRoots(projectDir, sources).filter((r) => r.prefix)) {
+    const dest = path.join(sessionCwd, source.prefix);
+    assertNoLinkSegments(snapDir, dest);
+    mkdirSync(dest, { recursive: true, mode: 0o700 });
+    if (source.file) {
+      copyNoFollow(source.file, path.join(dest, path.basename(source.file)), snapDir);
+      continue;
+    }
+    const sourceTop = await run(['git', 'rev-parse', '--show-toplevel'], { cwd: source.dir, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    if (sourceTop.result !== 'ok') {
+      copyNoFollow(source.dir, dest, snapDir);
+      continue;
+    }
+    const repo = realpathSync(sourceTop.stdout.trim());
+    const head = await run(['git', 'rev-parse', '--verify', '-q', 'HEAD'], { cwd: repo, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    if (head.result !== 'ok') continue;
+    const subfolder = path.relative(repo, source.dir).split(path.sep).join('/');
+    const tarPath = path.join(workDir, 'source.tar');
+    try {
+      const archived = await run(['git', 'archive', '--format=tar', '-o', tarPath, subfolder ? `HEAD:${subfolder}` : 'HEAD'], { cwd: repo, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+      if (archived.result !== 'ok') throw new FactsError('snapshot', `source ${source.label} could not be archived`);
+      const untar = await run(['tar', '-xf', tarPath, '-C', dest], { timeoutMs: GIT_TIMEOUT_MS });
+      if (untar.result !== 'ok') throw new FactsError('snapshot', `source ${source.label} could not be extracted`);
+      dropLinks(dest);
+    } finally {
+      rmSync(tarPath, { force: true });
+    }
+  }
   sealTree(snapDir);
   return sessionCwd;
 }
@@ -1202,8 +1363,9 @@ export async function buildFacts(opts, deps = {}) {
   if (opts.projectDir !== undefined) {
     try { projectBins = readProjectBins(opts.projectDir); } catch { projectBins = []; }
   }
-  const extractOpts = opts.projectDir === undefined ? {} : { projectBins, briefText, projectDir: opts.projectDir };
-  const claims = extractClaims([briefText, ...readSourcesText(opts.sources ?? [])].join('\n'), extractOpts);
+  const extractOpts = { symbols: true, globPaths: true, projectBins, briefText, projectDir: opts.projectDir };
+  const roots = sourceRoots(opts.projectDir, opts.sources ?? []);
+  const claims = mapClaims(extractClaims(briefText, extractOpts), roots);
   const lines = briefText.split(/\r?\n/).length - Number(briefText.endsWith('\n'));
   if (lines > 40 && claims.length < 5) {
     (deps.stderr ?? process.stderr).write(`forge facts: the brief has ${lines} lines but only ${claims.length} claims; the sheet checks almost nothing\n`);
@@ -1218,8 +1380,9 @@ export async function buildFacts(opts, deps = {}) {
   const packetPath = path.join(dir, 'packet.md');
   const snapDir = path.join(dir, 'snapshot');
   try {
-    writeFileSync(packetPath, buildFactsPacket(claims), { mode: 0o600 });
     const cwd = opts.projectDir === undefined ? undefined : await buildSnapshot(opts.projectDir, opts.sources ?? [], snapDir, dir);
+    if (cwd !== undefined) await markUnavailable(claims, roots, cwd, opts.gitRun ?? exec);
+    writeFileSync(packetPath, buildFactsPacket(claims), { mode: 0o600 });
     const result = await spawnSession(
       {
         cfg: opts.cfg,
