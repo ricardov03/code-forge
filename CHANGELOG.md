@@ -16,6 +16,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Reviewers get the bodies of the functions the changed code calls, inside the packet budget, so they stop raising false findings about code they could not see (B212)
 - A second stalled file now gets its own L3 patch rung instead of stopping the whole block with `l3_patch_exhausted` (B213)
 - `wait-block` no longer reports done while a file's last review was unavailable; it re-queues the file or names it, so `block close` does not refuse it later as unreviewed (B217)
+- `forge spawn --print-argv` prints the exact command it would run and runs nothing; the Solo adapter guide step 2 now uses it (B229)
 
 ## [0.15.4] — 2026-10-31
 
