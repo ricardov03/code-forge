@@ -6,6 +6,7 @@ import (
 	"io"
 	"os"
 	"path/filepath"
+	"syscall"
 	"time"
 )
 
@@ -68,13 +69,20 @@ func AppendObject(dir, slug string, row Object, rotateAtBytes int64) (Object, er
 	// Serialize Go rotation/recovery across processes. Node's existing writer
 	// does not take this lock; its append uses the same atomic O_APPEND write.
 	lock := filepath.Join(dir, slug+".append.lock")
+	lockFile, err := os.OpenFile(lock, os.O_CREATE|os.O_RDWR, 0666)
+	if err != nil {
+		return nil, err
+	}
+	// Closing releases the kernel lock even on process exit. Keep the file in
+	// place so all waiters lock the same inode; its existence never blocks us.
+	defer lockFile.Close()
 	deadline := time.Now().Add(5 * time.Second)
 	for {
-		err := os.Mkdir(lock, 0755)
+		err := syscall.Flock(int(lockFile.Fd()), syscall.LOCK_EX|syscall.LOCK_NB)
 		if err == nil {
 			break
 		}
-		if !os.IsExist(err) {
+		if err != syscall.EWOULDBLOCK && err != syscall.EAGAIN && err != syscall.EINTR {
 			return nil, err
 		}
 		if time.Now().After(deadline) {
@@ -82,7 +90,6 @@ func AppendObject(dir, slug string, row Object, rotateAtBytes int64) (Object, er
 		}
 		time.Sleep(25 * time.Millisecond)
 	}
-	defer os.Remove(lock)
 	file := filepath.Join(dir, slug+".jsonl")
 	info, err := os.Stat(file)
 	if err != nil && !os.IsNotExist(err) {
