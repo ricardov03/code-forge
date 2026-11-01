@@ -6,6 +6,8 @@ The report has 17 sections. Its final sections are `agent_waivers`, `run_time`, 
 
 A glossary. Each term links the idea to the command or config key that makes it real.
 
+`gates run --changed` includes tests that import changed source directly or through other repository modules, including static imports, export-from declarations and literal dynamic imports. A change to `schema/code-forge.schema.json` also adds the config and doctor tests. The sorted union with the block's changed tests runs the full suite when it exceeds `gates.full_suite_threshold_files` (reason `threshold`); changed-scope JSON results list the added files in `dependents`. Keep running one full suite per wave.
+
 | Term | Meaning | Where you see it |
 |---|---|---|
 | **Brief** | A short text that says what to build. The input to the Plan job. | `plans/<name>.md` |
