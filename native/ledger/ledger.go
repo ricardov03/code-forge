@@ -1,4 +1,4 @@
-// Package ledger reads code-forge JSONL ledgers without modifying them.
+// Package ledger reads and appends Node-compatible code-forge JSONL ledgers.
 package ledger
 
 import (
