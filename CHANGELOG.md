@@ -27,6 +27,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - A gate that hits its time limit now says `TIMEOUT after <n> s (not a test failure)` with the flag to raise it, and test files left unfinished by the timeout are no longer listed as failed tests (B223)
 - `wait-block` no longer reports done while a file's last review was unavailable; it re-queues the file or names it, so `block close` does not refuse it later as unreviewed (B217)
 - `block close` no longer refuses a file that the block's own commits created and then deleted; a missing file with no such history still needs review (B230)
+- `status` warns when a live worker of the run is not the pinned one and names `run start --reattach`, before `block close` can stop blocks it served (B224)
 
 ## [0.15.4] — 2026-10-31
 
