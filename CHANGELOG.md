@@ -26,6 +26,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `gates run --changed` gives each test runner only its own test files (no more `.go` files passed to `node --test`); when none fit, the gate runs the full suite and reports scope `full` (B203)
 - A gate that hits its time limit now says `TIMEOUT after <n> s (not a test failure)` with the flag to raise it, and test files left unfinished by the timeout are no longer listed as failed tests (B223)
 - `wait-block` no longer reports done while a file's last review was unavailable; it re-queues the file or names it, so `block close` does not refuse it later as unreviewed (B217)
+- `block close` no longer refuses a file that the block's own commits created and then deleted; a missing file with no such history still needs review (B230)
 
 ## [0.15.4] — 2026-10-31
 
