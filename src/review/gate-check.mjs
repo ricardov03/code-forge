@@ -909,20 +909,22 @@ export function repoRelativePath(raw) {
  * The block's file set (§4.1): changed tracked files since `base` (deletions included, hashed
  * `DELETED_HASH`) ∪ untracked files, filtered to `owned` (`matchOwned`, default the registry's `ownsFile` with `ownedKinds`: an exact entry owns its path and the paths below it unless recorded as a regular file, B57), each with its content hash.
  * Every path goes through `repoRelativePath`; files deleted now get one git base-existence check
- * and are omitted if absent at base too. Other files need no extra git call.
- * @param {{repoRoot: string, base: string, owned: string[], ownedKinds?: Record<string, string>, matchOwned?: (file: string) => boolean, changed?: string[]}} opts
+ * and are omitted only when git successfully confirms absence at base too. Failed checks keep
+ * the deletion for review. Other files need no extra git call.
+ * @param {{repoRoot: string, base: string, owned: string[], ownedKinds?: Record<string, string>, matchOwned?: (file: string) => boolean, changed?: string[], gitRun?: (argv: string[], opts: Parameters<typeof exec>[1]) => Promise<{result: 'ok' | 'failed', stdout?: string, timedOut?: boolean}>}} opts
  *   `changed`: the tree's changed files when the caller already listed them ({@link changedFiles}).
+ *   `gitRun`: the base-existence runner (defaults to {@link exec}).
  * @returns {Promise<Array<{file: string, content_hash: string}>>}
  */
-export async function blockFileSet({ repoRoot, base, owned, ownedKinds, matchOwned, changed }) {
+export async function blockFileSet({ repoRoot, base, owned, ownedKinds, matchOwned, changed, gitRun = exec }) {
   const all = changed ?? (await changedFiles({ repoRoot, base }));
   const isOwned = matchOwned ?? ((/** @type {string} */ f) => ownsFile(owned, f, ownedKinds));
   const files = [];
   for (const file of all.filter((f) => isOwned(f))) {
     const content_hash = currentHash(repoRoot, file);
     if (content_hash === DELETED_HASH) {
-      const atBase = await exec(['git', 'cat-file', '-e', `${base}:${file}`], { cwd: repoRoot, env: gitChildEnv(), timeoutMs: 30000 });
-      if (atBase.result !== 'ok') continue;
+      const atBase = await gitRun(['git', 'ls-tree', '--name-only', '-z', base, '--', file], { cwd: repoRoot, env: gitChildEnv(), timeoutMs: 30000 });
+      if (atBase.result === 'ok' && atBase.stdout === '') continue;
     }
     files.push({ file, content_hash });
   }

@@ -49,6 +49,63 @@ test('blockFileSet keeps exactly the modified file with its content hash', async
   assert.deepEqual(files, [{ file: modified, content_hash: createHash('sha256').update(bytes).digest('hex') }], 'the modified bytes keep their hash');
 });
 
+test('blockFileSet checks base existence only for files deleted now', async () => {
+  const repo = await makeRepo();
+  const modified = ['src/first.mjs', 'src/second.mjs'];
+  for (const file of modified) writeFile(repo, file, 'original\n');
+  await commitAll(repo);
+  const base = (await git(['rev-parse', 'HEAD'], repo)).trim();
+  for (const file of modified) writeFile(repo, file, 'modified\n');
+  writeFile(repo, TRANSIENT, 'temporary\n');
+  unlinkSync(path.join(repo, TRANSIENT));
+  const calls = [];
+
+  const files = await blockFileSet({
+    repoRoot: repo, base, owned: ['src'], changed: [...modified, TRANSIENT],
+    gitRun: async (argv, opts) => {
+      calls.push({ argv, opts });
+      return { result: 'ok', stdout: '' };
+    },
+  });
+
+  assert.equal(calls.length, 1, 'two modified files and one transient deletion cost exactly one base check');
+  assert.deepEqual(calls[0].argv, ['git', 'ls-tree', '--name-only', '-z', base, '--', TRANSIENT]);
+  assert.equal(calls[0].opts.cwd, repo);
+  assert.equal(calls[0].opts.timeoutMs, 30000);
+  assert.deepEqual(files, modified.map((file) => ({ file, content_hash: createHash('sha256').update('modified\n').digest('hex') })));
+});
+
+test('blockFileSet keeps a deleted file when its base check times out', async () => {
+  const repo = await makeRepo();
+  const deleted = 'src/deleted.mjs';
+  writeFile(repo, deleted, 'original\n');
+  await commitAll(repo);
+  const base = (await git(['rev-parse', 'HEAD'], repo)).trim();
+  unlinkSync(path.join(repo, deleted));
+  let calls = 0;
+
+  const files = await blockFileSet({
+    repoRoot: repo, base, owned: ['src'], changed: [deleted],
+    gitRun: async () => {
+      calls += 1;
+      return { result: 'failed', timedOut: true };
+    },
+  });
+  assert.equal(calls, 1, 'the deleted file uses the timed-out base check');
+  assert.deepEqual(files, [{ file: deleted, content_hash: DELETED_HASH }]);
+});
+
+test('blockFileSet keeps a deleted file when the base SHA is invalid', async () => {
+  const repo = await makeRepo();
+  const deleted = 'src/deleted.mjs';
+  writeFile(repo, deleted, 'original\n');
+  await commitAll(repo);
+  unlinkSync(path.join(repo, deleted));
+
+  const files = await blockFileSet({ repoRoot: repo, base: '0'.repeat(40), owned: ['src'], changed: [deleted] });
+  assert.deepEqual(files, [{ file: deleted, content_hash: DELETED_HASH }]);
+});
+
 test('block close accepts a reviewed file created then deleted alongside approved work', async () => {
   const repo = await makeRepo();
   const kept = 'src/kept.mjs';
