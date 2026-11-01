@@ -74,6 +74,29 @@ export function isChangedTest(file) {
 }
 
 /**
+ * Keep test files supported by the executable's runner family. Wrappers in the JS family
+ * still accept JS tests; unknown executables retain the caller's complete file list.
+ * @param {ReadonlyArray<string>} argv @param {ReadonlyArray<string>} files
+ * @returns {string[]}
+ */
+export function testsForRunner(argv, files) {
+  let extensions;
+  switch (path.basename(argv[0] ?? '')) {
+    case 'node': case 'bun': case 'deno': case 'npm': case 'npx': case 'pnpm':
+    case 'yarn': case 'bunx': case 'vitest': case 'jest': case 'mocha':
+      extensions = /\.(?:js|mjs|cjs|jsx|ts|mts|cts|tsx)$/;
+      break;
+    case 'go': extensions = /\.go$/; break;
+    case 'php': case 'pest': case 'phpunit': extensions = /\.php$/; break;
+    case 'pytest': case 'python': case 'python3': extensions = /\.py$/; break;
+    case 'cargo': extensions = /\.rs$/; break;
+    case 'swift': case 'xcodebuild': extensions = /\.swift$/; break;
+    default: return [...files];
+  }
+  return files.filter((file) => extensions.test(file));
+}
+
+/**
  * Existing owned changed tests plus every test importing an owned changed source since base.
  * Deleted tests are omitted; ownership limits changed inputs, not their test callers.
  * @param {{cwd: string, base: string, owned: string[], kinds?: Record<string, string>}} opts
@@ -262,7 +285,7 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
  */
 export function expandArgv(argv, scope) {
   if (!argv.includes(TEST_FILES_TOKEN) && !argv.includes(CHANGED_FILES_TOKEN)) return { argv: [...argv], scoped: false };
-  const files = scope.scope === 'full' ? [] : scope.files;
+  const files = scope.scope === 'full' ? [] : testsForRunner(argv, scope.files);
   const changed = scope.scope === 'changed' ? scope.changedFiles : [];
   if (changed.some((file) => !safeFile(file))) throw new TypeError('expandArgv: unsafe changed path');
   const dashed = files.find((f) => f.startsWith('-'));

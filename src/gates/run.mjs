@@ -14,7 +14,7 @@ import { customGateMessages } from '../config/validate.mjs';
 import { exec } from '../util/exec.mjs';
 import { registerSecret } from '../util/redact.mjs';
 import { CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
-import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, maskableEnvValues, scopeFields } from './expand.mjs';
+import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, maskableEnvValues, scopeFields, testsForRunner } from './expand.mjs';
 
 /** @typedef {import('./detect.mjs').Gate} Gate */
 /** @typedef {import('./detect.mjs').GateCommand} GateCommand */
@@ -358,7 +358,8 @@ export async function runGates(gates, opts) {
       duration_ms: 0,
       argv,
       skipped: false,
-      ...(scoped ? scopeFields(scope) : {}),
+      ...(scoped ? scopeFields(scope.scope !== 'full' && command.originalArgv.includes(TEST_FILES_TOKEN)
+        ? { ...scope, files: testsForRunner(command.originalArgv, scope.files) } : scope) : {}),
       ...outcome,
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
     });
@@ -367,7 +368,11 @@ export async function runGates(gates, opts) {
       if (!command.originalArgv.includes(TEST_FILES_TOKEN)) {
         repeat.onSkip?.('repeat_new_tests: skipped (gates.test has no {test_files})');
       } else {
-        const files = (await changedTestFiles({ cwd, ...repeat })).filter((file) => !gates.lightTestFiles || gates.lightTestFiles.includes(file));
+        const changedFiles = (await changedTestFiles({ cwd, ...repeat })).filter((file) => !gates.lightTestFiles || gates.lightTestFiles.includes(file));
+        const files = testsForRunner(command.originalArgv, changedFiles);
+        if (changedFiles.length > 0 && files.length === 0) {
+          repeat.onSkip?.('repeat_new_tests: skipped (no changed tests for this runner)');
+        }
         if (files.length > 0) {
           result.repeats = { n: repeat.n, files, failed: false };
           const repeatArgv = expandArgv(command.originalArgv, { scope: 'related', files }).argv;
