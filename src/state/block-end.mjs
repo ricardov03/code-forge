@@ -25,6 +25,7 @@ import path from 'node:path';
 import { runSpend } from '../ledger/spend.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { exec } from '../util/exec.mjs';
+import { daemonRequest } from '../util/native.mjs';
 import { assertRunId, runsDir } from './paths.mjs';
 import { withRunLock, writeSigned } from './run.mjs';
 
@@ -113,7 +114,8 @@ export async function writeDoneFile({ record, id, status, event, reason = null, 
     /** @type {Record<string, any>[] | null} */
     let rows = null;
     try {
-      rows = await readAllRows(record.project);
+      const reply = await daemonRequest(runId, { method: 'rows', block: id }, { config: record.config?.snapshots?.[record.config?.hash] });
+      rows = reply?.rows ?? await readAllRows(record.project);
     } catch {
       rows = null;
     }

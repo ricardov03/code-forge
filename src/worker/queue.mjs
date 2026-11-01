@@ -520,8 +520,9 @@ export function pendingTickets(repoRoot) {
     return [];
   }
   const claimed = new Set(names.map((n) => CLAIM.exec(n)?.[1]));
+  const present = new Set(names);
   const ids = names.filter((n) => /^[0-9a-f]{24}\.json$/.test(n)).map((n) => n.slice(0, 24));
-  const pending = ids.filter((id) => !names.includes(`${id}.done`) && !claimed.has(id));
+  const pending = ids.filter((id) => !present.has(`${id}.done`) && !claimed.has(id));
   const at = (/** @type {string} */ id) => {
     const t = readJSON(path.join(queueDir(repoRoot), `${id}.json`));
     return typeof t?.enqueued_at === 'string' ? t.enqueued_at : '';
