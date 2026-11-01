@@ -231,3 +231,75 @@ func TestStaleMismatchedWorkerReportsDown(t *testing.T) {
 		t.Fatalf("stale worker was served: %v", result)
 	}
 }
+
+func TestWaitBlockUnavailableReview(t *testing.T) {
+	s := &server{repo: t.TempDir(), home: t.TempDir(), run: "r-test", project: "test", trees: make(map[string]*treeState)}
+	var err error
+	s.repo, err = filepath.EvalSymlinks(s.repo)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "base"}} {
+		if _, err := git(s.repo, args...); err != nil {
+			t.Fatal(err)
+		}
+	}
+	base, err := git(s.repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	writeObject(t, filepath.Join(s.repo, ".code-forge", "runs", s.run+".json"), object{
+		"run_id": s.run, "project": s.project,
+		"blocks": object{"B1": object{"owned_files": []any{"*.go"}, "base_sha": strings.TrimSpace(base)}},
+	})
+	if err := os.WriteFile(filepath.Join(s.repo, "a.go"), []byte("package fixture\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	s.queue.Dir = filepath.Join(s.repo, ".code-forge", "queue")
+	writeObject(t, filepath.Join(s.queue.Dir, "worker.json"), object{"pid": os.Getpid(), "run": s.run, "start_time": "unknown"})
+	zero := int64(0)
+	req := request{Method: "wait-block", Block: "B1", MaxMS: &zero}
+	pending := s.handle(context.Background(), req)
+	states, ok := pending["files"].([]object)
+	if !ok || len(states) != 1 || states[0]["status"] != "pending" {
+		t.Fatalf("expected exactly one pending file, got %v", pending)
+	}
+	id := text(states[0], "ticket")
+	marker := filepath.Join(s.queue.Dir, id+".done")
+	// Spend the single retry through the real join before publishing its last result.
+	rel := ".code-forge/reviews/initial.json"
+	writeObject(t, filepath.Join(s.repo, rel), object{"status": "unavailable"})
+	writeObject(t, marker, object{"ticket": id, "status": "unavailable", "result": rel})
+	if got := s.handle(context.Background(), req); got["reason"] != "wait_timeout" {
+		t.Fatalf("first unavailable result must stay pending: %v", got)
+	}
+	for _, tc := range []struct {
+		name   string
+		marker object
+		done   bool
+	}{
+		{"unavailable", object{"status": "unavailable"}, false},
+		{"stale", object{"status": "stale"}, false},
+		{"refused", object{"status": "refused", "reason": "review-state-lost"}, false},
+		{"unknown", object{"status": "unknown"}, false},
+		{"approved", object{"status": "reviewed", "approved": true}, true},
+		{"findings", object{"status": "reviewed", "approved": false, "open_findings": true}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tc.marker["ticket"] = id
+			writeObject(t, marker, tc.marker)
+			got := s.handle(context.Background(), req)
+			if got["done"] != tc.done {
+				t.Fatalf("done = %v, want %v: %v", got["done"], tc.done, got)
+			}
+			if !tc.done {
+				wantNext := "review-file a.go --fresh re-runs it; if --fresh refuses, block reopen B1 --run r-test --file a.go --reason <text>"
+				if got["reason"] != "review_unavailable" || got["next"] != wantNext {
+					t.Fatalf("missing unavailable report: %v", got)
+				}
+			} else if got["reason"] != nil || got["next"] != nil {
+				t.Fatalf("completed review has an unavailable report: %v", got)
+			}
+		})
+	}
+}
