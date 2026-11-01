@@ -276,7 +276,7 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
     : res.code === null ? res.signal ?? (res.error ? 'spawn-error' : 'terminated')
     : prompt ? 'prompt' : undefined;
   const diagnostic = res.timedOut
-    ? `TIMEOUT after ${timeoutMs / 1000} s (not a test failure); rerun with --timeout-ms ${timeoutMs * 2} or raise gates.timeout_s`
+    ? `gate timeout after ${timeoutMs / 1000} seconds; raise gates.timeout_s (or --timeout-ms)`
     : res.code === null ? `gate terminated: ${res.signal ?? res.error ?? 'no exit status (no signal reported)'}`
     : prompt ? 'gate ended on an interactive prompt; install the tool or make the command non-interactive' : '';
   const stdout = res.timedOut ? unfinishedOutput(res.stdout) : res.stdout;
@@ -286,7 +286,9 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
     const tail = output.trimEnd().split(/\r?\n/).slice(-10).join('\n');
     return tail ? [`${stream} tail:\n${tail}`] : [];
   });
-  const message = [diagnostic, ...tails].join('\n');
+  const message = [res.timedOut
+    ? `TIMEOUT after ${timeoutMs / 1000} s (not a test failure); rerun with --timeout-ms ${timeoutMs * 2} or raise gates.timeout_s`
+    : diagnostic, ...tails].join('\n');
   return {
     ok: res.result === 'ok' && !reason && (!failOnStdout || res.stdout.trim().length === 0),
     code: res.code,
