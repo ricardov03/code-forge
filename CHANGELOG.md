@@ -6,6 +6,18 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `forge spawn --print-argv` prints the exact command it would run and runs nothing; the Solo adapter guide step 2 now uses it (B229)
+- `npm run bench:block` measures one block flow under Node and under the Go daemon (process count, peak memory, wall time); each pass runs in its own child process (B184)
+- Forge facts checks the code names in a brief, marks ignored or outside-snapshot paths UNVERIFIABLE (never NOT-FOUND), takes claims from the brief only, maps absolute paths inside any `--sources` root to that source, and handles globs, `/dev/null` and route patterns (B227)
+
+### Changed
+
+- Reviewers get the bodies of the functions the changed code calls, inside the packet budget, so they stop raising false findings about code they could not see (B212)
+- A second stalled file now gets its own L3 patch rung instead of stopping the whole block with `l3_patch_exhausted` (B213)
+- The worker prunes done queue tickets and keeps an index; worker polls and done checks read only new ledger rows instead of the whole ledger each time (B214)
+
 ### Fixed
 
 - Worker start times use one format everywhere: `ps` pads days 1-9 with two spaces, so worker pins and route checks failed on those days. Old padded pins still match (B225)
@@ -13,13 +25,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Daemon tests wait for readiness against a deadline instead of fixed sleeps, so they do not fail on a busy machine (B226)
 - `gates run --changed` gives each test runner only its own test files (no more `.go` files passed to `node --test`); when none fit, the gate runs the full suite and reports scope `full` (B203)
 - A gate that hits its time limit now says `TIMEOUT after <n> s (not a test failure)` with the flag to raise it, and test files left unfinished by the timeout are no longer listed as failed tests (B223)
-- Reviewers get the bodies of the functions the changed code calls, inside the packet budget, so they stop raising false findings about code they could not see (B212)
-- A second stalled file now gets its own L3 patch rung instead of stopping the whole block with `l3_patch_exhausted` (B213)
 - `wait-block` no longer reports done while a file's last review was unavailable; it re-queues the file or names it, so `block close` does not refuse it later as unreviewed (B217)
-- `forge spawn --print-argv` prints the exact command it would run and runs nothing; the Solo adapter guide step 2 now uses it (B229)
-- `npm run bench:block` measures one block flow under Node and under the Go daemon (process count, peak memory, wall time); each pass runs in its own child process (B184)
-- Forge facts checks the code names in a brief, marks ignored or outside-snapshot paths UNVERIFIABLE (never NOT-FOUND), takes claims from the brief only, maps absolute paths inside any `--sources` root to that source, and handles globs, `/dev/null` and route patterns (B227)
-- The worker prunes done queue tickets and keeps an index; worker polls and done checks read only new ledger rows instead of the whole ledger each time (B214)
 
 ## [0.15.4] — 2026-10-31
 
