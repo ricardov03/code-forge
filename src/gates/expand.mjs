@@ -224,7 +224,9 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
   function withDependents(files, sources, changedFiles, reason) {
     const dependents = [...new Set(sources.filter((file) => !isChangedTest(file)).flatMap((file) => current?.dependents?.[file] ?? []))]
       .filter((file) => !files.includes(file)).sort();
-    const union = [...new Set([...files, ...dependents])].sort();
+    // An empty full fallback means every test; adding callers would narrow that run.
+    const fullFallback = fallback.scope === 'full' && (reason === 'unpaired' || reason === 'no_baseline');
+    const union = fullFallback ? [] : [...new Set([...files, ...dependents])].sort();
     const overThreshold = union.length > threshold || reason === 'threshold';
     return { scope: 'changed', files: overThreshold ? [] : union, changedFiles,
       ...(current?.dependents || current === null ? { dependents } : {}),

@@ -96,6 +96,37 @@ test('schema changes add config and doctor tests; their union above the threshol
   });
 });
 
+test('full fallback keeps the full suite when another changed source has an importing test', async (t) => {
+  await withTempDir(async (cwd) => {
+    const owned = ['src/unpaired.mjs', 'src/value.mjs'];
+    const importer = 'test/consumer.test.mjs';
+    await put(cwd, {
+      [owned[0]]: 'export const unpaired = 1;',
+      [owned[1]]: 'export const value = 1;',
+      [importer]: "import { value } from '../src/value.mjs';",
+      'test/unrelated.test.mjs': 'export {};',
+    });
+    baseCommit(cwd);
+    const baseline = (await fileBaseline(cwd, owned)).files;
+    await put(cwd, {
+      [owned[0]]: 'export const unpaired = 2;',
+      [owned[1]]: 'export const value = 2;',
+    });
+    const current = await fileBaseline(cwd, owned);
+    for (const [reason, previous] of Object.entries({ unpaired: baseline, no_baseline: null })) {
+      await t.test(reason, () => {
+        const scope = changedScope({ baseline: previous, current, fallback: { scope: 'full', reason: 'no_tests' }, owned });
+        assert.equal(scope.reason, reason);
+        assert.deepEqual(scope.dependents, [importer], 'the importing test remains in the explanation');
+        assert.deepEqual(scope.files, [], 'the full fallback must cover the source with no callers');
+        assert.deepEqual(expandArgv(['runner', '{test_files}'], scope).argv, ['runner']);
+        const related = changedScope({ baseline: previous, current, fallback: { scope: 'related', files: ['test/unrelated.test.mjs'] }, owned });
+        assert.deepEqual(related.files, [importer, 'test/unrelated.test.mjs'], 'related fallback still merges dependents');
+      });
+    }
+  });
+});
+
 test('unreadable and malformed files are skipped, and a changed test does not pull in its importers', async () => {
   await withTempDir(async (cwd) => {
     const good = 'test/good.test.mjs';
