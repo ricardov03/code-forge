@@ -248,7 +248,7 @@ export async function readFileDiff({ repoRoot, file, base, io }) {
     readFile,
   });
   const parsed = parseDiff(res.stdout);
-  const definitions = res.stdout.trim().length === 0 ? [] : await findDefinitions({
+  const definitions = content === null || res.stdout.trim().length === 0 ? [] : await findDefinitions({
     path: rel, diffLines: res.stdout.split('\n'),
     header: splitLines(content).slice(0, importHeaderEnd(rel, content)).join('\n'),
     io: { repoRoot, readFile, windows: parsed.hunks.map((h) => ({ start: h.newStart, end: h.newStart + h.newLines - 1 })) },
@@ -290,6 +290,13 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   let pairedSection = boundedPaired(paired, budgetFor(cfg, 'full_in'));
   const names = ['quick', 'full'].includes(lens) ? (diff.related ?? []) : [];
   let relatedSection = names.length > 0 ? `## related files (not shown)\n${names.join('\n')}` : '';
+  // Optional sections are dropped before context shrinks. Choose the final windows before
+  // excluding definitions already shown there, so shrinking cannot lose a called body.
+  if (estimateTokens(render(lensText, digest, factsExcerpt, ctx.text, diffSection, moved)) > limit) {
+    relatedSection = '';
+    pairedSection = '';
+    ctx = packetContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: 'minimal' });
+  }
   const definitions = lens === 'judge' ? [] : (diff.definitions ?? []).filter((definition) => definition.path !== diff.file ||
     !ctx.windows.some((w) => w.start <= definition.start && definition.end <= w.end));
   while (definitions.length > 0 && estimateTokens(definitionsSection(definitions)) > Math.floor(budgetFor(cfg, 'full_in') / 8)) definitions.pop();
@@ -305,10 +312,6 @@ export function assemblePacket({ diff, lens, rulesDigest = '', factsExcerpt = ''
   }
   if (estimateTokens(text) > limit && pairedSection.length > 0) {
     pairedSection = '';
-    text = renderPacket();
-  }
-  if (estimateTokens(text) > limit) {
-    ctx = packetContext({ file: diff.file, content: diff.content, hunks: diff.hunks, cfg, mode: 'minimal' });
     text = renderPacket();
   }
   while (estimateTokens(text) > limit && digest.length > 0) {

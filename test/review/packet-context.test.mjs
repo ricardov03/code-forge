@@ -1,8 +1,9 @@
 import assert from 'node:assert/strict';
+import { unlinkSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 import { commitAll, makeRepo, writeFile } from './helpers.mjs';
-import { assembleJudgePacket, assembleLightPacket, assemblePacket, estimateTokens, readFileDiff } from '../../src/review/packet.mjs';
+import { assembleJudgePacket, assembleLightPacket, assemblePacket, buildPacket, estimateTokens, readFileDiff } from '../../src/review/packet.mjs';
 
 const heading = '## definitions (called by changed lines)';
 const section = (text) => text.split(`${heading}\n`)[1]?.split('\n## ')[0].trimEnd() ?? '';
@@ -46,6 +47,51 @@ async function fixture() {
   const diff = await readFileDiff({ repoRoot, file: 'main.mjs', io });
   return { diff, reads };
 }
+
+test('a deleted tracked caller produces a deletion packet without definitions', async () => {
+  const repoRoot = await makeRepo();
+  writeFile(repoRoot, 'main.mjs', "import { helper } from './util.mjs';\nhelper();\n");
+  writeFile(repoRoot, 'util.mjs', 'export function helper() { return 42; }\n');
+  await commitAll(repoRoot);
+  unlinkSync(path.join(repoRoot, 'main.mjs'));
+
+  const packet = await buildPacket({ repoRoot, file: 'main.mjs', lens: 'full' });
+  assert.equal(packet.status, 'ok');
+  if (packet.status !== 'ok') throw new Error('expected reviewable deletion');
+  assert.equal(packet.diff.content, null);
+  assert.deepEqual(packet.diff.definitions, []);
+  assert.match(packet.diff.diffText, /deleted file mode/);
+  assert.match(packet.diff.diffText, /\+\+\+ \/dev\/null/);
+  assert.match(packet.diff.diffText, /\n-helper\(\);\n/);
+  assert.equal(packet.text.endsWith(packet.diff.diffText), true, 'entire deletion diff is retained');
+  assert.equal(packet.text.includes(heading), false);
+});
+
+test('shrinking context restores a called local definition that the full windows covered', async () => {
+  const repoRoot = await makeRepo();
+  const content = [
+    ...Array.from({ length: 469 }, (_, i) => `// padding ${i}`),
+    'function helper(x) {', '  return x + 42;', '}',
+    ...Array.from({ length: 27 }, (_, i) => `// tail padding ${i}`),
+    'const result = 0;',
+  ].join('\n') + '\n';
+  writeFile(repoRoot, 'main.mjs', content);
+  await commitAll(repoRoot);
+  writeFile(repoRoot, 'main.mjs', content.replace('const result = 0;', 'const result = helper(1);'));
+  const diff = await readFileDiff({ repoRoot, file: 'main.mjs' });
+  const full = packetFor({ diff, lens: 'full' });
+  assert.equal(full.contextMode, 'hunks');
+  assert.equal(section(full.text), '', 'the full context already shows the definition');
+  assert.match(full.text, /470\| function helper\(x\) \{\n471\|   return x \+ 42;\n472\| \}/);
+
+  const minimal = packetFor({ diff, lens: 'full', budget: full.tokensIn - 1 });
+  assert.equal(minimal.contextMode, 'minimal');
+  assert.equal(minimal.overBudget, false);
+  assert.deepEqual(entries(minimal.text), ['### main.mjs:470-472']);
+  assert.match(section(minimal.text), /470\| function helper\(x\) \{\n471\|   return x \+ 42;\n472\| \}/);
+  assert.equal(minimal.text.split('471|   return x + 42;').length - 1, 1);
+  assert.equal(minimal.text.endsWith(diff.diffText), true);
+});
 
 test('the review packet includes called imported and unseen local definitions, with exact ranges and bounded bodies', async () => {
   const { diff, reads } = await fixture();
