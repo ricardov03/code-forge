@@ -612,8 +612,12 @@ async function rebaseWorktreeBlock({ runId, id, writeRow, acceptChanged, reason,
     }
     const before = closed ? await committedBlobs(tree, reviewedHead, files) : null;
     const moved = { old_base: block.base_sha, new_base: newBase };
+    // Global config and inherited GIT_* stay scrubbed. Replay with the block's own committer,
+    // rather than guessing an identity or silently substituting the repository's local user.
+    const identity = await git(['git', 'log', '-1', '--format=%cn%x00%ce', oldHead], tree);
+    const [committerName, committerEmail] = identity.stdout.trimEnd().split('\0');
     try {
-      const rebased = await exec(['git', '-C', tree, 'rebase', newBase], { cwd: record.workspace, env: gitEnv(), timeoutMs: 30000 });
+      const rebased = await exec(['git', '-C', tree, 'rebase', newBase], { cwd: record.workspace, env: { ...gitEnv(), GIT_COMMITTER_NAME: committerName, GIT_COMMITTER_EMAIL: committerEmail }, timeoutMs: 30000 });
       if (rebased.result !== 'ok') throw new StateError('rebase-conflict', 'rebase-conflict');
       const after = before === null ? null : await committedBlobs(tree, 'HEAD', files);
       const changed = after === null ? [] : files.filter((file) => before.get(file) !== after.get(file));
