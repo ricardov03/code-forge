@@ -42,13 +42,24 @@ test('block bench measures Node and Go processes, RSS and wall time and persists
       await t.test(`${mode} reports all four block measurements`, (check) => {
         if (mode === 'go' && !hasGo) return check.skip('Go is not on PATH; Node and packaging checks still run');
         const metrics = report[mode];
-        assert.deepEqual(Object.keys(metrics).sort(), ['cli_runs', 'peak_rss_mb', 'processes', 'wall_ms'], `${mode} has exactly four measurements`);
+        assert.deepEqual(Object.keys(metrics).sort(), ['cli_runs', 'home', 'peak_rss_mb', 'processes', 'run_id', 'slug', 'wall_ms'], `${mode} reports four measurements and its isolated identity`);
+        for (const key of ['cli_runs', 'peak_rss_mb', 'processes', 'wall_ms']) {
+          assert.equal(typeof metrics[key], 'number', `${mode} ${key} is numeric`);
+          assert.ok(Number.isFinite(metrics[key]), `${mode} ${key} is finite`);
+        }
         assert.equal(metrics.cli_runs, 4, `${mode} starts two enqueues, one block wait and one status`);
         assert.ok(metrics.processes >= metrics.cli_runs, `${mode} samples at least ${metrics.cli_runs} distinct descendants, got ${metrics.processes}`);
         assert.ok(metrics.peak_rss_mb > 0, `${mode} peak RSS is positive, got ${metrics.peak_rss_mb}`);
         assert.ok(metrics.wall_ms > 0, `${mode} wall time is positive, got ${metrics.wall_ms}`);
       });
     }
+    await t.test('the passes have separate run ids, project slugs and HOMEs', () => {
+      for (const key of ['run_id', 'slug', 'home']) {
+        assert.equal(typeof report.node[key], 'string', `Node reports ${key}`);
+        assert.equal(typeof report.go[key], 'string', `Go reports ${key}, including when skipped`);
+        assert.notEqual(report.node[key], report.go[key], `${key} is isolated between passes`);
+      }
+    });
     const packed = run('npm', ['pack', '--dry-run', '--json']);
     assert.equal(packed.status, 0, packed.stderr);
     assert.equal(JSON.parse(packed.stdout)[0].files.filter((file) => file.path === 'scripts/bench-block.mjs').length, 0, 'npm ships zero copies of the maintainer benchmark');
