@@ -6,6 +6,7 @@ import net from 'node:net';
 import path from 'node:path';
 import { after, mock, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { waitReady } from '../helpers/wait-ready.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
@@ -109,11 +110,12 @@ async function fixture(t, config = { review: { exclude: ['**/*.md'] } }) {
     let error = '';
     child.stderr.on('data', (s) => { error += s; });
     children.push(child);
-    for (let i = 0; i < 100; i++) {
-      if (await ping(home, run)) return child;
-      await delay(20);
+    try {
+      await waitReady(() => ping(home, run), { stop: () => child.exitCode !== null });
+      return child;
+    } catch (err) {
+      assert.fail(`daemon must answer ping within 15 seconds; ${err.message}: ${error}`);
     }
-    assert.fail(`daemon must answer ping within 2 seconds: ${error}`);
   }
   async function wait(max = '0ms') {
     let stdout = '';

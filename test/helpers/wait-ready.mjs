@@ -1,5 +1,10 @@
 import { setTimeout as delay } from 'node:timers/promises';
 
+/**
+ * @template T
+ * @param {() => T | Promise<T>} probe
+ * @param {{ timeoutMs?: number, intervalMs?: number, stop?: () => boolean }} [options]
+ */
 export async function waitReady(probe, { timeoutMs = 15000, intervalMs = 20, stop } = {}) {
   const started = Date.now();
   const deadline = started + timeoutMs;
