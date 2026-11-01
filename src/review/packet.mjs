@@ -230,13 +230,14 @@ export async function readFileDiff({ repoRoot, file, base, io }) {
       : ['git', 'diff', '--no-color', '--no-ext-diff', ref, '--', rel];
   const res = await exec(argv, { cwd: repoRoot, env, timeoutMs: GIT_TIMEOUT_MS, ...(kind === 'new' ? { okExitCodes: [0, 1] } : {}) });
   if (res.result !== 'ok') throw new PacketError('git', `git diff failed for ${rel} (exit ${res.code})`);
+  const content = onDisk ? await (io?.readFile ? io.readFile(full) : readRepoText(repoRoot, rel)) : null;
   const readFile = (full) => {
     const candidate = path.relative(repoRoot, full).split(path.sep).join('/');
     if (isSecretLike(candidate)) return null;
+    if (candidate === rel) return content;
     const safe = assertPacketPath(repoRoot, candidate);
     return io?.readFile ? io.readFile(path.join(repoRoot, safe)) : readRepoText(repoRoot, safe);
   };
-  const content = onDisk ? await readFile(full) : null;
   const related = res.stdout.trim().length === 0 ? [] : await relatedFiles({
     repoRoot, file: rel,
     listFiles: async () => {
