@@ -15,11 +15,12 @@
  *
  * Text: at most {@link STATUS_MAX_LINES} lines per run, runs separated by one blank line:
  *   run <id> · <status> · <plan|brief> · spent $<x>[ of $<budget>]
- *   <id> <state> <level> · <model or -> · gate <pass|fail|none>[ (<gate>)] · findings <n>
+ *   <id> <state> <level> · <model or -> · gate <pass|fail|timeout|none>[ (<gate>)] · findings <n>
  *   … +<k> more blocks                  (only when the open blocks do not fit)
  *   closed <a> · stopped <b>            (only when any exist; printed last, but block lines are
  *                                        dropped first to keep it inside the cap)
- * The gate field is `gate pass`, `gate fail (<gate>)`, `gate fail` (no gate named) or `gate none`.
+ * The gate field is `gate pass`, `gate fail (<gate>)`, `gate timeout (<gate>)`, `gate fail`
+ * (no gate named) or `gate none`.
  * `<x>` is `run status`'s spent_usd with 2 decimals, followed by `+?` when some session has no
  * known price (`run status`'s unknown_usd_sessions > 0); the whole amount is `$?` when the ledger
  * cannot be read. A run record with no status shows `-`.
@@ -67,7 +68,8 @@ const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
 const STATUS_MAX_LINES = 10;
 
 /**
- * @typedef {import('../state/brief-status.mjs').RunStatus & {awaiting_human_check?: string[]}} RunStatus
+ * @typedef {Omit<import('../state/brief-status.mjs').BlockStatus, 'gate'> & {gate: {result: 'pass'|'fail'|'timeout'|'none', name: string | null}}} BlockStatus
+ * @typedef {Omit<import('../state/brief-status.mjs').RunStatus, 'blocks'> & {blocks: BlockStatus[], awaiting_human_check?: string[]}} RunStatus
  */
 
 /** @param {string} p @returns {Promise<string>} */
@@ -77,6 +79,31 @@ async function realOr(p) {
   } catch {
     return path.resolve(p);
   }
+}
+
+/** Recover timeout reasons from the last gate run, including older rows without timed_out.
+ * @param {RunStatus} summary @param {Array<Record<string, any>> | null} rows
+ * @returns {RunStatus}
+ */
+function timeoutStatus(summary, rows) {
+  const pending = new Set(), timedOut = new Set();
+  for (const row of rows ?? []) {
+    if (row.run !== summary.run_id || typeof row.block !== 'string') continue;
+    if (row.event === 'gate.red') {
+      if (row.reason === 'timeout' || row.timed_out === true) {
+        pending.add(row.block);
+        timedOut.add(row.block);
+      } else {
+        pending.delete(row.block);
+        timedOut.delete(row.block);
+      }
+    } else if (row.event === 'gate.done') {
+      if (row.all_ok === true || !pending.has(row.block)) timedOut.delete(row.block);
+      pending.delete(row.block);
+    }
+  }
+  return { ...summary, blocks: summary.blocks.map((block) => block.gate.result === 'fail' && timedOut.has(block.id)
+    ? { ...block, gate: { ...block.gate, result: 'timeout' } } : block) };
 }
 
 /**
@@ -114,8 +141,8 @@ export async function statusOf(record, cachedRows) {
     else byBlock.set(r.block, [r]);
   }
   const awaiting = Object.keys(record.blocks ?? {}).filter((id) => record.blocks[id].status === 'awaiting_human_check').sort();
-  return { ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
-    ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) };
+  return timeoutStatus({ ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
+    ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) }, rows);
 }
 
 /** Restore the Node renderer's insertion order after Go's sorted JSON map encoding.
@@ -231,6 +258,9 @@ export default async function status(args) {
       const answer = await daemonRequest(String(record.run_id), { method: 'status' }, { config });
       let summary;
       try { summary = answer ? daemonStatus(answer.runs[0]) : null; } catch { summary = null; }
+      if (summary?.blocks.some((block) => block.gate.result === 'fail')) {
+        summary = timeoutStatus(summary, await readAllRows(record.project).catch(() => null));
+      }
       shown.push(summary ?? await statusOf(record));
     }
     if (json) {
