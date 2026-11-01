@@ -5,10 +5,11 @@ import path from 'node:path';
 import { mock, test } from 'node:test';
 
 const realReview = await import('../../src/cli/review-file.mjs');
+const { default: defaultReview, ...namedReview } = realReview;
 /** @type {{now: number, finishAt: number, finish: () => Promise<void>, stderr?: string} | null} */
 let slowReview = null;
 // Keep the real join, queue, and results; control its polling clock and optional stderr.
-mock.module('../../src/cli/review-file.mjs', { namedExports: { ...realReview,
+mock.module('../../src/cli/review-file.mjs', { defaultExport: defaultReview, namedExports: { ...namedReview,
   runReviewFile: (args, deps) => {
     if (slowReview?.stderr) deps.stderr.write(slowReview.stderr);
     return realReview.runReviewFile(args, slowReview ? { ...deps,

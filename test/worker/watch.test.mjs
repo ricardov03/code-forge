@@ -322,31 +322,105 @@ test('(8) watch setting reaches exec spy; without setting idle drains do no watc
   for (let i = 0; i < 3; i++) assert.equal(await p.worker.drain(), 0);
   assert.deepEqual([calls, reads, readdirSync(p.repo).includes('.code-forge')], [0, 0, true]);
 });
+test('worker and manual watch ticks share the quiet deadline before superseding held content', async () => {
+  let now = 0;
+  const p = await fixture({ deps: { watchNow: () => now } });
+  const tick = () => p.tick({ now: () => now });
+  await p.commit({ 'src/a.mjs': 'first\n' });
+  await tick(); now = 15000; await tick();
+  const first = p.tickets()[0].ticket;
+  await p.commit({ 'src/a.mjs': 'second\n' });
+  // The scheduler observes this HEAD first. Manual ticks must use the same deadline.
+  now = 30000; await p.worker.watchTick();
+  now = 44999; await tick();
+  assert.deepEqual(pendingTickets(p.repo), [first], 'the older ticket remains pending at 14,999 ms');
+  now = 45000; await tick();
+  assert.deepEqual(pendingTickets(p.repo), [], 'the older pending ticket is superseded at exactly 15,000 ms');
+  assert.deepEqual(marker(p, first), { ticket: first, status: 'refused', reason: 'superseded' });
+  assert.deepEqual(p.tickets().map(({ ticket }) => ticket), [first], 'held content queues zero additional tickets');
+  assert.deepEqual(p.rows.filter(({ event }) => event === 'watch.held').map(({ file, content_hash }) => ({ file, content_hash })),
+    [{ file: 'src/a.mjs', content_hash: hashBytes(Buffer.from('second\n')) }], 'exactly one held observation at the shared quiet deadline');
+});
+test('overlapping watch ticks preserve the same state and queue as two serial ticks', async () => {
+  const exercise = async (overlap) => {
+    const p = await fixture();
+    const head = await p.commit({ 'src/a.mjs': 'first\n' });
+    let calls = 0; let reads = 0;
+    // Resolve the initial reads immediately so the unprotected second tick deterministically
+    // saves its pending state while the first is paused. Object reads still use real git.
+    const execute = async (argv, options) => {
+      calls++;
+      if (argv[1] === 'rev-parse') return { result: 'ok', stdout: `${head}\n`, stderr: '', code: 0 };
+      if (argv[1] === 'merge-base') return { result: 'ok', stdout: '', stderr: '', code: 0 };
+      return exec(argv, options);
+    };
+    let started;
+    const secondStarted = new Promise((resolve) => { started = resolve; });
+    const loadRun = async (id) => {
+      const record = await readRun(id);
+      if (++reads === 2) started();
+      return record;
+    };
+    const tick = (time, hooks = {}) => p.tick({ now: () => time, exec: execute, readRun: loadRun, hooks });
+    if (overlap) {
+      let entered; let release;
+      const firstEntered = new Promise((resolve) => { entered = resolve; });
+      const held = new Promise((resolve) => { release = resolve; });
+      const first = tick(0, { afterHead: async () => { entered(); await held; } });
+      await firstEntered;
+      const second = tick(15000);
+      try {
+        await secondStarted;
+        await new Promise((resolve) => setImmediate(resolve));
+      } finally { release(); }
+      await Promise.all([first, second]);
+    } else {
+      await tick(0);
+      await tick(15000);
+    }
+    const state = JSON.parse(readFileSync(path.join(queueDir(p.repo), 'watch', `${BLOCK}.json`), 'utf8'));
+    return { p, head, state, calls, reads };
+  };
+  const serial = await exercise(false);
+  const overlap = await exercise(true);
+  assert.deepEqual(overlap.state, { ...serial.state, run: overlap.p.runId, base: overlap.p.base, sha: overlap.head });
+  const queue = (p) => p.tickets().map(({ file, content_hash, ticket }) => ({ file, content_hash, pending: pendingTickets(p.repo).includes(ticket) }));
+  assert.equal(queue(serial.p).length, 1);
+  assert.deepEqual(queue(overlap.p), queue(serial.p));
+  assert.deepEqual([overlap.calls, overlap.reads], [serial.calls, 2], 'serialization adds no git calls or run-record reads');
+});
 test('held commits preserve running and done tickets while superseding a later pending ticket', async () => {
   let p; let completed;
-  p = await fixture({ review: async (ticket) => {
-    if (ticket.file === 'src/a.mjs') {
-      await p.commit({ 'src/a.mjs': 'second\n', 'src/b.mjs': 'second\n' });
-      await p.tick({ running: new Set([ticket.ticket]) });
-      await p.tick({ running: new Set([ticket.ticket]) });
-      assert.deepEqual(pendingTickets(p.repo), [ticket.ticket], 'held content must not queue alongside the running review');
-      const second = enqueue({ ...p.opts, file: 'src/a.mjs' }).ticket;
-      await p.commit({ 'src/a.mjs': 'third\n' }); await p.tick({ running: new Set([ticket.ticket]) });
-      await p.tick({ running: new Set([ticket.ticket]) });
-      assert.deepEqual(pendingTickets(p.repo), [ticket.ticket]);
-      assert.deepEqual(marker(p, second), { ticket: second, status: 'refused', reason: 'superseded' });
-      assert.equal(isDone(p.repo, ticket.ticket), false);
-      assert.equal(readResult(p.repo, p.runId, ticket.ticket), null);
-      assert.deepEqual(marker(p, completed.ticket), completed.marker, 'completed ticket must keep its real result');
-    }
-    return { status: 'reviewed', approved: true, sessions: [] };
+  let now = 0;
+  const tick = async (extra = {}) => { now += 15000; await p.tick({ ...extra, now: () => now }); };
+  let reviewFailure;
+  p = await fixture({ deps: { watchNow: () => now }, review: async (ticket) => {
+    try {
+      if (ticket.file === 'src/a.mjs') {
+        await p.commit({ 'src/a.mjs': 'second\n', 'src/b.mjs': 'second\n' });
+        await tick({ running: new Set([ticket.ticket]) });
+        await tick({ running: new Set([ticket.ticket]) });
+        assert.deepEqual(pendingTickets(p.repo), [ticket.ticket], 'held content must not queue alongside the running review');
+        const second = enqueue({ ...p.opts, file: 'src/a.mjs' }).ticket;
+        await p.commit({ 'src/a.mjs': 'third\n' }); await tick({ running: new Set([ticket.ticket]) });
+        await tick({ running: new Set([ticket.ticket]) });
+        assert.deepEqual(pendingTickets(p.repo), [ticket.ticket]);
+        assert.deepEqual(marker(p, second), { ticket: second, status: 'refused', reason: 'superseded' });
+        assert.equal(isDone(p.repo, ticket.ticket), false);
+        assert.equal(readResult(p.repo, p.runId, ticket.ticket), null);
+        assert.deepEqual(marker(p, completed.ticket), completed.marker, 'completed ticket must keep its real result');
+      }
+      return { status: 'reviewed', approved: true, sessions: [] };
+    } catch (err) { reviewFailure = err; throw err; }
   } });
-  await p.commit({ 'src/a.mjs': 'first\n', 'src/b.mjs': 'first\n' }); await p.tick(); await p.tick();
+  await p.commit({ 'src/a.mjs': 'first\n', 'src/b.mjs': 'first\n' }); await tick(); await tick();
   const first = currentId(p, 'src/a.mjs');
   const done = currentId(p, 'src/b.mjs');
   assert.equal((await p.worker.processTicket(done)).status, 'reviewed');
   completed = { ticket: done, marker: marker(p, done) };
-  assert.equal(await p.worker.drain(), 1);
+  const drained = await p.worker.drain();
+  assert.equal(reviewFailure, undefined, 'review callback assertions must reach the test runner');
+  assert.equal(drained, 1);
   assert.deepEqual(p.sessions, [done, first]);
   assert.equal(readResult(p.repo, p.runId, first).approved, true);
 });

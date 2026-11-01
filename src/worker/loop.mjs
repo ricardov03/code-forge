@@ -244,6 +244,7 @@ export function recordedVerdict(result) {
  * @property {{beforeLock?: () => void, afterCount?: (count: number) => Promise<unknown>}} [hooks] - deterministic boot races.
  * @property {typeof readTicket} [readTicket] - the ticket read (a test seam).
  * @property {typeof import('../util/exec.mjs').exec} [watchExec] - watch git exec seam.
+ * @property {() => number} [watchNow] - watch debounce clock (default: Date.now).
  * @property {Parameters<typeof watchTick>[0]['hooks']} [watchHooks] - deterministic watch races.
  * @property {import('../keys/store.mjs').KeyStore} [store] - default: B2's production store.
  * @property {any} [opRead]
@@ -357,7 +358,7 @@ export async function createWorker(opts, deps = {}) {
   const ledger = (row) => writeRow(signRow({ run: runId, ...row }, key));
   // Shared across direct ticks and the scheduler, so running tickets are never superseded.
   const activeTickets = new Set();
-  const tickWatch = () => watchTick({ repoRoot, runId, cfg, readRun: loadRun, writeRow: ledger, running: activeTickets, exec: deps.watchExec, hooks: deps.watchHooks });
+  const tickWatch = () => watchTick({ repoRoot, runId, cfg, readRun: loadRun, writeRow: ledger, running: activeTickets, exec: deps.watchExec, hooks: deps.watchHooks, now: deps.watchNow });
 
   /**
    * The config ticket `id` is reviewed with (B35): its snapshot from the run record, re-read per
