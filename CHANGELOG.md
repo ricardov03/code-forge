@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Worker start times use one format everywhere: `ps` pads days 1-9 with two spaces, so worker pins and route checks failed on those days. Old padded pins still match (B225)
 - `gates run --changed` also runs the tests of files that import a changed file, so a change cannot break callers in other folders unseen (B221)
+- Daemon tests wait for readiness against a deadline instead of fixed sleeps, so they do not fail on a busy machine (B226)
 
 ## [0.15.4] — 2026-10-31
 
