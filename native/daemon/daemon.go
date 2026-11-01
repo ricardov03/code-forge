@@ -43,6 +43,7 @@ type server struct {
 	trees                                        map[string]*treeState
 	statusProcess                                *statusProcess
 	psProcesses                                  int64
+	lastSweep                                    time.Time
 }
 
 type treeState struct {
@@ -99,6 +100,10 @@ func Serve(home, run, version string, idle time.Duration) error {
 		return fmt.Errorf("a live daemon already owns this run")
 	}
 	defer syscall.Flock(int(lock.Fd()), syscall.LOCK_UN)
+	if err := s.refresh(); err != nil {
+		return err
+	}
+	s.sweep(time.Now())
 	socket := filepath.Join(dir, "native.sock")
 	if info, err := os.Lstat(socket); err == nil {
 		if info.Mode()&os.ModeSocket == 0 {
@@ -265,6 +270,20 @@ func (s *server) handle(ctx context.Context, req request) object {
 func (s *server) step(req request, deadline time.Time, down *int, delivered map[string]bool) (object, bool) {
 	if err := s.refresh(); err != nil {
 		return failure(err.Error()), true
+	}
+	s.sweep(time.Now())
+	if req.Method == "rows" {
+		if req.Block != "" && !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`).MatchString(req.Block) {
+			return failure("bad-request"), true
+		}
+		rows := []ledger.Row{}
+		for _, value := range s.rows {
+			row := mapping(value)
+			if row["run"] == s.run && (req.Block == "" || row["block"] == req.Block) {
+				rows = append(rows, value)
+			}
+		}
+		return object{"rows": rows}, true
 	}
 	if req.Method == "ping" {
 		return object{"ok": true, "version": s.version, "pid": os.Getpid(), "run": s.run}, true

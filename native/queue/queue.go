@@ -347,8 +347,17 @@ func (idx *Index) Ensure(p ticket.Parts) error {
 // Prune removes only entries indexed to this run/block, across all revisions,
 // trees and ticket kinds. Callers must authorize it with a signed close row.
 func (idx *Index) Prune(run, block string) (tickets, markers int, err error) {
+	return idx.prune(run, &block)
+}
+
+// PruneRun removes every ticket and marker belonging to an authorized ended run.
+func (idx *Index) PruneRun(run string) (tickets, markers int, err error) {
+	return idx.prune(run, nil)
+}
+
+func (idx *Index) prune(run string, block *string) (tickets, markers int, err error) {
 	for name, item := range idx.entries {
-		if !ticketName.MatchString(name) || item.value["run"] != run || item.value["block"] != block {
+		if !ticketName.MatchString(name) || item.value["run"] != run || (block != nil && item.value["block"] != *block) {
 			continue
 		}
 		id := name[:24]

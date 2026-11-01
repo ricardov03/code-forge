@@ -44,7 +44,8 @@ import { expiryChecks } from '../autopilot/limits.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { reviewWorkers } from '../config/validate.mjs';
 import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
-import { appendRow, readAllRows } from '../ledger/write.mjs';
+import { createTailReader } from '../ledger/tail.mjs';
+import { appendRow } from '../ledger/write.mjs';
 import { providerLimit, spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
 import { runRecordPath } from '../state/paths.mjs';
@@ -250,7 +251,7 @@ export function recordedVerdict(result) {
  * @property {Partial<Record<'claude'|'codex'|'grok', string>>} [bins]
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow] - default: B6 `appendRow`.
  * @property {() => Promise<Array<Record<string, any>>>} [readRows] - the ledger rows the fix-loop
- *   state is anchored in; default: B6 `readAllRows(slug)`.
+ *   state is anchored in; default: one project tail reader for the worker.
  * @property {{write: (s: string) => unknown}} [stderr]
  * @property {import('../review/triage.mjs').JevAsk} [jev] - S1 for triage and the recheck (tests
  *   inject a mock); default: `askJev` with the resolved Jev key, none without one.
@@ -272,7 +273,7 @@ export async function createWorker(opts, deps = {}) {
   const loadRun = deps.readRun ?? readRun;
   const loadTicket = deps.readTicket ?? readTicket;
   const writeRow = deps.writeRow ?? ((/** @type {Record<string, any>} */ row) => appendRow(row, { slug }));
-  const readRows = deps.readRows ?? (() => readAllRows(slug));
+  const readRows = deps.readRows ?? createTailReader(slug).read;
   // B48: the run's own writer (unsigned base; the checks sign their rows with the run key)
   const expiryCheck = deps.expiryCheck ?? (() => expiryChecks(runId, new Date(), { writeRow }));
   const warnStream = deps.stderr ?? process.stderr;

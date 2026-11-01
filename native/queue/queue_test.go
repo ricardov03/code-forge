@@ -159,3 +159,47 @@ func TestNullTreeTicket(t *testing.T) {
 		}
 	}
 }
+
+func TestPruneRun(t *testing.T) {
+	idx := &Index{Dir: t.TempDir()}
+	for _, run := range []string{"r-ended", "r-open"} {
+		for _, block := range []string{"B1", "B2"} {
+			p := ticket.Parts{Run: run, Block: block, File: "a.go", ContentHash: "hash"}
+			id := ticket.ReviewID(p)
+			data, err := json.Marshal(Object{"ticket": id, "run": run, "block": block, "file": p.File, "content_hash": p.ContentHash})
+			if err != nil {
+				t.Fatal(err)
+			}
+			for _, suffix := range []string{".json", ".done", ".delivered", ".retried"} {
+				if err := os.WriteFile(filepath.Join(idx.Dir, id+suffix), data, 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+		}
+	}
+	if err := idx.Refresh(); err != nil {
+		t.Fatal(err)
+	}
+	pruner, ok := any(idx).(interface {
+		PruneRun(string) (int, int, error)
+	})
+	if !ok {
+		t.Fatal("run pruning removed 0 tickets and 0 markers; want 2 tickets and 6 markers")
+	}
+	n, m, err := pruner.PruneRun("r-ended")
+	if n != 2 || m != 6 || err != nil {
+		t.Fatalf("PruneRun = %d, %d, %v; want 2, 6, nil", n, m, err)
+	}
+	names, err := os.ReadDir(idx.Dir)
+	if err != nil || len(names) != 8 {
+		t.Fatalf("remaining files = %d, %v; want 8, nil", len(names), err)
+	}
+	for _, block := range []string{"B1", "B2"} {
+		if got := len(idx.Block("r-ended", block, nil, nil)); got != 0 {
+			t.Errorf("ended %s index has %d tickets", block, got)
+		}
+		if got := len(idx.Block("r-open", block, nil, nil)); got != 1 {
+			t.Errorf("open %s index has %d tickets, want 1", block, got)
+		}
+	}
+}

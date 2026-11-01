@@ -83,6 +83,8 @@ export async function daemonRequest(run, request, { config, timeoutMs = request.
         socket.write(`${JSON.stringify(request)}\n`);
       } else {
         const { stats, ...result } = answer;
+        if (request.method === 'rows' && (!Array.isArray(result.rows)
+          || !result.rows.every((row) => row !== null && typeof row === 'object' && !Array.isArray(row)))) return finish(null);
         if (request.method === 'wait-block' && (result.block !== request.block || !Array.isArray(result.files) || typeof result.done !== 'boolean'
           || !result.files.every((/** @type {any} */ file) => file && typeof file.file === 'string' && typeof file.status === 'string'))) return finish(null);
         if (request.method === 'status' && (!Array.isArray(result.runs) || result.runs.length !== 1 || result.runs[0]?.run_id !== run || !Array.isArray(result.runs[0]?.blocks))) return finish(null);
