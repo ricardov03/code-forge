@@ -72,7 +72,7 @@ import { closedBookRefused, openBookCodexAllowed } from '../config/closed-book.m
 import { resolveLevel } from '../config/known-ids.mjs';
 import { logWarning } from '../util/error-log.mjs';
 import { withLock } from '../util/file-locks.mjs';
-import { schemaErrorsOf } from './validate-review.mjs';
+import { FINDING_SCHEMA, schemaErrorsOf } from './validate-review.mjs';
 
 /** Broken results (B91: schema misses and timeouts) of the level's own ladder on one packet before the second level is tried. */
 export const SCHEMA_FAILURES_BEFORE_FALLBACK = 2;
@@ -100,6 +100,44 @@ const KEPT_PARAMS = Object.freeze(['missingProperty', 'additionalProperty', 'typ
 /** @param {string} text @returns {string} the packet's identity: sha256 hex of its exact text. */
 export function packetHash(text) {
   return createHash('sha256').update(text, 'utf8').digest('hex');
+}
+
+/**
+ * Shorten only schema-bounded strings, preserving every other schema error. The spawner may
+ * have rejected the JSON already, leaving it in `text`; restore that object for the stub guard.
+ * Cuts live on the session result, never inside the schema-constrained answer.
+ * @param {Record<string, any> | null} res @returns {Record<string, any> | null}
+ */
+export function truncateReviewFields(res) {
+  if (!res || !['ok', 'invalid-output'].includes(res.status)) return res;
+  let answer = res.answer;
+  if (answer == null && typeof res.text === 'string') {
+    try { answer = JSON.parse(res.text); } catch { return res; }
+  }
+  if (!answer || typeof answer !== 'object' || Array.isArray(answer)) return res;
+  answer = structuredClone(answer);
+  /** @type {Array<{path: string, original_length: number, max_length: number}>} */
+  const truncated_fields = [];
+  /** @param {any} value @param {Record<string, any>} schema @param {string} at @returns {any} */
+  function shorten(value, schema, at) {
+    if (typeof value === 'string' && Number.isInteger(schema.maxLength)) {
+      const chars = Array.from(value);
+      if (chars.length > schema.maxLength) {
+        truncated_fields.push({ path: at, original_length: chars.length, max_length: schema.maxLength });
+        return `${chars.slice(0, Math.max(0, schema.maxLength - 1)).join('')}…`;
+      }
+    } else if (Array.isArray(value) && schema.items) {
+      return value.map((item, i) => shorten(item, schema.items, `${at}/${i}`));
+    } else if (value && typeof value === 'object' && !Array.isArray(value)) {
+      for (const [name, child] of Object.entries(schema.properties ?? {})) {
+        if (Object.hasOwn(value, name)) value[name] = shorten(value[name], child, `${at}/${name}`);
+      }
+    }
+    return value;
+  }
+  shorten(answer, FINDING_SCHEMA, '');
+  return { ...res, answer, truncated_fields,
+    ...(truncated_fields.length > 0 && res.status === 'invalid-output' ? { status: 'ok' } : {}) };
 }
 
 /** @param {unknown} v @returns {string} the JSON type of `v`. */

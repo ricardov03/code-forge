@@ -63,6 +63,7 @@ import { lstatSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
 import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { resolveLevel } from '../config/known-ids.mjs';
+import { closedBookRefused, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { blockKind, isDocsKind } from '../decide/escalation.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { isMigrationPath, isPolicyPath } from '../decide/lane-facts.mjs';
@@ -76,7 +77,8 @@ import { redact } from '../util/redact.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './sections.mjs';
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithBrokenFallback, spawnWithTimeoutRetry } from './session-retry.mjs';
-import { afterSchemaMiss, logSecondLevelMiss, packetHash } from './schema-fallback.mjs';
+import { afterSchemaMiss, logSecondLevelMiss, packetHash, truncateReviewFields } from './schema-fallback.mjs';
+import { ruleProvider } from './route.mjs';
 import { assertRowPath, readRegularFileNoFollow } from '../worker/ticket.mjs';
 
 /**
@@ -488,9 +490,13 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
   // (each helper handles its own failed write)
   const write = deps.writeRow ? (/** @type {Record<string, any>} */ row) => /** @type {NonNullable<ReviewDeps['writeRow']>} */ (deps.writeRow)(row) : undefined;
   const hash = packetHash(text);
+  const routedRecovery = schemaFallback && !spec.cfg && cfg.review?.routes?.some((rule) =>
+    (rule.level ?? 'L2') === spec.level && rule.model === cfg.levels?.[spec.level]?.model
+    && ruleProvider(cfg, rule) === resolveLevel(cfg, spec.level).provider)
+    && cfg.levels?.[spec.level]?.fallback?.length > 0;
   // An explicit second level keeps its signed, once-per-packet protocol. Without one, the
   // level's own fallback ladder must also recover broken answers in this ticket.
-  const levelRecovery = schemaFallback && !spec.cfg && !cfg.review?.second_levels?.[spec.level]
+  const levelRecovery = !routedRecovery && schemaFallback && !spec.cfg && !cfg.review?.second_levels?.[spec.level]
     && cfg.levels?.[spec.level]?.fallback?.length > 0;
   /** @type {{level: string, provider: string, model: string} | null} the second level once its try started */
   let tried = null;
@@ -521,7 +527,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
     // (bad config, refused argv) is an `exit` failure, never approval. B91: each timed-out attempt
     // is a broken result of this packet; the second one tries the second level instead
     spawnWithTimeoutRetry(
-      deps.spawn,
+      async (opts) => truncateReviewFields(await deps.spawn(opts)),
       {
         level: spec.level,
         role: spec.role,
@@ -545,7 +551,50 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
     /** @type {Awaited<ReturnType<typeof spawnWithTimeoutRetry>> | null} */
     let first = null;
     try {
-      first = await attempt(spec.cfg, 0);
+      if (routedRecovery) {
+        const resolved = resolveLevel(cfg, spec.level);
+        const seen = new Set();
+        let from = null;
+        let trigger = 'schema';
+        for (const entry of [resolved, ...resolved.fallback]) {
+          const provider = entry.provider ?? resolved.provider;
+          const identity = `${provider}\0${entry.model}`;
+          if (seen.has(identity) || closedBookRefused(provider, spec.role, openBookCodexAllowed(cfg))) continue;
+          seen.add(identity);
+          const sessionCfg = { ...cfg, levels: { ...cfg.levels, [spec.level]: {
+            provider, model: entry.model, ...(entry.effort !== undefined ? { effort: entry.effort } : {}), fallback: [],
+          } } };
+          // Routed broken answers advance immediately, including timeouts and failed exits.
+          // Each entry is pinned so a provider fallback cannot consume the ladder invisibly.
+          attempts += 1;
+          let result = null;
+          try {
+            result = truncateReviewFields(await deps.spawn({ level: spec.level, role: spec.role,
+              promptPath, schema: FINDING_SCHEMA, cfg: sessionCfg,
+              rowExtra: { lens: spec.lens, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn } }));
+          } catch { /* a throwing session is an exit failure */ }
+          first = { res: result, attempts };
+          tokensIn = addTokens(tokensIn, result?.usage?.tokens_in);
+          tokensOut = addTokens(tokensOut, result?.usage?.tokens_out);
+          if (from) fellBackTo = { level: `levels.${spec.level}.fallback`, provider, model: entry.model };
+          const checked = validateReview(result, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
+          if (checked.ok || !['schema', 'timeout', 'exit'].includes(checked.reason)) break;
+          if (checked.reason === 'schema') {
+            await afterSchemaMiss({ res: result, session, packetText: text, cfg: sessionCfg,
+              allowed: false, history: undefined, writeRow: write, spawnAt: async () => ({ res: null, attempts: 0 }) });
+          } else if (checked.reason === 'timeout') {
+            await note(deps, { event: 'review.session_timeout', ...session, provider, model: entry.model,
+              attempt: attempts, retried: false, packet_hash: hash, second_level: false });
+          }
+          if (!from) {
+            from = { provider, model: entry.model };
+            trigger = checked.reason;
+          }
+        }
+        if (fellBackTo) await note(deps, { event: 'review.schema_fallback', ...session, packet_hash: hash,
+          from_provider: from.provider, from_model: from.model, to: fellBackTo.level,
+          to_provider: fellBackTo.provider, to_model: fellBackTo.model, attempts, trigger });
+      } else first = await attempt(spec.cfg, 0);
       if (levelRecovery && validateReview(first.res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min }).reason === 'schema') {
         const recovered = await spawnWithBrokenFallback(
           (opts) => attempt(opts.cfg, attempts),
@@ -588,7 +637,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
       tokensOut = tokensOut ?? res?.usage?.tokens_out ?? null;
       verdict = validateReview(res, { hunkHeaders: packet.hunkHeaders, minTokensOut: min });
     }
-    if (!levelRecovery && !fellBackTo && !verdict.ok && verdict.reason === 'schema') {
+    if (!routedRecovery && !levelRecovery && !fellBackTo && !verdict.ok && verdict.reason === 'schema') {
       try {
         const done = attempts;
         const second = await tryNext(res, 'schema');
@@ -617,6 +666,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
     model: res?.model ?? null,
     fallback_step: res?.fallback_step ?? 0,
     attempts,
+    ...(res?.truncated_fields?.length > 0 ? { truncated_fields: res.truncated_fields } : {}),
     ...(fellBackTo ? { schema_fallback: fellBackTo } : {}),
     tokens_in: tokensIn,
     tokens_out: tokensOut,
