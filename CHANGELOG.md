@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- `block close` leaves out a reviewed file that is now back to its base bytes, and a file the block added and then deleted; a file with other changes still needs review (B228, #30)
+
 ## [0.16.0] — 2026-11-01
 
 ### Added
