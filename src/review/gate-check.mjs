@@ -93,7 +93,7 @@ import { ownsFile } from '../state/registry.mjs';
 import { sameStamp, treeStamp } from '../state/block.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { tierFor } from '../proof/tiers.mjs';
-import { DELETED_HASH, contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
+import { DELETED_HASH, contentHash, gitChildEnv, hashBytes, readRegularFileNoFollow } from '../worker/ticket.mjs';
 import { verifyResult } from '../worker/queue.mjs';
 import { stopExitsLine } from './stop-exits.mjs';
 import { checkFileForm, checkFindingId } from './verb-forms.mjs';
@@ -1041,6 +1041,47 @@ export function reviewedFiles(rows, block) {
     }
   }
   return [...out].sort();
+}
+
+/**
+ * Reviewed paths back at their base bytes, with no review of those current bytes. Reuses the
+ * close's rows; unreadable files or git failures keep the path in the gate (fail closed).
+ * @param {{repoRoot: string, base: string, files: ReadonlyArray<string>, rows: Array<Record<string, any>>, block: string}} opts
+ * @returns {Promise<string[]>}
+ */
+export async function revertedToBase({ repoRoot, base, files, rows, block }) {
+  if (typeof base !== 'string' || !/^[0-9a-f]{7,64}$/.test(base)) return [];
+  /** @type {Map<string, Array<Record<string, any>>>} */
+  const reviews = new Map();
+  for (const row of rows) {
+    if (row?.block !== block || !REVIEW_EVENTS.has(row.event) || typeof row.file !== 'string') continue;
+    try {
+      const file = repoRelativePath(row.file);
+      if (!reviews.has(file)) reviews.set(file, []);
+      reviews.get(file).push(row);
+    } catch { /* invalid review paths cannot name a file in the gate */ }
+  }
+  const env = { ...gitChildEnv(), LC_ALL: 'C' };
+  /** @type {Promise<boolean> | undefined} */
+  let validBase;
+  const reverted = [];
+  for (const file of [...new Set(files)].sort()) {
+    try {
+      repoRelativePath(file);
+      const current = contentHash(repoRoot, file);
+      if ((reviews.get(file) ?? []).some((row) => row.content_hash === undefined || row.content_hash === current)) continue;
+      const shown = await exec(['git', 'show', `${base}:${file}`], { cwd: repoRoot, env, stdoutEncoding: 'base64', timeoutMs: 30000 });
+      if (shown.result === 'ok') {
+        if (hashBytes(Buffer.from(shown.stdout, 'base64')) === current) reverted.push(file);
+      } else if (!shown.timedOut && shown.code === 128 && current === DELETED_HASH && shown.stderr === `fatal: path '${file}' does not exist in '${base}'\n`) {
+        // Git reports a missing path even for an unknown object: verify the commit before
+        // treating absent at both ends as a reverted addition. Share this check across paths.
+        validBase ??= exec(['git', 'cat-file', '-e', `${base}^{commit}`], { cwd: repoRoot, env, timeoutMs: 30000 }).then((result) => result.result === 'ok');
+        if (await validBase) reverted.push(file);
+      }
+    } catch { /* unreadable or unsafe paths stay in the gate */ }
+  }
+  return reverted;
 }
 
 /** @param {string} repoRoot @param {string} file @returns {string} the content hash, `DELETED_HASH` when gone. */

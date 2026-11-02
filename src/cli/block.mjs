@@ -217,7 +217,7 @@ import { readFileDiff } from '../review/packet.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, verifyRow } from '../state/signer.mjs';
-import { PROOF_FINDING, blockFileSet, changedFiles, checkBlockReviews, lockfileProblem, openFindings, ownsAt, recordedSeverity, resultFilesFor, reviewedFiles, reviewGateCheck, routineCloseProblem, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
+import { PROOF_FINDING, blockFileSet, changedFiles, checkBlockReviews, lockfileProblem, openFindings, ownsAt, recordedSeverity, resultFilesFor, revertedToBase, reviewedFiles, reviewGateCheck, routineCloseProblem, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { agentWaivers, agentWaiversAcked, prepareAckWaivers, prepareUnwaive, waiveAsAgent } from '../review/agent-waiver.mjs';
 import { checkExpiry, grantFor, grantState } from '../autopilot/grant.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
@@ -1103,7 +1103,11 @@ export async function runBlock(args, deps = {}) {
           // the file set is the diff since base ∪ every owned file with review rows of this block —
           // work the diff cannot see (committed before `block open`, done in another worktree) is
           // still checked, at its content in the workspace (in the block's worktree when it has one)
-          const reviewed = reviewedFiles(rows, id).filter(isMine);
+          let reviewed = reviewedFiles(rows, id).filter(isMine);
+          const changedSet = new Set(changed);
+          // B52 18b: a missing path can be work reviewed in another tree, so close keeps it.
+          const reverted = new Set(await revertedToBase({ repoRoot: top, base, files: reviewed.filter((file) => !changedSet.has(file) && readRegularFileNoFollow(top, file) !== null), rows, block: id }));
+          reviewed = reviewed.filter((file) => !reverted.has(file));
           const fileSet = await blockFileSet({ repoRoot: top, base, owned: entry.owned_files, matchOwned: isMine, changed: [...new Set([...changed, ...reviewed])].sort() });
           return { top, mainTop, where, inTree, wsPrefix, owns, changed, fileSet, reviewed };
         })());
@@ -1185,7 +1189,7 @@ export async function runBlock(args, deps = {}) {
           files: reviewsWaived || external !== null ? [] : fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null),
           // B52: nothing changed and nothing reviewed is never a pass (the owner's way out is
           // --no-require-reviews); B58: `review.external` does not lift it
-          noChanges: !reviewsWaived && fileSet.length === 0,
+          noChanges: !reviewsWaived && fileSet.length === 0 && !reviewedFiles(rows, id).some(isMine),
           // B20: high-tier files need a proven red→green row; `--no-require-reviews` does not lift it
           proofFiles: fileSet,
           highPaths,
