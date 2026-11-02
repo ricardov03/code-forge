@@ -137,7 +137,9 @@ test('B159: a green gates row before rebase cannot close the changed tree; fresh
   assert.equal((await f.rebase())[0], 0, 'open tree rebases successfully');
   assert.notEqual(await f.head(), oldHead);
   const rows = await f.rows();
-  assert.deepEqual(await f.close(), [1, '', `block B1 open: no green gates run; run: code-forge gates run --run ${f.runId} --block B1\n`]);
+  assert.deepEqual(await f.close(), [1,
+    `no_green_gates - no green gates run; run: code-forge gates run --run ${f.runId} --block B1\n  fix: code-forge gates run --run ${f.runId} --block B1\n`,
+    `block B1 open: no green gates run; run: code-forge gates run --run ${f.runId} --block B1\n`]);
   assert.equal((await f.entry()).status, 'open');
   assert.deepEqual(await f.rows(), rows, 'stale green refusal writes zero rows');
   await f.green();

@@ -610,7 +610,7 @@ test('B159: block rebase moves an open worktree onto main, updates both bases an
   assert.deepEqual(verifyRow(rows.at(-1), await loadKey(runId)), { ok: true });
   assert.deepEqual(await fx.close('B1'), [
     1,
-    `block B1 open: no green gates run; run: code-forge gates run --run ${runId} --block B1\n`,
+    `no_green_gates - no green gates run; run: code-forge gates run --run r-b159-worktree-rebase --block B1\n  fix: code-forge gates run --run r-b159-worktree-rebase --block B1\n` + `block B1 open: no green gates run; run: code-forge gates run --run ${runId} --block B1\n`,
   ]);
   assert.equal((await readRun(runId)).blocks.B1.status, 'open');
   assert.deepEqual(await fx.rows(), rows);

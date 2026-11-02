@@ -165,8 +165,12 @@ async function fixture(slug, extra, owned = ['src/a.mjs']) {
   assert.equal(code, 0, text);
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
   const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
+  let lastReport = "'<coder-report>'";
   /** @param {string[]} more @param {Record<string, any>} [deps] */
-  const close = (more = [], deps = {}) => cli(runBlock, ['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...more], deps);
+  const close = (more = [], deps = {}) => {
+    lastReport = more.includes('--report') ? more[more.indexOf('--report') + 1] : "'<coder-report>'";
+    return cli(runBlock, ['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...more], deps);
+  };
   /** B96: the close with stdout and stderr kept apart. @param {string[]} more @returns {Promise<[number, string, string]>} */
   const closeSplit = async (more) => {
     const out = capture();
@@ -190,7 +194,7 @@ async function fixture(slug, extra, owned = ['src/a.mjs']) {
       .sort()
       .map((file) => `reviewed ${file} ticket ${ticketId({ run: runId, block: 'B1', file, content_hash: contentHash(repo, file) })}\n`)
       .join('');
-  return { runId, repo, writeRow, close, closeSplit, report, approve, reviewed, rows: () => readAllRows(slug) };
+  return { runId, repo, writeRow, close, closeSplit, report, approve, reviewed, get lastReport() { return lastReport; }, rows: () => readAllRows(slug) };
 }
 
 /** @param {Record<string, any>} row */
@@ -203,7 +207,16 @@ const GREEN = 'TESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n';
  * @param {Awaited<ReturnType<typeof fixture>>} fx @param {[number, string]} result @param {string} reason
  */
 async function refused(fx, result, reason) {
-  assert.deepEqual(result, [1, `block B1 open: coder report FAILED: ${reason}\n`]);
+  const repair = reason.startsWith('TESTS exit=')
+    ? `fix the failing tests, rerun them, and update the TESTS line in ${fx.lastReport} with the actual command and exit code`
+    : {
+      'context.require_coder_tests needs --report': 'create a coder report and pass its path with --report',
+      '--report cannot be read': `restore readable report ${fx.lastReport} or correct --report`,
+      'no ===BLOCK B1 COMPLETE=== sentinel': `add ===BLOCK B1 COMPLETE=== to ${fx.lastReport}`,
+      'no TESTS line': `add TESTS <command> exit=<n> with the actual test result before ===BLOCK B1 COMPLETE=== in ${fx.lastReport}`,
+    }[reason];
+  assert.ok(repair, `expected manual repair for ${reason}`);
+  assert.deepEqual(result, [1, `coder_report_failed - coder report FAILED: ${reason}\n  fix: no automatic fix: coder_report_failed; ${repair}; rerun block ready\nblock B1 open: coder report FAILED: ${reason}\n`]);
   const rows = await fx.rows();
   assert.deepEqual(only(rows, 'block.close'), []);
   assert.deepEqual(only(rows, 'coder.tests'), []);

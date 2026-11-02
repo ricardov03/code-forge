@@ -45,11 +45,12 @@ Another harness, or the connector is missing: the two Markdown files in the run 
 ## §5 Never delegated — always the owner
 
 These never go to the delegate, whatever the grant says (the CLI's fixed deny list refuses them too):
+Here, a critical waiver means the delegate's `autopilot waive` action; the evidence-backed orchestrator exception is in §2.
 
 - plan approval (`plan.md` §4.1) and design approval;
 - a budget raise (`code.md` §6, `review.md` §7);
 - a threshold edit or any other limit or rule change — only the owner's own `forge autopilot approve` at a terminal;
-- a critical waiver through the delegate's `autopilot waive` action (the evidence-backed agent exception is in §2), a proof waiver, or closing a block without its reviews;
+- a critical waiver, a proof waiver, or closing a block without its reviews;
 - merges and destructive actions.
 
 When one of these comes up during the window: stop that line of work, add it to Actions only you can take, and wait. The delegate never relaxes a rule or a limit to keep work moving (`rules-core.md` R17).

@@ -302,7 +302,7 @@ test('closeBlock: every row verifies but the dispatch row is gone ⇒ ledger.tam
       ok: false, status: 'stopped', event: 'ledger.tamper', reason: 'no verified dispatch row',
     });
     await checkScope({ runId: 'r-disp', id: 'O', files: ['c.txt', 'z.txt'], writeRow });
-    assert.deepEqual(await closeBlock({ runId: 'r-disp', id: 'O', rows, writeRow, livePid: 4242, probe: PROBE }), { ok: false, status: 'open', reason: 'orphans: z.txt' });
+    assert.deepEqual(await closeBlock({ runId: 'r-disp', id: 'O', rows, writeRow, livePid: 4242, probe: PROBE }), { ok: false, status: 'open', reason: 'orphans: z.txt', blockers: [{ code: 'unowned_change', file: 'z.txt', detail: 'orphan in run registry: z.txt' }] });
     assert.equal((await readRun('r-disp')).blocks.O.status, 'open');
   });
 });
@@ -380,7 +380,7 @@ test('B36 → B96 `block close --report`: an unreadable report is FAILED; a hand
     // B52: the transcript and reports live under .code-forge/ — a file the close reads elsewhere in the tree is still an unowned change
     const unreadable = captureStream();
     assert.equal(await runBlock(close(path.join(ws, 'no-such-report.md')), { stdout: unreadable, stderr: unreadable, probe: PROBE }), 1);
-    assert.equal(unreadable.text, 'block B8 open: coder report FAILED: --report cannot be read\n');
+    assert.equal(unreadable.text, `coder_report_failed - coder report FAILED: --report cannot be read\n  fix: no automatic fix: coder_report_failed; restore readable report ${path.join(ws, 'no-such-report.md')} or correct --report; rerun block ready\nblock B8 open: coder report FAILED: --report cannot be read\n`);
 
     await writeFile(path.join(ws, '.code-forge', 'report-ok.md'), '===BLOCK B8 COMPLETE===\nreviewed a.txt ticket 0123456789abcdef01234567\n');
     const closed = captureStream();

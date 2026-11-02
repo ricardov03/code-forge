@@ -611,7 +611,7 @@ test('B64b (3): a coder transcript that runs the hook refuses the close (no row,
   const logs = freshDir('logs');
   writeFile(logs, 'coder.log', `$ npm test\nok\n$ ${path.basename(process.execPath)} ${HOOK} /dev/null\n`);
   const res = await fx.block(['close', 'B1', '--worker-pid', PID, '--transcript', path.join(logs, 'coder.log')]);
-  assert.deepEqual(res, { code: 1, stdout: '', stderr: 'block B1 open: rule_break transcript line 3: code-forge-on-block-end-hook\n' });
+  assert.deepEqual(res, { code: 1, stdout: `rule_break - transcript line 3: code-forge-on-block-end-hook\n  fix: code-forge block close B1 --run ${fx.runId} --decide --reason '<reason>' --transcript ${path.join(logs, 'coder.log')}\n`, stderr: 'block B1 open: rule_break transcript line 3: code-forge-on-block-end-hook\n' });
   assert.equal(existsSync(doneFilePath(fx.runId, 'B1')), false);
   assert.equal(existsSync(out), false);
   assert.deepEqual(await fx.hookRows(), []);

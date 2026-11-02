@@ -54,7 +54,8 @@ test('B124b clause 4: snapshot ack policy refuses close until the current counte
   const f = await fixture();
   assert.equal((await f.waive())[0], 0);
   const before = (await f.rows()).length;
-  assert.deepEqual(await f.close(), [1, '', 'block B1 open: agent-waivers-not-acked\n']);
+  const blockers = `agent-waivers-not-acked - agent-waivers-not-acked\n  fix: code-forge block ack-waivers B1 --run ${f.runId}\n`;
+  assert.deepEqual(await f.close(), [1, blockers, 'block B1 open: agent-waivers-not-acked\n']);
   assert.equal((await f.rows()).length - before, 0);
   writeFile(f.repo, '.code-forge.yml', 'version: 1\nreview:\n  agent_waivers:\n    require_ack: false\n');
   assert.equal((await f.close())[0], 1, 'live config cannot turn off snapshot policy');
@@ -69,14 +70,15 @@ test('B124b clause 4: snapshot ack policy refuses close until the current counte
   assert.equal((await f.invoke(f.args))[0], 0);
   assert.equal((await f.waive())[0], 0);
   const after = (await f.rows()).length;
-  assert.deepEqual(await f.close(), [1, '', 'block B1 open: agent-waivers-not-acked\n']);
+  const configBlocker = `unowned_change .code-forge.yml .code-forge.yml changed but no block of the run owns it — block claim it, or put it back\n  fix: code-forge block claim B1 .code-forge.yml --run ${f.runId}\n`;
+  assert.deepEqual(await f.close(), [1, blockers + configBlocker, 'block B1 open: agent-waivers-not-acked\n']);
   assert.equal((await f.rows()).length - after, 0);
   assert.equal((await f.invoke(f.args))[0], 0);
   await f.sign({ event: 'review.triage', finding: 'A1', severity: 'nit' });
   await f.sign({ event: 'review.waived', finding: 'A1', severity: 'nit', reason: 'another reason', verdict: 'agree', by: 'agent' });
   assert.equal((await f.invoke(f.args))[0], 0);
   await f.sign({ event: 'review.unwaived', finding: 'W1', reason: 'undo', by: 'human' });
-  assert.deepEqual(await f.close(), [1, '', 'block B1 open: agent-waivers-not-acked\n'], 'removing one of two findings changes the digest');
+  assert.deepEqual(await f.close(), [1, blockers + configBlocker, 'block B1 open: agent-waivers-not-acked\n'], 'removing one of two findings changes the digest');
   assert.equal((await f.invoke(f.args))[0], 0);
   writeFile(f.repo, '.code-forge.yml', JSON.stringify(f.cfg));
   assert.equal((await f.close())[0], 0);

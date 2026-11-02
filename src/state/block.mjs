@@ -757,22 +757,26 @@ export async function humanPassBlock({ runId, id, note, proof = null, writeRow, 
   });
 }
 
+/** @typedef {{code: string, file?: string, finding?: string, detail?: string}} CloseBlocker */
+
 /**
  * B8's rows of the block gate, in order: worker pin ⇒ `worker.replaced`/`worker.down` (block
  * stopped); the block's signed `dispatch` row must exist and verify, and every other
- * gate-relevant row of the block must verify ⇒ else `ledger.tamper` (block stopped); then
- * `extraChecks`; finally, UNDER the run lock, orphans in the registry ⇒ refused (block stays
+ * gate-relevant row of the block must verify ⇒ else `ledger.tamper` (block stopped). A real
+ * stop returns before extra checks; a dry run collects its blockers without stopping. Otherwise
+ * collect every extra check and registry orphan before returning; finally, UNDER the run lock, recheck
+ * orphans in the registry ⇒ refused (block stays
  * open), else closed. B58: `closeRows` are signed and written under that same lock just before
  * `block.close`, and only when the block closes — a row that records why it may close is never
  * left behind by a refused close.
  * @param {{
  *   runId: string, id: string, rows: Record<string, any>[], writeRow: WriteRow,
  *   livePid?: number, probe?: import('./run.mjs').StartTimeProbe,
- *   extraChecks?: Array<() => Promise<{ok: boolean, reason?: string}>>,
+ *   extraChecks?: Array<(collectOnly?: boolean) => Promise<{ok: boolean, reason?: string, blockers?: CloseBlocker[]}>>,
  *   closeRows?: Record<string, any>[],
  *   dryRun?: boolean,
  * }} opts
- * @returns {Promise<{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string}>}
+ * @returns {Promise<{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string, blockers?: CloseBlocker[]}>}
  */
 export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, extraChecks = [], closeRows = [], dryRun = false }) {
   const record = await readRun(runId);
@@ -807,9 +811,18 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
       }
     }
   }
+  /** @type {CloseBlocker[]} */
+  const blockers = [];
+  const failures = [];
+  /** @type {{event: string, reason: string} | null} */
+  let fatal = pin.ok ? null : { event: pin.event, reason: pin.reason };
   if (!pin.ok) {
-    if (!dryRun) await stopBlock({ runId, id, reason: pin.reason, writeRow, event: pin.event });
-    return { ok: false, status: 'stopped', event: pin.event, reason: pin.reason };
+    if (!dryRun) {
+      await stopBlock({ runId, id, reason: pin.reason, writeRow, event: pin.event });
+      return { ok: false, status: 'stopped', event: pin.event, reason: pin.reason };
+    }
+    blockers.push({ code: pin.event, detail: pin.reason });
+    failures.push(pin.reason);
   }
 
   const key = await loadKey(runId);
@@ -821,28 +834,39 @@ export async function closeBlock({ runId, id, rows, writeRow, livePid, probe, ex
     const reasons = bad.map((x) => `${x.row.event}: ${x.result.reason}`);
     if (!dispatchOk) reasons.push('no verified dispatch row');
     const reason = reasons.join('; ');
-    if (!dryRun) await stopBlock({ runId, id, reason, writeRow, event: 'ledger.tamper' });
-    return { ok: false, status: 'stopped', event: 'ledger.tamper', reason };
+    if (!dryRun) {
+      await stopBlock({ runId, id, reason, writeRow, event: 'ledger.tamper' });
+      return { ok: false, status: 'stopped', event: 'ledger.tamper', reason };
+    }
+    blockers.push({ code: 'ledger.tamper', detail: reason });
+    failures.push(reason);
+    fatal ??= { event: 'ledger.tamper', reason };
   }
 
-  const failures = [];
   for (const check of extraChecks) {
-    const result = await check();
+    let result;
+    try { result = await check(failures.length > 0); }
+    catch (err) {
+      if (!(err instanceof StateError)) throw err;
+      result = { ok: false, reason: err.message, blockers: [{ code: err.code, detail: err.message }] };
+    }
     if (!result.ok) {
-      if (!dryRun) return { ok: false, status: 'open', reason: result.reason ?? 'check failed' };
       failures.push(result.reason ?? 'check failed');
+      blockers.push(...(result.blockers ?? [{ code: 'close_check_failed', detail: result.reason ?? 'check failed' }]));
     }
   }
+  for (const file of record.orphans) blockers.push({ code: 'unowned_change', file, detail: `orphan in run registry: ${file}` });
+  if (record.orphans.length > 0) failures.push(`orphans: ${record.orphans.join(', ')}`);
   if (dryRun) {
-    if (record.orphans.length > 0) failures.push(`orphans: ${record.orphans.join(', ')}`);
-    return { ok: failures.length === 0, status: 'open', ...(failures.length ? { reason: failures.join('; ') } : {}) };
+    return { ok: failures.length === 0, status: fatal === null ? 'open' : 'stopped', blockers, ...(failures.length ? { reason: failures.join('; ') } : {}), ...(fatal ? { event: fatal.event } : {}) };
   }
+  if (failures.length > 0) return { ok: false, status: 'open', reason: failures[0], blockers };
 
-  /** @typedef {{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string}} CloseResult */
+  /** @typedef {{ok: boolean, status: 'closed' | 'awaiting_human_check' | 'stopped' | 'open', reason?: string, event?: string, blockers?: CloseBlocker[]}} CloseResult */
   return mutateRun(runId, id, writeRow, (current, block) => {
     if (current.orphans.length > 0) {
       /** @type {CloseResult} */
-      const refused = { ok: false, status: 'open', reason: `orphans: ${current.orphans.join(', ')}` };
+      const refused = { ok: false, status: 'open', reason: `orphans: ${current.orphans.join(', ')}`, blockers: current.orphans.map((file) => ({ code: 'unowned_change', file, detail: `orphan in run registry: ${file}` })) };
       return { result: refused, rows: [] };
     }
     const checks = block.human_checks ?? [];

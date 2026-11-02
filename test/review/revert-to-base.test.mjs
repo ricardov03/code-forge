@@ -108,7 +108,7 @@ test('close omits reverted files, retains non-reverted files and current-hash ba
 
 test('customer case: approve H1 then revert the only file to H0 closes normally; a block with no reviews still refuses', async () => {
   const { repo, close, approve, status } = await closeFixture('customer', ['src/a.mjs']);
-  assert.deepEqual(await close(), { code: 1, output: 'block B1 open: no_changes\n' });
+  assert.deepEqual(await close(), { code: 1, output: `no_changes - block B1 changed no owned file and has no reviews\n  fix: code-forge block close B1 --run r-revert-customer --no-require-reviews\nblock B1 open: no_changes\n` });
   assert.equal(await status(), 'open');
   writeFile(repo, 'src/a.mjs', H1);
   await approve('src/a.mjs');
@@ -125,7 +125,7 @@ test('customer boundary: a second file at unapproved H2 still needs review while
   }
   writeFile(repo, 'src/a.mjs', H0);
   writeFile(repo, 'src/b.mjs', H2);
-  assert.deepEqual(await close(), { code: 1, output: 'block B1 open: unreviewed src/b.mjs\n' });
+  assert.deepEqual(await close(), { code: 1, output: 'unreviewed src/b.mjs no review.approved row for src/b.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-revert-customer-h2\nblock B1 open: unreviewed src/b.mjs\n' });
   assert.equal(await status(), 'open');
   await approve('src/b.mjs');
   assert.deepEqual(await close(), { code: 0, output: `${reviewedLine('src/b.mjs')}block B1 closed\n` });

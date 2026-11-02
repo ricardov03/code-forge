@@ -1,5 +1,5 @@
 /**
- * `code-forge block open|attempt|rebase|claim|close|stop|waive|reopen` (plan §4.9). The skill calls
+ * `code-forge block open|attempt|rebase|claim|ready|close|stop|waive|reopen` (plan §4.9). The skill calls
  * `block open` before every spawn in every engine; it prints the brief pointer (≤ 200 bytes).
  *
  *   block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file>
@@ -8,6 +8,7 @@
  *   block attempt <id> --run <r>
  *   block rebase <id> --run <r> [--head <ref>]
  *   block claim <id> <path> --run <r>
+ *   block ready <id> --run <r> [--transcript <file>] [--report <file>] [--json]
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree] [--auto-claim]
  *   block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]
  *   block stop <id> --run <r> --reason <text>
@@ -23,10 +24,14 @@
  * `--remove-worktree`). On
  * failure the exit code and stderr are unchanged and stdout stays empty, except an open refused
  * for `after-not-done`, `bad-after`, `outcome-not-ready` or `bad-after-outcome`, which prints `{"block", "event": "refused", "code", "message"}`,
- * or a close the gate refused (`closeBlock` said no), which also prints `{"block", "ok": false, "reason"}`. A usage
+ * or a close the gate refused (`closeBlock` said no), which prints `{"block", "ok": false, "reason", "blockers"}`.
+ * A close that stops the block without blockers omits `blockers`.
+ * `ready` always prints `{"block", "ready", "blockers"}` and exits 1 while any blocker remains;
+ * its checks never write audit rows, queue reviews or change the run. Text refusals from close
+ * print the same blocker lines and fix commands before the existing refusal summary. A usage
  * error, a thrown refusal, a cancelled `--no-require-reviews`, `block waive` or `block reopen` (or
  * one with no terminal, B80) and a failed `--remove-worktree`
- * print nothing on stdout. Without `--json` every output is byte-identical to before.
+ * print nothing on stdout.
  *
  * B64b block end: a close that closes or stops the block and `block stop` write
  * `<runs>/<run>/blocks/<id>.done.json` after the end's rows (`state/block-end.mjs`), then, with
@@ -529,6 +534,7 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
 
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n' +
+  '       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +
@@ -546,6 +552,7 @@ const VERB_USAGE = {
   attempt: '<id> --run <r>',
   rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>]',
   claim: '<id> <path> --run <r>',
+  ready: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>]',
   close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]',
   land: '<id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate]',
   stop: '<id> --run <r> --reason <text>',
@@ -564,6 +571,7 @@ function verbUsage(sub) {
   return `usage: code-forge block ${sub} ${VERB_USAGE[sub]} [--json] [--help|-h]\n` +
     '  --help, -h  Print this usage and exit without changing state.\n' +
     '  --json      Print one JSON line on success instead of text.\n' +
+    (sub === 'ready' ? '  Read-only close checks: list every blocker and its fix; exit 1 while any remain.\n' : '') +
     (sub === 'open' || sub === 'amend-acceptance'
       ? '  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n' +
         '                       Human checks use {clause, kind: human_check} without tests.\n' : '') +
@@ -678,6 +686,9 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'open' && json) jsonOpenId = id;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
+    if (sub === 'ready' && (positionals.length !== 1 || Object.keys(flags).some((key) => !['run', 'json', 'worker-pid', 'transcript', 'report'].includes(key)))) {
+      throw new StateError('usage', 'block ready takes one block id, --run and optional --worker-pid/--transcript/--report/--json');
+    }
     if (sub === 'land' && (positionals.length !== 1 || typeof flags.report !== 'string' || typeof flags.transcript !== 'string' || Object.keys(flags).some((key) => !['run', 'report', 'transcript', 'max', 'merge', 'no-merge-gate', 'json'].includes(key)))) {
       throw new StateError('usage', 'block land takes one block id, --run, --report, --transcript and optional --max/--merge/--no-merge-gate/--json');
     }
@@ -869,7 +880,7 @@ export async function runBlock(args, deps = {}) {
     };
     // B148: a refused dependency must not leave even an expiry row behind.
     const deferExpiry = sub === 'open' && (Array.isArray(flags.after) || Array.isArray(flags['after-outcome']));
-    if (!deferExpiry) await expire();
+    if (!deferExpiry && sub !== 'ready') await expire();
 
     if (sub === 'open') {
       // an explicit --level wins; B59: else in a brief-mode run the rules lane; B47: else the level
@@ -1011,7 +1022,9 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'reopen') {
       return await reopened(false);
     }
-    if (sub === 'close') {
+    if (sub === 'close' || sub === 'ready') {
+      const ready = sub === 'ready';
+      const formatBlockers = (/** @type {import('../state/block.mjs').CloseBlocker[]} */ problems) => closeBlockers(problems, id, runId, flags, record.blocks?.[id]?.test_files ?? []);
       const entry = record.blocks?.[id];
       if (!entry) throw new StateError('unknown_block', `block ${id} is not in run ${runId}`);
       // B52: a block that is not open is refused here, with or without --no-require-reviews, by
@@ -1062,7 +1075,7 @@ export async function runBlock(args, deps = {}) {
       let rows = (await readAllRows(record.project)).filter((row) => row.run === runId);
       // Restart changed stopped findings before entering closeBlock's run lock: the worker
       // needs that lock to publish its fresh review. Refresh rows after the join finishes.
-      if (!reviewsWaived && external === null && !deciding && routineGrant === null) {
+      if (!ready && !reviewsWaived && external === null && !deciding && routineGrant === null) {
         const mainTop = await repoTop(record.workspace);
         const restarted = await requeueStoppedFiles({ repoRoot: mainTop, run: runId, block: id,
           tree: wt?.top ?? mainTop, files: reviewedFiles(rows, id), print: err });
@@ -1132,16 +1145,24 @@ export async function runBlock(args, deps = {}) {
         const others = closeRows.filter((r) => r.event !== 'gate.review_waived_all');
         closeRows.splice(0, closeRows.length, ...others, ...files.map((f) => ({ event: 'gate.review_waived_all', block: id, file: f.file, content_hash: f.content_hash, findings: f.findings, by: f.by, ...(f.answered?.length ? { answered: f.answered } : {}) })));
       };
-      let dryRun = deciding || routineGrant !== null;
+      let dryRun = ready || deciding || routineGrant !== null;
+      // Checks after the first refusal collect blockers without adding warnings or audit rows
+      // that the old short-circuiting close never reached.
+      let collectOnly = false;
       let transcriptFile = '';
-      const loadGate = async () => {
+      /** @type {import('../state/block.mjs').CloseBlocker[]} */
+      let loadBlockers = [];
+      // Ready and routine-policy previews cannot audit, regardless of the close pass's mode.
+      const loadGate = async ({ readOnly = ready } = {}) => {
+        // The only reset: each gate load starts empty; lockfile blockers pushed below reach reviews().
+        loadBlockers = [];
         const transcript = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null, (file) => { transcriptFile = file; });
-        if (transcript === null && !dryRun) {
+        if (transcript === null && !readOnly && !dryRun && !collectOnly) {
           await writeSigned(runId, writeRow, { event: 'gate.transcript_missing', block: id });
           err(`WARN block ${id}: no coder transcript found (--transcript, run record, .code-forge/runs/${runId}/${id}.log); the transcript grep did not run\n`);
         }
         // the human's way out of the per-file review check leaves a signed audit row before the close
-        if (reviewsWaived && !dryRun) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
+        if (reviewsWaived && !readOnly && !dryRun && !collectOnly) await writeSigned(runId, writeRow, { event: 'gate.reviews_waived', block: id, by: 'human' });
         // B20: the high paths come first — a base the workspace does not know refuses the close here
         const highPaths = await highPathsAt(record.workspace, base);
         const { top, mainTop, where, inTree, wsPrefix, owns, changed, fileSet, reviewed } = await tree();
@@ -1151,14 +1172,14 @@ export async function runBlock(args, deps = {}) {
         });
         for (const f of excluded) {
           const problem = lockfileProblem(top, f.file, reviewConfig);
-          if (problem !== null) throw new StateError('lockfile', `lockfile ${f.file}: ${problem}`);
+          if (problem !== null) loadBlockers.push({ code: 'lockfile', file: f.file, detail: problem });
         }
         const otherRows = closeRows.filter((r) => r.event !== 'gate.review_excluded');
         closeRows.splice(0, closeRows.length, ...otherRows, ...excluded.map((f) => ({ event: 'gate.review_excluded', block: id, ...f })));
         const isMine = (/** @type {string} */ f) => owns(entry.owned_files, f, entry.owned_kinds);
         const key = await loadKey(runId);
         // B52: an empty diff with review rows is never silent — name the likely cause
-        if (reviewed.length > 0 && !changed.some(isMine)) {
+        if (!collectOnly && reviewed.length > 0 && !changed.some(isMine)) {
           const likely = inTree ? 'done outside the block\'s worktree (in the main checkout or another tree)' : 'committed before block open or done in another worktree';
           err(`WARN block ${id}: no owned file differs from the block base in ${where}, but ${reviewed.length} owned file(s) have review rows — the work was likely ${likely}; they are checked at their content in ${where}\n`);
         }
@@ -1173,8 +1194,8 @@ export async function runBlock(args, deps = {}) {
         // B62b: a block's own tree started clean at its base and no other block works in it — no
         // stamp from the main tree and no other block's ownership exempts a change there
         const scope = await unownedChanges({ top, changed: changed.filter((f) => !ownState.has(f)), id, blocks: record.blocks, rows, key, isMine, owns, stateDir: '.code-forge', ownTree: inTree });
-        if (scope === null) err(`WARN block ${id}: opened before code-forge recorded the tree at block open; unowned changes were not checked\n`);
-        for (const { file, block: other } of scope?.siblings ?? []) err(`WARN block ${id}: ${file} changed and is owned by open block ${other}; not checked here (its own gate reviews it)\n`);
+        if (!collectOnly && scope === null) err(`WARN block ${id}: opened before code-forge recorded the tree at block open; unowned changes were not checked\n`);
+        if (!collectOnly) for (const { file, block: other } of scope?.siblings ?? []) err(`WARN block ${id}: ${file} changed and is owned by open block ${other}; not checked here (its own gate reviews it)\n`);
         return {
           block: id,
           runId,
@@ -1201,8 +1222,12 @@ export async function runBlock(args, deps = {}) {
       // and `closeBlock` is called once below), so the gate's one pass is its final one.
       const reviews = async () => {
         const result = await gate();
-        reviewsPassed = result.ok;
-        return result;
+        reviewsPassed = result.ok && loadBlockers.length === 0;
+        return loadBlockers.length === 0 ? result : {
+          ok: false,
+          reason: [...loadBlockers.map((b) => `${b.code} ${b.file}: ${b.detail}`), ...(result.reason ? [result.reason] : [])].join('; '),
+          blockers: [...loadBlockers, ...(result.blockers ?? [])],
+        };
       };
       // B96: the stderr warnings of the reviewed lines (`WARN no ticket for <path>`, `WARN bad
       // ticket for <path>`, `WARN reviewed lines unavailable: <message>`, `WARN report ticket
@@ -1259,17 +1284,18 @@ export async function runBlock(args, deps = {}) {
         try {
           text = await readFile(flags.report, 'utf8');
         } catch {
-          return { ok: false, reason: 'coder report FAILED: --report cannot be read' };
+          const reason = 'coder report FAILED: --report cannot be read';
+          return { ok: false, reason, blockers: [{ code: 'coder_report_failed', detail: reason }] };
         }
         const { fileSet } = await tree();
         const lines = await toolLines();
         const given = new Set(lines.map((l) => l.file));
         const missing = missingReviewTickets(text, fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null).map((f) => f.file)).filter((f) => !given.has(f));
-        if (missing.length > 0) return { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}` };
+        if (missing.length > 0) return { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}`, blockers: missing.map((file) => ({ code: 'coder_report_failed', file, detail: `coder report FAILED: no review-file ticket id for ${file}` })) };
         for (const file of reportMismatches(text, lines)) lineWarnings.push(`WARN report ticket mismatch ${file}\n`);
         return { ok: true };
       };
-      /** @type {Array<() => Promise<{ok: boolean, reason?: string}>>} */
+      /** @type {Array<() => Promise<{ok: boolean, reason?: string, blockers?: import('../state/block.mjs').CloseBlocker[]}>>} */
       const extraChecks = [reviews, report];
       if (entry.kind === 'light') extraChecks.unshift(async () => {
         const { top, changed, owns } = await tree();
@@ -1281,7 +1307,7 @@ export async function runBlock(args, deps = {}) {
         }
         const cfg = configInForce(record);
         return files.length > (cfg?.light?.max_files ?? 5) || lines > (cfg?.light?.max_lines ?? 300)
-          ? { ok: false, reason: `light-limits ${files.length} files, ${lines} lines` } : { ok: true };
+          ? { ok: false, reason: `light-limits ${files.length} files, ${lines} lines`, blockers: [{ code: 'light_limits', detail: `${files.length} files, ${lines} lines exceed light block limits` }] } : { ok: true };
       });
       if (configInForce(record)?.gates?.test != null) {
         const testGate = async () => {
@@ -1296,14 +1322,15 @@ export async function runBlock(args, deps = {}) {
           const committed = commit?.result === 'ok' ? Number.parseInt(commit.stdout.trim(), 10) * 1000 : Number.NaN;
           const ok = commit?.result === 'ok' && (commit.stdout.trim() === '' || Number.isFinite(committed)) &&
             green.some((row) => !Number.isFinite(committed) || !Number.isFinite(Date.parse(row.ts)) || Date.parse(row.ts) > committed);
-          return ok ? { ok: true } : { ok: false, reason: `no green gates run; run: code-forge gates run --run ${runId} --block ${id}` };
+          const reason = `no green gates run; run: code-forge gates run --run ${runId} --block ${id}`;
+          return ok ? { ok: true } : { ok: false, reason, blockers: [{ code: 'no_green_gates', detail: reason }] };
         };
         // Keep human-bypass diagnostics ahead of the test gate; waiving reviews still needs green tests.
         if (reviewsWaived) extraChecks.push(testGate);
         else extraChecks.unshift(testGate);
       }
       extraChecks.unshift(async () => agentWaiversAcked(record, rows, id, await loadKey(runId))
-        ? { ok: true } : { ok: false, reason: 'agent-waivers-not-acked' });
+        ? { ok: true } : { ok: false, reason: 'agent-waivers-not-acked', blockers: [{ code: 'agent-waivers-not-acked', detail: 'agent-waivers-not-acked' }] });
       // B63b: `context.require_coder_tests` in the run's config snapshot (never the live config)
       // needs the coder's green test run — waived reviews do not lift it. It runs FIRST: it only
       // reads the report, so a refusal here leaves no row (not even the human waiver row the review
@@ -1311,7 +1338,7 @@ export async function runBlock(args, deps = {}) {
       if (requireCoderTests(record)) {
         extraChecks.unshift(async () => {
           const tests = await coderTests(flags.report, id);
-          if (!tests.ok) return tests;
+          if (tests.ok === false) return { ...tests, blockers: [{ code: 'coder_report_failed', detail: tests.reason }] };
           // signed under the run lock by `closeBlock`, after the waiver row, only when the block closes
           closeRows.push({ event: 'coder.tests', block: id, command: redact(tests.command), exit: tests.exit });
           return { ok: true };
@@ -1323,11 +1350,34 @@ export async function runBlock(args, deps = {}) {
       if (hook !== null) {
         extraChecks.unshift(async () => {
           const text = await findTranscript(record, id, typeof flags.transcript === 'string' ? flags.transcript : null);
-          const [hit] = text === null ? [] : scanTranscript(text, hookForbidden(hook.argv));
-          return hit ? { ok: false, reason: `rule_break transcript line ${hit.line}: ${hit.id}` } : { ok: true };
+          const hits = text === null ? [] : scanTranscript(text, hookForbidden(hook.argv));
+          return hits.length > 0 ? { ok: false, reason: `rule_break transcript line ${hits[0].line}: ${hits[0].id}`, blockers: hits.map((hit) => ({ code: 'rule_break', detail: `transcript line ${hit.line}: ${hit.id}` })) } : { ok: true };
         });
       }
-      const closeOptions = { runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe, extraChecks, closeRows };
+      // A read-only preview of a delegated close must obey the same routine-close policy.
+      const routinePreview = ready && configInForce(record)?.close?.require_human === true && record.autopilot &&
+        grantState(record.autopilot, (deps.now ?? (() => new Date()))()) === 'active';
+      if (routineGrant !== null || routinePreview) extraChecks.push(async () => {
+        const problem = external !== null ? 'external reviews' : routineCloseProblem(await loadGate({ readOnly: true }));
+        return problem === null ? { ok: true } : {
+          ok: false, reason: problem, blockers: [{ code: 'close-not-routine', detail: problem }],
+        };
+      });
+      const closeOptions = { runId, id, rows, writeRow, livePid: intFlag(flags['worker-pid'], 'worker-pid'), probe,
+        extraChecks: extraChecks.map((check) => async (collecting = false) => {
+          collectOnly = collecting;
+          return check();
+        }), closeRows };
+      if (ready) {
+        const result = await closeBlock({ ...closeOptions, dryRun: true });
+        const blockers = formatBlockers(result.blockers ?? []);
+        if (json) emit({ block: id, ready: result.ok, blockers });
+        else {
+          say(blockersText(blockers));
+          say(result.ok ? `block ${id} ready\n` : `block ${id} not ready: ${blockers.length} blockers\n`);
+        }
+        return result.ok ? 0 : 1;
+      }
       if (deciding) {
         const data = await loadGate();
         const initial = checkBlockReviews(data);
@@ -1377,11 +1427,14 @@ export async function runBlock(args, deps = {}) {
         rows.splice(0, rows.length, ...(await readAllRows(record.project)).filter((row) => row.run === runId));
       }
       if (routineGrant !== null) {
-        const data = await loadGate();
-        const problem = external !== null ? 'external reviews' : routineCloseProblem(data);
-        if (problem !== null) { err(`close-not-routine: ${problem}\n`); return 1; }
         const preview = await closeBlock({ ...closeOptions, dryRun: true });
-        if (!preview.ok) { err(`close-not-routine: ${preview.reason}\n`); return 1; }
+        if (!preview.ok) {
+          const blockers = formatBlockers(preview.blockers ?? []);
+          if (json) emit({ block: id, ok: false, reason: preview.reason, blockers });
+          else say(blockersText(blockers));
+          err(`close-not-routine: ${preview.reason}\n`);
+          return 1;
+        }
         closeRows.splice(0, closeRows.length, { event: 'autopilot.close', block: id, grant: routineGrant.grant_id });
         linesOnce = undefined;
       }
@@ -1393,6 +1446,8 @@ export async function runBlock(args, deps = {}) {
         lineWarnings.length = 0;
       }
       const result = await closeBlock(closeOptions);
+      const blockers = formatBlockers(result.blockers ?? []);
+      if (!result.ok) say(blockersText(blockers));
       const agentRows = agentWaivers(rows, id, await loadKey(runId));
       const reopenedRows = agentReopens(rows.filter((r) => r.run === runId), id, await loadKey(runId));
       // B64b: the block ended (closed, or stopped by a worker pin event or ledger.tamper) — its rows
@@ -1426,7 +1481,7 @@ export async function runBlock(args, deps = {}) {
           say(`next: code-forge block human-pass ${id} --run ${runId} --note "<device check note>" [--proof <dir-or-file>]\n`);
         } else (result.ok ? say : err)(`block ${id} ${result.status}${result.event ? ` (${result.event})` : ''}${result.reason ? `: ${result.reason}` : ''}\n`);
         // B64a: a refused close also names itself on stdout under --json (its stderr is unchanged)
-        if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null, ...(end?.json ?? {}) });
+        if (json && !result.ok) emit({ block: id, ok: false, reason: result.reason ?? null, ...(result.status === 'stopped' && blockers.length === 0 ? {} : { blockers }), ...(end?.json ?? {}) });
         const closedJson = {
           block: id,
           event: result.status,
@@ -1468,6 +1523,67 @@ export async function runBlock(args, deps = {}) {
   }
   err(USAGE);
   return 2;
+}
+
+/** Attach shell-safe commands or manual repair instructions to the close gate's facts.
+ * @param {import('../state/block.mjs').CloseBlocker[]} problems
+ * @param {string} id @param {string} runId @param {Record<string, any>} flags @param {string[]} tests
+ */
+function closeBlockers(problems, id, runId, flags, tests) {
+  const seen = new Set();
+  return problems.filter((problem) => {
+    // Scope and the run registry can both report the same unowned file.
+    const key = JSON.stringify([problem.code, problem.file, problem.finding, problem.code === 'unowned_change' ? null : problem.detail]);
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  }).map((problem) => {
+    const { code, file } = problem;
+    // Old ledgers may contain malformed cap ids. Keep their diagnostic, but do not build
+    // a waiver command from a value that cannot name a finding.
+    const finding = typeof problem.finding === 'string' ? problem.finding : undefined;
+    let fix = `no automatic fix: ${code}`;
+    /** @type {string[] | null} */
+    let argv = null;
+    if (code === 'lockfile') fix += `; repair or regenerate ${landCommand([file ?? '<lockfile>'])} as valid lock JSON with HTTPS resolved URLs on review.lockfile_registries and nonempty integrity for resolved packages`;
+    else if (code === 'light_limits') fix += '; stop this attempt, then reopen with --kind code --attempt <n+1> and the original base, ownership and acceptance, or split the block within light limits';
+    else if (code === 'unowned_change' && file) argv = ['code-forge', 'block', 'claim', id, file, '--run', runId];
+    else if (['unreviewed', 'unsigned'].includes(code)) argv = ['code-forge', 'review-file', '--wait-block', id, '--run', runId];
+    else if (code === 'no_green_gates') argv = ['code-forge', 'gates', 'run', '--run', runId, '--block', id];
+    else if (code === 'no_changes') argv = ['code-forge', 'block', 'close', id, '--run', runId, '--no-require-reviews'];
+    else if (code === 'coder_report_failed') {
+      const report = landCommand([typeof flags.report === 'string' ? flags.report : '<coder-report>']);
+      const reason = problem.detail ?? '';
+      let repair = `repair ${report} to address the reported failure`;
+      if (file) repair = `add the review-file ticket id for ${landCommand([file])} to ${report}`;
+      else if (reason === 'coder report FAILED: context.require_coder_tests needs --report') repair = 'create a coder report and pass its path with --report';
+      else if (reason === 'coder report FAILED: --report cannot be read') repair = `restore readable report ${report} or correct --report`;
+      else if (reason === `coder report FAILED: no ===BLOCK ${id} COMPLETE=== sentinel`) repair = `add ===BLOCK ${id} COMPLETE=== to ${report}`;
+      else if (reason === 'coder report FAILED: no TESTS line') repair = `add TESTS <command> exit=<n> with the actual test result before ===BLOCK ${id} COMPLETE=== in ${report}`;
+      else if (reason.startsWith('coder report FAILED: TESTS line malformed:')) repair = `correct the malformed TESTS line to TESTS <command> exit=<n> with the actual test result before ===BLOCK ${id} COMPLETE=== in ${report}`;
+      else if (reason.startsWith('coder report FAILED: TESTS exit=')) repair = `fix the failing tests, rerun them, and update the TESTS line in ${report} with the actual command and exit code`;
+      fix += `; ${repair}; rerun block ready`;
+    }
+    else if (['not_approved', 'late_unruled', 'review_cap', 'autopilot_waiver_invalid'].includes(code) && file) {
+      argv = finding
+        ? ['code-forge', 'block', 'waive', id, finding, '--run', runId, '--file', file, '--reason', '<reason>']
+        : ['code-forge', 'block', 'reopen', id, '--run', runId, '--file', file, '--reason', '<reason>'];
+    } else if (code === 'unproven') {
+      argv = ['code-forge', 'proof', 'red-green', id, '--run', runId, '--test', tests[0] ?? '<test-file>'];
+    } else if (code === 'agent-waivers-not-acked') argv = ['code-forge', 'block', 'ack-waivers', id, '--run', runId];
+    else if (code.startsWith('worker.')) argv = ['code-forge', 'run', 'start', '--reattach', '--run', runId];
+    else if (code === 'rule_break' || code === 'close-not-routine') {
+      argv = ['code-forge', 'block', 'close', id, '--run', runId, '--decide', '--reason', '<reason>'];
+      for (const flag of ['report', 'transcript']) if (typeof flags[flag] === 'string') argv.push(`--${flag}`, flags[flag]);
+    } else if (code === 'git-failed') argv = ['code-forge', 'block', 'rebase', id, '--run', runId];
+    else if (code === 'ledger.tamper') argv = ['code-forge', 'doctor'];
+    return { code, file: file ?? null, detail: problem.detail ?? finding ?? code, ...(finding ? { finding } : {}), fix: argv === null ? fix : landCommand(argv) };
+  });
+}
+
+/** @param {ReturnType<typeof closeBlockers>} blockers */
+function blockersText(blockers) {
+  return blockers.map((b) => `${b.code} ${b.file ?? '-'} ${b.detail}\n  fix: ${b.fix}\n`).join('');
 }
 
 /**

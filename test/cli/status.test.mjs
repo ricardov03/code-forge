@@ -481,12 +481,12 @@ test('B64a (4): a refused close keeps its stderr and exit 1 and prints {"block",
   writeFile(fx.repo, 'src/a.mjs', 'export const a = 2;\n');
   const text = await fx.block(['close', 'B1', '--worker-pid', PID]);
   assert.equal(text.code, 1);
-  assert.equal(text.stdout, '');
+  assert.equal(text.stdout, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run ${fx.runId}\n`);
   const json = await fx.block(['close', 'B1', '--worker-pid', PID, '--json']);
   assert.deepEqual({ code: json.code, stderr: json.stderr }, { code: 1, stderr: text.stderr });
   const reason = text.stderr.split('\n').find((l) => l.startsWith('block B1 open: '))?.slice('block B1 open: '.length);
   assert.equal(reason, 'unreviewed src/a.mjs'); // pinned: no reviewer is configured and nothing reviewed the changed file
-  assert.equal(json.stdout, `${JSON.stringify({ block: 'B1', ok: false, reason })}\n`);
+  assert.equal(json.stdout, `${JSON.stringify({ block: 'B1', ok: false, reason, blockers: [{ code: 'unreviewed', file: 'src/a.mjs', detail: 'no review.approved row for src/a.mjs at its current content', fix: `code-forge review-file --wait-block B1 --run ${fx.runId}` }] })}\n`);
   // a block that does not exist: the thrown refusal is unchanged and stdout stays empty
   const missing = await fx.block(['close', 'B9', '--json']);
   assert.deepEqual(missing, { code: 1, stdout: '', stderr: 'block close: block B9 is not in run r-b64a-refused\n' });

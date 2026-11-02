@@ -211,7 +211,7 @@ test('B58 (6): the same close without the key is refused as before (unreviewed) 
   const fx = await fixture('b58-control', 'r-b58-control', { extra: 'review:\n  external: {required: false, name: Grok}\n' });
   opened(await fx.open('B1', ['src/a.mjs']));
   writeFile(fx.root, 'src/a.mjs', 'export const a = 2;\n');
-  assert.deepEqual(await fx.close([], { isTTY: false }), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await fx.close([], { isTTY: false }), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b58-control\n` + 'block B1 open: unreviewed src/a.mjs\n']);
   await writeSigned('r-b58-control', fx.writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(fx.root, 'src/a.mjs'), round: 1 });
   const report = path.join(freshDir('report'), 'report.md');
   writeFile(path.dirname(report), 'report.md', 'done, no tickets\n');
@@ -232,13 +232,13 @@ test('B58 (2): unowned changes, no_changes and the transcript grep still refuse 
   const fx = await fixture('b58-still', 'r-b58-still');
   opened(await fx.open('B1', ['src/a.mjs', 'coder.log']));
   // nothing changed and nothing reviewed is never a pass
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: no_changes\n']);
+  assert.deepEqual(await fx.close([]), [1, `no_changes - block B1 changed no owned file and has no reviews\n  fix: code-forge block close B1 --run r-b58-still --no-require-reviews\n` + 'block B1 open: no_changes\n']);
   writeFile(fx.root, 'src/a.mjs', 'export const a = 2;\n');
   writeFile(fx.root, 'README.md', '# demo, edited\n');
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: unowned_change README.md\n']);
+  assert.deepEqual(await fx.close([]), [1, `unowned_change README.md README.md changed but no block of the run owns it — block claim it, or put it back\n  fix: code-forge block claim B1 README.md --run r-b58-still\nblock B1 open: unowned_change README.md\n`]);
   writeFile(fx.root, 'README.md', '# demo\n');
   writeFile(fx.root, 'coder.log', '$ node --test\n$ forge block close B1 --no-require-reviews\n');
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: rule_break transcript line 2: code-forge-no-require-reviews\n']);
+  assert.deepEqual(await fx.close([]), [1, `rule_break - transcript line 2: code-forge-no-require-reviews\n  fix: code-forge block close B1 --run r-b58-still --decide --reason '<reason>' --transcript ${fx.root}/coder.log\nblock B1 open: rule_break transcript line 2: code-forge-no-require-reviews\n`]);
   assert.equal((await readRun('r-b58-still')).blocks.B1.status, 'open');
   const rows = await fx.rows();
   assert.equal(rows.filter((r) => r.event === 'block.close').length, 0);
@@ -259,7 +259,7 @@ test('B58 (1): a review that did not approve the file (not_approved) refuses wit
     return fx;
   };
   const control = await staleApproval('b58-notappr-off', '');
-  assert.deepEqual(await control.close([]), [1, 'block B1 open: not_approved src/a.mjs W1\n']);
+  assert.deepEqual(await control.close([]), [1, `not_approved src/a.mjs the latest review of src/a.mjs's current content left W1 open and it is not waived\n  fix: code-forge block waive B1 W1 --run r-b58-notappr-off --file src/a.mjs --reason '<reason>'\n` + 'block B1 open: not_approved src/a.mjs W1\n']);
   assert.deepEqual(waived(await control.rows()), []);
 
   const fx = await staleApproval('b58-notappr', EXTERNAL);
@@ -301,7 +301,7 @@ test('B58 (2): closeBlock\'s own refusal (orphans in the registry) still refuses
   const record = await readRun('r-b58-orphans');
   record.orphans = ['src/zz.mjs'];
   await saveRun(record);
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: orphans: src/zz.mjs\n']);
+  assert.deepEqual(await fx.close([]), [1, `unowned_change src/zz.mjs orphan in run registry: src/zz.mjs\n  fix: code-forge block claim B1 src/zz.mjs --run r-b58-orphans\n` + 'block B1 open: orphans: src/zz.mjs\n']);
   const rows = await fx.rows();
   assert.deepEqual(waived(rows), []);
   assert.equal(rows.filter((r) => r.event === 'block.close').length, 0);
@@ -318,7 +318,7 @@ test('B58 (6): with no review key at all, a full close works as today — approv
   const fx = await fixture('b58-absent', 'r-b58-absent', { extra: '' });
   opened(await fx.open('B1', ['src/a.mjs']));
   writeFile(fx.root, 'src/a.mjs', 'export const a = 2;\n');
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await fx.close([]), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b58-absent\n` + 'block B1 open: unreviewed src/a.mjs\n']);
   await writeSigned('r-b58-absent', fx.writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(fx.root, 'src/a.mjs'), round: 1 });
   const report = path.join(freshDir('report'), 'report.md');
   const line = rv(fx.root, 'r-b58-absent', 'src/a.mjs');
@@ -333,7 +333,7 @@ test('B58 (2): a high-tier file still needs its proven red→green row', async (
   const fx = await fixture('b58-proof', 'r-b58-proof', { extra: `${EXTERNAL}proof:\n  tiers:\n    high:\n      paths: [src/a.mjs]\n` });
   opened(await fx.open('B1', ['src/a.mjs']));
   writeFile(fx.root, 'src/a.mjs', 'export const a = 2;\n');
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: unproven src/a.mjs\n']);
+  assert.deepEqual(await fx.close([]), [1, `unproven src/a.mjs src/a.mjs is high tier and has no proven red→green row covering it\n  fix: code-forge proof red-green B1 --run r-b58-proof --test '<test-file>'\n` + 'block B1 open: unproven src/a.mjs\n']);
   assert.equal((await readRun('r-b58-proof')).blocks.B1.status, 'open');
   assert.deepEqual(waived(await fx.rows()), []);
 });
@@ -420,6 +420,6 @@ test('B58 (1): a snapshot with required true but a blank name is no switch — t
   await saveRun(record);
   opened(await fx.open('B1', ['src/a.mjs', '.code-forge.yml']));
   writeFile(fx.root, 'src/a.mjs', 'export const a = 2;\n');
-  assert.deepEqual(await fx.close([]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await fx.close([]), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b58-blankname\n` + 'block B1 open: unreviewed src/a.mjs\n']);
   assert.deepEqual(waived(await fx.rows()), []);
 });

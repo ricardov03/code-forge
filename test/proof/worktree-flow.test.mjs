@@ -385,7 +385,7 @@ test('B62b (3): block close measures the tree — an owned change only in the ma
   await fx.open('B1', ['src/a.mjs', 'src/n.mjs']);
   const tree = fx.tree('B1');
   writeFile(fx.repo, 'src/a.mjs', 'export const a = 2;\n');
-  assert.deepEqual(await fx.close('B1'), [1, '', 'block B1 open: no_changes\n']);
+  assert.deepEqual(await fx.close('B1'), [1, `no_changes - block B1 changed no owned file and has no reviews\n  fix: code-forge block close B1 --run r-b62b-close --no-require-reviews\n`, 'block B1 open: no_changes\n']);
   // committed on the block's branch counts
   writeFile(tree, 'src/a.mjs', 'export const a = 3;\n');
   await git(['commit', '-q', '-am', 'tree work'], tree);
@@ -404,7 +404,7 @@ test('B62b (3): the file set is the tree\'s, committed and uncommitted — the r
   writeFile(tree, 'src/n.mjs', 'export const n = 1;\n');
   writeFile(fx.repo, 'src/main-only.mjs', 'export const m = 1;\n');
   // no review.external here: each changed file needs a review, so the refusal lists the file set
-  assert.deepEqual(await fx.close('B1'), [1, '', 'block B1 open: unreviewed src/a.mjs; unreviewed src/n.mjs\n']);
+  assert.deepEqual(await fx.close('B1'), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b62b-files\nunreviewed src/n.mjs no review.approved row for src/n.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b62b-files\n`, 'block B1 open: unreviewed src/a.mjs; unreviewed src/n.mjs\n']);
 });
 
 test('B62b (3): an unowned change in the tree is refused; one in the main tree or in another block\'s tree never counts', async () => {
@@ -425,7 +425,7 @@ test('B62b (3): an unowned change in the tree is refused; one in the main tree o
   writeFile(tree, 'notes.txt', 'b1\n');
   assert.deepEqual(await fx.close('B1'), [
     1,
-    '',
+    `unowned_change README.md README.md changed but no block of the run owns it — block claim it, or put it back\n  fix: code-forge block claim B1 README.md --run r-b62b-unowned\nunowned_change notes.txt notes.txt changed but no block of the run owns it — block claim it, or put it back\n  fix: code-forge block claim B1 notes.txt --run r-b62b-unowned\n`,
     'block B1 open: unowned_change README.md; unowned_change notes.txt\n',
   ]);
   rmSync(path.join(tree, 'notes.txt'));
@@ -440,7 +440,7 @@ test('B62b (3): in a block\'s tree a file a sibling block owns is unowned too �
   const tree = fx.tree('B1');
   writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
   writeFile(tree, 'src/x.mjs', 'export const x = 1;\n');
-  assert.deepEqual(await fx.close('B1'), [1, '', 'block B1 open: unowned_change src/x.mjs\n']);
+  assert.deepEqual(await fx.close('B1'), [1, `unowned_change src/x.mjs src/x.mjs changed but no block of the run owns it — block claim it, or put it back\n  fix: code-forge block claim B1 src/x.mjs --run r-b62b-sibling\n`, 'block B1 open: unowned_change src/x.mjs\n']);
   rmSync(path.join(tree, 'src/x.mjs'));
   assert.deepEqual(await fx.close('B1'), [0, 'block B1 closed\n', '']);
 });
@@ -460,7 +460,7 @@ test('B62b (3): in a block\'s tree a closed block\'s signed approval never excus
     (await fx.rows()).filter((r) => r.event === 'review.approved').map((r) => [r.block, r.file, r.content_hash]),
     [['B0', 'src/x.mjs', hash]],
   );
-  assert.deepEqual(await fx.close('B1'), [1, '', 'block B1 open: unowned_change src/x.mjs\n']);
+  assert.deepEqual(await fx.close('B1'), [1, `unowned_change src/x.mjs src/x.mjs changed but no block of the run owns it — block claim it, or put it back\n  fix: code-forge block claim B1 src/x.mjs --run r-b62b-closedok\n`, 'block B1 open: unowned_change src/x.mjs\n']);
   rmSync(path.join(tree, 'src/x.mjs'));
   assert.deepEqual(await fx.close('B1'), [0, 'block B1 closed\n', '']);
 });

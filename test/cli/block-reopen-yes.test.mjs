@@ -221,7 +221,11 @@ test('clause 5: close prints each verified agent reopen and JSON adds only a non
     const [code, text] = await f.close(kind === 'text' ? [] : ['--json']);
     if (kind === 'unsigned' || kind === 'tampered') {
       assert.equal(code, 1, kind);
-      assert.equal(text, `block B1 open: unproven ${FILE}\n${JSON.stringify({ block: 'B1', ok: false, reason: `unproven ${FILE}` })}\n`);
+      assert.equal(text, `block B1 open: unproven ${FILE}\n${JSON.stringify({ block: 'B1', ok: false, reason: `unproven ${FILE}`, blockers: [{
+        code: 'unproven', file: FILE,
+        detail: `${FILE} is high tier and has no proven red→green row covering it`,
+        fix: `code-forge proof red-green B1 --run ${f.runId} --test '<test-file>'`,
+      }] })}\n`);
       continue;
     }
     assert.equal(code, 0, `${kind}: ${text}`);

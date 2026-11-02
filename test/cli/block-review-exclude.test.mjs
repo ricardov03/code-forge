@@ -97,7 +97,9 @@ test('report still needs the reviewed source ticket when the tool cannot supply 
   const report = f.report(text);
   const before = await f.rows();
   assert.deepEqual(await f.close(['--report', report], deps), {
-    code: 1, out: '', err: 'block B1 open: coder report FAILED: no review-file ticket id for a.mjs\n',
+    code: 1,
+    out: `coder_report_failed a.mjs coder report FAILED: no review-file ticket id for a.mjs\n  fix: no automatic fix: coder_report_failed; add the review-file ticket id for a.mjs to ${report}; rerun block ready\n`,
+    err: 'block B1 open: coder report FAILED: no review-file ticket id for a.mjs\n',
   });
   assert.deepEqual(await f.rows(), before, 'refused close writes no rows, including exclusion audit rows');
   assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');

@@ -81,10 +81,10 @@ test('B70 (1)+(4): a signed round at the current hash whose findings the human a
   const f = await fixture('b70-human');
   await f.sign({ event: 'review.round', round: 1, kind: 'full', open_after: 2 });
   await f.sign({ event: 'review.result', ticket: 't1', status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }, { id: 'C1', severity: 'critical' }] });
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs W1; not_approved src/a.mjs C1\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b70-human\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left W1 open and it is not waived\n  fix: code-forge block waive B1 W1 --run r-b70-human --file src/a.mjs --reason '<reason>'\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left C1 open and it is not waived\n  fix: code-forge block waive B1 C1 --run r-b70-human --file src/a.mjs --reason '<reason>'\n` + 'block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs W1; not_approved src/a.mjs C1\n']);
   // (3) one named finding not waived: still unreviewed
   await f.waive('W1');
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs C1\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run ${f.runId}\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left C1 open and it is not waived\n  fix: code-forge block waive B1 C1 --run ${f.runId} --file src/a.mjs --reason '<reason>'\nblock B1 open: unreviewed src/a.mjs; not_approved src/a.mjs C1\n`]);
   await f.waive('C1');
   // (4) the review check passes, a later check refuses: no row is left behind. The later refusal
   // is an orphan in the registry, which closeBlock checks after every extra check (B96: a readable
@@ -99,7 +99,7 @@ test('B70 (1)+(4): a signed round at the current hash whose findings the human a
     asked += 1;
     return resolveTicket(t);
   };
-  assert.deepEqual(await f.close(['--report', `${reportDir}/report.md`], { resolveTicket: counted }), [1, 'block B1 open: orphans: zz.txt\n']);
+  assert.deepEqual(await f.close(['--report', `${reportDir}/report.md`], { resolveTicket: counted }), [1, `unowned_change zz.txt orphan in run registry: zz.txt\n  fix: code-forge block claim B1 zz.txt --run ${f.runId}\nblock B1 open: orphans: zz.txt\n`]);
   assert.equal(asked, 1);
   assert.equal((await f.waivedAllRows()).length, 0);
   await claimPath({ runId: f.runId, id: 'B1', file: 'zz.txt', writeRow: f.writeRow });
@@ -122,9 +122,9 @@ test('B70 (2): a file stopped at review_cap with every open id waived closes —
   await f.sign({ event: 'review.round', round: 4, kind: 'recheck', open_after: 2 });
   await f.sign({ event: 'review.cap', round: 4, reason: 'review_cap', open: ['W2', 'N3'] });
   await f.sign({ event: 'review.result', ticket: 't2', status: 'stopped', stopped: 'review_cap', approved: false, open: [{ id: 'W2', severity: 'warning' }, { id: 'N3', severity: 'nit' }] });
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; review_cap src/a.mjs W2; review_cap src/a.mjs N3\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge review-file --wait-block B1 --run r-b70-cap\nreview_cap src/a.mjs src/a.mjs stopped at review_cap; finding W2 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge block waive B1 W2 --run r-b70-cap --file src/a.mjs --reason '<reason>'\nreview_cap src/a.mjs src/a.mjs stopped at review_cap; finding N3 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge block waive B1 N3 --run r-b70-cap --file src/a.mjs --reason '<reason>'\n` + 'block B1 open: unreviewed src/a.mjs; review_cap src/a.mjs W2; review_cap src/a.mjs N3\n']);
   await f.waive('N3');
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; review_cap src/a.mjs W2\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge review-file --wait-block B1 --run ${f.runId}\nreview_cap src/a.mjs src/a.mjs stopped at review_cap; finding W2 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge block waive B1 W2 --run ${f.runId} --file src/a.mjs --reason '<reason>'\nblock B1 open: unreviewed src/a.mjs; review_cap src/a.mjs W2\n`]);
   assert.equal((await f.waivedAllRows()).length, 0);
   await f.autopilotWaive('W2', 'warning');
   const [code, out] = await f.close(['--json']);
@@ -150,7 +150,7 @@ test('B70 (3): no signed review.round for the current hash — every finding wai
   await f.sign({ event: 'review.round', content_hash: 'b'.repeat(64), round: 1, kind: 'full', open_after: 1 });
   await f.sign({ event: 'review.result', ticket: 't3', status: 'stopped', approved: false, open: [{ id: 'W1', severity: 'warning' }] });
   await f.waive('W1');
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b70-noround\n` + 'block B1 open: unreviewed src/a.mjs\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
 });
 
@@ -160,7 +160,7 @@ test('B70 (3): the review.round at the current hash is not signed — every find
   await f.sign({ event: 'review.result', ticket: 't12', status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }] });
   await f.waive('W1');
   // an unsigned row naming the file also makes it high tier (closeTier fails closed): unproven too
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; unproven src/a.mjs\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b70-unsignedround\nunproven src/a.mjs src/a.mjs is high tier and has no proven red→green row covering it\n  fix: code-forge proof red-green B1 --run r-b70-unsignedround --test '<test-file>'\n` + 'block B1 open: unreviewed src/a.mjs; unproven src/a.mjs\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
 });
 
@@ -170,7 +170,7 @@ test('B70 (3): the latest refusal row has no content_hash — still unreviewed',
   await f.sign({ event: 'review.result', ticket: 't4', status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }] });
   await writeSigned(f.runId, f.writeRow, { event: 'review.result', block: 'B1', file: FILE, ticket: 't5', status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }] });
   await f.waive('W1');
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b70-nohash\n` + 'block B1 open: unreviewed src/a.mjs\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
 });
 
@@ -180,7 +180,7 @@ test('B70 (3): the latest refusal names no finding — still unreviewed', async 
   await f.sign({ event: 'review.result', ticket: 't6', status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }] });
   await f.waive('W1');
   await f.sign({ event: 'review.result', ticket: 't7', status: 'reviewed', approved: false, open: [] });
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b70-nofinding\n` + 'block B1 open: unreviewed src/a.mjs\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
 });
 
@@ -190,7 +190,7 @@ test('B70 (3): the latest refusal row is not signed — still unreviewed', async
   await f.writeRow({ run: f.runId, event: 'review.result', block: 'B1', file: FILE, content_hash: f.hash, ticket: 't8', status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }] });
   await f.waive('W1');
   // an unsigned row naming the file also makes it high tier (closeTier fails closed): unproven too
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; unproven src/a.mjs\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b70-unsigned\nunproven src/a.mjs src/a.mjs is high tier and has no proven red→green row covering it\n  fix: code-forge proof red-green B1 --run r-b70-unsigned --test '<test-file>'\n` + 'block B1 open: unreviewed src/a.mjs; unproven src/a.mjs\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
 });
 
@@ -213,7 +213,7 @@ test('B70 (3): a critical waived only by autopilot — still unreviewed only bec
   // ... yet both checks refuse it, each only because the latest refusal (its signed result file)
   // records C1 critical, which only the human waives: the stale-findings check names the waiver
   // invalid, and the waived-all check leaves the file unreviewed
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; autopilot_waiver_invalid src/a.mjs C1\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b70-critical\nautopilot_waiver_invalid src/a.mjs the autopilot waiver of C1 in src/a.mjs does not count: the latest review records it critical; only the human waives it\n  fix: code-forge block waive B1 C1 --run r-b70-critical --file src/a.mjs --reason '<reason>'\n` + 'block B1 open: unreviewed src/a.mjs; autopilot_waiver_invalid src/a.mjs C1\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
   // the human's waiver of the same critical makes it reviewed_by_waiver
   await f.waive('C1');
@@ -235,13 +235,13 @@ test('B70 (2)+(3): a review.cap id the latest refusal does not name needs a seve
   await f.sign({ event: 'review.cap', round: 4, reason: 'review_cap', open: ['W2', 'N3'] });
   await f.sign({ event: 'review.result', ticket: 't10', status: 'stopped', stopped: 'review_cap', approved: false, open: [{ id: 'N3', severity: 'nit' }] });
   await f.waive('N3');
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs; review_cap src/a.mjs W2\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge review-file --wait-block B1 --run r-b70-capid\nreview_cap src/a.mjs src/a.mjs stopped at review_cap; finding W2 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge block waive B1 W2 --run r-b70-capid --file src/a.mjs --reason '<reason>'\n` + 'block B1 open: unreviewed src/a.mjs; review_cap src/a.mjs W2\n']);
   assert.equal((await f.waivedAllRows()).length, 0);
   // a valid autopilot waiver of W2 (triage records it warning) clears the cap check, but no refusal
   // row records W2's severity: it stays the human's, so the file is still unreviewed
   await f.sign({ event: 'review.triage', finding: 'W2', severity: 'warning' });
   await f.autopilotWaive('W2', 'warning');
-  assert.deepEqual(await f.close(), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge review-file --wait-block B1 --run ${f.runId}\nblock B1 open: unreviewed src/a.mjs\n`]);
   assert.equal((await f.waivedAllRows()).length, 0);
   await f.waive('W2');
   assert.deepEqual(await f.close(), [0, `${f.line}block B1: src/a.mjs reviewed_by_waiver (N3, W2; by human)\nblock B1 closed\n`]);
@@ -260,7 +260,10 @@ for (const [name, open, rest] of /** @type {Array<[string, unknown, string]>} */
     await f.sign({ event: 'review.cap', round: 4, reason: 'review_cap', open });
     await f.sign({ event: 'review.result', ticket: 't11', status: 'stopped', stopped: 'review_cap', approved: false, open: [{ id: 'W1', severity: 'warning' }] });
     await f.waive('W1');
-    assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed src/a.mjs${rest}\n`]);
+    const runId = `r-b70-badcap-${name.replace(/\W+/g, '-')}`;
+    const fix = `code-forge review-file --wait-block B1 --run ${runId}`;
+    const extra = name === 'a string' ? '' : `review_cap src/a.mjs src/a.mjs stopped at review_cap; finding ${name === 'an empty id' ? '' : '[object Object]'} is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge block reopen B1 --run ${runId} --file src/a.mjs --reason '<reason>'\n`;
+    assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: ${fix}\n${extra}block B1 open: unreviewed src/a.mjs${rest}\n`]);
     assert.equal((await f.waivedAllRows()).length, 0);
   });
 }

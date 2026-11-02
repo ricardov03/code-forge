@@ -66,6 +66,7 @@ async function fixture(slug, testGate) {
     repo,
     runId,
     stdout: `reviewed a.mjs ticket ${ticket}\nblock B1 closed\n`,
+    blockers: `no_green_gates - no green gates run; run: code-forge gates run --run ${runId} --block B1\n  fix: code-forge gates run --run ${runId} --block B1\n`,
     refusal: `block B1 open: no green gates run; run: code-forge gates run --run ${runId} --block B1\n`,
     sign: (/** @type {Record<string, any>} */ row) => writeSigned(runId, writeRow, { block: 'B1', ...row }),
     close: (extra = [], deps = {}) => cli(['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', path.join(files, 'coder.log'), ...extra], deps),
@@ -86,7 +87,7 @@ test('B135: configured test gate refuses missing or failed gates without closing
     await f.sign({ event: 'gate.done', block: 'B2', all_ok: true });
     await f.sign({ event: 'gate.done', run: 'r-other', all_ok: true });
     const before = (await f.rows()).length;
-    assert.deepEqual(await f.close(), [1, '', f.refusal]);
+    assert.deepEqual(await f.close(), [1, f.blockers, f.refusal]);
     assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
     assert.equal((await f.rows()).length, before, 'refused close writes zero rows');
   }
@@ -123,7 +124,7 @@ test('B135: waived reviews still require fresh green gates and keep the human co
       confirm: async () => { confirms++; return true; }, isCancel: () => false,
     } });
     if (evidence !== 'unconfigured') {
-      assert.deepEqual(await close(), [1, '', f.refusal], evidence);
+      assert.deepEqual(await close(), [1, f.blockers, f.refusal], evidence);
       assert.equal(confirms, 1, 'one confirmation per close attempt');
       assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
       assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 0);
@@ -158,7 +159,7 @@ test('B135: close succeeds after real green gates and refuses after real red gat
     const f = await fixture(`b120-close-${exit}`, ['node', '-e', `process.exit(${exit})`]);
     const [code, stdout, stderr] = await f.gates();
     assert.deepEqual([code, stderr, JSON.parse(stdout).allOk], [exit, '', exit === 0]);
-    assert.deepEqual(await f.close(), exit === 0 ? [0, f.stdout, ''] : [1, '', f.refusal]);
+    assert.deepEqual(await f.close(), exit === 0 ? [0, f.stdout, ''] : [1, f.blockers, f.refusal]);
     assert.equal((await readRun(f.runId)).blocks.B1.status, exit === 0 ? 'closed' : 'open');
     assert.equal((await f.rows()).filter((r) => r.event === 'block.close' && r.block === 'B1').length, exit === 0 ? 1 : 0);
   }
@@ -186,7 +187,7 @@ test('B135: green evidence older than the last block commit refuses; a newer gre
   await git(['commit', '-q', '-m', 'block changes'], f.repo);
   const committed = Number((await git(['log', '-1', '--format=%ct'], f.repo)).trim()) * 1000;
   await f.sign({ event: 'gate.done', all_ok: true, ts: new Date(committed - 1000).toISOString() });
-  assert.deepEqual(await f.close(), [1, '', f.refusal]);
+  assert.deepEqual(await f.close(), [1, f.blockers, f.refusal]);
   assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
   assert.equal((await f.rows()).filter((r) => r.event === 'block.close').length, 0);
   await f.sign({ event: 'gate.done', all_ok: true, ts: new Date(committed + 1000).toISOString() });
@@ -201,7 +202,7 @@ test('B135: failed git log refuses green evidence; successful empty log permits 
   const before = await f.rows();
   failGitLog = true;
   try {
-    assert.deepEqual(await f.close(), [1, '', f.refusal]);
+    assert.deepEqual(await f.close(), [1, f.blockers, f.refusal]);
   } finally {
     failGitLog = false;
   }
