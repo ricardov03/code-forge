@@ -61,12 +61,31 @@ import { runsDir, StateError } from '../state/paths.mjs';
 import { readRun } from '../state/run.mjs';
 import { unpinnedWorkerWarnings } from '../worker/worker-warning.mjs';
 import { daemonRequest } from '../util/native.mjs';
+import { exec } from '../util/exec.mjs';
 import { writeSafe } from '../util/redact.mjs';
+import { gitChildEnv } from '../worker/ticket.mjs';
 
 const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
 
 /** The hard cap on text lines per run. */
 const STATUS_MAX_LINES = 10;
+
+/** @param {Record<string, any>} record @returns {Promise<string | null>} */
+async function runEndHint(record) {
+  if (record.status !== 'active') return null;
+  const open = Object.values(record.blocks ?? {}).filter((entry) => entry.status === 'open');
+  if (open.length === 0) return null;
+  for (const entry of open) {
+    const branch = entry.worktree?.branch;
+    const base = entry.base_branch;
+    if (typeof branch !== 'string' || !branch || typeof base !== 'string' || !base) return null;
+    const result = await exec(['git', 'merge-base', '--is-ancestor', `refs/heads/${branch}`, `refs/heads/${base}`], {
+      cwd: record.workspace, env: gitChildEnv(), timeoutMs: 10000,
+    });
+    if (result.result !== 'ok') return null;
+  }
+  return `all open blocks are merged: end the run with: code-forge run end --run ${record.run_id}`;
+}
 
 /**
  * @typedef {Omit<import('../state/brief-status.mjs').BlockStatus, 'gate'> & {gate: {result: 'pass'|'fail'|'timeout'|'none', name: string | null}}} BlockStatus
@@ -197,14 +216,14 @@ const usd = (n) => `$${n.toFixed(2)}`;
 
 /**
  * The text lines of one run, at most {@link STATUS_MAX_LINES}.
- * @param {RunStatus} s @returns {string[]}
+ * @param {RunStatus} s @param {string | null} [hint] @returns {string[]}
  */
-export function runLines(s) {
+export function runLines(s, hint = null) {
   const spent = s.spent_usd === null ? '$?' : `${usd(s.spent_usd)}${(s.unknown_usd_sessions ?? 0) > 0 ? '+?' : ''}`;
   const lines = [`run ${s.run_id} · ${s.status ?? '-'} · ${s.mode} · spent ${spent}${s.budget_usd !== null ? ` of ${usd(s.budget_usd)}` : ''}`];
   const tally = s.closed + s.stopped > 0 ? `closed ${s.closed} · stopped ${s.stopped}` : null;
   const awaiting = s.awaiting_human_check?.length ? `awaiting_human_check: ${JSON.stringify(s.awaiting_human_check)}` : null;
-  const room = STATUS_MAX_LINES - lines.length - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1);
+  const room = STATUS_MAX_LINES - lines.length - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1) - (hint === null ? 0 : 1);
   const shown = s.blocks.length <= room ? s.blocks : s.blocks.slice(0, room - 1);
   for (const b of shown) {
     lines.push(`${b.id} ${b.state} ${b.level ?? '-'} · ${b.model ?? '-'} · gate ${b.gate.result}${b.gate.name ? ` (${b.gate.name})` : ''} · findings ${b.findings}`);
@@ -212,6 +231,7 @@ export function runLines(s) {
   if (shown.length < s.blocks.length) lines.push(`… +${s.blocks.length - shown.length} more blocks`);
   if (awaiting !== null) lines.push(awaiting);
   if (tally !== null) lines.push(tally);
+  if (hint !== null) lines.push(hint);
   return lines;
 }
 
@@ -247,6 +267,7 @@ export default async function status(args) {
       records = await activeRunsFor(projectRootFor(process.cwd()));
     }
     const shown = [];
+    const hints = [];
     for (const record of records) {
       let config;
       try {
@@ -263,6 +284,7 @@ export default async function status(args) {
         summary = timeoutStatus(summary, await readAllRows(record.project).catch(() => null));
       }
       shown.push(summary ?? await statusOf(record));
+      hints.push(json ? null : await runEndHint(record));
       for (const warning of await unpinnedWorkerWarnings(record)) err(`${warning}\n`);
     }
     if (json) {
@@ -273,7 +295,7 @@ export default async function status(args) {
       out('no active run\n');
       return 0;
     }
-    out(`${shown.map((s) => runLines(s).join('\n')).join('\n\n')}\n`);
+    out(`${shown.map((s, i) => runLines(s, hints[i]).join('\n')).join('\n\n')}\n`);
     return 0;
   } catch (thrown) {
     err(`status: ${thrown?.message ?? String(thrown)}\n`);

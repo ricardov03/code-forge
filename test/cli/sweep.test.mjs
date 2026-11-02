@@ -119,6 +119,46 @@ test('sweep preserves open, running and active workers and fails closed on unrea
   await sleep(50);
 });
 
+test('sweep lists and stops an idle-run worker but preserves recent activity and disabled timeouts', async (t) => {
+  mkdirSync(path.dirname(runRecordPath('r-idle')), { recursive: true });
+  const old = new Date(Date.now() - 25 * 3600000).toISOString();
+  const workers = [];
+  for (const [id, started_at, hours] of /** @type {[string, string, number][]} */ ([['r-idle', old, 24], ['r-recent', new Date().toISOString(), 24], ['r-disabled', old, 0], ['r-queued', old, 24]])) {
+    const workspace = path.join(root, id);
+    mkdirSync(workspace, { recursive: true });
+    execFileSync('git', ['init', '-q'], { cwd: workspace });
+    writeFileSync(path.join(workspace, '.code-forge.yml'), `version: 1\nprovider: anthropic\nlevels:\n  L0: {model: a}\n  L1: {model: b}\n  L2: {model: c}\n  L3: {model: d}\nworker: {idle_exit_hours: ${hours}}\n`);
+    writeFileSync(runRecordPath(id), JSON.stringify({ run_id: id, project: id, workspace, status: 'active', started_at, blocks: {} }));
+    if (id === 'r-queued') {
+      const queue = path.join(workspace, '.code-forge', 'queue');
+      mkdirSync(queue, { recursive: true });
+      writeFileSync(path.join(queue, 'a'.repeat(24) + '.json'), JSON.stringify({ run: id }));
+    }
+    workers.push(await worker(id));
+  }
+  try {
+    const dry = await command(['--json']);
+    assert.deepEqual(dry.json.items.filter((p) => workers.some((c) => c.pid === p.pid)).map((p) => p.pid), [workers[0].pid], 'exactly the idle-run worker is stale');
+    t.mock.module('../../src/doctor/index.mjs', { namedExports: { runDoctor: async () => [
+      { id: 'sweep', status: 'OK', label: 'sweep', detail: '0 stale workers, 0 orphans, 0 zombies' },
+    ] } });
+    const { runDoctorCli } = await import('../../src/cli/doctor.mjs');
+    let output = '';
+    await runDoctorCli(['--json', '--cwd', path.join(root, 'r-idle')], {
+      stdout: { write: (s) => { output += s; } }, stderr: { write: () => {} },
+    });
+    const rows = JSON.parse(output).rows.filter((row) => row.id === 'sweep');
+    assert.equal(rows.length, 1, 'doctor lists one process hygiene row');
+    assert.equal(rows[0].status, 'WARN', 'doctor flags idle-run workers');
+    assert.match(rows[0].detail, new RegExp(`pid ${workers[0].pid} run r-idle`), 'doctor identifies the idle-run worker');
+    assert.deepEqual(workers.map((c) => reaper.isAlive(c.pid)), [true, true, true, true], 'doctor never stops workers');
+    const applied = await command(['--apply', '--json']);
+    assert.equal(applied.code, 0);
+    await sleep(50);
+    assert.deepEqual(workers.map((c) => reaper.isAlive(c.pid)), [false, true, true, true], 'apply stops only the idle-run worker, preserving queued work');
+  } finally { for (const child of workers) child.kill('SIGKILL'); }
+});
+
 async function orphan(marked) {
   const owner = spawn(process.execPath, ['-e', `const {spawn}=require('node:child_process');
     const c=spawn(process.execPath,['-e','setInterval(()=>{},1000)'],{detached:true,stdio:'ignore',env:${marked ? '{...process.env,CODE_FORGE_OWNER_PID:String(process.pid),CODE_FORGE_RUN_ID:"r-orphan"}' : '{}'}});

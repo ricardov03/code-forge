@@ -11,6 +11,8 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | Key | Type | Required | Default | Notes |
 |---|---|---|---|---|
 | `version` | const `1` | yes | — |  |
+| `worker` | object |  | — |  |
+| `worker.idle_exit_hours` | number |  | `24` | min 0; Stop a worker after this many hours without run ledger activity, queued/running tickets or changed open worktrees. Checked at most once a minute. 0 disables idle exit and idle-run sweep classification. |
 | `native` | object |  | — |  |
 | `native.daemon` | boolean |  | `true` | Use the optional native daemon for run status and block waits. False uses Node only; CODE_FORGE_NATIVE=0 also disables it. |
 | `project` | object |  | — |  |

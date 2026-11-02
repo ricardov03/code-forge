@@ -9,6 +9,13 @@
   "$comment": "version/provider/levels are REQUIRED with NO schema-level default (a config omitting them is refused here) — `migrate.mjs` fills a MISSING `version` to CURRENT_VERSION before this schema ever runs (so an on-disk file may omit `version`), but `provider` has no such auto-fill anywhere and must be present in the loaded document.",
   "properties": {
     "version": { "type": "integer", "const": 1 },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idle_exit_hours": { "type": "number", "minimum": 0, "default": 24, "description": "Stop a worker after this many hours without run ledger activity, queued/running tickets or changed open worktrees. Checked at most once a minute. 0 disables idle exit and idle-run sweep classification." }
+      }
+    },
     "native": {
       "type": "object",
       "additionalProperties": false,

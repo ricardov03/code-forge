@@ -35,6 +35,8 @@ Under `proof.isolation: worktree` (`proof.md` §3) the coder calls `review-file`
 
 The orchestrator can add a review worker to an active run with `run start --add-worker --run <id>`, up to `review.workers` (1–4, default 1); coders never run this verb.
 
+Workers stop cleanly after `worker.idle_exit_hours` without run activity (default 24 hours; `0` disables), removing their heartbeat and writing one signed `worker.idle_exit` row when the ledger is writable. Any run ledger row, queued or running ticket, or changed open worktree resets the clock; checks run at most once a minute and add no git calls after observed ticket activity. `sweep` and full `doctor` list idle-run workers as stale, including older workers without idle exit; `sweep --apply` can stop them after its usual ownership and process identity checks. When every open branch is merged into its recorded base branch, `status` prints the command to end the active run.
+
 ## §2 Depth by risk (adaptive mode)
 
 The topology is decided in one place (`planSessions`). Consensus (§6) runs only when `review.multimodel` is on **and** the file's risk is above `review.single_reviewer_max_risk` (default 1) **and** the block is not a `docs`/`contract` block (`decisions.md` §5) unless `review.multimodel_for_docs` is true (default false). Everything else is adaptive, below. Why: a consensus review of a four-file docs block cost $16.70 — review cost dominates, and a low-risk file gains nothing from a second provider.

@@ -41,6 +41,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expiryChecks } from '../autopilot/limits.mjs';
+import { idleExitHours, runActivityAt } from '../cli/sweep.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { reviewWorkers } from '../config/validate.mjs';
 import { cacheHoursFrom, createDefaultKeyStore, resolveKey } from '../keys/store.mjs';
@@ -69,6 +70,7 @@ export const JEV_KEY_NAME = 'jev';
 
 export const DEFAULT_POLL_MS = 250;
 export const DEFAULT_SESSION_TIMEOUT_S = 300;
+
 
 /** B42: `review.parallel_tickets` when the config does not set a valid one. */
 export const DEFAULT_PARALLEL_TICKETS = 6;
@@ -245,6 +247,8 @@ export function recordedVerdict(result) {
  * @property {typeof readTicket} [readTicket] - the ticket read (a test seam).
  * @property {typeof import('../util/exec.mjs').exec} [watchExec] - watch git exec seam.
  * @property {() => number} [watchNow] - watch debounce clock (default: Date.now).
+ * @property {() => number} [now] - idle activity clock (default: Date.now).
+ * @property {typeof import('../util/exec.mjs').exec} [idleExec] - idle worktree git reads.
  * @property {Parameters<typeof watchTick>[0]['hooks']} [watchHooks] - deterministic watch races.
  * @property {import('../keys/store.mjs').KeyStore} [store] - default: B2's production store.
  * @property {any} [opRead]
@@ -296,6 +300,11 @@ export async function createWorker(opts, deps = {}) {
   /** @type {(() => void) | null} wakes the pool's wait in `drain` (stop) */
   let poolWake = null;
   let activity = 0;
+  const now = deps.now ?? Date.now;
+  let lastIdleCheck = -Infinity;
+  let lastActivity = 0;
+  let ticketSinceCheck = false;
+  const idleTrees = new Map();
 
   // Sessions waiting for a provider retain their ticket's pool slot. Resolve the actual provider
   // at spawn time, after routing and second-level overrides; admission hints never bypass caps.
@@ -761,7 +770,11 @@ export async function createWorker(opts, deps = {}) {
           try { await logWarning({ warning: 'watch_tick_failed', message: text }); } catch { /* a log failure never stops dispatch */ }
         }
         const pending = pendingTickets(repoRoot).filter((id) => !poisoned.has(id) && !started.has(id));
-        if (pending.length > 0 || running.size > 0) activity += 1;
+        if (pending.length > 0 || running.size > 0) {
+          activity += 1;
+          lastActivity = now();
+          ticketSinceCheck = true;
+        }
         if (pending.length > 0 && limit === null) ({ limit, fairShare, record } = await poolSettings());
         // Cache even unreadable hints for this tick: ranking never reads a ticket twice.
         /** @type {Map<string, ReturnType<typeof fileKeyOf>>} */
@@ -834,6 +847,27 @@ export async function createWorker(opts, deps = {}) {
     } catch { /* process hygiene must never fail the worker */ }
   }
 
+  async function checkIdle() {
+    const time = now();
+    if (time - lastIdleCheck < 60000) return;
+    lastIdleCheck = time;
+    // Any ticket observed since the last check is sufficient evidence, even after it
+    // finished. This path adds no git calls or ledger reads to ticket processing.
+    if (ticketSinceCheck) { ticketSinceCheck = false; return; }
+    try {
+      const record = await loadRun(runId);
+      const hours = idleExitHours(snapshotFor(record, '')?.config ?? cfg);
+      if (hours === 0) return;
+      lastActivity = Math.max(lastActivity, await runActivityAt({ ...record, run_id: runId }, {
+        now: time, repoRoot, readRows, execute: deps.idleExec, trees: idleTrees,
+      }));
+      if (stopping || time - lastActivity < hours * 3600000 || pendingTickets(repoRoot).length > 0) return;
+      stop();
+      try { await ledger({ event: 'worker.idle_exit', ts: new Date(time).toISOString(), idle_hours: hours, worker: identity }); }
+      catch { /* ledger failures still allow a clean exit and heartbeat retraction */ }
+    } catch { /* unknown activity is not proof of idleness */ }
+  }
+
   /**
    * Resolve when one of `slots` settles, `pollMs` passes, or `stop()` is called.
    * @param {Array<Promise<void>>} slots
@@ -900,7 +934,12 @@ export async function createWorker(opts, deps = {}) {
       try {
         queueWatch = watch(queueDir(repoRoot), (_event, file) => {
           if (!file || !/^[a-f0-9]{24}\.json$/.test(String(file))) return;
+          // Notifications may arrive after dispatch finished the ticket. Its activity
+          // was already counted by drain; a late event must not restart idle backoff.
+          if (isDone(repoRoot, String(file).slice(0, 24))) return;
           activity += 1;
+          lastActivity = now();
+          ticketSinceCheck = true;
           wake?.();
           poolWake?.();
         });
@@ -914,6 +953,7 @@ export async function createWorker(opts, deps = {}) {
         const before = activity;
         try {
           if (await drain() > 0) await cleanOrphans();
+          await checkIdle();
         } catch {
           // the queue directory itself failed to read: try again on the next poll
         }
