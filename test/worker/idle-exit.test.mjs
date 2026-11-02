@@ -5,20 +5,23 @@ import path from 'node:path';
 import { test } from 'node:test';
 import { createWorker } from '../../src/worker/loop.mjs';
 import { exec } from '../../src/util/exec.mjs';
-import { enqueue, readWorker } from '../../src/worker/queue.mjs';
+import { enqueue, isDone, pendingTickets, readWorker, reviewsDir } from '../../src/worker/queue.mjs';
 import { createKeyStore } from '../../src/keys/store.mjs';
 import { loadKey, verifyRow } from '../../src/state/signer.mjs';
 
 const HOUR = 3600000;
 
-/** @param {{hours?: number, ticketAt?: number, ledgerAt?: number, treeAt?: number, unwritable?: boolean, step?: number}} [opts] */
-async function idleRun({ hours, ticketAt, ledgerAt, treeAt, unwritable = false, step = HOUR } = {}) {
+/** @param {{hours?: number, ticketAt?: number, ledgerAt?: number, treeAt?: number, unwritable?: boolean, poisonTicket?: boolean, step?: number}} [opts] */
+async function idleRun({ hours, ticketAt, ledgerAt, treeAt, unwritable = false, poisonTicket = false, step = HOUR } = {}) {
   const { repo, runId } = await makeRepo();
   mkdirSync(path.join(repo, '.code-forge', 'queue'), { recursive: true });
+  const ticket = poisonTicket ? enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' }) : null;
+  if (ticket) mkdirSync(path.join(reviewsDir(repo, runId), `${ticket.ticket}.json`, 'blocker'), { recursive: true });
   const start = Date.now();
   let now = start;
   let sleeps = 0;
   let forced = false;
+  let reviews = 0;
   const rows = [];
   const history = [];
   const gitChecks = [];
@@ -35,7 +38,7 @@ async function idleRun({ hours, ticketAt, ledgerAt, treeAt, unwritable = false, 
     idleExec: async (argv, opts) => { gitChecks.push(now - start); return exec(argv, opts); },
     writeRow: async (row) => { if (unwritable) throw new Error('read only'); rows.push(row); },
     expiryCheck: async () => {},
-    review: async () => ({ status: 'reviewed', approved: true, engine: 'test', sessions: [] }),
+    review: async () => { reviews++; return { status: 'reviewed', approved: true, engine: 'test', sessions: [] }; },
     sleep: async () => {
       now += step;
       sleeps++;
@@ -47,7 +50,7 @@ async function idleRun({ hours, ticketAt, ledgerAt, treeAt, unwritable = false, 
   });
   await worker.run();
   assert.equal(readWorker(repo), null, 'the idle stop removes its heartbeat');
-  return { rows: rows.filter((r) => r.event === 'worker.idle_exit'), sleeps, forced, key, runId, gitChecks };
+  return { rows: rows.filter((r) => r.event === 'worker.idle_exit'), sleeps, forced, key, runId, gitChecks, repo, ticket, reviews };
 }
 
 test('default idle timeout exits at 24 hours with exactly one signed row', async () => {
@@ -67,6 +70,17 @@ test('a queued ticket, any run ledger row or changed open worktree resets the id
     assert.equal(result.rows.length, 1, 'one idle exit after new activity');
     if (activity.ticketAt) assert.equal(result.gitChecks.filter((at) => at === 23 * HOUR).length, 0, 'a queued ticket adds zero idle git calls');
   }
+});
+
+test('a poisoned pending ticket without a done marker does not block idle exit', async () => {
+  const result = await idleRun({ hours: 1, poisonTicket: true });
+  assert.ok(result.ticket);
+  assert.equal(result.reviews, 1, 'the poisoned ticket is reviewed once and skipped thereafter');
+  assert.deepEqual(pendingTickets(result.repo), [result.ticket.ticket], 'the failed result write leaves the ticket pending');
+  assert.equal(isDone(result.repo, result.ticket.ticket), false, 'no done marker was published');
+  assert.equal(result.forced, false, 'the poisoned ticket does not require an external stop');
+  assert.equal(result.sleeps, 1, 'worker exits after the configured idle hour');
+  assert.equal(result.rows.length, 1, 'one idle exit row');
 });
 
 test('idle activity scans run at most once a minute', async () => {

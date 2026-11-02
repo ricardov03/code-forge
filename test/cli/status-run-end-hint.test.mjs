@@ -30,7 +30,7 @@ test('status hints exactly once only while every open branch is merged into its 
   git('-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-q', '--allow-empty', '-m', 'unmerged');
   git('checkout', '-q', base);
   for (const state of ['unmerged', 'ended', 'empty', 'missing']) {
-    if (state === 'ended') record.status = 'ended';
+    if (state === 'ended') { record.status = 'ended'; record.blocks = { one: original.one }; }
     if (state === 'empty') { record.status = 'active'; record.blocks = {}; }
     if (state === 'missing') record.blocks = { one: { status: 'open', base_branch: base, worktree: { branch: 'missing' } } };
     await saveRun(record);

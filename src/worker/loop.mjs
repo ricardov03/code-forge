@@ -859,9 +859,9 @@ export async function createWorker(opts, deps = {}) {
       const hours = idleExitHours(snapshotFor(record, '')?.config ?? cfg);
       if (hours === 0) return;
       lastActivity = Math.max(lastActivity, await runActivityAt({ ...record, run_id: runId }, {
-        now: time, repoRoot, readRows, execute: deps.idleExec, trees: idleTrees,
+        now: time, repoRoot, readRows, execute: deps.idleExec, trees: idleTrees, ignoredTickets: poisoned,
       }));
-      if (stopping || time - lastActivity < hours * 3600000 || pendingTickets(repoRoot).length > 0) return;
+      if (stopping || time - lastActivity < hours * 3600000 || pendingTickets(repoRoot).filter((id) => !poisoned.has(id)).length > 0) return;
       stop();
       try { await ledger({ event: 'worker.idle_exit', ts: new Date(time).toISOString(), idle_hours: hours, worker: identity }); }
       catch { /* ledger failures still allow a clean exit and heartbeat retraction */ }

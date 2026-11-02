@@ -21,7 +21,7 @@ export function idleExitHours(cfg) {
  * their root so queued work needs no git read. Metadata detects edits to already dirty files.
  * @param {Record<string, any>} record
  * @param {{now?: number, repoRoot?: string, readRows?: () => Promise<Record<string, any>[]>,
- * execute?: typeof exec, trees?: Map<string, string>}} [deps]
+ * execute?: typeof exec, trees?: Map<string, string>, ignoredTickets?: ReadonlySet<string>}} [deps]
  */
 export async function runActivityAt(record, deps = {}) {
   const now = deps.now ?? Date.now();
@@ -41,7 +41,7 @@ export async function runActivityAt(record, deps = {}) {
     names = new Set();
   }
   for (const name of names) {
-    if (!/^[a-f0-9]{24}\.json$/.test(name) || names.has(name.slice(0, 24) + '.done')) continue;
+    if (!/^[a-f0-9]{24}\.json$/.test(name) || names.has(name.slice(0, 24) + '.done') || deps.ignoredTickets?.has(name.slice(0, 24))) continue;
     // Include fresh claims too: a held completion marker cannot prove inactivity.
     if (JSON.parse(readFileSync(path.join(queue, name), 'utf8')).run === record.run_id) return now;
   }
