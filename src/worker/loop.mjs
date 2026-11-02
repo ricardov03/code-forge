@@ -60,7 +60,7 @@ import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { openFindings } from '../review/gate-check.mjs';
 import { countLines, RouteError, routeTicket } from '../review/route.mjs';
 import { canonicalPath, contentRootFor, reviewTicket } from './engine.mjs';
-import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, queueDir, readTicket, retractWorker, workerRegistry, writeResult, writeTicketTimings } from './queue.mjs';
+import { announceWorker, beatWorker, HEARTBEAT_MS, isDone, liveWorker, pendingTickets, queueDir, readResult, readTicket, retractWorker, workerRegistry, writeResult, writeTicketTimings } from './queue.mjs';
 import { DELETED_HASH, hashBytes, readRegularFileNoFollow, repoRootOf, WorkerError } from './ticket.mjs';
 import { watchTick } from './watch.mjs';
 
@@ -362,13 +362,15 @@ export async function createWorker(opts, deps = {}) {
 
   /**
    * The config ticket `id` is reviewed with (B35): its snapshot from the run record, re-read per
-   * ticket; the boot `cfg` when the run has no record or the record has no snapshot.
+   * ticket; retries use the current snapshot after a reload. The boot `cfg` is used when the
+   * run has no record or the record has no snapshot.
    * @param {string} id
+   * @param {boolean} [retry]
    * @returns {Promise<Record<string, any>>}
    * @throws {Error} `config-snapshot` — a record that cannot be read, or a missing/altered snapshot.
    */
-  async function configFor(id) {
-    return snapshotFor(await configRecord(), id)?.config ?? cfg;
+  async function configFor(id, retry = false) {
+    return snapshotFor(await configRecord(), retry ? '' : id)?.config ?? cfg;
   }
 
   /** Read once for pool admission hints; ticket processing still re-reads its own snapshot. */
@@ -553,7 +555,7 @@ export async function createWorker(opts, deps = {}) {
     if (current !== ticket.content_hash) return { ...base, status: 'stale', ...(ticket.kind === 'answers' ? { reason: 'source-changed' } : {}), approved: false };
     let ticketCfg;
     try {
-      ticketCfg = await configFor(id);
+      ticketCfg = await configFor(id, ticket.started_at != null || readResult(repoRoot, runId, id) !== null);
     } catch {
       return { ...base, status: 'unavailable', reason: 'config-snapshot', approved: false };
     }
@@ -680,7 +682,8 @@ export async function createWorker(opts, deps = {}) {
    */
   async function providerHint(id, record) {
     try {
-      let current = snapshotFor(record, id)?.config ?? cfg;
+      // Admission follows current capacity; reviewOne resolves any first-attempt pin itself.
+      let current = snapshotFor(record, '')?.config ?? cfg;
       if (current?.review?.routes?.length) {
         const ticket = loadTicket(repoRoot, id);
         const root = await contentRootFor(runId, ticket.block, repoRoot);

@@ -257,7 +257,7 @@ function adaptiveTicket(cfg, file, performance, picked) {
   const previous = performance.rows.find((r) => r.event === 'review.route' && r.level === 'L2'
     && r.ticket === performance.ticketId && (performance.runId === undefined || r.run === performance.runId));
   const prior = previous && candidates.find((c) => c.model === previous.model && c.provider === previous.provider);
-  if (previous && !prior) throw new RouteError();
+  // A reload may remove the former choice. In that case pick from today's candidates.
   const choice = prior ? { candidate: prior, reason: previous.reason ?? 'configured-order' }
     : rule?.pin === true ? { candidate: candidates[0], reason: 'pinned' }
     : pickReviewer(candidates, stats, { ...cfg.review?.adaptive, ticketId: performance.ticketId });
