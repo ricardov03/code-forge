@@ -6,6 +6,14 @@ and closed by the same gate as in a plan run.
 
 For design first, open code blocks with `--after <design-id>`: the design must be closed, including its owner's `block human-pass` when it has a `human_check` clause.
 
+When closed blocks of the same run have landed changes to files your open worktree block owns,
+use `code-forge block rebase <id> --run <r> --accept-landed`. It requires the native binary,
+checks every upstream commit against those closed blocks' branches, queues changed owned files
+for review again, and signs the accepted origins. It needs no terminal and works under an active
+autopilot grant. `--accept-changed <file> --reason <text>` remains a human-only acceptance at a
+terminal and is refused while a grant is active; foreign owned changes still refuse with
+`owned-conflict`.
+
 This page walks one brief-mode run from start to end, in a repository where an outside reviewer
 (a person or a CI review bot) reviews every pull request. Every command and every output on this
 page comes from the CLI as built. When a verb's usage line disagrees with this page, the verb is

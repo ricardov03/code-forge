@@ -1,0 +1,166 @@
+import { cfgFor, freshDir, git, writeFile } from '../review/helpers.mjs';
+import assert from 'node:assert/strict';
+import path from 'node:path';
+import { test } from 'node:test';
+import { startGrant } from '../../src/autopilot/grant.mjs';
+import { runBlock } from '../../src/cli/block.mjs';
+import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
+import { readRun, saveRun, startRun, writeSigned } from '../../src/state/run.mjs';
+import { loadKey, verifyRow } from '../../src/state/signer.mjs';
+import { nativePath } from '../../src/util/native.mjs';
+import { blockTickets, readTicket, resolveTicket } from '../../src/worker/queue.mjs';
+import { contentHash } from '../../src/worker/ticket.mjs';
+
+const available = { skip: nativePath() ? false : 'needs a locally built native binary' };
+const probe = async (/** @type {number} */ pid) => pid === 4242 ? 'fixture-worker' : null;
+
+/** @param {string[]} args @param {Record<string, any>} [deps] */
+async function cli(args, deps = {}) {
+  let out = ''; let err = '';
+  const code = await runBlock(args, { probe, isTTY: false, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } }, ...deps });
+  return { code, out, err };
+}
+
+/** Closed sibling branches model B228/B231 landing while B205b remains open. */
+async function fixture(label, prefix = '') {
+  const slug = `landed-${label}`;
+  const repo = freshDir(slug);
+  const workspace = path.join(repo, prefix);
+  const files = Array.from({ length: 5 }, (_, i) => `${prefix ? `${prefix}/` : ''}src/shared${i}.mjs`);
+  await git(['init', '-qb', 'main'], repo);
+  await git(['config', 'user.useConfigOnly', 'true'], repo);
+  const config = { version: 1, project: { slug }, ...cfgFor(), gates: { test: ['node', '--test'], lint: null, types: null, format: null }, proof: { isolation: 'worktree', worktree: { dir: freshDir('trees') } } };
+  writeFile(workspace, '.code-forge.yml', JSON.stringify(config));
+  writeFile(repo, '.gitignore', '.code-forge/\n');
+  for (const file of files) writeFile(repo, file, '// base\n');
+  writeFile(repo, 'upstream.md', 'base\n');
+  await git(['add', '-A'], repo);
+  await git(['commit', '-qm', 'base'], repo);
+  const runId = `r-${slug}`;
+  const writeRow = (row) => appendRow(row, { slug });
+  await startRun({ workspace, project: slug, runId, workerPid: 4242, probe, config, writeRow });
+  const inputs = freshDir('inputs');
+  writeFile(inputs, 'acceptance.json', JSON.stringify([{ clause: 'landed rebase', tests: ['block-rebase-landed'] }]));
+  writeFile(inputs, 'coder.log', '$ node --test\n');
+  assert.equal((await cli(['open', 'B205b', '--run', runId, '--level', 'L2', '--owned', 'src', '--acceptance', path.join(inputs, 'acceptance.json')])).code, 0);
+  const entry = (await readRun(runId)).blocks.B205b;
+  const tree = entry.worktree;
+  for (const [i, name] of ['First', 'Second'].entries()) {
+    writeFile(tree.path, `${prefix ? `${prefix}/` : ''}src/local.mjs`, `// local ${i}\n`);
+    await git(['add', '-A'], tree.path);
+    await git(['-c', `user.name=${name}`, '-c', `user.email=${name}@example.invalid`, 'commit', '-qm', `local ${i}`], tree.path);
+  }
+  const head = async () => (await git(['rev-parse', 'HEAD'], tree.path)).trim();
+  const sign = (row) => writeSigned(runId, writeRow, { block: 'B205b', ...row });
+  return { repo, files, runId, tree, base: entry.base_sha, head, sign,
+    rows: () => readAllRows(slug), entry: async () => (await readRun(runId)).blocks.B205b,
+    rebase: () => cli(['rebase', 'B205b', '--run', runId, '--accept-landed', '--json']),
+    close: () => cli(['close', 'B205b', '--run', runId, '--worker-pid', '4242', '--transcript', path.join(inputs, 'coder.log')]),
+    move: async (kind = 'landed') => {
+      for (const [index, id] of ['B228', 'B231'].entries()) {
+        const changed = files.slice(index === 0 ? 0 : 3, index === 0 ? 3 : 5);
+        for (const file of changed) writeFile(repo, file, `// ${id}\n`);
+        writeFile(repo, 'upstream.md', `${id}\n`);
+        await git(['add', '-A'], repo);
+        await git(['commit', '-qm', id], repo);
+        if (kind === 'landed') {
+          // One default branch and one recorded custom branch exercise both origin forms.
+          const branch = index === 0 ? `forge/${runId}/${id}` : 'custom-landed';
+          await git(['branch', branch], repo);
+          const record = await readRun(runId);
+          record.blocks[id] = { status: 'closed', owned_files: changed, worktree: { branch } };
+          await saveRun(record);
+        }
+      }
+      return (await git(['rev-parse', 'HEAD'], repo)).trim();
+    },
+  };
+}
+
+test('landed siblings: five owned files queue again, bases move, row verifies and committers survive without identity', available, async () => {
+  const f = await fixture('siblings', 'project');
+  const original = await git(['log', '-2', '--format=%s%x00%cn%x00%ce'], f.tree.path);
+  const newBase = await f.move();
+  const previous = process.env.GIT_CONFIG_GLOBAL;
+  process.env.GIT_CONFIG_GLOBAL = '/dev/null';
+  let result;
+  try { result = await f.rebase(); } finally {
+    if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = previous;
+  }
+  assert.equal(result.code, 0, result.err);
+  // B231's branch also contains B228's earlier commits, so both are witnesses.
+  const accepted = f.files.map((file, i) => ({ file, blocks: i < 3 ? ['B228', 'B231'] : ['B231'] }));
+  assert.deepEqual(JSON.parse(result.out), { block: 'B205b', event: 'rebased', old_base: f.base, new_base: newBase, accepted_landed: accepted });
+  const entry = await f.entry();
+  assert.deepEqual([entry.base_sha, entry.worktree.base_sha, entry.status], [newBase, newBase, 'open']);
+  assert.equal(await git(['log', '-2', '--format=%s%x00%cn%x00%ce'], f.tree.path), original);
+  assert.equal((await git(['rev-parse', 'HEAD~2'], f.tree.path)).trim(), newBase);
+  const tickets = blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B205b', tree: f.tree.path });
+  assert.deepEqual(tickets.map((t) => t.file).sort(), f.files, 'exactly the five changed owned files are queued');
+  for (const file of f.files) {
+    const id = resolveTicket({ repoRoot: f.repo, run: f.runId, block: 'B205b', file, tree: f.tree.path }).ticket;
+    assert.equal(readTicket(f.repo, id).content_hash, contentHash(f.tree.path, file), `${file}: Node ticket identity and hash`);
+  }
+  const rows = (await f.rows()).filter((r) => r.event === 'block.rebase');
+  assert.equal(rows.length, 1);
+  assert.deepEqual([rows[0].old_base, rows[0].new_base, rows[0].worktree, rows[0].accepted_landed], [f.base, newBase, true, accepted]);
+  assert.deepEqual(verifyRow(rows[0], await loadKey(f.runId)), { ok: true });
+});
+
+test('foreign owned commits, including a reverted change after a landed commit, refuse with exact state unchanged', available, async () => {
+  for (const reverted of [false, true]) {
+    const f = await fixture(`foreign-${reverted}`, 'project');
+    if (reverted) await f.move();
+    const file = f.files[0];
+    writeFile(f.repo, file, '// foreign\n');
+    await git(['add', '-A'], f.repo);
+    await git(['commit', '-qm', 'foreign'], f.repo);
+    const foreign = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+    if (reverted) {
+      writeFile(f.repo, file, '// B228\n');
+      await git(['add', '-A'], f.repo);
+      await git(['commit', '-qm', 'revert foreign'], f.repo);
+    }
+    const before = [await f.head(), await f.entry(), await f.rows()];
+    const result = await f.rebase();
+    assert.equal(result.code, 1);
+    assert.equal(result.out, '');
+    assert.match(result.err, /owned-conflict/);
+    assert.ok(result.err.includes(file) && result.err.includes(foreign), 'refusal identifies the file and foreign commit');
+    assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'head, both bases and every row stay unchanged');
+  }
+});
+
+test('under an active grant landed rebase needs no TTY, human acceptance stays refused, and close prints no unowned_change', available, async () => {
+  const f = await fixture('grant');
+  const now = new Date();
+  await startGrant({ runId: f.runId, input: { until: new Date(now.getTime() + 3600000).toISOString(), delegate: 'L2', allow: 'waive:warning' }, now, writeRow: (row) => appendRow(row, { slug: 'landed-grant' }) });
+  await f.move();
+  const before = [await f.head(), await f.entry(), await f.rows()];
+  const humanArgs = ['rebase', 'B205b', '--run', f.runId, '--accept-changed', f.files[0], '--reason', 'owner acceptance'];
+  const human = await cli(humanArgs, { isTTY: true, confirm: async () => true });
+  assert.equal(human.code, 1);
+  assert.match(human.err, /refused while an autopilot grant is active/);
+  assert.equal((await cli(humanArgs)).code, 2, 'human acceptance still requires a terminal');
+  assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before);
+  const result = await f.rebase();
+  assert.equal(result.code, 0, result.err);
+  const closed = await f.close();
+  assert.equal(closed.code, 1, 'close exposes remaining review and gate blockers');
+  assert.match(closed.out, /not_approved|no_green_gates/);
+  assert.doesNotMatch(closed.out + closed.err, /unowned_change/, 'all printed close blockers exclude upstream files');
+});
+
+test('disabled native binary requires the native binary and changes nothing', async () => {
+  const f = await fixture('disabled');
+  await f.move();
+  const before = [await f.head(), await f.entry(), await f.rows()];
+  const previous = process.env.CODE_FORGE_NATIVE;
+  process.env.CODE_FORGE_NATIVE = '0';
+  let result;
+  try { result = await f.rebase(); } finally {
+    if (previous === undefined) delete process.env.CODE_FORGE_NATIVE; else process.env.CODE_FORGE_NATIVE = previous;
+  }
+  assert.deepEqual(result, { code: 1, out: '', err: 'block rebase --accept-landed needs the native binary (native/bin/<platform>-<arch>)\n' });
+  assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before);
+});

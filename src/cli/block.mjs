@@ -6,7 +6,7 @@
  *              [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <forecast>] [--kind code|docs|contract|light]
  *              [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]
  *   block attempt <id> --run <r>
- *   block rebase <id> --run <r> [--head <ref>]
+ *   block rebase <id> --run <r> [--head <ref>] [--accept-landed]
  *   block claim <id> <path> --run <r>
  *   block ready <id> --run <r> [--transcript <file>] [--report <file>] [--json]
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree] [--auto-claim]
@@ -204,6 +204,7 @@
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { mkdtemp, readFile, realpath, rm } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { parse as parseYAML } from 'yaml';
 import { runGatesVerb } from './gates.mjs';
@@ -231,6 +232,7 @@ import { DEFAULT_CONFIG_FILENAME, loadProjectConfig } from '../config/load.mjs';
 import { reviewExcludeRule, validateConfig } from '../config/validate.mjs';
 import { migrateConfig } from '../config/migrate.mjs';
 import { exec } from '../util/exec.mjs';
+import { runNative } from '../util/native.mjs';
 import { contentHash, gitChildEnv, readRegularFileNoFollow } from '../worker/ticket.mjs';
 import { clearDone, enqueue, resetAcceptanceWatch, resolveTicket } from '../worker/queue.mjs';
 import { loadState } from '../worker/review-state.mjs';
@@ -550,7 +552,7 @@ const USAGE =
 const VERB_USAGE = {
   open: '<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]',
   attempt: '<id> --run <r>',
-  rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>]',
+  rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed]',
   claim: '<id> <path> --run <r>',
   ready: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>]',
   close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]',
@@ -668,7 +670,7 @@ export async function runBlock(args, deps = {}) {
   }
   let jsonOpenId;
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'land' ? ['merge', 'no-merge-gate'] : []), ...(sub === 'close' ? ['decide', 'auto-claim'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'rebase' ? ['accept-landed'] : []), ...(sub === 'land' ? ['merge', 'no-merge-gate'] : []), ...(sub === 'close' ? ['decide', 'auto-claim'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;
@@ -686,6 +688,22 @@ export async function runBlock(args, deps = {}) {
     if (sub === 'open' && json) jsonOpenId = id;
     const runId = typeof flags.run === 'string' ? flags.run : undefined;
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
+    if (sub === 'rebase' && flags['accept-landed'] === true) {
+      if (positionals.length !== 1 || Object.keys(flags).some((key) => !['run', 'json', 'accept-landed'].includes(key))) throw new StateError('usage', '--accept-landed takes one block id, --run and optional --json');
+      const result = await runNative(['block-rebase-landed', '--home', os.homedir(), '--run', runId, '--block', id, '--json']);
+      if (result === null) {
+        err('block rebase --accept-landed needs the native binary (native/bin/<platform>-<arch>)\n');
+        return 1;
+      }
+      if (result.result !== 'ok') {
+        err(result.stderr || 'block rebase --accept-landed: native command failed\n');
+        return result.code ?? 1;
+      }
+      const moved = JSON.parse(result.stdout);
+      say(`block ${id} rebased ${moved.old_base.slice(0, 12)} → ${moved.new_base.slice(0, 12)}\n`);
+      if (json) out(result.stdout);
+      return 0;
+    }
     if (sub === 'ready' && (positionals.length !== 1 || Object.keys(flags).some((key) => !['run', 'json', 'worker-pid', 'transcript', 'report'].includes(key)))) {
       throw new StateError('usage', 'block ready takes one block id, --run and optional --worker-pid/--transcript/--report/--json');
     }

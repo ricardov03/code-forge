@@ -50,6 +50,13 @@ State lives in the plan file's header — `facts → planned → hardened → co
 
 ## §4 Hard rules (the headings of `references/rules-core.md`)
 
+For an open worktree block whose owned files changed upstream through closed blocks of the same
+run, use `forge block rebase <id> --run <r> --accept-landed`. The native binary must be installed;
+it verifies every touching commit against the closed blocks' branches, queues changed owned files
+for review again, and signs `accepted_landed` origins. No terminal is needed, including under an
+active autopilot grant. `--accept-changed <file> --reason <text>` stays human-only at a terminal
+and is refused during an active grant; foreign changes remain `owned-conflict`.
+
 - **R1** Coder ≠ reviewer, always
 - **R2** The orchestrator never codes, reviews or judges
 - **R3** State lives outside the conversation

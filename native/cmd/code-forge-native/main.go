@@ -14,6 +14,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/rebase"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -45,12 +46,17 @@ func run(args []string) (int, error) {
 	if len(args) == 1 && args[0] == "version" {
 		return 0, json.NewEncoder(os.Stdout).Encode(map[string]string{"version": version, "goVersion": runtime.Version()})
 	}
-	if len(args) == 0 || (args[0] != "verify-ledger" && args[0] != "serve" && args[0] != "state-golden") {
-		return 2, fmt.Errorf("usage: code-forge-native version | verify-ledger | serve --home <dir> --run <id>")
+	if len(args) == 0 || (args[0] != "verify-ledger" && args[0] != "serve" && args[0] != "state-golden" && args[0] != "block-rebase-landed") {
+		return 2, fmt.Errorf("usage: code-forge-native version | verify-ledger | serve | block-rebase-landed --home <dir> --run <id> --block <id> --json")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	home := flags.String("home", "", "home directory containing .code-forge")
 	runID := flags.String("run", "", "run ID")
+	var block *string
+	if args[0] == "block-rebase-landed" {
+		block = flags.String("block", "", "open worktree block ID")
+		flags.Bool("json", false, "print JSON result")
+	}
 	var op *string
 	if args[0] == "state-golden" {
 		op = flags.String("op", "", "test operation: append, save, lock")
@@ -64,6 +70,16 @@ func run(args []string) (int, error) {
 	}
 	if *home == "" || !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`).MatchString(*runID) || flags.NArg() != 0 {
 		return 2, fmt.Errorf("%s requires --home <dir> and a valid --run <id>", args[0])
+	}
+	if args[0] == "block-rebase-landed" {
+		if !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$`).MatchString(*block) {
+			return 2, fmt.Errorf("block-rebase-landed requires a valid --block <id>")
+		}
+		result, err := rebase.Run(*home, *runID, *block)
+		if err != nil {
+			return 1, err
+		}
+		return 0, json.NewEncoder(os.Stdout).Encode(result)
 	}
 	if args[0] == "state-golden" {
 		if err := stateGolden(*home, *runID, *op); err != nil {

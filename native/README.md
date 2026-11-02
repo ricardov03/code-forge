@@ -3,6 +3,15 @@
 `native/` contains the optional Go accelerator and compatibility packages for code-forge.
 The build is pure Go, uses only the standard library, and keeps CGO off (`CGO_ENABLED=0`).
 This also avoids the macOS 26 LC_UUID linker error during local tests.
+
+`block-rebase-landed --home <dir> --run <id> --block <id> --json` implements
+`block rebase --accept-landed`; this feature requires the native binary and has no
+Node fallback. Under the shared run lock it checks owned upstream changes against
+closed sibling branches, rebases with each original committer identity, queues
+changed owned content using Node ticket identities, then writes a signed
+`block.rebase` row before saving both bases. Failed replay aborts and restores the
+old head. Release builds provide binaries; local tests use `node scripts/build-native.mjs`.
+
 Test from the repository root:
 
 ```sh
