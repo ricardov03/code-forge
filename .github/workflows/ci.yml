@@ -49,6 +49,7 @@ jobs:
       - name: npm audit (high severity)
         run: npm audit --audit-level=high
 
+
       # Skill / plugin validation (`claude plugin validate .`, plan §9.2) is deliberately NOT a
       # step here. `.claude-plugin/plugin.json` doesn't exist until B15, and the `claude` CLI
       # isn't installed on GitHub-hosted runners — a step that only checks `command -v claude`
@@ -58,3 +59,42 @@ jobs:
       # `claude plugin validate .` runs locally in step 4 of `npm run release`, before every
       # release (the release workflow only creates the GitHub release).
 
+  # B237: the Go core (native/) has its own tests. Run them on the go.mod floor and on the
+  # newest Go, so a toolchain change cannot break the native binary without a red run.
+  go:
+    name: go (${{ matrix.go }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        go: ['1.22.x', stable]
+    defaults:
+      run:
+        working-directory: native
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-go@v5
+        with:
+          go-version: ${{ matrix.go }}
+          cache: false
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+
+      - name: gofmt (no unformatted files)
+        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go test (race detector)
+        run: go test -race -count=1 ./...
+
+      # The same script the release runs: all four targets must build, and the host binary must run.
+      - name: build-native (all release targets)
+        working-directory: .
+        run: |
+          node scripts/build-native.mjs
+          native/bin/linux-x64/code-forge-native version
