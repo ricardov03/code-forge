@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `code-forge block ready <id>` lists every close blocker at once, each with the exact fix command, and writes nothing; `block close` now prints the same full list when it refuses (B205c)
+
 ### Fixed
 
 - `block close` leaves out a reviewed file that is now back to its base bytes, and a file the block added and then deleted; a file with other changes still needs review (B228, #30)
