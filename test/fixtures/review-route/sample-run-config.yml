@@ -1,0 +1,57 @@
+version: 1
+project:
+  name: code-forge
+  slug: code-forge
+provider: anthropic
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-1
+caps:
+  coders: 2
+review:
+  multimodel: false
+  file_loop: watch
+  routes:
+    - min_lines: 400
+      provider: xai
+      model: grok-4.7
+      session_timeout_s: 1800
+      fallback:
+        - provider: anthropic
+          model: claude-opus-5-5
+engine: auto
+harnesses:
+  - claude
+system1:
+  fallback: rules
+gates:
+  test:
+    - npm
+    - test
+  lint: null
+  types:
+    - npm
+    - run
+    - typecheck
+  format: null
+proof:
+  tiers:
+    high:
+      paths: []
+  isolation: worktree
+  worktree:
+    dir: .claude/worktrees/cf
+  export:
+    link_dirs:
+      - node_modules
+    copy_untracked: []
+context:
+  commands:
+    build: [npm, run, typecheck]
+    test: [node, --import, ./test/helpers/isolate.mjs, --experimental-test-module-mocks, --test]

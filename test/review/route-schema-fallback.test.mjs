@@ -1,8 +1,6 @@
 import { answerFor, freshDir, lines, makeRepo, writeFile } from './helpers.mjs';
 import assert from 'node:assert/strict';
-import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
-import path from 'node:path';
 import { test } from 'node:test';
 import { parse } from 'yaml';
 
@@ -14,10 +12,7 @@ const { startRun } = await import('../../src/state/run.mjs');
 const { openBlock } = await import('../../src/state/block.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
-const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
-const commonDir = execFileSync('git', ['rev-parse', '--path-format=absolute', '--git-common-dir'],
-  { cwd: new URL('../../', import.meta.url), encoding: 'utf8', env: gitChildEnv() }).trim();
-const FIXTURES = `${path.resolve(commonDir, '..', 'plans/tools/forge/b234')}/`;
+const FIXTURES = new URL('../fixtures/review-route/', import.meta.url).pathname;
 const sample = readFileSync(`${FIXTURES}sample.jsonl`, 'utf8').trim().split('\n').map((s) => JSON.parse(s));
 const miss = sample.find((r) => r.event === 'review.schema_invalid');
 const route = sample.find((r) => r.event === 'review.route');
