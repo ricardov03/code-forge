@@ -21,6 +21,7 @@ import { writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
 import { DEFAULT_BRANCH_TEMPLATE, isNoindexPath, repoTopOf, worktreeDirectory } from '../util/worktree-paths.mjs';
 import { liveWorker } from '../worker/queue.mjs';
+import { sweepIdleWorkers } from './sweep.mjs';
 
 const USAGE = 'usage: code-forge doctor [--quick] [--json] [--cwd <dir>]\n';
 
@@ -62,6 +63,17 @@ export async function runDoctorCli(args, deps = {}, adopt = false) {
   try {
     const rows = await runDoctor({ cwd, quick: flags.quick === true, ...(root ? { runRootDir: root } : {}) }, deps);
     if (!flags.quick) {
+      try {
+        const loaded = await loadProjectConfig(cwd);
+        const report = await sweepIdleWorkers({ root: loaded.ok ? loaded.config.tmp?.root : undefined });
+        const workers = report.items.filter((item) => item.kind === 'worker');
+        const existing = rows.find((row) => row.id === 'sweep');
+        if (existing && workers.length > 0) {
+          existing.status = 'WARN';
+          existing.detail = existing.detail.replace(/^\d+ stale workers/, `${workers.length} stale workers`)
+            + ` (${workers.map((item) => `pid ${item.pid} run ${item.runId}`).join(', ')})`;
+        }
+      } catch { /* an unavailable scan leaves the ordinary doctor checks intact */ }
       const binary = nativePath();
       let nativeDetail = 'not found, using Node';
       let nativeOK = false;

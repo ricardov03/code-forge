@@ -568,6 +568,10 @@ The first worker also writes `queue/worker.json` for older readers. Its timer be
 and a clean stop removes its announcements. `worker_down` means no registered worker is live.
 An unreadable or malformed registry entry blocks a new worker. Doctor names its path.
 
+Forgotten workers exit after `worker.idle_exit_hours` without run activity (default 24, `0` disables);
+`sweep` and `doctor` flag idle workers, and `status` hints when all open branches are merged so
+you can end the run.
+
 1. **Tools first.** The project's gates on that file. Red ⇒ `tools_red` back to the coder, no model review.
 2. **S1 scores risk** 0–3 (path rules first). Low confidence ⇒ S2 picks the depth.
 3. **Depth by risk** (multimodel off, the default; at or below `review.single_reviewer_max_risk`,
