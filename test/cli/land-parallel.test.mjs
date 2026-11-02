@@ -55,10 +55,15 @@ test('exec sends no SIGKILL after exit when aborted before its timeout elapses',
     child.kill('SIGTERM');
     await exited;
     const result = await pending;
-    // Advance beyond both possible escalation deadlines after exec has settled.
-    t.mock.timers.tick(2100);
+    assert.equal(hasExited, true, 'the child exits before either escalation deadline');
+    // Check the abort's original deadline separately from the timeout's later deadline:
+    // overwriting killTimer used to leave the first handle alive after exit.
+    t.mock.timers.tick(1899);
+    assert.deepEqual(signals.filter(({ signal }) => signal === 'SIGKILL'), [], 'no escalation before the grace period');
+    t.mock.timers.tick(1);
     assert.deepEqual(signals.filter(({ signal, afterExit }) => signal === 'SIGKILL' && afterExit), [],
-      'no stale escalation timer may signal the exited process group');
+      'the abort escalation timer must not signal the exited process group');
+    t.mock.timers.tick(100);
     assert.deepEqual(signals, [{ signal: 'SIGTERM', afterExit: false }], 'abort sends exactly one SIGTERM');
     assert.equal(result.cancelled, true);
     assert.equal(result.timedOut, false);
