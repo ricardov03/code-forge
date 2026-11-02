@@ -223,7 +223,7 @@ export function exec(argv, opts = {}) {
     let settled = false;
     let exited = false;
     let remaining = Promise.resolve();
-    /** @type {NodeJS.Timeout | undefined} */
+    /** @type {NodeJS.Timeout | null | undefined} */
     let termTimer;
     /** @type {NodeJS.Timeout | undefined} */
     let killTimer;
@@ -278,6 +278,8 @@ export function exec(argv, opts = {}) {
     const abort = () => {
       if (settled || cancelled) return;
       cancelled = true;
+      if (termTimer) clearTimeout(termTimer);
+      termTimer = null;
       if (exited) return;
       killGroup('SIGTERM');
       if (killTimer) clearTimeout(killTimer);
@@ -288,8 +290,10 @@ export function exec(argv, opts = {}) {
 
     if (timeoutMs && !cancelled) {
       termTimer = setTimeout(() => {
+        if (cancelled || exited) return;
         timedOut = true;
         killGroup('SIGTERM');
+        if (killTimer) clearTimeout(killTimer);
         killTimer = setTimeout(() => {
           killGroup('SIGKILL');
         }, KILL_GRACE_MS);

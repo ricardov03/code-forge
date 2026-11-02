@@ -1,6 +1,9 @@
 import { cfgFor, freshDir, git, makeRepo, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
+import childProcess from 'node:child_process';
 import { randomBytes } from 'node:crypto';
+import { once } from 'node:events';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { setTimeout as sleep } from 'node:timers/promises';
 import { test } from 'node:test';
@@ -13,8 +16,64 @@ const { startRun, readRun } = await import('../../src/state/run.mjs');
 const { signRow, verifyRow } = await import('../../src/state/signer.mjs');
 const { gitChildEnv } = await import('../../src/worker/ticket.mjs');
 const { parseTapPassed } = await import('../../src/gates/acceptance.mjs');
+const { exec } = await import('../../src/util/exec.mjs');
 
 let serial = 0;
+
+test('exec sends no SIGKILL after exit when aborted before its timeout elapses', { timeout: 10000 }, async (t) => {
+  const controller = new AbortController();
+  const spawn = childProcess.spawn;
+  let child, ready, exited;
+  let hasExited = false;
+  const signals = [];
+  const spawnSpy = t.mock.method(childProcess, 'spawn', (command, args, options) => {
+    child = spawn(command, args, options);
+    ready = once(child.stdout, 'data');
+    exited = once(child, 'exit');
+    child.once('exit', () => { hasExited = true; });
+    return child;
+  });
+  syncBuiltinESMExports();
+  const kill = process.kill;
+  const killSpy = t.mock.method(process, 'kill', (pid, signal) => {
+    if (pid === -child?.pid) {
+      // Hold the real child alive across both cancellation and the timeout deadline.
+      signals.push({ signal, afterExit: hasExited });
+      return true;
+    }
+    return kill.call(process, pid, signal);
+  });
+  t.mock.timers.enable({ apis: ['setTimeout'] });
+  try {
+    const pending = exec([process.execPath, '-e', "console.log('ready'); setInterval(() => {}, 1000)"], {
+      signal: controller.signal, timeoutMs: 100,
+    });
+    await ready;
+    controller.abort();
+    t.mock.timers.tick(100);
+    assert.equal(hasExited, false, 'the timeout deadline passes before the child exits');
+    child.kill('SIGTERM');
+    await exited;
+    const result = await pending;
+    // Advance beyond both possible escalation deadlines after exec has settled.
+    t.mock.timers.tick(2100);
+    assert.deepEqual(signals.filter(({ signal, afterExit }) => signal === 'SIGKILL' && afterExit), [],
+      'no stale escalation timer may signal the exited process group');
+    assert.deepEqual(signals, [{ signal: 'SIGTERM', afterExit: false }], 'abort sends exactly one SIGTERM');
+    assert.equal(result.cancelled, true);
+    assert.equal(result.timedOut, false);
+    assert.equal(result.result, 'failed');
+  } finally {
+    t.mock.timers.reset();
+    if (child && !hasExited) {
+      child.kill('SIGKILL');
+      await exited;
+    }
+    killSpy.mock.restore();
+    spawnSpy.mock.restore();
+    syncBuiltinESMExports();
+  }
+});
 
 /** @param {{finding?: boolean, red?: boolean, joinDelay?: number, gateDelay?: number, waitForGates?: boolean, change?: (repo: string) => Promise<void>, throwJoin?: boolean, throwGate?: boolean}} [settings] */
 async function fixture(settings = {}) {
