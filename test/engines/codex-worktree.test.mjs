@@ -65,7 +65,12 @@ setTimeout(() => process.exit(0), 15000).unref();
         child: { home: recorded.home, rules: true },
       }, `named run: ${namedRun}`);
     } finally {
-      if (alive(result.pid)) process.kill(-result.pid, 'SIGKILL');
+      // The fake coder exits by itself; a group that is gone (or only a zombie on macOS) is fine.
+      try {
+        if (alive(result.pid)) process.kill(-result.pid, 'SIGKILL');
+      } catch (err) {
+        if (!['ESRCH', 'EPERM'].includes(err.code)) throw err;
+      }
     }
   }
 });
