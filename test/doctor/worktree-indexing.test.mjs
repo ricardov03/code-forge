@@ -23,8 +23,9 @@ mock.module('../../src/util/native.mjs', { namedExports: {
   daemonEnabled: () => enabled,
   daemonRequest: async () => responds ? { ok: true } : null,
 } });
-mock.module('../../src/proof/worktree.mjs', { namedExports: {
+mock.module('../../src/util/worktree-paths.mjs', { namedExports: {
   DEFAULT_BRANCH_TEMPLATE: 'forge/{run}/{block}',
+  isNoindexPath: () => true,
   repoTopOf: async () => top,
   worktreeDirectory: async () => {
     lookups++;

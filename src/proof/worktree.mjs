@@ -37,9 +37,8 @@ import path from 'node:path';
 import { configInForce } from '../state/config-snapshot.mjs';
 import { StateError } from '../state/paths.mjs';
 import { exec } from '../util/exec.mjs';
-
-/** The default branch template (`proof.worktree.branch`). */
-export const DEFAULT_BRANCH_TEMPLATE = 'forge/{run}/{block}';
+import { DEFAULT_BRANCH_TEMPLATE, branchName, realAsFarAsExists, repoTopOf, worktreeDirectory } from '../util/worktree-paths.mjs';
+export { DEFAULT_BRANCH_TEMPLATE, branchName, repoTopOf, worktreeDirectory } from '../util/worktree-paths.mjs';
 
 /** `git worktree add` checks out a whole tree: allow it longer than a read. */
 const ADD_TIMEOUT_MS = 300000;
@@ -73,16 +72,6 @@ export function worktreeSettings(record) {
     branch: typeof wt.branch === 'string' ? wt.branch : DEFAULT_BRANCH_TEMPLATE,
     base: typeof wt.base === 'string' ? wt.base : null,
   };
-}
-
-/**
- * The branch name for a block: `{run}` and `{block}` substituted in one pass (a value that itself
- * contains `{block}` is never substituted again); any other text is kept as written.
- * @param {string} template @param {{run: string, block: string}} values
- * @returns {string}
- */
-export function branchName(template, { run, block }) {
-  return template.replace(/\{(run|block)\}/g, (_whole, key) => (key === 'run' ? run : block));
 }
 
 /** `process.env` minus every inherited `GIT_*` (hooks export GIT_DIR…), with no system/global config and no prompt. */
@@ -229,46 +218,6 @@ async function addTree(argv, treePath, top, id, newBranch) {
   const left = await discard(top, tree, branch);
   const outcome = left.length === 0 ? 'nothing was recorded' : `nothing was recorded, but ${leftBehind(left)}`;
   throw new StateError('worktree-failed', `block ${id}: git worktree add failed (${gitReason(res)}); ${outcome}`);
-}
-
-/**
- * `p` with its nearest existing ancestor realpath'd (the rest joined on as written), so a path
- * planned before it exists is spelled as its realpath will be once it does.
- * @param {string} p - absolute. @returns {string}
- */
-function realAsFarAsExists(p) {
-  /** @type {string[]} */
-  const rest = [];
-  let head = p;
-  while (!occupied(head) && path.dirname(head) !== head) {
-    rest.unshift(path.basename(head));
-    head = path.dirname(head);
-  }
-  return path.join(real(head), ...rest);
-}
-
-/**
- * Resolve a directory without moving live trees. A macOS run with a registered tree in the
- * old default keeps that default; other runs get the platform's current default.
- * @param {{top: string, settings: WorktreeSettings, runId?: string, platform?: NodeJS.Platform}} opts
- * @returns {Promise<{dir: string, mark: boolean}>}
- */
-export async function worktreeDirectory({ top, settings, runId, platform = process.platform }) {
-  const old = realAsFarAsExists(path.resolve(top, '..', `${path.basename(top)}-worktrees`));
-  if (settings.dir !== null) return { dir: realAsFarAsExists(path.resolve(top, settings.dir)), mark: false };
-  if (platform !== 'darwin') return { dir: old, mark: false };
-  if (runId) {
-    const res = await git(['git', 'worktree', 'list', '--porcelain', '-z'], top);
-    if (res.result !== 'ok') throw new StateError('git-failed', `git worktree list failed (${gitReason(res)})`);
-    let where = '';
-    for (const line of res.stdout.split('\0')) {
-      if (line.startsWith('worktree ')) where = line.slice('worktree '.length);
-      else if (line.startsWith('branch refs/heads/') && where
-        && realAsFarAsExists(path.dirname(where)) === old
-        && line.slice('branch refs/heads/'.length) === branchName(settings.branch, { run: runId, block: path.basename(where) })) return { dir: old, mark: false };
-    }
-  }
-  return { dir: realAsFarAsExists(path.resolve(top, '..', `${path.basename(top)}-worktrees.noindex`)), mark: true };
 }
 
 /** Create the marker once in the macOS default .noindex directory.
@@ -427,16 +376,6 @@ export async function removeWorktree({ cwd, worktree }) {
   if (!entry?.prunable) return gitReason(res);
   const pruned = await git(['git', 'worktree', 'prune'], cwd);
   return pruned.result === 'ok' ? null : gitReason(pruned);
-}
-
-/**
- * @param {string} cwd @returns {Promise<string>} the repository top level, realpath'd.
- * @throws {StateError} `git-failed`
- */
-export async function repoTopOf(cwd) {
-  const res = await git(['git', 'rev-parse', '--show-toplevel'], cwd);
-  if (res.result !== 'ok') throw new StateError('git-failed', `git rev-parse --show-toplevel failed (${gitReason(res)})`);
-  return realpathSync(res.stdout.trim());
 }
 
 /**

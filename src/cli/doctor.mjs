@@ -13,13 +13,13 @@ import path from 'node:path';
 import { loadProjectConfig, projectRootFor } from '../config/load.mjs';
 import { runDoctor } from '../doctor/index.mjs';
 import { counts, exitCode, renderJSON, renderText } from '../doctor/rows.mjs';
-import { DEFAULT_BRANCH_TEMPLATE, repoTopOf, worktreeDirectory } from '../proof/worktree.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
 import { readRun } from '../state/run.mjs';
 import { daemonEnabled, daemonRequest, nativePath, runNative } from '../util/native.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { runRoot, setRunRoot } from '../util/tmp.mjs';
+import { DEFAULT_BRANCH_TEMPLATE, isNoindexPath, repoTopOf, worktreeDirectory } from '../util/worktree-paths.mjs';
 import { liveWorker } from '../worker/queue.mjs';
 
 const USAGE = 'usage: code-forge doctor [--quick] [--json] [--cwd <dir>]\n';
@@ -90,8 +90,8 @@ export async function runDoctorCli(args, deps = {}, adopt = false) {
             // Non-git projects still get a useful config-relative warning.
             const top = await repoTopOf(cwd).catch(() => path.dirname(loaded.path));
             const wt = config.proof?.worktree ?? {};
-            const { dir } = await worktreeDirectory({ top, settings: { dir: wt.dir ?? null, branch: wt.branch ?? DEFAULT_BRANCH_TEMPLATE, base: wt.base ?? null }, runId: worker?.run, platform: 'darwin' });
-            if (!dir.split(path.sep).some((part) => part.endsWith('.noindex'))) {
+            const { dir } = await worktreeDirectory({ top, settings: { dir: wt.dir ?? null, branch: wt.branch ?? DEFAULT_BRANCH_TEMPLATE }, runId: worker?.run, platform: 'darwin' });
+            if (!isNoindexPath(dir)) {
               rows.push({ id: 'worktree-indexing', status: 'WARN', label: 'worktree indexing', detail: `${dir} may be indexed by Spotlight.\nproof.worktree.dir: ../${path.basename(top)}-worktrees.noindex\nTo move the old folder, finish or end the runs, then mv the folder to the .noindex path; or remove it.` });
             }
           }

@@ -150,6 +150,9 @@ The ledger gets a signed `run.mode {mode: brief, plan: none}` row right after `r
 
 ## Step 3: open the block
 
+The example output uses the default path on Linux. On macOS, the worktree path in this step
+and the removal output in step 7 is `/work/shop-api-worktrees.noindex/B1`.
+
 ```text
 code-forge block open B1 --run cart-1 --owned src/cart.mjs test/cart.test.mjs \
   --tests test/cart.test.mjs --acceptance plans/cart-total.acc.yml \
