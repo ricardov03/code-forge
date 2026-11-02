@@ -19,6 +19,8 @@ const NO_HIT = 'block accept-hit: accept-hit-no-such-hit: the named transcript h
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 let seq = 0;
 
+const ruleBlocker = (f, detail) => `rule_break - ${detail}\n  fix: code-forge block close B1 --run ${f.runId} --decide --reason '<reason>' --transcript ${f.transcript}\n`;
+
 async function fixture() {
   const slug = `accept-hit-${++seq}`;
   const runId = `r-${slug}`;
@@ -132,7 +134,7 @@ test('B127 E1: an extra-token hit uses the same list for acceptance and close', 
   assert.deepEqual(row, { run: f.runId, event: 'rule_break.accepted', block: 'B1', rule, line: 2, line_sha256: hash(text), reason: REASON, by: 'human' });
   assert.deepEqual(verifyRow(rows[0], f.key), { ok: true });
   f.log(`safe\n${text} different\n`);
-  assert.deepEqual(await f.invoke(closeArgs, deps), [1, '', `block B1 open: rule_break transcript line 2: ${rule}\n`]);
+  assert.deepEqual(await f.invoke(closeArgs, deps), [1, ruleBlocker(f, `transcript line 2: ${rule}`), `block B1 open: rule_break transcript line 2: ${rule}\n`]);
   assert.equal((await f.rows()).length - before, 1, 'refused close writes zero additional rows');
   f.log(`safe\n${text}\n`);
   const [code, out, err] = await f.invoke([...closeArgs, '--json'], deps);
@@ -193,7 +195,7 @@ test('B127 clause 3: close accepts signed content after lines move, but refuses 
   assert.equal((await f.accept())[0], 0);
   f.log(`joined prefix\nsafe\n${LINE}\n${LINE} different\n`);
   const refused = await f.close();
-  assert.deepEqual(refused, [1, '', `block B1 open: rule_break transcript line 4: ${RULE}\n`]);
+  assert.deepEqual(refused, [1, ruleBlocker(f, `transcript line 4: ${RULE}`), `block B1 open: rule_break transcript line 4: ${RULE}\n`]);
   f.log(`joined prefix\nsafe\n${LINE}\n`);
   assert.equal((await f.close())[0], 0, 'the accepted content still matches at line 3');
 });
@@ -213,7 +215,8 @@ test('B127 clause 3 boundary: unsigned, tampered, other-block, other-run, wrong-
     } else await f.sign({ ...row, ...(kind === 'other-block' ? { block: 'B2' } : kind === 'other-run' ? { run: 'r-other' } : kind === 'wrong-rule' ? { rule: 'git-clean' } : { by: 'agent' }) });
     const before = (await f.rows()).length;
     const expected = kind === 'ledger' ? 'rule_break' : `rule_break transcript line 2: ${RULE}`;
-    assert.deepEqual(await f.close(), [1, '', `block B1 open: ${expected}\n`], kind);
+    const blockers = ruleBlocker(f, kind === 'ledger' ? `rule_break row: ${RULE}` : `transcript line 2: ${RULE}`);
+    assert.deepEqual(await f.close(), [1, blockers, `block B1 open: ${expected}\n`], kind);
     assert.equal((await f.rows()).length - before, 0, `${kind}: refused close writes zero rows`);
   }
 });
@@ -251,7 +254,7 @@ test('B127 clause 5 and boundary: both command prefixes refuse close as rule_bre
     const f = await fixture();
     f.log(`${argv.join(' ')}\n`);
     const before = (await f.rows()).length;
-    assert.deepEqual(await f.close(), [1, '', 'block B1 open: rule_break transcript line 1: code-forge-block-accept-hit-from-coder\n']);
+    assert.deepEqual(await f.close(), [1, ruleBlocker(f, 'transcript line 1: code-forge-block-accept-hit-from-coder'), 'block B1 open: rule_break transcript line 1: code-forge-block-accept-hit-from-coder\n']);
     assert.equal((await f.rows()).length - before, 0, `${bin}: refused close writes zero rows`);
   }
 });

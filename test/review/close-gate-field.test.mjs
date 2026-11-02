@@ -78,6 +78,14 @@ const REFUSALS =
   'not_approved src/feature/Fan.swift F1; not_approved src/feature/Fan.swift F2; not_approved src/feature/Fan.swift F3; not_approved src/feature/Hub.swift F1; ' +
   'not_approved test/feature/FanTests.swift F1; not_approved test/feature/FanTests.swift F2; not_approved test/feature/HubTests.swift F1; not_approved test/feature/HubTests.swift F2';
 
+/** @param {string} runId @param {string[]} files @param {boolean} [findings] */
+function blockerLines(runId, files, findings = true) {
+  const unreviewed = files.map((file) => `unreviewed ${file} no review.approved row for ${file} at its current content\n  fix: code-forge review-file --wait-block B1 --run ${runId}\n`).join('');
+  const open = findings ? Object.entries(FAILING).flatMap(([file, ids]) => ids.map(([id]) =>
+    `not_approved ${file} the latest review of ${file}'s current content left ${id} open and it is not waived\n  fix: code-forge block waive B1 ${id} --run ${runId} --file ${file} --reason '<reason>'\n`)).join('') : '';
+  return unreviewed + open;
+}
+
 /** @param {string} runId */
 async function close(runId) {
   const stream = capture();
@@ -94,7 +102,7 @@ test('B52 item 18c: owned_files as two directories — the reviewed files inside
   await openBlock({ runId: 'r-field-dirs', id: 'B1', level: 'L2', owned: ['src/feature', 'test/feature'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
   writeWork(repo);
   await replayLedger({ repo, files: repo, runId: 'r-field-dirs', writeRow });
-  assert.deepEqual(await close('r-field-dirs'), [1, `${WARN_TRANSCRIPT('r-field-dirs')}block B1 open: ${REFUSALS}\n`]);
+  assert.deepEqual(await close('r-field-dirs'), [1, `${WARN_TRANSCRIPT('r-field-dirs')}${blockerLines('r-field-dirs', Object.keys(FAILING))}block B1 open: ${REFUSALS}\n`]);
   assert.equal((await readAllRows('b52-field-dirs')).filter((r) => r.event === 'block.close').length, 0);
 });
 
@@ -108,7 +116,7 @@ test('B52 item 18a: the work was committed before `block open` recorded the base
   await openBlock({ runId: 'r-field-commit', id: 'B1', level: 'L2', owned: ['src/feature/**', 'test/feature/**'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
   await replayLedger({ repo, files: repo, runId: 'r-field-commit', writeRow });
   const warn = 'WARN block B1: no owned file differs from the block base in the workspace, but 9 owned file(s) have review rows — the work was likely committed before block open or done in another worktree; they are checked at their content in the workspace\n';
-  assert.deepEqual(await close('r-field-commit'), [1, `${WARN_TRANSCRIPT('r-field-commit')}${warn}block B1 open: ${REFUSALS}\n`]);
+  assert.deepEqual(await close('r-field-commit'), [1, `${WARN_TRANSCRIPT('r-field-commit')}${warn}${blockerLines('r-field-commit', Object.keys(FAILING))}block B1 open: ${REFUSALS}\n`]);
 });
 
 test('B52 item 18b: the coder worked in another worktree — the reviewed files are missing from the workspace and every one refuses', async () => {
@@ -124,7 +132,7 @@ test('B52 item 18b: the coder worked in another worktree — the reviewed files 
   await replayLedger({ repo, files: wt, runId: 'r-field-wt', writeRow });
   const all = [...PASSING, ...Object.keys(FAILING)].sort();
   const warn = 'WARN block B1: no owned file differs from the block base in the workspace, but 9 owned file(s) have review rows — the work was likely committed before block open or done in another worktree; they are checked at their content in the workspace\n';
-  assert.deepEqual(await close('r-field-wt'), [1, `${WARN_TRANSCRIPT('r-field-wt')}${warn}block B1 open: ${all.map((f) => `unreviewed ${f}`).join('; ')}\n`]);
+  assert.deepEqual(await close('r-field-wt'), [1, `${WARN_TRANSCRIPT('r-field-wt')}${warn}${blockerLines('r-field-wt', all, false)}block B1 open: ${all.map((f) => `unreviewed ${f}`).join('; ')}\n`]);
 });
 
 test('B52 item 20: a block that changed no owned file and has no review rows refuses no_changes; --no-require-reviews (confirmed at a terminal) is the owner\'s way out', async () => {
@@ -134,7 +142,7 @@ test('B52 item 20: a block that changed no owned file and has no review rows ref
   const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug: 'b52-field-empty' });
   await startRun({ workspace: repo, project: 'b52-field-empty', runId: 'r-field-empty', workerPid: 4242, writeRow, probe: PROBE });
   await openBlock({ runId: 'r-field-empty', id: 'B1', level: 'L2', owned: ['src/feature/**'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
-  assert.deepEqual(await close('r-field-empty'), [1, `${WARN_TRANSCRIPT('r-field-empty')}block B1 open: no_changes\n`]);
+  assert.deepEqual(await close('r-field-empty'), [1, `${WARN_TRANSCRIPT('r-field-empty')}no_changes - block B1 changed no owned file and has no reviews\n  fix: code-forge block close B1 --run r-field-empty --no-require-reviews\nblock B1 open: no_changes\n`]);
   const stream = capture();
   const yes = { confirm: async () => true, isCancel: () => false };
   const code = await runBlock(['close', 'B1', '--run', 'r-field-empty', '--no-require-reviews'], { stdout: stream, stderr: stream, probe: PROBE, isTTY: true, ui: yes });

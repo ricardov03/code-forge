@@ -120,6 +120,8 @@ const OWNER_SAYS_YES = { confirm: async () => true, isCancel: () => false };
 
 const WARN = 'WARN block B1: no coder transcript found (--transcript, run record, .code-forge/runs/r-gate/B1.log); the transcript grep did not run\n';
 const NO_DIFF = (/** @type {number} */ n) => `WARN block B1: no owned file differs from the block base in the workspace, but ${n} owned file(s) have review rows — the work was likely committed before block open or done in another worktree; they are checked at their content in the workspace\n`;
+const unreviewedText = (run, file) => `unreviewed ${file} no review.approved row for ${file} at its current content\n  fix: code-forge review-file --wait-block B1 --run ${run}\n`;
+const unprovenText = (run, block, file) => `unproven ${file} ${file} is high tier and has no proven red→green row covering it\n  fix: code-forge proof red-green ${block} --run ${run} --test '<test-file>'\n`;
 
 test('CLI: close refuses an unknown block, an unruled late finding and an unreviewed hash; `block waive` writes a signed by: human row; a missing transcript is a signed row + WARN', async () => {
   const repo = await makeRepo();
@@ -138,7 +140,7 @@ test('CLI: close refuses an unknown block, an unruled late finding and an unrevi
 
   assert.deepEqual(await close([], 'B9'), [1, 'block close: block B9 is not in run r-gate\n']);
   // B52: nothing changed yet, but the late finding is a review row: src/a.mjs is checked (and the empty diff WARNs)
-  assert.deepEqual(await close(), [1, `${WARN}${NO_DIFF(1)}block B1 open: unreviewed src/a.mjs; late_unruled src/a.mjs L1\n`]);
+  assert.deepEqual(await close(), [1, `${WARN}${NO_DIFF(1)}${unreviewedText('r-gate', 'src/a.mjs')}late_unruled src/a.mjs late finding L1 in src/a.mjs has no ruling\n  fix: code-forge block waive B1 L1 --run r-gate --file src/a.mjs --reason '<reason>'\nblock B1 open: unreviewed src/a.mjs; late_unruled src/a.mjs L1\n`]);
 
   const noFile = capture();
   assert.equal(await runBlock(['waive', 'B1', 'L1', '--run', 'r-gate', '--reason', 'Ricardo: accepted in chat'], { stdout: noFile, stderr: noFile }), 2);
@@ -159,7 +161,7 @@ test('CLI: close refuses an unknown block, an unruled late finding and an unrevi
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
   const transcript = `${repo}/.code-forge/coder.log`;
   writeFile(repo, '.code-forge/coder.log', '$ node --test\n');
-  assert.deepEqual(await close(['--transcript', transcript]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await close(['--transcript', transcript]), [1, `${unreviewedText('r-gate', 'src/a.mjs')}block B1 open: unreviewed src/a.mjs\n`]);
   await writeSigned('r-gate', writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(repo, 'src/a.mjs') });
   assert.deepEqual(await close(['--transcript', transcript]), [0, `${rv(repo, 'r-gate', 'src/a.mjs')}block B1 closed\n`]);
   assert.equal((await readAllRows('gate-demo')).filter((r) => r.event === 'gate.reviews_waived').length, 0);
@@ -180,7 +182,7 @@ test('fix 1: CLI `block close --no-require-reviews` closes an unreviewed file bu
     const code = await runBlock(['close', 'B1', '--run', 'r-nrr', '--worker-pid', '4242', '--transcript', `${repo}/.code-forge/coder.log`, ...extra], { stdout: stream, stderr: stream, probe, isTTY: true, ui: OWNER_SAYS_YES });
     return [code, stream.text];
   };
-  assert.deepEqual(await close([]), [1, 'block B1 open: unreviewed src/a.mjs\n']);
+  assert.deepEqual(await close([]), [1, `${unreviewedText('r-nrr', 'src/a.mjs')}block B1 open: unreviewed src/a.mjs\n`]);
   assert.equal((await readAllRows('gate-waive')).filter((r) => r.event === 'gate.reviews_waived').length, 0);
 
   assert.deepEqual(await close(['--no-require-reviews']), [0, 'block B1 closed\n']);
@@ -300,10 +302,10 @@ test('B20 CLI: close refuses `unproven <file>` for a high file; a signed coverin
   writeFile(repo, '.code-forge.yml', NO_HIGH_CONFIG);
   await approve('B2', 'src/auth/a.mjs');
   await approve('B2', '.code-forge.yml');
-  assert.deepEqual(await close('B2'), [1, 'block B2 open: unproven src/auth/a.mjs\n']);
+  assert.deepEqual(await close('B2'), [1, `${unprovenText('r-pf', 'B2', 'src/auth/a.mjs')}block B2 open: unproven src/auth/a.mjs\n`]);
   // a proof row of ANOTHER block in the same run does not count
   await proven('B1', ['src/auth/a.mjs']);
-  assert.deepEqual(await close('B2'), [1, 'block B2 open: unproven src/auth/a.mjs\n']);
+  assert.deepEqual(await close('B2'), [1, `${unprovenText('r-pf', 'B2', 'src/auth/a.mjs')}block B2 open: unproven src/auth/a.mjs\n`]);
   const waived = capture();
   assert.equal(await runBlock(['waive', 'B2', 'proof', '--run', 'r-pf', '--file', 'src/auth/a.mjs', '--reason', 'Ricardo: no test reaches it'], humanSaysYes({ stdout: waived, stderr: waived })), 0);
   assert.deepEqual(await close('B2'), [0, `${rv(repo, 'r-pf', '.code-forge.yml', 'B2')}${rv(repo, 'r-pf', 'src/auth/a.mjs', 'B2')}block B2 closed\n`]);
@@ -313,7 +315,7 @@ test('B20 CLI: close refuses `unproven <file>` for a high file; a signed coverin
   writeFile(repo, 'src/c.mjs', 'export const c = 1;\n');
   await approve('B3', 'src/c.mjs');
   await writeSigned('r-pf', writeRow, { event: 'review.plan', block: 'B3', file: 'src/c.mjs', risk: 2 });
-  assert.deepEqual(await close('B3'), [1, 'block B3 open: unproven src/c.mjs\n']);
+  assert.deepEqual(await close('B3'), [1, `${unprovenText('r-pf', 'B3', 'src/c.mjs')}block B3 open: unproven src/c.mjs\n`]);
   await proven('B3', ['src/c.mjs']);
   assert.deepEqual(await close('B3'), [0, `${rv(repo, 'r-pf', 'src/c.mjs', 'B3')}block B3 closed\n`]);
 
@@ -326,7 +328,7 @@ test('B20 CLI: close refuses `unproven <file>` for a high file; a signed coverin
   await recordProof({ runId: 'r-pf', writeRow: async (r) => { captured = r; }, row: { block: 'B4', isolation: 'export', step: 'red-green', test: 'test/a.test.mjs', mechanism: 'revert', red_kind: 'assertion', red: 'RED_INVALID', green: null, proven: false, covers: ['src/auth/d.mjs'] } });
   await appendRow({ .../** @type {Record<string, any>} */ (captured), red: 'RED', green: 'GREEN', proven: true }, { slug: 'gate-proof' });
   const [code, text] = await close('B4');
-  assert.deepEqual([code, /** @type {string} */ (text).startsWith('block B4 stopped (ledger.tamper): proof: ')], [1, true]);
+  assert.deepEqual([code, text], [1, 'block B4 stopped (ledger.tamper): proof: mismatch\n']);
 });
 
 // ── B20 fix round 3 ──
@@ -367,7 +369,7 @@ test('fix 4 CLI: `block close --no-require-reviews` lifts the review rows but st
   writeFile(repo, 'src/auth/a.mjs', 'export const a = 2;\n');
   const stream = capture();
   const code = await runBlock(['close', 'B1', '--run', 'r-nrr-high', '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, '--no-require-reviews'], { stdout: stream, stderr: stream, probe, isTTY: true, ui: OWNER_SAYS_YES });
-  assert.deepEqual([code, stream.text], [1, 'block B1 open: unproven src/auth/a.mjs\n']);
+  assert.deepEqual([code, stream.text], [1, `${unprovenText('r-nrr-high', 'B1', 'src/auth/a.mjs')}block B1 open: unproven src/auth/a.mjs\n`]);
   const rows = await readAllRows('gate-nrr-high');
   assert.deepEqual([rows.filter((r) => r.event === 'gate.reviews_waived').length, rows.filter((r) => r.event === 'block.close').length], [1, 0]);
 });
@@ -404,12 +406,12 @@ test('fix 1 CLI: a run record whose block lost its base, or names a base the wor
   };
   const good = (await readRun('r-base')).blocks.B1.base_sha;
   await setBase(undefined);
-  assert.deepEqual(await close(), [1, 'block close: the block has no base commit — the close cannot read the base config\n']);
+  assert.deepEqual(await close(), [1, 'git-failed - the block has no base commit — the close cannot read the base config\n  fix: code-forge block rebase B1 --run r-base\nblock B1 open: the block has no base commit — the close cannot read the base config\n']);
   await setBase('0'.repeat(40));
-  assert.deepEqual(await close(), [1, 'block close: the block base is not a commit of the workspace — the close cannot read the base config\n']);
+  assert.deepEqual(await close(), [1, 'git-failed - the block base is not a commit of the workspace — the close cannot read the base config\n  fix: code-forge block rebase B1 --run r-base\nblock B1 open: the block base is not a commit of the workspace — the close cannot read the base config\n']);
   await setBase(good);
   // B52: a block that changed nothing is `no_changes`; with its one change approved it closes
-  assert.deepEqual(await close(), [1, 'block B1 open: no_changes\n']);
+  assert.deepEqual(await close(), [1, 'no_changes - block B1 changed no owned file and has no reviews\n  fix: code-forge block close B1 --run r-base --no-require-reviews\nblock B1 open: no_changes\n']);
   writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
   await writeSigned('r-base', writeRow, { event: 'review.approved', block: 'B1', file: 'src/a.mjs', content_hash: contentHash(repo, 'src/a.mjs') });
   assert.deepEqual(await close(), [0, `${rv(repo, 'r-base', 'src/a.mjs')}block B1 closed\n`]);
@@ -450,10 +452,10 @@ test('fix 3 CLI: `proof red-green` with a ./-prefixed test (revert) and a ::case
     const code = await runProof(['red-green', 'B1', '--run', 'r-cov', ...args], { stdout: stream, stderr: errors });
     return [code, errors.text];
   };
-  assert.deepEqual(await close(), [1, 'block B1 open: unproven src/math.mjs; unproven test/add.spec.mjs\n']);
+  assert.deepEqual(await close(), [1, `${unprovenText('r-cov', 'B1', 'src/math.mjs')}${unprovenText('r-cov', 'B1', 'test/add.spec.mjs')}block B1 open: unproven src/math.mjs; unproven test/add.spec.mjs\n`]);
 
   assert.deepEqual(await prove(['--test', './test/./clamp.spec.mjs']), [0, 'RED test/clamp.spec.mjs\nGREEN test/clamp.spec.mjs\n']);
-  assert.deepEqual(await close(), [1, 'block B1 open: unproven test/add.spec.mjs\n']);
+  assert.deepEqual(await close(), [1, `${unprovenText('r-cov', 'B1', 'test/add.spec.mjs')}block B1 open: unproven test/add.spec.mjs\n`]);
 
   assert.deepEqual(await prove(['--test', './test/add.spec.mjs::add pins', '--mechanism', 'assertion-deletion']), [0, 'RED test/add.spec.mjs::add pins\nGREEN test/add.spec.mjs::add pins\n']);
   const proofs = (await readAllRows('gate-covers')).filter((r) => r.event === 'proof' && r.step === 'red-green');

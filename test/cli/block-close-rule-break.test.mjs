@@ -35,6 +35,7 @@ async function fixture(slug, approved = true) {
   if (approved) await writeSigned(runId, writeRow, { event: 'review.approved', block: 'B1', file: 'a.mjs', content_hash: contentHash(repo, 'a.mjs'), round: 1 });
   return {
     runId,
+    transcript: path.join(files, 'coder.log'),
     sign: (row) => writeSigned(runId, writeRow, { block: 'B1', ...row }),
     rows: () => readAllRows(slug),
     close: (text) => {
@@ -47,14 +48,15 @@ async function fixture(slug, approved = true) {
 const commands = ['cat ~/.code-forge/runs/x.key', 'gh pr ready', 'gh pr merge', 'gh pr close', 'git reset --hard', 'git clean', 'git stash'];
 const ids = ['code-forge-runs-access', 'gh-pr-ready', 'gh-pr-merge', 'gh-pr-close', 'git-reset-hard', 'git-clean', 'git-stash'];
 const firstFive = ids.slice(0, 5).map((id, i) => `rule_break transcript line ${i + 2}: ${id}`).join('; ');
+const ruleBlocker = (f, detail) => `rule_break - ${detail}\n  fix: code-forge block close B1 --run ${f.runId} --decide --reason '<reason>' --transcript ${f.transcript}\n`;
 
-test('block close names each distinct transcript rule once at its first line, capped at five', async () => {
+test('block close lists every transcript blocker and summarizes distinct rules at their first line, capped at five', async () => {
   const f = await fixture('b119-close-rules');
   assert.deepEqual(await f.close('\n' + Array(80).fill(commands[0]).join('\n')), [
-    1, '', 'block B1 open: rule_break transcript line 2: code-forge-runs-access\n',
+    1, Array.from({ length: 80 }, (_, i) => ruleBlocker(f, `transcript line ${i + 2}: ${ids[0]}`)).join(''), 'block B1 open: rule_break transcript line 2: code-forge-runs-access\n',
   ], '80 hits of one id produce exactly one named refusal at its first line');
   assert.deepEqual(await f.close(['', ...commands, ...commands].join('\n')), [
-    1, '', `block B1 open: ${firstFive}; +2 more rule_break\n`,
+    1, [...ids, ...ids].map((id, i) => ruleBlocker(f, `transcript line ${i + 2}: ${id}`)).join(''), `block B1 open: ${firstFive}; +2 more rule_break\n`,
   ], 'seven distinct ids produce exactly five entries and two more, ignoring repeats');
   assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
   assert.equal((await f.rows()).filter((r) => r.event === 'block.close' && r.block === 'B1').length, 0, 'refused closes write zero block.close rows');
@@ -65,8 +67,11 @@ test('block close boundary: exactly five has no suffix; six has +1; other refusa
   await f.sign({ event: 'rule_break', id: 'ledger-rule' });
   for (const n of [5, 6, 0]) {
     const rules = n === 0 ? '' : `; ${firstFive}${n === 6 ? '; +1 more rule_break' : ''}`;
+    const blockers = `unreviewed a.mjs no review.approved row for a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run ${f.runId}\n` +
+      ruleBlocker(f, 'rule_break row: ledger-rule') +
+      ids.slice(0, n).map((id, i) => ruleBlocker(f, `transcript line ${i + 2}: ${id}`)).join('');
     assert.deepEqual(await f.close(['', ...commands.slice(0, n)].join('\n')), [
-      1, '', `block B1 open: unreviewed a.mjs; rule_break${rules}\n`,
+      1, blockers, `block B1 open: unreviewed a.mjs; rule_break${rules}\n`,
     ], `${n} transcript ids: exact cap boundary and unchanged non-transcript refusal text`);
   }
 });

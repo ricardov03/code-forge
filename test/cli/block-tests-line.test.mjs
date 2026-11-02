@@ -85,16 +85,29 @@ test('B114: malformed TESTS lines name the exact line (120 chars); missing, nonz
   const fx = await fixture('b114-tests', { owned: [A], extra: ['context:', '  require_coder_tests: true'] });
   fx.edit(A, "export const v = 'a 1';\n");
   await fx.sign(A, { event: 'review.approved', round: 1 });
-  const malformed = ['TESTS npm test exit=0 (12 pass, 0 fail)', 'TESTS npm test', 'TESTS npm test exit=00', 'TESTS npm test exit=256', 'TESTS npm test exit=-1', 'TESTS npm test exit=no', 'TESTS exit=0', `TESTS ${'x'.repeat(140)} exit=0 trailing`];
+  const refused = (report, detail) => {
+    const repair = detail.startsWith('TESTS line malformed:')
+      ? `correct the malformed TESTS line to TESTS <command> exit=<n> with the actual test result before ===BLOCK B1 COMPLETE=== in ${report}`
+      : detail === 'no TESTS line'
+        ? `add TESTS <command> exit=<n> with the actual test result before ===BLOCK B1 COMPLETE=== in ${report}`
+        : `fix the failing tests, rerun them, and update the TESTS line in ${report} with the actual command and exit code`;
+    return [1,
+      `coder_report_failed - coder report FAILED: ${detail}\n  fix: no automatic fix: coder_report_failed; ${repair}; rerun block ready\n`,
+      `block B1 open: coder report FAILED: ${detail}\n`];
+  };
+  const malformed = ['TESTS npm test exit=0 (12 pass, 0 fail)', 'TESTS npm test', 'TESTS npm test exit=00', 'TESTS npm test exit=256', 'TESTS npm test exit=-1', 'TESTS npm test exit=no', 'TESTS exit=0', `TESTS ${'x'.repeat(140)} exit=0 trailing`, 'TESTS needs --report', 'TESTS --report cannot be read', 'TESTS no ===BLOCK B1 COMPLETE=== sentinel', 'TESTS no TESTS line'];
   for (const line of malformed) {
     const report = fx.report('bad', `${line}\n===BLOCK B1 COMPLETE===\n`);
-    assert.deepEqual(await fx.close(['--report', report]), [1, '', `block B1 open: coder report FAILED: TESTS line malformed: ${line.slice(0, 120)}\n`]);
+    assert.deepEqual(await fx.close(['--report', report]), refused(report, `TESTS line malformed: ${line.slice(0, 120)}`));
   }
-  assert.deepEqual(await fx.close(['--report', fx.report('mixed', 'TESTS npm test exit=0\nTESTS broken\n===BLOCK B1 COMPLETE===\n')]), [1, '', 'block B1 open: coder report FAILED: TESTS line malformed: TESTS broken\n']);
+  const mixed = fx.report('mixed', 'TESTS npm test exit=0\nTESTS broken\n===BLOCK B1 COMPLETE===\n');
+  assert.deepEqual(await fx.close(['--report', mixed]), refused(mixed, 'TESTS line malformed: TESTS broken'));
   for (const text of ['===BLOCK B1 COMPLETE===\nTESTS npm test exit=0 trailing\n', 'TESTS npm test exit=0 trailing\n===BLOCK B2 COMPLETE===\n===BLOCK B1 COMPLETE===\n', 'Prose TESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n']) {
-    assert.deepEqual(await fx.close(['--report', fx.report('missing', text)]), [1, '', 'block B1 open: coder report FAILED: no TESTS line\n']);
+    const missing = fx.report('missing', text);
+    assert.deepEqual(await fx.close(['--report', missing]), refused(missing, 'no TESTS line'));
   }
-  assert.deepEqual(await fx.close(['--report', fx.report('nonzero', 'TESTS npm test exit=1\n===BLOCK B1 COMPLETE===\n')]), [1, '', 'block B1 open: coder report FAILED: TESTS exit=1\n']);
+  const nonzero = fx.report('nonzero', 'TESTS npm test exit=1\n===BLOCK B1 COMPLETE===\n');
+  assert.deepEqual(await fx.close(['--report', nonzero]), refused(nonzero, 'TESTS exit=1'));
   const report = fx.report('valid', 'TESTS npm test exit=0 trailing\n===BLOCK B2 COMPLETE===\n  TESTS npm test exit=0  \n===BLOCK B1 COMPLETE===\nTESTS bad\n');
   assert.deepEqual(await fx.close(['--report', report]), [0, `reviewed ${A} ticket ${fx.ticket(A)}\nblock B1 closed\n`, '']);
 });

@@ -149,6 +149,13 @@ async function signedReview(/** @type {Awaited<ReturnType<typeof fixture>>} */ f
   await f.sign({ event: 'review.result', ticket, status: 'reviewed', approved: false, open });
 }
 
+/** @param {string} runId @param {string} file @param {string[]} [ids] @param {boolean} [proof] */
+function refusalBlockers(runId, file, ids = [], proof = false) {
+  return `unreviewed ${file} no review.approved row for ${file} at its current content\n  fix: code-forge review-file --wait-block B1 --run ${runId}\n` +
+    ids.map((id) => `not_approved ${file} the latest review of ${file}'s current content left ${id} open and it is not waived\n  fix: code-forge block waive B1 ${id} --run ${runId} --file ${file} --reason '<reason>'\n`).join('') +
+    (proof ? `unproven ${file} ${file} is high tier and has no proven red→green row covering it\n  fix: code-forge proof red-green B1 --run ${runId} --test '<test-file>'\n` : '');
+}
+
 const resolvedAll = (/** @type {string} */ text) => ({ verdicts: [...text.matchAll(/^## Finding (\S+)$/gm)].map((m) => ({ id: m[1], verdict: 'resolved', reason: 'the test now pins add' })) });
 
 test('B71 (1): a resolved answer writes one signed review.answered row; the source closes reviewed_by_waiver with C1 under answered', async () => {
@@ -179,7 +186,7 @@ test('B71 (1): a resolved answer writes one signed review.answered row; the sour
   const w = await f.reviewFile(['--wait', q.out?.ticket]);
   assert.deepEqual([w.code, w.out?.status, w.out?.answers, w.out?.fix_list], [0, 'done', [{ id: 'C1', verdict: 'resolved', reason: 'the test now pins add' }], undefined]);
   // the answering file still needs its own approval; the source no longer refuses
-  assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${ANS}\n`]);
+  assert.deepEqual(await f.close(), [1, `unreviewed test/a.test.mjs no review.approved row for test/a.test.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b71-resolved\n` + `block B1 open: unreviewed ${ANS}\n`]);
   await f.sign({ event: 'review.approved' }, ANS);
   assert.deepEqual(await f.close(), [0, `${f.reviewed()}block B1: ${SRC} reviewed_by_waiver (answered C1)\nblock B1 closed\n`]);
   const all = await f.rows();
@@ -213,7 +220,7 @@ test('B71 (2): not_resolved, no verdict, a broken answer or a failed session wri
     [['N4', 'not_resolved'], ['W1', 'not_resolved'], ['W2', 'not_resolved'], ['W3', 'not_resolved']],
   );
   assert.equal((await f.answeredRows()).length, 0);
-  assert.deepEqual(await f.close(), [1, refusedText]);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b71-not\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left W1 open and it is not waived\n  fix: code-forge block waive B1 W1 --run r-b71-not --file src/a.mjs --reason '<reason>'\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left W2 open and it is not waived\n  fix: code-forge block waive B1 W2 --run r-b71-not --file src/a.mjs --reason '<reason>'\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left W3 open and it is not waived\n  fix: code-forge block waive B1 W3 --run r-b71-not --file src/a.mjs --reason '<reason>'\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left N4 open and it is not waived\n  fix: code-forge block waive B1 N4 --run r-b71-not --file src/a.mjs --reason '<reason>'\n` + refusedText]);
   // an answer that is not JSON at all: no row
   writeFile(f.repo, ANS, `${ANS_V1}// v2\n`);
   await f.sign({ event: 'review.approved' }, ANS);
@@ -236,7 +243,7 @@ test('B71 (2): not_resolved, no verdict, a broken answer or a failed session wri
   assert.deepEqual([again.code, again.out?.ticket, again.out?.retry, again.out?.status], [0, failed.out?.ticket, true, 'queued']);
   assert.equal(await f.drain(), 1);
   assert.deepEqual((await f.answeredRows()).map((x) => x.finding), ['W1']);
-  assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W2; not_approved ${SRC} W3; not_approved ${SRC} N4\n`]);
+  assert.deepEqual(await f.close(), [1, refusalBlockers(f.runId, SRC, ['W2', 'W3', 'N4']) + `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W2; not_approved ${SRC} W3; not_approved ${SRC} N4\n`]);
 });
 
 test('B71 (3): refusals — not owned, same file, not open, more than 10 ids, no --of — queue nothing; the worker refuses the same with signed rows', async () => {
@@ -350,7 +357,7 @@ test('B71 (4): a change to the source or to the answering file makes the answer 
   assert.deepEqual(a2.map((r) => [r.finding, r.by_hash, verifyRow(r, f2.key).ok]), [['W1', ansBefore, true]]);
   writeFile(f2.repo, ANS, `${ANS_V1}// later\n`);
   await f2.sign({ event: 'review.approved' }, ANS);
-  assert.deepEqual(await f2.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
+  assert.deepEqual(await f2.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b71-stale-ans\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left W1 open and it is not waived\n  fix: code-forge block waive B1 W1 --run r-b71-stale-ans --file src/a.mjs --reason '<reason>'\n` + `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
   // the control: the same steps without the change close
   const c2 = await fixture('b71-stale-ctl');
   await signedReview(c2, [{ id: 'W1', severity: 'warning' }]);
@@ -369,7 +376,7 @@ test('B71 (4): a change to the source or to the answering file makes the answer 
   assert.equal((await f3.answeredRows()).length, 1);
   writeFile(f3.repo, SRC, `${SRC_V2}// later\n`);
   await signedReview(f3, [{ id: 'W1', severity: 'warning' }], 't2');
-  assert.deepEqual(await f3.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
+  assert.deepEqual(await f3.close(), [1, refusalBlockers(f3.runId, SRC, ['W1']) + `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
 });
 
 test('B71 (5): an unsigned review.answered row or one with a bad MAC clears nothing; the same row signed does', async () => {
@@ -384,17 +391,17 @@ test('B71 (5): an unsigned review.answered row or one with a bad MAC clears noth
   // unsigned: not counted (and the file's unsigned row leaves it unproven too)
   const u = await setup('b71-unsigned');
   await u.f.writeRow(u.body);
-  assert.deepEqual(await u.f.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1; unproven ${SRC}\n`]);
+  assert.deepEqual(await u.f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b71-unsigned\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left W1 open and it is not waived\n  fix: code-forge block waive B1 W1 --run r-b71-unsigned --file src/a.mjs --reason '<reason>'\nunproven src/a.mjs src/a.mjs is high tier and has no proven red→green row covering it\n  fix: code-forge proof red-green B1 --run r-b71-unsigned --test '<test-file>'\n` + `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1; unproven ${SRC}\n`]);
   // a bad MAC: not counted
   const b = await setup('b71-badmac');
   const signed = signRow(b.body, b.f.key);
   const flipped = `${signed.mac.slice(0, -1)}${signed.mac.endsWith('0') ? '1' : '0'}`;
   await b.f.writeRow({ ...signed, mac: flipped });
-  assert.deepEqual(await b.f.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1; unproven ${SRC}\n`]);
+  assert.deepEqual(await b.f.close(), [1, refusalBlockers(b.f.runId, SRC, ['W1'], true) + `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1; unproven ${SRC}\n`]);
   // signed, but naming the source as its own answering file: not counted
   const s = await setup('b71-selfans');
   await writeSigned(s.f.runId, s.f.writeRow, { ...s.body, by_file: SRC, by_hash: s.f.hashOf(SRC) });
-  assert.deepEqual(await s.f.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
+  assert.deepEqual(await s.f.close(), [1, refusalBlockers(s.f.runId, SRC, ['W1']) + `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
   // the same row, signed: the source closes
   await writeSigned(s.f.runId, s.f.writeRow, s.body);
   assert.deepEqual(await s.f.close(), [0, `${s.f.reviewed()}block B1: ${SRC} reviewed_by_waiver (answered W1)\nblock B1 closed\n`]);
@@ -424,12 +431,12 @@ test('B71 (6): an answer clears a critical (the answering file still needs its o
   assert.deepEqual((await f.answeredRows()).map((r) => r.finding), ['C1']);
   // U1 and K1 stay the human's (the cap refusal names K1); once the human waives both, the close
   // passes with C1 under answered
-  assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${SRC}; unreviewed ${ANS}; review_cap ${SRC} K1\n`]);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge review-file --wait-block B1 --run r-b71-critical\nunreviewed test/a.test.mjs no review.approved row for test/a.test.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b71-critical\nreview_cap src/a.mjs src/a.mjs stopped at review_cap; finding K1 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge block waive B1 K1 --run r-b71-critical --file src/a.mjs --reason '<reason>'\n` + `block B1 open: unreviewed ${SRC}; unreviewed ${ANS}; review_cap ${SRC} K1\n`]);
   for (const id of ['U1', 'K1']) {
     const w = capture();
     assert.equal(await runBlock(['waive', 'B1', id, '--run', f.runId, '--file', SRC, '--reason', 'owner accepted it in chat'], humanSaysYes({ stdout: w, stderr: w, now: () => T0 })), 0);
   }
-  assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${ANS}\n`]);
+  assert.deepEqual(await f.close(), [1, refusalBlockers(f.runId, ANS) + `block B1 open: unreviewed ${ANS}\n`]);
   await f.sign({ event: 'review.approved' }, ANS);
   const [code, out] = await f.close(['--json']);
   assert.equal(code, 0);
@@ -633,7 +640,7 @@ test('B71 (13): the packet and by_hash come from the ONE read of the answering f
   assert.notEqual(f.hashOf(ANS), seen);
   // the answer is stale for the changed file: the source is not cleared
   await f.sign({ event: 'review.approved' }, ANS);
-  assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content\n  fix: code-forge review-file --wait-block B1 --run r-b71-one-read\nnot_approved src/a.mjs the latest review of src/a.mjs's current content left W1 open and it is not waived\n  fix: code-forge block waive B1 W1 --run r-b71-one-read --file src/a.mjs --reason '<reason>'\n` + `block B1 open: unreviewed ${SRC}; not_approved ${SRC} W1\n`]);
   // (b) the source (tracked since the block base) answers a finding of the new file: its diff
   const t = await fixture('b71-tracked');
   await t.sign({ event: 'review.round', round: 1, kind: 'full', open_after: 1 }, ANS);
@@ -703,7 +710,7 @@ test('B79 (a): a cap id with no severity recorded at the hash is never open, eve
   assert.deepEqual((await f.answeredRows()).map((r) => r.finding), ['W1']);
   // the close still refuses K1 at the cap
   await f.sign({ event: 'review.approved' }, ANS);
-  assert.deepEqual(await f.close(), [1, `block B1 open: unreviewed ${SRC}; review_cap ${SRC} K1\n`]);
+  assert.deepEqual(await f.close(), [1, `unreviewed src/a.mjs no review.approved row for src/a.mjs at its current content; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge review-file --wait-block B1 --run r-b79-cap-latest\nreview_cap src/a.mjs src/a.mjs stopped at review_cap; finding K1 is open and not waived; exits: block reopen, block waive, review-file --answers, re-decompose\n  fix: code-forge block waive B1 K1 --run r-b79-cap-latest --file src/a.mjs --reason '<reason>'\n` + `block B1 open: unreviewed ${SRC}; review_cap ${SRC} K1\n`]);
 });
 
 /**

@@ -94,8 +94,18 @@ async function fixture(slug, { extra = [], owned = [A, B] } = {}) {
   };
   /** @param {string[]} [more] @param {Record<string, any>} [deps] */
   const close = (more = [], deps = {}) => cli(runBlock, ['close', 'B1', '--run', runId, '--worker-pid', '4242', '--transcript', `${repo}/coder.log`, ...more], deps);
+  /** @param {string} report @param {string} reason @param {Array<string | null>} [files] */
+  const reportFailure = (report, reason, files = [null]) => files.map((file) => {
+    const repair = file ? `add the review-file ticket id for ${file} to ${report}` : {
+      '--report cannot be read': `restore readable report ${report} or correct --report`,
+      'no ===BLOCK B1 COMPLETE=== sentinel': `add ===BLOCK B1 COMPLETE=== to ${report}`,
+      'no TESTS line': `add TESTS <command> exit=<n> with the actual test result before ===BLOCK B1 COMPLETE=== in ${report}`,
+    }[reason];
+    assert.ok(repair, `expected manual repair for ${reason}`);
+    return `coder_report_failed ${file ?? '-'} coder report FAILED: ${reason}${file ?? ''}\n  fix: no automatic fix: coder_report_failed; ${repair}; rerun block ready\n`;
+  }).join('');
   const done = () => JSON.parse(readFileSync(doneFilePath(runId, 'B1'), 'utf8'));
-  return { repo, runId, where, edit, sign, ticket, report, close, done, writeRow };
+  return { repo, runId, where, edit, sign, ticket, report, reportFailure, close, done, writeRow };
 }
 
 // ── clause 1: the reproduction (written first; on the base sha the close refused) ──────────────
@@ -227,7 +237,8 @@ test('B96 (5): an unreadable --report is still refused before anything closes', 
   const fx = await fixture('b96-unreadable', { owned: [A] });
   fx.edit(A, "export const v = 'a 1';\n");
   await fx.sign(A, { event: 'review.approved', round: 1 });
-  assert.deepEqual(await fx.close(['--report', path.join(freshDir('none'), 'no-such-report.md')]), [1, '', 'block B1 open: coder report FAILED: --report cannot be read\n']);
+  const report = path.join(freshDir('none'), 'no-such-report.md');
+  assert.deepEqual(await fx.close(['--report', report]), [1, fx.reportFailure(report, '--report cannot be read'), 'block B1 open: coder report FAILED: --report cannot be read\n']);
 });
 
 // ── clause 6: waived or external-review closes are unchanged ────────────────────────────────────
@@ -293,7 +304,7 @@ test('B96 r1 (4): a mismatched hand line followed by a later refusal (an orphan 
   await fx.sign(A, { event: 'review.approved', round: 1 });
   await checkScope({ runId: fx.runId, id: 'B1', files: [A, 'zz.txt'], writeRow: fx.writeRow });
   const report = fx.report('latewarn', `reviewed ${A} ticket ${'0'.repeat(24)}\nTESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n`);
-  assert.deepEqual(await fx.close(['--report', report]), [1, '', 'block B1 open: orphans: zz.txt\n']);
+  assert.deepEqual(await fx.close(['--report', report]), [1, `unowned_change zz.txt orphan in run registry: zz.txt\n  fix: code-forge block claim B1 zz.txt --run r-b96-latewarn\n`, 'block B1 open: orphans: zz.txt\n']);
   await claimPath({ runId: fx.runId, id: 'B1', file: 'zz.txt', writeRow: fx.writeRow });
   assert.deepEqual(await fx.close(['--report', report]), [0, `reviewed ${A} ticket ${fx.ticket(A)}\nblock B1 closed\n`, `WARN report ticket mismatch ${A}\n`]);
 });
@@ -328,7 +339,7 @@ test('B96 r1 (6): a gate-accepted file whose ticket cannot be given has no line 
   await fx.sign(A, { event: 'review.approved', round: 1 });
   await fx.sign(B, { event: 'review.approved', round: 1 });
   const report = fx.report('noticket', 'TESTS npm test exit=0\n===BLOCK B1 COMPLETE===\n');
-  assert.deepEqual(await fx.close(['--report', report], { resolveTicket: noA }), [1, '', `block B1 open: coder report FAILED: no review-file ticket id for ${A}\n`]);
+  assert.deepEqual(await fx.close(['--report', report], { resolveTicket: noA }), [1, fx.reportFailure(report, 'no review-file ticket id for ', [A]), `block B1 open: coder report FAILED: no review-file ticket id for ${A}\n`]);
   assert.deepEqual(await fx.close([], { resolveTicket: noA }), [0, `reviewed ${B} ticket ${fx.ticket(B)}\nblock B1 closed\n`, `WARN no ticket for ${A}\n`]);
   assert.deepEqual(fx.done().reviewed, [{ file: B, ticket: fx.ticket(B), via: 'approved' }]);
 });
@@ -358,7 +369,7 @@ test('B96 r1 (10): an owned file that did not change gets no line; a close the g
   fx.edit(A, "export const v = 'a 1';\n");
   await fx.sign(A, { event: 'review.approved', round: 1 });
   fx.edit(C, "export const v = 'c 1';\n");
-  assert.deepEqual(await fx.close(), [1, '', `block B1 open: unowned_change ${C}\n`]);
+  assert.deepEqual(await fx.close(), [1, `unowned_change src/c.mjs src/c.mjs changed but no block of the run owns it — block claim it, or put it back\n  fix: code-forge block claim B1 src/c.mjs --run r-b96-unchanged\n`, `block B1 open: unowned_change ${C}\n`]);
   fx.edit(C, `export const v = '${C} 0';\n`);
   assert.deepEqual(await fx.close(), [0, `reviewed ${A} ticket ${fx.ticket(A)}\nblock B1 closed\n`, '']);
 });
@@ -371,7 +382,8 @@ test('B96 r1 (10): under context.require_coder_tests a --report with no COMPLETE
     const fx = await fixture(slug, { owned: [A], extra: ['context:', '  require_coder_tests: true'] });
     fx.edit(A, "export const v = 'a 1';\n");
     await fx.sign(A, { event: 'review.approved', round: 1 });
-    assert.deepEqual(await fx.close(['--report', fx.report(slug, text)]), [1, '', `block B1 open: coder report FAILED: ${reason}\n`]);
+    const report = fx.report(slug, text);
+    assert.deepEqual(await fx.close(['--report', report]), [1, fx.reportFailure(report, reason), `block B1 open: coder report FAILED: ${reason}\n`]);
   }
 });
 
@@ -410,9 +422,10 @@ async function allApproved(slug, owned = [A, B]) {
 test('B96 r2 (6): when the lines cannot be built at all, --report needs a hand line for every file the gate accepts — none, or only a\'s, is refused for the rest and prints no WARN', async () => {
   const fx = await allApproved('b96-r2-nolines');
   const deps = { reviewedLines: linesFail };
-  assert.deepEqual(await fx.close(['--report', fx.report('bare', SENTINEL)], deps), [1, '', `block B1 open: coder report FAILED: no review-file ticket id for ${A}, ${B}\n`]);
+  const bare = fx.report('bare', SENTINEL);
+  assert.deepEqual(await fx.close(['--report', bare], deps), [1, fx.reportFailure(bare, 'no review-file ticket id for ', [A, B]), `block B1 open: coder report FAILED: no review-file ticket id for ${A}, ${B}\n`]);
   const onlyA = fx.report('only-a', `reviewed ${A} ticket ${fx.ticket(A)}\n${SENTINEL}`);
-  assert.deepEqual(await fx.close(['--report', onlyA], deps), [1, '', `block B1 open: coder report FAILED: no review-file ticket id for ${B}\n`]);
+  assert.deepEqual(await fx.close(['--report', onlyA], deps), [1, fx.reportFailure(onlyA, 'no review-file ticket id for ', [B]), `block B1 open: coder report FAILED: no review-file ticket id for ${B}\n`]);
 });
 
 test('B96 r2 (5)(6): `WARN reviewed lines unavailable` is held — a later refusal (an orphan) prints it not; once the orphan is claimed the close prints it once, and no hand line is compared with a ticket', async () => {
@@ -422,7 +435,7 @@ test('B96 r2 (5)(6): `WARN reviewed lines unavailable` is held — a later refus
   // a hand line for each file, neither naming the file's ticket
   const report = fx.report('held', `reviewed ${A} ticket ${'0'.repeat(24)}\nreviewed ${B} ticket ${'1'.repeat(24)}\n${SENTINEL}`);
   assert.notEqual(fx.ticket(A), '0'.repeat(24));
-  assert.deepEqual(await fx.close(['--report', report], deps), [1, '', 'block B1 open: orphans: zz.txt\n']);
+  assert.deepEqual(await fx.close(['--report', report], deps), [1, `unowned_change zz.txt orphan in run registry: zz.txt\n  fix: code-forge block claim B1 zz.txt --run r-b96-r2-held\n`, 'block B1 open: orphans: zz.txt\n']);
   await claimPath({ runId: fx.runId, id: 'B1', file: 'zz.txt', writeRow: fx.writeRow });
   assert.deepEqual(await fx.close(['--report', report], deps), [0, 'block B1 closed\n', 'WARN reviewed lines unavailable: boom\n']);
   assert.equal(Object.hasOwn(fx.done(), 'reviewed'), false);
@@ -439,11 +452,12 @@ test('B96 r2 (3)(6): a file whose content changed after the review gate read it 
     return resolveTicket(t);
   };
   const deps = { resolveTicket: moveA };
-  assert.deepEqual(await fx.close(['--report', fx.report('only-b', `reviewed ${B} ticket ${tb}\n${SENTINEL}`)], deps), [1, '', `block B1 open: coder report FAILED: no review-file ticket id for ${A}\n`]);
+  const onlyB = fx.report('only-b', `reviewed ${B} ticket ${tb}\n${SENTINEL}`);
+  assert.deepEqual(await fx.close(['--report', onlyB], deps), [1, fx.reportFailure(onlyB, 'no review-file ticket id for ', [A]), `block B1 open: coder report FAILED: no review-file ticket id for ${A}\n`]);
   fx.edit(A, approvedA);
   await checkScope({ runId: fx.runId, id: 'B1', files: [A, B, 'zz.txt'], writeRow: fx.writeRow });
   const both = fx.report('both', `reviewed ${A} ticket ${ta}\nreviewed ${B} ticket ${tb}\n${SENTINEL}`);
-  assert.deepEqual(await fx.close(['--report', both], deps), [1, '', 'block B1 open: orphans: zz.txt\n']);
+  assert.deepEqual(await fx.close(['--report', both], deps), [1, `unowned_change zz.txt orphan in run registry: zz.txt\n  fix: code-forge block claim B1 zz.txt --run ${fx.runId}\n`, 'block B1 open: orphans: zz.txt\n']);
   fx.edit(A, approvedA);
   await claimPath({ runId: fx.runId, id: 'B1', file: 'zz.txt', writeRow: fx.writeRow });
   assert.deepEqual(await fx.close(['--report', both], deps), [0, `reviewed ${B} ticket ${tb}\nblock B1 closed\n`, `WARN no ticket for ${A}\n`]);
@@ -462,7 +476,7 @@ test('B96 r2 (7): a ticket that is a string but not 24 lowercase hex (here in ca
   const deps = { resolveTicket: upperA };
   // with --report the lines are built before the orphan check refuses (a has no line, so it needs its hand line)
   await checkScope({ runId: fx.runId, id: 'B1', files: [A, B, 'zz.txt'], writeRow: fx.writeRow });
-  assert.deepEqual(await fx.close(['--report', fx.report('only-a', `reviewed ${A} ticket ${ta}\n${SENTINEL}`)], deps), [1, '', 'block B1 open: orphans: zz.txt\n']);
+  assert.deepEqual(await fx.close(['--report', fx.report('only-a', `reviewed ${A} ticket ${ta}\n${SENTINEL}`)], deps), [1, `unowned_change zz.txt orphan in run registry: zz.txt\n  fix: code-forge block claim B1 zz.txt --run r-b96-r2-badticket\n`, 'block B1 open: orphans: zz.txt\n']);
   await claimPath({ runId: fx.runId, id: 'B1', file: 'zz.txt', writeRow: fx.writeRow });
   assert.deepEqual(await fx.close([], deps), [0, `reviewed ${B} ticket ${tb}\nblock B1 closed\n`, `WARN bad ticket for ${A}\n`]);
   assert.deepEqual(fx.done().reviewed, [{ file: B, ticket: tb, via: 'approved' }]);
@@ -537,7 +551,8 @@ test('B96 r2 (9): an owned, changed file the review gate refuses (not approved, 
     return resolveTicket(t);
   };
   const report = fx.report('gate', `reviewed ${B} ticket ${'0'.repeat(24)}\n${SENTINEL}`);
-  const refused = [1, '', `block B1 open: unreviewed ${A}; not_approved ${A} W1\n`];
-  assert.deepEqual(await fx.close(['--report', report], { resolveTicket: noC }), refused);
-  assert.deepEqual(await fx.close([], { resolveTicket: noC }), refused);
+  const blockers = `unreviewed ${A} no review.approved row for ${A} at its current content\n  fix: code-forge review-file --wait-block B1 --run ${fx.runId}\nnot_approved ${A} the latest review of ${A}'s current content left W1 open and it is not waived\n  fix: code-forge block waive B1 W1 --run ${fx.runId} --file ${A} --reason '<reason>'\n`;
+  const reason = `block B1 open: unreviewed ${A}; not_approved ${A} W1\n`;
+  assert.deepEqual(await fx.close(['--report', report], { resolveTicket: noC }), [1, blockers + fx.reportFailure(report, 'no review-file ticket id for ', [A, C]), reason]);
+  assert.deepEqual(await fx.close([], { resolveTicket: noC }), [1, blockers, reason]);
 });

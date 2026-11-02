@@ -260,12 +260,13 @@ test('B49b fix 2–6: link stored first, one doc per run, refused edits keep the
 test('B49b: the never-delegated list in references/autopilot.md §5 has its 5 items, in order', async () => {
   const text = await readSkillFile('references/autopilot.md');
   assert.match(text, /^## §5 Never delegated — always the owner$/m);
+  assert.ok(section(text, 5).includes("Here, a critical waiver means the delegate's `autopilot waive` action; the evidence-backed orchestrator exception is in §2."));
   const items = [...section(text, 5).matchAll(/^- (.+)$/gm)].map((m) => m[1]);
   assert.deepEqual(items, [
     'plan approval (`plan.md` §4.1) and design approval;',
     'a budget raise (`code.md` §6, `review.md` §7);',
     'a threshold edit or any other limit or rule change — only the owner\'s own `forge autopilot approve` at a terminal;',
-    'a critical waiver through the delegate\'s `autopilot waive` action (the evidence-backed agent exception is in §2), a proof waiver, or closing a block without its reviews;',
+    'a critical waiver, a proof waiver, or closing a block without its reviews;',
     'merges and destructive actions.',
   ]);
 });

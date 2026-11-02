@@ -154,7 +154,7 @@ test('B74 (3): a deletion with no approval is unreviewed at close; an approval a
   const f = await fixture('b74-unreviewed');
   const refused = await f.close();
   assert.equal(refused.code, 1);
-  assert.equal(refused.out, '');
+  assert.equal(refused.out, `unreviewed ${SRC} no review.approved row for ${SRC} at its current content\n  fix: code-forge review-file --wait-block B1 --run ${f.runId}\n`);
   assert.equal(refused.err.includes(`unreviewed ${SRC}`), true, refused.err);
 
   const r = await f.review();

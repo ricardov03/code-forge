@@ -244,16 +244,21 @@ export function checkBlockReviews({ block, runId, files, rows, key, transcript =
  */
 export function routineCloseProblem(opts) {
   const mine = opts.rows.filter((r) => r.block === opts.block && r.run === opts.runId);
-  if (mine.some((r) => typeof r.event === 'string' && r.event.includes('waiv'))) return 'waiver rows for block';
-  if (mine.some((r) => r.event === 'rule_break' || r.event === 'rule_break.accepted')) return 'rule_break or accepted hit for block';
+  const problems = [];
+  if (mine.some((r) => typeof r.event === 'string' && r.event.includes('waiv'))) problems.push('waiver rows for block');
+  if (mine.some((r) => r.event === 'rule_break' || r.event === 'rule_break.accepted')) problems.push('rule_break or accepted hit for block');
   const hits = acceptedTranscriptHits({ ...opts, transcript: opts.transcript ?? null, rows: [] }).remaining;
-  if (hits.length > 0) return `rule_break transcript line ${hits[0].line}: ${hits[0].id}`;
-  if (!mine.some((r) => r.event === 'gate.done' && r.all_ok === true && verified(r, opts.key))) return 'no signed green gate row';
+  const transcriptDetails = new Set(hits.map((hit) => `transcript line ${hit.line}: ${hit.id}`));
+  for (const hit of hits) problems.push(`rule_break transcript line ${hit.line}: ${hit.id}`);
+  if (!mine.some((r) => r.event === 'gate.done' && r.all_ok === true && verified(r, opts.key))) problems.push('no signed green gate row');
   const result = checkBlockReviews(opts);
-  if (!result.ok) return result.refusals.map((r) => `${r.code}${r.file ? ` ${r.file}` : ''}`).join('; ');
-  if (result.waivedAll.length > 0) return 'reviewed_by_waiver or answered-only file';
-  if (opts.files.length === 0) return 'no approved changed files';
-  return null;
+  for (const r of result.refusals) {
+    if (r.code === 'rule_break' && transcriptDetails.has(r.detail)) continue;
+    problems.push(`${r.code}${r.file ? ` ${r.file}` : ''}`);
+  }
+  if (result.waivedAll.length > 0) problems.push('reviewed_by_waiver or answered-only file');
+  if (opts.files.length === 0) problems.push('no approved changed files');
+  return problems.length > 0 ? problems.join('; ') : null;
 }
 
 /** B71: the signed row the worker writes for a finding a reviewer judged resolved by another owned file. */
@@ -1183,7 +1188,7 @@ function isOnDisk(repoRoot, file) {
  * refused close writes none.
  * @param {() => Promise<Parameters<typeof checkBlockReviews>[0]>} load
  * @param {{onWaivedAll?: (files: WaivedAll[]) => void, onAcceptedHits?: (hits: import('./accept-hit.mjs').AcceptedHit[]) => void}} [hooks]
- * @returns {() => Promise<{ok: boolean, reason?: string}>}
+ * @returns {() => Promise<{ok: boolean, reason?: string, blockers?: Refusal[]}>}
  */
 export function reviewGateCheck(load, { onWaivedAll, onAcceptedHits } = {}) {
   return async () => {
@@ -1204,7 +1209,7 @@ export function reviewGateCheck(load, { onWaivedAll, onAcceptedHits } = {}) {
       } else reasons.push(`${r.code}${r.file ? ` ${r.file}` : ''}${r.finding ? ` ${r.finding}` : ''}`);
     }
     if (transcriptIds.size > 5) reasons.push(`+${transcriptIds.size - 5} more rule_break`);
-    return { ok: false, reason: reasons.join('; ') };
+    return { ok: false, reason: reasons.join('; '), blockers: result.refusals };
   };
 }
 
