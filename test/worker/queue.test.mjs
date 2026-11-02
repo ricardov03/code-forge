@@ -14,18 +14,28 @@ describe('review-file enqueue (V4 paths, timing, worker_down)', () => {
     const { repo, runId } = await makeRepo();
     announceWorker(repo, { pid: process.pid, run: runId }); // this live process stands in for the worker
     try {
-      const started = Date.now();
-      const baseline = await exec([process.execPath, '-e', '0'], { cwd: repo, env: childEnv(), timeoutMs: 60000 });
-      const baselineMs = Date.now() - started;
-      assert.equal(baseline.code, 0, baseline.stderr);
-      let res = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
-      // A busy full suite can slow one cold CLI start; the same enqueue again (same ticket) must still be fast.
-      if (res.ms >= 1000 + baselineMs) res = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
-      assert.equal(res.code, 0);
-      assert.equal(res.json.status, 'queued');
-      assert.match(res.json.ticket, /^[0-9a-f]{24}$/);
-      assert.ok(res.ms < 1000 + baselineMs, `enqueue took ${res.ms} ms; cold node start took ${baselineMs} ms (enqueue overhead must be < 1000 ms)`);
-      assert.deepEqual(queued(repo, 'json'), [res.json.ticket]);
+      const samples = [];
+      // Alternate adjacent cold-start/enqueue samples so both minima see the same load.
+      // Validate every enqueue, including the idempotent repeats used for timing.
+      for (let i = 0; i < 3; i += 1) {
+        const env = childEnv();
+        const started = Date.now();
+        const baseline = await exec([process.execPath, '-e', '0'], { cwd: repo, env, timeoutMs: 60000 });
+        const baselineMs = Date.now() - started;
+        assert.equal(baseline.code, 0, baseline.stderr);
+        const res = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
+        assert.equal(res.code, 0, res.stderr);
+        assert.equal(res.json.status, 'queued');
+        assert.match(res.json.ticket, /^[0-9a-f]{24}$/);
+        samples.push({ baselineMs, res });
+      }
+      const baselineMs = Math.min(...samples.map((s) => s.baselineMs));
+      const enqueueMs = Math.min(...samples.map((s) => s.res.ms));
+      const timing = `enqueue took ${enqueueMs} ms; cold node start took ${baselineMs} ms (min of 3 each; enqueue overhead must be < 1000 ms)`;
+      assert.ok(enqueueMs - baselineMs < 1000, timing);
+      const ticket = samples[0].res.json.ticket;
+      assert.deepEqual(samples.map((s) => s.res.json.ticket), [ticket, ticket, ticket]);
+      assert.deepEqual(queued(repo, 'json'), [ticket]);
     } finally {
       retractWorker(repo, process.pid);
     }
@@ -141,7 +151,9 @@ describe('review-file enqueue (V4 paths, timing, worker_down)', () => {
     symlinkSync(tree, link);
     assert.deepEqual(enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs', tree: link }), first);
     assert.throws(() => enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/b.mjs', tree: 'rel/tree' }), { code: 'bad-path', message: 'the content tree rel/tree is not an absolute path' });
-    assert.throws(() => enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/b.mjs', tree: `${repo}-gone` }), { code: 'bad-path', message: `the content tree ${repo}-gone cannot be resolved` });
+    const goneTree = `${repo}-gone`;
+    const missingTreeError = { code: 'bad-path', message: `the content tree ${goneTree} cannot be resolved` };
+    assert.throws(() => enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/b.mjs', tree: goneTree }), missingTreeError);
     assert.deepEqual(queued(repo, 'json'), [id, main.ticket, same.ticket].sort());
   });
 });

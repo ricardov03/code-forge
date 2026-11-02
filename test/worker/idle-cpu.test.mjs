@@ -1,6 +1,7 @@
 import { BLOCK, freshDir, makeRepo } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import childProcess from 'node:child_process';
+import { EventEmitter } from 'node:events';
 import fs from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
@@ -39,9 +40,10 @@ async function join(t, change) {
   announceWorker(repo, { pid: process.pid, run: runId });
   const counts = counters(t);
   activeCounts = counts;
-  // Legacy code has no injected clock: let its real-clock timeout finish immediately.
-  let legacyTime = Date.now();
-  t.mock.method(Date, 'now', () => (legacyTime += 60_000));
+  // Polling sequences must not also race real filesystem notifications. Completion and
+  // discovery changes are observed on the next injected poll; wake-up is tested separately.
+  t.mock.method(fs, 'watch', () => Object.assign(new EventEmitter(), { close() {} }));
+  syncBuiltinESMExports();
   let time = 0;
   const sleeps = [];
   let output = '';
@@ -85,9 +87,8 @@ test('idle block wait and worker grow sleeps to 5 s and reset on ticket completi
       if (sleeps.length === 10) worker.stop();
     },
   });
-  // Injected polls stop at ten; the real timer only guards against a hung loop.
-  const legacyStop = setTimeout(() => worker.stop(), 30_000);
-  try { await worker.run(); } finally { clearTimeout(legacyStop); }
+  t.after(() => worker.stop());
+  await worker.run();
   assert.deepEqual(sleeps, [250, 500, 1000, 2000, 4000, 5000, 5000, 5000, 250, 500], 'empty worker caps at 5000 ms and a new ticket resets to 250 ms');
   assert.deepEqual(joined.sleeps, [200, 400, 800, 1600, 3200, 5000, 5000, 5000, 200, 400], 'block wait caps at 5000 ms and completion resets to 200 ms');
   assert.equal(joined.result.done, true, 'all three completed tickets finish the join');
