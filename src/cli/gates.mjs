@@ -238,11 +238,11 @@ function scopeOf({ scope, test_count: testCount, reason }) {
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}}} [deps]
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, signal?: AbortSignal}} [deps]
  * @returns {Promise<number>}
  */
 export async function runGatesVerb(args, deps = {}) {
-  const { stdout = process.stdout, stderr = process.stderr } = deps;
+  const { stdout = process.stdout, stderr = process.stderr, signal } = deps;
   const out = (/** @type {object} */ value) => writeSafe(stdout, `${redactJSON(value)}\n`);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
   const usage = () =>
@@ -355,19 +355,21 @@ export async function runGatesVerb(args, deps = {}) {
           if (scope.scope !== 'related' || !argv?.includes('{test_files}')) throw new StateError('light-tests', 'light-tests: block tests and a gates.test {test_files} item are required');
           planned = { ...planned, lightTestFiles: scope.files };
         }
-        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates: planned, cwd, threshold, changed: light ? false : changed, slug, timeoutMs });
+        const guarded = await runGatesGuarded({ runId: runFlag.value, blockId: blockFlag.value, gates: planned, cwd, threshold, changed: light ? false : changed, slug, timeoutMs, signal });
         if (guarded.result === 'proof.busy') {
           out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
           return 1;
         }
         ran = /** @type {{value: {results: any[], allOk: boolean, ledger_slug?: string, files?: Record<string, string>, changed_scope?: import('../gates/expand.mjs').ChangedScope}}} */ (guarded).value;
       } else {
-        ran = await runGates(gates, { cwd, timeoutMs });
+        ran = await runGates(gates, { cwd, timeoutMs, signal });
       }
-      const { results, allOk } = ran;
+      const { results } = ran;
+      const cancelled = signal?.aborted === true;
+      const allOk = !cancelled && ran.allOk;
       const durationMs = results.reduce((sum, r) => sum + r.duration_ms, 0);
       for (const result of results) {
-        if (!result.skipped && result.code === null) err(`${result.gate}: ${result.message}\n`);
+        if (!cancelled && !result.skipped && result.code === null) err(`${result.gate}: ${result.message}\n`);
       }
       const repeats = results.find((r) => r.repeats)?.repeats;
 
@@ -380,7 +382,7 @@ export async function runGatesVerb(args, deps = {}) {
         // B60: with --run/--block the rows name the run and the block, so the run's binnacle reads them
         const owner = runFlag.value !== undefined ? { run: runFlag.value, block: blockFlag.value, ...inTree } : {};
         for (const result of results) {
-          if (!result.skipped && !result.ok) {
+          if (!cancelled && !result.skipped && !result.ok) {
             await writeGateRow({ ...owner, event: 'gate.red', gate: result.gate, code: result.code, ...scopeOf(result),
               duration_ms: result.duration_ms, total_duration_ms: durationMs,
               ...(result.custom ? { custom: true } : {}),
@@ -392,7 +394,8 @@ export async function runGatesVerb(args, deps = {}) {
         // without --run/--block that is `scope: full, reason: no_tests`
         const scoped = results.find((r) => r.scope !== undefined);
         const custom = results.filter((r) => r.custom);
-        await writeGateRow({ ...owner, event: 'gate.done', stack: gates.stack, all_ok: allOk,
+        await writeGateRow({ ...owner, event: cancelled ? 'gate.cancelled' : 'gate.done', stack: gates.stack, all_ok: allOk,
+          ...(cancelled ? { cancelled: true } : {}),
           duration_ms: durationMs,
           results: results.map(({ gate, ok, skipped, duration_ms }) => ({ gate, ok, skipped, duration_ms })),
           ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
@@ -402,7 +405,7 @@ export async function runGatesVerb(args, deps = {}) {
           } : {}),
           ...(ran.files ? { files: ran.files } : {}), ...(repeats ? { repeats } : {}) });
       }
-      out({ stack: gates.stack, ...inTree, results, allOk, duration_ms: durationMs, ...(message ? { message } : {}), ...(repeats ? { repeats } : {}) });
+      out({ stack: gates.stack, ...inTree, results, allOk, duration_ms: durationMs, ...(cancelled ? { cancelled: true } : {}), ...(message ? { message } : {}), ...(repeats ? { repeats } : {}) });
       return allOk ? 0 : 1;
     }
 

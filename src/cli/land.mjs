@@ -112,21 +112,27 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
         joinMs = Date.now() - started;
       }
     };
+    const gateController = new AbortController();
     const runGates = async () => {
       const started = Date.now();
       try {
-        return await capture((streams) => runGatesVerb(['run', '--run', runId, '--block', id, '--changed', '--cwd', tree.workspace], streams));
+        return await capture((streams) => runGatesVerb(['run', '--run', runId, '--block', id, '--changed', '--cwd', tree.workspace], { ...streams, signal: gateController.signal }));
       } finally {
         gatesMs += Date.now() - started;
       }
     };
-    const [joined, initialGates] = await Promise.allSettled([join(), runGates()]);
-    let gateResult = initialGates;
-    if (before !== await stamp()) [gateResult] = await Promise.allSettled([runGates()]);
+    // Observe both rejections immediately, but cancel gates as soon as join refuses.
+    const joining = Promise.allSettled([join()]);
+    const gating = Promise.allSettled([runGates()]);
+    const [joined] = await joining;
     const joinReason = joined.status === 'fulfilled' ? joined.value : joined.reason?.message ?? String(joined.reason);
+    if (joinReason) gateController.abort();
+    const [initialGates] = await gating;
+    let gateResult = initialGates;
+    if (!joinReason && before !== await stamp()) [gateResult] = await Promise.allSettled([runGates()]);
     const gates = gateResult.status === 'fulfilled' ? gateResult.value : null;
     const gateReason = gateResult.status === 'rejected' ? gateResult.reason?.message ?? String(gateResult.reason)
-      : gates.code !== 0 || gates.data?.allOk !== true ? gates.error + (gates.output || 'gates did not pass') : '';
+      : gates.data?.cancelled ? '' : gates.code !== 0 || gates.data?.allOk !== true ? gates.error + (gates.output || 'gates did not pass') : '';
     if (joinReason) return stop(joinReason + (gateReason ? `\ngates: ${gateReason}` : ''));
 
     step = 'gates';

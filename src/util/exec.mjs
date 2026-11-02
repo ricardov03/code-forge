@@ -46,6 +46,7 @@
  * @property {string} stdout
  * @property {string} stderr
  * @property {boolean} timedOut
+ * @property {true} [cancelled]
  * @property {string} [error]
  */
 
@@ -152,6 +153,7 @@ function untrackChild(pid) {
  * @param {string | Uint8Array} [opts.input] - Content written to the child's stdin, followed by
  *   EOF. Omitted ⇒ stdin is `ignore`.
  * @param {boolean} [opts.shell] - Forbidden. Only exists so passing it throws immediately.
+ * @param {AbortSignal} [opts.signal] - Cancel the process group and wait for its exit.
  * @returns {Promise<ExecResult>}
  */
 export function exec(argv, opts = {}) {
@@ -168,7 +170,8 @@ export function exec(argv, opts = {}) {
     throw new TypeError('exec: input must be a string or a Uint8Array/Buffer when given');
   }
 
-  const { cwd, env, timeoutMs, input, okExitCodes = [0], maxBufferBytes = DEFAULT_MAX_BUFFER_BYTES } = opts;
+  const { cwd, env, timeoutMs, input, signal, okExitCodes = [0], maxBufferBytes = DEFAULT_MAX_BUFFER_BYTES } = opts;
+  if (signal?.aborted) return Promise.resolve({ result: 'failed', code: null, signal: null, stdout: '', stderr: '', timedOut: false, cancelled: true });
   const [command, ...args] = argv;
 
   /** @type {NodeJS.ProcessEnv} */
@@ -215,8 +218,10 @@ export function exec(argv, opts = {}) {
     const stderrChunks = [];
     const byteCounts = { stdout: 0, stderr: 0 };
     let timedOut = false;
+    let cancelled = false;
     let overBuffer = false;
     let settled = false;
+    let exited = false;
     let remaining = Promise.resolve();
     /** @type {NodeJS.Timeout | undefined} */
     let termTimer;
@@ -240,16 +245,18 @@ export function exec(argv, opts = {}) {
       settled = true;
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
+      signal?.removeEventListener('abort', abort);
       await remaining;
       // Pipe data can arrive while the remaining group members are being stopped.
       // Snapshot the output and buffer-limit state only once that wait is over.
       /** @type {ExecResult} */
       const result = {
         ...outcome,
-        result: !outcome.error && !timedOut && !overBuffer && outcome.code !== null && okExitCodes.includes(outcome.code) ? 'ok' : 'failed',
+        result: !outcome.error && !timedOut && !cancelled && !overBuffer && outcome.code !== null && okExitCodes.includes(outcome.code) ? 'ok' : 'failed',
         stdout: stdoutText(),
         stderr: stderrText(),
         timedOut,
+        ...(cancelled ? { cancelled: /** @type {const} */ (true) } : {}),
         ...(overBuffer ? { error: 'exec: maxBufferBytes exceeded' } : {}),
       };
       if (typeof pid === 'number') {
@@ -268,7 +275,18 @@ export function exec(argv, opts = {}) {
       resolve(result);
     };
 
-    if (timeoutMs) {
+    const abort = () => {
+      if (settled || cancelled) return;
+      cancelled = true;
+      if (exited) return;
+      killGroup('SIGTERM');
+      if (killTimer) clearTimeout(killTimer);
+      killTimer = setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS);
+    };
+    signal?.addEventListener('abort', abort, { once: true });
+    if (signal?.aborted) abort();
+
+    if (timeoutMs && !cancelled) {
       termTimer = setTimeout(() => {
         timedOut = true;
         killGroup('SIGTERM');
@@ -316,12 +334,13 @@ export function exec(argv, opts = {}) {
     // Capture the group before unregistering on EVERY leader exit. Never signal the dead
     // leader/group again: each remaining member has its own synchronous identity check.
     child.on('exit', (code, signal) => {
+      exited = true;
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
       const members = typeof pid === 'number' ? groupMembers(pid) : new Map();
       if (typeof pid === 'number') untrackChild(pid);
       remaining = stopMembers(members, KILL_GRACE_MS).then(() => {});
-      if (timedOut || overBuffer || members.size > 0) {
+      if (timedOut || cancelled || overBuffer || members.size > 0) {
         settle({ code, signal });
       }
     });

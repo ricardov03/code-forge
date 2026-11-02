@@ -142,9 +142,9 @@ export async function withGateSlot({ runId, blockId, fn, pid = process.pid }) {
  * owned files are counted by `ownedFileCount` over the tracked and new (not ignored) files at
  * `cwd`. Plain gates without --changed retain the old path. B99 records bounded owned hashes
  * after green scoped runs; --changed uses the last green record and B97's stem pairs.
- * @param {{runId: string, blockId: string, gates: Parameters<typeof runGates>[0], cwd: string, timeoutMs?: number, threshold?: number, changed?: boolean, slug?: string}} opts
+ * @param {{runId: string, blockId: string, gates: Parameters<typeof runGates>[0], cwd: string, timeoutMs?: number, signal?: AbortSignal, threshold?: number, changed?: boolean, slug?: string}} opts
  */
-export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, threshold, changed = false, slug }) {
+export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, signal, threshold, changed = false, slug }) {
   return withGateSlot({
     runId,
     blockId,
@@ -152,7 +152,7 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, t
       // Plain gates without --changed need no scope or baseline.
       if (!hasScopeItem(gates) && !changed) {
         const record = await readRun(runId);
-        const ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}) });
+        const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}) });
         return { ...ran, ledger_slug: slug ?? record.project };
       }
       // the slot checked the block is open; it may still be gone by the time it is read again
@@ -168,7 +168,7 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, t
         baseline = rows.filter((row) => row.event === 'gate.done' && row.run === runId && row.block === blockId && row.all_ok === true && row.worktree === block.worktree?.path).at(-1)?.files;
       }
       const scope = changed ? changedScope({ baseline, current, fallback, owned: block.owned_files, kinds: block.owned_kinds, ...(threshold === undefined ? {} : { threshold }) }) : fallback;
-      const ran = await runGates(gates, { cwd, ...(timeoutMs ? { timeoutMs } : {}), scope });
+      const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}), scope });
       // A command that changed an input did not measure the resulting bytes. Do not baseline it.
       const after = ran.allOk && current ? await fileBaseline(cwd, block.owned_files, block.owned_kinds) : null;
       const files = after && JSON.stringify(current?.files) === JSON.stringify(after.files) ? after.files : undefined;
