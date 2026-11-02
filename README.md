@@ -158,10 +158,6 @@ issue, and sends only with your yes; `CODE_FORGE_NO_ERROR_LOG=1` disables loggin
 Proof uses unit/feature tests and red→green, with no mutation testing or hand mutations.
 See [security details](skill/references/security.md) and [privacy](docs/privacy.md).
 
-## Troubleshooting
-
-Forgotten workers exit after `worker.idle_exit_hours` without run activity (default 24, `0` disables); `sweep` and `doctor` flag idle workers, and `status` hints when all open branches are merged so you can end the run.
-
 ## Links
 
 - [Documentation](docs/): setup, concepts, tutorials, and reference pages.

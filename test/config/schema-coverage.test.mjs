@@ -404,6 +404,9 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   // B155: the two paths behind the 227 -> 229 re-pin.
   'review.exclude',
   'review.lockfile_registries',
+  // B200: the two paths behind the 245 -> 247 re-pin.
+  'worker',
+  'worker.idle_exit_hours',
 ]);
 
 /**
@@ -445,7 +448,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B183: +2 = native{,.daemon} ⇒ 238.
 // B208: +1 = review.provider_parallel ⇒ 239.
 // B207: +6 = review.adaptive{,.enabled,.window_days,.min_sessions,.explore} and review.routes.pin ⇒ 245.
-const EXPECTED_SCHEMA_PATH_COUNT = 245;
+// B200: +2 = worker{,.idle_exit_hours} ⇒ 247.
+const EXPECTED_SCHEMA_PATH_COUNT = 247;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;
