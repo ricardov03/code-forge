@@ -15,6 +15,7 @@ The coder then forecasts **cases** (tests) and **lines**. Compute the floor your
 ## §3 Dispatch — what the brief contains
 
 Acceptance (`block open --acceptance`) is a YAML/JSON list. Code clauses need `tests: [<test ids>]`. A device check instead uses `- clause: "Check the layout on a phone"` with `kind: human_check` on the next indented line and no `tests` key (even an empty list is refused). These texts are recorded as the block's `human_checks` and skipped by test-coverage checks; every other clause still needs tests.
+With an active autopilot grant, `block open` and `block amend-acceptance` refuse every `human_check` clause with `autopilot-human-check`; turn each into a clause with tests or ask the owner.
 
 For design first, put `{clause: "Owner approves the design", kind: human_check}` in `design.acc.yml`, then follow this order:
 

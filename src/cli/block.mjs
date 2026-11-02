@@ -216,7 +216,7 @@ import { laneFacts } from '../decide/lane-facts.mjs';
 import { appendRow, readAllRows } from '../ledger/write.mjs';
 import { checkOutcome } from '../outcome/outcome.mjs';
 import { loadPipeline } from '../pipeline/pipeline.mjs';
-import { amendAcceptanceBlock, attemptBlock, claimPath, closeBlock, humanPassBlock, openBlock, prepareAcceptanceAmendment, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
+import { amendAcceptanceBlock, attemptBlock, claimPath, closeBlock, humanPassBlock, openBlock, prepareAcceptance, prepareAcceptanceAmendment, rebaseBlock, repoTop, stopBlock } from '../state/block.mjs';
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { configInForce, externalReviewer, requireCoderTests } from '../state/config-snapshot.mjs';
 import { readFileDiff } from '../review/packet.mjs';
@@ -750,6 +750,12 @@ export async function runBlock(args, deps = {}) {
     }
     const record = await readRun(runId);
     if (sub === 'land') return await landBlock({ id, runId, record, report: /** @type {string} */ (flags.report), transcript: /** @type {string} */ (flags.transcript), maxMs: landMaxMs, merge: flags.merge === true, noMergeGate: flags['no-merge-gate'] === true, json }, deps);
+    // Refuse human checks before expiry side effects or any terminal question.
+    if ((sub === 'open' || sub === 'amend-acceptance') && record.autopilot && grantState(record.autopilot, (deps.now ?? (() => new Date()))()) === 'active') {
+      const grant = await checkExpiry(runId, (deps.now ?? (() => new Date()))());
+      const clauses = parseYAML(await readFile(/** @type {string} */ (flags.acceptance), 'utf8'), { prettyErrors: false });
+      prepareAcceptance(clauses, grant.state === 'active');
+    }
     if (sub === 'amend-acceptance') {
       /** @type {ReturnType<typeof prepareAcceptanceAmendment> | null} */
       let prepared = null;
