@@ -36,6 +36,7 @@ function ownWorker() {
 }
 const EXTERNAL = 'review:\n  external: {required: true, name: Outside}\n';
 const WORKTREE = 'proof:\n  isolation: worktree\n';
+const WORKTREE_SUFFIX = process.platform === 'darwin' ? '.noindex' : '';
 const BUDGET = 'budget:\n  usd: 5\n';
 /** A marker that only a transcript and a review diff carry: it must never reach stdout. */
 const MARKER = 'ZZ-SECRET-MARKER-7f3a9c';
@@ -499,21 +500,21 @@ test('B64a (4): block open and close --remove-worktree under worktree isolation:
   const j = await fixture('b64a-wt-json', 'r-b64a-wt-json', { extra: `${WORKTREE}${EXTERNAL}`, files: ['src/a.mjs'] });
   const tBase = await t.head();
   const jBase = await j.head();
-  ok(await t.open('B1', ['src/a.mjs']), `block B1 open · L1 · code · attempt 1 · base ${tBase.slice(0, 12)}\nworktree ${t.repo}-worktrees/B1 · branch forge/r-b64a-wt-text/B1\nbrief: none given (--brief <file>)\n`);
+  ok(await t.open('B1', ['src/a.mjs']), `block B1 open · L1 · code · attempt 1 · base ${tBase.slice(0, 12)}\nworktree ${t.repo}-worktrees${WORKTREE_SUFFIX}/B1 · branch forge/r-b64a-wt-text/B1\nbrief: none given (--brief <file>)\n`);
   const opened = await j.open('B1', ['src/a.mjs'], ['--json']);
   assert.equal(opened.code, 0, opened.stderr);
-  assert.deepEqual(JSON.parse(opened.stdout), { block: 'B1', event: 'open', level: 'L1', asked: 'L1', source: 'flag', kind: 'code', attempt: 1, base_sha: jBase, tests: 0, worktree: { path: `${j.repo}-worktrees/B1`, branch: 'forge/r-b64a-wt-json/B1', reused: false }, brief: null });
+  assert.deepEqual(JSON.parse(opened.stdout), { block: 'B1', event: 'open', level: 'L1', asked: 'L1', source: 'flag', kind: 'code', attempt: 1, base_sha: jBase, tests: 0, worktree: { path: `${j.repo}-worktrees${WORKTREE_SUFFIX}/B1`, branch: 'forge/r-b64a-wt-json/B1', reused: false }, brief: null });
   // the work, committed on the block's branch in its tree (so the tree is clean and can be removed)
   for (const fx of [t, j]) {
-    const tree = `${fx.repo}-worktrees/B1`;
+    const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
     writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
     await git(['add', 'src/a.mjs'], tree);
     await git(['commit', '-q', '-m', 'work'], tree);
   }
-  ok(await t.block(['close', 'B1', '--worker-pid', PID, '--remove-worktree']), `block B1 closed\nblock B1 worktree removed: ${t.repo}-worktrees/B1 (branch forge/r-b64a-wt-text/B1 kept)\n`);
+  ok(await t.block(['close', 'B1', '--worker-pid', PID, '--remove-worktree']), `block B1 closed\nblock B1 worktree removed: ${t.repo}-worktrees${WORKTREE_SUFFIX}/B1 (branch forge/r-b64a-wt-text/B1 kept)\n`);
   ok(
     await j.block(['close', 'B1', '--worker-pid', PID, '--remove-worktree', '--json']),
-    `${JSON.stringify({ block: 'B1', event: 'closed', status: 'closed', reason: null, close_event: null, worktree: { removed: true, path: `${j.repo}-worktrees/B1`, branch: 'forge/r-b64a-wt-json/B1' } })}\n`,
+    `${JSON.stringify({ block: 'B1', event: 'closed', status: 'closed', reason: null, close_event: null, worktree: { removed: true, path: `${j.repo}-worktrees${WORKTREE_SUFFIX}/B1`, branch: 'forge/r-b64a-wt-json/B1' } })}\n`,
   );
 });
 

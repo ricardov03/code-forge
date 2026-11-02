@@ -101,7 +101,7 @@ What each new key does:
 | `review.external` | The outside reviewer replaces code-forge's per-file reviews at `block close`. The close writes a signed `gate.reviews_waived {by: config}` row with the reviewer's name. `name` is required |
 | `gates.test` as `{argv, env}` | The test gate. The item `{test_files}` becomes the block's test files. `env` adds variables to the gate's environment. code-forge shows only their names (`env_keys`), never their values |
 | `gates.full_suite_threshold_files` | A block that owns more files than this runs the full suite instead of its related tests |
-| `proof.isolation: worktree` | `block open` gives each block its own git worktree and branch. The default tree folder is `../<repo-name>-worktrees` |
+| `proof.isolation: worktree` | `block open` gives each block its own git worktree and branch. The default tree folder is `../<repo-name>-worktrees.noindex` on macOS and `../<repo-name>-worktrees` elsewhere; existing runs keep their old directory and live trees never move |
 | `proof.worktree.branch` | The branch name. Only `{run}` and `{block}` are filled in |
 | `context` | What goes in the coder's context pack: rules files, a lessons file, the project's commands (code-forge never runs them) and a line cap |
 | `context.require_coder_tests` | `block close` refuses a coder report without a `TESTS <command> exit=0` line before its COMPLETE sentinel |
@@ -157,6 +157,9 @@ The ledger gets a signed `run.mode {mode: brief, plan: none}` row right after `r
 `review.external` row naming the outside reviewer.
 
 ## Step 3: open the block
+
+The example output uses the default path on Linux. On macOS, the worktree path in this step
+and the removal output in step 7 is `/work/shop-api-worktrees.noindex/B1`.
 
 ```text
 code-forge block open B1 --run cart-1 --owned src/cart.mjs test/cart.test.mjs \

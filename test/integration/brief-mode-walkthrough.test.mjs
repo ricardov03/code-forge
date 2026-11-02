@@ -26,6 +26,7 @@ const BIN = path.join(ROOT, 'bin', 'code-forge.mjs');
 const DOC = readFileSync(path.join(ROOT, 'docs', 'brief-mode.md'), 'utf8');
 const RUN = 'r-b67-walk';
 const SLUG = 'shop-api';
+const WORKTREE_SUFFIX = process.platform === 'darwin' ? '.noindex' : '';
 
 /** @type {import('node:child_process').ChildProcess[]} */
 const children = [];
@@ -110,7 +111,7 @@ test('B67 (5): the docs/brief-mode.md walk-through runs as written with the real
   // Step 3: block open without --level takes the rules lane.
   const open = await cf(['block', 'open', 'B1', '--run', RUN, '--owned', 'src/cart.mjs', 'test/cart.test.mjs', '--tests', 'test/cart.test.mjs', '--acceptance', 'plans/cart-total.acc.yml', '--brief', 'plans/cart-total.brief.md', '--lines', '20'], repo);
   assert.equal(open.code, 0, open.stderr);
-  const tree = path.join(path.dirname(repo), `${path.basename(repo)}-worktrees`, 'B1');
+  const tree = path.join(path.dirname(repo), `${path.basename(repo)}-worktrees${WORKTREE_SUFFIX}`, 'B1');
   assert.equal(path.dirname(path.dirname(tree)), PARENT);
   const branch = `forge/${RUN}/B1`;
   const openLines = open.stdout.split('\n');

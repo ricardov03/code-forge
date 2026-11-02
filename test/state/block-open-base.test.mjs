@@ -9,6 +9,7 @@ import { readAllRows } from '../../src/ledger/write.mjs';
 import { readRun } from '../../src/state/run.mjs';
 
 const PROBE = async (/** @type {number} */ pid) => pid === 4242 ? 'start-A' : null;
+const WORKTREE_SUFFIX = process.platform === 'darwin' ? '.noindex' : '';
 
 /** @param {Function} fn @param {string[]} args */
 async function cli(fn, args) {
@@ -40,7 +41,7 @@ async function fixture(name) {
   const started = await cli(runRun, ['start', '--cwd', repo, '--run', runId, '--worker-pid', '4242']);
   assert.equal(started.code, 0, started.output);
   const rows = () => readAllRows(name);
-  const tree = (/** @type {string} */ id) => `${repo}-worktrees/${id}`;
+  const tree = (/** @type {string} */ id) => `${repo}-worktrees${WORKTREE_SUFFIX}/${id}`;
   const branch = (/** @type {string} */ id) => `forge/${runId}/${id}`;
   const open = (/** @type {string} */ id, /** @type {string} */ sha, /** @type {string} */ owned = 'child.txt') =>
     cli(runBlock, ['open', id, '--run', runId, '--level', 'L1', '--owned', owned, '--acceptance', acc, '--base', sha]);

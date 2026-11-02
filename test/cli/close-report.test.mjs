@@ -29,6 +29,7 @@ const PROBE = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : n
 const A = 'src/a.mjs';
 const B = 'src/b.mjs';
 const C = 'src/c.mjs';
+const WORKTREE_SUFFIX = process.platform === 'darwin' ? '.noindex' : '';
 
 /** @returns {{write: (s: string) => boolean, text: string}} */
 function capture() {
@@ -79,7 +80,7 @@ async function fixture(slug, { extra = [], owned = [A, B] } = {}) {
   const [opened, , openErr] = await cli(runBlock, ['open', 'B1', '--run', runId, '--level', 'L2', '--owned', ...owned, '--acceptance', ACC]);
   assert.equal(opened, 0, openErr);
   const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
-  const where = extra.some((l) => l.includes('isolation: worktree')) ? `${repo}-worktrees/B1` : repo;
+  const where = extra.some((l) => l.includes('isolation: worktree')) ? `${repo}-worktrees${WORKTREE_SUFFIX}/B1` : repo;
   /** @param {string} file @param {string} content */
   const edit = (file, content) => writeFile(where, file, content);
   /** A signed row of B1 for `file` at its current hash in the block's tree. @param {string} file @param {Record<string, any>} row */

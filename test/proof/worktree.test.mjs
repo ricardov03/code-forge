@@ -1,6 +1,6 @@
 import { commitAll, freshDir, git, makeRepo, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
+import { existsSync, mkdirSync, readFileSync, realpathSync, rmSync, symlinkSync } from 'node:fs';
 import path from 'node:path';
 import { test } from 'node:test';
 
@@ -25,6 +25,7 @@ const T0 = new Date('2026-10-11T10:00:00.000Z');
 const PROBE = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
 const EXTERNAL = 'review:\n  external: {required: true, name: Grok}\n';
 const WORKTREE = 'proof:\n  isolation: worktree\n';
+const WORKTREE_SUFFIX = process.platform === 'darwin' ? '.noindex' : '';
 
 /** @param {string} slug @param {string} extra - YAML appended to the base config. */
 const configYaml = (slug, extra) =>
@@ -106,9 +107,9 @@ const strip = ({ mac: _m, ts: _t, ...rest }) => rest;
 const openText = (id, head, tree, branch, extra = '') =>
   `block ${id} open · L2 · code · attempt 1 · base ${head.slice(0, 12)}\nworktree ${tree} · branch ${branch}${extra}\nbrief: none given (--brief <file>)\n`;
 
-test('B62a (2): block open makes <repo>-worktrees/<block> on forge/<run>/<block> from the block base, records it, writes a signed worktree.created row before dispatch and prints the path and the branch', async () => {
+test('B62a (2): block open makes the platform default <dir>/<block> on forge/<run>/<block> from the block base, records it, writes a signed worktree.created row before dispatch and prints the path and the branch', async () => {
   const fx = await fixture('b62a-open', 'r-b62a-open');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   assert.deepEqual(await fx.open('B1', ['src/a.mjs']), [0, openText('B1', fx.head, tree, 'forge/r-b62a-open/B1')]);
   assert.deepEqual((await readRun('r-b62a-open')).blocks.B1.worktree, { path: tree, branch: 'forge/r-b62a-open/B1', base_sha: fx.head });
   const rows = await fx.rows();
@@ -119,6 +120,10 @@ test('B62a (2): block open makes <repo>-worktrees/<block> on forge/<run>/<block>
   assert.equal(await fx.branchSha('forge/r-b62a-open/B1'), fx.head);
   assert.equal((await git(['rev-parse', '--abbrev-ref', 'HEAD'], tree)).trim(), 'forge/r-b62a-open/B1');
   assert.equal(existsSync(path.join(tree, 'src/a.mjs')), true);
+  const marker = path.join(path.dirname(tree), '.metadata_never_index');
+  assert.equal(existsSync(marker), process.platform === 'darwin');
+  if (process.platform === 'darwin') assert.equal(readFileSync(marker, 'utf8'), '');
+  assert.equal(await git(['status', '--porcelain'], tree), '');
   // the main tree lists only code-forge's own state: the trees sit beside the repository; nothing is pushed
   assert.equal(await git(['status', '--porcelain'], fx.repo), '?? .code-forge/\n');
   assert.equal(await git(['remote'], fx.repo), '');
@@ -136,9 +141,9 @@ test('B62a (2): a refused worktree refuses the open with exit 1 and a clear mess
     return fx;
   };
   const taken = await refused('b62a-branch', WORKTREE, async (fx) => void (await git(['branch', 'forge/r-b62a-branch/B1', 'HEAD~1'], fx.repo)), (fx) => `block B1: branch forge/r-b62a-branch/B1 does not descend from base ${fx.head} — delete the branch or pick another block id; nothing was recorded`);
-  assert.equal(existsSync(`${taken.repo}-worktrees/B1`), false);
+  assert.equal(existsSync(`${taken.repo}-worktrees${WORKTREE_SUFFIX}/B1`), false);
 
-  const occupied = await refused('b62a-path', WORKTREE, async (fx) => void mkdirSync(`${fx.repo}-worktrees/B1`, { recursive: true }), (fx) => `block B1: ${fx.repo}-worktrees/B1 already exists and is not this block's worktree — move it away or change proof.worktree.dir; nothing was recorded`);
+  const occupied = await refused('b62a-path', WORKTREE, async (fx) => void mkdirSync(`${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`, { recursive: true }), (fx) => `block B1: ${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1 already exists and is not this block's worktree — move it away or change proof.worktree.dir; nothing was recorded`);
   assert.equal(await occupied.branchSha('forge/r-b62a-path/B1'), 'none');
 
   const badBase = await refused('b62a-base', `${WORKTREE}  worktree: {base: no-such-ref}\n`, async () => {}, () => 'block B1: proof.worktree.base "no-such-ref" is not a commit of the repository; nothing was recorded');
@@ -163,7 +168,7 @@ test('B62a (2): a refused worktree refuses the open with exit 1 and a clear mess
 
 test('B62a (2): a re-open (--attempt) reuses the worktree and the branch with no new created row; a tree removed in between is made again on the same branch', async () => {
   const fx = await fixture('b62a-reopen', 'r-b62a-reopen');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-reopen/B1';
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   writeFile(tree, 'src/a.mjs', 'export const a = 2;\n'); // work in progress in the tree survives the re-open
@@ -191,7 +196,7 @@ test('B62a (3): two open blocks with their own worktrees may own the same path (
   const fx = await fixture('b62a-overlap', 'r-b62a-overlap');
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   const [code, text] = await fx.open('B2', ['src/**']);
-  assert.deepEqual([code, text], [0, openText('B2', fx.head, `${fx.repo}-worktrees/B2`, 'forge/r-b62a-overlap/B2')]);
+  assert.deepEqual([code, text], [0, openText('B2', fx.head, `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B2`, 'forge/r-b62a-overlap/B2')]);
   assert.deepEqual(await cli(runBlock, ['claim', 'B1', 'src/b.mjs', '--run', 'r-b62a-overlap']), [0, 'block B1 claimed src/b.mjs\n']);
   const blocks = (await readRun('r-b62a-overlap')).blocks;
   assert.deepEqual([blocks.B1.worktree.branch, blocks.B2.worktree.branch], ['forge/r-b62a-overlap/B1', 'forge/r-b62a-overlap/B2']);
@@ -202,7 +207,7 @@ test('B62a (3): two open blocks with their own worktrees may own the same path (
   assert.deepEqual(await ex.open('B2', ['src/**']), [1, 'block open: block B2 owns src/**, which overlaps src/a.mjs owned by open block B1\n']);
   assert.equal((await ex.open('B2', ['src/c.mjs']))[0], 0);
   assert.deepEqual(await cli(runBlock, ['claim', 'B2', 'src/a.mjs', '--run', 'r-b62a-overlap-export']), [1, 'block claim: src/a.mjs overlaps src/a.mjs owned by open block B1\n']);
-  assert.equal(existsSync(`${ex.repo}-worktrees`), false);
+  assert.equal(existsSync(`${ex.repo}-worktrees${WORKTREE_SUFFIX}`), false);
 });
 
 const RELOAD = (/** @type {string} */ key, /** @type {string} */ why) => `run reload: ${key} cannot change mid-run (${why}) — put it back, or end the run and start a new one\n`;
@@ -220,7 +225,7 @@ test('B62a (1): run reload refuses to switch proof.isolation or change proof.wor
     assert.deepEqual(await cli(runRun, ['reload', '--run', 'r-b62a-reload']), [1, RELOAD(key, why)]);
   }
   // the file on disk now says export; the run still opens blocks in worktrees
-  assert.deepEqual(await fx.open('B1', ['src/a.mjs']), [0, openText('B1', fx.head, `${fx.repo}-worktrees/B1`, 'forge/r-b62a-reload/B1')]);
+  assert.deepEqual(await fx.open('B1', ['src/a.mjs']), [0, openText('B1', fx.head, `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`, 'forge/r-b62a-reload/B1')]);
 
   const ex = await fixture('b62a-reload-on', 'r-b62a-reload-on', EXTERNAL);
   writeFile(ex.repo, '.code-forge.yml', configYaml('b62a-reload-on', `${WORKTREE}${EXTERNAL}`));
@@ -229,7 +234,7 @@ test('B62a (1): run reload refuses to switch proof.isolation or change proof.wor
   assert.equal((await ex.open('B1', ['src/a.mjs']))[0], 0);
   assert.equal((await readRun('r-b62a-reload-on')).blocks.B1.worktree, undefined);
   assert.equal((await ex.events()).includes('worktree.created'), false);
-  assert.equal(existsSync(`${ex.repo}-worktrees`), false);
+  assert.equal(existsSync(`${ex.repo}-worktrees${WORKTREE_SUFFIX}`), false);
 
   // a run recorded before snapshots cannot turn worktree isolation on at its first reload
   const record = await readRun('r-b62a-reload-on');
@@ -277,7 +282,7 @@ test('B62a (1): custom proof.worktree dir, branch and base', async () => {
 
 test('B62a (4): block close --remove-worktree removes the tree after the close, keeps the branch and writes a signed worktree.removed row', async () => {
   const fx = await fixture('b62a-remove', 'r-b62a-remove');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
   await git(['commit', '-q', '-am', 'tree work'], tree);
@@ -296,7 +301,7 @@ test('B62a (4): block close --remove-worktree removes the tree after the close, 
 
 test('B62a (4): a tree with uncommitted work is not removed — signed worktree.remove_failed, exit 1, the block stays closed, the tree stays', async () => {
   const fx = await fixture('b62a-dirty', 'r-b62a-dirty');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   assert.equal((await fx.open('B1', ['src/a.mjs', 'notes.txt']))[0], 0);
   writeFile(tree, 'notes.txt', 'not committed\n');
   writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
@@ -319,7 +324,7 @@ test('B62a (4): a tree with uncommitted work is not removed — signed worktree.
 
 test('B62a (4): without --remove-worktree the tree stays; the flag on a block without a worktree, or on another subcommand, is a usage error (exit 2)', async () => {
   const fx = await fixture('b62a-keep', 'r-b62a-keep');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   assert.deepEqual(await cli(runBlock, ['stop', 'B1', '--run', 'r-b62a-keep', '--reason', 'x', '--remove-worktree']), [2, 'block stop: --remove-worktree is a block close flag\n']);
   assert.deepEqual(await cli(runBlock, ['open', 'B2', '--run', 'r-b62a-keep', '--level', 'L2', '--owned', 'src/b.mjs', '--acceptance', ACC, '--remove-worktree']), [2, 'block open: --remove-worktree is a block close flag\n']);
@@ -338,7 +343,7 @@ test('B62a (4): without --remove-worktree the tree stays; the flag on a block wi
 
 test('B62a (2): a re-open after the tree directory was deleted by hand prunes the stale registration and makes the tree again at the same path on the same branch', async () => {
   const fx = await fixture('b62a-stale', 'r-b62a-stale');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-stale/B1';
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   assert.deepEqual(await cli(runBlock, ['stop', 'B1', '--run', 'r-b62a-stale', '--reason', 'retry']), [0, 'block B1 stopped\n']);
@@ -356,7 +361,7 @@ test('B62a (2): a re-open after the tree directory was deleted by hand prunes th
 
 test('B62a (4): a re-open after block close --remove-worktree makes the tree again on the kept branch, with the work the branch holds', async () => {
   const fx = await fixture('b62a-again', 'r-b62a-again');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-again/B1';
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   writeFile(tree, 'src/a.mjs', 'export const a = 3;\n');
@@ -374,7 +379,7 @@ test('B62a (4): a re-open after block close --remove-worktree makes the tree aga
 
 test('B62a (2): a tree made for an open that then fails to record is rolled back — no tree, no branch, the run record unchanged', async () => {
   const fx = await fixture('b62a-rollback', 'r-b62a-rollback');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-rollback/B1';
   const before = await readRun('r-b62a-rollback');
   const settings = worktreeSettings(before);
@@ -413,7 +418,7 @@ async function failingReason(argv, cwd) {
 
 test('B62a (2): a rollback that cannot remove the tree or the branch throws the original error with a sentence naming each leftover and git\'s reason', async () => {
   const fx = await fixture('b62a-stuck', 'r-b62a-stuck');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-stuck/B1';
   const before = await readRun('r-b62a-stuck');
   const settings = worktreeSettings(before);
@@ -444,7 +449,7 @@ test('B62a (2): a rollback that cannot remove the tree or the branch throws the 
 test('B166: a failed open on an existing branch removes its new tree and preserves the branch tip', async () => {
   const fx = await fixture('b166-kept-branch', 'r-b166-kept-branch');
   const branch = 'forge/r-b166-kept-branch/B1';
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   await git(['branch', branch], fx.repo);
   const before = await readRun('r-b166-kept-branch');
   const settings = worktreeSettings(before);
@@ -461,7 +466,7 @@ test('B166: a failed open on an existing branch removes its new tree and preserv
   assert.deepEqual(await readRun('r-b166-kept-branch'), before);
 
   // Git refuses to attach a branch checked out in another tree; that tree and branch survive.
-  const other = `${fx.repo}-worktrees/other`;
+  const other = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/other`;
   await git(['worktree', 'add', other, branch], fx.repo);
   const [code, text] = await fx.open('B1', ['src/a.mjs']);
   assert.equal(code, 1, text);
@@ -475,7 +480,7 @@ test('B166: a failed open on an existing branch removes its new tree and preserv
 
 test('B62a (2): a re-open whose tree is registered on another branch or a detached HEAD is refused with exit 1 naming what it is on', async () => {
   const fx = await fixture('b62a-other', 'r-b62a-other');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-other/B1';
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   assert.deepEqual(await cli(runBlock, ['stop', 'B1', '--run', 'r-b62a-other', '--reason', 'retry']), [0, 'block B1 stopped\n']);
@@ -549,7 +554,7 @@ test('B166: an existing branch moved outside the base ancestry between plan and 
 
 test('B62a/B62b (4): a tree whose directory was deleted by hand refuses block close (its work cannot be measured; nothing recorded), and removeWorktree prunes such a tree', async () => {
   const fx = await fixture('b62a-gone', 'r-b62a-gone');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-gone/B1';
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   rmSync(tree, { recursive: true, force: true });
@@ -573,7 +578,7 @@ test('B159: block rebase moves an open worktree onto main, updates both bases an
   const runId = `r-${slug}`;
   const fx = await fixture(slug, runId, `${WORKTREE}${EXTERNAL}gates:\n  test: [node, --test]\n`);
   await git(['branch', '-M', 'main'], fx.repo);
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = `forge/${runId}/B1`;
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   writeFile(tree, 'src/a.mjs', 'export const a = 2;\n');
@@ -622,7 +627,7 @@ test('B159: block rebase moves an open worktree onto main, updates both bases an
 
 test('B62a (2): a re-open keeps the worktree base — the block base is the tree base, and a --base that resolves elsewhere is refused with exit 1 and nothing recorded', async () => {
   const fx = await fixture('b62a-rebase', 'r-b62a-rebase');
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-rebase/B1';
   assert.equal((await fx.open('B1', ['src/a.mjs']))[0], 0);
   assert.deepEqual(await cli(runBlock, ['stop', 'B1', '--run', 'r-b62a-rebase', '--reason', 'retry']), [0, 'block B1 stopped\n']);
@@ -651,7 +656,7 @@ test('B62a (2): a re-open keeps the worktree base — the block base is the tree
 test('B62a (2): an inherited GIT_DIR naming another repository does not redirect the worktree or the branch', async () => {
   const fx = await fixture('b62a-gitdir', 'r-b62a-gitdir');
   const other = await makeRepo();
-  const tree = `${fx.repo}-worktrees/B1`;
+  const tree = `${fx.repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const branch = 'forge/r-b62a-gitdir/B1';
   const original = process.env.GIT_DIR;
   process.env.GIT_DIR = path.join(other, '.git');
@@ -665,7 +670,7 @@ test('B62a (2): an inherited GIT_DIR naming another repository does not redirect
   assert.deepEqual(await registered(fx.repo), [fx.repo, tree]);
   assert.equal((await git(['branch', '--list', 'forge/*'], other)).trim(), '');
   assert.deepEqual(await registered(other), [other]);
-  assert.equal(existsSync(`${other}-worktrees`), false);
+  assert.equal(existsSync(`${other}-worktrees${WORKTREE_SUFFIX}`), false);
 });
 
 test('B62a (2): prepareWorktree refuses a block id that is not one plain path segment before touching git', async () => {
@@ -678,11 +683,11 @@ test('B62a (2): prepareWorktree refuses a block id that is not one plain path se
       message: `block ${JSON.stringify(id)}: a block id must be one plain path segment (no "/", "\\" or "..") to name its worktree; nothing was recorded`,
     });
   }
-  assert.equal(existsSync(`${repo}-worktrees`), false);
+  assert.equal(existsSync(`${repo}-worktrees${WORKTREE_SUFFIX}`), false);
   assert.equal((await git(['branch', '--list', 'forge/*'], repo)).trim(), '');
-  // one plain segment is planned at <repo>-worktrees/<id>; nothing is made until make()
+  // one plain segment is planned at the platform default <dir>/<id>; nothing is made until make()
   const planned = await prepareWorktree({ cwd: repo, settings, runId: 'r-seg', id: 'B1', baseSha: head, previous: null });
-  assert.equal(planned.path, `${repo}-worktrees/B1`);
+  assert.equal(planned.path, `${repo}-worktrees${WORKTREE_SUFFIX}/B1`);
   assert.equal(existsSync(planned.path), false);
 });
 
