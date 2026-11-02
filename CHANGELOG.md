@@ -18,6 +18,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - Node and the Go core now use one shared ledger append lock, so both can write the same run at the same time without lost or broken lines (B220a)
 - A routed review whose answer breaks the schema now tries the route's fallback models before it gives up; an over-long text field is cut to its limit and recorded instead of failing; `review-file --fresh` and retries use the current config after `run reload` (B234)
 - Fixed a test that read a half-written JSON file and failed about 1 run in 10 (B235)
+- Timing tests in the worker queue, idle CPU, bench-review and block-open-base suites no longer fail when other suites run at the same time (B236)
 - On macOS the default worktree folder is now `../<repo>-worktrees.noindex` with a `.metadata_never_index` file, so Spotlight does not index block worktrees; live worktrees and an explicit `proof.worktree.dir` do not move; `doctor` warns when the folder is not under `.noindex`; a failed `git worktree remove` with "Directory not empty" names the leftover path and the `rm` command (B198, #28)
 
 ## [0.16.0] — 2026-11-01
