@@ -14,6 +14,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - `block close` leaves out a reviewed file that is now back to its base bytes, and a file the block added and then deleted; a file with other changes still needs review (B228, #30)
 - Node and the Go core now use one shared ledger append lock, so both can write the same run at the same time without lost or broken lines (B220a)
+- A routed review whose answer breaks the schema now tries the route's fallback models before it gives up; an over-long text field is cut to its limit and recorded instead of failing; `review-file --fresh` and retries use the current config after `run reload` (B234)
 
 ## [0.16.0] — 2026-11-01
 
