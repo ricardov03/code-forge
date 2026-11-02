@@ -1,8 +1,8 @@
 package rebase
 
 import (
-	"regexp"
 	"strings"
+	"unicode/utf16"
 
 	"github.com/ricardov03/code-forge/native/ledger"
 )
@@ -43,18 +43,23 @@ func glob(file, pattern []string) bool {
 		}
 		return false
 	}
-	var body strings.Builder
-	for _, c := range pattern[0] {
-		switch c {
-		case '*':
-			body.WriteString("[^/]*")
-		case '?':
-			body.WriteString("[^/]")
-		default:
-			body.WriteString(regexp.QuoteMeta(string(c)))
-		}
+	return len(file) > 0 && segment(utf16.Encode([]rune(file[0])), utf16.Encode([]rune(pattern[0]))) && glob(file[1:], pattern[1:])
+}
+
+// Node's non-unicode RegExp matches UTF-16 units, including for ?.
+func segment(file, pattern []uint16) bool {
+	if len(pattern) == 0 {
+		return len(file) == 0
 	}
-	return len(file) > 0 && regexp.MustCompile("^"+body.String()+"$").MatchString(file[0]) && glob(file[1:], pattern[1:])
+	if pattern[0] == '*' {
+		for i := 0; i <= len(file); i++ {
+			if segment(file[i:], pattern[1:]) {
+				return true
+			}
+		}
+		return false
+	}
+	return len(file) > 0 && (pattern[0] == '?' || pattern[0] == file[0]) && segment(file[1:], pattern[1:])
 }
 
 func braces(pattern string) []string {
