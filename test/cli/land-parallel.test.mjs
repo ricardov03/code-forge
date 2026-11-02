@@ -20,65 +20,76 @@ const { exec } = await import('../../src/util/exec.mjs');
 
 let serial = 0;
 
-test('exec sends no SIGKILL after exit when aborted before its timeout elapses', { timeout: 10000 }, async (t) => {
-  const controller = new AbortController();
-  const spawn = childProcess.spawn;
-  let child, ready, exited;
-  let hasExited = false;
-  const signals = [];
-  const spawnSpy = t.mock.method(childProcess, 'spawn', (command, args, options) => {
-    child = spawn(command, args, options);
-    ready = once(child.stdout, 'data');
-    exited = once(child, 'exit');
-    child.once('exit', () => { hasExited = true; });
-    return child;
-  });
-  syncBuiltinESMExports();
-  const kill = process.kill;
-  const killSpy = t.mock.method(process, 'kill', (pid, signal) => {
-    if (pid === -child?.pid) {
-      // Hold the real child alive across both cancellation and the timeout deadline.
-      signals.push({ signal, afterExit: hasExited });
-      return true;
-    }
-    return kill.call(process, pid, signal);
-  });
-  t.mock.timers.enable({ apis: ['setTimeout'] });
-  try {
-    const pending = exec([process.execPath, '-e', "console.log('ready'); setInterval(() => {}, 1000)"], {
-      signal: controller.signal, timeoutMs: 100,
+for (const queuedTimeout of [false, true]) {
+  test(`exec sends no SIGKILL after exit when aborted before its timeout elapses (queued timeout: ${queuedTimeout})`, { timeout: 10000 }, async (t) => {
+    const controller = new AbortController();
+    const spawn = childProcess.spawn;
+    let child, ready, exited;
+    let hasExited = false;
+    const signals = [];
+    const spawnSpy = t.mock.method(childProcess, 'spawn', (command, args, options) => {
+      child = spawn(command, args, options);
+      ready = once(child.stdout, 'data');
+      exited = once(child, 'exit');
+      child.once('exit', () => { hasExited = true; });
+      return child;
     });
-    await ready;
-    controller.abort();
-    t.mock.timers.tick(100);
-    assert.equal(hasExited, false, 'the timeout deadline passes before the child exits');
-    child.kill('SIGTERM');
-    await exited;
-    const result = await pending;
-    assert.equal(hasExited, true, 'the child exits before either escalation deadline');
-    // Check the abort's original deadline separately from the timeout's later deadline:
-    // overwriting killTimer used to leave the first handle alive after exit.
-    t.mock.timers.tick(1899);
-    assert.deepEqual(signals.filter(({ signal }) => signal === 'SIGKILL'), [], 'no escalation before the grace period');
-    t.mock.timers.tick(1);
-    assert.deepEqual(signals.filter(({ signal, afterExit }) => signal === 'SIGKILL' && afterExit), [],
-      'the abort escalation timer must not signal the exited process group');
-    t.mock.timers.tick(100);
-    assert.deepEqual(signals, [{ signal: 'SIGTERM', afterExit: false }], 'abort sends exactly one SIGTERM');
-    assert.equal(result.cancelled, true);
-    assert.equal(result.timedOut, false);
-    assert.equal(result.result, 'failed');
-  } finally {
-    t.mock.timers.reset();
-    if (child && !hasExited) {
-      child.kill('SIGKILL');
-      await exited;
-    }
-    killSpy.mock.restore();
-    spawnSpy.mock.restore();
     syncBuiltinESMExports();
-  }
-});
+    const kill = process.kill;
+    const killSpy = t.mock.method(process, 'kill', (pid, signal) => {
+      if (pid === -child?.pid) {
+        // Hold the real child alive across both cancellation and the timeout deadline.
+        signals.push({ signal, afterExit: hasExited });
+        return true;
+      }
+      return kill.call(process, pid, signal);
+    });
+    t.mock.timers.enable({ apis: ['setTimeout'] });
+    const setTimeout = globalThis.setTimeout;
+    let timeoutCallback;
+    const timerSpy = t.mock.method(globalThis, 'setTimeout', (callback, delay, ...args) => {
+      if (delay === 100) timeoutCallback = callback;
+      return setTimeout(callback, delay, ...args);
+    });
+    try {
+      const pending = exec([process.execPath, '-e', "console.log('ready'); setInterval(() => {}, 1000)"], {
+        signal: controller.signal, timeoutMs: 100,
+      });
+      await ready;
+      controller.abort();
+      t.mock.timers.tick(100);
+      // A timer callback already queued for delivery must also respect cancellation.
+      if (queuedTimeout) timeoutCallback();
+      assert.equal(hasExited, false, 'the timeout deadline passes before the child exits');
+      child.kill('SIGTERM');
+      await exited;
+      const result = await pending;
+      assert.equal(hasExited, true, 'the child exits before either escalation deadline');
+      // Check the abort's original deadline separately from the timeout's later deadline:
+      // overwriting killTimer used to leave the first handle alive after exit.
+      t.mock.timers.tick(1899);
+      assert.deepEqual(signals.filter(({ signal }) => signal === 'SIGKILL'), [], 'no escalation before the grace period');
+      t.mock.timers.tick(1);
+      assert.deepEqual(signals.filter(({ signal, afterExit }) => signal === 'SIGKILL' && afterExit), [],
+        'the abort escalation timer must not signal the exited process group');
+      t.mock.timers.tick(100);
+      assert.deepEqual(signals, [{ signal: 'SIGTERM', afterExit: false }], 'abort sends exactly one SIGTERM');
+      assert.equal(result.cancelled, true);
+      assert.equal(result.timedOut, false);
+      assert.equal(result.result, 'failed');
+    } finally {
+      timerSpy.mock.restore();
+      t.mock.timers.reset();
+      if (child && !hasExited) {
+        child.kill('SIGKILL');
+        await exited;
+      }
+      killSpy.mock.restore();
+      spawnSpy.mock.restore();
+      syncBuiltinESMExports();
+    }
+  });
+}
 
 /** @param {{finding?: boolean, red?: boolean, joinDelay?: number, gateDelay?: number, waitForGates?: boolean, change?: (repo: string) => Promise<void>, throwJoin?: boolean, throwGate?: boolean}} [settings] */
 async function fixture(settings = {}) {
