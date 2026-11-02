@@ -219,9 +219,10 @@ export function briefPointer(relPath, content) {
 
 /**
  * @param {unknown} clauses
+ * @param {boolean} [activeGrant]
  * @returns {import('../gates/acceptance.mjs').AcceptanceClause[]}
  */
-function assertAcceptance(clauses) {
+export function prepareAcceptance(clauses, activeGrant = false) {
   const ok =
     Array.isArray(clauses) &&
     clauses.length > 0 &&
@@ -231,6 +232,10 @@ function assertAcceptance(clauses) {
         : Array.isArray(c.tests) && c.tests.length > 0 && c.tests.every((t) => typeof t === 'string' && t.length > 0)),
     );
   if (!ok) throw new StateError('bad-acceptance', 'acceptance: a non-empty list of {clause, tests: [test ids…]} or {clause, kind: human_check} without tests is required');
+  const humanChecks = clauses.filter((c) => c.kind === 'human_check').map((c) => c.clause);
+  if (activeGrant && humanChecks.length > 0) {
+    throw new StateError('autopilot-human-check', `autopilot-human-check: an active autopilot grant cannot wait on human_check clauses: ${humanChecks.map((clause) => JSON.stringify(clause)).join(', ')}; turn each into a clause with tests or ask the owner`);
+  }
   return clauses;
 }
 
@@ -241,7 +246,7 @@ export function prepareAcceptanceAmendment(record, id, clauses) {
   const block = record.blocks?.[id];
   if (!block) throw new StateError('unknown_block', `block ${id} is not in run ${record.run_id}`);
   if (block.status !== 'open') throw new StateError('not-open', `not-open: block ${id} is not open`);
-  const acceptance = assertAcceptance(clauses);
+  const acceptance = prepareAcceptance(clauses);
   const old_sha256 = sha256(canonicalJSON(block.acceptance));
   const new_sha256 = sha256(canonicalJSON(acceptance));
   if (old_sha256 === new_sha256) throw new StateError('acceptance-unchanged', 'acceptance-unchanged: the clause list is unchanged; nothing was recorded');
@@ -409,7 +414,7 @@ export async function openBlock(opts) {
   if (opts.kind !== undefined && opts.kind !== 'light' && !BLOCK_KINDS.includes(opts.kind)) throw new StateError('bad-kind', `kind must be one of ${[...BLOCK_KINDS, 'light'].join(', ')}`);
   if (opts.decision && opts.decision.answer !== level) throw new StateError('bad-decision', `the decision answer ${opts.decision.answer} is not the requested level ${level}`);
   const declaredOwned = assertOwned(opts.owned);
-  const acceptance = assertAcceptance(opts.acceptance);
+  const acceptance = prepareAcceptance(opts.acceptance);
   const humanChecks = acceptance.filter((c) => c.kind === 'human_check').map((c) => c.clause);
   const tests = opts.tests === undefined ? null : [...assertOwned(opts.tests, { label: 'test files', code: 'bad-tests' })];
   const after = opts.after === undefined ? null : [...new Set(opts.after)];
