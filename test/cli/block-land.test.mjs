@@ -3,14 +3,25 @@ import assert from 'node:assert/strict';
 import { existsSync, readFileSync } from 'node:fs';
 import path from 'node:path';
 import { mock, test } from 'node:test';
+import { setTimeout as sleep } from 'node:timers/promises';
 
 const realReview = await import('../../src/cli/review-file.mjs');
 const { default: defaultReview, ...namedReview } = realReview;
 /** @type {{now: number, finishAt: number, finish: () => Promise<void>, stderr?: string} | null} */
 let slowReview = null;
+/** @type {string | null} */
+let gateReady = null;
 // Keep the real join, queue, and results; control its polling clock and optional stderr.
 mock.module('../../src/cli/review-file.mjs', { defaultExport: defaultReview, namedExports: { ...namedReview,
-  runReviewFile: (args, deps) => {
+  runReviewFile: async (args, deps) => {
+    // Refuse only after both gate processes exist, independent of scheduler speed.
+    if (gateReady && args[0] === '--wait-block') {
+      const deadline = performance.now() + 10_000;
+      while (!existsSync(gateReady)) {
+        assert.ok(performance.now() < deadline, 'gate process group starts during join');
+        await sleep(10);
+      }
+    }
     if (slowReview?.stderr) deps.stderr.write(slowReview.stderr);
     return realReview.runReviewFile(args, slowReview ? { ...deps,
       now: () => slowReview.now,
@@ -45,11 +56,28 @@ async function cli(args) {
   return { code, stdout, stderr };
 }
 
-/** @param {string} slug @param {{finding?: boolean, red?: boolean}} [options] */
+/** @param {string} slug @param {{finding?: boolean, red?: boolean, runningGate?: boolean}} [options] */
 async function fixture(slug, options = {}) {
   const repo = freshDir(slug);
   const files = freshDir('land-inputs');
   const gateOutput = path.join(files, 'gate-cwd');
+  const gatePids = path.join(files, 'gate-pids.json');
+  const gateStopped = path.join(files, 'gate-stopped');
+  const childScript = `
+    process.on('SIGTERM', () => setTimeout(() => {
+      require('node:fs').writeFileSync(${JSON.stringify(gateStopped)}, 'stopped');
+      process.exit(0);
+    }, 100));
+    process.send('ready');
+    setInterval(() => {}, 1000);
+  `;
+  const runningGate = `
+    process.on('SIGTERM', () => {});
+    const child = require('node:child_process').spawn(process.execPath, ['-e', ${JSON.stringify(childScript)}], { stdio: ['ignore', 'ignore', 'ignore', 'ipc'] });
+    child.on('message', () => require('node:fs').writeFileSync(${JSON.stringify(gatePids)}, JSON.stringify([process.pid, child.pid])));
+    child.on('exit', () => process.exit(0));
+    setTimeout(() => { child.kill('SIGKILL'); process.exit(1); }, 15_000);
+  `;
   await git(['init', '-q', '-b', 'main'], repo);
   await git(['config', 'user.name', 'Fake Tester'], repo);
   await git(['config', 'user.email', 'fake@example.invalid'], repo);
@@ -58,7 +86,7 @@ async function fixture(slug, options = {}) {
     proof: { isolation: 'worktree', worktree: { dir: freshDir('land-trees') } },
     context: { require_coder_tests: true },
     gates: {
-      test: [process.execPath, '-e', `require('node:fs').writeFileSync(${JSON.stringify(gateOutput)}, process.cwd()); console.error('land gate tail'); process.exit(${options.red ? 1 : 0})`],
+      test: [process.execPath, '-e', options.runningGate ? runningGate : `require('node:fs').writeFileSync(${JSON.stringify(gateOutput)}, process.cwd()); console.error('land gate tail'); process.exit(${options.red ? 1 : 0})`],
       lint: null, types: null, format: null,
     },
   };
@@ -83,7 +111,7 @@ async function fixture(slug, options = {}) {
   const head = (await git(['rev-parse', 'HEAD'], worktree.path)).trim();
   const finding = { id: 'F1', file: 'a.mjs', severity: 'warning', line_start: 1, line_end: 1, claim: 'land finding', fix: 'fix the value' };
   const ticket = enqueue({ repoRoot: repo, tree: worktree.path, run: runId, block: 'B1', file: 'a.mjs' }).ticket;
-  writeResult({ repoRoot: repo, runId, ticket, key: await loadKey(runId), result: { status: 'reviewed', approved: !options.finding, findings: options.finding ? [finding] : [] } });
+  const reviewResult = writeResult({ repoRoot: repo, runId, ticket, key: await loadKey(runId), result: { status: 'reviewed', approved: !options.finding, findings: options.finding ? [finding] : [] } });
   await writeSigned(runId, writeRow, {
     event: options.finding ? 'review.result' : 'review.approved', block: 'B1', file: 'a.mjs',
     content_hash: contentHash(worktree.path, 'a.mjs'), round: 1,
@@ -91,28 +119,57 @@ async function fixture(slug, options = {}) {
   });
   announceWorker(repo, { pid: process.pid, run: runId });
   return {
-    repo, files, runId, base, head, worktree, ticket, gateOutput,
-    land: (extra = []) => cli(['land', 'B1', '--run', runId, '--report', path.join(files, 'report.txt'), '--transcript', path.join(files, 'coder.log'), ...extra]),
+    repo, files, runId, base, head, worktree, ticket, gateOutput, gatePids, gateStopped, reviewResult,
+    land: async (extra = []) => {
+      gateReady = options.runningGate ? gatePids : null;
+      try {
+        return await cli(['land', 'B1', '--run', runId, '--report', path.join(files, 'report.txt'), '--transcript', path.join(files, 'coder.log'), ...extra]);
+      } finally { gateReady = null; }
+    },
     rows: () => readAllRows(slug),
     cleanup: () => retractWorker(repo, process.pid),
   };
 }
 
-test('B185: clean land joins, gates, closes and merges; a finding stops before gates and close', async () => {
+/** @param {Awaited<ReturnType<typeof fixture>>} f */
+async function assertGateCancelled(f) {
+  const pids = JSON.parse(readFileSync(f.gatePids, 'utf8'));
+  assert.equal(pids.length, 2, 'gate and its child both started');
+  for (const pid of pids) {
+    assert.throws(() => process.kill(pid, 0), { code: 'ESRCH' }, 'gate process group is gone before land returns');
+  }
+  assert.equal(readFileSync(f.gateStopped, 'utf8'), 'stopped', 'land waited for the child to handle the group signal and exit');
+  const rows = await f.rows();
+  assert.equal(rows.filter((r) => ['gate.done', 'gate.red', 'block.close'].includes(r.event)).length, 0, 'cancelled gates never pass or close the block');
+  const cancelled = rows.filter((r) => r.event === 'gate.cancelled');
+  assert.equal(cancelled.length, 1, 'exactly one cancelled gate ledger row');
+  const [row] = cancelled;
+  assert.deepEqual([row.run, row.block, row.cancelled, row.all_ok], [f.runId, 'B1', true, false]);
+  assert.ok(Number.isFinite(row.duration_ms) && row.duration_ms >= 100, 'cancelled run retains its duration including shutdown');
+  assert.equal(row.results.filter((r) => r.gate === 'test' && !r.ok && r.duration_ms >= 100).length, 1, 'cancelled test gate retains its duration and never passes even after exit 0');
+  const timings = rows.filter((r) => r.event === 'land.timing');
+  assert.equal(timings.length, 1);
+  assert.equal(timings[0].merge_gate_ms, null, 'merge gate never ran');
+  assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+  assert.equal((await git(['rev-parse', 'main'], f.repo)).trim(), f.base, 'base remains unchanged');
+}
+
+test('B185: clean land joins, gates, closes and merges; a finding cancels gates and prevents close and merge', async () => {
   for (const finding of [false, true]) {
-    const f = await fixture(`b185-land-${finding}`, { finding });
+    const f = await fixture(`b185-land-${finding}`, { finding, runningGate: finding });
     try {
       const result = await f.land(['--merge']);
       assert.equal(result.code, finding ? 1 : 0, result.stderr);
       const rows = await f.rows();
-      assert.equal(rows.filter((r) => r.event === 'gate.done').length, finding ? 0 : 1, 'exactly one gate run only after a clean join');
+      assert.equal(rows.filter((r) => r.event === 'gate.done').length, finding ? 0 : 1, 'only a clean join records passing gates');
       assert.equal(rows.filter((r) => r.event === 'block.close').length, finding ? 0 : 1, 'exactly one close only after green gates');
       assert.equal((await readRun(f.runId)).blocks.B1.status, finding ? 'open' : 'closed');
       if (finding) {
-        assert.match(result.stderr, /join/);
-        assert.match(result.stderr, /F1.*land finding/s);
-        assert.ok(result.stderr.includes(`review-file --wait ${f.ticket}`), 'stop names the findings command');
-        assert.equal((await git(['rev-parse', 'main'], f.repo)).trim(), f.base, 'finding leaves base unchanged');
+        const detail = JSON.stringify({ ticket: f.ticket, status: 'done', result: f.reviewResult,
+          fix_list: [{ id: 'F1', severity: 'warning', lines: '1-1', claim: 'land finding', fix: 'fix the value' }] });
+        assert.equal(result.stderr, `block B1 land stopped at join: a.mjs: findings\n${detail}\nnext: code-forge review-file --wait ${f.ticket}\n`, 'finding and retry output remain exact and come first');
+        assert.equal(result.stdout, '', 'cancelled gates print no passing or landing output');
+        await assertGateCancelled(f);
       } else {
         assert.equal(result.stdout.trim().split('\n').at(-1), 'block B1 landed');
         assert.deepEqual((await git(['rev-list', '--parents', '-n', '1', 'main'], f.repo)).trim().split(' ').slice(1), [f.base, f.head], 'base has exactly the two parents of a no-ff merge');
@@ -230,7 +287,7 @@ test('B190: max 1s times out at join and names a larger max in the land retry', 
     { stderr: '', noMergeGate: true },
     { stderr: 'review polling diagnostic\n', noMergeGate: true },
   ]) {
-    const f = await fixture(`b190-timeout-${stderr ? 'stderr' : 'quiet'}-${noMergeGate}`);
+    const f = await fixture(`b190-timeout-${stderr ? 'stderr' : 'quiet'}-${noMergeGate}`, { runningGate: true });
     const start = Date.now();
     try {
       clearDone({ repoRoot: f.repo, tree: f.worktree.path, run: f.runId, block: 'B1', file: 'a.mjs' });
@@ -239,8 +296,10 @@ test('B190: max 1s times out at join and names a larger max in the land retry', 
       const result = await f.land(['--max', '1s', '--merge', ...(noMergeGate ? ['--no-merge-gate'] : []), '--json']);
       assert.equal(result.code, 1, result.stderr);
       const refused = JSON.parse(result.stdout);
-      assert.deepEqual([refused.step, refused.reason], ['join', 'wait_timeout']);
-      assert.equal(result.stderr.split('\n')[0], 'block B1 land stopped at join: wait_timeout');
+      const retry = `code-forge block land B1 --run ${f.runId} --report ${path.join(f.files, 'report.txt')} --transcript ${path.join(f.files, 'coder.log')} --max 1800s --merge${noMergeGate ? ' --no-merge-gate' : ''} --json`;
+      assert.deepEqual(refused, { block: 'B1', event: 'refused', step: 'join', reason: 'wait_timeout', next: retry });
+      assert.equal(result.stderr, `block B1 land stopped at join: wait_timeout\nnext: ${refused.next}\n`, 'timeout and retry output remain exact and come first');
+      assert.equal(result.stdout, `${JSON.stringify(refused)}\n`, 'one refusal JSON line and no gates-passed output');
       const nextLines = result.stderr.split('\n').filter((line) => line.startsWith('next: '));
       assert.equal(nextLines.length, 1, 'exactly one next line');
       assert.equal(nextLines[0], `next: ${refused.next}`, 'text and JSON name the same retry');
@@ -254,8 +313,7 @@ test('B190: max 1s times out at join and names a larger max in the land retry', 
       const retryMs = duration.endsWith('m') ? Number(duration.slice(0, -1)) * 60_000 : realReview.parseMax(duration);
       assert.ok(retryMs > 1000, 'retry gives a larger wait budget');
       assert.equal(slowReview.now - start, 1000, 'total polling wait is exactly the shared 1s budget');
-      assert.equal((await f.rows()).filter((r) => ['gate.done', 'block.close'].includes(r.event)).length, 0, 'no gates or closes on timeout');
-      assert.equal((await readRun(f.runId)).blocks.B1.status, 'open');
+      await assertGateCancelled(f);
     } finally { t.mock.restoreAll(); slowReview = null; f.cleanup(); }
   }
 });
