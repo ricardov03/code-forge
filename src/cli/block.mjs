@@ -1581,7 +1581,7 @@ function closeBlockers(problems, id, runId, flags, tests) {
   });
 }
 
-/** @param {ReturnType<typeof closeBlockers>} blockers */
+/** B205: one `<code> <file> <detail>` line and one `fix:` line per blocker. @param {ReturnType<typeof closeBlockers>} blockers */
 function blockersText(blockers) {
   return blockers.map((b) => `${b.code} ${b.file ?? '-'} ${b.detail}\n  fix: ${b.fix}\n`).join('');
 }
