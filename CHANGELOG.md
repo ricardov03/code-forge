@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.16.2] — 2026-11-02
+
 ### Added
 
 - CI runs the Go core tests: gofmt, `go vet`, `go test -race` on the go.mod floor (1.22) and the newest Go, and a build of all four native release targets (B237)
