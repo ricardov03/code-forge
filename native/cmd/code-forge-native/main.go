@@ -5,6 +5,7 @@ import (
 	"encoding/json"
 	"flag"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -14,6 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/sign"
+	"github.com/ricardov03/code-forge/native/state"
 )
 
 // Set from package.json by scripts/build-native.mjs.
@@ -43,12 +45,16 @@ func run(args []string) (int, error) {
 	if len(args) == 1 && args[0] == "version" {
 		return 0, json.NewEncoder(os.Stdout).Encode(map[string]string{"version": version, "goVersion": runtime.Version()})
 	}
-	if len(args) == 0 || (args[0] != "verify-ledger" && args[0] != "serve") {
+	if len(args) == 0 || (args[0] != "verify-ledger" && args[0] != "serve" && args[0] != "state-golden") {
 		return 2, fmt.Errorf("usage: code-forge-native version | verify-ledger | serve --home <dir> --run <id>")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	home := flags.String("home", "", "home directory containing .code-forge")
 	runID := flags.String("run", "", "run ID")
+	var op *string
+	if args[0] == "state-golden" {
+		op = flags.String("op", "", "test operation: append, save, lock")
+	}
 	var idle *time.Duration
 	if args[0] == "serve" {
 		idle = flags.Duration("idle", 30*time.Minute, "exit after this duration without requests")
@@ -58,6 +64,12 @@ func run(args []string) (int, error) {
 	}
 	if *home == "" || !regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`).MatchString(*runID) || flags.NArg() != 0 {
 		return 2, fmt.Errorf("%s requires --home <dir> and a valid --run <id>", args[0])
+	}
+	if args[0] == "state-golden" {
+		if err := stateGolden(*home, *runID, *op); err != nil {
+			return 1, err
+		}
+		return 0, nil
 	}
 	if args[0] == "serve" {
 		if *idle <= 0 {
@@ -79,6 +91,72 @@ func run(args []string) (int, error) {
 		return 1, nil
 	}
 	return 0, nil
+}
+
+// stateGolden is a hidden compatibility-test driver, not a product command.
+// save merges stdin properties into the authoritative record under the lock;
+// append consumes {slug, rows, rotateAtBytes?, signed?}; lock holds until EOF.
+func stateGolden(home, runID, op string) error {
+	if op == "lock" {
+		return state.WithRunLock(home, runID, func() error {
+			if _, err := fmt.Fprintln(os.Stdout, "locked"); err != nil {
+				return err
+			}
+			_, err := io.Copy(io.Discard, os.Stdin)
+			return err
+		})
+	}
+	if op != "save" && op != "append" {
+		return fmt.Errorf("state-golden requires --op append|save|lock")
+	}
+	data, err := io.ReadAll(os.Stdin)
+	if err != nil {
+		return err
+	}
+	input, err := ledger.DecodeObject(data)
+	if err != nil {
+		return err
+	}
+	if op == "save" {
+		return state.WithRunLock(home, runID, func() error {
+			record, err := state.ReadRun(home, runID)
+			if err != nil {
+				return err
+			}
+			for _, field := range input {
+				record.Set(field.Key, field.Value)
+			}
+			return state.SaveRun(home, record)
+		})
+	}
+	slug, _ := input.Get("slug").(string)
+	limit := ledger.DefaultRotateAtBytes
+	if value := input.Get("rotateAtBytes"); value != nil {
+		number, ok := value.(float64)
+		if !ok || number <= 0 || number > float64(int64(1<<63-1)) {
+			return fmt.Errorf("invalid rotateAtBytes")
+		}
+		limit = int64(number)
+	}
+	rows, ok := input.Get("rows").([]any)
+	if !ok {
+		return fmt.Errorf("append requires rows array")
+	}
+	for _, value := range rows {
+		row, ok := value.(ledger.Object)
+		if !ok {
+			return fmt.Errorf("appendRow: row must be a plain object")
+		}
+		if input.Get("signed") == true {
+			_, err = state.WriteSigned(home, runID, row)
+		} else {
+			_, err = ledger.AppendObject(filepath.Join(home, ".code-forge", "ledger"), slug, row, limit)
+		}
+		if err != nil {
+			return err
+		}
+	}
+	return nil
 }
 
 func verifyLedger(home, runID string) (verification, error) {
