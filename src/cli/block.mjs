@@ -537,6 +537,7 @@ async function landBlock({ id, runId, record, report, transcript, maxMs, merge, 
 const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n' +
   '       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n' +
+  '       code-forge block rebase <id> --run <r> --accept-landed\n' +
   '       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>\n' +
   '       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]\n' +
   '       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]\n' +

@@ -48,14 +48,14 @@ State lives in the plan file's header — `facts → planned → hardened → co
 7. `forge block close <id> --run <r> --report <coder report>` is the gate. It needs every changed file accepted by the review gate — a signed `review.approved` row for its current content that no later review of the same content overrode (else `not_approved`), or every finding its review left open waived or answered (`reviewed_by_waiver`) — no `unowned_change`, no `no_changes` (the files are the owned diff plus every owned file reviewed for the block), gates green, every clause covered, forecast vs actual, no `rule_break`. The final report needs no `reviewed <path> ticket <id>` lines: `block close` prints one for every file the review gate accepts (approved, waived or answered), with the queue's ticket. The close prints the reviewed lines, then the `reviewed_by_waiver` lines, then the `closed` line. With `--report`, a hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr when the block closes, and the close goes on. A file with a `review.waived` finding still gets a line; only a close with every review waived (`--no-require-reviews`) or `review.external` prints none. The printed line has no `via`: `--json` and the block's done file carry the lines as `reviewed: [{file, ticket, via}]`, with `via: approved` for a file with a signed approval, `via: waiver` when at least one of its open findings was waived (also when the others were answered), and `via: answered` when every one was answered. With `context.require_coder_tests` (set before `run start`) `--report` is required, and a report whose LAST `TESTS` line before its COMPLETE sentinel is missing or not `TESTS <command> exit=0` is FAILED, waived or external reviews or not (`references/code.md` §3). Red ⇒ `references/decisions.md` (S1 `next`, escalation). Green ⇒ one commit for the block in the project's house style; `forge block rebase <id> --run <r>` first when HEAD moved.
 8. `forge run end --run <r>` when every block is `done`; `forge report --slug <slug>` prints cost per block, escalations, review rounds, the outside review rounds per PR next to their code-forge cost, and the spend per run (`budget.usd`, `references/ledger.md` §3.1); when a PR also got an outside review, record it first with `forge ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]…` (`references/ledger.md` §4).
 
-## §4 Hard rules (the headings of `references/rules-core.md`)
-
 For an open worktree block whose owned files changed upstream through closed blocks of the same
 run, use `forge block rebase <id> --run <r> --accept-landed`. The native binary must be installed;
 it verifies every touching commit against the closed blocks' branches, queues changed owned files
 for review again, and signs `accepted_landed` origins. No terminal is needed, including under an
 active autopilot grant. `--accept-changed <file> --reason <text>` stays human-only at a terminal
 and is refused during an active grant; foreign changes remain `owned-conflict`.
+
+## §4 Hard rules (the headings of `references/rules-core.md`)
 
 - **R1** Coder ≠ reviewer, always
 - **R2** The orchestrator never codes, reviews or judges

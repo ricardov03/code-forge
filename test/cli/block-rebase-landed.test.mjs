@@ -58,6 +58,8 @@ async function fixture(label, prefix = '') {
     close: () => cli(['close', 'B205b', '--run', runId, '--worker-pid', '4242', '--transcript', path.join(inputs, 'coder.log')]),
     move: async (kind = 'landed') => {
       for (const [index, id] of ['B228', 'B231'].entries()) {
+        const branch = index === 0 ? `forge/${runId}/${id}` : 'custom-landed';
+        if (kind === 'landed') await git(['checkout', '-qb', branch], repo);
         const changed = files.slice(index === 0 ? 0 : 3, index === 0 ? 3 : 5);
         for (const file of changed) writeFile(repo, file, `// ${id}\n`);
         writeFile(repo, 'upstream.md', `${id}\n`);
@@ -65,8 +67,8 @@ async function fixture(label, prefix = '') {
         await git(['commit', '-qm', id], repo);
         if (kind === 'landed') {
           // One default branch and one recorded custom branch exercise both origin forms.
-          const branch = index === 0 ? `forge/${runId}/${id}` : 'custom-landed';
-          await git(['branch', branch], repo);
+          await git(['checkout', '-q', 'main'], repo);
+          await git(['merge', '--ff-only', branch], repo);
           const record = await readRun(runId);
           record.blocks[id] = { status: 'closed', owned_files: changed, worktree: { branch } };
           await saveRun(record);
@@ -79,6 +81,7 @@ async function fixture(label, prefix = '') {
 
 test('landed siblings: five owned files queue again, bases move, row verifies and committers survive without identity', available, async () => {
   const f = await fixture('siblings', 'project');
+  for (const file of f.files) await f.sign({ event: 'review.approved', file, content_hash: contentHash(f.tree.path, file), round: 1 });
   const original = await git(['log', '-2', '--format=%s%x00%cn%x00%ce'], f.tree.path);
   const newBase = await f.move();
   const previous = process.env.GIT_CONFIG_GLOBAL;
@@ -129,6 +132,20 @@ test('foreign owned commits, including a reverted change after a landed commit, 
     assert.ok(result.err.includes(file) && result.err.includes(foreign), 'refusal identifies the file and foreign commit');
     assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'head, both bases and every row stay unchanged');
   }
+  const f = await fixture('replay-conflict');
+  writeFile(f.tree.path, 'upstream.md', 'local conflict\n');
+  await git(['add', '-A'], f.tree.path);
+  await git(['commit', '-qm', 'conflict after earlier replayed commits'], f.tree.path);
+  await f.move();
+  const before = [await f.head(), await f.entry(), await f.rows()];
+  const result = await f.rebase();
+  assert.equal(result.code, 1);
+  assert.equal(result.out, '');
+  assert.match(result.err, /rebase-conflict/);
+  assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'conflict after replay restores exact head and both bases, with zero rows');
+  assert.equal(await git(['status', '--porcelain'], f.tree.path), '');
+  assert.equal((await git(['symbolic-ref', '--short', 'HEAD'], f.tree.path)).trim(), f.tree.branch);
+  assert.doesNotMatch(await git(['status'], f.tree.path), /cherry-pick|rebase in progress/);
 });
 
 test('under an active grant landed rebase needs no TTY, human acceptance stays refused, and close prints no unowned_change', available, async () => {
