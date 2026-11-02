@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { existsSync } from 'node:fs';
+import { chmodSync, copyFileSync, existsSync, mkdtempSync, rmSync } from 'node:fs';
 import { chmod, mkdir, mkdtemp, readFile, rm, stat, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -11,7 +11,11 @@ import { appendRow } from '../../src/ledger/write.mjs';
 import { readRun, saveRun, withRunLock, writeSigned } from '../../src/state/run.mjs';
 import { generateKey, verifyRow } from '../../src/state/signer.mjs';
 
-const binary = fileURLToPath(new URL(`../../native/bin/${process.platform}-${process.arch}/code-forge-native`, import.meta.url));
+const release = fileURLToPath(new URL(`../../native/bin/${process.platform}-${process.arch}/code-forge-native`, import.meta.url));
+// Installation tests rename/chmod the release binary in parallel. Run a private, executable copy.
+const binary = path.join(mkdtempSync(path.join(os.tmpdir(), 'native-state-bin-')), 'code-forge-native');
+if (existsSync(release)) { copyFileSync(release, binary); chmodSync(binary, 0o755); }
+process.on('exit', () => rmSync(path.dirname(binary), { recursive: true, force: true }));
 const writer = fileURLToPath(new URL('../../src/ledger/write.mjs', import.meta.url));
 const run = 'native-state-fixture';
 const slug = 'state-golden';

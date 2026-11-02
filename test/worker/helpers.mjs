@@ -311,7 +311,7 @@ export function queued(repo, ext) {
 /** @param {string} dir @returns {Array<Record<string, any>>} the fake reviewer's records. */
 export function records(dir) {
   return readdirSync(dir)
-    .filter((n) => n.startsWith('reviewer-'))
+    .filter((n) => n.startsWith('reviewer-') && n.endsWith('.json')) // skip half-written .json.tmp files
     .map((n) => JSON.parse(readFileSync(path.join(dir, n), 'utf8')));
 }
 

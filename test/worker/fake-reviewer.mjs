@@ -3,7 +3,7 @@
 // test/fixtures/bin (reused here for stdin/sleep/answer), it also records its environment — NAMES
 // only (`env_keys`), plus the names of variables whose value carries a fake secret marker
 // (`fake_valued_keys`), never a value. That is what the "0 key variables" clause is about.
-import { writeFileSync } from 'node:fs';
+import { renameSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { answer, maybeSleep, readStdin } from '../fixtures/bin/fake-common.mjs';
 
@@ -12,7 +12,10 @@ if (process.env.FAKE_RECORD) {
   const entry = { pid: process.pid, argv: process.argv.slice(2), env_keys: Object.keys(process.env).sort(),
     fake_valued_keys: Object.keys(process.env).filter((k) => String(process.env[k]).includes('FAKE-')),
     stdin_bytes: stdin.bytes.length, started_at: Date.now() };
-  writeFileSync(path.join(process.env.FAKE_RECORD, `reviewer-${process.pid}.json`), JSON.stringify(entry));
+  // Write then rename, so a reader never sees a half-written record.
+  const record = path.join(process.env.FAKE_RECORD, `reviewer-${process.pid}.json`);
+  writeFileSync(`${record}.tmp`, JSON.stringify(entry));
+  renameSync(`${record}.tmp`, record);
 }
 await maybeSleep();
 const value = answer();
