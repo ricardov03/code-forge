@@ -2,7 +2,7 @@
 
 A CLI and Agent Skill for cross-model, parallel, evidence-gated feature delivery.
 
-Latest: 0.16.0 - see [CHANGELOG.md](CHANGELOG.md)
+Latest: 0.16.1 - see [CHANGELOG.md](CHANGELOG.md)
 
 ## The problem
 
