@@ -89,4 +89,3 @@ test('automatic retry also ignores the queued snapshot and a previous route whos
   assert.deepEqual([w.result.status, w.result.approved], ['reviewed', true]);
   assert.deepEqual(w.calls, ['claude-sonnet-5']);
 });
-
