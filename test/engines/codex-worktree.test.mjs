@@ -25,13 +25,15 @@ test('background Codex home lives under the session run root and survives the sp
 const fs = require('node:fs');
 const path = require('node:path');
 const home = process.env.CODEX_HOME;
-fs.writeFileSync(${JSON.stringify(ready)}, JSON.stringify({ home }));
+fs.writeFileSync(${JSON.stringify(ready + '.tmp')}, JSON.stringify({ home }));
+fs.renameSync(${JSON.stringify(ready + '.tmp')}, ${JSON.stringify(ready)});
 const timer = setInterval(() => {
   if (!fs.existsSync(${JSON.stringify(release)})) return;
   clearInterval(timer);
-  fs.writeFileSync(${JSON.stringify(checked)}, JSON.stringify({
+  fs.writeFileSync(${JSON.stringify(checked + '.tmp')}, JSON.stringify({
     home, rules: fs.existsSync(path.join(home, 'rules', 'code-forge.rules'))
   }));
+  fs.renameSync(${JSON.stringify(checked + '.tmp')}, ${JSON.stringify(checked)});
 }, 25);
 setTimeout(() => process.exit(0), 15000).unref();
 `);
