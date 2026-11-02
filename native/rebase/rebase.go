@@ -73,22 +73,49 @@ func resolve(tree, ref string) (string, error) {
 }
 
 // origins checks every touching commit, including merge parents and changes later
-// reverted. A block's branch must still contain the commit; messages prove nothing.
+// reverted. A block only vouches for commits between its recorded bases and branch;
+// inherited history and commit messages prove nothing.
 func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns func(string) bool) ([]Accepted, error) {
-	refs := map[string][]string{}
+	originCommits := map[string]map[string]bool{}
 	for _, field := range blocks {
 		b, _ := field.Value.(ledger.Object)
 		if text(b, "status") != "closed" {
 			continue
 		}
+		base, err := resolve(tree, text(b, "base_sha"))
+		if err != nil {
+			continue // No credit without a verifiable recorded base.
+		}
+		bases := []string{base}
+		if recorded := text(object(b, "worktree"), "base_sha"); recorded != "" {
+			base, err := resolve(tree, recorded)
+			if err != nil {
+				continue
+			}
+			bases = append(bases, base)
+		}
+		branches := []string{}
 		for _, branch := range []string{"forge/" + runID + "/" + field.Key, text(object(b, "worktree"), "branch")} {
 			if branch == "" {
 				continue
 			}
 			sha, err := resolve(tree, "refs/heads/"+branch)
 			if err == nil {
-				refs[field.Key] = append(refs[field.Key], sha)
+				branches = append(branches, sha)
 			}
+		}
+		if len(branches) == 0 {
+			continue
+		}
+		args := append([]string{"rev-list"}, branches...)
+		args = append(args, "--not")
+		commits, err := git(tree, append(args, bases...)...)
+		if err != nil {
+			return nil, err
+		}
+		originCommits[field.Key] = map[string]bool{}
+		for _, commit := range strings.Fields(commits) {
+			originCommits[field.Key][commit] = true
 		}
 	}
 	commits, err := git(tree, "rev-list", "--reverse", oldBase+".."+newBase)
@@ -111,12 +138,9 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 			continue
 		}
 		ids := []string{}
-		for id, branches := range refs {
-			for _, ref := range branches {
-				if _, err := git(tree, "merge-base", "--is-ancestor", commit, ref); err == nil {
-					ids = append(ids, id)
-					break
-				}
+		for id, commits := range originCommits {
+			if commits[commit] {
+				ids = append(ids, id)
 			}
 		}
 		if len(ids) == 0 {
@@ -195,7 +219,7 @@ func replay(tree, oldBase, newBase, oldHead string) error {
 
 // Run holds the same lock as Node through validation, replay and state publication.
 func Run(home, runID, blockID string) (result Result, err error) {
-	err = state.WithRunLock(home, runID, func() error {
+	err = state.WithRunLock(home, runID, func() (runErr error) {
 		record, err := state.ReadRun(home, runID)
 		if err != nil {
 			return err
@@ -265,14 +289,18 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		if err != nil {
 			return err
 		}
-		// No mutation occurs until all origin checks pass. Restore the exact old
-		// head on a replay failure, including failure after earlier successful picks.
+		// No mutation occurs until all origin checks pass. Every failure from
+		// replay through publication must restore the exact original HEAD.
+		defer func() {
+			if runErr != nil {
+				if _, resetErr := git(tree, "reset", "--hard", oldHead); resetErr != nil {
+					runErr = fmt.Errorf("%w; restore HEAD: %v", runErr, resetErr)
+				}
+			}
+		}()
 		if err := replay(tree, oldBase, newBase, oldHead); err != nil {
 			_, _ = git(tree, "cherry-pick", "--abort")
 			_, _ = git(tree, "rebase", "--abort")
-			if _, resetErr := git(tree, "reset", "--hard", oldHead); resetErr != nil {
-				return resetErr
-			}
 			return refusal("rebase-conflict", "rebase-conflict")
 		}
 		changed, err := git(tree, "diff", "--no-renames", "--name-only", "-z", oldHead, "HEAD", "--")
@@ -291,6 +319,7 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		if value, ok := block.Get("acceptance_revision").(string); ok {
 			revision = &value
 		}
+		pending := []ticket.Parts{}
 		for _, file := range strings.Split(changed, "\x00") {
 			if file == "" || !owns(file) {
 				continue
@@ -308,6 +337,11 @@ func Run(home, runID, blockID string) (result Result, err error) {
 					}
 				}
 			}
+			pending = append(pending, p)
+		}
+		// Prepare every hash and ticket before queue publication; signed state
+		// publication is last, in the same WriteSigned/SaveRun order as Node.
+		for _, p := range pending {
 			if err := idx.Ensure(p); err != nil {
 				return err
 			}

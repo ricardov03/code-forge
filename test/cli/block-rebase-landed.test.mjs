@@ -1,17 +1,28 @@
 import { cfgFor, freshDir, git, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
+import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { test } from 'node:test';
+import { mock, test } from 'node:test';
 import { startGrant } from '../../src/autopilot/grant.mjs';
-import { runBlock } from '../../src/cli/block.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
 import { readRun, saveRun, startRun, writeSigned } from '../../src/state/run.mjs';
 import { loadKey, verifyRow } from '../../src/state/signer.mjs';
-import { nativePath } from '../../src/util/native.mjs';
+import { exec } from '../../src/util/exec.mjs';
+import * as native from '../../src/util/native.mjs';
 import { blockTickets, readTicket, resolveTicket } from '../../src/worker/queue.mjs';
 import { contentHash } from '../../src/worker/ticket.mjs';
 
-const available = { skip: nativePath() ? false : 'needs a locally built native binary' };
+// Installation compatibility tests rename/chmod the release binary in parallel.
+// Exercise the CLI against a private copy for the lifetime of this test file.
+const binary = native.nativePath();
+const testBinary = binary ? path.join(freshDir('native'), 'code-forge-native') : null;
+if (binary && testBinary) copyFileSync(binary, testBinary);
+mock.module('../../src/util/native.mjs', { namedExports: { ...native,
+  runNative: async (/** @type {string[]} */ args) => testBinary && process.env.CODE_FORGE_NATIVE !== '0'
+    ? exec([testBinary, ...args], { timeoutMs: 30_000 }) : null,
+} });
+const { runBlock } = await import('../../src/cli/block.mjs');
+const available = { skip: testBinary ? false : 'needs a locally built native binary' };
 const probe = async (/** @type {number} */ pid) => pid === 4242 ? 'fixture-worker' : null;
 
 /** @param {string[]} args @param {Record<string, any>} [deps] */
@@ -59,6 +70,7 @@ async function fixture(label, prefix = '') {
     move: async (kind = 'landed') => {
       for (const [index, id] of ['B228', 'B231'].entries()) {
         const branch = index === 0 ? `forge/${runId}/${id}` : 'custom-landed';
+        const base = (await git(['rev-parse', 'HEAD'], repo)).trim();
         if (kind === 'landed') await git(['checkout', '-qb', branch], repo);
         const changed = files.slice(index === 0 ? 0 : 3, index === 0 ? 3 : 5);
         for (const file of changed) writeFile(repo, file, `// ${id}\n`);
@@ -70,7 +82,7 @@ async function fixture(label, prefix = '') {
           await git(['checkout', '-q', 'main'], repo);
           await git(['merge', '--ff-only', branch], repo);
           const record = await readRun(runId);
-          record.blocks[id] = { status: 'closed', owned_files: changed, worktree: { branch } };
+          record.blocks[id] = { status: 'closed', base_sha: base, owned_files: changed, worktree: { branch, base_sha: base } };
           await saveRun(record);
         }
       }
@@ -91,8 +103,8 @@ test('landed siblings: five owned files queue again, bases move, row verifies an
     if (previous === undefined) delete process.env.GIT_CONFIG_GLOBAL; else process.env.GIT_CONFIG_GLOBAL = previous;
   }
   assert.equal(result.code, 0, result.err);
-  // B231's branch also contains B228's earlier commits, so both are witnesses.
-  const accepted = f.files.map((file, i) => ({ file, blocks: i < 3 ? ['B228', 'B231'] : ['B231'] }));
+  // B228's commits precede B231's fork and cannot be credited to B231.
+  const accepted = f.files.map((file, i) => ({ file, blocks: [i < 3 ? 'B228' : 'B231'] }));
   assert.deepEqual(JSON.parse(result.out), { block: 'B205b', event: 'rebased', old_base: f.base, new_base: newBase, accepted_landed: accepted });
   const entry = await f.entry();
   assert.deepEqual([entry.base_sha, entry.worktree.base_sha, entry.status], [newBase, newBase, 'open']);
@@ -108,6 +120,67 @@ test('landed siblings: five owned files queue again, bases move, row verifies an
   assert.equal(rows.length, 1);
   assert.deepEqual([rows[0].old_base, rows[0].new_base, rows[0].worktree, rows[0].accepted_landed], [f.base, newBase, true, accepted]);
   assert.deepEqual(verifyRow(rows[0], await loadKey(f.runId)), { ok: true });
+});
+
+test('foreign owned commits before a sibling fork or recorded worktree base refuse without mutation', available, async (t) => {
+  for (const base of ['block', 'worktree']) {
+    await t.test(base, async () => {
+      const f = await fixture(`foreign-before-${base}`);
+      const file = f.files[0];
+      writeFile(f.repo, file, '// foreign before sibling fork\n');
+      await git(['add', '-A'], f.repo);
+      await git(['commit', '-qm', 'foreign before sibling fork'], f.repo);
+      const foreign = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+      // The foreign commit is strictly before the recorded base, not just equal to it.
+      writeFile(f.repo, 'upstream.md', 'advance before fork\n');
+      await git(['add', '-A'], f.repo);
+      await git(['commit', '-qm', 'advance before fork'], f.repo);
+      await f.move();
+      if (base === 'worktree') {
+        const record = await readRun(f.runId);
+        for (const id of ['B228', 'B231']) record.blocks[id].base_sha = f.base;
+        await saveRun(record);
+      }
+      const before = [await f.head(), await f.entry(), await f.rows()];
+      const result = await f.rebase();
+      assert.equal(result.code, 1, result.err || result.out);
+      assert.equal(result.out, '');
+      assert.match(result.err, /owned-conflict/);
+      assert.ok(result.err.includes(file) && result.err.includes(foreign), 'refusal names the foreign commit and owned file');
+      assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'HEAD, both bases and ledger stay unchanged');
+    });
+  }
+});
+
+test('errors after replay restore HEAD and leave bases and ledger unchanged', available, async (t) => {
+  for (const failure of ['queue', 'signer']) {
+    await t.test(failure, async () => {
+      const f = await fixture(`post-replay-${failure}`);
+      await f.move();
+      const before = [await f.head(), await f.entry(), await f.rows()];
+      const queue = path.join(f.repo, '.code-forge', 'queue');
+      const key = path.join(process.env.HOME ?? '', '.code-forge', 'runs', `${f.runId}.key`);
+      const keyBytes = readFileSync(key);
+      if (failure === 'queue') {
+        rmSync(queue, { recursive: true, force: true });
+        writeFileSync(queue, 'queue cannot be read as a directory\n');
+      } else rmSync(key);
+      let result;
+      try { result = await f.rebase(); } finally {
+        if (failure === 'queue') rmSync(queue);
+        else writeFileSync(key, keyBytes, { mode: 0o600 });
+      }
+      assert.equal(result.code, 1);
+      assert.equal(result.out, '');
+      assert.match(result.err, failure === 'queue' ? /queue-unreadable/ : /no signer key/);
+      assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'post-replay failure restores HEAD and publishes no rebase');
+      assert.equal(await git(['status', '--porcelain'], f.tree.path), '');
+      assert.equal((await git(['symbolic-ref', '--short', 'HEAD'], f.tree.path)).trim(), f.tree.branch);
+      const retry = await f.rebase();
+      assert.equal(retry.code, 0, retry.err);
+      assert.equal((await f.rows()).filter((row) => row.event === 'block.rebase').length, 1);
+    });
+  }
 });
 
 test('foreign owned commits, including a reverted change after a landed commit, refuse with exact state unchanged', available, async () => {

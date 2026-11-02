@@ -11,7 +11,7 @@ import (
 )
 
 func TestOrigins(t *testing.T) {
-	for _, kind := range []string{"closed", "custom", "open", "other-run", "missing", "reverted", "rename", "unicode-boundary"} {
+	for _, kind := range []string{"closed", "custom", "open", "other-run", "missing", "reverted", "rename", "unicode-boundary", "block-base", "worktree-base", "missing-base", "invalid-base", "invalid-worktree-base"} {
 		t.Run(kind, func(t *testing.T) {
 			tree := t.TempDir()
 			g := func(args ...string) string {
@@ -59,9 +59,21 @@ func TestOrigins(t *testing.T) {
 			if kind == "open" {
 				status = "open"
 			}
-			sibling := ledger.Object{{Key: "status", Value: status}}
+			sibling := ledger.Object{{Key: "status", Value: status}, {Key: "base_sha", Value: base}}
 			if kind == "custom" {
 				sibling.Set("worktree", ledger.Object{{Key: "branch", Value: branch}})
+			}
+			switch kind {
+			case "block-base":
+				sibling.Set("base_sha", landed)
+			case "worktree-base":
+				sibling.Set("worktree", ledger.Object{{Key: "base_sha", Value: landed}})
+			case "missing-base":
+				sibling.Delete("base_sha")
+			case "invalid-base":
+				sibling.Set("base_sha", "missing-base")
+			case "invalid-worktree-base":
+				sibling.Set("worktree", ledger.Object{{Key: "base_sha", Value: "missing-base"}})
 			}
 			blocks := ledger.Object{{Key: "A", Value: sibling}}
 			foreign := ""
