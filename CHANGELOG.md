@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - `code-forge block ready <id>` lists every close blocker at once, each with the exact fix command, and writes nothing; `block close` now prints the same full list when it refuses (B205c)
 - `code-forge block rebase <id> --accept-landed` (Go core) moves a block onto the new base when a sibling block already landed some of its commits; it credits a commit only when it is in that sibling's own base..branch range, and it puts the old head back on any error after the replay (B220b)
+- Under an active autopilot grant, `block open` and `block amend-acceptance` refuse acceptance clauses of `kind: human_check`, so an unattended run never waits on a human check (B222)
 
 ### Fixed
 
