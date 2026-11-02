@@ -82,6 +82,10 @@ Every answer is one signed `autopilot.decision` row with an id. The action then 
 decision (same grant, scope and block/file/finding, at most 30 minutes old) is refused. A waiver is
 written `by: autopilot` and opens one tracked GitHub issue in the project's repo.
 
+While a grant is active, `block open` and `block amend-acceptance` refuse an acceptance clause
+of `kind: human_check`. An unattended run never waits on a human check. Open such blocks before
+the grant starts, or after it ends.
+
 ## Budget stop
 
 With `--budget`, each category pauses when its spend since the grant started (plus what running

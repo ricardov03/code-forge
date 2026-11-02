@@ -289,6 +289,10 @@ Every other check still runs:
   `coder.tests` row. Waived reviews never lift this check.
 
 `block close` does not run the gates. Run them in step 6 and read their result before you close.
+
+To see every close blocker before you close, run `code-forge block ready B1 --run cart-1`. It
+lists each blocker with the exact command that fixes it, and writes nothing. When `block close`
+refuses, it prints the same full list.
 With `gates.test` set in the config in force, close warns if the block's last gate result is not
 a green `gate.done`, and still closes. With `gates.test: null`, it prints no such warning.
 
