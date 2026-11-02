@@ -399,10 +399,15 @@ tree stays. Coders may not use the flag. code-forge never pushes, and never dele
 branch except one a failed open made itself.
 
 `code-forge block land <id> --run <run> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]`
-joins the block's reviews, runs `gates run --run <run> --block <id> --changed` in its recorded
-worktree, then runs the normal close checks with the report and transcript. It stops at the first
+joins the block's reviews and, at the same time, runs `gates run --run <run> --block <id> --changed`
+in its recorded worktree. When the tree changes during the join, the gates run again. Land closes
+only when the join is clean and the gates pass. When both fail, one stop message names both.
+A finding or a gate timeout stops the gate process group, and land never closes or merges.
+Then it runs the normal close checks with the report and transcript. It stops at the first
 failure with exit 1, the step, findings or gate output or close refusal, and the next command.
-A close awaiting a human check also stops before merging.
+A close awaiting a human check also stops before merging. Each land, pass or stop, writes one
+signed `land.timing` row with `join_ms`, `gates_ms` and `merge_gate_ms` (null without a merge
+gate). Per-gate times stay in `gate.done`.
 
 `--max` sets the total review wait, defaulting to `30m` (also accepts `90s` or `1500ms`).
 Land makes up to three join attempts while a held findings round remains open, sharing that
