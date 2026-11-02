@@ -29,6 +29,7 @@ const NODE = process.execPath;
 const PROBE = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
 const EXTERNAL = 'review:\n  external: {required: true, name: Grok}\n';
 const WORKTREE = 'proof:\n  isolation: worktree\n';
+const WORKTREE_SUFFIX = process.platform === 'darwin' ? '.noindex' : '';
 const SRC = { tokens_source: null, cost_source: null };
 
 /** @param {string[]} args @param {string} cwd @returns {Promise<string>} git's stdout; a failure throws. */
@@ -144,7 +145,7 @@ async function fixture(slug, extra) {
     }
     return r;
   });
-  return { repo, origin, runId, head, open, close, gate, rows, gateRows, tree: (/** @type {string} */ id) => `${repo}-worktrees/${id}` };
+  return { repo, origin, runId, head, open, close, gate, rows, gateRows, tree: (/** @type {string} */ id) => `${repo}-worktrees${WORKTREE_SUFFIX}/${id}` };
 }
 
 /** YAML lines for a `test` gate on the probe, the other gates off. @param {string} script @param {string[]} [argv] */
@@ -230,7 +231,7 @@ test('B62b (1): a worktree that is gone or malformed refuses gates run — exit 
 
 test('B62b (1): a red gate in the tree writes gate.red naming the tree; a block without a worktree (export) runs in --cwd and its rows carry no worktree', async () => {
   const red = path.join(freshDir('red'), 'red.mjs');
-  writeFile(path.dirname(red), 'red.mjs', 'process.exit(process.cwd().endsWith("-worktrees/B1") ? 4 : 0);\n');
+  writeFile(path.dirname(red), 'red.mjs', `process.exit(process.cwd().endsWith("-worktrees${WORKTREE_SUFFIX}/B1") ? 4 : 0);\n`);
   const fx = await fixture('b62b-red', [WORKTREE.trimEnd(), ...probeGate(red)]);
   await fx.open('B1', ['src/a.mjs']);
   const tree = fx.tree('B1');
@@ -337,7 +338,7 @@ test('B62b (1): with the workspace in a subdirectory, --cwd must name that subdi
   assert.equal(started, 0, startErr);
   const [opened, , openErr] = await cli(runBlock, ['open', 'B1', '--run', runId, '--level', 'L2', '--owned', 'src/a.mjs', '--acceptance', ACC]);
   assert.equal(opened, 0, openErr);
-  const tree = `${repo}-worktrees/B1`;
+  const tree = `${repo}-worktrees${WORKTREE_SUFFIX}/B1`;
   const place = path.join(tree, 'app');
   const gate = async (/** @type {string[]} */ more) => {
     const [code, out, err] = await cli(runGatesVerb, ['run', '--slug', 'b62b-sub', '--run', runId, '--block', 'B1', ...more]);
@@ -542,7 +543,7 @@ async function withWorker(name, body) {
   try {
     const opened = await cliProc(['block', 'open', 'B1', '--run', runId, '--level', 'L2', '--owned', 'src/a.mjs', '--acceptance', ACC], repo, env);
     assert.equal(opened.code, 0, opened.stderr);
-    const tree = `${repo}-worktrees/B1`;
+    const tree = `${repo}-worktrees${WORKTREE_SUFFIX}/B1`;
     assert.equal((await readRun(runId)).blocks.B1.worktree.path, tree);
     await body({ repo, origin, tree, runId, env, records });
   } finally {

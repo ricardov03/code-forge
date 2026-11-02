@@ -348,11 +348,21 @@ With `proof.isolation: worktree` (B62a), each block gets its own git worktree on
 `block open` runs `git worktree add <dir>/<block> -b <branch> <base>` before the block is recorded:
 
 - The tree goes in `proof.worktree.dir`, resolved from the repository top level. The default is
-  `../<repo-name>-worktrees`, beside the repository; `<repo-name>` is replaced with the basename of
-  the repository top level.
+  `../<repo-name>-worktrees.noindex` on macOS and `../<repo-name>-worktrees` elsewhere, beside the
+  repository; `<repo-name>` is replaced with the basename of the repository top level. Spotlight
+  skips the `.noindex` directory. First use of the macOS default creates a missing
+  `.metadata_never_index` marker without overwriting one. Other platforms, explicit directories,
+  and retained old directories are unchanged.
 - The branch is `proof.worktree.branch`, default `forge/{run}/{block}`. Only `{run}` and `{block}`
   are filled in, and git must accept the name.
 - The tree starts from `proof.worktree.base`, else the block's base.
+
+An existing run with worktrees in the old default directory keeps using it for new blocks;
+each block keeps its recorded path. To migrate, finish or end the runs, then
+`mv ../<repo-name>-worktrees ../<repo-name>-worktrees.noindex`, or remove the old folder when no
+longer needed. Never move live worktrees. macOS `doctor` warns about an effective worktree
+directory outside `.noindex`. Temp packets stay in `$TMPDIR/code-forge/…`: the default macOS
+`$TMPDIR` under `/private/var/folders` is already excluded from Spotlight indexing.
 
 The block records `worktree {path, branch, base_sha}`, and a signed `worktree.created` row comes
 before `dispatch`. The open prints `worktree <path> · branch <branch>`. If the tree cannot be made, the

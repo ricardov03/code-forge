@@ -10,7 +10,8 @@
  *
  *   proof.worktree.dir     where the trees go, resolved from the repository top level (not from the
  *                          workspace, even for a workspace in a subdirectory); default
- *                          `../<repo-name>-worktrees`, where `<repo-name>` is replaced with the
+ *                          `../<repo-name>-worktrees.noindex` on macOS, `../<repo-name>-worktrees`
+ *                          elsewhere, where `<repo-name>` is replaced with the
  *                          basename of the top level — beside the repository, so the main tree
  *                          never lists a tree as untracked. The block's tree is `<dir>/<block>`.
  *   proof.worktree.branch  a template; only `{run}` and `{block}` are substituted, and the result
@@ -30,7 +31,7 @@
  * main tree, and nothing checks out, pushes or merges: the work stays on the block's branch.
  */
 
-import { lstatSync, realpathSync, statSync } from 'node:fs';
+import { lstatSync, mkdirSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { configInForce } from '../state/config-snapshot.mjs';
@@ -66,7 +67,7 @@ export function worktreeSettings(record) {
   if (proof?.isolation !== 'worktree') return null;
   const wt = proof.worktree ?? {};
   return {
-    // the schema's default text `../<repo-name>-worktrees` is documentation only, never used as is:
+    // the schema's platform-dependent default text is documentation only, never used as is:
     // an unset dir is null here, and `prepareWorktree` puts the top level's basename in its place
     dir: typeof wt.dir === 'string' ? wt.dir : null,
     branch: typeof wt.branch === 'string' ? wt.branch : DEFAULT_BRANCH_TEMPLATE,
@@ -247,6 +248,50 @@ function realAsFarAsExists(p) {
 }
 
 /**
+ * Resolve a directory without moving live trees. A macOS run with a registered tree in the
+ * old default keeps that default; other runs get the platform's current default.
+ * @param {{top: string, settings: WorktreeSettings, runId?: string, platform?: NodeJS.Platform}} opts
+ * @returns {Promise<{dir: string, mark: boolean}>}
+ */
+export async function worktreeDirectory({ top, settings, runId, platform = process.platform }) {
+  const old = realAsFarAsExists(path.resolve(top, '..', `${path.basename(top)}-worktrees`));
+  if (settings.dir !== null) return { dir: realAsFarAsExists(path.resolve(top, settings.dir)), mark: false };
+  if (platform !== 'darwin') return { dir: old, mark: false };
+  if (runId) {
+    const res = await git(['git', 'worktree', 'list', '--porcelain', '-z'], top);
+    if (res.result !== 'ok') throw new StateError('git-failed', `git worktree list failed (${gitReason(res)})`);
+    let where = '';
+    for (const line of res.stdout.split('\0')) {
+      if (line.startsWith('worktree ')) where = line.slice('worktree '.length);
+      else if (line.startsWith('branch refs/heads/') && where
+        && realAsFarAsExists(path.dirname(where)) === old
+        && line.slice('branch refs/heads/'.length) === branchName(settings.branch, { run: runId, block: path.basename(where) })) return { dir: old, mark: false };
+    }
+  }
+  return { dir: realAsFarAsExists(path.resolve(top, '..', `${path.basename(top)}-worktrees.noindex`)), mark: true };
+}
+
+/** Create the marker once in the macOS default .noindex directory.
+ * @param {string} dir
+ */
+function markDirectory(dir) {
+  try {
+    mkdirSync(dir, { recursive: true });
+  } catch (err) {
+    // Let git worktree add report an invalid parent path and clean up its branch as usual.
+    if (err.code === 'EEXIST' || err.code === 'ENOTDIR') return;
+    throw err;
+  }
+  const marker = path.join(dir, '.metadata_never_index');
+  if (occupied(marker)) return;
+  try {
+    writeFileSync(marker, '', { flag: 'wx' });
+  } catch (err) {
+    if (err.code !== 'EEXIST') throw err;
+  }
+}
+
+/**
  * @param {string} ref @param {string} top @param {string} id @returns {Promise<string>} the full commit sha
  * @throws {StateError} `worktree-failed`
  */
@@ -283,11 +328,11 @@ async function commitOf(ref, top, id) {
  * `git worktree remove --force <path>`, and `git branch -D <branch>` only when this call made the
  * branch (a branch kept from an earlier attempt is kept). Both results are checked: it resolves to
  * a sentence naming what is left behind, or null.
- * @param {{cwd: string, settings: WorktreeSettings, runId: string, id: string, baseSha: string, baseExplicit?: boolean, previous: WorktreeRecord | null}} opts
+ * @param {{cwd: string, settings: WorktreeSettings, runId: string, id: string, baseSha: string, baseExplicit?: boolean, previous: WorktreeRecord | null, platform?: NodeJS.Platform}} opts
  * @returns {Promise<PlannedWorktree>} the tree's `path` is absolute (a realpath once made).
  * @throws {StateError} `worktree-failed`, `git-failed`
  */
-export async function prepareWorktree({ cwd, settings, runId, id, baseSha, baseExplicit = false, previous }) {
+export async function prepareWorktree({ cwd, settings, runId, id, baseSha, baseExplicit = false, previous, platform = process.platform }) {
   assertSegment(id);
   const top = await repoTopOf(cwd);
   const refuseOccupied = (/** @type {string} */ p) => {
@@ -305,16 +350,22 @@ export async function prepareWorktree({ cwd, settings, runId, id, baseSha, baseE
 
   if (previous) {
     const want = { ...previous };
+    const { dir, mark } = await worktreeDirectory({ top, settings, platform });
+    const markPrevious = mark && realAsFarAsExists(path.dirname(want.path)) === dir;
     const make = async () => {
       const entry = await registeredAt(want.path, top);
       if (entry !== null && !entry.prunable && occupied(want.path)) {
-        if (entry.branch === want.branch) return { worktree: want, created: false, rollback: null };
+        if (entry.branch === want.branch) {
+          if (markPrevious) markDirectory(dir);
+          return { worktree: want, created: false, rollback: null };
+        }
         throw new StateError('worktree-failed', `block ${id}: worktree ${want.path} is on ${entry.branch ?? 'a detached HEAD'}, not ${want.branch} — check out ${want.branch} in it; nothing was recorded`);
       }
       if (entry !== null) await git(['git', 'worktree', 'prune'], top);
       refuseOccupied(want.path);
       const attach = await branchExists(want.branch, top);
       const newBranch = attach ? null : want.branch;
+      if (markPrevious) markDirectory(dir);
       await addTree(attach ? ['git', 'worktree', 'add', want.path, want.branch] : ['git', 'worktree', 'add', want.path, '-b', want.branch, want.base_sha], want.path, top, id, newBranch);
       return made(want, newBranch);
     };
@@ -328,7 +379,7 @@ export async function prepareWorktree({ cwd, settings, runId, id, baseSha, baseE
     if (await branchExists(branch, top)) throw new StateError('worktree-failed', `block ${id}: branch ${branch} already exists — delete it or change proof.worktree.branch; nothing was recorded`);
   };
   // spelled as the realpath it will have, so the planned path (the overlap rule) equals the recorded one
-  const dir = realAsFarAsExists(path.resolve(top, settings.dir ?? path.join('..', `${path.basename(top)}-worktrees`)));
+  const { dir, mark } = await worktreeDirectory({ top, settings, runId, platform });
   const want = { path: path.join(dir, id), branch, base_sha: baseExplicit || settings.base === null ? baseSha : await commitOf(settings.base, top, id) };
   const assertDescendant = async () => {
     const res = await git(['git', 'merge-base', '--is-ancestor', want.base_sha, `refs/heads/${branch}`], top);
@@ -344,6 +395,7 @@ export async function prepareWorktree({ cwd, settings, runId, id, baseSha, baseE
     if (attach) await assertDescendant();
     else await refuseBranch();
     const newBranch = attach ? null : want.branch;
+    if (mark) markDirectory(dir);
     await addTree(attach ? ['git', 'worktree', 'add', want.path, want.branch] : ['git', 'worktree', 'add', want.path, '-b', want.branch, want.base_sha], want.path, top, id, newBranch);
     return made(want, newBranch);
   };
@@ -367,6 +419,11 @@ export async function removeWorktree({ cwd, worktree }) {
   } catch {
     return gitReason(res);
   }
+  if (entry === null && /Directory not empty/i.test(res.stderr)) {
+    const p = worktree.path;
+    const quoted = /^[a-zA-Z0-9_./-]+$/.test(p) ? p : `'${p.replaceAll("'", "'\\''")}'`;
+    return `worktree ${p} was unregistered but files are left; remove them with: rm -rf ${quoted}`;
+  }
   if (!entry?.prunable) return gitReason(res);
   const pruned = await git(['git', 'worktree', 'prune'], cwd);
   return pruned.result === 'ok' ? null : gitReason(pruned);
@@ -376,7 +433,7 @@ export async function removeWorktree({ cwd, worktree }) {
  * @param {string} cwd @returns {Promise<string>} the repository top level, realpath'd.
  * @throws {StateError} `git-failed`
  */
-async function repoTopOf(cwd) {
+export async function repoTopOf(cwd) {
   const res = await git(['git', 'rev-parse', '--show-toplevel'], cwd);
   if (res.result !== 'ok') throw new StateError('git-failed', `git rev-parse --show-toplevel failed (${gitReason(res)})`);
   return realpathSync(res.stdout.trim());

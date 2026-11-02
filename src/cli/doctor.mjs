@@ -13,6 +13,7 @@ import path from 'node:path';
 import { loadProjectConfig, projectRootFor } from '../config/load.mjs';
 import { runDoctor } from '../doctor/index.mjs';
 import { counts, exitCode, renderJSON, renderText } from '../doctor/rows.mjs';
+import { DEFAULT_BRANCH_TEMPLATE, repoTopOf, worktreeDirectory } from '../proof/worktree.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 import { configInForce } from '../state/config-snapshot.mjs';
 import { readRun } from '../state/run.mjs';
@@ -84,6 +85,17 @@ export async function runDoctorCli(args, deps = {}, adopt = false) {
         if (daemonEnabled(config)) {
           daemon = worker && await daemonRequest(worker.run, { method: 'ping' }, { config }) ? 'live' : 'fallback';
         }
+        try {
+          if ((deps.platform ?? process.platform) === 'darwin' && loaded.ok) {
+            // Non-git projects still get a useful config-relative warning.
+            const top = await repoTopOf(cwd).catch(() => path.dirname(loaded.path));
+            const wt = config.proof?.worktree ?? {};
+            const { dir } = await worktreeDirectory({ top, settings: { dir: wt.dir ?? null, branch: wt.branch ?? DEFAULT_BRANCH_TEMPLATE, base: wt.base ?? null }, runId: worker?.run, platform: 'darwin' });
+            if (!dir.split(path.sep).some((part) => part.endsWith('.noindex'))) {
+              rows.push({ id: 'worktree-indexing', status: 'WARN', label: 'worktree indexing', detail: `${dir} may be indexed by Spotlight.\nproof.worktree.dir: ../${path.basename(top)}-worktrees.noindex\nTo move the old folder, finish or end the runs, then mv the folder to the .noindex path; or remove it.` });
+            }
+          }
+        } catch { /* an unavailable indexing check must not change the daemon result */ }
       } catch { /* an unreadable config or worker leaves native acceleration off */ }
       rows.push({ id: 'native_daemon', status: 'INFO', label: 'native daemon', detail: daemon });
     }

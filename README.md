@@ -14,6 +14,7 @@ You approve the plan and keep control of budgets, permissions, and landing the r
 ## Install
 
 Requires Node.js >= 22 and git. Install the CLI with `npm install -g @codedology/code-forge`.
+macOS: worktrees default to a `.noindex` folder so Spotlight does not index them.
 The scoped npm name is only for installation; the command is `code-forge`.
 The unscoped npm package `code-forge` is an unrelated tool.
 

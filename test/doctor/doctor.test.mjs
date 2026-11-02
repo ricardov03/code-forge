@@ -251,6 +251,32 @@ describe('doctor full run', () => {
 });
 
 describe('doctor wiring and modes', () => {
+  test('macOS warns once for an indexed worktree directory with a fix and migration hint; no warning under noindex or on linux', async () => {
+    for (const [platform, dir, warned] of /** @type {const} */ ([
+      ['darwin', '../old-worktrees', true],
+      ['darwin', '../safe.noindex/trees', false],
+      ['darwin', '../almost.noindex-more/trees', true],
+      ['linux', '../old-worktrees', false],
+      ['darwin', null, false],
+    ])) {
+      const { proj } = makeProject();
+      if (dir) {
+        const file = path.join(proj, '.code-forge.yml');
+        writeFileSync(file, `${readFileSync(file, 'utf8')}proof:\n  isolation: worktree\n  worktree:\n    dir: ${dir}\n`);
+      }
+      const d = doctorDeps();
+      d.deps.platform = platform;
+      const { doc } = await runJSON(['--cwd', proj], d);
+      const warnings = doc.rows.filter((r) => r.id === 'worktree-indexing' && r.status === 'WARN');
+      assert.equal(warnings.length, warned ? 1 : 0, `${platform} ${dir}: warning count`);
+      if (warned) {
+        const fix = `proof.worktree.dir: ../${path.basename(proj)}-worktrees.noindex`;
+        assert.equal(warnings[0].detail.split('\n').filter((line) => line === fix).length, 1, 'exact fix line');
+        assert.match(warnings[0].detail, /finish or end the runs.*mv.*or remove/i);
+      }
+    }
+  });
+
   test('the worker row uses B11 and the signer row uses B8, both statically imported', () => {
     const src = readFileSync(path.join(SRC, 'doctor', 'worker-probe.mjs'), 'utf8');
     assert.match(src, /^import \{[^}]*\blaunchWorker\b[^}]*\} from '\.\.\/worker\/loop\.mjs';$/m);
