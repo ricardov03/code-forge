@@ -1,9 +1,10 @@
-import { alive, cli, FAKE_JEV_KEY, VALID_REVIEW, FAKE_SNEAKY, freshDir, makeRepo, queued, records, runRootOf, startWorker, stopPid, stopPidAfter, stopWorker, waitFor } from './helpers.mjs';
+import { alive, cli, FAKE_JEV_KEY, VALID_REVIEW, FAKE_SNEAKY, freshDir, makeRepo, queued, records, runRootOf, startWorker, stopPid, stopPidAfter, stopWorker, useFake, waitFor } from './helpers.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
-import { existsSync, readFileSync, rmSync } from 'node:fs';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { describe, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const { announceWorker, enqueue, liveWorker, readResult, verifyResult } = await import('../../src/worker/queue.mjs');
 const { createWorker } = await import('../../src/worker/loop.mjs');
@@ -11,6 +12,37 @@ const { readRun, stopPinnedWorker } = await import('../../src/state/run.mjs');
 const { runRun } = await import('../../src/cli/run.mjs');
 const { loadKey, verifyRow } = await import('../../src/state/signer.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
+
+/** A real reviewer process held until the test publishes a release file; no guessed session duration.
+ * @param {string} repo @param {string} runId @param {string} recordDir
+ */
+async function startGatedWorker(repo, runId, recordDir) {
+  const gateDir = freshDir('review-gate');
+  const gate = path.join(gateDir, 'release');
+  const fake = path.join(gateDir, 'reviewer.mjs');
+  const original = new URL('./fake-reviewer.mjs', import.meta.url);
+  writeFileSync(fake, `#!/usr/bin/env node
+import { existsSync, renameSync, watch, writeFileSync } from 'node:fs';
+import path from 'node:path';
+// exec registers this pid before writing stdin. Wait for that write before publishing readiness.
+await new Promise((resolve) => process.stdin.once('readable', resolve));
+const gate = ${JSON.stringify(gate)};
+await new Promise((resolve) => {
+  const ready = () => { if (existsSync(gate)) { watcher.close(); resolve(); } };
+  const watcher = watch(path.dirname(gate), ready);
+  const record = path.join(process.env.FAKE_RECORD, 'reviewer-' + process.pid + '.json');
+  writeFileSync(record + '.tmp', JSON.stringify({ pid: process.pid }));
+  renameSync(record + '.tmp', record);
+  ready();
+});
+await import(${JSON.stringify(original.href)});
+`, { mode: 0o700 });
+  useFake(fake);
+  try {
+    const worker = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '0', FAKE_ANSWER: VALID_REVIEW });
+    return { ...worker, release: () => writeFileSync(gate, '') };
+  } finally { useFake(fileURLToPath(original)); }
+}
 
 /**
  * Wait for each pid to be gone (`process.kill(pid, 0)` throws ESRCH), polling every 25 ms up to a
@@ -38,20 +70,21 @@ async function waitDead(pids, ms = 20000) {
   return left;
 }
 
-describe('a long review session (the fake sleeps 3 s; the coder waits 1 s at a time)', () => {
-  test('the coder-side wait ends first; the ticket still ends done; 0 tickets lost', async () => {
-    // The plan's 150 s is scaled to 3 s through the fake's FAKE_SLEEP_MS knob; what is shown is the
-    // same: the session outlives the coder's `--wait --max`, and only the worker's own session
-    // timeout (review.session_timeout_s = 60 in the fixture) could end it.
+describe('a long review session (the fake is gated; the coder waits 1 s at a time)', () => {
+  test('the coder-side wait ends first; the ticket still ends done; 0 tickets lost', { timeout: 60_000 }, async () => {
+    // Hold both real sessions until the coder's wait has returned, regardless of host load.
     const { repo, runId } = await makeRepo();
     const recordDir = freshDir('records');
-    const w = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '3000', FAKE_ANSWER: VALID_REVIEW });
+    const w = await startGatedWorker(repo, runId, recordDir);
     try {
       const a = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
       const b = await cli(['review-file', 'src/b.mjs', '--block', 'B11'], repo);
       assert.deepEqual([a.json.status, b.json.status], ['queued', 'queued']);
+      assert.equal(await waitFor(() => records(recordDir).length === 2), true, 'both reviewer sessions reached the gate');
       const short = await cli(['review-file', '--wait', a.json.ticket, '--max', '1s'], repo);
       assert.deepEqual([short.code, short.json.status], [0, 'pending']);
+      assert.deepEqual(queued(repo, 'done'), [], 'the coder timeout completes neither gated session');
+      w.release();
       const doneA = await cli(['review-file', '--wait', a.json.ticket, '--max', '30s'], repo);
       const doneB = await cli(['review-file', '--wait', b.json.ticket, '--max', '30s'], repo);
       assert.deepEqual([doneA.json.status, doneA.json.result.status, doneA.json.result.file], ['done', 'reviewed', 'src/a.mjs']);
@@ -85,10 +118,10 @@ describe('the sessions the worker spawns', () => {
     }
   });
 
-  test('every session has a pid-registry entry while alive, and none after', async () => {
+  test('every session has a pid-registry entry while alive, and none after', { timeout: 60_000 }, async () => {
     const { repo, runId } = await makeRepo();
     const recordDir = freshDir('records');
-    const w = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '2000' });
+    const w = await startGatedWorker(repo, runId, recordDir);
     try {
       const a = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
       assert.ok(await waitFor(() => records(recordDir).length === 1));
@@ -96,6 +129,7 @@ describe('the sessions the worker spawns', () => {
       const entry = path.join(runRootOf(runId), 'pids', `${pid}.json`);
       assert.equal(alive(pid), true);
       assert.equal(JSON.parse(readFileSync(entry, 'utf8')).pid, pid);
+      w.release();
       assert.equal((await cli(['review-file', '--wait', a.json.ticket, '--max', '30s'], repo)).json.status, 'done');
       assert.ok(await waitFor(() => !existsSync(entry), 20000));
     } finally {
@@ -105,12 +139,11 @@ describe('the sessions the worker spawns', () => {
 });
 
 describe('worker restart', () => {
-  test('a new worker re-reads 3 queued tickets and completes them; run start --reattach re-pins its pid', async () => {
+  test('a new worker re-reads 3 queued tickets and completes them; run start --reattach re-pins its pid', { timeout: 120_000 }, async () => {
     const { repo, runId } = await makeRepo();
     const recordDir = freshDir('records');
-    // The first worker's sessions sleep 30 s: past the 20 s wait for their death below, so a
-    // session that stopWorker did not kill can never pass by ending on its own.
-    const first = await startWorker(repo, runId, { FAKE_RECORD: recordDir, FAKE_SLEEP_MS: '30000' });
+    // Never release the first worker's sessions: only stopping them can end them.
+    const first = await startGatedWorker(repo, runId, recordDir);
     assert.equal((await cli(['run', 'start', '--reattach', '--run', runId], repo)).code, 0);
     assert.equal((await readRun(runId)).worker.pid, first.pid);
     const tickets = [];
@@ -120,21 +153,26 @@ describe('worker restart', () => {
     assert.ok(await waitFor(() => records(recordDir).length >= 1));
     await stopWorker(first, runId);
     const inFlight = records(recordDir).map((r) => r.pid);
-    assert.ok(inFlight.length >= 1 && inFlight.length <= 3, `in-flight sessions: ${inFlight.length}`);
+    const flightCount = `in-flight sessions: ${inFlight.length}`;
+    assert.ok(inFlight.length >= 1 && inFlight.length <= 3, flightCount);
     const stillAlive = await waitDead(inFlight);
-    assert.deepEqual(stillAlive, [], `killed sessions still alive 5 s after stopWorker: ${stillAlive.join(', ')}`);
+    const survivors = `killed sessions still alive 20 s after stopWorker: ${stillAlive.join(', ')}`;
+    assert.deepEqual(stillAlive, [], survivors);
     assert.deepEqual(queued(repo, 'done'), []); // the killed session was abandoned, not recorded
 
     const second = await startWorker(repo, runId, { FAKE_RECORD: recordDir });
     try {
       assert.ok(await waitFor(() => queued(repo, 'done').length === 3, 20000));
       assert.deepEqual(queued(repo, 'done'), [...tickets].sort());
-      for (const t of tickets) assert.equal((await verifyResult(repo, runId, t)).ok, true);
+      for (const t of tickets) {
+        assert.equal((await verifyResult(repo, runId, t)).ok, true);
+      }
 
       assert.equal((await readRun(runId)).worker.pid, first.pid); // restarting alone never re-pins
       const reattach = await cli(['run', 'start', '--reattach', '--run', runId], repo);
       assert.equal(reattach.code, 0, reattach.stderr);
-      assert.equal(reattach.stdout, `run ${runId}: worker re-pinned to pid ${second.pid}\n`);
+      const repinned = `run ${runId}: worker re-pinned to pid ${second.pid}\n`;
+      assert.equal(reattach.stdout, repinned);
       assert.equal((await readRun(runId)).worker.pid, second.pid);
     } finally {
       await stopWorker(second, runId);
@@ -238,13 +276,7 @@ describe('the ctx the loop hands the engine hook (B12a seam)', () => {
     assert.equal(spawned[0].cfg.marker, 'per-call');
     assert.equal(spawned[1].cfg.marker, 'worker');
     // what the worker pins is pinned on both calls, per-call cfg or not
-    assert.deepEqual(
-      spawned.map((o) => [o.run, o.block, o.timeoutMs]),
-      [
-        [runId, 'B11', 7000],
-        [runId, 'B11', 7000],
-      ],
-    );
+    assert.deepEqual(spawned.map((o) => [o.run, o.block, o.timeoutMs]), [[runId, 'B11', 7000], [runId, 'B11', 7000]]);
   });
 
   test('(b) a row written through ctx.writeRow carries block, file and content_hash from the ticket, even when the row supplies other values', async () => {
@@ -337,7 +369,8 @@ describe('worker lifecycle', () => {
     assert.notEqual(live, null);
     assert.equal(alive(live.pid), true);
     assert.equal((await readRun(runId)).worker.pid, live.pid);
-    assert.equal(res.stdout, `run ${runId} started · engine auto · worker pid ${live.pid}\n`);
+    const started = `run ${runId} started · engine auto · worker pid ${live.pid}\n`;
+    assert.equal(res.stdout, started);
     await stopPid(live.pid, runId);
     assert.equal(alive(live.pid), false);
   });
@@ -349,13 +382,17 @@ describe('worker lifecycle', () => {
   function sleepingChild() {
     const child = spawn('sleep', ['60'], { stdio: 'ignore', shell: false });
     const pid = /** @type {number} */ (child.pid);
-    const exited = new Promise((resolve) => child.on('exit', () => resolve(true)));
-    const kill = () => {
+    const exited = new Promise((resolve, reject) => {
+      child.once('close', () => resolve(true));
+      child.once('error', reject);
+    });
+    const kill = async () => {
       try {
         process.kill(pid, 'SIGKILL');
       } catch {
         // already gone
       }
+      await exited;
     };
     return { pid, exited, kill };
   }
@@ -381,9 +418,14 @@ describe('worker lifecycle', () => {
 
   /** Allow up to 20 s to observe the launched child's exit after the stop. */
   async function assertStoppedQuickly(/** @type {{pid: number, exited: Promise<unknown>}} */ c) {
-    const exited = await Promise.race([c.exited, new Promise((r) => setTimeout(() => r(false), 20000).unref())]);
-    assert.equal(exited, true, `pid ${c.pid} still running 3 s after the stop`);
-    assert.equal(await waitFor(() => !alive(c.pid), 20000), true);
+    let timer;
+    try {
+      // Keep this deadline referenced until close is observed; always clear the losing timer.
+      const exited = await Promise.race([c.exited, new Promise((r) => { timer = setTimeout(() => r(false), 20000); })]);
+      const message = `pid ${c.pid} still running 20 s after the stop`;
+      assert.equal(exited, true, message);
+      assert.equal(await waitFor(() => !alive(c.pid), 20000), true);
+    } finally { clearTimeout(timer); }
   }
 
   test('run start whose launched worker never announces itself stops that pid exactly once (no orphan) and fails', async () => {
@@ -394,11 +436,12 @@ describe('worker lifecycle', () => {
       assert.equal(res.code, 1);
       assert.deepEqual(res.stops, [launched.pid]);
       await assertStoppedQuickly(launched);
-      assert.equal(res.stderr, `run start: launched worker pid ${launched.pid} was not pinned; stopped it\nrun start: no live worker serves this queue\n`);
+      const error = `run start: launched worker pid ${launched.pid} was not pinned; stopped it\nrun start: no live worker serves this queue\n`;
+      assert.equal(res.stderr, error);
       assert.equal(res.stdout, '');
       assert.equal((await readRun(runId)).worker, null);
     } finally {
-      launched.kill();
+      await launched.kill();
     }
   });
 
@@ -414,14 +457,12 @@ describe('worker lifecycle', () => {
       await assertStoppedQuickly(launched);
       assert.equal(alive(older.pid), true);
       assert.equal(liveWorker(repo)?.pid, older.pid);
-      assert.equal(
-        res.stderr,
-        `run start: launched worker pid ${launched.pid} was not pinned; stopped it\nrun start: the queue announces worker pid ${older.pid}, not the launched pid ${launched.pid}\n`,
-      );
+      const error = `run start: launched worker pid ${launched.pid} was not pinned; stopped it\nrun start: the queue announces worker pid ${older.pid}, not the launched pid ${launched.pid}\n`;
+      assert.equal(res.stderr, error);
       assert.equal((await readRun(runId)).worker, null); // neither pid was pinned
     } finally {
-      launched.kill();
-      older.kill();
+      await launched.kill();
+      await older.kill();
     }
   });
 });

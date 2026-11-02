@@ -3,6 +3,9 @@
 // than at 1 (ideal 3x; 1.5x leaves room for a loaded machine while excluding serial work).
 import { BLOCK, freshDir, makeRepo } from './worker/helpers.mjs';
 import assert from 'node:assert/strict';
+import { EventEmitter } from 'node:events';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
@@ -24,11 +27,12 @@ describe('scripts/bench-review.mjs (B44)', () => {
     const json = await bench(['--review-ms', '300', '--json']);
     assert.equal(json.code, 0);
     const res = JSON.parse(json.stdout.trim());
-    assert.deepEqual([res.reviewMs, res.files, res.runs.map((/** @type {any} */ r) => r.tickets)], [300, 6, [1, 3]]);
+    assert.deepEqual([res.reviewMs, res.files, res.runs.map((r) => r.tickets)], [300, 6, [1, 3]]);
     const [one, three] = res.runs;
     t.diagnostic(`N=1 ${one.ms} ms, N=3 ${three.ms} ms, speedup ${res.speedup}x`);
     assert.equal(one.ms >= 6 * 300, true); // serial: at least 6 reviews back to back
-    assert.equal(one.ms / three.ms >= 1.5, true, `N=1 ${one.ms} ms, N=3 ${three.ms} ms`);
+    const timing = `N=1 ${one.ms} ms, N=3 ${three.ms} ms`;
+    assert.equal(one.ms / three.ms >= 1.5, true, timing);
     assert.equal(res.speedup, Math.round((one.ms / three.ms) * 100) / 100);
 
     const text = await bench(['--review-ms', '50', '--files', '2', '--tickets', '1,2']);
@@ -49,7 +53,7 @@ describe('scripts/bench-review.mjs (B44)', () => {
   });
 });
 
-test('a ticket arriving during capped idle back-off wakes the worker within the fast interval', async () => {
+test('a ticket arriving during capped idle back-off wakes the worker within the fast interval', { timeout: 30_000 }, async (t) => {
   const { repo, runId } = await makeRepo();
   let idle;
   let resume;
@@ -58,12 +62,19 @@ test('a ticket arriving during capped idle back-off wakes the worker within the 
   const sleeping = new Promise((resolve) => { resume = resolve; });
   const started = new Promise((resolve) => { reviewed = resolve; });
   const sleeps = [];
+  let elapsed = 0;
+  let notify;
+  const watcher = Object.assign(new EventEmitter(), { close() {} });
+  t.mock.method(fs, 'watch', (_dir, listener) => { notify = listener; return watcher; });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   const worker = await createWorker({ runId, repoRoot: repo, cfg: {}, key: await loadKey(runId), slug: 'worker-test', runRootDir: freshDir('wake-root') }, {
     env: {}, store: await createKeyStore({ backends: [], dir: freshDir('wake-store') }),
     expiryCheck: async () => {}, writeRow: async () => {}, readRows: async () => [],
     sleep: async (ms) => {
       sleeps.push(ms);
       if (ms === 5000) { idle(); await sleeping; }
+      elapsed += ms;
     },
     review: async (ticket) => {
       reviewed(ticket.file);
@@ -72,15 +83,18 @@ test('a ticket arriving during capped idle back-off wakes the worker within the 
     },
   });
   const running = worker.run();
-  let timer;
+  t.after(async () => { worker.stop(); resume(); await running; });
   try {
     await capped;
-    enqueue({ repoRoot: repo, run: runId, block: BLOCK, file: 'src/a.mjs' });
-    const result = await Promise.race([started, new Promise((resolve) => { timer = setTimeout(() => resolve('idle timeout'), 250); })]);
-    assert.equal(result, 'src/a.mjs', 'one waiting ticket starts within 250 ms instead of waiting for the 5 s idle sleep');
+    const { ticket } = enqueue({ repoRoot: repo, run: runId, block: BLOCK, file: 'src/a.mjs' });
+    const arrived = elapsed;
+    // Deliver the rename explicitly. The capped sleep stays pending throughout dispatch:
+    // a wake must start this ticket without consuming even the 250 ms fast interval.
+    notify('rename', `${ticket}.json`);
+    assert.equal(await started, 'src/a.mjs', 'the notification dispatches exactly the waiting file');
+    assert.equal(elapsed - arrived, 0, 'the ticket starts before any of the 250 ms fast interval elapses');
     assert.deepEqual(sleeps, [250, 500, 1000, 2000, 4000, 5000], 'the empty queue still backs off to 5 s');
   } finally {
-    clearTimeout(timer);
     worker.stop();
     resume();
     await running;
