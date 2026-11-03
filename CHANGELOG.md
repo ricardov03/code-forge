@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.16.3] — 2026-11-02
+
 ### Added
 
 - `review.silence_timeout_s` (default 60): a reviewer or judge session that prints nothing for this long is killed and counts as a timeout (B206, landed as B240)
