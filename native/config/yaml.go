@@ -9,6 +9,7 @@ import (
 	"regexp"
 	"strconv"
 	"strings"
+	"time"
 	"unicode/utf16"
 
 	"github.com/ricardov03/code-forge/native/canon"
@@ -19,7 +20,7 @@ import (
 var decimal = regexp.MustCompile(`^[+-]?(?:[0-9]+(?:\.[0-9]*)?|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)
 var radix = regexp.MustCompile(`^0(?:o[0-7]+|x[0-9a-fA-F]+)$`)
 var integer = regexp.MustCompile(`^[+-]?[0-9]+$`)
-var timestamp = regexp.MustCompile(`^[0-9]{4}-[0-9]{1,2}-[0-9]{1,2}(?:(?:t|T|[ \t]+)[0-9]{1,2}:[0-9]{1,2}:[0-9]{1,2}(\.[0-9]+)?(?:[ \t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$`)
+var timestamp = regexp.MustCompile(`^([0-9]{4})-([0-9]{1,2})-([0-9]{1,2})(?:(?:t|T|[ \t]+)([0-9]{1,2}):([0-9]{1,2}):([0-9]{1,2})(\.[0-9]+)?(?:[ \t]*(Z|[-+][012]?[0-9](?::[0-9]{2})?))?)?$`)
 var secret = regexp.MustCompile(`sk-[A-Za-z0-9_-]{10,}|xai-[A-Za-z0-9]{20,}|xox[baprs]-[A-Za-z0-9-]{10,}|gh[opsu]_[A-Za-z0-9]{20,}|github_pat_[A-Za-z0-9_]{20,}|AKIA[0-9A-Z]{12,}|AIza[0-9A-Za-z_-]{20,}|eyJ[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{10,}\.[A-Za-z0-9_-]{5,}`)
 
 func maskSecrets(text string) string {
@@ -183,8 +184,7 @@ func scalar(n *yaml.Node) any {
 	if explicit {
 		switch n.Tag {
 		case "!!timestamp":
-			// canonicalJSON visits enumerable own properties; JS Dates have none.
-			return map[string]any{}
+			return timestampISO(text)
 		case "!!binary":
 			var encoded strings.Builder
 			for _, c := range text {
@@ -266,6 +266,41 @@ func scalar(n *yaml.Node) any {
 	return text
 }
 
+func timestampISO(text string) string {
+	parts := timestamp.FindStringSubmatch(text)
+	number := func(index int) int { n, _ := strconv.Atoi(parts[index]); return n }
+	year := number(1)
+	// Date.UTC interprets years 0..99 as 1900..1999 and normalizes overflow.
+	if year < 100 {
+		year += 1900
+	}
+	millis := 0
+	if parts[7] != "" {
+		millis, _ = strconv.Atoi((parts[7][1:] + "00")[:3])
+	}
+	date := time.Date(year, time.Month(number(2)), number(3), number(4), number(5), number(6), millis*int(time.Millisecond), time.UTC)
+	if zone := parts[8]; zone != "" && zone != "Z" {
+		minutes := 0
+		for _, part := range strings.Split(zone[1:], ":") {
+			n, _ := strconv.Atoi(part)
+			minutes = minutes*60 + n
+		}
+		// Match yaml's sexagesimal offset resolver, including small offsets.
+		if minutes < 30 {
+			minutes *= 60
+		}
+		if zone[0] == '-' {
+			minutes = -minutes
+		}
+		date = date.Add(-time.Duration(minutes) * time.Minute)
+	}
+	isoYear := fmt.Sprintf("%04d", date.Year())
+	if date.Year() > 9999 || date.Year() < 0 {
+		isoYear = fmt.Sprintf("%+07d", date.Year())
+	}
+	return isoYear + date.Format("-01-02T15:04:05.000Z")
+}
+
 func jsKey(value any) string {
 	switch v := value.(type) {
 	case string:
@@ -319,82 +354,145 @@ func describeSyntax(source string, err error) error {
 		return fmt.Errorf("YAML_PARSE_ERROR: Unresolved alias (the anchor must be set before the alias): %s", maskSecrets(name))
 	}
 	lines := strings.Split(source, "\n")
-	for i, line := range lines {
-		for j, c := range line {
-			if c == '\t' {
-				return yamlError("TAB_AS_INDENT", "Tabs are not allowed as indentation", i+1, j+1)
-			}
-			if c != ' ' {
-				break
-			}
-		}
+	reportedLine := 1
+	if match := syntaxLine.FindStringSubmatch(message); len(match) > 1 {
+		reportedLine, _ = strconv.Atoi(match[1])
 	}
+	// yaml.v3 may report a collection's context mark using a zero-based line.
+	// Read the whole prefix for lexical context, but diagnose only the reported
+	// line (or the collection starting on the following line), never a file-wide
+	// first match. Errors without a line originate on the first line.
+	near := func(line int) bool { return line == reportedLine || line == reportedLine+1 }
+	flowFailure := strings.Contains(message, "expected ',' or")
+	tokenFailure := strings.Contains(message, "cannot start any token")
+	escapeFailure := strings.Contains(message, "unknown escape character")
 	// Track flow delimiters outside comments and quoted strings to report the
 	// same missing terminator and UTF-16 location as yaml's core-schema parser.
-	var stack []rune
-	quote, escaped, comment := rune(0), false, false
+	type delimiter struct {
+		char rune
+		line int
+	}
+	var stack []delimiter
+	quote, escaped, doubledQuote := rune(0), false, false
+	quoteLine := 0
 	escapeLine, escapeColumn := 0, 0
 	line, column := 1, 1
-	for offset, c := range source {
-		if quote != 0 {
-			if escaped {
-				if !strings.ContainsRune("0abtnvfre \"/\\N_LPuxU\n\r", c) {
-					return yamlError("BAD_DQ_ESCAPE", "Invalid escape sequence \\"+string(c), escapeLine, escapeColumn)
-				}
-				escaped = false
-			} else if c == '\\' && quote == '"' {
-				escaped = true
-				escapeLine, escapeColumn = line, column
-			} else if c == quote {
-				quote = 0
+	blockIndent := -1
+	for index, lineText := range lines {
+		line, column = index+1, 1
+		indent := len(lineText) - len(strings.TrimLeft(lineText, " "))
+		if blockIndent >= 0 {
+			if strings.TrimSpace(lineText) == "" || indent > blockIndent {
+				column += len(utf16.Encode([]rune(lineText)))
+				continue
 			}
-		} else if !comment {
-			switch c {
-			case '#':
-				comment = true
-			case '\'', '"':
-				quote = c
-			case '@', '`':
-				if offset == 0 || source[offset-1] == ' ' || source[offset-1] == ':' {
-					return yamlError("BAD_SCALAR_START", "Plain value cannot start with reserved character "+string(c), line, column)
-				}
-			case '[', '{':
-				stack = append(stack, c)
-			case ']', '}':
-				if len(stack) > 0 {
-					open := stack[len(stack)-1]
-					if open == '[' && c != ']' || open == '{' && c != '}' {
-						return flowError(open, line, column)
-					}
-					stack = stack[:len(stack)-1]
-				}
-			}
+			blockIndent = -1
 		}
-		if c == '\n' {
-			line, column, comment = line+1, 1, false
-		} else {
+		// A newline does not open a new scalar inside a quoted value.
+		scalarStart, comment := quote == 0, false
+		for offset, c := range lineText {
+			next := byte(0)
+			if offset+1 < len(lineText) {
+				next = lineText[offset+1]
+			}
+			if quote != 0 {
+				if doubledQuote {
+					doubledQuote = false
+				} else if escaped {
+					if escapeFailure && (near(line) || near(quoteLine)) && !strings.ContainsRune("0abtnvfre \"/\\N_LPuxU\n\r", c) {
+						return yamlError("BAD_DQ_ESCAPE", "Invalid escape sequence \\"+string(c), escapeLine, escapeColumn)
+					}
+					escaped = false
+				} else if c == '\\' && quote == '"' {
+					escaped = true
+					escapeLine, escapeColumn = line, column
+				} else if c == quote {
+					if quote == '\'' && next == '\'' {
+						doubledQuote = true
+					} else {
+						quote = 0
+					}
+				}
+			} else if !comment {
+				switch c {
+				case ' ', '\t', '\r':
+					if c == '\t' && line == reportedLine && (tokenFailure || strings.Contains(message, "tab character")) && offset <= len(lineText)-len(strings.TrimLeft(lineText, " \t")) {
+						return yamlError("TAB_AS_INDENT", "Tabs are not allowed as indentation", line, column)
+					}
+				case '#':
+					comment = offset == 0 || lineText[offset-1] == ' ' || lineText[offset-1] == '\t'
+					if !comment {
+						scalarStart = false
+					}
+				case '\'', '"':
+					if scalarStart {
+						quote, quoteLine = c, line
+					}
+					scalarStart = false
+				case '@', '`':
+					if scalarStart && tokenFailure && near(line) {
+						return yamlError("BAD_SCALAR_START", "Plain value cannot start with reserved character "+string(c), line, column)
+					}
+					scalarStart = false
+				case '[', '{':
+					if scalarStart || len(stack) > 0 {
+						stack = append(stack, delimiter{c, line})
+						scalarStart = true
+					}
+				case ']', '}':
+					if len(stack) > 0 {
+						open := stack[len(stack)-1]
+						if open.char == '[' && c != ']' || open.char == '{' && c != '}' {
+							if flowFailure && near(open.line) {
+								return flowError(open.char, line, column)
+							}
+						}
+						stack = stack[:len(stack)-1]
+					}
+					scalarStart = false
+				case ':':
+					if next == 0 || next == ' ' || next == '\t' || len(stack) > 0 && strings.ContainsRune("[]{},", rune(next)) {
+						scalarStart = true
+					}
+				case ',':
+					scalarStart = len(stack) > 0
+				case '-':
+					scalarStart = scalarStart && (next == ' ' || next == '\t')
+				case '|', '>':
+					if scalarStart && len(stack) == 0 {
+						blockIndent, comment = indent, true
+					}
+					scalarStart = false
+				default:
+					scalarStart = false
+				}
+			}
 			column += len(utf16.Encode([]rune{c}))
 		}
+		// A backslash followed by a newline is a valid double-quote escape.
+		escaped = false
 	}
-	if quote != 0 {
+	if quote != 0 && strings.Contains(message, "unexpected end of stream") && (near(quoteLine) || near(line)) {
 		return yamlError("MISSING_CHAR", "Missing closing "+string(quote)+"quote", line, column)
 	}
-	if len(stack) > 0 {
-		return flowError(stack[len(stack)-1], line, column)
+	if len(stack) > 0 && flowFailure && near(stack[len(stack)-1].line) {
+		return flowError(stack[len(stack)-1].char, line, column)
 	}
 	if strings.Contains(message, "expected ':'") {
-		for i, line := range lines {
-			trim := strings.TrimSpace(line)
-			if trim != "" && !strings.Contains(trim, ":") && !strings.HasPrefix(trim, "#") && trim != "---" && trim != "..." {
-				return yamlError("MISSING_CHAR", "Implicit map keys need to be followed by map values", i+1, len(line)-len(strings.TrimLeft(line, " \t"))+1)
+		if reportedLine <= len(lines) {
+			text := lines[reportedLine-1]
+			column := 1 + len(text) - len(strings.TrimLeft(text, " \t"))
+			for _, following := range lines[reportedLine:] {
+				if trim := strings.TrimSpace(following); trim != "" && !strings.HasPrefix(trim, "#") {
+					return yamlError("MULTILINE_IMPLICIT_KEY", "Implicit keys need to be on a single line", reportedLine, column)
+				}
 			}
+			return yamlError("MISSING_CHAR", "Implicit map keys need to be followed by map values", reportedLine, column)
 		}
 	}
 	if strings.Contains(message, "mapping values are not allowed") {
-		match := regexp.MustCompile(`line ([0-9]+):`).FindStringSubmatch(message)
-		if len(match) > 1 {
-			n, _ := strconv.Atoi(match[1])
-			index := n - 1
+		if reportedLine <= len(lines) {
+			index := reportedLine - 1
 			if index > 0 {
 				index--
 			}
@@ -410,8 +508,10 @@ func describeSyntax(source string, err error) error {
 			}
 		}
 	}
-	return yamlError("YAML_PARSE_ERROR", "Invalid YAML", line, column)
+	return yamlError("YAML_PARSE_ERROR", "Invalid YAML", reportedLine, 1)
 }
+
+var syntaxLine = regexp.MustCompile(`line ([0-9]+):`)
 
 func flowError(open rune, line, column int) error {
 	kind, close := "sequence", "]"

@@ -444,7 +444,63 @@
     "expected": {
       "ok": true,
       "path": "$ROOT/project/.code-forge.yml",
-      "canonical": "{\"values\":[\"12\",12,1.2,true,null,{},{\"0\":72,\"1\":101,\"2\":108,\"3\":108,\"4\":111},\"42\"],\"version\":1}"
+      "canonical": "{\"values\":[\"12\",12,1.2,true,null,\"2026-01-02T00:00:00.000Z\",{\"0\":72,\"1\":101,\"2\":108,\"3\":108,\"4\":111},\"42\"],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/explicit-timestamps",
+    "files": {
+      "project/.code-forge.yml": "values: [!!timestamp 2026-01-02, !!timestamp 2026-01-02T03:04:05.6789Z, !!timestamp 2026-1-2t3:4:5-5, !!timestamp 2026-01-02 03:04:05 +02:30]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[\"2026-01-02T00:00:00.000Z\",\"2026-01-02T03:04:05.678Z\",\"2026-01-02T08:04:05.000Z\",\"2026-01-02T00:34:05.000Z\"],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/plain-hash",
+    "files": {
+      "project/.code-forge.yml": "url: a#b\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"url\":\"a#b\",\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/plain-apostrophe-bracket",
+    "files": {
+      "project/.code-forge.yml": "msg: it's [\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"msg\":\"it's [\",\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/plain-reserved-middle",
+    "files": {
+      "project/.code-forge.yml": "note: a @b\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"note\":\"a @b\",\"version\":1}"
     }
   },
   {

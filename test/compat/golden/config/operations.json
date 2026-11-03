@@ -774,6 +774,90 @@
     }
   },
   {
+    "name": "pattern/evidence-valid",
+    "group": "pattern",
+    "operation": "pattern",
+    "pattern": "^(?!/)(?!.*(?:^|/)(?:[A-Za-z]:|\\.\\.(?:/|$)))[^\\\\\\u0000]+$",
+    "value": "reports/**/*.json",
+    "unsupported": false,
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "true"
+    }
+  },
+  {
+    "name": "pattern/evidence-parent",
+    "group": "pattern",
+    "operation": "pattern",
+    "pattern": "^(?!/)(?!.*(?:^|/)(?:[A-Za-z]:|\\.\\.(?:/|$)))[^\\\\\\u0000]+$",
+    "value": "../outside",
+    "unsupported": false,
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "false"
+    }
+  },
+  {
+    "name": "pattern/changed-evidence-suffix",
+    "group": "pattern",
+    "operation": "pattern",
+    "pattern": "^(?!/)(?!.*(?:^|/)(?:[A-Za-z]:|\\.\\.(?:/|$)))[^\\\\\\u0000]+$extra",
+    "value": "reports/result.json",
+    "unsupported": true,
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "false"
+    }
+  },
+  {
+    "name": "pattern/same-prefix-other-rule",
+    "group": "pattern",
+    "operation": "pattern",
+    "pattern": "^(?!/)allowed$",
+    "value": "other",
+    "unsupported": true,
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "false"
+    }
+  },
+  {
+    "name": "pattern/other-unsupported",
+    "group": "pattern",
+    "operation": "pattern",
+    "pattern": "(?<=prefix)value",
+    "value": "prefixvalue",
+    "unsupported": true,
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "true"
+    }
+  },
+  {
+    "name": "pattern/re2-supported",
+    "group": "pattern",
+    "operation": "pattern",
+    "pattern": "^allowed$",
+    "value": "other",
+    "unsupported": false,
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "false"
+    }
+  },
+  {
     "name": "refresh/missing",
     "operation": "refresh",
     "files": {},

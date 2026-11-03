@@ -165,6 +165,246 @@
     }
   },
   {
+    "name": "yaml/plain-hash-before-flow-error",
+    "files": {
+      "project/.code-forge.yml": "url: a#b [\nbad: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 2, column 11)"
+    }
+  },
+  {
+    "name": "yaml/flow-hash-before-mismatch",
+    "files": {
+      "project/.code-forge.yml": "items: [a#b, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 1, column 15)"
+    }
+  },
+  {
+    "name": "yaml/plain-apostrophe-before-flow-error",
+    "files": {
+      "project/.code-forge.yml": "msg: it's [\nbad: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 2, column 11)"
+    }
+  },
+  {
+    "name": "yaml/plain-reserved-before-flow-error",
+    "files": {
+      "project/.code-forge.yml": "note: a @b\nbad: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 2, column 11)"
+    }
+  },
+  {
+    "name": "yaml/block-tab-before-flow-error",
+    "files": {
+      "project/.code-forge.yml": "note: |\n  first line\n  \tlegal tab [ @x\nbad: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 4, column 11)"
+    }
+  },
+  {
+    "name": "yaml/quoted-tab-before-flow-error",
+    "files": {
+      "project/.code-forge.yml": "note: \"text\n  \tlegal tab\"\nbad: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 3, column 11)"
+    }
+  },
+  {
+    "name": "yaml/sequence-before-implicit-key",
+    "files": {
+      "project/.code-forge.yml": "items:\n  - item\nvalid: yes\nmissing value\nnext: ok\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "MULTILINE_IMPLICIT_KEY: Implicit keys need to be on a single line (line 4, column 1)"
+    }
+  },
+  {
+    "name": "yaml/sequence-before-missing-colon",
+    "files": {
+      "project/.code-forge.yml": "items:\n  - item\nvalid: yes\nmissing value\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "MISSING_CHAR: Implicit map keys need to be followed by map values (line 4, column 1)"
+    }
+  },
+  {
+    "name": "yaml/block-before-implicit-key",
+    "files": {
+      "project/.code-forge.yml": "note: |\n  content\nvalid: yes\nmissing value\nnext: ok\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "MULTILINE_IMPLICIT_KEY: Implicit keys need to be on a single line (line 4, column 1)"
+    }
+  },
+  {
+    "name": "yaml/sequence-reserved",
+    "files": {
+      "project/.code-forge.yml": "items:\n  - @x\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_SCALAR_START: Plain value cannot start with reserved character @ (line 2, column 5)"
+    }
+  },
+  {
+    "name": "yaml/root-sequence-reserved",
+    "files": {
+      "project/.code-forge.yml": "- @x\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_SCALAR_START: Plain value cannot start with reserved character @ (line 1, column 3)"
+    }
+  },
+  {
+    "name": "yaml/flow-reserved",
+    "files": {
+      "project/.code-forge.yml": "items: [ok,@x]\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_SCALAR_START: Plain value cannot start with reserved character @ (line 1, column 12)"
+    }
+  },
+  {
+    "name": "yaml/flow-first-reserved",
+    "files": {
+      "project/.code-forge.yml": "items: [@x]\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_SCALAR_START: Plain value cannot start with reserved character @ (line 1, column 9)"
+    }
+  },
+  {
+    "name": "yaml/indented-reserved",
+    "files": {
+      "project/.code-forge.yml": "items:\n  `x\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_SCALAR_START: Plain value cannot start with reserved character ` (line 2, column 3)"
+    }
+  },
+  {
+    "name": "yaml/comment-before-flow-error",
+    "files": {
+      "project/.code-forge.yml": "url: a # [\nbad: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 2, column 11)"
+    }
+  },
+  {
+    "name": "yaml/quoted-before-flow-error",
+    "files": {
+      "project/.code-forge.yml": "msg: \"it's [\"\nbad: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 2, column 11)"
+    }
+  },
+  {
     "name": "yaml/invalid-timestamp-tag",
     "files": {
       "project/.code-forge.yml": "value: !!timestamp not-a-date"

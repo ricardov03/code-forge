@@ -93,6 +93,28 @@ func jsIndex(key string) (uint64, bool) {
 
 var projectSchema = object(readSchema(json.NewDecoder(strings.NewReader(schemaJSON))))
 
+func init() { checkSchemaPatterns(projectSchema) }
+
+// Check every embedded rule at startup, including branches no config uses yet.
+func checkSchemaPatterns(value any) {
+	switch node := value.(type) {
+	case schemaObject:
+		if pattern := text(node.get("pattern")); pattern != "" {
+			patternMatches(pattern, "")
+		}
+		for _, entry := range object(node.get("patternProperties")) {
+			patternMatches(entry.key, "")
+		}
+		for _, entry := range node {
+			checkSchemaPatterns(entry.value)
+		}
+	case []any:
+		for _, child := range node {
+			checkSchemaPatterns(child)
+		}
+	}
+}
+
 // ValidateSchema returns the schema layer's refusals, in Ajv order. It does not
 // run machine-dependent domain rules or mutate the config by applying defaults.
 // version is the CLI package version used in Node's unknown-key diagnostic.
@@ -184,7 +206,8 @@ func typeMatches(value any, kind string) bool {
 func patternMatches(pattern, value string) bool {
 	// The evidence path rule uses ECMAScript lookahead, which RE2 does not
 	// implement. These predicates implement that rule's excluded path segments.
-	if strings.HasPrefix(pattern, "^(?!/)") {
+	const evidencePathPattern = `^(?!/)(?!.*(?:^|/)(?:[A-Za-z]:|\.\.(?:/|$)))[^\\\u0000]+$`
+	if pattern == evidencePathPattern {
 		if value == "" || strings.HasPrefix(value, "/") || strings.ContainsAny(value, "\\\x00") {
 			return false
 		}

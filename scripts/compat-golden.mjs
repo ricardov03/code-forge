@@ -16,6 +16,7 @@ import { loadProjectConfig, projectRootFor } from '../src/config/load.mjs';
 import { PROVIDER_DEFAULTS, defaultsForProvider } from '../src/config/defaults/index.mjs';
 import { validateConfig } from '../src/config/validate.mjs';
 import { loadSeenInCache, refreshFromCliCaches, userModelsCachePath } from '../src/config/refresh.mjs';
+import { Ajv2020 } from 'ajv/dist/2020.js';
 
 const stamp = '2026-01-02T03:04:05.006Z';
 const key = Buffer.from('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f', 'hex');
@@ -23,8 +24,19 @@ const key = Buffer.from('000102030405060708090a0b0c0d0e0f101112131415161718191a1
 /**
  * Config inputs are complete filesystem recipes. Paths in oracle output use
  * $ROOT so committed bytes are independent of temp directories and HOME.
- * @typedef {{name: string, group?: string, operation?: string, provider?: string, config?: Record<string, any>, files?: Record<string, string>, dirs?: string[], links?: Record<string, string>, cwd?: string, home?: string}} ConfigCase
+ * @typedef {{name: string, group?: string, operation?: string, provider?: string, pattern?: string, value?: string, unsupported?: boolean, config?: Record<string, any>, files?: Record<string, string>, dirs?: string[], links?: Record<string, string>, cwd?: string, home?: string}} ConfigCase
  */
+
+// Keep Date values in the config oracle without changing ledger canonicalization.
+/** @param {any} value @returns {any} */
+function configJSONValue(value) {
+  if (value instanceof Date) return value.toISOString();
+  if (Array.isArray(value)) return value.map(configJSONValue);
+  if (value !== null && typeof value === 'object') {
+    return Object.fromEntries(Object.entries(value).map(([key, child]) => [key, configJSONValue(child)]));
+  }
+  return value;
+}
 
 export async function buildConfigGoldens() {
   const repo = fileURLToPath(new URL('../', import.meta.url));
@@ -76,6 +88,26 @@ export async function buildConfigGoldens() {
     'numeric-keys': '1: one\n"1": overwritten\ntrue: a\n"true": b\nnull: c',
     'prototype-keys': '__proto__: {polluted: false}\nconstructor: own\nprototype: own',
     'explicit-tags': 'values: [!!str 12, !!int 012, !!float 1.2, !!bool TRUE, !!null null, !!timestamp 2026-01-02, !!binary SGVsbG8=, !custom 42]',
+    'explicit-timestamps': 'values: [!!timestamp 2026-01-02, !!timestamp 2026-01-02T03:04:05.6789Z, !!timestamp 2026-1-2t3:4:5-5, !!timestamp 2026-01-02 03:04:05 +02:30]',
+    'plain-hash': 'url: a#b\n',
+    'plain-apostrophe-bracket': "msg: it's [\n",
+    'plain-reserved-middle': 'note: a @b\n',
+    'plain-hash-before-flow-error': 'url: a#b [\nbad: [1, 2}\n',
+    'flow-hash-before-mismatch': 'items: [a#b, 2}\n',
+    'plain-apostrophe-before-flow-error': "msg: it's [\nbad: [1, 2}\n",
+    'plain-reserved-before-flow-error': 'note: a @b\nbad: [1, 2}\n',
+    'block-tab-before-flow-error': 'note: |\n  first line\n  \tlegal tab [ @x\nbad: [1, 2}\n',
+    'quoted-tab-before-flow-error': 'note: "text\n  \tlegal tab"\nbad: [1, 2}\n',
+    'sequence-before-implicit-key': 'items:\n  - item\nvalid: yes\nmissing value\nnext: ok\n',
+    'sequence-before-missing-colon': 'items:\n  - item\nvalid: yes\nmissing value\n',
+    'block-before-implicit-key': 'note: |\n  content\nvalid: yes\nmissing value\nnext: ok\n',
+    'sequence-reserved': 'items:\n  - @x\n',
+    'root-sequence-reserved': '- @x\n',
+    'flow-reserved': 'items: [ok,@x]\n',
+    'flow-first-reserved': 'items: [@x]\n',
+    'indented-reserved': 'items:\n  `x\n',
+    'comment-before-flow-error': 'url: a # [\nbad: [1, 2}\n',
+    'quoted-before-flow-error': 'msg: "it\'s ["\nbad: [1, 2}\n',
     'unresolved-scalar-tags': 'values: [!!float 1, !!int 1.2, !!int true, !!null false, !!bool 1, !!str null]',
     'lenient-binary-tag': 'values: [!!binary invalid, !!binary "SGVsbG8_***", !!binary "SG=ignored"]',
     'invalid-timestamp-tag': 'value: !!timestamp not-a-date',
@@ -149,6 +181,16 @@ export async function buildConfigGoldens() {
     'nul-pattern': { proof: { worktree: { setup: [['node', '\u0000']] } } },
   })) inputs.push({ name: `validate/${name}`, operation: 'schema', files: { 'project/.code-forge.yml': JSON.stringify({ ...base, ...extra }) } });
   inputs.push(...inputs.slice(0, fixtureCount).map((sample) => ({ ...sample, name: `validate-sample/${sample.name}`, operation: 'schema' })));
+  const sourceSchema = JSON.parse(await readFile(path.join(repo, 'schema/code-forge.schema.json'), 'utf8'));
+  const evidencePattern = sourceSchema.properties.gates.properties.custom.items.properties.evidence.items.pattern;
+  for (const [name, pattern, value, unsupported] of [
+    ['evidence-valid', evidencePattern, 'reports/**/*.json', false],
+    ['evidence-parent', evidencePattern, '../outside', false],
+    ['changed-evidence-suffix', `${evidencePattern}extra`, 'reports/result.json', true],
+    ['same-prefix-other-rule', '^(?!/)allowed$', 'other', true],
+    ['other-unsupported', '(?<=prefix)value', 'prefixvalue', true],
+    ['re2-supported', '^allowed$', 'other', false],
+  ]) inputs.push({ name: `pattern/${name}`, group: 'pattern', operation: 'pattern', pattern, value, unsupported });
   const refreshInputs = {
     missing: {},
     'bare-arrays': { 'home/.codex/models_cache.json': '["b","a","b",7]', 'home/.grok/models_cache.json': '["z","z",false]' },
@@ -182,14 +224,17 @@ export async function buildConfigGoldens() {
       process.env.HOME = path.join(root, home);
       const normalize = (text) => text.split(root).join('$ROOT');
       let expected;
-      if (input.operation === 'defaults') {
+      if (input.operation === 'pattern') {
+        const validate = new Ajv2020().compile({ type: 'string', pattern: input.pattern });
+        expected = { ok: true, canonical: canonicalJSON(validate(input.value)) };
+      } else if (input.operation === 'defaults') {
         expected = { ok: true, canonical: canonicalJSON(defaultsForProvider(input.provider) ?? null) };
       } else if (input.operation === 'schema') {
         const loaded = await loadProjectConfig(path.join(root, cwd));
         if (!loaded.ok) throw new Error(`${input.name}: schema input must load before validation`);
         const errors = validateConfig(loaded.config, { hasCliOnPath: () => true }).errors.filter((issue) => issue.rule === 'schema');
         expected = errors.length ? { ok: false, error: 'schema', message: errors.map((issue) => issue.message).join('\n') }
-          : { ok: true, canonical: canonicalJSON(loaded.config) };
+          : { ok: true, canonical: canonicalJSON(configJSONValue(loaded.config)) };
       } else if (input.operation === 'refresh') {
         const result = await refreshFromCliCaches({ home: process.env.HOME });
         const { updated_at, ...cache } = JSON.parse(await readFile(userModelsCachePath(process.env.HOME), 'utf8'));
@@ -197,7 +242,7 @@ export async function buildConfigGoldens() {
       } else {
         const result = await loadProjectConfig(path.join(root, cwd));
         expected = result.ok
-          ? { ok: true, path: normalize(result.path), canonical: canonicalJSON(result.config) }
+          ? { ok: true, path: normalize(result.path), canonical: canonicalJSON(configJSONValue(result.config)) }
           : { ok: false, path: normalize(result.path), error: result.error, message: normalize(result.message) };
       }
       const group = input.group ?? (expected.ok ? 'valid' : 'error');

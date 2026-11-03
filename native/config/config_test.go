@@ -12,17 +12,20 @@ import (
 )
 
 type configCase struct {
-	Name      string
-	Group     string
-	Files     map[string]string
-	Dirs      []string
-	Links     map[string]string
-	Cwd       string
-	Home      string
-	Root      string
-	Operation string
-	Provider  string
-	Expected  struct {
+	Name        string
+	Group       string
+	Files       map[string]string
+	Dirs        []string
+	Links       map[string]string
+	Cwd         string
+	Home        string
+	Root        string
+	Operation   string
+	Provider    string
+	Pattern     string
+	Value       string
+	Unsupported bool
+	Expected    struct {
 		OK        bool
 		Path      string
 		Canonical string
@@ -167,6 +170,26 @@ func TestConfigValid(t *testing.T) {
 	}
 }
 
+func TestConfigPatternInitialization(t *testing.T) {
+	for _, c := range cases(t, "pattern") {
+		for _, keyword := range []string{"pattern", "patternProperties"} {
+			t.Run(c.Name+"/"+keyword, func(t *testing.T) {
+				defer func() {
+					p := recover()
+					if (p != nil) != c.Unsupported {
+						t.Fatalf("schema initialization panic = %v, unsupported = %v", p, c.Unsupported)
+					}
+				}()
+				rule := schemaObject{{"pattern", c.Pattern}}
+				if keyword == "patternProperties" {
+					rule = schemaObject{{"patternProperties", schemaObject{{c.Pattern, schemaObject{}}}}}
+				}
+				checkSchemaPatterns(schemaObject{{"$defs", schemaObject{{"unused", rule}}}})
+			})
+		}
+	}
+}
+
 func TestConfigErrors(t *testing.T) {
 	for _, c := range cases(t, "error") {
 		t.Run(c.Name, func(t *testing.T) {
@@ -185,6 +208,25 @@ func TestConfigRoots(t *testing.T) {
 				t.Fatalf("project root got %s want %s", got, c.Root)
 			}
 			checkLoad(t, c, root, cwd)
+		})
+	}
+}
+
+func TestConfigPatterns(t *testing.T) {
+	for _, c := range cases(t, "pattern") {
+		t.Run(c.Name, func(t *testing.T) {
+			defer func() {
+				if p := recover(); p != nil {
+					if !c.Unsupported {
+						t.Fatalf("supported pattern panicked: %v", p)
+					}
+				} else if c.Unsupported {
+					t.Fatal("unsupported schema pattern must panic")
+				}
+			}()
+			if got := patternMatches(c.Pattern, c.Value); !c.Unsupported && (got != (c.Expected.Canonical == "true")) {
+				t.Fatalf("pattern match got %v want %s", got, c.Expected.Canonical)
+			}
 		})
 	}
 }

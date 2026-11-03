@@ -72,6 +72,13 @@ test('Go refuses every invalid config with the Node error kind and exact message
   goTest('TestConfigErrors', cases.length);
 });
 
+test('Go schema patterns match Ajv or fail loudly for unsupported rules', async () => {
+  const data = await kit();
+  const cases = Object.values(data).flat().filter((c) => c.group === 'pattern');
+  assert.equal(cases.length, 6);
+  goTest('TestConfigPatterns', cases.length);
+});
+
 test('pinned vendored YAML resolves offline and all four native release targets build', () => {
   const dependency = spawnSync('go', ['list', '-mod=vendor', '-json', 'gopkg.in/yaml.v3'], {
     cwd: path.join(root, 'native'), encoding: 'utf8', env: goEnv,
