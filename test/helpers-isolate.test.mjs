@@ -1,9 +1,10 @@
 import assert from 'node:assert/strict';
-import { execFileSync, spawn } from 'node:child_process';
+import childProcess, { execFileSync, execSync, spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
 import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
+import { syncBuiltinESMExports } from 'node:module';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { leakedEntries, snapshotGuarded } from './helpers/isolate.mjs';
@@ -253,7 +254,7 @@ test('a guarded dir that appears is a leak, and an unchanged snapshot is 0 leaks
 });
 
 const FOREIGN_PID = 2_000_000_001;
-const START = 'Mon Oct 19 08:21:32 2026';
+const START = 'Mon Jan  1 00:00:00 2001';
 /** @param {number} n */
 const lockName = (n) => `${n.toString(16).padStart(64, '0')}.lock`;
 /** @param {number} pid */
@@ -320,6 +321,86 @@ test('a lock that vanishes after the exit snapshot is 0 leaks', () => {
   rmSync(lock);
   assert.deepEqual(leakedEntries(baseline, now, dirs, foreignProbe), [], 'the vanished lock and its empty directory are 0 leaks');
 });
+
+for (const [name, result] of /** @type {const} */ ([
+  ['missing owner', { status: 1, signal: null, stdout: '', stderr: '' }],
+  ['ps failure', { status: 2, signal: null, stdout: '', stderr: '' }],
+  ['ps diagnostic', { status: 1, signal: null, stdout: '', stderr: 'ps: unavailable' }],
+  ['ps unexpected output', { status: 1, signal: null, stdout: 'unexpected', stderr: '' }],
+  ['ps timeout', { status: null, signal: 'SIGTERM', code: 'ETIMEDOUT', stdout: '', stderr: '' }],
+  ['ps timeout with exit 1', { status: 1, signal: null, code: 'ETIMEDOUT', stdout: '', stderr: '' }],
+  ['ps signal', { status: null, signal: 'SIGKILL', stdout: '', stderr: '' }],
+  ['ps malformed output', 'not a process record'],
+  ['ps empty success', ''],
+])) {
+  test(`real probe distinguishes ${name} from an absent owner`, (t) => {
+    const { dirs, home } = fakeDirs(`probe-${name}`);
+    const before = snapshotGuarded(dirs);
+    const locks = path.join(home, 'locks');
+    mkdirSync(locks);
+    const lock = path.join(locks, lockName(1));
+    writeFileSync(lock, JSON.stringify({ key: name, pid: FOREIGN_PID, start: START }));
+    t.mock.method(childProcess, 'execFileSync', () => {
+      if (typeof result === 'string') return result;
+      throw Object.assign(new Error(name), result);
+    });
+    syncBuiltinESMExports();
+    t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
+    assert.deepEqual(leakedEntries(before, snapshotGuarded(dirs), dirs),
+      name === 'missing owner' ? [] : [locks, lock]);
+  });
+}
+
+for (const api of ['spawnSync', 'execFileSync', 'execSync']) {
+  test(`an exited ${api} child retains suite ownership even with an old recorded start`, () => {
+    const script = 'process.stdout.write(String(process.pid))';
+    const options = { encoding: /** @type {const} */ ('utf8') };
+    const output = api === 'spawnSync' ? spawnSync(process.execPath, ['-e', script], options).stdout
+      : api === 'execFileSync' ? execFileSync(process.execPath, ['-e', script], options)
+        : execSync(`exec "${process.execPath}" -e '${script}'`, options);
+    const pid = Number(output);
+    assert.ok(Number.isInteger(pid) && pid > 1);
+    const { dirs, home } = fakeDirs(`sync-owner-${api}`);
+    const before = snapshotGuarded(dirs);
+    const locks = path.join(home, 'locks');
+    mkdirSync(locks);
+    const lock = path.join(locks, lockName(1));
+    writeFileSync(lock, JSON.stringify({ key: api, pid, start: START }));
+    assert.deepEqual(leakedEntries(before, snapshotGuarded(dirs), dirs), [locks, lock]);
+  });
+}
+
+test('an exited untracked grandchild remains a leak', () => {
+  const script = `
+    const {execFileSync} = require('node:child_process');
+    const start = execFileSync('/bin/ps', ['-o', 'lstart=', '-p', String(process.pid)],
+      {encoding: 'utf8', env: {...process.env, LC_ALL: 'C'}}).trim();
+    process.stdout.write(JSON.stringify({key: 'grandchild', pid: process.pid, start}));
+  `;
+  const parentScript = `process.stdout.write(require('node:child_process').execFileSync(
+    process.execPath, ['-e', ${JSON.stringify(script)}]));`;
+  const record = execFileSync(process.execPath, ['-e', parentScript], { encoding: 'utf8' });
+  const { dirs, home } = fakeDirs('dead-grandchild');
+  const before = snapshotGuarded(dirs);
+  const locks = path.join(home, 'locks');
+  mkdirSync(locks);
+  const lock = path.join(locks, lockName(1));
+  writeFileSync(lock, record);
+  assert.deepEqual(leakedEntries(before, snapshotGuarded(dirs), dirs), [locks, lock]);
+});
+
+for (const start of [START, new Date().toString(), 'not a timestamp']) {
+  test(`an untracked dead owner is exempt only with a start before the suite: ${start}`, () => {
+    const { dirs, home } = fakeDirs(`dead-owner-${start.replaceAll(':', '-')}`);
+    const before = snapshotGuarded(dirs);
+    const locks = path.join(home, 'locks');
+    mkdirSync(locks);
+    const lock = path.join(locks, lockName(1));
+    writeFileSync(lock, JSON.stringify({ key: 'untracked', pid: FOREIGN_PID, start }));
+    assert.deepEqual(leakedEntries(before, snapshotGuarded(dirs), dirs, () => null),
+      start === START ? [] : [locks, lock]);
+  });
+}
 
 test('dead outside owners are exempt while dead suite owners and invalid existing locks remain exact leaks', async () => {
   const descendant = FOREIGN_PID + 1;
