@@ -1,4 +1,4 @@
-// code-forge-native is an optional, prebuilt accelerator for the Node CLI.
+// code-forge-native routes public CLI verbs and hosts internal accelerators.
 package main
 
 import (
@@ -42,12 +42,12 @@ func main() {
 	os.Exit(code)
 }
 
-func run(args []string) (int, error) {
+func runInternal(args []string) (int, error) {
 	if len(args) == 1 && args[0] == "version" {
 		return 0, json.NewEncoder(os.Stdout).Encode(map[string]string{"version": version, "goVersion": runtime.Version()})
 	}
 	if len(args) == 0 || (args[0] != "verify-ledger" && args[0] != "serve" && args[0] != "state-golden" && args[0] != "block-rebase-landed") {
-		return 2, fmt.Errorf("usage: code-forge-native version | verify-ledger | serve | block-rebase-landed --home <dir> --run <id> --block <id> --json")
+		return 2, fmt.Errorf("usage: code-forge-native internal version | verify-ledger | serve | state-golden | block-rebase-landed --home <dir> --run <id> --block <id> --json")
 	}
 	flags := flag.NewFlagSet(args[0], flag.ContinueOnError)
 	home := flags.String("home", "", "home directory containing .code-forge")

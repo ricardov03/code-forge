@@ -1,0 +1,37 @@
+#!/bin/sh
+
+# npm links this file into a bin directory, sometimes through multiple links.
+entry=$0
+case "$entry" in
+  */*) ;;
+  *) entry=$(command -v "$entry") || exit 1 ;;
+esac
+case "$entry" in
+  /*) ;;
+  *) entry=$PWD/$entry ;;
+esac
+while [ -L "$entry" ]; do
+  entry_dir=$(CDPATH= cd -P "${entry%/*}" && pwd) || exit 1
+  entry=$(readlink "$entry") || exit 1
+  case "$entry" in
+    /*) ;;
+    *) entry=$entry_dir/$entry ;;
+  esac
+done
+pkg=$(CDPATH= cd -P "${entry%/*}/.." && pwd) || exit 1
+
+case $(uname -s) in
+  Darwin) platform=darwin ;;
+  Linux) platform=linux ;;
+  *) platform=unsupported ;;
+esac
+case $(uname -m) in
+  x86_64|amd64) arch=x64 ;;
+  arm64|aarch64) arch=arm64 ;;
+  *) arch=unsupported ;;
+esac
+native=$pkg/native/bin/$platform-$arch/code-forge-native
+if [ "${CODE_FORGE_NATIVE:-}" != 0 ] && [ -f "$native" ] && [ -x "$native" ]; then
+  exec "$native" "$@"
+fi
+exec node "$pkg/bin/code-forge.mjs" "$@"
