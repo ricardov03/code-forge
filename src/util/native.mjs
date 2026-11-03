@@ -24,7 +24,7 @@ export function nativePath() {
  */
 export async function runNative(args) {
   const binary = nativePath();
-  return binary ? exec([binary, ...args], { timeoutMs: 30_000 }) : null;
+  return binary ? exec([binary, 'internal', ...args], { timeoutMs: 30_000 }) : null;
 }
 
 /** @param {Record<string, any> | null} [config] @param {NodeJS.ProcessEnv} [env] */
@@ -107,7 +107,7 @@ export async function startNativeDaemon(run, config, env = process.env) {
   const binary = nativePath();
   if (!binary || await daemonRequest(run, { method: 'ping' }, { config })) return noop;
   let child;
-  try { child = spawn(binary, ['serve', '--home', os.homedir(), '--run', run], { stdio: 'ignore', env }); }
+  try { child = spawn(binary, ['internal', 'serve', '--home', os.homedir(), '--run', run], { stdio: 'ignore', env }); }
   catch { return noop; }
   let ended = false;
   const exited = new Promise((resolve) => {

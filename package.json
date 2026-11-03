@@ -19,7 +19,7 @@
     "node": ">=22"
   },
   "bin": {
-    "code-forge": "bin/code-forge.mjs"
+    "code-forge": "bin/code-forge"
   },
   "files": [
     "bin",

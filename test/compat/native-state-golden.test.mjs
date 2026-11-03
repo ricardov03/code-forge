@@ -40,7 +40,7 @@ async function fixture(t) {
 }
 
 function start(t, home, op) {
-  const child = spawn(binary, ['state-golden', '--home', home, '--run', run, '--op', op], { stdio: ['pipe', 'pipe', 'pipe'] });
+  const child = spawn(binary, ['internal', 'state-golden', '--home', home, '--run', run, '--op', op], { stdio: ['pipe', 'pipe', 'pipe'] });
   t.after(() => { if (child.exitCode === null) child.kill(); });
   let stdout = '', stderr = '';
   child.stdout.on('data', (chunk) => { stdout += chunk; });

@@ -126,7 +126,7 @@ async function fixture(t) {
     const env = { ...process.env };
     delete env.CODE_FORGE_PRUNE_GRACE;
     if (grace !== undefined) env.CODE_FORGE_PRUNE_GRACE = grace;
-    const child = spawn(binary, ['serve', '--home', home, '--run', run], { env, stdio: 'ignore' });
+    const child = spawn(binary, ['internal', 'serve', '--home', home, '--run', run], { env, stdio: 'ignore' });
     children.push(child);
     return waitReady(() => request(socket, { method: 'ping' }), { stop: () => child.exitCode !== null });
   }

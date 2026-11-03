@@ -74,7 +74,7 @@ async function fixture(t) {
     rmSync(dir, { recursive: true, force: true });
   });
   function start(idle = '30m') {
-    const child = spawn(daemonBinary, ['serve', '--home', home, '--run', run, '--idle', idle], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(daemonBinary, ['internal', 'serve', '--home', home, '--run', run, '--idle', idle], { stdio: ['ignore', 'ignore', 'pipe'] });
     children.push(child);
     return child;
   }

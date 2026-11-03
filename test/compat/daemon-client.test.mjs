@@ -14,9 +14,9 @@ const daemonBinary = `${binary}-client-test-${process.pid}`;
 let daemonSpawns = 0;
 const daemonChildren = [];
 mock.module('node:child_process', { defaultExport: childProcess, namedExports: { ...childProcess, spawn: (file, args, options) => {
-  if (args?.[0] === 'serve') daemonSpawns++;
+  if (args?.[0] === 'internal' && args[1] === 'serve') daemonSpawns++;
   const child = spawn(file === binary ? daemonBinary : file, args, options);
-  if (args?.[0] === 'serve') daemonChildren.push(child);
+  if (args?.[0] === 'internal' && args[1] === 'serve') daemonChildren.push(child);
   return child;
 } } });
 // Installation tests rename/chmod the release binary in parallel. The lifecycle
@@ -106,7 +106,7 @@ async function fixture(t, config = { review: { exclude: ['**/*.md'] } }) {
     rmSync(dir, { recursive: true, force: true });
   });
   async function start() {
-    const child = spawn(daemonBinary, ['serve', '--home', home, '--run', run], { stdio: ['ignore', 'ignore', 'pipe'] });
+    const child = spawn(daemonBinary, ['internal', 'serve', '--home', home, '--run', run], { stdio: ['ignore', 'ignore', 'pipe'] });
     let error = '';
     child.stderr.on('data', (s) => { error += s; });
     children.push(child);

@@ -19,7 +19,7 @@ const testBinary = binary ? path.join(freshDir('native'), 'code-forge-native') :
 if (binary && testBinary) copyFileSync(binary, testBinary);
 mock.module('../../src/util/native.mjs', { namedExports: { ...native,
   runNative: async (/** @type {string[]} */ args) => testBinary && process.env.CODE_FORGE_NATIVE !== '0'
-    ? exec([testBinary, ...args], { timeoutMs: 30_000 }) : null,
+    ? exec([testBinary, 'internal', ...args], { timeoutMs: 30_000 }) : null,
 } });
 const { runBlock } = await import('../../src/cli/block.mjs');
 const available = { skip: testBinary ? false : 'needs a locally built native binary' };
