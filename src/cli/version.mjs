@@ -16,3 +16,7 @@ export default async function version(_args) {
   process.stdout.write(`${pkg.name} ${pkg.version}\n`);
   return 0;
 }
+
+export const USAGE = "usage: code-forge version\n";
+
+export const SUMMARY = "Print the package name and version.";

@@ -23,7 +23,7 @@ import { DEFAULT_BRANCH_TEMPLATE, isNoindexPath, repoTopOf, worktreeDirectory } 
 import { liveWorker } from '../worker/queue.mjs';
 import { sweepIdleWorkers } from './sweep.mjs';
 
-const USAGE = 'usage: code-forge doctor [--quick] [--json] [--cwd <dir>]\n';
+export const USAGE = 'usage: code-forge doctor [--quick] [--json] [--cwd <dir>]\n';
 
 /**
  * @param {string[]} args
@@ -127,3 +127,5 @@ export async function runDoctorCli(args, deps = {}, adopt = false) {
 export default async function doctor(args) {
   return runDoctorCli(args, {}, true);
 }
+
+export const SUMMARY = "Check the project configuration, tools, credentials, and runtime setup.";

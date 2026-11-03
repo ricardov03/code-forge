@@ -32,7 +32,7 @@ function codeSpans(markdown) {
   const inline = (end) => {
     const text = markdown.slice(proseStart, end);
     for (const match of text.matchAll(/(`+)([\s\S]*?)\1(?!`)/g)) {
-      spans.push({ text: match[2], offset: proseStart + match.index + match[1].length });
+      spans.push({ text: match[2], offset: proseStart + match.index + match[1].length, fenced: false });
     }
   };
   for (const line of markdown.split(/(?<=\n)/)) {
@@ -42,21 +42,22 @@ function codeSpans(markdown) {
       fence = marker[1];
       start = offset + line.length;
     } else if (fence !== null && new RegExp(`^ {0,3}${fence[0]}{${fence.length},}[ \\t]*(?:\\r?\\n)?$`).test(line)) {
-      spans.push({ text: markdown.slice(start, offset), offset: start });
+      spans.push({ text: markdown.slice(start, offset), offset: start, fenced: true });
       fence = null;
       proseStart = offset + line.length;
     }
     offset += line.length;
   }
-  if (fence !== null) spans.push({ text: markdown.slice(start), offset: start });
+  if (fence !== null) spans.push({ text: markdown.slice(start), offset: start, fenced: true });
   else inline(markdown.length);
   return spans;
 }
 
 function mentions(markdown) {
+  const pattern = /(?:^[ \t]*|\$ |&& |\| |; |npx )(?:code-forge|forge)[ \t]+([A-Za-z][\w-]*)(?:[ \t]+([A-Za-z][\w-]*(?:\|[A-Za-z][\w-]*)*))?/;
   return codeSpans(markdown).flatMap((span) => [...span.text.matchAll(
-    /(?<![\w@/.-])(?:code-forge|forge)[ \t]+([A-Za-z][\w-]*)(?:[ \t]+([A-Za-z][\w-]*(?:\|[A-Za-z][\w-]*)*))?/g,
-  )].map((match) => ({
+    new RegExp(pattern.source, span.fenced ? 'gm' : 'g'),
+  )].filter((match) => span.text.lastIndexOf('<', match.index) <= span.text.lastIndexOf('>', match.index)).map((match) => ({
     verb: match[1], subs: match[1] === 'block' && match[2] ? match[2].split('|') : [],
     line: markdown.slice(0, span.offset + match.index).split('\n').length,
   })));
@@ -65,7 +66,7 @@ function mentions(markdown) {
 function docFiles(dir) {
   return readdirSync(path.join(REPO, dir), { withFileTypes: true }).flatMap((entry) => {
     const file = `${dir}/${entry.name}`;
-    if (file === 'docs/marketing') return [];
+    if (file === 'docs/marketing' || file === 'docs/reference/commands.md') return [];
     if (entry.isDirectory()) return docFiles(file);
     return entry.isFile() && entry.name.endsWith('.md') ? [file] : [];
   });
@@ -103,6 +104,25 @@ test('all command mentions in README and docs code name runtime verbs and valid 
     'sample.md:6, nonexistent-command', 'sample.md:9, block nonexistent-subcommand',
     'sample.md:11, nonexistent-command',
   ], 'scanner must report exactly three invalid code mentions with their original lines');
+  const positions = [
+    '`<code-forge home>` and `<path to code-forge missing>` are placeholders.',
+    '`echo code-forge missing` and `grep "code-forge missing" file` are arguments.',
+    '`$ code-forge missing-dollar`',
+    '`true && forge missing-and`',
+    '`true | code-forge missing-pipe`',
+    '`true; forge missing-semicolon`',
+    '`npx code-forge missing-npx`',
+    '```sh',
+    '  code-forge missing-indented',
+    'echo code-forge missing-argument',
+    '```',
+    '`echo\ncode-forge missing-inline-continuation`',
+  ].join('\n');
+  assert.deepEqual(badMentions('positions.md', positions), [
+    'positions.md:3, missing-dollar', 'positions.md:4, missing-and',
+    'positions.md:5, missing-pipe', 'positions.md:6, missing-semicolon',
+    'positions.md:7, missing-npx', 'positions.md:9, missing-indented',
+  ], 'only shell command positions are checked, with placeholders ignored');
   const files = ['README.md', ...docFiles('docs')];
   const bad = files.flatMap((file) => badMentions(file, readFileSync(path.join(REPO, file), 'utf8')));
   assert.equal(bad.length, 0, `${bad.length} invalid command mentions across ${files.length} pages:\n${bad.join('\n')}`);

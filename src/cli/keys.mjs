@@ -36,7 +36,7 @@ import { DEFAULT_CONFIG_FILENAME, loadConfigFile, projectRootFor } from '../conf
 import { describeOpItem, isOpRef, OP_APPROVE_NOTE, OP_MESSAGES, opItemIdFromInput, toOpRef } from '../keys/onepassword.mjs';
 import { assertKeyName, CACHE_HOURS_RULE, cacheHoursFrom, createDefaultKeyStore, DEFAULT_CACHE_HOURS, isCacheHours, isTime, parseRef, readOpAndCache, resolveKey, shellWord } from '../keys/store.mjs';
 
-const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>\n';
+export const USAGE = 'usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>\n';
 
 /** The flags each subcommand accepts (list and remove take none); each at most once, any order. */
 const FLAGS = /** @type {Record<string, string[]>} */ ({ list: [], set: ['--op', '--cache-hours'], test: ['--ref'], remove: [] });
@@ -334,3 +334,12 @@ export async function runKeys(args, { store, stdout = process.stdout, stderr = p
 export default async function keys(args) {
   return runKeys(args, { store: await createDefaultKeyStore() });
 }
+
+export const SUMMARY = "Store, list, test, or remove named credential references.";
+
+export const SUB_USAGE = {
+  "list": "usage: code-forge keys list\n",
+  "set": "usage: code-forge keys set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]]\n",
+  "test": "usage: code-forge keys test <name> [--ref <ref>]\n",
+  "remove": "usage: code-forge keys remove <name>\n"
+};

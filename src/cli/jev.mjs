@@ -50,7 +50,7 @@ import { cacheHoursFrom, createDefaultKeyStore, isTime, resolveKey, shellWord } 
 import { appendRow as realAppendRow } from '../ledger/write.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
-const USAGE = 'usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]\n';
+export const USAGE = 'usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]\n';
 
 /** The block id shape the run record uses (`state/block.mjs`). */
 const BLOCK_ID = /^[A-Za-z0-9][A-Za-z0-9._-]{0,31}$/;
@@ -293,3 +293,7 @@ export async function runJev(args, deps = {}) {
 export default async function jev(args) {
   return runJev(args, {});
 }
+
+export const SUMMARY = "Ask a recorded decision question through the Jev service.";
+
+export const SUB_USAGE = { ask: USAGE };

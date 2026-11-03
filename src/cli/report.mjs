@@ -40,7 +40,7 @@ export async function runReport(args, deps = {}) {
 
   const slug = flagValue(args, '--slug');
   if (!slug) {
-    err('usage: code-forge report --slug <slug> [--json] [--export <dir>]\n');
+    err(USAGE);
     return 2;
   }
 
@@ -163,3 +163,7 @@ export function modeLines(modes) {
 export default async function report(args) {
   return runReport(args);
 }
+
+export const USAGE = 'usage: code-forge report --slug <slug> [--json] [--export <dir>]\n';
+
+export const SUMMARY = "Display or export project ledger reports.";

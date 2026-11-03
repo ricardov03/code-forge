@@ -41,81 +41,99 @@ This page lists the CLI commands and their usage. It is generated from the CLI. 
 
 ## author
 
-usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]
+Write or harden a plan draft from a brief using an author session.
 
-No usage text yet.
+```text
+usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]
+```
 
 ## autopilot
 
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+Manage delegated run approvals, decisions, budgets, and activity records.
 
-No usage text yet.
+```text
+usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+```
 
 ### autopilot start
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes]
 ```
 
 ### autopilot status
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot status --run <id> [--json]
 ```
 
 ### autopilot stop
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot stop --run <id>
 ```
 
 ### autopilot ask
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2)
 ```
 
 ### autopilot waive
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id>
 ```
 
 ### autopilot round
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot round --run <id> --block <id> --file <path> --decision <id>
 ```
 
 ### autopilot level
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot level --run <id> --block <id> --plan <file> --decision <id>
 ```
 
 ### autopilot approve
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset>
 ```
 
 ### autopilot binnacle
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot binnacle --run <id> [--json|--markdown] [--link <https url>]
 ```
 
 ### autopilot log
 
 ```text
-usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]
+usage: code-forge autopilot log --run <id> [--json|--markdown]
 ```
 
 ## block
 
-usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]
+Manage block worktrees, ownership, reviews, acceptance evidence, and closure.
 
-No usage text yet.
+```text
+usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]
+       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]
+       code-forge block rebase <id> --run <r> --accept-landed
+       code-forge block attempt|rebase <id> --run <r> · block close <id> --run <r> [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] · block claim <id> <path> --run <r> · block stop <id> --run <r> --reason <text>
+       code-forge block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]
+       code-forge block reopen <id> --run <r> --file <path> --reason <text> [--yes]
+       code-forge block accept-hit <id> --run <r> [--rule <rule-id>] --line <n> --transcript <path> --reason <text>
+       code-forge block unwaive <id> <finding-id> --run <r> --file <path> --reason <text>
+       code-forge block ack-waivers <id> --run <r>
+       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]
+       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>
+       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate]
+       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text
+```
 
 ### block open
 
@@ -128,13 +146,12 @@ usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --
   --brief <file>       A file inside the repository, not inline text.
 ```
 
-### block ready
+### block attempt
 
 ```text
-usage: code-forge block ready <id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--json] [--help|-h]
+usage: code-forge block attempt <id> --run <r> [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
-  Read-only close checks: list every blocker and its fix; exit 1 while any remain.
 ```
 
 ### block rebase
@@ -145,12 +162,21 @@ usage: code-forge block rebase <id> --run <r> [--head <ref>] [--accept-changed <
   --json      Print one JSON line on success instead of text.
 ```
 
-### block attempt
+### block claim
 
 ```text
-usage: code-forge block attempt <id> --run <r> [--json] [--help|-h]
+usage: code-forge block claim <id> <path> --run <r> [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
+```
+
+### block ready
+
+```text
+usage: code-forge block ready <id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--json] [--help|-h]
+  --help, -h  Print this usage and exit without changing state.
+  --json      Print one JSON line on success instead of text.
+  Read-only close checks: list every blocker and its fix; exit 1 while any remain.
 ```
 
 ### block close
@@ -161,12 +187,16 @@ usage: code-forge block close <id> --run <r> [--worker-pid <pid>] [--transcript 
   --json      Print one JSON line on success instead of text.
 ```
 
-### block claim
+### block land
 
 ```text
-usage: code-forge block claim <id> <path> --run <r> [--json] [--help|-h]
+usage: code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
+  Join block reviews, run changed gates in its worktree, then close.
+  --max <dur>  Total review wait (default 30m); accepts 90s, 30m or 1500ms.
+  --merge     Check the merged full suite, then merge with --no-ff in the clean main checkout.
+  --no-merge-gate  Skip the merged full suite with a warning.
 ```
 
 ### block stop
@@ -235,23 +265,13 @@ usage: code-forge block amend-acceptance <id> --run <r> --acceptance <file> --re
                        Human checks use {clause, kind: human_check} without tests.
 ```
 
-### block land
-
-```text
-usage: code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json] [--help|-h]
-  --help, -h  Print this usage and exit without changing state.
-  --json      Print one JSON line on success instead of text.
-  Join block reviews, run changed gates in its worktree, then close.
-  --max <dur>  Total review wait (default 30m); accepts 90s, 30m or 1500ms.
-  --merge     Check the merged full suite, then merge with --no-ff in the clean main checkout.
-  --no-merge-gate  Skip the merged full suite with a warning.
-```
-
 ## context
 
-usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
+Build a context pack for a block in a run.
 
-No usage text yet.
+```text
+usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
+```
 
 ### context pack
 
@@ -261,141 +281,100 @@ usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
 
 ## doctor
 
-usage: code-forge doctor [--quick] [--json] [--cwd <dir>]
+Check the project configuration, tools, credentials, and runtime setup.
 
-No usage text yet.
+```text
+usage: code-forge doctor [--quick] [--json] [--cwd <dir>]
+```
 
 ## facts
 
-usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]
+Build and validate a facts sheet from a brief and project sources.
 
-No usage text yet.
+```text
+usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]
+```
 
 ## gates
 
-usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-
-No usage text yet.
-
-### gates detect
+Detect and run project gates or check secrets, scope, acceptance, and transcripts.
 
 ```text
 usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
   gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
   gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
+```
+
+### gates detect
+
+```text
+usage: code-forge gates detect [--cwd <dir>]
 ```
 
 ### gates run
 
 ```text
-usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
-  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
+usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed]
 ```
 
 ### gates secret-scan
 
 ```text
-usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
-  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
+usage: code-forge gates secret-scan [--cwd <dir>] --file <path> [--file <path>...]
 ```
 
 ### gates safe-edit
 
 ```text
-usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
-  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
+usage: code-forge gates safe-edit [--cwd <dir>] --base <sha>
 ```
 
 ### gates scope
 
 ```text
-usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
-  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
+usage: code-forge gates scope [--cwd <dir>] --base <sha>
 ```
 
 ### gates acceptance
 
 ```text
-usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
-  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
+usage: code-forge gates acceptance --clauses <file.json> --tap <file>
 ```
 
 ### gates transcript-grep
 
 ```text
-usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
-  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
+usage: code-forge gates transcript-grep --file <path> [--cwd <dir>]
 ```
 
 ## help
 
-Block usage: code-forge block <verb> --help (or -h).
+List the available CLI verbs and shared command guidance.
 
 ```text
-Usage: code-forge <verb> [args]
-
-Verbs:
-  author
-  autopilot
-  block
-  context
-  doctor
-  facts
-  gates
-  help
-  init
-  jev
-  keys
-  land
-  ledger
-  list
-  logs
-  models
-  native-status
-  outcome
-  pipeline
-  plan
-  proof
-  remove
-  report
-  resolve
-  review
-  review-file
-  run
-  s2
-  spawn
-  status
-  sweep
-  tools
-  upgrade
-  validate
-  version
-  worker
-
-Block usage: code-forge block <verb> --help (or -h).
-  block open --acceptance <file>: JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.
-  block open --brief <file>: a file inside the repository, not inline text.
-  block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]: join reviews, run changed gates, close, then optionally merge with --no-ff.
-  Configuration fallback entries must be {provider, model} objects, not model-name strings (optional effort).
+usage: code-forge help
 ```
 
 ## init
 
-usage: code-forge init [--no-interaction] [--tools recommended|current] [--yes-tool <tool>]…
+Configure a project and install the skill for selected harnesses.
 
-No usage text yet.
+```text
+usage: code-forge init [--no-interaction] [--tools recommended|current] [--yes-tool <tool>]…
+  [--harness a,b] [-g|-p] [--copy] [--provider P] [--level Ln=model[:effort][@provider]]…
+  [--refresh-models] [--multimodel on|off] [--second-provider P]
+  [--jev-ref <item-id|link|op://…> | --jev-env NAME | --no-jev] [--engine auto|solo|harness] [--solo-project N]
+  [--coder-may-push yes|no] [--coder-may-open-draft-pr yes|no]
+  [--gate name=cmd]… [--proof isolation=export|lock | high=a,b | link_dirs=a,b | copy_untracked=a,b]… [--skip-doctor]
+```
 
 ## jev
 
-usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]
+Ask a recorded decision question through the Jev service.
 
-No usage text yet.
+```text
+usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <slug>] [--key-ref <ref>] [--block <id>] [--plan <file>] [--rules]
+```
 
 ### jev ask
 
@@ -405,169 +384,195 @@ usage: code-forge jev ask <question-id> --state <file> [--cwd <dir>] [--slug <sl
 
 ## keys
 
-usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>
+Store, list, test, or remove named credential references.
 
-No usage text yet.
+```text
+usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>
+```
 
 ### keys list
 
 ```text
-usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>
+usage: code-forge keys list
 ```
 
 ### keys set
 
 ```text
-usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>
+usage: code-forge keys set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]]
 ```
 
 ### keys test
 
 ```text
-usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>
+usage: code-forge keys test <name> [--ref <ref>]
 ```
 
 ### keys remove
 
 ```text
-usage: code-forge keys list | set <name> [--op <item-id|link|op://ref> [--cache-hours <1-24>]] | test <name> [--ref <ref>] | remove <name>
+usage: code-forge keys remove <name>
 ```
 
 ## land
 
-No usage text yet.
+Provide the block landing implementation used by block land.
+
+```text
+usage: code-forge land
+  Used internally by code-forge block land; this module has no standalone handler.
+```
 
 ## ledger
 
-usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
+Read calibration and ledger history or record outcomes, spend, and outside reviews.
 
-No usage text yet.
+```text
+usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
+```
 
 ### ledger calibration
 
 ```text
-usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
+usage: code-forge ledger calibration --slug <slug> [--question <id>]
 ```
 
 ### ledger outcome
 
 ```text
-usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
+usage: code-forge ledger outcome --scan-git --slug <slug> [--cwd <dir>] [--days <n>]
+usage: code-forge ledger outcome --pr <n> --ci red|green|reverted --slug <slug>
 ```
 
 ### ledger tail
 
 ```text
-usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
+usage: code-forge ledger tail --slug <slug> [--n <count> | -n <count>]
 ```
 
 ### ledger add
 
 ```text
-usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
+usage: code-forge ledger add coder --run <r> --block <b> --usd <n> [--note "..."]
 ```
 
 ### ledger outside-review
 
 ```text
-usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
+usage: code-forge ledger outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...
 ```
 
 ## list
 
-usage: code-forge list
+List the recorded skill installations.
 
-No usage text yet.
+```text
+usage: code-forge list
+```
 
 ## logs
 
-usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path
-
-No usage text yet.
-
-### logs summary
+Read, summarize, clear, or report local CLI errors.
 
 ```text
 usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path
        code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]
+```
+
+### logs summary
+
+```text
+usage: code-forge logs summary [--days N] [--json]
 ```
 
 ### logs clear
 
 ```text
-usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path
-       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]
+usage: code-forge logs clear [--yes]
 ```
 
 ### logs path
 
 ```text
-usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path
-       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]
+usage: code-forge logs path
 ```
 
 ### logs report
 
 ```text
-usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path
-       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]
+usage: code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]
 ```
 
 ## models
 
-No usage text yet.
+List provider model catalogs and optionally refresh them from local CLI caches.
+
+```text
+usage: code-forge models [--refresh --from-cli-caches]
+```
 
 ## native-status
 
-No usage text yet.
+Convert cached daemon records and rows from standard input into run status JSON.
+
+```text
+usage: code-forge native-status
+  Internal daemon companion: reads JSON records and rows from standard input.
+```
 
 ## outcome
 
-usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]
+Seal, validate, or record a specialist outcome file.
 
-No usage text yet.
+```text
+usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]
+```
 
 ### outcome seal
 
 ```text
-usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]
+usage: code-forge outcome seal <outcome.json> [--root <dir>]
 ```
 
 ### outcome check
 
 ```text
-usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]
+usage: code-forge outcome check <outcome.json> [--root <dir>] [--json]
 ```
 
 ### outcome record
 
 ```text
-usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]
+usage: code-forge outcome record <outcome.json> [--root <dir>] [--step <id>] [--json]
 ```
 
 ## pipeline
 
-usage: code-forge pipeline status|next [--json] [--root <dir>]
+Show pipeline step status or list the steps ready to run.
 
-No usage text yet.
+```text
+usage: code-forge pipeline status|next [--json] [--root <dir>]
+```
 
 ### pipeline status
 
 ```text
-usage: code-forge pipeline status|next [--json] [--root <dir>]
+usage: code-forge pipeline status [--json] [--root <dir>]
 ```
 
 ### pipeline next
 
 ```text
-usage: code-forge pipeline status|next [--json] [--root <dir>]
+usage: code-forge pipeline next [--json] [--root <dir>]
 ```
 
 ## plan
 
-usage: code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]
+Check a plan against its facts, project rules, and recorded decisions.
 
-No usage text yet.
+```text
+usage: code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]
+```
 
 ### plan check
 
@@ -577,83 +582,78 @@ usage: code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]
 
 ## proof
 
-usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
+Manage proof tiers, isolated exports, locks, restoration, and red-green evidence.
 
-No usage text yet.
+```text
+usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
+       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
+       code-forge proof restore <block> --run <r>
+       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
+```
 
 ### proof tier
 
 ```text
 usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
-       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
-       code-forge proof restore <block> --run <r>
-       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
 ```
 
 ### proof export
 
 ```text
-usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
-       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
-       code-forge proof restore <block> --run <r>
-       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
+usage: code-forge proof export <block> --run <r> [--remove]
 ```
 
 ### proof lock
 
 ```text
-usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
-       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
-       code-forge proof restore <block> --run <r>
-       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
+usage: code-forge proof lock <block> --run <r>
 ```
 
 ### proof unlock
 
 ```text
-usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
-       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
-       code-forge proof restore <block> --run <r>
-       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
+usage: code-forge proof unlock <block> --run <r>
 ```
 
 ### proof restore
 
 ```text
-usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
-       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
-       code-forge proof restore <block> --run <r>
-       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
+usage: code-forge proof restore <block> --run <r>
 ```
 
 ### proof red-green
 
 ```text
-usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]
-       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>
-       code-forge proof restore <block> --run <r>
-       code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
+usage: code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
 ```
 
 ## remove
 
-usage: code-forge remove [<harness>] [--scope project|global]
+Remove recorded skill installations for a harness or scope.
 
-No usage text yet.
+```text
+usage: code-forge remove [<harness>] [--scope project|global]
+```
 
 ## report
 
-usage: code-forge report --slug <slug> [--json] [--export <dir>]
+Display or export project ledger reports.
 
-No usage text yet.
+```text
+usage: code-forge report --slug <slug> [--json] [--export <dir>]
+```
 
 ## resolve
 
-No usage text yet.
+Show the provider, model, effort, fallbacks, and CLI resolved for a level.
+
+```text
+usage: code-forge resolve <L0|L1|L2|L3>
+```
 
 ## review
 
-usage: code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> | --intent "<text>"] [--run <id>] [--max <seconds>] [--json] [--keep-run]
+Review changed files against acceptance criteria or stated intent.
 
 ```text
 usage: code-forge review [--base <ref>] [--files <path…>] [--acceptance <file> | --intent "<text>"] [--run <id>] [--max <seconds>] [--json] [--keep-run]
@@ -661,61 +661,77 @@ usage: code-forge review [--base <ref>] [--files <path…>] [--acceptance <file>
 
 ## review-file
 
-usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]
+Queue file reviews, wait for results, or check review evidence after a rebase.
 
-No usage text yet.
+```text
+usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]
+       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]
+       code-forge review-file --rebase-check --block <id> --run <id>
+       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]
+       --cwd <dir> applies to queueing and both wait modes
+```
 
 ## run
 
-usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+Start, inspect, reload, or end a run and manage its workers.
 
-No usage text yet.
+```text
+usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+```
 
 ### run start
 
 ```text
-usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]
+usage: code-forge run start --add-worker --run <id>
+usage: code-forge run start --reattach --run <id> [--worker-pid <pid>]
 ```
 
 ### run status
 
 ```text
-usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+usage: code-forge run status --run <id>
 ```
 
 ### run reload
 
 ```text
-usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+usage: code-forge run reload --run <id>
 ```
 
 ### run end
 
 ```text
-usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>
+usage: code-forge run end --run <id>
 ```
 
 ## s2
 
-usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]
+Answer a decision packet using a System 2 session.
 
-No usage text yet.
+```text
+usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]
+```
 
 ## spawn
 
-usage: code-forge spawn --level L0|L1|L2|L3 --role coder|reviewer|judge|s2|author|facts|delegate --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <seconds>] [--background] [--print-argv]
+Run a session at a selected level and role from a brief.
 
-No usage text yet.
+```text
+usage: code-forge spawn --level L0|L1|L2|L3 --role coder|reviewer|judge|s2|author|facts|delegate --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <seconds>] [--background] [--print-argv]
+```
 
 ## status
 
-usage: code-forge status [--run <id>] [--json]
+Show active runs, block progress, review gates, and spend.
 
-No usage text yet.
+```text
+usage: code-forge status [--run <id>] [--json]
+```
 
 ## sweep
 
-Dry run by default: list stale workers, dead-run registry children and marked orphans with RSS and total MB.
+Report stale processes and optionally stop those proven stale.
 
 ```text
 usage: code-forge sweep [--apply] [--json]
@@ -726,37 +742,48 @@ Zombies are reported by parent only; neither they nor their parents are signalle
 
 ## tools
 
-usage: code-forge tools [--json] | tools install [<id>...] [--yes] [--dry-run]
-
-No usage text yet.
-
-### tools install
+List detected tools or install selected tools after confirmation.
 
 ```text
 usage: code-forge tools [--json] | tools install [<id>...] [--yes] [--dry-run]
   (install asks one yes, default no; answering no prints "cancelled — nothing installed" and exits 1)
 ```
 
+### tools install
+
+```text
+usage: code-forge tools install [<id>...] [--yes] [--dry-run]
+  (install asks one yes, default no; answering no prints "cancelled — nothing installed" and exits 1)
+```
+
 ## upgrade
 
-usage: code-forge upgrade [--source <path>] [--plain]
+Refresh recorded skill installations from a skill source.
 
-No usage text yet.
+```text
+usage: code-forge upgrade [--source <path>] [--plain]
+```
 
 ## validate
 
-No usage text yet.
+Validate project configuration and pipeline definitions.
+
+```text
+usage: code-forge validate [--file <path>]
+```
 
 ## version
 
-@codedology/code-forge 0.16.3
+Print the package name and version.
 
 ```text
-@codedology/code-forge 0.16.3
+usage: code-forge version
 ```
 
 ## worker
 
-usage: code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]
+Serve a run's review queue until stopped or drain it once.
 
-No usage text yet.
+```text
+usage: code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]
+```

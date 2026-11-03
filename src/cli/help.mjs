@@ -51,3 +51,7 @@ export default async function help(_args, context = {}) {
   process.stdout.write('  Configuration fallback entries must be {provider, model} objects, not model-name strings (optional effort).\n');
   return 0;
 }
+
+export const USAGE = "usage: code-forge help\n";
+
+export const SUMMARY = "List the available CLI verbs and shared command guidance.";

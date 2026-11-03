@@ -7,7 +7,7 @@ import { checkOutcome, sealOutcome } from '../outcome/outcome.mjs';
 import { loadPipeline } from '../pipeline/pipeline.mjs';
 import { withRunLock, writeSigned } from '../state/run.mjs';
 
-const USAGE = 'usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]\n';
+export const USAGE = 'usage: code-forge outcome seal|check|record <outcome.json> [--root <dir>] [--step <id> (record only)] [--json (check or record)]\n';
 
 /** @param {string} file @param {string} root @param {string | undefined} explicitStep */
 async function recordOutcome(file, root, explicitStep) {
@@ -85,3 +85,11 @@ export default async function outcome(args) {
   }
   return result.ok ? 0 : 1;
 }
+
+export const SUMMARY = "Seal, validate, or record a specialist outcome file.";
+
+export const SUB_USAGE = {
+  "seal": "usage: code-forge outcome seal <outcome.json> [--root <dir>]\n",
+  "check": "usage: code-forge outcome check <outcome.json> [--root <dir>] [--json]\n",
+  "record": "usage: code-forge outcome record <outcome.json> [--root <dir>] [--step <id>] [--json]\n"
+};

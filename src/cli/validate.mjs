@@ -112,3 +112,7 @@ export default async function validate(args) {
   log.info(`${parsed.file}: invalid (${result.errors.length} error${result.errors.length === 1 ? '' : 's'})`);
   return 1;
 }
+
+export const USAGE = "usage: code-forge validate [--file <path>]\n";
+
+export const SUMMARY = "Validate project configuration and pipeline definitions.";

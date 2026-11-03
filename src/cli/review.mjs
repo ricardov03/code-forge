@@ -649,3 +649,5 @@ function assertRunIdUsage(id) {
 export default async function review(args) {
   return runReview(args);
 }
+
+export const SUMMARY = "Review changed files against acceptance criteria or stated intent.";

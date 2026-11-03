@@ -90,7 +90,7 @@ export async function runLedger(args, deps = {}) {
   const { stdout = process.stdout, stderr = process.stderr } = deps;
   const out = (/** @type {string} */ s) => writeSafe(stdout, s);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
-  const usage = () => err('usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...\n');
+  const usage = () => err(USAGE);
 
   const [sub] = args;
   if (sub === 'add') return addSpend(args.slice(1), { out, err });
@@ -207,7 +207,7 @@ const MAX_NOTE_CHARS = 500;
  * @returns {Promise<number>}
  */
 async function addSpend(args, { out, err }) {
-  const usage = () => err('usage: code-forge ledger add coder --run <r> --block <b> --usd <n> [--note "..."]\n');
+  const usage = () => err(SUB_USAGE.add);
   const [role] = args;
   const run = flagValue(args, '--run');
   const block = flagValue(args, '--block');
@@ -312,3 +312,15 @@ async function addOutsideReview(args, { out, err }) {
 export default async function ledger(args) {
   return runLedger(args);
 }
+
+export const USAGE = 'usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note "..."] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...\n';
+
+export const SUMMARY = "Read calibration and ledger history or record outcomes, spend, and outside reviews.";
+
+export const SUB_USAGE = {
+  "calibration": "usage: code-forge ledger calibration --slug <slug> [--question <id>]\n",
+  "outcome": "usage: code-forge ledger outcome --scan-git --slug <slug> [--cwd <dir>] [--days <n>]\nusage: code-forge ledger outcome --pr <n> --ci red|green|reverted --slug <slug>\n",
+  "tail": "usage: code-forge ledger tail --slug <slug> [--n <count> | -n <count>]\n",
+  "add": "usage: code-forge ledger add coder --run <r> --block <b> --usd <n> [--note \"...\"]\n",
+  'outside-review': OUTSIDE_REVIEW_USAGE + '\n',
+};

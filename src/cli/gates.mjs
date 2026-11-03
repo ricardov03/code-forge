@@ -245,12 +245,7 @@ export async function runGatesVerb(args, deps = {}) {
   const { stdout = process.stdout, stderr = process.stderr, signal } = deps;
   const out = (/** @type {object} */ value) => writeSafe(stdout, `${redactJSON(value)}\n`);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
-  const usage = () =>
-    err(
-      'usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n' +
-        `  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n` +
-        `  gates run: a gate may be {argv, env}. ${GATE_ENV_RULE}\n`,
-    );
+  const usage = () => err(USAGE);
 
   const [sub] = args;
 
@@ -496,3 +491,20 @@ export async function runGatesVerb(args, deps = {}) {
 export default async function gates(args) {
   return runGatesVerb(args);
 }
+
+export const USAGE =
+  'usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n' +
+  `  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n` +
+  `  gates run: a gate may be {argv, env}. ${GATE_ENV_RULE}\n`;
+
+export const SUMMARY = "Detect and run project gates or check secrets, scope, acceptance, and transcripts.";
+
+export const SUB_USAGE = {
+  "detect": "usage: code-forge gates detect [--cwd <dir>]\n",
+  "run": "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed]\n",
+  "secret-scan": "usage: code-forge gates secret-scan [--cwd <dir>] --file <path> [--file <path>...]\n",
+  "safe-edit": "usage: code-forge gates safe-edit [--cwd <dir>] --base <sha>\n",
+  "scope": "usage: code-forge gates scope [--cwd <dir>] --base <sha>\n",
+  "acceptance": "usage: code-forge gates acceptance --clauses <file.json> --tap <file>\n",
+  "transcript-grep": "usage: code-forge gates transcript-grep --file <path> [--cwd <dir>]\n"
+};

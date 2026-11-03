@@ -1,7 +1,7 @@
 import path from 'node:path';
 import { loadPipeline, pipelineStatus } from '../pipeline/pipeline.mjs';
 
-const USAGE = 'usage: code-forge pipeline status|next [--json] [--root <dir>]\n';
+export const USAGE = 'usage: code-forge pipeline status|next [--json] [--root <dir>]\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function pipeline(args) {
@@ -59,3 +59,10 @@ export default async function pipeline(args) {
   }
   return 0;
 }
+
+export const SUMMARY = "Show pipeline step status or list the steps ready to run.";
+
+export const SUB_USAGE = {
+  "status": "usage: code-forge pipeline status [--json] [--root <dir>]\n",
+  "next": "usage: code-forge pipeline next [--json] [--root <dir>]\n"
+};

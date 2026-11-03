@@ -44,7 +44,7 @@ async function readJSONFlag(file, flag) {
   }
 }
 
-const USAGE = `usage: code-forge spawn --level L0|L1|L2|L3 --role ${ROLES.join('|')} --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <seconds>] [--background] [--print-argv]\n`;
+export const USAGE = `usage: code-forge spawn --level L0|L1|L2|L3 --role ${ROLES.join('|')} --brief <file> [--schema <file>] [--cwd <dir>] [--run <id>] [--block <id>] [--timeout <seconds>] [--background] [--print-argv]\n`;
 
 /**
  * @param {{status: string}} result
@@ -148,3 +148,5 @@ export async function runSpawn(args, deps = {}) {
 export default async function spawnVerb(args) {
   return runSpawn(args);
 }
+
+export const SUMMARY = "Run a session at a selected level and role from a brief.";

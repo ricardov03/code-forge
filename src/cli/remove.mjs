@@ -9,7 +9,7 @@ import os from 'node:os';
 import { writeSafe } from '../util/redact.mjs';
 import { installsPath, removeRecords } from '../install/link.mjs';
 
-const USAGE = 'usage: code-forge remove [<harness>] [--scope project|global]\n';
+export const USAGE = 'usage: code-forge remove [<harness>] [--scope project|global]\n';
 
 /**
  * Strict parse: `[<harness>] [--scope <project|global>]`, in that order. An unknown flag, a
@@ -74,3 +74,5 @@ export async function runRemove(args, { stdout = process.stdout, stderr = proces
 export default async function remove(args) {
   return runRemove(args, {});
 }
+
+export const SUMMARY = "Remove recorded skill installations for a harness or scope.";

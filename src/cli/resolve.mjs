@@ -38,7 +38,7 @@ const VALID_LEVELS = Object.freeze(['L0', 'L1', 'L2', 'L3']);
  */
 function parseArgs(args) {
   if (args.length !== 1) {
-    return { error: `usage: resolve <${VALID_LEVELS.join('|')}>` };
+    return { error: USAGE.replace('code-forge ', '').trimEnd() };
   }
   const [level] = args;
   if (!VALID_LEVELS.includes(level)) {
@@ -92,3 +92,7 @@ export default async function resolve(args) {
   writeSafe(process.stdout, `${JSON.stringify(output)}\n`);
   return 0;
 }
+
+export const USAGE = "usage: code-forge resolve <L0|L1|L2|L3>\n";
+
+export const SUMMARY = "Show the provider, model, effort, fallbacks, and CLI resolved for a level.";

@@ -17,7 +17,7 @@ import { stripVTControlCharacters } from 'node:util';
 import { writeSafe } from '../util/redact.mjs';
 import { installsPath, readInstalls, upgradeAll } from '../install/link.mjs';
 
-const USAGE = 'usage: code-forge upgrade [--source <path>] [--plain]\n';
+export const USAGE = 'usage: code-forge upgrade [--source <path>] [--plain]\n';
 const LOGO = ' ___  __   __   ___       ___  __   __   __   ___\n|    |  | |  \\ |__   __  |__  |  | |__/ | _  |__\n|___ |__| |__/ |___      |    |__| |  \\ |__] |___\n';
 const PACKAGE_VERSION = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
 const CHANGELOG_PATH = fileURLToPath(new URL('../../CHANGELOG.md', import.meta.url));
@@ -181,3 +181,5 @@ export async function runUpgrade(
 export default async function upgrade(args) {
   return runUpgrade(args, {});
 }
+
+export const SUMMARY = "Refresh recorded skill installations from a skill source.";

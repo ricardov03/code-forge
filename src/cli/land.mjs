@@ -29,6 +29,10 @@ export function landCommand(argv) {
   return argv.map((arg) => /^[\w./:@=-]+$/.test(arg) ? arg : `'${arg.replaceAll("'", "'\\''")}'`).join(' ');
 }
 
+
+export const USAGE = "usage: code-forge land\n  Used internally by code-forge block land; this module has no standalone handler.\n";
+
+export const SUMMARY = "Provide the block landing implementation used by block land.";
 /** Join, gates and close share their existing CLI handlers, without spawning the CLI.
  * @param {{id: string, runId: string, record: Record<string, any>, report: string, transcript: string, maxMs: number, merge: boolean, noMergeGate: boolean, json: boolean}} options
  * @param {LandDeps} deps

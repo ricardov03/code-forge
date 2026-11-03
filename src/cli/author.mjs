@@ -19,7 +19,7 @@ import { StateError } from '../state/paths.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { exitCodeFor } from './spawn.mjs';
 
-const USAGE = 'usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]\n';
+export const USAGE = 'usage: code-forge author --job plan|harden --brief <file> [--facts <file>] [--draft <file>] [--answers <file>] [--out <file>] [--run <id>] [--timeout <seconds>]\n';
 
 /**
  * @param {string[]} args
@@ -87,3 +87,5 @@ export async function runAuthorVerb(args, deps = {}) {
 export default async function authorVerb(args) {
   return runAuthorVerb(args);
 }
+
+export const SUMMARY = "Write or harden a plan draft from a brief using an author session.";

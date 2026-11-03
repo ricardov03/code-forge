@@ -491,10 +491,14 @@ export async function runAutopilot(args, deps = {}) {
   }
 }
 
-const USAGE =
+export const USAGE =
   'usage: code-forge autopilot start --run <id> --until <ISO-8601 with offset> --delegate <L2|L3> --allow <scope,…> [--deny <scope,…>] [--budget <category>=<usd>,…] [--stop-at <0..1>] [--yes] | status --run <id> [--json] | stop --run <id> | ask --run <id> --scope <scope> --question <text> [--options a,b,…] [--context-file <path>] [--block <id>] [--file <path>] [--finding <id>] [--json] (options for an action: waive,fix · allow,deny · L1,L2) | waive --run <id> --block <id> --file <path> --finding <id> --severity <warning|nit> --reason <text> --decision <id> | round --run <id> --block <id> --file <path> --decision <id> | level --run <id> --block <id> --plan <file> --decision <id> | approve --run <id> --key <dot.path> --value <json> --until <ISO-8601 with offset> | binnacle --run <id> [--json|--markdown] [--link <https url>] | log --run <id> [--json|--markdown]\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function autopilot(args) {
   return runAutopilot(args);
 }
+
+export const SUMMARY = "Manage delegated run approvals, decisions, budgets, and activity records.";
+
+export const SUB_USAGE = Object.fromEntries(USAGE.trimEnd().replace('usage: code-forge autopilot ', '').split(' | ').map((line) => [line.split(' ')[0], 'usage: code-forge autopilot ' + line + '\n']));

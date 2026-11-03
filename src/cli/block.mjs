@@ -349,7 +349,7 @@ async function autoClaimChanges({ record, runId, id, writeRow, print, join = tru
 }
 
 
-const USAGE =
+export const USAGE =
   'usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]\n' +
   '       code-forge block ready <id> --run <r> [--transcript <file>] [--report <file>]\n' +
   '       code-forge block rebase <id> --run <r> --accept-landed\n' +
@@ -1798,3 +1798,7 @@ export async function highPathsAt(workspace, base) {
 export default async function block(args) {
   return runBlock(args);
 }
+
+export const SUMMARY = "Manage block worktrees, ownership, reviews, acceptance evidence, and closure.";
+
+export const SUB_USAGE = Object.fromEntries(SUBCOMMANDS.map((sub) => [sub, verbUsage(sub)]));

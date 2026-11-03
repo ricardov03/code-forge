@@ -8,7 +8,7 @@ manual, so nothing leaves your machine until you say so.
 Add one CHANGELOG entry per change, while you work, instead of writing them all at release time:
 
 ```
-npm run changelog -- added "**`code-forge foo`** — what it does, in one sentence."
+npm run changelog -- added "**`code-forge <verb>`** — what it does, in one sentence."
 npm run changelog -- fixed "What was wrong and what happens now."
 npm run changelog -- list                # the current [Unreleased] entries
 ```

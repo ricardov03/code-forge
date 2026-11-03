@@ -258,10 +258,19 @@ async function reloadVerb(runId, { out, err }) {
   return 0;
 }
 
-const USAGE =
+export const USAGE =
   'usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief] | start --add-worker --run <id> | start --reattach --run <id> [--worker-pid <pid>] | status --run <id> | reload --run <id> | end --run <id>\n';
 
 /** @param {string[]} args @returns {Promise<number>} */
 export default async function run(args) {
   return runRun(args, { startWorker: launchWorker });
 }
+
+export const SUMMARY = "Start, inspect, reload, or end a run and manage its workers.";
+
+export const SUB_USAGE = {
+  "start": "usage: code-forge run start [--cwd <dir>] [--run <id>] [--engine <e>] [--worker-pid <pid>] [--mode plan|brief]\nusage: code-forge run start --add-worker --run <id>\nusage: code-forge run start --reattach --run <id> [--worker-pid <pid>]\n",
+  "status": "usage: code-forge run status --run <id>\n",
+  "reload": "usage: code-forge run reload --run <id>\n",
+  "end": "usage: code-forge run end --run <id>\n"
+};

@@ -21,7 +21,7 @@ import { parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
-const USAGE = 'usage: code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]\n';
+export const USAGE = 'usage: code-forge plan check <plan-file> [--facts <sheet>] [--slug <slug>]\n';
 
 /**
  * @param {string[]} args
@@ -95,3 +95,7 @@ export async function runPlanVerb(args, deps = {}) {
 export default async function planVerb(args) {
   return runPlanVerb(args);
 }
+
+export const SUMMARY = "Check a plan against its facts, project rules, and recorded decisions.";
+
+export const SUB_USAGE = { check: USAGE };

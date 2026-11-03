@@ -15,7 +15,7 @@ import { detectAll } from '../install/detect.mjs';
 import { HARNESSES } from '../install/harnesses.mjs';
 import { installsPath, readInstalls, targetResolves } from '../install/link.mjs';
 
-const USAGE = 'usage: code-forge list\n';
+export const USAGE = 'usage: code-forge list\n';
 
 /**
  * @param {string[]} args
@@ -66,3 +66,5 @@ export async function runList(args, { stdout = process.stdout, stderr = process.
 export default async function list(args) {
   return runList(args, {});
 }
+
+export const SUMMARY = "List the recorded skill installations.";

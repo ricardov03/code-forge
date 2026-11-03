@@ -92,7 +92,7 @@ import { writeSafe } from '../util/redact.mjs';
 import { daemonRequest } from '../util/native.mjs';
 import { runRootPath } from '../util/tmp.mjs';
 
-const USAGE =
+export const USAGE =
   'usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n' +
   '       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n' +
   '       code-forge review-file --rebase-check --block <id> --run <id>\n' +
@@ -880,3 +880,5 @@ async function enqueueAnswersTicket({ flags, answering, block, cwd, repoRoot, sa
 export default async function run(args) {
   return runReviewFile(args);
 }
+
+export const SUMMARY = "Queue file reviews, wait for results, or check review evidence after a rebase.";
