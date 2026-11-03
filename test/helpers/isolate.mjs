@@ -192,6 +192,8 @@ function isForeignAtomicTemp(p, probe) {
   }
 }
 
+const lockRetryWait = new Int32Array(new SharedArrayBuffer(4));
+
 /**
  * Ignore vanished locks and exited outside owners whose starts predate this suite;
  * verify live owners' entire ancestry. Untracked dead descendants remain unverified.
@@ -203,6 +205,8 @@ function isForeignAtomicTemp(p, probe) {
  */
 function isForeignLock(p, probe) {
   for (let attempt = 0; attempt < 3; attempt++) {
+    // Let an outside writer or process probe recover; total retry delay is 200 ms.
+    if (attempt > 0) Atomics.wait(lockRetryWait, 0, 0, attempt === 1 ? 50 : 150);
     try {
       const lock = JSON.parse(readFileSync(p, 'utf8'));
       if (lock === null || typeof lock !== 'object' || Array.isArray(lock)

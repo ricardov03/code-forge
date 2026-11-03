@@ -120,11 +120,12 @@ test('lock guard exempts live foreign sample locks, recovered probes and locks g
     return undefined;
   });
   const vanishedBeforeRead = leakedEntries(before, now, [dir], probe);
-  writeFileSync(files[0], JSON.stringify({ key: keys[0], pid: owner.pid, start }));
+  // A suite-owned lock can only be exempt once it actually vanishes.
+  writeFileSync(files[0], JSON.stringify({ key: keys[0], pid: process.pid, start }));
   const originalRead = fs.readFileSync;
   const reader = t.mock.method(fs, 'readFileSync', (file, options) => {
     if (file !== files[0]) return originalRead(file, options);
-    rmSync(files[0]);
+    rmSync(files[0], { force: true });
     throw Object.assign(new Error('writer replaced the lock during read'), { code: 'EACCES' });
   });
   syncBuiltinESMExports();
@@ -135,9 +136,13 @@ test('lock guard exempts live foreign sample locks, recovered probes and locks g
     reader.mock.restore();
     syncBuiltinESMExports();
   }
-  assert.deepEqual({ live, recoveredOwner, ownerAttempts, recoveredAncestry, ancestorAttempts, vanishedDuringProbe, vanishedBeforeRead, vanishedDuringRead }, {
+  assert.equal(reader.mock.calls.some(({ arguments: args }) => args[0] === files[0]), true,
+    'the reader mock must intercept the lock read');
+  assert.equal(existsSync(files[0]), false, 'the lock is absent at the final re-check');
+  assert.deepEqual(vanishedDuringRead, [], 'only the ENOENT re-check exempts the lock removed during read');
+  assert.deepEqual({ live, recoveredOwner, ownerAttempts, recoveredAncestry, ancestorAttempts, vanishedDuringProbe, vanishedBeforeRead }, {
     live: [], recoveredOwner: [], ownerAttempts: 3, recoveredAncestry: [], ancestorAttempts: 3,
-    vanishedDuringProbe: [], vanishedBeforeRead: [], vanishedDuringRead: [],
+    vanishedDuringProbe: [], vanishedBeforeRead: [],
   }, 'both sample bodies, three-attempt owner/ancestor recovery and all three vanished-lock races yield exactly 0 leaks');
 });
 
@@ -161,13 +166,14 @@ test('lock guard keeps suite owners and dead owners started during the suite as 
   const probe = (pid) => pid === owner.pid ? { start, ppid: /** @type {number} */ (owner.parent) }
     : pid === process.ppid ? { start: 'Tue Nov  3 12:29:44 2026', ppid: 1 }
       : { start, ppid: 1 };
-  const liveTree = leakedEntries(before, snapshotGuarded([dir]), [dir], probe);
+  // Reversed snapshot order also proves leakedEntries returns sorted leaks.
+  const liveTree = leakedEntries(before, [...snapshotGuarded([dir])].reverse(), [dir], probe);
   await owner.stop();
   rmSync(descendant);
   writeFileSync(dead, JSON.stringify({ key: 'ticket\u0000r-suite\u0000dead-id', pid: owner.pid, start }));
   const deadTree = leakedEntries(before, snapshotGuarded([dir]), [dir], (pid) => pid === owner.pid ? null : probe(pid));
   assert.deepEqual({ liveTree, deadTree }, {
-    liveTree: [self, child, descendant], deadTree: [self, child, dead],
+    liveTree: [self, child, descendant].sort(), deadTree: [self, child, dead].sort(),
   }, 'exactly three suite locks leak in each check; the matching live foreign neighbor never leaks');
 });
 
