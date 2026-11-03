@@ -186,7 +186,7 @@ async function mode(name, dir, params) {
     }
     const started = performance.now();
     if (binary) {
-      daemon = child(binary, ['serve', '--home', process.env.HOME, '--run', run], repo);
+      daemon = child(binary, ['internal', 'serve', '--home', process.env.HOME, '--run', run], repo);
       let ready = false;
       for (let i = 0; i < 100 && daemon.proc.exitCode === null; i++) {
         if (await daemonRequest(run, { method: 'ping' }, { timeoutMs: 100 })) { ready = true; break; }
