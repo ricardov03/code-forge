@@ -226,17 +226,35 @@ export async function runParity(verbArgs, { fixture, goCommand, env = {}, stdin 
     const goResult = await runCopy(go, goCommand);
     for (const field of ['code', 'signal', 'stdout', 'stderr']) compare(normalize(nodeResult[field], node), normalize(goResult[field], go), 'process', field, diffs);
     const left = await stateFiles(node), right = await stateFiles(go);
-    const index = (files, copy) => new Map([...files].map(([name, entry]) => [normalizeText(name, copy), { ...entry, name }]));
+    const index = (files, copy) => {
+      const groups = new Map();
+      for (const [name, entry] of files) {
+        const normalized = normalizeText(name, copy);
+        if (!groups.has(normalized)) groups.set(normalized, []);
+        groups.get(normalized).push({ ...entry, name });
+      }
+      return groups;
+    };
     const leftIndex = index(left, node), rightIndex = index(right, go);
     for (const name of [...new Set([...leftIndex.keys(), ...rightIndex.keys()])].sort()) {
-      const a = leftIndex.get(name), b = rightIndex.get(name);
-      if (!a || !b) { diffs.push({ where: name, field: '$file', node: a ? 'present' : undefined, go: b ? 'present' : undefined }); continue; }
-      if (a.kind !== b.kind) { diffs.push({ where: name, field: '$type', node: a.kind, go: b.kind }); continue; }
-      const rawA = a.kind === 'file' ? decode(a.name, a.value) : a.value;
-      const rawB = b.kind === 'file' ? decode(b.name, b.value) : b.value;
-      const normA = normalize(rawA, node), normB = normalize(rawB, go);
-      await normalizeSignatures(rawA, rawB, normA, normB, node, go);
-      compare(normA, normB, name, '$', diffs);
+      const leftGroup = leftIndex.get(name) ?? [], rightGroup = rightIndex.get(name) ?? [];
+      const pairs = [];
+      // Match unchanged identities first. Keep ALL remaining files even when several volatile
+      // names normalize to the same name; a Map overwrite would silently lose extra files.
+      for (let i = leftGroup.length - 1; i >= 0; i--) {
+        const j = rightGroup.findIndex((entry) => entry.name === leftGroup[i].name);
+        if (j >= 0) pairs.push([leftGroup.splice(i, 1)[0], rightGroup.splice(j, 1)[0]]);
+      }
+      while (leftGroup.length || rightGroup.length) pairs.push([leftGroup.shift(), rightGroup.shift()]);
+      for (const [a, b] of pairs) {
+        if (!a || !b) { diffs.push({ where: name, field: '$file', node: a ? 'present' : undefined, go: b ? 'present' : undefined }); continue; }
+        if (a.kind !== b.kind) { diffs.push({ where: name, field: '$type', node: a.kind, go: b.kind }); continue; }
+        const rawA = a.kind === 'file' ? decode(a.name, a.value) : a.value;
+        const rawB = b.kind === 'file' ? decode(b.name, b.value) : b.value;
+        const normA = normalize(rawA, node), normB = normalize(rawB, go);
+        await normalizeSignatures(rawA, rawB, normA, normB, node, go);
+        compare(normA, normB, name, '$', diffs);
+      }
     }
     return { equal: diffs.length === 0, diffs };
   } finally { await rm(root, { recursive: true, force: true }); }

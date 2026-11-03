@@ -38,6 +38,10 @@ const FAKE = [process.execPath, '--input-type=module', '-e', `
     fs.mkdirSync(path.join(process.cwd(), '.code-forge', 'nested'), { recursive: true });
     fs.writeFileSync(path.join(process.cwd(), '.code-forge', 'nested', '.extra'), 'extra');
   }
+  if (mode === 'clock-file') {
+    const run = args[args.indexOf('--run') + 1];
+    fs.copyFileSync(path.join(home, 'runs', run + '.json'), path.join(home, 'runs', 'r-20990101-000000-ffffff.json'));
+  }
   if (['volatile', 'invalid', 'row', 'signed-row'].includes(mode)) {
     const rows = fs.readFileSync(ledger, 'utf8').trim().split('\\n').map(JSON.parse);
     const row = rows[0];
@@ -95,6 +99,7 @@ test('clause 1 boundary: stderr, binary state and missing nested dotfiles retain
     await rm(path.join(fixture.home, '.code-forge', 'bytes.bin'));
   }
   assert.deepEqual(await check('extra'), { equal: false, diffs: [{ where: 'repo/.code-forge/nested/.extra', field: '$file', node: undefined, go: 'present' }] }, 'one extra nested dotfile');
+  assert.deepEqual(await check('clock-file'), { equal: false, diffs: [{ where: 'home/.code-forge/runs/<clock-run>.json', field: '$file', node: undefined, go: 'present' }] }, 'normalizing a clock-based filename must not hide a second state file');
 });
 
 test('clause 2: only volatile fields normalize and otherwise equal, verified rows can have different signatures', async () => {
