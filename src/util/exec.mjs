@@ -47,6 +47,7 @@
  * @property {string} stderr
  * @property {boolean} timedOut
  * @property {true} [cancelled]
+ * @property {boolean} [silenceTimedOut]
  * @property {string} [error]
  */
 
@@ -144,6 +145,8 @@ function untrackChild(pid) {
  * @param {BufferEncoding} [opts.stdoutEncoding] - stdout encoding (default UTF-8); base64 preserves binary git blobs.
  * @param {number} [opts.timeoutMs] - Kill the child (and its process group) if it runs longer
  *   than this. Must be a finite number > 0 when given.
+ * @param {number} [opts.silenceTimeoutMs] - Kill as a timeout if neither stdout nor stderr
+ *   emits any bytes before this startup deadline. Any output disables this timer.
  * @param {number[]} [opts.okExitCodes] - Exit codes treated as `result: "ok"` (default `[0]`).
  *   Some read-only git subcommands (e.g. `diff --no-index`, `merge-base --is-ancestor`) use a
  *   non-zero exit code to report a normal "no" answer, not a failure.
@@ -165,6 +168,9 @@ export function exec(argv, opts = {}) {
   }
   if (opts.timeoutMs !== undefined && !(Number.isFinite(opts.timeoutMs) && opts.timeoutMs > 0)) {
     throw new TypeError('exec: timeoutMs must be a finite number greater than 0 when given');
+  }
+  if (opts.silenceTimeoutMs !== undefined && !(Number.isFinite(opts.silenceTimeoutMs) && opts.silenceTimeoutMs > 0)) {
+    throw new TypeError('exec: silenceTimeoutMs must be a finite number greater than 0 when given');
   }
   if (opts.input !== undefined && typeof opts.input !== 'string' && !(opts.input instanceof Uint8Array)) {
     throw new TypeError('exec: input must be a string or a Uint8Array/Buffer when given');
@@ -219,6 +225,7 @@ export function exec(argv, opts = {}) {
     const byteCounts = { stdout: 0, stderr: 0 };
     let timedOut = false;
     let cancelled = false;
+    let silenceTimedOut = false;
     let overBuffer = false;
     let settled = false;
     let exited = false;
@@ -227,6 +234,8 @@ export function exec(argv, opts = {}) {
     let termTimer;
     /** @type {NodeJS.Timeout | undefined} */
     let killTimer;
+    /** @type {NodeJS.Timeout | undefined} */
+    let silenceTimer;
 
     /** Kill the child's whole process group; falls back to the direct child (e.g. on Windows). */
     const killGroup = (/** @type {NodeJS.Signals} */ signal) => {
@@ -246,6 +255,7 @@ export function exec(argv, opts = {}) {
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
       signal?.removeEventListener('abort', abort);
+      if (silenceTimer) clearTimeout(silenceTimer);
       await remaining;
       // Pipe data can arrive while the remaining group members are being stopped.
       // Snapshot the output and buffer-limit state only once that wait is over.
@@ -257,6 +267,7 @@ export function exec(argv, opts = {}) {
         stderr: stderrText(),
         timedOut,
         ...(cancelled ? { cancelled: /** @type {const} */ (true) } : {}),
+        ...(silenceTimedOut ? { silenceTimedOut: true } : {}),
         ...(overBuffer ? { error: 'exec: maxBufferBytes exceeded' } : {}),
       };
       if (typeof pid === 'number') {
@@ -280,6 +291,8 @@ export function exec(argv, opts = {}) {
       cancelled = true;
       if (termTimer) clearTimeout(termTimer);
       termTimer = null;
+      if (silenceTimer) clearTimeout(silenceTimer);
+      silenceTimer = undefined;
       if (exited) return;
       killGroup('SIGTERM');
       if (killTimer) clearTimeout(killTimer);
@@ -288,17 +301,16 @@ export function exec(argv, opts = {}) {
     signal?.addEventListener('abort', abort, { once: true });
     if (signal?.aborted) abort();
 
-    if (timeoutMs && !cancelled) {
-      termTimer = setTimeout(() => {
-        if (cancelled || exited) return;
-        timedOut = true;
-        killGroup('SIGTERM');
-        if (killTimer) clearTimeout(killTimer);
-        killTimer = setTimeout(() => {
-          killGroup('SIGKILL');
-        }, KILL_GRACE_MS);
-      }, timeoutMs);
-    }
+    const timeOut = (silent = false) => {
+      if (timedOut || settled || cancelled || exited) return;
+      timedOut = true;
+      silenceTimedOut = silent;
+      killGroup('SIGTERM');
+      if (killTimer) clearTimeout(killTimer);
+      killTimer = setTimeout(() => killGroup('SIGKILL'), KILL_GRACE_MS);
+    };
+    if (timeoutMs && !cancelled) termTimer = setTimeout(timeOut, timeoutMs);
+    if (opts.silenceTimeoutMs && !cancelled) silenceTimer = setTimeout(() => timeOut(true), opts.silenceTimeoutMs);
 
     /**
      * @param {'stdout'|'stderr'} stream
@@ -306,6 +318,10 @@ export function exec(argv, opts = {}) {
      * @param {Buffer} chunk
      */
     const collect = (stream, chunks, chunk) => {
+      if (chunk.length > 0 && silenceTimer) {
+        clearTimeout(silenceTimer);
+        silenceTimer = undefined;
+      }
       if (overBuffer) return;
       const room = maxBufferBytes - byteCounts[stream];
       if (chunk.length > room) {
@@ -341,6 +357,7 @@ export function exec(argv, opts = {}) {
       exited = true;
       if (termTimer) clearTimeout(termTimer);
       if (killTimer) clearTimeout(killTimer);
+      if (silenceTimer) clearTimeout(silenceTimer);
       const members = typeof pid === 'number' ? groupMembers(pid) : new Map();
       if (typeof pid === 'number') untrackChild(pid);
       remaining = stopMembers(members, KILL_GRACE_MS).then(() => {});

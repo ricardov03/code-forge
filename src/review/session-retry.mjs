@@ -1,5 +1,6 @@
 /**
- * One review session with ONE automatic retry on `timeout` (block B30, issue #2).
+ * One review session: advance a configured fallback ladder immediately on timeout or capacity;
+ * without a ladder, keep ONE automatic retry on `timeout` (block B30, issue #2).
  *
  * Field data: a reviewer CLI can hang for the whole `review.session_timeout_s` with almost no
  * output, while the same packet reviews in seconds on a second try. So a session whose status is
@@ -114,6 +115,8 @@ export async function spawnWithBrokenFallback(spawn, opts, isBroken, onBroken = 
  *   (and `broken`) when a timed-out attempt started the second-level try.
  */
 export async function spawnWithTimeoutRetry(spawn, opts, note, onAttempt = () => {}, broken = {}) {
+  const hasLadder = opts.cfg?.levels?.[opts.level]?.fallback?.length > 0;
+  let currentOpts = opts;
   let attempts = 0;
   for (;;) {
     attempts += 1;
@@ -121,12 +124,35 @@ export async function spawnWithTimeoutRetry(spawn, opts, note, onAttempt = () =>
     /** @type {Record<string, any> | null} */
     let res;
     try {
-      res = await spawn(opts);
+      res = await spawn(currentOpts);
     } catch {
       return { res: null, attempts }; // a throw is an `exit` failure, never retried
     }
-    if (res?.status !== 'timeout') return { res, attempts };
-    const retried = attempts <= TIMEOUT_RETRIES;
+    const capacity = res?.status === 'unavailable' && res.reason === 'at-capacity';
+    if (res?.status !== 'timeout' && !capacity) return { res, attempts };
+    // A route's ladder takes precedence over retrying a stalled or overloaded model. The
+    // spawner may already have consumed provider-error steps: resume AFTER its actual model.
+    let nextOpts;
+    if (hasLadder) {
+      const level = resolveLevel(currentOpts.cfg, currentOpts.level);
+      const models = [level, ...level.fallback];
+      const at = models.findIndex((m) => m.model === res.model && (m.provider ?? level.provider) === res.provider);
+      const remaining = models.slice(Math.max(0, at) + 1)
+        .filter((m) => !closedBookRefused(m.provider ?? level.provider, opts.role, openBookCodexAllowed(opts.cfg)))
+        .filter((m) => m.model !== res.model || (m.provider ?? level.provider) !== res.provider)
+        .map((m) => ({ ...m, provider: m.provider ?? level.provider }));
+      const next = remaining[0];
+      if (next) nextOpts = { ...opts, cfg: { ...opts.cfg, levels: { ...opts.cfg.levels, [opts.level]: {
+        provider: next.provider ?? level.provider, model: next.model,
+        ...(next.effort !== undefined ? { effort: next.effort } : {}), fallback: remaining.slice(1),
+      } } } };
+    }
+    if (capacity) {
+      if (!nextOpts) return { res, attempts };
+      currentOpts = nextOpts;
+      continue;
+    }
+    const retried = !hasLadder && attempts <= TIMEOUT_RETRIES;
     try {
       await note({
         event: 'review.session_timeout',
@@ -147,6 +173,10 @@ export async function spawnWithTimeoutRetry(spawn, opts, note, onAttempt = () =>
       });
     } catch {
       // a failed note never stops the retry or the result (the count then misses it: fewer tries)
+    }
+    if (nextOpts) {
+      currentOpts = nextOpts;
+      continue;
     }
     if (broken.onBroken && broken.secondLevel !== true) {
       // Contract: `onBroken` is called AFTER this attempt's note was written (or its write failed),
