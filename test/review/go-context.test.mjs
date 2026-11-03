@@ -45,6 +45,7 @@ test('Go related files are sorted directory siblings and include tests only for 
 test('Go packet definitions contain each called function and method body once with opaque literals and comments', async () => {
   const repoRoot = await fixture();
   const result = await packet(repoRoot);
+  assert.doesNotMatch(result.text, /OPAQUE_STRING_BODY/, 'fakeString body is absent from the packet when its call occurs only inside an interpreted string');
   const router = sample('router.go').split('\n');
   const expected = ['run', 'serve'].map((name) => {
     const start = router.findIndex((line) => line.startsWith('func ') && line.includes(`${name}(`));

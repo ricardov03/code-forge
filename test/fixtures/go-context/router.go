@@ -3,7 +3,7 @@ package main
 type server struct{}
 
 func run() {
-	label := "} \" {"
+	label := "} \" { fakeString()"
 	raw := `} \` + "`" + ` {
 func fakeRaw() {`
 	runeBrace := '}'
