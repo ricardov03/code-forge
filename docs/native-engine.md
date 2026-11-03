@@ -1,0 +1,157 @@
+# Go engine
+
+## What it is
+
+In 0.17.0, the npm `code-forge` command starts the Go engine first.
+The engine is a binary: a program that is already built for your computer.
+You do not need to install Go. You still need Node.js 22 or newer.
+
+The command works in three steps:
+
+1. The shell entry finds `native/bin/<platform>-<arch>/code-forge-native`
+   inside the installed package. The platform is the operating system.
+   The architecture, or arch, is the processor type.
+2. If that file exists and can run, the entry starts it.
+3. Go runs a command if its public route table lists that command.
+   Otherwise, Go hands the arguments to `bin/code-forge.mjs` in Node.
+   This hand-over happens by itself. It keeps the same standard output,
+   error output and exit code. The exit code is the number that tells the
+   shell whether a command succeeded.
+
+**Today, no public command runs fully in Go.** The public route table is empty.
+For example, `code-forge version`, `code-forge status` and `code-forge doctor`
+all go through Go to Node. Go also runs private helpers and the optional
+background daemon. These are separate from the public route table.
+
+### See what is available
+
+Run the full doctor in your project:
+
+```sh
+code-forge doctor --json
+```
+
+Read these rows in the JSON `rows` list:
+
+| Row id | Meaning |
+|---|---|
+| `native` | `OK` gives the binary path and version. `INFO` with `not found, using Node` means the helper is absent, cannot run, or is disabled. A path followed by `unavailable, using Node` means its version check failed. |
+| `native_daemon` | `live` means the daemon answered for the active worker. `off` means it is disabled or no usable config was found. `fallback` means it is enabled but no compatible daemon answered. |
+
+The text form, `code-forge doctor`, labels these rows `native binary` and
+`native daemon`. The quick doctor omits them. Other setup checks can fail
+even when the native binary row is `OK`.
+
+These rows check availability. They do not say that a public verb ran fully
+in Go. The `native-status.mjs` helper reads data from the daemon on standard
+input. It does not report which engine started a command. Although help
+lists `native-status`, it is a private helper with no public command handler.
+Use `code-forge status` to check run progress.
+
+## Platforms with a binary
+
+Release builds supply these four targets:
+
+| System | Processor | Package directory |
+|---|---|---|
+| macOS | Apple silicon | `native/bin/darwin-arm64/` |
+| macOS | Intel 64-bit | `native/bin/darwin-x64/` |
+| Linux | x86 64-bit | `native/bin/linux-x64/` |
+| Linux | ARM 64-bit | `native/bin/linux-arm64/` |
+
+If the shell entry finds no binary for your platform and architecture,
+it starts Node directly. It does the same if the file is missing or lacks
+execute permission. There is no extra option to set. Node must be on `PATH`,
+the list of directories where the shell looks for programs.
+
+## Switches
+
+### Use Node only
+
+```sh
+CODE_FORGE_NATIVE=0 code-forge version
+```
+
+Set `CODE_FORGE_NATIVE` to exactly `0` to skip the Go entry and disable native
+helpers and the daemon. The shell starts `node` from `PATH`.
+Remove the setting to allow Go again.
+
+### Turn off the daemon
+
+In `.code-forge.yml`, set:
+
+```yaml
+native:
+  daemon: false
+```
+
+The daemon is enabled by default. This setting disables only the daemon.
+The Go entry and other native helpers can still run. Workers read this setting
+at startup. Clients use the run's current config snapshot, which is the stored
+copy of its settings. The setting makes status and block waits use Node.
+
+### Choose Node for the hand-over
+
+`CODE_FORGE_NODE` selects the Node executable that Go starts. For example,
+in a shell where `node` already works:
+
+```sh
+CODE_FORGE_NODE="$(command -v node)" code-forge version
+```
+
+Use an executable path or a command name found on `PATH`. If the setting is
+empty or absent, Go looks for `node` on `PATH`. This setting applies only to
+the Go hand-over. When the shell skips Go, it uses `node` on `PATH` instead.
+
+## Internal verbs
+
+The native binary reserves the `internal` namespace for its helpers.
+These include `version`, `verify-ledger`, `serve`, `state-golden` and
+`block-rebase-landed`. They support version checks, ledger checks, the daemon,
+compatibility tests and block updates. Users do not call them.
+Keep using the public commands. The worker starts and stops the daemon for you.
+
+## Native daemon
+
+A daemon is a program that keeps running in the background.
+When the optional native binary is installed and the daemon is enabled,
+the review worker starts one Go daemon for its run.
+It stops the daemon it started when the worker exits.
+Another worker can share a daemon that is already running.
+
+The private `native.sock` Unix socket carries requests between local programs.
+The daemon serves block waits and status from cached ledger and queue data.
+Cached data is a copy kept ready in memory. It avoids repeated reads in Node
+clients. A missing, crashed or incompatible daemon causes clients to use Node
+by themselves, with the same answers. Both text and JSON status output have
+the same bytes on the daemon and Node paths.
+
+The full doctor shows `native daemon` as `live`, `off` or `fallback`.
+Use the switches above to turn off all native code or just the daemon.
+The daemon config setting takes effect for workers at startup;
+clients use the run's current snapshot.
+
+## Troubleshooting
+
+| Problem | What to do |
+|---|---|
+| The binary lacks execute permission. | The entry uses Node directly. Reinstall the npm package to restore its executable file. For a source checkout, rebuild the host binary. Check the full doctor's `native` row again. |
+| The binary is for the wrong platform or processor. | Install the package for this machine, or rebuild for this host. A missing matching file makes the entry use Node. If a wrong binary was put at the matching path, it can fail to start; set `CODE_FORGE_NATIVE=0` while you replace it. |
+| The Go hand-over says `node executable … not found`. | Put Node on `PATH`, or set `CODE_FORGE_NODE` to its real executable path. This failure exits 127. If Go is disabled or missing, fix `PATH`: the shell does not use `CODE_FORGE_NODE`. |
+| The doctor shows daemon `fallback`. | Check that a review worker is active and that the package versions match. With no active worker, `fallback` can be normal. Status and waits still use Node. To keep the daemon off, set `native.daemon: false` before the next worker starts. |
+
+Contributors can rebuild from the repository root with Go installed:
+
+```sh
+node scripts/build-native.mjs --host
+```
+
+## How we keep Go and Node the same
+
+Contributors use parity tests. Parity means that both paths give the same
+result. The tests run commands in separate copies of a test project and home
+folder. They compare output bytes, error output, exit codes and saved state.
+They allow only known changes such as timestamps. Entry tests also check
+arguments, standard input, the working directory, environment settings,
+symbolic links, Node-only mode and missing executables. Daemon tests compare
+status and block waits with Node and check fallback when the daemon fails.

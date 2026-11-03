@@ -21,6 +21,10 @@ npm install -g @codedology/code-forge
 code-forge version
 ```
 
+In 0.17.0, the command starts Go first and hands commands to Node when needed.
+You do not need to install Go. With no matching binary, it uses Node directly.
+See [Go engine and Node fallback](native-engine.md).
+
 The scoped name `@codedology/code-forge` is used **only in this install line**. The command it
 installs is unscoped: `code-forge`. Every page runs it as `code-forge <verb>`, in any folder. Never
 install `code-forge` without the scope: the unscoped npm name `code-forge` is a different,
