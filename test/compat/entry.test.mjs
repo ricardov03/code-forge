@@ -13,7 +13,7 @@ const builtBinary = path.join(scratch, 'code-forge-native');
 const env = { ...process.env, CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_KEY_BACKEND: 'file' };
 after(() => rmSync(scratch, { recursive: true, force: true }));
 before(() => {
-  const build = spawnSync('go', ['build', '-ldflags', `-X main.version=${pkg.version}`, '-o', builtBinary, './cmd/code-forge-native'], {
+  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${pkg.version}`, '-o', builtBinary, './cmd/code-forge-native'], {
     cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000,
     env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
   });
@@ -152,6 +152,8 @@ test('internal namespace preserves native callers including doctor and daemon st
 
 test('Go handover adds at most 25 ms over Node in the median of ten version runs', (t) => {
   const f = fixture(t);
+  const npmLink = path.join(f.dir, 'temp bin/npm-code-forge');
+  symlinkSync(path.join('..', pkg.bin['code-forge']), npmLink);
   const direct = [], entry = [];
   const measure = (file, args) => {
     const start = performance.now();
@@ -163,11 +165,11 @@ test('Go handover adds at most 25 ms over Node in the median of ten version runs
   };
   // Assert Go actually hands over before measuring the public linked entry.
   assert.deepEqual(output(run(f.binary, ['--version'])), output(run(process.execPath, [f.script, '--version'])), 'timing measures a working Go handover');
-  measure(f.launcher, ['--version']);
+  measure(npmLink, ['--version']);
   measure(process.execPath, [f.script, '--version']);
   for (let i = 0; i < 10; i++) {
     const nodeRun = () => direct.push(measure(process.execPath, [f.script, '--version']));
-    const entryRun = () => entry.push(measure(f.launcher, ['--version']));
+    const entryRun = () => entry.push(measure(npmLink, ['--version']));
     if (i % 2) { entryRun(); nodeRun(); } else { nodeRun(); entryRun(); }
   }
   const median = (values) => { values.sort((a, b) => a - b); return (values[4] + values[5]) / 2; };

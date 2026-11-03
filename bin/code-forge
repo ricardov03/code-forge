@@ -20,14 +20,15 @@ while [ -L "$entry" ]; do
 done
 pkg=$(CDPATH= cd -P "${entry%/*}/.." && pwd) || exit 1
 
-case $(uname -s) in
-  Darwin) platform=darwin ;;
-  Linux) platform=linux ;;
+host=$(uname -sm)
+case "$host" in
+  Darwin\ *) platform=darwin ;;
+  Linux\ *) platform=linux ;;
   *) platform=unsupported ;;
 esac
-case $(uname -m) in
-  x86_64|amd64) arch=x64 ;;
-  arm64|aarch64) arch=arm64 ;;
+case "$host" in
+  *\ x86_64|*\ amd64) arch=x64 ;;
+  *\ arm64|*\ aarch64) arch=arm64 ;;
   *) arch=unsupported ;;
 esac
 native=$pkg/native/bin/$platform-$arch/code-forge-native
