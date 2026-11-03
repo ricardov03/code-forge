@@ -63,16 +63,27 @@ export async function runReport(args, deps = {}) {
     }
     const rows = await readAllRows(slug);
     const { sections } = buildReport(rows);
+    /** @type {Map<string | null, Set<string>>} */
+    const recovered = new Map();
+    for (const row of rows) {
+      if (row.event !== 'gate.done' || !Array.isArray(row.flaky)) continue;
+      const run = typeof row.run === 'string' ? row.run : null;
+      const files = recovered.get(run) ?? new Set();
+      for (const file of row.flaky) if (typeof file === 'string') files.add(file);
+      if (files.size > 0) recovered.set(run, files);
+    }
+    const flaky = [...recovered].map(([run, files]) => ({ run, files: [...files].sort() }));
+    const reported = flaky.length ? { ...sections, flaky } : sections;
 
     const exportDir = flagValue(args, '--export');
     if (exportDir) {
-      const paths = await exportReportSections(exportDir, sections);
+      const paths = await exportReportSections(exportDir, reported);
       out(`exported ${paths.length} section file(s) to ${exportDir}\n`);
       return 0;
     }
 
     if (args.includes('--json')) {
-      out(`${JSON.stringify(sections, null, 2)}\n`);
+      out(`${JSON.stringify(reported, null, 2)}\n`);
       return 0;
     }
 
@@ -87,6 +98,7 @@ export async function runReport(args, deps = {}) {
     }
     out(spendLines(buildSpend(rows)));
     out(modeLines(buildRunModes(rows)));
+    for (const entry of flaky) out(`${entry.run === null ? 'outside runs' : `run ${entry.run}`} flaky: ${entry.files.join(', ')}\n`);
     out(`== specialist_outcomes ==\n${specialistOutcomeLines(sections.specialist_outcomes)}`);
     return 0;
   } catch (err_) {
