@@ -9,11 +9,18 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Added
 
 - Go config loader (`native/config`, yaml.v3 pinned and vendored): reads `.code-forge.yml` with the same defaults, schema checks and error lines as the Node loader, checked byte for byte against goldens made by Node (B243)
+- Per-verb parity harness: runs each ported verb in Node and in Go on isolated copies of the same state, and compares output and state files field by field (B244)
+
+### Changed
+
+- npm `code-forge` starts the Go binary; unported verbs go to Node; native internal verbs are under `internal` (B242)
+- On macOS, `npm test` runs the suite in a sandbox that blocks writes to the real `~/.code-forge` and `$TMPDIR/code-forge`, so a leak fails at once and other runs on the machine cannot cause false leaks; it prints `leak guard: sandbox` or `leak guard: snapshot (<reason>)` (B254)
 
 ### Fixed
 
 - A review of a Go file now lists the other Go files of the same package and shows the bodies of the functions its changed lines call, so a reviewer no longer reports a function in a sibling file as missing (B245)
 - The test leak check ignores short-lived lock files and live-run control writes made by other code-forge runs on the same machine, fails closed when a process probe errors, and tracks children started with spawnSync/execFileSync, so gates no longer fail on false leaks (B246)
+- The leak check ignores atomic temp files of other processes and temp files that vanish during the scan (B250)
 
 ## [0.16.3] — 2026-11-02
 
