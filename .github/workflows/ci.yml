@@ -86,7 +86,7 @@ jobs:
           node-version: 24
 
       - name: gofmt (no unformatted files)
-        run: test -z "$(gofmt -l .)" || { gofmt -l .; exit 1; }
+        run: test -z "$(find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l)" || { find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l; exit 1; }
 
       - name: go vet
         run: go vet ./...

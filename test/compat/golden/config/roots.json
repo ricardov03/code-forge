@@ -1,0 +1,207 @@
+[
+  {
+    "name": "root/git-parent",
+    "files": {
+      "project/.git": "",
+      "project/.code-forge.yml": "name: parent"
+    },
+    "cwd": "project/sub/deep",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"name\":\"parent\",\"version\":1}"
+    },
+    "root": "$ROOT/project"
+  },
+  {
+    "name": "root/git-nearest",
+    "files": {
+      "project/.git": "",
+      "project/.code-forge.yml": "name: parent",
+      "project/sub/.code-forge.yml": "name: nearest"
+    },
+    "cwd": "project/sub/deep",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/sub/.code-forge.yml",
+      "canonical": "{\"name\":\"nearest\",\"version\":1}"
+    },
+    "root": "$ROOT/project/sub"
+  },
+  {
+    "name": "root/git-boundary",
+    "files": {
+      ".code-forge.yml": "name: outside",
+      "project/.git": ""
+    },
+    "cwd": "project/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "not-found",
+      "message": "no config file at $ROOT/project/.code-forge.yml"
+    },
+    "root": "$ROOT/project"
+  },
+  {
+    "name": "root/git-directory",
+    "dirs": [
+      "project/.git"
+    ],
+    "files": {
+      "project/.code-forge.yml": "name: parent"
+    },
+    "cwd": "project/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"name\":\"parent\",\"version\":1}"
+    },
+    "root": "$ROOT/project"
+  },
+  {
+    "name": "root/home-parent",
+    "files": {
+      "home/.code-forge.yml": "name: home"
+    },
+    "cwd": "home/sub/deep",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/home/.code-forge.yml",
+      "canonical": "{\"name\":\"home\",\"version\":1}"
+    },
+    "root": "$ROOT/home"
+  },
+  {
+    "name": "root/home-git-ignored",
+    "files": {
+      "home/.git": "",
+      "home/.code-forge.yml": "name: home"
+    },
+    "cwd": "home/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/home/.code-forge.yml",
+      "canonical": "{\"name\":\"home\",\"version\":1}"
+    },
+    "root": "$ROOT/home"
+  },
+  {
+    "name": "root/home-no-config",
+    "files": {},
+    "cwd": "home/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/home/sub/.code-forge.yml",
+      "error": "not-found",
+      "message": "no config file at $ROOT/home/sub/.code-forge.yml"
+    },
+    "root": "$ROOT/home/sub"
+  },
+  {
+    "name": "root/outside-home",
+    "files": {
+      ".code-forge.yml": "name: outside"
+    },
+    "cwd": "project/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/sub/.code-forge.yml",
+      "error": "not-found",
+      "message": "no config file at $ROOT/project/sub/.code-forge.yml"
+    },
+    "root": "$ROOT/project/sub"
+  },
+  {
+    "name": "root/directory-config",
+    "files": {
+      "project/.git": "",
+      "project/.code-forge.yml": "name: parent"
+    },
+    "dirs": [
+      "project/sub/.code-forge.yml"
+    ],
+    "cwd": "project/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"name\":\"parent\",\"version\":1}"
+    },
+    "root": "$ROOT/project"
+  },
+  {
+    "name": "root/symlink-config",
+    "files": {
+      "project/.git": "",
+      "project/shared.yml": "name: linked"
+    },
+    "links": {
+      "project/.code-forge.yml": "project/shared.yml"
+    },
+    "cwd": "project/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"name\":\"linked\",\"version\":1}"
+    },
+    "root": "$ROOT/project"
+  },
+  {
+    "name": "root/symlink-start",
+    "files": {
+      "project/.git": "",
+      "project/.code-forge.yml": "name: linked"
+    },
+    "links": {
+      "alias": "project"
+    },
+    "cwd": "alias/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/alias/.code-forge.yml",
+      "canonical": "{\"name\":\"linked\",\"version\":1}"
+    },
+    "root": "$ROOT/alias"
+  },
+  {
+    "name": "root/broken-config-link",
+    "files": {
+      "project/.git": ""
+    },
+    "links": {
+      "project/.code-forge.yml": "missing"
+    },
+    "cwd": "project/sub",
+    "group": "root",
+    "home": "home",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "not-found",
+      "message": "no config file at $ROOT/project/.code-forge.yml"
+    },
+    "root": "$ROOT/project"
+  }
+]

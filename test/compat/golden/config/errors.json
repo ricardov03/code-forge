@@ -1,0 +1,450 @@
+[
+  {
+    "name": "migrate/future",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":2}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: config version 2 is newer than this code-forge understands (1) — upgrade the package"
+    }
+  },
+  {
+    "name": "migrate/zero",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":0}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a number"
+    }
+  },
+  {
+    "name": "migrate/negative",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":-1}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a number"
+    }
+  },
+  {
+    "name": "migrate/fractional",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1.5}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a number"
+    }
+  },
+  {
+    "name": "migrate/string",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":\"1\"}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a string"
+    }
+  },
+  {
+    "name": "migrate/boolean",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":true}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a boolean"
+    }
+  },
+  {
+    "name": "migrate/array",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":[]}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a array"
+    }
+  },
+  {
+    "name": "migrate/object",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":{}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a object"
+    }
+  },
+  {
+    "name": "migrate/nan",
+    "files": {
+      "project/.code-forge.yml": "version: .nan\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a number"
+    }
+  },
+  {
+    "name": "migrate/infinity",
+    "files": {
+      "project/.code-forge.yml": "version: .inf\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: version must be a positive integer, got a number"
+    }
+  },
+  {
+    "name": "yaml/duplicate-root",
+    "files": {
+      "project/.code-forge.yml": "provider: openai\nprovider: xai"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "DUPLICATE_KEY: Map keys must be unique (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/duplicate-nested",
+    "files": {
+      "project/.code-forge.yml": "levels:\n  L0: {model: one, model: two}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "DUPLICATE_KEY: Map keys must be unique (line 2, column 20)"
+    }
+  },
+  {
+    "name": "yaml/duplicate-number",
+    "files": {
+      "project/.code-forge.yml": "1: one\n01: two"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "DUPLICATE_KEY: Map keys must be unique (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/duplicate-quoted",
+    "files": {
+      "project/.code-forge.yml": "\"a\": one\na: two"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "DUPLICATE_KEY: Map keys must be unique (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/missing-alias",
+    "files": {
+      "project/.code-forge.yml": "value: *missing"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "YAML_PARSE_ERROR: Unresolved alias (the anchor must be set before the alias): missing"
+    }
+  },
+  {
+    "name": "yaml/forward-alias",
+    "files": {
+      "project/.code-forge.yml": "first: *later\nsecond: &later 12"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "YAML_PARSE_ERROR: Unresolved alias (the anchor must be set before the alias): later"
+    }
+  },
+  {
+    "name": "yaml/masked-alias",
+    "files": {
+      "project/.code-forge.yml": "value: *sk-fake12345678901234567890"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "YAML_PARSE_ERROR: Unresolved alias (the anchor must be set before the alias): [REDACTED]"
+    }
+  },
+  {
+    "name": "yaml/unterminated-sequence",
+    "files": {
+      "project/.code-forge.yml": "provider: [unterminated\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/unterminated-map",
+    "files": {
+      "project/.code-forge.yml": "project: {name: hello\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow map in block collection must be sufficiently indented and end with a } (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/mismatched-flow",
+    "files": {
+      "project/.code-forge.yml": "project: [1, 2}\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_INDENT: Flow sequence in block collection must be sufficiently indented and end with a ] (line 1, column 15)"
+    }
+  },
+  {
+    "name": "yaml/tab-indent",
+    "files": {
+      "project/.code-forge.yml": "project:\n\tname: hello\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "TAB_AS_INDENT: Tabs are not allowed as indentation (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/multiple-documents",
+    "files": {
+      "project/.code-forge.yml": "provider: openai\n---\nprovider: xai\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "MULTIPLE_DOCS: Source contains multiple documents; please use YAML.parseAllDocuments() (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/empty",
+    "files": {
+      "project/.code-forge.yml": ""
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "config root must be a mapping, got an empty document"
+    }
+  },
+  {
+    "name": "yaml/root-null",
+    "files": {
+      "project/.code-forge.yml": "null"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "config root must be a mapping, got an empty document"
+    }
+  },
+  {
+    "name": "yaml/root-string",
+    "files": {
+      "project/.code-forge.yml": "hello"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "config root must be a mapping, got string"
+    }
+  },
+  {
+    "name": "yaml/root-number",
+    "files": {
+      "project/.code-forge.yml": "42"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "config root must be a mapping, got number"
+    }
+  },
+  {
+    "name": "yaml/root-boolean",
+    "files": {
+      "project/.code-forge.yml": "true"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "config root must be a mapping, got boolean"
+    }
+  },
+  {
+    "name": "yaml/root-list",
+    "files": {
+      "project/.code-forge.yml": "[one, two]"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "config root must be a mapping, got a list"
+    }
+  },
+  {
+    "name": "io/not-found",
+    "files": {},
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "not-found",
+      "message": "no config file at $ROOT/project/.code-forge.yml"
+    }
+  },
+  {
+    "name": "io/directory",
+    "dirs": [
+      "project/.code-forge.yml"
+    ],
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "read-error",
+      "message": "could not read $ROOT/project/.code-forge.yml: EISDIR"
+    }
+  }
+]

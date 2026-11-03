@@ -1,0 +1,450 @@
+[
+  {
+    "name": "defaults/empty-mapping",
+    "files": {
+      "project/.code-forge.yml": "{}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"version\":1}"
+    }
+  },
+  {
+    "name": "defaults/no-insertion",
+    "files": {
+      "project/.code-forge.yml": "provider: openai\nlevels: {}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"levels\":{},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "defaults/anthropic",
+    "files": {
+      "project/.code-forge.yml": "{\"provider\":\"anthropic\",\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"caps\":{\"coders\":2}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"provider\":\"anthropic\",\"version\":1}"
+    }
+  },
+  {
+    "name": "defaults/openai",
+    "files": {
+      "project/.code-forge.yml": "{\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "defaults/xai",
+    "files": {
+      "project/.code-forge.yml": "{\"provider\":\"xai\",\"levels\":{\"L0\":{\"model\":\"grok-4.7\",\"effort\":\"low\"},\"L1\":{\"model\":\"grok-4.7\",\"effort\":\"medium\"},\"L2\":{\"model\":\"grok-4.7\",\"effort\":\"high\"},\"L3\":{\"model\":\"grok-4.7\",\"effort\":\"xhigh\"}},\"caps\":{\"coders\":2}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"grok-4.7\"},\"L1\":{\"effort\":\"medium\",\"model\":\"grok-4.7\"},\"L2\":{\"effort\":\"high\",\"model\":\"grok-4.7\"},\"L3\":{\"effort\":\"xhigh\",\"model\":\"grok-4.7\"}},\"provider\":\"xai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "migrate/missing",
+    "files": {
+      "project/.code-forge.yml": "{\"provider\":\"openai\"}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "migrate/null",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":null}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"version\":1}"
+    }
+  },
+  {
+    "name": "migrate/current",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/string",
+    "files": {
+      "project/.code-forge.yml": "project: {name: \"hello é😀\"}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"project\":{\"name\":\"hello é😀\"},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/integer",
+    "files": {
+      "project/.code-forge.yml": "budget: {block_lines: 42}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"budget\":{\"block_lines\":42},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/number",
+    "files": {
+      "project/.code-forge.yml": "calibration: {shadow_rate: 0.25}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"calibration\":{\"shadow_rate\":0.25},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/boolean",
+    "files": {
+      "project/.code-forge.yml": "native: {daemon: false}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"native\":{\"daemon\":false},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/null",
+    "files": {
+      "project/.code-forge.yml": "tmp: {root: null}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"tmp\":{\"root\":null},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/array",
+    "files": {
+      "project/.code-forge.yml": "production: {names: [one, two]}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"production\":{\"names\":[\"one\",\"two\"]},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/object",
+    "files": {
+      "project/.code-forge.yml": "context: {commands: {test: [node, --test]}}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"context\":{\"commands\":{\"test\":[\"node\",\"--test\"]}},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/unknown-key",
+    "files": {
+      "project/.code-forge.yml": "unknown: true\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"unknown\":true,\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/wrong-type",
+    "files": {
+      "project/.code-forge.yml": "caps: {coders: \"two\"}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"caps\":{\"coders\":\"two\"},\"version\":1}"
+    }
+  },
+  {
+    "name": "schema/schema-violation",
+    "files": {
+      "project/.code-forge.yml": "calibration: {shadow_rate: 2}\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"calibration\":{\"shadow_rate\":2},\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/numbers",
+    "files": {
+      "project/.code-forge.yml": "values: [0, -0, +12, 012, 0o17, 0x1f, 0b11, +0x1f, -0x1f, 1_000, 1.2e+4, 1e-7, 9007199254740993, .nan, .Inf, -.inf, 1e999]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[0,0,12,12,15,31,\"0b11\",\"+0x1f\",\"-0x1f\",\"1_000\",12000,1e-7,9007199254740992,null,null,null,null],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/booleans",
+    "files": {
+      "project/.code-forge.yml": "values: [true, True, TRUE, false, False, FALSE, yes, no, on, off, y, n, tRuE]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[true,true,true,false,false,false,\"yes\",\"no\",\"on\",\"off\",\"y\",\"n\",\"tRuE\"],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/nulls",
+    "files": {
+      "project/.code-forge.yml": "values: [null, Null, NULL, ~, \"null\", \"~\"]\nempty:"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"empty\":null,\"values\":[null,null,null,null,\"null\",\"~\"],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/timestamps",
+    "files": {
+      "project/.code-forge.yml": "values: [2026-01-02, 2026-01-02T03:04:05Z]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[\"2026-01-02\",\"2026-01-02T03:04:05Z\"],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/strings",
+    "files": {
+      "project/.code-forge.yml": "values: [\"12\", 'true', \"\\u00e9😀\\nline\", \"0x10\"]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[\"12\",\"true\",\"é😀\\nline\",\"0x10\"],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/anchors",
+    "files": {
+      "project/.code-forge.yml": "first: &one {model: test, options: [true, null, 2]}\nsecond: *one\nthird: [*one, *one]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"first\":{\"model\":\"test\",\"options\":[true,null,2]},\"second\":{\"model\":\"test\",\"options\":[true,null,2]},\"third\":[{\"model\":\"test\",\"options\":[true,null,2]},{\"model\":\"test\",\"options\":[true,null,2]}],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/merge-is-ordinary-key",
+    "files": {
+      "project/.code-forge.yml": "first: &one {model: test}\nsecond: {<<: *one, other: true}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"first\":{\"model\":\"test\"},\"second\":{\"<<\":{\"model\":\"test\"},\"other\":true},\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/literal",
+    "files": {
+      "project/.code-forge.yml": "project:\n  name: |\n    line one\n    line two\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"project\":{\"name\":\"line one\\nline two\\n\"},\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/folded",
+    "files": {
+      "project/.code-forge.yml": "project:\n  name: >-\n    line one\n    line two\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"project\":{\"name\":\"line one line two\"},\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/crlf",
+    "files": {
+      "project/.code-forge.yml": "project:\r\n  name: hello\r\n"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"project\":{\"name\":\"hello\"},\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/bom",
+    "files": {
+      "project/.code-forge.yml": "﻿provider: openai"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/numeric-keys",
+    "files": {
+      "project/.code-forge.yml": "1: one\n\"1\": overwritten\ntrue: a\n\"true\": b\nnull: c"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"\":\"c\",\"1\":\"overwritten\",\"true\":\"b\",\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/prototype-keys",
+    "files": {
+      "project/.code-forge.yml": "__proto__: {polluted: false}\nconstructor: own\nprototype: own"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"__proto__\":{\"polluted\":false},\"constructor\":\"own\",\"prototype\":\"own\",\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/explicit-tags",
+    "files": {
+      "project/.code-forge.yml": "values: [!!str 12, !!int 012, !!float 1.2, !!bool TRUE, !!null null, !!timestamp 2026-01-02, !!binary SGVsbG8=, !custom 42]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[\"12\",12,1.2,true,null,{},{\"0\":72,\"1\":101,\"2\":108,\"3\":108,\"4\":111},\"42\"],\"version\":1}"
+    }
+  }
+]
