@@ -260,6 +260,63 @@ const lockName = (n) => `${n.toString(16).padStart(64, '0')}.lock`;
 /** @param {number} pid */
 const foreignProbe = (pid) => pid === FOREIGN_PID ? { start: START, ppid: 1 } : null;
 
+test('foreign and vanished atomic temp files are 0 leaks for all three product names in both guarded dirs', () => {
+  const { dirs } = fakeDirs('atomic-foreign-and-vanished');
+  for (const dir of dirs) mkdirSync(path.join(dir, 'logs'));
+  const before = snapshotGuarded(dirs);
+  const vanished = [];
+  for (const dir of dirs) {
+    for (const name of ['breadcrumbs.json', 'errors.jsonl', 'hints.json']) {
+      const file = path.join(dir, 'logs', name);
+      writeFileSync(`${file}.tmp-${FOREIGN_PID}`, '');
+      const gone = `${file}.tmp-${process.pid}`;
+      writeFileSync(gone, '');
+      vanished.push(gone);
+    }
+  }
+  const now = snapshotGuarded(dirs);
+  assert.equal(now.size - before.size, 12, 'exactly six foreign and six soon-to-vanish temp files');
+  for (const file of vanished) rmSync(file);
+  assert.deepEqual(leakedEntries(before, now, dirs, (pid) => pid === FOREIGN_PID
+    ? { start: START, ppid: FOREIGN_PID + 1 }
+    : pid === FOREIGN_PID + 1 ? { start: START, ppid: 1 } : undefined), [],
+  'all 12 atomic temp files are exempt: six outside the suite ancestry and six vanished, even with a suite pid');
+});
+
+test('suite, child, descendant, failed-probe and bad-pid atomic temp files remain exact leaks beside a foreign file', async () => {
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  await once(child, 'exit');
+  const { dirs, home } = fakeDirs('atomic-fail-closed');
+  const logs = path.join(home, 'logs');
+  mkdirSync(logs);
+  const before = snapshotGuarded(dirs);
+  const names = [
+    `suite.json.tmp-${process.pid}`,
+    `child.json.tmp-${child.pid}`,
+    `descendant.json.tmp-${FOREIGN_PID + 1}`,
+    `failed.json.tmp-${FOREIGN_PID + 3}`,
+    `thrown.json.tmp-${FOREIGN_PID + 4}`,
+    `unknown-ancestry.json.tmp-${FOREIGN_PID + 5}`,
+    'bad.json.tmp-not-a-pid',
+    'unsafe.json.tmp-9007199254740993',
+  ];
+  const expected = names.map((name) => path.join(logs, name)).sort();
+  for (const file of expected) writeFileSync(file, '');
+  writeFileSync(path.join(logs, `hints.json.tmp-${FOREIGN_PID}`), '');
+  const now = snapshotGuarded(dirs);
+  assert.equal(now.size - before.size, 9, 'exactly eight unsafe temp files and one verified foreign neighbor');
+  assert.deepEqual(leakedEntries(before, now, dirs, (pid) => {
+    if (pid === FOREIGN_PID + 1) return { start: START, ppid: FOREIGN_PID + 2 };
+    if (pid === FOREIGN_PID + 2) return { start: START, ppid: process.pid };
+    if (pid === FOREIGN_PID + 3) return undefined;
+    if (pid === FOREIGN_PID + 4) throw new Error('ps unavailable');
+    if (pid === FOREIGN_PID + 5) return { start: START, ppid: FOREIGN_PID + 6 };
+    // Even a probe reporting a suite pid as foreign must not override retained ownership.
+    if (pid === process.pid || pid === child.pid) return { start: START, ppid: 1 };
+    return foreignProbe(pid);
+  }), expected, 'exactly eight unsafe temp paths leak; only the verified foreign neighbor is exempt');
+});
+
 // Optional calls keep a missing export on the base an assertion failure, not an import error.
 test('leakedSince ignores a new file under a run whose record was in the baseline: 0 leaks', () => {
   const { dirs, home } = fakeDirs('since-baseline-run');

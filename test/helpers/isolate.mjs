@@ -15,7 +15,7 @@
  *     `HOME`, `TMPDIR` and the cwd at it, and exports it as `CODE_FORGE_TEST_ROOT`;
  *  4. then sweeps stale `code-forge-test-*` roots left by killed runs — their registered children
  *     are reaped (`src/util/reaper.mjs`, start-time checked) and the directories removed;
- *  5. on exit, reaps registered children, fails on new guarded entries except foreign or vanished locks and outside-temp runs with their project ledgers, and removes its root.
+ *  5. on exit, reaps registered children, fails on new guarded entries except foreign or vanished locks/atomic temps and outside-temp runs with their project ledgers, and removes its root.
  *     (`leakedEntries`: new paths of a run already in the baseline are a live run, not a leak.)
  * `src/**` modules are imported dynamically, AFTER `HOME` is pinned, so no `src` module can ever
  * see the real `HOME` from this process.
@@ -139,6 +139,51 @@ function realpathOrRaw(p) {
 }
 
 /**
+ * Prove the entire live ancestry reaches init without touching a retained suite pid.
+ * Missing, invalid or cyclic ancestry cannot establish foreign ownership.
+ * @param {number} pid
+ * @param {ReturnType<ProcessProbe>} current
+ * @param {ProcessProbe} probe
+ * @returns {boolean}
+ */
+function hasForeignAncestry(pid, current, probe) {
+  const seen = new Set();
+  while (pid !== 1) {
+    if (suitePids.has(pid) || seen.has(pid) || current == null
+      || !Number.isInteger(current.ppid) || current.ppid < 1) return false;
+    seen.add(pid);
+    pid = current.ppid;
+    if (pid !== 1) current = probe(pid);
+  }
+  return true;
+}
+
+/**
+ * Atomic writers use `<name>.tmp-<pid>`. Only absence or verified foreign ancestry
+ * exempts a valid name; unreadable entries, bad pids and failed probes stay leaks.
+ * @param {string} p
+ * @param {ProcessProbe} probe
+ * @returns {boolean}
+ */
+function isForeignAtomicTemp(p, probe) {
+  const match = /^.+\.tmp-(\d+)$/.exec(path.basename(p));
+  if (match === null) return false;
+  const pid = Number(match[1]);
+  if (!Number.isSafeInteger(pid) || pid <= 1) return false;
+  try {
+    lstatSync(p);
+  } catch (err) {
+    return /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT';
+  }
+  if (suitePids.has(pid)) return false;
+  try {
+    return hasForeignAncestry(pid, probe(pid), probe);
+  } catch {
+    return false;
+  }
+}
+
+/**
  * Ignore vanished locks and exited outside owners whose starts predate this suite;
  * verify live owners' entire ancestry. Untracked dead descendants remain unverified.
  * Retained suite pids keep dead/reparented children from acquiring a foreign exemption.
@@ -164,17 +209,7 @@ function isForeignLock(p, probe) {
     if (owner === null) return Date.parse(lock.start) < suiteStart;
     if (owner === undefined) return false;
     if (owner.start !== lock.start) return false;
-    const seen = new Set();
-    let pid = lock.pid;
-    let current = owner;
-    while (pid !== 1) {
-      if (suitePids.has(pid) || seen.has(pid) || current == null
-        || !Number.isInteger(current.ppid) || current.ppid < 1) return false;
-      seen.add(pid);
-      pid = current.ppid;
-      if (pid !== 1) current = probe(pid);
-    }
-    return true;
+    return hasForeignAncestry(lock.pid, owner, probe);
   } catch {
     return false;
   }
@@ -225,6 +260,8 @@ function foreignRuns(dir, tempDir) {
  * locks directory containing no leaks. Dead untracked owners need a start before the suite.
  * Existing malformed/unreadable locks, failed probes and unknown owner identity or ancestry
  * fail closed; retained suite pids always remain leaks.
+ * Atomic `<name>.tmp-<pid>` entries are exempt only when vanished or their live ancestry
+ * is verified foreign. Invalid pids, suite owners and failed probes remain leaks.
  * New `runs/<id>`, `runs/<id>.<anything>` and nested paths, plus matching project ledgers, are also exempt when a current record names an absolute workspace outside the raw and resolved real temp dir and TEST_BASE.
  * @param {Iterable<string>} baseline - the snapshot taken at start.
  * @param {Iterable<string>} now - the snapshot taken at exit.
@@ -244,6 +281,7 @@ export function leakedEntries(baseline, now, dirs = GUARDED_DIRS, probe = probeP
     const dir = dirs.find((d) => p.startsWith(d + path.sep));
     if (dir !== undefined && belongsToRun(dir, p, (id) => before.has(path.join(dir, 'runs', `${id}.json`)))) continue;
     if (dir !== undefined) {
+      if (isForeignAtomicTemp(p, probe)) continue;
       let foreign = foreignByDir.get(dir);
       if (foreign === undefined) {
         foreign = foreignRuns(dir, tempDir);
