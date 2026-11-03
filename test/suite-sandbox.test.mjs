@@ -253,15 +253,28 @@ assert.equal(process.env.CODE_FORGE_LEAK_GUARD, 'snapshot');\n`);
 });
 
 test('forced snapshot still fails on exactly one escaped file written by the suite', t => {
-  const f = fixture(t);
-  const leak = path.join(f.guarded[0], 'escaped-write');
-  writeFileSync(f.sample, `import {writeFileSync} from 'node:fs';
-writeFileSync(${JSON.stringify(leak)}, 'escaped');\n`);
-  const result = spawnSync('/bin/sh', [WRAPPER, f.sample], { cwd: REPO,
-    env: { ...f.env, CODE_FORGE_LEAK_GUARD: 'snapshot' }, encoding: 'utf8', timeout: 30000 });
-  assert.equal(result.status, 1, result.stdout + result.stderr);
-  assert.match(result.stderr, /leak guard: snapshot \(forced\)/);
-  assert.ok((result.stdout + result.stderr).includes(`isolate: 1 new entries under the real code-forge dirs:\n${leak}\n`),
-    'the unchanged preload reports exactly the escaped file');
-  assert.equal(readFileSync(leak, 'utf8'), 'escaped', 'snapshot detects the write after it succeeds');
+  for (const escaped of [false, true]) {
+    const f = fixture(t);
+    const leak = path.join(f.guarded[0], 'escaped-write');
+    writeFileSync(f.sample, escaped ? `import {writeFileSync} from 'node:fs';
+writeFileSync(${JSON.stringify(leak)}, 'escaped');\n` : '');
+    const result = spawnSync('/bin/sh', [WRAPPER, f.sample], { cwd: REPO,
+      env: { ...f.env, CODE_FORGE_LEAK_GUARD: 'snapshot' }, encoding: 'utf8', timeout: 30000 });
+    const output = result.stdout + result.stderr;
+    assert.equal(result.status, escaped ? 1 : 0, output);
+    assert.match(result.stderr, /leak guard: snapshot \(forced\)/);
+    // Node 22 can omit the preload's exit-time stderr; the final step still
+    // reports the leaked directories. Check every report, whichever emits it.
+    const reports = [...output.matchAll(/isolate: (\d+) new entries under the real code-forge dirs:\n/g)]
+      .map(match => output.slice(match.index + match[0].length).split('\n')
+        .slice(0, Number(match[1])).map(line => line.replace(/^# /, '')));
+    for (const match of output.matchAll(/suite leaks: directories (\[[^\n]*?\]); leaked pid\/run list/g))
+      reports.push(JSON.parse(match[1]));
+    if (escaped) assert.ok(reports.length > 0, `the escaped write must produce a leak report: ${output}`);
+    for (const reported of reports)
+      assert.deepEqual(reported, escaped ? [leak] : [], 'each leak report names exactly the expected paths');
+    if (escaped)
+      assert.equal(readFileSync(leak, 'utf8'), 'escaped', 'snapshot detects the write after it succeeds');
+    else assert.equal(existsSync(leak), false, 'the clean run creates no escaped file');
+  }
 });
