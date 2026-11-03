@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { execFileSync, spawn } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdirSync, realpathSync, symlinkSync, writeFileSync } from 'node:fs';
+import { mkdirSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { mkdtemp, rm } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
@@ -308,12 +308,28 @@ test('live foreign locks with matching start times are 0 leaks, including a new 
   assert.deepEqual(leakedEntries(baseline, snapshotGuarded(dirs), dirs, foreignProbe), [], 'new and existing locks directories with foreign owners: 0 leaks');
 });
 
-test('dead pid, start mismatch, unknown start, malformed, own pid and descendant locks remain exact leaks', () => {
+test('a lock that vanishes after the exit snapshot is 0 leaks', () => {
+  const { dirs, home } = fakeDirs('vanished-lock');
+  const baseline = snapshotGuarded(dirs);
+  const locks = path.join(home, 'locks');
+  mkdirSync(locks);
+  const lock = path.join(locks, lockName(1));
+  writeFileSync(lock, JSON.stringify({ key: 'outside', pid: FOREIGN_PID, start: START }));
+  const now = snapshotGuarded(dirs);
+  assert.equal(now.size - baseline.size, 2, 'snapshot contains exactly the new locks directory and lock');
+  rmSync(lock);
+  assert.deepEqual(leakedEntries(baseline, now, dirs, foreignProbe), [], 'the vanished lock and its empty directory are 0 leaks');
+});
+
+test('dead outside owners are exempt while dead suite owners and invalid existing locks remain exact leaks', async () => {
   const descendant = FOREIGN_PID + 1;
   const intermediate = FOREIGN_PID + 2;
+  const child = spawn(process.execPath, ['-e', ''], { stdio: 'ignore' });
+  await once(child, 'exit');
   /** @type {Array<{name: string, record?: unknown, raw?: string, filename?: string, directory?: boolean, probe?: (pid: number) => {start: string | null, ppid: number} | null}>} */
   const cases = [
-    { name: 'dead pid', record: { key: 'dead', pid: FOREIGN_PID + 3, start: START } },
+    { name: 'dead suite child', record: { key: 'dead-child', pid: child.pid, start: START } },
+    { name: 'dead suite process', record: { key: 'dead-self', pid: process.pid, start: START } },
     { name: 'start mismatch', record: { key: 'reused', pid: FOREIGN_PID, start: 'Sun Oct 18 08:21:32 2026' } },
     { name: 'unknown live start', probe: (pid) => pid === descendant ? { start: null, ppid: 1 } : foreignProbe(pid) },
     { name: 'unknown recorded start', record: { key: 'unknown', pid: FOREIGN_PID, start: 'unknown' } },
@@ -337,6 +353,7 @@ test('dead pid, start mismatch, unknown start, malformed, own pid and descendant
     const locks = path.join(home, 'locks');
     mkdirSync(locks);
     writeFileSync(path.join(locks, lockName(1)), JSON.stringify({ key: 'allowed neighbor', pid: FOREIGN_PID, start: START }));
+    writeFileSync(path.join(locks, lockName(3)), JSON.stringify({ key: 'dead outside neighbor', pid: FOREIGN_PID + 3, start: START }));
     const bad = path.join(locks, fixture.filename ?? lockName(2));
     if (fixture.directory) mkdirSync(bad);
     else writeFileSync(bad, fixture.raw ?? JSON.stringify(fixture.record ?? { key: 'bad', pid: descendant, start: START }));

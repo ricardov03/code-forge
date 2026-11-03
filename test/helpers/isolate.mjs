@@ -15,19 +15,28 @@
  *     `HOME`, `TMPDIR` and the cwd at it, and exports it as `CODE_FORGE_TEST_ROOT`;
  *  4. then sweeps stale `code-forge-test-*` roots left by killed runs — their registered children
  *     are reaped (`src/util/reaper.mjs`, start-time checked) and the directories removed;
- *  5. on exit, reaps registered children, fails on new guarded entries except verified live foreign locks and outside-temp runs with their project ledgers, and removes its root.
+ *  5. on exit, reaps registered children, fails on new guarded entries except foreign or vanished locks and outside-temp runs with their project ledgers, and removes its root.
  *     (`leakedEntries`: new paths of a run already in the baseline are a live run, not a leak.)
  * `src/**` modules are imported dynamically, AFTER `HOME` is pinned, so no `src` module can ever
  * see the real `HOME` from this process.
  */
 
-import { execFileSync } from 'node:child_process';
+import { ChildProcess, execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// Retain ownership after exit/unregistration: ps can no longer prove a dead child's ancestry.
+// Observe every async child (including exec's registered children) before its spawn listeners.
+const suitePids = new Set([process.pid]);
+const emitChildEvent = ChildProcess.prototype.emit;
+ChildProcess.prototype.emit = function (event, ...args) {
+  if (event === 'spawn' && this.pid !== undefined) suitePids.add(this.pid);
+  return emitChildEvent.call(this, event, ...args);
+};
 
 process.env.CODE_FORGE_REAL_HOME ??= os.homedir();
 process.env.CODE_FORGE_REAL_TMPDIR ??= os.tmpdir();
@@ -112,24 +121,34 @@ function realpathOrRaw(p) {
 }
 
 /**
- * Verify both the owner identity and its entire ancestry before exempting a lock.
+ * Ignore a vanished lock or an exited outside owner; verify live owners' entire ancestry.
+ * Retained suite pids keep dead/reparented children from acquiring a foreign exemption.
  * @param {string} p
  * @param {ProcessProbe} probe
  * @returns {boolean}
  */
 function isForeignLock(p, probe) {
+  let text;
   try {
-    const lock = JSON.parse(readFileSync(p, 'utf8'));
+    text = readFileSync(p, 'utf8');
+  } catch (err) {
+    // Only absence proves there is no longer a lock. Unreadable existing files fail closed.
+    return /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT';
+  }
+  try {
+    const lock = JSON.parse(text);
     if (lock === null || typeof lock !== 'object' || Array.isArray(lock)
       || typeof lock.key !== 'string' || !Number.isInteger(lock.pid) || lock.pid <= 1
       || typeof lock.start !== 'string' || lock.start.trim() === '' || lock.start === 'unknown') return false;
+    if (suitePids.has(lock.pid)) return false;
     const owner = probe(lock.pid);
-    if (owner === null || owner.start !== lock.start) return false;
+    if (owner === null) return true;
+    if (owner.start !== lock.start) return false;
     const seen = new Set();
     let pid = lock.pid;
     let current = owner;
     while (pid !== 1) {
-      if (pid === process.pid || seen.has(pid) || current === null
+      if (suitePids.has(pid) || seen.has(pid) || current === null
         || !Number.isInteger(current.ppid) || current.ppid < 1) return false;
       seen.add(pid);
       pid = current.ppid;
@@ -182,8 +201,9 @@ function foreignRuns(dir, tempDir) {
  * The new paths under the guarded dirs that count as leaks, sorted. A path not in `baseline` is a
  * leak unless it belongs to a run whose record was already in the baseline (a live run of the
  * developer that started before the tests): `runs/<id>`, `runs/<id>.<anything>`, `runs/<id>/…`.
- * Verified live foreign `locks/<sha>.lock` owners are also exempt, as is a new locks directory
- * containing no leaks. Unknown owner identity or ancestry fails closed.
+ * Vanished `locks/<sha>.lock` entries and foreign owners (live or exited) are also exempt, as
+ * is a new locks directory containing no leaks. Existing malformed/unreadable locks and unknown
+ * live owner identity or ancestry fail closed; retained suite pids always remain leaks.
  * New `runs/<id>`, `runs/<id>.<anything>` and nested paths, plus matching project ledgers, are also exempt when a current record names an absolute workspace outside the raw and resolved real temp dir and TEST_BASE.
  * @param {Iterable<string>} baseline - the snapshot taken at start.
  * @param {Iterable<string>} now - the snapshot taken at exit.
