@@ -51,7 +51,7 @@ import { blockTree } from '../proof/worktree.mjs';
 import { blockFileSet, repoRelativePath } from '../review/gate-check.mjs';
 import { ownsFile } from '../state/registry.mjs';
 
-const USAGE =
+export const USAGE =
   'usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]\n' +
   '       code-forge proof export <block> --run <r> [--remove] · proof lock|unlock <block> --run <r>\n' +
   '       code-forge proof restore <block> --run <r>\n' +
@@ -392,3 +392,14 @@ export async function runProof(args, deps = {}) {
 export default async function proof(args) {
   return runProof(args);
 }
+
+export const SUMMARY = "Manage proof tiers, isolated exports, locks, restoration, and red-green evidence.";
+
+export const SUB_USAGE = {
+  "tier": "usage: code-forge proof tier --file <path> --risk <0-3> [--security] [--cwd <dir>]\n",
+  "export": "usage: code-forge proof export <block> --run <r> [--remove]\n",
+  "lock": "usage: code-forge proof lock <block> --run <r>\n",
+  "unlock": "usage: code-forge proof unlock <block> --run <r>\n",
+  "restore": "usage: code-forge proof restore <block> --run <r>\n",
+  "red-green": "usage: code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]\n"
+};

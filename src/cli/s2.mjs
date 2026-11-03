@@ -35,7 +35,7 @@ async function readJSONFlag(file, flag) {
   }
 }
 
-const USAGE = 'usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]\n';
+export const USAGE = 'usage: code-forge s2 --packet <file.json> [--run <id>] [--block <id>] [--timeout <seconds>]\n';
 
 /**
  * @param {string[]} args
@@ -92,3 +92,5 @@ export async function runS2Verb(args, deps = {}) {
 export default async function s2Verb(args) {
   return runS2Verb(args);
 }
+
+export const SUMMARY = "Answer a decision packet using a System 2 session.";

@@ -47,7 +47,7 @@ import { GH_TIMEOUT_MS, findReported, findSecret, ghWithBodyFile, pathLookup } f
 import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { AI_REPORT_MAX_BYTES, applyItems, describeAiCounts, runAiScrub } from '../session/scrub.mjs';
 
-const USAGE =
+export const USAGE =
   'usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n' +
   '       code-forge logs report [--last N] [--kind K] [--verb V] [--note "text"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n';
 
@@ -894,3 +894,12 @@ async function printLink(repo, title, body, fp, home, deps, out, alwaysSave) {
 export default async function logs(args) {
   return runLogs(args);
 }
+
+export const SUMMARY = "Read, summarize, clear, or report local CLI errors.";
+
+export const SUB_USAGE = {
+  "summary": "usage: code-forge logs summary [--days N] [--json]\n",
+  "clear": "usage: code-forge logs clear [--yes]\n",
+  "path": "usage: code-forge logs path\n",
+  "report": "usage: code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n"
+};

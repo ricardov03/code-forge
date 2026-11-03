@@ -118,7 +118,7 @@ export async function sweepIdleWorkers(opts = {}, sweep = sweepProcesses) {
   } });
 }
 
-const HELP = 'usage: code-forge sweep [--apply] [--json]\nDry run by default: list stale workers, dead-run registry children and marked orphans with RSS and total MB.\n--apply stops proven stale processes with SIGTERM, then SIGKILL after a grace period.\nZombies are reported by parent only; neither they nor their parents are signalled. Live engines have no memory limit.\n';
+export const USAGE = 'usage: code-forge sweep [--apply] [--json]\nDry run by default: list stale workers, dead-run registry children and marked orphans with RSS and total MB.\n--apply stops proven stale processes with SIGTERM, then SIGKILL after a grace period.\nZombies are reported by parent only; neither they nor their parents are signalled. Live engines have no memory limit.\n';
 
 /** @param {string[]} args @param {{sweep?:typeof sweepProcesses}} [deps] */
 export default async function runSweep(args, deps = {}) {
@@ -128,10 +128,10 @@ export default async function runSweep(args, deps = {}) {
     if (parsed.positionals.length) throw new Error('unexpected positional argument');
     flags = parsed.flags;
   } catch {
-    writeSafe(process.stderr, HELP);
+    writeSafe(process.stderr, USAGE);
     return 2;
   }
-  if (flags.help) { writeSafe(process.stdout, HELP); return 0; }
+  if (flags.help) { writeSafe(process.stdout, USAGE); return 0; }
   const report = await sweepIdleWorkers({ apply: flags.apply === true }, deps.sweep);
   if (flags.json) writeSafe(process.stdout, `${JSON.stringify(report)}\n`);
   else {
@@ -142,3 +142,5 @@ export default async function runSweep(args, deps = {}) {
   }
   return 0;
 }
+
+export const SUMMARY = "Report stale processes and optionally stop those proven stale.";

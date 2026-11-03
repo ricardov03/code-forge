@@ -39,7 +39,7 @@ import { loadKey, verifyRow } from '../state/signer.mjs';
 import { assertBlockId, mainRootOf, WorkerError } from '../worker/ticket.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
-const USAGE = 'usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]\n';
+export const USAGE = 'usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]\n';
 
 /** @param {unknown} err @returns {string} the fs error's code (or message) for a one-line refusal. */
 const fsCode = (err) => /** @type {NodeJS.ErrnoException} */ (err)?.code ?? (err instanceof Error ? err.message : 'error');
@@ -184,3 +184,7 @@ export async function runContext(args, deps = {}) {
 export default async function context(args) {
   return runContext(args);
 }
+
+export const SUMMARY = "Build a context pack for a block in a run.";
+
+export const SUB_USAGE = { pack: USAGE };

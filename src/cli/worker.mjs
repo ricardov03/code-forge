@@ -12,7 +12,7 @@ import { intFlag, parseFlags } from '../state/cli-args.mjs';
 import { StateError } from '../state/paths.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
-const USAGE = 'usage: code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]\n';
+export const USAGE = 'usage: code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]\n';
 
 /**
  * @param {string[]} args
@@ -74,3 +74,5 @@ export async function runWorker(args, deps = {}) {
 export default async function run(args) {
   return runWorker(args);
 }
+
+export const SUMMARY = "Serve a run's review queue until stopped or drain it once.";

@@ -20,7 +20,7 @@ import { writeSafe } from '../util/redact.mjs';
 import { detectTool, failureReason, installPlan, TOOL_IDS, TOOLS, toolById, toolVersion } from '../install/tools.mjs';
 import { parseFlags } from '../state/cli-args.mjs';
 
-const USAGE = 'usage: code-forge tools [--json] | tools install [<id>...] [--yes] [--dry-run]\n  (install asks one yes, default no; answering no prints "cancelled — nothing installed" and exits 1)\n';
+export const USAGE = 'usage: code-forge tools [--json] | tools install [<id>...] [--yes] [--dry-run]\n  (install asks one yes, default no; answering no prints "cancelled — nothing installed" and exits 1)\n';
 
 /** An install may take a while (npm, brew); a hung one is killed after this. */
 const INSTALL_TIMEOUT_MS = 600_000;
@@ -219,3 +219,9 @@ function printTable(out, table) {
 export default async function tools(args) {
   return runTools(args);
 }
+
+export const SUMMARY = "List detected tools or install selected tools after confirmation.";
+
+export const SUB_USAGE = {
+  "install": "usage: code-forge tools install [<id>...] [--yes] [--dry-run]\n  (install asks one yes, default no; answering no prints \"cancelled — nothing installed\" and exits 1)\n"
+};

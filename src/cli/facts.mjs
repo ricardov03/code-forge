@@ -46,7 +46,7 @@ export function downgradeLine(d) {
   return `facts: ${id} not counted — ${reason}\n`;
 }
 
-const USAGE = 'usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]\n';
+export const USAGE = 'usage: code-forge facts --brief <file> [--sources <path>...] [--out <file>] [--run <id>] [--timeout <seconds>]\n';
 
 /**
  * @param {string[]} args
@@ -138,3 +138,5 @@ export async function runFactsVerb(args, deps = {}) {
 export default async function factsVerb(args) {
   return runFactsVerb(args);
 }
+
+export const SUMMARY = "Build and validate a facts sheet from a brief and project sources.";

@@ -65,7 +65,7 @@ import { exec } from '../util/exec.mjs';
 import { writeSafe } from '../util/redact.mjs';
 import { gitChildEnv } from '../worker/ticket.mjs';
 
-const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
+export const USAGE = 'usage: code-forge status [--run <id>] [--json]\n';
 
 /** The hard cap on text lines per run. */
 const STATUS_MAX_LINES = 10;
@@ -100,6 +100,8 @@ async function realOr(p) {
     return path.resolve(p);
   }
 }
+
+export const SUMMARY = "Show active runs, block progress, review gates, and spend.";
 
 /** Recover timeout reasons from the last gate run, including older rows without timed_out.
  * @param {RunStatus} summary @param {Array<Record<string, any>> | null} rows

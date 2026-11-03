@@ -129,3 +129,7 @@ export default async function models(args) {
   }
   return 0;
 }
+
+export const USAGE = "usage: code-forge models [--refresh --from-cli-caches]\n";
+
+export const SUMMARY = "List provider model catalogs and optionally refresh them from local CLI caches.";

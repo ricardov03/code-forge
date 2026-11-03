@@ -76,9 +76,10 @@ export async function applyTmpRoot({ env = process.env, cwd = process.cwd() } = 
 
 /**
  * @param {string[]} argv - e.g. `process.argv.slice(2)`.
+ * @param {{configureTmpRoot?: boolean}} [options]
  * @returns {Promise<number>} the process exit code.
  */
-export async function run(argv) {
+export async function run(argv, { configureTmpRoot = false } = {}) {
   const [first, ...rest] = argv;
   const verbs = await listVerbs();
 
@@ -97,6 +98,22 @@ export async function run(argv) {
   }
 
   const modulePath = path.join(CLI_DIR, `${verb}.mjs`);
+
+  // Help is metadata only: return before config, breadcrumbs, error logging, or handlers.
+  // block also accepts help anywhere after its subcommand; retain that precedence and text.
+  const helpRequested = HELP_ALIASES.has(rest[0]) || HELP_ALIASES.has(rest[1]) ||
+    (verb === 'block' && rest.slice(1).some((arg) => HELP_ALIASES.has(arg)));
+  if (helpRequested) {
+    const mod = await import(pathToFileURL(modulePath).href);
+    const usage = HELP_ALIASES.has(rest[0]) ? mod.USAGE :
+      (Object.hasOwn(mod.SUB_USAGE ?? {}, rest[0]) ? mod.SUB_USAGE[rest[0]] : undefined);
+    if (typeof usage === 'string') {
+      process.stdout.write(usage.endsWith('\n') ? usage : `${usage}\n`);
+      return 0;
+    }
+  }
+
+  if (configureTmpRoot) await applyTmpRoot();
 
   // B37: the verb and its known subcommand word (never a flag or a value) join the last-5 list in
   // `~/.code-forge/logs/breadcrumbs.json`; an error logged below names the commands before it.
@@ -192,7 +209,6 @@ function computeIsMain() {
 
 const isMain = computeIsMain();
 if (isMain) {
-  await applyTmpRoot();
-  const code = await run(process.argv.slice(2));
+  const code = await run(process.argv.slice(2), { configureTmpRoot: true });
   process.exitCode = code;
 }

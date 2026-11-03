@@ -12,3 +12,7 @@ import { runInit } from '../install/wizard/run.mjs';
 export default async function init(args) {
   return runInit(args);
 }
+
+export { USAGE } from '../install/wizard/run.mjs';
+
+export const SUMMARY = "Configure a project and install the skill for selected harnesses.";
