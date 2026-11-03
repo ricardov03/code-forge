@@ -106,20 +106,21 @@ func fixture(t *testing.T, c configCase) (string, string) {
 
 func checkLoad(t *testing.T, c configCase, root, cwd string) {
 	t.Helper()
+	data, readErr := os.ReadFile("../../package.json")
+	if readErr != nil {
+		t.Fatal(readErr)
+	}
+	var pkg struct{ Version string }
+	if err := json.Unmarshal(data, &pkg); err != nil {
+		t.Fatal(err)
+	}
+	c.Expected.Message = strings.ReplaceAll(c.Expected.Message, "{{version}}", pkg.Version)
 	var value any
 	var err error
 	switch c.Operation {
 	case "defaults":
 		value = DefaultsForProvider(c.Provider)
 	case "schema":
-		data, readErr := os.ReadFile("../../package.json")
-		if readErr != nil {
-			t.Fatal(readErr)
-		}
-		var pkg struct{ Version string }
-		if err := json.Unmarshal(data, &pkg); err != nil {
-			t.Fatal(err)
-		}
 		value, err = LoadValidated(cwd, pkg.Version)
 	case "refresh":
 		home := filepath.Join(root, c.Home)

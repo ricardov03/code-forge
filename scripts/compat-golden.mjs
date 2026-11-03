@@ -40,6 +40,7 @@ function configJSONValue(value) {
 
 export async function buildConfigGoldens() {
   const repo = fileURLToPath(new URL('../', import.meta.url));
+  const { version } = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8'));
   /** @type {ConfigCase[]} */
   const inputs = [];
   const yaml = (name, text) => inputs.push({ name, files: { 'project/.code-forge.yml': text } });
@@ -250,6 +251,8 @@ export async function buildConfigGoldens() {
           ? { ok: true, path: normalize(result.path), canonical: canonicalJSON(configJSONValue(result.config)) }
           : { ok: false, path: normalize(result.path), error: result.error, message: normalize(result.message) };
       }
+      // Package releases must not change golden messages; readers expand this token before comparing.
+      if (expected.message) expected.message = expected.message.replaceAll(version, '{{version}}');
       const group = input.group ?? (expected.ok ? 'valid' : 'error');
       const entry = { ...input, group, home, cwd, expected, ...(group === 'root' ? { root: normalize(projectRootFor(path.join(root, cwd))) } : {}) };
       groups[input.operation ? 'operations.json' : group === 'root' ? 'roots.json' : index < fixtureCount ? 'fixtures.json' : expected.ok ? 'valid.json' : 'errors.json'].push(entry);

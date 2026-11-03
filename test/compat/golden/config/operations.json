@@ -324,7 +324,7 @@
     "expected": {
       "ok": false,
       "error": "schema",
-      "message": "(root) must NOT have additional property \"unknown\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge 0.16.3)"
+      "message": "(root) must NOT have additional property \"unknown\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge {{version}})"
     }
   },
   {
@@ -339,7 +339,7 @@
     "expected": {
       "ok": false,
       "error": "schema",
-      "message": "/caps must NOT have additional property \"nope\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge 0.16.3)"
+      "message": "/caps must NOT have additional property \"nope\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge {{version}})"
     }
   },
   {
@@ -669,7 +669,7 @@
     "expected": {
       "ok": false,
       "error": "schema",
-      "message": "/proof/runners/0/env must NOT have additional property \"bad-key\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge 0.16.3)"
+      "message": "/proof/runners/0/env must NOT have additional property \"bad-key\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge {{version}})"
     }
   },
   {
