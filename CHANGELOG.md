@@ -26,6 +26,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The test leak check ignores short-lived lock files and live-run control writes made by other code-forge runs on the same machine, fails closed when a process probe errors, and tracks children started with spawnSync/execFileSync, so gates no longer fail on false leaks (B246)
 - The leak check ignores atomic temp files of other processes and temp files that vanish during the scan (B250)
 - The leak check now sees that a lock file belongs to another live code-forge run on days 1-9 of a month (`ps` pads the date with two spaces), and retries a busy process check before it reports a leak (B258)
+- The Go config goldens no longer hold the package version, so a version bump in `npm run release` no longer fails its own test step (B262)
 
 ## [0.16.3] — 2026-11-02
 
