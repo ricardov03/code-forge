@@ -70,6 +70,11 @@ const FAKE = [process.execPath, '--input-type=module', '-e', `
   }
   if (mode === 'binary') fs.writeFileSync(path.join(home, 'bytes.bin'), Buffer.from([0, 255, 2]));
   if (mode === 'json-marker') fs.writeFileSync(path.join(home, 'fixture.done'), JSON.stringify({ value: 2 }));
+  if (mode === 'invalid-utf8') {
+    const bytes = Buffer.from(out), at = bytes.indexOf(Buffer.from('�'));
+    if (at < 0) throw new Error('missing Unicode output fixture');
+    out = Buffer.concat([bytes.subarray(0, at), Buffer.from([255]), bytes.subarray(at + 3)]);
+  }
   process.stdout.write(out); process.stderr.write(err); process.exitCode = code;
 `];
 
@@ -105,6 +110,17 @@ test('clause 1 boundary: stderr, binary state and missing nested dotfiles retain
   try {
     assert.deepEqual(await check('json-marker'), { equal: false, diffs: [{ where: 'home/.code-forge/fixture.done', field: '$.value', node: 1, go: 2 }] }, 'JSON markers without a .json suffix still report individual fields');
   } finally { await rm(marker); }
+  const record = path.join(fixture.home, '.code-forge', 'runs', `${fixture.runId}.json`);
+  const saved = await readFile(record), unicode = JSON.parse(saved.toString('utf8'));
+  unicode.blocks.B1.acceptance[0].clause = 'Unicode �';
+  await writeFile(record, JSON.stringify(unicode));
+  try {
+    const changed = await check('invalid-utf8', ['run', 'status', '--run', fixture.runId]);
+    assert.equal(changed.equal, false, 'a malformed byte must not compare equal to a literal Unicode replacement character');
+    assert.deepEqual(locations(changed), [['process', 'stdout']], 'exactly one stdout byte-sequence difference');
+    const bytes = Buffer.from(changed.diffs[0].node), at = bytes.indexOf(Buffer.from('�'));
+    assert.equal(changed.diffs[0].go, Buffer.concat([bytes.subarray(0, at), Buffer.from([255]), bytes.subarray(at + 3)]).toString('hex'), 'invalid UTF-8 is reported losslessly as hex');
+  } finally { await writeFile(record, saved); }
 });
 
 test('clause 2: only volatile fields normalize and otherwise equal, verified rows can have different signatures', async () => {

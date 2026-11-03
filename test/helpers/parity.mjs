@@ -15,7 +15,7 @@ const CLI = fileURLToPath(new URL('../../bin/code-forge.mjs', import.meta.url));
 /** Run argv without a shell; a signal and a spawn failure must never count as success.
  * @param {string | string[]} command @param {string[]} args @param {string} cwd
  * @param {NodeJS.ProcessEnv} env @param {string | Buffer} [stdin]
- * @returns {Promise<{code: number | null, signal: string | null, stdout: string, stderr: string}>}
+ * @returns {Promise<{code: number | null, signal: string | null, stdout: string | Buffer, stderr: string | Buffer}>}
  */
 function execute(command, args, cwd, env, stdin = '') {
   return new Promise((resolve, reject) => {
@@ -26,7 +26,13 @@ function execute(command, args, cwd, env, stdin = '') {
     child.stderr.on('data', (chunk) => stderr.push(chunk));
     child.on('error', reject);
     child.stdin.on('error', (err) => { if (/** @type {NodeJS.ErrnoException} */ (err).code !== 'EPIPE') reject(err); });
-    child.on('close', (code, signal) => resolve({ code, signal, stdout: Buffer.concat(stdout).toString('utf8'), stderr: Buffer.concat(stderr).toString('utf8') }));
+    child.on('close', (code, signal) => {
+      const [out, err] = [stdout, stderr].map((chunks) => {
+        const bytes = Buffer.concat(chunks), text = bytes.toString('utf8');
+        return Buffer.from(text).equals(bytes) ? text : bytes;
+      });
+      resolve({ code, signal, stdout: out, stderr: err });
+    });
     child.stdin.end(stdin);
   });
 }
@@ -62,7 +68,7 @@ export async function makeParityFixture({ env = {} } = {}) {
     await checked('git', ['add', '.']);
     await checked('git', ['-c', 'user.name=Parity Fixture', '-c', 'user.email=parity@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture']);
     const started = await checked([process.execPath, CLI], ['run', 'start', '--worker-pid', String(process.pid)]);
-    const runId = /^run (\S+) started/m.exec(started.stdout)?.[1];
+    const runId = /^run (\S+) started/m.exec(String(started.stdout))?.[1];
     if (!runId) throw new Error(`fixture run id missing: ${started.stdout}`);
     await checked([process.execPath, CLI], ['block', 'open', 'B1', '--run', runId, '--level', 'L1', '--owned', 'sample.mjs', '--acceptance', 'acceptance.json']);
     announceWorker(repo, { pid: process.pid, run: runId });
@@ -175,7 +181,11 @@ function normalize(value, copy, field = '') {
   if (Buffer.isBuffer(value)) {
     const text = value.toString('utf8');
     // Invalid UTF-8 must not collapse distinct binary files to replacement characters.
-    return Buffer.from(text).equals(value) ? Buffer.from(normalizeText(text, copy)) : value;
+    if (Buffer.from(text).equals(value)) return Buffer.from(normalizeText(text, copy));
+    // Latin-1 is a reversible byte mapping. Normalize the same ASCII volatile values while
+    // keeping malformed bytes intact, including any UTF-8 bytes in the copy's path names.
+    const byteCopy = { repo: Buffer.from(copy.repo).toString('latin1'), home: Buffer.from(copy.home).toString('latin1') };
+    return Buffer.from(normalizeText(value.toString('latin1'), byteCopy), 'latin1');
   }
   if (typeof value === 'string') return normalizeText(value, copy);
   if (typeof value === 'number' && Number.isFinite(value)) {
