@@ -103,7 +103,10 @@ function resolveGates(cwd, configured) {
  */
 async function configuredGates(cwd) {
   const loaded = await loadProjectConfig(cwd);
-  return loaded.ok && loaded.config?.gates && typeof loaded.config.gates === 'object' ? loaded.config.gates : null;
+  const config = loaded.ok ? loaded.config : null;
+  if (!config?.gates || typeof config.gates !== 'object') return null;
+  const rerunFailed = config.gates.rerun_failed;
+  return { ...config.gates, rerun_failed: rerunFailed === undefined ? 1 : rerunFailed };
 }
 
 /**

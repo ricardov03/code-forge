@@ -34,6 +34,14 @@ type configCase struct {
 	}
 }
 
+func TestRerunFailedDefault(t *testing.T) {
+	gates := object(object(projectSchema.get("properties")).get("gates"))
+	rerun := object(object(gates.get("properties")).get("rerun_failed"))
+	if got := rerun.get("default"); got != float64(1) {
+		t.Fatalf("embedded gates.rerun_failed default = %v, want 1", got)
+	}
+}
+
 func cases(t *testing.T, group string) []configCase {
 	t.Helper()
 	files, err := filepath.Glob("../../test/compat/golden/config/*.json")

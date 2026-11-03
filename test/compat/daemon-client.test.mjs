@@ -191,13 +191,24 @@ test('live daemon gives byte-identical wait and status payloads without client l
     started_at: '2026-01-01T00:00:01Z', finished_at: '2026-01-01T00:00:02Z', duration_ms: 1000,
   } });
   const done = await f.wait();
+  for (const row of [
+    { event: 'gate.done', run: f.run, block: 'B1', all_ok: true, flaky: ['z.test.mjs', 'a.test.mjs'] },
+    { event: 'gate.done', run: f.run, block: 'B1', all_ok: true, flaky: ['a.test.mjs'] },
+    { event: 'gate.done', run: f.run, block: 'B1', all_ok: true },
+    { event: 'gate.done', run: 'r-other', block: 'B1', all_ok: true, flaky: ['other.test.mjs'] },
+    { event: 'gate.red', run: f.run, block: 'B1', gate: 'test', reason: 'timeout' },
+    { event: 'gate.done', run: f.run, block: 'B1', all_ok: false },
+  ]) await ledger.appendRow(row, { slug: 'daemon-client-test' });
   ledgerReads = 0;
   const json = await f.show();
   assert.ok(ledgerReads > 0, 'Node-only JSON status exercises the client ledger reader');
+  assert.deepEqual(JSON.parse(json).runs[0].flaky, ['a.test.mjs', 'z.test.mjs'], 'flaky files survive clean gates, deduplicate, sort and stay scoped to the run');
+  assert.equal(JSON.parse(json).runs[0].blocks[0].gate.result, 'timeout');
   assert.equal(json, `${JSON.stringify({ runs: [await statusOf(await readRun(f.run))] })}\n`, 'JSON contains exactly the Node run summary, without daemon metadata');
   ledgerReads = 0;
   const text = await f.show(false);
   assert.ok(ledgerReads > 0, 'Node-only human status exercises the client ledger reader');
+  assert.match(text, /flaky: a\.test\.mjs, z\.test\.mjs\n/);
   assert.doesNotMatch(text, /native daemon:/);
   assert.equal(await f.doctor(), 'off');
   delete process.env.CODE_FORGE_NATIVE;

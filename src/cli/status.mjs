@@ -182,6 +182,7 @@ function daemonStatus(s) {
     })),
     more: s.more, closed: s.closed, stopped: s.stopped,
     ...(s.awaiting_human_check ? { awaiting_human_check: s.awaiting_human_check } : {}),
+    ...(s.flaky?.length ? { flaky: s.flaky } : {}),
   };
 }
 
@@ -286,9 +287,6 @@ export default async function status(args) {
       const answer = await daemonRequest(String(record.run_id), { method: 'status' }, { config });
       let summary;
       try { summary = answer ? daemonStatus(answer.runs[0]) : null; } catch { summary = null; }
-      if (summary) {
-        summary = timeoutStatus(summary, await readAllRows(record.project).catch(() => null));
-      }
       shown.push(summary ?? await statusOf(record));
       hints.push(json ? null : await runEndHint(record));
       for (const warning of await unpinnedWorkerWarnings(record)) err(`${warning}\n`);
