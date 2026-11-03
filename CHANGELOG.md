@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- CI also runs on a push to a `ci-check-*` branch and by hand (`workflow_dispatch`), so the pre-release check really runs before main moves (B239)
+
 ## [0.16.2] — 2026-11-02
 
 ### Added
