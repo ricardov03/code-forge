@@ -3,56 +3,17 @@
 This page follows one feature from a written brief to a closed block. The skill runs these steps
 for you; every step is also a plain CLI verb you can run and inspect by hand.
 
-## Native daemon
+The steps are:
 
-When the optional native binary is installed, the review worker starts one Go daemon for its
-run and stops the daemon it started when it exits. The private `native.sock` Unix socket serves
-block waits and status from cached ledger and queue data, avoiding repeated reads in Node
-clients. Another worker can share an existing daemon. A missing, crashed or incompatible daemon
-automatically falls back to Node with the same answers. `doctor` shows `native daemon`:
-`live`, `off` or `fallback`. Both text and JSON `status` output are byte-identical on the daemon and Node paths.
+1. Check the brief, write the plan and answer its open questions.
+2. Approve the plan and start a run.
+3. Open blocks, write code and review each file.
+4. Run the proof and gates, close the blocks and read the report.
 
-Set `CODE_FORGE_NATIVE=0` or `native.daemon: false` in the project config to use Node only.
-The config switch takes effect for workers at startup; clients use the run's current snapshot.
+See [Step by step](step-by-step.md) for a guided walkthrough.
 
-Every `block <verb>` accepts `--help` or `-h`, prints that verb's usage and exits 0 without
-reading run state, prompting or writing anything, even when other required arguments are absent.
-
-For `block open` and `block amend-acceptance`, `--acceptance <file>` reads a JSON/YAML list of
-`{clause, tests}` objects. `tests` is a nonempty list of test ids, for example:
-
-```yaml
-- clause: The command prints its usage and exits successfully
-  tests: [test/cli/verb-help.test.mjs]
-```
-
-The equivalent JSON is `[{"clause":"The command prints its usage and exits successfully","tests":["test/cli/verb-help.test.mjs"]}]`.
-Device checks may instead use `{clause, kind: human_check}` without `tests`.
-For `block open`, `--brief <file>` must name a file inside the repository; it cannot be inline
-brief text or a file outside the repo.
-
-The human can correct an open block's snapshotted clauses with `code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>`. Both terminals and confirmation are required; there is no `--yes`, and an active autopilot grant refuses it. The file follows the same rules as `block open`; invalid or unchanged lists write nothing. One signed `block.acceptance_amended` row records the old and new hashes and the reason. Earlier reviews no longer count, and the next review request or watch tick reviews the new clauses. Coders never run this verb.
-
-UI acceptance may include `kind: human_check` clauses without tests, recorded as `human_checks`. After all code gates pass, `block close` leaves such a block `awaiting_human_check`, prints every check and the next command, and delays its done signal. Status and report list the waiting ids, and `run end` refuses until the human checks the device and types `code-forge block human-pass <id> --run <r> --note "<device check note>" [--proof <existing-path>]` in a terminal, or stops the block. The note is required; `--proof` is optional, and when it is given the path must exist. When omitted, the row records `proof: null`. Human pass records a signed human row and closes it; there is no `--yes`, and an active autopilot grant refuses the verb.
-
-For design first, give the design block an acceptance clause such as `{clause: "Owner approves the design", kind: human_check}`. Open it, finish its work and pass its code gates, then close it. The owner approves in their terminal before code blocks open:
-
-```sh
-code-forge block open DESIGN --run <r> --level L1 --kind docs --owned docs/design.md --acceptance design.acc.yml
-# Finish the design and pass its code gates, then:
-code-forge block close DESIGN --run <r>
-# The owner checks the design and runs this in their terminal:
-code-forge block human-pass DESIGN --run <r> --note "Design approved"
-code-forge block open CODE --run <r> --level L2 --owned src/feature.mjs --acceptance code.acc.yml --after DESIGN
-```
-
-`--after <id> [<id> ...]` requires every named block in the same run to be `closed`. Under the run lock, open refuses with `after-not-done`, naming every blocker and its status (`open`, `awaiting_human_check`, `stopped`, or `not in run`), and creates no rows or worktree. With `--json`, it also prints `{block, event: "refused", code: "after-not-done", message}`. Naming the new block itself refuses with `bad-after`; duplicate ids are removed. The entry and `dispatch` row record `after: [ids]` only when supplied. A later attempt checks dependencies again only if that call supplies `--after`.
-
-`--after-outcome <step> [<step> ...]` waits for pipeline step outcomes in the run's project root (the main checkout, never the block worktree). Each outcome must exist, have status `approved`, and pass `outcome check`. The flag is repeatable; duplicate step ids are removed. Missing or invalid pipelines and unknown step ids refuse with `bad-after-outcome`; an outcome that is not ready refuses with `outcome-not-ready`, naming the step and first problem. Both refusals exit 1 and create no rows or worktree. With `--json`, stdout is `{block, event: "refused", code, message}`. On success, the entry and `dispatch` row record `after_outcome: [{step, sha256}]`, hashing the accepted outcome file's bytes. With both dependency flags, `--after` is checked first and both must pass. See [pipelines.md](pipelines.md) for an example.
-
-Small changes can use `block open <id> --kind light`. A light block may change at most `light.max_files` owned files (default 5) and `light.max_lines` added plus removed lines (default 300). Its reviews go in one batch, and its gate runs only the block tests (`{test_files}` in the test command). If close refuses with `light-limits`, stop the attempt and open the same id again with `--kind code --attempt <n+1>`.
-
-Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
+The optional Go daemon serves status and block waits; Node takes over if it is unavailable.
+See [Go engine: native daemon](native-engine.md#native-daemon) for its settings and checks.
 
 ## The workflow at a glance
 
@@ -145,6 +106,51 @@ go to stderr and print only when the block closes; a refused close prints none o
 refuses `coder report FAILED: no review-file ticket id for <files>` only when, under `--report`, a
 file the review gate accepts has no reviewed line from the close and no hand line for it in the
 report.
+
+### Block help
+
+Every `block <verb>` accepts `--help` or `-h`, prints that verb's usage and exits 0 without
+reading run state, prompting or writing anything, even when other required arguments are absent.
+
+### Block acceptance and dependencies
+
+For `block open` and `block amend-acceptance`, `--acceptance <file>` reads a JSON/YAML list of
+`{clause, tests}` objects. `tests` is a nonempty list of test ids, for example:
+
+```yaml
+- clause: The command prints its usage and exits successfully
+  tests: [test/cli/verb-help.test.mjs]
+```
+
+The equivalent JSON is `[{"clause":"The command prints its usage and exits successfully","tests":["test/cli/verb-help.test.mjs"]}]`.
+Device checks may instead use `{clause, kind: human_check}` without `tests`.
+For `block open`, `--brief <file>` must name a file inside the repository; it cannot be inline
+brief text or a file outside the repo.
+
+The human can correct an open block's snapshotted clauses with `code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>`. Both terminals and confirmation are required; there is no `--yes`, and an active autopilot grant refuses it. The file follows the same rules as `block open`; invalid or unchanged lists write nothing. One signed `block.acceptance_amended` row records the old and new hashes and the reason. Earlier reviews no longer count, and the next review request or watch tick reviews the new clauses. Coders never run this verb.
+
+UI acceptance may include `kind: human_check` clauses without tests, recorded as `human_checks`. After all code gates pass, `block close` leaves such a block `awaiting_human_check`, prints every check and the next command, and delays its done signal. Status and report list the waiting ids, and `run end` refuses until the human checks the device and types `code-forge block human-pass <id> --run <r> --note "<device check note>" [--proof <existing-path>]` in a terminal, or stops the block. The note is required; `--proof` is optional, and when it is given the path must exist. When omitted, the row records `proof: null`. Human pass records a signed human row and closes it; there is no `--yes`, and an active autopilot grant refuses the verb.
+
+For design first, give the design block an acceptance clause such as `{clause: "Owner approves the design", kind: human_check}`. Open it, finish its work and pass its code gates, then close it. The owner approves in their terminal before code blocks open:
+
+```sh
+code-forge block open DESIGN --run <r> --level L1 --kind docs --owned docs/design.md --acceptance design.acc.yml
+# Finish the design and pass its code gates, then:
+code-forge block close DESIGN --run <r>
+# The owner checks the design and runs this in their terminal:
+code-forge block human-pass DESIGN --run <r> --note "Design approved"
+code-forge block open CODE --run <r> --level L2 --owned src/feature.mjs --acceptance code.acc.yml --after DESIGN
+```
+
+`--after <id> [<id> ...]` requires every named block in the same run to be `closed`. Under the run lock, open refuses with `after-not-done`, naming every blocker and its status (`open`, `awaiting_human_check`, `stopped`, or `not in run`), and creates no rows or worktree. With `--json`, it also prints `{block, event: "refused", code: "after-not-done", message}`. Naming the new block itself refuses with `bad-after`; duplicate ids are removed. The entry and `dispatch` row record `after: [ids]` only when supplied. A later attempt checks dependencies again only if that call supplies `--after`.
+
+`--after-outcome <step> [<step> ...]` waits for pipeline step outcomes in the run's project root (the main checkout, never the block worktree). Each outcome must exist, have status `approved`, and pass `outcome check`. The flag is repeatable; duplicate step ids are removed. Missing or invalid pipelines and unknown step ids refuse with `bad-after-outcome`; an outcome that is not ready refuses with `outcome-not-ready`, naming the step and first problem. Both refusals exit 1 and create no rows or worktree. With `--json`, stdout is `{block, event: "refused", code, message}`. On success, the entry and `dispatch` row record `after_outcome: [{step, sha256}]`, hashing the accepted outcome file's bytes. With both dependency flags, `--after` is checked first and both must pass. See [pipelines.md](pipelines.md) for an example.
+
+### Small blocks and proof
+
+Small changes can use `block open <id> --kind light`. A light block may change at most `light.max_files` owned files (default 5) and `light.max_lines` added plus removed lines (default 300). Its reviews go in one batch, and its gate runs only the block tests (`{test_files}` in the test command). If close refuses with `light-limits`, stop the attempt and open the same id again with `--kind code --attempt <n+1>`.
+
+Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
 
 ### Checking progress
 
