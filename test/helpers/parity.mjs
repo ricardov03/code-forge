@@ -88,12 +88,14 @@ async function stateFiles(fixture) {
   return files;
 }
 
-/** Parse only JSON/JSONL; other files are compared byte for byte. */
+/** JSON markers also use suffixes such as .done. Keys and non-JSON stay byte comparisons. */
 function decode(name, bytes) {
+  if (name.endsWith('.key')) return bytes;
   const text = bytes.toString('utf8');
+  if (!Buffer.from(text).equals(bytes)) return bytes;
   try {
-    if (name.endsWith('.json')) return JSON.parse(text);
     if (name.endsWith('.jsonl')) return text.trimEnd().split('\n').filter((line) => line.trim()).map((line) => JSON.parse(line));
+    return JSON.parse(text);
   } catch { /* malformed state is still compared, as raw bytes */ }
   return bytes;
 }

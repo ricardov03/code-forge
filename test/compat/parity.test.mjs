@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, writeFile } from 'node:fs/promises';
+import { readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -69,6 +69,7 @@ const FAKE = [process.execPath, '--input-type=module', '-e', `
     fs.writeFileSync(file, JSON.stringify(p));
   }
   if (mode === 'binary') fs.writeFileSync(path.join(home, 'bytes.bin'), Buffer.from([0, 255, 2]));
+  if (mode === 'json-marker') fs.writeFileSync(path.join(home, 'fixture.done'), JSON.stringify({ value: 2 }));
   process.stdout.write(out); process.stderr.write(err); process.exitCode = code;
 `];
 
@@ -95,11 +96,15 @@ test('clause 1 boundary: stderr, binary state and missing nested dotfiles retain
   try {
     assert.deepEqual(await check('binary'), { equal: false, diffs: [{ where: 'home/.code-forge/bytes.bin', field: '$', node: '00ff01', go: '00ff02' }] }, 'binary bytes are compared without lossy UTF-8 decoding');
   } finally {
-    const { rm } = await import('node:fs/promises');
     await rm(path.join(fixture.home, '.code-forge', 'bytes.bin'));
   }
   assert.deepEqual(await check('extra'), { equal: false, diffs: [{ where: 'repo/.code-forge/nested/.extra', field: '$file', node: undefined, go: 'present' }] }, 'one extra nested dotfile');
   assert.deepEqual(await check('clock-file'), { equal: false, diffs: [{ where: 'home/.code-forge/runs/<clock-run>.json', field: '$file', node: undefined, go: 'present' }] }, 'normalizing a clock-based filename must not hide a second state file');
+  const marker = path.join(fixture.home, '.code-forge', 'fixture.done');
+  await writeFile(marker, JSON.stringify({ value: 1 }));
+  try {
+    assert.deepEqual(await check('json-marker'), { equal: false, diffs: [{ where: 'home/.code-forge/fixture.done', field: '$.value', node: 1, go: 2 }] }, 'JSON markers without a .json suffix still report individual fields');
+  } finally { await rm(marker); }
 });
 
 test('clause 2: only volatile fields normalize and otherwise equal, verified rows can have different signatures', async () => {
@@ -108,7 +113,6 @@ test('clause 2: only volatile fields normalize and otherwise equal, verified row
   try {
     assert.deepEqual(await check('volatile'), { equal: true, diffs: [] }, 'timestamps, both duration conventions, nested pid, clock run id and verified MACs yield zero differences');
   } finally {
-    const { rm } = await import('node:fs/promises');
     await rm(file);
   }
 });
@@ -130,7 +134,6 @@ test('clause 2 boundary: semantic fields, missing fields, unsigned and semantica
       { field: '$.timestamp', node: 'invalid-date-1', go: 'invalid-date-2' },
     ].map((diff) => ({ where: 'home/.code-forge/boundary.json', ...diff })), 'exactly eight semantic field differences, with both values');
   } finally {
-    const { rm } = await import('node:fs/promises');
     await rm(file);
   }
   const invalid = await check('invalid');
