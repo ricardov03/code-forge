@@ -15,19 +15,42 @@
  *     `HOME`, `TMPDIR` and the cwd at it, and exports it as `CODE_FORGE_TEST_ROOT`;
  *  4. then sweeps stale `code-forge-test-*` roots left by killed runs — their registered children
  *     are reaped (`src/util/reaper.mjs`, start-time checked) and the directories removed;
- *  5. on exit, reaps registered children, fails on new guarded entries except verified live foreign locks and outside-temp runs with their project ledgers, and removes its root.
+ *  5. on exit, reaps registered children, fails on new guarded entries except foreign or vanished locks and outside-temp runs with their project ledgers, and removes its root.
  *     (`leakedEntries`: new paths of a run already in the baseline are a live run, not a leak.)
  * `src/**` modules are imported dynamically, AFTER `HOME` is pinned, so no `src` module can ever
  * see the real `HOME` from this process.
  */
 
-import { execFileSync } from 'node:child_process';
+import { ChildProcess, execFileSync } from 'node:child_process';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, realpathSync, rmSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..', '..');
+
+// ps start times have second precision. Owners from this same second remain unverified.
+const suiteStart = Math.floor((Date.now() - process.uptime() * 1000) / 1000) * 1000;
+
+// Retain ownership after exit/unregistration: ps can no longer prove a dead child's ancestry.
+// Observe every async child (including exec's registered children) before its spawn listeners.
+const suitePids = new Set([process.pid]);
+const emitChildEvent = ChildProcess.prototype.emit;
+ChildProcess.prototype.emit = function (event, ...args) {
+  if (event === 'spawn' && this.pid !== undefined) suitePids.add(this.pid);
+  return emitChildEvent.call(this, event, ...args);
+};
+
+// Node's execFileSync/execSync close over their internal spawnSync, so wrapping the public
+// spawnSync export misses them. Observe their shared native boundary instead: it exposes the
+// pid before exec helpers discard it, while preserving all native output/error semantics.
+const syncBinding = /** @type {{ spawn: (options: unknown) => { pid: number } }} */ (process['binding']('spawn_sync'));
+const spawnSyncProcess = syncBinding.spawn;
+syncBinding.spawn = function (options) {
+  const result = spawnSyncProcess.call(this, options);
+  if (result.pid > 1) suitePids.add(result.pid);
+  return result;
+};
 
 process.env.CODE_FORGE_REAL_HOME ??= os.homedir();
 process.env.CODE_FORGE_REAL_TMPDIR ??= os.tmpdir();
@@ -78,10 +101,11 @@ function belongsToRun(dir, p, hasRun) {
   return false;
 }
 
-/** @typedef {(pid: number) => {start: string | null, ppid: number} | null} ProcessProbe */
+/** @typedef {(pid: number) => {start: string | null, ppid: number} | null | undefined} ProcessProbe */
 
 /**
- * Synchronous because the guard runs during exit. A failed ps leaves the owner unverified.
+ * Synchronous because the guard runs during exit. null proves absence; undefined means
+ * ps failed or returned an invalid record and leaves the owner unverified.
  * @type {ProcessProbe}
  */
 function probeProcess(pid) {
@@ -89,13 +113,16 @@ function probeProcess(pid) {
     const text = execFileSync('/bin/ps', ['-o', 'ppid=', '-o', 'lstart=', '-p', String(pid)], {
       encoding: 'utf8',
       env: { ...process.env, LC_ALL: 'C' },
-      stdio: ['ignore', 'pipe', 'ignore'],
+      stdio: ['ignore', 'pipe', 'pipe'],
       timeout: 5000,
     }).trim();
     const match = /^(\d+)\s+(.+)$/.exec(text);
-    return match ? { ppid: Number(match[1]), start: match[2] } : null;
-  } catch {
-    return null;
+    return match ? { ppid: Number(match[1]), start: match[2] } : undefined;
+  } catch (err) {
+    const failure = /** @type {{status?: number, signal?: string | null, code?: string, stdout?: string | Buffer, stderr?: string | Buffer}} */ (err);
+    return failure.status === 1 && failure.signal === null && failure.code === undefined
+      && failure.stdout?.toString().trim() === '' && failure.stderr?.toString().trim() === ''
+      ? null : undefined;
   }
 }
 
@@ -112,24 +139,36 @@ function realpathOrRaw(p) {
 }
 
 /**
- * Verify both the owner identity and its entire ancestry before exempting a lock.
+ * Ignore vanished locks and exited outside owners whose starts predate this suite;
+ * verify live owners' entire ancestry. Untracked dead descendants remain unverified.
+ * Retained suite pids keep dead/reparented children from acquiring a foreign exemption.
  * @param {string} p
  * @param {ProcessProbe} probe
  * @returns {boolean}
  */
 function isForeignLock(p, probe) {
+  let text;
   try {
-    const lock = JSON.parse(readFileSync(p, 'utf8'));
+    text = readFileSync(p, 'utf8');
+  } catch (err) {
+    // Only absence proves there is no longer a lock. Unreadable existing files fail closed.
+    return /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT';
+  }
+  try {
+    const lock = JSON.parse(text);
     if (lock === null || typeof lock !== 'object' || Array.isArray(lock)
       || typeof lock.key !== 'string' || !Number.isInteger(lock.pid) || lock.pid <= 1
       || typeof lock.start !== 'string' || lock.start.trim() === '' || lock.start === 'unknown') return false;
+    if (suitePids.has(lock.pid)) return false;
     const owner = probe(lock.pid);
-    if (owner === null || owner.start !== lock.start) return false;
+    if (owner === null) return Date.parse(lock.start) < suiteStart;
+    if (owner === undefined) return false;
+    if (owner.start !== lock.start) return false;
     const seen = new Set();
     let pid = lock.pid;
     let current = owner;
     while (pid !== 1) {
-      if (pid === process.pid || seen.has(pid) || current === null
+      if (suitePids.has(pid) || seen.has(pid) || current == null
         || !Number.isInteger(current.ppid) || current.ppid < 1) return false;
       seen.add(pid);
       pid = current.ppid;
@@ -182,8 +221,10 @@ function foreignRuns(dir, tempDir) {
  * The new paths under the guarded dirs that count as leaks, sorted. A path not in `baseline` is a
  * leak unless it belongs to a run whose record was already in the baseline (a live run of the
  * developer that started before the tests): `runs/<id>`, `runs/<id>.<anything>`, `runs/<id>/…`.
- * Verified live foreign `locks/<sha>.lock` owners are also exempt, as is a new locks directory
- * containing no leaks. Unknown owner identity or ancestry fails closed.
+ * Vanished `locks/<sha>.lock` entries and verified foreign owners are also exempt, as is a new
+ * locks directory containing no leaks. Dead untracked owners need a start before the suite.
+ * Existing malformed/unreadable locks, failed probes and unknown owner identity or ancestry
+ * fail closed; retained suite pids always remain leaks.
  * New `runs/<id>`, `runs/<id>.<anything>` and nested paths, plus matching project ledgers, are also exempt when a current record names an absolute workspace outside the raw and resolved real temp dir and TEST_BASE.
  * @param {Iterable<string>} baseline - the snapshot taken at start.
  * @param {Iterable<string>} now - the snapshot taken at exit.

@@ -47,7 +47,7 @@ after(async () => {
  * @returns {string[]}
  */
 function newEntries(dirs, baseline) {
-  return [...snapshotGuarded(dirs)].filter((p) => !baseline.has(p));
+  return leakedEntries(baseline, snapshotGuarded(dirs), dirs);
 }
 
 test('the snapshot watches the REAL dirs: <real HOME>/.code-forge and <repo>/.code-forge, exactly 2', () => {
@@ -70,11 +70,21 @@ test('control: a product write under the temp HOME is 1 file there and 0 new ent
   assert.deepEqual(newEntries(GUARDED_DIRS, baseline), []);
 });
 
-test('positive control over TEMP dirs: a planned entry is exactly the one new path, and [] after cleanup', () => {
+test('control over TEMP dirs: outside writes into a pre-existing run are exempt; an escaped product write is exactly 1 leak', () => {
   const dirs = [path.join(PARENT, 'home-code-forge'), path.join(PARENT, 'repo-code-forge')];
   for (const dir of dirs) mkdirSync(dir);
+  const runs = path.join(dirs[0], 'runs');
+  mkdirSync(runs);
+  const record = path.join(runs, 'existing.json');
+  writeFileSync(record, '{}\n');
   const baseline = snapshotGuarded(dirs);
-  assert.deepEqual([...baseline], dirs);
+  assert.deepEqual([...baseline].sort(), [...dirs, runs, record].sort());
+
+  const state = path.join(runs, 'existing', 'review-state', 'other-block');
+  mkdirSync(state, { recursive: true });
+  writeFileSync(path.join(state, 'outside.json'), '{}\n');
+  assert.equal(snapshotGuarded(dirs).size - baseline.size, 4, 'the outside worker added exactly 4 paths to its existing run');
+  assert.deepEqual(newEntries(dirs, baseline), [], 'outside writes into the existing run are 0 leaks');
 
   const probe = path.join(dirs[1], 'probe.json');
   writeFileSync(probe, '');
