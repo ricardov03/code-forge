@@ -1,5 +1,5 @@
 import { spawn } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, writeFile } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, readlink, realpath, rm, symlink, unlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { isDeepStrictEqual } from 'node:util';
@@ -46,9 +46,9 @@ function childEnv(home, tmp, extra = {}) {
 /** A private git fixture, a real CLI-started run, and an open B1 owning sample.mjs.
  * The test process stands in for an idle worker: review-file queues, but no model runs.
  * Call cleanup() after use. Custom fixtures need only supply {repo, home}.
- * @param {{env?: Record<string, string>}} [options]
+ * @param {{env?: Record<string, string>, isolation?: 'export' | 'worktree'}} [options]
  */
-export async function makeParityFixture({ env = {} } = {}) {
+export async function makeParityFixture({ env = {}, isolation = 'export' } = {}) {
   const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cf-parity-fixture-')));
   const repo = path.join(root, 'repo'), home = path.join(root, 'home');
   const cleanup = () => rm(root, { recursive: true, force: true });
@@ -61,7 +61,7 @@ export async function makeParityFixture({ env = {} } = {}) {
       return result;
     };
     await checked('git', ['init', '-q', '-b', 'main']);
-    await writeFile(path.join(repo, '.code-forge.yml'), 'version: 1\nproject: {slug: parity-fixture}\nprovider: anthropic\nengine: harness\nlevels:\n  L0: {model: claude-haiku-4-5-20251001}\n  L1: {model: claude-sonnet-5}\n  L2: {model: claude-opus-5-5}\n  L3: {model: claude-fable-5-1}\nproof: {isolation: export}\n');
+    await writeFile(path.join(repo, '.code-forge.yml'), `version: 1\nproject: {slug: parity-fixture}\nprovider: anthropic\nengine: harness\nlevels:\n  L0: {model: claude-haiku-4-5-20251001}\n  L1: {model: claude-sonnet-5}\n  L2: {model: claude-opus-5-5}\n  L3: {model: claude-fable-5-1}\nproof: {isolation: ${isolation}, worktree: {dir: .code-forge/worktrees}}\n`);
     await writeFile(path.join(repo, '.gitignore'), '.code-forge/\n');
     await writeFile(path.join(repo, 'sample.mjs'), 'export const value = 1;\n');
     await writeFile(path.join(repo, 'acceptance.json'), JSON.stringify([{ clause: 'sample works', tests: ['sample'] }]));
@@ -76,8 +76,8 @@ export async function makeParityFixture({ env = {} } = {}) {
   } catch (err) { await cleanup(); throw err; }
 }
 
-/** Every state file, including binary files, dotfiles and symlink targets. */
-async function stateFiles(fixture) {
+/** Every file in the requested scope, including binary files, dotfiles and symlink targets. */
+async function fixtureFiles(fixture, scope = '') {
   const files = new Map();
   async function walk(dir, prefix) {
     let entries;
@@ -90,7 +90,7 @@ async function stateFiles(fixture) {
       else files.set(name, { kind: 'file', value: await readFile(full) });
     }
   }
-  for (const key of ['home', 'repo']) await walk(path.join(fixture[key], '.code-forge'), `${key}/.code-forge`);
+  for (const key of ['home', 'repo']) await walk(path.join(fixture[key], scope), scope ? `${key}/${scope}` : key);
   return files;
 }
 
@@ -117,7 +117,7 @@ async function rowKey(row, home) {
   catch (err) { if (err.code === 'ENOENT') return null; throw err; }
 }
 
-/** Relocate state references, re-signing only originally verified rows whose paths moved. */
+/** Relocate all text and internal absolute links, re-signing only verified rows whose paths moved. */
 async function copyFixture(fixture, root) {
   const copy = { repo: path.join(root, 'repo'), home: path.join(root, 'home') };
   await mkdir(root);
@@ -127,22 +127,46 @@ async function copyFixture(fixture, root) {
     if (typeof value === 'string') return replacePaths(value, fixture, copy);
     if (value === null || typeof value !== 'object') return value;
     if (Array.isArray(value)) return Promise.all(value.map(relocate));
-    const moved = Object.fromEntries(await Promise.all(Object.entries(value).map(async ([k, v]) => [k, await relocate(v)])));
+    const moved = Object.fromEntries(await Promise.all(Object.entries(value).map(async ([k, v]) => [replacePaths(k, fixture, copy), await relocate(v)])));
     if (Object.hasOwn(value, 'mac') && !isDeepStrictEqual(value, moved)) {
       const key = await rowKey(value, copy.home);
       if (key && verifyRow(value, key).ok) return signRow(moved, key);
     }
     return moved;
   }
-  for (const [name, entry] of await stateFiles(copy)) {
-    if (entry.kind !== 'file') continue;
+  for (const [name, entry] of await fixtureFiles(copy)) {
+    const [area, ...parts] = name.split('/');
+    const file = path.join(copy[area], ...parts);
+    if (entry.kind === 'symlink') {
+      if (path.isAbsolute(entry.value) && ['repo', 'home'].some((key) =>
+        entry.value === fixture[key] || entry.value.startsWith(fixture[key] + path.sep))) {
+        await unlink(file);
+        await symlink(replacePaths(entry.value, fixture, copy), file);
+      }
+      continue;
+    }
     const value = decode(name, entry.value);
-    if (Buffer.isBuffer(value)) continue;
+    if (Buffer.isBuffer(value)) {
+      const text = value.toString('utf8');
+      if (Buffer.from(text).equals(value)) {
+        const moved = replacePaths(text, fixture, copy);
+        if (moved !== text) await writeFile(file, moved);
+      }
+      continue;
+    }
     const moved = await relocate(value);
     if (isDeepStrictEqual(value, moved)) continue;
     const body = name.endsWith('.jsonl') ? moved.map((row) => JSON.stringify(row)).join('\n') + '\n' : JSON.stringify(moved) + '\n';
-    const [area, ...parts] = name.split('/');
-    await writeFile(path.join(copy[area], ...parts), body);
+    await writeFile(file, body);
+  }
+  // Inspect again after relocation, including binary files. A leftover reference must stop
+  // the commands before either copy can accidentally read or modify the authoritative fixture.
+  for (const [name, entry] of await fixtureFiles(copy)) {
+    for (const key of ['repo', 'home']) {
+      if (entry.value.includes(entry.kind === 'file' ? Buffer.from(fixture[key]) : fixture[key])) {
+        throw new Error(`parity fixture copy retains original ${key} path in ${entry.kind} ${name}`);
+      }
+    }
   }
   return copy;
 }
@@ -162,18 +186,27 @@ function compare(node, go, where, field, diffs) {
 
 const CLOCK_RUN = /\br-\d{8}-\d{6}-[a-f0-9]{6}\b/g;
 const ISO_TIME = /\b\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})\b/g;
-const isPid = (field) => /^(?:pid|pids)$|_pids?$|Pids?$/.test(field);
-const isDuration = (field) => /^(?:duration|elapsed|ms)$|_ms$|Ms$/.test(field);
+const PID_FIELDS = new Set(['pid', 'pids', 'worker_pid']);
+// Gate/worker rows use duration_ms; gate.done adds total_duration_ms and land.timing
+// records join_ms/gates_ms/merge_gate_ms. ledger/report.mjs emits the named *TimeMs totals.
+const DURATION_FIELDS = new Set([
+  'duration_ms', 'elapsed_ms', 'wall_ms', 'durationMs', 'elapsedMs', 'wallMs',
+  'total_duration_ms', 'join_ms', 'gates_ms', 'merge_gate_ms',
+  'proofTimeMs', 'gateTimeMs', 'reviewTimeMs', 'humanWaitMs',
+]);
 
 function normalizeText(text, copy) {
   text = replacePaths(text, copy, { repo: '<repo>', home: '<home>' });
+  // Node's mkdtemp appends six random alphanumeric characters to the given prefix.
+  // Keep that prefix and every following path segment visible to the comparison.
+  text = text.replace(/(<home>\/tmp\/[^/\s"'\\]*?)[A-Za-z0-9]{6}(?=[/\s"'\\]|$)/g, '$1<temp>');
   // TMPDIR is also private to the copy; preserve its suffix and all surrounding text.
   text = text.replaceAll(path.dirname(copy.repo) + path.sep, '<copy>/');
   text = text.replace(ISO_TIME, (stamp) => Number.isFinite(Date.parse(stamp)) ? '<timestamp>' : stamp);
   text = text.replace(CLOCK_RUN, '<clock-run>');
   // Structured fields in CLI JSON retain whitespace, ordering and all other output bytes.
   text = text.replace(/("([^"\n]+)"\s*:\s*)(\d+(?:\.\d+)?)(?=\s*[,}\]])/g, (all, prefix, field) =>
-    isPid(field) ? `${prefix}<pid>` : isDuration(field) ? `${prefix}<duration>` : all);
+    PID_FIELDS.has(field) ? `${prefix}<pid>` : DURATION_FIELDS.has(field) ? `${prefix}<duration>` : all);
   return text.replace(/\bpid(\s+|\s*[=:]\s*)\d+\b/gi, 'pid$1<pid>');
 }
 
@@ -189,8 +222,8 @@ function normalize(value, copy, field = '') {
   }
   if (typeof value === 'string') return normalizeText(value, copy);
   if (typeof value === 'number' && Number.isFinite(value)) {
-    if (isPid(field) && Number.isInteger(value) && value > 0) return '<pid>';
-    if (isDuration(field) && value >= 0) return '<duration>';
+    if (PID_FIELDS.has(field) && Number.isInteger(value) && value > 0) return '<pid>';
+    if (DURATION_FIELDS.has(field) && value >= 0) return '<duration>';
   }
   if (Array.isArray(value)) return value.map((entry) => normalize(entry, copy, field));
   if (value !== null && typeof value === 'object') return Object.fromEntries(Object.entries(value).map(([key, entry]) => [key, normalize(entry, copy, key)]));
@@ -237,7 +270,7 @@ export async function runParity(verbArgs, { fixture, goCommand, env = {}, stdin 
     const nodeResult = await runCopy(node, [process.execPath, CLI]);
     const goResult = await runCopy(go, goCommand);
     for (const field of ['code', 'signal', 'stdout', 'stderr']) compare(normalize(nodeResult[field], node), normalize(goResult[field], go), 'process', field, diffs);
-    const left = await stateFiles(node), right = await stateFiles(go);
+    const left = await fixtureFiles(node, '.code-forge'), right = await fixtureFiles(go, '.code-forge');
     const index = (files, copy) => {
       const groups = new Map();
       for (const [name, entry] of files) {

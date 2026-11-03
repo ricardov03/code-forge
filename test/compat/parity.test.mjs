@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { readFile, rm, writeFile } from 'node:fs/promises';
+import { readFile, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
@@ -15,6 +15,7 @@ after(async () => { await fixture?.cleanup(); });
 // A fake Go executable delegates to the real CLI, then changes exactly the chosen behavior.
 // It never launches a worker or a model, and all mutations are in the disposable Go copy.
 const FAKE = [process.execPath, '--input-type=module', '-e', `
+  import assert from 'node:assert/strict';
   import { spawnSync } from 'node:child_process';
   import fs from 'node:fs';
   import path from 'node:path';
@@ -30,6 +31,25 @@ const FAKE = [process.execPath, '--input-type=module', '-e', `
     const input = fs.readFileSync(0, 'utf8');
     if (input !== 'parity input\\n' || process.env.PARITY_CUSTOM !== 'passed'
       || process.cwd() === process.env.PARITY_ORIGINAL_REPO || process.env.HOME === process.env.PARITY_ORIGINAL_HOME) code = 29;
+  }
+  if (mode === 'relocated') {
+    const run = args[args.indexOf('--run') + 1];
+    const record = JSON.parse(fs.readFileSync(path.join(home, 'runs', run + '.json'), 'utf8'));
+    const tree = record.blocks.B1.worktree.path;
+    assert.equal(tree, path.join(process.cwd(), '.code-forge', 'worktrees', 'B1'));
+    assert.equal(fs.readFileSync(path.join(tree, '.git'), 'utf8'), 'gitdir: ' + path.join(process.cwd(), '.git', 'worktrees', 'B1') + '\\n');
+    assert.equal(fs.readFileSync(path.join(process.cwd(), '.git', 'worktrees', 'B1', 'gitdir'), 'utf8'), path.join(tree, '.git') + '\\n');
+    const git = spawnSync('git', ['-C', tree, 'rev-parse', '--show-toplevel'], { encoding: 'utf8' });
+    assert.equal(git.status, 0, git.stderr);
+    assert.equal(git.stdout.trim(), tree);
+    assert.equal(fs.readFileSync('paths.txt', 'utf8'), process.cwd() + '\\n' + process.env.HOME + '\\n');
+    assert.deepEqual(JSON.parse(fs.readFileSync(path.join(process.env.HOME, 'paths.data'), 'utf8')), { repo: process.cwd(), home: process.env.HOME });
+    assert.equal(fs.readlinkSync('repo-link'), path.join(process.cwd(), 'paths.txt'));
+    assert.equal(fs.readlinkSync('home-link'), path.join(process.env.HOME, 'paths.data'));
+    assert.equal(fs.readlinkSync('home-dir-link'), process.env.HOME);
+    assert.equal(fs.readlinkSync('relative-link'), 'paths.txt');
+    fs.writeFileSync('repo-link', 'only the copy was changed');
+    fs.writeFileSync('home-link', 'only the copy was changed');
   }
   if (mode === 'stdout') out = '!' + out.slice(1);
   if (mode === 'stderr') err += 'one stderr byte!';
@@ -56,6 +76,8 @@ const FAKE = [process.execPath, '--input-type=module', '-e', `
     const file = path.join(home, 'normalization.json');
     const p = JSON.parse(fs.readFileSync(file, 'utf8'));
     p.ts = '2031-02-03T04:05:06.000Z'; p.duration_ms = 999; p.elapsedMs = 123;
+    p.elapsed_ms = 234; p.wall_ms = 345; p.worker_pid = 99998;
+    p.total_duration_ms = 456; p.join_ms = 567; p.gates_ms = 678; p.merge_gate_ms = 789;
     p.worker.pid = 99999; p.run = 'r-20300102-030405-abcdef';
     // Key order and JSON spacing have no semantic meaning in a state file.
     fs.writeFileSync(file, JSON.stringify(Object.fromEntries(Object.entries(p).reverse()), null, 4));
@@ -68,6 +90,16 @@ const FAKE = [process.execPath, '--input-type=module', '-e', `
     delete p.present; p.added = true;
     fs.writeFileSync(file, JSON.stringify(p));
   }
+  if (mode === 'timeout') {
+    const run = args[args.indexOf('--run') + 1];
+    const file = path.join(home, 'runs', run + '.json');
+    const record = JSON.parse(fs.readFileSync(file, 'utf8'));
+    record.blocks.B1.timeout_ms = 2000; record.blocks.B1.timeoutMs = 4000;
+    fs.writeFileSync(file, JSON.stringify(record));
+    out = out.replace('"timeout_ms": 1000', '"timeout_ms": 2000').replace('"timeoutMs": 3000', '"timeoutMs": 4000');
+  }
+  if (mode === 'temp-file') out = out.replaceAll('report.json', 'different.json');
+  if (mode === 'temp-prefix') out = out.replaceAll('parity-scratch-', 'different-scratch-');
   if (mode === 'binary') fs.writeFileSync(path.join(home, 'bytes.bin'), Buffer.from([0, 255, 2]));
   if (mode === 'json-marker') fs.writeFileSync(path.join(home, 'fixture.done'), JSON.stringify({ value: 2 }));
   if (mode === 'invalid-utf8') {
@@ -92,6 +124,43 @@ test('clause 1: independent repo and HOME copies compare the complete CLI result
   });
   assert.deepEqual(result, { equal: true, diffs: [] }, 'exit, streams and every copied state file have zero differences');
   assert.deepEqual(await readFile(record), beforeBytes, 'the authoritative fixture record is byte-identical after both commands');
+});
+
+test('clause 1: worktree pointers, all text files and internal absolute symlinks stay inside each copy', async () => {
+  const isolated = await makeParityFixture({ isolation: 'worktree' });
+  try {
+    const text = path.join(isolated.repo, 'paths.txt'), data = path.join(isolated.home, 'paths.data');
+    await writeFile(text, `${isolated.repo}\n${isolated.home}\n`);
+    await writeFile(data, JSON.stringify({ repo: isolated.repo, home: isolated.home }));
+    const links = { 'repo-link': text, 'home-link': data, 'home-dir-link': isolated.home, 'relative-link': 'paths.txt' };
+    for (const [name, target] of Object.entries(links)) await symlink(target, path.join(isolated.repo, name));
+    const pointers = [text, data,
+      path.join(isolated.repo, '.git', 'worktrees', 'B1', 'gitdir'),
+      path.join(isolated.repo, '.code-forge', 'worktrees', 'B1', '.git')];
+    const saved = await Promise.all(pointers.map((file) => readFile(file)));
+    const result = await runParity(['status', '--run', isolated.runId, '--json'], {
+      fixture: isolated, goCommand: FAKE, env: { PARITY_MODE: 'relocated' },
+    });
+    assert.deepEqual(result, { equal: true, diffs: [] }, 'both commands use a functional copied git worktree and relocated paths');
+    assert.deepEqual(await Promise.all(pointers.map((file) => readFile(file))), saved, 'writes through copied symlinks leave the original text and worktree metadata byte-identical');
+    for (const [name, target] of Object.entries(links)) assert.equal(await readlink(path.join(isolated.repo, name)), target);
+  } finally { await isolated.cleanup(); }
+});
+
+test('clause 1 boundary: leftover original paths in binary files or external links refuse execution', async () => {
+  const file = path.join(fixture.repo, 'leak.bin'), link = path.join(fixture.home, 'leak-link');
+  for (const key of ['repo', 'home']) {
+    await writeFile(file, Buffer.concat([Buffer.from([255]), Buffer.from(fixture[key])]));
+    try {
+      await assert.rejects(runParity(status(), { fixture, goCommand: 'must-not-execute' }),
+        new RegExp(`retains original ${key} path in file repo/leak\\.bin`));
+    } finally { await rm(file); }
+    await symlink(`${fixture[key]}-outside/target`, link);
+    try {
+      await assert.rejects(runParity(status(), { fixture, goCommand: 'must-not-execute' }),
+        new RegExp(`retains original ${key} path in symlink home/leak-link`));
+    } finally { await rm(link); }
+  }
 });
 
 test('clause 1 boundary: stderr, binary state and missing nested dotfiles retain exact locations and values', async () => {
@@ -125,11 +194,61 @@ test('clause 1 boundary: stderr, binary state and missing nested dotfiles retain
 
 test('clause 2: only volatile fields normalize and otherwise equal, verified rows can have different signatures', async () => {
   const file = path.join(fixture.home, '.code-forge', 'normalization.json');
-  await writeFile(file, JSON.stringify({ ts: '2026-01-02T03:04:05.000Z', duration_ms: 1, elapsedMs: 2, worker: { pid: 123 }, run: fixture.runId }));
+  await writeFile(file, JSON.stringify({ ts: '2026-01-02T03:04:05.000Z', duration_ms: 1, elapsedMs: 2,
+    elapsed_ms: 3, wall_ms: 4, worker_pid: 1234, total_duration_ms: 5, join_ms: 6, gates_ms: 7, merge_gate_ms: 8,
+    worker: { pid: 123 }, run: fixture.runId }));
   try {
     assert.deepEqual(await check('volatile'), { equal: true, diffs: [] }, 'timestamps, both duration conventions, nested pid, clock run id and verified MACs yield zero differences');
   } finally {
     await rm(file);
+  }
+});
+
+test('clause 2 boundary: timeout settings remain differences in both state and CLI JSON', async () => {
+  const record = path.join(fixture.home, '.code-forge', 'runs', `${fixture.runId}.json`);
+  const saved = await readFile(record), changed = JSON.parse(saved.toString('utf8'));
+  Object.assign(changed.blocks.B1, { timeout_ms: 1000, timeoutMs: 3000 });
+  await writeFile(record, JSON.stringify(changed));
+  try {
+    const result = await check('timeout', ['run', 'status', '--run', fixture.runId]);
+    assert.equal(result.equal, false);
+    assert.deepEqual(locations(result), [['process', 'stdout'],
+      ['home/.code-forge/runs/<clock-run>.json', '$.blocks.B1.timeoutMs'],
+      ['home/.code-forge/runs/<clock-run>.json', '$.blocks.B1.timeout_ms']]);
+    assert.equal(result.diffs[0].go, result.diffs[0].node
+      .replace('"timeout_ms": 1000', '"timeout_ms": 2000').replace('"timeoutMs": 3000', '"timeoutMs": 4000'));
+    assert.deepEqual(result.diffs.slice(1).map(({ node, go }) => [node, go]), [[3000, 4000], [1000, 2000]]);
+  } finally { await writeFile(record, saved); }
+});
+
+test('clause 2: independently created mkdtemp paths normalize while their prefixes and child paths stay visible', async () => {
+  const config = path.join(fixture.repo, '.code-forge.yml'), saved = await readFile(config);
+  const script = path.join(fixture.repo, 'temp-gate.cjs'), capture = path.join(fixture.repo, '..', 'temp-paths.jsonl');
+  await writeFile(script, `
+    const fs = require('node:fs'), path = require('node:path'), os = require('node:os');
+    const dir = fs.mkdtempSync(path.join(os.tmpdir(), 'parity-scratch-'));
+    const value = { dir, file: path.join(dir, 'report.json') };
+    fs.appendFileSync(process.env.PARITY_CAPTURE, JSON.stringify(value) + '\\n');
+    fs.writeFileSync(path.join(process.env.HOME, '.code-forge', 'temp-path.json'), JSON.stringify(value));
+    console.log(JSON.stringify(value));
+  `);
+  await writeFile(config, saved + `\ngates:\n  test: ${JSON.stringify([process.execPath, 'temp-gate.cjs'])}\n  lint: null\n  types: null\n  format: null\n`);
+  try {
+    const args = ['gates', 'run', '--cwd', fixture.repo];
+    const options = { fixture, goCommand: NODE, env: { PARITY_CAPTURE: capture } };
+    assert.deepEqual(await runParity(args, options), { equal: true, diffs: [] }, 'two real runs print independently created temporary paths and write them to state');
+    const printed = (await readFile(capture, 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(printed.length, 2, 'both gates ran and printed a directory');
+    assert.notEqual(path.basename(printed[0].dir), path.basename(printed[1].dir), 'the mkdtemp random suffixes differ');
+    for (const value of printed) assert.match(value.dir, /\/home\/tmp\/parity-scratch-[A-Za-z0-9]{6}$/);
+    for (const mode of ['temp-file', 'temp-prefix']) {
+      const result = await runParity(args, { ...options, goCommand: FAKE, env: { ...options.env, PARITY_MODE: mode } });
+      assert.equal(result.equal, false, `${mode} is still a semantic difference`);
+      assert.deepEqual(locations(result), [['process', 'stdout']]);
+    }
+  } finally {
+    await writeFile(config, saved);
+    await Promise.all([rm(script), rm(capture, { force: true })]);
   }
 });
 
