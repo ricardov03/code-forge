@@ -1,13 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdtemp, readFile, readdir, rm } from 'node:fs/promises';
+import { cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const committed = path.join(root, 'test/compat/golden/config');
 const goEnv = { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' };
 
 test('Go embedded config schema equals the source schema byte for byte', async () => {
@@ -25,10 +24,12 @@ async function names(dir) {
   })).sort();
 }
 
-async function kit() {
+async function kit(repo = root) {
+  const committed = path.join(repo, 'test/compat/golden/config');
+  const { version } = JSON.parse(await readFile(path.join(repo, 'package.json'), 'utf8'));
   const dir = await mkdtemp(path.join(os.tmpdir(), 'config-golden-'));
   try {
-    const generated = spawnSync(process.execPath, [path.join(root, 'scripts/compat-golden.mjs'), dir, '--config'], {
+    const generated = spawnSync(process.execPath, [path.join(repo, 'scripts/compat-golden.mjs'), dir, '--config'], {
       cwd: dir, encoding: 'utf8', env: process.env,
     });
     assert.equal(generated.status, 0, `Node config oracle failed: ${generated.stderr}`);
@@ -38,7 +39,9 @@ async function kit() {
     const result = {};
     for (const name of files) {
       const expected = await readFile(path.join(dir, 'config', name), 'utf8');
-      assert.equal(await readFile(path.join(committed, name), 'utf8'), expected, `${name}: committed config golden bytes drifted`);
+      const saved = await readFile(path.join(committed, name), 'utf8');
+      assert.equal(saved.replaceAll('{{version}}', version), expected.replaceAll('{{version}}', version),
+        `${name}: committed config golden bytes drifted`);
       result[name] = JSON.parse(expected);
     }
     return result;
@@ -47,15 +50,79 @@ async function kit() {
   }
 }
 
-function goTest(pattern, expectedCount) {
+function goTest(pattern, expectedCount, repo = root) {
   const result = spawnSync('go', ['test', '-count=1', '-json', './config', '-run', pattern], {
-    cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000, env: goEnv,
+    cwd: path.join(repo, 'native'), encoding: 'utf8', timeout: 120_000, env: goEnv,
   });
   assert.equal(result.status, 0, `Go config assertions failed:\n${result.stdout}\n${result.stderr ?? result.error}`);
   const events = result.stdout.trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(events.filter((e) => e.Action === 'pass' && e.Test?.startsWith(`${pattern}/`)).length,
     expectedCount, `${pattern}: every one of ${expectedCount} golden cases must execute`);
 }
+
+async function versionFixture(t) {
+  const repo = await mkdtemp(path.join(os.tmpdir(), 'config-version-'));
+  t.after(() => rm(repo, { recursive: true, force: true }));
+  // Copy only the oracle's tracked inputs and Go config dependencies, never local state or binaries.
+  for (const relative of ['package.json', 'scripts/compat-golden.mjs', 'src', 'schema', 'examples',
+    'test/fixtures', 'test/compat/golden/config', 'native/config', 'native/canon', 'native/vendor', 'native/go.mod', 'native/go.sum']) {
+    const target = path.join(repo, relative);
+    await mkdir(path.dirname(target), { recursive: true });
+    await cp(path.join(root, relative), target, { recursive: true });
+  }
+  const dependencies = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('ajv/package.json'))));
+  await symlink(dependencies, path.join(repo, 'node_modules'), 'dir');
+  const pkgPath = path.join(repo, 'package.json');
+  const pkg = JSON.parse(await readFile(pkgPath, 'utf8'));
+  pkg.version = '9.8.7';
+  await writeFile(pkgPath, `${JSON.stringify(pkg, null, 2)}\n`);
+  return repo;
+}
+
+test('config goldens survive a package version bump in Node and Go and live messages name that version', async (t) => {
+  const repo = await versionFixture(t);
+  const data = await kit(repo);
+  const versionCases = data['operations.json'].filter((c) => c.expected.message?.includes('{{version}}'));
+  assert.deepEqual(versionCases.map((c) => c.name),
+    ['validate/unknown-key', 'validate/nested-unknown', 'validate/pattern-properties'],
+    'exactly the three unknown-property messages must hold the stable version placeholder');
+  const live = spawnSync(process.execPath, ['--input-type=module', '-e', `
+    import { validateConfig } from './src/config/validate.mjs';
+    const cases = JSON.parse(process.argv[1]);
+    console.log(JSON.stringify(cases.map((c) => validateConfig(JSON.parse(c.files['project/.code-forge.yml']),
+      { hasCliOnPath: () => true }).errors.filter((issue) => issue.rule === 'schema').map((issue) => issue.message).join('\\n'))));
+  `, JSON.stringify(versionCases)], { cwd: repo, encoding: 'utf8', env: process.env });
+  assert.equal(live.status, 0, `live Node validation failed: ${live.stderr}`);
+  const messages = JSON.parse(live.stdout);
+  assert.deepEqual(messages, versionCases.map((c) => c.expected.message.replaceAll('{{version}}', '9.8.7')),
+    'all three live diagnostics must match the expanded golden messages exactly');
+  assert.equal(messages.filter((message) => message.endsWith('this is code-forge 9.8.7)')).length, 3,
+    'all three live diagnostics must actually name the bumped package version');
+  goTest('TestConfigErrors', Object.values(data).flat().filter((c) => c.group === 'error').length, repo);
+});
+
+test('a changed golden message word still fails the exact Node and Go checks after a version bump', async (t) => {
+  const repo = await versionFixture(t);
+  const file = path.join(repo, 'test/compat/golden/config/operations.json');
+  const data = JSON.parse(await readFile(file, 'utf8'));
+  const changed = data.filter((c) => c.name === 'validate/unknown-key');
+  assert.equal(changed.length, 1, 'change exactly the root unknown-key golden case');
+  changed[0].expected.message = changed[0].expected.message.replace('additional', 'unexpected');
+  await writeFile(file, `${JSON.stringify(data, null, 2)}\n`);
+  await assert.rejects(kit(repo), (err) => {
+    assert.ok(err instanceof assert.AssertionError);
+    assert.equal(err.code, 'ERR_ASSERTION');
+    assert.equal(err.message.split('\n')[0], 'operations.json: committed config golden bytes drifted');
+    return true;
+  });
+  const result = spawnSync('go', ['test', '-count=1', '-json', './config', '-run', 'TestConfigErrors'], {
+    cwd: path.join(repo, 'native'), encoding: 'utf8', timeout: 120_000, env: goEnv,
+  });
+  assert.equal(result.status, 1, `Go must reject the changed message: ${result.stderr ?? result.error}`);
+  const events = result.stdout.trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(events.filter((e) => e.Action === 'fail' && e.Test?.startsWith('TestConfigErrors/')).map((e) => e.Test),
+    ['TestConfigErrors/validate/unknown-key'], 'exactly the case with a changed word must fail; version expansion must preserve every other message');
+});
 
 test('config goldens are current and Go resolved canonical bytes equal Node for every valid case', async () => {
   const data = await kit();
