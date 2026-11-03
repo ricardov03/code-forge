@@ -6,7 +6,14 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `review.silence_timeout_s` (default 60): a reviewer or judge session that prints nothing for this long is killed and counts as a timeout (B206, landed as B240)
+
 ### Changed
+
+- A review answer with `passed: null` and findings is read as a failing review with its findings kept; with no findings it is unavailable (schema) and the fallback model reviews the file (B206, landed as B240)
+- After a timeout, a silence kill or an at-capacity answer, the next fallback model runs at once instead of a second try of the same model; without a fallback list the old single retry stays (B206, landed as B240)
 
 - CI also runs on a push to a `ci-check-*` branch and by hand (`workflow_dispatch`), so the pre-release check really runs before main moves (B239)
 - The queue and parallel review tests check order and state with an injected clock, not short wall-clock deadlines, so they pass on a busy machine (B216, landed as B241)
