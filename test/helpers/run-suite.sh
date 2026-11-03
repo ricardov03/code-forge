@@ -4,6 +4,7 @@
 if [ "${1:-}" = --suite-sandbox-active ]; then
   shift
   export CODE_FORGE_LEAK_GUARD=sandbox
+  unset CODE_FORGE_LEAK_GUARD_SCOPE
 else
   cf_reason=
   if [ "${CODE_FORGE_LEAK_GUARD:-}" = snapshot ]; then
@@ -55,8 +56,7 @@ fi
 
 export CODE_FORGE_TEST_SUITE=${CODE_FORGE_TEST_SUITE:-$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')}
 CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && {
-  if [ "$#" -eq 0 ]; then set -- 'test/**/*.test.mjs'; fi
-  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@"
+  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@" 'test/**/*.test.mjs'
   cf_test_status=$?
   CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs
   cf_leak_status=$?

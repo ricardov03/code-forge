@@ -62,6 +62,15 @@ export const GUARDED_DIRS = Object.freeze([
   path.join(REPO, '.code-forge'),
 ]);
 
+// The kernel guard belongs to this suite and these directories. A nested check
+// with its own marker or fixture directories still needs its snapshot reports.
+// Record the scope in each top-level worker, before it can spawn such checks.
+if (process.env.CODE_FORGE_LEAK_GUARD === 'sandbox') {
+  const scope = JSON.stringify([process.env.CODE_FORGE_TEST_SUITE, ...GUARDED_DIRS]);
+  process.env.CODE_FORGE_LEAK_GUARD_SCOPE ??= scope;
+  if (process.env.CODE_FORGE_LEAK_GUARD_SCOPE !== scope) process.env.CODE_FORGE_LEAK_GUARD = 'snapshot';
+}
+
 /**
  * Every path under `dirs` (the directories themselves included when present).
  * @param {readonly string[]} [dirs] - defaults to the real guarded directories.
