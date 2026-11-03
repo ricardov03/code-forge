@@ -60,7 +60,7 @@ test('Go refuses every invalid config with the Node error kind and exact message
   const data = await kit();
   const cases = Object.values(data).flat().filter((c) => c.group === 'error');
   assert.deepEqual([...new Set(cases.map((c) => c.expected.error))].sort(),
-    ['migrate-error', 'not-found', 'parse-error', 'read-error'], 'all four Node loader error kinds must be covered');
+    ['migrate-error', 'not-found', 'parse-error', 'read-error', 'schema'], 'all four Node loader error kinds and schema refusals must be covered');
   goTest('TestConfigErrors', cases.length);
 });
 

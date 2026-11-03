@@ -1,0 +1,955 @@
+[
+  {
+    "name": "provider-defaults/anthropic",
+    "operation": "defaults",
+    "provider": "anthropic",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"provider\":\"anthropic\"}"
+    }
+  },
+  {
+    "name": "provider-defaults/openai",
+    "operation": "defaults",
+    "provider": "openai",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\"}"
+    }
+  },
+  {
+    "name": "provider-defaults/xai",
+    "operation": "defaults",
+    "provider": "xai",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"grok-4.7\"},\"L1\":{\"effort\":\"medium\",\"model\":\"grok-4.7\"},\"L2\":{\"effort\":\"high\",\"model\":\"grok-4.7\"},\"L3\":{\"effort\":\"xhigh\",\"model\":\"grok-4.7\"}},\"provider\":\"xai\"}"
+    }
+  },
+  {
+    "name": "provider-defaults/constructor",
+    "operation": "defaults",
+    "provider": "constructor",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "null"
+    }
+  },
+  {
+    "name": "provider-defaults/__proto__",
+    "operation": "defaults",
+    "provider": "__proto__",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "null"
+    }
+  },
+  {
+    "name": "provider-defaults/empty",
+    "operation": "defaults",
+    "provider": "",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "null"
+    }
+  },
+  {
+    "name": "provider-defaults/unknown",
+    "operation": "defaults",
+    "provider": "unknown",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "null"
+    }
+  },
+  {
+    "name": "validate/valid",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/string",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"project\":{\"name\":\"hello\"}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"project\":{\"name\":\"hello\"},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/integer",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"budget\":{\"block_lines\":42}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"budget\":{\"block_lines\":42},\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/number",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"calibration\":{\"shadow_rate\":0.25}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"calibration\":{\"shadow_rate\":0.25},\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/boolean",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"native\":{\"daemon\":false}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"native\":{\"daemon\":false},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/null",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"tmp\":{\"root\":null}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"tmp\":{\"root\":null},\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/array",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"production\":{\"names\":[\"one\",\"two\"]}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"production\":{\"names\":[\"one\",\"two\"]},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/object",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"context\":{\"commands\":{\"test\":[\"node\",\"--test\"]}}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"context\":{\"commands\":{\"test\":[\"node\",\"--test\"]}},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/unknown-key",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"unknown\":true}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "(root) must NOT have additional property \"unknown\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge 0.16.3)"
+    }
+  },
+  {
+    "name": "validate/nested-unknown",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"nope\":1}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/caps must NOT have additional property \"nope\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge 0.16.3)"
+    }
+  },
+  {
+    "name": "validate/wrong-string",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"project\":{\"name\":42}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/project/name must be string"
+    }
+  },
+  {
+    "name": "validate/wrong-integer",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"budget\":{\"block_lines\":1.5}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/budget/block_lines must be integer"
+    }
+  },
+  {
+    "name": "validate/wrong-number",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"calibration\":{\"shadow_rate\":\"0.1\"}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/calibration/shadow_rate must be number"
+    }
+  },
+  {
+    "name": "validate/wrong-boolean",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"native\":{\"daemon\":1}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/native/daemon must be boolean"
+    }
+  },
+  {
+    "name": "validate/wrong-null-union",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"tmp\":{\"root\":2}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/tmp/root must be string\n/tmp/root must be null\n/tmp/root must match a schema in anyOf"
+    }
+  },
+  {
+    "name": "validate/wrong-array",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"production\":{\"names\":\"one\"}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/production/names must be array"
+    }
+  },
+  {
+    "name": "validate/wrong-object",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"context\":[]}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/context must be object"
+    }
+  },
+  {
+    "name": "validate/missing-required",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{},\"caps\":{\"coders\":2}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/levels must have required property 'L0'\n/levels must have required property 'L1'\n/levels must have required property 'L2'\n/levels must have required property 'L3'"
+    }
+  },
+  {
+    "name": "validate/enum",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"other\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/provider must be equal to one of the allowed values"
+    }
+  },
+  {
+    "name": "validate/const",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"telemetry\":\"on\"}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/telemetry must be equal to constant"
+    }
+  },
+  {
+    "name": "validate/enum-wrong-type",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":42,\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/provider must be string\n/provider must be equal to one of the allowed values"
+    }
+  },
+  {
+    "name": "validate/const-wrong-type",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"telemetry\":true}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/telemetry must be string\n/telemetry must be equal to constant"
+    }
+  },
+  {
+    "name": "validate/minimum",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"budget\":{\"block_lines\":0}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/budget/block_lines must be >= 1"
+    }
+  },
+  {
+    "name": "validate/maximum",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"calibration\":{\"shadow_rate\":2}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/calibration/shadow_rate must be <= 0.5"
+    }
+  },
+  {
+    "name": "validate/exclusive-minimum",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"budget\":{\"usd\":0}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/budget/usd must be > 0"
+    }
+  },
+  {
+    "name": "validate/min-length",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/levels/L0/model must NOT have fewer than 1 characters"
+    }
+  },
+  {
+    "name": "validate/min-items",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"context\":{\"commands\":{\"test\":[]}}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/context/commands/test must NOT have fewer than 1 items"
+    }
+  },
+  {
+    "name": "validate/max-items",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"custom\":[{\"name\":\"gate0\",\"argv\":[\"true\"]},{\"name\":\"gate1\",\"argv\":[\"true\"]},{\"name\":\"gate2\",\"argv\":[\"true\"]},{\"name\":\"gate3\",\"argv\":[\"true\"]},{\"name\":\"gate4\",\"argv\":[\"true\"]},{\"name\":\"gate5\",\"argv\":[\"true\"]},{\"name\":\"gate6\",\"argv\":[\"true\"]},{\"name\":\"gate7\",\"argv\":[\"true\"]},{\"name\":\"gate8\",\"argv\":[\"true\"]},{\"name\":\"gate9\",\"argv\":[\"true\"]},{\"name\":\"gate10\",\"argv\":[\"true\"]},{\"name\":\"gate11\",\"argv\":[\"true\"]},{\"name\":\"gate12\",\"argv\":[\"true\"]},{\"name\":\"gate13\",\"argv\":[\"true\"]},{\"name\":\"gate14\",\"argv\":[\"true\"]},{\"name\":\"gate15\",\"argv\":[\"true\"]},{\"name\":\"gate16\",\"argv\":[\"true\"]},{\"name\":\"gate17\",\"argv\":[\"true\"]},{\"name\":\"gate18\",\"argv\":[\"true\"]},{\"name\":\"gate19\",\"argv\":[\"true\"]},{\"name\":\"gate20\",\"argv\":[\"true\"]}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/custom must NOT have more than 20 items"
+    }
+  },
+  {
+    "name": "validate/unique",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"context\":{\"rules\":[\"same\",\"same\"]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/context/rules must NOT have duplicate items (items ## 1 and 0 are identical)"
+    }
+  },
+  {
+    "name": "validate/pattern",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"coder\":{\"sandbox\":{\"add_dirs\":[\"relative\"]}}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/coder/sandbox/add_dirs/0 must match pattern \"^(/|~/)\""
+    }
+  },
+  {
+    "name": "validate/property-names",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"review\":{\"second_levels\":{\"L9\":{\"model\":\"x\"}}}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/review/second_levels must be null\n/review/second_levels property name \"L9\" is not allowed (propertyNames)\n/review/second_levels must match a schema in anyOf"
+    }
+  },
+  {
+    "name": "validate/pattern-properties",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"proof\":{\"runners\":[{\"adapter\":\"junit\",\"match\":[\"*\"],\"argv\":[\"test\",\"{report}\",\"{test_file}\"],\"env\":{\"bad-key\":\"value\"}}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/proof/runners/0/env must NOT have additional property \"bad-key\" (unknown key; if it comes from a newer code-forge, upgrade: this is code-forge 0.16.3)"
+    }
+  },
+  {
+    "name": "validate/conditional-required",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"proof\":{\"runners\":[{\"adapter\":\"xcodebuild\",\"match\":[\"*\"],\"argv\":[\"xcodebuild\"]}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/proof/runners/0 must NOT be valid\n/proof/runners/0 must match \"then\" schema"
+    }
+  },
+  {
+    "name": "validate/conditional-else",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"proof\":{\"runners\":[{\"adapter\":\"junit\",\"match\":[\"*\"],\"argv\":[\"test\"],\"xcode\":{\"scheme\":\"s\",\"destination\":\"d\",\"test_target\":\"t\"}}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/proof/runners/0 property name \"xcode\" is not allowed (propertyNames)\n/proof/runners/0 must match \"else\" schema"
+    }
+  },
+  {
+    "name": "validate/dependent-schema",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"proof\":{\"runners\":[{\"adapter\":\"xcodebuild\",\"match\":[\"*\"],\"argv\":[\"xcodebuild\"],\"xcode\":{\"workspace\":\"a\",\"project\":\"b\",\"scheme\":\"a\",\"destination\":\"b\",\"test_target\":\"a\"}}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/proof/runners/0/xcode property name \"project\" is not allowed (propertyNames)"
+    }
+  },
+  {
+    "name": "validate/contains",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"custom\":[{\"name\":\"build\",\"argv\":[\"node\",\"{test_files}\"]}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/custom/0/argv must NOT be valid"
+    }
+  },
+  {
+    "name": "validate/not",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"custom\":[{\"name\":\"test\",\"argv\":[\"node\"]}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/custom/0/name must NOT be valid"
+    }
+  },
+  {
+    "name": "validate/evidence-pattern-valid",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"custom\":[{\"name\":\"build\",\"argv\":[\"node\"],\"evidence\":[\"reports/**/*.json\"]}]}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"gates\":{\"custom\":[{\"argv\":[\"node\"],\"evidence\":[\"reports/**/*.json\"],\"name\":\"build\"}]},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/evidence-pattern-invalid",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"custom\":[{\"name\":\"build\",\"argv\":[\"node\"],\"evidence\":[\"../outside\"]}]}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/custom/0/evidence/0 must match pattern \"^(?!/)(?!.*(?:^|/)(?:[A-Za-z]:|\\.\\.(?:/|$)))[^\\\\\\u0000]+$\""
+    }
+  },
+  {
+    "name": "validate/nul-pattern",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"proof\":{\"worktree\":{\"setup\":[[\"node\",\"\\u0000\"]]}}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/proof/worktree/setup/0/1 must match pattern \"^[^\\u0000]*$\""
+    }
+  },
+  {
+    "name": "validate-sample/test/fixtures/config/invalid-missing-level.code-forge.yml",
+    "files": {
+      "project/.code-forge.yml": "version: 1\nprovider: anthropic\nlevels:\n  L0:\n    model: claude-haiku-4-5-20251001\n  L1:\n    model: claude-sonnet-5\n  L2:\n    model: claude-opus-5-5\n"
+    },
+    "operation": "schema",
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/levels must have required property 'L3'"
+    }
+  },
+  {
+    "name": "validate-sample/test/fixtures/config/minimal-anthropic.yml",
+    "files": {
+      "project/.code-forge.yml": "version: 1\nprovider: anthropic\nlevels:\n  L0:\n    model: claude-haiku-4-5-20251001\n  L1:\n    model: claude-sonnet-5\n  L2:\n    model: claude-opus-5-5\n  L3:\n    model: claude-fable-5-1\n"
+    },
+    "operation": "schema",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"provider\":\"anthropic\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate-sample/test/fixtures/config/minimal-openai.yml",
+    "files": {
+      "project/.code-forge.yml": "version: 1\nprovider: openai\nlevels:\n  L0:\n    model: gpt-6-luna\n    effort: low\n  L1:\n    model: gpt-6-luna\n    effort: high\n  L2:\n    model: gpt-6-sol\n    effort: high\n  L3:\n    model: gpt-6-astra\n    effort: high\n"
+    },
+    "operation": "schema",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate-sample/test/fixtures/config/minimal-xai.yml",
+    "files": {
+      "project/.code-forge.yml": "version: 1\nprovider: xai\nlevels:\n  L0:\n    model: grok-4.7\n    effort: low\n  L1:\n    model: grok-4.7\n    effort: medium\n  L2:\n    model: grok-4.7\n    effort: high\n  L3:\n    model: grok-4.7\n    effort: xhigh\n"
+    },
+    "operation": "schema",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"grok-4.7\"},\"L1\":{\"effort\":\"medium\",\"model\":\"grok-4.7\"},\"L2\":{\"effort\":\"high\",\"model\":\"grok-4.7\"},\"L3\":{\"effort\":\"xhigh\",\"model\":\"grok-4.7\"}},\"provider\":\"xai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate-sample/test/fixtures/config/valid-full.code-forge.yml",
+    "files": {
+      "project/.code-forge.yml": "version: 1\nproject:\n  name: Example Project\n  slug: example-project\n  plans_dir: plans\n  languages:\n    chat: en\n    ui: en\n    pr: en\nprovider: anthropic\nlevels:\n  L0:\n    model: claude-haiku-4-5-20251001\n  L1:\n    model: claude-sonnet-5\n  L2:\n    model: claude-opus-5-5\n  L3:\n    model: claude-fable-5-1\norchestrator: L1\nengine: harness\ngates:\n  test: [\"node\", \"--test\"]\n  lint: null\n  types: null\n  format: null\nreview:\n  max_rounds_per_file: 4\n  recheck_scope: fix_hunks\n  late_findings: sweep\nbudget:\n  block_cases: 80\ntmp:\n  root: null\ncalibration:\n  shadow_rate: 0\n"
+    },
+    "operation": "schema",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"budget\":{\"block_cases\":80},\"calibration\":{\"shadow_rate\":0},\"engine\":\"harness\",\"gates\":{\"format\":null,\"lint\":null,\"test\":[\"node\",\"--test\"],\"types\":null},\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"orchestrator\":\"L1\",\"project\":{\"languages\":{\"chat\":\"en\",\"pr\":\"en\",\"ui\":\"en\"},\"name\":\"Example Project\",\"plans_dir\":\"plans\",\"slug\":\"example-project\"},\"provider\":\"anthropic\",\"review\":{\"late_findings\":\"sweep\",\"max_rounds_per_file\":4,\"recheck_scope\":\"fix_hunks\"},\"tmp\":{\"root\":null},\"version\":1}"
+    }
+  },
+  {
+    "name": "validate-sample/test/fixtures/repos/laravel-vue/expected.code-forge.yml",
+    "files": {
+      "project/.code-forge.yml": "# The `.code-forge.yml` that `code-forge init --no-interaction` writes for this fixture\n# (block B13a), run under Claude Code (CLAUDECODE=1) with the Jev key in CODE_FORGE_KEY_JEV.\n# No Solo in that run: `engine: auto` resolves to the harness, so `caps.coders` is 1 (§5.5, B19).\n# B24: proof settings are not asked. High-risk paths are a deliberate blank; `link_dirs` follows\n# the manifests (`composer.json` ⇒ vendor, `package.json` ⇒ node_modules, installed or not);\n# `copy_untracked` keeps only files that exist, and `.env`/`.env.testing` do not.\n# B65: `autonomy` is always written, both keys; with no flag both answers are no.\nversion: 1\nproject:\n  name: laravel-vue\n  slug: laravel-vue\nprovider: anthropic\nlevels:\n  L0:\n    model: claude-haiku-4-5-20251001\n  L1:\n    model: claude-sonnet-5\n  L2:\n    model: claude-opus-5-5\n  L3:\n    model: claude-fable-5-1\ncaps:\n  coders: 1\nreview:\n  multimodel: false\nengine: auto\nharnesses:\n  - claude\nkeys:\n  jev: env:CODE_FORGE_KEY_JEV\ngates:\n  test:\n    - php\n    - artisan\n    - test\n    - --compact\n  lint: null\n  types:\n    - vendor/bin/phpstan\n  format:\n    - vendor/bin/pint\n    - --test\nproof:\n  tiers:\n    high:\n      paths: []\n  isolation: export\n  export:\n    link_dirs:\n      - vendor\n      - node_modules\n    copy_untracked: []\nautonomy:\n  coder_may_push: false\n  coder_may_open_draft_pr: false\n"
+    },
+    "operation": "schema",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"autonomy\":{\"coder_may_open_draft_pr\":false,\"coder_may_push\":false},\"caps\":{\"coders\":1},\"engine\":\"auto\",\"gates\":{\"format\":[\"vendor/bin/pint\",\"--test\"],\"lint\":null,\"test\":[\"php\",\"artisan\",\"test\",\"--compact\"],\"types\":[\"vendor/bin/phpstan\"]},\"harnesses\":[\"claude\"],\"keys\":{\"jev\":\"env:CODE_FORGE_KEY_JEV\"},\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"project\":{\"name\":\"laravel-vue\",\"slug\":\"laravel-vue\"},\"proof\":{\"export\":{\"copy_untracked\":[],\"link_dirs\":[\"vendor\",\"node_modules\"]},\"isolation\":\"export\",\"tiers\":{\"high\":{\"paths\":[]}}},\"provider\":\"anthropic\",\"review\":{\"multimodel\":false},\"version\":1}"
+    }
+  },
+  {
+    "name": "validate-sample/test/fixtures/review-route/sample-run-config.yml",
+    "files": {
+      "project/.code-forge.yml": "version: 1\nproject:\n  name: code-forge\n  slug: code-forge\nprovider: anthropic\nlevels:\n  L0:\n    model: claude-haiku-4-5-20251001\n  L1:\n    model: claude-sonnet-5\n  L2:\n    model: claude-opus-5-5\n  L3:\n    model: claude-fable-5-1\ncaps:\n  coders: 2\nreview:\n  multimodel: false\n  file_loop: watch\n  routes:\n    - min_lines: 400\n      provider: xai\n      model: grok-4.7\n      session_timeout_s: 1800\n      fallback:\n        - provider: anthropic\n          model: claude-opus-5-5\nengine: auto\nharnesses:\n  - claude\nsystem1:\n  fallback: rules\ngates:\n  test:\n    - npm\n    - test\n  lint: null\n  types:\n    - npm\n    - run\n    - typecheck\n  format: null\nproof:\n  tiers:\n    high:\n      paths: []\n  isolation: worktree\n  worktree:\n    dir: .claude/worktrees/cf\n  export:\n    link_dirs:\n      - node_modules\n    copy_untracked: []\ncontext:\n  commands:\n    build: [npm, run, typecheck]\n    test: [node, --import, ./test/helpers/isolate.mjs, --experimental-test-module-mocks, --test]\n"
+    },
+    "operation": "schema",
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"context\":{\"commands\":{\"build\":[\"npm\",\"run\",\"typecheck\"],\"test\":[\"node\",\"--import\",\"./test/helpers/isolate.mjs\",\"--experimental-test-module-mocks\",\"--test\"]}},\"engine\":\"auto\",\"gates\":{\"format\":null,\"lint\":null,\"test\":[\"npm\",\"test\"],\"types\":[\"npm\",\"run\",\"typecheck\"]},\"harnesses\":[\"claude\"],\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"project\":{\"name\":\"code-forge\",\"slug\":\"code-forge\"},\"proof\":{\"export\":{\"copy_untracked\":[],\"link_dirs\":[\"node_modules\"]},\"isolation\":\"worktree\",\"tiers\":{\"high\":{\"paths\":[]}},\"worktree\":{\"dir\":\".claude/worktrees/cf\"}},\"provider\":\"anthropic\",\"review\":{\"file_loop\":\"watch\",\"multimodel\":false,\"routes\":[{\"fallback\":[{\"model\":\"claude-opus-5-5\",\"provider\":\"anthropic\"}],\"min_lines\":400,\"model\":\"grok-4.7\",\"provider\":\"xai\",\"session_timeout_s\":1800}]},\"system1\":{\"fallback\":\"rules\"},\"version\":1}"
+    }
+  },
+  {
+    "name": "refresh/missing",
+    "operation": "refresh",
+    "files": {},
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{},\"sourcesRead\":[],\"sourcesSkipped\":[]},\"seen\":{}}"
+    }
+  },
+  {
+    "name": "refresh/bare-arrays",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "[\"b\",\"a\",\"b\",7]",
+      "home/.grok/models_cache.json": "[\"z\",\"z\",false]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"openai\":[\"a\",\"b\"],\"xai\":[\"z\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"openai\":[\"b\",\"a\",\"b\"],\"xai\":[\"z\",\"z\"]},\"sourcesRead\":[\"$ROOT/home/.codex/models_cache.json\",\"$ROOT/home/.grok/models_cache.json\"],\"sourcesSkipped\":[]},\"seen\":{\"openai\":[\"a\",\"b\"],\"xai\":[\"z\"]}}"
+    }
+  },
+  {
+    "name": "refresh/wrapped-arrays",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "{\"models\":[\"b\",\"a\"]}",
+      "home/.grok/models_cache.json": "{\"models\":[\"y\",\"x\"]}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"openai\":[\"a\",\"b\"],\"xai\":[\"x\",\"y\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"openai\":[\"b\",\"a\"],\"xai\":[\"y\",\"x\"]},\"sourcesRead\":[\"$ROOT/home/.codex/models_cache.json\",\"$ROOT/home/.grok/models_cache.json\"],\"sourcesSkipped\":[]},\"seen\":{\"openai\":[\"a\",\"b\"],\"xai\":[\"x\",\"y\"]}}"
+    }
+  },
+  {
+    "name": "refresh/real-shapes",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "{\"models\":[{\"slug\":\"gpt-test\"},{\"slug\":\"\"},{\"other\":1},null]}",
+      "home/.grok/models_cache.json": "{\"models\":{\"one\":{\"info\":{\"id\":\"grok-test\"}},\"fallback\":{},\"empty\":{\"info\":{\"id\":\"\"}}}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"openai\":[\"gpt-test\"],\"xai\":[\"empty\",\"fallback\",\"grok-test\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"openai\":[\"gpt-test\"],\"xai\":[\"grok-test\",\"fallback\",\"empty\"]},\"sourcesRead\":[\"$ROOT/home/.codex/models_cache.json\",\"$ROOT/home/.grok/models_cache.json\"],\"sourcesSkipped\":[]},\"seen\":{\"openai\":[\"gpt-test\"],\"xai\":[\"empty\",\"fallback\",\"grok-test\"]}}"
+    }
+  },
+  {
+    "name": "refresh/malformed",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "not json",
+      "home/.grok/models_cache.json": "[\"good\"]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"xai\":[\"good\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"xai\":[\"good\"]},\"sourcesRead\":[\"$ROOT/home/.grok/models_cache.json\"],\"sourcesSkipped\":[{\"path\":\"$ROOT/home/.codex/models_cache.json\",\"reason\":\"not valid JSON\"}]},\"seen\":{\"xai\":[\"good\"]}}"
+    }
+  },
+  {
+    "name": "refresh/malformed-position",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "{\"models\":[] ,}",
+      "home/.grok/models_cache.json": "[\"good\"]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"xai\":[\"good\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"xai\":[\"good\"]},\"sourcesRead\":[\"$ROOT/home/.grok/models_cache.json\"],\"sourcesSkipped\":[{\"path\":\"$ROOT/home/.codex/models_cache.json\",\"reason\":\"not valid JSON (at position 14)\"}]},\"seen\":{\"xai\":[\"good\"]}}"
+    }
+  },
+  {
+    "name": "refresh/json-numbers-and-key-order",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "{\"models\":[1e999,\"good\"]}",
+      "home/.grok/models_cache.json": "{\"models\":{\"2\":{},\"1\":{},\"z\":{},\"z\":{\"info\":{\"id\":\"last\"}}}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"openai\":[\"good\"],\"xai\":[\"1\",\"2\",\"last\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"openai\":[\"good\"],\"xai\":[\"1\",\"2\",\"last\"]},\"sourcesRead\":[\"$ROOT/home/.codex/models_cache.json\",\"$ROOT/home/.grok/models_cache.json\"],\"sourcesSkipped\":[]},\"seen\":{\"openai\":[\"good\"],\"xai\":[\"1\",\"2\",\"last\"]}}"
+    }
+  },
+  {
+    "name": "refresh/unrecognized-shapes",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "{\"models\":{}}",
+      "home/.grok/models_cache.json": "42"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{},\"sourcesRead\":[],\"sourcesSkipped\":[{\"path\":\"$ROOT/home/.codex/models_cache.json\",\"reason\":\"parsed but no model ids could be read from it\"},{\"path\":\"$ROOT/home/.grok/models_cache.json\",\"reason\":\"parsed but no model ids could be read from it\"}]},\"seen\":{}}"
+    }
+  },
+  {
+    "name": "refresh/merge-existing",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "[\"new\",\"a\"]",
+      "home/.code-forge/cache/models.json": "{\"seen\":{\"openai\":[\"old\",\"a\"],\"other\":[\"preserve\"],\"bad\":1,\"__proto__\":[\"no\"],\"constructor\":[\"no\"],\"prototype\":[\"no\"]}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"openai\":[\"a\",\"new\",\"old\"],\"other\":[\"preserve\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"openai\":[\"new\",\"a\"]},\"sourcesRead\":[\"$ROOT/home/.codex/models_cache.json\"],\"sourcesSkipped\":[]},\"seen\":{\"openai\":[\"a\",\"new\",\"old\"],\"other\":[\"preserve\"]}}"
+    }
+  },
+  {
+    "name": "refresh/corrupt-existing",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "[\"good\"]",
+      "home/.code-forge/cache/models.json": "not json"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"openai\":[\"good\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"openai\":[\"good\"]},\"sourcesRead\":[\"$ROOT/home/.codex/models_cache.json\"],\"sourcesSkipped\":[]},\"seen\":{\"openai\":[\"good\"]}}"
+    }
+  },
+  {
+    "name": "refresh/wrong-existing-shape",
+    "operation": "refresh",
+    "files": {
+      "home/.codex/models_cache.json": "[\"good\"]",
+      "home/.code-forge/cache/models.json": "{\"seen\":[\"wrong\"]}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"openai\":[\"good\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"openai\":[\"good\"]},\"sourcesRead\":[\"$ROOT/home/.codex/models_cache.json\"],\"sourcesSkipped\":[]},\"seen\":{\"openai\":[\"good\"]}}"
+    }
+  },
+  {
+    "name": "refresh/unreadable-source",
+    "operation": "refresh",
+    "dirs": [
+      "home/.codex/models_cache.json"
+    ],
+    "files": {
+      "home/.grok/models_cache.json": "[\"good\"]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"cache\":{\"seen\":{\"xai\":[\"good\"]},\"status\":\"seen-in-cache\"},\"result\":{\"cachePath\":\"$ROOT/home/.code-forge/cache/models.json\",\"seenThisRun\":{\"xai\":[\"good\"]},\"sourcesRead\":[\"$ROOT/home/.grok/models_cache.json\"],\"sourcesSkipped\":[{\"path\":\"$ROOT/home/.codex/models_cache.json\",\"reason\":\"unreadable (EISDIR)\"}]},\"seen\":{\"xai\":[\"good\"]}}"
+    }
+  }
+]

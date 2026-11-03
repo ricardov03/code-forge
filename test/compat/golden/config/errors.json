@@ -150,6 +150,36 @@
     }
   },
   {
+    "name": "migrate/large-version",
+    "files": {
+      "project/.code-forge.yml": "version: 1e21\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "migrate-error",
+      "message": "migrateConfig: config version 1e+21 is newer than this code-forge understands (1) — upgrade the package"
+    }
+  },
+  {
+    "name": "yaml/invalid-timestamp-tag",
+    "files": {
+      "project/.code-forge.yml": "value: !!timestamp not-a-date"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "TAG_RESOLVE_FAILED: !!timestamp expects a date, starting with yyyy-mm-dd (line 1, column 8)"
+    }
+  },
+  {
     "name": "yaml/duplicate-root",
     "files": {
       "project/.code-forge.yml": "provider: openai\nprovider: xai"
@@ -315,6 +345,111 @@
     }
   },
   {
+    "name": "yaml/invalid-escape",
+    "files": {
+      "project/.code-forge.yml": "a: \"bad\\q\"\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_DQ_ESCAPE: Invalid escape sequence \\q (line 1, column 8)"
+    }
+  },
+  {
+    "name": "yaml/unterminated-quote",
+    "files": {
+      "project/.code-forge.yml": "a: \"unterminated\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "MISSING_CHAR: Missing closing \"quote (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/missing-colon",
+    "files": {
+      "project/.code-forge.yml": "a: 1\nb 2\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "MISSING_CHAR: Implicit map keys need to be followed by map values (line 2, column 1)"
+    }
+  },
+  {
+    "name": "yaml/nested-compact-mapping",
+    "files": {
+      "project/.code-forge.yml": "a:\n b: 1\n  c: 2\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BLOCK_AS_IMPLICIT_KEY: Nested mappings are not allowed in compact mappings (line 2, column 5)"
+    }
+  },
+  {
+    "name": "yaml/reserved-scalar",
+    "files": {
+      "project/.code-forge.yml": "a: @bad\n"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "BAD_SCALAR_START: Plain value cannot start with reserved character @ (line 1, column 4)"
+    }
+  },
+  {
+    "name": "yaml/unmasked-alias-prefix",
+    "files": {
+      "project/.code-forge.yml": "value: *task-sk-fake12345678901234567890"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "YAML_PARSE_ERROR: Unresolved alias (the anchor must be set before the alias): task-sk-fake12345678901234567890"
+    }
+  },
+  {
+    "name": "yaml/unicode-duplicate",
+    "files": {
+      "project/.code-forge.yml": "value: {emoji: \"😀\", model: a, model: b}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "DUPLICATE_KEY: Map keys must be unique (line 1, column 32)"
+    }
+  },
+  {
     "name": "yaml/multiple-documents",
     "files": {
       "project/.code-forge.yml": "provider: openai\n---\nprovider: xai\n"
@@ -417,6 +552,21 @@
       "path": "$ROOT/project/.code-forge.yml",
       "error": "parse-error",
       "message": "config root must be a mapping, got a list"
+    }
+  },
+  {
+    "name": "yaml/alias-limit-100",
+    "files": {
+      "project/.code-forge.yml": "value: &one scalar\naliases: [*one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one]"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "path": "$ROOT/project/.code-forge.yml",
+      "error": "parse-error",
+      "message": "YAML_PARSE_ERROR: Excessive alias count indicates a resource exhaustion attack"
     }
   },
   {

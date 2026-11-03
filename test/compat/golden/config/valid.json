@@ -446,5 +446,47 @@
       "path": "$ROOT/project/.code-forge.yml",
       "canonical": "{\"values\":[\"12\",12,1.2,true,null,{},{\"0\":72,\"1\":101,\"2\":108,\"3\":108,\"4\":111},\"42\"],\"version\":1}"
     }
+  },
+  {
+    "name": "yaml/unresolved-scalar-tags",
+    "files": {
+      "project/.code-forge.yml": "values: [!!float 1, !!int 1.2, !!int true, !!null false, !!bool 1, !!str null]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[\"1\",\"1.2\",\"true\",\"false\",\"1\",\"null\"],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/lenient-binary-tag",
+    "files": {
+      "project/.code-forge.yml": "values: [!!binary invalid, !!binary \"SGVsbG8_***\", !!binary \"SG=ignored\"]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"values\":[{\"0\":138,\"1\":123,\"2\":218,\"3\":150,\"4\":39},{\"0\":72,\"1\":101,\"2\":108,\"3\":108,\"4\":111,\"5\":63},{\"0\":72}],\"version\":1}"
+    }
+  },
+  {
+    "name": "yaml/alias-limit-99",
+    "files": {
+      "project/.code-forge.yml": "value: &one scalar\naliases: [*one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one, *one]"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "path": "$ROOT/project/.code-forge.yml",
+      "canonical": "{\"aliases\":[\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\",\"scalar\"],\"value\":\"scalar\",\"version\":1}"
+    }
   }
 ]

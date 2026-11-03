@@ -12,15 +12,17 @@ import (
 )
 
 type configCase struct {
-	Name     string
-	Group    string
-	Files    map[string]string
-	Dirs     []string
-	Links    map[string]string
-	Cwd      string
-	Home     string
-	Root     string
-	Expected struct {
+	Name      string
+	Group     string
+	Files     map[string]string
+	Dirs      []string
+	Links     map[string]string
+	Cwd       string
+	Home      string
+	Root      string
+	Operation string
+	Provider  string
+	Expected  struct {
 		OK        bool
 		Path      string
 		Canonical string
@@ -93,7 +95,43 @@ func fixture(t *testing.T, c configCase) (string, string) {
 
 func checkLoad(t *testing.T, c configCase, root, cwd string) {
 	t.Helper()
-	value, err := Load(cwd)
+	var value any
+	var err error
+	switch c.Operation {
+	case "defaults":
+		value = DefaultsForProvider(c.Provider)
+	case "schema":
+		data, readErr := os.ReadFile("../../package.json")
+		if readErr != nil {
+			t.Fatal(readErr)
+		}
+		var pkg struct{ Version string }
+		if err := json.Unmarshal(data, &pkg); err != nil {
+			t.Fatal(err)
+		}
+		value, err = LoadValidated(cwd, pkg.Version)
+	case "refresh":
+		home := filepath.Join(root, c.Home)
+		result, refreshErr := RefreshFromCLICaches(home)
+		err = refreshErr
+		if err == nil {
+			data, readErr := os.ReadFile(UserModelsCachePath(home))
+			if readErr != nil {
+				t.Fatal(readErr)
+			}
+			var cache map[string]any
+			if err := json.Unmarshal(data, &cache); err != nil {
+				t.Fatal(err)
+			}
+			if stamp, ok := cache["updated_at"].(string); !ok || stamp == "" {
+				t.Fatal("refresh timestamp must be a nonempty string")
+			}
+			delete(cache, "updated_at")
+			value = map[string]any{"result": result, "cache": cache, "seen": LoadSeenInCache(home)}
+		}
+	default:
+		value, err = Load(cwd)
+	}
 	normalize := func(text string) string { return strings.ReplaceAll(text, root, "$ROOT") }
 	if c.Expected.OK {
 		if err != nil {
@@ -103,10 +141,10 @@ func checkLoad(t *testing.T, c configCase, root, cwd string) {
 		if err != nil {
 			t.Fatal(err)
 		}
-		if string(data) != c.Expected.Canonical {
+		if normalize(string(data)) != c.Expected.Canonical {
 			t.Fatalf("canonical config got %s\nwant %s", data, c.Expected.Canonical)
 		}
-		if got := normalize(filepath.Join(ProjectRootFor(cwd), Filename)); got != c.Expected.Path {
+		if got := normalize(filepath.Join(ProjectRootFor(cwd), Filename)); c.Expected.Path != "" && got != c.Expected.Path {
 			t.Fatalf("config path got %s want %s", got, c.Expected.Path)
 		}
 		return

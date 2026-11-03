@@ -8,7 +8,6 @@ import (
 	"math"
 	"os"
 	"path/filepath"
-	"strconv"
 	"strings"
 	"syscall"
 )
@@ -71,7 +70,7 @@ func LoadFile(path string) (map[string]any, error) {
 		return nil, failure("migrate-error", "migrateConfig: version must be a positive integer, got a "+kind, path)
 	}
 	if n > 1 {
-		return nil, failure("migrate-error", fmt.Sprintf("migrateConfig: config version %s is newer than this code-forge understands (1) — upgrade the package", strconv.FormatFloat(n, 'f', -1, 64)), path)
+		return nil, failure("migrate-error", fmt.Sprintf("migrateConfig: config version %s is newer than this code-forge understands (1) — upgrade the package", jsKey(n)), path)
 	}
 	mapping["version"] = float64(1)
 	jsonNumbers(mapping)

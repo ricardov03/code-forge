@@ -12,7 +12,9 @@ import { runRecordPath } from '../src/state/paths.mjs';
 import { ledgerDir, ledgerPath } from '../src/ledger/paths.mjs';
 import { appendRow, readAllRows, readRows } from '../src/ledger/write.mjs';
 import { loadProjectConfig, projectRootFor } from '../src/config/load.mjs';
-import { PROVIDER_DEFAULTS } from '../src/config/defaults/index.mjs';
+import { PROVIDER_DEFAULTS, defaultsForProvider } from '../src/config/defaults/index.mjs';
+import { validateConfig } from '../src/config/validate.mjs';
+import { loadSeenInCache, refreshFromCliCaches, userModelsCachePath } from '../src/config/refresh.mjs';
 
 const stamp = '2026-01-02T03:04:05.006Z';
 const key = Buffer.from('000102030405060708090a0b0c0d0e0f101112131415161718191a1b1c1d1e1f', 'hex');
@@ -20,7 +22,7 @@ const key = Buffer.from('000102030405060708090a0b0c0d0e0f101112131415161718191a1
 /**
  * Config inputs are complete filesystem recipes. Paths in oracle output use
  * $ROOT so committed bytes are independent of temp directories and HOME.
- * @typedef {{name: string, group?: string, files?: Record<string, string>, dirs?: string[], links?: Record<string, string>, cwd?: string, home?: string}} ConfigCase
+ * @typedef {{name: string, group?: string, operation?: string, provider?: string, config?: Record<string, any>, files?: Record<string, string>, dirs?: string[], links?: Record<string, string>, cwd?: string, home?: string}} ConfigCase
  */
 
 export async function buildConfigGoldens() {
@@ -51,6 +53,7 @@ export async function buildConfigGoldens() {
   }
   yaml('migrate/nan', 'version: .nan\n');
   yaml('migrate/infinity', 'version: .inf\n');
+  yaml('migrate/large-version', 'version: 1e21\n');
   for (const [name, text] of Object.entries({
     string: 'project: {name: "hello é😀"}', integer: 'budget: {block_lines: 42}',
     number: 'calibration: {shadow_rate: 0.25}', boolean: 'native: {daemon: false}',
@@ -72,6 +75,9 @@ export async function buildConfigGoldens() {
     'numeric-keys': '1: one\n"1": overwritten\ntrue: a\n"true": b\nnull: c',
     'prototype-keys': '__proto__: {polluted: false}\nconstructor: own\nprototype: own',
     'explicit-tags': 'values: [!!str 12, !!int 012, !!float 1.2, !!bool TRUE, !!null null, !!timestamp 2026-01-02, !!binary SGVsbG8=, !custom 42]',
+    'unresolved-scalar-tags': 'values: [!!float 1, !!int 1.2, !!int true, !!null false, !!bool 1, !!str null]',
+    'lenient-binary-tag': 'values: [!!binary invalid, !!binary "SGVsbG8_***", !!binary "SG=ignored"]',
+    'invalid-timestamp-tag': 'value: !!timestamp not-a-date',
     'duplicate-root': 'provider: openai\nprovider: xai',
     'duplicate-nested': 'levels:\n  L0: {model: one, model: two}',
     'duplicate-number': '1: one\n01: two',
@@ -83,9 +89,17 @@ export async function buildConfigGoldens() {
     'unterminated-map': 'project: {name: hello\n',
     'mismatched-flow': 'project: [1, 2}\n',
     'tab-indent': 'project:\n\tname: hello\n',
+    'invalid-escape': 'a: "bad\\q"\n',
+    'unterminated-quote': 'a: "unterminated\n',
+    'missing-colon': 'a: 1\nb 2\n',
+    'nested-compact-mapping': 'a:\n b: 1\n  c: 2\n',
+    'reserved-scalar': 'a: @bad\n',
+    'unmasked-alias-prefix': 'value: *task-sk-fake12345678901234567890',
+    'unicode-duplicate': 'value: {emoji: "😀", model: a, model: b}',
     'multiple-documents': 'provider: openai\n---\nprovider: xai\n',
     empty: '', 'root-null': 'null', 'root-string': 'hello', 'root-number': '42', 'root-boolean': 'true', 'root-list': '[one, two]',
   })) yaml(`yaml/${name}`, text);
+  for (const count of [99, 100]) yaml(`yaml/alias-limit-${count}`, `value: &one scalar\naliases: [${Array(count).fill('*one').join(', ')}]`);
   inputs.push({ name: 'io/not-found', files: {} }, { name: 'io/directory', dirs: ['project/.code-forge.yml'] });
 
   const roots = [
@@ -104,7 +118,53 @@ export async function buildConfigGoldens() {
   ];
   inputs.push(...roots.map((c) => ({ ...c, name: `root/${c.name}`, group: 'root' })));
 
-  const groups = { 'fixtures.json': [], 'valid.json': [], 'errors.json': [], 'roots.json': [] };
+  for (const provider of ['anthropic', 'openai', 'xai', 'constructor', '__proto__', '', 'unknown']) {
+    inputs.push({ name: `provider-defaults/${provider || 'empty'}`, operation: 'defaults', provider });
+  }
+  const base = { version: 1, ...PROVIDER_DEFAULTS.openai };
+  for (const [name, extra] of Object.entries({
+    valid: {}, string: { project: { name: 'hello' } }, integer: { budget: { block_lines: 42 } },
+    number: { calibration: { shadow_rate: 0.25 } }, boolean: { native: { daemon: false } },
+    null: { tmp: { root: null } }, array: { production: { names: ['one', 'two'] } }, object: { context: { commands: { test: ['node', '--test'] } } },
+    'unknown-key': { unknown: true }, 'nested-unknown': { caps: { nope: 1 } },
+    'wrong-string': { project: { name: 42 } }, 'wrong-integer': { budget: { block_lines: 1.5 } },
+    'wrong-number': { calibration: { shadow_rate: '0.1' } }, 'wrong-boolean': { native: { daemon: 1 } },
+    'wrong-null-union': { tmp: { root: 2 } }, 'wrong-array': { production: { names: 'one' } }, 'wrong-object': { context: [] },
+    'missing-required': { levels: {} }, enum: { provider: 'other' }, const: { telemetry: 'on' },
+    'enum-wrong-type': { provider: 42 }, 'const-wrong-type': { telemetry: true },
+    minimum: { budget: { block_lines: 0 } }, maximum: { calibration: { shadow_rate: 2 } },
+    'exclusive-minimum': { budget: { usd: 0 } }, 'min-length': { levels: { ...base.levels, L0: { model: '' } } },
+    'min-items': { context: { commands: { test: [] } } }, 'max-items': { gates: { custom: Array.from({ length: 21 }, (_, i) => ({ name: `gate${i}`, argv: ['true'] })) } },
+    unique: { context: { rules: ['same', 'same'] } }, pattern: { coder: { sandbox: { add_dirs: ['relative'] } } },
+    'property-names': { review: { second_levels: { L9: { model: 'x' } } } },
+    'pattern-properties': { proof: { runners: [{ adapter: 'junit', match: ['*'], argv: ['test', '{report}', '{test_file}'], env: { 'bad-key': 'value' } }] } },
+    'conditional-required': { proof: { runners: [{ adapter: 'xcodebuild', match: ['*'], argv: ['xcodebuild'] }] } },
+    'conditional-else': { proof: { runners: [{ adapter: 'junit', match: ['*'], argv: ['test'], xcode: { scheme: 's', destination: 'd', test_target: 't' } }] } },
+    'dependent-schema': { proof: { runners: [{ adapter: 'xcodebuild', match: ['*'], argv: ['xcodebuild'], xcode: { workspace: 'a', project: 'b', scheme: 'a', destination: 'b', test_target: 'a' } }] } },
+    contains: { gates: { custom: [{ name: 'build', argv: ['node', '{test_files}'] }] } },
+    not: { gates: { custom: [{ name: 'test', argv: ['node'] }] } },
+    'evidence-pattern-valid': { gates: { custom: [{ name: 'build', argv: ['node'], evidence: ['reports/**/*.json'] }] } },
+    'evidence-pattern-invalid': { gates: { custom: [{ name: 'build', argv: ['node'], evidence: ['../outside'] }] } },
+    'nul-pattern': { proof: { worktree: { setup: [['node', '\u0000']] } } },
+  })) inputs.push({ name: `validate/${name}`, operation: 'schema', files: { 'project/.code-forge.yml': JSON.stringify({ ...base, ...extra }) } });
+  inputs.push(...inputs.slice(0, fixtureCount).map((sample) => ({ ...sample, name: `validate-sample/${sample.name}`, operation: 'schema' })));
+  const refreshInputs = {
+    missing: {},
+    'bare-arrays': { 'home/.codex/models_cache.json': '["b","a","b",7]', 'home/.grok/models_cache.json': '["z","z",false]' },
+    'wrapped-arrays': { 'home/.codex/models_cache.json': '{"models":["b","a"]}', 'home/.grok/models_cache.json': '{"models":["y","x"]}' },
+    'real-shapes': { 'home/.codex/models_cache.json': '{"models":[{"slug":"gpt-test"},{"slug":""},{"other":1},null]}', 'home/.grok/models_cache.json': '{"models":{"one":{"info":{"id":"grok-test"}},"fallback":{},"empty":{"info":{"id":""}}}}' },
+    malformed: { 'home/.codex/models_cache.json': 'not json', 'home/.grok/models_cache.json': '["good"]' },
+    'malformed-position': { 'home/.codex/models_cache.json': '{"models":[] ,}', 'home/.grok/models_cache.json': '["good"]' },
+    'json-numbers-and-key-order': { 'home/.codex/models_cache.json': '{"models":[1e999,"good"]}', 'home/.grok/models_cache.json': '{"models":{"2":{},"1":{},"z":{},"z":{"info":{"id":"last"}}}}' },
+    'unrecognized-shapes': { 'home/.codex/models_cache.json': '{"models":{}}', 'home/.grok/models_cache.json': '42' },
+    'merge-existing': { 'home/.codex/models_cache.json': '["new","a"]', 'home/.code-forge/cache/models.json': '{"seen":{"openai":["old","a"],"other":["preserve"],"bad":1,"__proto__":["no"],"constructor":["no"],"prototype":["no"]}}' },
+    'corrupt-existing': { 'home/.codex/models_cache.json': '["good"]', 'home/.code-forge/cache/models.json': 'not json' },
+    'wrong-existing-shape': { 'home/.codex/models_cache.json': '["good"]', 'home/.code-forge/cache/models.json': '{"seen":["wrong"]}' },
+  };
+  for (const [name, files] of Object.entries(refreshInputs)) inputs.push({ name: `refresh/${name}`, operation: 'refresh', files });
+  inputs.push({ name: 'refresh/unreadable-source', operation: 'refresh', dirs: ['home/.codex/models_cache.json'], files: { 'home/.grok/models_cache.json': '["good"]' } });
+
+  const groups = { 'fixtures.json': [], 'valid.json': [], 'errors.json': [], 'roots.json': [], 'operations.json': [] };
   for (const [index, input] of inputs.entries()) {
     const root = await mkdtemp(path.join(os.tmpdir(), 'config-oracle-'));
     const oldHome = process.env.HOME;
@@ -119,14 +179,29 @@ export async function buildConfigGoldens() {
       for (const [name, target] of Object.entries(input.links ?? {})) await symlink(path.join(root, target), path.join(root, name));
       await mkdir(path.join(root, cwd), { recursive: true });
       process.env.HOME = path.join(root, home);
-      const result = await loadProjectConfig(path.join(root, cwd));
       const normalize = (text) => text.split(root).join('$ROOT');
-      const expected = result.ok
-        ? { ok: true, path: normalize(result.path), canonical: canonicalJSON(result.config) }
-        : { ok: false, path: normalize(result.path), error: result.error, message: normalize(result.message) };
-      const group = input.group ?? (result.ok ? 'valid' : 'error');
+      let expected;
+      if (input.operation === 'defaults') {
+        expected = { ok: true, canonical: canonicalJSON(defaultsForProvider(input.provider) ?? null) };
+      } else if (input.operation === 'schema') {
+        const loaded = await loadProjectConfig(path.join(root, cwd));
+        if (!loaded.ok) throw new Error(`${input.name}: schema input must load before validation`);
+        const errors = validateConfig(loaded.config, { hasCliOnPath: () => true }).errors.filter((issue) => issue.rule === 'schema');
+        expected = errors.length ? { ok: false, error: 'schema', message: errors.map((issue) => issue.message).join('\n') }
+          : { ok: true, canonical: canonicalJSON(loaded.config) };
+      } else if (input.operation === 'refresh') {
+        const result = await refreshFromCliCaches({ home: process.env.HOME });
+        const { updated_at, ...cache } = JSON.parse(await readFile(userModelsCachePath(process.env.HOME), 'utf8'));
+        expected = { ok: true, canonical: normalize(canonicalJSON({ result, cache, seen: await loadSeenInCache({ home: process.env.HOME }) })) };
+      } else {
+        const result = await loadProjectConfig(path.join(root, cwd));
+        expected = result.ok
+          ? { ok: true, path: normalize(result.path), canonical: canonicalJSON(result.config) }
+          : { ok: false, path: normalize(result.path), error: result.error, message: normalize(result.message) };
+      }
+      const group = input.group ?? (expected.ok ? 'valid' : 'error');
       const entry = { ...input, group, home, cwd, expected, ...(group === 'root' ? { root: normalize(projectRootFor(path.join(root, cwd))) } : {}) };
-      groups[group === 'root' ? 'roots.json' : index < fixtureCount ? 'fixtures.json' : result.ok ? 'valid.json' : 'errors.json'].push(entry);
+      groups[input.operation ? 'operations.json' : group === 'root' ? 'roots.json' : index < fixtureCount ? 'fixtures.json' : expected.ok ? 'valid.json' : 'errors.json'].push(entry);
     } finally {
       if (oldHome === undefined) delete process.env.HOME;
       else process.env.HOME = oldHome;
