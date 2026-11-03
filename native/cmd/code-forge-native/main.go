@@ -34,6 +34,8 @@ type verification struct {
 	Bad  []failure `json:"bad"`
 }
 
+// main calls run (router.go), which sends `internal <verb>` to runInternal,
+// runs ported verbs from the route table, and hands every other verb to Node.
 func main() {
 	code, err := run(os.Args[1:])
 	if err != nil {
