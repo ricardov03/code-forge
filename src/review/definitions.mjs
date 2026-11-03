@@ -1,4 +1,4 @@
-/** Best-effort JavaScript/TypeScript definition context, with caller-supplied I/O. */
+/** Best-effort JavaScript/TypeScript and Go definition context, with caller-supplied I/O. */
 import nodePath from 'node:path';
 import { isSecretLike } from './packet.mjs';
 
@@ -10,12 +10,16 @@ const IDENTIFIER = /^[A-Za-z_$][\w$]*$/;
 
 /** Comments and literals stay opaque; positions still refer to the original source.
  * @param {string} text
+ * @param {boolean} [go]
  */
-function tokensOf(text) {
+function tokensOf(text, go = false) {
   const tokens = [];
   let line = 1;
   let offset = 0;
-  for (const match of text.matchAll(/\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|`(?:\\[\s\S]|[^`\\])*`|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*"|\/(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\n\\])+\/[dgimsuvy]*|[A-Za-z_$][\w$]*|=>|[^\s]/g)) {
+  const pattern = go
+    ? /\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|`[^`]*`|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*"|[\p{L}_][\p{L}\p{Nd}_]*|[^\s]/gu
+    : /\/\/[^\r\n]*|\/\*[\s\S]*?\*\/|`(?:\\[\s\S]|[^`\\])*`|'(?:\\[\s\S]|[^'\\])*'|"(?:\\[\s\S]|[^"\\])*"|\/(?:\\.|\[(?:\\.|[^\]\\])*\]|[^/\n\\])+\/[dgimsuvy]*|[A-Za-z_$][\w$]*|=>|[^\s]/g;
+  for (const match of text.matchAll(pattern)) {
     line += text.slice(offset, match.index).split('\n').length - 1;
     offset = match.index;
     if (!/^\/[/\*]/.test(match[0])) tokens.push({ value: match[0], line });
@@ -84,6 +88,105 @@ function declaration(text, file, name, exported) {
   return null;
 }
 
+/** Top-level Go functions and methods; skip nested blocks and anonymous functions.
+ * @param {string} text @param {string} file @returns {Definition[]}
+ */
+function goDeclarations(text, file) {
+  const tokens = tokensOf(text, true);
+  const lines = text.split(/\r?\n/);
+  const found = [];
+  for (let i = 0; i < tokens.length; i++) {
+    if (tokens[i].value === '{') {
+      const end = closing(tokens, i);
+      if (end < 0) break;
+      i = end;
+      continue;
+    }
+    if (tokens[i].value !== 'func') continue;
+    let name = i + 1;
+    if (tokens[name]?.value === '(') {
+      const receiverEnd = closing(tokens, name);
+      if (receiverEnd < 0) continue;
+      name = receiverEnd + 1;
+    }
+    if (!/^[\p{L}_][\p{L}\p{Nd}_]*$/u.test(tokens[name]?.value ?? '')) continue;
+    let body = name + 1;
+    if (tokens[body]?.value === '[') body = closing(tokens, body) + 1;
+    if (tokens[body]?.value !== '(') continue;
+    const paramsEnd = closing(tokens, body);
+    if (paramsEnd < 0) continue;
+    body = paramsEnd + 1;
+    for (; body < tokens.length; body++) {
+      const value = tokens[body].value;
+      if (['(', '['].includes(value) || (value === '{' && ['struct', 'interface'].includes(tokens[body - 1]?.value))) {
+        const end = closing(tokens, body);
+        if (end < 0) break;
+        body = end;
+      } else if (value === '{' || value === 'func' || value === ';') break;
+    }
+    if (tokens[body]?.value !== '{') continue;
+    const end = closing(tokens, body);
+    if (end < 0) continue;
+    const firstLine = tokens[i].line;
+    const lastLine = tokens[end].line;
+    const lastShown = Math.min(lastLine, firstLine + 39);
+    found.push({ path: file, name: tokens[name].value, start: firstLine, end: lastShown,
+      lines: [...lines.slice(firstLine - 1, lastShown), ...(lastLine > lastShown ? ['…'] : [])] });
+    i = end;
+  }
+  return found;
+}
+
+/** Tokenize the whole caller so a hunk inside a multiline comment or raw string stays opaque.
+ * @param {string} text @param {string} path @param {string[]} diffLines
+ * @param {(file: string) => Promise<string | null>} read
+ * @param {Parameters<typeof findDefinitions>[0]['io']} io
+ * @returns {Promise<Definition[]>}
+ */
+async function goDefinitions(text, path, diffLines, read, io) {
+  const addedLines = new Set();
+  let line = 0;
+  for (const diffLine of diffLines) {
+    const hunk = diffLine.match(/^@@ -\d+(?:,\d+)? \+(\d+)(?:,\d+)? @@/);
+    if (hunk) line = Number(hunk[1]);
+    else if (line > 0 && diffLine.startsWith('+')) addedLines.add(line++);
+    else if (line > 0 && diffLine.startsWith(' ')) line++;
+  }
+  const local = goDeclarations(text, path);
+  const defined = new Set(local.filter((d) => addedLines.has(d.start)).map((d) => d.name));
+  let siblings = [];
+  try {
+    siblings = [...new Set(await io.listFiles?.(io.repoRoot) ?? [])].filter((file) => safePath(file) && file !== path &&
+      nodePath.posix.dirname(file) === nodePath.posix.dirname(path) && file.endsWith('.go') &&
+      (path.endsWith('_test.go') || !file.endsWith('_test.go'))).sort();
+  } catch { /* Local definitions still help when listing fails. */ }
+  const declarations = new Map([[path, local]]);
+  const found = [];
+  const seen = new Set();
+  const tokens = tokensOf(text, true);
+  for (let i = 0; i < tokens.length; i++) {
+    const name = tokens[i].value;
+    if (!addedLines.has(tokens[i].line) || tokens[i + 1]?.value !== '(' ||
+      !/^[\p{L}_][\p{L}\p{Nd}_]*$/u.test(name) || KEYWORDS.has(name) || defined.has(name)) continue;
+    let definition = local.find((d) => d.name === name);
+    if (definition && io.windows?.some((w) => w.start <= definition.start && definition.end <= w.end)) definition = null;
+    if (!definition) {
+      for (const file of siblings) {
+        if (!declarations.has(file)) {
+          const source = await read(file);
+          declarations.set(file, typeof source === 'string' ? goDeclarations(source, file) : []);
+        }
+        definition = declarations.get(file).find((d) => d.name === name);
+        if (definition) break;
+      }
+    }
+    if (!definition) continue;
+    const key = `${definition.path}:${definition.start}`;
+    if (!seen.has(key)) { seen.add(key); found.push(definition); }
+  }
+  return found;
+}
+
 /** Parse local bindings, preserving aliases and namespace owners.
  * @param {string} header
  */
@@ -119,13 +222,15 @@ function importsOf(header) {
  * `readFile` takes an absolute path, as in relatedFiles; windows are current-file line ranges.
  * @param {{path: string, diffLines: string[], header: string, io: {
  *   repoRoot: string, readFile: (file: string) => string | null | Promise<string | null>,
+ *   listFiles?: (repoRoot: string) => string[] | Promise<string[]>,
  *   windows?: Array<{start: number, end: number}>
  * }}} opts
  * @returns {Promise<Definition[]>}
  */
 export async function findDefinitions({ path, diffLines, header, io }) {
   const found = [];
-  if (!safePath(path) || !EXTENSIONS.includes(nodePath.posix.extname(path).toLowerCase())) return found;
+  const go = nodePath.posix.extname(path).toLowerCase() === '.go';
+  if (!safePath(path) || (!go && !EXTENSIONS.includes(nodePath.posix.extname(path).toLowerCase()))) return found;
   try {
     const cache = new Map();
     const read = async (rel) => {
@@ -138,6 +243,7 @@ export async function findDefinitions({ path, diffLines, header, io }) {
     };
     const text = await read(path);
     if (typeof text !== 'string') return found;
+    if (go) return await goDefinitions(text, path, diffLines, read, io);
     const added = tokensOf(diffLines.filter((line) => line.startsWith('+') && !line.startsWith('+++')).map((line) => line.slice(1)).join('\n'));
     const defined = new Set(added.filter((token, i) => ['function', 'const', 'class', 'let', 'var'].includes(added[i - 1]?.value) ||
       (added[i + 1]?.value === '(' && added[closing(added, i + 1) + 1]?.value === '{')).map((token) => token.value));
