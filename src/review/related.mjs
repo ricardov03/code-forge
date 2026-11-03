@@ -66,7 +66,15 @@ function specifiers(text, file) {
  * @returns {Promise<string[]>}
  */
 export async function relatedFiles({ repoRoot, file, listFiles, readFile }) {
-  if (!safePath(file) || !EXTENSIONS.includes(path.posix.extname(file).toLowerCase())) return [];
+  if (!safePath(file)) return [];
+  if (path.posix.extname(file).toLowerCase() === '.go') {
+    try {
+      return [...new Set(await listFiles(repoRoot))].filter((rel) => safePath(rel) && rel !== file &&
+        path.posix.dirname(rel) === path.posix.dirname(file) && rel.endsWith('.go') &&
+        (file.endsWith('_test.go') || !rel.endsWith('_test.go'))).sort().slice(0, 12);
+    } catch { return []; }
+  }
+  if (!EXTENSIONS.includes(path.posix.extname(file).toLowerCase())) return [];
   const cache = new Map();
   const read = async (rel) => {
     if (!safePath(rel)) return null;

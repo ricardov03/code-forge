@@ -238,20 +238,21 @@ export async function readFileDiff({ repoRoot, file, base, io }) {
     const safe = assertPacketPath(repoRoot, candidate);
     return io?.readFile ? io.readFile(path.join(repoRoot, safe)) : readRepoText(repoRoot, safe);
   };
+  const listFiles = async () => {
+    if (io?.listFiles) return io.listFiles(repoRoot);
+    const tracked = await exec(['git', 'ls-files', '-z'], { cwd: repoRoot, env, timeoutMs: GIT_TIMEOUT_MS });
+    return tracked.result === 'ok' ? tracked.stdout.split('\0').filter(Boolean) : [];
+  };
   const related = res.stdout.trim().length === 0 ? [] : await relatedFiles({
     repoRoot, file: rel,
-    listFiles: async () => {
-      if (io?.listFiles) return io.listFiles(repoRoot);
-      const tracked = await exec(['git', 'ls-files', '-z'], { cwd: repoRoot, env, timeoutMs: GIT_TIMEOUT_MS });
-      return tracked.result === 'ok' ? tracked.stdout.split('\0').filter(Boolean) : [];
-    },
+    listFiles,
     readFile,
   });
   const parsed = parseDiff(res.stdout);
   const definitions = content === null || res.stdout.trim().length === 0 ? [] : await findDefinitions({
     path: rel, diffLines: res.stdout.split('\n'),
     header: splitLines(content).slice(0, importHeaderEnd(rel, content)).join('\n'),
-    io: { repoRoot, readFile, windows: parsed.hunks.map((h) => ({ start: h.newStart, end: h.newStart + h.newLines - 1 })) },
+    io: { repoRoot, readFile, listFiles, windows: parsed.hunks.map((h) => ({ start: h.newStart, end: h.newStart + h.newLines - 1 })) },
   });
   return { file: rel, kind, diffText: res.stdout, content, related, definitions, ...parsed };
 }
