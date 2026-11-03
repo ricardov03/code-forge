@@ -998,7 +998,8 @@ async function runForeground(built, opts, deps) {
   const input = built.stdinFile ? readFileSync(built.stdinFile) : undefined;
   const started = Date.now();
   const run = deps.exec ?? exec;
-  const silence = opts.cfg?.review?.silence_timeout_s;
+  const { cfg } = opts;
+  const silence = cfg?.review?.silence_timeout_s;
   const silenceMs = (Number.isInteger(silence) && silence > 0 ? silence : 60) * 1000;
   /** @type {import('../util/exec.mjs').ExecResult} */
   let res;
