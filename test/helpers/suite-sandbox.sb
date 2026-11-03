@@ -1,0 +1,11 @@
+(version 1)
+(allow default)
+; macOS ps is setuid and cannot exec inside Seatbelt. Only this fixed, read-only
+; system utility leaves the sandbox, preserving reaper/orphan process probes.
+(allow process-exec (literal "/bin/ps") (with no-sandbox))
+; Canonical paths supplied by run-suite.sh. subpath includes the directory
+; itself, so tests cannot create an absent code-forge directory either.
+(deny file-write*
+  (subpath (param "HOME_CF"))
+  (subpath (param "TMP_CF"))
+  (subpath (param "REPO_CF")))
