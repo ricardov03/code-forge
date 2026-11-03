@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - Go config loader (`native/config`, yaml.v3 pinned and vendored): reads `.code-forge.yml` with the same defaults, schema checks and error lines as the Node loader, checked byte for byte against goldens made by Node (B243)
 - Per-verb parity harness: runs each ported verb in Node and in Go on isolated copies of the same state, and compares output and state files field by field (B244)
+- `code-forge <verb> --help` for every verb, and a generated command reference `docs/reference/commands.md` (checked by `scripts/gen-commands-doc.mjs --check`); a test fails when a doc names a verb that does not exist (B251)
 
 ### Changed
 
