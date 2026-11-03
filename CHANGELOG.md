@@ -11,17 +11,21 @@ waits on a second real consumer (plan §10.4, Q17).
 - Go config loader (`native/config`, yaml.v3 pinned and vendored): reads `.code-forge.yml` with the same defaults, schema checks and error lines as the Node loader, checked byte for byte against goldens made by Node (B243)
 - Per-verb parity harness: runs each ported verb in Node and in Go on isolated copies of the same state, and compares output and state files field by field (B244)
 - `code-forge <verb> --help` for every verb, and a generated command reference `docs/reference/commands.md` (checked by `scripts/gen-commands-doc.mjs --check`); a test fails when a doc names a verb that does not exist (B251)
+- The test gate reruns only the failing test files once, one at a time; a pass on rerun makes the gate green and marks those files `flaky` in `status` and `report`. Set `gates.rerun_failed: 0` to turn it off (B255)
+- `docs/step-by-step.md`: the whole project workflow, step by step, from install to release (B252)
 
 ### Changed
 
 - npm `code-forge` starts the Go binary; unported verbs go to Node; native internal verbs are under `internal` (B242)
 - On macOS, `npm test` runs the suite in a sandbox that blocks writes to the real `~/.code-forge` and `$TMPDIR/code-forge`, so a leak fails at once and other runs on the machine cannot cause false leaks; it prints `leak guard: sandbox` or `leak guard: snapshot (<reason>)` (B254)
+- The docs explain the Go entry and the Node fallback: `docs/getting-started.md`, `docs/how-it-works.md`, `docs/native-engine.md` (B253)
 
 ### Fixed
 
 - A review of a Go file now lists the other Go files of the same package and shows the bodies of the functions its changed lines call, so a reviewer no longer reports a function in a sibling file as missing (B245)
 - The test leak check ignores short-lived lock files and live-run control writes made by other code-forge runs on the same machine, fails closed when a process probe errors, and tracks children started with spawnSync/execFileSync, so gates no longer fail on false leaks (B246)
 - The leak check ignores atomic temp files of other processes and temp files that vanish during the scan (B250)
+- The leak check now sees that a lock file belongs to another live code-forge run on days 1-9 of a month (`ps` pads the date with two spaces), and retries a busy process check before it reports a leak (B258)
 
 ## [0.16.3] — 2026-11-02
 
