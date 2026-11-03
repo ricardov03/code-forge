@@ -192,36 +192,47 @@ function isForeignAtomicTemp(p, probe) {
   }
 }
 
+const lockRetryWait = new Int32Array(new SharedArrayBuffer(4));
+
 /**
  * Ignore vanished locks and exited outside owners whose starts predate this suite;
  * verify live owners' entire ancestry. Untracked dead descendants remain unverified.
  * Retained suite pids keep dead/reparented children from acquiring a foreign exemption.
+ * Retry reads and probes under load; only a still-present unverified lock is a leak.
  * @param {string} p
  * @param {ProcessProbe} probe
  * @returns {boolean}
  */
 function isForeignLock(p, probe) {
-  let text;
+  for (let attempt = 0; attempt < 3; attempt++) {
+    // Let an outside writer or process probe recover; total retry delay is 200 ms.
+    if (attempt > 0) Atomics.wait(lockRetryWait, 0, 0, attempt === 1 ? 50 : 150);
+    try {
+      const lock = JSON.parse(readFileSync(p, 'utf8'));
+      if (lock === null || typeof lock !== 'object' || Array.isArray(lock)
+        || typeof lock.key !== 'string' || !Number.isInteger(lock.pid) || lock.pid <= 1
+        || typeof lock.start !== 'string' || lock.start.trim() === '' || lock.start === 'unknown') continue;
+      if (suitePids.has(lock.pid)) break;
+      const owner = probe(lock.pid);
+      if (owner === null) {
+        if (Date.parse(lock.start) < suiteStart) return true;
+        break;
+      }
+      if (owner === undefined || typeof owner.start !== 'string') continue;
+      // Lock writers normalize ps padding (e.g. "Nov  3"); compare the same identity.
+      if (owner.start.trim().replace(/\s+/g, ' ') !== lock.start.trim().replace(/\s+/g, ' ')) continue;
+      if (hasForeignAncestry(lock.pid, owner, probe)) return true;
+    } catch {
+      // A writer may be replacing an unreadable/partial lock, or ps may time out.
+    }
+  }
   try {
-    text = readFileSync(p, 'utf8');
+    lstatSync(p);
   } catch (err) {
-    // Only absence proves there is no longer a lock. Unreadable existing files fail closed.
+    // A timeout or read failure must not report a lock that has since disappeared.
     return /** @type {NodeJS.ErrnoException} */ (err).code === 'ENOENT';
   }
-  try {
-    const lock = JSON.parse(text);
-    if (lock === null || typeof lock !== 'object' || Array.isArray(lock)
-      || typeof lock.key !== 'string' || !Number.isInteger(lock.pid) || lock.pid <= 1
-      || typeof lock.start !== 'string' || lock.start.trim() === '' || lock.start === 'unknown') return false;
-    if (suitePids.has(lock.pid)) return false;
-    const owner = probe(lock.pid);
-    if (owner === null) return Date.parse(lock.start) < suiteStart;
-    if (owner === undefined) return false;
-    if (owner.start !== lock.start) return false;
-    return hasForeignAncestry(lock.pid, owner, probe);
-  } catch {
-    return false;
-  }
+  return false;
 }
 
 /**
@@ -267,8 +278,8 @@ function foreignRuns(dir, tempDir) {
  * developer that started before the tests): `runs/<id>`, `runs/<id>.<anything>`, `runs/<id>/…`.
  * Vanished `locks/<sha>.lock` entries and verified foreign owners are also exempt, as is a new
  * locks directory containing no leaks. Dead untracked owners need a start before the suite.
- * Existing malformed/unreadable locks, failed probes and unknown owner identity or ancestry
- * fail closed; retained suite pids always remain leaks.
+ * Still-present malformed/unreadable locks, persistently failed probes and unknown owner
+ * identity or ancestry fail closed after retries; retained suite pids always remain leaks.
  * Atomic `<name>.tmp-<pid>` entries are exempt only when vanished or their live ancestry
  * is verified foreign. Invalid pids, suite owners and failed probes remain leaks.
  * New `runs/<id>`, `runs/<id>.<anything>` and nested paths, plus matching project ledgers, are also exempt when a current record names an absolute workspace outside the raw and resolved real temp dir and TEST_BASE.
