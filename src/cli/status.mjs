@@ -134,9 +134,10 @@ function timeoutStatus(summary, rows) {
  * The status data of one run.
  * @param {Record<string, any>} record
  * @param {Array<Record<string, any>> | null | undefined} [cachedRows] - daemon's incrementally read ledger
+ * @param {{gateDetails?: boolean}} [options] - the Go daemon supplies its own gate details
  * @returns {Promise<RunStatus>}
  */
-export async function statusOf(record, cachedRows) {
+export async function statusOf(record, cachedRows, { gateDetails = true } = {}) {
   /** @type {Array<Record<string, any>> | null} null: the ledger cannot be read */
   let rows = cachedRows ?? null;
   if (cachedRows === undefined) {
@@ -165,8 +166,9 @@ export async function statusOf(record, cachedRows) {
     else byBlock.set(r.block, [r]);
   }
   const awaiting = Object.keys(record.blocks ?? {}).filter((id) => record.blocks[id].status === 'awaiting_human_check').sort();
-  return timeoutStatus({ ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
-    ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) }, rows);
+  const summary = { ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
+    ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) };
+  return gateDetails ? timeoutStatus(summary, rows) : summary;
 }
 
 /** Restore the Node renderer's insertion order after Go's sorted JSON map encoding.

@@ -174,6 +174,41 @@ test('status text with a live daemon equals CODE_FORGE_NATIVE=0 for the same run
   assert.equal(await f.doctor(), 'off');
 });
 
+test('live daemon status preserves timeout and recovered flaky gates with zero client ledger reads', async (t) => {
+  const f = await fixture(t);
+  await openBlock({ runId: f.run, id: 'B2', level: 'L2', owned: ['test/**'],
+    acceptance: [{ clause: 'flaky recovery', tests: ['fixture'] }], writeRow: async () => {} });
+  await f.start();
+  await f.show(); // Start the companion before the gate rows arrive.
+  for (const row of [
+    { event: 'gate.red', run: f.run, block: 'B1', gate: 'test', reason: 'timeout' },
+    { event: 'gate.done', run: f.run, block: 'B1', all_ok: false },
+    { event: 'gate.red', run: f.run, block: 'B2', gate: 'test', reason: 'exit' },
+    { event: 'gate.done', run: f.run, block: 'B2', all_ok: true, flaky: ['z.test.mjs', 'a.test.mjs'] },
+    { event: 'gate.done', run: f.run, block: 'B2', all_ok: true, flaky: ['a.test.mjs'] },
+    { event: 'gate.done', run: f.run, block: 'B2', all_ok: true },
+    { event: 'gate.done', run: 'r-other', block: 'B2', all_ok: true, flaky: ['other.test.mjs'] },
+  ]) await ledger.appendRow(row, { slug: 'daemon-client-test' });
+  ledgerReads = 0;
+  const liveText = await f.show(false);
+  const liveJson = await f.show();
+  assert.equal(ledgerReads, 0, 'both live daemon renders call the client ledger reader zero times');
+  assert.equal(await f.doctor(), 'live');
+  const summary = JSON.parse(liveJson).runs[0];
+  assert.deepEqual(summary.blocks.map((b) => b.gate), [
+    { result: 'timeout', name: 'test' }, { result: 'pass', name: null },
+  ]);
+  assert.deepEqual(summary.flaky, ['a.test.mjs', 'z.test.mjs']);
+  assert.match(liveText, /B1 .*gate timeout \(test\)/);
+  assert.match(liveText, /B2 .*gate pass/);
+  assert.match(liveText, /flaky: a\.test\.mjs, z\.test\.mjs\n/);
+  process.env.CODE_FORGE_NATIVE = '0';
+  ledgerReads = 0;
+  assert.equal(await f.show(false), liveText, 'complete text equals the Node path');
+  assert.equal(await f.show(), liveJson, 'complete JSON equals the Node path');
+  assert.equal(ledgerReads, 2, 'disabled daemon reads the ledger once per render');
+});
+
 test('live daemon gives byte-identical wait and status payloads without client ledger reads', async (t) => {
   const f = await fixture(t);
   process.env.CODE_FORGE_NATIVE = '0';
