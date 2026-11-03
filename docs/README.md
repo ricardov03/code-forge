@@ -8,6 +8,7 @@ disagree, the verb is right: each verb prints its own usage line when its argume
 
 | # | Page | Read it when you want to… |
 |---|---|---|
+| Start here | [step-by-step.md](step-by-step.md) | run the whole tool, step by step, from install to your project's release |
 | 1 | [overview.md](overview.md) | know what code-forge is, the problem it solves, who it is for, and what it is not |
 | 2 | [concepts.md](concepts.md) | look up a word: block, level, lane, tier, S1/S2, waiver, ledger, budget, block kind, closed book, plan approval, owner rule, autopilot grant, known fix… |
 | 3 | [how-it-works.md](how-it-works.md) | follow the full workflow from a brief to a closed block (plan approval, parallel review, the escalation ladder, the rules the orchestrator keeps), and see who does what and where state lives |
@@ -19,13 +20,15 @@ disagree, the verb is right: each verb prints its own usage line when its argume
 | 6 | [examples/marketing-site/brief.md](examples/marketing-site/brief.md) | copy the brief the tutorial uses |
 | 7 | [marketing.md](marketing.md) | read the product story: the problem, the promise, the honest limits |
 
-New to the tool? Read 1 → 3 → 4, then do 5. Keep 2 open as a glossary. Only want reviews? Read 4,
+New to the tool? Start with [step-by-step.md](step-by-step.md), then do 5. Keep 2 open as a glossary. Only want reviews? Read 4,
 then 5a. Going away while a run goes on? Read 5b. One small task, no plan? Read 5c.
 
 ## Reference pages (already in the repo)
 
 | Page | What it is |
 |---|---|
+| [reference/commands.md](reference/commands.md) | the generated command reference; CLI usage is the source of truth |
+| [native-engine.md](native-engine.md) | how the Go engine starts commands and falls back to Node |
 | [../CHANGELOG.md](../CHANGELOG.md) | what changed in each version; `## [Unreleased]` is the next one |
 | [reference/config.md](reference/config.md) | every `.code-forge.yml` key, its type and default. Generated from `schema/code-forge.schema.json` |
 | [outcomes.md](outcomes.md) | specialist result fields, approval statuses, and the outcome seal and check commands |
