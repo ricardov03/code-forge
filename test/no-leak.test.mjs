@@ -25,9 +25,11 @@ import { requireSuiteMarker, suiteWorkers } from './helpers/worker-processes.mjs
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const MODE = process.env.CODE_FORGE_NO_LEAK ?? 'suite';
+const SANDBOX = process.env.CODE_FORGE_LEAK_GUARD === 'sandbox';
+const KERNEL_GUARD = SANDBOX && 'kernel sandbox enforces guarded writes; no snapshot comparison';
 const SUITE = process.env.CODE_FORGE_TEST_SUITE ?? '';
 const BASELINE_FILE = path.join(TEST_BASE, `no-leak-${createHash('sha256').update(SUITE).digest('hex')}.json`);
-const SKIP_SNAPSHOT = MODE !== 'snapshot' && 'runs only in the snapshot step of the test script';
+const SKIP_SNAPSHOT = KERNEL_GUARD || (MODE !== 'snapshot' && 'runs only in the snapshot step of the test script');
 const SKIP_FINAL = MODE !== 'final' && 'runs only in the final step of the test script';
 /** @returns {number | null} */
 const baselineMtime = () => (existsSync(BASELINE_FILE) ? statSync(BASELINE_FILE).mtimeMs : null);
@@ -58,7 +60,7 @@ test('the snapshot watches the REAL dirs: <real HOME>/.code-forge and <repo>/.co
   assert.notEqual(GUARDED_DIRS[0], path.join(os.homedir(), '.code-forge'));
 });
 
-test('control: a product write under the temp HOME is 1 file there and 0 new entries in the real dirs', () => {
+test('control: a product write under the temp HOME is 1 file there and 0 new entries in the real dirs', { skip: KERNEL_GUARD }, () => {
   const baseline = snapshotGuarded();
   const dir = runsDir();
   assert.equal(dir, path.join(/** @type {string} */ (process.env.CODE_FORGE_TEST_ROOT), '.code-forge', 'runs'));
@@ -110,7 +112,7 @@ test('snapshot step (CODE_FORGE_NO_LEAK=snapshot): the pre-suite snapshot of the
 test('final step (CODE_FORGE_NO_LEAK=final): 0 new entries under the real dirs and 0 live suite workers', { skip: SKIP_FINAL }, async () => {
   let baselineError = null;
   let baseline = [];
-  try {
+  if (!SANDBOX) try {
     if (!existsSync(BASELINE_FILE)) baselineError = `no pre-suite snapshot at ${BASELINE_FILE}: run the snapshot step first`;
     else {
       const parsed = JSON.parse(readFileSync(BASELINE_FILE, 'utf8'));
@@ -122,7 +124,7 @@ test('final step (CODE_FORGE_NO_LEAK=final): 0 new entries under the real dirs a
   } finally {
     rmSync(BASELINE_FILE, { force: true });
   }
-  const dirs = leakedEntries(baseline, snapshotGuarded());
+  const dirs = SANDBOX ? [] : leakedEntries(baseline, snapshotGuarded());
   let markerError = null;
   try { requireSuiteMarker(SUITE); } catch (err) { markerError = err.message; }
   // Allow cleanup and the orphan guard several seconds after the last test process exits.

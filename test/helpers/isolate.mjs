@@ -62,6 +62,15 @@ export const GUARDED_DIRS = Object.freeze([
   path.join(REPO, '.code-forge'),
 ]);
 
+// The kernel guard belongs to this suite and these directories. A nested check
+// with its own marker or fixture directories still needs its snapshot reports.
+// Record the scope in each top-level worker, before it can spawn such checks.
+if (process.env.CODE_FORGE_LEAK_GUARD === 'sandbox') {
+  const scope = JSON.stringify([process.env.CODE_FORGE_TEST_SUITE, ...GUARDED_DIRS]);
+  process.env.CODE_FORGE_LEAK_GUARD_SCOPE ??= scope;
+  if (process.env.CODE_FORGE_LEAK_GUARD_SCOPE !== scope) process.env.CODE_FORGE_LEAK_GUARD = 'snapshot';
+}
+
 /**
  * Every path under `dirs` (the directories themselves included when present).
  * @param {readonly string[]} [dirs] - defaults to the real guarded directories.
@@ -324,7 +333,9 @@ export function leakedSince(before, dirs = GUARDED_DIRS, probe = probeProcess) {
   return leakedEntries(before, snapshotGuarded(dirs), dirs, probe);
 }
 
-const baseline = snapshotGuarded();
+// Seatbelt attributes denied writes to their caller. Outside processes can still
+// write here, so taking/diffing snapshots in sandbox mode would create false leaks.
+const baseline = process.env.CODE_FORGE_LEAK_GUARD === 'sandbox' ? null : snapshotGuarded();
 
 // Pin before any src module is loaded. The roots live in a private base (0700, ours) rather than
 // directly in the OS temp dir, which on Linux is world-writable and so never a trusted base.
@@ -361,7 +372,7 @@ process.env.CODE_FORGE_TEST_ROOT = root;
 process.chdir(root);
 
 process.on('exit', () => {
-  const leaked = leakedEntries(baseline, snapshotGuarded());
+  const leaked = baseline === null ? [] : leakedEntries(baseline, snapshotGuarded());
   if (leaked.length > 0) {
     process.stderr.write(`isolate: ${leaked.length} new entries under the real code-forge dirs:\n${leaked.join('\n')}\n`);
     process.exitCode = 1;
