@@ -77,12 +77,13 @@ export function gateTimeoutMs({ flag, config }) {
  * A missing/unparseable config file is not an error here: detection alone is a valid answer.
  * @param {string} cwd
  * @param {Record<string, any> | null} configured - the config's `gates` section ({@link configuredGates}).
- * @returns {import('../gates/detect.mjs').DetectedGates & {custom?: import('../gates/run.mjs').CustomGate[]}}
+ * @returns {import('../gates/detect.mjs').DetectedGates & {custom?: import('../gates/run.mjs').CustomGate[], rerun_failed?: 0 | 1}}
  */
 function resolveGates(cwd, configured) {
   const detected = detectGates(cwd);
   if (!configured) return detected;
   const errors = [...customGateMessages(configured.custom), ...kindGateMessages(configured)];
+  if (configured.rerun_failed !== undefined && configured.rerun_failed !== 0 && configured.rerun_failed !== 1) errors.push('gates.rerun_failed must be 0 or 1');
   if (errors.length > 0) throw new TypeError(errors.join('; '));
   return {
     stack: detected.stack,
@@ -91,6 +92,7 @@ function resolveGates(cwd, configured) {
     types: 'types' in configured ? configured.types : detected.types,
     format: 'format' in configured ? configured.format : detected.format,
     ...(configured.custom !== undefined ? { custom: configured.custom } : {}),
+    ...(configured.rerun_failed !== undefined ? { rerun_failed: configured.rerun_failed } : {}),
   };
 }
 
@@ -101,7 +103,10 @@ function resolveGates(cwd, configured) {
  */
 async function configuredGates(cwd) {
   const loaded = await loadProjectConfig(cwd);
-  return loaded.ok && loaded.config?.gates && typeof loaded.config.gates === 'object' ? loaded.config.gates : null;
+  const config = loaded.ok ? loaded.config : null;
+  if (!config?.gates || typeof config.gates !== 'object') return null;
+  const rerunFailed = config.gates.rerun_failed;
+  return { ...config.gates, rerun_failed: rerunFailed === undefined ? 1 : rerunFailed };
 }
 
 /**
@@ -367,6 +372,8 @@ export async function runGatesVerb(args, deps = {}) {
         if (!cancelled && !result.skipped && result.code === null) err(`${result.gate}: ${result.message}\n`);
       }
       const repeats = results.find((r) => r.repeats)?.repeats;
+      const flaky = results.find((r) => r.flaky)?.flaky;
+      if (flaky && !args.includes('--json')) err(`flaky: ${flaky.join(', ')}\n`);
 
       const ledgerSlug = slug ?? ran.ledger_slug;
       if (ledgerSlug) {
@@ -392,15 +399,15 @@ export async function runGatesVerb(args, deps = {}) {
         await writeGateRow({ ...owner, event: cancelled ? 'gate.cancelled' : 'gate.done', stack: gates.stack, all_ok: allOk,
           ...(cancelled ? { cancelled: true } : {}),
           duration_ms: durationMs,
-          results: results.map(({ gate, ok, skipped, duration_ms }) => ({ gate, ok, skipped, duration_ms })),
+          results: results.map(({ gate, ok, skipped, duration_ms, flaky }) => ({ gate, ok, skipped, duration_ms, ...(flaky ? { flaky } : {}) })),
           ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
           ...(custom.length ? {
             custom: custom.map((r) => ({ name: r.gate, ok: r.ok, evidence_count: r.evidence.length, ...(r.missing ? { missing: r.missing } : {}) })),
             ...(runFlag.value !== undefined ? { evidence: Object.fromEntries(custom.map((r) => [r.gate, r.evidence])) } : {}),
           } : {}),
-          ...(ran.files ? { files: ran.files } : {}), ...(repeats ? { repeats } : {}) });
+          ...(ran.files ? { files: ran.files } : {}), ...(repeats ? { repeats } : {}), ...(flaky ? { flaky } : {}) });
       }
-      out({ stack: gates.stack, ...inTree, results, allOk, duration_ms: durationMs, ...(cancelled ? { cancelled: true } : {}), ...(message ? { message } : {}), ...(repeats ? { repeats } : {}) });
+      out({ stack: gates.stack, ...inTree, results, allOk, duration_ms: durationMs, ...(cancelled ? { cancelled: true } : {}), ...(message ? { message } : {}), ...(repeats ? { repeats } : {}), ...(flaky ? { flaky } : {}) });
       return allOk ? 0 : 1;
     }
 

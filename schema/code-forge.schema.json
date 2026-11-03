@@ -338,6 +338,13 @@
             "invariants": { "type": "string" }
           }
         },
+        "rerun_failed": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 1,
+          "default": 1,
+          "description": "Rerun a failed test gate's failing files once, one file at a time. Node test commands use --test-concurrency=1; other commands require a whole {test_files} argv item. Unparseable failures and commands that cannot be narrowed are not rerun. A successful rerun makes the gate green and records flaky files in results, text/JSON output and gate.done rows; status and report list them for the run. 0 disables reruns. Passing gates incur no extra command."
+        },
         "repeat_new_tests": {
           "type": "integer",
           "minimum": 2,

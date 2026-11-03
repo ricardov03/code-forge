@@ -89,7 +89,7 @@ async function runEndHint(record) {
 
 /**
  * @typedef {Omit<import('../state/brief-status.mjs').BlockStatus, 'gate'> & {gate: {result: 'pass'|'fail'|'timeout'|'none', name: string | null}}} BlockStatus
- * @typedef {Omit<import('../state/brief-status.mjs').RunStatus, 'blocks'> & {blocks: BlockStatus[], awaiting_human_check?: string[]}} RunStatus
+ * @typedef {Omit<import('../state/brief-status.mjs').RunStatus, 'blocks'> & {blocks: BlockStatus[], awaiting_human_check?: string[], flaky?: string[]}} RunStatus
  */
 
 /** @param {string} p @returns {Promise<string>} */
@@ -124,7 +124,9 @@ function timeoutStatus(summary, rows) {
       pending.delete(row.block);
     }
   }
-  return { ...summary, blocks: summary.blocks.map((block) => block.gate.result === 'fail' && timedOut.has(block.id)
+  const flaky = [...new Set((rows ?? []).filter((row) => row.run === summary.run_id && row.event === 'gate.done')
+    .flatMap((row) => Array.isArray(row.flaky) ? row.flaky.filter((file) => typeof file === 'string') : []))].sort();
+  return { ...summary, ...(flaky.length ? { flaky } : {}), blocks: summary.blocks.map((block) => block.gate.result === 'fail' && timedOut.has(block.id)
     ? { ...block, gate: { ...block.gate, result: 'timeout' } } : block) };
 }
 
@@ -132,9 +134,10 @@ function timeoutStatus(summary, rows) {
  * The status data of one run.
  * @param {Record<string, any>} record
  * @param {Array<Record<string, any>> | null | undefined} [cachedRows] - daemon's incrementally read ledger
+ * @param {{gateDetails?: boolean}} [options] - the Go daemon supplies its own gate details
  * @returns {Promise<RunStatus>}
  */
-export async function statusOf(record, cachedRows) {
+export async function statusOf(record, cachedRows, { gateDetails = true } = {}) {
   /** @type {Array<Record<string, any>> | null} null: the ledger cannot be read */
   let rows = cachedRows ?? null;
   if (cachedRows === undefined) {
@@ -163,8 +166,9 @@ export async function statusOf(record, cachedRows) {
     else byBlock.set(r.block, [r]);
   }
   const awaiting = Object.keys(record.blocks ?? {}).filter((id) => record.blocks[id].status === 'awaiting_human_check').sort();
-  return timeoutStatus({ ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
-    ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) }, rows);
+  const summary = { ...briefStatus({ record, rows, budget, findingsOf: (block) => openFindingsOf({ block, runId, mine: byBlock.get(block) ?? [], rows: all, key }) }),
+    ...(awaiting.length > 0 ? { awaiting_human_check: awaiting } : {}) };
+  return gateDetails ? timeoutStatus(summary, rows) : summary;
 }
 
 /** Restore the Node renderer's insertion order after Go's sorted JSON map encoding.
@@ -180,6 +184,7 @@ function daemonStatus(s) {
     })),
     more: s.more, closed: s.closed, stopped: s.stopped,
     ...(s.awaiting_human_check ? { awaiting_human_check: s.awaiting_human_check } : {}),
+    ...(s.flaky?.length ? { flaky: s.flaky } : {}),
   };
 }
 
@@ -225,7 +230,8 @@ export function runLines(s, hint = null) {
   const lines = [`run ${s.run_id} · ${s.status ?? '-'} · ${s.mode} · spent ${spent}${s.budget_usd !== null ? ` of ${usd(s.budget_usd)}` : ''}`];
   const tally = s.closed + s.stopped > 0 ? `closed ${s.closed} · stopped ${s.stopped}` : null;
   const awaiting = s.awaiting_human_check?.length ? `awaiting_human_check: ${JSON.stringify(s.awaiting_human_check)}` : null;
-  const room = STATUS_MAX_LINES - lines.length - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1) - (hint === null ? 0 : 1);
+  const flaky = s.flaky?.length ? `flaky: ${s.flaky.join(', ')}` : null;
+  const room = STATUS_MAX_LINES - lines.length - (tally === null ? 0 : 1) - (awaiting === null ? 0 : 1) - (hint === null ? 0 : 1) - (flaky === null ? 0 : 1);
   const shown = s.blocks.length <= room ? s.blocks : s.blocks.slice(0, room - 1);
   for (const b of shown) {
     lines.push(`${b.id} ${b.state} ${b.level ?? '-'} · ${b.model ?? '-'} · gate ${b.gate.result}${b.gate.name ? ` (${b.gate.name})` : ''} · findings ${b.findings}`);
@@ -233,6 +239,7 @@ export function runLines(s, hint = null) {
   if (shown.length < s.blocks.length) lines.push(`… +${s.blocks.length - shown.length} more blocks`);
   if (awaiting !== null) lines.push(awaiting);
   if (tally !== null) lines.push(tally);
+  if (flaky !== null) lines.push(flaky);
   if (hint !== null) lines.push(hint);
   return lines;
 }
@@ -282,9 +289,6 @@ export default async function status(args) {
       const answer = await daemonRequest(String(record.run_id), { method: 'status' }, { config });
       let summary;
       try { summary = answer ? daemonStatus(answer.runs[0]) : null; } catch { summary = null; }
-      if (summary?.blocks.some((block) => block.gate.result === 'fail')) {
-        summary = timeoutStatus(summary, await readAllRows(record.project).catch(() => null));
-      }
       shown.push(summary ?? await statusOf(record));
       hints.push(json ? null : await runEndHint(record));
       for (const warning of await unpinnedWorkerWarnings(record)) err(`${warning}\n`);

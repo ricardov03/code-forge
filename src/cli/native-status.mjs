@@ -9,7 +9,7 @@ async function serve() {
   for await (const line of createInterface({ input: process.stdin, crlfDelay: Infinity })) {
     try {
       const { record, rows } = JSON.parse(line);
-      process.stdout.write(`${JSON.stringify({ runs: [await statusOf(record, rows)] })}\n`);
+      process.stdout.write(`${JSON.stringify({ runs: [await statusOf(record, rows, { gateDetails: false })] })}\n`);
     } catch {
       process.stdout.write(`${JSON.stringify({ ok: false, error: 'status-unreadable' })}\n`);
     }

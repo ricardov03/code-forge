@@ -409,6 +409,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'worker.idle_exit_hours',
   // B240: the one path behind the 247 -> 248 re-pin.
   'review.silence_timeout_s',
+  // B255: the one path behind the 248 -> 249 re-pin.
+  'gates.rerun_failed',
 ]);
 
 /**
@@ -452,7 +454,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B207: +6 = review.adaptive{,.enabled,.window_days,.min_sessions,.explore} and review.routes.pin ⇒ 245.
 // B200: +2 = worker{,.idle_exit_hours} ⇒ 247.
 // B240: +1 = review.silence_timeout_s ⇒ 248.
-const EXPECTED_SCHEMA_PATH_COUNT = 248;
+// B255: +1 = gates.rerun_failed ⇒ 249.
+const EXPECTED_SCHEMA_PATH_COUNT = 249;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;
@@ -498,4 +501,10 @@ test('unreadSchemaPaths(): B240 review silence timeout is read by product code',
   const { schemaPaths, unread } = await unreadSchemaPaths();
   assert.equal(schemaPaths.has('review.silence_timeout_s'), true, 'the collector must produce review.silence_timeout_s');
   assert.equal(unread.includes('review.silence_timeout_s'), false, 'review.silence_timeout_s is read by product code');
+});
+
+test('unreadSchemaPaths(): B255 failed-test rerun policy is read by product code', async () => {
+  const { schemaPaths, unread } = await unreadSchemaPaths();
+  assert.equal(schemaPaths.has('gates.rerun_failed'), true, 'the collector must produce gates.rerun_failed');
+  assert.equal(unread.includes('gates.rerun_failed'), false, 'gates.rerun_failed is read by product code');
 });

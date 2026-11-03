@@ -196,6 +196,123 @@
     }
   },
   {
+    "name": "validate/rerun-default",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"gates\":{},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/rerun-enabled",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":1}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":1},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/rerun-disabled",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":0}}"
+    },
+    "group": "valid",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": true,
+      "canonical": "{\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":0},\"levels\":{\"L0\":{\"effort\":\"low\",\"model\":\"gpt-6-luna\"},\"L1\":{\"effort\":\"high\",\"model\":\"gpt-6-luna\"},\"L2\":{\"effort\":\"high\",\"model\":\"gpt-6-sol\"},\"L3\":{\"effort\":\"high\",\"model\":\"gpt-6-astra\"}},\"provider\":\"openai\",\"version\":1}"
+    }
+  },
+  {
+    "name": "validate/rerun-negative",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":-1}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/rerun_failed must be >= 0"
+    }
+  },
+  {
+    "name": "validate/rerun-too-many",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":2}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/rerun_failed must be <= 1"
+    }
+  },
+  {
+    "name": "validate/rerun-fractional",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":0.5}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/rerun_failed must be integer"
+    }
+  },
+  {
+    "name": "validate/rerun-string",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":\"1\"}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/rerun_failed must be integer"
+    }
+  },
+  {
+    "name": "validate/rerun-null",
+    "operation": "schema",
+    "files": {
+      "project/.code-forge.yml": "{\"version\":1,\"provider\":\"openai\",\"levels\":{\"L0\":{\"model\":\"gpt-6-luna\",\"effort\":\"low\"},\"L1\":{\"model\":\"gpt-6-luna\",\"effort\":\"high\"},\"L2\":{\"model\":\"gpt-6-sol\",\"effort\":\"high\"},\"L3\":{\"model\":\"gpt-6-astra\",\"effort\":\"high\"}},\"caps\":{\"coders\":2},\"gates\":{\"rerun_failed\":null}}"
+    },
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "/gates/rerun_failed must be integer"
+    }
+  },
+  {
     "name": "validate/unknown-key",
     "operation": "schema",
     "files": {

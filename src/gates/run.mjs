@@ -10,6 +10,7 @@ import { createHash } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, readdir, realpath } from 'node:fs/promises';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { customGateMessages } from '../config/validate.mjs';
 import { exec } from '../util/exec.mjs';
 import { registerSecret } from '../util/redact.mjs';
@@ -50,6 +51,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
  * @property {'threshold'|'no_tests'|'runner-filter'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
  * @property {Repeats} [repeats]
+ * @property {string[]} [flaky] - failed files recovered by one serial rerun.
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
  *   NAMES, sorted (the values are never in a result).
  */
@@ -325,12 +327,85 @@ function gateOutcome(res, timeoutMs, failOnStdout = false) {
   };
 }
 
+/** Failure headers only: stack frames can name passing helpers or unrelated source files.
+ * @param {string} output @param {string} cwd @returns {Promise<string[]>}
+ */
+async function failedTestFiles(output, cwd) {
+  const lines = output.replace(/\x1b\[[0-9;?]*[A-Za-z]/g, '').split(/\r?\n/);
+  const candidates = [];
+  for (let i = 0; i < lines.length; i++) {
+    const line = lines[i];
+    const tap = /^\s*not ok\s+\d+\s+- (.*)/.exec(line);
+    if (tap) {
+      if (/\s+#\s*(?:TODO|SKIP)\b/i.test(tap[1])) continue;
+      let location;
+      let parent = false;
+      for (let j = i + 1; j < lines.length && !/^\s*(?:\.\.\.|(?:not )?ok\s+\d+\b|# Subtest:)/.test(lines[j]); j++) {
+        location = /^\s*location: ['"]?(.*?)['"]?\s*$/.exec(lines[j])?.[1] ?? location;
+        if (/\bfailureType: ['"]?subtestsFailed\b/.test(lines[j])) parent = true;
+      }
+      if (location) candidates.push(location);
+      else if (/\.(?:[cm]?[jt]sx?|php|py|go|rs|swift)(?:\s|$)/.test(tap[1])) candidates.push(tap[1]);
+      else if (!parent) return []; // Never recover only the identifiable subset of failures.
+    }
+    const header = /^\s*test at (.+)/.exec(line)
+      ?? /^\s*(?:FAIL|FAILED)\s+(.+?)(?:::|\s+[-–]|$)/.exec(line)
+      ?? /^\s*✖ (.+?\.(?:[cm]?[jt]sx?|php|py|go|rs|swift))(?:\s+\(|$)/.exec(line);
+    if (header) candidates.push(header[1]);
+  }
+  const files = new Set();
+  for (let candidate of candidates) {
+    candidate = candidate.replace(/\s+\([\d.]+m?s\)$/, '').replace(/:\d+(?::\d+)?$/, '');
+    if (candidate.startsWith('file:')) {
+      try { candidate = fileURLToPath(candidate); } catch { return []; }
+    }
+    const file = path.relative(cwd, path.resolve(cwd, candidate));
+    if (!file || file.startsWith(`..${path.sep}`) || path.isAbsolute(file) || file.startsWith('-')) return [];
+    try { if (!(await lstat(path.join(cwd, file))).isFile()) return []; }
+    catch { return []; }
+    files.add(file.split(path.sep).join('/'));
+  }
+  return [...files].sort();
+}
+
+/** Preserve Node options and their operands while replacing test selectors. Unknown options
+ * with separate operands cannot safely be narrowed without the explicit file token.
+ * @param {string[]} original @param {string} file @returns {string[] | null}
+ */
+function failedFileArgv(original, file) {
+  const node = /^(?:node|node\.exe)$/.test(path.basename(original[0])) && original.includes('--test');
+  if (!node) return original.includes(TEST_FILES_TOKEN) ? expandArgv(original, { scope: 'related', files: [file] }).argv : null;
+  const valued = new Set(['--import', '--require', '-r', '--loader', '--experimental-loader', '--conditions', '-C',
+    '--test-reporter', '--test-reporter-destination', '--test-name-pattern', '--test-skip-pattern', '--test-shard',
+    '--test-timeout', '--test-concurrency', '--test-isolation', '--experimental-test-isolation', '--env-file', '--env-file-if-exists', '--disable-warning']);
+  const flags = new Set(['--test', '--experimental-test-module-mocks', '--experimental-strip-types', '--experimental-transform-types',
+    '--enable-source-maps', '--no-warnings', '--trace-warnings', '--test-force-exit', '--test-only',
+    '--experimental-test-coverage', '--test-update-snapshots']);
+  const argv = [original[0], '--test-concurrency=1'];
+  for (let i = 1; i < original.length; i++) {
+    const arg = original[i];
+    if (arg === '--') break;
+    if (arg.startsWith('--test-concurrency=') || arg.startsWith('--test-shard=')) continue;
+    if (valued.has(arg)) {
+      if (i + 1 >= original.length) return null;
+      if (arg === '--test-concurrency' || arg === '--test-shard') i++;
+      else argv.push(arg, original[++i]);
+    } else if (arg.startsWith('-')) {
+      if (!arg.includes('=') && !flags.has(arg)) return null;
+      argv.push(arg);
+    } else if (i < original.indexOf('--test')) {
+      return original.includes(TEST_FILES_TOKEN) ? expandArgv(original, { scope: 'related', files: [file] }).argv : null;
+    }
+  }
+  return [...argv, file];
+}
+
 /**
  * B60: `opts.scope` is the block's {@link TestScope} (`testScope`, gates/expand.mjs); a gate argv
  * item that is exactly `{test_files}` expands to its files, or is dropped for a full run. Left out,
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment, overriding the CI=1/npm_config_yes=false defaults.
- * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], repeatNewTests?: RepeatNewTests, lightTestFiles?: string[], kindGates?: KindGates}} gates
+ * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], rerun_failed?: 0 | 1, repeatNewTests?: RepeatNewTests, lightTestFiles?: string[], kindGates?: KindGates}} gates
  * @param {{cwd: string, timeoutMs?: number, signal?: AbortSignal, scope?: TestScope | import('./expand.mjs').ChangedScope, formatArgvBudgetBytes?: number}} opts - formatArgvBudgetBytes overrides the detected formatter batch budget (default 100 KiB).
  * @returns {Promise<{results: GateResult[], allOk: boolean, duration_ms: number, repeats?: Repeats}>}
  */
@@ -420,8 +495,22 @@ export async function runGates(gates, opts) {
       ...outcome,
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
     });
+    if (gate === 'test' && !result.ok && result.code !== null && !outcome.reason && gates.rerun_failed !== 0 && !signal?.aborted) {
+      const files = await failedTestFiles(`${result.stdout}\n${result.stderr}`, cwd);
+      const reruns = files.map((file) => failedFileArgv(command.originalArgv, file));
+      if (reruns.length > 0 && reruns.every((args) => args !== null)) {
+        let recovered = true;
+        for (const args of reruns) {
+          if (signal?.aborted) { recovered = false; break; }
+          const retried = gateOutcome(await exec(args, execOpts), timeoutMs, failOnStdout);
+          if (!retried.ok) recovered = false;
+        }
+        // Keep the initial diagnostics on persistent failure; a recovery is explicit evidence.
+        if (recovered && !signal?.aborted) Object.assign(result, { ok: true, code: 0, flaky: files });
+      }
+    }
     const repeat = gates.repeatNewTests;
-    if (gate === 'test' && outcome.ok && repeat && !signal?.aborted) {
+    if (gate === 'test' && result.ok && repeat && !signal?.aborted) {
       if (!command.originalArgv.includes(TEST_FILES_TOKEN)) {
         repeat.onSkip?.('repeat_new_tests: skipped (gates.test has no {test_files})');
       } else if (command.full) {
