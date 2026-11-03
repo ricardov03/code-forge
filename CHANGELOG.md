@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - CI also runs on a push to a `ci-check-*` branch and by hand (`workflow_dispatch`), so the pre-release check really runs before main moves (B239)
+- The queue and parallel review tests check order and state with an injected clock, not short wall-clock deadlines, so they pass on a busy machine (B216, landed as B241)
 
 ## [0.16.2] — 2026-11-02
 
