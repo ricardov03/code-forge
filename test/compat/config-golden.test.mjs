@@ -10,6 +10,14 @@ const root = fileURLToPath(new URL('../../', import.meta.url));
 const committed = path.join(root, 'test/compat/golden/config');
 const goEnv = { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' };
 
+test('Go embedded config schema equals the source schema byte for byte', async () => {
+  const [source, embedded] = await Promise.all([
+    readFile(path.join(root, 'schema/code-forge.schema.json')),
+    readFile(path.join(root, 'native/config/schema.json')),
+  ]);
+  assert.deepEqual(embedded, source, 'embedded config schema drifted; run node scripts/compat-golden.mjs');
+});
+
 async function names(dir) {
   return (await readdir(dir).catch((err) => {
     if (err.code === 'ENOENT') return [];

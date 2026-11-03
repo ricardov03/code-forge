@@ -1,6 +1,7 @@
 // Regenerate with: node scripts/compat-golden.mjs [output-directory]
+// With no output-directory, also refresh the Go embedded config schema.
 // Every expected value comes from the production Node implementation.
-import { appendFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { appendFile, copyFile, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -331,4 +332,7 @@ export async function generateGoldens(out, configOnly = false) {
 
 if (process.argv[1] && path.resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
   await generateGoldens(process.argv[2] ?? fileURLToPath(new URL('../test/compat/golden/', import.meta.url)), process.argv[3] === '--config');
+  if (!process.argv[2]) {
+    await copyFile(new URL('../schema/code-forge.schema.json', import.meta.url), new URL('../native/config/schema.json', import.meta.url));
+  }
 }
