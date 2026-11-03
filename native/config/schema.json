@@ -1,0 +1,655 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "https://code-forge.dev/schema/code-forge.schema.json",
+  "title": "code-forge project configuration (.code-forge.yml)",
+  "description": "Plan v1.2 §1.3 — every key any section of the plan reads must appear here. additionalProperties: false everywhere a key set is fixed; a typed additionalProperties schema (never bare true) marks the handful of genuinely open-ended maps (thresholds.<question>, system1.criteria_extra, known_extra, keys, review.second_levels — the last restricted to L0..L3 keys only via propertyNames). v1.3 (B1.1) amendment: review.max_rounds_per_file/recheck_scope/late_findings (§4.11), budget.block_cases (§10.7), caps.coders re-defaulted to 2 (R10), tmp.root (§9.6/§1.2, V12).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": ["version", "provider", "levels"],
+  "$comment": "version/provider/levels are REQUIRED with NO schema-level default (a config omitting them is refused here) — `migrate.mjs` fills a MISSING `version` to CURRENT_VERSION before this schema ever runs (so an on-disk file may omit `version`), but `provider` has no such auto-fill anywhere and must be present in the loaded document.",
+  "properties": {
+    "version": { "type": "integer", "const": 1 },
+    "worker": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "idle_exit_hours": { "type": "number", "minimum": 0, "default": 24, "description": "Stop a worker after this many hours without run ledger activity, queued/running tickets or changed open worktrees. Checked at most once a minute. 0 disables idle exit and idle-run sweep classification." }
+      }
+    },
+    "native": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "daemon": { "type": "boolean", "default": true, "description": "Use the optional native daemon for run status and block waits. False uses Node only; CODE_FORGE_NATIVE=0 also disables it." }
+      }
+    },
+    "project": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "name": { "type": "string" },
+        "slug": { "type": "string", "description": "B50: the ledger name. Default: the project root's folder name (the nearest .code-forge.yml up to the git top level, else the git top level), so every verb run from a subfolder writes to the same ledger." },
+        "plans_dir": { "type": "string" },
+        "languages": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "chat": { "type": "string" },
+            "ui": { "type": "string" },
+            "pr": { "type": "string" }
+          }
+        }
+      }
+    },
+    "provider": { "$ref": "#/$defs/provider" },
+    "levels": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["L0", "L1", "L2", "L3"],
+      "properties": {
+        "L0": { "$ref": "#/$defs/level" },
+        "L1": { "$ref": "#/$defs/level" },
+        "L2": { "$ref": "#/$defs/level" },
+        "L3": { "$ref": "#/$defs/level" },
+        "coder_floor_docs": { "type": "string", "enum": ["L0", "L1", "L2"], "default": "L1" }
+      }
+    },
+    "orchestrator": { "$ref": "#/$defs/levelName" },
+    "light": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "max_files": { "type": "integer", "minimum": 1, "default": 5, "description": "Maximum owned changed files in a light block at close." },
+        "max_lines": { "type": "integer", "minimum": 1, "default": 300, "description": "Maximum added plus removed lines in a light block at close." }
+      }
+    },
+    "close": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "require_human": { "type": "boolean", "default": false, "description": "B138: require a terminal-confirmed human close, unless an active close:routine grant covers a routine block. Read from the run snapshot; cannot change by run reload." }
+      }
+    },
+    "system1": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "provider": { "$ref": "#/$defs/provider" },
+        "model": { "type": "string" },
+        "key": { "type": "string" },
+        "fallback": { "type": "string", "enum": ["rules", "s2", "stop"], "default": "rules" },
+        "criteria_extra": {
+          "type": "object",
+          "additionalProperties": {
+            "type": "object",
+            "additionalProperties": false,
+            "properties": {
+              "instructions": { "type": "string" },
+              "criteria": { "type": "object", "additionalProperties": { "type": "string" } }
+            }
+          }
+        },
+        "disable": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "thresholds": {
+      "type": "object",
+      "additionalProperties": { "$ref": "#/$defs/thresholdBand" },
+      "properties": {
+        "default": { "$ref": "#/$defs/thresholdBand" },
+        "findings": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "fix": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 },
+            "nit": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.4 },
+            "resolved": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.9 }
+          }
+        }
+      }
+    },
+    "escalation": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "retries_per_level": { "type": "integer", "minimum": 0, "default": 2 },
+        "review_rounds_per_level": { "type": "integer", "minimum": 0, "default": 2 },
+        "stop_at": { "type": "string", "const": "L3", "default": "L3" },
+        "l3_mode": { "type": "string", "enum": ["patch", "code"], "default": "patch" },
+        "after_rounds_with_warnings": { "type": "integer", "minimum": 0, "default": 1 },
+        "warning_threshold": { "type": "integer", "minimum": 1, "default": 2 }
+      }
+    },
+    "review": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "exclude": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": ["**/package-lock.json", "**/npm-shrinkwrap.json", "**/yarn.lock", "**/pnpm-lock.yaml", "**/bun.lock", "**/bun.lockb", "**/composer.lock", "**/Cargo.lock", "**/Gemfile.lock", "**/poetry.lock", "**/uv.lock", "**/go.sum", "**/Package.resolved", "**/Podfile.lock", "**/pubspec.lock", "**/mix.lock", "**/flake.lock"],
+          "description": "Repo-relative globs excluded from model code review, including scaffolding archives. Uses the ownership glob syntax (*, ?, ** and braces). A project list replaces the defaults; [] disables exclusion. Ownership and all other close checks still apply. A passing close signs gate.review_excluded per file."
+        },
+        "lockfile_registries": {
+          "type": "array",
+          "items": { "type": "string", "minLength": 1 },
+          "default": ["registry.npmjs.org"],
+          "description": "Allowed URL hosts for excluded package-lock.json and npm-shrinkwrap.json packages.*.resolved entries. Close requires HTTPS and integrity for each resolved package; link:true and entries without resolved are allowed. Other lock formats receive no safety check."
+        },
+        "multimodel": { "type": "boolean", "default": false },
+        "multimodel_for_docs": { "type": "boolean", "default": false },
+        "single_reviewer_max_risk": { "type": "number", "minimum": 0, "maximum": 3, "default": 1 },
+        "second_provider": { "anyOf": [{ "$ref": "#/$defs/provider" }, { "type": "null" }], "default": null },
+        "second_levels": {
+          "anyOf": [
+            { "type": "null" },
+            {
+              "type": "object",
+              "propertyNames": { "$ref": "#/$defs/levelName" },
+              "additionalProperties": { "$ref": "#/$defs/level" }
+            }
+          ],
+          "default": null
+        },
+        "closed_book": { "type": "boolean", "const": true, "default": true },
+        "judge_sees_diff": { "type": "boolean", "default": false },
+        "budgets": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "quick_in": { "type": "integer", "minimum": 1, "default": 6000 },
+            "full_in": { "type": "integer", "minimum": 1, "default": 32000, "description": "Packet budget in tokens (bytes / 4) for a full, lens A/B or recheck review session. A diff alone over it is split_required, except a Markdown file, which is reviewed section by section (B54)." },
+            "judge_in": { "type": "integer", "minimum": 1, "default": 8000 },
+            "out": { "type": "integer", "minimum": 1, "default": 1200 }
+          }
+        },
+        "context": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "whole_file_max_lines": { "type": "integer", "minimum": 0, "default": 400 },
+            "hunk_context_lines": { "type": "integer", "minimum": 0, "default": 40 },
+            "min_context_lines": { "type": "integer", "minimum": 0, "default": 10 }
+          }
+        },
+        "block_budget_tokens": { "type": "integer", "minimum": 1, "default": 150000 },
+        "block_budget_usd": {
+          "anyOf": [{ "type": "number", "exclusiveMinimum": 0 }, { "type": "null" }],
+          "default": null
+        },
+        "min_tokens_out": { "type": "integer", "minimum": 1, "default": 120, "description": "The stub guard: a review answer with fewer output tokens is unavailable (too_short). A clean pass (passed: true, no findings, a non-blank summary) needs only min(this, 40), whatever the diff size (B53)." },
+        "batch_small_files": { "type": "boolean", "default": true },
+        "session_timeout_s": { "type": "integer", "minimum": 1, "default": 300 },
+        "adaptive": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Choose the primary reviewer by availability × (1 − waived share) ÷ median session seconds from this project's ledger. No history keeps configured order; a matching explicit route has configured priority but competes on performance unless pinned. Disabling restores legacy routing exactly.",
+          "properties": {
+            "enabled": { "type": "boolean", "default": true },
+            "window_days": { "type": "integer", "minimum": 1, "default": 14 },
+            "min_sessions": { "type": "integer", "minimum": 1, "default": 10 },
+            "explore": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.1, "description": "Share of tickets given to a less-measured candidate, deterministically hashed from the ticket id." }
+          }
+        },
+        "silence_timeout_s": { "type": "integer", "minimum": 1, "default": 60, "description": "Kill a reviewer or judge session that prints no stdout or stderr at all within this many seconds, treating it as a timeout. Any output disables this startup silence limit; session_timeout_s still applies. A timeout or at-capacity answer advances immediately to the next configured fallback model; without a fallback list, the existing single timeout retry applies." },
+        "routes": {
+          "type": "array",
+          "description": "B90: size-based review routing. min_lines and model are required. A rule's level decides which sessions it changes: an L2 rule (level: L2, the default) changes only the reviewers' model, and in consensus mode only slot A (slot B stays review.second_levels.L2); an L3 rule changes only the judge's model. The count is the file's lines at the reviewed state (the bytes in the review packet): newline bytes, plus one for a last line without one; a deleted file is never routed. Rules compete only within their level: among the rules of one level, the largest min_lines at or under the count wins; the same level and min_lines twice is refused. Left out, an optional key gets: provider the top-level provider (the rule replaces the level entry, so the level's own provider is not inherited; validation checks the rule with that same provider); effort none; fallback none; session_timeout_s nothing (the rule does not count in the timeout); second review.second_levels for the rule's level. The timeout is one value for every session of the ticket: the largest session_timeout_s among the matched rules that set one (a matched rule without one is left out of that max), else review.session_timeout_s. The second-level try uses the rule's second, except for an L2 rule in consensus mode. The worker writes one signed review.route row per routed level before the first session, never twice for one ticket; its second_model is null when the rule's second is not used, which includes an L2 rule in consensus mode, because slot B is not the rule's. run reload accepts a change.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["min_lines", "model"],
+            "properties": {
+              "min_lines": { "type": "integer", "minimum": 0, "description": "B90: the rule applies to a file with at least this many lines (0: every file that is not deleted)." },
+              "level": { "type": "string", "enum": ["L2", "L3"], "default": "L2", "description": "B90: the level the rule replaces, L2 (the reviewers) or L3 (the judge)." },
+              "pin": { "type": "boolean", "default": false, "description": "Force this matching route's model instead of adaptive primary-reviewer selection." },
+              "model": { "type": "string", "minLength": 1 },
+              "effort": { "type": "string" },
+              "provider": { "$ref": "#/$defs/provider" },
+              "fallback": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": ["provider", "model"],
+                  "properties": {
+                    "provider": { "$ref": "#/$defs/provider" },
+                    "model": { "type": "string", "minLength": 1 },
+                    "effort": { "type": "string" }
+                  }
+                }
+              },
+              "session_timeout_s": { "type": "integer", "minimum": 1, "description": "B90: a matched rule's timeout; every session of the ticket runs at the largest one among the matched rules that set one. Unset: the rule does not count in that max (review.session_timeout_s applies only when no matched rule sets one)." },
+              "second": { "$ref": "#/$defs/level" }
+            }
+          }
+        },
+        "workers": { "type": "integer", "minimum": 1, "maximum": 4, "default": 1, "description": "B107: Maximum live workers serving the queue. The orchestrator adds one with run start --add-worker --run <id>." },
+        "max_rounds_per_file": { "type": "integer", "minimum": 2, "maximum": 6, "default": 4 },
+        "recheck_scope": { "type": "string", "enum": ["fix_hunks", "file"], "default": "fix_hunks" },
+        "late_findings": { "type": "string", "enum": ["sweep", "block"], "default": "sweep" },
+        "allow_open_book_codex": { "type": "boolean", "default": false, "description": "B32: let openai (Codex) run reviewer/judge/S2/author with its read-only sandbox, which can read files on this machine. Off: those sessions are refused." },
+        "provider_concurrency": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "B40: how many sessions of each provider may run at once in this process; a rate-limited session waits 2 s, then 6 s (±30 %) before it retries.",
+          "properties": {
+            "anthropic": { "type": "integer", "minimum": 1, "default": 4 },
+            "openai": { "type": "integer", "minimum": 1, "default": 2 },
+            "xai": { "type": "integer", "minimum": 1, "default": 2 }
+          }
+        },
+        "parallel_tickets": { "type": "integer", "minimum": 1, "maximum": 16, "default": 6, "description": "B42: how many review tickets the worker runs at once (oldest first); 1 = one at a time. Tickets for the same file never overlap." },
+        "provider_parallel": { "type": "integer", "minimum": 1, "maximum": 16, "default": 4, "description": "Maximum simultaneous review sessions per provider in the worker. Tickets waiting for this cap still count toward parallel_tickets; stricter provider_concurrency limits still apply." },
+        "fair_share": { "type": "boolean", "default": false, "description": "Give each free ticket slot to the block with the fewest running tickets; ties stay oldest first." },
+        "file_loop": { "type": "string", "enum": ["wait", "overlap", "watch"], "default": "wait", "description": "After each green file, enqueue its review. wait (default): wait for its ticket before the next file. overlap: continue coding, then run review-file --wait-block <id> --run <run> before the completion sentinel; inspect findings with --wait <ticket>. watch: commit each green file instead of running review-file. A file's first commit is queued at once. Later commits of a file that already has a ticket of this block are held (a watch.held row) until --wait-block, which queues the latest content once before the sentinel. Older pending tickets are still superseded." },
+        "agent_waivers": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "Human acknowledgement of counted agent waivers. Set before run start; run reload refuses to change require_ack.",
+          "properties": {
+            "require_ack": { "type": "boolean", "default": false, "description": "Require a verified human acknowledgement of the current counted agent waiver set before block close. Read only from the run config snapshot. New or removed waivers need a new acknowledgement." }
+          }
+        },
+        "external": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "B58: an outside reviewer reviews each block. Set it before run start; run reload refuses to add, remove or change it.",
+          "properties": {
+            "required": { "type": "boolean", "default": false, "description": "B58: true ⇒ block close skips the local per-file review checks (and the --report ticket check), with no terminal and under autopilot, and writes a signed gate.reviews_waived {by: config} row. Unowned changes, proof, no_changes and the transcript grep still refuse. No block may own .code-forge.yml." },
+            "name": { "type": "string", "minLength": 1, "pattern": "\\S", "description": "B58: the outside reviewer, written in the review.external and gate.reviews_waived rows. Required when required is true: run start refuses a missing or blank name." }
+          }
+        }
+      }
+    },
+    "engine": { "type": "string", "enum": ["auto", "solo", "harness", "subprocess"], "default": "auto" },
+    "harnesses": { "type": "array", "items": { "type": "string" } },
+    "harness": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "claude": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "worktree": { "type": "boolean", "default": false } }
+        },
+        "solo": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": { "interactive_harden": { "type": "boolean", "default": false } }
+        }
+      }
+    },
+    "caps": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "coders": { "type": "integer", "minimum": 1, "default": 2 } }
+    },
+    "gates": {
+      "type": "object",
+      "description": "Every fixed gate, custom gate and repeat inherits CI=1 and npm_config_yes=false; a gate's explicit env wins. These injected defaults are omitted from env_keys. A gate exiting 0 fails with reason prompt if the last non-empty line of either stdout or stderr ends with ?, (y), (y/n), [y/N], [Y/n] or Yes/No (case-insensitive; trailing whitespace ignored). Earlier prompt-like lines followed by normal output do not count. The failure says: gate ended on an interactive prompt; install the tool or make the command non-interactive.",
+      "additionalProperties": false,
+      "properties": {
+        "test": { "$ref": "#/$defs/argvOrNull" },
+        "lint": { "$ref": "#/$defs/argvOrNull" },
+        "types": { "$ref": "#/$defs/argvOrNull" },
+        "format": { "$ref": "#/$defs/argvOrNull" },
+        "merge_gate": {
+          "type": "boolean",
+          "default": true,
+          "description": "With block land --merge, run the configured full suite on a trial merge in a temporary detached worktree under the run worktree root before merging into main. Failure or conflict leaves main unchanged and removes the temporary tree. False or --no-merge-gate skips this check with a warning. Without --merge the gate does not run."
+        },
+        "kinds": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "code": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "docs": { "type": "array", "items": { "type": "string", "minLength": 1 } },
+            "contract": { "type": "array", "items": { "type": "string", "minLength": 1 } }
+          },
+          "description": "Optional gate sets for code, docs and contract blocks. Each value is an array of fixed gate names (test, lint, types, format) or gates.custom[].name values. Unknown names and explicitly null fixed gates are refused with the kind and name. With gates run --run R --block B, the declared block kind wins; otherwise the kind is inferred from owned files using block open's rules. An entry runs only its listed gates; every other configured gate is reported skipped with reason not in gates.kinds.<kind>. A missing entry runs all gates as usual. An empty array runs no commands, reports 0 gates for kind <kind>, and writes gate.done with all_ok: true so block close can proceed to its remaining checks. Light blocks keep their light rules and ignore kinds. A gates run without --block ignores kinds. Example: gates: {types: [npm, run, typecheck], kinds: {docs: [types], contract: []}}."
+        },
+        "custom": {
+          "type": "array",
+          "maxItems": 20,
+          "description": "Named gates run after test, lint, types and format in list order, independently even after a failure, with the same timeout and env rules. At most 20; names are unique and cannot be fixed gate names (gates-not-argv-array error rule). Custom argv refuses {test_files} and {changed_files}; --changed and light-block narrowing do not apply. Evidence uses safe relative paths or simple globs: * within a segment, ** across segments; absolute paths, backslashes, empty strings and .. segments are refused. After pass or fail, regular files under cwd are hashed (no symlinks followed), sorted by path, deduplicated and capped at 200 per gate as {path, bytes, sha256}; unmatched patterns appear in missing and do not fail the gate. Files are never copied or stored as content. gate.red includes gate and custom: true; gate.done includes custom summaries {name, ok, evidence_count, missing?}, and with --run/--block an evidence map by name. Website example: gates: {custom: [{name: build, argv: [npm, run, build]}, {name: lighthouse, argv: [npm, run, lighthouse], evidence: ['reports/**/*.json']}, {name: links, argv: [npm, run, links]}]}.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["name", "argv"],
+            "properties": {
+              "name": { "type": "string", "pattern": "^[a-z][a-z0-9_-]{0,31}$", "not": { "enum": ["test", "lint", "types", "format"] }, "description": "Matches ^[a-z][a-z0-9_-]{0,31}$, unique in the list, and not test, lint, types or format." },
+              "argv": {
+                "type": "array", "minItems": 1,
+                "items": { "type": "string", "minLength": 1 },
+                "not": { "contains": { "type": "string", "pattern": "\\{(?:test_files|changed_files)\\}" } }
+              },
+              "env": { "type": "object", "additionalProperties": false, "patternProperties": { "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" } } },
+              "evidence": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^(?!/)(?!.*(?:^|/)(?:[A-Za-z]:|\\.\\.(?:/|$)))[^\\\\\\u0000]+$" } }
+            }
+          }
+        },
+        "extra": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "secret_scan": { "type": "boolean", "default": true },
+            "safe_edit": { "type": "boolean", "default": true },
+            "invariants": { "type": "string" }
+          }
+        },
+        "repeat_new_tests": {
+          "type": "integer",
+          "minimum": 2,
+          "maximum": 10,
+          "description": "After a passing test gate with --run and --block, run its command this many additional times for only tests added or changed against the block base; absent means off. Requires a whole {test_files} argv item; otherwise prints repeat_new_tests: skipped (gates.test has no {test_files}). A failed repeat makes the gate red with reason flaky-test; output and signed gate rows carry repeats {n, files, failed}, and report shows the count."
+        },
+        "timeout_s": {
+          "type": "integer",
+          "minimum": 30,
+          "maximum": 7200,
+          "default": 300,
+          "description": "Whole seconds, 30..7200, for each fixed gate, custom gate and test repeat. gates run --timeout-ms overrides this value. A timed-out gate fails with reason timeout and stderr naming the timeout in seconds and gates.timeout_s to raise."
+        },
+        "full_suite_threshold_files": {
+          "type": "integer",
+          "minimum": 1,
+          "default": 10,
+          "description": "A block that owns more files than this runs the full suite for a {test_files} gate (reason threshold), not its related tests. Owned files are counted this way. A glob or a directory counts the tracked and new (not ignored) files it covers. A path not created yet counts as 1. Outside git each entry counts 1. A git failure runs the full suite. block open --tests names the test files precisely. With gates run --changed, the threshold counts changed files since the last green gates run --run --block instead."
+        }
+      }
+    },
+    "proof": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "tiers": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "high": {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "paths": { "type": "array", "items": { "type": "string" } }
+              }
+            },
+            "light": { "type": "object", "additionalProperties": false, "properties": {} }
+          }
+        },
+        "extra": { "type": "array", "items": { "type": "string" } },
+        "isolation": { "type": "string", "enum": ["export", "lock", "worktree"], "default": "export", "description": "export: proof runs in a temporary copy; lock: in the shared tree under the proof lock; worktree (B62a): block open gives each block its own git worktree and branch (proof.worktree). Fixed for the run: run reload refuses to change it." },
+        "worktree": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "B62a: used when proof.isolation is worktree. block open runs git worktree add <dir>/<block> -b <branch> <base>; nothing is pushed. Fixed for the run: run reload refuses to change it. Until B62b, gates, reviews and the close check run as under export (from the main checkout) and do not see changes made only in the block worktree.",
+          "properties": {
+            "dir": { "type": "string", "minLength": 1, "default": "../<repo-name>-worktrees.noindex (macOS); ../<repo-name>-worktrees (other platforms)", "description": "Where the trees go, relative to the repository top level (not the workspace). In the default, <repo-name> is replaced with the basename of the repository top level; the default text is never used as is. The default sits beside the repository, so the main tree never lists the trees as untracked. An explicit dir is unchanged. Existing runs keep their old worktree directory and recorded block paths never move. A missing .metadata_never_index marker is created once only in the macOS default .noindex directory." },
+            "branch": { "type": "string", "minLength": 1, "default": "forge/{run}/{block}", "description": "The branch template: only {run} and {block} are substituted; the result must pass git check-ref-format --branch." },
+            "base": { "type": "string", "minLength": 1, "description": "The commit-ish the tree starts from; default the block's base (block open --base, else HEAD)." },
+            "setup": {
+              "type": "array",
+              "description": "Argv commands run sequentially in the proof export after export and before RED. A command failure stops proof with reason setup and its output tail. Never run during block worktree creation or under proof lock.",
+              "items": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1, "pattern": "^[^\\u0000]*$" } }
+            }
+          }
+        },
+        "export": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "link_dirs": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": ["vendor", "node_modules"]
+            },
+            "copy_untracked": {
+              "type": "array",
+              "items": { "type": "string" },
+              "default": [".env", ".env.testing"]
+            }
+          }
+        },
+        "runners": {
+          "type": "array",
+          "minItems": 1,
+          "description": "How proof red-green runs tests. The first matching entry wins. With no match, Node files use node:test and PHP tests in Pest/Laravel projects use a default JUnit runner. run reload may append runners but cannot change, reorder or remove existing entries. With runners set no block may own .code-forge.yml. An empty list is refused: leave the key out for defaults.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["match", "adapter", "argv"],
+            "if": { "patternProperties": { "^adapter$": { "const": "xcodebuild" } } },
+            "then": { "not": { "propertyNames": { "not": { "const": "xcode" } } } },
+            "else": { "propertyNames": { "not": { "const": "xcode" } } },
+            "properties": {
+              "match": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "Globs of the test files this runner runs, relative to the repository (the same glob rules as owned entries)." },
+              "adapter": { "type": "string", "enum": ["junit", "swift", "xcodebuild"], "description": "How the result is read. junit: the runner writes a JUnit XML report to {report} (PHPUnit, Pest, pytest and other JUnit runners). swift: swift test with --xunit-output {report}. xcodebuild: xcodebuild test with -resultBundlePath {result_bundle}; the result is read with xcrun xcresulttool, and a precheck needs full Xcode and the destination's simulator first." },
+              "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 }, "description": "The command, an argv array (never a shell string). These items are replaced when an item is exactly the token. junit and swift: {test_file} (the test path), {test_id} (<file>::<case>, or <file> with no case), {test_filter} (the case, regex-escaped), {report} (a fresh report path outside the work dir); {report} and one test token are required. xcodebuild: {workspace}, {project}, {scheme}, {destination} (from xcode), {only_testing} (one item, -only-testing:<test_target>/<Suite>[/<case>]), {result_bundle} (a fresh result bundle path outside the work dir); {scheme}, {destination}, {only_testing} and {result_bundle} are required. A token cannot be the command (argv[0]) or part of a longer item." },
+              "xcode": {
+                "type": "object",
+                "additionalProperties": false,
+                "required": ["scheme", "destination", "test_target"],
+                "dependentSchemas": { "workspace": { "propertyNames": { "not": { "const": "project" } } } },
+                "description": "B102: the xcodebuild adapter's values; required for it, refused on any other adapter. Each value is a non-empty string that does not start with -. At most one of workspace and project.",
+                "properties": {
+                  "workspace": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The .xcworkspace for {workspace}. At most one of workspace and project; neither = a Swift package in the work dir." },
+                  "project": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The .xcodeproj for {project}. At most one of workspace and project." },
+                  "scheme": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The scheme for {scheme}." },
+                  "destination": { "type": "string", "minLength": 1, "pattern": "^[^-]", "description": "The destination for {destination}, e.g. platform=iOS Simulator,name=iPhone 17. A simulator destination must name a device xcrun simctl lists as available (by name or id, and OS when given); platform=macOS needs none. code-forge never boots, creates or deletes a simulator." },
+                  "test_target": { "type": "string", "minLength": 1, "pattern": "^[^-/][^/]*$", "description": "The test target (one name, no /) that {only_testing} starts with; every test in the result must sit under <test_target>/<Suite>." }
+                }
+              },
+              "env": {
+                "type": "object",
+                "additionalProperties": false,
+                "patternProperties": { "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" } },
+                "description": "Variables added to the runner's environment, NAME: value. code-forge never prints or records an env value; only the names are shown (env_keys). Child output is masked only for values of 8 or more characters. Not a secret store."
+              },
+              "timeout_s": { "type": "integer", "minimum": 60, "maximum": 7200, "default": 600, "description": "Seconds each step (RED, GREEN) may run before it is stopped." }
+            }
+          }
+        }
+      }
+    },
+    "budget": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "block_lines": { "type": "integer", "minimum": 1, "default": 600 },
+        "block_tokens_soft": { "type": "integer", "minimum": 1 },
+        "block_tokens_hard": { "type": "integer", "minimum": 1 },
+        "run_usd_soft": { "type": "number", "minimum": 0 },
+        "usd": {
+          "type": "number",
+          "exclusiveMinimum": 0,
+          "description": "Per-run spend stop in USD (R6). Before every session spawn the run's estimated spend is checked: one warning at 80%, new sessions refused at 100%."
+        },
+        "block_cases": { "type": "integer", "minimum": 10, "default": 80 }
+      }
+    },
+    "autonomy": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "coder_may_open_draft_pr": {
+          "type": "boolean",
+          "default": false,
+          "description": "A coder may open a draft PR on its own, under the skill's five-condition rule. Has effect only when coder_may_push is true. False or absent: it never opens a PR."
+        },
+        "coder_may_push": {
+          "type": "boolean",
+          "default": false,
+          "description": "A coder may push its block branch on its own. False or absent: it hands back the branch and the orchestrator (or the human) pushes."
+        }
+      }
+    },
+    "commit": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "trailers": { "type": "string", "enum": ["none", "harness"], "default": "none" }
+      }
+    },
+    "wip": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": { "ready_prs": { "type": "integer", "minimum": 1, "default": 1 } }
+    },
+    "production": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "markers": { "type": "array", "items": { "type": "string" } },
+        "names": { "type": "array", "items": { "type": "string" } }
+      }
+    },
+    "known_extra": {
+      "type": "object",
+      "additionalProperties": { "type": "array", "items": { "type": "string" } }
+    },
+    "calibration": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "shadow_rate": { "type": "number", "minimum": 0, "maximum": 0.5, "default": 0 }
+      }
+    },
+    "keys": {
+      "type": "object",
+      "properties": {
+        "cache_hours": { "type": "integer", "minimum": 1, "maximum": 24, "default": 8, "description": "B84: how many whole hours a key read from 1Password stays cached in the per-user key store (keys set --op, keys test, jev ask, doctor, the worker). keys set --cache-hours wins over it. A cached key is never trusted for longer than the reader's value." }
+      },
+      "additionalProperties": { "type": "string" }
+    },
+    "tmp": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "root": {
+          "anyOf": [{ "type": "string", "minLength": 1 }, { "type": "null" }],
+          "default": null
+        }
+      }
+    },
+    "context": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "The coder context pack. `code-forge context pack --run <id> --block <id>` builds one pack per block from it (header, commands, rules, lessons; cut to max_lines), and every review packet carries the rules and lessons in its project-rules digest. The whole key is read from the live config, not the run-start snapshot: it is not authority, and `run reload` accepts a change to it — except require_coder_tests, which is authority, read from the snapshot only and fixed for the run. Without this key packets are unchanged.",
+      "properties": {
+        "rules": { "type": "array", "items": { "type": "string", "minLength": 1 }, "uniqueItems": true, "default": [], "description": "Rules files (paths relative to the repository root), in order. Read from the main tree; a missing file or a path outside the repository is refused." },
+        "lessons": { "type": "string", "minLength": 1, "description": "One lessons-learned file (path relative to the repository root). Cut first when the pack is over max_lines." },
+        "commands": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The project's commands as argv lists, shown to the coder in the pack. code-forge never runs them.",
+          "properties": {
+            "build": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The build command (argv), shown POSIX shell-quoted in the pack." },
+            "test": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The test command (argv), shown POSIX shell-quoted in the pack." },
+            "lint": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The lint command (argv), shown POSIX shell-quoted in the pack." },
+            "format": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The format command (argv), shown POSIX shell-quoted in the pack." }
+          }
+        },
+        "max_lines": { "type": "integer", "minimum": 20, "default": 300, "description": "The pack's line cap. Lessons are cut first, then the rules files from the last one backwards, each cut section ending in [cut: N lines dropped]; the header and the commands are never cut." },
+        "require_coder_tests": { "type": "boolean", "default": false, "description": "block close refuses unless --report carries the block's COMPLETE sentinel with a `TESTS <command> exit=0` line before it, and writes a signed coder.tests row. Authority, unlike the rest of `context`: read from the run-start snapshot only, and `run reload` refuses a change to it. Reviews waived (--no-require-reviews or review.external) do not lift it." }
+      }
+    },
+    "hooks": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "Commands code-forge runs on the owner's machine. Read from the run-start snapshot only: `run reload` refuses a change. With hooks.on_block_end set, .code-forge.yml is non-ownable (the same guard as review.external.required): no block may own it, also when hooks.on_block_end is the only key that guards it.",
+      "properties": {
+        "on_block_end": {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["argv"],
+          "description": "Run once after every block end (block close closes or stops it, block stop), after the done file `<run root>/blocks/<id>.done.json` is written (its absolute path is in CODE_FORGE_DONE_FILE, the empty string when it was not written, and in done_file of close/stop --json) and outside the run lock. No shell; cwd is the repository top; stdin closed; output discarded; env adds CODE_FORGE_RUN, CODE_FORGE_BLOCK, CODE_FORGE_BLOCK_STATUS, CODE_FORGE_DONE_FILE. One signed hook.ran row (block, hook, argv0, exit, signal, timed_out, duration_ms) per block end, also when the hook fails. A failing, missing or timed-out hook only adds a stderr warning. A coder transcript that runs it refuses the close.",
+          "properties": {
+            "argv": { "type": "array", "items": { "type": "string", "minLength": 1 }, "minItems": 1, "description": "The command as an argv list (no shell): at least one item, and every item a non-empty string (an empty argument is refused). argv[0] is a program on PATH or a path." },
+            "timeout_s": { "type": "integer", "minimum": 1, "maximum": 600, "default": 60, "description": "Seconds before the hook's process group is killed (the hook.ran row then says timed_out)." }
+          }
+        }
+      }
+    },
+    "autopilot": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "min_confidence": { "type": "number", "minimum": 0, "maximum": 1, "default": 0.7, "description": "B46: the lowest confidence at which the autopilot delegate's answer is acted on; below it the question goes to the owner." }
+      }
+    },
+    "coder": {
+      "type": "object",
+      "additionalProperties": false,
+      "description": "B93: what the coder session may write beyond the project tree. Read by the Codex (openai) coder only; it has no effect on the Claude (anthropic) and Grok (xai) coders, whose argv does not change. No key means profile workspace and today's coder argv. Authority: fixed at run start; `run reload` refuses a change; `forge spawn --role coder --run <id>` refuses a live value that differs from the run-start snapshot (sandbox-changed). Without --run, spawn reads the live config.",
+      "properties": {
+        "sandbox": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The Codex coder sandbox profile and its extra writable directories.",
+          "properties": {
+            "profile": { "type": "string", "enum": ["workspace", "toolchain", "full"], "default": "workspace", "description": "workspace (the default; no key gives today's argv): `-s workspace-write`, the project tree is the only writable root. toolchain: the same plus one `--add-dir <abs>` per add_dirs entry (a build cache, a package store). full: `-s danger-full-access`, the coder writes anywhere the user can; like the Claude coder, the forbidden list, the transcript grep and the gates are the only limits, and doctor prints a WARN row. Every profile keeps the $TMPDIR and /tmp exclusions in the argv; Codex ignores them under danger-full-access." },
+            "add_dirs": { "type": "array", "items": { "type": "string", "minLength": 1, "pattern": "^(/|~/)" }, "uniqueItems": true, "default": [], "description": "Extra writable directories for profile toolchain; under workspace or full they are unused and validate warns (rule sandbox-dirs-unused), and a refused entry is still refused. Each entry is absolute or starts with ~/ (expanded against the process HOME) and becomes an absolute realpath: symlinks are followed, even a dangling one, so a symlink is judged by its target. Refused (rule sandbox-dir-refused, by validate and again by the builder; the message names the key path, never the value): /, the home directory itself, and any directory that is, holds or sits inside ~/.code-forge, ~/.codex or $CODEX_HOME, ~/.ssh, ~/.gnupg, ~/.aws, ~/.config, ~/Library/Keychains, the run temp root (so $TMPDIR or /tmp when it holds it), or the session CODEX_HOME; for example ~/Library is refused because it holds ~/Library/Keychains." }
+          }
+        }
+      }
+    },
+    "telemetry": { "type": "string", "const": "off", "default": "off" }
+  },
+  "$defs": {
+    "provider": { "type": "string", "enum": ["anthropic", "openai", "xai"] },
+    "levelName": { "type": "string", "enum": ["L0", "L1", "L2", "L3"] },
+    "level": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": ["model"],
+      "properties": {
+        "model": { "type": "string", "minLength": 1 },
+        "effort": { "type": "string" },
+        "provider": { "$ref": "#/$defs/provider" },
+        "fallback": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["provider", "model"],
+            "properties": {
+              "provider": { "$ref": "#/$defs/provider" },
+              "model": { "type": "string", "minLength": 1 },
+              "effort": { "type": "string" }
+            }
+          }
+        }
+      }
+    },
+    "thresholdBand": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "act": { "type": "number", "minimum": 0, "maximum": 1 },
+        "check": { "type": "number", "minimum": 0, "maximum": 1 },
+        "close_margin": { "type": "number", "minimum": 0, "maximum": 1 }
+      }
+    },
+    "argvOrNull": {
+      "description": "An argv array (never a shell string), an {argv, env} object, or null. An argv item that is exactly {test_files} is replaced by the block's test files. It must be a whole item. It cannot be the command or the only item. The test files are the block open --tests paths, else the owned entries that are concrete test files. The item is dropped, and the full suite runs, in two cases. The block owns more files than full_suite_threshold_files (reason threshold). Or no test file is known, or the gate runs without --run/--block (reason no_tests). The gate.red and gate.done rows then carry scope related with test_count, or scope full with reason. With gates run --run --block --changed, {test_files} expands to changed tests plus stem-paired tests of changed sources, and {changed_files} expands to changed paths for lint or format. Both tokens must be whole argv items and cannot be the command or the only item. Config validation refuses a gate whose command or only item is {changed_files}. Deleted files count for pairing and the threshold, but both tokens receive only files that exist now. Without --changed, {changed_files} is dropped. Changed rows carry scope changed; narrowed rows have no reason. Only fallback rows carry a reason: no_baseline uses today's scope, unpaired uses today's test scope, threshold runs the full suite above the changed-file threshold, and no_changes uses today's scope when nothing is left to run. Gates without either token run unchanged. Any green gates run --run --block records owned file hashes on gate.done, including runs without --changed. When --slug is omitted, these rows go to the run's project ledger. More than 200 owned files means no record, so the next --changed falls back with no_baseline; unreadable inputs also leave no record. A fix-round TESTS line may use --changed; the orchestrator runs full gates before block close.",
+      "anyOf": [
+        { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "required": ["argv"],
+          "properties": {
+            "argv": { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            "env": {
+              "type": "object",
+              "additionalProperties": false,
+              "patternProperties": { "^[A-Za-z_][A-Za-z0-9_]*$": { "type": "string" } },
+              "description": "Variables added to the gate's environment, NAME: value. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters. Only the names are shown (env_keys); put secrets in the environment or a secret manager."
+            }
+          }
+        },
+        { "type": "null" }
+      ]
+    }
+  }
+}
