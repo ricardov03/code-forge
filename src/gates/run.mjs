@@ -337,12 +337,16 @@ async function failedTestFiles(output, cwd) {
     const line = lines[i];
     const tap = /^\s*not ok\s+\d+\s+- (.*)/.exec(line);
     if (tap) {
+      if (/\s+#\s*(?:TODO|SKIP)\b/i.test(tap[1])) continue;
       let location;
+      let parent = false;
       for (let j = i + 1; j < lines.length && !/^\s*(?:\.\.\.|(?:not )?ok\s+\d+\b|# Subtest:)/.test(lines[j]); j++) {
         location = /^\s*location: ['"]?(.*?)['"]?\s*$/.exec(lines[j])?.[1] ?? location;
+        if (/\bfailureType: ['"]?subtestsFailed\b/.test(lines[j])) parent = true;
       }
       if (location) candidates.push(location);
       else if (/\.(?:[cm]?[jt]sx?|php|py|go|rs|swift)(?:\s|$)/.test(tap[1])) candidates.push(tap[1]);
+      else if (!parent) return []; // Never recover only the identifiable subset of failures.
     }
     const header = /^\s*test at (.+)/.exec(line)
       ?? /^\s*(?:FAIL|FAILED)\s+(.+?)(?:::|\s+[-–]|$)/.exec(line)
@@ -370,31 +374,27 @@ async function failedTestFiles(output, cwd) {
  */
 function failedFileArgv(original, file) {
   const node = /^(?:node|node\.exe)$/.test(path.basename(original[0])) && original.includes('--test');
-  if (original.includes(TEST_FILES_TOKEN)) {
-    const argv = expandArgv(original, { scope: 'related', files: [file] }).argv;
-    if (!node) return argv;
-    return [argv[0], '--test-concurrency=1', ...argv.slice(1).filter((arg, i, args) =>
-      !arg.startsWith('--test-concurrency=') && arg !== '--test-concurrency' && args[i - 1] !== '--test-concurrency')];
-  }
-  if (!node) return null;
+  if (!node) return original.includes(TEST_FILES_TOKEN) ? expandArgv(original, { scope: 'related', files: [file] }).argv : null;
   const valued = new Set(['--import', '--require', '-r', '--loader', '--experimental-loader', '--conditions', '-C',
     '--test-reporter', '--test-reporter-destination', '--test-name-pattern', '--test-skip-pattern', '--test-shard',
-    '--test-timeout', '--test-concurrency', '--test-isolation', '--experimental-test-isolation', '--env-file', '--env-file-if-exists']);
+    '--test-timeout', '--test-concurrency', '--test-isolation', '--experimental-test-isolation', '--env-file', '--env-file-if-exists', '--disable-warning']);
   const flags = new Set(['--test', '--experimental-test-module-mocks', '--experimental-strip-types', '--experimental-transform-types',
-    '--enable-source-maps', '--no-warnings', '--disable-warning', '--trace-warnings', '--test-force-exit', '--test-only',
+    '--enable-source-maps', '--no-warnings', '--trace-warnings', '--test-force-exit', '--test-only',
     '--experimental-test-coverage', '--test-update-snapshots']);
   const argv = [original[0], '--test-concurrency=1'];
   for (let i = 1; i < original.length; i++) {
     const arg = original[i];
     if (arg === '--') break;
-    if (arg.startsWith('--test-concurrency=')) continue;
+    if (arg.startsWith('--test-concurrency=') || arg.startsWith('--test-shard=')) continue;
     if (valued.has(arg)) {
       if (i + 1 >= original.length) return null;
-      if (arg === '--test-concurrency') i++;
+      if (arg === '--test-concurrency' || arg === '--test-shard') i++;
       else argv.push(arg, original[++i]);
     } else if (arg.startsWith('-')) {
       if (!arg.includes('=') && !flags.has(arg)) return null;
       argv.push(arg);
+    } else if (i < original.indexOf('--test')) {
+      return original.includes(TEST_FILES_TOKEN) ? expandArgv(original, { scope: 'related', files: [file] }).argv : null;
     }
   }
   return [...argv, file];

@@ -55,7 +55,7 @@ test('failed test gates rerun only failed files serially once and publish flaky 
   for (const reporter of ['tap', 'spec']) await withTempDir(async (cwd) => {
     const calls = await nodeFixture(cwd);
     const slug = `rerun-node-${++sequence}`;
-    const argv = [process.execPath, '--test', `--test-reporter=${reporter}`, '--test-concurrency=3', '*.test.mjs'];
+    const argv = [process.execPath, '--test', '--test-reporter', reporter, '--test-concurrency', '3', '*.test.mjs', ...(reporter === 'spec' ? ['{test_files}'] : [])];
     await writeFile(path.join(cwd, '.code-forge.yml'), JSON.stringify({ version: 1, gates: { test: argv } }));
     const ran = await cli(runGatesVerb, ['run', '--cwd', cwd, '--slug', slug, '--json']);
     assert.equal(ran.code, 0, `recovered ${reporter} test gate must exit 0: ${ran.err}\n${ran.out}`);
@@ -115,8 +115,10 @@ test('second failure stays red; disabled, unparseable and unnarrowable gates exe
   for (const { token, output, gate } of [
     { token: false, output: 'FAILED a.test.mjs::case - AssertionError', gate: 'test' },
     { token: true, output: 'unknown failure without a file', gate: 'test' },
+    { token: true, output: "not ok 1 - known\n  ---\n  location: 'a.test.mjs:1:1'\n  ...\nnot ok 2 - unmapped assertion\n  ---\n  error: 'AssertionError'\n  ...", gate: 'test' },
     { token: true, output: 'FAILED a.test.mjs::case - AssertionError', gate: 'lint' },
   ]) await withTempDir(async (cwd) => {
+    await writeFile(path.join(cwd, 'a.test.mjs'), 'export {};\n');
     await writeFile(path.join(cwd, 'runner.mjs'), `
 import { appendFileSync } from 'node:fs';
 appendFileSync('calls', 'called\\n');
