@@ -1,9 +1,12 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
+import { once } from 'node:events';
 import { cpSync, copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync, chmodSync } from 'node:fs';
+import { cpus } from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
+import { Worker } from 'node:worker_threads';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -17,7 +20,7 @@ before(() => {
     cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000,
     env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
   });
-  assert.equal(build.status, 0, `host binary builds before entry assertions: ${build.stderr}`);
+  assert.equal(build.status, 0, 'host binary builds before entry assertions: ' + build.stderr);
 });
 
 function fixture(t, probe = false) {
@@ -49,7 +52,7 @@ process.exitCode = Number(process.env.ENTRY_EXIT || 0);
 
 function run(file, args, options = {}) {
   const result = spawnSync(file, args, { env, cwd: scratch, encoding: 'utf8', timeout: 15_000, ...options });
-  assert.equal(result.error, undefined, `entry must execute: ${result.error?.message}`);
+  assert.equal(result.error, undefined, 'entry must execute: ' + result.error?.message);
   assert.equal(result.signal, null, 'entry exits normally');
   return { stdout: result.stdout, stderr: result.stderr, code: result.status, pid: result.pid };
 }
@@ -71,9 +74,9 @@ test('npm entry selects Go or Node and preserves all process inputs and outputs'
     if (mode === 'missing') rmSync(f.binary);
     for (const code of [0, 1, 2, 3]) {
       const result = run(f.launcher, args, { cwd: f.dir, input, env: { ...env, ENTRY_TOKEN: 'kept "verbatim"', ENTRY_EXIT: String(code), CODE_FORGE_NATIVE: mode === 'disabled' ? '0' : '1' } });
-      assert.equal(result.code, code, `${mode}: exit ${code} passes through`);
-      assert.equal(result.stderr, 'probe stderr\n', `${mode}: stderr passes through once`);
-      assert.deepEqual(JSON.parse(result.stdout), { args, input, cwd: realpathSync(f.dir), token: 'kept "verbatim"', pid: result.pid }, `${mode}: argv, stdin, cwd, env, stdout and exec PID pass through`);
+      assert.equal(result.code, code, mode + ': exit ' + code + ' passes through');
+      assert.equal(result.stderr, 'probe stderr\n', mode + ': stderr passes through once');
+      assert.deepEqual(JSON.parse(result.stdout), { args, input, cwd: realpathSync(f.dir), token: 'kept "verbatim"', pid: result.pid }, mode + ': argv, stdin, cwd, env, stdout and exec PID pass through');
     }
   }
 });
@@ -84,8 +87,8 @@ test('empty public route table hands unknown verbs and aliases to Node through l
   symlinkSync(path.relative(path.dirname(binaryLink), f.binary), binaryLink);
   for (const args of [['unknown-entry-verb', 'with spaces', 'a"b'], ['--help'], ['--version'], []]) {
     const expected = output(run(process.execPath, [path.join(root, 'bin/code-forge.mjs'), ...args]));
-    assert.deepEqual(output(run(f.launcher, args)), expected, `${JSON.stringify(args)}: npm symlink matches Node stdout, stderr and exit`);
-    assert.deepEqual(output(run(binaryLink, args)), expected, `${JSON.stringify(args)}: executable symlink matches Node stdout, stderr and exit`);
+    assert.deepEqual(output(run(f.launcher, args)), expected, JSON.stringify(args) + ': npm symlink matches Node stdout, stderr and exit');
+    assert.deepEqual(output(run(binaryLink, args)), expected, JSON.stringify(args) + ': executable symlink matches Node stdout, stderr and exit');
   }
 });
 
@@ -99,11 +102,11 @@ test('internal namespace preserves native callers including doctor and daemon st
   assert.match(JSON.parse(version.stdout).goVersion, /^go\d+\./, 'internal version reports Go runtime');
   assert.deepEqual(output(run(f.binary, ['--version'], { env: { ...env, CODE_FORGE_NODE: '' } })), output(run(process.execPath, [f.script, '--version'])), 'unset Node override resolves node from PATH');
   for (const verb of ['version', 'verify-ledger', 'serve', 'state-golden', 'block-rebase-landed']) {
-    assert.deepEqual(output(run(f.binary, [verb])), output(run(process.execPath, [f.script, verb])), `${verb} without internal goes to Node`);
+    assert.deepEqual(output(run(f.binary, [verb])), output(run(process.execPath, [f.script, verb])), verb + ' without internal goes to Node');
     if (verb !== 'version') {
       const invalid = run(f.binary, ['internal', verb]);
-      assert.equal(invalid.code, 2, `${verb}: internal flags retain usage exit 2`);
-      assert.match(invalid.stderr, new RegExp(`${verb} requires --home`), `${verb}: internal handler parses flags`);
+      assert.equal(invalid.code, 2, verb + ': internal flags retain usage exit 2');
+      assert.match(invalid.stderr, new RegExp(verb + ' requires --home'), verb + ': internal handler parses flags');
     }
   }
   // Copy the helper into a private package so nativePath cannot race installation tests.
@@ -134,7 +137,7 @@ test('internal namespace preserves native callers including doctor and daemon st
   const rows = JSON.parse(doctorOutput).rows.filter((row) => row.id === 'native');
   assert.equal(rows.length, 1, 'doctor emits exactly one native row');
   assert.equal(rows[0].status, 'OK', 'doctor negotiates native version');
-  assert.equal(rows[0].detail, `${f.binary}, version ${pkg.version}`, 'doctor identifies binary and version');
+  assert.equal(rows[0].detail, f.binary + ', version ' + pkg.version, 'doctor identifies binary and version');
   const repo = path.join(scratch, `repo-${process.pid}`);
   mkdirSync(repo);
   assert.equal(run('git', ['init', '-q', repo]).code, 0, 'daemon fixture repository initializes');
@@ -150,39 +153,94 @@ test('internal namespace preserves native callers including doctor and daemon st
   } finally { await stop(); }
 });
 
-test('Go handover adds at most 25 ms over Node in the median of ten version runs', (t) => {
-  const f = fixture(t);
+async function fullCpuLoad(t) {
+  const workers = [];
+  t.after(async () => { await Promise.all(workers.map((worker) => worker.terminate())); });
+  const ready = [];
+  for (let i = 0; i < cpus().length; i++) {
+    const worker = new Worker(`
+      const { parentPort } = require('node:worker_threads');
+      parentPort.postMessage('ready');
+      for (;;) {}
+    `, { eval: true, execArgv: [] });
+    workers.push(worker);
+    ready.push(once(worker, 'message'));
+  }
+  assert.deepEqual(await Promise.all(ready), workers.map(() => ['ready']), workers.length + ' CPU load workers are running before timing');
+  t.diagnostic(`CPU load: ${workers.length} busy workers for ${cpus().length} logical CPUs`);
+}
+
+function handoverOverhead(t, f, slow = false) {
   const npmLink = path.join(f.dir, 'temp bin/npm-code-forge');
   symlinkSync(path.join('..', pkg.bin['code-forge']), npmLink);
-  const measure = (file, args) => {
+  const delayed = path.join(f.dir, 'slow-handover');
+  writeFileSync(delayed, '#!/bin/sh\nsleep 0.04\nexec "$@"\n', { mode: 0o755 });
+  const entry = slow ? delayed : npmLink;
+  const entryArgs = slow ? [npmLink, '--version'] : ['--version'];
+  // Both modes use the same npm link, shell resolution and Node executable.
+  // Comparing against bare Node charges the Go budget for shell subprocesses
+  // waiting to be scheduled, which grows with machine load.
+  const timingEnv = { ...env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH || ''}` };
+  const measure = (file, args, native = '1') => {
     const start = performance.now();
-    const result = run(file, args);
+    const result = run(file, args, { env: { ...timingEnv, CODE_FORGE_NATIVE: native } });
     const elapsed = performance.now() - start;
-    assert.equal(result.code, 0, `version timing command succeeds: ${result.stderr}`);
-    assert.equal(result.stdout, `${pkg.name} ${pkg.version}\n`, 'timed command prints exactly the package name and version');
+    assert.equal(result.code, 0, 'version timing command succeeds: ' + result.stderr);
+    assert.equal(result.stdout, pkg.name + ' ' + pkg.version + '\n', 'timed command prints exactly the package name and version');
     return elapsed;
   };
   // Assert Go actually hands over before measuring the public linked entry.
   assert.deepEqual(output(run(f.binary, ['--version'])), output(run(process.execPath, [f.script, '--version'])), 'timing measures a working Go handover');
-  measure(process.execPath, [f.script, '--version']);
-  measure(npmLink, ['--version']);
+  measure(npmLink, ['--version'], '0');
+  measure(entry, entryArgs);
   const median = (values) => { values.sort((a, b) => a - b); return (values[4] + values[5]) / 2; };
   const attempts = [];
   for (let attempt = 1; attempt <= 3; attempt++) {
-    const direct = [], entry = [];
-    // Interleave Node and Go so both sample the same machine load.
+    const direct = [], entries = [], differences = [];
+    // Pair samples under the same load, alternating which mode runs first.
     for (let i = 0; i < 10; i++) {
-      direct.push(measure(process.execPath, [f.script, '--version']));
-      entry.push(measure(npmLink, ['--version']));
+      const control = () => direct.push(measure(npmLink, ['--version'], '0'));
+      const handover = () => entries.push(measure(entry, entryArgs));
+      if (i % 2 === 0) { control(); handover(); } else { handover(); control(); }
+      differences.push(entries[i] - direct[i]);
     }
-    const nodeMedian = median(direct), entryMedian = median(entry);
-    const overhead = entryMedian - nodeMedian;
-    const summary = `attempt ${attempt}, 10 runs: Node median ${nodeMedian.toFixed(2)} ms; Go entry median ${entryMedian.toFixed(2)} ms; overhead ${overhead.toFixed(2)} ms`;
-    attempts.push(summary);
+    const nodeMedian = median(direct), entryMedian = median(entries);
+    const overhead = median(differences);
+    const summary = `attempt ${attempt}, 10 pairs: Node control median ${nodeMedian.toFixed(2)} ms; Go entry median ${entryMedian.toFixed(2)} ms; paired overhead ${overhead.toFixed(2)} ms`;
+    attempts.push(overhead);
     t.diagnostic(summary);
-    if (overhead <= 25) return;
   }
-  assert.fail(`median Go entry overhead must be <=25 ms in at least one attempt:\n${attempts.join('\n')}`);
+  return Math.min(...attempts);
+}
+
+function assertHandoverBudget(overhead) {
+  assert.ok(overhead <= 25, 'Go handover overhead ' + overhead.toFixed(2) + ' ms must be <=25 ms');
+}
+
+test('Go handover stays within 25 ms', (t) => {
+  const f = fixture(t);
+  const overhead = handoverOverhead(t, f);
+  assertHandoverBudget(overhead);
+});
+
+test('Go handover budget rejects a 40 ms delay', (t) => {
+  const f = fixture(t);
+  const overhead = handoverOverhead(t, f, true);
+  assert.throws(() => assertHandoverBudget(overhead), { code: 'ERR_ASSERTION' }, '40 ms delayed handover overhead ' + overhead.toFixed(2) + ' ms must fail the same 25 ms budget check');
+});
+
+test('Go handover stays within 25 ms under full CPU load', { skip: process.env.CODE_FORGE_LOAD_PROOF === '1' ? false : 'set CODE_FORGE_LOAD_PROOF=1 to run under full CPU load' }, async (t) => {
+  const f = fixture(t);
+  await fullCpuLoad(t);
+  const overhead = handoverOverhead(t, f);
+  assertHandoverBudget(overhead);
+});
+
+test('Go handover budget rejects a 40 ms delay under full CPU load', { skip: process.env.CODE_FORGE_LOAD_PROOF === '1' ? false : 'set CODE_FORGE_LOAD_PROOF=1 to run under full CPU load' }, async (t) => {
+  const f = fixture(t);
+  await fullCpuLoad(t);
+  const overhead = handoverOverhead(t, f, true);
+  assert.throws(() => assertHandoverBudget(overhead), { code: 'ERR_ASSERTION' }, '40 ms delayed handover overhead ' + overhead.toFixed(2) + ' ms must fail the same 25 ms budget check');
 });
 
 test('entry boundaries handle nonexecutable native files and missing Node with one error', (t) => {
