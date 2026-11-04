@@ -146,4 +146,9 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
   await parity(['logs'], true, native);
   assert.equal(invoke(['logs'], { native }).code, 127, 'nonempty known-fix table requires Node');
   assert.equal(invoke(['logs', '--json'], { native }).code, 0, 'known-fix table does not prevent native JSON listing');
+  await writeFile(path.join(pkg, 'src/util/known-fixes.json'), '{corrupt');
+  await parity(['logs'], true, native);
+  assert.deepEqual(invoke(['logs'], { native, nodePath: process.execPath }),
+    invoke(['logs'], { node: true }), 'corrupt known-fix table preserves Node exit code and both streams');
+  assert.equal(invoke(['logs'], { native }).code, 127, 'corrupt known-fix table requires Node');
 });

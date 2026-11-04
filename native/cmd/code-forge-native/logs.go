@@ -2,7 +2,9 @@ package main
 
 import (
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io/fs"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -254,11 +256,11 @@ func logsEmptyFixes() bool {
 	file := filepath.Join(filepath.Dir(exe), "..", "..", "..", "src", "util", "known-fixes.json")
 	data, err := os.ReadFile(file)
 	if err != nil {
-		return true
+		return errors.Is(err, fs.ErrNotExist) // Node treats a missing table as empty.
 	}
 	var table any
 	if json.Unmarshal(data, &table) != nil {
-		return true
+		return false
 	}
 	rows, ok := table.([]any)
 	return !ok || len(rows) == 0
