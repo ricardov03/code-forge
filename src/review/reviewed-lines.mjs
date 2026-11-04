@@ -78,7 +78,7 @@ const HAND_LINE = /^(?:(?:[-*]|\d{1,9}\.)\s+)?reviewed\s+(\S+)\s+ticket\s+([0-9a
  * exactly, so an id in capitals is another ticket). Only a `reviewed <path> ticket <id>` line
  * counts ({@link HAND_LINE}); a hash of another length, or a line of any other shape that names
  * the file, never does.
- * @param {string} report @param {ReadonlyArray<ReviewedLine>} lines
+ * @param {string} report @param {ReadonlyArray<{file: string, ticket: string}>} lines
  * @returns {string[]} the files with a mismatched hand line, in the order of `lines`.
  */
 export function reportMismatches(report, lines) {

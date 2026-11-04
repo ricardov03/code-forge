@@ -83,12 +83,13 @@
  * hash the gate accepted (`resolveTicket`: the tree of a worktree block is part of it). `--json`
  * and the done file get `reviewed: [{file, ticket, via}]` (`via`: approved, waiver or answered —
  * the gate's own verdict, `review/reviewed-lines.mjs`), only when there is a line. So `--report`
- * needs no ticket line: a missing hand line refuses only for a file the tool has no line for, and a
+ * needs no ticket line: a missing hand line refuses only for a file with neither a tool line nor
+ * a signed, finished review-file ticket for its current hash in this block and run (B270), and a
  * hand line that names another ticket prints `WARN report ticket mismatch <path>` on stderr while
  * the close goes on (D1). A gate-accepted file with no ticket prints `WARN no ticket for <path>`
  * (`WARN bad ticket for <path>` when the ticket is not 24 lowercase hex) and has no line; lines that
  * cannot be built at all give no line and `WARN reviewed lines unavailable: <message>` — then
- * `--report` needs a hand line for every file the gate accepted, as before B96. All four warnings
+ * `--report` still credits recorded reviews of the current bytes. All four warnings
  * are held and print only when the block closes. A waived or external-review close is unchanged:
  * no line, no key.
  *
@@ -1115,9 +1116,9 @@ export async function runBlock(args, deps = {}) {
         })();
         return linesOnce;
       };
-      // B36 → B96: the coder's report. The tool gives the reviewed lines, so a missing hand line is
-      // a refusal only for a file the tool has no line for; a hand line that names another ticket
-      // is a warning and the close goes on (D1: the tool lines are the record)
+      // B270: the report also credits finished review-file tickets from the close's existing
+      // ledger snapshot. Tool lines can be unavailable even when the current bytes were reviewed;
+      // their output is best-effort and must not force the coder to copy a ticket by hand.
       const report = async () => {
         if (typeof flags.report !== 'string' || reviewsWaived || external !== null) return { ok: true };
         let text;
@@ -1129,10 +1130,22 @@ export async function runBlock(args, deps = {}) {
         }
         const { fileSet } = await tree();
         const lines = await toolLines();
-        const given = new Set(lines.map((l) => l.file));
-        const missing = missingReviewTickets(text, fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null).map((f) => f.file)).filter((f) => !given.has(f));
+        const files = fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null);
+        const hashes = new Map(files.map((f) => [f.file, f.content_hash]));
+        const tickets = new Map(lines.map(({ file, ticket }) => [file, { file, ticket }]));
+        const key = await loadKey(runId);
+        // One pass over rows, no per-file ledger reads. Ledger presence is report evidence only:
+        // the review gate still decides whether every file's current content is acceptable.
+        for (const row of rows) {
+          if (row.event === 'review.result' && row.run === runId && row.block === id && row.status === 'reviewed' &&
+              hashes.has(row.file) && hashes.get(row.file) === row.content_hash &&
+              typeof row.ticket === 'string' && /^[0-9a-f]{24}$/.test(row.ticket) && verifyRow(row, key).ok) {
+            tickets.set(row.file, { file: row.file, ticket: row.ticket });
+          }
+        }
+        const missing = missingReviewTickets(text, files.map((f) => f.file)).filter((f) => !tickets.has(f));
         if (missing.length > 0) return { ok: false, reason: `coder report FAILED: no review-file ticket id for ${missing.join(', ')}`, blockers: missing.map((file) => ({ code: 'coder_report_failed', file, detail: `coder report FAILED: no review-file ticket id for ${file}` })) };
-        for (const file of reportMismatches(text, lines)) lineWarnings.push(`WARN report ticket mismatch ${file}\n`);
+        for (const file of reportMismatches(text, [...tickets.values()])) lineWarnings.push(`WARN report ticket mismatch ${file}\n`);
         return { ok: true };
       };
       /** @type {Array<() => Promise<{ok: boolean, reason?: string, blockers?: import('../state/block.mjs').CloseBlocker[]}>>} */
