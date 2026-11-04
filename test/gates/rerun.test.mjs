@@ -99,6 +99,32 @@ if (process.argv.length === 2) {
   });
 });
 
+test('spaced Jest durations are stripped from failed file headers before rerunning once', async (t) => {
+  for (const line of ['✕ adds numbers (5.123 s)', '✕ adds numbers (12 ms)']) {
+    await t.test(line, async () => {
+      for (const knownFile of [true, false]) await withTempDir(async (cwd) => {
+        if (knownFile) await writeFile(path.join(cwd, 'a.test.mjs'), 'export {};\n');
+        const duration = line.slice(line.lastIndexOf('('));
+        await writeFile(path.join(cwd, 'runner.mjs'), `
+import { appendFileSync } from 'node:fs';
+appendFileSync('argv.jsonl', JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.argv.length === 2) {
+  console.error(${JSON.stringify(`FAIL a.test.mjs ${duration}\n  ${line}`)});
+  process.exitCode = 1;
+} else {
+  process.exitCode = process.argv.length === 3 && process.argv[2] === 'a.test.mjs' ? 0 : 1;
+}
+`);
+        const ran = await runGates({ test: [process.execPath, 'runner.mjs', '{test_files}'] }, { cwd });
+        const calls = (await readFile(path.join(cwd, 'argv.jsonl'), 'utf8')).trim().split('\n').map((entry) => JSON.parse(entry));
+        assert.deepEqual(calls, knownFile ? [[], ['a.test.mjs']] : [[]], 'exactly one rerun targets the bare failed file; a missing file must not rerun');
+        assert.equal(ran.allOk, knownFile, 'only a known failed file can recover');
+        assert.deepEqual(ran.results[0].flaky, knownFile ? ['a.test.mjs'] : undefined);
+      });
+    });
+  }
+});
+
 test('second failure stays red; disabled, unparseable and unnarrowable gates execute only once', async () => {
   for (const disabled of [false, true]) await withTempDir(async (cwd) => {
     const calls = await nodeFixture(cwd, true);
