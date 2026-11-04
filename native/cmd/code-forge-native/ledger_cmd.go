@@ -22,6 +22,9 @@ import (
 const ledgerUsage = "usage: code-forge ledger calibration|outcome|tail --slug <slug> [...]  (tail: [--n|-n <count>]) | add coder --run <r> --block <b> --usd <n> [--note \"...\"] | outside-review --run <r> --pr <n> --rounds <n> --findings <n> [--link <url>] [--block <id>]...\n"
 const ledgerTailUsage = "usage: code-forge ledger tail --slug <slug> [--n <count> | -n <count>]\n"
 
+var ledgerSurrogatePattern = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
+var ledgerBreadcrumbPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}(?: [a-z][a-z0-9-]{0,39})?$`)
+
 func init() { routes["ledger"] = runLedger }
 
 func ledgerHandover(args []string) int {
@@ -185,7 +188,7 @@ func ledgerTail(slug string, n float64) (int, string, string, bool) {
 			}
 			// The existing ordered ledger decoder also supports scalar/array rows
 			// through this envelope, without losing nested property order.
-			if regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`).MatchString(line) {
+			if ledgerSurrogatePattern.MatchString(line) {
 				return 0, "", "", false
 			}
 			obj, err := ledger.DecodeObject([]byte(`{"row":` + line + `}`))
@@ -256,7 +259,7 @@ func ledgerLog(args []string, code int, message string) bool {
 	slug := ""
 	if code != 0 {
 		nodeVersion = ledgerNodeVersion()
-		if nodeVersion == "" || !regexp.MustCompile(`^[A-Za-z0-9 \t\n.,:;|()/<>?\[\]"_=*-]*$`).MatchString(message) {
+		if nodeVersion == "" || !regexp.MustCompile(`^[A-Za-z0-9 \t\n.,:;|()/<>?\[\]"_=*^$-]*$`).MatchString(message) {
 			return false
 		}
 		// Preserve Node's path/reference/id scrubbing for contexts outside this
@@ -288,7 +291,7 @@ func ledgerLog(args []string, code int, message string) bool {
 	var old []any
 	if data, err := os.ReadFile(crumbFile); err == nil && json.Unmarshal(data, &old) == nil {
 		for _, v := range old {
-			if s, ok := v.(string); ok && regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}(?: [a-z][a-z0-9-]{0,39})?$`).MatchString(s) {
+			if s, ok := v.(string); ok && ledgerBreadcrumbPattern.MatchString(s) {
 				before = append(before, s)
 			}
 		}

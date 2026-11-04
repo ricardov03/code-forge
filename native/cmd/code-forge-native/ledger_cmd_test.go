@@ -54,8 +54,33 @@ func TestLedgerNativeEmpty(t *testing.T) {
 	if err := os.WriteFile(filepath.Join(dir, "empty.jsonl"), nil, 0600); err != nil {
 		t.Fatal(err)
 	}
-	code, err := run([]string{"ledger", "tail", "--slug", "empty", "-n", "0"})
-	if code != 0 || err != nil {
-		t.Fatalf("empty tail: got (%d, %v), want (0, nil)", code, err)
+	stdout, err := os.CreateTemp(t.TempDir(), "stdout")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stdout.Close()
+	stderr, err := os.CreateTemp(t.TempDir(), "stderr")
+	if err != nil {
+		t.Fatal(err)
+	}
+	defer stderr.Close()
+	oldOut, oldErr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = stdout, stderr
+	code, runErr := run([]string{"ledger", "tail", "--slug", "empty", "-n", "0"})
+	os.Stdout, os.Stderr = oldOut, oldErr
+	if code != 0 || runErr != nil {
+		t.Fatalf("empty tail: got (%d, %v), want (0, nil)", code, runErr)
+	}
+	for name, stream := range map[string]*os.File{"stdout": stdout, "stderr": stderr} {
+		if _, err := stream.Seek(0, 0); err != nil {
+			t.Fatal(err)
+		}
+		text, err := io.ReadAll(stream)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if len(text) != 0 {
+			t.Errorf("empty tail %s: got %q, want Node's empty output", name, text)
+		}
 	}
 }

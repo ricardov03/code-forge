@@ -83,10 +83,11 @@ test('B248 boundary: missing state and unported ledger subcommands preserve Node
   const preload = path.join(f.repo, 'logging.cjs');
   await writeFile(preload, 'delete process.env.CODE_FORGE_NO_ERROR_LOG;');
   const loggedGo = [process.execPath, '--input-type=module', '-e',
-    `import { spawnSync } from 'node:child_process'; delete process.env.CODE_FORGE_NO_ERROR_LOG; const r = spawnSync(${JSON.stringify(binary)}, process.argv.slice(1), { env: process.env, stdio: 'inherit' }); process.exit(r.status);`];
-  for (const args of [[], ['tail'], ['tail', '--slug', 'absent', '--n', 'bad'], ['tail', '--slug', 'absent']]) {
+    `import { spawnSync } from 'node:child_process'; delete process.env.CODE_FORGE_NO_ERROR_LOG; const r = spawnSync(${JSON.stringify(binary)}, process.argv.slice(1), { env: process.env, stdio: 'inherit' }); if (r.error) throw r.error; process.exit(r.status ?? 1);`];
+  // The unavailable override makes any Node handover fail, including invalid-slug logging.
+  for (const args of [[], ['tail'], ['tail', '--slug', 'absent', '--n', 'bad'], ['tail', '--slug', 'absent'], ['tail', '--slug', 'INVALID']]) {
     assert.deepEqual(await runParity(['ledger', ...args], { fixture: f, goCommand: loggedGo,
       env: { NODE_OPTIONS: '--require=' + preload, CODE_FORGE_NODE: unavailable } }),
-    { equal: true, diffs: [] }, JSON.stringify(args) + ': breadcrumbs and error log have zero differences');
+    { equal: true, diffs: [] }, JSON.stringify(args) + ': output, breadcrumbs and error log match Node without handover');
   }
 });
