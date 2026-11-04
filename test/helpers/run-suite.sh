@@ -1,4 +1,40 @@
 #!/bin/sh
+# Validate explicit test paths before starting either leak-check step. Resolve
+# existing ancestors too, so a symlink cannot lead outside the suite's repo.
+cf_has_tests=false
+for cf_arg do
+  case "$cf_arg" in
+    -*) ;;
+    *.test.mjs) cf_has_tests=true ;;
+  esac
+done
+if [ "$cf_has_tests" = true ]; then
+  cf_suite_root=$(CDPATH= cd -- "${0%/*}/../.." && pwd -P) || exit 2
+  node -e '
+    const fs = require("node:fs"), path = require("node:path");
+    function canonical(p) {
+      try { return fs.realpathSync(p); } catch (err) {
+        if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
+        const parent = path.dirname(p);
+        if (parent === p) throw err;
+        return path.join(canonical(parent), path.basename(p));
+      }
+    }
+    const root = process.argv[1];
+    try {
+      for (const file of process.argv.slice(2)) {
+        if (file.startsWith("-") || !file.endsWith(".test.mjs")) continue;
+        if (file.split("/").includes("..")) throw new Error("traversal");
+        const relative = path.relative(root, canonical(path.resolve(file)));
+        if (relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) throw new Error("outside");
+      }
+    } catch {
+      console.error("run-suite: test paths must stay inside the repo (no ..)");
+      process.exit(2);
+    }
+  ' "$cf_suite_root" "$@" || exit 2
+fi
+
 # Re-enter only after sandbox-exec has installed the profile. The two no-leak
 # steps and the test runner must all inherit the same kernel restrictions.
 if [ "${1:-}" = --suite-sandbox-active ]; then
@@ -55,8 +91,11 @@ else
 fi
 
 export CODE_FORGE_TEST_SUITE=${CODE_FORGE_TEST_SUITE:-$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')}
+if [ "$cf_has_tests" = false ]; then
+  set -- "$@" 'test/**/*.test.mjs'
+fi
 CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && {
-  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@" 'test/**/*.test.mjs'
+  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@"
   cf_test_status=$?
   CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs
   cf_leak_status=$?
