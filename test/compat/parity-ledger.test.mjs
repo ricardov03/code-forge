@@ -1,14 +1,31 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
-import { test } from 'node:test';
+import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+// Installation tests rename/chmod the release binary in parallel. Build directly
+// into a private package layout so every native spawn and Node handover is isolated.
+const pkg = await mkdtemp(path.join(os.tmpdir(), `cf-ledger-package-${process.pid}-`));
+const binary = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+after(() => rm(pkg, { recursive: true, force: true }));
+before(async () => {
+  await mkdir(path.dirname(binary), { recursive: true });
+  await mkdir(path.join(pkg, 'bin'));
+  await symlink(path.join(root, 'bin/code-forge.mjs'), path.join(pkg, 'bin/code-forge.mjs'));
+  const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
+  const cache = path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build');
+  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', binary, './cmd/code-forge-native'], {
+    cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000,
+    env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: cache },
+  });
+  assert.equal(build.status, 0, 'private parity binary builds: ' + (build.error?.message ?? build.stderr));
+});
 const unavailable = '/nonexistent-b248-node';
 
 async function fixture(t) {
