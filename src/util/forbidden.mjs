@@ -826,6 +826,69 @@ export function renderForCodex(list = FORBIDDEN) {
 // ── Transcripts ──────────────────────────────────────────────────────────────
 
 /**
+ * Ignore spawn words in literal Python json.loads data, not in other strings (which
+ * can name a process API via getattr). Dynamic lookup/evaluation outside the masked
+ * literals keeps the whole body. Walk strings/comments so a lookalike inside a string
+ * cannot hide executable code. Unsupported or unfinished strings scan whole.
+ * @param {string} body
+ * @returns {string}
+ */
+function pythonSpawnText(body) {
+  const chunks = [];
+  let end = 0;
+  let i = 0;
+  while (i < body.length) {
+    if (body[i] === '#') {
+      const newline = body.indexOf('\n', i);
+      i = newline < 0 ? body.length : newline + 1;
+      continue;
+    }
+    let jsonArgument = false;
+    if (body.startsWith('json.loads(', i) && (i === 0 || !/[\w.]/.test(body[i - 1]))) {
+      i += 'json.loads('.length;
+      while (/\s/.test(body[i] ?? '')) i += 1;
+      jsonArgument = true;
+    }
+    const quote = body[i];
+    if (quote !== '"' && quote !== "'") { i += 1; continue; }
+    const start = i;
+    let prefixStart = start;
+    while (prefixStart > 0 && /\w/.test(body[prefixStart - 1])) prefixStart -= 1;
+    const prefix = body.slice(prefixStart, start);
+    // In particular, f-strings can execute expressions inside their quotes.
+    if (prefix && !/^(?:r|u|b|br|rb)$/i.test(prefix)) return body;
+    const delimiter = body.startsWith(quote.repeat(3), i) ? quote.repeat(3) : quote;
+    i += delimiter.length;
+    let closed = false;
+    while (i < body.length) {
+      if (body.startsWith(delimiter, i)) { i += delimiter.length; closed = true; break; }
+      if (delimiter.length === 1 && /[\r\n]/.test(body[i])) return body;
+      i += body[i] === '\\' ? 2 : 1;
+    }
+    if (!closed) return body;
+    if (!jsonArgument || prefix || delimiter !== '"') continue;
+    let next = i;
+    while (/\s/.test(body[next] ?? '')) next += 1;
+    if (body[next] !== ')') continue;
+    try {
+      // JSON double-quoted literals are also ordinary Python string literals.
+      // Requiring both layers to parse excludes expressions and uncertain escapes.
+      JSON.parse(JSON.parse(body.slice(start, i)));
+      chunks.push(body.slice(end, start), ' ');
+      end = i;
+    } catch {
+      // Anything other than literal JSON data retains the original spawn words.
+    }
+  }
+  chunks.push(body.slice(end));
+  const masked = chunks.join('');
+  // JSON data can supply API names to dynamic lookup or code to evaluation. Check
+  // the entire remainder, including comments and other strings, before masking.
+  const dynamicLookup = /\b(?:getattr|__import__|importlib|eval|exec|compile|globals|locals|vars|__builtins__|operator\s*\.\s*attrgetter|setattr)\b/;
+  return dynamicLookup.test(masked) ? body : masked;
+}
+
+/**
  * Mask inert, non-shell interpreter bodies for command/contains rules only. Walk shell
  * words and queued heredocs once; unknown commands, malformed quotes and unfinished
  * heredocs stay fail closed. Decode at most one shell -c wrapper; deeper wrappers
@@ -884,7 +947,8 @@ function transcriptCommandText(command, unwrapShell = true) {
     return false;
   };
   /** @param {string} body @param {string} language @param {boolean} shellExpands */
-  const hasSpawn = (body, language, shellExpands) => spawnWord.test(body)
+  const hasSpawn = (body, language, shellExpands) => spawnWord.test(
+    language === 'python' || language === 'python3' ? pythonSpawnText(body) : body)
     || (shellExpands && hasShellSubstitution(body))
     || ((language === 'ruby' || language === 'perl') && /`|\$\(|%x/.test(body))
     || (language === 'perl' && /\bqx\b/.test(body));
@@ -1025,7 +1089,8 @@ function transcriptCommandText(command, unwrapShell = true) {
  * items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
  * is never scanned; non-item events are skipped. For string commands, node/python/ruby/perl
  * heredocs and quoted -e/-c/--eval/-p/--print bodies without a process-spawn word are omitted
- * from command and contains rules only; path rules still scan the whole command. Backticks and
+ * from command and contains rules only; path rules still scan the whole command. Spawn words
+ * inside a literal Python json.loads JSON argument count as data. Backticks and
  * $( count when unescaped and the shell expands the body (unquoted heredoc delimiter or double-quoted inline
  * script), or for Ruby/Perl; %x counts for Ruby/Perl, and qx for Perl. Quoted or backslash-escaped
  * heredoc delimiters and single-quoted inline scripts prevent shell expansion. One sh/bash/zsh/

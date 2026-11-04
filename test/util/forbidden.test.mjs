@@ -1,4 +1,5 @@
 import assert from 'node:assert/strict';
+import { readFileSync } from 'node:fs';
 import os from 'node:os';
 import { test } from 'node:test';
 import {
@@ -11,6 +12,90 @@ import {
   renderForGrok,
   scanTranscript,
 } from '../../src/util/forbidden.mjs';
+
+const codexCommands = (...commands) => [
+  { type: 'thread.started', thread_id: 'b256-test' },
+  ...commands.map((command) => ({ type: 'item.started', item: { type: 'command_execution', command } })),
+].map((event) => JSON.stringify(event)).join('\n');
+const shellQuote = (script) => `"${script.replace(/["\\$`]/g, '\\$&')}"`;
+
+test('B256: B251 Python data is inert while process calls and shell commands remain forbidden', () => {
+  const sample = readFileSync(new URL('../fixtures/transcripts/b256-python-heredoc.jsonl', import.meta.url), 'utf8');
+  const transcript = `${JSON.stringify({ type: 'thread.started' })}\n${sample}`;
+  assert.deepEqual(scanTranscript(transcript, mergeForbidden()), [], 'B251 item: exactly zero rule_break hits');
+  const command = JSON.parse(sample).item.command;
+  const processCall = shellQuote('subprocess.run(["code-forge","worker"])').slice(1, -1);
+  const spawning = command.replace('\nPY"', `\nimport subprocess\n${processCall}\nPY"`);
+  assert.notEqual(spawning, command, 'insert the process call before the sample heredoc terminator');
+  const workerRules = mergeForbidden().filter((entry) => entry.id === 'code-forge-worker-from-coder');
+  assert.equal(workerRules.length, 1, 'exactly one worker rule');
+  assert.deepEqual(scanTranscript(codexCommands(
+    spawning,
+    'zsh -lc "code-forge worker"',
+    "sh <<'EOF'\ncode-forge worker\nEOF",
+  ), workerRules), [2, 3, 4].map((line) => ({ id: workerRules[0].id, line })),
+  'spawning sample, shell -c and shell heredoc: exactly one worker hit each');
+});
+
+test('B256: Python JSON data exemption fails closed at quote and execution boundaries', () => {
+  const data = `data=json.loads(${JSON.stringify(JSON.stringify({ spawn: 'code-forge worker --sentinel' }))})`;
+  const script = `python3 - <<'PY'\nimport json\n${data}\nPY`;
+  const wrapped = `/bin/zsh -lc ${shellQuote(script)}`;
+  const commands = [
+    script, wrapped,
+    wrapped.slice(0, -1),
+    `${wrapped} 'unfinished`,
+    script.replace(/\nPY$/, ''),
+    script.replace(data, data.slice(0, -2)),
+    script.replace(data, `${data}; import subprocess; subprocess.run(['code-forge', 'worker'])`),
+    script.replace(data, `json.loads(get_data()); spawn('code-forge worker')`),
+    script.replace(data, `text = '${data.replace('code-forge worker', "'; subprocess.run(['code-forge', 'worker']); #")}'`),
+  ];
+  const workerRules = mergeForbidden().filter((entry) => entry.id === 'code-forge-worker-from-coder');
+  assert.deepEqual(scanTranscript(codexCommands(...commands), workerRules),
+    commands.slice(2).map((_, index) => ({ id: 'code-forge-worker-from-coder', line: index + 4 })),
+    'two complete data bodies: zero hits; every malformed body or executable spawn: exactly one worker hit');
+});
+
+test('B256 F1: JSON-derived process APIs remain forbidden through dynamic lookup', () => {
+  const bodies = [
+    String.raw`import os, json
+getattr(os, json.loads("\"system\""))("code-forge worker")`,
+    String.raw`import json
+__import__(json.loads("\"subprocess\"")).run(["code-forge", "worker"])`,
+  ];
+  const commands = bodies.flatMap((body) => {
+    const script = `python3 - <<'PY'\n${body}\nPY`;
+    return [script, `/bin/zsh -lc ${shellQuote(script)}`];
+  });
+  const workerRules = mergeForbidden().filter((entry) => entry.id === 'code-forge-worker-from-coder');
+  assert.deepEqual(scanTranscript(codexCommands(...commands), workerRules),
+    commands.map((_, index) => ({ id: 'code-forge-worker-from-coder', line: index + 2 })),
+    'each dynamic process call gives exactly one worker hit, bare and wrapped');
+});
+
+test('B256 F1: dynamic lookup anywhere outside JSON literals disables the data exemption', () => {
+  const names = [
+    'getattr', '__import__', 'importlib', 'eval', 'exec', 'compile',
+    'globals', 'locals', 'vars', '__builtins__', 'operator.attrgetter', 'setattr',
+  ];
+  const data = `data=json.loads(${JSON.stringify(JSON.stringify({ spawn: 'code-forge worker', names }))})`;
+  const command = (body) => `python3 - <<'PY'\nimport json\n${body}\nprint('code-forge worker')\nPY`;
+  const workerRules = mergeForbidden().filter((entry) => entry.id === 'code-forge-worker-from-coder');
+  assert.deepEqual(scanTranscript(codexCommands(command(data)), workerRules), [],
+    'dynamic lookup names inside literal JSON remain inert');
+  for (const name of names) {
+    const commands = [
+      command(`${name}\n${data}`),
+      command(`${data}\n${name}`),
+      command(`${data}\n# ${name}`),
+      command(`${data}\ntext = '${name}'`),
+    ];
+    assert.deepEqual(scanTranscript(codexCommands(...commands), workerRules),
+      commands.map((_, index) => ({ id: 'code-forge-worker-from-coder', line: index + 2 })),
+      `${name} before or after JSON data, including comments and other strings, keeps the body`);
+  }
+});
 
 test('B107: add-worker is an explicit coder-only rule and transcript hit', () => {
   const rules = CODER_ONLY_FORBIDDEN.filter((e) => e.id === 'code-forge-add-worker-from-coder');
