@@ -21,10 +21,11 @@
  */
 
 import { spawnSync } from 'node:child_process';
-import { existsSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { stripVTControlCharacters } from 'node:util';
 
 import { findSection, findUnreleased, parseSubsections } from './changelog.mjs';
 
@@ -411,7 +412,28 @@ function checkPack(root, name, version) {
 function runChecks(root, name, version) {
   /** @param {string} label @param {ReturnType<typeof run>} r */
   const failed = (label, r) => {
-    const tail = `${r.stdout}${r.stderr}`.trimEnd().split('\n').slice(-30).join('\n');
+    const output = `${r.stdout}${r.stderr}`;
+    const tail = output.trimEnd().split('\n').slice(-30).join('\n');
+    if (label === 'npm test') {
+      const names = new Set();
+      let summary = false;
+      for (const line of stripVTControlCharacters(output).split('\n')) {
+        if (/^\s*(?:[ℹ✖]\s+)?failing tests:\s*$/.test(line)) {
+          summary = true;
+          continue;
+        }
+        const tap = /^\s*not ok \d+ - (.+?)\s*$/.exec(line);
+        const spec = summary ? /^\s*✖ (.+?)\s*$/.exec(line) : null;
+        if (tap) names.add(tap[1]);
+        else if (spec) names.add(spec[1].replace(/ \(\d+(?:\.\d+)?ms\)$/, ''));
+      }
+      const temp = path.join(root, '.code-forge-tmp');
+      mkdirSync(temp, { recursive: true });
+      const log = path.join(temp, `release-npm-test-${Date.now()}-${process.pid}.log`);
+      writeFileSync(log, output);
+      const failures = names.size ? `\nfailing tests:\n${[...names].map((n) => `  - ${n}`).join('\n')}` : '';
+      return `${label} failed (exit ${r.code})${failures}\nFull output: ${log}${tail ? `\nLast 30 lines:\n${tail}` : ''}`;
+    }
     return `${label} failed (exit ${r.code})${tail ? `:\n${tail}` : ''}`;
   };
   const genDoc = path.join(root, 'scripts', 'gen-config-doc.mjs');
@@ -567,6 +589,13 @@ export function main(argv, root = process.cwd()) {
     const { text: changelogAfter, notes } = releaseChangelog(changelogBefore, next, date);
     ok('CHANGELOG.md [Unreleased] has entries');
     const readmeAfter = releaseReadme(readmeBefore, current, next);
+    const docsFile = 'docs/step-by-step.md';
+    const docsPath = path.join(root, docsFile);
+    const docsBefore = existsSync(docsPath) ? readFileSync(docsPath, 'utf8') : '';
+    const versionPattern = current.replaceAll('.', '\\.');
+    const docsAfter = docsBefore
+      .replace(new RegExp(`(@codedology/code-forge@)${versionPattern}(?=\\s|$)`, 'g'), `$1${next}`)
+      .replace(new RegExp(`^(@codedology/code-forge )${versionPattern}(\\r?)$`, 'gm'), `$1${next}$2`);
     /** @type {string[]} */
     const refusals = [];
     preflight(root, { branch, allowBranch: opts.allowBranch, tag, current, next, name }, (msg) => {
@@ -581,8 +610,11 @@ export function main(argv, root = process.cwd()) {
       ...(readmeAfter === readmeBefore ? [] : [
         { file: 'README.md', label: `Latest: ${current} → ${next}`, before: readmeBefore, after: readmeAfter },
       ]),
+      ...(docsAfter === docsBefore ? [] : [
+        { file: docsFile, label: `version pins: ${current} → ${next}`, before: docsBefore, after: docsAfter },
+      ]),
     ];
-    const textFiles = new Set(['CHANGELOG.md', 'README.md']);
+    const textFiles = new Set(['CHANGELOG.md', 'README.md', docsFile]);
 
     process.stdout.write('\n== 2. bump + 3. CHANGELOG and README ==\n');
     for (const f of plan) {

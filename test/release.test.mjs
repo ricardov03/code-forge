@@ -72,12 +72,20 @@ const seen = (check) => {
   const dir = process.env.FAKE_NPM_SEEN;
   if (!dir) return;
   fs.mkdirSync(path.join(dir, check), { recursive: true });
-  for (const f of ['README.md', 'CHANGELOG.md', 'package.json', 'package-lock.json']) {
-    if (fs.existsSync(f)) fs.copyFileSync(f, path.join(dir, check, f));
+  for (const f of ['README.md', 'CHANGELOG.md', 'package.json', 'package-lock.json', 'docs/step-by-step.md']) {
+    if (fs.existsSync(f)) {
+      fs.mkdirSync(path.dirname(path.join(dir, check, f)), { recursive: true });
+      fs.copyFileSync(f, path.join(dir, check, f));
+    }
   }
 };
 if (a[0] === 'view') { process.stdout.write((process.env.FAKE_NPM_VIEW || '0.1.0') + '\\n'); process.exit(0); }
-if (a[0] === 'test') { seen('test'); process.stdout.write('fake npm test\\n'); process.exit(Number(process.env.FAKE_NPM_TEST_EXIT || 0)); }
+if (a[0] === 'test') {
+  seen('test');
+  process.stdout.write(process.env.FAKE_NPM_TEST_STDOUT ?? 'fake npm test\\n');
+  process.stderr.write(process.env.FAKE_NPM_TEST_STDERR ?? '');
+  process.exit(Number(process.env.FAKE_NPM_TEST_EXIT || 0));
+}
 if (a[0] === 'run' && a[1] === 'typecheck') { seen('typecheck'); process.exit(Number(process.env.FAKE_NPM_TYPECHECK_EXIT || 0)); }
 if (a[0] === 'pack') {
   const p = JSON.parse(fs.readFileSync('package.json', 'utf8'));
@@ -132,10 +140,10 @@ const GEN_DOC_STALE = "process.stderr.write('gen-config-doc --check: docs/refere
 
 /**
  * A fresh work repo with one pushed commit on main and a bare origin.
- * @param {{ changelog?: string, genDoc?: string | null, lock?: boolean, readme?: string }} [o] - `genDoc: null` writes no
+ * @param {{ changelog?: string, genDoc?: string | null, lock?: boolean, readme?: string, docs?: string }} [o] - `genDoc: null` writes no
  *   scripts/gen-config-doc.mjs; `lock: true` also commits a package-lock.json
  */
-function makeRepo({ changelog = CHANGELOG, genDoc = GEN_DOC_OK, lock = false, readme = README } = {}) {
+function makeRepo({ changelog = CHANGELOG, genDoc = GEN_DOC_OK, lock = false, readme = README, docs } = {}) {
   counter += 1;
   const dir = path.join(PARENT, `case-${counter}`);
   const origin = path.join(dir, 'origin.git');
@@ -151,6 +159,11 @@ function makeRepo({ changelog = CHANGELOG, genDoc = GEN_DOC_OK, lock = false, re
   writeFileSync(path.join(work, 'skill', 'scripts', 'forge'), SHIM);
   writeFileSync(path.join(work, 'CHANGELOG.md'), changelog);
   writeFileSync(path.join(work, 'README.md'), readme);
+  writeFileSync(path.join(work, '.gitignore'), '*.log\n');
+  if (docs !== undefined) {
+    mkdirSync(path.join(work, 'docs'));
+    writeFileSync(path.join(work, 'docs', 'step-by-step.md'), docs);
+  }
   if (lock) writeFileSync(path.join(work, 'package-lock.json'), LOCK);
   if (genDoc !== null) {
     mkdirSync(path.join(work, 'scripts'));
@@ -185,6 +198,83 @@ before(() => {
 after(() => rmSync(PARENT, { recursive: true, force: true }));
 
 describe('scripts/release.mjs (B23)', () => {
+  test('B263: releases plan and bump both docs pins; npm test names every failure once, saves full output, and rolls back the docs', () => {
+    const docs = '# Guide\n\nnpm install --save-dev --save-exact @codedology/code-forge@0.1.0\n\n@codedology/code-forge 0.1.0\n';
+    const bumped = '# Guide\n\nnpm install --save-dev --save-exact @codedology/code-forge@0.2.0\n\n@codedology/code-forge 0.2.0\n';
+    const { dir, work } = makeRepo({ docs });
+    const files = snapshot(work);
+    const st = state(work);
+    const seen = path.join(dir, 'seen');
+    const noise = Array.from({ length: 100 }, (_, i) => `noise ${i + 1}`);
+    const stdout = [
+      '✖ outside summary (1ms)',
+      '✖ failing tests:',
+      '✖ keeps docs current (1.25ms)',
+      '✖ keeps docs current (2ms)',
+      '  ✖ reports nested failure (3ms)',
+      'not ok 1 - keeps docs current',
+      '    not ok 2 - TAP only failure',
+      ...noise,
+      '',
+    ].join('\n');
+    const stderr = 'stderr sentinel\n';
+    const failed = release(work, ['minor'], {
+      FAKE_NPM_TEST_EXIT: '1', FAKE_NPM_TEST_STDOUT: stdout, FAKE_NPM_TEST_STDERR: stderr, FAKE_NPM_SEEN: seen,
+    });
+    assert.equal(failed.code, 1, failed.stderr);
+    const names = ['keeps docs current', 'reports nested failure', 'TAP only failure'];
+    assert.deepEqual(failed.stderr.split('\n').filter((l) => l.startsWith('  - ')), names.map((n) => `  - ${n}`), 'exactly 3 distinct failing names in first-seen order');
+    const logs = [...failed.stderr.matchAll(/^Full output: (.+)$/gm)];
+    assert.equal(logs.length, 1, 'exactly 1 full-output log path');
+    const log = logs[0][1];
+    assert.equal(path.dirname(log), path.join(work, '.code-forge-tmp'), 'log stays in the fixture repo temp area');
+    assert.equal(git(work, ['check-ignore', '--', log]).trim(), log, 'the full log is ignored by git');
+    assert.equal(readFileSync(log, 'utf8'), stdout + stderr, 'full log preserves all stdout and stderr bytes');
+    assert.equal(failed.stderr, `\nFAILED: npm test failed (exit 1)\nfailing tests:\n${names.map((n) => `  - ${n}`).join('\n')}\nFull output: ${log}\nLast 30 lines:\n${[...noise.slice(-29), 'stderr sentinel'].join('\n')}\nrolled back 7 files; nothing was committed or tagged\n`);
+    assert.equal(readFileSync(path.join(seen, 'test', 'docs', 'step-by-step.md'), 'utf8'), bumped, 'npm test saw both bumped pins');
+    assert.equal(readFileSync(path.join(work, 'docs', 'step-by-step.md'), 'utf8'), docs, 'rollback restores every docs byte');
+    assert.deepEqual(snapshot(work), files);
+    assert.deepEqual(state(work), st, 'rollback leaves the same HEAD, tags and clean tree');
+
+    const dry = release(work, ['minor', '--dry-run']);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.equal(dry.stdout.split('\ndocs/step-by-step.md: ').length - 1, 1, 'docs appears once in the plan');
+    assert.match(dry.stdout, /^    \+ npm install --save-dev --save-exact @codedology\/code-forge@0\.2\.0$/m);
+    assert.match(dry.stdout, /^    \+ @codedology\/code-forge 0\.2\.0$/m);
+    assert.match(dry.stdout, /would commit "Release v0\.2\.0" \(7 files\)/);
+    assert.equal(readFileSync(path.join(work, 'docs', 'step-by-step.md'), 'utf8'), docs, 'dry run writes zero docs bytes');
+    assert.deepEqual(state(work), st);
+    const passed = release(work, ['minor']);
+    assert.equal(passed.code, 0, passed.stderr);
+    assert.equal(readFileSync(path.join(work, 'docs', 'step-by-step.md'), 'utf8'), bumped, 'only the two pins change');
+    assert.deepEqual(git(work, ['show', '--name-only', '--format=', 'HEAD']).trim().split('\n').sort(), [...FILES, 'docs/step-by-step.md'].sort(), 'commit includes exactly 7 release files');
+    assert.equal(state(work).status, '', 'ignored failure log does not dirty the next release');
+  });
+
+  test('B263 boundary: docs edits preserve CRLF and unrelated versions; npm test without named failures still saves all output and the tail', () => {
+    const unchanged = 'history 0.1.0\r\n@codedology/code-forge 0.1.0 extra\r\n@codedology/code-forge 0.0.9\r\n@codedology/code-forge@0.1.00\r\n@codedology/code-forge@0.1.0-beta\r\n@codedology/code-forge@0x1x0\r\n';
+    const docs = `npm install --save-dev --save-exact @codedology/code-forge@0.1.0\r\n@codedology/code-forge 0.1.0\r\n${unchanged}`;
+    const bumped = `npm install --save-dev --save-exact @codedology/code-forge@0.2.0\r\n@codedology/code-forge 0.2.0\r\n${unchanged}`;
+    const { work } = makeRepo({ docs });
+    const passed = release(work, ['minor']);
+    assert.equal(passed.code, 0, passed.stderr);
+    assert.equal(readFileSync(path.join(work, 'docs', 'step-by-step.md'), 'utf8'), bumped, 'exactly two complete current-version pins change, preserving all other bytes');
+    const changelog = path.join(work, 'CHANGELOG.md');
+    writeFileSync(changelog, readFileSync(changelog, 'utf8').replace('## [Unreleased]\n', '## [Unreleased]\n\n### Fixed\n\n- Next fix.\n'));
+    git(work, ['commit', '-q', '-am', 'next release entry']);
+    const st = state(work);
+    const failed = release(work, ['patch'], { FAKE_NPM_TEST_EXIT: '1' });
+    assert.equal(failed.code, 1, failed.stderr);
+    const logs = [...failed.stderr.matchAll(/^Full output: (.+)$/gm)];
+    assert.equal(logs.length, 1, 'exactly 1 log even with zero named failures');
+    const log = logs[0][1];
+    assert.equal(path.dirname(log), path.join(work, '.code-forge-tmp'));
+    assert.equal(readFileSync(log, 'utf8'), 'fake npm test\n');
+    assert.equal(failed.stderr, `\nFAILED: npm test failed (exit 1)\nFull output: ${log}\nLast 30 lines:\nfake npm test\nrolled back 7 files; nothing was committed or tagged\n`, 'zero invented names and the complete short tail');
+    assert.equal(readFileSync(path.join(work, 'docs', 'step-by-step.md'), 'utf8'), bumped, 'second-release rollback restores the current docs pins');
+    assert.deepEqual(state(work), st);
+  });
+
   test('--dry-run shows 0.1.0 → 0.2.0 and the README diff, and changes 0 files, 0 commits, 0 tags; the same release then passes', () => {
     const { work, origin } = makeRepo();
     const files = snapshot(work);
@@ -352,7 +442,7 @@ describe('scripts/release.mjs (B23)', () => {
 
   test('B108: a check that fails after README.md and the other files were rewritten (npm test or npm run typecheck exits 1) restores README, CHANGELOG, package.json and package-lock.json byte-for-byte: 7 files, no commit, no tag', () => {
     const cases = [
-      ['test', 'FAKE_NPM_TEST_EXIT', 'npm test failed (exit 1):\nfake npm test'],
+      ['test', 'FAKE_NPM_TEST_EXIT', 'npm test failed (exit 1)'],
       ['typecheck', 'FAKE_NPM_TYPECHECK_EXIT', 'npm run typecheck failed (exit 1)'],
     ];
     for (const [check, exitVar, why] of cases) {
@@ -364,7 +454,13 @@ describe('scripts/release.mjs (B23)', () => {
       const seen = path.join(dir, 'seen');
       const r = release(work, ['minor', '--date', '2026-09-26'], { [exitVar]: '1', FAKE_NPM_SEEN: seen });
       assert.equal(r.code, 1, `${check}: ${r.stdout}\n${r.stderr}`);
-      assert.equal(r.stderr, `\nFAILED: ${why}\nrolled back 7 files; nothing was committed or tagged\n`);
+      let detail = why;
+      if (check === 'test') {
+        const logs = [...r.stderr.matchAll(/^Full output: (.+)$/gm)];
+        assert.equal(logs.length, 1, 'npm test failure prints exactly 1 full-output path');
+        detail += `\nFull output: ${logs[0][1]}\nLast 30 lines:\nfake npm test`;
+      }
+      assert.equal(r.stderr, `\nFAILED: ${detail}\nrolled back 7 files; nothing was committed or tagged\n`);
       // the failing check ran on the rewritten files (the fake npm copied them as it saw them)
       const saw = (/** @type {string} */ f) => readFileSync(path.join(seen, check, f), 'utf8');
       assert.equal(saw('README.md'), README_020, check);
