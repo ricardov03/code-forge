@@ -827,8 +827,9 @@ export function renderForCodex(list = FORBIDDEN) {
 
 /**
  * Ignore spawn words in literal Python json.loads data, not in other strings (which
- * can name a process API via getattr). Walk strings/comments so a lookalike inside
- * a string cannot hide executable code. Unsupported or unfinished strings scan whole.
+ * can name a process API via getattr). Dynamic lookup/evaluation outside the masked
+ * literals keeps the whole body. Walk strings/comments so a lookalike inside a string
+ * cannot hide executable code. Unsupported or unfinished strings scan whole.
  * @param {string} body
  * @returns {string}
  */
@@ -880,7 +881,11 @@ function pythonSpawnText(body) {
     }
   }
   chunks.push(body.slice(end));
-  return chunks.join('');
+  const masked = chunks.join('');
+  // JSON data can supply API names to dynamic lookup or code to evaluation. Check
+  // the entire remainder, including comments and other strings, before masking.
+  const dynamicLookup = /\b(?:getattr|__import__|importlib|eval|exec|compile|globals|locals|vars|__builtins__|operator\s*\.\s*attrgetter|setattr)\b/;
+  return dynamicLookup.test(masked) ? body : masked;
 }
 
 /**

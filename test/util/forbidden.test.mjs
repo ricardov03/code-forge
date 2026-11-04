@@ -57,6 +57,46 @@ test('B256: Python JSON data exemption fails closed at quote and execution bound
     'two complete data bodies: zero hits; every malformed body or executable spawn: exactly one worker hit');
 });
 
+test('B256 F1: JSON-derived process APIs remain forbidden through dynamic lookup', () => {
+  const bodies = [
+    String.raw`import os, json
+getattr(os, json.loads("\"system\""))("code-forge worker")`,
+    String.raw`import json
+__import__(json.loads("\"subprocess\"")).run(["code-forge", "worker"])`,
+  ];
+  const commands = bodies.flatMap((body) => {
+    const script = `python3 - <<'PY'\n${body}\nPY`;
+    return [script, `/bin/zsh -lc ${shellQuote(script)}`];
+  });
+  const workerRules = mergeForbidden().filter((entry) => entry.id === 'code-forge-worker-from-coder');
+  assert.deepEqual(scanTranscript(codexCommands(...commands), workerRules),
+    commands.map((_, index) => ({ id: 'code-forge-worker-from-coder', line: index + 2 })),
+    'each dynamic process call gives exactly one worker hit, bare and wrapped');
+});
+
+test('B256 F1: dynamic lookup anywhere outside JSON literals disables the data exemption', () => {
+  const names = [
+    'getattr', '__import__', 'importlib', 'eval', 'exec', 'compile',
+    'globals', 'locals', 'vars', '__builtins__', 'operator.attrgetter', 'setattr',
+  ];
+  const data = `data=json.loads(${JSON.stringify(JSON.stringify({ spawn: 'code-forge worker', names }))})`;
+  const command = (body) => `python3 - <<'PY'\nimport json\n${body}\nprint('code-forge worker')\nPY`;
+  const workerRules = mergeForbidden().filter((entry) => entry.id === 'code-forge-worker-from-coder');
+  assert.deepEqual(scanTranscript(codexCommands(command(data)), workerRules), [],
+    'dynamic lookup names inside literal JSON remain inert');
+  for (const name of names) {
+    const commands = [
+      command(`${name}\n${data}`),
+      command(`${data}\n${name}`),
+      command(`${data}\n# ${name}`),
+      command(`${data}\ntext = '${name}'`),
+    ];
+    assert.deepEqual(scanTranscript(codexCommands(...commands), workerRules),
+      commands.map((_, index) => ({ id: 'code-forge-worker-from-coder', line: index + 2 })),
+      `${name} before or after JSON data, including comments and other strings, keeps the body`);
+  }
+});
+
 test('B107: add-worker is an explicit coder-only rule and transcript hit', () => {
   const rules = CODER_ONLY_FORBIDDEN.filter((e) => e.id === 'code-forge-add-worker-from-coder');
   assert.equal(rules.length, 1, 'exactly one add-worker entry');
