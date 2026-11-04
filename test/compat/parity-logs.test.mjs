@@ -8,9 +8,9 @@ import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
-const binary = path.join(root, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const cli = path.join(root, 'bin/code-forge.mjs');
 let scratch;
+let binary;
 let fixture;
 const entries = Array.from({ length: 12 }, (_, i) => ({
   ts: '2099-01-02T03:04:05.000Z', verb: i % 2 ? 'run' : 'block', sub: null,
@@ -21,6 +21,23 @@ const entries = Array.from({ length: 12 }, (_, i) => ({
 
 before(async () => {
   scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-logs-'));
+  // Installation tests rename/chmod/remove the release binary in parallel.
+  // Build once into a private package so direct calls and handovers stay isolated.
+  const pkg = path.join(scratch, 'package');
+  binary = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+  await mkdir(path.dirname(binary), { recursive: true });
+  const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
+  const built = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', binary, './cmd/code-forge-native'], {
+    cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000,
+    env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off',
+      GOCACHE: path.join(process.env.CODE_FORGE_REAL_HOME ?? os.homedir(), process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') },
+  });
+  assert.equal(built.status, 0, `private native binary builds: ${built.error ?? built.stderr}`);
+  await mkdir(path.join(pkg, 'bin'));
+  await symlink(cli, path.join(pkg, 'bin/code-forge.mjs'));
+  await copyFile(path.join(root, 'bin/code-forge'), path.join(pkg, 'bin/code-forge'));
+  await mkdir(path.join(pkg, 'src/util'), { recursive: true });
+  await copyFile(path.join(root, 'src/util/known-fixes.json'), path.join(pkg, 'src/util/known-fixes.json'));
   fixture = { repo: path.join(scratch, 'repo'), home: path.join(scratch, 'home') };
   await mkdir(fixture.repo);
   await mkdir(fixture.home);
@@ -83,6 +100,9 @@ test('B247 clause: logs read verbs run without Node with byte parity; clear and 
   assert.equal(result.code, 0, 'path with logging enabled starts no Node');
   assert.deepEqual(JSON.parse(await readFile(path.join(fixture.home, '.code-forge/logs/breadcrumbs.json'), 'utf8')),
     ['logs path'], 'exactly one breadcrumb is recorded');
+  const launcher = path.join(scratch, 'package/bin/code-forge');
+  await parity(['logs', 'path'], false, launcher);
+  assert.deepEqual(invoke(['logs', 'path'], { native: launcher }), invoke(['logs', 'path'], { node: true }), 'private npm entry matches Node output');
   for (const args of [['clear', '--yes'], ['report']]) {
     await seed(null); // report has no entries: no network, model, or terminal.
     await parity(['logs', ...args], true);
