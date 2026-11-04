@@ -180,7 +180,7 @@ function children(pid) {
 }
 function alive(pid) { try { process.kill(pid, 0); return true; } catch { return false; } }
 
-test('max boundaries stay native; usage, unknown flags and unported forms hand over with identical logs', async () => {
+test('max boundaries and wait usage errors stay native with Node parity', async () => {
   const f = await fixture();
   await done(f, { approved: true });
   for (const max of ['0', '90', '90s', '1500ms', '9999999s']) {
@@ -192,6 +192,58 @@ test('max boundaries stay native; usage, unknown flags and unported forms hand o
     [...WAIT, '--max', '-1'], [...WAIT, '--max', '1.5s'], [...WAIT, '--max', '10000000'],
     [...WAIT, '--max'], [...WAIT, '--max='], [...WAIT, '--wait', TICKET],
     ['review-file', '--wait', 'unknown'], ['review-file', '--wait'],
+    ['review-file', '--wait='], ['review-file', '--wait', ''],
+    [...WAIT, '--max', ''], [...WAIT, '--max', '1s', '--max=2s'],
+  ];
+  for (const args of cases) {
+    const result = await launch(f, args).ended;
+    assert.notEqual(result.code, 127, `${args.join(' ')}: usage is served without Node`);
+    assert.equal(result.code, 2, 'native wait usage exits 2');
+    assert.doesNotMatch(result.stderr, /node executable .* not found/, 'usage does not attempt handover');
+    await parity(f, args);
+    await parity(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' });
+  }
+  for (const slug of ['ticket', 'review-file', 24]) {
+    await writeFile(path.join(f.repo, '.code-forge.yml'), JSON.stringify({ project: { slug } }));
+    await parity(f, ['review-file', '--wait', 'unknown'], { CODE_FORGE_NO_ERROR_LOG: '0' });
+  }
+});
+
+test('worker_down writes the Node error-log shape natively with default logging', async () => {
+  const f = await fixture();
+  const logs = path.join(f.home, '.code-forge', 'logs');
+  await mkdir(logs, { recursive: true });
+  await writeFile(path.join(logs, 'breadcrumbs.json'), JSON.stringify(['init', 'keys test', 'bad/value', 'run start', 'block open', 'review-file', 'run status']));
+  for (const setting of ['', '0']) {
+    await parity(f, [...WAIT, '--max=0ms'], { CODE_FORGE_NO_ERROR_LOG: setting });
+  }
+  const start = performance.now();
+  const result = await launch(f, [...WAIT, '--max=0ms'], { CODE_FORGE_NO_ERROR_LOG: undefined }).ended;
+  assert.equal(result.code, 3, 'default logging worker_down runs without Node');
+  assert.equal(result.stdout, `{"ticket":"${TICKET}","status":"worker_down"}\n`);
+  assert.equal(result.stderr, '', 'worker_down emits no stderr');
+  assert.ok(performance.now() - start < 1500, 'failure exits after its two down polls');
+  const entries = (await readFile(path.join(logs, 'errors.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(entries.length, 1, 'one failure is logged');
+  assert.equal(entries[0].exit, 3);
+  assert.equal(entries[0].kind, 'error');
+  assert.equal(entries[0].message, null);
+  assert.deepEqual(entries[0].before, ['keys test', 'run start', 'block open', 'review-file', 'run status']);
+  assert.deepEqual(JSON.parse(await readFile(path.join(logs, 'breadcrumbs.json'), 'utf8')), ['run start', 'block open', 'review-file', 'run status', 'review-file']);
+
+  // Logging is best effort, including append failures and rotation at 1 MiB.
+  await rm(path.join(logs, 'errors.jsonl'));
+  await mkdir(path.join(logs, 'errors.jsonl'));
+  await parity(f, [...WAIT, '--max', '0'], { CODE_FORGE_NO_ERROR_LOG: '' });
+  await rm(path.join(logs, 'errors.jsonl'), { recursive: true });
+  await writeFile(path.join(logs, 'errors.jsonl'), `${JSON.stringify({ old: 'x'.repeat(1000) })}\n`.repeat(1100));
+  await parity(f, [...WAIT, '--max', '0'], { CODE_FORGE_NO_ERROR_LOG: '' });
+});
+
+test('unknown flags and unported forms hand over with identical logs', async () => {
+  const f = await fixture();
+  await done(f, { approved: true });
+  const cases = [
     [...WAIT, '--json'], [...WAIT, '--unknown'], [...WAIT, '--'],
     [...WAIT, '--cwd', 'missing-dir'], [...WAIT, '--cwd', 'plain-file'],
     [...WAIT, '--block', 'B1'], [...WAIT, 'sample.mjs'], [],
@@ -203,7 +255,7 @@ test('max boundaries stay native; usage, unknown flags and unported forms hand o
   for (const args of cases) {
     await parity(f, args, { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
     const result = await launch(f, args).ended;
-    assert.equal(result.code, 127, `${args.join(' ')}: unported/error form requires Node`);
+    assert.equal(result.code, 127, `${args.join(' ')}: unported form requires Node`);
     assert.match(result.stderr, /node executable .* not found/, 'handover identifies missing Node');
   }
   await rm(path.join(f.repo, '.git'), { recursive: true });

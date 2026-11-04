@@ -25,7 +25,7 @@ try {
     const binary = path.join(dir, 'code-forge-native');
     const pending = `${binary}.${process.pid}.tmp`;
     try {
-      const built = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', pending, './cmd/code-forge-native'], {
+      const built = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', pending, './cmd/code-forge-native'], {
         cwd: path.join(root, 'native'), encoding: 'utf8',
         env: { ...process.env, CGO_ENABLED: '0', GOOS: platform, GOARCH: arch === 'x64' ? 'amd64' : arch, GOTOOLCHAIN: 'local', GOPROXY: 'off' },
       });

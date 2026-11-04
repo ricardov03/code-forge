@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"os"
@@ -10,6 +11,7 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"strconv"
 	"strings"
 	"sync/atomic"
@@ -18,6 +20,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/ledger"
+	"gopkg.in/yaml.v3"
 )
 
 func init() { routes["review-file"] = runReviewFileWait }
@@ -26,50 +29,50 @@ var reviewWaitTicket = regexp.MustCompile(`^[0-9a-f]{24}$`)
 var reviewWaitMax = regexp.MustCompile(`^(\d{1,7})(ms|s)?$`)
 var reviewWaitSurrogate = regexp.MustCompile(`(?i)\\ud[89a-f][0-9a-f]{2}`)
 
-// Only this read-only form is owned here. In particular, Node retains usage
-// errors and its error log, help precedence, enqueue, and block joins.
-func reviewWaitFlags(args []string) (map[string]string, time.Duration, bool) {
+const reviewWaitUsage = "usage: code-forge review-file [--cwd <dir>] <path> --block <id> [--run <id>] [--fresh] | review-file --wait <ticket> [--max <seconds>s]\n" +
+	"       code-forge review-file --wait-block <id> --run <id> [--max <seconds>s]\n" +
+	"       code-forge review-file --rebase-check --block <id> --run <id>\n" +
+	"       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n" +
+	"       --cwd <dir> applies to queueing and both wait modes\n"
+
+// Only wait and its flags are owned here; help, enqueue and block joins stay
+// with Node. Keep parser errors separate from validation after root discovery.
+func reviewWaitFlags(args []string) (map[string]string, string, bool) {
 	flags := map[string]string{}
+	wait := false
+	for _, arg := range args {
+		if arg == "--wait" || strings.HasPrefix(arg, "--wait=") {
+			wait = true
+		}
+	}
+	if !wait {
+		return nil, "", false
+	}
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "--") {
-			return nil, 0, false
+			return nil, "", false
 		}
 		name, value, inline := strings.Cut(arg[2:], "=")
 		if name != "wait" && name != "max" && name != "cwd" && name != "run" {
-			return nil, 0, false
+			return nil, "", false
 		}
 		if _, exists := flags[name]; exists {
-			return nil, 0, false
+			return flags, "--" + name + " given more than once", true
 		}
 		if !inline {
 			i++
 			if i >= len(args) || strings.HasPrefix(args[i], "--") {
-				return nil, 0, false
+				return flags, "--" + name + " needs a value", true
 			}
 			value = args[i]
 		}
-		if value == "" {
-			return nil, 0, false
+		if inline && value == "" {
+			return flags, "--" + name + " needs a value", true
 		}
 		flags[name] = value
 	}
-	if !reviewWaitTicket.MatchString(flags["wait"]) {
-		return nil, 0, false
-	}
-	max := 90 * time.Second
-	if raw, exists := flags["max"]; exists {
-		match := reviewWaitMax.FindStringSubmatch(raw)
-		if match == nil {
-			return nil, 0, false
-		}
-		n, _ := strconv.ParseInt(match[1], 10, 64)
-		max = time.Duration(n) * time.Second
-		if match[2] == "ms" {
-			max = time.Duration(n) * time.Millisecond
-		}
-	}
-	return flags, max, true
+	return flags, "", true
 }
 
 func reviewWaitHandover(args []string) int {
@@ -81,9 +84,12 @@ func reviewWaitHandover(args []string) int {
 }
 
 func runReviewFileWait(args []string) int {
-	flags, max, ok := reviewWaitFlags(args)
+	flags, usage, ok := reviewWaitFlags(args)
 	if !ok {
 		return reviewWaitHandover(args)
+	}
+	if usage != "" {
+		return reviewWaitUsageError(args, usage)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
@@ -120,6 +126,21 @@ func runReviewFileWait(args []string) int {
 	if !ok {
 		return reviewWaitHandover(args)
 	}
+	if !reviewWaitTicket.MatchString(flags["wait"]) {
+		return reviewWaitUsageError(args, "a ticket id is 24 lowercase hex characters")
+	}
+	max := 90 * time.Second
+	if raw, exists := flags["max"]; exists {
+		match := reviewWaitMax.FindStringSubmatch(raw)
+		if match == nil {
+			return reviewWaitUsageError(args, "--max must look like 90s or 1500ms")
+		}
+		n, _ := strconv.ParseInt(match[1], 10, 64)
+		max = time.Duration(n) * time.Second
+		if match[2] == "ms" {
+			max = time.Duration(n) * time.Millisecond
+		}
+	}
 	deadline := time.Now().Add(max)
 	ticket := flags["wait"]
 	marker := filepath.Join(root, ".code-forge", "queue", ticket+".done")
@@ -153,12 +174,10 @@ func runReviewFileWait(args []string) int {
 		}
 		if down >= 2 {
 			if _, err := os.Stat(marker); err != nil {
-				// Node records runtime/version metadata on failures. Let it own
-				// that log rather than approximating those bytes in Go.
-				if reviewWaitLogging() {
-					return reviewWaitHandover(args)
-				}
-				reviewWaitSay(ledger.Object{{Key: "ticket", Value: ticket}, {Key: "status", Value: "worker_down"}})
+				before := reviewWaitBreadcrumb()
+				data, _ := ledger.Stringify(ledger.Object{{Key: "ticket", Value: ticket}, {Key: "status", Value: "worker_down"}}, false)
+				fmt.Fprintln(os.Stdout, string(data))
+				reviewWaitFailure(args, 3, nil, before)
 				return 3
 			}
 		}
@@ -507,11 +526,10 @@ func reviewWaitSay(out ledger.Object) int {
 
 var reviewWaitCrumb = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}( [a-z][a-z0-9-]{0,39})?$`)
 
-// Successful native waits keep the router's sole durable side effect. Failures
-// have not written anything when handing over, so Node logs them exactly once.
-func reviewWaitBreadcrumb() {
+// Return the commands before this invocation, as Node's noteVerb does.
+func reviewWaitBreadcrumb() []any {
 	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
-		return
+		return []any{}
 	}
 	dir := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs")
 	file := filepath.Join(dir, "breadcrumbs.json")
@@ -528,18 +546,178 @@ func reviewWaitBreadcrumb() {
 	if len(next) > 5 {
 		next = next[len(next)-5:]
 	}
+	previous := append([]any{}, next...)
 	next = append(next, "review-file")
 	if len(next) > 5 {
 		next = next[len(next)-5:]
 	}
 	if os.MkdirAll(dir, 0700) != nil {
-		return
+		return previous
 	}
 	_ = os.Chmod(dir, 0700)
 	tmp := file + ".tmp-" + strconv.Itoa(os.Getpid())
 	defer os.Remove(tmp)
 	data, _ := ledger.Stringify(next, false)
 	if os.WriteFile(tmp, append(data, '\n'), 0600) == nil {
+		_ = os.Rename(tmp, file)
+	}
+	return previous
+}
+
+func reviewWaitUsageError(args []string, message string) int {
+	before := reviewWaitBreadcrumb()
+	text := "review-file: " + message + "\n" + reviewWaitUsage
+	fmt.Fprint(os.Stderr, text)
+	reviewWaitFailure(args, 2, strings.TrimSpace(text), before)
+	return 2
+}
+
+// The release builder supplies the Node compatibility runtime version without
+// launching Node during a native wait. Plain go builds have no Node metadata.
+var reviewWaitNodeVersion = "unknown"
+
+var reviewWaitLogFlag = regexp.MustCompile(`^--([A-Za-z][A-Za-z0-9-]{0,39})(=|$)`)
+var reviewWaitLogShort = regexp.MustCompile(`^-([A-Za-z])`)
+var reviewWaitLogWords = regexp.MustCompile(`\s+`)
+var reviewWaitLogQuotes = regexp.MustCompile("\"[^\"\n]*\"|'[^'\n]*'|`[^`\n]*`")
+var reviewWaitLogPlaceholders = regexp.MustCompile(`<[^<>\n]*>`)
+var reviewWaitLogPaths = regexp.MustCompile(`\S*/\S*`)
+
+// Native failures contain only fixed messages and flag names, never user values
+// or stacks. Match buildEntry/appendLine in src/util/error-log.mjs for this shape.
+func reviewWaitFailure(args []string, code int, message any, before []any) {
+	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
+		return
+	}
+	cleaned := []any{}
+	slug := ""
+	var config map[string]any
+	if cwd, err := os.Getwd(); err == nil {
+		if data, err := os.ReadFile(filepath.Join(cwd, ".code-forge.yml")); err == nil && yaml.Unmarshal(data, &config) == nil {
+			if project, ok := config["project"].(map[string]any); ok {
+				slug, _ = project["slug"].(string)
+			}
+		}
+	}
+	slugCount := 0
+	clean := func(s string) string {
+		if slug == "" {
+			return s
+		}
+		// The fixed fields have no home paths, emails, op refs or item IDs.
+		// A configured project slug can still occur in a message or flag name.
+		pattern := regexp.MustCompile(regexp.QuoteMeta(slug))
+		matches := pattern.FindAllStringIndex(s, -1)
+		word := func(c byte) bool {
+			return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
+		}
+		for i := len(matches) - 1; i >= 0; i-- {
+			start, end := matches[i][0], matches[i][1]
+			if start > 0 && (word(s[start-1]) || s[start-1] == '<') || end < len(s) && (word(s[end]) || s[end] == '>') || strings.HasPrefix(s[end:], "://") {
+				continue
+			}
+			s = s[:start] + "<slug>" + s[end:]
+			slugCount++
+		}
+		return s
+	}
+	if text, ok := message.(string); ok {
+		text = clean(text)
+		if len(text) > 2048 {
+			end := 2048
+			for !utf8.RuneStart(text[end]) {
+				end--
+			}
+			text = text[:end]
+		}
+		message = text
+	}
+	flags := []any{}
+	afterLong := false
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if m := reviewWaitLogFlag.FindStringSubmatch(arg); m != nil {
+			flags = append(flags, clean("--"+m[1]))
+			afterLong = m[2] == ""
+			continue
+		}
+		if m := reviewWaitLogShort.FindStringSubmatch(arg); m != nil && !afterLong {
+			flags = append(flags, clean("-"+m[1]))
+		}
+		afterLong = false
+	}
+	verb := clean("review-file")
+	if slugCount > 0 {
+		cleaned = append(cleaned, ledger.Object{{Key: "rule", Value: "project_name"}, {Key: "count", Value: slugCount}})
+	}
+	kind := "error"
+	if code == 2 {
+		kind = "usage"
+	}
+	normalized, _ := message.(string)
+	normalized = reviewWaitLogQuotes.ReplaceAllString(normalized, " ")
+	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
+	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
+	normalized = strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(normalized, " "))
+	fp := sha256.Sum256([]byte(verb + "\n\n" + kind + "\n" + normalized))
+	arch := runtime.GOARCH
+	if arch == "amd64" {
+		arch = "x64"
+	}
+	entry := ledger.Object{
+		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
+		{Key: "version", Value: version}, {Key: "node", Value: reviewWaitNodeVersion},
+		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
+		{Key: "verb", Value: verb}, {Key: "sub", Value: nil}, {Key: "flags", Value: flags},
+		{Key: "exit", Value: code}, {Key: "kind", Value: kind}, {Key: "message", Value: message},
+		{Key: "stack", Value: nil}, {Key: "cleaned", Value: cleaned},
+		{Key: "fp", Value: fmt.Sprintf("%x", fp[:6])}, {Key: "before", Value: before},
+	}
+	data, err := ledger.Stringify(entry, false)
+	if err != nil {
+		return
+	}
+	file := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "errors.jsonl")
+	if os.MkdirAll(filepath.Dir(file), 0700) != nil {
+		return
+	}
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	_, err = f.Write(append(data, '\n'))
+	_ = f.Close()
+	if err != nil {
+		return
+	}
+	info, err := os.Stat(file)
+	if err != nil || info.Size() <= 1024*1024 {
+		return
+	}
+	all, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+	lines := []string{}
+	for _, line := range strings.Split(string(all), "\n") {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	used, start := int64(0), len(lines)
+	for start > 0 {
+		size := int64(len(lines[start-1]) + 1)
+		if start < len(lines) && used+size > info.Size()/2 {
+			break
+		}
+		used += size
+		start--
+	}
+	tmp := file + ".tmp-" + strconv.Itoa(os.Getpid())
+	defer os.Remove(tmp)
+	if os.WriteFile(tmp, []byte(strings.Join(lines[start:], "\n")+"\n"), 0600) == nil {
 		_ = os.Rename(tmp, file)
 	}
 }
