@@ -28,6 +28,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - The leak check now sees that a lock file belongs to another live code-forge run on days 1-9 of a month (`ps` pads the date with two spaces), and retries a busy process check before it reports a leak (B258)
 - The Go config goldens no longer hold the package version, so a version bump in `npm run release` no longer fails its own test step (B262)
 - The Go entry speed test compares the Go start with a matched Node start in pairs, so a busy machine no longer fails it; the 25 ms budget is unchanged (B257)
+- `npm run release` now also bumps the version pins in `docs/step-by-step.md`, and when `npm test` fails it lists the failing test names and saves the full log to `.code-forge-tmp/release-npm-test-*.log` (B263)
+- A file rerun after a failed gate now finds test names whose duration has a space before the unit, such as `(12.5 ms)` (B259)
+- The coder command check no longer flags spawn words that are only data inside a Python `json.loads(...)` literal; a dynamic lookup such as `getattr` or `__import__` keeps the check on (B256)
 
 ## [0.16.3] — 2026-11-02
 
