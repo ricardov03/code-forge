@@ -27,6 +27,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The leak check ignores atomic temp files of other processes and temp files that vanish during the scan (B250)
 - The leak check now sees that a lock file belongs to another live code-forge run on days 1-9 of a month (`ps` pads the date with two spaces), and retries a busy process check before it reports a leak (B258)
 - The Go config goldens no longer hold the package version, so a version bump in `npm run release` no longer fails its own test step (B262)
+- The Go entry speed test compares the Go start with a matched Node start in pairs, so a busy machine no longer fails it; the 25 ms budget is unchanged (B257)
 
 ## [0.16.3] — 2026-11-02
 
