@@ -355,7 +355,7 @@ async function failedTestFiles(output, cwd) {
   }
   const files = new Set();
   for (let candidate of candidates) {
-    candidate = candidate.replace(/\s+\([\d.]+m?s\)$/, '').replace(/:\d+(?::\d+)?$/, '');
+    candidate = candidate.replace(/\s+\([\d.]+\s*m?s\)$/, '').replace(/:\d+(?::\d+)?$/, '');
     if (candidate.startsWith('file:')) {
       try { candidate = fileURLToPath(candidate); } catch { return []; }
     }
