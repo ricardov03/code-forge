@@ -214,17 +214,29 @@ function handoverOverhead(t, f, slow = false) {
 }
 
 function assertHandoverBudget(overhead) {
-  assert.ok(overhead <= 25, 'Go handover overhead ' + overhead.toFixed(2) + ' ms must be <=25 ms under full CPU load');
+  assert.ok(overhead <= 25, 'Go handover overhead ' + overhead.toFixed(2) + ' ms must be <=25 ms');
 }
 
-test('Go handover stays within 25 ms under full CPU load', async (t) => {
+test('Go handover stays within 25 ms', (t) => {
+  const f = fixture(t);
+  const overhead = handoverOverhead(t, f);
+  assertHandoverBudget(overhead);
+});
+
+test('Go handover budget rejects a 40 ms delay', (t) => {
+  const f = fixture(t);
+  const overhead = handoverOverhead(t, f, true);
+  assert.throws(() => assertHandoverBudget(overhead), { code: 'ERR_ASSERTION' }, '40 ms delayed handover overhead ' + overhead.toFixed(2) + ' ms must fail the same 25 ms budget check');
+});
+
+test('Go handover stays within 25 ms under full CPU load', { skip: process.env.CODE_FORGE_LOAD_PROOF === '1' ? false : 'set CODE_FORGE_LOAD_PROOF=1 to run under full CPU load' }, async (t) => {
   const f = fixture(t);
   await fullCpuLoad(t);
   const overhead = handoverOverhead(t, f);
   assertHandoverBudget(overhead);
 });
 
-test('Go handover budget rejects a 40 ms delay under full CPU load', async (t) => {
+test('Go handover budget rejects a 40 ms delay under full CPU load', { skip: process.env.CODE_FORGE_LOAD_PROOF === '1' ? false : 'set CODE_FORGE_LOAD_PROOF=1 to run under full CPU load' }, async (t) => {
   const f = fixture(t);
   await fullCpuLoad(t);
   const overhead = handoverOverhead(t, f, true);
