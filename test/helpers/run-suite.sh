@@ -9,7 +9,9 @@ for cf_arg do
   esac
 done
 if [ "$cf_has_tests" = true ]; then
-  cf_suite_root=$(CDPATH= cd -- "${0%/*}/../.." && pwd -P) || exit 2
+  # All runner paths below are relative to the caller's working directory, even
+  # when this wrapper lives in another checkout (for example a fixture suite).
+  cf_suite_root=$(pwd -P) || exit 2
   node -e '
     const fs = require("node:fs"), path = require("node:path");
     function canonical(p) {
@@ -25,7 +27,7 @@ if [ "$cf_has_tests" = true ]; then
       for (const file of process.argv.slice(2)) {
         if (file.startsWith("-") || !file.endsWith(".test.mjs")) continue;
         if (file.split("/").includes("..")) throw new Error("traversal");
-        const relative = path.relative(root, canonical(path.resolve(file)));
+        const relative = path.relative(root, canonical(path.resolve(root, file)));
         if (relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) throw new Error("outside");
       }
     } catch {

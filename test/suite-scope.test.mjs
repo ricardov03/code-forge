@@ -8,8 +8,8 @@ import { test } from 'node:test';
 import { parse, stringify } from 'yaml';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
-const NODE = '/Users/ricardov/.nvm/versions/node/v24.21.0/bin/node';
-const CLI = '/Users/ricardov/Code/Herd/SEISIGMA/coder-forge/bin/code-forge.mjs';
+const NODE = process.execPath;
+const CLI = path.join(REPO, 'bin/code-forge.mjs');
 const { runRun } = await import('../src/cli/run.mjs');
 const { runBlock } = await import('../src/cli/block.mjs');
 const { readAllRows } = await import('../src/ledger/write.mjs');

@@ -25,6 +25,8 @@ function fixture(t) {
   symlinkSync(root, alias);
   const stages = path.join(root, 'stages.jsonl');
   const sample = path.join(root, 'sample.test.mjs');
+  // Run the suite in this fixture repo while reusing the real leak checks.
+  symlinkSync(path.join(REPO, 'test'), path.join(root, 'test'));
   const shim = path.join(bin, 'node');
   symlinkSync('/bin/ps', path.join(bin, 'ps'));
   writeFileSync(shim, `#!${NODE}
@@ -142,7 +144,7 @@ process.stdout.write('nested leak reports verified\\n');
 `);
   const extra = ['--test-name-pattern=a b', '--test-name-pattern=x*', '*', '--test-reporter=spec'];
   const result = spawnSync('/bin/sh', [WRAPPER, ...extra, f.sample], {
-    cwd: REPO, env: f.env, encoding: 'utf8', timeout: 60000,
+    cwd: f.root, env: f.env, encoding: 'utf8', timeout: 60000,
   });
   assert.equal(result.status, 0, result.stdout + result.stderr);
   assert.match(result.stdout, /nested leak reports verified/);
@@ -153,9 +155,9 @@ process.stdout.write('nested leak reports verified\\n');
   assert.deepEqual(calls.map(s => s.args), [
     ['--import', './test/helpers/isolate.mjs', '--test', 'test/no-leak.test.mjs'],
     ['--import', './test/helpers/isolate.mjs', '--experimental-test-module-mocks', '--test',
-      ...extra, f.sample, 'test/**/*.test.mjs'],
+      ...extra, f.sample],
     ['--import', './test/helpers/isolate.mjs', '--test', 'test/no-leak.test.mjs'],
-  ], 'only main receives extra arguments, followed by the default glob');
+  ], 'only main receives extra arguments and the selected file');
 });
 
 test('sandbox rejects suite writes with EPERM, permits other writes, and ignores an unrelated writer', {
@@ -193,7 +195,7 @@ assert.equal(existsSync(path.join(dirs[0], 'unrelated')), true, 'exactly one out
 assert.equal(readdirSync(${JSON.stringify(path.join(f.tmp, 'code-forge-tests'))}).filter(n => n.startsWith('no-leak-')).length,
   0, 'sandbox snapshot step creates zero baseline files');
 `);
-  const child = spawn('/bin/sh', [WRAPPER, f.sample], { cwd: REPO, env: f.env });
+  const child = spawn('/bin/sh', [WRAPPER, f.sample], { cwd: f.root, env: f.env });
   t.after(() => { if (child.exitCode === null) child.kill('SIGKILL'); });
   let stdout = '';
   let stderr = '';
@@ -238,7 +240,7 @@ assert.equal(process.env.CODE_FORGE_LEAK_GUARD, 'snapshot');\n`);
     /** @type {NodeJS.ProcessEnv} */
     const env = { ...f.env, PATH: f.bin, CODE_FORGE_LEAK_GUARD: guard };
     if (codex) env.CODEX_SANDBOX = codex;
-    const result = spawnSync('/bin/sh', [WRAPPER, f.sample], { cwd: REPO,
+    const result = spawnSync('/bin/sh', [WRAPPER, f.sample], { cwd: f.root,
       env,
       encoding: 'utf8', timeout: 30000 });
     assert.equal(result.status, 0, `${name}: ${result.stdout}${result.stderr}`);
@@ -247,8 +249,23 @@ assert.equal(process.env.CODE_FORGE_LEAK_GUARD, 'snapshot');\n`);
     const calls = stages(f);
     assert.deepEqual(calls.map(s => [s.mode, s.guard]),
       [['snapshot', 'snapshot'], ['suite', 'snapshot'], ['final', 'snapshot']], `${name}: all three steps retain snapshot checks`);
-    assert.deepEqual(calls[1].args.slice(calls[1].args.indexOf('--test') + 1), [f.sample, 'test/**/*.test.mjs'],
-      `${name}: the supplied file precedes the default glob`);
+    assert.deepEqual(calls[1].args.slice(calls[1].args.indexOf('--test') + 1), [f.sample],
+      `${name}: only the supplied file is selected`);
+  }
+});
+
+test('wrapper refuses traversal and outside test paths in the fixture repo before any leak step', t => {
+  const f = fixture(t);
+  writeFileSync(f.sample, '');
+  for (const file of ['../sample.test.mjs', 'sub/../sample.test.mjs',
+    path.join(REPO, 'test/no-leak.test.mjs'), 'test/no-leak.test.mjs']) {
+    const result = spawnSync('/bin/sh', [WRAPPER, file], {
+      cwd: f.root, env: f.env, encoding: 'utf8', timeout: 10000,
+    });
+    assert.equal(result.status, 2, `${file}: ${result.stdout}${result.stderr}`);
+    assert.equal(result.stdout, '', 'unsafe input launches no test process');
+    assert.equal(result.stderr.trim(), 'run-suite: test paths must stay inside the repo (no ..)');
+    assert.equal(existsSync(f.stages), false, 'no leak step runs for unsafe input');
   }
 });
 
@@ -258,7 +275,7 @@ test('forced snapshot still fails on exactly one escaped file written by the sui
     const leak = path.join(f.guarded[0], 'escaped-write');
     writeFileSync(f.sample, escaped ? `import {writeFileSync} from 'node:fs';
 writeFileSync(${JSON.stringify(leak)}, 'escaped');\n` : '');
-    const result = spawnSync('/bin/sh', [WRAPPER, f.sample], { cwd: REPO,
+    const result = spawnSync('/bin/sh', [WRAPPER, f.sample], { cwd: f.root,
       env: { ...f.env, CODE_FORGE_LEAK_GUARD: 'snapshot' }, encoding: 'utf8', timeout: 30000 });
     const output = result.stdout + result.stderr;
     assert.equal(result.status, escaped ? 1 : 0, output);
