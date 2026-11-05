@@ -6,6 +6,23 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Go runs `logs path`, `logs [--last] [--json]` and `logs summary`; `logs clear` and `logs report` hand over to Node (B247)
+- Go runs `ledger tail`; other `ledger` commands hand over to Node (B248)
+- Go runs `review-file --wait <ticket>` (B266), and `review-file --wait-block` through the daemon; stopped files and unusual answers hand over to Node, which writes all signed rows (B267)
+- Go runs `status --json --run <id>` through the daemon client `native/daemonclient`, with Node fallback (B268)
+- `npm run bench:verbs` compares Node and Go per verb (time, memory, output parity, leftover processes); `bench:block` adds the Go-first `entry` lane (B265)
+
+### Changed
+
+- Land gates run only the tests the block changed or affects; the full suite runs once per wave (B269)
+- `block close` finds the final approved review tickets in the ledger, so a report needs no hand ticket lines (B270)
+
+### Fixed
+
+- The CI timing check "Go handover budget rejects a 40 ms delay" no longer fails on a busy machine (B271)
+
 ## [0.17.0] — 2026-11-04
 
 ### Added

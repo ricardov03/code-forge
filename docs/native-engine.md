@@ -23,7 +23,15 @@ The public route table currently serves:
 - `status --json --run <id>` when a compatible daemon is already running,
   the run's config enables it, and Go can establish that no worker warning
   needs to be printed. Either flag order is accepted.
+- `logs path`, `logs [--last] [--json]` and `logs summary`. `logs clear` and
+  `logs report` hand over to Node.
+- `ledger tail`. Other `ledger` commands hand over to Node.
+- `review-file --wait <ticket> [--max <n>s]`.
+- `review-file --wait-block <id> --run <id> [--max <n>s]` when a compatible
+  daemon answers. A stopped file, an unusual answer or no daemon hands over
+  to Node. Node writes all signed rows.
 
+All other review-file forms hand over to Node.
 All other status forms and any uncertain or unavailable daemon answer hand
 over to Node. Status never starts a daemon. Commands such as `code-forge version`
 and `code-forge doctor` also go through Go to Node. Go additionally runs private
@@ -53,6 +61,23 @@ in Go. The `native-status.mjs` helper reads data from the daemon on standard
 input. It does not report which engine started a command. Although help
 lists `native-status`, it is a private helper with no public command handler.
 Use `code-forge status` to check run progress.
+
+### Measure it
+
+Build the binary with `node scripts/build-native.mjs --host`.
+Then run `npm run bench:verbs` or `npm run bench:block`.
+
+`bench:verbs` compares the Node lane and the Go lane of the npm entry for each
+verb, after two warmup runs. The columns show the median, p90 and minimum time
+in milliseconds, the peak memory (RSS) in MB, the engine that ran, the speedup
+(Node median / Go median), and whether output and exit code are the same.
+
+`bench:block` compares three lanes: `node` (Node only), `go` (Node with the Go
+helper) and `entry` (Go first). It reports child processes, CLI calls, peak
+memory, wall time and leftover processes.
+
+Both benchmarks use isolated state. Both fail when a process or a daemon socket
+stays after the run. Use `--json`, or `--out <file>`, to get JSON.
 
 ## Platforms with a binary
 
