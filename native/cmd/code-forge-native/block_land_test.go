@@ -192,3 +192,47 @@ func TestBlockLandDurationRefusals(t *testing.T) {
 		}
 	}
 }
+
+func TestLandClaimFilesRequiresCheckedScope(t *testing.T) {
+	home, repo := t.TempDir(), t.TempDir()
+	git := func(args ...string) string {
+		t.Helper()
+		cmd := exec.Command("git", args...)
+		cmd.Dir, cmd.Env = repo, gitx.ChildEnv()
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+		return strings.TrimSpace(string(out))
+	}
+	git("init", "-qb", "main")
+	git("-c", "user.name=Fixture", "-c", "user.email=f@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "base")
+	entry := ledger.Object{{Key: "base_sha", Value: git("rev-parse", "HEAD")}, {Key: "owned_files", Value: []any{}}}
+	record := ledger.Object{{Key: "workspace", Value: repo}, {Key: "project", Value: "fixture"}, {Key: "blocks", Value: ledger.Object{{Key: "B1", Value: entry}}}}
+	const run = "r-scope-unit"
+	dir := filepath.Join(home, ".code-forge/runs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(dir, run+".key"), make([]byte, 32), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "outsider.mjs"), []byte("changed\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	files, err := landClaimFiles(home, run, "B1", repo, repo, record, entry)
+	if err == nil || files != nil {
+		t.Fatalf("unchecked scope must fail without claim candidates: files=%v err=%v", files, err)
+	}
+	entry.Set("tree_at_open", ledger.Object{})
+	blocks := blockObject(record.Get("blocks"))
+	blocks.Set("B1", entry)
+	record.Set("blocks", blocks)
+	files, err = landClaimFiles(home, run, "B1", repo, repo, record, entry)
+	if err != nil || len(files) != 1 || files[0] != "outsider.mjs" {
+		t.Fatalf("checked scope must return the unowned change: files=%v err=%v", files, err)
+	}
+	if _, err := os.Stat(filepath.Join(home, ".code-forge/ledger")); !os.IsNotExist(err) {
+		t.Fatalf("scope check wrote ledger: %v", err)
+	}
+}

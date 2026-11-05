@@ -155,11 +155,8 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 	if blockCloseStep(closeArgs, dry) == landHandover {
 		return fallback()
 	}
-	dry.record = nil
-	for _, file := range files {
-		if reviewEnqueueStep([]string{file, "--block", id, "--run", run, "--cwd", top}, dry) == landHandover {
-			return fallback()
-		}
+	if err := landAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
+		return fallback()
 	}
 	// All hand-over predicates are settled. No code below this point starts Node.
 	begin()
@@ -170,7 +167,7 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 	if json {
 		print = stderr
 	}
-	if err := landAutoClaim(home, run, id, top, record, files, print); err != nil {
+	if err := landAutoClaim(home, run, id, top, record, files, print, false); err != nil {
 		return stop(err.Error())
 	}
 	stamp := func() (string, error) {

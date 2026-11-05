@@ -216,6 +216,23 @@ func ClaimAuto(home, run, id, file string, guarded []string, why string, safe fu
 			}
 		}
 		kinds := ledger.Object{{Key: file, Value: owned.PathKind(root, file)}}
+		prefix := ""
+		if auto {
+			workspace := text(record.Get("workspace"))
+			main, err := gitx.RepoTop(workspace)
+			if err != nil {
+				return nil, err
+			}
+			real, err := filepath.EvalSymlinks(workspace)
+			if err != nil {
+				return nil, err
+			}
+			prefix, err = filepath.Rel(main, real)
+			if err != nil {
+				return nil, err
+			}
+			prefix = filepath.ToSlash(prefix)
+		}
 		for _, path := range guarded {
 			if owned.OwnsFile([]any{file}, kinds, path) {
 				return nil, &state.Error{Code: "config-owned", Message: "owned entry " + quote(file) + " covers the project's .code-forge.yml; no block may own it while " + why}
@@ -235,15 +252,6 @@ func ClaimAuto(home, run, id, file string, guarded []string, why string, safe fu
 				}
 				entry, overlap := overlaps(file, kinds, candidate, other)
 				if auto {
-					main, err := gitx.RepoTop(text(record.Get("workspace")))
-					if err != nil {
-						return nil, err
-					}
-					prefix, err := filepath.Rel(main, text(record.Get("workspace")))
-					if err != nil {
-						return nil, err
-					}
-					prefix = filepath.ToSlash(prefix)
 					entries, _ := other.Get("owned_files").([]any)
 					if prefix != "." && strings.HasPrefix(file, prefix+"/") && owned.OwnsFile(entries, object(other.Get("owned_kinds")), strings.TrimPrefix(file, prefix+"/")) {
 						overlap = true

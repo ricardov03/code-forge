@@ -93,7 +93,10 @@ func landClaimFiles(home, run, id, top, main string, record, entry ledger.Object
 	if err != nil {
 		return nil, err
 	}
-	files, warnings, _ := gatecheck.Scope(top, gatecheck.Prefix(main, blockString(record.Get("workspace"))), id, run, blockObject(record.Get("blocks")), changed, rows, key, entry.Get("worktree") != nil)
+	files, warnings, checked := gatecheck.Scope(top, gatecheck.Prefix(main, blockString(record.Get("workspace"))), id, run, blockObject(record.Get("blocks")), changed, rows, key, entry.Get("worktree") != nil)
+	if !checked {
+		return nil, fmt.Errorf("cannot auto-claim without a checked block scope")
+	}
 	// Scope warnings identify siblings in a shared tree; auto-claim includes them.
 	for _, warning := range warnings {
 		prefix := "WARN block " + id + ": "
@@ -112,7 +115,7 @@ func landClaimFiles(home, run, id, top, main string, record, entry ledger.Object
 	return unique, nil
 }
 
-func landAutoClaim(home, run, id, top string, record ledger.Object, files []string, print io.Writer) error {
+func landAutoClaim(home, run, id, top string, record ledger.Object, files []string, print io.Writer, preflight bool) error {
 	cfg, _ := blockSnapshot(record)
 	why := ""
 	external := blockMap(blockMap(cfg["review"])["external"])
@@ -129,6 +132,17 @@ func landAutoClaim(home, run, id, top string, record ledger.Object, files []stri
 		if err := blockops.ValidateClaim(file); err != nil {
 			return err
 		}
+	}
+	if preflight {
+		// Check every enqueue before the first claim can publish a signed row.
+		for _, file := range files {
+			if reviewEnqueueStep([]string{file, "--block", id, "--run", run, "--cwd", top}, &landStep{preflight: true}) == landHandover {
+				return blockops.ErrHandover
+			}
+		}
+		return nil
+	}
+	for _, file := range files {
 		if err := blockops.ClaimAuto(home, run, id, file, guarded, why, func(r ledger.Object) bool { return blockSafe(r) && blockStorageSafe(home, run, r) }, true); err != nil {
 			return err
 		}

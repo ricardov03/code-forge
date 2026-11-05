@@ -12,7 +12,7 @@ import { appendRow } from '../../src/ledger/write.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
 import { announceWorker, writeResult } from '../../src/worker/queue.mjs';
-import { contentHash } from '../../src/worker/ticket.mjs';
+import { contentHash, ticketId } from '../../src/worker/ticket.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
@@ -245,6 +245,31 @@ test('no daemon, close hook, and unscoped merge gate hand over before any Go wri
       assert.equal(result.code, 127, result.stderr);
       assert.deepEqual(await snapshot(direct), before, 'every state byte and directory unchanged');
     } finally { await daemon?.cleanup(); await rm(home, { recursive: true, force: true }); }
+  }
+});
+test('auto-claim enqueue handover on a later file hands over the whole land without changing state', async () => {
+  for (const json of [false, true]) {
+    const f = await openFixture('auto');
+    await writeFile(path.join(f.tree, 'a-claim.mjs'), 'export const first = true;\n');
+    // The first file can enqueue natively; the second needs Node to retry its result.
+    for (const file of ['a-claim.mjs', 'outsider.mjs']) {
+      const ticket = ticketId({ run: RUN, block: 'B1', file, content_hash: contentHash(f.tree, file), tree: f.tree });
+      writeResult({ repoRoot: f.repo, runId: RUN, ticket, key: KEY,
+        result: file === 'outsider.mjs' ? { status: 'unavailable' } : { status: 'reviewed', approved: true, findings: [] } });
+    }
+    const home = await mkdtemp('/tmp/cf-le-');
+    const { cp } = await import('node:fs/promises');
+    await cp(f.home, home, { recursive: true });
+    const direct = { ...f, home };
+    const daemon = await serveDaemon(direct, RUN, async () => { throw new Error('no land step may start'); });
+    try {
+      const before = await snapshot(direct);
+      const result = await native(direct, [...args, ...(json ? ['--json'] : [])]);
+      assert.equal(result.code, 127, result.stderr);
+      assert.equal(result.stdout, '', 'no auto-claimed output before whole-land handover');
+      assert.deepEqual(await snapshot(direct), before, 'all run, ledger and queue bytes and directories are unchanged');
+      assert.ok(daemon.requests.every((request) => request.method === 'ping'), 'join and gates never start');
+    } finally { await daemon.cleanup(); await rm(home, { recursive: true, force: true }); }
   }
 });
 async function snapshot(f) {
