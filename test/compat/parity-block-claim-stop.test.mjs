@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
-import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { cp, lstat, mkdir, mkdtemp, readFile, readdir, readlink, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -67,6 +67,35 @@ function launch(f, args, { node = false, env = {} } = {}) {
     child.stdout.on('data', (b) => { stdout += b; }); child.stderr.on('data', (b) => { stderr += b; });
     child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
+}
+// Preserve absence, directory entries (including empty lock directories), symlink
+// targets and raw file bytes. Both state trees include the ledger, queue and locks.
+async function handoverState(file) {
+  let stat;
+  try { stat = await lstat(file); }
+  catch (err) { if (err.code === 'ENOENT') return null; throw err; }
+  if (stat.isSymbolicLink()) return { kind: 'symlink', target: await readlink(file) };
+  if (stat.isDirectory()) {
+    const entries = await readdir(file);
+    return { kind: 'directory', entries: await Promise.all(entries.sort().map(async (name) =>
+      [name, await handoverState(path.join(file, name))])) };
+  }
+  assert.ok(stat.isFile(), `unexpected state entry: ${file}`);
+  return { kind: 'file', bytes: await readFile(file) };
+}
+async function assertHandoverWithoutMutation(f, args, message, env = {}) {
+  const record = path.join(f.home, '.code-forge/runs', `${RUN}.json`);
+  const trees = [f.home, f.repo].map((root) => path.join(root, '.code-forge'));
+  const [recordBefore, ...stateBefore] = await Promise.all([
+    readFile(record), ...trees.map(handoverState),
+  ]);
+  const result = await launch(f, args, { env });
+  assert.equal(result.code, 127, message);
+  assert.deepEqual(await readFile(record), recordBefore, `${message}: run record bytes unchanged`);
+  await assert.rejects(readFile(path.join(f.home, '.code-forge/ledger/claim-stop.jsonl')),
+    { code: 'ENOENT' }, `${message}: no ledger row before handover`);
+  assert.deepEqual(await Promise.all(trees.map(handoverState)), stateBefore,
+    `${message}: ledger, queue, lock and mirror state unchanged`);
 }
 const claim = (file = 'new') => ['block', 'claim', 'B1', file, '--run', RUN];
 const stop = ['block', 'stop', 'B1', '--run', RUN, '--reason', 'finished <&> café\nnext'];
@@ -163,13 +192,13 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
   ]) {
     const delegated = await fixture(mutate);
     for (const args of [claim(), stop]) {
-      assert.equal((await launch(delegated, args)).code, 127, 'grant, pending approval or hook delegates without mutation');
+      await assertHandoverWithoutMutation(delegated, args, 'grant, pending approval or hook delegates without mutation');
       await parity(delegated, args, { CODE_FORGE_NODE: process.execPath });
     }
   }
   const delegated = await fixture();
   for (const args of [...['open', 'close', 'land', 'ready', 'attempt', 'rebase', 'status'].map((sub) => ['block', sub]), [...claim(), '--auto']]) {
-    assert.equal((await launch(delegated, args)).code, 127, 'other subcommands and internal flags delegate');
+    await assertHandoverWithoutMutation(delegated, args, 'other subcommands and internal flags delegate');
     await parity(delegated, args, { CODE_FORGE_NODE: process.execPath });
   }
 
@@ -225,10 +254,11 @@ test('claim and stop refusals and usage boundaries match Node without starting N
   await parity(await fixture(), [...stop, '--reason=']);
   for (const sub of ['claim', 'stop']) for (const help of ['--help', '-h']) await parity(f, ['block', sub, '--invalid', help]);
   // Default error logging must preserve Node's scrubbed error records via fallback.
+  await assertHandoverWithoutMutation(f, ['block', 'claim'], 'default error logging delegates without mutation', { CODE_FORGE_NO_ERROR_LOG: '0' });
   await parity(f, ['block', 'claim'], { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
   const blocked = await fixture();
   await mkdir(path.join(blocked.repo, '.code-forge'));
   await writeFile(path.join(blocked.repo, '.code-forge/runs'), 'mirror obstruction');
-  assert.equal((await launch(blocked, claim())).code, 127, 'an unsupported mirror layout delegates before signing');
+  await assertHandoverWithoutMutation(blocked, claim(), 'an unsupported mirror layout delegates before signing');
   await parity(blocked, claim(), { CODE_FORGE_NODE: process.execPath });
 });
