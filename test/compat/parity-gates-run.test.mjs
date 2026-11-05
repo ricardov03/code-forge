@@ -181,10 +181,21 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
     await parity(green, [...ARGS, ...flags], false, { CODE_FORGE_NO_ERROR_LOG: '0' });
   }
   for (const args of [['gates', 'run', '--run', 'fixture'], ['gates', 'run', '--block', 'B1']]) await parity(green, args);
+  /** @type {[Record<string, any>, Record<string, any>, number][]} */
+  const ported = [
+    [{ repeat_new_tests: 2 }, {}, 0],
+    [{ custom: [{ name: 'extra', argv: command('') }] }, {}, 0],
+    [{}, { kind: 'light' }, 1],
+    [{ rerun_failed: 1 }, {}, 0],
+  ];
+  for (const [gates, block, code] of ported) {
+    const f = await fixture(gates, block);
+    assert.equal((await launch(f).ended).code, code, 'ported case runs in Go with unavailable Node');
+    await parity(f);
+  }
   /** @type {[Record<string, any>, Record<string, any>, string[]][]} */
   const handovers = [
-    [{ repeat_new_tests: 2 }, {}, ARGS], [{ custom: [{ name: 'extra', argv: command('') }] }, {}, ARGS],
-    [{}, { kind: 'light' }, ARGS], [{ rerun_failed: 1 }, {}, ARGS], [{ test: ['/nonexistent-gate-tool'] }, {}, ARGS], [{}, {}, ['gates', 'detect']], [{}, {}, ['gates', 'run']],
+    [{ test: ['/nonexistent-gate-tool'] }, {}, ARGS], [{}, {}, ['gates', 'detect']], [{}, {}, ['gates', 'run']],
   ];
   for (const [gates, block, args] of handovers) {
     const f = await fixture(gates, block);

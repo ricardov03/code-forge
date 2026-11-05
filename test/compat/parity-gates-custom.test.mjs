@@ -150,6 +150,21 @@ test('B289 gates run: native custom, repeats, light and flaky cases match Node i
   assert.deepEqual((await rows(cancelled)).map((r) => r.event), ['gate.cancelled']);
 });
 
+test('B289 telemetry: an unsupported flag records exactly one hand-over with its reason', async () => {
+  const f = await fixture();
+  const runFile = path.join(f.home, '.code-forge/runs/fixture.json');
+  const before = await readFile(runFile, 'utf8');
+  const result = await launch(f, [...ARGS, '--help'], { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }).ended;
+  assert.equal(result.code, 127, 'unsupported flag still requires Node');
+  const recorded = (await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(recorded.length, 1, 'one invocation writes exactly one hand-over row');
+  assert.deepEqual(Object.keys(recorded[0]).sort(), ['at', 'reason', 'sub', 'verb', 'version']);
+  assert.deepEqual({ ...recorded[0], at: '<time>' }, { at: '<time>', verb: 'gates', sub: 'run', reason: 'gates-unsupported-flag', version: '0.19.0' });
+  assert.equal(Number.isNaN(Date.parse(recorded[0].at)), false, 'row includes a valid timestamp');
+  assert.equal(await readFile(runFile, 'utf8'), before, 'hand-over leaves run state unchanged');
+  await assert.rejects(readFile(path.join(f.home, '.code-forge/ledger/fixture.jsonl')), { code: 'ENOENT' });
+});
+
 test('B289 boundary: light refusals and usage match; unsupported commands hand over before writes', async () => {
   const light = await fixture({}, { kind: 'light' });
   const refused = await launch(light).ended;
