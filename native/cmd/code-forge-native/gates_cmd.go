@@ -89,8 +89,7 @@ func runGates(args []string) int {
 	if len(args) == 0 || args[0] != "run" {
 		return gatesHandover(args)
 	}
-	// The Node entry owns help and logging, including failure fingerprinting.
-	if reviewWaitLogging() || os.Getenv("HOME") == "" {
+	if os.Getenv("HOME") == "" {
 		return gatesHandover(args)
 	}
 	for i := 1; i < len(args); i++ {
@@ -109,7 +108,8 @@ func runGates(args []string) int {
 	}
 	o, message := gatesParse(args)
 	if message != "" {
-		fmt.Fprintln(os.Stderr, "gates run:", message)
+		gatesErrf("gates run: %s\n", message)
+		gatesFinish(args, 2)
 		return 2
 	}
 	if o.run == "" && o.block == "" {
@@ -119,5 +119,6 @@ func runGates(args []string) int {
 	if !safe {
 		return gatesHandover(args)
 	}
+	gatesFinish(args, code)
 	return code
 }

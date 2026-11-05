@@ -2,6 +2,7 @@ package main
 
 import (
 	"context"
+	"crypto/sha256"
 	"encoding/json"
 	"fmt"
 	"github.com/ricardov03/code-forge/native/config"
@@ -14,11 +15,251 @@ import (
 	"os/signal"
 	"path/filepath"
 	"regexp"
+	"runtime"
+	"sort"
+	"strconv"
 	"strings"
 	"syscall"
+	"time"
+	"unicode/utf8"
 )
 
 func gatesObj(v any) ledger.Object { o, _ := v.(ledger.Object); return o }
+
+// Each public route is one process invocation. Keep the last complete stderr
+// write, matching captureStderr, and publish logging only after preflight accepts.
+var gatesLastMessage any
+
+func gatesErrf(format string, args ...any) {
+	s := fmt.Sprintf(format, args...)
+	if strings.TrimSpace(s) != "" {
+		gatesLastMessage = strings.TrimSpace(s)
+	}
+	fmt.Fprint(os.Stderr, s)
+}
+func gatesFinish(args []string, code int) {
+	before := gatesBreadcrumb()
+	if code != 0 {
+		gatesFailure(args, code, gatesLastMessage, before)
+	}
+}
+func gatesScrubber(slug string) (func(string) string, func() []any) {
+	tally := map[string]int{}
+	type step struct {
+		rule, from, to string
+		re             *regexp.Regexp
+		left, right    bool
+	}
+	steps := []step{{rule: "op_ref", to: "op://<ref>", re: regexp.MustCompile("op://(?:[^/\\r\\n\"'`<>]+/[^/\\r\\n\"'`<>]+/)?[^\\s\"'`<>)\\]]+")}}
+	cwd, _ := os.Getwd()
+	home := os.Getenv("HOME")
+	paths := []step{}
+	seen := map[string]bool{}
+	for _, p := range []struct{ rule, path, to string }{{"project_path", cwd, "<project>"}, {"home", home, "~"}} {
+		for _, v := range []string{p.path, proof.Real(p.path)} {
+			v = strings.TrimRight(v, "/\\")
+			if len(v) < 2 || seen[v] || (p.rule == "project_path" && proof.Real(cwd) == proof.Real(home)) {
+				continue
+			}
+			seen[v] = true
+			paths = append(paths, step{rule: p.rule, from: v, to: p.to, right: true})
+		}
+	}
+	sort.SliceStable(paths, func(i, j int) bool { return len(paths[i].from) > len(paths[j].from) })
+	steps = append(steps, paths...)
+	steps = append(steps, step{rule: "email", to: "<email>", re: regexp.MustCompile(`[A-Za-z0-9._%+-]+@[A-Za-z0-9-]+(?:\.[A-Za-z0-9-]+)*\.[A-Za-z]{2,}`)})
+	if slug != "" {
+		steps = append(steps, step{rule: "project_name", from: slug, to: "<slug>", left: true, right: true})
+	}
+	steps = append(steps, step{rule: "item_id", to: "<item-id>", re: regexp.MustCompile(`[a-z0-9]{26}`), left: true, right: true})
+	word := func(c byte) bool {
+		return c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z' || c >= '0' && c <= '9' || c == '_' || c == '-'
+	}
+	clean := func(s string) string {
+		for _, step := range steps {
+			r := step.re
+			if r == nil {
+				r = regexp.MustCompile(regexp.QuoteMeta(step.from))
+			}
+			matches := r.FindAllStringIndex(s, -1)
+			for i := len(matches) - 1; i >= 0; i-- {
+				a, b := matches[i][0], matches[i][1]
+				if step.left && a > 0 && (word(s[a-1]) || step.rule == "project_name" && s[a-1] == '<') {
+					continue
+				}
+				if step.right && b < len(s) && (word(s[b]) || step.rule == "project_name" && s[b] == '>') {
+					continue
+				}
+				if step.rule == "project_name" && strings.HasPrefix(s[b:], "://") {
+					continue
+				}
+				s = s[:a] + step.to + s[b:]
+				tally[step.rule]++
+			}
+		}
+		return s
+	}
+	counts := func() []any {
+		out := []any{}
+		for _, rule := range []string{"op_ref", "project_path", "home", "email", "project_name", "item_id"} {
+			if tally[rule] > 0 {
+				out = append(out, ledger.Object{{Key: "rule", Value: rule}, {Key: "count", Value: tally[rule]}})
+			}
+		}
+		return out
+	}
+	return clean, counts
+}
+func gatesBreadcrumb() []any {
+	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
+		return []any{}
+	}
+	dir := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs")
+	file := filepath.Join(dir, "breadcrumbs.json")
+	before := []any{}
+	if data, err := os.ReadFile(file); err == nil {
+		_ = json.Unmarshal(data, &before)
+	}
+	next := []any{}
+	for _, v := range before {
+		if s, ok := v.(string); ok && reviewWaitCrumb.MatchString(s) {
+			next = append(next, s)
+		}
+	}
+	if len(next) > 5 {
+		next = next[len(next)-5:]
+	}
+	previous := append([]any{}, next...)
+	next = append(next, "gates run")
+	if len(next) > 5 {
+		next = next[len(next)-5:]
+	}
+	if os.MkdirAll(dir, 0700) != nil {
+		return previous
+	}
+	_ = os.Chmod(dir, 0700)
+	tmp := file + ".tmp-" + strconv.Itoa(os.Getpid())
+	defer os.Remove(tmp)
+	data, _ := ledger.Stringify(next, false)
+	if os.WriteFile(tmp, append(data, '\n'), 0600) == nil {
+		_ = os.Rename(tmp, file)
+	}
+	return previous
+}
+func gatesFailure(args []string, code int, message any, before []any) {
+	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
+		return
+	}
+	cleaned := []any{}
+	slug := ""
+	var loadedConfig map[string]any
+	if cwd, err := os.Getwd(); err == nil {
+		if loaded, err := config.LoadFile(filepath.Join(cwd, ".code-forge.yml")); err == nil {
+			loadedConfig = loaded
+			if project, ok := loadedConfig["project"].(map[string]any); ok {
+				slug, _ = project["slug"].(string)
+			}
+		}
+	}
+	clean, counts := gatesScrubber(slug)
+	if text, ok := message.(string); ok {
+		text = clean(text)
+		if len(text) > 2048 {
+			end := 2048
+			for !utf8.RuneStart(text[end]) {
+				end--
+			}
+			text = text[:end]
+		}
+		message = text
+	}
+	flags := []any{}
+	afterLong := false
+	for _, arg := range args {
+		if arg == "--" {
+			break
+		}
+		if m := reviewWaitLogFlag.FindStringSubmatch(arg); m != nil {
+			flags = append(flags, clean("--"+m[1]))
+			afterLong = m[2] == ""
+			continue
+		}
+		if m := reviewWaitLogShort.FindStringSubmatch(arg); m != nil && !afterLong {
+			flags = append(flags, clean("-"+m[1]))
+		}
+		afterLong = false
+	}
+	verb := clean("gates")
+	cleaned = counts()
+	kind := "error"
+	if code == 2 {
+		kind = "usage"
+	}
+	normalized, _ := message.(string)
+	normalized = reviewWaitLogQuotes.ReplaceAllString(normalized, " ")
+	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
+	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
+	normalized = strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(normalized, " "))
+	fp := sha256.Sum256([]byte(verb + "\nrun\n" + kind + "\n" + normalized))
+	arch := runtime.GOARCH
+	if arch == "amd64" {
+		arch = "x64"
+	}
+	entry := ledger.Object{
+		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
+		{Key: "version", Value: version}, {Key: "node", Value: reviewWaitNodeVersion},
+		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
+		{Key: "verb", Value: verb}, {Key: "sub", Value: "run"}, {Key: "flags", Value: flags},
+		{Key: "exit", Value: code}, {Key: "kind", Value: kind}, {Key: "message", Value: message},
+		{Key: "stack", Value: nil}, {Key: "cleaned", Value: cleaned},
+		{Key: "fp", Value: fmt.Sprintf("%x", fp[:6])}, {Key: "before", Value: before},
+	}
+	data, err := ledger.Stringify(entry, false)
+	if err != nil {
+		return
+	}
+	file := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "errors.jsonl")
+	if os.MkdirAll(filepath.Dir(file), 0700) != nil {
+		return
+	}
+	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
+	if err != nil {
+		return
+	}
+	_, err = f.Write(append(data, '\n'))
+	_ = f.Close()
+	if err != nil {
+		return
+	}
+	info, err := os.Stat(file)
+	if err != nil || info.Size() <= 1024*1024 {
+		return
+	}
+	all, err := os.ReadFile(file)
+	if err != nil {
+		return
+	}
+	lines := []string{}
+	for _, line := range strings.Split(string(all), "\n") {
+		if line != "" {
+			lines = append(lines, line)
+		}
+	}
+	used, start := int64(0), len(lines)
+	for start > 0 {
+		size := int64(len(lines[start-1]) + 1)
+		if start < len(lines) && used+size > info.Size()/2 {
+			break
+		}
+		used += size
+		start--
+	}
+	tmp := file + ".tmp-" + strconv.Itoa(os.Getpid())
+	defer os.Remove(tmp)
+	if os.WriteFile(tmp, []byte(strings.Join(lines[start:], "\n")+"\n"), 0600) == nil {
+		_ = os.Rename(tmp, file)
+	}
+}
 func gatesAdd(o *ledger.Object, fields ledger.Object) {
 	for _, f := range fields {
 		o.Set(f.Key, f.Value)
@@ -28,7 +269,7 @@ func gatesSay(o ledger.Object, secrets []string) {
 	b, _ := ledger.Stringify(gates.Redact(o, secrets), false)
 	fmt.Fprintln(os.Stdout, gates.Mask(string(b), secrets))
 }
-func gatesError(e error) (int, bool) { fmt.Fprintln(os.Stderr, "gates run:", e); return 1, true }
+func gatesError(e error) (int, bool) { gatesErrf("gates run: %s\n", e); return 1, true }
 func gatesNumber(v any) (float64, bool) {
 	switch n := v.(type) {
 	case json.Number:
@@ -59,12 +300,12 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 		if tree != nil {
 			for _, a := range args {
 				if strings.HasPrefix(a, "--cwd=") {
-					fmt.Fprintf(os.Stderr, "gates run: block %s of run %s works in its worktree %s, not in %s — drop it (--cwd=<dir> is not read as --cwd); no gate was run\n", o.block, o.run, tree.Workspace, a)
+					gatesErrf("gates run: block %s of run %s works in its worktree %s, not in %s — drop it (--cwd=<dir> is not read as --cwd); no gate was run\n", o.block, o.run, tree.Workspace, a)
 					return 2, true
 				}
 			}
 			if o.cwdGiven && proof.Real(cwd) != proof.Real(tree.Workspace) {
-				fmt.Fprintf(os.Stderr, "gates run: block %s of run %s works in its worktree %s, not in --cwd %s — drop --cwd (or give the worktree); no gate was run\n", o.block, o.run, tree.Workspace, cwd)
+				gatesErrf("gates run: block %s of run %s works in its worktree %s, not in --cwd %s — drop --cwd (or give the worktree); no gate was run\n", o.block, o.run, tree.Workspace, cwd)
 				return 2, true
 			}
 			cwd = tree.Workspace
@@ -270,7 +511,7 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 			scoped = gatesScopeOf(r)
 		}
 		if !cancelled && r.Get("skipped") != true && r.Get("code") == nil {
-			fmt.Fprintln(os.Stderr, gates.Mask(fmt.Sprintf("%s: %s", r.Get("gate"), r.Get("message")), secrets))
+			gatesErrf("%s\n", gates.Mask(fmt.Sprintf("%s: %s", r.Get("gate"), r.Get("message")), secrets))
 		}
 		if slug != "" && !cancelled && r.Get("skipped") != true && r.Get("ok") != true {
 			row := owner.Clone()
@@ -431,7 +672,7 @@ func gatesWarn(cwd string) {
 		}
 		if deps {
 			if st, e := os.Stat(filepath.Join(dir, "node_modules")); e != nil || !st.IsDir() {
-				fmt.Fprintf(os.Stderr, "warn: %s has package.json but no node_modules; run npm ci there first\n", dir)
+				gatesErrf("warn: %s has package.json but no node_modules; run npm ci there first\n", dir)
 			}
 		}
 	}

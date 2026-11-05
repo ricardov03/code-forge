@@ -20,7 +20,8 @@ before(async () => {
   await mkdir(path.join(scratch, 'pkg/bin'));
   await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(scratch, 'pkg/bin/code-forge.mjs'));
   const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
-  const build = spawnSync('go', ['build', '-o', BINARY, './cmd/code-forge-native'], {
+  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  const build = spawnSync('go', ['build', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
     cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') },
   });
   assert.equal(build.status, 0, `private native binary builds: ${build.stderr}`);
@@ -57,8 +58,8 @@ function launch(f, args = ARGS, extra = {}) {
   child.stdout.on('data', (s) => { stdout += s; }); child.stderr.on('data', (s) => { stderr += s; });
   return { child, ended: once(child, 'close').then(([code, signal]) => ({ code, signal, stdout, stderr })) };
 }
-async function parity(f, args = ARGS, fallback = false) {
-  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE } });
+async function parity(f, args = ARGS, fallback = false, env = {}) {
+  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE, ...env } });
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero stream, exit and state differences`);
 }
 
@@ -68,6 +69,9 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
   assert.equal(speed.code, 0, `green gate runs with unavailable Node handover executable: ${speed.stderr}`);
   assert.equal(JSON.parse(speed.stdout).results.length, 4, 'exactly four built-in gate results');
   await parity(green);
+  const logged = await launch(green, ARGS, { CODE_FORGE_NO_ERROR_LOG: '0' }).ended;
+  assert.equal(logged.code, 0, 'default logging also runs without Node');
+  await parity(green, ARGS, false, { CODE_FORGE_NO_ERROR_LOG: '0' });
   for (const gates of [
     { test: command('process.exit(3)'), lint: command('console.log("after red")') },
     { test: command('setTimeout(()=>{}, 10000)') },
@@ -88,13 +92,17 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
   const busy = await fixture({}, {}, { proof_lock: { block: 'B2', acquired_at: '2026-01-01T00:00:00.000Z' } });
   await parity(busy);
   const b = await launch(busy).ended; assert.equal(b.code, 1); assert.equal(b.stdout, '{"result":"proof.busy","holder":"B2"}\n');
+  await parity(busy, ARGS, false, { CODE_FORGE_NO_ERROR_LOG: '0' });
   const tree = await fixture(scoped);
   const base = git(tree, ['rev-parse', 'HEAD']);
   const treePath = path.join(tree.repo, 'linked');
   git(tree, ['worktree', 'add', '-q', '-b', 'linked', treePath]);
   await record(tree, { run_id: 'fixture', project: 'fixture', workspace: tree.repo, status: 'active', blocks: { B1: { status: 'open', kind: 'code', owned_files: ['sample.mjs'], test_files: ['sample.test.mjs'], worktree: { path: treePath, branch: 'linked', base_sha: base } } } });
   for (const flags of [[], ['--cwd', treePath], ['--cwd', tree.repo], [`--cwd=${tree.repo}`]]) await parity(tree, [...ARGS, ...flags]);
-  for (const flags of [['--timeout-ms'], ['--timeout-ms', 'bad'], ['--timeout-ms', '0'], ['--slug'], ['--cwd'], ['--run'], ['--block']]) await parity(green, [...ARGS, ...flags]);
+  for (const flags of [['--timeout-ms'], ['--timeout-ms', 'bad'], ['--timeout-ms', '0'], ['--slug'], ['--cwd'], ['--run'], ['--block']]) {
+    await parity(green, [...ARGS, ...flags]);
+    await parity(green, [...ARGS, ...flags], false, { CODE_FORGE_NO_ERROR_LOG: '0' });
+  }
   for (const args of [['gates', 'run', '--run', 'fixture'], ['gates', 'run', '--block', 'B1']]) await parity(green, args);
   for (const [gates, block, args] of [
     [{ repeat_new_tests: 2 }, {}, ARGS], [{ custom: [{ name: 'extra', argv: command('') }] }, {}, ARGS],
@@ -104,6 +112,23 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
     assert.equal((await launch(f, args).ended).code, 127, 'unported case requires Node');
     await parity(f, args, true);
   }
+});
+
+test('gates run waits for a concurrent run writer and preserves its new proof lock', async () => {
+  const f = await fixture();
+  const writer = spawn(BINARY, ['internal', 'state-golden', '--home', f.home, '--run', 'fixture', '--op', 'lock'], { cwd: f.repo, env: { ...process.env, HOME: f.home }, stdio: ['pipe', 'pipe', 'pipe'] });
+  await once(writer.stdout, 'data');
+  const run = launch(f);
+  await delay(100);
+  const data = JSON.parse(await readFile(path.join(f.home, '.code-forge/runs/fixture.json'), 'utf8'));
+  data.proof_lock = { block: 'writer', acquired_at: '2026-01-01T00:00:00.000Z' };
+  await record(f, data);
+  writer.stdin.end();
+  const [code] = await once(writer, 'close'); assert.equal(code, 0, 'writer releases the same run lock');
+  const result = await run.ended;
+  assert.equal(result.code, 1); assert.equal(result.stdout, '{"result":"proof.busy","holder":"writer"}\n');
+  const saved = JSON.parse(await readFile(path.join(f.home, '.code-forge/runs/fixture.json'), 'utf8'));
+  assert.deepEqual(saved, data, 'waiting gate preserves every writer field and starts no gate');
 });
 
 test('gates run cancellation stops the gate and records exactly one cancelled row', { timeout: 15_000 }, async () => {
