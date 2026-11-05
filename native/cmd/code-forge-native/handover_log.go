@@ -6,7 +6,6 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
-	"regexp"
 	"sort"
 	"strings"
 	"syscall"
@@ -389,44 +388,66 @@ func handoverLogPath() string {
 	return filepath.Join(home, ".code-forge", "native", "handovers.jsonl")
 }
 
-// Subcommands use fixed vocabulary: other positional tokens can be private
-// paths or identifiers. Unknown verbs must still be plain command words.
-var handoverVerb = regexp.MustCompile(`^[a-z][a-z-]{0,39}$`)
-
+// Only public verbs from routes and src/cli/*.mjs, and their own known
+// subcommands, may be recorded. Other tokens can be private argument values;
+// store "unknown" for them, or an empty field when the argument is absent.
 var handoverCommands = map[string]string{
-	"block":       "open close claim stop land ready join merge status list plan accept reject",
-	"logs":        "path summary clear report handovers",
-	"ledger":      "tail calibration outcome add outside-review",
-	"gates":       "run",
-	"run":         "start status list stop reload resume",
-	"review-file": "", "doctor": "", "version": "", "status": "",
-	"help": "", "init": "", "config": "", "review": "", "bench": "",
+	"author":        "",
+	"autopilot":     "start status stop ask waive round level approve binnacle log",
+	"block":         "open attempt rebase claim ready close land stop waive reopen accept-hit unwaive ack-waivers human-pass amend-acceptance",
+	"context":       "pack",
+	"doctor":        "",
+	"facts":         "",
+	"gates":         "detect run secret-scan safe-edit scope acceptance transcript-grep",
+	"help":          "",
+	"init":          "",
+	"jev":           "ask",
+	"keys":          "list set test remove",
+	"land":          "",
+	"ledger":        "calibration outcome tail add outside-review",
+	"list":          "",
+	"logs":          "summary clear path report handovers",
+	"models":        "",
+	"native-status": "",
+	"outcome":       "seal check record",
+	"pipeline":      "status next",
+	"plan":          "check",
+	"proof":         "tier export lock unlock restore red-green baseline",
+	"remove":        "",
+	"report":        "",
+	"resolve":       "",
+	"review-file":   "",
+	"review":        "",
+	"run":           "start status reload end",
+	"s2":            "",
+	"spawn":         "",
+	"status":        "",
+	"sweep":         "",
+	"tools":         "install",
+	"upgrade":       "",
+	"validate":      "",
+	"version":       "",
+	"worker":        "",
 }
 
 func handoverCommand(args []string) (string, string) {
 	if len(args) == 0 {
 		return "", ""
 	}
+	verb := "unknown"
 	subs, known := handoverCommands[args[0]]
-	if !known {
-		if handoverVerb.MatchString(args[0]) {
-			return args[0], ""
-		}
-		return "", ""
+	if known {
+		verb = args[0]
 	}
-	for _, arg := range args[1:] {
-		// A leading flag can consume the next word as its private value.
-		if strings.HasPrefix(arg, "-") {
-			break
-		}
-		for _, sub := range strings.Fields(subs) {
-			if arg == sub {
-				return args[0], sub
-			}
-		}
-		break
+	if len(args) == 1 {
+		return verb, ""
 	}
-	return args[0], ""
+	for _, sub := range strings.Fields(subs) {
+		if args[1] == sub {
+			return verb, sub
+		}
+	}
+	return verb, "unknown"
 }
 
 // Best effort only: no diagnostics, no changes to process inputs. A separate

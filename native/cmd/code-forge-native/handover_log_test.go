@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strings"
 	"testing"
 	"time"
 )
@@ -28,7 +29,7 @@ func TestHandoverTelemetry(t *testing.T) {
 	if err := json.Unmarshal(data, &row); err != nil {
 		t.Fatal(err)
 	}
-	if len(row) != 5 || row["reason"] != "unrouted" || row["verb"] != "doctor" || row["sub"] != "" {
+	if len(row) != 5 || row["reason"] != "unrouted" || row["verb"] != "doctor" || row["sub"] != "unknown" {
 		t.Fatalf("unexpected private-safe row: %#v", row)
 	}
 	if _, err := time.Parse(time.RFC3339Nano, row["at"]); err != nil {
@@ -62,7 +63,7 @@ func TestHandoverTelemetry(t *testing.T) {
 	}
 	for _, args := range [][]string{{"review-file", "/private/customer"}, {"block", "--report", "close"}, {"doctor", "secret-id"}} {
 		_, sub := handoverCommand(args)
-		if sub != "" {
+		if sub != "unknown" {
 			t.Fatalf("private argument treated as subcommand for %q: %q", args, sub)
 		}
 	}
@@ -74,5 +75,57 @@ func TestHandoverTelemetry(t *testing.T) {
 			t.Fatalf("%s=0 changed log", flag)
 		}
 		t.Setenv(flag, "1")
+	}
+}
+
+func TestHandoverCommandVocabulary(t *testing.T) {
+	// Keep the single production allowlist aligned with both public routers.
+	verbs := map[string]bool{}
+	for verb := range routes {
+		verbs[verb] = true
+	}
+	entries, err := os.ReadDir("../../../src/cli")
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, entry := range entries {
+		if !entry.IsDir() && strings.HasSuffix(entry.Name(), ".mjs") {
+			verbs[strings.TrimSuffix(entry.Name(), ".mjs")] = true
+		}
+	}
+	for verb := range verbs {
+		if got, sub := handoverCommand([]string{verb}); got != verb || sub != "" {
+			t.Errorf("public verb %q recorded as (%q, %q)", verb, got, sub)
+		}
+	}
+	for verb := range handoverCommands {
+		if !verbs[verb] {
+			t.Errorf("allowlisted verb %q is not a public command", verb)
+		}
+	}
+	for _, tt := range []struct {
+		args      []string
+		verb, sub string
+	}{
+		{nil, "", ""},
+		{[]string{"my-secret-project-name"}, "unknown", ""},
+		{[]string{"/private/customer", "close"}, "unknown", "unknown"},
+		{[]string{"bench"}, "unknown", ""},
+		{[]string{"doctor", "close"}, "doctor", "unknown"},
+		{[]string{"block", "my-secret-project-name"}, "block", "unknown"},
+		{[]string{"block", "join"}, "block", "unknown"},
+		{[]string{"block", "--report", "close"}, "block", "unknown"},
+		{[]string{"block", "close", "private-id"}, "block", "close"},
+		{[]string{"block", "amend-acceptance"}, "block", "amend-acceptance"},
+		{[]string{"logs", "handovers"}, "logs", "handovers"},
+		{[]string{"keys", "set"}, "keys", "set"},
+		{[]string{"autopilot", "approve"}, "autopilot", "approve"},
+		{[]string{"pipeline", "next"}, "pipeline", "next"},
+		{[]string{"run", "end"}, "run", "end"},
+		{[]string{"run", "resume"}, "run", "unknown"},
+	} {
+		if verb, sub := handoverCommand(tt.args); verb != tt.verb || sub != tt.sub {
+			t.Errorf("handoverCommand(%q) = (%q, %q), want (%q, %q)", tt.args, verb, sub, tt.verb, tt.sub)
+		}
 	}
 }

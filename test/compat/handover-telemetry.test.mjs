@@ -51,7 +51,7 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
   assert.equal(rows(f).length, 1, 'one exec writes exactly one row');
   const row = rows(f)[0];
   assert.deepEqual(Object.keys(row).sort(), ['at', 'reason', 'sub', 'verb', 'version'], 'row has only five safe fields');
-  assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'unported-telemetry', sub: '', reason: 'unrouted', version: pkg.version }, 'unknown verb is recorded without flag values, paths or ids');
+  assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'unknown', sub: 'unknown', reason: 'unrouted', version: pkg.version }, 'unknown command tokens are replaced without flag values, paths or ids');
   assert.match(row.at, /^\d{4}-\d\d-\d\dT.*Z$/, 'timestamp is UTC ISO');
   assert.equal(Number.isNaN(Date.parse(row.at)), false, 'timestamp is valid');
   const closeArgs = ['block', 'close', 'private-id', '--auto-claim'];
@@ -69,10 +69,10 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
   assert.equal(report.code, 0, 'report runs without Node');
   assert.equal(report.stderr, '', 'report has no stderr');
   assert.deepEqual(JSON.parse(report.stdout), { total: 3, rows: [
-    { verb: 'unported-telemetry', sub: '', reason: 'unrouted', count: 2, last_at: rows(f)[2].at },
+    { verb: 'unknown', sub: 'unknown', reason: 'unrouted', count: 2, last_at: rows(f)[2].at },
     { verb: 'block', sub: 'close', reason: 'close-auto-claim', count: 1, last_at: rows(f)[1].at },
   ] }, 'JSON sorts by count and reports the latest timestamp');
-  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  unported-telemetry    unrouted\n1  block  close  close-auto-claim\ntotal  3\n', 'text table sorts by count and includes total');
+  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  unknown  unknown  unrouted\n1  block  close  close-auto-claim\ntotal  3\n', 'text table sorts by count and includes total');
   assert.deepEqual(JSON.parse(run(f, ['logs', 'handovers', '--json', '--since', '2999-01-01']).stdout), { total: 0, rows: [] }, 'since excludes older rows');
   assert.equal(rows(f).length, 3, 'Go reports do not record rows');
   const empty = fixture();
@@ -89,6 +89,20 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
   }
   const parity = fixture();
   assert.deepEqual(await runParity(['version'], { fixture: parity, goCommand: path.join(root, `native/bin/${process.platform}-${process.arch}/code-forge-native`), env: { CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NODE: process.execPath } }), { equal: true, diffs: [] }, 'real fallback has zero parity diffs when telemetry is disabled');
+});
+
+test('B282 privacy: only known verbs and their own subcommands reach the log', () => {
+  const f = fixture();
+  for (const args of [['my-secret-project-name'], ['doctor'], ['block', 'my-secret-project-name'], ['doctor', 'close']]) {
+    assert.equal(run(f, args).code, 0, 'hand-over succeeds');
+  }
+  assert.deepEqual(rows(f).map(({ verb, sub }) => ({ verb, sub })), [
+    { verb: 'unknown', sub: '' },
+    { verb: 'doctor', sub: '' },
+    { verb: 'block', sub: 'unknown' },
+    { verb: 'doctor', sub: 'unknown' },
+  ], 'known verbs are preserved and subcommands are scoped to their verb');
+  assert.equal(readFileSync(f.file, 'utf8').includes('my-secret-project-name'), false, 'private command tokens are absent from the entire log');
 });
 
 test('B282 boundary: disabled and failed recording preserve behavior; cap and parallel execs keep complete rows', async () => {
