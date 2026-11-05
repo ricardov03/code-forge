@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Fixed
+
+- `code-forge init` asks for a level again when the answer is unreadable, is empty, or repeats the provider, model and effort of an earlier level, the L3 judge included. Before, init went to the end and stopped with "the resulting config is invalid, nothing written" (#31, B281)
+
 ## [0.19.0] — 2026-11-05
 
 ### Added
