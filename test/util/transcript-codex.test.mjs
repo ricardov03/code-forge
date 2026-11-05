@@ -13,6 +13,53 @@ const ruleHits = (line) => ruleIds.map((id) => ({ id, line }));
 const doubleQuote = (text) => `"${text.replace(/["\\$`]/g, '\\$&')}"`;
 const wrapped = (script) => `/bin/zsh -lc ${doubleQuote(script)}`;
 
+const banner = 'Reading additional input from stdin...';
+const briefText = 'Forbidden: git reset --hard, git stash, git clean -fd, forge block close --no-require-reviews';
+
+test('a Codex stderr banner before thread.started keeps the JSONL scan (output is not scanned)', () => {
+  const transcript = `${banner}\n${jsonl(started,
+    event({ type: 'command_execution', command: wrapped('cat .code-forge/lessons.md'), aggregated_output: briefText }))}`;
+  assert.deepEqual(scanTranscript(transcript, coderRules), []);
+});
+
+test('a real forbidden command after the banner is still a hit', () => {
+  const transcript = `${banner}\n${jsonl(started,
+    event({ type: 'command_execution', command: wrapped('git stash'), aggregated_output: '' }))}`;
+  assert.deepEqual(scanTranscript(transcript, coderRules).map((h) => h.id), ['git-stash']);
+  assert.equal(scanTranscript(transcript, coderRules)[0].line, 3); // line numbers stay the file's own
+});
+
+test('a non-JSON line AFTER thread.started still makes the whole log fail closed', () => {
+  const transcript = `${jsonl(started)}\nnot json\n${jsonl(
+    event({ type: 'command_execution', command: wrapped('cat x'), aggregated_output: briefText }))}`;
+  assert.ok(scanTranscript(transcript, coderRules).length > 0);
+});
+
+test('Plain fallback after thread.started catches JSON-escaped forbidden commands', () => {
+  for (const slashes of [1, 2, 3]) {
+    for (const [command, id] of [['git stash', 'git-stash'], ['git reset --hard', 'git-reset-hard']]) {
+      const quote = '\\'.repeat(slashes) + '"';
+      const log = `${jsonl(started)}\nbad line\n/bin/zsh -lc ${quote}${command}${quote}`;
+      assert.deepEqual(scanTranscript(log), [{ id, line: 3 }], `${slashes} backslashes: exactly one ${id} on file line 3`);
+    }
+  }
+  const escaped = String.raw`\"git stash\" legacy\"`;
+  assert.deepEqual(scanTranscript(escaped, mergeForbidden(['legacy\\'])), [
+    { id: 'git-stash', line: 1 }, { id: 'production-marker-extra-0', line: 1 },
+  ], 'quote normalization adds the command hit and retains the original backslash marker hit');
+});
+
+test('Unknown preambles and a stdin banner after thread.started keep plain fallback', () => {
+  const output = event({ type: 'command_execution', command: 'cat brief.md', aggregated_output: 'git stash' });
+  for (const preamble of ['unknown diagnostic', 'Reading additional input from stdin....']) {
+    assert.deepEqual(scanTranscript(`${preamble}\n${jsonl(started, output)}`), [{ id: 'git-stash', line: 3 }]);
+  }
+  assert.deepEqual(scanTranscript(`${jsonl(started)}\nReading additional input from stdin...\n${jsonl(output)}`),
+    [{ id: 'git-stash', line: 3 }]);
+  const padded = `\n \t${banner} \t\n\n${commands('git stash')}`;
+  assert.deepEqual(scanTranscript(padded), [{ id: 'git-stash', line: 5 }], 'trimmed preamble and blanks retain file numbering');
+});
+
 // Verbatim command strings from B137b transcript lines 71 and 72 (started/completed).
 const b137bCommands = [
   "/bin/zsh -lc \"node --input-type=module <<'NODE'\nimport { readFileSync, writeFileSync } from 'node:fs';\nconst home = 'test/engines/codex-home.test.mjs';\nlet text = readFileSync(home, 'utf8');\ntext = text.replace(\\\"['code-forge-block-ack-waivers-from-coder', 4]]);\\\", \\\"['code-forge-block-ack-waivers-from-coder', 4], ['code-forge-block-human-pass-from-coder', 4]]); // B137: append four human-pass patterns\\\");\nwriteFileSync(home, text);\nconst snapshots = 'test/engines/builders/argv-snapshots.test.mjs';\ntext = readFileSync(snapshots, 'utf8');\ntext = text.replace('assert.equal(CODER_ONLY_FORBIDDEN.length, 8); // B127: + human transcript-hit acceptance', 'assert.equal(CODER_ONLY_FORBIDDEN.length, 9); // B127: + human transcript-hit acceptance; B137: + human-pass');\ntext = text.replace('assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 24); // B127: + four acceptance patterns', 'assert.equal(renderCodexRules(renderForCodex(CODER_ONLY_FORBIDDEN)).count, 28); // B127: + four acceptance patterns; B137: + four human-pass patterns');\nwriteFileSync(snapshots, text);\nconst rendering = 'test/engines/builders/forbidden-rendering.test.mjs';\ntext = readFileSync(rendering, 'utf8');\ntext = text.replaceAll('FORBIDDEN.length + 8); // B45: + the autopilot entry; B62a: + --remove-worktree; B72: + block reopen; B127: + block accept-hit', 'FORBIDDEN.length + 9); // B45: + the autopilot entry; B62a: + --remove-worktree; B72: + block reopen; B127: + block accept-hit; B137: + block human-pass');\ntext = text.replace('forbiddenOnly + 24); // B4.2:', 'forbiddenOnly + 28); // B137: + the 4 \"'`block human-pass` spellings; B4.2:'\"');\ntext = text.replace('19 of 24 ids (B127: + block accept-hit).', '22 of 27 ids (B137: + block human-pass).');\ntext = text.replace('assert.equal(ids.size, 21); // B127: + code-forge-block-accept-hit-from-coder', 'assert.equal(ids.size, 22); // B127: + code-forge-block-accept-hit-from-coder; B137: + code-forge-block-human-pass-from-coder');\nwriteFileSync(rendering, text);\nNODE\n git diff --check; git diff --stat; git diff -- src/util/forbidden.mjs test/engines/codex-home.test.mjs test/engines/builders/argv-snapshots.test.mjs test/engines/builders/forbidden-rendering.test.mjs\"",
