@@ -9,6 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Fixed
 
 - `code-forge init` asks for a level again when the answer is unreadable, is empty, or repeats the provider, model and effort of an earlier level, the L3 judge included. Before, init went to the end and stopped with "the resulting config is invalid, nothing written" (#31, B281)
+- The forbidden-command scan reads Codex coder logs again when they start with the plain "Reading additional input from stdin..." banner. The coder's stderr now goes to `session.err.log`. Before, the banner switched the scan to plain text: brief text in command output gave false hits, and a real `git stash` inside an escaped shell command was missed (#32, B293)
 
 ## [0.19.0] — 2026-11-05
 
