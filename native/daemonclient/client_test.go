@@ -51,6 +51,10 @@ func TestRequest(t *testing.T) {
 		{name: "bad wait-block", method: "wait-block", response: `{"block":"B2","done":false,"files":[]}`},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
+			timeout := 50 * time.Millisecond
+			if tc.name == "oversized" {
+				timeout = 2 * time.Second
+			}
 			method := tc.method
 			if method == "" {
 				method = "status"
@@ -76,7 +80,7 @@ func TestRequest(t *testing.T) {
 						return
 					}
 					defer conn.Close()
-					conn.SetDeadline(time.Now().Add(time.Second))
+					conn.SetDeadline(time.Now().Add(max(time.Second, timeout)))
 					scan := bufio.NewScanner(conn)
 					for scan.Scan() {
 						var got map[string]any
@@ -98,7 +102,7 @@ func TestRequest(t *testing.T) {
 				}()
 			}
 			started := time.Now()
-			answer, err := Request(run, req, 50*time.Millisecond)
+			answer, err := Request(run, req, timeout)
 			if tc.ok {
 				if err != nil || answer == nil {
 					t.Fatalf("healthy %s: answer=%v error=%v", method, answer, err)
@@ -120,7 +124,10 @@ func TestRequest(t *testing.T) {
 			} else if err == nil || answer != nil {
 				t.Fatalf("%s: want nil answer and error, got %v, %v", tc.name, answer, err)
 			}
-			if time.Since(started) > 500*time.Millisecond {
+			if tc.name == "oversized" && err.Error() != "daemon answer exceeds 8 MiB" {
+				t.Fatalf("oversized: want size-limit error, got %v", err)
+			}
+			if time.Since(started) > timeout+450*time.Millisecond {
 				t.Fatal("request exceeded its bounded timeout")
 			}
 		})

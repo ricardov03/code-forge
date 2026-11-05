@@ -201,6 +201,7 @@ test('status JSON uses the live Go daemon without Node; other forms preserve Nod
   assert.deepEqual(await f.command(args), warning, 'unpinned worker warning survives handover');
   await f.stop();
   assert.deepEqual(await f.command(args), await f.command(args, { CODE_FORGE_NATIVE: '0' }), 'down daemon hands over');
+  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127, 'down daemon must start Node');
 });
 
 test('daemon client refuses missing socket, bad JSON, timeout, oversized and odd answers, leaving no processes or socket', async (t) => {
@@ -212,6 +213,7 @@ test('daemon client refuses missing socket, bad JSON, timeout, oversized and odd
   assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected, 'healthy Go client returns exactly one summary without Node');
   await f.stop();
   assert.deepEqual(await f.command(args), expected, 'no socket falls back');
+  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127, 'no socket: attempts handover');
   for (const fault of ['bad JSON', 'timeout', 'oversized', 'odd status', 'odd fields', 'wrong version', 'wrong run']) {
     const sockets = new Set();
     const server = net.createServer((socket) => {
