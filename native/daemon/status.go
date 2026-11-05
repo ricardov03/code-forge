@@ -8,15 +8,14 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
-	"slices"
-	"sort"
 	"strings"
 	"time"
-	"unicode/utf16"
+
+	"github.com/ricardov03/code-forge/native/runstatus"
 )
 
-// Keep the shared Node status rules in one long-lived companion. The Go daemon
-// supplies its cached record and rows; status never launches a process per read.
+// Complex review-clearing rules still use one long-lived Node companion. The
+// common path below computes status in Go over the daemon's cached rows.
 type statusProcess struct {
 	cmd    *exec.Cmd
 	input  io.WriteCloser
@@ -36,6 +35,14 @@ func (s *server) closeStatus() {
 }
 
 func (s *server) status() object {
+	if summary, ok := runstatus.Compute(s.record, s.rows, s.home); ok {
+		// Decode once to preserve the daemon's map-shaped protocol envelope.
+		data, err := json.Marshal(summary)
+		var decoded object
+		if err == nil && json.Unmarshal(data, &decoded) == nil {
+			return object{"runs": []any{decoded}}
+		}
+	}
 	if s.statusProcess == nil {
 		executable, err := os.Executable()
 		if err != nil {
@@ -100,65 +107,12 @@ func (s *server) status() object {
 // A failed gate.done retains a timeout only from its pending gate.red; another
 // done without a red, a successful done, or a non-timeout red clears it.
 func (s *server) statusGateDetails(result object) {
-	pending, timedOut := make(map[string]bool), make(map[string]bool)
-	flaky := make(map[string]bool)
-	for _, value := range s.rows {
-		row := mapping(value)
-		if row["run"] != s.run {
-			continue
-		}
-		if row["event"] == "gate.done" {
-			files, _ := row["flaky"].([]any)
-			for _, value := range files {
-				if file, ok := value.(string); ok {
-					flaky[file] = true
-				}
-			}
-		}
-		block, ok := row["block"].(string)
-		if !ok {
-			continue
-		}
-		switch row["event"] {
-		case "gate.red":
-			if row["reason"] == "timeout" || row["timed_out"] == true {
-				pending[block], timedOut[block] = true, true
-			} else {
-				delete(pending, block)
-				delete(timedOut, block)
-			}
-		case "gate.done":
-			if row["all_ok"] == true || !pending[block] {
-				delete(timedOut, block)
-			}
-			delete(pending, block)
-		}
-	}
-	files := make([]string, 0, len(flaky))
-	for file := range flaky {
-		files = append(files, file)
-	}
-	// JavaScript's default sort compares UTF-16 units, including astral names.
-	sort.Slice(files, func(i, j int) bool {
-		return slices.Compare(utf16.Encode([]rune(files[i])), utf16.Encode([]rune(files[j]))) < 0
-	})
 	runs, _ := result["runs"].([]any)
 	for _, value := range runs {
 		run := mapping(value)
 		if run["run_id"] != s.run {
 			continue
 		}
-		delete(run, "flaky")
-		if len(files) > 0 {
-			run["flaky"] = files
-		}
-		blocks, _ := run["blocks"].([]any)
-		for _, value := range blocks {
-			block := mapping(value)
-			gate := mapping(block["gate"])
-			if gate["result"] == "fail" && timedOut[text(block, "id")] {
-				gate["result"] = "timeout"
-			}
-		}
+		runstatus.Details(run, s.rows, s.run)
 	}
 }

@@ -138,7 +138,7 @@ function ping(socket) {
   });
 }
 
-test('status JSON uses the live Go daemon without Node; other forms preserve Node bytes and exit codes', async (t) => {
+test('direct Go status preserves Node bytes and exit codes across forms and daemon configurations', async (t) => {
   const f = await fixture(t);
   const args = ['--json', '--run', f.run];
   const daemon = await f.start();
@@ -166,24 +166,24 @@ test('status JSON uses the live Go daemon without Node; other forms preserve Nod
   t.diagnostic(`15-run median ms: Go ${times.go.sort((a, b) => a - b)[7].toFixed(2)}, Node ${times.node.sort((a, b) => a - b)[7].toFixed(2)}`);
   assert.deepEqual(childrenOf(process.pid, daemon.pid), warmChildren, 'status leaves exactly the existing daemon and companion');
   for (const flags of [[], ['--json'], ['--run', f.run], ['--json', '--run', 'r-missing'], ['--json', '--run'], ['--json=true'], ['--json', '--json'], ['--run', '', '--run', f.run, '--json'], ['--run', f.run, '--run', f.run, '--json'], ['--wat'], ['unexpected'], ['--run', '../escape', '--json']]) {
-    assert.deepEqual(await f.command(flags), await f.command(flags, { CODE_FORGE_NATIVE: '0' }), `handover preserves ${JSON.stringify(flags)}`);
-    assert.equal((await f.command(flags, { CODE_FORGE_NODE: '/nonexistent' })).code, 127, `${JSON.stringify(flags)} must hand over`);
+    const node = await f.command(flags, { CODE_FORGE_NATIVE: '0' });
+    assert.deepEqual(await f.command(flags), node, `direct Go preserves ${JSON.stringify(flags)}`);
+    assert.deepEqual(await f.command(flags, { CODE_FORGE_NODE: '/nonexistent' }), node, `${JSON.stringify(flags)} is served without Node`);
   }
-  // The snapshot takes precedence over a live workspace config, including the
-  // empty-ticket pin used by configInForce(record).
+  // Direct status reads disk independently of the daemon's config and snapshots.
   writeFileSync(path.join(f.repo, '.code-forge.yml'), 'version: 1\nproject:\n  slug: status-test\nnative:\n  daemon: false\nbudget:\n  usd: 8\n');
   assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected, 'enabled snapshot wins over disabled workspace config');
   await f.change((record) => { delete record.config; });
-  assert.deepEqual(await f.command(args), expected, 'legacy record uses disabled workspace config and hands over');
-  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127);
+  assert.deepEqual(await f.command(args), expected, 'legacy record with disabled daemon preserves Node bytes');
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected);
   writeFileSync(path.join(f.repo, '.code-forge.yml'), 'version: 1\nproject:\n  slug: status-test\nbudget:\n  usd: 8\n');
   assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected, 'legacy record uses enabled workspace config');
   await f.change((record) => {
     record.config = initialConfigState(f.config);
     record.config.snapshots[record.config.hash].native.daemon = false;
   });
-  assert.deepEqual(await f.command(args), expected, 'corrupt snapshot hands over');
-  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127);
+  assert.deepEqual(await f.command(args), expected, 'corrupt daemon snapshot does not affect direct status');
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected);
   await f.change((record) => {
     const disabled = initialConfigState({ native: { daemon: false } });
     record.config = initialConfigState(f.config);
@@ -191,32 +191,45 @@ test('status JSON uses the live Go daemon without Node; other forms preserve Nod
     record.config.pins[''] = disabled.hash;
   });
   assert.deepEqual(await f.command(args), expected, 'empty-ticket config pin disables the daemon');
-  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127);
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected);
   await f.change((record) => { record.config = initialConfigState({ native: { daemon: false } }); });
-  assert.deepEqual(await f.command(args), await f.command(args, { CODE_FORGE_NATIVE: '0' }), 'disabled snapshot hands over');
-  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127, 'disabled daemon must start Node');
+  const disabled = await f.command(args, { CODE_FORGE_NATIVE: '0' });
+  assert.deepEqual(await f.command(args), disabled, 'disabled snapshot preserves Node bytes');
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), disabled, 'disabled daemon still serves direct status');
   await f.change((record) => { record.config = initialConfigState(f.config); delete record.worker; record.workers = []; });
   const warning = await f.command(args, { CODE_FORGE_NATIVE: '0' });
   assert.match(warning.stderr, /warning: live worker .* is not pinned/);
-  assert.deepEqual(await f.command(args), warning, 'unpinned worker warning survives handover');
+  assert.deepEqual(await f.command(args), warning, 'direct status preserves the unpinned worker warning');
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), warning);
   await f.stop();
-  assert.deepEqual(await f.command(args), await f.command(args, { CODE_FORGE_NATIVE: '0' }), 'down daemon hands over');
-  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127, 'down daemon must start Node');
+  // Change disk state so shutdown checks cannot reuse the live-daemon expectation.
+  await f.change((record) => { record.blocks.B1.status = 'closed'; });
+  const down = await f.command(args, { CODE_FORGE_NATIVE: '0' });
+  assert.deepEqual(await f.command(args), down, 'down daemon preserves Node bytes');
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), down, 'down daemon still serves direct status');
+  await appendRow({ event: 'review.answered', run: f.run, block: 'B1' }, { slug: 'status-test' });
+  const unsupported = await f.command(args, { CODE_FORGE_NATIVE: '0' });
+  assert.deepEqual(await f.command(args), unsupported, 'unsupported review state still hands over with exact Node bytes');
+  const handed = await f.command(args, { CODE_FORGE_NODE: '/nonexistent' });
+  assert.equal(handed.code, 127, 'unsupported review state must still start Node');
+  assert.equal(handed.stdout, '', 'handover emits no partial summary');
 });
 
-test('daemon client refuses missing socket, bad JSON, timeout, oversized and odd answers, leaving no processes or socket', async (t) => {
+test('direct status ignores missing socket, bad JSON, timeout, oversized and odd daemon answers, leaving no processes or socket', async (t) => {
   const f = await fixture(t);
   const args = ['--json', '--run', f.run];
   const expected = await f.command(args, { CODE_FORGE_NATIVE: '0' });
-  // A healthy request proves this suite actually exercises the Go client.
+  // A live daemon and a missing socket must produce the same direct answer.
   await f.start();
   assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected, 'healthy Go client returns exactly one summary without Node');
   await f.stop();
-  assert.deepEqual(await f.command(args), expected, 'no socket falls back');
-  assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127, 'no socket: attempts handover');
+  assert.deepEqual(await f.command(args), expected, 'no socket preserves Node bytes');
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected, 'no socket: served directly without Node');
   for (const fault of ['bad JSON', 'timeout', 'oversized', 'odd status', 'odd fields', 'wrong version', 'wrong run']) {
     const sockets = new Set();
+    let connections = 0;
     const server = net.createServer((socket) => {
+      connections++;
       sockets.add(socket);
       socket.on('error', () => {});
       socket.on('close', () => sockets.delete(socket));
@@ -243,9 +256,9 @@ test('daemon client refuses missing socket, bad JSON, timeout, oversized and odd
     });
     await new Promise((resolve) => server.listen(f.socket, () => resolve(undefined)));
     try {
-      const fallback = fault === 'odd fields' ? await f.command(args, {}, true) : expected;
-      assert.deepEqual(await f.command(args), fallback, `${fault}: exact Node fallback output and exit`);
-      assert.equal((await f.command(args, { CODE_FORGE_NODE: '/nonexistent' })).code, 127, `${fault}: refuses answer and attempts handover`);
+      assert.deepEqual(await f.command(args), expected, `${fault}: exact Node output and exit`);
+      assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), expected, `${fault}: served directly without Node`);
+      assert.equal(connections, 0, `${fault}: direct status makes zero daemon connections`);
     } finally {
       for (const socket of sockets) socket.destroy();
       await new Promise((resolve) => server.close(resolve));
