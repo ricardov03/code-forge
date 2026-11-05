@@ -97,3 +97,63 @@ test('bad text is re-asked; unchanged prefill still checks default provider and 
     L3: { model: 'claude-fable-5-1' },
   });
 });
+
+test('judge duplicate is immediately re-asked with the same level error, then writes the correction', async () => {
+  const ui = scriptedUi({
+    'Multimodel review': true,
+    'Second provider': 'openai',
+    'L3 judge': ['grok-4.7:low@xai', 'grok-4.7:high@xai'],
+    Engine: 'harness',
+  });
+  const r = await run(['--no-jev', '--level', 'L0=grok-4.7:low@xai'], ui);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(existsSync(r.file), true, 'corrected judge writes the config');
+  assert.doesNotMatch(r.stdout + r.stderr, /nothing written/i);
+  const calls = ui.calls.filter((c) => c.message.startsWith('L3 judge'));
+  assert.equal(calls.length, 2);
+  assert.equal(ui.calls.indexOf(calls[1]), ui.calls.indexOf(calls[0]) + 1);
+  assert.equal(messageCount(ui, 'L3 is the same as L0. Each level must be a different model or effort.'), 1);
+  assert.equal(calls[1].initialValue, 'grok-4.7:low@xai');
+  const written = parseYAML(readFileSync(r.file, 'utf8'));
+  assert.deepEqual(written.levels.L0, { model: 'grok-4.7', effort: 'low', provider: 'xai' });
+  assert.deepEqual(written.levels.L3, { model: 'grok-4.7', effort: 'high', provider: 'xai' });
+});
+
+test('judge bad text is immediately re-asked with the usage error, then writes the correction', async () => {
+  const ui = scriptedUi({
+    'Multimodel review': true,
+    'Second provider': 'openai',
+    'L3 judge': ['grok-4.7:@xai', 'grok-4.7:high@xai'],
+    Engine: 'harness',
+  });
+  const r = await run(['--no-jev'], ui);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(existsSync(r.file), true, 'corrected judge writes the config');
+  assert.doesNotMatch(r.stdout + r.stderr, /nothing written/i);
+  const calls = ui.calls.filter((c) => c.message.startsWith('L3 judge'));
+  assert.equal(calls.length, 2);
+  assert.equal(ui.calls.indexOf(calls[1]), ui.calls.indexOf(calls[0]) + 1);
+  assert.equal(messageCount(ui, '--level: empty effort'), 1);
+  assert.equal(calls[1].initialValue, 'grok-4.7:@xai');
+  assert.deepEqual(parseYAML(readFileSync(r.file, 'utf8')).levels.L3,
+    { model: 'grok-4.7', effort: 'high', provider: 'xai' });
+});
+
+test('a cleared level answer returning undefined is re-asked as empty, then writes the correction', async () => {
+  const ui = scriptedUi({
+    'Keep the level matrix?': false,
+    'L0 model': [undefined, 'claude-haiku-4-5-20251001'],
+    Engine: 'harness',
+  });
+  const r = await run(['--no-jev'], ui);
+  assert.equal(r.code, 0, r.stderr);
+  assert.equal(existsSync(r.file), true, 'corrected level writes the config');
+  assert.doesNotMatch(r.stdout + r.stderr, /nothing written/i);
+  const calls = levelCalls(ui);
+  assert.deepEqual(calls.map((c) => c.message.slice(0, 2)), ['L0', 'L0', 'L1', 'L2', 'L3']);
+  assert.equal(ui.calls.indexOf(calls[1]), ui.calls.indexOf(calls[0]) + 1);
+  assert.equal(messageCount(ui, '--level: empty model'), 1);
+  assert.equal(calls[1].initialValue, '', 'the cleared field stays empty on retry');
+  assert.deepEqual(parseYAML(readFileSync(r.file, 'utf8')).levels.L0,
+    { model: 'claude-haiku-4-5-20251001' });
+});
