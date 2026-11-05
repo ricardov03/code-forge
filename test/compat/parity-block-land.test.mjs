@@ -104,7 +104,7 @@ function git(repo, argv) {
 function native(f, argv = args, env = {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(BINARY, argv, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home,
-      CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', ...env } });
+      CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_HANDOVER_LOG: '0', ...env } });
     let stdout = '', stderr = '';
     child.stdout.on('data', (b) => { stdout += b; }); child.stderr.on('data', (b) => { stderr += b; });
     child.on('error', reject); child.on('close', (code) => resolve({ code, stdout, stderr }));
