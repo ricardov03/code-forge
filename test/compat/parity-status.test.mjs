@@ -202,8 +202,11 @@ test('direct Go status preserves Node bytes and exit codes across forms and daem
   assert.deepEqual(await f.command(args), warning, 'direct status preserves the unpinned worker warning');
   assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), warning);
   await f.stop();
-  assert.deepEqual(await f.command(args), await f.command(args, { CODE_FORGE_NATIVE: '0' }), 'down daemon preserves Node bytes');
-  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), warning, 'down daemon still serves direct status');
+  // Change disk state so shutdown checks cannot reuse the live-daemon expectation.
+  await f.change((record) => { record.blocks.B1.status = 'closed'; });
+  const down = await f.command(args, { CODE_FORGE_NATIVE: '0' });
+  assert.deepEqual(await f.command(args), down, 'down daemon preserves Node bytes');
+  assert.deepEqual(await f.command(args, { CODE_FORGE_NODE: '/nonexistent' }), down, 'down daemon still serves direct status');
   await appendRow({ event: 'review.answered', run: f.run, block: 'B1' }, { slug: 'status-test' });
   const unsupported = await f.command(args, { CODE_FORGE_NATIVE: '0' });
   assert.deepEqual(await f.command(args), unsupported, 'unsupported review state still hands over with exact Node bytes');
