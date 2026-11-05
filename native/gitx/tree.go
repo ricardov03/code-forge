@@ -195,6 +195,11 @@ func TreeAtOpen(cwd, base string) (ledger.Object, error) {
 	files, _ := union(a, b, false)
 	out := ledger.Object{}
 	for _, file := range files {
+		// Node assigns string stamps into {}. Its inherited __proto__ setter
+		// ignores a string assignment rather than creating an own property.
+		if file == "__proto__" {
+			continue
+		}
 		out.Set(file, TreeStamp(top, file))
 	}
 	return out, nil

@@ -1,7 +1,6 @@
 package main
 
 import (
-	"bufio"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -18,9 +17,9 @@ import (
 // kitGolden is an internal JSON fixture driver. Lock holders announce a JSON
 // result after acquisition and retain ownership until stdin closes.
 func kitGolden(in io.Reader, out io.Writer) error {
-	r := bufio.NewReader(in)
-	data, err := r.ReadBytes('\n')
-	if err != nil && err != io.EOF {
+	decoder := json.NewDecoder(in)
+	var data json.RawMessage
+	if err := decoder.Decode(&data); err != nil {
 		return err
 	}
 	input, err := ledger.DecodeObject(data)
@@ -104,7 +103,7 @@ func kitGolden(in io.Reader, out io.Writer) error {
 			if err := encode(map[string]bool{"ok": true}); err != nil {
 				return err
 			}
-			_, err := io.Copy(io.Discard, r)
+			_, err := io.Copy(io.Discard, io.MultiReader(decoder.Buffered(), in))
 			return err
 		}, filelock.Options{})
 	case "update":

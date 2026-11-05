@@ -9,6 +9,7 @@ import (
 func TestKitGoldenProtocol(t *testing.T) {
 	for _, c := range []struct{ input, want string }{
 		{`{"op":"owned","entries":["?.go"],"files":["a.go","😀.go"]}`, "{\"kinds\":{},\"matches\":[true,false]}\n"},
+		{"{\n  \"op\": \"owned\",\n  \"entries\": [],\n  \"files\": []\n}\n", "{\"kinds\":{},\"matches\":[]}\n"},
 		{`{"op":"changed","base":"HEAD"}`, "{\"error\":{\"code\":\"bad-ref\",\"message\":\"the block base must be a commit id\"}}\n"},
 	} {
 		var out bytes.Buffer

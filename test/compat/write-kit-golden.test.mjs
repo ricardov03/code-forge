@@ -93,6 +93,7 @@ test('write kit matches Node locks, git, stamps, hashes, owned paths and locked 
   t.after(() => gitVars.forEach((key, i) => { if (saved[i] === undefined) delete process.env[key]; else process.env[key] = saved[i]; }));
   await writeFile(path.join(tree, 'file'), 'changed\n'); await chmod(path.join(tree, 'file'), 0o755);
   await writeFile(path.join(tree, 'new\nfile'), 'untracked');
+  await writeFile(path.join(tree, '__proto__'), 'literal filename');
   await rm(path.join(tree, 'link'));
   const nested = path.join(tree, 'nested'); await mkdir(nested);
   git(nested, 'init', '-qb', 'main');
