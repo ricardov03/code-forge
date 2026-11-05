@@ -72,6 +72,19 @@ func TestGitAndTreeHelpers(t *testing.T) {
 	if _, err := ChangedFiles(root, "HEAD"); err == nil || err.Error() != "the block base must be a commit id" {
 		t.Fatalf("bad-ref: %v", err)
 	}
+	output := filepath.Join(t.TempDir(), "injected-diff")
+	for _, invalid := range []string{"", "HEAD", "-x", "--output=" + output, "abcdef", strings.Repeat("a", 65), strings.ToUpper(base)} {
+		t.Run("bad-base/"+invalid, func(t *testing.T) {
+			files, err := TreeAtOpen(root, invalid)
+			badRef, ok := err.(*Error)
+			if files != nil || !ok || badRef.Code != "bad-ref" || badRef.Message != "the block base must be a commit id" {
+				t.Errorf("TreeAtOpen(%q) = %v, %v; want nil, bad-ref", invalid, files, err)
+			}
+			if _, err := os.Stat(output); !os.IsNotExist(err) {
+				t.Errorf("base option created output file: %v", err)
+			}
+		})
+	}
 	files = []string{"\ue000", "😀", "a"}
 	SortStrings(files)
 	if !reflect.DeepEqual(files, []string{"a", "😀", "\ue000"}) {

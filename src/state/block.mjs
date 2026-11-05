@@ -170,9 +170,10 @@ export async function repoTop(cwd) {
  * that changed since, or could not be read either time, is `unowned_change` (`review/gate-check.mjs`).
  * @param {string} cwd @param {string} base - a full commit sha.
  * @returns {Promise<Record<string, string>>}
- * @throws {StateError} `git-failed`
+ * @throws {StateError} `bad-ref`, `git-failed`
  */
 export async function treeAtOpen(cwd, base) {
+  if (typeof base !== 'string' || !/^[0-9a-f]{7,64}$/.test(base)) throw new StateError('bad-ref', 'the block base must be a commit id');
   const top = await repoTop(cwd);
   const changed = await git(['git', 'diff', '--name-only', '-z', '--no-renames', base, '--'], top);
   const untracked = await git(['git', 'ls-files', '-z', '--others', '--exclude-standard'], top);

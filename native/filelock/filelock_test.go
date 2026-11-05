@@ -6,9 +6,41 @@ import (
 	"path/filepath"
 	"reflect"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 )
+
+func TestNodeErrorOperations(t *testing.T) {
+	for _, operation := range []string{"read", "write", "close", "fsync", "ftruncate", "fstat", "sync", "open", "mkdir", "unlink", "scandir"} {
+		t.Run(operation, func(t *testing.T) {
+			cause := &os.PathError{Op: operation, Path: "/private/lock", Err: syscall.EISDIR}
+			for _, override := range []string{"", operation} {
+				got := nodeError(cause, override, "")
+				detail := operation
+				if operation == "sync" {
+					detail = "fsync"
+				}
+				switch operation {
+				case "open", "mkdir", "unlink", "scandir":
+					detail += " '/private/lock'"
+				}
+				want := "EISDIR: illegal operation on a directory, " + detail
+				var converted *Error
+				if !errors.As(got, &converted) || converted.Code != "EISDIR" || got.Error() != want || !errors.Is(got, cause) {
+					t.Errorf("override %q: got %v, want %s with original cause", override, got, want)
+				}
+			}
+		})
+	}
+	_, err := os.ReadFile(t.TempDir())
+	if err == nil {
+		t.Fatal("reading a directory must fail")
+	}
+	if got := nodeError(err, "", "").Error(); got != "EISDIR: illegal operation on a directory, read" {
+		t.Fatalf("directory read: %s", got)
+	}
+}
 
 func TestOwnershipAndBreaks(t *testing.T) {
 	t.Setenv("HOME", t.TempDir())

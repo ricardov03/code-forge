@@ -118,6 +118,7 @@ test('write kit matches Node locks, git, stamps, hashes, owned paths and locked 
     node.release();
     assert.equal((await waiter.done).code, 0, 'Go proceeds after Node releases');
   } finally { node.release(); }
+  await rm(path.dirname(lockFile(home, key)), { recursive: true });
   const holder = start(t, { op: 'with-lock', key }, true);
   const ready = await Promise.race([once(holder.child.stdout, 'data').then(([b]) => b.toString()), holder.done.then((r) => r.stderr)]);
   assert.equal(ready, '{"ok":true}\n', 'Go announces acquisition');
@@ -206,4 +207,16 @@ test('write kit fails closed for malformed owners, stale races, unsafe hashes an
   assert.equal(handed.status, 127, 'unported public command still hands over to Node');
   assert.deepEqual(await runParity(['kit-unported'], { fixture: { repo: tree, home }, goCommand: binary,
     env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } }), { equal: true, diffs: [] }, 'handover has zero process or state differences under the parity harness');
+});
+
+test('tree-at-open rejects invalid bases before Git can interpret options', async (t) => {
+  const { root, tree } = await fixture(t);
+  git(tree, 'init', '-qb', 'main');
+  const output = path.join(root, 'injected-diff');
+  for (const base of ['', 'HEAD', '-x', `--output=${output}`, 'abcdef', 'a'.repeat(65), 'ABCDEF0']) {
+    assert.deepEqual(await caught(() => treeAtOpen(tree, base)), {
+      code: 'bad-ref', message: 'the block base must be a commit id',
+    }, `${base}: exact tree-at-open refusal`);
+    await assert.rejects(stat(output), { code: 'ENOENT' }, 'invalid base must not create a Git output file');
+  }
 });

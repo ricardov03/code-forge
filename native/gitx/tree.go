@@ -180,6 +180,9 @@ func ChangedFiles(root, base string) ([]string, error) {
 }
 
 func TreeAtOpen(cwd, base string) (ledger.Object, error) {
+	if !commitID.MatchString(base) {
+		return nil, &Error{"bad-ref", "the block base must be a commit id"}
+	}
 	top, err := RepoTop(cwd)
 	if err != nil {
 		return nil, err

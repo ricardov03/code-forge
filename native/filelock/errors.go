@@ -61,15 +61,21 @@ func nodeError(err error, operation, file string) error {
 	}
 	if operation == "" {
 		operation = pe.Op
-		if operation == "remove" {
-			operation = "unlink"
-		}
+	}
+	switch operation {
+	case "remove":
+		operation = "unlink"
+	case "sync":
+		operation = "fsync"
 	}
 	if file == "" {
 		file = pe.Path
 	}
 	detail := operation
-	if operation != "write" && operation != "close" {
+	switch operation {
+	case "read", "write", "close", "fsync", "ftruncate", "fstat":
+		// Node's fd-based errors carry no path, even when Go has one.
+	default:
 		detail += fmt.Sprintf(" '%s'", file)
 	}
 	return &Error{code, fmt.Sprintf("%s: %s, %s", code, message, detail), err}
