@@ -115,7 +115,7 @@ test('disabled, missing, and nonexecutable native binaries keep doctor on the No
   await symlink(dependencies, path.join(pkg, 'node_modules'), 'dir');
   const privateBinary = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
   await mkdir(path.dirname(privateBinary), { recursive: true });
-  await cp(binary, privateBinary);
+  await cp(binary, privateBinary).catch((err) => { if (err.code !== 'ENOENT') throw err; });
   const { runDoctorCli: privateDoctor } = await import(pathToFileURL(path.join(pkg, 'src/cli/doctor.mjs')).href);
   const { nativePath, runNative } = await import(pathToFileURL(path.join(pkg, 'src/util/native.mjs')).href);
   const previous = process.env.CODE_FORGE_NATIVE;
