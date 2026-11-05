@@ -54,14 +54,14 @@ async function fixture() {
   await put(repo, `workers/${process.pid}-unknown.json`, { pid: process.pid, start_time: 'unknown', run: RUN, started_at: stamp, heartbeat_at: stamp });
   return { repo, home, record, save };
 }
-function execute(f, args = ARGS, node = false) {
+function execute(f, args = ARGS, node = false, extra = {}) {
   const r = spawnSync(node ? process.execPath : BIN, node ? [CLI, ...args] : args, { cwd: f.repo, encoding: 'utf8', env: {
-    PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file',
+    PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_HANDOVER_LOG: '0', ...extra,
   } });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 async function executeAsync(f, args) {
-  const child = spawn(BIN, args, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(BIN, args, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_HANDOVER_LOG: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', (b) => { stdout += b; }); child.stderr.on('data', (b) => { stderr += b; });
   const [code] = await once(child, 'close');
@@ -87,6 +87,18 @@ async function snapshot(f) {
   for (const area of ['repo', 'home']) await walk(path.join(f[area], '.code-forge'), area);
   return files;
 }
+
+test('unported help flag records exactly one hand-over with its B282 reason', async () => {
+  const f = await fixture();
+  const args = ['review-file', '--help'];
+  const expected = execute(f, args, true);
+  assert.deepEqual(execute(f, args, false, { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_HANDOVER_LOG: '1' }), expected, 'recording preserves Node output and exit');
+  const rows = (await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(rows.length, 1, 'one hand-over writes exactly one JSONL row');
+  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.deepEqual({ ...rows[0], at: '<time>' }, { at: '<time>', verb: 'review-file', sub: 'unknown', reason: 'enqueue-help-encoding', version }, 'help uses the existing reason and only safe telemetry fields');
+  assert.equal(Number.isNaN(Date.parse(rows[0].at)), false, 'row has a valid timestamp');
+});
 
 test('enqueue flag modes and cache retries run in Go with zero Node parity differences', async () => {
   const f = await fixture();

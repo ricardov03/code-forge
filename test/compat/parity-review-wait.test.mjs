@@ -281,7 +281,7 @@ test('unknown wait flags and unported forms hand over with identical logs', asyn
     [...WAIT, '--cwd', 'missing-dir'], [...WAIT, '--cwd', 'plain-file'],
     [...WAIT, '--block', 'B1'], [...WAIT, 'sample.mjs'], [],
     ['review-file', '--wait-block', 'B1', '--run', 'bad'],
-    ['review-file', '--rebase-check'], ['review-file', '--help'],
+    ['review-file', '--help'],
   ];
   await writeFile(path.join(f.repo, 'plain-file'), 'x');
   for (const args of cases) {
@@ -290,6 +290,12 @@ test('unknown wait flags and unported forms hand over with identical logs', asyn
     assert.equal(result.code, 127, `${args.join(' ')}: unported form requires Node`);
     assert.match(result.stderr, /node executable .* not found/, 'handover identifies missing Node');
   }
+  const rebaseArgs = ['review-file', '--rebase-check'];
+  await parity(f, rebaseArgs, { CODE_FORGE_NO_ERROR_LOG: '0' });
+  const rebase = await launch(f, rebaseArgs).ended;
+  assert.equal(rebase.code, 2, 'incomplete rebase check is native usage');
+  assert.equal(rebase.stdout, '', 'native rebase usage has zero stdout bytes');
+  assert.ok(rebase.stderr.startsWith('review-file: --rebase-check takes --block and --run only\nusage:'), 'native rebase usage has the exact error prefix');
   await rm(path.join(f.repo, '.git'), { recursive: true });
   await parity(f, WAIT, { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
 });
