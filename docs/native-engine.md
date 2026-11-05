@@ -18,24 +18,36 @@ The command works in three steps:
    error output and exit code. The exit code is the number that tells the
    shell whether a command succeeded.
 
-The public route table currently serves:
+The public route table currently serves these read commands:
 
-- `status --json --run <id>` when a compatible daemon is already running,
-  the run's config enables it, and Go can establish that no worker warning
-  needs to be printed. Either flag order is accepted.
+- `status`, `status --json` and `status --run <id>`. Go reads the run files
+  from disk. It does not need the daemon and it never takes a lock.
+  If Go cannot read the state, it hands over to Node.
 - `logs path`, `logs [--last] [--json]` and `logs summary`. `logs clear` and
   `logs report` hand over to Node.
 - `ledger tail`. Other `ledger` commands hand over to Node.
 - `review-file --wait <ticket> [--max <n>s]`.
 - `review-file --wait-block <id> --run <id> [--max <n>s]` when a compatible
   daemon answers. A stopped file, an unusual answer or no daemon hands over
-  to Node. Node writes all signed rows.
+  to Node.
 
-All other review-file forms hand over to Node.
-All other status forms and any uncertain or unavailable daemon answer hand
-over to Node. Status never starts a daemon. Commands such as `code-forge version`
-and `code-forge doctor` also go through Go to Node. Go additionally runs private
-helpers and the optional background daemon.
+Since 0.19.0, it also serves these write commands. Go writes the same files,
+locks and signed ledger rows as Node.
+
+| Command | Runs in Go | Hands over to Node |
+|---|---|---|
+| `review-file <file> --block <id>` | Plain enqueue. | `--fresh`, `--answers`, `--of`, `--rebase-check`, and a cached result that needs a fresh ticket. |
+| `block claim`, `block stop` | Plain claim and stop. | An autopilot grant, a pending approval, or `hooks.on_block_end`. |
+| `block open` | Open with `--level`, including the worktree. | No `--level`, `--after`, `--after-outcome`, or autopilot. |
+| `block close` | Plain agent close. | `--decide`, `--no-require-reviews`, `--auto-claim`, `--remove-worktree`, `ready`, a human close, an external reviewer, hooks, or autopilot. |
+| `gates run` | Built-in gates. A stop signal (SIGINT or SIGTERM) writes the same cancel rows. | Custom gates, `repeat_new_tests`, light blocks, flaky detection, and other `gates` subcommands. |
+| `block land` | Join, gates, close and merge, when every step can run in Go. | Any step that would hand over. Go checks this before its first write, so one land never mixes Go and Node steps. |
+
+A hand-over always passes the original arguments. Node then runs the command
+exactly as before. When Go is not sure it gives the same answer, it hands over.
+Commands such as `code-forge version` and `code-forge doctor` also go through
+Go to Node. Go additionally runs private helpers and the optional background
+daemon.
 
 ### See what is available
 
@@ -119,7 +131,7 @@ native:
 The daemon is enabled by default. This setting disables only the daemon.
 The Go entry and other native helpers can still run. Workers read this setting
 at startup. Clients use the run's current config snapshot, which is the stored
-copy of its settings. The setting makes status and block waits use Node.
+copy of its settings. The setting makes block waits use Node. Status in Go does not use the daemon.
 
 ### Choose Node for the hand-over
 
@@ -151,7 +163,8 @@ It stops the daemon it started when the worker exits.
 Another worker can share a daemon that is already running.
 
 The private `native.sock` Unix socket carries requests between local programs.
-The daemon serves block waits and status from cached ledger and queue data.
+The daemon serves block waits and Node status from cached ledger and queue data.
+Status in Go reads the disk directly and does not use the daemon.
 Cached data is a copy kept ready in memory. It avoids repeated reads in Node
 clients. A missing, crashed or incompatible daemon causes clients to use Node
 by themselves, with the same answers. Both text and JSON status output have
@@ -169,7 +182,7 @@ clients use the run's current snapshot.
 | The binary lacks execute permission. | The entry uses Node directly. Reinstall the npm package to restore its executable file. For a source checkout, rebuild the host binary. Check the full doctor's `native` row again. |
 | The binary is for the wrong platform or processor. | Install the package for this machine, or rebuild for this host. A missing matching file makes the entry use Node. If a wrong binary was put at the matching path, it can fail to start; set `CODE_FORGE_NATIVE=0` while you replace it. |
 | The Go hand-over says `node executable … not found`. | Put Node on `PATH`, or set `CODE_FORGE_NODE` to its real executable path. This failure exits 127. If Go is disabled or missing, fix `PATH`: the shell does not use `CODE_FORGE_NODE`. |
-| The doctor shows daemon `fallback`. | Check that a review worker is active and that the package versions match. With no active worker, `fallback` can be normal. Status and waits still use Node. To keep the daemon off, set `native.daemon: false` before the next worker starts. |
+| The doctor shows daemon `fallback`. | Check that a review worker is active and that the package versions match. With no active worker, `fallback` can be normal. Block waits still use Node; status in Go reads the disk. To keep the daemon off, set `native.daemon: false` before the next worker starts. |
 
 Contributors can rebuild from the repository root with Go installed:
 

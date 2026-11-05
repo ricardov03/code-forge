@@ -6,6 +6,21 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- Go write kit: file locks, signed ledger rows and atomic state writes with the same bytes and lock rules as Node. No public verb (B272)
+- Go runs every `status` form (`status`, `--json`, `--run <id>`) directly from disk, with no daemon and no lock; unreadable or unknown state hands over to Node (B273)
+- Go runs `review-file <file> --block <id>` (plain enqueue); `--fresh`, `--answers`, `--of`, `--rebase-check` and fresh-ticket cases hand over to Node (B274)
+- Go runs `block claim` and `block stop`; autopilot grants, pending approvals and `hooks.on_block_end` hand over to Node (B275)
+- Go runs `block open` with an explicit `--level`, including worktree creation; no `--level`, `--after`/`--after-outcome` and autopilot cases hand over to Node (B276)
+- Go runs the plain agent `block close`; `--decide`, `--no-require-reviews`, `--auto-claim`, `--remove-worktree`, `ready`, human-close, external reviewer, hooks and autopilot cases hand over to Node (B277)
+- Go runs `gates run` for built-in gates, with the same rows on cancel (SIGINT/SIGTERM); custom gates, `repeat_new_tests`, light blocks, flaky detection and other `gates` subcommands hand over to Node (B278)
+- Go runs `block land` (join, gates, close, merge) when every step can run in Go; it checks this before any write, so one land never mixes Go and Node steps (B279)
+
+### Fixed
+
+- `block claim` in Go resolves symbolic links in the workspace path before it checks overlap (B279)
+
 ## [0.18.0] — 2026-11-05
 
 ### Added
