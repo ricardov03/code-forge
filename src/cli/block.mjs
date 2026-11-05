@@ -1134,11 +1134,12 @@ export async function runBlock(args, deps = {}) {
         const hashes = new Map(files.map((f) => [f.file, f.content_hash]));
         const tickets = new Map(lines.map(({ file, ticket }) => [file, { file, ticket }]));
         const key = await loadKey(runId);
-        // One pass over rows, no per-file ledger reads. Ledger presence is report evidence only:
-        // the review gate still decides whether every file's current content is acceptable.
+        // One pass over rows, no per-file ledger reads. Only approved results supply ledger
+        // evidence; waived or answered findings still get credit through the gate's tool lines.
+        // The review gate still decides whether every file's current content is acceptable.
         for (const row of rows) {
           if (row.event === 'review.result' && row.run === runId && row.block === id && row.status === 'reviewed' &&
-              hashes.has(row.file) && hashes.get(row.file) === row.content_hash &&
+              row.approved === true && hashes.has(row.file) && hashes.get(row.file) === row.content_hash &&
               typeof row.ticket === 'string' && /^[0-9a-f]{24}$/.test(row.ticket) && verifyRow(row, key).ok) {
             tickets.set(row.file, { file: row.file, ticket: row.ticket });
           }

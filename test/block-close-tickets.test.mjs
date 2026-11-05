@@ -142,3 +142,21 @@ test('close does not credit another block, run, unfinished or unsigned review fo
       `${variant}: exactly the test lacks a finished review in this block and run`);
   }
 });
+
+test('close keeps coder_report_failed for a signed current review that left an open finding', async () => {
+  const f = await fixture();
+  writeFile(f.repo, TEST, 'export const expected = 3; // finding still open\n');
+  const content_hash = contentHash(f.repo, TEST);
+  const { ticket } = resolveTicket({ repoRoot: f.repo, run: f.runId, block: 'B1', file: TEST });
+  await writeSigned(f.runId, f.writeRow, { event: 'review.round', block: 'B1', file: TEST, content_hash,
+    round: 3, kind: 'full', open_after: 1 });
+  await writeSigned(f.runId, f.writeRow, { event: 'review.result', block: 'B1', file: TEST, content_hash,
+    ticket, status: 'reviewed', approved: false, open: [{ id: 'W1', severity: 'warning' }],
+    finished_at: new Date().toISOString() });
+
+  const refused = await f.close();
+  assert.equal(refused.code, 1);
+  assert.deepEqual(refused.json.blockers.filter((b) => b.code === 'not_approved').map((b) => b.file), [TEST]);
+  assert.deepEqual(refused.json.blockers.filter((b) => b.code === 'coder_report_failed').map((b) => b.file), [TEST],
+    'a completed review that did not approve the current bytes cannot replace a report ticket line');
+});
