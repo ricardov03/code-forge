@@ -8,6 +8,7 @@
  * because it is asked only when the chain resolves nothing.
  */
 
+import { validateConfig } from '../../config/validate.mjs';
 import { isOpRef, OP_MESSAGES } from '../../keys/onepassword.mjs';
 import { HARNESSES } from '../harnesses.mjs';
 import { effectiveProvider, judgeCollision, proposeJudge } from './answers.mjs';
@@ -128,6 +129,48 @@ export function levelText(level) {
 }
 
 /**
+ * Re-asks malformed levels and tuples already used by an earlier level.
+ * @param {import('./answers.mjs').Answers} values
+ * @param {string} level
+ * @param {Ui} ui
+ * @param {string} message
+ * @param {string} hint
+ * @param {{model: string, effort?: string, provider?: string}|null} shownLevel
+ */
+async function askLevel(values, level, ui, message, hint, shownLevel) {
+  const names = ['L0', 'L1', 'L2', 'L3'];
+  const shown = shownLevel ? levelText(shownLevel) : '';
+  let initialValue = shown;
+  let error = '';
+  for (;;) {
+    const typed = await answer(ui, ui.text({
+      message: withHint(message, error ? `${hint}\n${error}` : hint),
+      initialValue,
+    }));
+    initialValue = String(typed ?? '').trim();
+    let candidate;
+    try {
+      // Enter keeps the original level object, `fallback` included, but still checks it.
+      candidate = shownLevel && initialValue === shown ? shownLevel : parseLevel(`${level}=${initialValue}`).spec;
+    } catch (err) {
+      if (!(err instanceof UsageError)) throw err;
+      error = err.message;
+      continue;
+    }
+    // Use the final validator's tuple semantics, including provider inheritance and absent effort.
+    const duplicate = names.slice(0, names.indexOf(level)).find((earlier) => validateConfig({
+      provider: values.provider,
+      levels: { [earlier]: values.levels[earlier], [level]: candidate },
+    }).errors.some((issue) => issue.rule === 'duplicate-level-tuple'));
+    if (duplicate) {
+      error = `${level} is the same as ${duplicate}. Each level must be a different model or effort.`;
+      continue;
+    }
+    return candidate;
+  }
+}
+
+/**
  * Asks every answer whose source is not `flag`, in step order — gates and proof excepted (B24:
  * see {@link askProjectSettings}). Mutates and returns `values`.
  * @param {import('./answers.mjs').Answers} values
@@ -168,10 +211,8 @@ export async function askAnswers(values, sources, ctx, ui) {
     const keep = await answer(ui, ui.confirm({ message: withHint(`Keep the level matrix? ${summary}`, HINTS.levels), initialValue: true }));
     if (!keep) {
       for (const level of ['L0', 'L1', 'L2', 'L3']) {
-        const shown = levelText(values.levels[level]);
-        const typed = await answer(ui, ui.text({ message: withHint(`${level} model[:effort][@provider]`, HINTS.level), initialValue: shown }));
-        // Enter (unchanged text) keeps the level object as it is, `fallback` included
-        if (String(typed).trim() !== shown) values.levels[level] = parseLevel(`${level}=${String(typed).trim()}`).spec;
+        values.levels[level] = await askLevel(values, level, ui,
+          `${level} model[:effort][@provider]`, HINTS.level, values.levels[level]);
       }
     }
   }
@@ -196,12 +237,10 @@ export async function askAnswers(values, sources, ctx, ui) {
   // asked when a flag-supplied second provider equals the effective L2 — `runInit` refuses that.
   const reviewersDiffer = values.second_provider !== effectiveProvider(values, 'L2');
   for (let collision = reviewersDiffer ? judgeCollision(values) : null; collision; collision = judgeCollision(values)) {
-    const proposal = collision.third ? levelText(proposeJudge(collision.third)) : '';
-    const typed = await answer(ui, ui.text({
-      message: withHint(`L3 judge — must come from a third provider (reviewers: ${collision.reviewers.join(', ')}); model[:effort][@provider]`, HINTS.judge),
-      initialValue: proposal,
-    }));
-    values.levels.L3 = parseLevel(`L3=${String(typed).trim()}`).spec;
+    const proposal = collision.third ? proposeJudge(collision.third) : null;
+    values.levels.L3 = await askLevel(values, 'L3', ui,
+      `L3 judge — must come from a third provider (reviewers: ${collision.reviewers.join(', ')}); model[:effort][@provider]`,
+      HINTS.judge, proposal);
   }
   // `subprocess` is never offered (R2); an existing `engine: subprocess` is kept, not asked.
   if (open('engine') && values.engine !== 'subprocess') {
