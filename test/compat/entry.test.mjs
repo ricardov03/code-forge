@@ -210,7 +210,9 @@ function handoverOverhead(t, f, slow = false) {
     attempts.push(overhead);
     t.diagnostic(summary);
   }
-  return Math.min(...attempts);
+  // Negative controls use the largest attempt median so lucky scheduling noise
+  // cannot hide the injected delay in the best attempt; positives keep that best case.
+  return slow ? Math.max(...attempts) : Math.min(...attempts);
 }
 
 function assertHandoverBudget(overhead) {
@@ -224,6 +226,24 @@ test('Go handover stays within 25 ms', (t) => {
 });
 
 test('Go handover budget rejects a 40 ms delay', (t) => {
+  const durations = [100, 140]; // Warmup control and delayed entry.
+  for (const noise of [0, -90, -90]) {
+    for (let i = 0; i < 10; i++) {
+      const pair = [100, 140 + noise];
+      durations.push(...(i % 2 === 0 ? pair : pair.reverse()));
+    }
+  }
+  let calls = 0;
+  const clock = t.mock.method(performance, 'now', () => {
+    const sample = Math.floor(calls / 2);
+    return calls++ % 2 === 0 ? 0 : durations[sample];
+  });
+  try {
+    const noisyOverhead = handoverOverhead(t, fixture(t), true);
+    assert.throws(() => assertHandoverBudget(noisyOverhead), { code: 'ERR_ASSERTION' }, '40 ms delayed handover must fail the 25 ms budget even when two of three attempt medians undercount by 90 ms');
+    assert.equal(noisyOverhead, 40, 'three attempt medians of 40, -50 and -50 ms retain the 40 ms delayed control');
+    assert.equal(clock.mock.callCount(), durations.length * 2, 'all 30 noisy pairs and both warmups consume exactly two clock readings per command');
+  } finally { clock.mock.restore(); }
   const f = fixture(t);
   const overhead = handoverOverhead(t, f, true);
   assert.throws(() => assertHandoverBudget(overhead), { code: 'ERR_ASSERTION' }, '40 ms delayed handover overhead ' + overhead.toFixed(2) + ' ms must fail the same 25 ms budget check');
