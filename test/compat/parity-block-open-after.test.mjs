@@ -56,9 +56,9 @@ async function fixture({ isolated = false, change = () => {}, outcome = 'approve
   }
   return f;
 }
-function launch(f, args, { node = false, fallback = false } = {}) {
+function launch(f, args, { node = false, fallback = false, handoverLog = false } = {}) {
   return new Promise((resolve, reject) => {
-    const p = spawn(node ? process.execPath : BINARY, node ? [CLI, ...args] : args, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : '/nonexistent', CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NO_ERROR_LOG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
+    const p = spawn(node ? process.execPath : BINARY, node ? [CLI, ...args] : args, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NATIVE: handoverLog ? '1' : '0', CODE_FORGE_HANDOVER_LOG: handoverLog ? '1' : '0', CODE_FORGE_NODE: fallback ? process.execPath : '/nonexistent', CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NO_ERROR_LOG: '1' }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     p.stdout.on('data', (b) => { stdout += b; }); p.stderr.on('data', (b) => { stderr += b; });
     p.on('error', reject); p.on('close', (code) => resolve({ code, stdout, stderr }));
@@ -75,6 +75,21 @@ const normalize = (s, f) => s.replaceAll(f.repo, '<repo>').replaceAll(f.home, '<
 async function rows(f) {
   return (await readFile(path.join(f.home, '.code-forge/ledger/after-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
 }
+
+test('unported outcome syntax records exactly one reason-coded handover before exec', async () => {
+  const f = await fixture({ pipeline: 'steps: [broken\n' });
+  const before = await readFile(runFile(f));
+  const result = await launch(f, open(['--after-outcome', 'design']), { handoverLog: true });
+  assert.equal(result.code, 127, 'unported outcome syntax delegates to missing Node');
+  assert.deepEqual(await readFile(runFile(f)), before, 'handover preserves exact run bytes');
+  const log = await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8');
+  assert.equal(log.endsWith('\n'), true, 'row is newline terminated');
+  const recorded = log.trimEnd().split('\n').map((line) => JSON.parse(line));
+  assert.equal(recorded.length, 1, 'one handover writes exactly one row');
+  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  assert.deepEqual(recorded.map(({ at, ...row }) => row), [{ verb: 'block', sub: 'open', reason: 'open-after-outcome', version }]);
+  assert.equal(Number.isNaN(Date.parse(recorded[0].at)), false, 'row has a valid timestamp');
+});
 
 test('open dependencies and recorded default levels run natively with byte parity and serialized writes', async () => {
   for (const isolated of [false, true]) {

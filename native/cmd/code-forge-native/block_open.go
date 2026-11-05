@@ -158,6 +158,9 @@ func runBlockOpen(args []string) int {
 	cfg, _ := blockSnapshot(record)
 	level, source, decision, err := blockopen.PickLevel(home, run, id, flags, record, cfg)
 	if err != nil {
+		if errors.Is(err, blockops.ErrHandover) {
+			return fallback(hOpenNoLevel)
+		}
 		return failure(err)
 	}
 	// B48 is a proven no-op here: QuietExpiry excludes every grant and every
@@ -209,10 +212,16 @@ func runBlockOpen(args []string) int {
 	}
 	if steps, ok := flags["after-outcome"].([]string); ok {
 		if err := blockopen.CheckAfter(record, id, opts.After); err != nil {
+			if errors.Is(err, blockops.ErrHandover) {
+				return fallback(hOpenAfter)
+			}
 			return failure(err)
 		}
 		opts.AfterOutcome, err = blockopen.AcceptedOutcomes(blockString(record.Get("workspace")), id, steps)
 		if err != nil {
+			if errors.Is(err, blockops.ErrHandover) {
+				return fallback(hOpenAfterOutcome)
+			}
 			return failure(err)
 		}
 	}
