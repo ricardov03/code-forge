@@ -5,7 +5,7 @@ cf_has_tests=false
 for cf_arg do
   case "$cf_arg" in
     -*) ;;
-    *.test.mjs) cf_has_tests=true ;;
+    *) cf_has_tests=true ;;
   esac
 done
 if [ "$cf_has_tests" = true ]; then
@@ -25,7 +25,7 @@ if [ "$cf_has_tests" = true ]; then
     const root = process.argv[1];
     try {
       for (const file of process.argv.slice(2)) {
-        if (file.startsWith("-") || !file.endsWith(".test.mjs")) continue;
+        if (file.startsWith("-")) continue;
         if (file.split("/").includes("..")) throw new Error("traversal");
         const relative = path.relative(root, canonical(path.resolve(root, file)));
         if (relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) throw new Error("outside");

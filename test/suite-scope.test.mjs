@@ -106,7 +106,8 @@ test('suite file arguments select only those tests with both leak steps; no file
 test('suite rejects traversal and outside paths before any leak or test step', async t => {
   const f = await fixture(t);
   symlinkSync(path.dirname(f.repo), path.join(f.repo, 'escape'));
-  for (const file of ['../a.test.mjs', 'test/../test/a.test.mjs', `${f.repo}-neighbor/a.test.mjs`, 'escape/a.test.mjs']) {
+  for (const file of ['../a.test.mjs', 'test/../test/a.test.mjs', `${f.repo}-neighbor/a.test.mjs`, 'escape/a.test.mjs',
+    '../evil.mjs', '..', `${f.repo}-neighbor/x.js`, path.dirname(f.repo), 'escape']) {
     f.clear();
     const rejected = f.suite([file]);
     assert.equal(rejected.status, 2, `${file}: ${rejected.stdout}${rejected.stderr}`);
