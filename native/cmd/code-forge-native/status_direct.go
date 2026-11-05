@@ -72,11 +72,18 @@ func statusFlags(args []string) (run string, jsonFlag bool, message string) {
 	return
 }
 
-func statusMap(record ledger.Object) map[string]any {
-	b, _ := json.Marshal(record)
+// Compute explicitly sorts block ids; the renderer constructs ordered summaries.
+// Source object insertion order is therefore not needed by this map-based input.
+func statusMap(record ledger.Object) (map[string]any, error) {
+	b, err := json.Marshal(record)
+	if err != nil {
+		return nil, err
+	}
 	var m map[string]any
-	_ = json.Unmarshal(b, &m)
-	return m
+	if err := json.Unmarshal(b, &m); err != nil {
+		return nil, err
+	}
+	return m, nil
 }
 func statusReal(path string) string {
 	if p, e := filepath.EvalSymlinks(path); e == nil {
@@ -113,7 +120,11 @@ func directStatus(args []string) (int, bool) {
 			}
 			return 0, false
 		}
-		records = append(records, statusMap(r))
+		m, err := statusMap(r)
+		if err != nil {
+			return 0, false
+		}
+		records = append(records, m)
 	} else {
 		cwd, err := os.Getwd()
 		if err != nil {
@@ -130,7 +141,10 @@ func directStatus(args []string) (int, bool) {
 				if e != nil {
 					continue
 				}
-				m := statusMap(r)
+				m, err := statusMap(r)
+				if err != nil {
+					return 0, false
+				}
 				w, ok := m["workspace"].(string)
 				if ok && m["status"] != "ended" && statusReal(w) == want {
 					records = append(records, m)
@@ -465,6 +479,8 @@ func statusWorkerWarnings(record map[string]any) ([]string, bool) {
 				}
 			}
 		} else {
+			// Match Node's checkWorkerPin: a single pin probes legacy worker,
+			// even when workers[0] is absent from or differs from that field.
 			p, _ := record["worker"].(map[string]any)
 			good, reason = statusPin(p)
 			if p == nil {

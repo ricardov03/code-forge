@@ -3,6 +3,7 @@ package main
 import (
 	"bytes"
 	"encoding/json"
+	"math"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -16,6 +17,22 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
+
+func TestStatusMapConversionErrors(t *testing.T) {
+	for _, value := range []any{math.NaN(), math.Inf(1), make(chan int)} {
+		if m, err := statusMap(ledger.Object{{Key: "unsupported", Value: value}}); err == nil || m != nil {
+			t.Fatalf("unsupported %T: map=%v, error=%v; want nil map and error", value, m, err)
+		}
+	}
+	r, err := ledger.DecodeObject([]byte(`{"blocks":{"B10":{},"B2":{}},"run_id":"r-test"}`))
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := statusMap(r)
+	if err != nil || m["run_id"] != "r-test" || len(m["blocks"].(map[string]any)) != 2 {
+		t.Fatalf("valid conversion: map=%v, error=%v", m, err)
+	}
+}
 
 // This uses the public route, including its process-free error behavior, rather
 // than checking implementation text. The helper is a real socket daemon.

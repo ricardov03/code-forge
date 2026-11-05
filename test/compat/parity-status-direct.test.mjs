@@ -9,6 +9,7 @@ import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
 import { signRow } from '../../src/state/signer.mjs';
 import { announceWorker } from '../../src/worker/queue.mjs';
+import { denialOf } from '../../src/review/gate-check.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const pkg = await mkdtemp(path.join(os.tmpdir(), 'cf-status-direct-pkg-'));
@@ -168,4 +169,65 @@ test('B273 boundary: unknown runs and usage errors stay native; unsupported stat
   const result = await runParity(['status', '--run', 'r-direct'], { fixture: f, goCommand: binary,
     env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
   assert.deepEqual(result, { equal: true, diffs: [] }, 'handed-over review state has zero process and state differences');
+});
+
+test('B273 F1: single workers pin warnings match Node with absent, stale and matching legacy worker', async (t) => {
+  const f = await fixture(t);
+  const child = spawn('/bin/sleep', ['60']);
+  t.after(async () => {
+    if (child.exitCode === null && child.signalCode === null) {
+      const closed = once(child, 'close'); child.kill('SIGTERM'); await closed;
+    }
+  });
+  await once(child, 'spawn');
+  const start = spawnSync('/bin/ps', ['-o', 'lstart=', '-p', String(child.pid)], { encoding: 'utf8', env: { ...process.env, LC_ALL: 'C' } });
+  assert.equal(start.status, 0, start.stderr);
+  const pin = { pid: child.pid, started_at: start.stdout.trim().replace(/\s+/g, ' ') };
+  announceWorker(f.repo, { pid: process.pid, run: 'r-direct' });
+  for (const [worker, reason] of [[undefined, 'down'], [{ ...pin, started_at: 'stale' }, 'replaced'], [pin, null]]) {
+    await save(f, record(f, 'r-direct', { workers: [pin], worker }));
+    for (const args of [['--run', 'r-direct'], ['--json', '--run', 'r-direct']]) {
+      await parity(f, args);
+      const answer = native(f, args);
+      assert.equal(answer.code, 0, 'single-pin state is served without Node');
+      assert.match(answer.stderr, /warning: live worker \d+ is not pinned:/);
+      if (reason) assert.ok(answer.stderr.endsWith(` (pinned pid ${pin.pid} is ${reason})\n`));
+      else assert.doesNotMatch(answer.stderr, /pinned pid/);
+    }
+  }
+});
+
+test('B273 runstatus F1: severity deduplication matches Node', async (t) => {
+  const f = await fixture(t);
+  await save(f, record(f, 'r-direct', { blocks: { B1: {} } }));
+  for (const approved of [true, false]) {
+    /** @type {Array<[string[], boolean]>} */
+    const cases = [
+      [['critical', 'unknown'], !approved], [['unknown', 'critical'], !approved],
+      [['critical', 'unrecognized'], !approved], [['critical', 'warning'], true],
+      [['warning', 'critical'], true], [['unknown'], !approved], [['warning'], !approved],
+    ];
+    for (const [severities, denies] of cases) {
+      const row = { event: 'review.result', run: 'r-direct', block: 'B1', file: 'a.mjs', approved,
+        open: severities.map((severity) => ({ id: 'F1', severity })) };
+      assert.equal(denialOf(row) !== null, denies, `Node verdict: approved=${approved}, ${severities}`);
+      await rows(f, [row]);
+      for (const args of [['--run', 'r-direct'], ['--json', '--run', 'r-direct']]) await parity(f, args);
+      const answer = native(f, ['--json', '--run', 'r-direct']);
+      assert.equal(answer.code, 0, 'severity cases are served without Node');
+      const summary = JSON.parse(answer.stdout).runs[0];
+      assert.equal(summary.blocks.find((b) => b.id === 'B1').findings, denies ? 1 : 0);
+    }
+  }
+});
+
+test('B273 status_direct F2: block order is explicit and independent of record insertion order', async (t) => {
+  const f = await fixture(t);
+  for (const ids of [['B10', 'B2', 'B1', 'B01', 'B001'], ['B001', 'B01', 'B1', 'B2', 'B10']]) {
+    await save(f, record(f, 'r-direct', { blocks: Object.fromEntries(ids.map((id) => [id, {}])) }));
+    for (const args of [['--run', 'r-direct'], ['--json', '--run', 'r-direct']]) await parity(f, args);
+    const answer = native(f, ['--json', '--run', 'r-direct']);
+    assert.equal(answer.code, 0);
+    assert.deepEqual(JSON.parse(answer.stdout).runs[0].blocks.map((b) => b.id), ['B001', 'B01', 'B1', 'B2', 'B10']);
+  }
 });
