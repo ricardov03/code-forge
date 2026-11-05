@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -10,7 +10,24 @@ import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const BINARY = path.join(ROOT, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+// Installation tests rename/chmod the release binary in parallel. Build directly
+// into a private package layout so every native spawn and Node handover is isolated.
+const pkg = await mkdtemp(path.join(os.tmpdir(), `cf-review-wait-package-${process.pid}-`));
+const BINARY = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+after(() => rm(pkg, { recursive: true, force: true }));
+before(async () => {
+  await mkdir(path.dirname(BINARY), { recursive: true });
+  await mkdir(path.join(pkg, 'bin'));
+  await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(pkg, 'bin/code-forge.mjs'));
+  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
+  const cache = path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build');
+  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', BINARY, './cmd/code-forge-native'], {
+    cwd: path.join(ROOT, 'native'), encoding: 'utf8', timeout: 120_000,
+    env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: cache },
+  });
+  assert.equal(build.status, 0, 'private parity binary builds: ' + (build.error?.message ?? build.stderr));
+});
 const TICKET = 'abcdef0123456789abcdef01';
 const WAIT = ['review-file', '--wait', TICKET];
 const NO_NODE = '/nonexistent-code-forge-node';
