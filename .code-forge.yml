@@ -1,0 +1,43 @@
+version: 1
+project:
+  name: code-forge
+  slug: code-forge
+provider: anthropic
+levels:
+  L0:
+    model: claude-haiku-4-5-20251001
+  L1:
+    model: claude-sonnet-5
+  L2:
+    model: claude-opus-5-5
+  L3:
+    model: claude-fable-5-1
+caps:
+  coders: 2
+review:
+  multimodel: false
+engine: auto
+harnesses:
+  - claude
+system1:
+  fallback: rules
+gates:
+  test:
+    - sh
+    - test/helpers/run-suite.sh
+    - "{test_files}"
+  lint: null
+  types:
+    - npm
+    - run
+    - typecheck
+  format: null
+proof:
+  tiers:
+    high:
+      paths: []
+  isolation: export
+  export:
+    link_dirs:
+      - node_modules
+    copy_untracked: []

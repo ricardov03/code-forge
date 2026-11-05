@@ -107,6 +107,12 @@ refuses `coder report FAILED: no review-file ticket id for <files>` only when, u
 file the review gate accepts has no reviewed line from the close and no hand line for it in the
 report.
 
+Block land gates use `{test_files}` to run impacted tests: changed tests, stem-paired
+tests and dependent tests, with the documented scope fallbacks above. The suite wrapper
+keeps its sandbox and both leak checks for scoped runs. The orchestrator runs `npm test`
+once per wave before push to check the full suite; plain `code-forge gates run` also
+keeps full scope when no run or block is given.
+
 ### Block help
 
 Every `block <verb>` accepts `--help` or `-h`, prints that verb's usage and exits 0 without

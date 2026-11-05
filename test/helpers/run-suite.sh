@@ -1,4 +1,62 @@
 #!/bin/sh
+# Validate explicit test paths before starting either leak-check step. Resolve
+# existing ancestors too, so a symlink cannot lead outside the suite's repo.
+# All runner paths below are relative to the caller's working directory, even
+# when this wrapper lives in another checkout (for example a fixture suite).
+cf_suite_root=$(pwd -P) || exit 2
+cf_validate_path() {
+  node -e '
+    const fs = require("node:fs"), path = require("node:path");
+    function canonical(p) {
+      try { return fs.realpathSync(p); } catch (err) {
+        if (err.code !== "ENOENT" && err.code !== "ENOTDIR") throw err;
+        const parent = path.dirname(p);
+        if (parent === p) throw err;
+        return path.join(canonical(parent), path.basename(p));
+      }
+    }
+    const root = process.argv[1];
+    try {
+      for (const file of process.argv.slice(2)) {
+        if (file.split("/").includes("..")) throw new Error("traversal");
+        const relative = path.relative(root, canonical(path.resolve(root, file)));
+        if (relative === ".." || relative.startsWith("../") || path.isAbsolute(relative)) throw new Error("outside");
+      }
+    } catch {
+      console.error("run-suite: test paths must stay inside the repo (no ..)");
+      process.exit(2);
+    }
+  ' "$cf_suite_root" "$1" >/dev/null || exit 2
+}
+cf_has_tests=false
+cf_flag_value=false
+cf_options=true
+for cf_arg do
+  if [ "$cf_flag_value" = true ]; then
+    cf_flag_value=false
+    continue
+  fi
+  if [ "$cf_options" = true ]; then
+    case "$cf_arg" in
+      --) cf_options=false; continue ;;
+      --test-name-pattern|--test-skip-pattern|--test-reporter|--test-reporter-destination|\
+      --test-timeout|--test-concurrency|--test-shard|--test-isolation|--experimental-test-isolation|\
+      --test-coverage-branches|--test-coverage-functions|--test-coverage-lines|\
+      --test-coverage-include|--test-coverage-exclude|--test-global-setup|\
+      --test-rerun-failures|--test-random-seed|--experimental-test-tag-filter|\
+      --import|--require|-r|--conditions|-C|--loader|--experimental-loader)
+        cf_flag_value=true; continue ;;
+      -*) continue ;;
+    esac
+  fi
+  cf_validate_path "$cf_arg"
+  # Preserve the B115 bare-wildcard argv contract: it is forwarded verbatim,
+  # but does not replace the default suite glob. Other paths select the scope.
+  if [ "$cf_arg" != '*' ]; then
+    cf_has_tests=true
+  fi
+done
+
 # Re-enter only after sandbox-exec has installed the profile. The two no-leak
 # steps and the test runner must all inherit the same kernel restrictions.
 if [ "${1:-}" = --suite-sandbox-active ]; then
@@ -55,8 +113,11 @@ else
 fi
 
 export CODE_FORGE_TEST_SUITE=${CODE_FORGE_TEST_SUITE:-$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')}
+if [ "$cf_has_tests" = false ]; then
+  set -- "$@" 'test/**/*.test.mjs'
+fi
 CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && {
-  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@" 'test/**/*.test.mjs'
+  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@"
   cf_test_status=$?
   CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs
   cf_leak_status=$?
