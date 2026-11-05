@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.18.0] — 2026-11-05
+
 ### Added
 
 - Go runs `logs path`, `logs [--last] [--json]` and `logs summary`; `logs clear` and `logs report` hand over to Node (B247)

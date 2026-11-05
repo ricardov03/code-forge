@@ -37,7 +37,7 @@ code-forge version
 Or pin one version in a project that has a `package.json`:
 
 ```sh
-npm install --save-dev --save-exact @codedology/code-forge@0.17.0
+npm install --save-dev --save-exact @codedology/code-forge@0.18.0
 npx code-forge version
 ```
 
@@ -47,7 +47,7 @@ when you install. The unscoped npm package is a different tool.
 **You see** — Output shortened (local CLI check):
 
 ```text
-@codedology/code-forge 0.17.0
+@codedology/code-forge 0.18.0
 ```
 
 **What changed**
