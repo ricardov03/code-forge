@@ -86,11 +86,26 @@ func gatesParse(args []string) (gatesOptions, string) {
 	return o, ""
 }
 func runGates(args []string) int {
+	gatesLastMessage = nil
 	if len(args) == 0 || args[0] != "run" {
 		return gatesHandover(args)
 	}
 	if os.Getenv("HOME") == "" {
 		return gatesHandover(args)
+	}
+	_, hasRun, _ := gatesFlag(args, "--run")
+	_, hasBlock, _ := gatesFlag(args, "--block")
+	if !hasRun && !hasBlock {
+		return gatesHandover(args)
+	}
+	if v, given, ok := gatesFlag(args, "--timeout-ms"); given && ok {
+		trimmed := strings.TrimSpace(v)
+		if strings.HasPrefix(trimmed, "0x") || strings.HasPrefix(trimmed, "0X") || strings.HasPrefix(trimmed, "0b") || strings.HasPrefix(trimmed, "0B") || strings.HasPrefix(trimmed, "0o") || strings.HasPrefix(trimmed, "0O") {
+			return gatesHandover(args)
+		}
+		if n, e := strconv.ParseFloat(trimmed, 64); e == nil && n > 2147483647 && !math.IsInf(n, 0) {
+			return gatesHandover(args)
+		}
 	}
 	for i := 1; i < len(args); i++ {
 		s := args[i]

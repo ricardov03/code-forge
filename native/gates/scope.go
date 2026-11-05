@@ -225,6 +225,7 @@ func ChangedEmptyGraph(old map[string]any, current ledger.Object, fallback Scope
 			}
 		}
 		if !paired {
+			s.Files = []string{}
 			fallbackFiles()
 			s.Reason = "unpaired"
 			s.Files = unique(s.Files)

@@ -166,7 +166,7 @@ func Resolve(cwd string, configured map[string]any) (Plan, bool) {
 				c.Env = map[string]string{}
 				for k, v := range env {
 					s, ok := v.(string)
-					if !ok {
+					if !ok || k == "" || strings.ContainsAny(k, "=\x00") || strings.ContainsRune(s, 0) {
 						return p, false
 					}
 					c.Env[k] = s

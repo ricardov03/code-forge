@@ -6,9 +6,11 @@ import (
 	"fmt"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"io"
 	"math"
 	"os"
 	"os/exec"
+	"path/filepath"
 	"regexp"
 	"sort"
 	"strconv"
@@ -296,7 +298,12 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 	return results, all && ctx.Err() == nil, nil
 }
 func execute(ctx context.Context, argv []string, env map[string]string, cwd, run string, timeout float64, failOnStdout bool) ledger.Object {
-	cmd := exec.Command(argv[0], argv[1:]...)
+	program := Executable(cwd, &Command{Argv: argv, Env: env})
+	if program == "" {
+		program = argv[0]
+	}
+	cmd := exec.Command(program, argv[1:]...)
+	cmd.Args[0] = argv[0]
 	cmd.Dir = cwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	vars := map[string]string{}
@@ -315,7 +322,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 	} else {
 		delete(vars, "CODE_FORGE_OWNER_START_TIME")
 	}
-	if vars["CODE_FORGE_RUN_ID"] == "" {
+	if _, present := vars["CODE_FORGE_RUN_ID"]; !present {
 		vars["CODE_FORGE_RUN_ID"] = run
 	}
 	for k, v := range vars {
@@ -327,15 +334,40 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		}
 	}
 	stdout, stderr := &boundedBuffer{kill: kill}, &boundedBuffer{kill: kill}
-	cmd.Stdout = stdout
-	cmd.Stderr = stderr
+	// Keep pipe draining independent of Wait: the leader can exit while a
+	// surviving group member still holds its inherited output descriptors.
+	outRead, outWrite, outErr := os.Pipe()
+	errRead, errWrite, errErr := os.Pipe()
+	if outErr != nil || errErr != nil {
+		if outRead != nil {
+			outRead.Close()
+			outWrite.Close()
+		}
+		if errRead != nil {
+			errRead.Close()
+			errWrite.Close()
+		}
+		return ledger.Object{{Key: "ok", Value: false}, {Key: "code", Value: nil}, {Key: "stdout", Value: ""}, {Key: "stderr", Value: "gate terminated: pipe error\n"}, {Key: "reason", Value: "spawn-error"}, {Key: "message", Value: "gate terminated: pipe error"}}
+	}
+	defer outRead.Close()
+	defer errRead.Close()
+	cmd.Stdout = outWrite
+	cmd.Stderr = errWrite
+	var drains sync.WaitGroup
+	drains.Add(2)
+	go func() { defer drains.Done(); _, _ = io.Copy(stdout, outRead) }()
+	go func() { defer drains.Done(); _, _ = io.Copy(stderr, errRead) }()
 	var code any
 	reason, diagnostic, message := "", "", ""
 	timed := false
 	if e := cmd.Start(); e != nil {
+		outWrite.Close()
+		errWrite.Close()
 		reason = "spawn-error"
 		diagnostic = "gate terminated: spawn " + argv[0] + " ENOENT"
 	} else {
+		outWrite.Close()
+		errWrite.Close()
 		done := make(chan error, 1)
 		go func() { done <- cmd.Wait() }()
 		duration := time.Duration(timeout * float64(time.Millisecond))
@@ -368,7 +400,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 			}
 		}
 		timer.Stop()
-		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGTERM)
+		stopRemaining(cmd.Process.Pid)
 		if cmd.ProcessState.ExitCode() >= 0 {
 			code = cmd.ProcessState.ExitCode()
 		} else {
@@ -386,6 +418,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		}
 		_ = err
 	}
+	drains.Wait()
 	out, errout := stdout.text(), stderr.text()
 	if timed {
 		reason = "timeout"
@@ -423,4 +456,96 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		r.Set("message", message)
 	}
 	return r
+}
+
+// Executable resolves the child's PATH, rather than Go's parent-side LookPath.
+// Its original spelling remains in the result argv and in the child's argv[0].
+func Executable(cwd string, c *Command) string {
+	cwd, _ = filepath.Abs(cwd)
+	check := func(p string) string {
+		st, e := os.Stat(p)
+		if e == nil && st.Mode().IsRegular() && st.Mode().Perm()&0111 != 0 {
+			return p
+		}
+		return ""
+	}
+	name := c.Argv[0]
+	if strings.ContainsRune(name, '/') {
+		if !filepath.IsAbs(name) {
+			name = filepath.Join(cwd, name)
+		}
+		return check(name)
+	}
+	paths, present := os.LookupEnv("PATH")
+	if !present {
+		paths = "/usr/bin:/bin"
+	}
+	if v, ok := c.Env["PATH"]; ok {
+		paths = v
+	}
+	for _, dir := range strings.Split(paths, string(os.PathListSeparator)) {
+		if !filepath.IsAbs(dir) {
+			dir = filepath.Join(cwd, dir)
+		}
+		if p := check(filepath.Join(dir, name)); p != "" {
+			return p
+		}
+	}
+	return ""
+}
+
+// Like Node's groupMembers/stopMembers, signal surviving members only after
+// checking the identity captured when the leader exited.
+func stopRemaining(pgid int) {
+	cmd := exec.Command("/bin/ps", "-A", "-o", "pid=,pgid=,lstart=")
+	cmd.Env = append(os.Environ(), "LC_ALL=C", "LANG=C")
+	data, e := cmd.Output()
+	if e != nil {
+		return
+	}
+	members := map[int]string{}
+	for _, line := range strings.Split(string(data), "\n") {
+		f := strings.Fields(line)
+		if len(f) < 3 {
+			continue
+		}
+		pid, _ := strconv.Atoi(f[0])
+		group, _ := strconv.Atoi(f[1])
+		if group == pgid && pid != pgid && pid != os.Getpid() {
+			members[pid] = strings.Join(f[2:], " ")
+		}
+	}
+	alive := func(pid int, start string) bool {
+		cmd := exec.Command("/bin/ps", "-o", "state=,lstart=", "-p", strconv.Itoa(pid))
+		cmd.Env = append(os.Environ(), "LC_ALL=C")
+		b, e := cmd.Output()
+		f := strings.Fields(string(b))
+		return e == nil && len(f) > 1 && !strings.HasPrefix(f[0], "Z") && strings.Join(f[1:], " ") == start
+	}
+	sent := map[int]string{}
+	for pid, start := range members {
+		if alive(pid, start) {
+			_ = syscall.Kill(pid, syscall.SIGTERM)
+			sent[pid] = start
+		}
+	}
+	wait := func(deadline time.Time) {
+		for len(sent) > 0 && time.Now().Before(deadline) {
+			for pid, start := range sent {
+				if !alive(pid, start) {
+					delete(sent, pid)
+				}
+			}
+			if len(sent) > 0 {
+				time.Sleep(25 * time.Millisecond)
+			}
+		}
+	}
+	wait(time.Now().Add(2 * time.Second))
+	for pid, start := range sent {
+		if alive(pid, start) {
+			_ = syscall.Kill(pid, syscall.SIGKILL)
+		}
+	}
+	wait(time.Now().Add(2 * time.Second))
 }

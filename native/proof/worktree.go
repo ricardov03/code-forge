@@ -43,6 +43,9 @@ func BlockTree(workspace string, entry ledger.Object) (*Tree, error) {
 		return nil, fmt.Errorf("the worktree %s is not a directory", p)
 	}
 	head, e := gitx.WithEnv(top, append(gitx.ChildEnv(), "GIT_CEILING_DIRECTORIES="+filepath.Dir(top)), "-C", top, "symbolic-ref", "-q", "HEAD")
+	if gitErr, ok := e.(*gitx.CommandError); ok && gitErr.Code < 0 {
+		return nil, e
+	}
 	head = strings.TrimSpace(head)
 	if e != nil || head != "refs/heads/"+branch {
 		now := "its HEAD is detached, or it is not a git worktree"
@@ -51,18 +54,26 @@ func BlockTree(workspace string, entry ledger.Object) (*Tree, error) {
 		}
 		return nil, fmt.Errorf("the worktree %s is not on its branch %s (%s)", p, branch, now)
 	}
-	common := func(dir string) string {
+	common := func(dir string) (string, error) {
 		v, e := gitx.Run(dir, "rev-parse", "--git-common-dir")
 		if e != nil {
-			return ""
+			return "", e
 		}
 		v = strings.TrimSpace(v)
 		if !filepath.IsAbs(v) {
 			v = filepath.Join(dir, v)
 		}
-		return Real(v)
+		return Real(v), nil
 	}
-	if common(top) != common(workspace) {
+	treeCommon, e := common(top)
+	if e != nil {
+		return nil, e
+	}
+	workspaceCommon, e := common(workspace)
+	if e != nil {
+		return nil, e
+	}
+	if treeCommon != workspaceCommon {
 		return nil, fmt.Errorf("the worktree %s belongs to another repository", p)
 	}
 	main, e := gitx.RepoTop(workspace)

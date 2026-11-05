@@ -52,8 +52,8 @@ async function record(f, value) {
   await mkdir(dir, { recursive: true });
   await writeFile(path.join(dir, 'fixture.json'), JSON.stringify(value));
 }
-function launch(f, args = ARGS, extra = {}) {
-  const child = spawn(BINARY, args, { cwd: f.repo, env: { ...process.env, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+function launch(f, args = ARGS, extra = {}, program = BINARY, prefix = []) {
+  const child = spawn(program, [...prefix, ...args], { cwd: f.repo, env: { ...process.env, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', (s) => { stdout += s; }); child.stderr.on('data', (s) => { stderr += s; });
   return { child, ended: once(child, 'close').then(([code, signal]) => ({ code, signal, stdout, stderr })) };
@@ -61,6 +61,15 @@ function launch(f, args = ARGS, extra = {}) {
 async function parity(f, args = ARGS, fallback = false, env = {}) {
   const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE, ...env } });
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero stream, exit and state differences`);
+}
+const normalizeRows = (bytes) => bytes.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<time>').replace(/("(?:total_)?duration_ms":)\d+/g, '$1<duration>');
+async function rowBytes(f, args) {
+  const file = path.join(f.home, '.code-forge/ledger/fixture.jsonl');
+  const node = await launch(f, args, {}, process.execPath, [path.join(ROOT, 'bin/code-forge.mjs')]).ended;
+  const expected = await readFile(file, 'utf8'); await rm(file);
+  const native = await launch(f, args).ended;
+  assert.equal(native.code, node.code, 'raw-row comparison preserves the gate exit');
+  assert.equal(normalizeRows(await readFile(file, 'utf8')), normalizeRows(expected), 'all ledger row bytes match after only timestamp and duration normalization');
 }
 
 test('gates run: native speed and byte parity for gates, scope, lock, worktrees, usage and fallback', async () => {
@@ -76,12 +85,19 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
     { test: command('process.exit(3)'), lint: command('console.log("after red")') },
     { test: command('setTimeout(()=>{}, 10000)') },
     { test: { argv: command('console.log(process.env.TOKEN, process.env.MODE, process.env.CI, process.env.npm_config_yes)'), env: { TOKEN: 'secret-value-123', MODE: 'test' } } },
+    { test: { argv: command('console.log(process.env.TOKEN)'), env: { TOKEN: 'gate.done' } } },
     { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}') },
     { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}'), full_suite_threshold_files: 0 },
     { kinds: { code: [] } },
   ]) {
     const f = await fixture(gates);
     await parity(f, [...ARGS, '--json', '--timeout-ms', '100']);
+    await rowBytes(f, [...ARGS, '--json', '--timeout-ms', '100']);
+    if (!Array.isArray(gates.test) && gates.test?.env?.TOKEN === 'secret-value-123') {
+      const output = JSON.parse((await launch(f).ended).stdout);
+      assert.equal(output.results[0].stdout, '[REDACTED] test 1 false\n', 'long env value masked, short value and child defaults retained');
+      assert.deepEqual(output.results[0].env_keys, ['MODE', 'TOKEN'], 'exactly two sorted env names');
+    }
   }
   const scoped = { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}') };
   const noTests = await fixture(scoped, { test_files: [] }); await parity(noTests);
@@ -104,10 +120,12 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
     await parity(green, [...ARGS, ...flags], false, { CODE_FORGE_NO_ERROR_LOG: '0' });
   }
   for (const args of [['gates', 'run', '--run', 'fixture'], ['gates', 'run', '--block', 'B1']]) await parity(green, args);
-  for (const [gates, block, args] of [
+  /** @type {[Record<string, any>, Record<string, any>, string[]][]} */
+  const handovers = [
     [{ repeat_new_tests: 2 }, {}, ARGS], [{ custom: [{ name: 'extra', argv: command('') }] }, {}, ARGS],
-    [{}, { kind: 'light' }, ARGS], [{ rerun_failed: 1 }, {}, ARGS], [{}, {}, ['gates', 'detect']], [{}, {}, ['gates', 'run']],
-  ]) {
+    [{}, { kind: 'light' }, ARGS], [{ rerun_failed: 1 }, {}, ARGS], [{ test: ['/nonexistent-gate-tool'] }, {}, ARGS], [{}, {}, ['gates', 'detect']], [{}, {}, ['gates', 'run']],
+  ];
+  for (const [gates, block, args] of handovers) {
     const f = await fixture(gates, block);
     assert.equal((await launch(f, args).ended).code, 127, 'unported case requires Node');
     await parity(f, args, true);
@@ -140,7 +158,7 @@ test('gates run cancellation stops the gate and records exactly one cancelled ro
       try { pid = Number(await readFile(path.join(f.repo, 'child.pid'), 'utf8')); break; } catch { await delay(10); }
     }
     assert.ok(pid > 1, `${signal}: gate starts`);
-    running.child.kill(signal);
+    running.child.kill(/** @type {NodeJS.Signals} */ (signal));
     const result = await running.ended;
     assert.equal(result.code, 1, `${signal}: cancelled exit`);
     assert.notEqual(result.stdout, '', `cancelled output: ${result.stderr}`);
@@ -149,5 +167,23 @@ test('gates run cancellation stops the gate and records exactly one cancelled ro
     assert.throws(() => process.kill(pid, 0), /ESRCH/, `${signal}: gate child reaped`);
     const rows = (await readFile(path.join(f.home, '.code-forge/ledger/fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(rows.length, 1); assert.equal(rows[0].event, 'gate.cancelled'); assert.equal(rows[0].cancelled, true);
+    const ledgerFile = path.join(f.home, '.code-forge/ledger/fixture.jsonl');
+    const nativeRows = await readFile(ledgerFile, 'utf8');
+    await rm(ledgerFile); await rm(path.join(f.repo, 'child.pid'));
+    // Compare a real process signal to Node's AbortSignal path. Trigger the
+    // latter through a fixture marker so exec's signal-forwarding listener
+    // cannot race the abort and change which signal the child observes.
+    const script = `import { existsSync } from 'node:fs'; import { runGatesVerb } from ${JSON.stringify(new URL('../../src/cli/gates.mjs', import.meta.url).href)}; const c = new AbortController(); const timer = setInterval(() => { if (existsSync('abort.marker')) { clearInterval(timer); c.abort(); } }, 5); try { process.exitCode = await runGatesVerb(${JSON.stringify(ARGS.slice(1))}, { signal: c.signal }); } finally { clearInterval(timer); }`;
+    const node = launch(f, [], {}, process.execPath, ['--input-type=module', '-e', script]);
+    let nodePid;
+    for (let i = 0; i < 200; i++) {
+      try { nodePid = Number(await readFile(path.join(f.repo, 'child.pid'), 'utf8')); break; } catch { await delay(10); }
+    }
+    assert.ok(nodePid > 1, 'Node reference gate starts before abort');
+    await writeFile(path.join(f.repo, 'abort.marker'), 'abort');
+    const reference = await node.ended;
+    assert.equal(reference.code, result.code, `${signal}: same exit as Node abort`);
+    assert.equal(normalizeRows(result.stdout), normalizeRows(reference.stdout), `${signal}: stdout bytes match Node abort`);
+    assert.equal(normalizeRows(nativeRows), normalizeRows(await readFile(ledgerFile, 'utf8')), `${signal}: cancelled row bytes match Node abort`);
   }
 });

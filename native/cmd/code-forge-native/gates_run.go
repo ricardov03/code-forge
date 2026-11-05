@@ -4,13 +4,16 @@ import (
 	"context"
 	"crypto/sha256"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/state"
+	"math"
 	"os"
 	"os/signal"
 	"path/filepath"
@@ -101,7 +104,7 @@ func gatesScrubber(slug string) (func(string) string, func() []any) {
 	}
 	counts := func() []any {
 		out := []any{}
-		for _, rule := range []string{"op_ref", "project_path", "home", "email", "project_name", "item_id"} {
+		for _, rule := range []string{"home", "project_path", "project_name", "email", "op_ref", "item_id"} {
 			if tally[rule] > 0 {
 				out = append(out, ledger.Object{{Key: "rule", Value: rule}, {Key: "count", Value: tally[rule]}})
 			}
@@ -281,8 +284,29 @@ func gatesNumber(v any) (float64, bool) {
 	return 0, false
 }
 func gatesNative(args []string, o gatesOptions) (int, bool) {
+	if os.Getenv("CODE_FORGE_TMP_ROOT") == "" {
+		here, _ := os.Getwd()
+		routerConfig, _ := config.Load(here)
+		tmp, _ := routerConfig["tmp"].(map[string]any)
+		if root, ok := tmp["root"].(string); ok && root != "" {
+			return 0, false
+		}
+	}
 	home := os.Getenv("HOME")
 	record, readErr := state.ReadRun(home, o.run)
+	if readErr != nil {
+		var stateErr *state.Error
+		if !errors.As(readErr, &stateErr) {
+			return 0, false
+		}
+	} else {
+		if record.Get("run_id") != o.run {
+			return 0, false
+		}
+		if _, ok := record.Get("workspace").(string); !ok {
+			return 0, false
+		}
+	}
 	block := gatesObj(gatesObj(record.Get("blocks")).Get(o.block))
 	if block.Get("kind") == "light" {
 		return 0, false
@@ -295,6 +319,11 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 		var e error
 		tree, e = proof.BlockTree(workspace, block)
 		if e != nil {
+			var commandError *gitx.CommandError
+			var gitError *gitx.Error
+			if errors.As(e, &commandError) || errors.As(e, &gitError) {
+				return 0, false
+			}
 			return gatesError(fmt.Errorf("block %s of run %s: %s; no gate was run", o.block, o.run, e))
 		}
 		if tree != nil {
@@ -339,6 +368,9 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 	if n, ok := gatesNumber(configured["full_suite_threshold_files"]); ok && n >= 0 && n == float64(int(n)) {
 		threshold = int(n)
 	}
+	if n, ok := gatesNumber(configured["full_suite_threshold_files"]); ok && n >= float64(math.MaxInt64) {
+		return 0, false
+	}
 	kind, safe := gatesKind(block)
 	if !safe {
 		return 0, false
@@ -356,6 +388,9 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 				if !gates.Has(gates.Order, name) {
 					return 0, false
 				}
+				if value, present := configured[name]; present && value == nil {
+					return 0, false
+				}
 			}
 		}
 		if names, ok := kinds[kind].([]any); ok {
@@ -365,6 +400,13 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 		}
 	} else if configured["kinds"] != nil {
 		return 0, false
+	}
+	// Preserve platform-specific spawn diagnostics in Node. Resolve against the
+	// child's cwd and PATH, including configured environment overrides.
+	for name, command := range p.Commands {
+		if command != nil && (!p.Restricted || gates.Has(p.Names, name)) && !gatesExecutable(cwd, command) {
+			return 0, false
+		}
 	}
 	// A rerun-enabled test can recover a failure. Decide before any writes or
 	// child execution, so a fallback never repeats an already-run command.
@@ -379,7 +421,14 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 			return 0, false
 		}
 	}
-	listed, listErr := gates.List(cwd)
+	var listed []string
+	var listErr error
+	if gates.Scoped(p) || o.changed {
+		listed, listErr = gates.List(cwd)
+		if listErr != nil {
+			return 0, false
+		}
+	}
 	if o.changed {
 		if listErr != nil {
 			return 0, false
@@ -388,7 +437,7 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 			if !gates.IsTest(file) && !strings.HasSuffix(file, "Tests.swift") {
 				continue
 			}
-			if !gatesEmptyTest(cwd, file) {
+			if strings.HasPrefix(file, "test/config/") || strings.HasPrefix(file, "test/doctor/") || !gatesEmptyTest(cwd, file) {
 				return 0, false
 			}
 		}
@@ -398,6 +447,13 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 		return 0, false
 	}
 	secrets := gates.Masks(p)
+	started := false
+	failure := func(e error) (int, bool) {
+		if started {
+			return gatesError(fmt.Errorf("%s", gates.Mask(e.Error(), secrets)))
+		}
+		return gatesError(e)
+	}
 	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	defer cancel()
 	gatesWarn(cwd)
@@ -440,21 +496,30 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 				// Malformed/foreign baselines require Node's full validation.
 				if old != nil {
 					if len(old) > 200 {
-						return fmt.Errorf("unsupported changed baseline")
+						old = nil
 					}
 					for f, v := range old {
 						hash, ok := v.(string)
-						if !gates.SafeFile(f) || !ok || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(hash) {
+						entries, _ := b.Get("owned_files").([]any)
+						kinds, _ := b.Get("owned_kinds").(ledger.Object)
+						if !gates.SafeFile(f) || !owned.OwnsFile(entries, kinds, f) || !ok || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(hash) {
 							old = nil
 							break
 						}
 					}
 				}
-				scope = gates.ChangedEmptyGraph(old, current, scope, listed, threshold)
+				candidates := []string{}
+				for _, file := range listed {
+					if _, e := os.Stat(filepath.Join(cwd, file)); e == nil {
+						candidates = append(candidates, file)
+					}
+				}
+				scope = gates.ChangedEmptyGraph(old, current, scope, candidates, threshold)
 				changedScope = &scope
 			}
 		}
 		var err error
+		started = true
 		results, all, err = gates.Run(ctx, p, cwd, o.run, timeout, scope)
 		if err != nil {
 			return err
@@ -473,7 +538,7 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 		return nil
 	})
 	if e != nil {
-		return gatesError(e)
+		return failure(e)
 	}
 	if holder != "" {
 		gatesSay(ledger.Object{{Key: "result", Value: "proof.busy"}, {Key: "holder", Value: holder}}, nil)
@@ -495,7 +560,7 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 		owner.Set("worktree", tree.Path)
 	}
 	appendRow := func(row ledger.Object) error {
-		_, e := ledger.AppendObject(filepath.Join(home, ".code-forge", "ledger"), slug, gates.Redact(row, secrets).(ledger.Object), ledger.DefaultRotateAtBytes)
+		_, e := ledger.AppendObject(filepath.Join(home, ".code-forge", "ledger"), slug, row, ledger.DefaultRotateAtBytes)
 		return e
 	}
 	summaries := []any{}
@@ -525,7 +590,7 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 				row.Set("reason", r.Get("reason"))
 			}
 			if e := appendRow(row); e != nil {
-				return gatesError(e)
+				return failure(e)
 			}
 		}
 	}
@@ -552,7 +617,7 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 			row.Set("files", files)
 		}
 		if e := appendRow(row); e != nil {
-			return gatesError(e)
+			return failure(e)
 		}
 	}
 	out := ledger.Object{{Key: "stack", Value: p.Stack}}
@@ -632,11 +697,32 @@ func gatesEmptyTest(cwd, file string) bool {
 		return false
 	}
 	s := strings.TrimSpace(string(b))
-	return s == "" || regexp.MustCompile(`(?s)^(/\*.*?\*/\s*|//[^\n]*(\n|$)\s*)*$`).MatchString(s)
+	for s != "" {
+		if strings.HasPrefix(s, "//") {
+			end := strings.IndexByte(s, '\n')
+			if end < 0 {
+				return true
+			}
+			s = s[end+1:]
+		} else if strings.HasPrefix(s, "/*") {
+			end := strings.Index(s[2:], "*/")
+			if end < 0 {
+				return false
+			}
+			s = s[end+4:]
+		} else {
+			return false
+		}
+		s = strings.TrimSpace(s)
+	}
+	return true
+}
+func gatesExecutable(cwd string, c *gates.Command) bool {
+	return c.Argv[0] == "{test_files}" || c.Argv[0] == "{changed_files}" || gates.Executable(cwd, c) != ""
 }
 func gatesWarn(cwd string) {
 	dirs := []string{proof.Real(cwd)}
-	if out, e := gitx.Run(cwd, "rev-parse", "--show-toplevel", "--git-common-dir"); e == nil {
+	if out, e := gitx.WithEnv(cwd, os.Environ(), "rev-parse", "--show-toplevel", "--git-common-dir"); e == nil {
 		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
 		if len(lines) > 0 {
 			dirs = append(dirs, proof.Real(lines[0]))
