@@ -91,7 +91,7 @@ func runReviewFileWait(args []string) int {
 	}
 	flags, usage, ok := reviewWaitFlags(args)
 	if !ok {
-		return reviewWaitHandover(args)
+		return runReviewEnqueue(args)
 	}
 	if usage != "" {
 		return reviewWaitUsageError(args, usage)
