@@ -31,7 +31,7 @@ func init() { blockSubs["close"] = runBlockClose }
 
 // ready stays with Node: a preview collects fatal and nonfatal blockers together,
 // whereas a real close stops immediately on a failed pin or tampered gate row.
-func runBlockClose(args []string) int { return blockCloseStep(args, nil) }
+func runBlockClose(args []string) int { return closeWithFlags(args) }
 
 func blockCloseStep(args []string, step *landStep) int {
 	stdout, stderr := step.writers()
@@ -61,11 +61,11 @@ func blockCloseStep(args []string, step *landStep) int {
 	usage := func(text string) int { return fail(&state.Error{Code: "usage", Message: text}) }
 	for _, arg := range args {
 		name, _, _ := strings.Cut(arg, "=")
-		if slices.Contains([]string{"--decide", "--no-require-reviews", "--auto-claim", "--remove-worktree", "--help", "-h"}, name) {
+		if slices.Contains([]string{"--decide", "--help", "-h"}, name) {
 			return fallback(handoverFlagReason("close", name, hCloseUnsupportedFlag))
 		}
 	}
-	flags, pos, message := blockFlags(args)
+	flags, pos, message := closeFlags(args)
 	if message != "" {
 		return usage(message)
 	}
@@ -107,6 +107,9 @@ func blockCloseStep(args []string, step *landStep) int {
 	}
 	if entry.Get("status") != "open" {
 		return fail(&state.Error{Code: "no-block", Message: fmt.Sprintf("block %s is not open in run %s", id, run)})
+	}
+	if flags["remove-worktree"] == true && entry.Get("worktree") == nil {
+		return usage(fmt.Sprintf("block %s has no worktree (proof.isolation is not worktree); --remove-worktree does not apply", id))
 	}
 	if entry.Get("kind") == "light" {
 		return fallback(hCloseLight)
@@ -165,6 +168,14 @@ func blockCloseStep(args []string, step *landStep) int {
 			return fallback(hCloseWorktreePrefix)
 		}
 		top, base, inTree = real, sha, true
+	}
+	if flags["no-require-reviews"] == true {
+		// A terminal confirmation remains a human close, owned by Node. Pipes
+		// refuse before confirmation, expiry, claims, or any signed writes.
+		if closeMayHaveTerminal() {
+			return fallback()
+		}
+		return usage("--no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)")
 	}
 	all, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), blockString(record.Get("project")))
 	if err != nil {
@@ -433,6 +444,29 @@ func blockCloseStep(args []string, step *landStep) int {
 			fmt.Fprint(stdout, text)
 		}
 	}
+	var removedTree ledger.Object
+	if result.OK && result.Status != "awaiting_human_check" && flags["remove-worktree"] == true {
+		tree := blockObject(entry.Get("worktree"))
+		why := blockclose.RemoveWorktree(workspace, blockString(tree.Get("path")))
+		row := ledger.Object{{Key: "event", Value: "worktree.removed"}, {Key: "block", Value: id}, {Key: "path", Value: tree.Get("path")}}
+		if why == "" {
+			row.Set("branch", tree.Get("branch"))
+		} else {
+			row.Set("event", "worktree.remove_failed")
+			row.Set("reason", why)
+		}
+		if _, err := state.WriteSigned(home, run, row); err != nil {
+			return publishError(err)
+		}
+		if why != "" {
+			fmt.Fprintf(stderr, "block %s worktree NOT removed: %s — the block stays closed; the tree stays at %s (commit or clean it, then git worktree remove it)\n", id, why, tree.Get("path"))
+			return 1
+		}
+		if !jsonFlag {
+			fmt.Fprintf(stdout, "block %s worktree removed: %s (branch %s kept)\n", id, tree.Get("path"), tree.Get("branch"))
+		}
+		removedTree = ledger.Object{{Key: "removed", Value: true}, {Key: "path", Value: tree.Get("path")}, {Key: "branch", Value: tree.Get("branch")}}
+	}
 	if jsonFlag {
 		var why any
 		if result.Reason != "" {
@@ -467,6 +501,9 @@ func blockCloseStep(args []string, step *landStep) int {
 			}
 			if len(lines) > 0 {
 				out.Set("reviewed", lines)
+			}
+			if removedTree != nil {
+				out.Set("worktree", removedTree)
 			}
 		}
 		data, _ := ledger.Stringify(out, false)
