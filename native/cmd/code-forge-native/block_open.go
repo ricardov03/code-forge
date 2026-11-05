@@ -24,6 +24,8 @@ func init() { blockSubs["open"] = runBlockOpen }
 // Keep the original argv until every pre-publication check has been mapped.
 func runBlockOpen(args []string) int {
 	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"open"}, args...), reason) }
+	var flags map[string]any
+	var id string
 	failure := func(err error) int {
 		var publishing *blockops.PublicationError
 		if errors.As(err, &publishing) {
@@ -38,6 +40,10 @@ func runBlockOpen(args []string) int {
 		if reviewWaitLogging() || !errors.As(err, &se) && !errors.As(err, &ge) {
 			return fallback(hOpenErrorLog)
 		}
+		if se != nil && flags["json"] == true && id != "" && slices.Contains([]string{"after-not-done", "bad-after", "outcome-not-ready", "bad-after-outcome"}, se.Code) {
+			out, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "refused"}, {Key: "code", Value: se.Code}, {Key: "message", Value: se.Message}}, false)
+			fmt.Fprintln(os.Stdout, string(out))
+		}
 		fmt.Fprintln(os.Stderr, "block open:", err.Error())
 		if se != nil && se.Code == "usage" {
 			return 2
@@ -45,7 +51,6 @@ func runBlockOpen(args []string) int {
 		return 1
 	}
 	usage := func(message string) int { return failure(&state.Error{Code: "usage", Message: message}) }
-	hasLevel := false
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
 			return fallback(hOpenHelp)
@@ -54,17 +59,13 @@ func runBlockOpen(args []string) int {
 			continue
 		}
 		name, _, _ := strings.Cut(arg[2:], "=")
-		if name == "level" {
-			hasLevel = true
-		}
-		if !slices.Contains([]string{"run", "level", "owned", "acceptance", "tests", "brief", "base", "attempt", "lines", "kind", "json", "remove-worktree"}, name) {
+		if !slices.Contains([]string{"run", "level", "owned", "acceptance", "tests", "brief", "base", "attempt", "lines", "kind", "json", "remove-worktree", "after", "after-outcome"}, name) {
 			return fallback(handoverFlagReason("open", name, hOpenUnsupportedFlag))
 		}
 	}
-	if !hasLevel {
-		return fallback(hOpenNoLevel)
-	}
-	flags, positionals, message := blockFlags(args)
+	var positionals []string
+	var message string
+	flags, positionals, message = blockOpenFlags(args)
 	if message != "" {
 		return usage(message)
 	}
@@ -81,7 +82,7 @@ func runBlockOpen(args []string) int {
 	if len(positionals) == 0 || positionals[0] == "" || run == "" {
 		return usage("a block id and --run are required")
 	}
-	id := positionals[0]
+	id = positionals[0]
 	// JS regexp end anchors and inherited object keys need Node's semantics.
 	if id == "__proto__" || strings.HasSuffix(id, "\n") || strings.HasSuffix(blockString(flags["level"]), "\n") {
 		return fallback(hOpenJsSemantics)
@@ -154,6 +155,11 @@ func runBlockOpen(args []string) int {
 	if err := blockopen.WhitespacePaths(root, tests, "tests"); err != nil {
 		return failure(err)
 	}
+	cfg, _ := blockSnapshot(record)
+	level, source, decision, err := blockopen.PickLevel(home, run, id, flags, record, cfg)
+	if err != nil {
+		return failure(err)
+	}
 	// B48 is a proven no-op here: QuietExpiry excludes every grant and every
 	// active approval, so neither check takes a lock, signs a row or emits text.
 	data, err := os.ReadFile(acceptanceFile)
@@ -164,7 +170,8 @@ func runBlockOpen(args []string) int {
 	if err != nil {
 		return fallback(hOpenAcceptanceFormat)
 	}
-	opts := blockopen.Options{Home: home, Run: run, ID: id, Level: blockString(flags["level"]), Kind: blockString(flags["kind"]), Owned: files, Tests: tests, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: safe}
+	opts := blockopen.Options{Home: home, Run: run, ID: id, Level: level, Kind: blockString(flags["kind"]), Owned: files, Tests: tests, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: safe, Decision: decision}
+	opts.After, _ = flags["after"].([]string)
 	if brief, ok := flags["brief"].(string); ok {
 		absolute, err := filepath.EvalSymlinks(brief)
 		if err != nil {
@@ -187,7 +194,6 @@ func runBlockOpen(args []string) int {
 		}
 		opts.BriefPath, opts.BriefData = relative, body
 	}
-	cfg, _ := blockSnapshot(record)
 	proof := blockMap(cfg["proof"])
 	if proof["isolation"] == "worktree" {
 		wt := blockMap(proof["worktree"])
@@ -200,6 +206,15 @@ func runBlockOpen(args []string) int {
 			return fallback(hOpenWorktreeSettings)
 		}
 		opts.Settings = &worktree.Settings{Dir: blockString(wt["dir"]), Branch: branch, Base: blockString(wt["base"])}
+	}
+	if steps, ok := flags["after-outcome"].([]string); ok {
+		if err := blockopen.CheckAfter(record, id, opts.After); err != nil {
+			return failure(err)
+		}
+		opts.AfterOutcome, err = blockopen.AcceptedOutcomes(blockString(record.Get("workspace")), id, steps)
+		if err != nil {
+			return failure(err)
+		}
 	}
 	for _, name := range []string{"attempt", "lines"} {
 		if raw, ok := flags[name].(string); ok {
@@ -240,7 +255,7 @@ func runBlockOpen(args []string) int {
 	tree := blockObject(b.Get("worktree"))
 	testCount := len(tests)
 	if flags["json"] == true {
-		out := ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "open"}, {Key: "level", Value: b.Get("level")}, {Key: "asked", Value: opts.Level}, {Key: "source", Value: "flag"}, {Key: "kind", Value: b.Get("kind")}, {Key: "attempt", Value: opts.Attempt}}
+		out := ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "open"}, {Key: "level", Value: b.Get("level")}, {Key: "asked", Value: opts.Level}, {Key: "source", Value: source}, {Key: "kind", Value: b.Get("kind")}, {Key: "attempt", Value: opts.Attempt}}
 		if result.Kept > 0 {
 			out.Set("kept_claims", result.Kept)
 		}
@@ -262,6 +277,12 @@ func runBlockOpen(args []string) int {
 		if b.Get("level") != opts.Level {
 			raised = fmt.Sprintf(" (%s floor, asked %s)", blockString(b.Get("kind")), opts.Level)
 		}
+		chosen := ""
+		if source == "rules" {
+			chosen = " (rules lane)"
+		} else if source == "autopilot" {
+			chosen = " (autopilot level)"
+		}
 		testText := ""
 		if testCount > 0 {
 			plural := "s"
@@ -270,7 +291,7 @@ func runBlockOpen(args []string) int {
 			}
 			testText = fmt.Sprintf(" · %d test file%s", testCount, plural)
 		}
-		fmt.Fprintf(os.Stdout, "block %s open · %s%s · %s · attempt %d · base %s%s\n", id, blockString(b.Get("level")), raised, blockString(b.Get("kind")), opts.Attempt, blockString(b.Get("base_sha"))[:12], testText)
+		fmt.Fprintf(os.Stdout, "block %s open · %s%s%s · %s · attempt %d · base %s%s\n", id, blockString(b.Get("level")), raised, chosen, blockString(b.Get("kind")), opts.Attempt, blockString(b.Get("base_sha"))[:12], testText)
 		if result.Kept > 0 {
 			fmt.Fprintf(os.Stdout, "kept claims: %d\n", result.Kept)
 		}

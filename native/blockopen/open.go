@@ -1,6 +1,7 @@
 package blockopen
 
 import (
+	"crypto/rand"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -27,6 +28,9 @@ type Options struct {
 	BaseExplicit                                                          bool
 	Settings                                                              *worktree.Settings
 	Safe                                                                  func(ledger.Object) bool
+	After                                                                 []string
+	AfterOutcome                                                          []any
+	Decision                                                              ledger.Object
 }
 type Result struct {
 	Block   ledger.Object
@@ -189,6 +193,9 @@ func Open(o Options) (result Result, err error) {
 		if status == "awaiting_human_check" {
 			return nil, refusal("already-open", "block "+o.ID+" is awaiting a human check")
 		}
+		if err := CheckAfter(*record, o.ID, o.After); err != nil {
+			return nil, err
+		}
 		kept := []string{}
 		if o.Attempt > 1 {
 			var err error
@@ -267,7 +274,21 @@ func Open(o Options) (result Result, err error) {
 		}
 		entry := ledger.Object{{Key: "block", Value: o.ID}, {Key: "base_sha", Value: base}, {Key: "base_branch", Value: baseBranch}, {Key: "owned_files", Value: files}, {Key: "owned_kinds", Value: kinds}, {Key: "level", Value: level}, {Key: "kind", Value: kind}, {Key: "attempt", Value: o.Attempt}, {Key: "opened_at", Value: now}, {Key: "acceptance", Value: acceptance}, {Key: "lines_forecast", Value: o.Lines}, {Key: "status", Value: "open"}, {Key: "tree_at_open", Value: treeOpen}}
 		if o.Tests != nil {
-			entry.Set("test_files", o.Tests)
+			tests := []any{}
+			for _, file := range o.Tests {
+				tests = append(tests, file)
+			}
+			entry.Set("test_files", tests)
+		}
+		if o.After != nil {
+			after := []any{}
+			for _, dependency := range unique(o.After) {
+				after = append(after, dependency)
+			}
+			entry.Set("after", after)
+		}
+		if o.AfterOutcome != nil {
+			entry.Set("after_outcome", o.AfterOutcome)
 		}
 		if made != nil {
 			entry.Set("worktree", made.Record)
@@ -287,6 +308,18 @@ func Open(o Options) (result Result, err error) {
 		blocks.Set(o.ID, entry)
 		record.Set("blocks", blocks)
 		rows := []ledger.Object{}
+		if o.Decision != nil {
+			uuid := make([]byte, 16)
+			if _, err := rand.Read(uuid); err != nil {
+				return nil, err
+			}
+			uuid[6], uuid[8] = uuid[6]&0x0f|0x40, uuid[8]&0x3f|0x80
+			decision := append(ledger.Object{}, o.Decision...)
+			decision.Set("event", "decision")
+			decision.Set("decision_id", fmt.Sprintf("%x-%x-%x-%x-%x", uuid[:4], uuid[4:6], uuid[6:8], uuid[8:10], uuid[10:]))
+			decision.Set("block", o.ID)
+			rows = append(rows, decision)
+		}
 		if made != nil && made.Created {
 			rows = append(rows, ledger.Object{{Key: "event", Value: "worktree.created"}, {Key: "block", Value: o.ID}, {Key: "path", Value: made.Record.Get("path")}, {Key: "branch", Value: made.Record.Get("branch")}, {Key: "base", Value: made.Record.Get("base_sha")}})
 		}
@@ -299,7 +332,13 @@ func Open(o Options) (result Result, err error) {
 			dispatch.Set(f.Key, f.Value)
 		}
 		if o.Tests != nil {
-			dispatch.Set("test_files", o.Tests)
+			dispatch.Set("test_files", entry.Get("test_files"))
+		}
+		if o.After != nil {
+			dispatch.Set("after", entry.Get("after"))
+		}
+		if o.AfterOutcome != nil {
+			dispatch.Set("after_outcome", o.AfterOutcome)
 		}
 		rows = append(rows, dispatch)
 		result = Result{Block: entry, Pointer: o.Pointer, Reused: made != nil && !made.Created, Kept: len(kept)}
