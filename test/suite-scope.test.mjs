@@ -5,7 +5,7 @@ import { copyFileSync, existsSync, readFileSync, rmSync, symlinkSync } from 'nod
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { test } from 'node:test';
-import { parse, stringify } from 'yaml';
+import { stringify } from 'yaml';
 
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const NODE = process.execPath;
@@ -52,17 +52,14 @@ test('fixture leak check', () => {
   writeFile(repo, 'test/unrelated.test.mjs', "import { test } from 'node:test'; test('unrelated test', async () => { await new Promise(resolve => setTimeout(resolve, 300)); });\n");
   writeFile(repo, 'src/a.mjs', 'export const a = 1;\n');
   writeFile(repo, 'src/unrelated.mjs', 'export const unrelated = 1;\n');
-  const configFile = path.join(REPO, '.code-forge.yml');
-  // The local config was absent from the base git tree; detection used npm test.
-  const config = existsSync(configFile) ? parse(readFileSync(configFile, 'utf8')) : {
+  const config = {
     version: 1, provider: 'anthropic', levels: {
       L0: { model: 'claude-haiku-4-5-20251001' }, L1: { model: 'claude-sonnet-5' },
       L2: { model: 'claude-opus-5-5' }, L3: { model: 'claude-fable-5-1' },
-    }, gates: { test: ['npm', 'test'] },
+    },
   };
   config.project = { slug };
-  // Exercise the project's real test gate while keeping other fixture gates inert.
-  config.gates = { test: config.gates.test, lint: null, types: null, format: null };
+  config.gates = { test: ['sh', 'test/helpers/run-suite.sh', '{test_files}'], lint: null, types: null, format: null };
   writeFile(repo, '.code-forge.yml', stringify(config));
   writeFile(repo, 'package.json', JSON.stringify({ type: 'module', scripts: { test: 'sh test/helpers/run-suite.sh' } }));
   /** @type {NodeJS.ProcessEnv} */
