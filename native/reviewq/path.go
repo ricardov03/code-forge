@@ -68,7 +68,7 @@ func Normalize(raw, cwd, root string) (string, error) {
 		}
 	}
 	joined := filepath.Join(real(cwd), raw)
-	rel, err := filepath.Rel(root, filepath.Join(real(filepath.Dir(joined)), filepath.Base(joined)))
+	rel, err := filepath.Rel(real(root), filepath.Join(real(filepath.Dir(joined)), filepath.Base(joined)))
 	if err != nil || !inside(rel) {
 		return "", bad("the path is outside the repository")
 	}

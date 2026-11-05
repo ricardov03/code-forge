@@ -258,14 +258,28 @@ test('worker_down writes the Node error-log shape natively with default logging'
   await parity(f, [...WAIT, '--max', '0'], { CODE_FORGE_NO_ERROR_LOG: '' });
 });
 
-test('unknown flags and unported forms hand over with identical logs', async () => {
+test('plain enqueue and its usage errors stay native with byte-equal Node parity', async () => {
+  const f = await fixture();
+  await writeFile(path.join(f.repo, 'sample.mjs'), 'export const value = 1;\n');
+  for (const { args, code } of [
+    { args: ['review-file'], code: 2 },
+    { args: ['review-file', 'sample.mjs', '--block', 'B1'], code: 3 },
+  ]) {
+    const result = await launch(f, args).ended;
+    assert.equal(result.code, code, `${args.join(' ')}: served without Node`);
+    assert.doesNotMatch(result.stderr, /node executable .* not found/, 'native form does not attempt handover');
+    await parity(f, args);
+    await parity(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' });
+  }
+});
+
+test('unknown wait flags and unported forms hand over with identical logs', async () => {
   const f = await fixture();
   await done(f, { approved: true });
   const cases = [
     [...WAIT, '--json'], [...WAIT, '--unknown'], [...WAIT, '--'],
     [...WAIT, '--cwd', 'missing-dir'], [...WAIT, '--cwd', 'plain-file'],
     [...WAIT, '--block', 'B1'], [...WAIT, 'sample.mjs'], [],
-    ['review-file'], ['review-file', 'sample.mjs', '--block', 'B1'],
     ['review-file', '--wait-block', 'B1', '--run', 'bad'],
     ['review-file', '--rebase-check'], ['review-file', '--help'],
   ];
