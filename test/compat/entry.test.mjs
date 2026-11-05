@@ -16,7 +16,7 @@ const builtBinary = path.join(scratch, 'code-forge-native');
 const env = { ...process.env, CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_KEY_BACKEND: 'file' };
 after(() => rmSync(scratch, { recursive: true, force: true }));
 before(() => {
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${pkg.version}`, '-o', builtBinary, './cmd/code-forge-native'], {
+  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${pkg.version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', builtBinary, './cmd/code-forge-native'], {
     cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000,
     env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
   });

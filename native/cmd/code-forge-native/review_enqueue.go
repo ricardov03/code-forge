@@ -183,7 +183,45 @@ func reviewEnqueueExclusion(home, root, run, file string) (string, bool) {
 	return reviewq.Exclusion(cfg, file)
 }
 
-func runReviewEnqueue(args []string) int {
+func runReviewEnqueue(args []string) int { return reviewEnqueueStep(args, nil) }
+
+func reviewEnqueueStep(args []string, step *landStep) int {
+	stdout, stderr := step.writers()
+	reviewWaitHandover := func(args []string) int {
+		if step != nil {
+			return landHandover
+		}
+		return reviewWaitHandover(args)
+	}
+	reviewEnqueueSay := func(args []string, out ledger.Object, code int) int {
+		if step == nil {
+			return reviewEnqueueSay(args, out, code)
+		}
+		data, err := ledger.Stringify(out, false)
+		if err != nil {
+			return landHandover
+		}
+		fmt.Fprintln(stdout, string(data))
+		return code
+	}
+
+	reviewEnqueueError := func(args []string, err error) int {
+		if step == nil {
+			return reviewEnqueueError(args, err)
+		}
+		var pathError *gitx.Error
+		if !errors.As(err, &pathError) || pathError.Code != "bad-path" {
+			return landHandover
+		}
+		return reviewEnqueueSay(args, ledger.Object{{Key: "status", Value: "refused"}, {Key: "reason", Value: pathError.Code}, {Key: "message", Value: pathError.Message}}, 1)
+	}
+	reviewWaitUsageError := func(args []string, message string) int {
+		if step == nil {
+			return reviewWaitUsageError(args, message)
+		}
+		fmt.Fprint(stderr, "review-file: "+message+"\n"+reviewWaitUsage)
+		return 2
+	}
 	for i, arg := range args {
 		if !utf8.ValidString(arg) || i < 2 && (arg == "--help" || arg == "-h") {
 			return reviewWaitHandover(args)
@@ -267,8 +305,13 @@ func runReviewEnqueue(args []string) int {
 		return reviewWaitHandover(args)
 	}
 	if rule != "" {
-		reviewWaitBreadcrumb()
-		fmt.Fprintf(os.Stdout, "not reviewed (review.exclude %s): %s\n", rule, file)
+		if step != nil && step.preflight {
+			return 0
+		}
+		if step == nil {
+			reviewWaitBreadcrumb()
+		}
+		fmt.Fprintf(stdout, "not reviewed (review.exclude %s): %s\n", rule, file)
 		return 0
 	}
 	if worker == nil || requested && run != worker.Get("run") {
@@ -334,6 +377,9 @@ func runReviewEnqueue(args []string) int {
 	// responsibility, including markers installed by a concurrent worker.
 	if !reviewEnqueueCached(root, id) {
 		return reviewWaitHandover(args)
+	}
+	if step != nil && step.preflight {
+		return 0
 	}
 	if err := queue.Publish(dir, p, id, time.Now()); err != nil {
 		return reviewWaitHandover(args)

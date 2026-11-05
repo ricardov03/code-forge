@@ -25,7 +25,7 @@ before(() => {
   mkdirSync(path.dirname(entry));
   // Build directly into this process's private package: install tests may move
   // the shared release binary at any time, including between build and copy.
-  const result = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', binary, './cmd/code-forge-native'], {
+  const result = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', binary, './cmd/code-forge-native'], {
     cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120000,
     env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
   });

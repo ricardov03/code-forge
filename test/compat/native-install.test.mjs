@@ -1,11 +1,11 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, mkdtemp, readFile, readdir, realpath, rename, rm, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 import { runDoctorCli } from '../../src/cli/doctor.mjs';
 import { ledgerPath } from '../../src/ledger/paths.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
@@ -21,9 +21,9 @@ const goEnv = {
   GOCACHE: path.join(process.env.CODE_FORGE_REAL_HOME ?? os.homedir(), process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build'),
 };
 
-async function doctorNative() {
+async function doctorNative(runDoctor = runDoctorCli) {
   let output = '';
-  await runDoctorCli(['--json', '--cwd', os.homedir()], {
+  await runDoctor(['--json', '--cwd', os.homedir()], {
     stdout: { write: (s) => { output += s; } }, stderr: { write: () => {} },
     env: { ...process.env, CODE_FORGE_KEY_BACKEND: 'file' },
   });
@@ -103,32 +103,45 @@ test('npm installation ships a working host binary, reports its version, and ver
   }
 });
 
-test('disabled, missing, and nonexecutable native binaries keep doctor on the Node path', async () => {
+test('disabled, missing, and nonexecutable native binaries keep doctor on the Node path', async (t) => {
+  // Other compatibility tests rebuild the release binary while doctor probes run.
+  // Exercise lookup and doctor against a private package whose binary we control.
+  const pkg = await mkdtemp(path.join(os.tmpdir(), 'native-fallback-'));
+  t.after(() => rm(pkg, { recursive: true, force: true }));
+  for (const relative of ['src', 'schema', 'package.json']) {
+    await cp(path.join(root, relative), path.join(pkg, relative), { recursive: true });
+  }
+  const dependencies = path.dirname(path.dirname(fileURLToPath(import.meta.resolve('ajv/package.json'))));
+  await symlink(dependencies, path.join(pkg, 'node_modules'), 'dir');
+  const privateBinary = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+  await mkdir(path.dirname(privateBinary), { recursive: true });
+  await cp(binary, privateBinary).catch((err) => { if (err.code !== 'ENOENT') throw err; });
+  const { runDoctorCli: privateDoctor } = await import(pathToFileURL(path.join(pkg, 'src/cli/doctor.mjs')).href);
+  const { nativePath, runNative } = await import(pathToFileURL(path.join(pkg, 'src/util/native.mjs')).href);
   const previous = process.env.CODE_FORGE_NATIVE;
   process.env.CODE_FORGE_NATIVE = '0';
   try {
-    assert.equal((await doctorNative()).detail, 'not found, using Node');
-    const { nativePath, runNative } = await import('../../src/util/native.mjs');
+    assert.equal((await doctorNative(privateDoctor)).detail, 'not found, using Node');
     assert.equal(nativePath(), null, 'CODE_FORGE_NATIVE=0 must disable native lookup');
     assert.equal(await runNative(['version']), null, 'disabled native execution must return null');
     delete process.env.CODE_FORGE_NATIVE;
     const holding = await mkdtemp(path.join(os.tmpdir(), 'native-holding-'));
     let moved = false;
     try {
-      await rename(binary, path.join(holding, 'binary')).then(() => { moved = true; }, (err) => { if (err.code !== 'ENOENT') throw err; });
+      await rename(privateBinary, path.join(holding, 'binary')).then(() => { moved = true; }, (err) => { if (err.code !== 'ENOENT') throw err; });
       assert.equal(nativePath(), null, 'a removed binary must return null');
-      assert.equal((await doctorNative()).detail, 'not found, using Node');
+      assert.equal((await doctorNative(privateDoctor)).detail, 'not found, using Node');
       if (moved) {
-        await rename(path.join(holding, 'binary'), binary);
+        await rename(path.join(holding, 'binary'), privateBinary);
         moved = false;
-        await chmod(binary, 0o644);
+        await chmod(privateBinary, 0o644);
         try {
           assert.equal(nativePath(), null, 'a nonexecutable file must return null');
-          assert.equal((await doctorNative()).detail, 'not found, using Node');
-        } finally { await chmod(binary, 0o755); }
+          assert.equal((await doctorNative(privateDoctor)).detail, 'not found, using Node');
+        } finally { await chmod(privateBinary, 0o755); }
       }
     } finally {
-      if (moved) await rename(path.join(holding, 'binary'), binary);
+      if (moved) await rename(path.join(holding, 'binary'), privateBinary);
       await rm(holding, { recursive: true, force: true });
     }
   } finally {

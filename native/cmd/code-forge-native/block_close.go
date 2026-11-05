@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -16,6 +17,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/blockclose"
+	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -29,19 +31,28 @@ func init() { blockSubs["close"] = runBlockClose }
 
 // ready stays with Node: a preview collects fatal and nonfatal blockers together,
 // whereas a real close stops immediately on a failed pin or tampered gate row.
-func runBlockClose(args []string) int {
+func runBlockClose(args []string) int { return blockCloseStep(args, nil) }
+
+func blockCloseStep(args []string, step *landStep) int {
+	stdout, stderr := step.writers()
+
 	original := append([]string{"close"}, args...)
-	fallback := func() int { return blockHandover(original) }
+	fallback := func() int {
+		if step != nil {
+			return landHandover
+		}
+		return blockHandover(original)
+	}
 	fail := func(err error) int {
 		// Arbitrary filesystem messages still use Node's error-log redaction.
-		if reviewWaitLogging() {
+		if reviewWaitLogging() && step == nil {
 			return fallback()
 		}
 		var se *state.Error
 		if !errors.As(err, &se) {
 			return fallback()
 		}
-		fmt.Fprintln(os.Stderr, "block close:", err)
+		fmt.Fprintln(stderr, "block close:", err)
 		if se.Code == "usage" {
 			return 2
 		}
@@ -70,6 +81,9 @@ func runBlockClose(args []string) int {
 	record, err := state.ReadRun(home, run)
 	if err != nil {
 		return fail(err)
+	}
+	if step != nil && step.preflight && step.record != nil {
+		record = step.record
 	}
 	// This is the hand-over boundary. Everything through preflight is read-only;
 	// it must finish before a transcript warning or a stopped-block row is signed.
@@ -168,12 +182,6 @@ func runBlockClose(args []string) int {
 	}
 	if !gatecheck.Supported(rows) {
 		return fallback()
-	}
-	// A serving daemon can supply a different snapshot for done-file facts.
-	if os.Getenv("CODE_FORGE_NATIVE") != "0" {
-		if _, e := os.Lstat(filepath.Join(home, ".code-forge/runs", run, "native.sock")); e == nil {
-			return fallback()
-		}
 	}
 	key, err := blockclose.ReadKey(home, run)
 	if err != nil {
@@ -302,8 +310,13 @@ func runBlockClose(args []string) int {
 	}
 	// No deferred read may hand over past here. From the first append onward an
 	// error is reported directly, never retried through Node.
-	blockBreadcrumb("close")
-	publishError := func(err error) int { fmt.Fprintln(os.Stderr, "block close:", blockIOMessage(err)); return 1 }
+	if step != nil && step.preflight {
+		return 0
+	}
+	if step == nil {
+		blockBreadcrumb("close")
+	}
+	publishError := func(err error) int { fmt.Fprintln(stderr, "block close:", blockIOMessage(err)); return 1 }
 	var result blockclose.Result
 	if event != "" {
 		result, err = blockclose.Stop(home, run, id, event, reason)
@@ -323,7 +336,7 @@ func runBlockClose(args []string) int {
 			if err != nil {
 				return publishError(err)
 			}
-			fmt.Fprintf(os.Stderr, "WARN block %s: no coder transcript found (--transcript, run record, .code-forge/runs/%s/%s.log); the transcript grep did not run\n", id, run, id)
+			fmt.Fprintf(stderr, "WARN block %s: no coder transcript found (--transcript, run record, .code-forge/runs/%s/%s.log); the transcript grep did not run\n", id, run, id)
 		}
 		if !collectOnly {
 			if len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) }) {
@@ -332,13 +345,13 @@ func runBlockClose(args []string) int {
 					where = "the worktree " + blockString(blockObject(entry.Get("worktree")).Get("path"))
 					likely = "done outside the block's worktree (in the main checkout or another tree)"
 				}
-				fmt.Fprintf(os.Stderr, "WARN block %s: no owned file differs from the block base in %s, but %d owned file(s) have review rows — the work was likely %s; they are checked at their content in %s\n", id, where, len(reviewed), likely, where)
+				fmt.Fprintf(stderr, "WARN block %s: no owned file differs from the block base in %s, but %d owned file(s) have review rows — the work was likely %s; they are checked at their content in %s\n", id, where, len(reviewed), likely, where)
 			}
 			if !scopeChecked {
-				fmt.Fprintf(os.Stderr, "WARN block %s: opened before code-forge recorded the tree at block open; unowned changes were not checked\n", id)
+				fmt.Fprintf(stderr, "WARN block %s: opened before code-forge recorded the tree at block open; unowned changes were not checked\n", id)
 			}
 			for _, w := range scopeWarnings {
-				fmt.Fprint(os.Stderr, w)
+				fmt.Fprint(stderr, w)
 			}
 		}
 		result = blockclose.Result{Status: "open", Blockers: []gatecheck.Blocker{}}
@@ -370,21 +383,21 @@ func runBlockClose(args []string) int {
 	if !result.OK && !jsonFlag {
 		for _, b := range blockers {
 			o := b.(ledger.Object)
-			fmt.Fprintf(os.Stdout, "%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
+			fmt.Fprintf(stdout, "%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
 		}
 	}
 	if result.Status == "closed" || result.Status == "stopped" {
-		closeWriteDone(home, run, id, record, result, lines, rows, key)
+		closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
 	}
 	if result.OK {
-		closeWarnMovedBase(workspace, entry, id, run)
+		closeWarnMovedBase(workspace, entry, id, run, stderr)
 		for _, w := range lineWarnings {
-			fmt.Fprint(os.Stderr, w)
+			fmt.Fprint(stderr, w)
 		}
 		if !jsonFlag {
 			for _, v := range lines {
 				l := v.(ledger.Object)
-				fmt.Fprintf(os.Stdout, "reviewed %s ticket %s\n", l.Get("file"), l.Get("ticket"))
+				fmt.Fprintf(stdout, "reviewed %s ticket %s\n", l.Get("file"), l.Get("ticket"))
 			}
 			for _, w := range gate.Waived {
 				parts := []string{}
@@ -394,16 +407,16 @@ func runBlockClose(args []string) int {
 				if len(w.Answered) > 0 {
 					parts = append(parts, "answered "+strings.Join(w.Answered, ", "))
 				}
-				fmt.Fprintf(os.Stdout, "block %s: %s reviewed_by_waiver (%s)\n", id, w.File, strings.Join(parts, "; "))
+				fmt.Fprintf(stdout, "block %s: %s reviewed_by_waiver (%s)\n", id, w.File, strings.Join(parts, "; "))
 			}
 		}
 	}
 	if result.Status == "awaiting_human_check" {
 		if !jsonFlag {
 			for _, v := range entry.Get("human_checks").([]any) {
-				fmt.Fprintf(os.Stdout, "block %s awaiting human check: %s\n", id, v)
+				fmt.Fprintf(stdout, "block %s awaiting human check: %s\n", id, v)
 			}
-			fmt.Fprintf(os.Stdout, "next: code-forge block human-pass %s --run %s --note \"<device check note>\" [--proof <dir-or-file>]\n", id, run)
+			fmt.Fprintf(stdout, "next: code-forge block human-pass %s --run %s --note \"<device check note>\" [--proof <dir-or-file>]\n", id, run)
 		}
 	} else {
 		text := fmt.Sprintf("block %s %s", id, result.Status)
@@ -415,9 +428,9 @@ func runBlockClose(args []string) int {
 		}
 		text += "\n"
 		if !result.OK {
-			fmt.Fprint(os.Stderr, text)
+			fmt.Fprint(stderr, text)
 		} else if !jsonFlag {
-			fmt.Fprint(os.Stdout, text)
+			fmt.Fprint(stdout, text)
 		}
 	}
 	if jsonFlag {
@@ -457,7 +470,7 @@ func runBlockClose(args []string) int {
 			}
 		}
 		data, _ := ledger.Stringify(out, false)
-		fmt.Fprintln(os.Stdout, string(data))
+		fmt.Fprintln(stdout, string(data))
 	}
 	if result.OK {
 		return 0
@@ -1011,14 +1024,18 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 	return out
 }
 
-func closeWriteDone(home, run, id string, record ledger.Object, result blockclose.Result, lines []any, rows []gatecheck.Row, key []byte) {
+func closeWriteDone(home, run, id string, record ledger.Object, result blockclose.Result, lines []any, rows []gatecheck.Row, key []byte, writers ...io.Writer) {
+	stderr := io.Writer(os.Stderr)
+	if len(writers) > 0 {
+		stderr = writers[0]
+	}
 	at := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	if id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
-		fmt.Fprintf(os.Stderr, "warning: done file not written: block id %s cannot name a done file\n", statusQuote(id))
+		fmt.Fprintf(stderr, "warning: done file not written: block id %s cannot name a done file\n", statusQuote(id))
 		return
 	}
 	var spent, unknown, findings any
-	values, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), blockString(record.Get("project")))
+	values, err := closeDoneRows(home, run, id, record)
 	if err == nil {
 		all := []gatecheck.Row{}
 		sessions := []ledger.Row{}
@@ -1092,11 +1109,15 @@ func closeWriteDone(home, run, id string, record ledger.Object, result blockclos
 		if errors.As(err, &errno) {
 			code = blockErrno(errno)
 		}
-		fmt.Fprintln(os.Stderr, "warning: done file not written:", code)
+		fmt.Fprintln(stderr, "warning: done file not written:", code)
 	}
 }
 
-func closeWarnMovedBase(workspace string, entry ledger.Object, id, run string) {
+func closeWarnMovedBase(workspace string, entry ledger.Object, id, run string, writers ...io.Writer) {
+	stderr := io.Writer(os.Stderr)
+	if len(writers) > 0 {
+		stderr = writers[0]
+	}
 	branch := blockString(entry.Get("base_branch"))
 	if branch == "" {
 		return
@@ -1123,5 +1144,19 @@ func closeWarnMovedBase(workspace string, entry ledger.Object, id, run string) {
 	if e != nil || !regexp.MustCompile(`^[0-9]+$`).MatchString(strings.TrimSpace(count)) {
 		return
 	}
-	fmt.Fprintf(os.Stderr, "WARN block %s: base moved: %s is %s commit(s) ahead of the block base; run: code-forge block rebase %s --run %s\n", id, branch, strings.TrimSpace(count), id, run)
+	fmt.Fprintf(stderr, "WARN block %s: base moved: %s is %s commit(s) ahead of the block base; run: code-forge block rebase %s --run %s\n", id, branch, strings.TrimSpace(count), id, run)
+}
+
+// Done-file facts use the daemon snapshot, independently of close's gate rows.
+// An unavailable daemon returns no answer, so the ledger remains the fallback.
+func closeDoneRows(home, run, id string, record ledger.Object) ([]any, error) {
+	cfg, _ := blockSnapshot(record)
+	if daemonclient.Enabled(cfg) {
+		if reply, err := daemonclient.Request(run, map[string]any{"method": "rows", "block": id}, 6500*time.Millisecond); err == nil {
+			if rows, ok := reply["rows"].([]any); ok {
+				return rows, nil
+			}
+		}
+	}
+	return ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), blockString(record.Get("project")))
 }

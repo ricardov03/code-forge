@@ -34,7 +34,16 @@ func reviewBlockFlags(args []string) (map[string]string, bool) {
 	return flags, ok && usage == "" && reviewBlockID.MatchString(flags["wait"]) && reviewBlockRun.MatchString(flags["run"])
 }
 
-func runReviewWaitBlock(args []string) int {
+func runReviewWaitBlock(args []string) int { return reviewWaitBlockStep(args, nil) }
+
+func reviewWaitBlockStep(args []string, step *landStep) int {
+	stdout, _ := step.writers()
+	reviewWaitHandover := func(args []string) int {
+		if step != nil {
+			return landHandover
+		}
+		return reviewWaitHandover(args)
+	}
 	flags, ok := reviewBlockFlags(args)
 	if !ok || !daemonclient.Enabled(nil) {
 		return reviewWaitHandover(args)
@@ -76,6 +85,13 @@ func runReviewWaitBlock(args []string) int {
 	if !ok || !daemonclient.Enabled(cfg) {
 		return reviewWaitHandover(args)
 	}
+	if step != nil && step.preflight {
+		_, err := daemonclient.Request(run, map[string]any{"method": "ping"}, 6500*time.Millisecond)
+		if err != nil {
+			return landHandover
+		}
+		return 0
+	}
 	deadline := time.Now().UnixMilli() + maxMs
 	for {
 		cfg, ok = reviewBlockConfig(ctx, root, cwd, run, block)
@@ -99,10 +115,15 @@ func runReviewWaitBlock(args []string) int {
 		if err != nil {
 			return reviewWaitHandover(args)
 		}
-		before := reviewWaitBreadcrumb()
-		fmt.Fprintln(os.Stdout, string(data))
+		before := []any{}
+		if step == nil {
+			before = reviewWaitBreadcrumb()
+		}
+		fmt.Fprintln(stdout, string(data))
 		if answer["status"] == "worker_down" {
-			reviewWaitFailure(args, 3, nil, before)
+			if step == nil {
+				reviewWaitFailure(args, 3, nil, before)
+			}
 			return 3
 		}
 		return 0

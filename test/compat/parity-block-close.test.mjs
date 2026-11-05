@@ -7,6 +7,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
+import { serveDaemon } from '../helpers/daemon-fixture.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
@@ -51,7 +52,8 @@ before(async () => {
   }
   const overlayFile = path.join(scratch, 'overlay.json');
   await writeFile(overlayFile, JSON.stringify({ Replace: overlay }));
-  const built = spawnSync('go', ['build', '-overlay', overlayFile, '-o', BINARY, './cmd/code-forge-native'], {
+  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  const built = spawnSync('go', ['build', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-overlay', overlayFile, '-o', BINARY, './cmd/code-forge-native'], {
     cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
   });
   assert.equal(built.status, 0, `private binary builds: ${built.stderr}`);
@@ -302,4 +304,30 @@ test('unsupported close cases hand over the original arguments before any state 
     fixture: await fixture(), goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath },
   });
   assert.deepEqual(delegatedBoundary.diffs, [], 'human confirmation boundary stays with a real Node');
+});
+
+test('close uses live daemon facts and stays native when an existing socket gives no answer', async () => {
+  for (const answering of [true, false]) {
+    const f = await fixture();
+    const prepare = async (copy) => {
+      const daemon = await serveDaemon(copy, RUN, async () => answering
+        ? { rows: [{ event: 'session', run: RUN, block: 'B1', usd: 3.25 }] } : null);
+      return daemon.cleanup;
+    };
+    const parity = await runParity([...args, '--json'], { fixture: f, goCommand: BINARY, tempRoot: '/tmp', prepare,
+      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], `answering=${answering}: daemon and ledger fallback match Node`);
+    const home = await mkdtemp('/tmp/cf-cd-');
+    try {
+      await cp(f.home, home, { recursive: true });
+      const direct = { ...f, home };
+      const cleanup = await prepare(direct);
+      try {
+        const result = await launch(direct, [...args, '--json'], false, { CODE_FORGE_NATIVE: '1' });
+        assert.equal(result.code, 0, result.stderr);
+        const done = JSON.parse(await readFile(path.join(home, '.code-forge/runs', RUN, 'blocks/B1.done.json'), 'utf8'));
+        assert.equal(done.spent_usd, answering ? 3.25 : 0, 'facts come from the selected snapshot');
+      } finally { await cleanup(); }
+    } finally { await rm(home, { recursive: true, force: true }); }
+  }
 });

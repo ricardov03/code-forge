@@ -10,6 +10,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
+	"github.com/ricardov03/code-forge/native/reviewq"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -185,12 +186,53 @@ func Guarded(record ledger.Object, why string) ([]string, error) {
 
 // Claim signs even an already-owned claim and removes all covered orphans.
 func Claim(home, run, id, file string, guarded []string, why string, safe func(ledger.Object) bool) error {
+	return ClaimAuto(home, run, id, file, guarded, why, safe, false)
+}
+
+// ClaimAuto shares the claim lock and publication order, adding land's audit fields.
+func ClaimAuto(home, run, id, file string, guarded []string, why string, safe func(ledger.Object) bool, auto bool) error {
 	prepared := false
 	err := state.UpdateBlock(home, run, id, func(record, block *ledger.Object) ([]ledger.Object, error) {
 		if !safe(*record) {
 			return nil, ErrHandover
 		}
-		kinds := ledger.Object{{Key: file, Value: owned.PathKind(text(record.Get("workspace")), file)}}
+		root := text(record.Get("workspace"))
+		if auto {
+			if wt := text(object(block.Get("worktree")).Get("path")); wt != "" {
+				root = wt
+			}
+			var err error
+			root, err = gitx.RepoTop(root)
+			if err != nil {
+				return nil, err
+			}
+			for _, part := range strings.Split(file, "/") {
+				if strings.EqualFold(part, ".git") || strings.EqualFold(part, ".code-forge") {
+					return nil, &state.Error{Code: "unowned_change", Message: "unowned_change " + file + ": cannot auto-claim repository state"}
+				}
+			}
+			if reviewq.Inside(root, file) != nil {
+				return nil, &state.Error{Code: "unowned_change", Message: "unowned_change " + file + ": cannot auto-claim a path outside the repository or a symlink"}
+			}
+		}
+		kinds := ledger.Object{{Key: file, Value: owned.PathKind(root, file)}}
+		prefix := ""
+		if auto {
+			workspace := text(record.Get("workspace"))
+			main, err := gitx.RepoTop(workspace)
+			if err != nil {
+				return nil, err
+			}
+			real, err := filepath.EvalSymlinks(workspace)
+			if err != nil {
+				return nil, err
+			}
+			prefix, err = filepath.Rel(main, real)
+			if err != nil {
+				return nil, err
+			}
+			prefix = filepath.ToSlash(prefix)
+		}
 		for _, path := range guarded {
 			if owned.OwnsFile([]any{file}, kinds, path) {
 				return nil, &state.Error{Code: "config-owned", Message: "owned entry " + quote(file) + " covers the project's .code-forge.yml; no block may own it while " + why}
@@ -203,8 +245,27 @@ func Claim(home, run, id, file string, guarded []string, why string, safe func(l
 		for _, field := range ordered {
 			other := object(field.Value)
 			if field.Key != id && other.Get("status") == "open" {
-				if entry, ok := overlaps(file, kinds, *block, other); ok {
-					return nil, &state.Error{Code: "overlap", Message: fmt.Sprintf("%s overlaps %s owned by open block %s", file, entry, field.Key)}
+				candidate := *block
+				if auto {
+					candidate = candidate.Clone()
+					candidate.Delete("worktree")
+				}
+				entry, overlap := overlaps(file, kinds, candidate, other)
+				if auto {
+					entries, _ := other.Get("owned_files").([]any)
+					if prefix != "." && strings.HasPrefix(file, prefix+"/") && owned.OwnsFile(entries, object(other.Get("owned_kinds")), strings.TrimPrefix(file, prefix+"/")) {
+						overlap = true
+						if entry == "" {
+							entry = file
+						}
+					}
+				}
+				if overlap {
+					code, prefix := "overlap", ""
+					if auto {
+						code, prefix = "unowned_change", "unowned_change "
+					}
+					return nil, &state.Error{Code: code, Message: fmt.Sprintf("%s%s overlaps %s owned by open block %s", prefix, file, entry, field.Key)}
 				}
 			}
 		}
@@ -233,7 +294,12 @@ func Claim(home, run, id, file string, guarded []string, why string, safe func(l
 		}
 		record.Set("orphans", remaining)
 		prepared = true
-		return []ledger.Object{{{Key: "event", Value: "block.claim"}, {Key: "block", Value: id}, {Key: "path", Value: file}}}, nil
+		row := ledger.Object{{Key: "event", Value: "block.claim"}, {Key: "block", Value: id}, {Key: "path", Value: file}}
+		if auto {
+			row.Set("auto", true)
+			row.Set("reason", "auto-claim: changed outside owned files")
+		}
+		return []ledger.Object{row}, nil
 	})
 	if err != nil && prepared {
 		return &PublicationError{err}
