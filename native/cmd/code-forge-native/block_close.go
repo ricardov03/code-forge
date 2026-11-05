@@ -233,18 +233,18 @@ func runBlockClose(args []string) int {
 		live = &n
 	}
 	// Verify all read-only report and test prerequisites before the first write.
-	var reportText string
+	var reportData []byte
+	var reportErr error
 	if report, has := flags["report"].(string); has {
-		if data, e := os.ReadFile(report); e == nil {
-			reportText = string(data)
-		}
+		reportData, reportErr = os.ReadFile(report)
 	}
+	reportText := string(reportData)
 	if !closeTextSafe(reportText) || strings.Contains(reportText, hex.EncodeToString(key)) {
 		return fallback()
 	}
 	checks, closeRows := []closeCheck{}, []ledger.Object{}
 	if blockMap(cfg["context"])["require_coder_tests"] == true {
-		command, reason, supported := closeCoderTests(flags["report"], id, reportText)
+		command, reason, supported := closeCoderTests(flags["report"], id, reportData, reportErr)
 		if !supported {
 			return fallback()
 		}
@@ -255,7 +255,11 @@ func runBlockClose(args []string) int {
 		}
 	}
 	if blockMap(cfg["gates"])["test"] != nil {
-		checks = append(checks, closeTestGate(top, base, run, id, entry, rows))
+		check, supported := closeTestGate(top, base, run, id, entry, rows)
+		if !supported {
+			return fallback()
+		}
+		checks = append(checks, check)
 	}
 	// Review exclusions include lock-file validation. Keep that dialect with Node.
 	for _, f := range files {
@@ -270,13 +274,12 @@ func runBlockClose(args []string) int {
 	gateIndex := len(checks)
 	checks = append(checks, closeCheck{gateReason, gate.Blockers})
 	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, files, gate.Waived, inTree, len(gate.Blockers) == 0)
-	if report, has := flags["report"].(string); has {
-		data, e := os.ReadFile(report)
-		if e != nil {
+	if _, has := flags["report"].(string); has {
+		if reportErr != nil {
 			reason := "coder report FAILED: --report cannot be read"
 			checks = append(checks, closeCheck{reason, []gatecheck.Blocker{{Code: "coder_report_failed", Detail: reason}}})
 		} else {
-			check, warnings := closeReport(string(data), run, id, files, lines, rows, key)
+			check, warnings := closeReport(reportText, run, id, files, lines, rows, key)
 			checks = append(checks, check)
 			lineWarnings = append(lineWarnings, warnings...)
 		}
@@ -769,15 +772,14 @@ var closeComplete = regexp.MustCompile(`^===BLOCK\s+(\S+)\s+COMPLETE===$`)
 var closeFailed = regexp.MustCompile(`^===BLOCK\s+(\S+)\s+FAILED:\s*(.*?)\s*===$`)
 var closeTests = regexp.MustCompile(`^TESTS\s+(\S.*?)\s+exit=(0|[1-9][0-9]{0,2})$`)
 
-func closeCoderTests(report any, id, text string) (command, reason string, supported bool) {
+func closeCoderTests(report any, id string, data []byte, readErr error) (command, reason string, supported bool) {
 	if _, ok := report.(string); !ok {
 		return "", "coder report FAILED: context.require_coder_tests needs --report", true
 	}
-	data, err := os.ReadFile(report.(string))
-	if err != nil {
+	if readErr != nil {
 		return "", "coder report FAILED: --report cannot be read", true
 	}
-	text = string(data)
+	text := string(data)
 	// parseSentinel decodes JSON envelopes, but its malformed-line scan does not.
 	// Delegate that uncommon dialect rather than merging the two segments.
 	if json.Valid(data) {
@@ -836,7 +838,9 @@ func closeCoderTests(report any, id, text string) (command, reason string, suppo
 	return lastCommand, "", true
 }
 
-func closeTestGate(top, base, run, id string, entry ledger.Object, rows []gatecheck.Row) closeCheck {
+var closeGateTimestamp = regexp.MustCompile(`^[0-9]{4}-[0-9]{2}-[0-9]{2}T[0-9]{2}:[0-9]{2}:[0-9]{2}(\.[0-9]{1,9})?Z$`)
+
+func closeTestGate(top, base, run, id string, entry ledger.Object, rows []gatecheck.Row) (closeCheck, bool) {
 	lastRebase := -1
 	for i, r := range rows {
 		if r["block"] == id && r["event"] == "block.rebase" {
@@ -859,20 +863,31 @@ func closeTestGate(top, base, run, id string, entry ledger.Object, rows []gatech
 			commit = strings.TrimSpace(commit)
 			seconds, e := strconv.ParseInt(commit, 10, 64)
 			if commit == "" {
-				return closeCheck{}
+				return closeCheck{}, true
 			}
 			if e == nil {
 				for _, r := range green {
-					at, e := time.Parse(time.RFC3339Nano, blockString(r["ts"]))
-					if e != nil || at.UnixMilli() > seconds*1000 {
-						return closeCheck{}
+					// Node explicitly accepts non-finite Date.parse results for legacy
+					// rows. Missing/null and empty timestamps are known invalid dates.
+					if r["ts"] == nil || r["ts"] == "" {
+						return closeCheck{}, true
+					}
+					text, ok := r["ts"].(string)
+					at, e := time.Parse(time.RFC3339Nano, text)
+					if !ok || e != nil || !closeGateTimestamp.MatchString(text) {
+						// Date.parse accepts more formats and coerces non-strings.
+						// Let Node distinguish an invalid date from a stale one.
+						return closeCheck{}, false
+					}
+					if at.UnixMilli() > seconds*1000 {
+						return closeCheck{}, true
 					}
 				}
 			}
 		}
 	}
 	reason := fmt.Sprintf("no green gates run; run: code-forge gates run --run %s --block %s", run, id)
-	return closeCheck{reason, []gatecheck.Blocker{{Code: "no_green_gates", Detail: reason}}}
+	return closeCheck{reason, []gatecheck.Blocker{{Code: "no_green_gates", Detail: reason}}}, true
 }
 
 var closeShellSafe = regexp.MustCompile(`^[\w./:@=-]+$`)

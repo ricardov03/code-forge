@@ -1,17 +1,16 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, mkdir, mkdtemp, readFile, readdir, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
-import { signRow, verifyRow } from '../../src/state/signer.mjs';
+import { macFor, signRow, verifyRow } from '../../src/state/signer.mjs';
 import { newFileState } from '../../src/review/fixloop.mjs';
 import { saveState } from '../../src/worker/review-state.mjs';
 
@@ -20,6 +19,7 @@ const CLI = path.join(ROOT, 'bin/code-forge.mjs');
 const scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-close-'));
 const BINARY = path.join(scratch, 'package/native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const PROBE = path.join(scratch, 'argv-node');
+const LOCK_WAIT = 'TEST: waiting on run lock\n';
 const RUN = 'r-close-fixture', KEY = Buffer.alloc(32, 27), SLUG = 'close-fixture';
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 const args = ['block', 'close', 'B1', '--run', RUN];
@@ -34,7 +34,24 @@ before(async () => {
   await symlink(CLI, path.join(scratch, 'package/bin/code-forge.mjs'));
   await writeFile(PROBE, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(3)) + '\\n');\n`);
   await chmod(PROBE, 0o755);
-  const built = spawnSync('go', ['build', '-o', BINARY, './cmd/code-forge-native'], {
+  // Instrument only the private binary: the signal is emitted after mkdir
+  // encounters the held lock, and report replacement is after the safety check.
+  // Keep these hooks out of the shipped binary and exercise the real close code.
+  const overlay = {};
+  for (const [file, anchor, inserted] of [
+    ['state/run.go', '\t\ttime.Sleep(lockPoll)', `\t\tfmt.Fprint(os.Stderr, ${JSON.stringify(LOCK_WAIT)})\n`],
+    ['cmd/code-forge-native/block_close.go', '\tchecks, closeRows := []closeCheck{}, []ledger.Object{}',
+      '\tif replacement := os.Getenv("CODE_FORGE_TEST_REPORT_REPLACEMENT"); replacement != "" {\n\t\tif err := os.Rename(replacement, blockString(flags["report"])); err != nil { panic(err) }\n\t}\n'],
+  ]) {
+    const original = path.join(ROOT, 'native', file), source = await readFile(original, 'utf8');
+    assert.equal(source.split(anchor).length, 2, `unique instrumentation anchor in ${file}`);
+    const instrumented = path.join(scratch, path.basename(file));
+    await writeFile(instrumented, source.replace(anchor, inserted + anchor));
+    overlay[original] = instrumented;
+  }
+  const overlayFile = path.join(scratch, 'overlay.json');
+  await writeFile(overlayFile, JSON.stringify({ Replace: overlay }));
+  const built = spawnSync('go', ['build', '-overlay', overlayFile, '-o', BINARY, './cmd/code-forge-native'], {
     cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
   });
   assert.equal(built.status, 0, `private binary builds: ${built.stderr}`);
@@ -109,13 +126,16 @@ async function fixture(kind = 'clean', config = {}) {
   }
   return f;
 }
-function launch(f, argv = args, node = false, env = {}) {
+function launch(f, argv = args, node = false, env = {}, onLockWait = () => {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(node ? process.execPath : BINARY, node ? [CLI, ...argv] : argv, { cwd: f.repo, env: {
       PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', ...env,
     }, stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
-    child.stdout.on('data', (b) => { stdout += b; }); child.stderr.on('data', (b) => { stderr += b; });
+    child.stdout.on('data', (b) => { stdout += b; }); child.stderr.on('data', (b) => {
+      stderr += b;
+      if (stderr.includes(LOCK_WAIT)) onLockWait();
+    });
     child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
   });
 }
@@ -167,21 +187,90 @@ test('plain agent close has native speed and byte parity for the complete close 
   await writeFile(reportFile, 'TESTS node --test exit=0\n===BLOCK B1 COMPLETE===\n');
   const credit = await runParity([...args, '--report', reportFile, '--json'], { fixture: report, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
   assert.deepEqual(credit.diffs, [], 'B270 signed ticket credit and coder.tests publication have zero diffs');
+});
 
+test('report safety, coder.tests and review tickets use the same snapshot despite atomic replacement', async () => {
+  for (const replacementCredit of [true, false]) {
+    const f = await fixture('credit', { context: { require_coder_tests: true } });
+    const report = path.join(f.home, 'report.txt'), replacement = report + '.next';
+    await writeFile(report, `reviewed sample.mjs ticket ${'a'.repeat(24)}\nTESTS node --test exit=0\n===BLOCK B1 COMPLETE===\n`);
+    const changedTicket = replacementCredit ? `reviewed sample.mjs ticket ${'b'.repeat(24)}\n` : '';
+    await writeFile(replacement, changedTicket + `TESTS echo ${KEY.toString('hex')} exit=0\n===BLOCK B1 COMPLETE===\n`);
+    const result = await launch(f, [...args, '--report', report, '--json'], false, { CODE_FORGE_TEST_REPORT_REPLACEMENT: replacement });
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stderr, '', 'ticket validation uses the original matching ticket, not the replacement');
+    const ledger = await readFile(path.join(f.home, '.code-forge/ledger', `${SLUG}.jsonl`), 'utf8');
+    const rows = ledger.trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(rows.filter((r) => r.event === 'coder.tests').map((r) => r.command), ['node --test']);
+    assert.equal(ledger.includes(KEY.toString('hex')), false, 'replacement key never reaches a signed row');
+    assert.equal(rows.every((r) => verifyRow(r, KEY).ok), true);
+  }
+});
+
+test('report read error is retained when the file appears after the initial read', async () => {
+  for (const requireTests of [true, false]) {
+    const f = await fixture('credit', { context: { require_coder_tests: requireTests } });
+    const report = path.join(f.home, 'missing.txt'), replacement = report + '.next';
+    await writeFile(replacement, `sample.mjs ${'a'.repeat(24)}\nTESTS node --test exit=0\n===BLOCK B1 COMPLETE===\n`);
+    const result = await launch(f, [...args, '--report', report, '--json'], false, { CODE_FORGE_TEST_REPORT_REPLACEMENT: replacement });
+    assert.equal(result.code, 1, `initial read error refuses with require_coder_tests=${requireTests}`);
+    assert.equal(JSON.parse(result.stdout).reason, 'coder report FAILED: --report cannot be read');
+    const ledger = await readFile(path.join(f.home, '.code-forge/ledger', `${SLUG}.jsonl`), 'utf8');
+    assert.equal(ledger.includes('coder.tests'), false);
+    assert.equal(ledger.includes('block.close'), false);
+  }
+});
+
+test('concurrent orphan is observed under the lock after a confirmed lock wait', async () => {
   const concurrent = await fixture(), clone = { repo: concurrent.repo, home: path.join(scratch, 'concurrent-home') };
   await cp(concurrent.home, clone.home, { recursive: true });
   const lock = path.join(clone.home, '.code-forge/runs', `${RUN}.lock`);
   await mkdir(lock);
-  const pending = launch(clone);
-  await delay(150);
-  const fresh = JSON.parse(await readFile(path.join(clone.home, '.code-forge/runs', `${RUN}.json`), 'utf8'));
-  fresh.orphans = ['late.mjs'];
-  await writeFile(path.join(clone.home, '.code-forge/runs', `${RUN}.json`), JSON.stringify(fresh, null, 2) + '\n');
-  await rm(lock, { recursive: true });
+  let signal;
+  const waiting = new Promise((resolve) => { signal = resolve; });
+  const pending = launch(clone, args, false, {}, () => signal('waiting'));
+  try {
+    assert.equal(await Promise.race([waiting, pending.then(() => 'exited')]), 'waiting', 'child encountered the held run lock');
+    const record = path.join(clone.home, '.code-forge/runs', `${RUN}.json`);
+    const fresh = JSON.parse(await readFile(record, 'utf8'));
+    fresh.orphans = ['late.mjs'];
+    await writeFile(record + '.next', JSON.stringify(fresh, null, 2) + '\n', { mode: 0o600 });
+    await rename(record + '.next', record);
+  } finally { await rm(lock, { recursive: true }); }
   const refused = await pending;
   assert.equal(refused.code, 1, 'under-lock registry recheck refuses a concurrent orphan');
   assert.match(refused.stdout, /unowned_change late\.mjs orphan in run registry: late\.mjs/, 'one concurrent orphan is named');
   assert.equal(JSON.parse(await readFile(path.join(clone.home, '.code-forge/runs', `${RUN}.json`), 'utf8')).blocks.B1.status, 'open', 'concurrent refusal preserves the open block');
+});
+
+test('Node accepts missing and invalid gate timestamps; native dates match and uncertain dates hand over', async () => {
+  for (const [ts, expected, native] of [
+    [undefined, 0, true], [null, 0, true], ['', 0, true],
+    ['2000-01-01T00:00:00.000Z', 1, true], ['2099-01-01T00:00:00.000Z', 0, true],
+    ['not-a-date', 0, false], ['2000-01-01', 1, false], ['2099-01-01', 0, false],
+    [0, 1, false], ['2000-01-01T00:00:00+24:00', 0, false],
+  ]) {
+    const f = await fixture('clean', { gates: { test: { argv: ['true'] } } });
+    for (const argv of [['add', 'sample.mjs'], ['-c', 'user.name=Fixture', '-c', 'user.email=f@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'owned change']]) {
+      const git = spawnSync('git', argv, { cwd: f.repo, encoding: 'utf8' });
+      assert.equal(git.status, 0, git.stderr);
+    }
+    const row = { run: RUN, event: 'gate.done', block: 'B1', all_ok: true, ...(ts === undefined ? {} : { ts }) };
+    const ledger = path.join(f.home, '.code-forge/ledger', `${SLUG}.jsonl`);
+    // Preserve a genuinely missing ts: signRow/appendRow would stamp one.
+    await writeFile(ledger, await readFile(ledger, 'utf8') + JSON.stringify({ ...row, mac: macFor(row, KEY) }) + '\n');
+    const env = { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: native ? '/nonexistent' : process.execPath };
+    const result = await runParity([...args, '--json'], { fixture: f, goCommand: BINARY, env });
+    assert.deepEqual(result.diffs, [], `timestamp ${String(ts)}: exact Node parity, native=${native}`);
+    if (!native) {
+      const before = await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]);
+      const missingNode = await launch(f, [...args, '--json']);
+      assert.equal(missingNode.code, 127, `timestamp ${String(ts)} hands over before writing`);
+      assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before);
+    }
+    const direct = await launch(f, [...args, '--json'], false, env);
+    assert.equal(direct.code, expected, `timestamp ${String(ts)}: ${direct.stderr}`);
+  }
 });
 
 test('unsupported close cases hand over the original arguments before any state write; native usage and refusal boundaries match Node', async () => {
@@ -206,7 +295,11 @@ test('unsupported close cases hand over the original arguments before any state 
     assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before, 'successful handover also preserves every state byte');
   }
   for (const argv of [['block', 'close'], ['block', 'close', 'B1'], [...args, '--json=true'], [...args, '--run', RUN], [...args, '--worker-pid', 'bad'], [...args, '--unknown']]) {
-    const result = await runParity(argv, { fixture: await fixture(), goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+    const result = await runParity(argv, { fixture: await fixture(), goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
     assert.deepEqual(result.diffs, [], `${argv}: exact boundary exit and stream bytes`);
   }
+  const delegatedBoundary = await runParity([...args, '--no-require-reviews'], {
+    fixture: await fixture(), goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath },
+  });
+  assert.deepEqual(delegatedBoundary.diffs, [], 'human confirmation boundary stays with a real Node');
 });
