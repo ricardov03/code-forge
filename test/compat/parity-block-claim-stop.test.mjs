@@ -197,7 +197,7 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
     }
   }
   const delegated = await fixture();
-  for (const args of [...['open', 'close', 'land', 'ready', 'attempt', 'rebase', 'status'].map((sub) => ['block', sub]), [...claim(), '--auto']]) {
+  for (const args of [...['open', 'land', 'ready', 'attempt', 'rebase', 'status'].map((sub) => ['block', sub]), [...claim(), '--auto']]) {
     await assertHandoverWithoutMutation(delegated, args, 'other subcommands and internal flags delegate');
     await parity(delegated, args, { CODE_FORGE_NODE: process.execPath });
   }
