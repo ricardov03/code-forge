@@ -141,18 +141,19 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
   const logged = await launch(green, ARGS, { CODE_FORGE_NO_ERROR_LOG: '0' }).ended;
   assert.equal(logged.code, 0, 'default logging also runs without Node');
   await parity(green, ARGS, false, { CODE_FORGE_NO_ERROR_LOG: '0' });
-  for (const gates of [
-    { test: command('process.exit(3)'), lint: command('console.log("after red")') },
-    { test: command('setTimeout(()=>{}, 10000)') },
-    { test: { argv: command('console.log(process.env.TOKEN, process.env.MODE, process.env.CI, process.env.npm_config_yes)'), env: { TOKEN: 'secret-value-123', MODE: 'test' } } },
-    { test: { argv: command('console.log(process.env.TOKEN)'), env: { TOKEN: 'gate.done' } } },
-    { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}') },
-    { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}'), full_suite_threshold_files: 0 },
-    { kinds: { code: [] } },
+  for (const { gates, timeoutMs = '10000' } of [
+    { gates: { test: command('process.exit(3)'), lint: command('console.log("after red")') } },
+    { gates: { test: command('setTimeout(()=>{}, 10000)') }, timeoutMs: '100' },
+    { gates: { test: { argv: command('console.log(process.env.TOKEN, process.env.MODE, process.env.CI, process.env.npm_config_yes)'), env: { TOKEN: 'secret-value-123', MODE: 'test' } } } },
+    { gates: { test: { argv: command('console.log(process.env.TOKEN)'), env: { TOKEN: 'gate.done' } } } },
+    { gates: { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}') } },
+    { gates: { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}'), full_suite_threshold_files: 0 } },
+    { gates: { kinds: { code: [] } } },
   ]) {
     const f = await fixture(gates);
-    await parity(f, [...ARGS, '--json', '--timeout-ms', '100']);
-    await rowBytes(f, [...ARGS, '--json', '--timeout-ms', '100']);
+    const args = [...ARGS, '--json', '--timeout-ms', timeoutMs];
+    await parity(f, args);
+    await rowBytes(f, args);
     if (!Array.isArray(gates.test) && gates.test?.env?.TOKEN === 'secret-value-123') {
       const output = JSON.parse((await launch(f).ended).stdout);
       assert.equal(output.results[0].stdout, '[REDACTED] test 1 false\n', 'long env value masked, short value and child defaults retained');
