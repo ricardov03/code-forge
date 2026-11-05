@@ -2,17 +2,15 @@
 package rebase
 
 import (
-	"context"
 	"crypto/sha256"
 	"encoding/hex"
 	"fmt"
 	"os"
-	"os/exec"
 	"path/filepath"
 	"sort"
 	"strings"
-	"time"
 
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/state"
@@ -43,27 +41,15 @@ func refusal(code, message string) error {
 
 // Never let hook-exported GIT_* variables select another repository or identity.
 func gitEnv() []string {
-	env := []string{}
-	for _, v := range os.Environ() {
-		if !strings.HasPrefix(v, "GIT_") {
-			env = append(env, v)
-		}
-	}
-	return append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0")
+	return gitx.ChildEnv()
 }
 
 func gitWithEnv(tree string, env []string, args ...string) (string, error) {
-	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
-	defer cancel()
-	cmd := exec.CommandContext(ctx, "git", append([]string{"-C", tree, "-c", "commit.gpgsign=false"}, args...)...)
-	cmd.Env = env
-	var stderr strings.Builder
-	cmd.Stderr = &stderr
-	out, err := cmd.Output()
-	if err != nil {
-		return string(out), fmt.Errorf("git %s: %w: %s", args[0], err, stderr.String())
+	out, err := gitx.WithEnv("", env, append([]string{"-C", tree, "-c", "commit.gpgsign=false"}, args...)...)
+	if e, ok := err.(*gitx.CommandError); ok {
+		e.Args = args
 	}
-	return string(out), nil
+	return out, err
 }
 
 func git(tree string, args ...string) (string, error) { return gitWithEnv(tree, gitEnv(), args...) }

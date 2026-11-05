@@ -41,6 +41,15 @@ test('Go canon, sign, ticket and ledger match every shared golden case', (t) => 
   const failures = events.filter((event) => event.Action === 'fail' || event.Action === 'output' && /got |want |FAIL/.test(event.Output));
   assert.equal(result.status, 0, `Go golden assertions failed:\n${JSON.stringify(failures, null, 2)}\n${result.stderr ?? result.error}`);
   const packages = events.filter((event) => event.Action === 'pass' && !event.Test).map((event) => event.Package.split('/').at(-1)).sort();
-  assert.deepEqual(packages, ['canon', 'code-forge-native', 'config', 'daemon', 'daemonclient', 'ledger', 'queue', 'rebase', 'sign', 'ticket'], 'all ten Go test packages must execute and pass');
+  // Every package that has test files must run and pass; the core ten must always be among them.
+  const listed = spawnSync('go', ['list', '-f', '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}', './...'], {
+    cwd: fileURLToPath(new URL('../../native/', import.meta.url)), encoding: 'utf8', timeout: 60_000, env: goEnv(),
+  });
+  assert.equal(listed.status, 0, `go list failed: ${listed.stderr}`);
+  const tested = listed.stdout.split('\n').filter(Boolean).map((p) => p.split('/').at(-1)).sort();
+  assert.deepEqual(packages, tested, 'every Go package with tests must execute and pass');
+  for (const core of ['canon', 'code-forge-native', 'config', 'daemon', 'daemonclient', 'ledger', 'queue', 'rebase', 'sign', 'ticket']) {
+    assert.ok(packages.includes(core), `core Go package ${core} must execute and pass`);
+  }
   assert.equal(events.filter((event) => event.Action === 'pass' && event.Test === 'TestGolden').length, 4, 'all four golden tests must execute');
 });
