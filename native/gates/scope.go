@@ -46,6 +46,11 @@ func IsTest(p string) bool {
 	return testName.MatchString(parts[len(parts)-1])
 }
 
+// Node's changed-scope filter deliberately adds Swift, but not *_test.py.
+func IsChangedTest(p string) bool {
+	return IsTest(p) || strings.HasSuffix(p, "Tests.swift")
+}
+
 type Scope struct {
 	Kind, Reason               string
 	Files, Changed, Dependents []string
@@ -211,7 +216,7 @@ func ChangedEmptyGraph(old map[string]any, current ledger.Object, fallback Scope
 		if Has(listed, f) {
 			s.Changed = append(s.Changed, f)
 		}
-		if IsTest(f) || strings.HasSuffix(f, "Tests.swift") {
+		if IsChangedTest(f) {
 			if Has(listed, f) {
 				s.Files = append(s.Files, f)
 			}
@@ -255,28 +260,61 @@ func unique(files []string) []string {
 }
 func pair(a, b string) bool {
 	ext := filepath.Ext(a)
-	if ext != filepath.Ext(b) || a == b || IsTest(a) == IsTest(b) {
+	if ext != filepath.Ext(b) || a == b || !IsChangedTest(b) {
 		return false
 	}
-	stem := func(f string) string {
+	// Match review/paired.mjs's identity before expand.mjs filters candidates
+	// with isChangedTest. These are distinct predicates in Node too.
+	identity := func(f string) (string, bool) {
+		if filepath.IsAbs(f) || strings.ContainsAny(f, "\\\x00") || regexp.MustCompile(`[\x00-\x1f]`).MatchString(f) {
+			return "", false
+		}
+		test := false
+		parts := strings.Split(f, "/")
+		for i, part := range parts {
+			if part == "" || part == "." || part == ".." {
+				return "", false
+			}
+			if i < len(parts)-1 && (part == "test" || part == "tests") {
+				test = true
+			}
+		}
 		n := strings.TrimSuffix(filepath.Base(f), ext)
+		prefix, suffix := "", ""
 		switch ext {
 		case ".mjs", ".ts":
-			n = strings.TrimSuffix(strings.TrimSuffix(n, ".test"), ".spec")
+			if strings.HasSuffix(n, ".test") {
+				suffix = ".test"
+			} else {
+				suffix = ".spec"
+			}
 		case ".php":
-			n = strings.TrimSuffix(n, "Test")
+			suffix = "Test"
 		case ".go":
-			n = strings.TrimSuffix(n, "_test")
+			suffix = "_test"
 		case ".py":
-			n = strings.TrimPrefix(strings.TrimSuffix(n, "_test"), "test_")
+			if strings.HasPrefix(n, "test_") {
+				prefix = "test_"
+			} else {
+				suffix = "_test"
+			}
 		case ".swift":
-			n = strings.TrimSuffix(n, "Tests")
+			suffix = "Tests"
 		default:
-			return ""
+			return "", false
 		}
-		return n
+		if prefix != "" && strings.HasPrefix(n, prefix) {
+			test = true
+			n = strings.TrimPrefix(n, prefix)
+		} else if suffix != "" && strings.HasSuffix(n, suffix) {
+			test = true
+			n = strings.TrimSuffix(n, suffix)
+		}
+		return n, test
 	}
-	return stem(a) != "" && stem(a) == stem(b)
+	left, leftTest := identity(a)
+	right, rightTest := identity(b)
+	return left != "" && left == right && leftTest != rightTest
 }
 func RunnerFiles(argv, files []string) []string {
 	ext := ""

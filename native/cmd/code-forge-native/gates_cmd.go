@@ -116,6 +116,8 @@ func runGates(args []string) int {
 			}
 		case "--changed", "--json":
 		default:
+			// Node's router passes argv through unchanged. Ordinary runs ignore
+			// --cwd=; worktree runs explicitly reject it in gatesNative.
 			if !strings.HasPrefix(s, "--cwd=") {
 				return gatesHandover(args)
 			}

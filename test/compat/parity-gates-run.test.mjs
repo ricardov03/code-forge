@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
+import { changedScope, isChangedTest } from '../../src/gates/expand.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-gates-'));
@@ -71,6 +72,65 @@ async function rowBytes(f, args) {
   assert.equal(native.code, node.code, 'raw-row comparison preserves the gate exit');
   assert.equal(normalizeRows(await readFile(file, 'utf8')), normalizeRows(expected), 'all ledger row bytes match after only timestamp and duration normalization');
 }
+
+test('review cwd-equals-ignored: Node ignores joined cwd outside a worktree', async () => {
+  const f = await fixture();
+  const elsewhere = path.join(f.repo, 'elsewhere');
+  await mkdir(elsewhere);
+  await writeFile(path.join(elsewhere, '.code-forge.yml'), JSON.stringify({ gates: { test: command('process.exit(42)'), rerun_failed: 0 } }));
+  for (const flags of [[`--cwd=${elsewhere}`], ['--cwd', f.repo, `--cwd=${elsewhere}`]]) {
+    await parity(f, [...ARGS, ...flags]);
+    assert.equal((await launch(f, [...ARGS, ...flags]).ended).code, 0, 'joined cwd must not select the failing gate');
+  }
+});
+
+test('review F1 signals: native termination diagnostics match Node signal names', async () => {
+  for (const signal of ['SIGHUP', 'SIGSEGV', 'SIGUSR1', 'SIGUSR2', 'SIGPIPE', 'SIGALRM']) {
+    const f = await fixture({ test: ['/bin/sh', '-c', `ulimit -c 0; kill -${signal.slice(3)} $$`] });
+    await parity(f);
+    const result = JSON.parse((await launch(f).ended).stdout).results[0];
+    assert.equal(result.reason, signal);
+    assert.equal(result.stderr, `gate terminated: ${signal}\n`);
+  }
+});
+
+test('review spawn/PATH: unresolvable child commands hand over to Node before running', async () => {
+  const missing = await fixture({ test: { argv: ['sh', '-c', 'echo wrong-parent-path'], env: { PATH: '/nonexistent-child-path' } } });
+  const denied = await fixture({ test: ['./no-execute'] });
+  await writeFile(path.join(denied.repo, 'no-execute'), '#!/bin/sh\nexit 0\n', { mode: 0o600 });
+  const shell = await fixture({ test: ['./plain-script'] });
+  await writeFile(path.join(shell.repo, 'plain-script'), 'printf shell-fallback\n', { mode: 0o755 });
+  for (const f of [missing, denied, shell]) {
+    assert.equal((await launch(f).ended).code, 127, 'preflight delegates unsupported spawns to Node');
+    await parity(f, ARGS, true);
+  }
+});
+
+test('review F1 scope: changed Swift pairs, Python suffix follows Node filtering', async () => {
+  /** @type {[string, string, boolean][]} */
+  const cases = [
+    ['Foo.swift', 'FooTests.swift', true],
+    ['foo.py', 'foo_test.py', false],
+    ['foo.py', 'test_foo.py', true],
+    ['foo.py', 'tests/foo_test.py', true],
+  ];
+  for (const [source, candidate, expected] of cases) {
+    const f = await fixture({ test: ['/bin/echo', '{test_files}'] }, { owned_files: [source], test_files: [] });
+    await writeFile(path.join(f.repo, source), '// before\n');
+    await mkdir(path.dirname(path.join(f.repo, candidate)), { recursive: true });
+    await writeFile(path.join(f.repo, candidate), '// empty test\n');
+    assert.equal(isChangedTest(candidate), expected, 'Node changed-test predicate defines candidate eligibility');
+    const nodeScope = changedScope({ baseline: { [source]: 'a'.repeat(64) }, current: { files: { [source]: 'b'.repeat(64) }, candidates: [source, candidate], dependents: {} }, fallback: { scope: 'full', reason: 'no_tests' } });
+    assert.deepEqual(nodeScope.files, expected ? [candidate] : []);
+    assert.equal(nodeScope.reason, expected ? undefined : 'unpaired');
+    assert.equal((await launch(f).ended).code, 0, 'save native baseline');
+    await writeFile(path.join(f.repo, source), '// after\n');
+    await parity(f, [...ARGS, '--changed']);
+    const result = JSON.parse((await launch(f, [...ARGS, '--changed']).ended).stdout).results[0];
+    assert.equal(result.test_count, expected ? 1 : 0);
+    assert.equal(result.reason, expected ? undefined : 'unpaired');
+  }
+});
 
 test('gates run: native speed and byte parity for gates, scope, lock, worktrees, usage and fallback', async () => {
   const green = await fixture();

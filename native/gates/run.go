@@ -3,6 +3,7 @@ package gates
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -12,6 +13,7 @@ import (
 	"os/exec"
 	"path/filepath"
 	"regexp"
+	"runtime"
 	"sort"
 	"strconv"
 	"strings"
@@ -298,11 +300,11 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 	return results, all && ctx.Err() == nil, nil
 }
 func execute(ctx context.Context, argv []string, env map[string]string, cwd, run string, timeout float64, failOnStdout bool) ledger.Object {
-	program := Executable(cwd, &Command{Argv: argv, Env: env})
-	if program == "" {
-		program = argv[0]
-	}
+	program, resolveErr := resolveExecutable(cwd, &Command{Argv: argv, Env: env})
+	// Always give exec.Command an absolute path. It must never search the
+	// parent's PATH when the child's PATH did not resolve the executable.
 	cmd := exec.Command(program, argv[1:]...)
+	cmd.Err = resolveErr
 	cmd.Args[0] = argv[0]
 	cmd.Dir = cwd
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
@@ -364,7 +366,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		outWrite.Close()
 		errWrite.Close()
 		reason = "spawn-error"
-		diagnostic = "gate terminated: spawn " + argv[0] + " ENOENT"
+		diagnostic = "gate terminated: spawn " + argv[0] + " " + spawnErrorCode(e)
 	} else {
 		outWrite.Close()
 		errWrite.Close()
@@ -405,20 +407,30 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 			code = cmd.ProcessState.ExitCode()
 		} else {
 			sig := cmd.ProcessState.Sys().(syscall.WaitStatus).Signal()
-			reason = "SIG" + strings.ToUpper(sig.String())
-			switch sig {
-			case syscall.SIGTERM:
-				reason = "SIGTERM"
-			case syscall.SIGINT:
-				reason = "SIGINT"
-			case syscall.SIGKILL:
-				reason = "SIGKILL"
+			reason = signalName(sig)
+			if reason == "" {
+				reason = "terminated"
+				diagnostic = "gate terminated: no exit status (no signal reported)"
+			} else {
+				diagnostic = "gate terminated: " + reason
 			}
-			diagnostic = "gate terminated: " + reason
 		}
 		_ = err
 	}
-	drains.Wait()
+	// Node destroys both streams after timeout/cancellation and remaining-member
+	// cleanup. An escaped descendant (or failed ps) must not hold this run open.
+	// Allow queued bytes to drain, then close the read ends to unblock io.Copy.
+	drained := make(chan struct{})
+	go func() { drains.Wait(); close(drained) }()
+	drainTimer := time.NewTimer(100 * time.Millisecond)
+	select {
+	case <-drained:
+	case <-drainTimer.C:
+		outRead.Close()
+		errRead.Close()
+		<-drained
+	}
+	drainTimer.Stop()
 	out, errout := stdout.text(), stderr.text()
 	if timed {
 		reason = "timeout"
@@ -461,20 +473,43 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 // Executable resolves the child's PATH, rather than Go's parent-side LookPath.
 // Its original spelling remains in the result argv and in the child's argv[0].
 func Executable(cwd string, c *Command) string {
-	cwd, _ = filepath.Abs(cwd)
-	check := func(p string) string {
-		st, e := os.Stat(p)
-		if e == nil && st.Mode().IsRegular() && st.Mode().Perm()&0111 != 0 {
-			return p
-		}
+	p, e := resolveExecutable(cwd, c)
+	if e != nil {
 		return ""
 	}
+	st, e := os.Stat(p)
+	if e != nil || !st.Mode().IsRegular() || st.Mode().Perm()&0111 == 0 {
+		return ""
+	}
+	// Node/execvp runs unrecognized executable files through /bin/sh on
+	// ENOEXEC; Go does not. Delegate these before taking the proof slot.
+	f, e := os.Open(p)
+	if e != nil {
+		return ""
+	}
+	defer f.Close()
+	header := make([]byte, 4)
+	n, _ := f.Read(header)
+	if n >= 2 && string(header[:2]) == "#!" {
+		return p
+	}
+	if n == 4 {
+		switch string(header) {
+		case "\x7fELF", "\xfe\xed\xfa\xce", "\xce\xfa\xed\xfe", "\xfe\xed\xfa\xcf", "\xcf\xfa\xed\xfe", "\xca\xfe\xba\xbe", "\xbe\xba\xfe\xca", "\xca\xfe\xba\xbf", "\xbf\xba\xfe\xca":
+			return p
+		}
+	}
+	return ""
+}
+
+func resolveExecutable(cwd string, c *Command) (string, error) {
+	cwd, _ = filepath.Abs(cwd)
 	name := c.Argv[0]
 	if strings.ContainsRune(name, '/') {
 		if !filepath.IsAbs(name) {
 			name = filepath.Join(cwd, name)
 		}
-		return check(name)
+		return name, nil // let Start retain the real errno, including EACCES
 	}
 	paths, present := os.LookupEnv("PATH")
 	if !present {
@@ -483,15 +518,78 @@ func Executable(cwd string, c *Command) string {
 	if v, ok := c.Env["PATH"]; ok {
 		paths = v
 	}
+	var denied bool
 	for _, dir := range strings.Split(paths, string(os.PathListSeparator)) {
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(cwd, dir)
 		}
-		if p := check(filepath.Join(dir, name)); p != "" {
-			return p
+		p := filepath.Join(dir, name)
+		st, e := os.Stat(p)
+		if e == nil {
+			if st.Mode().IsRegular() && st.Mode().Perm()&0111 != 0 {
+				return p, nil
+			}
+			denied = true
+		} else if errors.Is(e, syscall.EACCES) {
+			denied = true
+		} else if !errors.Is(e, syscall.ENOENT) && !errors.Is(e, syscall.ENOTDIR) {
+			return p, e
 		}
 	}
+	if denied {
+		return "", syscall.EACCES
+	}
+	return "", exec.ErrNotFound
+}
+
+// These are libuv/Node's canonical names, never Go's human descriptions.
+func signalName(sig syscall.Signal) string {
+	names := map[syscall.Signal]string{
+		syscall.SIGHUP: "SIGHUP", syscall.SIGINT: "SIGINT", syscall.SIGQUIT: "SIGQUIT",
+		syscall.SIGILL: "SIGILL", syscall.SIGTRAP: "SIGTRAP", syscall.SIGABRT: "SIGABRT",
+		syscall.SIGBUS: "SIGBUS", syscall.SIGFPE: "SIGFPE", syscall.SIGKILL: "SIGKILL",
+		syscall.SIGUSR1: "SIGUSR1", syscall.SIGSEGV: "SIGSEGV", syscall.SIGUSR2: "SIGUSR2",
+		syscall.SIGPIPE: "SIGPIPE", syscall.SIGALRM: "SIGALRM", syscall.SIGTERM: "SIGTERM",
+		syscall.SIGCHLD: "SIGCHLD", syscall.SIGCONT: "SIGCONT", syscall.SIGSTOP: "SIGSTOP",
+		syscall.SIGTSTP: "SIGTSTP", syscall.SIGTTIN: "SIGTTIN", syscall.SIGTTOU: "SIGTTOU",
+		syscall.SIGURG: "SIGURG", syscall.SIGXCPU: "SIGXCPU", syscall.SIGXFSZ: "SIGXFSZ",
+		syscall.SIGVTALRM: "SIGVTALRM", syscall.SIGPROF: "SIGPROF", syscall.SIGWINCH: "SIGWINCH",
+		syscall.SIGIO: "SIGIO", syscall.SIGSYS: "SIGSYS",
+	}
+	if name := names[sig]; name != "" {
+		return name
+	}
+	// Platform-only signals are not all defined in Go's syscall package on
+	// both release targets. Their numbers are fixed by the respective ABIs.
+	if runtime.GOOS == "darwin" {
+		return map[syscall.Signal]string{7: "SIGEMT", 29: "SIGINFO"}[sig]
+	}
+	if runtime.GOOS == "linux" {
+		return map[syscall.Signal]string{16: "SIGSTKFLT", 30: "SIGPWR"}[sig]
+	}
 	return ""
+}
+
+func spawnErrorCode(err error) string {
+	if errors.Is(err, exec.ErrNotFound) {
+		return "ENOENT"
+	}
+	var errno syscall.Errno
+	if errors.As(err, &errno) {
+		names := map[syscall.Errno]string{
+			syscall.EACCES: "EACCES", syscall.ENOENT: "ENOENT", syscall.ENOTDIR: "ENOTDIR",
+			syscall.ELOOP: "ELOOP", syscall.E2BIG: "E2BIG", syscall.ENAMETOOLONG: "ENAMETOOLONG",
+			syscall.ENOMEM: "ENOMEM", syscall.EAGAIN: "EAGAIN", syscall.ETXTBSY: "ETXTBSY",
+			syscall.EIO: "EIO", syscall.EMFILE: "EMFILE", syscall.ENFILE: "ENFILE",
+			syscall.EPERM: "EPERM", syscall.EINVAL: "EINVAL", syscall.ENOEXEC: "ENOEXEC",
+			syscall.EFAULT: "EFAULT", syscall.EISDIR: "EISDIR", syscall.EINTR: "EINTR", syscall.ENOSYS: "ENOSYS",
+		}
+		if name := names[errno]; name != "" {
+			return name
+		}
+		return fmt.Sprintf("Unknown system error -%d", errno)
+	}
+	return err.Error()
 }
 
 // Like Node's groupMembers/stopMembers, signal surviving members only after

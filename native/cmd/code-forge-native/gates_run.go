@@ -434,7 +434,7 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 			return 0, false
 		}
 		for _, file := range listed {
-			if !gates.IsTest(file) && !strings.HasSuffix(file, "Tests.swift") {
+			if !gates.IsChangedTest(file) {
 				continue
 			}
 			if strings.HasPrefix(file, "test/config/") || strings.HasPrefix(file, "test/doctor/") || !gatesEmptyTest(cwd, file) {
