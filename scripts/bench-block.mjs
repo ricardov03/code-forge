@@ -6,8 +6,10 @@ import os from 'node:os';
 import path from 'node:path';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
+import { inspectLeftovers } from './bench-verbs.mjs';
 
 const CLI = fileURLToPath(new URL('../bin/code-forge.mjs', import.meta.url));
+const ENTRY = fileURLToPath(new URL('../bin/code-forge', import.meta.url));
 const SCRIPT = fileURLToPath(import.meta.url);
 const USAGE = 'usage: node scripts/bench-block.mjs [--files n] [--review-ms n] [--ledger-rows n] [--out file] [--json]\n';
 const CONFIG = 'version: 1\nproject:\n  slug: bench-block\nprovider: anthropic\nlevels:\n  L2:\n    model: claude-opus-5-5\n';
@@ -22,7 +24,7 @@ function parseArgs(argv) {
     if (flag === '--json') json = true;
     else if (flag === '--mode') {
       mode = argv[++i];
-      if (!['node', 'go'].includes(mode)) throw new Error('--mode needs node or go');
+      if (!['node', 'go', 'entry'].includes(mode)) throw new Error('--mode needs node, go or entry');
     } else if (flag === '--out') {
       out = argv[++i];
       if (!out || out.startsWith('--')) throw new Error('--out needs a file');
@@ -118,6 +120,9 @@ async function mode(name, dir, params) {
   process.env.TMPDIR = dir;
   process.env.CODE_FORGE_TMP_ROOT = path.join(dir, 'tmp');
   process.env.CODE_FORGE_KEY_BACKEND = 'file';
+  process.env.CODE_FORGE_NODE = process.execPath;
+  process.env.CODE_FORGE_NO_ERROR_LOG = '1';
+  process.env.PATH = `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH ?? ''}`;
   const run = `r-bench-block-${name}-${process.pid}`;
   const slug = `bench-block-${name}-${process.pid}`;
   const identity = { run_id: run, slug, home };
@@ -125,8 +130,8 @@ async function mode(name, dir, params) {
   else delete process.env.CODE_FORGE_NATIVE;
   // Pin HOME before importing any code that can resolve state or credentials.
   const { nativePath, daemonRequest } = await import('../src/util/native.mjs');
-  const binary = name === 'go' ? nativePath() : null;
-  if (name === 'go' && !binary) return { ...identity, skipped: 'no native binary' };
+  const binary = name === 'node' ? null : nativePath();
+  if (name !== 'node' && !binary) return { ...identity, skipped: 'no native binary', ...await inspectLeftovers(home) };
   const { startRun } = await import('../src/state/run.mjs');
   const { openBlock } = await import('../src/state/block.mjs');
   const { loadKey, signRow } = await import('../src/state/signer.mjs');
@@ -165,9 +170,10 @@ async function mode(name, dir, params) {
   let daemon;
   let active;
   let cliRuns = 0;
+  let report;
   const cli = async (args) => {
     if (workerError) throw workerError;
-    active = child(process.execPath, [CLI, ...args, '--run', run], repo);
+    active = name === 'entry' ? child(ENTRY, [...args, '--run', run], repo) : child(process.execPath, [CLI, ...args, '--run', run], repo);
     cliRuns++;
     const timer = setTimeout(() => active.proc.kill('SIGKILL'), 60_000);
     let result;
@@ -204,13 +210,16 @@ async function mode(name, dir, params) {
     }
     await cli(['status', '--json']);
     const wall_ms = Math.round((performance.now() - started) * 100) / 100;
-    return { ...identity, cli_runs: cliRuns, wall_ms };
+    report = { ...identity, cli_runs: cliRuns, wall_ms };
+    return report;
   } finally {
     process.send?.('bench:stop');
     clearInterval(worker);
     clearInterval(heartbeat);
     await Promise.all([stopChild(active), stopChild(daemon)]);
     retractWorker(repo, process.pid, self.start_time);
+    const leftovers = await inspectLeftovers(home);
+    if (report) Object.assign(report, leftovers);
   }
 }
 
@@ -231,8 +240,11 @@ async function observeMode(name, params) {
   });
   try {
     const result = await running.done;
-    if (result.code !== 0) throw new Error(`${name} pass failed: ${result.stderr || result.signal}`);
+    if (result.code !== 0 && !result.stdout.trim()) throw new Error(`${name} pass failed: ${result.stderr || result.signal}`);
     const report = JSON.parse(result.stdout.trim());
+    if (result.code !== 0 && (result.code !== 1 || !(report.leftover_processes.count || report.native_sockets.length))) {
+      throw new Error(`${name} pass failed: ${result.stderr || result.signal || result.code}`);
+    }
     if ('skipped' in report) return report;
     if (!measurements) throw new Error(`${name} pass did not complete observation`);
     return { ...report, ...await measurements };
@@ -249,23 +261,26 @@ async function main() {
   if (opts.mode) {
     const cwd = process.cwd();
     const dir = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'cf-bb-')));
-    try { process.stdout.write(`${JSON.stringify(await mode(opts.mode, dir, opts.params))}\n`); }
+    let report;
+    try { report = await mode(opts.mode, dir, opts.params); process.stdout.write(`${JSON.stringify(report)}\n`); }
     finally { process.chdir(cwd); rmSync(dir, { recursive: true, force: true }); }
-    return 0;
+    return report.leftover_processes.count || report.native_sockets.length ? 1 : 0;
   }
   const node = await observeMode('node', opts.params);
   const go = await observeMode('go', opts.params);
-  const report = { node, go, params: opts.params };
+  const entry = await observeMode('entry', opts.params);
+  const report = { node, go, entry, params: opts.params };
   const json = `${JSON.stringify(report)}\n`;
   if (opts.out) writeFileSync(opts.out, json);
   if (opts.json) process.stdout.write(json);
   else {
-    process.stdout.write('mode  processes  cli_runs  peak_rss_mb  wall_ms\n');
-    for (const [name, metrics] of Object.entries({ node, go })) {
-      process.stdout.write('skipped' in metrics ? `${name}    skipped: ${metrics.skipped}\n` : `${name.padEnd(6)}${String(metrics.processes).padEnd(11)}${String(metrics.cli_runs).padEnd(10)}${String(metrics.peak_rss_mb).padEnd(13)}${metrics.wall_ms}\n`);
+    process.stdout.write('mode   processes  cli_runs  peak_rss_mb  wall_ms  leftover_processes\n');
+    for (const [name, metrics] of Object.entries({ node, go, entry })) {
+      process.stdout.write('skipped' in metrics ? `${name}    skipped: ${metrics.skipped}; leftover_processes: ${JSON.stringify(metrics.leftover_processes)}\n` : `${name.padEnd(7)}${String(metrics.processes).padEnd(11)}${String(metrics.cli_runs).padEnd(10)}${String(metrics.peak_rss_mb).padEnd(13)}${metrics.wall_ms}  ${JSON.stringify(metrics.leftover_processes)}\n`);
+      if (metrics.native_sockets.length) process.stdout.write(`native_sockets: ${JSON.stringify(metrics.native_sockets)}\n`);
     }
   }
-  return 0;
+  return [node, go, entry].some((metrics) => metrics.leftover_processes.count || metrics.native_sockets.length) ? 1 : 0;
 }
 
 try { process.exitCode = await main(); }

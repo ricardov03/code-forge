@@ -35,6 +35,7 @@
     "!scripts/known-fix.mjs",
     "!scripts/bench-review.mjs",
     "!scripts/bench-block.mjs",
+    "!scripts/bench-verbs.mjs",
     "!scripts/build-native.mjs",
     "!scripts/compat-golden.mjs",
     "!scripts/gen-commands-doc.mjs",
@@ -49,7 +50,8 @@
     "changelog": "node scripts/changelog.mjs",
     "known-fix": "node scripts/known-fix.mjs",
     "bench:review": "node scripts/bench-review.mjs",
-    "bench:block": "node scripts/bench-block.mjs"
+    "bench:block": "node scripts/bench-block.mjs",
+    "bench:verbs": "node scripts/bench-verbs.mjs"
   },
   "dependencies": {
     "@clack/prompts": "1.8.1",
