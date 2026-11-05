@@ -83,13 +83,16 @@ test('suite file arguments select only those tests with both leak steps; no file
   const f = await fixture(t);
   for (const file of ['test/a.test.mjs', path.join(f.repo, 'test/a.test.mjs')]) {
     f.clear();
-    const selected = f.suite(['--test-timeout=10000', '--test-concurrency=1', file]);
+    const selected = f.suite(['--test-timeout=10000', '--test-concurrency', '1',
+      '--test-name-pattern', 'paired a|../not-a-path', file]);
     assert.equal(selected.status, 0, selected.stdout + selected.stderr);
     assert.deepEqual(counts(selected.stdout), [1, 1, 1], 'snapshot, exactly one selected test, final');
     assert.doesNotMatch(selected.stdout, /unrelated test|changed test|dependent test/);
     assert.deepEqual(f.calls(), [{ mode: 'snapshot', guard: 'snapshot' }, { mode: 'final', guard: 'snapshot' }]);
   }
-  for (const args of [[], ['--test-timeout=10000', '--test-concurrency=1']]) {
+  for (const args of [[], ['--test-timeout=10000', '--test-concurrency=1'],
+    ['--test-name-pattern', '.*|../not-a-path'],
+    ['--test-skip-pattern', '../not-a-test', '--test-timeout', '10000']]) {
     f.clear();
     const full = f.suite(args);
     assert.equal(full.status, 0, full.stdout + full.stderr);
@@ -103,11 +106,16 @@ test('suite file arguments select only those tests with both leak steps; no file
 test('suite rejects traversal and outside paths before any leak or test step', async t => {
   const f = await fixture(t);
   symlinkSync(path.dirname(f.repo), path.join(f.repo, 'escape'));
-  for (const file of ['../a.test.mjs', 'test/../test/a.test.mjs', `${f.repo}-neighbor/a.test.mjs`, 'escape/a.test.mjs',
-    '../evil.mjs', '..', `${f.repo}-neighbor/x.js`, path.dirname(f.repo), 'escape']) {
+  symlinkSync(path.dirname(f.repo), path.join(f.repo, '-escape'));
+  const paths = ['../a.test.mjs', 'test/../test/a.test.mjs', `${f.repo}-neighbor/a.test.mjs`, 'escape/a.test.mjs',
+    '../evil.mjs', '..', `${f.repo}-neighbor/x.js`, path.dirname(f.repo), 'escape'];
+  const inputs = paths.map(file => [file]);
+  inputs.push(['--test-name-pattern', '../not-a-path', 'test/a.test.mjs', '../evil.mjs'],
+    ['--test-name-pattern=paired a', '../evil.mjs'], ['--test-only', 'escape'], ['--', '-escape']);
+  for (const args of inputs) {
     f.clear();
-    const rejected = f.suite([file]);
-    assert.equal(rejected.status, 2, `${file}: ${rejected.stdout}${rejected.stderr}`);
+    const rejected = f.suite(args);
+    assert.equal(rejected.status, 2, `${JSON.stringify(args)}: ${rejected.stdout}${rejected.stderr}`);
     assert.equal(rejected.stdout, '', 'unsafe input launches no Node test process');
     assert.equal(rejected.stderr.trim().split('\n').length, 1, 'one refusal line');
     assert.match(rejected.stderr, /path.*inside.*repo|repo.*path/i);
