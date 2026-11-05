@@ -11,7 +11,7 @@ import { appendRow } from '../../src/ledger/write.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
-import { announceWorker } from '../../src/worker/queue.mjs';
+import { announceWorker, enqueue, writeResult } from '../../src/worker/queue.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
@@ -128,9 +128,30 @@ async function prepare(copy, outcome = 'approved') {
   };
 }
 
+async function prepareQueued(copy, approved = true) {
+  const record = JSON.parse(await readFile(path.join(copy.home, '.code-forge/runs', `${RUN}.json`), 'utf8'));
+  const tree = record.blocks.B1.worktree?.path ?? null;
+  const saved = process.env.HOME;
+  try {
+    process.env.HOME = copy.home;
+    for (const file of ['sample.mjs', 'outsider.mjs']) {
+      const queued = enqueue({ repoRoot: copy.repo, run: RUN, block: 'B1', file, tree });
+      assert.equal(queued.status, 'queued', `${file}: one queued content ticket`);
+      writeResult({ repoRoot: copy.repo, runId: RUN, ticket: queued.ticket, key: KEY,
+        result: { status: 'reviewed', approved, ts: '2020-01-01T00:00:00.000Z', findings: approved ? [] : [{ id: 'F1', severity: 'warning', file, claim: 'fixture finding' }] } });
+    }
+  } finally { process.env.HOME = saved; }
+}
+
 test('close flags run natively with byte parity for process, signed state and git worktrees', async () => {
   const speed = await launch(await fixture(), [...args, '--auto-claim']);
   assert.equal(speed.code, 0, `auto-claim with no extra paths succeeds without Node: ${speed.stderr}`);
+  for (const approved of [true, false]) {
+    const f = await fixture('auto');
+    const parity = await runParity([...args, '--auto-claim', '--json'], { fixture: f, goCommand: BINARY, samePaths: true,
+      prepare: (copy) => prepareQueued(copy, approved), env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], `daemon disabled, approved=${approved}: join and ticket-detail error match Node`);
+  }
   /** @type {[string, string[], number][]} */
   const cases = [
     ['plain', ['--auto-claim'], 0], ['auto', ['--auto-claim'], 0],
@@ -169,6 +190,14 @@ test('close flags run natively with byte parity for process, signed state and gi
 test('close flag refusals, concurrent claims and whole-command handovers preserve their boundaries', async () => {
   const waived = await launch(await fixture(), [...args, '--no-require-reviews']);
   assert.equal(waived.code, 2, 'no terminal: native human waiver refusal exits 2 without Node');
+  for (const [kind, flags] of /** @type {[string, string[]][]} */ ([
+    ['plain', ['--no-require-reviews']], ['plain', ['--remove-worktree']], ['dirty', ['--remove-worktree']],
+    ['worker-down', ['--auto-claim']], ['plain', ['--auto-claim=true']],
+  ])) {
+    const parity = await runParity([...args, ...flags, '--json'], { fixture: await fixture(kind), goCommand: BINARY, samePaths: true,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '0' } });
+    assert.deepEqual(parity.diffs, [], `${kind} ${flags}: exact outer command breadcrumb and scrubbed failure log`);
+  }
   for (const flags of [
     ['--no-require-reviews'], ['--auto-claim', '--no-require-reviews'], ['--remove-worktree'],
     ['--auto-claim', '--remove-worktree', '--no-require-reviews'],
@@ -179,6 +208,15 @@ test('close flag refusals, concurrent claims and whole-command handovers preserv
     const parity = await runParity([...args, ...flags, '--json'], { fixture: f, goCommand: BINARY,
       env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
     assert.deepEqual(parity.diffs, [], `${flags}: exact refusal, exit and zero writes`);
+  }
+  for (const flags of [
+    ['--no-require-reviews'], ['--no-require-reviews', '--auto-claim'],
+    ['--no-require-reviews', '--remove-worktree'], ['--no-require-reviews', '--auto-claim', '--remove-worktree'],
+  ]) {
+    const f = await fixture('auto-tree');
+    const parity = await runParity([...args, ...flags, '--json'], { fixture: f, goCommand: BINARY, samePaths: true,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], `${flags}: terminal refusal precedes all claims and worktree changes`);
   }
   for (const flags of [['--auto-claim'], ['--remove-worktree'], ['--no-require-reviews'], ['--auto-claim', '--remove-worktree', '--no-require-reviews']]) {
     /** @type {[Record<string, any>, string[], boolean][]} */
