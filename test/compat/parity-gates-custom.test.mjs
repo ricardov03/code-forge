@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
@@ -11,7 +11,7 @@ import { runParity } from '../helpers/parity.mjs';
 import { verifyRow } from '../../src/state/signer.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-custom-'));
+const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cf-custom-')));
 const BINARY = path.join(scratch, 'pkg/native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
 const ARGS = ['gates', 'run', '--run', 'fixture', '--block', 'B1'];
