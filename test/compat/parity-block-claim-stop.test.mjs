@@ -4,6 +4,7 @@ import { cp, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/pr
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
+import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
 import { configHash } from '../../src/state/config-snapshot.mjs';
@@ -132,7 +133,14 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
   const concurrent = await fixture();
   const copy = { repo: concurrent.repo, home: path.join(scratch, 'concurrent-home') };
   await cp(concurrent.home, copy.home, { recursive: true });
-  const go = await Promise.all([launch(copy, claim('first.mjs')), launch(copy, claim('second.mjs'))]);
+  const lock = path.join(copy.home, '.code-forge/runs', `${RUN}.lock`);
+  await mkdir(lock);
+  const writers = [launch(copy, claim('first.mjs')), launch(copy, claim('second.mjs'))];
+  try {
+    await delay(100);
+    await assert.rejects(readFile(path.join(copy.home, '.code-forge/ledger/claim-stop.jsonl')), { code: 'ENOENT' }, 'neither writer signs while another process holds the run lock');
+  } finally { await rm(lock, { recursive: true, force: true }); }
+  const go = await Promise.all(writers);
   const goRows = (await readFile(path.join(copy.home, '.code-forge/ledger/claim-stop.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(goRows.length, 2, 'two concurrent distinct claims each publish one row');
   const node = [];
