@@ -41,6 +41,6 @@ test('Go canon, sign, ticket and ledger match every shared golden case', (t) => 
   const failures = events.filter((event) => event.Action === 'fail' || event.Action === 'output' && /got |want |FAIL/.test(event.Output));
   assert.equal(result.status, 0, `Go golden assertions failed:\n${JSON.stringify(failures, null, 2)}\n${result.stderr ?? result.error}`);
   const packages = events.filter((event) => event.Action === 'pass' && !event.Test).map((event) => event.Package.split('/').at(-1)).sort();
-  assert.deepEqual(packages, ['canon', 'code-forge-native', 'config', 'daemon', 'ledger', 'queue', 'rebase', 'sign', 'ticket'], 'all nine Go test packages must execute and pass');
+  assert.deepEqual(packages, ['canon', 'code-forge-native', 'config', 'daemon', 'daemonclient', 'ledger', 'queue', 'rebase', 'sign', 'ticket'], 'all ten Go test packages must execute and pass');
   assert.equal(events.filter((event) => event.Action === 'pass' && event.Test === 'TestGolden').length, 4, 'all four golden tests must execute');
 });
