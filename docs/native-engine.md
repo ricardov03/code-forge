@@ -18,10 +18,16 @@ The command works in three steps:
    error output and exit code. The exit code is the number that tells the
    shell whether a command succeeded.
 
-**Today, no public command runs fully in Go.** The public route table is empty.
-For example, `code-forge version`, `code-forge status` and `code-forge doctor`
-all go through Go to Node. Go also runs private helpers and the optional
-background daemon. These are separate from the public route table.
+The public route table currently serves:
+
+- `status --json --run <id>` when a compatible daemon is already running,
+  the run's config enables it, and Go can establish that no worker warning
+  needs to be printed. Either flag order is accepted.
+
+All other status forms and any uncertain or unavailable daemon answer hand
+over to Node. Status never starts a daemon. Commands such as `code-forge version`
+and `code-forge doctor` also go through Go to Node. Go additionally runs private
+helpers and the optional background daemon.
 
 ### See what is available
 
