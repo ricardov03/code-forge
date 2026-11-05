@@ -156,7 +156,23 @@ async function openFixture(kind = 'clean', config = {}) {
     return { ...f, tree, ticket, kind };
   } finally { process.env.HOME = saved; }
 }
-async function prepareLand(copy, kind = 'clean', merge = false) {
+function assertLedgerSignatures(rows) {
+  const signed = rows.filter((r) => Object.hasOwn(r, 'mac'));
+  assert.equal(signed.every((r) => verifyRow(r, KEY).ok), true,
+    `every row with a MAC verifies: ${JSON.stringify(signed.filter((r) => !verifyRow(r, KEY).ok))}`);
+  const unsigned = rows.filter((r) => !Object.hasOwn(r, 'mac'));
+  const gates = rows.filter((r) => ['gate.red', 'gate.done', 'gate.cancelled'].includes(r.event));
+  assert.deepEqual(unsigned, gates, 'exactly the gate rows are unsigned; every other row must carry a MAC');
+  return unsigned.map(({ event, gate }) => ({ event, gate }));
+}
+function prepareParityLand(kind = 'clean', merge = false) {
+  let nodeUnsigned;
+  return (copy) => prepareLand(copy, kind, merge, (unsigned) => {
+    if (nodeUnsigned === undefined) nodeUnsigned = unsigned;
+    else assert.deepEqual(unsigned, nodeUnsigned, 'Node and Go have the same unsigned event/gate list');
+  });
+}
+async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = (_unsigned) => {}) {
   const record = JSON.parse(await readFile(path.join(copy.home, '.code-forge/runs', RUN + '.json'), 'utf8'));
   const tree = record.blocks.B1.worktree.path;
   const mainBefore = git(copy.repo, ['rev-parse', 'main']);
@@ -203,8 +219,7 @@ async function prepareLand(copy, kind = 'clean', merge = false) {
       assert.equal(mainAfter, mainBefore, 'land without --merge leaves main HEAD unchanged');
     }
     const rows = (await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
-    assert.equal(rows.every((r) => verifyRow(r, KEY).ok), true,
-      `every ledger row carries a valid MAC: ${JSON.stringify(rows.filter((r) => !verifyRow(r, KEY).ok))}`);
+    checkUnsigned(assertLedgerSignatures(rows));
     assert.equal(rows.filter((r) => r.event === 'land.timing').length, 1, 'exactly one signed timing row');
     assert.equal(rows.filter((r) => r.event === 'gate.done').length, kind === 'moved' ? 2 : 1, 'tree moves trigger exactly one gate rerun');
     assert.equal(rows.filter((r) => r.event === 'block.close').length, ['clean', 'moved', 'auto'].includes(kind) ? 1 : 0);
@@ -217,7 +232,7 @@ for (const kind of ['clean', 'findings', 'red', 'moved', 'timeout', 'auto', 'orp
     for (const json of [false, true]) {
       const f = await openFixture(kind), argv = [...args, '--max', kind === 'timeout' ? '2s' : '10s', ...(json ? ['--json'] : [])];
       const result = await runParity(argv, { fixture: f, goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
-        env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: (copy) => prepareLand(copy, kind) });
+        env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand(kind) });
       assert.deepEqual(result.diffs, [], `${kind} json=${json}: exact process and state parity`);
     }
   });
@@ -240,10 +255,10 @@ test('ported land and optional merge succeed with Node unavailable', async () =>
       const rows = (await readFile(path.join(short, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
       assert.equal(rows.filter((r) => r.event === 'block.close').length, 1);
       assert.equal(rows.filter((r) => r.event === 'land.timing').length, 1);
-      assert.equal(rows.every((r) => verifyRow(r, KEY).ok), true);
+      assertLedgerSignatures(rows);
     } finally { await cleanup(); await rm(short, { recursive: true, force: true }); }
     const result = await runParity([...args, ...extra], { fixture: await openFixture(), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
-      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: (copy) => prepareLand(copy, 'clean', extra.includes('--merge')) });
+      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand('clean', extra.includes('--merge')) });
     assert.deepEqual(result.diffs, [], `merge flow ${extra}: exact Node parity`);
   }
 });
@@ -326,7 +341,7 @@ async function snapshot(f) {
 test('composed land logs only the outer block invocation and matches Node failure logs', async () => {
   for (const kind of ['clean', 'findings', 'red', 'red-slow', 'orphan']) {
     const result = await runParity([...args, '--max', '10s', '--json'], { fixture: await openFixture(kind), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
-      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '0' }, prepare: (copy) => prepareLand(copy, kind) });
+      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '0' }, prepare: prepareParityLand(kind) });
     assert.deepEqual(result.diffs, [], `${kind}: exact outer breadcrumb and error log, no child CLI logs`);
   }
 });

@@ -120,7 +120,7 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
     const runGates = async () => {
       const started = Date.now();
       try {
-        return await capture((streams) => runGatesVerb(['run', '--run', runId, '--block', id, '--changed', '--cwd', tree.workspace], { ...streams, signal: gateController.signal, signRows: true }));
+        return await capture((streams) => runGatesVerb(['run', '--run', runId, '--block', id, '--changed', '--cwd', tree.workspace], { ...streams, signal: gateController.signal }));
       } finally {
         gatesMs += Date.now() - started;
       }

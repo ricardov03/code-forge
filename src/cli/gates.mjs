@@ -243,11 +243,11 @@ function scopeOf({ scope, test_count: testCount, reason }) {
 
 /**
  * @param {string[]} args
- * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, signal?: AbortSignal, signRows?: boolean}} [deps]
+ * @param {{stdout?: {write: (s: string) => unknown}, stderr?: {write: (s: string) => unknown}, signal?: AbortSignal}} [deps]
  * @returns {Promise<number>}
  */
 export async function runGatesVerb(args, deps = {}) {
-  const { stdout = process.stdout, stderr = process.stderr, signal, signRows = false } = deps;
+  const { stdout = process.stdout, stderr = process.stderr, signal } = deps;
   const out = (/** @type {object} */ value) => writeSafe(stdout, `${redactJSON(value)}\n`);
   const err = (/** @type {string} */ s) => writeSafe(stderr, s);
   const usage = () => err(USAGE);
@@ -377,8 +377,8 @@ export async function runGatesVerb(args, deps = {}) {
 
       const ledgerSlug = slug ?? ran.ledger_slug;
       if (ledgerSlug) {
-        // Land signs every composed gate row; repeat evidence also requires a run signature.
-        const writeGateRow = async (/** @type {Record<string, any>} */ row) => (signRows || repeats) && runFlag.value !== undefined
+        // Preserve the existing rows when off; repeat evidence is covered by the run signature.
+        const writeGateRow = async (/** @type {Record<string, any>} */ row) => repeats && runFlag.value !== undefined
           ? appendRow(signRow({ run: runFlag.value, ...row }, await loadKey(runFlag.value)), { slug: ledgerSlug })
           : appendRow(row, { slug: ledgerSlug });
         // B60: with --run/--block the rows name the run and the block, so the run's binnacle reads them
