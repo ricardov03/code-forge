@@ -76,6 +76,51 @@ async function parity(f, args, env = {}) {
   assert.equal(result.equal, true, 'parity reports equality');
 }
 
+const liveHook = { argv: [process.execPath, '-e', "require('node:fs').writeFileSync('.code-forge/live-hook-ran', 'ran')"] };
+for (const { key, config } of [
+  { key: 'hooks.on_block_end', config: { hooks: { on_block_end: liveHook } } },
+  { key: 'review.external', config: { review: { external: { required: true, name: 'owner' } } } },
+  { key: 'proof.runners', config: { proof: { runners: [{ match: ['test/**'], adapter: 'junit', argv: ['runner', '{test_file}', '{report}'] }] } } },
+]) {
+  test(`no-snapshot claim and stop ignore live ${key} with Node parity`, async () => {
+    for (const hashless of [false, true]) {
+      const make = async () => {
+        const f = await fixture((r) => { if (hashless) r.config = { snapshots: {}, pins: {} }; });
+        // JSON is valid YAML; the live settings deliberately have no run snapshot.
+        await writeFile(path.join(f.repo, '.code-forge.yml'), JSON.stringify({ version: 1, ...config }) + '\n');
+        await mkdir(path.join(f.repo, '.code-forge'));
+        return f;
+      };
+      const f = await make();
+      for (const args of [stop, claim('.code-forge.yml')]) {
+        await parity(f, args);
+        await parity(f, [...args, '--json']);
+      }
+      for (const node of [true, false]) {
+        const direct = await make();
+        const claimed = await launch(direct, [...claim('.code-forge.yml'), '--json'], { node });
+        assert.deepEqual(claimed, { code: 0, signal: null, stdout: '{"block":"B1","event":"claimed","path":".code-forge.yml"}\n', stderr: '' }, 'live config does not guard claim; native needs no Node');
+        const stopped = await launch(direct, [...stop, '--json'], { node });
+        assert.deepEqual(stopped, { code: 0, signal: null, stdout: '{"block":"B1","event":"stopped"}\n', stderr: '' }, 'live config does not add a stop hook or done_file output');
+        const rows = (await readFile(path.join(direct.home, '.code-forge/ledger/claim-stop.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+        assert.deepEqual(rows.map((r) => r.event), ['block.claim', 'block.stop'], 'no hook ledger rows');
+        assert.deepEqual(rows.map((r) => verifyRow(r, KEY).ok), [true, true], 'both rows are signed');
+        const done = JSON.parse(await readFile(path.join(direct.home, '.code-forge/runs', RUN, 'blocks/B1.done.json'), 'utf8'));
+        assert.equal(done.status, 'stopped', 'stop still publishes the done file');
+        await assert.rejects(readFile(path.join(direct.repo, '.code-forge/live-hook-ran')), { code: 'ENOENT' }, 'live hook is never executed');
+      }
+    }
+  });
+}
+
+test('the live-hook test command executes when present in the run snapshot', async () => {
+  const f = await fixture((r) => snapshot(r, { hooks: { on_block_end: liveHook } }));
+  await mkdir(path.join(f.repo, '.code-forge'));
+  const stopped = await launch(f, stop, { node: true });
+  assert.equal(stopped.code, 0, stopped.stderr);
+  assert.equal(await readFile(path.join(f.repo, '.code-forge/live-hook-ran'), 'utf8'), 'ran', 'positive control: the hook is executable');
+});
+
 test('claim and stop run natively with byte parity, signed concurrent writes and unchanged fallback', async () => {
   const speed = await launch(await fixture(), claim());
   assert.equal(speed.code, 0, 'claim succeeds with Node=/nonexistent');

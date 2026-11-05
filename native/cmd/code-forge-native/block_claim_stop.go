@@ -83,6 +83,8 @@ func blockFlags(args []string) (map[string]any, []string, string) {
 }
 
 func blockSnapshot(record ledger.Object) (map[string]any, bool) {
+	// Match Node's configInForce: legacy runs have no hook or claim guards.
+	// statusConfig's live-workspace fallback belongs to status, not these verbs.
 	if _, ok := blockObject(record.Get("config")).Get("hash").(string); !ok {
 		return nil, true
 	}
