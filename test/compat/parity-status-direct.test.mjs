@@ -20,7 +20,7 @@ before(async () => {
   await mkdir(path.join(pkg, 'bin'));
   await symlink(path.join(root, 'bin/code-forge.mjs'), path.join(pkg, 'bin/code-forge.mjs'));
   const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-X main.version=${version}`, '-o', binary, './cmd/code-forge-native'], {
+  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', binary, './cmd/code-forge-native'], {
     cwd: path.join(root, 'native'), encoding: 'utf8', env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local', CGO_ENABLED: '0' },
   });
   assert.equal(build.status, 0, build.stderr);

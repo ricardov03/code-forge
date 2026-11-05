@@ -22,7 +22,7 @@ before(async () => {
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
   const cache = path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build');
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', BINARY, './cmd/code-forge-native'], {
+  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
     cwd: path.join(ROOT, 'native'), encoding: 'utf8', timeout: 120_000,
     env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: cache },
   });

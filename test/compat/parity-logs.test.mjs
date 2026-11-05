@@ -27,7 +27,7 @@ before(async () => {
   binary = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
   await mkdir(path.dirname(binary), { recursive: true });
   const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-  const built = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version}`, '-o', binary, './cmd/code-forge-native'], {
+  const built = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', binary, './cmd/code-forge-native'], {
     cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000,
     env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off',
       GOCACHE: path.join(process.env.CODE_FORGE_REAL_HOME ?? os.homedir(), process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') },
