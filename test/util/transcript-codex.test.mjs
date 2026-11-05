@@ -49,6 +49,25 @@ test('Plain fallback after thread.started catches JSON-escaped forbidden command
   ], 'quote normalization adds the command hit and retains the original backslash marker hit');
 });
 
+for (const [escape, whitespace] of [['n', '\n'], ['r', '\r'], ['t', '\t']]) {
+  for (const slashes of [1, 2, 3]) {
+    test(`Plain fallback catches JSON-escaped ${escape} whitespace with ${slashes} backslashes`, () => {
+      const command = wrapped(`cd x${whitespace}git push --force${whitespace}`);
+      const commandLine = jsonl(event({ type: 'command_execution', command }))
+        .replaceAll(`\\${escape}`, '\\'.repeat(slashes) + escape);
+      const log = `${jsonl(started)}\nbad line\n${commandLine}`;
+      assert.deepEqual(scanTranscript(log), [{ id: 'git-push-force', line: 3 }]);
+    });
+  }
+}
+
+test('Plain fallback whitespace normalization retains original-text hits', () => {
+  const log = `${jsonl(started)}\nbad line\n${String.raw`\"git stash\" legacy\n`}`;
+  assert.deepEqual(scanTranscript(log, mergeForbidden([String.raw`legacy\n`])), [
+    { id: 'git-stash', line: 3 }, { id: 'production-marker-extra-0', line: 3 },
+  ]);
+});
+
 test('Unknown preambles and a stdin banner after thread.started keep plain fallback', () => {
   const output = event({ type: 'command_execution', command: 'cat brief.md', aggregated_output: 'git stash' });
   for (const preamble of ['unknown diagnostic', 'Reading additional input from stdin....']) {

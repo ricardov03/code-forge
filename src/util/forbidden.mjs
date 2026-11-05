@@ -1101,7 +1101,7 @@ function transcriptCommandText(command, unwrapShell = true) {
  * splices are literal at that layer. Unquoted splices, nested wrappers,
  * malformed wrappers, shell/unknown heredocs and
  * unterminated bodies scan whole. Any other log uses the plain-text grep above, also treating
- * backslash-escaped quotes as quote delimiters without losing any original-text hits.
+ * backslash-escaped quotes as quote delimiters and escaped n/r/t as whitespace without losing any original-text hits.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated once per text variant over its
  * tokens (a `write` path entry hits when a write command starts before a token naming the path);
@@ -1163,7 +1163,7 @@ export function scanTranscript(text, list = FORBIDDEN) {
       }
       const ids = new Set();
       // Keep the original scan as well: normalization must only add hits in plain mode.
-      const unescaped = events === null ? lineText.replace(/\\+(['"])/g, '$1') : lineText;
+      const unescaped = events === null ? lineText.replace(/\\+(['"])/g, '$1').replace(/\\+[nrt]/g, ' ') : lineText;
       for (const variant of unescaped === lineText ? [lineText] : [lineText, unescaped]) {
         const tokens = variant.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
         const commandTokens = commandText === undefined ? tokens : commandText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
