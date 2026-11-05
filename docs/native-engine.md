@@ -74,6 +74,36 @@ input. It does not report which engine started a command. Although help
 lists `native-status`, it is a private helper with no public command handler.
 Use `code-forge status` to check run progress.
 
+### See hand-overs
+
+Go records one row before it hands a command to Node.
+Each row has a UTC time, the command, a known subcommand, a reason and the version.
+It does not save argument values, paths or IDs. Unknown subcommands are empty.
+The file is `$HOME/.code-forge/native/handovers.jsonl`.
+Go uses the current `HOME` setting. New folders use mode `0700`.
+The file uses mode `0600`. It holds at most 5000 rows.
+When it grows past this limit, Go keeps the newest 4000 rows.
+Write errors are silent. They do not change the command result.
+
+Show the counts, with the largest count first:
+
+```sh
+code-forge logs handovers
+code-forge logs handovers --json --since 2026-11-01
+```
+
+`--since` accepts an ISO date or a date and time with a time zone.
+JSON also shows the last time for each group.
+This command runs in Go. It is not in the Node-only command set.
+Set `CODE_FORGE_HANDOVER_LOG=0` to stop recording.
+`CODE_FORGE_NATIVE=0` also records no rows.
+
+Reason codes are fixed names. For example, `unrouted` means Go has no route.
+`close-auto-claim` and `enqueue-fresh` name cases that still run in Node.
+`land-step-handover:close` means the close step needs Node.
+The full code list is the `handoverReasons` table in
+[`handover_log.go`](../native/cmd/code-forge-native/handover_log.go).
+
 ### Measure it
 
 Build the binary with `node scripts/build-native.mjs --host`.

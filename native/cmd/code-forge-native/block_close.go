@@ -37,20 +37,20 @@ func blockCloseStep(args []string, step *landStep) int {
 	stdout, stderr := step.writers()
 
 	original := append([]string{"close"}, args...)
-	fallback := func() int {
+	fallback := func(reason handoverReason) int {
 		if step != nil {
 			return landHandover
 		}
-		return blockHandover(original)
+		return blockHandover(original, reason)
 	}
 	fail := func(err error) int {
 		// Arbitrary filesystem messages still use Node's error-log redaction.
 		if reviewWaitLogging() && step == nil {
-			return fallback()
+			return fallback(hCloseErrorLog)
 		}
 		var se *state.Error
 		if !errors.As(err, &se) {
-			return fallback()
+			return fallback(hCloseError)
 		}
 		fmt.Fprintln(stderr, "block close:", err)
 		if se.Code == "usage" {
@@ -62,7 +62,7 @@ func blockCloseStep(args []string, step *landStep) int {
 	for _, arg := range args {
 		name, _, _ := strings.Cut(arg, "=")
 		if slices.Contains([]string{"--decide", "--no-require-reviews", "--auto-claim", "--remove-worktree", "--help", "-h"}, name) {
-			return fallback()
+			return fallback(handoverFlagReason("close", name, hCloseUnsupportedFlag))
 		}
 	}
 	flags, pos, message := blockFlags(args)
@@ -76,7 +76,7 @@ func blockCloseStep(args []string, step *landStep) int {
 	id := pos[0]
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fallback()
+		return fallback(hCloseHome)
 	}
 	record, err := state.ReadRun(home, run)
 	if err != nil {
@@ -88,18 +88,18 @@ func blockCloseStep(args []string, step *landStep) int {
 	// This is the hand-over boundary. Everything through preflight is read-only;
 	// it must finish before a transcript warning or a stopped-block row is signed.
 	if !blockSafe(record) || !blockStorageSafe(home, run, record) {
-		return fallback()
+		return fallback(blockStateHandoverReason(record, "close", hCloseStateStorage))
 	}
 	cfg, ok := blockSnapshot(record)
 	if !ok {
-		return fallback()
+		return fallback(hCloseConfig)
 	}
 	if blockMap(cfg["close"])["require_human"] == true {
-		return fallback()
+		return fallback(hCloseHuman)
 	}
 	external := blockMap(blockMap(cfg["review"])["external"])
 	if external["required"] == true && strings.TrimSpace(blockString(external["name"])) != "" {
-		return fallback()
+		return fallback(hCloseExternalReview)
 	}
 	entry := blockObject(blockObject(record.Get("blocks")).Get(id))
 	if entry == nil {
@@ -109,79 +109,79 @@ func blockCloseStep(args []string, step *landStep) int {
 		return fail(&state.Error{Code: "no-block", Message: fmt.Sprintf("block %s is not open in run %s", id, run)})
 	}
 	if entry.Get("kind") == "light" {
-		return fallback()
+		return fallback(hCloseLight)
 	}
 	if entry.Get("acceptance_revision") != nil {
-		return fallback()
+		return fallback(hCloseAcceptanceRevision)
 	}
 	if checks := entry.Get("human_checks"); checks != nil {
 		values, ok := checks.([]any)
 		if !ok {
-			return fallback()
+			return fallback(hCloseHumanChecksShape)
 		}
 		for _, value := range values {
 			if _, ok := value.(string); !ok {
-				return fallback()
+				return fallback(hCloseHumanChecksValue)
 			}
 		}
 	}
 	workspace := blockString(record.Get("workspace"))
 	mainTop, err := gitx.RepoTop(workspace)
 	if err != nil {
-		return fallback()
+		return fallback(hCloseRepo)
 	}
 	top, base, inTree := mainTop, blockString(entry.Get("base_sha")), false
 	if wt := entry.Get("worktree"); wt != nil {
 		tree := blockObject(wt)
 		p, branch, sha := blockString(tree.Get("path")), blockString(tree.Get("branch")), blockString(tree.Get("base_sha"))
 		if !filepath.IsAbs(p) || branch == "" || !regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`).MatchString(sha) || strings.ContainsAny(p+branch, "\x00\r\n\t") {
-			return fallback()
+			return fallback(hCloseWorktreeShape)
 		}
 		real, e := filepath.EvalSymlinks(p)
 		if e != nil {
 			if !os.IsNotExist(e) {
-				return fallback()
+				return fallback(hCloseWorktreeResolve)
 			}
 			return fail(&state.Error{Code: "worktree-missing", Message: fmt.Sprintf("block %s: its worktree %s is gone (removed or moved), so its work cannot be measured — restore it on branch %s (git worktree prune, then git worktree add %s %s) and close again; nothing was recorded", id, p, branch, p, branch)})
 		}
 		st, e := os.Stat(real)
 		if e != nil || !st.IsDir() {
-			return fallback()
+			return fallback(hCloseWorktreeStat)
 		}
 		actual, e := gitx.Run(real, "symbolic-ref", "--quiet", "--short", "HEAD")
 		if e != nil || strings.TrimSpace(actual) != branch {
-			return fallback()
+			return fallback(hCloseWorktreeBranch)
 		}
 		common, e := gitx.Run(real, "rev-parse", "--path-format=absolute", "--git-common-dir")
 		if e != nil {
-			return fallback()
+			return fallback(hCloseWorktreeCommonDir)
 		}
 		mainCommon, e := gitx.Run(workspace, "rev-parse", "--path-format=absolute", "--git-common-dir")
 		if e != nil || statusReal(strings.TrimSpace(common)) != statusReal(strings.TrimSpace(mainCommon)) {
-			return fallback()
+			return fallback(hCloseWorktreeIdentity)
 		}
 		prefix := gatecheck.Prefix(mainTop, workspace)
 		if st, e := os.Stat(filepath.Join(real, prefix)); e != nil || !st.IsDir() {
-			return fallback()
+			return fallback(hCloseWorktreePrefix)
 		}
 		top, base, inTree = real, sha, true
 	}
 	all, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), blockString(record.Get("project")))
 	if err != nil {
-		return fallback()
+		return fallback(hCloseLedgerRead)
 	}
 	rows := []gatecheck.Row{}
 	for _, v := range all {
 		r, ok := v.(map[string]any)
 		if !ok {
-			return fallback()
+			return fallback(hCloseLedgerShape)
 		}
 		if r["run"] == run {
 			rows = append(rows, r)
 		}
 	}
 	if !gatecheck.Supported(rows) {
-		return fallback()
+		return fallback(hCloseGatesFormat)
 	}
 	key, err := blockclose.ReadKey(home, run)
 	if err != nil {
@@ -189,33 +189,33 @@ func blockCloseStep(args []string, step *landStep) int {
 	}
 	transcript, missing, err := closeTranscript(record, entry, id, blockString(flags["transcript"]))
 	if err != nil {
-		return fallback()
+		return fallback(hCloseTranscriptRead)
 	}
 	hits, supported := gatecheck.Transcript(transcript)
 	if !supported {
-		return fallback()
+		return fallback(hCloseTranscriptFormat)
 	}
 	highPaths, ok := closeHighPaths(workspace, base)
 	if !ok {
-		return fallback()
+		return fallback(hCloseHighPaths)
 	}
 	prefix := gatecheck.Prefix(mainTop, workspace)
 	changed, err := gitx.ChangedFiles(top, base)
 	if err != nil {
-		return fallback()
+		return fallback(hCloseChangedFiles)
 	}
 	files, reviewed, err := gatecheck.FileSet(top, base, prefix, id, entry, rows, changed)
 	if err != nil {
-		return fallback()
+		return fallback(hCloseFileSet)
 	}
 	// A durable or legacy stopped state can requeue even without a cap row.
 	if !closeNoRequeue(home, run, id, top, rows, cfg) {
-		return fallback()
+		return fallback(hCloseRequeue)
 	}
 	qdir := filepath.Join(mainTop, ".code-forge/queue")
 	idx := queue.Index{Dir: qdir}
 	if idx.Refresh() != nil {
-		return fallback()
+		return fallback(hCloseQueueRefresh)
 	}
 	for _, f := range files {
 		p := ticket.Parts{Run: run, Block: id, File: f.File, ContentHash: f.Hash}
@@ -226,7 +226,7 @@ func blockCloseStep(args []string, step *landStep) int {
 			p.AcceptanceRevision = &rev
 		}
 		if _, e := queue.Identity(qdir, p); e != nil {
-			return fallback()
+			return fallback(hCloseQueueIdentity)
 		}
 	}
 	var live *float64
@@ -248,13 +248,13 @@ func blockCloseStep(args []string, step *landStep) int {
 	}
 	reportText := string(reportData)
 	if !closeTextSafe(reportText) || strings.Contains(reportText, hex.EncodeToString(key)) {
-		return fallback()
+		return fallback(hCloseReportRedaction)
 	}
 	checks, closeRows := []closeCheck{}, []ledger.Object{}
 	if blockMap(cfg["context"])["require_coder_tests"] == true {
 		command, reason, supported := closeCoderTests(flags["report"], id, reportData, reportErr)
 		if !supported {
-			return fallback()
+			return fallback(hCloseCoderTests)
 		}
 		if reason != "" {
 			checks = append(checks, closeCheck{reason, []gatecheck.Blocker{{Code: "coder_report_failed", Detail: reason}}})
@@ -265,14 +265,14 @@ func blockCloseStep(args []string, step *landStep) int {
 	if blockMap(cfg["gates"])["test"] != nil {
 		check, supported := closeTestGate(top, base, run, id, entry, rows)
 		if !supported {
-			return fallback()
+			return fallback(hCloseTestGate)
 		}
 		checks = append(checks, check)
 	}
 	// Review exclusions include lock-file validation. Keep that dialect with Node.
 	for _, f := range files {
 		if closeExcluded(cfg, f.File) {
-			return fallback()
+			return fallback(hCloseExcludedFile)
 		}
 	}
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, id, run, blockObject(record.Get("blocks")), changed, rows, key, inTree)
@@ -301,7 +301,7 @@ func blockCloseStep(args []string, step *landStep) int {
 	}
 	event, reason := blockclose.Pin(record, live, statusStart)
 	if !closeQueuePins(home, run, id, record, rows, &event, &reason, mainTop) {
-		return fallback()
+		return fallback(hCloseQueuePins)
 	}
 	if event == "" {
 		if why := blockclose.Tamper(run, id, rows, key); why != "" {

@@ -75,8 +75,8 @@ func reviewWaitFlags(args []string) (map[string]string, string, bool) {
 	return flags, "", true
 }
 
-func reviewWaitHandover(args []string) int {
-	code, err := handover(append([]string{"review-file"}, args...))
+func reviewWaitHandover(args []string, reason handoverReason) int {
+	code, err := handover(append([]string{"review-file"}, args...), reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
 	}
@@ -98,7 +98,7 @@ func runReviewFileWait(args []string) int {
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hWaitGetcwd)
 	}
 	if dir, exists := flags["cwd"]; exists {
 		if !filepath.IsAbs(dir) {
@@ -106,7 +106,7 @@ func runReviewFileWait(args []string) int {
 		}
 		info, err := os.Stat(dir)
 		if err != nil || !info.IsDir() {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hWaitCwd)
 		}
 		cwd = filepath.Clean(dir)
 	}
@@ -129,7 +129,7 @@ func runReviewFileWait(args []string) int {
 		return int(interrupted.Load())
 	}
 	if !ok {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hWaitRoot)
 	}
 	if !reviewWaitTicket.MatchString(flags["wait"]) {
 		return reviewWaitUsageError(args, "a ticket id is 24 lowercase hex characters")
@@ -157,11 +157,11 @@ func runReviewFileWait(args []string) int {
 		if _, err := os.Stat(marker); err == nil {
 			result, matched := reviewWaitResult(root, marker)
 			if !matched {
-				return reviewWaitHandover(args)
+				return reviewWaitHandover(args, hWaitResult)
 			}
 			out := ledger.Object{{Key: "ticket", Value: ticket}, {Key: "status", Value: "done"}, {Key: "result", Value: result}}
 			if !reviewWaitSummary(&out, result) {
-				return reviewWaitHandover(args)
+				return reviewWaitHandover(args, hWaitSummary)
 			}
 			return reviewWaitSay(out)
 		}
@@ -170,7 +170,7 @@ func runReviewFileWait(args []string) int {
 			return int(interrupted.Load())
 		}
 		if !matched {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hWaitWorker)
 		}
 		if live {
 			down = 0

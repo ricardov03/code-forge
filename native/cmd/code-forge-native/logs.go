@@ -21,8 +21,8 @@ func init() { routes["logs"] = runLogs }
 
 // Keep fallbacks before both output and breadcrumbs: Node must observe the
 // original state and argv, especially when a usage error itself gets logged.
-func logsHandover(args []string) int {
-	code, err := handover(append([]string{"logs"}, args...))
+func logsHandover(args []string, reason handoverReason) int {
+	code, err := handover(append([]string{"logs"}, args...), reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
 	}
@@ -36,22 +36,25 @@ var logsCrumb = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}( [a-z][a-z0-9-]{0,39})
 var logsSurrogate = regexp.MustCompile(`(?i)\\ud[89ab][0-9a-f]{2}|\\ud[cdef][0-9a-f]{2}`)
 
 func runLogs(args []string) int {
+	if len(args) > 0 && args[0] == "handovers" {
+		return runHandoverLogs(args[1:])
+	}
 	name, rest := "list", args
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
 		name, rest = args[0], args[1:]
 		if name != "path" && name != "summary" {
-			return logsHandover(args)
+			return logsHandover(args, hLogsUnportedSubcommand)
 		}
 	}
 	// The Node router handles help before parsing or touching any state.
 	for i := 0; i < len(args) && i < 2; i++ {
 		if args[i] == "--help" || args[i] == "-h" {
-			return logsHandover(args)
+			return logsHandover(args, hLogsHelp)
 		}
 	}
 	n, asJSON, ok := logsFlags(name, rest)
 	if !ok || os.Getenv("HOME") == "" {
-		return logsHandover(args)
+		return logsHandover(args, hLogsFlagsOrHome)
 	}
 	file := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "errors.jsonl")
 	var output string
@@ -60,7 +63,7 @@ func runLogs(args []string) int {
 	} else {
 		entries, safe := logsRead(file)
 		if !safe {
-			return logsHandover(args)
+			return logsHandover(args, hLogsDecode)
 		}
 		if len(entries) == 0 {
 			output = "no errors logged\n"
@@ -83,7 +86,7 @@ func runLogs(args []string) int {
 				output, ok = logsList(entries, asJSON)
 			}
 			if !ok {
-				return logsHandover(args)
+				return logsHandover(args, hLogsFormat)
 			}
 		}
 	}

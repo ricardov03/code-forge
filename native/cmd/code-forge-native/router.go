@@ -24,7 +24,12 @@ func run(args []string) (int, error) {
 	return handover(args)
 }
 
-func handover(args []string) (int, error) {
+func handover(args []string, reasons ...handoverReason) (int, error) {
+	reason := defaultHandoverReason(args)
+	if len(reasons) > 0 {
+		reason = reasons[0]
+	}
+	recordHandover(args, handoverReasons[reason])
 	node := os.Getenv("CODE_FORGE_NODE")
 	if node == "" {
 		node = "node"

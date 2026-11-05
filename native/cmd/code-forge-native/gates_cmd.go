@@ -9,8 +9,8 @@ import (
 )
 
 func init() { routes["gates"] = runGates }
-func gatesHandover(args []string) int {
-	code, e := handover(append([]string{"gates"}, args...))
+func gatesHandover(args []string, reason handoverReason) int {
+	code, e := handover(append([]string{"gates"}, args...), reason)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", e)
 	}
@@ -88,23 +88,23 @@ func gatesParse(args []string) (gatesOptions, string) {
 func runGates(args []string) int {
 	gatesLastMessage = nil
 	if len(args) == 0 || args[0] != "run" {
-		return gatesHandover(args)
+		return gatesHandover(args, hGatesUnportedSubcommand)
 	}
 	if os.Getenv("HOME") == "" {
-		return gatesHandover(args)
+		return gatesHandover(args, hGatesHome)
 	}
 	_, hasRun, _ := gatesFlag(args, "--run")
 	_, hasBlock, _ := gatesFlag(args, "--block")
 	if !hasRun && !hasBlock {
-		return gatesHandover(args)
+		return gatesHandover(args, hGatesUnscoped)
 	}
 	if v, given, ok := gatesFlag(args, "--timeout-ms"); given && ok {
 		trimmed := strings.TrimSpace(v)
 		if strings.HasPrefix(trimmed, "0x") || strings.HasPrefix(trimmed, "0X") || strings.HasPrefix(trimmed, "0b") || strings.HasPrefix(trimmed, "0B") || strings.HasPrefix(trimmed, "0o") || strings.HasPrefix(trimmed, "0O") {
-			return gatesHandover(args)
+			return gatesHandover(args, hGatesTimeoutRadix)
 		}
 		if n, e := strconv.ParseFloat(trimmed, 64); e == nil && n > 2147483647 && !math.IsInf(n, 0) {
-			return gatesHandover(args)
+			return gatesHandover(args, hGatesTimeoutOverflow)
 		}
 	}
 	for i := 1; i < len(args); i++ {
@@ -119,7 +119,7 @@ func runGates(args []string) int {
 			// Node's router passes argv through unchanged. Ordinary runs ignore
 			// --cwd=; worktree runs explicitly reject it in gatesNative.
 			if !strings.HasPrefix(s, "--cwd=") {
-				return gatesHandover(args)
+				return gatesHandover(args, hGatesUnsupportedFlag)
 			}
 		}
 	}
@@ -130,11 +130,11 @@ func runGates(args []string) int {
 		return 2
 	}
 	if o.run == "" && o.block == "" {
-		return gatesHandover(args)
+		return gatesHandover(args, hGatesEmptyScope)
 	}
 	code, safe := gatesNative(args, o)
 	if !safe {
-		return gatesHandover(args)
+		return gatesHandover(args, hGatesCustom)
 	}
 	gatesFinish(args, code)
 	return code
