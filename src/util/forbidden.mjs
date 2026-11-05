@@ -1085,8 +1085,9 @@ function transcriptCommandText(command, unwrapShell = true) {
  * `"name":"Write"` followed by the path — is found. It is a grep: a line that merely MENTIONS a
  * forbidden command is a hit too (fail closed; the block gate reports it as `rule_break`, B5).
  * Codex `exec --json` logs (every non-empty line an object with a string `type`, first event
- * `thread.started`) scan command_execution commands and file_change paths as writes. Other
- * items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
+ * `thread.started`) scan command_execution commands and file_change paths as writes. Only a
+ * trimmed stdin banner before the first JSON line is allowed outside JSON; other non-JSON lines
+ * force plain scanning. Other items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
  * is never scanned; non-item events are skipped. For string commands, node/python/ruby/perl
  * heredocs and quoted -e/-c/--eval/-p/--print bodies without a process-spawn word are omitted
  * from command and contains rules only; path rules still scan the whole command. Spawn words
@@ -1099,9 +1100,10 @@ function transcriptCommandText(command, unwrapShell = true) {
  * substitutions in double-quoted wrapper segments keep the entire command scanned; single-quoted
  * splices are literal at that layer. Unquoted splices, nested wrappers,
  * malformed wrappers, shell/unknown heredocs and
- * unterminated bodies scan whole. Any other log uses the plain-text grep above, unchanged.
+ * unterminated bodies scan whole. Any other log uses the plain-text grep above, also treating
+ * backslash-escaped quotes as quote delimiters and escaped n/r/t as whitespace without losing any original-text hits.
  *
- * Linear in the line length: `contains` and `path` entries are evaluated ONCE per line over its
+ * Linear in the line length: `contains` and `path` entries are evaluated once per text variant over its
  * tokens (a `write` path entry hits when a write command starts before a token naming the path);
  * command entries run only at tokens that can start one (their first word, a launcher, a
  * code-forge bin), each on a window of `TRANSCRIPT_WINDOW` tokens — a flag further than that
@@ -1115,7 +1117,15 @@ export function scanTranscript(text, list = FORBIDDEN) {
   /** @type {any[] | null} */
   let events = null;
   try {
-    const parsed = lines.map((line) => line.trim() === '' ? undefined : JSON.parse(line));
+    let beforeJson = true;
+    const parsed = lines.map((line) => {
+      const trimmed = line.trim();
+      if (trimmed === '') return undefined;
+      if (beforeJson && /^Reading additional input from stdin\.\.\.$/.test(trimmed)) return undefined;
+      const event = JSON.parse(line);
+      beforeJson = false;
+      return event;
+    });
     const nonEmpty = parsed.filter((event) => event !== undefined);
     if (nonEmpty[0]?.type === 'thread.started' && nonEmpty.every((event) =>
       event !== null && typeof event === 'object' && !Array.isArray(event) && typeof event.type === 'string')) events = parsed;
@@ -1151,24 +1161,28 @@ export function scanTranscript(text, list = FORBIDDEN) {
             .map((change) => `Write(${JSON.stringify(change.path)})`).join(' ');
         } else lineText = JSON.stringify(item);
       }
-      const tokens = lineText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
-      const commandTokens = commandText === undefined ? tokens : commandText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
       const ids = new Set();
-      let firstWrite = -1;
-      for (let i = 0; i < tokens.length && firstWrite < 0; i += 1) {
-        if (writeStarts.has(commandName(tokens[i])) && isWriteCommand(tokens.slice(i, i + TRANSCRIPT_WINDOW))) firstWrite = i;
-      }
-      for (const entry of list) {
-        if (entry.kind === 'contains' && matchesEntry([], commandTokens, entry)) ids.add(entry.id);
-        if (entry.kind !== 'path') continue;
-        const named = tokens.findIndex((t, i) => (entry.access === 'readwrite' || (firstWrite >= 0 && i > firstWrite)) && namesPath(t, entry));
-        if (named >= 0) ids.add(entry.id);
-      }
-      for (let i = 0; i < commandTokens.length; i += 1) {
-        if (!firstWords.has(commandName(commandTokens[i])) && !commandTokens[i].includes('code-forge')) continue;
-        const window = commandTokens.slice(i, i + TRANSCRIPT_WINDOW);
-        for (const entry of commandEntries) {
-          if (!ids.has(entry.id) && isForbidden(window, [entry])) ids.add(entry.id);
+      // Keep the original scan as well: normalization must only add hits in plain mode.
+      const unescaped = events === null ? lineText.replace(/\\+(['"])/g, '$1').replace(/\\+[nrt]/g, ' ') : lineText;
+      for (const variant of unescaped === lineText ? [lineText] : [lineText, unescaped]) {
+        const tokens = variant.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
+        const commandTokens = commandText === undefined ? tokens : commandText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
+        let firstWrite = -1;
+        for (let i = 0; i < tokens.length && firstWrite < 0; i += 1) {
+          if (writeStarts.has(commandName(tokens[i])) && isWriteCommand(tokens.slice(i, i + TRANSCRIPT_WINDOW))) firstWrite = i;
+        }
+        for (const entry of list) {
+          if (entry.kind === 'contains' && matchesEntry([], commandTokens, entry)) ids.add(entry.id);
+          if (entry.kind !== 'path') continue;
+          const named = tokens.findIndex((t, i) => (entry.access === 'readwrite' || (firstWrite >= 0 && i > firstWrite)) && namesPath(t, entry));
+          if (named >= 0) ids.add(entry.id);
+        }
+        for (let i = 0; i < commandTokens.length; i += 1) {
+          if (!firstWords.has(commandName(commandTokens[i])) && !commandTokens[i].includes('code-forge')) continue;
+          const window = commandTokens.slice(i, i + TRANSCRIPT_WINDOW);
+          for (const entry of commandEntries) {
+            if (!ids.has(entry.id) && isForbidden(window, [entry])) ids.add(entry.id);
+          }
         }
       }
       for (const entry of list) {

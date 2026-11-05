@@ -36,8 +36,9 @@
  * `review.allow_open_book_codex: true` lifts both and builds Codex's read-only argv — except for
  * the autopilot `delegate` (B46), which the opt-in never opens.
  *
- * `background: true` (coders, §5.2): the child is started detached with stdout/stderr going to
- * `<run-root>/sessions/<id>/session.log`, its pid written to `<run-root>/sessions/<id>/pid.json`
+ * `background: true` (coders, §5.2): the child is started detached with stdout going to
+ * `<run-root>/sessions/<id>/session.log` and stderr to `session.err.log`, its pid written to
+ * `<run-root>/sessions/<id>/pid.json`
  * and to the run root's pid registry; completion is the process exit plus the sentinel in the log.
  * `exec` cannot outlive its caller (it waits, and SIGTERMs live groups on the parent's exit), so
  * this one path uses `node:child_process.spawn` directly — argv array, `shell: false`.
@@ -1075,22 +1076,27 @@ async function runForeground(built, opts, deps) {
  */
 function startBackground(built, sessionDir, runRootDir, env) {
   const logPath = path.join(sessionDir, 'session.log');
+  const errLogPath = path.join(sessionDir, 'session.err.log');
   const pidFile = path.join(sessionDir, 'pid.json');
   const logFd = openSync(logPath, 'a', 0o600);
-  const inFd = built.stdinFile ? openSync(built.stdinFile, 'r') : null;
+  let errFd = null;
+  let inFd = null;
   try {
+    errFd = openSync(errLogPath, 'a', 0o600);
+    inFd = built.stdinFile ? openSync(built.stdinFile, 'r') : null;
     const [command, ...args] = built.argv;
-    const child = spawn(command, args, { cwd: built.cwd, env, shell: false, detached: true, stdio: [inFd ?? 'ignore', logFd, logFd] });
+    const child = spawn(command, args, { cwd: built.cwd, env, shell: false, detached: true, stdio: [inFd ?? 'ignore', logFd, errFd] });
     child.on('error', () => {}); // a missing CLI surfaces as a dead pid + an empty log, not a crash
     const pid = child.pid;
     if (typeof pid !== 'number') throw new Error(`spawn: could not start ${built.cli}`);
     registerPid(pidsDir(runRootDir), pid, command);
     const start_time = readStartTime(pid) ?? UNKNOWN_START_TIME;
-    writeFileSync(pidFile, `${JSON.stringify({ pid, start_time, argv0: command, log: logPath, ...(built.outPath ? { outPath: built.outPath } : {}) })}\n`, { mode: 0o600 });
+    writeFileSync(pidFile, `${JSON.stringify({ pid, start_time, argv0: command, log: logPath, errLog: errLogPath, ...(built.outPath ? { outPath: built.outPath } : {}) })}\n`, { mode: 0o600 });
     child.unref();
-    return { pid, pidFile, logPath, sessionDir };
+    return { pid, pidFile, logPath, errLogPath, sessionDir };
   } finally {
     closeSync(logFd);
+    if (errFd !== null) closeSync(errFd);
     if (inFd !== null) closeSync(inFd);
   }
 }
