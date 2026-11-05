@@ -8,6 +8,7 @@
  * because it is asked only when the chain resolves nothing.
  */
 
+import { validateConfig } from '../../config/validate.mjs';
 import { isOpRef, OP_MESSAGES } from '../../keys/onepassword.mjs';
 import { HARNESSES } from '../harnesses.mjs';
 import { effectiveProvider, judgeCollision, proposeJudge } from './answers.mjs';
@@ -167,11 +168,39 @@ export async function askAnswers(values, sources, ctx, ui) {
     const summary = ['L0', 'L1', 'L2', 'L3'].map((l) => `${l}=${levelText(values.levels[l])}`).join(' ');
     const keep = await answer(ui, ui.confirm({ message: withHint(`Keep the level matrix? ${summary}`, HINTS.levels), initialValue: true }));
     if (!keep) {
-      for (const level of ['L0', 'L1', 'L2', 'L3']) {
+      const names = ['L0', 'L1', 'L2', 'L3'];
+      for (const level of names) {
         const shown = levelText(values.levels[level]);
-        const typed = await answer(ui, ui.text({ message: withHint(`${level} model[:effort][@provider]`, HINTS.level), initialValue: shown }));
-        // Enter (unchanged text) keeps the level object as it is, `fallback` included
-        if (String(typed).trim() !== shown) values.levels[level] = parseLevel(`${level}=${String(typed).trim()}`).spec;
+        let initialValue = shown;
+        let error = '';
+        for (;;) {
+          const typed = await answer(ui, ui.text({
+            message: withHint(`${level} model[:effort][@provider]`, error ? `${HINTS.level}\n${error}` : HINTS.level),
+            initialValue,
+          }));
+          initialValue = String(typed).trim();
+          let candidate;
+          try {
+            // Enter keeps the original level object, `fallback` included, but still checks it.
+            candidate = initialValue === shown ? values.levels[level] : parseLevel(`${level}=${initialValue}`).spec;
+          } catch (err) {
+            if (!(err instanceof UsageError)) throw err;
+            error = err.message;
+            continue;
+          }
+          // Run the validator's rule on each earlier/current pair so provider inheritance and
+          // absent effort use exactly the same tuple semantics as final validation.
+          const duplicate = names.slice(0, names.indexOf(level)).find((earlier) => validateConfig({
+            provider: values.provider,
+            levels: { [earlier]: values.levels[earlier], [level]: candidate },
+          }).errors.some((issue) => issue.rule === 'duplicate-level-tuple'));
+          if (duplicate) {
+            error = `${level} is the same as ${duplicate}. Each level must be a different model or effort.`;
+            continue;
+          }
+          values.levels[level] = candidate;
+          break;
+        }
       }
     }
   }
