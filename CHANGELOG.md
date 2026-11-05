@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.19.0] — 2026-11-05
+
 ### Added
 
 - Go write kit: file locks, signed ledger rows and atomic state writes with the same bytes and lock rules as Node. No public verb (B272)
