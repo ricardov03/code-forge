@@ -8,7 +8,6 @@ import (
 	"strconv"
 	"strings"
 
-	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -88,10 +87,13 @@ func landMax(raw string) (int64, bool) {
 func runBlockLand(args []string) int {
 	fallback := func() int { return blockHandover(append([]string{"land"}, args...)) }
 	fail := func(message string, code int) int {
-		if reviewWaitLogging() {
+		if reviewWaitLogging() && !closeTextSafe(message) {
 			return fallback()
 		}
-		fmt.Fprintln(os.Stderr, "block land:", message)
+		before := gatesBreadcrumbName("block")
+		text := "block land: " + message + "\n"
+		fmt.Fprint(os.Stderr, text)
+		nativeVerbFailure("block", "", append([]string{"land"}, args...), code, strings.TrimSpace(text), before)
 		return code
 	}
 	for _, arg := range args {
@@ -140,29 +142,5 @@ func runBlockLand(args []string) int {
 	if value != nil && entry == nil {
 		return fallback()
 	}
-	reason := ""
-	if entry == nil {
-		reason = "unknown block in run " + run
-	} else if entry.Get("status") != "open" {
-		status, ok := entry.Get("status").(string)
-		if !ok {
-			return fallback()
-		}
-		reason = "block is " + status + ", not open"
-	}
-	if reason == "" || reviewWaitLogging() {
-		return fallback()
-	}
-	// These early refusals never invoke a child step; Node still records timing.
-	next := closeCommand([]string{"code-forge", "review-file", "--wait-block", id, "--run", run})
-	fmt.Fprintf(os.Stderr, "block %s land stopped at join: %s\nnext: %s\n", id, reason, next)
-	if flags["json"] == true {
-		data, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "refused"}, {Key: "step", Value: "join"}, {Key: "reason", Value: reason}, {Key: "next", Value: next}}, false)
-		fmt.Fprintln(os.Stdout, string(data))
-	}
-	_, err = state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.timing"}, {Key: "block", Value: id}, {Key: "join_ms", Value: 0}, {Key: "gates_ms", Value: 0}, {Key: "merge_gate_ms", Value: nil}, {Key: "parallel", Value: true}})
-	if err != nil {
-		return fail(err.Error(), 1)
-	}
-	return 1
+	return landExecute(args, flags, home, run, id, record, entry, fallback)
 }

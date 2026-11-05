@@ -6,6 +6,7 @@ import { isDeepStrictEqual } from 'node:util';
 import { fileURLToPath } from 'node:url';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
 import { announceWorker } from '../../src/worker/queue.mjs';
+import { fingerprint } from '../../src/util/error-log.mjs';
 
 const CLI = fileURLToPath(new URL('../../bin/code-forge.mjs', import.meta.url));
 
@@ -39,7 +40,7 @@ function execute(command, args, cwd, env, stdin = '') {
 
 // Do not inherit a caller's git routing, Node preloads, native overrides, or error-log path.
 function childEnv(home, tmp, extra = {}) {
-  const env = { PATH: process.env.PATH, ...extra, HOME: home, TMPDIR: tmp, CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NO_ERROR_LOG: '1' };
+  const env = { PATH: process.env.PATH, ...extra, HOME: home, TMPDIR: tmp, CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NO_ERROR_LOG: extra.CODE_FORGE_NO_ERROR_LOG ?? '1' };
   return env;
 }
 
@@ -207,6 +208,8 @@ function normalizeText(text, copy) {
   // Structured fields in CLI JSON retain whitespace, ordering and all other output bytes.
   text = text.replace(/("([^"\n]+)"\s*:\s*)(\d+(?:\.\d+)?)(?=\s*[,}\]])/g, (all, prefix, field) =>
     PID_FIELDS.has(field) ? `${prefix}<pid>` : DURATION_FIELDS.has(field) ? `${prefix}<duration>` : all);
+  text = text.replace(/(\\"([^"\\\n]+)\\"\s*:\s*)(\d+(?:\.\d+)?)(?=\s*[,}\]])/g, (all, prefix, field) =>
+    DURATION_FIELDS.has(field) ? `${prefix}<duration>` : all);
   return text.replace(/\bpid(\s+|\s*[=:]\s*)\d+\b/gi, 'pid$1<pid>');
 }
 
@@ -242,6 +245,14 @@ async function normalizeSignatures(a, b, left, right, node, go) {
       }
     }
   }
+  // Failure fingerprints include the message, which can contain volatile durations.
+  // Accept differing digests only after checking both against their original bodies.
+  if (typeof a.fp === 'string' && typeof b.fp === 'string' && typeof a.verb === 'string' && typeof b.verb === 'string') {
+    const { fp: _a, ...bodyA } = left, { fp: _b, ...bodyB } = right;
+    if (isDeepStrictEqual(bodyA, bodyB) && fingerprint(a) === a.fp && fingerprint(b) === b.fp) {
+      left.fp = '<verified-fingerprint>'; right.fp = '<verified-fingerprint>';
+    }
+  }
   for (const key of Object.keys(a)) {
     if (Object.hasOwn(b, key)) await normalizeSignatures(a[key], b[key], left[key], right[key], node, go);
   }
@@ -254,23 +265,32 @@ async function normalizeSignatures(a, b, left, right, node, go) {
  * even on errors. Diffs identify process streams or home/repo-relative state files and JSON
  * paths ($.field, $[row].field); raw files use $. Missing files use $file.
  * @param {string[]} verbArgs
- * @param {{fixture: Fixture, goCommand: string | string[], env?: Record<string, string>, stdin?: string | Buffer}} options
+ * @param {{fixture: Fixture, goCommand: string | string[], env?: Record<string, string>, stdin?: string | Buffer, tempRoot?: string, samePaths?: boolean, prepare?: (copy: Fixture) => Promise<(() => Promise<void>) | void>}} options
  * @returns {Promise<{equal: boolean, diffs: Diff[]}>}
  */
-export async function runParity(verbArgs, { fixture, goCommand, env = {}, stdin = '' }) {
-  const root = await realpath(await mkdtemp(path.join(os.tmpdir(), 'cf-parity-')));
+export async function runParity(verbArgs, { fixture, goCommand, env = {}, stdin = '', tempRoot = os.tmpdir(), samePaths = false, prepare }) {
+  const root = await realpath(await mkdtemp(path.join(tempRoot, 'cf-parity-')));
   try {
     const node = await copyFixture(fixture, path.join(root, 'node'));
-    const go = await copyFixture(fixture, path.join(root, 'go'));
+    const go = samePaths ? node : await copyFixture(fixture, path.join(root, 'go'));
     const diffs = [];
     const runCopy = async (copy, command) => {
       await mkdir(path.join(copy.home, 'tmp'), { recursive: true });
-      return execute(command, verbArgs.map((arg) => replacePaths(arg, fixture, copy)), copy.repo, childEnv(copy.home, path.join(copy.home, 'tmp'), env), stdin);
+      const cleanup = await prepare?.(copy);
+      try { return await execute(command, verbArgs.map((arg) => replacePaths(arg, fixture, copy)), copy.repo, childEnv(copy.home, path.join(copy.home, 'tmp'), env), stdin); }
+      finally { if (typeof cleanup === 'function') await cleanup(); }
     };
     const nodeResult = await runCopy(node, [process.execPath, CLI]);
+    // Path-derived worktree ticket identities must see the very same absolute paths.
+    // Restore a fresh copy after snapshotting Node, so no mutation carries over.
+    const left = await fixtureFiles(node, '.code-forge');
+    if (samePaths) {
+      await rm(path.dirname(node.repo), { recursive: true, force: true });
+      await copyFixture(fixture, path.dirname(node.repo));
+    }
     const goResult = await runCopy(go, goCommand);
     for (const field of ['code', 'signal', 'stdout', 'stderr']) compare(normalize(nodeResult[field], node), normalize(goResult[field], go), 'process', field, diffs);
-    const left = await fixtureFiles(node, '.code-forge'), right = await fixtureFiles(go, '.code-forge');
+    const right = await fixtureFiles(go, '.code-forge');
     const index = (files, copy) => {
       const groups = new Map();
       for (const [name, entry] of files) {

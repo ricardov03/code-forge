@@ -13,6 +13,7 @@ import (
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/state"
+	"io"
 	"math"
 	"os"
 	"os/signal"
@@ -113,7 +114,9 @@ func gatesScrubber(slug string) (func(string) string, func() []any) {
 	}
 	return clean, counts
 }
-func gatesBreadcrumb() []any {
+func gatesBreadcrumb() []any { return gatesBreadcrumbName("gates run") }
+
+func gatesBreadcrumbName(name string) []any {
 	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
 		return []any{}
 	}
@@ -133,7 +136,7 @@ func gatesBreadcrumb() []any {
 		next = next[len(next)-5:]
 	}
 	previous := append([]any{}, next...)
-	next = append(next, "gates run")
+	next = append(next, name)
 	if len(next) > 5 {
 		next = next[len(next)-5:]
 	}
@@ -150,6 +153,10 @@ func gatesBreadcrumb() []any {
 	return previous
 }
 func gatesFailure(args []string, code int, message any, before []any) {
+	nativeVerbFailure("gates", "run", args, code, message, before)
+}
+
+func nativeVerbFailure(verbName, subName string, args []string, code int, message any, before []any) {
 	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
 		return
 	}
@@ -192,7 +199,7 @@ func gatesFailure(args []string, code int, message any, before []any) {
 		}
 		afterLong = false
 	}
-	verb := clean("gates")
+	verb := clean(verbName)
 	cleaned = counts()
 	kind := "error"
 	if code == 2 {
@@ -203,7 +210,14 @@ func gatesFailure(args []string, code int, message any, before []any) {
 	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
 	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
 	normalized = strings.TrimSpace(reviewWaitLogWords.ReplaceAllString(normalized, " "))
-	fp := sha256.Sum256([]byte(verb + "\nrun\n" + kind + "\n" + normalized))
+	if verbName == "block" && subName == "" {
+		normalized = landFingerprintMessage(blockString(message))
+	}
+	fp := sha256.Sum256([]byte(verb + "\n" + subName + "\n" + kind + "\n" + normalized))
+	var sub any
+	if subName != "" {
+		sub = subName
+	}
 	arch := runtime.GOARCH
 	if arch == "amd64" {
 		arch = "x64"
@@ -212,7 +226,7 @@ func gatesFailure(args []string, code int, message any, before []any) {
 		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
 		{Key: "version", Value: version}, {Key: "node", Value: reviewWaitNodeVersion},
 		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
-		{Key: "verb", Value: verb}, {Key: "sub", Value: "run"}, {Key: "flags", Value: flags},
+		{Key: "verb", Value: verb}, {Key: "sub", Value: sub}, {Key: "flags", Value: flags},
 		{Key: "exit", Value: code}, {Key: "kind", Value: kind}, {Key: "message", Value: message},
 		{Key: "stack", Value: nil}, {Key: "cleaned", Value: cleaned},
 		{Key: "fp", Value: fmt.Sprintf("%x", fp[:6])}, {Key: "before", Value: before},
@@ -283,7 +297,22 @@ func gatesNumber(v any) (float64, bool) {
 	}
 	return 0, false
 }
-func gatesNative(args []string, o gatesOptions) (int, bool) {
+func gatesNative(args []string, o gatesOptions) (int, bool) { return gatesNativeStep(args, o, nil) }
+
+func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) {
+	stdout, stderr := step.writers()
+	gatesErrf := func(format string, args ...any) {
+		if step == nil {
+			gatesErrf(format, args...)
+			return
+		}
+		fmt.Fprintf(stderr, format, args...)
+	}
+	gatesError := func(e error) (int, bool) { gatesErrf("gates run: %s\n", e); return 1, true }
+	gatesSay := func(o ledger.Object, secrets []string) {
+		b, _ := ledger.Stringify(gates.Redact(o, secrets), false)
+		fmt.Fprintln(stdout, gates.Mask(string(b), secrets))
+	}
 	if os.Getenv("CODE_FORGE_TMP_ROOT") == "" {
 		here, _ := os.Getwd()
 		routerConfig, _ := config.Load(here)
@@ -446,6 +475,9 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 	if st, e := os.Stat(cwd); e != nil || !st.IsDir() {
 		return 0, false
 	}
+	if step != nil && step.preflight {
+		return 0, true
+	}
 	secrets := gates.Masks(p)
 	started := false
 	failure := func(e error) (int, bool) {
@@ -454,9 +486,17 @@ func gatesNative(args []string, o gatesOptions) (int, bool) {
 		}
 		return gatesError(e)
 	}
-	ctx, cancel := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
+	parent := context.Background()
+	if step != nil && step.ctx != nil {
+		parent = step.ctx
+	}
+	ctx, cancel := signal.NotifyContext(parent, os.Interrupt, syscall.SIGTERM)
 	defer cancel()
-	gatesWarn(cwd)
+	if step == nil {
+		gatesWarn(cwd)
+	} else {
+		gatesWarn(cwd, stderr)
+	}
 	var results []any
 	all := false
 	var files ledger.Object
@@ -720,7 +760,11 @@ func gatesEmptyTest(cwd, file string) bool {
 func gatesExecutable(cwd string, c *gates.Command) bool {
 	return c.Argv[0] == "{test_files}" || c.Argv[0] == "{changed_files}" || gates.Executable(cwd, c) != ""
 }
-func gatesWarn(cwd string) {
+func gatesWarn(cwd string, writers ...io.Writer) {
+	warn := func(format string, args ...any) { gatesErrf(format, args...) }
+	if len(writers) > 0 {
+		warn = func(format string, args ...any) { fmt.Fprintf(writers[0], format, args...) }
+	}
 	dirs := []string{proof.Real(cwd)}
 	if out, e := gitx.WithEnv(cwd, os.Environ(), "rev-parse", "--show-toplevel", "--git-common-dir"); e == nil {
 		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
@@ -758,7 +802,7 @@ func gatesWarn(cwd string) {
 		}
 		if deps {
 			if st, e := os.Stat(filepath.Join(dir, "node_modules")); e != nil || !st.IsDir() {
-				gatesErrf("warn: %s has package.json but no node_modules; run npm ci there first\n", dir)
+				warn("warn: %s has package.json but no node_modules; run npm ci there first\n", dir)
 			}
 		}
 	}
