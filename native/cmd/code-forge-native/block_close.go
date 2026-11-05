@@ -34,10 +34,19 @@ func init() { blockSubs["close"] = runBlockClose }
 func runBlockClose(args []string) int { return closeWithFlags(args) }
 
 func blockCloseStep(args []string, step *landStep) int {
+	return blockCloseStepWithReason(args, step, nil)
+}
+
+// Preflight returns its reason to the caller, which records only the final
+// whole-command handover. Shared land preflights keep their existing sentinel.
+func blockCloseStepWithReason(args []string, step *landStep, handover *handoverReason) int {
 	stdout, stderr := step.writers()
 
 	original := append([]string{"close"}, args...)
 	fallback := func(reason handoverReason) int {
+		if handover != nil {
+			*handover = reason
+		}
 		if step != nil {
 			return landHandover
 		}
@@ -173,7 +182,7 @@ func blockCloseStep(args []string, step *landStep) int {
 		// A terminal confirmation remains a human close, owned by Node. Pipes
 		// refuse before confirmation, expiry, claims, or any signed writes.
 		if closeMayHaveTerminal() {
-			return fallback()
+			return fallback(hCloseNoRequireReviews)
 		}
 		return usage("--no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)")
 	}

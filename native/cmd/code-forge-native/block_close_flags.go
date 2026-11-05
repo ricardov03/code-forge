@@ -89,13 +89,14 @@ func closeWithFlags(args []string) int {
 		return blockCloseStep(args, nil)
 	}
 	if !closeTextSafe(strings.Join(args, "\n")) {
-		return blockHandover(append([]string{"close"}, args...))
+		return blockHandover(append([]string{"close"}, args...), hCloseUnsupportedFlag)
 	}
 	var stdout bytes.Buffer
 	stderr := &closeErrorBuffer{}
-	code := closeFlagsStep(args, &landStep{stdout: &stdout, stderr: stderr})
+	reason := hCloseAutoClaim
+	code := closeFlagsStep(args, &landStep{stdout: &stdout, stderr: stderr}, &reason)
 	if code == landHandover {
-		return blockHandover(append([]string{"close"}, args...))
+		return blockHandover(append([]string{"close"}, args...), reason)
 	}
 	before := gatesBreadcrumbName("block close")
 	fmt.Fprint(os.Stdout, stdout.String())
@@ -124,36 +125,37 @@ func (b *closeErrorBuffer) Write(data []byte) (int, error) {
 	return b.Buffer.Write(data)
 }
 
-func closeFlagsStep(args []string, step *landStep) int {
+func closeFlagsStep(args []string, step *landStep, reason *handoverReason) int {
 	stdout, stderr := step.writers()
+	closeStep := func(s *landStep) int { return blockCloseStepWithReason(args, s, reason) }
 	flags, pos, message := closeFlags(args)
 	if flags["auto-claim"] != true || message != "" || len(pos) == 0 {
-		return blockCloseStep(args, step)
+		return closeStep(step)
 	}
-	fallback := func() int { return landHandover }
+	fallback := func(why handoverReason) int { *reason = why; return landHandover }
 	// Run the entire close's read-only boundary first, including unsupported
 	// flag/config combinations. Even a refused enqueue must not precede it.
 	dry := &landStep{preflight: true}
-	preflight := blockCloseStep(args, dry)
+	preflight := closeStep(dry)
 	if preflight == landHandover {
-		return fallback()
+		return preflight
 	}
 	if preflight != 0 || flags["no-require-reviews"] == true {
-		return blockCloseStep(args, step)
+		return closeStep(step)
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fallback()
+		return fallback(hCloseHome)
 	}
 	run, id := blockString(flags["run"]), pos[0]
 	record, err := state.ReadRun(home, run)
 	if err != nil {
-		return fallback()
+		return fallback(hCloseError)
 	}
 	entry := blockObject(blockObject(record.Get("blocks")).Get(id))
 	main, err := gitx.RepoTop(blockString(record.Get("workspace")))
 	if err != nil {
-		return fallback()
+		return fallback(hCloseRepo)
 	}
 	top := blockString(blockObject(entry.Get("worktree")).Get("path"))
 	if top == "" {
@@ -161,10 +163,10 @@ func closeFlagsStep(args []string, step *landStep) int {
 	}
 	files, err := landClaimFiles(home, run, id, top, main, record, entry)
 	if err != nil {
-		return fallback()
+		return fallback(hCloseAutoClaim)
 	}
 	if len(files) == 0 {
-		return blockCloseStep(args, step)
+		return closeStep(step)
 	}
 	// Recheck close against predicted ownership before any claim is signed.
 	encoded, _ := ledger.Stringify(record, false)
@@ -182,11 +184,11 @@ func closeFlagsStep(args []string, step *landStep) int {
 	blocks.Set(id, block)
 	predicted.Set("blocks", blocks)
 	dry.record = predicted
-	if blockCloseStep(args, dry) == landHandover {
-		return fallback()
+	if closeStep(dry) == landHandover {
+		return landHandover
 	}
 	if err := landAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
-		return fallback()
+		return fallback(hCloseAutoClaim)
 	}
 	// An enqueue refusal ends auto-claim immediately; it needs no join support.
 	willJoin := true
@@ -202,7 +204,7 @@ func closeFlagsStep(args []string, step *landStep) int {
 		daemonJoin = reviewWaitBlockStep(joinArgs, &landStep{preflight: true}) != landHandover
 		if !daemonJoin {
 			if _, _, err := closeLocalJoin(home, run, id, main, top, predicted, true); err != nil {
-				return fallback()
+				return fallback(hCloseAutoClaim)
 			}
 		}
 	}
@@ -252,7 +254,7 @@ func closeFlagsStep(args []string, step *landStep) int {
 		}
 		return fail(fmt.Errorf("auto-claim review refused %s: %s", file.Get("file"), detail))
 	}
-	code := blockCloseStep(args, step)
+	code := closeStep(step)
 	if code == landHandover {
 		return fail(fmt.Errorf("auto-claim review failed"))
 	}

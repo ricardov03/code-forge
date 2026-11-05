@@ -107,7 +107,7 @@ async function snapshot(root) {
 function launch(f, argv, env = {}, onLock = () => {}) {
   return new Promise((resolve, reject) => {
     const child = spawn(BINARY, argv, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home,
-      CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', ...env } });
+      CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', ...env } });
     let stdout = '', stderr = '';
     child.stdout.on('data', (b) => { stdout += b; });
     child.stderr.on('data', (b) => { stderr += b; if (stderr.includes(lockSignal)) onLock(); });
@@ -184,6 +184,36 @@ test('close flags run natively with byte parity for process, signed state and gi
     const parity = await runParity([...args, '--auto-claim', '--json'], { fixture: f, goCommand: BINARY, samePaths: true, tempRoot: '/tmp',
       prepare: (copy) => prepare(copy, outcome), env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' } });
     assert.deepEqual(parity.diffs, [], `${outcome}: exact auto-claim-review error and claim writes`);
+  }
+});
+
+test('still-handed-over close flags record exactly one row with the boundary reason', async () => {
+  /** @type {[Record<string, any>, string[], string][]} */
+  const cases = [
+    [{}, ['--decide'], 'close-decide'],
+    [{}, ['--auto-claim', '--decide'], 'close-decide'],
+    [{}, ['--remove-worktree', '--decide'], 'close-decide'],
+    [{}, ['--no-require-reviews', '--decide'], 'close-decide'],
+    [{ hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }, ['--auto-claim'], 'close-end-hook'],
+    [{ close: { require_human: true } }, ['--auto-claim'], 'close-human'],
+    [{ review: { external: { required: true, name: 'owner' } } }, ['--auto-claim'], 'close-external-review'],
+  ];
+  const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
+  for (const [config, flags, reason] of cases) {
+    const f = await fixture('auto-tree', config);
+    const before = await snapshot(path.join(f.repo, '.code-forge'));
+    const result = await launch(f, [...args, ...flags, '--json'], { CODE_FORGE_HANDOVER_LOG: '1' });
+    assert.equal(result.code, 127, `${flags}: still delegates when Node is unavailable`);
+    const log = await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8');
+    assert.equal(log.endsWith('\n'), true, 'one newline-terminated telemetry row');
+    const rows = log.trimEnd().split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows.length, 1, `${flags}: exactly one row, including nested preflight`);
+    assert.deepEqual({ ...rows[0], at: '<time>' }, { at: '<time>', verb: 'block', sub: 'close', reason, version }, 'exact reason and safe telemetry fields');
+    assert.equal(Number.isNaN(Date.parse(rows[0].at)), false, 'valid telemetry timestamp');
+    const report = await launch(f, ['logs', 'handovers', '--json']);
+    assert.equal(report.code, 0, report.stderr);
+    assert.deepEqual(JSON.parse(report.stdout), { total: 1, rows: [{ verb: 'block', sub: 'close', reason, count: 1, last_at: rows[0].at }] }, 'public hand-over report exposes the same single reason');
+    assert.deepEqual(await snapshot(path.join(f.repo, '.code-forge')), before, 'preflight writes no repository state');
   }
 });
 
