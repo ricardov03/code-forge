@@ -84,6 +84,11 @@ func reviewWaitHandover(args []string) int {
 }
 
 func runReviewFileWait(args []string) int {
+	for _, arg := range args {
+		if arg == "--wait-block" || strings.HasPrefix(arg, "--wait-block=") {
+			return runReviewWaitBlock(args)
+		}
+	}
 	flags, usage, ok := reviewWaitFlags(args)
 	if !ok {
 		return reviewWaitHandover(args)
