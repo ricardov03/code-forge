@@ -163,12 +163,15 @@ func reviewEnqueueAnswers(home, root, run, block, tree, file, byFile string, ids
 		}
 	}
 	dir := filepath.Join(root, ".code-forge", "queue")
+	marker := filepath.Join(dir, id+".done")
+	result, ok := reviewWaitResult(root, marker)
+	if !ok {
+		return nil, 0, false
+	}
 	if err := queue.PublishAnswers(dir, p, id, byFile, byHash, ids, time.Now()); err != nil {
 		return nil, 0, false
 	}
 	retry := false
-	marker := filepath.Join(dir, id+".done")
-	result, _ := reviewWaitResult(root, marker)
 	if r, _ := result.(ledger.Object); r.Get("status") == "unavailable" {
 		if err := os.Remove(marker); err != nil && !os.IsNotExist(err) {
 			return reviewEnqueueRefusal("error", err.Error()), 1, true
@@ -241,8 +244,10 @@ func reviewEnqueueFresh(root string, p ticket.Parts, id string, retry bool) (led
 		_ = json.Unmarshal(data, &marker)
 		result := reviewEnqueueResult(root, marker)
 		verdict = "counted"
-		if result != nil && marker["status"] == result.Get("status") {
-			switch result.Get("status") {
+		markerStatus, markerOK := marker["status"].(string)
+		resultStatus, resultOK := result.Get("status").(string)
+		if markerOK && resultOK && markerStatus == resultStatus {
+			switch resultStatus {
 			case "stale", "unavailable", "split_required":
 				verdict = "rerun"
 			case "refused":

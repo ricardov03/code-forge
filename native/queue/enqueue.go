@@ -76,7 +76,7 @@ func Publish(dir string, p ticket.Parts, id string, now time.Time) error {
 	}
 	stamp := now.UTC().Format("2006-01-02T15:04:05.000Z")
 	if p.ReopenedAt != nil {
-		if after, err := time.Parse(time.RFC3339Nano, *p.ReopenedAt); err == nil && !now.After(after) {
+		if after, err := time.Parse(time.RFC3339Nano, *p.ReopenedAt); err == nil && !now.Truncate(time.Millisecond).After(after) {
 			stamp = after.Add(time.Millisecond).UTC().Format("2006-01-02T15:04:05.000Z")
 		}
 	}

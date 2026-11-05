@@ -54,14 +54,17 @@ async function fixture() {
   await put(repo, `workers/${process.pid}-unknown.json`, { pid: process.pid, start_time: 'unknown', run: RUN, started_at: stamp, heartbeat_at: stamp });
   return { repo, home, record, save };
 }
-function execute(f, args = ARGS, node = false, extra = {}) {
-  const r = spawnSync(node ? process.execPath : BIN, node ? [CLI, ...args] : args, { cwd: f.repo, encoding: 'utf8', env: {
+function executeEnv(f, extra = {}) {
+  return {
     PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_HANDOVER_LOG: '0', ...extra,
-  } });
+  };
+}
+function execute(f, args = ARGS, node = false, extra = {}) {
+  const r = spawnSync(node ? process.execPath : BIN, node ? [CLI, ...args] : args, { cwd: f.repo, encoding: 'utf8', env: executeEnv(f, extra) });
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
 }
 async function executeAsync(f, args) {
-  const child = spawn(BIN, args, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_HANDOVER_LOG: '0' }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(BIN, args, { cwd: f.repo, env: executeEnv(f), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', (b) => { stdout += b; }); child.stderr.on('data', (b) => { stderr += b; });
   const [code] = await once(child, 'close');
@@ -205,7 +208,7 @@ test('enqueue flag refusals preserve cache bytes and unsupported cases hand over
     await parity(f, args, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '0' } });
   }
   const id = JSON.parse(execute(f).stdout).ticket;
-  for (const result of [{ status: 'reviewed', approved: true }, { status: 'refused', reason: 'review-state-tampered' }, { status: 'refused', reason: 'review-state-lost' }]) {
+  for (const result of [{ status: 'reviewed', approved: true }, { status: 'refused', reason: 'review-state-tampered' }, { status: 'refused', reason: 'review-state-lost' }, { status: ['stale'] }, { status: { value: 'stale' } }]) {
     await done(f, id, result);
     const file = path.join(f.repo, '.code-forge/queue', `${id}.done`), bytes = await readFile(file);
     await parity(f, [...ARGS, '--fresh']);
@@ -216,10 +219,28 @@ test('enqueue flag refusals preserve cache bytes and unsupported cases hand over
   assert.equal(execute(f, ['review-file', '--help']).code, 127, 'help still hands over with Node unavailable');
   assert.deepEqual(await snapshot(f), before, 'handover changes zero queue, ledger, run or log bytes and modes');
   await parity(f, ['review-file', '--help'], { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
-  await put(f.home, 'ledger/fixture.jsonl', JSON.stringify({ event: 'review.cap', run: RUN, block: 'B1', file: 'sample.mjs', open: ['f1'] }) + '\n');
+  await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.cap', run: RUN, block: 'B1', file: 'sample.mjs', open: ['f1'] }, Buffer.alloc(32, 7))) + '\n');
   const capArgs = ['review-file', 'answer.mjs', '--block=B1', `--run=${RUN}`, '--answers=f1', '--of=sample.mjs'];
   const capBefore = await snapshot(f);
   assert.equal(execute(f, capArgs).code, 127, 'unsupported cap clearing rules hand over');
   assert.deepEqual(await snapshot(f), capBefore, 'unsupported answers case changes zero state bytes or modes');
   await parity(f, capArgs, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+});
+
+test('unsupported answers marker and result encodings hand over before publication', async () => {
+  const f = await fixture();
+  const source = JSON.parse(execute(f).stdout);
+  await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.result', run: RUN, block: 'B1', file: 'sample.mjs', content_hash: source.content_hash, status: 'reviewed', approved: false, open: [{ id: 'f1', severity: 'warning' }] }, Buffer.alloc(32, 7))) + '\n');
+  const args = ['review-file', 'answer.mjs', '--block=B1', `--run=${RUN}`, '--answers=f1', '--of=sample.mjs'];
+  const answer = execute(f, args);
+  assert.equal(answer.code, 0, 'supported answers enqueue supplies the ticket identity');
+  const id = JSON.parse(answer.stdout).ticket;
+  await rm(path.join(f.repo, '.code-forge/queue', `${id}.json`));
+  for (const location of ['marker', 'result']) {
+    await done(f, id, { status: 'unavailable', ...(location === 'result' ? { detail: '\ud800' } : {}) }, location === 'marker' ? { detail: '\ud800' } : {});
+    const before = await snapshot(f);
+    assert.equal(execute(f, args).code, 127, `unsupported ${location} hands over with Node unavailable`);
+    assert.deepEqual(await snapshot(f), before, `unsupported ${location} changes zero state bytes or modes`);
+    await parity(f, args, { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+  }
 });
