@@ -45,6 +45,12 @@ func main() {
 }
 
 func runInternal(args []string) (int, error) {
+	if len(args) == 1 && args[0] == "kit-golden" {
+		if err := kitGolden(os.Stdin, os.Stdout); err != nil {
+			return 1, err
+		}
+		return 0, nil
+	}
 	if len(args) == 1 && args[0] == "version" {
 		return 0, json.NewEncoder(os.Stdout).Encode(map[string]string{"version": version, "goVersion": runtime.Version()})
 	}
