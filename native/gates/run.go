@@ -45,6 +45,13 @@ func Masks(p Plan) []string {
 			}
 		}
 	}
+	for _, c := range p.Custom {
+		for _, v := range c.Command.Env {
+			if len(utf16.Encode([]rune(v))) >= 8 {
+				out = append(out, v)
+			}
+		}
+	}
 	return out
 }
 func Mask(s string, secrets []string) string {
@@ -259,6 +266,9 @@ func tails(stdout, stderr string) string {
 // Run executes every built-in gate independently, reaping the process group on
 // deadline and cancellation. No shell interprets configured argv.
 func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope) ([]any, bool, error) {
+	if p.Light != nil {
+		s = Scope{Kind: "related", Files: p.Light}
+	}
 	planned, e := prepare(p, s)
 	if e != nil {
 		return nil, false, e
@@ -291,7 +301,115 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			sort.Strings(keys)
 			r.Set("env_keys", keys)
 		}
+		if item.name == "test" && r.Get("ok") != true && r.Get("code") != nil && outcome.Get("reason") == nil && p.Rerun && ctx.Err() == nil {
+			files := failedTestFiles(fmt.Sprint(r.Get("stdout"))+"\n"+fmt.Sprint(r.Get("stderr")), cwd)
+			reruns := [][]string{}
+			for _, f := range files {
+				a := failedFileArgv(c.Argv, f)
+				if a == nil {
+					reruns = nil
+					break
+				}
+				reruns = append(reruns, a)
+			}
+			recovered := len(reruns) > 0
+			for _, a := range reruns {
+				if ctx.Err() != nil {
+					recovered = false
+					break
+				}
+				if execute(ctx, a, c.Env, cwd, run, timeout, c.FailOnStdout).Get("ok") != true {
+					recovered = false
+				}
+			}
+			if recovered && ctx.Err() == nil {
+				r.Set("ok", true)
+				r.Set("code", 0)
+				r.Set("flaky", files)
+			}
+		}
+		if item.name == "test" && r.Get("ok") == true && p.Repeat != nil && ctx.Err() == nil {
+			skip := func(message string) {
+				if p.Repeat.OnSkip != nil {
+					p.Repeat.OnSkip(message)
+				}
+			}
+			full := item.scope.Get("scope") == "full" && item.scope.Get("reason") == "runner-filter"
+			if !Has(c.Argv, "{test_files}") {
+				skip("repeat_new_tests: skipped (gates.test has no {test_files})")
+			} else if full {
+				skip("repeat_new_tests: skipped (no changed tests for this runner)")
+			} else {
+				changed, safe := RepeatFiles(cwd, p.Repeat)
+				if !safe {
+					return nil, false, fmt.Errorf("repeat_new_tests: unsupported changed test selection")
+				}
+				if p.Light != nil {
+					selected := []string{}
+					for _, f := range changed {
+						if Has(p.Light, f) {
+							selected = append(selected, f)
+						}
+					}
+					changed = selected
+				}
+				files := RunnerFiles(c.Argv, changed)
+				if len(changed) > 0 && len(files) == 0 {
+					skip("repeat_new_tests: skipped (no changed tests for this runner)")
+				}
+				if len(files) > 0 {
+					repeats := ledger.Object{{Key: "n", Value: p.Repeat.N}, {Key: "files", Value: files}, {Key: "failed", Value: false}}
+					r.Set("repeats", repeats)
+					plan, e := prepare(Plan{Commands: map[string]*Command{"test": c}}, Scope{Kind: "related", Files: files})
+					if e != nil {
+						return nil, false, e
+					}
+					a := plan[0].argv
+					for i := 0; i < p.Repeat.N && ctx.Err() == nil; i++ {
+						repeated := execute(ctx, a, c.Env, cwd, run, timeout, c.FailOnStdout)
+						if repeated.Get("ok") != true && repeats.Get("failed") != true {
+							repeats.Set("failed", true)
+							r.Set("reason", "flaky-test")
+							r.Set("argv", a)
+							merge(&r, repeated)
+						}
+					}
+					r.Set("repeats", repeats)
+				}
+			}
+		}
 		r.Set("duration_ms", int64(math.Round(float64(time.Since(started))/float64(time.Millisecond))))
+		results = append(results, r)
+		if r.Get("ok") != true {
+			all = false
+		}
+	}
+	for _, custom := range p.Custom {
+		if ctx.Err() != nil {
+			break
+		}
+		c := custom.Command
+		if p.Restricted && !Has(p.Names, custom.Name) {
+			results = append(results, ledger.Object{{Key: "gate", Value: custom.Name}, {Key: "duration_ms", Value: 0}, {Key: "custom", Value: true}, {Key: "argv", Value: nil}, {Key: "skipped", Value: true}, {Key: "ok", Value: true}, {Key: "code", Value: nil}, {Key: "stdout", Value: ""}, {Key: "stderr", Value: ""}, {Key: "reason", Value: "not in gates.kinds." + p.Kind}, {Key: "evidence", Value: []any{}}})
+			continue
+		}
+		started := time.Now()
+		outcome := execute(ctx, c.Argv, c.Env, cwd, run, timeout, false)
+		evidence, e := collectEvidence(cwd, custom.Evidence)
+		if e != nil {
+			return nil, false, e
+		}
+		r := ledger.Object{{Key: "gate", Value: custom.Name}, {Key: "custom", Value: true}, {Key: "argv", Value: c.Argv}, {Key: "skipped", Value: false}, {Key: "duration_ms", Value: int64(math.Round(float64(time.Since(started)) / float64(time.Millisecond)))}}
+		merge(&r, outcome)
+		if len(c.Env) > 0 {
+			keys := []string{}
+			for k := range c.Env {
+				keys = append(keys, k)
+			}
+			sort.Strings(keys)
+			r.Set("env_keys", keys)
+		}
+		merge(&r, evidence)
 		results = append(results, r)
 		if r.Get("ok") != true {
 			all = false

@@ -337,9 +337,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		}
 	}
 	block := gatesObj(gatesObj(record.Get("blocks")).Get(o.block))
-	if block.Get("kind") == "light" {
-		return 0, false
-	}
+	light := block.Get("kind") == "light"
 	cwd := o.cwd
 	main := cwd
 	var tree *proof.Tree
@@ -372,14 +370,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	}
 	loaded, _ := config.Load(main)
 	configured, _ := loaded["gates"].(map[string]any)
-	if _, ok := configured["repeat_new_tests"]; ok {
-		return 0, false
-	}
-	if _, ok := configured["custom"]; ok {
-		return 0, false
-	}
 	p, safe := gates.Resolve(cwd, configured)
 	if !safe {
+		return 0, false
+	}
+	if !gates.ResolveCustom(&p, configured) {
 		return 0, false
 	}
 	timeout := 300000.0
@@ -400,6 +395,13 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	if n, ok := gatesNumber(configured["full_suite_threshold_files"]); ok && n >= float64(math.MaxInt64) {
 		return 0, false
 	}
+	if v, ok := configured["rerun_failed"]; ok {
+		n, is := gatesNumber(v)
+		if !is || (n != 0 && n != 1) {
+			return 0, false
+		}
+		p.Rerun = n != 0
+	}
 	kind, safe := gatesKind(block)
 	if !safe {
 		return 0, false
@@ -414,7 +416,13 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				return 0, false
 			}
 			for _, name := range gates.Strings(a) {
-				if !gates.Has(gates.Order, name) {
+				custom := false
+				for _, c := range p.Custom {
+					if c.Name == name {
+						custom = true
+					}
+				}
+				if !gates.Has(gates.Order, name) && !custom {
 					return 0, false
 				}
 				if value, present := configured[name]; present && value == nil {
@@ -422,13 +430,38 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				}
 			}
 		}
-		if names, ok := kinds[kind].([]any); ok {
+		if names, ok := kinds[kind].([]any); ok && !light {
 			p.Kind = kind
 			p.Restricted = true
 			p.Names = gates.Strings(names)
 		}
 	} else if configured["kinds"] != nil {
 		return 0, false
+	}
+	if light {
+		scope := gates.TestScope(block, nil, math.MaxInt)
+		c := p.Commands["test"]
+		if scope.Kind != "related" || c == nil || !gates.Has(c.Argv, "{test_files}") {
+			return gatesError(fmt.Errorf("light-tests: block tests and a gates.test {test_files} item are required"))
+		}
+		p.Light = scope.Files
+		o.changed = false
+	}
+	if v, exists := configured["repeat_new_tests"]; exists {
+		n, ok := gatesNumber(v)
+		if !ok || n < 2 || n > 10 || n != math.Trunc(n) {
+			return 0, false
+		}
+		base, _ := block.Get("base_sha").(string)
+		if wt := gatesObj(block.Get("worktree")); wt.Get("base_sha") != nil {
+			base, _ = wt.Get("base_sha").(string)
+		}
+		p.Repeat = &gates.Repeat{N: int(n), Base: base, Block: block, OnSkip: func(s string) { gatesErrf("%s\n", s) }}
+		if c := p.Commands["test"]; c != nil && (!p.Restricted || gates.Has(p.Names, "test")) && gates.Has(c.Argv, "{test_files}") {
+			if _, safe := gates.RepeatFiles(cwd, p.Repeat); !safe {
+				return 0, false
+			}
+		}
 	}
 	// Preserve platform-specific spawn diagnostics in Node. Resolve against the
 	// child's cwd and PATH, including configured environment overrides.
@@ -437,16 +470,8 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			return 0, false
 		}
 	}
-	// A rerun-enabled test can recover a failure. Decide before any writes or
-	// child execution, so a fallback never repeats an already-run command.
-	if p.Commands["test"] != nil && (!p.Restricted || gates.Has(p.Names, "test")) {
-		if n, ok := gatesNumber(configured["rerun_failed"]); !ok || n != 0 {
-			return 0, false
-		}
-	}
-	if v, ok := configured["rerun_failed"]; ok {
-		n, is := gatesNumber(v)
-		if !is || (n != 0 && n != 1) {
+	for _, c := range p.Custom {
+		if (!p.Restricted || gates.Has(p.Names, c.Name)) && !gatesExecutable(cwd, c.Command) {
 			return 0, false
 		}
 	}
@@ -587,7 +612,15 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	cancelled := ctx.Err() != nil
 	all = all && !cancelled
 	duration := int64(0)
+	var repeats, flaky any
 	for _, v := range results {
+		r := v.(ledger.Object)
+		if repeats == nil && r.Get("repeats") != nil {
+			repeats = r.Get("repeats")
+		}
+		if flaky == nil && r.Get("flaky") != nil {
+			flaky = r.Get("flaky")
+		}
 		switch n := v.(ledger.Object).Get("duration_ms").(type) {
 		case int:
 			duration += int64(n)
@@ -595,15 +628,29 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			duration += n
 		}
 	}
+	for _, v := range results {
+		r := v.(ledger.Object)
+		if !cancelled && r.Get("skipped") != true && r.Get("code") == nil {
+			gatesErrf("%s\n", gates.Mask(fmt.Sprintf("%s: %s", r.Get("gate"), r.Get("message")), secrets))
+		}
+	}
+	if flaky != nil && !gates.Has(args, "--json") {
+		gatesErrf("flaky: %s\n", strings.Join(flaky.([]string), ", "))
+	}
 	owner := ledger.Object{{Key: "run", Value: o.run}, {Key: "block", Value: o.block}}
 	if tree != nil {
 		owner.Set("worktree", tree.Path)
 	}
 	appendRow := func(row ledger.Object) error {
+		if repeats != nil {
+			return gatesSignedRow(home, o.run, slug, row)
+		}
 		_, e := ledger.AppendObject(filepath.Join(home, ".code-forge", "ledger"), slug, row, ledger.DefaultRotateAtBytes)
 		return e
 	}
 	summaries := []any{}
+	customs := []any{}
+	evidence := ledger.Object{}
 	var scoped ledger.Object
 	for _, v := range results {
 		r := v.(ledger.Object)
@@ -611,12 +658,21 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		for _, k := range []string{"gate", "ok", "skipped", "duration_ms"} {
 			summary.Set(k, r.Get(k))
 		}
+		if r.Get("flaky") != nil {
+			summary.Set("flaky", r.Get("flaky"))
+		}
+		if r.Get("custom") == true {
+			items, _ := r.Get("evidence").([]any)
+			entry := ledger.Object{{Key: "name", Value: r.Get("gate")}, {Key: "ok", Value: r.Get("ok")}, {Key: "evidence_count", Value: len(items)}}
+			if r.Get("missing") != nil {
+				entry.Set("missing", r.Get("missing"))
+			}
+			customs = append(customs, entry)
+			evidence.Set(r.Get("gate").(string), items)
+		}
 		summaries = append(summaries, summary)
 		if r.Get("scope") != nil && scoped == nil {
 			scoped = gatesScopeOf(r)
-		}
-		if !cancelled && r.Get("skipped") != true && r.Get("code") == nil {
-			gatesErrf("%s\n", gates.Mask(fmt.Sprintf("%s: %s", r.Get("gate"), r.Get("message")), secrets))
 		}
 		if slug != "" && !cancelled && r.Get("skipped") != true && r.Get("ok") != true {
 			row := owner.Clone()
@@ -626,8 +682,14 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			gatesAdd(&row, gatesScopeOf(r))
 			row.Set("duration_ms", r.Get("duration_ms"))
 			row.Set("total_duration_ms", duration)
+			if r.Get("custom") == true {
+				row.Set("custom", true)
+			}
 			if r.Get("reason") != nil {
 				row.Set("reason", r.Get("reason"))
+			}
+			if r.Get("repeats") != nil {
+				row.Set("repeats", r.Get("repeats"))
 			}
 			if e := appendRow(row); e != nil {
 				return failure(e)
@@ -653,8 +715,18 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		} else {
 			gatesAdd(&row, scoped)
 		}
+		if len(customs) > 0 {
+			row.Set("custom", customs)
+			row.Set("evidence", evidence)
+		}
 		if files != nil {
 			row.Set("files", files)
+		}
+		if repeats != nil {
+			row.Set("repeats", repeats)
+		}
+		if flaky != nil {
+			row.Set("flaky", flaky)
 		}
 		if e := appendRow(row); e != nil {
 			return failure(e)
@@ -672,6 +744,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	}
 	if p.Restricted && len(p.Names) == 0 {
 		out.Set("message", "0 gates for kind "+kind)
+	}
+	if repeats != nil {
+		out.Set("repeats", repeats)
+	}
+	if flaky != nil {
+		out.Set("flaky", flaky)
 	}
 	gatesSay(out, secrets)
 	if all {
