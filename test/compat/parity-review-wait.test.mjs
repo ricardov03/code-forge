@@ -143,7 +143,8 @@ test('wait stops at max and SIGTERM/SIGINT, reaping every observed child', { tim
   await worker(f);
   const tools = path.join(scratch, 'tools'); await mkdir(tools);
   const timeoutPids = path.join(scratch, 'timeout-pids');
-  // Record both git discovery children, including ones too short-lived for ps.
+  // Record both git discovery children while Go is running, including ones too
+  // short-lived for ps. Probe these PIDs after close, when orphans are reparented.
   await writeFile(path.join(tools, 'git'), `#!/bin/sh\necho $$ >> '${timeoutPids}'\nexec /usr/bin/git "$@"\n`);
   await chmod(path.join(tools, 'git'), 0o755);
   const before = performance.now();
@@ -153,7 +154,6 @@ test('wait stops at max and SIGTERM/SIGINT, reaping every observed child', { tim
   assert.equal(result.stdout, `{"ticket":"${TICKET}","status":"pending","reason":"wait_timeout"}\n`, 'one exact timeout line');
   assert.equal(result.stderr, '', 'timeout has zero stderr bytes');
   assert.ok(performance.now() - before < 1500, '25ms max finishes within 1500ms including git discovery');
-  assert.deepEqual(children(timeout.child.pid), [], 'zero children remain after wait_timeout');
   const observed = (await readFile(timeoutPids, 'utf8')).trim().split('\n').map(Number);
   assert.equal(observed.length, 2, 'timeout observed exactly two git discovery children');
   assert.deepEqual(observed.filter(alive), [], 'zero observed git children survive wait_timeout');
@@ -173,7 +173,8 @@ test('wait stops at max and SIGTERM/SIGINT, reaping every observed child', { tim
         await delay(10);
       }
       assert.ok(pid > 1, `${signal}: git child started before cancellation`);
-      assert.ok(children(waiting.child.pid).includes(pid), `${signal}: tracked git belongs to Go`);
+      const observedChildren = children(waiting.child.pid);
+      assert.ok(observedChildren.includes(pid), `${signal}: tracked git belongs to Go`);
       waiting.child.kill(/** @type {NodeJS.Signals} */ (signal));
       const ended = await Promise.race([waiting.ended, delay(2000).then(() => null)]);
       assert.notEqual(ended, null, `${signal}: Go exits within two seconds`);
@@ -181,7 +182,7 @@ test('wait stops at max and SIGTERM/SIGINT, reaping every observed child', { tim
       assert.equal(ended.stdout, '', `${signal}: zero partial output bytes`);
       assert.equal(ended.stderr, '', `${signal}: zero error bytes`);
       assert.equal(alive(pid), false, `${signal}: observed git child ${pid} was reaped`);
-      assert.deepEqual(children(waiting.child.pid), [], `${signal}: zero remaining children`);
+      assert.deepEqual(observedChildren.filter(alive), [], `${signal}: zero observed children survive cancellation`);
     } finally {
       waiting.child.kill('SIGKILL');
       if (pid > 1 && alive(pid)) process.kill(pid, 'SIGKILL');
