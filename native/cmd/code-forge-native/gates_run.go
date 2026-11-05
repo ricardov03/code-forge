@@ -600,6 +600,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		owner.Set("worktree", tree.Path)
 	}
 	appendRow := func(row ledger.Object) error {
+		if step != nil {
+			// Composed land gates carry the same run signature as every other land row.
+			_, e := state.WriteSigned(home, o.run, row)
+			return e
+		}
 		_, e := ledger.AppendObject(filepath.Join(home, ".code-forge", "ledger"), slug, row, ledger.DefaultRotateAtBytes)
 		return e
 	}

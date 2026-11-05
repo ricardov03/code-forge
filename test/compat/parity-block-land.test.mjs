@@ -156,9 +156,12 @@ async function openFixture(kind = 'clean', config = {}) {
     return { ...f, tree, ticket, kind };
   } finally { process.env.HOME = saved; }
 }
-async function prepareLand(copy, kind = 'clean') {
+async function prepareLand(copy, kind = 'clean', merge = false) {
   const record = JSON.parse(await readFile(path.join(copy.home, '.code-forge/runs', RUN + '.json'), 'utf8'));
   const tree = record.blocks.B1.worktree.path;
+  const mainBefore = git(copy.repo, ['rev-parse', 'main']);
+  const blockTip = git(copy.repo, ['rev-parse', 'block-B1']);
+  const blockContent = await readFile(path.join(tree, 'sample.mjs'), 'utf8');
   let joins = 0;
   const daemon = await serveDaemon(copy, RUN, async (req) => {
     if (req.method === 'rows') return { rows: (await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line)) };
@@ -187,7 +190,21 @@ async function prepareLand(copy, kind = 'clean') {
   });
   return async () => {
     await daemon.cleanup();
+    assert.equal(git(copy.repo, ['symbolic-ref', 'HEAD']), 'refs/heads/main', 'main remains checked out');
+    const mainAfter = git(copy.repo, ['rev-parse', 'main']);
+    if (merge) {
+      assert.notEqual(mainAfter, mainBefore, 'merge advances main HEAD');
+      assert.equal(git(copy.repo, ['rev-parse', 'HEAD']), mainAfter, 'main HEAD is the merge commit');
+      assert.deepEqual(git(copy.repo, ['rev-list', '--parents', '-n', '1', 'main']).split(' '),
+        [mainAfter, mainBefore, blockTip], 'merge has the original main HEAD and block branch tip as its two parents');
+      assert.equal(git(copy.repo, ['show', 'main:sample.mjs']), blockContent.trim(), 'main commit contains the block content');
+      assert.equal(await readFile(path.join(copy.repo, 'sample.mjs'), 'utf8'), blockContent, 'main checkout contains the block content');
+    } else {
+      assert.equal(mainAfter, mainBefore, 'land without --merge leaves main HEAD unchanged');
+    }
     const rows = (await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.equal(rows.every((r) => verifyRow(r, KEY).ok), true,
+      `every ledger row carries a valid MAC: ${JSON.stringify(rows.filter((r) => !verifyRow(r, KEY).ok))}`);
     assert.equal(rows.filter((r) => r.event === 'land.timing').length, 1, 'exactly one signed timing row');
     assert.equal(rows.filter((r) => r.event === 'gate.done').length, kind === 'moved' ? 2 : 1, 'tree moves trigger exactly one gate rerun');
     assert.equal(rows.filter((r) => r.event === 'block.close').length, ['clean', 'moved', 'auto'].includes(kind) ? 1 : 0);
@@ -213,7 +230,7 @@ test('ported land and optional merge succeed with Node unavailable', async () =>
     const { cp } = await import('node:fs/promises');
     await cp(f.home, short, { recursive: true });
     const direct = { ...f, home: short };
-    const cleanup = await prepareLand(direct);
+    const cleanup = await prepareLand(direct, 'clean', extra.includes('--merge'));
     try {
       const result = await native(direct, [...args, ...extra]);
       assert.equal(result.code, 0, result.stderr);
@@ -223,11 +240,32 @@ test('ported land and optional merge succeed with Node unavailable', async () =>
       const rows = (await readFile(path.join(short, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
       assert.equal(rows.filter((r) => r.event === 'block.close').length, 1);
       assert.equal(rows.filter((r) => r.event === 'land.timing').length, 1);
-      assert.equal(rows.every((r) => !r.mac || verifyRow(r, KEY).ok), true);
+      assert.equal(rows.every((r) => verifyRow(r, KEY).ok), true);
     } finally { await cleanup(); await rm(short, { recursive: true, force: true }); }
     const result = await runParity([...args, ...extra], { fixture: await openFixture(), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
-      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: (copy) => prepareLand(copy) });
+      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: (copy) => prepareLand(copy, 'clean', extra.includes('--merge')) });
     assert.deepEqual(result.diffs, [], `merge flow ${extra}: exact Node parity`);
+  }
+});
+test('findings, red gates, tree moves and wait_timeout run in Go with Node unavailable', async () => {
+  for (const kind of ['findings', 'red', 'moved', 'timeout']) {
+    for (const json of [false, true]) {
+      const f = await openFixture(kind);
+      const home = await mkdtemp('/tmp/cf-ln-');
+      const { cp } = await import('node:fs/promises');
+      await cp(f.home, home, { recursive: true });
+      const direct = { ...f, home };
+      const cleanup = await prepareLand(direct, kind);
+      try {
+        const result = await native(direct, [...args, '--max', kind === 'timeout' ? '2s' : '10s', ...(json ? ['--json'] : [])]);
+        assert.equal(result.code, kind === 'moved' ? 0 : 1, `${kind} json=${json}: ${result.stderr}`);
+        if (kind === 'moved') assert.match(result.stdout, /closed/);
+        else assert.match(result.stderr, kind === 'findings' ? /land stopped at join: sample\.mjs: findings/
+          : kind === 'red' ? /land stopped at gates:/ : /land stopped at join: wait_timeout/);
+        const record = JSON.parse(await readFile(path.join(home, '.code-forge/runs', RUN + '.json'), 'utf8'));
+        assert.equal(record.blocks.B1.status, kind === 'moved' ? 'closed' : 'open');
+      } finally { await cleanup(); await rm(home, { recursive: true, force: true }); }
+    }
   }
 });
 test('no daemon, close hook, and unscoped merge gate hand over before any Go writes', async () => {
