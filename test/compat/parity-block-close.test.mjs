@@ -278,10 +278,21 @@ test('Node accepts missing and invalid gate timestamps; native dates match and u
 test('unsupported close cases hand over the original arguments before any state write; native usage and refusal boundaries match Node', async () => {
   const usage = await launch(await fixture(), ['block', 'close']);
   assert.equal(usage.code, 2, 'missing close arguments are a native usage refusal with Node unavailable');
+  /** @type {[string, number][]} */
+  const nativeFlags = [['--no-require-reviews', 2], ['--auto-claim', 0], ['--remove-worktree', 2]];
+  for (const [flag, expected] of nativeFlags) {
+    const f = await fixture(), argv = [...args, flag, '--json'];
+    const parity = await runParity(argv, { fixture: f, goCommand: BINARY,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], `${flag}: native exit, stdout, stderr and every state byte match Node`);
+    const result = await launch(f, argv);
+    assert.equal(result.code, expected, `${flag}: expected native behavior with Node unavailable: ${result.stderr}`);
+    const record = JSON.parse(await readFile(path.join(f.home, '.code-forge/runs', `${RUN}.json`), 'utf8'));
+    assert.equal(record.blocks.B1.status, expected === 0 ? 'closed' : 'open', `${flag}: exact resulting block state`);
+  }
   /** @type {Array<[string, Record<string, any>, string[]]>} */
   const delegated = [
     ['clean', {}, ['--decide', '--reason', 'owner decision']],
-    ['clean', {}, ['--no-require-reviews']], ['clean', {}, ['--auto-claim']], ['clean', {}, ['--remove-worktree']],
     ['clean', { close: { require_human: true } }, []],
     ['clean', { review: { external: { required: true, name: 'owner' } } }, []],
     ['clean', { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }, []],
@@ -301,9 +312,9 @@ test('unsupported close cases hand over the original arguments before any state 
     assert.deepEqual(result.diffs, [], `${argv}: exact boundary exit and stream bytes`);
   }
   const delegatedBoundary = await runParity([...args, '--no-require-reviews'], {
-    fixture: await fixture(), goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath },
+    fixture: await fixture(), goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' },
   });
-  assert.deepEqual(delegatedBoundary.diffs, [], 'human confirmation boundary stays with a real Node');
+  assert.deepEqual(delegatedBoundary.diffs, [], 'human confirmation refusal runs natively with exact Node parity');
 });
 
 test('close uses live daemon facts and stays native when an existing socket gives no answer', async () => {
