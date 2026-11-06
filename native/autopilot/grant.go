@@ -1,0 +1,205 @@
+// Package autopilot reads the grant dialect issued by Node and performs its
+// lazy expiry. Unknown shapes are delegated before any state is changed.
+package autopilot
+
+import (
+	"errors"
+	"math"
+	"slices"
+	"time"
+
+	"github.com/ricardov03/code-forge/native/blockops"
+	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/state"
+)
+
+var ErrUnsupported = errors.New("unsupported autopilot grant")
+
+type Result struct {
+	State      string
+	Grant      ledger.Object
+	ExpiredNow bool
+}
+
+func text(v any) string { s, _ := v.(string); return s }
+
+func timestamp(v any) (time.Time, bool) {
+	s, ok := v.(string)
+	if !ok {
+		return time.Time{}, false
+	}
+	t, err := time.Parse("2006-01-02T15:04:05.000Z", s)
+	return t, err == nil && t.Format("2006-01-02T15:04:05.000Z") == s
+}
+
+// GrantState is pure, matching Node's stopped-before-expired precedence.
+func GrantState(grant ledger.Object, now time.Time) (string, error) {
+	if !valid(grant) {
+		return "", ErrUnsupported
+	}
+	status := text(grant.Get("status"))
+	if status == "stopped" || status == "expired" {
+		return status, nil
+	}
+	until, _ := timestamp(grant.Get("until"))
+	if !now.Before(until) {
+		return "expired", nil
+	}
+	return "active", nil
+}
+
+func valid(g ledger.Object) bool {
+	if g == nil || text(g.Get("grant_id")) == "" || !slices.Contains([]string{"active", "stopped", "expired"}, text(g.Get("status"))) {
+		return false
+	}
+	for _, f := range g {
+		if !slices.Contains([]string{"grant_id", "status", "scopes", "deny", "delegate", "until", "caps", "stop_at", "started_at", "stopped_at", "expired_at", "link", "paused"}, f.Key) {
+			return false
+		}
+	}
+	for _, name := range []string{"until", "started_at"} {
+		if _, ok := timestamp(g.Get(name)); !ok {
+			return false
+		}
+	}
+	for _, name := range []string{"stopped_at", "expired_at"} {
+		if g.Get(name) != nil {
+			if _, ok := timestamp(g.Get(name)); !ok {
+				return false
+			}
+		}
+	}
+	for _, name := range []string{"scopes", "deny"} {
+		values, ok := g.Get(name).([]any)
+		if !ok {
+			return false
+		}
+		for _, value := range values {
+			if _, ok := value.(string); !ok {
+				return false
+			}
+		}
+	}
+	if !slices.Contains([]string{"L2", "L3"}, text(g.Get("delegate"))) {
+		return false
+	}
+	caps, ok := g.Get("caps").(ledger.Object)
+	if !ok {
+		return false
+	}
+	for _, f := range caps {
+		if n, ok := f.Value.(float64); !ok || n <= 0 || math.IsNaN(n) || math.IsInf(n, 0) {
+			return false
+		}
+	}
+	if n, ok := g.Get("stop_at").(float64); !ok || !(n > 0 && n <= 1) {
+		return false
+	}
+	if g.Get("link") != nil {
+		if _, ok := g.Get("link").(string); !ok {
+			return false
+		}
+	}
+	if g.Get("paused") != nil {
+		if _, ok := g.Get("paused").(ledger.Object); !ok {
+			return false
+		}
+	}
+	return true
+}
+
+// Read also proves approvals are quiet: their restore path remains with Node.
+func Read(record ledger.Object, now time.Time) (Result, error) {
+	without := record.Clone()
+	without.Delete("autopilot")
+	if !blockops.QuietExpiry(without) {
+		return Result{}, ErrUnsupported
+	}
+	if record.Get("autopilot") == nil {
+		return Result{State: "none"}, nil
+	}
+	g, ok := record.Get("autopilot").(ledger.Object)
+	if !ok {
+		return Result{}, ErrUnsupported
+	}
+	s, err := GrantState(g, now)
+	if err != nil {
+		return Result{}, err
+	}
+	if record.Get("status") != "active" {
+		s = "run-ended"
+	}
+	return Result{State: s, Grant: g}, nil
+}
+
+func Supported(record ledger.Object) bool {
+	_, err := Read(record, time.Now())
+	return err == nil
+}
+
+// CheckExpiry re-reads under Node's shared run lock. Publish the signed row
+// before saving the expired state, with the original check time in both.
+func CheckExpiry(home, run string, now time.Time) (Result, error) {
+	read := func() (Result, error) {
+		r, err := state.ReadRun(home, run)
+		if err != nil {
+			return Result{}, err
+		}
+		return Read(r, now)
+	}
+	result, err := read()
+	if err != nil || result.State != "expired" || result.Grant.Get("status") != "active" {
+		return result, err
+	}
+	err = state.WithRunLock(home, run, func() error {
+		record, err := state.ReadRun(home, run)
+		if err != nil {
+			return err
+		}
+		result, err = Read(record, now)
+		if err != nil || result.State != "expired" || result.Grant.Get("status") != "active" {
+			return err
+		}
+		at := now.UTC().Format("2006-01-02T15:04:05.000Z")
+		_, err = state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "autopilot.expire"}, {Key: "grant_id", Value: result.Grant.Get("grant_id")}, {Key: "until", Value: result.Grant.Get("until")}, {Key: "ts", Value: at}})
+		if err != nil {
+			return err
+		}
+		result.Grant.Set("status", "expired")
+		result.Grant.Set("expired_at", at)
+		record.Set("autopilot", result.Grant)
+		if err := state.SaveRun(home, record); err != nil {
+			return err
+		}
+		result.ExpiredNow = true
+		return nil
+	})
+	return result, err
+}
+
+// RoutineRefusal is grantFor's close:routine subset (no budget category).
+func RoutineRefusal(result Result) string {
+	if result.State != "active" {
+		if result.State == "none" {
+			return "no-grant"
+		}
+		return result.State
+	}
+	deny, _ := result.Grant.Get("deny").([]any)
+	allow, _ := result.Grant.Get("scopes").([]any)
+	if slices.Contains(deny, any("close:routine")) {
+		return "denied"
+	}
+	if !slices.Contains(allow, any("close:routine")) {
+		return "not-allowed"
+	}
+	return ""
+}
+
+func ActiveGrantMessage(run, until string) string {
+	return "run " + run + " already has an active autopilot grant until " + until + "; stop it first with code-forge autopilot stop --run " + run
+}
+
+func ExpiredMessage(run, until string) string {
+	return "run " + run + "'s autopilot grant already expired at " + until
+}

@@ -9,7 +9,9 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockopen"
 	"github.com/ricardov03/code-forge/native/blockops"
 	"github.com/ricardov03/code-forge/native/config"
@@ -104,7 +106,7 @@ func runBlockOpen(args []string) int {
 		return failure(err)
 	}
 	safe := func(r ledger.Object) bool {
-		if !blockops.QuietExpiry(r) || !blockStorageSafe(home, run, r) {
+		if !autopilot.Supported(r) || !blockStorageSafe(home, run, r) {
 			return false
 		}
 		if _, ok := blockSnapshot(r); !ok {
@@ -145,6 +147,39 @@ func runBlockOpen(args []string) int {
 	if !safe(record) {
 		return fallback(blockStateHandoverReason(record, "open", hOpenState))
 	}
+	grant, _ := autopilot.Read(record, time.Now())
+	grantState := ""
+	if grant.Grant != nil {
+		grantState, _ = autopilot.GrantState(grant.Grant, time.Now())
+	}
+	if grantState == "active" {
+		data, err := os.ReadFile(acceptanceFile)
+		if err != nil {
+			return fallback(hOpenAcceptanceRead)
+		}
+		value, err := blockopen.ParseAcceptance(data)
+		if err != nil {
+			return fallback(hOpenAcceptanceFormat)
+		}
+		clauses, err := blockopen.Acceptance(value)
+		if err != nil {
+			return failure(err)
+		}
+		human := []string{}
+		for _, clause := range clauses {
+			c := blockObject(clause)
+			if c.Get("kind") == "human_check" {
+				human = append(human, statusQuote(blockString(c.Get("clause"))))
+			}
+		}
+		if grant.State == "active" && len(human) > 0 {
+			return failure(&state.Error{Code: "autopilot-human-check", Message: "autopilot-human-check: an active autopilot grant cannot wait on human_check clauses: " + strings.Join(human, ", ") + "; turn each into a clause with tests or ask the owner"})
+		}
+	}
+	deferExpiry := flags["after"] != nil || flags["after-outcome"] != nil
+	if !deferExpiry {
+		blockGrantExpiry(home, run, os.Stderr)
+	}
 	root := blockString(blockObject(blockObject(blockObject(record.Get("blocks")).Get(id)).Get("worktree")).Get("path"))
 	if root == "" {
 		root = blockString(record.Get("workspace"))
@@ -163,8 +198,6 @@ func runBlockOpen(args []string) int {
 		}
 		return failure(err)
 	}
-	// B48 is a proven no-op here: QuietExpiry excludes every grant and every
-	// active approval, so neither check takes a lock, signs a row or emits text.
 	data, err := os.ReadFile(acceptanceFile)
 	if err != nil {
 		return fallback(hOpenAcceptanceRead)
@@ -258,6 +291,9 @@ func runBlockOpen(args []string) int {
 	result, err := blockopen.Open(opts)
 	if err != nil {
 		return failure(err)
+	}
+	if deferExpiry {
+		blockGrantExpiry(home, run, os.Stderr)
 	}
 	blockBreadcrumb("open")
 	b := result.Block

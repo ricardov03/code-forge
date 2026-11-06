@@ -4,6 +4,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -13,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockops"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -126,6 +128,22 @@ func blockEndSafe(record ledger.Object) bool {
 	}
 	_, ok = blockSnapshot(record)
 	return ok
+}
+
+// Keep land's original no-grant predicate. Only the four ported verbs opt in.
+func blockGrantEndSafe(record ledger.Object) bool {
+	if !autopilot.Supported(record) {
+		return false
+	}
+	without := record.Clone()
+	without.Delete("autopilot")
+	return blockEndSafe(without)
+}
+
+func blockGrantExpiry(home, run string, stderr io.Writer) {
+	if _, err := autopilot.CheckExpiry(home, run, time.Now()); err != nil {
+		fmt.Fprintf(stderr, "autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(err))
+	}
 }
 
 // Explain the guarded cases, including the hook boundary retained by land.
@@ -268,13 +286,15 @@ func blockClaimStop(sub string, args []string) int {
 	if err != nil {
 		return failure(err)
 	}
-	if !blockEndSafe(record) {
+	if !blockGrantEndSafe(record) {
 		return fallback(blockStateHandoverReason(record, sub, hClaimStopState))
 	}
 	if !blockStorageSafe(home, run, record) {
 		return fallback(hClaimStopStorage)
 	}
-	safe := func(current ledger.Object) bool { return blockEndSafe(current) && blockStorageSafe(home, run, current) }
+	safe := func(current ledger.Object) bool {
+		return blockGrantEndSafe(current) && blockStorageSafe(home, run, current)
+	}
 	// A serving daemon can return a different rows snapshot. Let Node negotiate
 	// its protocol rather than mixing that snapshot with a direct ledger read.
 	if sub == "stop" && os.Getenv("CODE_FORGE_NATIVE") != "0" {
@@ -282,6 +302,12 @@ func blockClaimStop(sub string, args []string) int {
 			return fallback(hStopDaemon)
 		}
 	}
+	if sub == "stop" {
+		if _, ok := blockDoneFacts(home, run, id, record); !ok {
+			return fallback(hStopDoneFacts)
+		}
+	}
+	blockGrantExpiry(home, run, os.Stderr)
 	if sub == "claim" {
 		file := positionals[1]
 		if err := blockops.ValidateClaim(file); err != nil {
@@ -302,9 +328,6 @@ func blockClaimStop(sub string, args []string) int {
 		}
 		err = blockops.Claim(home, run, id, file, guarded, why, safe)
 	} else {
-		if _, ok := blockDoneFacts(home, run, id, record); !ok {
-			return fallback(hStopDoneFacts)
-		}
 		err = blockops.Stop(home, run, id, reason, safe)
 	}
 	if err != nil {
