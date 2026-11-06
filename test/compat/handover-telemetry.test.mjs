@@ -33,8 +33,8 @@ function fixture() {
 function env(f, extra = {}) {
   return { ...process.env, HOME: f.home, CODE_FORGE_NODE: process.execPath, CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NO_ERROR_LOG: '1', PATH: path.dirname(process.execPath) + path.delimiter + process.env.PATH, ...extra };
 }
-function run(f, args, extra = {}, entry = binary) {
-  const r = spawnSync(entry, args, { cwd: f.home, env: env(f, extra), input: 'private stdin\n', encoding: 'utf8' });
+function run(f, args, extra = {}, entry = binary, input = '') {
+  const r = spawnSync(entry, args, { cwd: f.home, env: env(f, extra), input, encoding: 'utf8' });
   assert.equal(r.error, undefined, 'command starts');
   assert.equal(r.signal, null, 'command exits normally');
   return { code: r.status, stdout: r.stdout, stderr: r.stderr };
@@ -46,18 +46,20 @@ function rows(f) {
 test('B282 clause: hand-overs record private-safe reasons before exec and Go reports counts', async () => {
   const f = fixture();
   const args = ['unported-telemetry', '--private', '/private/customer', 'secret-id'];
-  const expected = run(f, args, { CODE_FORGE_HANDOVER_LOG: '0', PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' });
-  assert.deepEqual(run(f, args, { PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }), expected, 'telemetry preserves every output byte and exit 3');
+  const input = 'private stdin\n';
+  const expected = run(f, args, { CODE_FORGE_HANDOVER_LOG: '0', PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }, binary, input);
+  assert.equal(JSON.parse(expected.stdout).input, input, 'hand-over forwards every stdin byte');
+  assert.deepEqual(run(f, args, { PROBE_TOKEN: 'unchanged', PROBE_EXIT: '3' }, binary, input), expected, 'telemetry preserves every output byte and exit 3');
   assert.equal(rows(f).length, 1, 'one exec writes exactly one row');
   const row = rows(f)[0];
   assert.deepEqual(Object.keys(row).sort(), ['at', 'reason', 'sub', 'verb', 'version'], 'row has only five safe fields');
   assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'unknown', sub: 'unknown', reason: 'unrouted', version: pkg.version }, 'unknown command tokens are replaced without flag values, paths or ids');
   assert.match(row.at, /^\d{4}-\d\d-\d\dT.*Z$/, 'timestamp is UTC ISO');
   assert.equal(Number.isNaN(Date.parse(row.at)), false, 'timestamp is valid');
-  const closeArgs = ['block', 'close', 'private-id', '--decide'];
-  assert.deepEqual(run(f, closeArgs), run(f, closeArgs, { CODE_FORGE_HANDOVER_LOG: '0' }), 'close hand-over preserves Node bytes');
+  const closeArgs = ['block', 'close', 'private-id', '--help'];
+  assert.deepEqual(run(f, closeArgs, {}, binary, input), run(f, closeArgs, { CODE_FORGE_HANDOVER_LOG: '0' }, binary, input), 'close hand-over preserves Node bytes');
   assert.equal(rows(f).length, 2, 'close adds exactly one row');
-  assert.equal(rows(f)[1].reason, 'close-decide', 'close has its own stable reason');
+  assert.equal(rows(f)[1].reason, 'close-help', 'close has its own stable reason');
   assert.equal(rows(f)[1].sub, 'close', 'subcommand is recorded without the block id');
   run(f, args);
   assert.equal(rows(f).length, 3, 'repeat hand-over adds exactly one row');
@@ -70,9 +72,9 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
   assert.equal(report.stderr, '', 'report has no stderr');
   assert.deepEqual(JSON.parse(report.stdout), { total: 3, rows: [
     { verb: 'unknown', sub: 'unknown', reason: 'unrouted', count: 2, last_at: rows(f)[2].at },
-    { verb: 'block', sub: 'close', reason: 'close-decide', count: 1, last_at: rows(f)[1].at },
+    { verb: 'block', sub: 'close', reason: 'close-help', count: 1, last_at: rows(f)[1].at },
   ] }, 'JSON sorts by count and reports the latest timestamp');
-  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  unknown  unknown  unrouted\n1  block  close  close-decide\ntotal  3\n', 'text table sorts by count and includes total');
+  assert.equal(run(f, ['logs', 'handovers']).stdout, 'count  verb  sub  reason\n2  unknown  unknown  unrouted\n1  block  close  close-help\ntotal  3\n', 'text table sorts by count and includes total');
   assert.deepEqual(JSON.parse(run(f, ['logs', 'handovers', '--json', '--since', '2999-01-01']).stdout), { total: 0, rows: [] }, 'since excludes older rows');
   assert.equal(rows(f).length, 3, 'Go reports do not record rows');
   const empty = fixture();

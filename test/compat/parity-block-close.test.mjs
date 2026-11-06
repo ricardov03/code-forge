@@ -290,10 +290,25 @@ test('unsupported close cases hand over the original arguments before any state 
     const record = JSON.parse(await readFile(path.join(f.home, '.code-forge/runs', `${RUN}.json`), 'utf8'));
     assert.equal(record.blocks.B1.status, expected === 0 ? 'closed' : 'open', `${flag}: exact resulting block state`);
   }
+  /** @type {Array<[Record<string, any>, string[]]>} */
+  const nativeHumanCases = [
+    [{}, ['--decide', '--reason', 'owner decision']],
+    [{ close: { require_human: true } }, []],
+  ];
+  for (const [config, extra] of nativeHumanCases) {
+    const f = await fixture('clean', config), argv = [...args, ...extra, '--json'];
+    const before = await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]);
+    const node = await launch(f, argv, true);
+    assert.equal(node.code, 2, `${JSON.stringify(config)} ${extra}: Node refuses without a terminal`);
+    const result = await launch(f, argv);
+    assert.deepEqual(result, node, 'native terminal refusal matches every Node output byte and exit 2 with Node unavailable');
+    assert.deepEqual(await Promise.all([tree(f.home), tree(path.join(f.repo, '.code-forge'))]), before, 'Node and Go terminal refusals preserve every state byte and directory');
+    const parity = await runParity(argv, { fixture: f, goCommand: BINARY,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], 'native human close exit, streams and all state match Node');
+  }
   /** @type {Array<[string, Record<string, any>, string[]]>} */
   const delegated = [
-    ['clean', {}, ['--decide', '--reason', 'owner decision']],
-    ['clean', { close: { require_human: true } }, []],
     ['grant', {}, []], ['approval', {}, []], ['stopped', {}, []],
   ];
   for (const [kind, config, extra] of delegated) {
