@@ -189,7 +189,7 @@ export async function reusableBaseMove(cwd, oldBase, base, dependents = {}) {
   if (typeof oldBase !== 'string' || !/^[a-f0-9]{40,64}$/.test(oldBase)) return false;
   if (oldBase === base) return true;
   try {
-    const diff = await exec(['git', 'diff', '--name-only', '-z', oldBase, base], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    const diff = await exec(['git', 'diff', '--no-renames', '--name-only', '-z', oldBase, base], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
     if (diff.result !== 'ok') return false;
     for (const file of splitNul(diff.stdout)) {
       if (documentation(file) && !dependents[file]?.length) continue;

@@ -1,13 +1,14 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { reusableBaseMove } from '../../src/gates/scope.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
-const SCRATCH = '/Users/ricardov/Code/Herd/SEISIGMA/coder-forge/plans/tools/forge/b294';
-const scratch = await mkdtemp(path.join(SCRATCH, 'changed-scope-'));
+const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'changed-scope-')));
 const binary = path.join(scratch, 'pkg/native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) =>
   !key.startsWith('GIT_') && !['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK'].includes(key)));
@@ -16,7 +17,7 @@ before(async () => {
   await mkdir(path.join(scratch, 'pkg/bin'), { recursive: true });
   await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(scratch, 'pkg/bin/code-forge.mjs'));
   const build = spawnSync('go', ['build', '-o', binary, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...cleanEnv(), GOCACHE: path.join(SCRATCH, 'go-cache'), GOPROXY: 'off', GOTOOLCHAIN: 'local', CGO_ENABLED: '0' },
+    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...cleanEnv(), GOCACHE: path.join(scratch, 'go-cache'), GOPROXY: 'off', GOTOOLCHAIN: 'local', CGO_ENABLED: '0' },
   });
   assert.equal(build.status, 0, build.stderr);
 });
@@ -45,6 +46,7 @@ async function fixture(native, owned = ['src/a.mjs', 'test/a.test.mjs'], thresho
   await put(f, 'package.json', '{"type":"module","version":"1.0.0"}\n');
   await put(f, 'src/a.mjs', 'export const a = 1;\n');
   await put(f, 'src/other.mjs', 'export const other = 1;\n');
+  await put(f, 'src/x.txt', 'source input\n');
   await put(f, 'test/a.test.mjs', "import '../src/a.mjs';\n");
   await put(f, 'test/other.test.mjs', "import '../src/other.mjs';\n");
   await put(f, 'native/main.go', 'package main\n');
@@ -144,6 +146,48 @@ test('native Go-only changes select exactly all binary parity tests and print th
       assert.equal(result.reason, 'native-binary', 'implicit binary dependency is visible');
       assert.deepEqual((await rows(f))[0].reason, 'native-binary');
     }
+  }
+});
+
+test('native changes with an uncovered source keep the full-suite fallback reason', async () => {
+  for (const native of [false, true]) {
+    for (const baseAware of [false, true]) {
+      const f = await fixture(native, ['native/main.go', 'src/uncovered.mjs']);
+      if (!baseAware) {
+        delete f.record.blocks.B1.base_branch;
+        delete f.record.blocks.B1.base_sha;
+        await writeFile(path.join(f.home, '.code-forge/runs/fixture.json'), JSON.stringify(f.record));
+      }
+      await put(f, 'native/main.go', 'package main\n// block\n');
+      await put(f, 'src/uncovered.mjs', 'export const uncovered = 1;\n');
+      commit(f);
+      const result = gate(f);
+      const reason = baseAware ? 'unpaired' : 'no_baseline';
+      assert.deepEqual(JSON.parse(result.stdout), [], 'the uncovered source requires the full suite');
+      assert.equal(result.reason, reason, 'native parity coverage must not mask the fallback');
+      assert.deepEqual(result.dependents, ['test/compat/parity-a.test.mjs', 'test/compat/parity-b.test.mjs']);
+      assert.equal((await rows(f))[0].reason, reason, 'the ledger preserves the fallback reason');
+    }
+  }
+});
+
+test('moving a source file into docs invalidates the green full suite across a rebase', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
+    await put(f, 'src/a.mjs', 'export const a = 2;\n');
+    commit(f);
+    gate(f, false);
+    git(f, 'checkout', '-q', 'main');
+    await mkdir(path.join(f.repo, 'docs'));
+    git(f, 'mv', 'src/x.txt', 'docs/x.txt');
+    const base = commit(f);
+    git(f, 'checkout', '-q', 'block');
+    git(f, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'rebase', 'main');
+    assert.equal(await reusableBaseMove(f.repo, f.record.blocks.B1.base_sha, base), false, 'the source side of a rename invalidates base evidence');
+    const result = gate(f);
+    assert.equal(result.reused ?? false, false, 'the green full suite cannot be reused');
+    assert.deepEqual([result.scope, result.reason], ['full', 'no_baseline']);
+    assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\nrun\n', 'the full suite executes again');
   }
 });
 

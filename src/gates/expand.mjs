@@ -274,7 +274,7 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
     const overThreshold = (!native && union.length > threshold) || reason === 'threshold';
     return { scope: 'changed', files: overThreshold ? [] : union, changedFiles,
       ...(current?.dependents || current === null ? { dependents } : {}),
-      ...(overThreshold ? { reason: /** @type {const} */ ('threshold') } : native ? { reason: /** @type {const} */ ('native-binary') } : reason ? { reason } : {}),
+      ...(overThreshold ? { reason: /** @type {const} */ ('threshold') } : native && !fullFallback ? { reason: /** @type {const} */ ('native-binary') } : reason ? { reason } : {}),
     };
   }
   if (!current || !old || typeof old !== 'object' || Array.isArray(old) || Object.keys(old).length > 200 ||
