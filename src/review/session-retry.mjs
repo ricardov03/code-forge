@@ -123,6 +123,7 @@ export async function spawnWithTimeoutRetry(spawn, opts, note, onAttempt = () =>
       opts.role, openBookCodexAllowed(opts.cfg))) === true;
   let currentOpts = opts;
   let attempts = 0;
+  const failedModels = new Set();
   for (;;) {
     attempts += 1;
     onAttempt(attempts);
@@ -140,11 +141,15 @@ export async function spawnWithTimeoutRetry(spawn, opts, note, onAttempt = () =>
     let nextOpts;
     if (hasLadder) {
       const level = resolveLevel(currentOpts.cfg, currentOpts.level);
+      // A configured ladder can repeat a model (and a custom spawner can report an alias).
+      // Neither case may send this packet back to a model that already stalled.
+      failedModels.add(level.model);
+      if (res.model) failedModels.add(res.model);
       const models = [level, ...level.fallback];
       const at = models.findIndex((m) => m.model === res.model && (m.provider ?? level.provider) === res.provider);
       const remaining = models.slice(Math.max(0, at) + 1)
         .filter((m) => !closedBookRefused(m.provider ?? level.provider, opts.role, openBookCodexAllowed(opts.cfg)))
-        .filter((m) => m.model !== res.model || (m.provider ?? level.provider) !== res.provider)
+        .filter((m) => !failedModels.has(m.model))
         .map((m) => ({ ...m, provider: m.provider ?? level.provider }));
       const next = remaining[0];
       if (next) nextOpts = { ...opts, cfg: { ...opts.cfg, levels: { ...opts.cfg.levels, [opts.level]: {

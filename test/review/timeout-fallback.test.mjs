@@ -188,3 +188,39 @@ test('judge levels, routes, second levels and ledger rows never configure review
     rows, ticketId: 'role-boundary', role: 'reviewer',
   }), null);
 });
+
+test('a configured timeout ladder never retries a stalled model, even with duplicates or reported aliases', async () => {
+  for (const alias of [false, true]) {
+    const cfg = { provider: 'anthropic', levels: { L2: { model: PRIMARY,
+      fallback: [PRIMARY, FAST, PRIMARY, FAST].map((model) => ({ model })),
+    } } };
+    const original = structuredClone(cfg);
+    const calls = [];
+    const notes = [];
+    const result = await spawnWithTimeoutRetry(async (opts) => {
+      const { model } = opts.cfg.levels.L2;
+      calls.push(model);
+      return { status: 'timeout', provider: 'anthropic', model: alias ? `alias-${model}` : model };
+    }, { cfg, level: 'L2', role: 'reviewer' }, async (row) => void notes.push(row));
+    assert.deepEqual(calls, [PRIMARY, FAST]);
+    assert.equal(result.attempts, 2);
+    assert.equal(result.res.status, 'timeout');
+    assert.deepEqual(notes.map((row) => [row.model, row.attempt, row.retried]), [
+      [alias ? `alias-${PRIMARY}` : PRIMARY, 1, false],
+      [alias ? `alias-${FAST}` : FAST, 2, false],
+    ]);
+    assert.deepEqual(cfg, original, 'recovery never changes the project config');
+  }
+});
+
+test('default models at other levels cannot recover an unidentified or aliased reviewer', () => {
+  const cfg = { provider: 'anthropic', levels: {
+    L0: { model: 'claude-haiku-4-5-20251001' }, L1: { model: FAST },
+    L2: { model: PRIMARY }, L3: { model: SLOW },
+  } };
+  for (const model of [PRIMARY, 'fake-model', undefined]) {
+    assert.equal(timeoutFallbackFor(cfg, 'L2', { provider: 'anthropic', model }, {
+      rows: [], ticketId: 'no-configured-alternative', role: 'reviewer',
+    }), null);
+  }
+});
