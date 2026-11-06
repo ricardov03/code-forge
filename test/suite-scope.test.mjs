@@ -104,6 +104,18 @@ test('suite file arguments select only those tests with both leak steps; no file
   }
 });
 
+test('suite directory arguments survive preload cwd changes and deduplicate an explicitly named test', async t => {
+  const f = await fixture(t);
+  writeFile(f.repo, 'test/helpers/isolate.mjs', "import { fileURLToPath } from 'node:url'; process.chdir(fileURLToPath(new URL('.', import.meta.url)));\n");
+  writeFile(f.repo, 'test/selected scope/a.test.mjs', "import { test } from 'node:test'; test('selected a', () => {});\n");
+  writeFile(f.repo, 'test/selected scope/nested/b.test.mjs', "import { test } from 'node:test'; test('selected b', () => {});\n");
+  const selected = f.suite(['--test-concurrency', '1', 'test/selected scope/a.test.mjs', 'test/selected scope/']);
+  assert.equal(selected.status, 0, selected.stdout + selected.stderr);
+  assert.deepEqual(counts(selected.stdout), [1, 2, 1], 'snapshot, exactly two unique tests including the nested file, final');
+  assert.doesNotMatch(selected.stdout, /unrelated test|changed test|dependent test|paired a/);
+  assert.deepEqual(f.calls(), [{ mode: 'snapshot', guard: 'snapshot' }, { mode: 'final', guard: 'snapshot' }]);
+});
+
 test('suite rejects traversal and outside paths before any leak or test step', async t => {
   const f = await fixture(t);
   symlinkSync(path.dirname(f.repo), path.join(f.repo, 'escape'));

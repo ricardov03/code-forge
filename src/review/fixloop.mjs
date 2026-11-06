@@ -90,8 +90,8 @@ import { exec } from '../util/exec.mjs';
 import { verifyRow } from '../state/signer.mjs';
 import { decisionProblem, grantCoverProblem } from './gate-check.mjs';
 import { contentHash, gitChildEnv } from '../worker/ticket.mjs';
-import { parseDiff } from './context.mjs';
-import { assemblePacket, assertPacketPath, budgetFor, diffOnlyTokens, readFileDiff } from './packet.mjs';
+import { currentDiffLines, packExtraDiffs, parseDiff } from './context.mjs';
+import { assemblePacket, assertPacketPath, budgetFor, crossFileEvidence, diffOnlyTokens, estimateTokens, readFileDiff } from './packet.mjs';
 import { movedText, movesFor, peerDiffReader } from './moved.mjs';
 import { pairedContext } from './engine.mjs';
 import { isMarkdownFile, packSections, sectionFindings, sectionGroups, sectionOf } from './sections.mjs';
@@ -394,14 +394,23 @@ export function recheckTokens(diff, open, moved = '') {
 /**
  * The recheck packet: the `recheck` lens on the fix hunks (hunk form, never the whole file), then
  * the open findings by id. Over budget ⇒ `minimal` (see the module doc).
- * @param {{diff: import('./packet.mjs').FileDiff, open: Finding[], cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', rulesDigest?: string, factsExcerpt?: string, moved?: string, paired?: string}} opts -
+ * @param {{diff: import('./packet.mjs').FileDiff, open: Finding[], cfg?: Record<string, any>, contextMode?: 'auto' | 'recheck', rulesDigest?: string, factsExcerpt?: string, moved?: string, paired?: string, extra?: Awaited<ReturnType<typeof crossFileEvidence>>}} opts -
  *   `moved`: the file's `## moved code` section (B56), '' for none.
  */
-export function buildRecheckPacket({ diff, open, cfg, contextMode = 'recheck', rulesDigest, factsExcerpt, moved = '', paired = '' }) {
+export function buildRecheckPacket({ diff, open, cfg, contextMode = 'recheck', rulesDigest, factsExcerpt, moved = '', paired = '', extra }) {
   const packet = assemblePacket({ diff, lens: 'recheck', cfg, contextMode, rulesDigest, factsExcerpt, moved, paired });
   if (packet.status !== 'ok') return packet;
-  const text = `${packet.text}${openFindingsText(open)}`;
-  return { ...packet, text, tokensIn: packet.tokensIn + Math.ceil(Buffer.byteLength(text.slice(packet.text.length)) / 4) };
+  const baseline = `${packet.text}${openFindingsText(open)}`;
+  if (!extra || (extra.files.length === 0 && extra.omitted === 0)) {
+    return { ...packet, text: baseline, tokensIn: packet.tokensIn + Math.ceil(Buffer.byteLength(baseline.slice(packet.text.length)) / 4) };
+  }
+  // Optional evidence never pushes a recheck over its existing packet budget.
+  const fits = estimateTokens(baseline + extra.text) <= packet.budget;
+  const cut = `## cross-file evidence\n(${extra.omitted + extra.files.length} other files omitted: packet budget)\n`;
+  const addition = fits ? extra.text : estimateTokens(baseline + cut) <= packet.budget ? cut : '';
+  const text = `${packet.text}${addition}${openFindingsText(open)}`;
+  return { ...packet, text, tokensIn: estimateTokens(text), extraEvidenceText: addition, extra_files: fits ? extra.files : [],
+    extra_files_omitted: extra.omitted + (fits ? 0 : extra.files.length), extra_files_trimmed: fits ? extra.trimmed : [] };
 }
 
 /**
@@ -420,7 +429,8 @@ const peerReaders = new WeakMap();
  */
 function recheckPeerDiffs(deps, base, rel) {
   if (deps.peerDiffs) return deps.peerDiffs;
-  const key = JSON.stringify([deps.repoRoot, base, rel, deps.peers ?? null]);
+  const peers = deps.peers ?? deps.changedFiles;
+  const key = JSON.stringify([deps.repoRoot, base, rel, peers ?? null]);
   let readers = peerReaders.get(deps);
   if (!readers) {
     readers = new Map();
@@ -428,7 +438,7 @@ function recheckPeerDiffs(deps, base, rel) {
   }
   const known = readers.get(key);
   if (known) return known;
-  const reader = peerDiffReader({ repoRoot: deps.repoRoot, base, file: rel, peers: deps.peers });
+  const reader = peerDiffReader({ repoRoot: deps.repoRoot, base, file: rel, peers });
   readers.set(key, reader);
   return reader;
 }
@@ -703,6 +713,12 @@ export async function runRound(state, deps, opts = {}) {
   let tokensOut = null;
   /** @type {{context_mode: string, context_lines: number} | null} */
   let packetInfo = null;
+  /** @type {Set<string>} */
+  const extraFiles = new Set();
+  /** @type {Set<string>} */
+  const extraTrimmed = new Set();
+  let extraOmitted = 0;
+  let hasExtra = false;
 
   if (kind === 'full') {
     const result = await deps.review();
@@ -719,12 +735,19 @@ export async function runRound(state, deps, opts = {}) {
       s.scope === 'file'
         ? await readFileDiff({ repoRoot: deps.repoRoot, file: current.rel, base: deps.base ?? null })
         : await fixHunkDiff({ file: current.rel, previous: state.reviewed_content ?? '', current: current.content, workDir: deps.workDir });
-    if (kind === 'recheck' && (current.content === state.reviewed_content || diff.hunks.length === 0)) {
+    let extra = packExtraDiffs([], 0);
+    try {
+      if (typeof deps.base === 'string') extra = await crossFileEvidence({ repoRoot: deps.repoRoot, file: current.rel,
+        peerDiffs: recheckPeerDiffs(deps, deps.base, current.rel), content: current.content, findings: state.open, cfg: deps.cfg });
+    } catch {
+      // Optional evidence shares the moved-code reader and its fail-soft contract.
+    }
+    if (kind === 'recheck' && (current.content === state.reviewed_content || diff.hunks.length === 0) && extra.files.length === 0) {
       state.next = { action: 'fix', level: state.level, trigger: null, reason: 'no-fix-hunks' };
       state.pending_kind = null;
       return state;
     }
-    if (diff.hunks.length > 0) {
+    if (diff.hunks.length > 0 || extra.files.length > 0) {
       /** @type {Finding[]} */
       const pending = [];
       for (const finding of state.open) {
@@ -737,7 +760,7 @@ export async function runRound(state, deps, opts = {}) {
         const contextMode = s.scope === 'file' ? 'auto' : 'recheck';
         const moves = await recheckMoves(deps, current.rel, s.scope === 'file' ? diff : null);
         const paired = pairedContext({ ...deps, file: current.rel });
-        const whole = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved: movedText(moves, diff.content, null), paired });
+        const whole = buildRecheckPacket({ diff, open: pending, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved: movedText(moves, diff.content, null), paired, extra });
         /** @type {Array<{index: number | null, heading: string | null, diff: import('./packet.mjs').FileDiff, open: Finding[], keys: number[] | null}>} */
         let parts = [{ index: null, heading: null, diff, open: pending, keys: null }];
         if (whole.status !== 'ok') {
@@ -758,7 +781,7 @@ export async function runRound(state, deps, opts = {}) {
             continue;
           }
           const moved = movedText(moves, diff.content, part.keys);
-          const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved, paired });
+          const packet = buildRecheckPacket({ diff: part.diff, open: part.open, cfg: deps.cfg, contextMode, rulesDigest: deps.rulesDigest, factsExcerpt: deps.factsExcerpt, moved, paired, extra });
           // a packet that fails to build stops with ITS status (and size, when it has one)
           if (packet.status !== 'ok') return stopBeforeRound(state, deps, kind, current.rel, current.hash, { ...packet, section: part.heading });
           const size = recheckTokens(part.diff, part.open, moved);
@@ -769,13 +792,19 @@ export async function runRound(state, deps, opts = {}) {
         const resolved = new Set();
         /** @type {Set<Finding>} */
         const stale = new Set();
-        const currentText = normaliseWhitespace(current.content);
         /** @type {Finding[]} */
         const inside = [];
         /** @type {Finding[]} */
         const blocking = [];
         for (const [i, part] of parts.entries()) {
           const packet = /** @type {any} */ (built[i]);
+          const currentText = normaliseWhitespace(`${current.content}\n${currentDiffLines(packet.extraEvidenceText ?? '')}`);
+          if (packet.extra_files) {
+            hasExtra = true;
+            for (const file of packet.extra_files) extraFiles.add(file);
+            for (const file of packet.extra_files_trimmed) extraTrimmed.add(file);
+            extraOmitted = Math.max(extraOmitted, packet.extra_files_omitted);
+          }
           packetInfo = mergePacketInfo(packetInfo, packet);
           const session = await recheckSession(packet, deps, part.open);
           tokensIn = sum(tokensIn, session.tokens_in);
@@ -858,6 +887,7 @@ export async function runRound(state, deps, opts = {}) {
     tokens_in: tokensIn,
     tokens_out: tokensOut,
     ...(packetInfo ? { context_mode: packetInfo.context_mode } : {}),
+    ...(hasExtra ? { extra_files: [...extraFiles], extra_files_omitted: extraOmitted, extra_files_trimmed: [...extraTrimmed] } : {}),
     ...(repeated.size > 0 ? { repeated: [...repeated] } : {}),
   };
 
