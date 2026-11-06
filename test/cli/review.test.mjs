@@ -353,9 +353,17 @@ describe('code-forge review (B22)', () => {
         if (stops > 1) return real();
         // hold the first `block stop` open, deliver the signal meanwhile, then report the step the
         // way `exec` reports a child the forwarded signal killed
-        const signalled = once(process, signal);
-        process.kill(process.pid, signal);
-        await signalled;
+        // A signal listener alone does not keep Node's event loop alive. Hold it open until
+        // delivery; the timer is only a hang guard, never a scheduling assertion.
+        const abort = new AbortController();
+        const keepAlive = setTimeout(() => abort.abort(), WAIT_CAP_MS);
+        try {
+          const signalled = once(process, signal, { signal: abort.signal });
+          process.kill(process.pid, signal);
+          await signalled;
+        } finally {
+          clearTimeout(keepAlive);
+        }
         return { result: 'failed', code: null, signal, stdout: '', stderr: '', timedOut: false };
       });
       assert.equal(res.code, 0, res.stderr);
