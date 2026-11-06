@@ -6,6 +6,14 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- The Go engine records each hand-over to Node in `~/.code-forge/native/handovers.jsonl`: the command, the known subcommand and a reason code. Unknown words are stored as `unknown`, never as typed. Set `CODE_FORGE_HANDOVER_LOG=0` to turn it off (B282)
+
+### Fixed
+
+- `npm run bench:block` counts every command it starts, so the process count no longer drops below the number of runs when fast Go commands end between two samples. This made CI fail on Linux (B297)
+
 ## [0.19.1] — 2026-11-05
 
 ### Fixed
