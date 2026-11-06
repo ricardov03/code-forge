@@ -5,9 +5,8 @@ import { mkdir, mkdtemp, readFile, realpath, rm, symlink, writeFile } from 'node
 import os from 'node:os';
 import path from 'node:path';
 import { after, before, test } from 'node:test';
-import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
-import { runParity } from '../helpers/parity.mjs';
+import { isolatedEnv, runParity } from '../helpers/parity.mjs';
 import { verifyRow } from '../../src/state/signer.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -16,12 +15,6 @@ const BINARY = path.join(scratch, 'pkg/native/bin', `${process.platform}-${proce
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
 const ARGS = ['gates', 'run', '--run', 'fixture', '--block', 'B1'];
 const NO_NODE = '/nonexistent';
-// Fixture children must not inherit the enclosing gate's run or ownership.
-function isolatedEnv(env) {
-  const clean = { ...env };
-  for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete clean[key];
-  return clean;
-}
 after(() => rm(scratch, { recursive: true, force: true }));
 before(async () => {
   await mkdir(path.dirname(BINARY), { recursive: true });
@@ -29,13 +22,13 @@ before(async () => {
   await symlink(CLI, path.join(scratch, 'pkg/bin/code-forge.mjs'));
   const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
   const build = spawnSync('go', ['build', '-ldflags', `-X main.version=0.19.0 -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') },
+    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: isolatedEnv({ ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') }),
   });
   assert.equal(build.status, 0, build.stderr);
 });
 const command = (script, ...args) => [process.execPath, '-e', script, ...args];
 function git(f, args) {
-  const r = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8' });
+  const r = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8', env: isolatedEnv() });
   assert.equal(r.status, 0, r.stderr); return r.stdout.trim();
 }
 async function fixture(gates = {}, block = {}) {
@@ -124,14 +117,22 @@ test('B289 gates run: native custom, repeats, light and flaky cases match Node i
   assert.equal(realRecovery.code, 0, 'real failing Node test recovers with serial file rerun and preserved reporter operands');
   assert.deepEqual(JSON.parse(realRecovery.stdout).flaky, ['sample.test.mjs']);
   for (const script of ['console.log("FAIL sample.test.mjs");process.exit(2)', 'console.log("not ok 1 - unknown case");process.exit(2)']) await parity(await fixture({ rerun_failed: 1, test: command(script, '{test_files}') }));
-  const timed = await fixture({ custom: [{ name: 'slow', argv: command('setTimeout(()=>{},30000)') }] });
-  await parity(timed, [...ARGS, '--timeout-ms', '100']);
+  // Every enabled gate waits for cancellation: none must finish successfully
+  // inside the 100 ms timeout just because the machine happens to be idle.
+  const hanging = command('setInterval(()=>{},1000)');
+  const timed = await fixture({ test: hanging, custom: [{ name: 'slow', argv: hanging }] });
+  await parity(timed, [...ARGS, '--timeout-ms', '100'], false, {
+    checkProcess(engine, result) {
+      assert.equal(result.code, 1, `${engine}: timed gates fail`);
+      assert.deepEqual(JSON.parse(String(result.stdout)).results.filter((r) => !r.skipped).map((r) => [r.gate, r.reason, r.timed_out]),
+        [['test', 'timeout', true], ['slow', 'timeout', true]], `${engine}: exactly two enabled gates time out`);
+    },
+  });
 
   const concurrent = await fixture({ custom: [{ name: 'extra', argv: command('') }] });
   const writer = spawn(BINARY, ['internal', 'state-golden', '--home', concurrent.home, '--run', 'fixture', '--op', 'lock'], { env: isolatedEnv({ ...process.env, HOME: concurrent.home }), stdio: ['pipe', 'pipe', 'pipe'] });
   await once(writer.stdout, 'data');
   const running = launch(concurrent);
-  await delay(100);
   const file = path.join(concurrent.home, '.code-forge/runs/fixture.json');
   const record = JSON.parse(await readFile(file, 'utf8')); record.proof_lock = { block: 'writer' };
   await writeFile(file, JSON.stringify(record));
@@ -140,7 +141,7 @@ test('B289 gates run: native custom, repeats, light and flaky cases match Node i
   assert.equal(busy.code, 1); assert.equal(busy.stdout, '{"result":"proof.busy","holder":"writer"}\n');
   assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), record);
 
-  const cancelled = await fixture({ custom: [{ name: 'slow', argv: command('require("node:fs").writeFileSync("ready","1");setTimeout(()=>{},30000)') }] });
+  const cancelled = await fixture({ custom: [{ name: 'slow', argv: command('require("node:fs").writeFileSync("ready","1");setInterval(()=>{},1000)') }] });
   const nodeScript = `import {existsSync} from 'node:fs';import {runGatesVerb} from ${JSON.stringify(new URL('../../src/cli/gates.mjs', import.meta.url).href)};const c=new AbortController();const t=setInterval(()=>{if(existsSync('ready')){clearInterval(t);c.abort()}},5);try{process.exitCode=await runGatesVerb(process.argv.slice(1),{signal:c.signal})}finally{clearInterval(t)}`;
   const goScript = `import {spawn} from 'node:child_process';import {existsSync} from 'node:fs';const p=spawn(${JSON.stringify(BINARY)},process.argv.slice(1),{stdio:'inherit'});const t=setInterval(()=>{if(existsSync('ready')){clearInterval(t);p.kill('SIGTERM')}},5);p.on('close',code=>{clearInterval(t);process.exitCode=code})`;
   const reference = await launch(cancelled, ARGS.slice(1), {}, process.execPath, ['--input-type=module', '-e', nodeScript]).ended;

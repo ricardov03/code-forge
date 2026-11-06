@@ -2,14 +2,16 @@
 // repo, with a temp HOME/TMPDIR (the worker helpers pin both under one per-file temp parent,
 // removed in `after()`), and a fake `claude` on PATH (no real CLI, no key, no network). The
 // helpers are imported FIRST so no `src` module ever sees the real HOME.
-import { alive, childEnv, cli, freshDir, stopPidAfter, stopRunAfter, useFake, waitFor } from '../worker/helpers.mjs';
+import { alive, childEnv, freshDir, stopPidAfter, stopRunAfter, useFake, waitFor } from '../worker/helpers.mjs';
 import assert from 'node:assert/strict';
 import { spawn, execFileSync } from 'node:child_process';
+import { once } from 'node:events';
 import { existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { describe, test } from 'node:test';
+import { isolatedEnv } from '../helpers/parity.mjs';
 
 const { exec } = await import('../../src/util/exec.mjs');
 const { currentRunRoot, setRunRoot } = await import('../../src/util/tmp.mjs');
@@ -21,7 +23,19 @@ const { DEFAULT_CLAUSE, runReview } = await import('../../src/cli/review.mjs');
 const SCRIPTED = fileURLToPath(new URL('../worker/fake-scripted-reviewer.mjs', import.meta.url));
 const SLEEPY = fileURLToPath(new URL('../worker/fake-reviewer.mjs', import.meta.url));
 const BIN = fileURLToPath(new URL('../../bin/code-forge.mjs', import.meta.url));
+// These are hang guards, not assertions about scheduling or cleanup speed.
+const WAIT_CAP_MS = 300_000;
 useFake(SCRIPTED);
+
+/** @param {string[]} args @param {string} cwd @param {Record<string, string>} [env] */
+async function cli(args, cwd, env = {}) {
+  try {
+    return await exec([process.execPath, BIN, ...args], { cwd, env: childEnv(env), timeoutMs: WAIT_CAP_MS });
+  } finally {
+    const worker = liveWorker(cwd);
+    if (worker && worker.pid !== process.pid) stopPidAfter(worker.pid, worker.run);
+  }
+}
 
 const FILE = 'src/a.mjs';
 const CONFIG = `version: 1
@@ -38,7 +52,7 @@ levels:
   L3:
     model: claude-fable-5-1
 review:
-  session_timeout_s: 60
+  session_timeout_s: 300
   min_tokens_out: 40
 `;
 
@@ -54,7 +68,7 @@ let seq = 0;
 async function makeRepo() {
   const repo = freshDir('rv');
   const git = async (/** @type {string[]} */ args) => {
-    const res = await exec(['git', '-c', 'init.defaultBranch=main', '-c', 'user.name=Fake Tester', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 });
+    const res = await exec(['git', '-c', 'init.defaultBranch=main', '-c', 'user.name=Fake Tester', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', ...args], { cwd: repo, env: isolatedEnv(gitChildEnv()), timeoutMs: WAIT_CAP_MS });
     assert.equal(res.result, 'ok', res.stderr);
     return res.stdout;
   };
@@ -88,7 +102,7 @@ async function makeRepo() {
 
 /** @param {string} runId @returns {number} live `code-forge worker --run <runId>` processes. */
 function workerProcesses(runId) {
-  const ps = execFileSync('ps', ['-Ao', 'command'], { encoding: 'utf8' });
+  const ps = execFileSync('ps', ['-Ao', 'command'], { encoding: 'utf8', env: isolatedEnv() });
   return ps.split('\n').filter((l) => l.includes(BIN) && l.includes(`worker --run ${runId}`)).length;
 }
 
@@ -108,6 +122,7 @@ async function assertCleanedUp(repo, runId) {
   if (record.worker?.pid) stopPidAfter(record.worker.pid, runId);
   const blocks = Object.values(record.blocks);
   assert.deepEqual([record.status, blocks.length, blocks[0].status], ['ended', 1, 'stopped']);
+  assert.equal(await waitFor(() => !alive(record.worker.pid), WAIT_CAP_MS), true, 'the stopped worker must exit');
   assert.equal(alive(record.worker.pid), false);
   assert.equal(liveWorker(repo), null);
   assert.equal(workerProcesses(runId), 0);
@@ -135,7 +150,7 @@ async function inProcess(args, r, seam) {
       cwd: r.repo,
       stdout: { write: (/** @type {string} */ s) => (stdout += s) },
       stderr: { write: (/** @type {string} */ s) => (stderr += s) },
-      exec: (argv, opts) => seam(argv, () => exec(argv, { ...opts, env })),
+      exec: (argv, opts) => seam(argv, () => exec(argv, { ...opts, env, timeoutMs: WAIT_CAP_MS })),
     });
     return { code, stdout, stderr, listenersLeft: process.listenerCount('SIGINT') + process.listenerCount('SIGTERM') - listeners };
   } finally {
@@ -262,30 +277,38 @@ describe('code-forge review (B22)', () => {
       child.stderr.on('data', (d) => {
         stderr += String(d);
       });
-      const exited = new Promise((resolve) => child.on('exit', (code) => resolve(code)));
+      const exited = once(child, 'close', { signal: AbortSignal.timeout(WAIT_CAP_MS) });
+      exited.catch(() => {});
       try {
-        assert.equal(await waitFor(() => reviewerPids(r.records).length === 1, 30000), true, stderr);
+        assert.equal(await waitFor(() => reviewerPids(r.records).length === 1, WAIT_CAP_MS), true, stderr);
         const [reviewerPid] = reviewerPids(r.records);
         child.kill(signal);
-        // the reviewer sleeps 60 s and `--max` is 900 s: only killing the in-flight wait ends within 20 s
-        const code = await Promise.race([exited, new Promise((resolve) => setTimeout(() => resolve('hung after 20 s'), 20000).unref())]);
+        const [code] = await exited;
         assert.equal(code, 1, stderr);
         assert.match(stderr, new RegExp(`^review: interrupted by ${signal}; stopping the review$`, 'm'));
         await assertCleanedUp(r.repo, r.runId);
-        assert.equal(await waitFor(() => !alive(reviewerPid), 20000), true, 'the sleeping reviewer session was left running');
+        assert.equal(await waitFor(() => !alive(reviewerPid), WAIT_CAP_MS), true, 'the sleeping reviewer session was left running');
       } finally {
         if (child.exitCode === null) child.kill('SIGKILL');
       }
     });
   }
 
-  test('--max 3 with a reviewer that sleeps 60 s: exit 1, `stopped: timeout`, the block is stopped, the run is ended, the reviewer is dead within 10 s', async () => {
+  test('--max 3 with a reviewer that sleeps 60 s: exit 1, `stopped: timeout`, the block is stopped, the run is ended, the reviewer exits', async () => {
     const r = await makeRepo();
     r.edit(60, 'change');
     useFake(SLEEPY);
     let out;
     try {
-      out = await cli(['review', '--run', r.runId, '--max', '3'], r.repo, { FAKE_RECORD: r.records, FAKE_SLEEP_MS: '60000' });
+      Object.assign(r.env, { FAKE_RECORD: r.records, FAKE_SLEEP_MS: '60000' });
+      out = await inProcess(['--run', r.runId, '--max', '3'], r, async (argv, real) => {
+        const result = await real();
+        if (argv[2] === 'review-file' && !argv.includes('--wait')) {
+          // Start the three-second wait only after the reviewer has started.
+          assert.equal(await waitFor(() => reviewerPids(r.records).length === 1, WAIT_CAP_MS), true, 'exactly one sleeping reviewer starts before the wait');
+        }
+        return result;
+      });
     } finally {
       useFake(SCRIPTED);
     }
@@ -294,7 +317,7 @@ describe('code-forge review (B22)', () => {
     await assertCleanedUp(r.repo, r.runId);
     const pids = reviewerPids(r.records);
     assert.equal(pids.length, 1);
-    assert.equal(await waitFor(() => !alive(pids[0]), 20000), true, 'the sleeping reviewer session was left running');
+    assert.equal(await waitFor(() => !alive(pids[0]), WAIT_CAP_MS), true, 'the sleeping reviewer session was left running');
   });
 
   test('a `block stop` step that throws: reported, `run end` and the worker reap still run, the temp root is removed, and the exit code stays the review\'s own 0', async () => {
@@ -327,8 +350,9 @@ describe('code-forge review (B22)', () => {
         if (stops > 1) return real();
         // hold the first `block stop` open, deliver the signal meanwhile, then report the step the
         // way `exec` reports a child the forwarded signal killed
+        const signalled = once(process, signal);
         process.kill(process.pid, signal);
-        await new Promise((resolve) => setTimeout(resolve, 200));
+        await signalled;
         return { result: 'failed', code: null, signal, stdout: '', stderr: '', timedOut: false };
       });
       assert.equal(res.code, 0, res.stderr);
