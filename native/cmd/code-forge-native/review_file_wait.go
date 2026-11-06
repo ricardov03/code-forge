@@ -84,6 +84,12 @@ func reviewWaitHandover(args []string, reason handoverReason) int {
 }
 
 func runReviewFileWait(args []string) int {
+	return runReviewFileWaitWith(args, reviewWaitLive, reviewWaitSleep)
+}
+
+// Keep polling and sleeping injectable so tests can verify the down-poll count
+// and requested delays independently of process startup and scheduler load.
+func runReviewFileWaitWith(args []string, poll func(context.Context, string, time.Time) (bool, bool), sleep func(context.Context, time.Duration) bool) int {
 	for _, arg := range args {
 		if arg == "--wait-block" || strings.HasPrefix(arg, "--wait-block=") {
 			return runReviewWaitBlock(args)
@@ -165,7 +171,7 @@ func runReviewFileWait(args []string) int {
 			}
 			return reviewWaitSay(out)
 		}
-		live, matched := reviewWaitLive(ctx, root, deadline)
+		live, matched := poll(ctx, root, deadline)
 		if ctx.Err() != nil {
 			return int(interrupted.Load())
 		}
@@ -195,13 +201,20 @@ func runReviewFileWait(args []string) int {
 		if down == 0 && time.Until(deadline) < pause {
 			pause = maxDuration(0, time.Until(deadline))
 		}
-		timer := time.NewTimer(pause)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
+		if !sleep(ctx, pause) {
 			return int(interrupted.Load())
-		case <-timer.C:
 		}
+	}
+}
+
+func reviewWaitSleep(ctx context.Context, pause time.Duration) bool {
+	timer := time.NewTimer(pause)
+	select {
+	case <-ctx.Done():
+		timer.Stop()
+		return false
+	case <-timer.C:
+		return true
 	}
 }
 
