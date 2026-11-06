@@ -21,6 +21,7 @@
  */
 
 import { resolveLevel } from '../config/known-ids.mjs';
+import { closedBookRefused, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { modelStats, pickReviewer } from './model-stats.mjs';
 
 export { modelStats, pickReviewer } from './model-stats.mjs';
@@ -283,4 +284,76 @@ function providerOf(cfg, rule) {
   const provider = ruleProvider(cfg, rule);
   if (provider === undefined) throw new RouteError();
   return provider;
+}
+
+/**
+ * A stalled session may borrow one other model explicitly configured for its review role.
+ * Project ledger attempts/results can confirm a model named elsewhere in the config has run
+ * in this role, but never introduce an unconfigured provider/model. Use the same measured
+ * speed/availability/accuracy policy as normal routing, excluding the stalled model entirely.
+ * The recovery entry has no ladder: it is one attempt, never another chain of retries.
+ * @param {Record<string, any>} cfg @param {string} level
+ * @param {{model: string, provider: string}} from
+ * @param {{rows: Array<Record<string, any>>, ticketId: string, role: string}} performance
+ * @returns {{cfg: Record<string, any>, model: string, provider: string, reason: string} | null}
+ */
+export function timeoutFallbackFor(cfg, level, from, { rows, ticketId, role }) {
+  /** @type {Array<Record<string, any>>} */
+  const entries = [];
+  /** @type {Array<Record<string, any>>} */
+  const configured = [];
+  /** @param {Record<string, any> | undefined} entry @param {string | undefined} provider
+   * @param {Array<Record<string, any>>} [target] */
+  const add = (entry, provider, target = entries) => {
+    if (!entry) return;
+    const ownProvider = entry.provider ?? provider;
+    target.push({ ...entry, provider: ownProvider }, ...(entry.fallback ?? []).map((fallback) => ({
+      ...fallback, provider: fallback.provider ?? ownProvider,
+    })));
+  };
+  const primary = cfg.levels?.[level];
+  // The current level is the failed session, not another configured candidate. In particular,
+  // older/custom spawners may omit its identity or report an alias in their timeout result.
+  for (const fallback of primary?.fallback ?? []) add(fallback, primary.provider ?? cfg.provider);
+  add(cfg.review?.second_levels?.[level], cfg.review?.second_provider ?? cfg.provider);
+  const rules = routeRules(cfg);
+  for (const rule of rules.filter((rule) => (rule.level ?? DEFAULT_ROUTE_LEVEL) === level)) {
+    const provider = providerOf(cfg, rule);
+    add(entryOf(rule), provider);
+    add(rule.second, cfg.review?.second_provider ?? cfg.provider);
+  }
+  // Defaults at other levels authorize a provider/model pair, but become candidates only
+  // after this project's ledger confirms the requested role. Explicit review alternatives
+  // above remain candidates even without history.
+  for (const entry of Object.values(cfg.levels ?? {})) add(entry, cfg.provider, configured);
+  for (const entry of Object.values(cfg.review?.second_levels ?? {})) {
+    add(entry, cfg.review?.second_provider ?? cfg.provider, configured);
+  }
+  for (const rule of rules) {
+    add(entryOf(rule), providerOf(cfg, rule), configured);
+    add(rule.second, cfg.review?.second_provider ?? cfg.provider, configured);
+  }
+  /** @param {Record<string, any>} session */
+  const confirm = (session) => {
+    if (session?.role !== role) return;
+    const entry = configured.find((entry) => entry.model === session.model && entry.provider === session.provider);
+    // Retain the current config's effort/settings, never the stale ledger's model entry.
+    if (entry) entries.push(entry);
+  };
+  for (const row of rows) {
+    if (row.event === 'session') confirm(row);
+    if (row.event === 'review.result' && Array.isArray(row.sessions)) {
+      for (const session of row.sessions) confirm(session);
+    }
+  }
+  const candidates = entries.filter((entry, i, all) => isText(entry.model) && isText(entry.provider)
+    && entry.model !== from.model && entry.model !== primary?.model
+    && !closedBookRefused(entry.provider, role, openBookCodexAllowed(cfg))
+    && all.findIndex((other) => other.model === entry.model && other.provider === entry.provider) === i);
+  if (candidates.length === 0) return null;
+  const choice = pickReviewer(candidates, modelStats(rows, cfg.review?.adaptive), { ...cfg.review?.adaptive, ticketId });
+  const { model, provider, effort } = choice.candidate;
+  return { cfg: { ...cfg, levels: { ...cfg.levels, [level]: {
+    model, provider, ...(effort !== undefined ? { effort } : {}), fallback: [],
+  } } }, model, provider, reason: choice.reason };
 }

@@ -152,6 +152,40 @@ export function immutableChanges(before, after) {
 }
 
 /**
+ * Recover a review-only reload while retaining the run's frozen settings. Other mutable
+ * changes still take the ordinary refusal path; this exception only updates review recovery.
+ * @param {Record<string, any>} before @param {Record<string, any>} after
+ * @param {string[]} frozen
+ * @returns {Record<string, any> | null}
+ */
+export function reviewOnlyReload(before, after, frozen) {
+  const next = structuredClone(before);
+  next.review = { ...next.review };
+  for (const key of ['second_levels', 'routes', 'session_timeout_s']) {
+    if (Object.hasOwn(after.review ?? {}, key)) next.review[key] = structuredClone(after.review[key]);
+    else delete next.review[key];
+  }
+  if (Object.keys(next.review).length === 0 && !Object.hasOwn(before, 'review')) delete next.review;
+  if (configHash(next) === configHash(before)) return null;
+  const retained = structuredClone(after);
+  for (const key of frozen) {
+    const parts = key.split('.');
+    const leaf = parts.pop();
+    let target = retained;
+    for (const part of parts) target = target[part] ??= {};
+    const value = valueAt(before, key);
+    if (value === undefined) delete target[leaf];
+    else target[leaf] = structuredClone(value);
+  }
+  // Removing a newly added frozen leaf must not leave an empty parent as a spurious change.
+  const changes = changedKeyPaths(next, retained).filter((key) => {
+    const value = valueAt(retained, key);
+    return !(valueAt(next, key) === undefined && isMapping(value) && Object.keys(value).length === 0);
+  });
+  return changes.length === 0 ? next : null;
+}
+
+/**
  * The `config` block for a new run record.
  * @param {Record<string, any>} cfg
  */

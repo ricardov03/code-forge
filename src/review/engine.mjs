@@ -78,7 +78,7 @@ import { isMarkdownFile, packSections, sectionFindings, sectionGroups } from './
 import { FINDING_SCHEMA, minTokensOut, validateReview } from './validate-review.mjs';
 import { spawnWithBrokenFallback, spawnWithTimeoutRetry } from './session-retry.mjs';
 import { afterSchemaMiss, logSecondLevelMiss, packetHash, truncateReviewFields } from './schema-fallback.mjs';
-import { ruleProvider } from './route.mjs';
+import { ruleProvider, timeoutFallbackFor } from './route.mjs';
 import { assertRowPath, readRegularFileNoFollow } from '../worker/ticket.mjs';
 
 /**
@@ -205,6 +205,9 @@ export function rulesRisk({ file, plusCount, minusCount = 0, cfg }) {
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow] - ledger rows
  *   (`review.plan`, `review.unavailable`, `review.schema_invalid`, `review.schema_fallback`); a
  *   failed write never fails the review (a failed `review.schema_fallback` write means no try).
+ * @property {() => Promise<Array<Record<string, any>>>} [readRows] - the run's project ledger,
+ *   supplied by the caller; the reviewed tree does not determine the project identity.
+ *   Missing or unreadable rows keep timeout recovery in configured order.
  * @property {(opts: {repoRoot: string, file: string}) => Promise<string>} [deletionNote] - B74: the
  *   deletion note reader (default `deletionNote`, `deletion.mjs`); a throw gives `references not checked`.
  * @property {import('./schema-fallback.mjs').SchemaHistory} [schemaHistory] - B55: the packet's
@@ -500,9 +503,49 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
     && cfg.levels?.[spec.level]?.fallback?.length > 0;
   /** @type {{level: string, provider: string, model: string} | null} the second level once its try started */
   let tried = null;
+  const timeouts = new Map();
   /** @param {Record<string, any> | null} missed @param {'schema' | 'timeout'} trigger */
-  const tryNext = (missed, trigger) =>
-    afterSchemaMiss({
+  const tryNext = async (missed, trigger) => {
+    if (trigger === 'timeout' && schemaFallback && !spec.cfg && !cfg.review?.second_levels?.[spec.level] && write) {
+      const resolved = resolveLevel(cfg, spec.level);
+      const from = { provider: missed?.provider ?? resolved.provider, model: missed?.model ?? resolved.model };
+      const identity = `${from.provider}\0${from.model}`;
+      const count = (timeouts.get(identity) ?? 0) + 1;
+      timeouts.set(identity, count);
+      if (count < 2 || tried) return null;
+      /** @type {Array<Record<string, any>>} */
+      let rows = [];
+      let routingError = null;
+      try {
+        if (deps.schemaHistory && (await deps.schemaHistory(hash, session)).fellBack) return null;
+        rows = await deps.readRows?.() ?? [];
+      } catch {
+        // Read failures must not strand this ticket. The local count still proves two
+        // timeouts; record the degraded choice before trying one configured alternative.
+        routingError = 'ledger-read-failed';
+      }
+      const fallback = timeoutFallbackFor(cfg, spec.level, from, { rows, ticketId: hash, role: spec.role });
+      try {
+        if (!fallback) return null;
+        await write({ event: 'review.schema_fallback', ...session, packet_hash: hash,
+          from_provider: from.provider, from_model: from.model, to: 'review.timeout_fallback',
+          to_provider: fallback.provider, to_model: fallback.model, attempts: count,
+          trigger: 'timeout', reason: 'repeated-timeout', routing_reason: fallback.reason,
+          ...(routingError ? { routing_error: routingError } : {}) });
+      } catch {
+        return null; // never run a recovery that could not be recorded
+      }
+      const to = { level: 'review.timeout_fallback', provider: fallback.provider, model: fallback.model };
+      tried = to;
+      let recovered = null;
+      try {
+        recovered = truncateReviewFields(await deps.spawn({ level: spec.level, role: spec.role,
+          promptPath, schema: FINDING_SCHEMA, cfg: fallback.cfg,
+          rowExtra: { lens: spec.lens, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn } }));
+      } catch { /* a failed recovery remains unavailable */ }
+      return { res: recovered, attempts: 1, to };
+    }
+    return afterSchemaMiss({
       res: missed,
       session,
       packetText: text,
@@ -517,6 +560,7 @@ async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallb
       },
       trigger,
     });
+  };
   /**
    * @param {Record<string, any> | undefined} sessionCfg @param {number} done - attempts before this call.
    * @param {boolean} [secondLevel] - B91: the second-level try (its timeouts never count, never try again).
