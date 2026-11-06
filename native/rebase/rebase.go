@@ -158,6 +158,15 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 					if originFiles[id] == nil {
 						originFiles[id] = map[string]bool{}
 						for origin := range commits {
+							parents, err := git(tree, "show", "-s", "--format=%P", origin, "--")
+							if err != nil {
+								return nil, err
+							}
+							// Sync merges expose main's files against other parents;
+							// only non-merge commits define the block's file set.
+							if len(strings.Fields(parents)) > 1 {
+								continue
+							}
 							changed, err := changedFiles(origin)
 							if err != nil {
 								return nil, err
