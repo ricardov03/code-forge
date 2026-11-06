@@ -287,7 +287,10 @@ function providerOf(cfg, rule) {
 }
 
 /**
- * A stalled reviewer may borrow one other configured review model. Use the same measured
+ * A stalled session may borrow one other model configured for its review role. Other levels
+ * (especially the default L3 judge) do not configure reviewer candidates. Project ledger
+ * attempts/results can also establish that a model has run in this role; never guess a model
+ * or provider from built-in defaults. Use the same measured
  * speed/availability/accuracy policy as normal routing, excluding the stalled model entirely.
  * The recovery entry has no ladder: it is one attempt, never another chain of retries.
  * @param {Record<string, any>} cfg @param {string} level
@@ -296,17 +299,34 @@ function providerOf(cfg, rule) {
  * @returns {{cfg: Record<string, any>, model: string, provider: string, reason: string} | null}
  */
 export function timeoutFallbackFor(cfg, level, from, { rows, ticketId, role }) {
+  /** @type {Array<Record<string, any>>} */
   const entries = [];
-  for (const reviewer of ROUTE_LEVELS) {
-    if (!cfg.levels?.[reviewer]?.model) continue;
-    const resolved = resolveLevel(cfg, /** @type {any} */ (reviewer));
-    entries.push(resolved, ...resolved.fallback.map((entry) => ({ ...entry, provider: entry.provider ?? resolved.provider })));
-  }
-  for (const rule of routeRules(cfg)) {
+  /** @param {Record<string, any> | undefined} entry @param {string | undefined} provider */
+  const add = (entry, provider) => {
+    if (!entry) return;
+    const ownProvider = entry.provider ?? provider;
+    entries.push({ ...entry, provider: ownProvider }, ...(entry.fallback ?? []).map((fallback) => ({
+      ...fallback, provider: fallback.provider ?? ownProvider,
+    })));
+  };
+  const primary = cfg.levels?.[level];
+  // The current level is the failed session, not another configured candidate. In particular,
+  // older/custom spawners may omit its identity or report an alias in their timeout result.
+  for (const fallback of primary?.fallback ?? []) add(fallback, primary.provider ?? cfg.provider);
+  add(cfg.review?.second_levels?.[level], cfg.review?.second_provider ?? cfg.provider);
+  for (const rule of routeRules(cfg).filter((rule) => (rule.level ?? DEFAULT_ROUTE_LEVEL) === level)) {
     const provider = providerOf(cfg, rule);
-    entries.push({ ...entryOf(rule), provider }, ...(rule.fallback ?? []).map((entry) => ({ ...entry, provider: entry.provider ?? provider })));
+    add(entryOf(rule), provider);
+    add(rule.second, cfg.review?.second_provider ?? cfg.provider);
   }
-  const candidates = entries.filter((entry, i, all) => entry.model !== from.model
+  for (const row of rows) {
+    if (row.event === 'session' && row.role === role) entries.push(row);
+    if (row.event === 'review.result' && Array.isArray(row.sessions)) {
+      entries.push(...row.sessions.filter((session) => session?.role === role));
+    }
+  }
+  const candidates = entries.filter((entry, i, all) => isText(entry.model) && isText(entry.provider)
+    && entry.model !== from.model && entry.model !== primary?.model
     && !closedBookRefused(entry.provider, role, openBookCodexAllowed(cfg))
     && all.findIndex((other) => other.model === entry.model && other.provider === entry.provider) === i);
   if (candidates.length === 0) return null;

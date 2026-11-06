@@ -11,6 +11,7 @@ const { openBlock } = await import('../../src/state/block.mjs');
 const { loadKey, signRow, verifyRow } = await import('../../src/state/signer.mjs');
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
+const { timeoutFallbackFor } = await import('../../src/review/route.mjs');
 
 const FILE = 'src/small.mjs';
 const PRIMARY = 'claude-opus-5-5';
@@ -21,8 +22,8 @@ const FAST = 'claude-sonnet-5';
 for (const name of Object.keys(process.env)) if (name.startsWith('CODE_FORGE_')) delete process.env[name];
 
 /** @param {string} slug @param {boolean} alternatives @param {boolean} [fallbackTimeout]
- * @param {{worktree?: boolean, ledgerFailure?: 'history' | 'performance'}} [options] */
-async function review(slug, alternatives, fallbackTimeout = false, { worktree = false, ledgerFailure } = {}) {
+ * @param {{worktree?: boolean, ledgerFailure?: 'history' | 'performance', ledgerOnly?: boolean}} [options] */
+async function review(slug, alternatives, fallbackTimeout = false, { worktree = false, ledgerFailure, ledgerOnly = false } = {}) {
   const repo = await makeRepo();
   writeFile(repo, FILE, 'export const small = 1;\n');
   const runId = `r-${slug}`;
@@ -30,9 +31,12 @@ async function review(slug, alternatives, fallbackTimeout = false, { worktree = 
     provider: 'anthropic', ...(worktree ? {} : { project: { slug } }),
     levels: {
       L0: { model: PRIMARY }, L1: { model: PRIMARY }, L2: { model: PRIMARY },
-      L3: alternatives ? { model: SLOW, fallback: [{ model: FAST }] } : { model: PRIMARY },
+      L3: ledgerOnly ? { model: PRIMARY } : { model: SLOW, fallback: [{ model: FAST }] },
     },
-    review: { min_tokens_out: 40, adaptive: { explore: 0 } },
+    review: { min_tokens_out: 40, adaptive: { explore: 0 },
+      // These models are configured as reviewers even when this small file does not match.
+      ...(alternatives && !ledgerOnly ? { routes: [{ min_lines: 10000, model: SLOW, fallback: [{ model: FAST }] }] } : {}),
+    },
   };
   await startRun({ workspace: repo, project: slug, runId, config: cfg, writeRow: async () => {} });
   const tree = worktree ? path.join(repo, '.claude/worktrees/cf/B1') : null;
@@ -47,7 +51,7 @@ async function review(slug, alternatives, fallbackTimeout = false, { worktree = 
   const writeRow = (row) => appendRow(row, { slug });
   if (alternatives) {
     for (const [model, duration_ms] of [[SLOW, 100000], [FAST, 1000]]) {
-      for (let i = 0; i < 10; i++) await writeRow(signRow({ event: 'session', run: runId, role: 'reviewer', model, status: 'ok', duration_ms, ts: new Date().toISOString() }, key));
+      for (let i = 0; i < 10; i++) await writeRow(signRow({ event: 'session', run: runId, role: 'reviewer', provider: cfg.provider, model, status: 'ok', duration_ms, ts: new Date().toISOString() }, key));
       const block = `history-${model}`;
       await writeRow(signRow({ event: 'review.result', run: runId, block, file: FILE, ts: new Date().toISOString(),
         sessions: [{ role: 'reviewer', model, findings: [{ id: 'F1', severity: 'warning' }] }],
@@ -109,6 +113,16 @@ test('worktree reviews without project.slug use the run project ledger for measu
   assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
 });
 
+test('project ledger reviewer models can recover without an explicit reviewer route', async () => {
+  const { result, calls, rows, key } = await review('timeout-ledger-only', true, false, { ledgerOnly: true });
+  assert.deepEqual(calls, [PRIMARY, PRIMARY, FAST]);
+  assert.deepEqual([result.status, result.approved, result.sessions[0].attempts], ['reviewed', true, 3]);
+  const fallback = rows.filter((row) => row.event === 'review.schema_fallback' && row.trigger === 'timeout');
+  assert.equal(fallback.length, 1);
+  assert.deepEqual([fallback[0].to_model, fallback[0].routing_reason], [FAST, 'performance']);
+  assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
+});
+
 for (const ledgerFailure of /** @type {const} */ (['history', 'performance'])) {
   test(`a failed ${ledgerFailure} ledger read still recovers once in configured order and records why`, async () => {
     for (const fallbackTimeout of [false, true]) {
@@ -130,4 +144,22 @@ test('without another configured reviewer two timeouts remain unavailable with r
   assert.deepEqual(calls, [PRIMARY, PRIMARY], 'exactly two original-model attempts');
   assert.deepEqual([result.status, result.reason, result.approved, result.next.action], ['unavailable', 'timeout', false, 'retry']);
   assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0, 'no fallback row without another model');
+});
+
+test('judge levels, routes, second levels and ledger rows never configure reviewer fallback models', () => {
+  const cfg = {
+    provider: 'anthropic',
+    levels: { L2: { model: PRIMARY }, L3: { model: SLOW, fallback: [{ model: FAST }] } },
+    review: {
+      second_levels: { L3: { model: FAST } },
+      routes: [{ level: 'L3', min_lines: 0, model: SLOW, fallback: [{ model: FAST }], second: { model: FAST } }],
+    },
+  };
+  const rows = [
+    { event: 'session', role: 'judge', provider: 'anthropic', model: SLOW, status: 'ok' },
+    { event: 'review.result', sessions: [{ role: 'judge', provider: 'anthropic', model: FAST }] },
+  ];
+  assert.equal(timeoutFallbackFor(cfg, 'L2', { model: PRIMARY, provider: 'anthropic' }, {
+    rows, ticketId: 'role-boundary', role: 'reviewer',
+  }), null);
 });

@@ -124,9 +124,12 @@ test('a silent reviewer is killed at one second and the fallback answers immedia
 });
 
 test('ordinary timeouts skip the primary retry when a fallback is configured', async () => {
-  const { outcome, calls } = await review({ ladder: true, silence: 60, timeoutMs: 1000, mode: 'timeout' });
+  const { outcome, calls, rows } = await review({ ladder: true, silence: 60, timeoutMs: 1000, mode: 'timeout' });
   assert.deepEqual(calls, [PRIMARY, FALLBACK]);
   assert.deepEqual([outcome.status, outcome.approved, outcome.sessions[0].model], ['reviewed', true, FALLBACK]);
+  assert.equal(outcome.sessions[0].attempts, 2);
+  assert.deepEqual(rows.filter((row) => row.event === 'review.session_timeout')
+    .map((row) => [row.model, row.attempt, row.retried]), [[PRIMARY, 1, false]]);
   const alone = await review({ timeoutMs: 1000, mode: 'timeout' });
   assert.deepEqual(alone.calls, [PRIMARY, PRIMARY]);
   assert.deepEqual([alone.outcome.status, alone.outcome.reason], ['unavailable', 'timeout']);
