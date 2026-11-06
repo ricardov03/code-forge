@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.20.0] — 2026-11-06
+
 ### Added
 
 - The Go engine records each hand-over to Node in `~/.code-forge/native/handovers.jsonl`: the command, the known subcommand and a reason code. Unknown words are stored as `unknown`, never as typed. Set `CODE_FORGE_HANDOVER_LOG=0` to turn it off (B282)
