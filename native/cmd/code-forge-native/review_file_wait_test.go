@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"os"
 	"os/exec"
@@ -10,18 +11,52 @@ import (
 	"time"
 )
 
+type reviewWaitTrace struct {
+	Polls  int
+	Pauses []time.Duration
+}
+
 func TestReviewWaitProcess(t *testing.T) {
 	if os.Getenv("REVIEW_WAIT_TEST_CHILD") != "1" {
 		return
 	}
-	os.Exit(runReviewFileWait([]string{"--wait", "abcdef0123456789abcdef01", "--max=0ms"}))
+	trace := reviewWaitTrace{}
+	code := runReviewFileWaitWith([]string{"--wait", "abcdef0123456789abcdef01", "--max=0ms"},
+		func(ctx context.Context, root string, deadline time.Time) (bool, bool) {
+			trace.Polls++
+			return reviewWaitLive(ctx, root, deadline)
+		},
+		func(ctx context.Context, pause time.Duration) bool {
+			trace.Pauses = append(trace.Pauses, pause)
+			return ctx.Err() == nil
+		})
+	data, err := json.Marshal(trace)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(os.Getenv("REVIEW_WAIT_TEST_TRACE"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	os.Exit(code)
+}
+
+func reviewWaitTestEnv(home string) []string {
+	env := []string{}
+	for _, entry := range os.Environ() {
+		if !strings.HasPrefix(entry, "HOME=") && !strings.HasPrefix(entry, "CODE_FORGE_") && !strings.HasPrefix(entry, "REVIEW_WAIT_TEST_") {
+			env = append(env, entry)
+		}
+	}
+	return append(env, "HOME="+home)
 }
 
 func TestReviewWaitWorkerDownLogging(t *testing.T) {
 	for _, mode := range []string{"default", "0", "1", "unwritable"} {
 		t.Run(mode, func(t *testing.T) {
 			repo, home := t.TempDir(), t.TempDir()
-			if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+			git := exec.Command("git", "init", "-q", repo)
+			git.Env = reviewWaitTestEnv(home)
+			if out, err := git.CombinedOutput(); err != nil {
 				t.Fatalf("git init: %v: %s", err, out)
 			}
 			logs := filepath.Join(home, ".code-forge", "logs")
@@ -39,18 +74,13 @@ func TestReviewWaitWorkerDownLogging(t *testing.T) {
 			}
 			cmd := exec.Command(os.Args[0], "-test.run=^TestReviewWaitProcess$")
 			cmd.Dir = repo
-			for _, entry := range os.Environ() {
-				if !strings.HasPrefix(entry, "HOME=") && !strings.HasPrefix(entry, "CODE_FORGE_NO_ERROR_LOG=") && !strings.HasPrefix(entry, "CODE_FORGE_NODE=") {
-					cmd.Env = append(cmd.Env, entry)
-				}
-			}
-			cmd.Env = append(cmd.Env, "HOME="+home, "CODE_FORGE_NODE=/nonexistent-code-forge-node", "REVIEW_WAIT_TEST_CHILD=1")
+			traceFile := filepath.Join(t.TempDir(), "trace.json")
+			cmd.Env = append(reviewWaitTestEnv(home), "CODE_FORGE_NODE=/nonexistent-code-forge-node", "REVIEW_WAIT_TEST_CHILD=1", "REVIEW_WAIT_TEST_TRACE="+traceFile)
 			if mode == "0" || mode == "1" {
 				cmd.Env = append(cmd.Env, "CODE_FORGE_NO_ERROR_LOG="+mode)
 			}
 			var stderr strings.Builder
 			cmd.Stderr = &stderr
-			start := time.Now()
 			out, err := cmd.Output()
 			if exit, ok := err.(*exec.ExitError); !ok || exit.ExitCode() != 3 {
 				t.Fatalf("want worker_down exit 3, got %v; stderr %s", err, stderr.String())
@@ -58,8 +88,19 @@ func TestReviewWaitWorkerDownLogging(t *testing.T) {
 			if string(out) != "{\"ticket\":\"abcdef0123456789abcdef01\",\"status\":\"worker_down\"}\n" || stderr.Len() != 0 {
 				t.Fatalf("unexpected streams: stdout %q, stderr %q", out, stderr.String())
 			}
-			if elapsed := time.Since(start); elapsed > 1500*time.Millisecond {
-				t.Fatalf("two down polls took %s", elapsed)
+			traceData, err := os.ReadFile(traceFile)
+			if err != nil {
+				t.Fatal(err)
+			}
+			var trace reviewWaitTrace
+			if err := json.Unmarshal(traceData, &trace); err != nil {
+				t.Fatal(err)
+			}
+			if trace.Polls != 2 {
+				t.Fatalf("worker_down: want exactly 2 down polls, got %d", trace.Polls)
+			}
+			if len(trace.Pauses) != 1 || trace.Pauses[0] != 200*time.Millisecond {
+				t.Fatalf("worker_down: want exactly one 200ms sleep between polls, got %v", trace.Pauses)
 			}
 			data, err := os.ReadFile(file)
 			if mode == "1" || mode == "unwritable" {
