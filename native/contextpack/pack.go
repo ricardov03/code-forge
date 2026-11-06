@@ -1,0 +1,604 @@
+// Package contextpack builds local, Node-compatible coder context packs.
+package contextpack
+
+import (
+	"crypto/sha256"
+	"errors"
+	"fmt"
+	"math"
+	"os"
+	"path"
+	"path/filepath"
+	"regexp"
+	"strings"
+	"syscall"
+	"unicode/utf8"
+
+	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/sign"
+	"github.com/ricardov03/code-forge/native/state"
+)
+
+// ErrHandover is returned only before publication, for inputs requiring Node.
+var ErrHandover = errors.New("context pack requires Node")
+
+type Error struct{ Message string }
+
+func (e *Error) Error() string     { return e.Message }
+func refusal(message string) error { return &Error{message} }
+func quote(s string) string        { b, _ := canon.Marshal(s); return string(b) }
+func control(s string) bool {
+	for _, r := range s {
+		if r < 32 || r >= 127 && r <= 159 {
+			return true
+		}
+	}
+	return false
+}
+func object(v any) ledger.Object { o, _ := v.(ledger.Object); return o }
+func str(v any) string           { s, _ := v.(string); return s }
+func split(s string) []string {
+	if s == "" {
+		return nil
+	}
+	return strings.Split(strings.TrimSuffix(s, "\n"), "\n")
+}
+
+// JavaScript trimEnd's whitespace set excludes NEL and includes BOM.
+func trimEnd(s string) string {
+	return strings.TrimRightFunc(s, func(r rune) bool {
+		return r >= 9 && r <= 13 || r == 32 || r == 160 || r == 0x1680 || r >= 0x2000 && r <= 0x200a || r == 0x2028 || r == 0x2029 || r == 0x202f || r == 0x205f || r == 0x3000 || r == 0xfeff
+	})
+}
+
+var commandKeys = []string{"build", "test", "lint", "format"}
+
+type settings struct {
+	rules    []string
+	lessons  string
+	commands map[string][]string
+	max      int
+}
+
+func stringsList(v any) ([]string, bool) {
+	a, ok := v.([]any)
+	if !ok {
+		return nil, false
+	}
+	out := []string{}
+	for _, v := range a {
+		s, ok := v.(string)
+		if !ok || s == "" {
+			return nil, false
+		}
+		out = append(out, s)
+	}
+	return out, true
+}
+func settingsFor(cfg map[string]any) (*settings, error) {
+	raw, present := cfg["context"]
+	if !present {
+		return nil, nil
+	}
+	m, ok := raw.(map[string]any)
+	if !ok {
+		return nil, refusal("context must be a mapping")
+	}
+	s := &settings{commands: map[string][]string{}, max: 300}
+	if m["rules"] != nil {
+		var ok bool
+		s.rules, ok = stringsList(m["rules"])
+		if !ok {
+			return nil, refusal("context.rules must be a list of file paths")
+		}
+	}
+	seen := map[string]bool{}
+	for _, file := range s.rules {
+		// POSIX normalize preserves a trailing slash.
+		n := path.Clean(file)
+		if strings.HasSuffix(file, "/") && n != "/" {
+			n += "/"
+		}
+		if seen[n] {
+			return nil, refusal("context.rules names a file twice")
+		}
+		seen[n] = true
+	}
+	if m["lessons"] != nil {
+		var ok bool
+		s.lessons, ok = m["lessons"].(string)
+		if !ok || s.lessons == "" {
+			return nil, refusal("context.lessons must be one file path")
+		}
+	}
+	commands := map[string]any{}
+	if m["commands"] != nil {
+		var ok bool
+		commands, ok = m["commands"].(map[string]any)
+		if !ok {
+			return nil, refusal("context.commands must be a mapping")
+		}
+	}
+	unknown := []string{}
+	for k := range commands {
+		if k != "build" && k != "test" && k != "lint" && k != "format" {
+			unknown = append(unknown, k)
+		}
+	}
+	// Go maps discard YAML insertion order; Node chooses the first invalid key.
+	if len(unknown) > 1 {
+		return nil, ErrHandover
+	}
+	if len(unknown) == 1 {
+		return nil, refusal("context.commands." + unknown[0] + " is not one of build, test, lint, format")
+	}
+	for _, k := range commandKeys {
+		if commands[k] == nil {
+			continue
+		}
+		argv, ok := stringsList(commands[k])
+		if !ok || len(argv) == 0 {
+			return nil, refusal("context.commands." + k + " must be an argv list of non-empty strings")
+		}
+		for _, a := range argv {
+			if control(a) {
+				return nil, refusal("context.commands." + k + " contains a control character")
+			}
+		}
+		s.commands[k] = argv
+	}
+	if m["require_coder_tests"] != nil {
+		if _, ok := m["require_coder_tests"].(bool); !ok {
+			return nil, refusal("context.require_coder_tests must be true or false")
+		}
+	}
+	if m["max_lines"] != nil {
+		n, ok := m["max_lines"].(float64)
+		if !ok || math.IsNaN(n) || math.IsInf(n, 0) || math.Trunc(n) != n || n < 20 {
+			return nil, refusal("context.max_lines must be an integer >= 20")
+		}
+		if n < float64(math.MaxInt) {
+			s.max = int(n)
+		} else {
+			s.max = math.MaxInt
+		}
+	}
+	return s, nil
+}
+
+func errno(err error) string {
+	for _, x := range []struct {
+		code syscall.Errno
+		name string
+	}{
+		{syscall.ENOENT, "ENOENT"}, {syscall.ENOTDIR, "ENOTDIR"}, {syscall.EISDIR, "EISDIR"}, {syscall.EACCES, "EACCES"}, {syscall.EPERM, "EPERM"}, {syscall.ELOOP, "ELOOP"}, {syscall.ENAMETOOLONG, "ENAMETOOLONG"}, {syscall.EROFS, "EROFS"}, {syscall.ENOSPC, "ENOSPC"}, {syscall.EEXIST, "EEXIST"}, {syscall.ENOTEMPTY, "ENOTEMPTY"},
+	} {
+		if errors.Is(err, x.code) {
+			return x.name
+		}
+	}
+	return "error"
+}
+
+// Node's fs error message is surfaced verbatim by the ledger-append refusal.
+func nodeError(err error) string {
+	var pe *os.PathError
+	if errors.As(err, &pe) {
+		code := errno(err)
+		description := map[string]string{"ENOENT": "no such file or directory", "ENOTDIR": "not a directory", "EISDIR": "illegal operation on a directory", "EACCES": "permission denied", "EPERM": "operation not permitted", "ELOOP": "too many symbolic links encountered", "ENAMETOOLONG": "name too long", "EROFS": "read-only file system", "ENOSPC": "no space left on device", "EEXIST": "file already exists", "ENOTEMPTY": "directory not empty"}[code]
+		if description != "" {
+			message := code + ": " + description + ", " + pe.Op
+			if pe.Op != "read" {
+				message += " '" + pe.Path + "'"
+			}
+			return message
+		}
+	}
+	return err.Error()
+}
+func inside(root, file string) bool {
+	rel, err := filepath.Rel(root, file)
+	return err == nil && rel != ".." && !strings.HasPrefix(rel, ".."+string(filepath.Separator)) && !filepath.IsAbs(rel)
+}
+
+// Follow broken links too: their target still determines the boundary.
+func walkLinks(file string) string {
+	parts := strings.Split(strings.TrimPrefix(file, "/"), "/")
+	cur, hops := "/", 0
+	for len(parts) > 0 {
+		next := filepath.Join(cur, parts[0])
+		parts = parts[1:]
+		st, err := os.Lstat(next)
+		if err != nil {
+			return filepath.Join(append([]string{next}, parts...)...)
+		}
+		if st.Mode()&os.ModeSymlink == 0 {
+			cur = next
+			continue
+		}
+		hops++
+		if hops > 40 {
+			return filepath.Join(append([]string{next}, parts...)...)
+		}
+		target, err := os.Readlink(next)
+		if err != nil {
+			return next
+		}
+		if !filepath.IsAbs(target) {
+			target = filepath.Join(cur, target)
+		}
+		target = filepath.Clean(target)
+		parts = append(strings.Split(strings.TrimPrefix(target, "/"), "/"), parts...)
+		cur = "/"
+	}
+	return cur
+}
+func readLines(root, rel, key string) ([]string, error) {
+	shown := key + ": " + quote(rel)
+	if control(rel) {
+		return nil, refusal(shown + " contains a control character")
+	}
+	if filepath.IsAbs(rel) {
+		return nil, refusal(shown + " is outside the repository (give a path relative to the repository root)")
+	}
+	for _, segment := range strings.FieldsFunc(rel, func(r rune) bool { return r == '/' || r == '\\' }) {
+		if segment == ".." {
+			return nil, refusal(shown + " is outside the repository (give a path relative to the repository root)")
+		}
+	}
+	file := walkLinks(filepath.Join(root, rel))
+	if !inside(root, file) {
+		return nil, refusal(shown + " leads outside the repository")
+	}
+	st, err := os.Lstat(file)
+	if os.IsNotExist(err) {
+		return nil, refusal(shown + " does not exist")
+	}
+	if err != nil {
+		return nil, refusal(shown + " cannot be read (" + errno(err) + ")")
+	}
+	if st.Mode()&os.ModeSymlink != 0 {
+		return nil, refusal(shown + " does not exist")
+	}
+	if !st.Mode().IsRegular() {
+		return nil, refusal(shown + " is not a file")
+	}
+	b, err := os.ReadFile(file)
+	if err != nil {
+		return nil, refusal(shown + " cannot be read (" + errno(err) + ")")
+	}
+	if !utf8.Valid(b) {
+		return nil, ErrHandover
+	}
+	return split(trimEnd(string(b))), nil
+}
+
+var bareToken = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
+
+func argvText(argv []string) string {
+	tokens := []string{}
+	for _, token := range argv {
+		if !bareToken.MatchString(token) {
+			token = "'" + strings.ReplaceAll(token, "'", "'\\''") + "'"
+		}
+		tokens = append(tokens, token)
+	}
+	return strings.Join(tokens, " ")
+}
+
+// Keep the built-in rule byte-equal to src/proof/rule.mjs.
+const proofRule = "## proof rule (code-forge)\n" +
+	"- Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure. `code-forge proof red-green` does this with the block's base code.\n" +
+	"- No hand mutations. Do not break the code on purpose to test the tests. Red→green is the proof.\n" +
+	"- One exact test per acceptance clause, plus one negative or boundary test where the clause can fail. Assertions say which element and how many, never only \"it exists\".\n" +
+	"- Proof scales with risk: a light-tier file needs red→green per new test; a high-tier file must have it at the gate. Do not add tests, mutants, layers, options or abstractions that the acceptance does not ask for.\n" +
+	"- A weak assertion is fixed by a stronger assertion, not by more tests or mutants."
+
+type section struct {
+	heading string
+	body    []string
+	dropped int
+}
+type Result struct {
+	Text, Path, SHA256 string
+	Tokens, Lines, Cut int
+}
+
+// Assemble performs all source reads and validation, before any pack is touched.
+func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, node, bin, version string) (Result, error) {
+	r := Result{}
+	s, err := settingsFor(cfg)
+	if err != nil {
+		return r, err
+	}
+	sections := []section{}
+	if s != nil {
+		for _, rel := range s.rules {
+			lines, err := readLines(root, rel, "context.rules")
+			if err != nil {
+				return r, err
+			}
+			sections = append(sections, section{heading: "## rules: " + rel, body: lines})
+		}
+		if s.lessons != "" {
+			lines, err := readLines(root, s.lessons, "context.lessons")
+			if err != nil {
+				return r, err
+			}
+			sections = append(sections, section{heading: "## lessons: " + s.lessons, body: lines})
+		}
+	}
+	brief := object(entry.Get("brief"))
+	var briefLines []string
+	briefPath, hasBrief := brief.Get("path").(string)
+	if hasBrief {
+		briefLines, err = readLines(root, briefPath, "block.brief")
+		if err != nil {
+			return r, err
+		}
+	}
+	values := []struct {
+		label string
+		value any
+	}{{"level", entry.Get("level")}}
+	owned, _ := entry.Get("owned_files").([]any)
+	tests, _ := entry.Get("test_files").([]any)
+	for _, v := range owned {
+		if _, ok := v.(string); !ok {
+			return r, ErrHandover
+		}
+		values = append(values, struct {
+			label string
+			value any
+		}{"owned file", v})
+	}
+	for _, v := range tests {
+		if _, ok := v.(string); !ok {
+			return r, ErrHandover
+		}
+		values = append(values, struct {
+			label string
+			value any
+		}{"test file", v})
+	}
+	tree := object(entry.Get("worktree"))
+	_, hasTree := tree.Get("path").(string)
+	if hasTree {
+		values = append(values, struct {
+			label string
+			value any
+		}{"worktree path", tree.Get("path")}, struct {
+			label string
+			value any
+		}{"worktree branch", tree.Get("branch")})
+	}
+	values = append(values, struct {
+		label string
+		value any
+	}{"code-forge node", node}, struct {
+		label string
+		value any
+	}{"code-forge bin", bin}, struct {
+		label string
+		value any
+	}{"code-forge version", version})
+	for _, v := range values {
+		if v.value == nil {
+			continue
+		}
+		text, ok := v.value.(string)
+		if !ok {
+			return r, ErrHandover
+		}
+		if control(text) {
+			return r, refusal("block " + id + ": " + v.label + " " + quote(text) + " contains a control character")
+		}
+	}
+	level := "(unknown)"
+	if entry.Get("level") != nil {
+		level = str(entry.Get("level"))
+	}
+	header := []string{"# code-forge context pack", "## block", "run: " + run, "block: " + id, "level: " + level, "owned files:"}
+	for _, f := range owned {
+		header = append(header, "- "+str(f))
+	}
+	if len(tests) > 0 {
+		header = append(header, "test files:")
+		for _, f := range tests {
+			header = append(header, "- "+str(f))
+		}
+	}
+	if hasTree {
+		branch := "undefined"
+		if tree.Get("branch") != nil {
+			branch = str(tree.Get("branch"))
+		} else {
+			for _, f := range tree {
+				if f.Key == "branch" {
+					branch = "null"
+				}
+			}
+		}
+		header = append(header, "worktree: "+str(tree.Get("path")), "branch: "+branch)
+	}
+	header = append(header, "## code-forge", "run code-forge verbs with exactly: "+argvText([]string{node, bin}), "version: "+version, "do not use another code-forge from PATH")
+	if s != nil {
+		header = append(header, "## commands (never run by code-forge)")
+		if len(s.commands) == 0 {
+			header = append(header, "(none)")
+		}
+		for _, k := range commandKeys {
+			if argv, ok := s.commands[k]; ok {
+				header = append(header, k+": "+argvText(argv))
+			}
+		}
+	}
+	header = append(header, split(proofRule)...)
+	task := []string{}
+	if hasBrief {
+		task = append(task, "## brief: "+briefPath)
+		task = append(task, split(strings.Join(briefLines, "\n"))...)
+	}
+	if entry.Get("acceptance") != nil {
+		clauses, ok := entry.Get("acceptance").([]any)
+		if !ok {
+			return r, ErrHandover
+		}
+		if len(clauses) > 0 {
+			task = append(task, "## acceptance")
+		}
+		for _, c := range clauses {
+			clause, ok := c.(ledger.Object)
+			if !ok {
+				return r, ErrHandover
+			}
+			text, ok := clause.Get("clause").(string)
+			if !ok {
+				return r, ErrHandover
+			}
+			task = append(task, "- "+text)
+			if clause.Get("kind") == "human_check" {
+				task = append(task, "  kind: human_check")
+			} else {
+				tests, ok := stringsList(clause.Get("tests"))
+				if !ok {
+					return r, ErrHandover
+				}
+				task = append(task, "  tests: "+strings.Join(tests, ", "))
+			}
+		}
+	}
+	header = append(header, split(strings.Join(task, "\n"))...)
+	max := 300
+	if s != nil {
+		max = s.max
+	}
+	total := func() int {
+		n := len(header)
+		for _, s := range sections {
+			n += 1 + len(s.body)
+			if s.dropped > 0 {
+				n++
+			}
+		}
+		return n
+	}
+	for i := len(sections) - 1; i >= 0; i-- {
+		excess := total() - max
+		if excess <= 0 {
+			break
+		}
+		s := &sections[i]
+		if len(s.body) < 2 {
+			continue
+		}
+		drop := min(len(s.body), excess+1)
+		s.body = s.body[:len(s.body)-drop]
+		s.dropped = drop
+	}
+	for _, s := range sections {
+		header = append(header, s.heading)
+		header = append(header, s.body...)
+		if s.dropped > 0 {
+			header = append(header, fmt.Sprintf("[cut: %d lines dropped]", s.dropped))
+		}
+		r.Cut += s.dropped
+	}
+	r.Text = strings.Join(header, "\n") + "\n"
+	r.Lines = len(header)
+	r.Tokens = (len(r.Text) + 3) / 4
+	r.SHA256 = fmt.Sprintf("%x", sha256.Sum256([]byte(r.Text)))
+	return r, nil
+}
+
+func loadKey(home, run string) ([]byte, error) {
+	file := filepath.Join(home, ".code-forge", "runs", run+".key")
+	st, err := os.Stat(file)
+	if os.IsNotExist(err) {
+		return nil, &state.Error{Code: "no-key", Message: "run " + run + " has no signer key"}
+	}
+	if err != nil {
+		return nil, ErrHandover
+	}
+	if st.Mode().Perm()&0077 != 0 {
+		return nil, &state.Error{Code: "bad-key-mode", Message: fmt.Sprintf("run %s signer key is accessible to other users (mode %o); expected 600", run, st.Mode().Perm())}
+	}
+	key, err := os.ReadFile(file)
+	if err != nil {
+		return nil, ErrHandover
+	}
+	if len(key) != 32 {
+		return nil, &state.Error{Code: "bad-key", Message: "run " + run + " signer key is not 32 bytes"}
+	}
+	return key, nil
+}
+
+// LastPack checks verified history before publication; corrupt/unsupported I/O
+// errors hand over so Node supplies its original stack and diagnostics.
+func LastPack(home, run, slug, id string) (map[string]any, error) {
+	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug)
+	if err != nil {
+		return nil, ErrHandover
+	}
+	matched := []map[string]any{}
+	for _, v := range rows {
+		if row, ok := v.(map[string]any); ok && row["event"] == "context.pack" && row["run"] == run && row["block"] == id {
+			matched = append(matched, row)
+		}
+	}
+	if len(matched) == 0 {
+		return nil, nil
+	}
+	key, err := loadKey(home, run)
+	if err != nil {
+		return nil, err
+	}
+	var last map[string]any
+	for _, row := range matched {
+		checked, err := sign.VerifyRow(row, key)
+		if err != nil {
+			return nil, ErrHandover
+		}
+		if checked.OK {
+			last = row
+		}
+	}
+	return last, nil
+}
+
+// Publish mirrors Node's temp -> signed ledger append -> rename ordering. Node
+// takes only the ledger append lock here, not a run lock, and so do we.
+func Publish(home, run, id string, r Result, last map[string]any) (string, error) {
+	file := r.Path
+	tmp := fmt.Sprintf("%s.%d.tmp", file, os.Getpid())
+	if err := os.MkdirAll(filepath.Dir(file), 0700); err != nil {
+		return "", refusal("cannot write " + file + " (" + errno(err) + ")")
+	}
+	if err := os.WriteFile(tmp, []byte(r.Text), 0600); err != nil {
+		_ = os.Remove(tmp)
+		return "", refusal("cannot write " + file + " (" + errno(err) + ")")
+	}
+	defer os.Remove(tmp)
+	needs := last == nil || last["sha256"] != r.SHA256 || last["path"] != file
+	if needs {
+		row := ledger.Object{{Key: "event", Value: "context.pack"}, {Key: "block", Value: id}, {Key: "path", Value: file}, {Key: "sha256", Value: r.SHA256}, {Key: "tokens", Value: r.Tokens}, {Key: "lines", Value: r.Lines}, {Key: "cut", Value: r.Cut}}
+		if _, err := state.WriteSigned(home, run, row); err != nil {
+			var se *state.Error
+			if !errors.As(err, &se) {
+				return "context: the context.pack ledger row could not be written (" + nodeError(err) + "); nothing was written\n", nil
+			}
+			return "context: the context.pack ledger row could not be written (" + se.Message + "); nothing was written\n", nil
+		}
+	}
+	// os.Rename preflights directory destinations and substitutes EEXIST on
+	// macOS. libuv exposes rename(2)'s EISDIR, which is part of this CLI's text.
+	if err := syscall.Rename(tmp, file); err != nil {
+		after := "nothing was written"
+		if needs {
+			after = "its context.pack ledger row was already written"
+		}
+		return "context: cannot write " + file + " (" + errno(err) + "); " + after + "\n", nil
+	}
+	return "", nil
+}
