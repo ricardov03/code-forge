@@ -41,7 +41,7 @@ locks and signed ledger rows as Node.
 | `block open` | Open with `--level`, including the worktree. | No `--level`, `--after`, `--after-outcome`, or autopilot. |
 | `block close` | Plain agent close. | `--decide`, `--no-require-reviews`, `--auto-claim`, `--remove-worktree`, `ready`, a human close, an external reviewer, hooks, or autopilot. |
 | `gates run` | Built-in gates. A stop signal (SIGINT or SIGTERM) writes the same cancel rows. | Custom gates, `repeat_new_tests`, light blocks, flaky detection, and other `gates` subcommands. |
-| `block land` | Join, gates, close and merge, when every step can run in Go. | Any step that would hand over. Go checks this before its first write, so one land never mixes Go and Node steps. |
+| `block land` | Go: plain land, `--merge` with the full merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | An unavailable compatible join daemon, unsupported state or a child step Go cannot execute. Read-only pre-checks finish before the first write; the B282 reason code identifies the unsupported step. |
 
 A hand-over always passes the original arguments. Node then runs the command
 exactly as before. When Go is not sure it gives the same answer, it hands over.
@@ -101,6 +101,8 @@ Set `CODE_FORGE_HANDOVER_LOG=0` to stop recording.
 Reason codes are fixed names. For example, `unrouted` means Go has no route.
 `close-auto-claim` and `enqueue-fresh` name cases that still run in Node.
 `land-step-handover:close` means the close step needs Node.
+Grants and end hooks supported by native close no longer cause a land hand-over.
+`land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
 The full code list is the `handoverReasons` table in
 [`handover_log.go`](../native/cmd/code-forge-native/handover_log.go).
 
@@ -113,6 +115,9 @@ Then run `npm run bench:verbs` or `npm run bench:block`.
 verb, after two warmup runs. The columns show the median, p90 and minimum time
 in milliseconds, the peak memory (RSS) in MB, the engine that ran, the speedup
 (Node median / Go median), and whether output and exit code are the same.
+The `block land` row measures the already-closed refusal, including its signed
+timing row, with Node unavailable in the engine probe. Successful land shapes
+and merge gates are checked by `parity-block-land-full.test.mjs`.
 
 `bench:block` compares three lanes: `node` (Node only), `go` (Node with the Go
 helper) and `entry` (Go first). It reports child processes, CLI calls, peak

@@ -82,11 +82,15 @@ test('land usage and bad max boundaries match Node without starting Node', async
       env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
     assert.deepEqual(parity.diffs, [], `${argv}: zero usage differences`);
   }
-  const f = await fixture('open', { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } });
+  const f = await fixture('open');
   const runs = path.join(f.home, '.code-forge/runs');
+  const file = path.join(runs, RUN + '.json');
+  const unsupported = JSON.parse(await readFile(file, 'utf8'));
+  unsupported.blocks.B1.owned_files = [42];
+  await writeFile(file, JSON.stringify(unsupported, null, 2) + '\n');
   const before = await Promise.all((await readdir(runs)).sort().map(async (name) => [name, await readFile(path.join(runs, name))]));
   const unavailable = launch(f, [...args, '--json']);
-  assert.equal(unavailable.status, 127, 'unsupported close hook hands over the entire land before Go writes');
+  assert.equal(unavailable.status, 127, 'unsupported ownership shape hands over the entire land before Go writes');
   const probe = path.join(scratch, 'argv-node');
   await writeFile(probe, `#!${process.execPath}\nprocess.stdout.write(JSON.stringify(process.argv.slice(3)) + '\\n');\n`);
   await chmod(probe, 0o755);
@@ -298,8 +302,8 @@ test('findings, red gates, tree moves and wait_timeout run in Go with Node unava
     }
   }
 });
-test('no daemon, close hook, and unscoped merge gate hand over before any Go writes', async () => {
-  const cases = /** @type {Array<[Record<string, any>, string[]]>} */ ([[{}, []], [{ hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }, []], [{}, ['--merge']]]);
+test('no daemon hands over before any Go writes', async () => {
+  const cases = /** @type {Array<[Record<string, any>, string[]]>} */ ([[{}, []]]);
   for (const [config, extra] of cases) {
     const f = await openFixture('clean', config);
     const home = await mkdtemp('/tmp/cf-lh-');

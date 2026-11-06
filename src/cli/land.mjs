@@ -192,6 +192,10 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
       const mainHead = await exec(['git', 'rev-parse', '--verify', 'HEAD'], gitOptions);
       const blockHead = await exec(['git', 'rev-parse', '--verify', `refs/heads/${tree.branch}`], gitOptions);
       if (mainHead.result !== 'ok' || blockHead.result !== 'ok') return stop('cannot resolve merge parents');
+      const workspacePrefix = await exec(['git', 'rev-parse', '--show-prefix'], { ...gitOptions, cwd: record.workspace });
+      if (workspacePrefix.result !== 'ok') return stop('cannot resolve merge-gate workspace prefix');
+      const prefix = workspacePrefix.stdout.replace(/\n$/, '');
+      if (prefix.startsWith('..') || path.isAbsolute(prefix)) return stop('merge-gate workspace prefix is outside the repository');
       const started = Date.now();
       // A sibling of this run's block worktree, never the process temp directory.
       const temporary = await mkdtemp(path.join(path.dirname(tree.path), '.merge-gate-'));
@@ -207,7 +211,7 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
           const conflicts = await exec(['git', 'diff', '--name-only', '--diff-filter=U'], { ...gitOptions, cwd: temporary });
           failure = conflicts.stdout.trim() ? `merge conflict:\n${conflicts.stdout.trim()}` : merged.stderr || merged.stdout || 'trial merge failed';
         } else {
-          const workspace = path.join(temporary, path.relative(main, record.workspace));
+          const workspace = path.join(temporary, prefix);
           // No block scope: the shared gate runner drops scope tokens and runs the full suite.
           const suite = await capture((streams) => runGatesVerb(['run', '--cwd', workspace], streams));
           if (suite.code !== 0 || suite.data?.allOk !== true) {

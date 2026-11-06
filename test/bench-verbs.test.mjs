@@ -5,10 +5,12 @@ import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
 import { fileURLToPath } from 'node:url';
+import { isolatedEnv } from './helpers/parity.mjs';
+import * as benchVerbs from '../scripts/bench-verbs.mjs';
 
 const root = fileURLToPath(new URL('../', import.meta.url));
 const script = path.join(root, 'scripts/bench-verbs.mjs');
-const env = { ...process.env, GOCACHE: path.join(process.env.CODE_FORGE_REAL_HOME ?? os.homedir(), process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') };
+const env = isolatedEnv({ ...process.env, GOCACHE: path.join(process.env.CODE_FORGE_REAL_HOME ?? os.homedir(), process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') });
 const run = (command, args) => spawnSync(command, args, { cwd: root, env, encoding: 'utf8', timeout: 120_000 });
 
 function registered() {
@@ -16,6 +18,22 @@ function registered() {
   assert.equal(result.status, 0, result.stderr);
   assert.equal(JSON.parse(result.stdout)['bench:verbs'], 'node scripts/bench-verbs.mjs', 'npm registers exactly one verb benchmark command');
 }
+
+test('verb bench requires the expected refusal JSON when an engine probe exits nonzero', () => {
+  assert.equal(typeof benchVerbs.engineFromProbe, 'function', 'the benchmark exports one engine probe classifier');
+  const { engineFromProbe } = benchVerbs;
+  const refusal = JSON.stringify({ block: 'B1', event: 'refused', step: 'join', reason: 'block is closed, not open',
+    next: 'code-forge review-file --wait-block B1 --run r-bench-verbs' }) + '\n';
+  assert.equal(engineFromProbe({ code: 1, stdout: refusal }, 1, refusal), 'go', 'native refusal proves the engine');
+  for (const stdout of ['', 'not JSON\n', '{}\n', refusal.replace('closed', 'stopped'), refusal + 'extra\n']) {
+    assert.equal(engineFromProbe({ code: 1, stdout }, 1, refusal), 'node-handover', 'exit 1 alone cannot prove native execution');
+  }
+  assert.equal(engineFromProbe({ code: 1, stdout: '' }, 1), 'node-handover', 'a nonzero case must declare its expected output');
+  for (const code of [0, 126, 127]) {
+    assert.equal(engineFromProbe({ code, stdout: refusal }, 1, refusal), 'node-handover', 'output alone cannot prove native execution');
+  }
+  assert.equal(engineFromProbe({ code: 0, stdout: 'native output\n' }), 'go', 'successful probes retain exit-code detection');
+});
 
 test('verb bench measures the npm entry in paired isolated lanes with parity and identical saved JSON', () => {
   registered();
@@ -38,8 +56,8 @@ test('verb bench measures the npm entry in paired isolated lanes with parity and
     assert.deepEqual(report.host, { platform: process.platform, arch: process.arch, node: process.version, cpus: os.cpus().length });
     assert.deepEqual(report.leftover_processes, { count: 0, list: [] }, 'zero live descendants or fixture workers');
     assert.deepEqual(report.native_sockets, [], 'zero native sockets before fixture removal');
-    const engines = { 'logs path': 'go', 'logs --last 5 --json': 'go', 'logs summary --json': 'go', 'ledger tail': 'go', '--version': 'node-handover', 'status --json': 'go' };
-    assert.deepEqual(report.cases.map((entry) => entry.case), Object.keys(engines), 'all six verb cases in order');
+    const engines = { 'logs path': 'go', 'logs --last 5 --json': 'go', 'logs summary --json': 'go', 'ledger tail': 'go', '--version': 'node-handover', 'status --json': 'go', 'block land': 'go' };
+    assert.deepEqual(report.cases.map((entry) => entry.case), Object.keys(engines), 'all seven verb cases in order, including native land');
     for (const entry of report.cases) {
       assert.equal(entry.parity, native ? true : null, `${entry.case}: parity is true, or unmeasured without native`);
       assert.equal(entry.engine, native ? engines[entry.case] : null, `${entry.case}: unavailable-Node probe identifies the engine`);

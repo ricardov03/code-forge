@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"path/filepath"
 	"strings"
 	"time"
 
@@ -43,6 +44,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	step := "join"
 	next := closeCommand([]string{"code-forge", "review-file", "--wait-block", id, "--run", run})
 	joinMs, gatesMs := int64(0), int64(0)
+	var mergeGateMs any
 	emit := func(out ledger.Object) {
 		data, _ := ledger.Stringify(out, false)
 		fmt.Fprintln(os.Stdout, string(data))
@@ -70,7 +72,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	}
 	// Refusals before a child step still append Node's timing row.
 	timing := func() {
-		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.timing"}, {Key: "block", Value: id}, {Key: "join_ms", Value: joinMs}, {Key: "gates_ms", Value: gatesMs}, {Key: "merge_gate_ms", Value: nil}, {Key: "parallel", Value: true}}); err != nil {
+		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.timing"}, {Key: "block", Value: id}, {Key: "join_ms", Value: joinMs}, {Key: "gates_ms", Value: gatesMs}, {Key: "merge_gate_ms", Value: mergeGateMs}, {Key: "parallel", Value: true}}); err != nil {
 			fmt.Fprintln(stderr, "block land:", err)
 			code = 1
 		}
@@ -90,7 +92,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		defer timing()
 		return stop("block is " + blockString(entry.Get("status")) + ", not open")
 	}
-	if !blockSafe(record) || !blockStorageSafe(home, run, record) {
+	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
 		return fallback(blockStateHandoverReason(record, "land", hLandStateStorage))
 	}
 	workspace := blockString(record.Get("workspace"))
@@ -116,12 +118,8 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		return fallback(hLandMainRepo)
 	}
 	cfg, ok := blockSnapshot(record)
-	if !ok || !blockSafe(record) || !blockStorageSafe(home, run, record) || !daemonclient.Enabled(cfg) {
+	if !ok || !daemonclient.Enabled(cfg) {
 		return fallback(hLandConfigDaemon)
-	}
-	// The shared gates route delegates all unscoped runs, including merge gates.
-	if merge && !skip && blockMap(cfg["gates"])["merge_gate"] != false {
-		return fallback(hLandMergeGate)
 	}
 	dry := &landStep{preflight: true}
 	if reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", "0ms", "--cwd", tree.Workspace}, dry) == landHandover {
@@ -134,6 +132,16 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	}
 	if _, safe := gatesNativeStep(gateArgs, gateOptions, dry); !safe {
 		return fallback(hLandStepHandoverGates)
+	}
+	mergeGate := merge && !skip && blockMap(cfg["gates"])["merge_gate"] != false
+	if mergeGate {
+		// Check the full-suite dialect before close can publish. The trial
+		// worktree will use the main checkout's committed gate configuration.
+		fullArgs := []string{"run", "--cwd", tree.Workspace}
+		fullOptions, _ := gatesParse(fullArgs)
+		if _, safe := gatesNativeStep(fullArgs, fullOptions, dry); !safe {
+			return fallback(hLandMergeGate)
+		}
 	}
 	files, err := landClaimFiles(home, run, id, top, main, record, entry)
 	if err != nil {
@@ -156,8 +164,9 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	predicted.Set("blocks", blocks)
 	dry.record = predicted
 	closeArgs := []string{id, "--run", run, "--report", report, "--transcript", transcript, "--json"}
-	if blockCloseStep(closeArgs, dry) == landHandover {
-		return fallback(hLandStepHandoverClose)
+	closeReason := hLandStepHandoverClose
+	if blockCloseStepWithReason(closeArgs, dry, &closeReason) == landHandover {
+		return fallback(closeReason)
 	}
 	if err := landAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
 		return fallback(hLandStepHandoverClaim)
@@ -296,7 +305,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	fmt.Fprint(stderr, gates.error)
 	step = "close"
 	next = closeCommand(append([]string{"code-forge", "block", "close"}, closeArgs[:len(closeArgs)-1]...))
-	closed := landCapture(func(s *landStep) int { return blockCloseStep(closeArgs, s) }, nil)
+	closed := landCapture(func(s *landStep) int { return blockCloseStepWithReason(closeArgs, s, &closeReason) }, nil)
 	if closed.code != 0 || closed.data.Get("status") != "closed" {
 		if n, ok := closed.data.Get("next_command").(string); ok {
 			next = n
@@ -339,7 +348,23 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		next = closeCommand([]string{"git", "-C", top, "status", "--short"})
 		return stop("block worktree is dirty or unreadable; commit and review its changes before merging")
 	}
-	fmt.Fprintln(stderr, "warning: merge gate skipped; merged full suite was not checked")
+	if mergeGate {
+		step = "merge-gate"
+		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
+		started := time.Now()
+		failure := landMergeGate(main, tree.Path, workspace, branch, base)
+		if failure.elapsed != nil {
+			mergeGateMs = *failure.elapsed
+		}
+		if failure.reason != "" {
+			return stop(failure.reason)
+		}
+		fmt.Fprintf(print, "merge gate: full suite passed (%.1fs)\n", float64(time.Since(started).Milliseconds())/1000)
+	} else {
+		fmt.Fprintln(stderr, "warning: merge gate skipped; merged full suite was not checked")
+	}
+	step = "merge"
+	next = command
 	output, err := gitx.Run(main, "-C", main, "merge", "--no-ff", "--no-edit", "--", branch)
 	if err != nil {
 		next = closeCommand([]string{"git", "-C", main, "status"})
@@ -351,6 +376,90 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		fmt.Fprintf(os.Stdout, "block %s landed\n", id)
 	}
 	return 0
+}
+
+type landMergeResult struct {
+	reason  string
+	elapsed *int64
+}
+
+// The trial merge and full suite run in an isolated sibling worktree. Cleanup
+// finishes before the checked parent identities are compared or main is merged.
+func landMergeGate(main, treePath, workspace, branch, base string) (result landMergeResult) {
+	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
+	if err != nil {
+		result.reason = "cannot resolve merge parents"
+		return
+	}
+	blockHead, err := gitx.Run(main, "rev-parse", "--verify", "refs/heads/"+branch)
+	if err != nil {
+		result.reason = "cannot resolve merge parents"
+		return
+	}
+	prefix, err := gitx.Run(workspace, "rev-parse", "--show-prefix")
+	if err != nil {
+		result.reason = "cannot resolve merge-gate workspace prefix"
+		return
+	}
+	prefix = strings.TrimSuffix(prefix, "\n")
+	if strings.HasPrefix(prefix, "..") || filepath.IsAbs(prefix) {
+		result.reason = "merge-gate workspace prefix is outside the repository"
+		return
+	}
+	started := time.Now()
+	temporary, err := os.MkdirTemp(filepath.Dir(treePath), ".merge-gate-")
+	if err != nil {
+		result.reason = err.Error()
+		return
+	}
+	added := false
+	func() {
+		defer func() {
+			elapsed := time.Since(started).Milliseconds()
+			result.elapsed = &elapsed
+			_, err := gitx.Run(main, "worktree", "remove", "--force", temporary)
+			if added && err != nil {
+				result.reason = "cannot remove merge-gate worktree " + temporary + ": " + landGitError(err, "")
+			}
+			_ = os.RemoveAll(temporary)
+		}()
+		if _, err := gitx.Run(main, "worktree", "add", "--detach", temporary, strings.TrimSpace(mainHead)); err != nil {
+			result.reason = landGitError(err, "cannot create merge-gate worktree")
+			return
+		}
+		added = true
+		output, err := gitx.Run(temporary, "merge", "--no-ff", "--no-edit", "--", strings.TrimSpace(blockHead))
+		if err != nil {
+			conflicts, _ := gitx.Run(temporary, "diff", "--name-only", "--diff-filter=U")
+			if strings.TrimSpace(conflicts) != "" {
+				result.reason = "merge conflict:\n" + strings.TrimSpace(conflicts)
+			} else {
+				result.reason = landFirst(landGitError(err, ""), output, "trial merge failed")
+			}
+			return
+		}
+		fullArgs := []string{"run", "--cwd", filepath.Join(temporary, prefix)}
+		options, _ := gatesParse(fullArgs)
+		suite := landCapture(func(s *landStep) int {
+			code, safe := gatesNativeStep(fullArgs, options, s)
+			if !safe {
+				return landHandover
+			}
+			return code
+		}, nil)
+		result.reason = landSuiteFailure(suite)
+	}()
+	if result.reason != "" {
+		return
+	}
+	currentMain, e1 := gitx.Run(main, "rev-parse", "--verify", "HEAD")
+	currentBlock, e2 := gitx.Run(main, "rev-parse", "--verify", "refs/heads/"+branch)
+	currentBranch, e3 := gitx.Run(main, "symbolic-ref", "-q", "HEAD")
+	currentStatus, e4 := gitx.Run(main, "status", "--porcelain", "--untracked-files=all")
+	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || currentMain != mainHead || currentBlock != blockHead || strings.TrimSpace(currentBranch) != "refs/heads/"+base || currentStatus != "" {
+		result.reason = "merge parents or main checkout changed during the full suite; check the checkout and rerun the merge gate"
+	}
+	return
 }
 
 func landGitError(err error, fallback string) string {

@@ -205,6 +205,10 @@ func reviewBlockTree(ctx context.Context, root string, record, entry ledger.Obje
 	if err != nil {
 		return false
 	}
+	workspace, err = filepath.EvalSymlinks(workspace)
+	if err != nil {
+		return false
+	}
 	top, t := reviewBlockGit(ctx, real, "rev-parse", "--show-toplevel")
 	actual, a := reviewBlockGit(ctx, real, "symbolic-ref", "--quiet", "--short", "HEAD")
 	main, m := reviewWaitRoot(ctx, real)
