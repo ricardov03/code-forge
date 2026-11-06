@@ -60,7 +60,9 @@ func resolve(tree, ref string) (string, error) {
 
 // origins checks every touching commit, including merge parents and changes later
 // reverted. A block only vouches for commits between its recorded bases and branch;
-// inherited history and commit messages prove nothing.
+// inherited history and commit messages prove nothing. A landing merge can also
+// vouch for a block when a non-first parent is credited to it and the merge adds
+// no files beyond those changed by that block's credited commits.
 func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns func(string) bool) ([]Accepted, error) {
 	originCommits := map[string]map[string]bool{}
 	for _, field := range blocks {
@@ -108,9 +110,15 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 	if err != nil {
 		return nil, err
 	}
+	changedFiles := func(revisions ...string) (string, error) {
+		args := []string{"diff-tree", "--root", "--no-commit-id", "--no-renames", "--name-only", "-r", "-m", "-z"}
+		args = append(args, revisions...)
+		return git(tree, append(args, "--")...)
+	}
+	originFiles := map[string]map[string]bool{}
 	accepted := map[string]map[string]bool{}
 	for _, commit := range strings.Fields(commits) {
-		changed, err := git(tree, "diff-tree", "--root", "--no-commit-id", "--no-renames", "--name-only", "-r", "-m", "-z", commit, "--")
+		changed, err := changedFiles(commit)
 		if err != nil {
 			return nil, err
 		}
@@ -130,7 +138,62 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 			}
 		}
 		if len(ids) == 0 {
-			return nil, refusal("owned-conflict", fmt.Sprintf("%s changed by commit %s outside closed blocks of run %s", files[0], commit, runID))
+			parents, err := git(tree, "show", "-s", "--format=%P", commit, "--")
+			if err != nil {
+				return nil, err
+			}
+			if parents := strings.Fields(parents); len(parents) > 1 {
+				changed, err := changedFiles(parents[0], commit)
+				if err != nil {
+					return nil, err
+				}
+				for id, commits := range originCommits {
+					creditedParent := false
+					for _, parent := range parents[1:] {
+						creditedParent = creditedParent || commits[parent]
+					}
+					if !creditedParent {
+						continue
+					}
+					if originFiles[id] == nil {
+						originFiles[id] = map[string]bool{}
+						for origin := range commits {
+							changed, err := changedFiles(origin)
+							if err != nil {
+								return nil, err
+							}
+							for _, file := range strings.Split(changed, "\x00") {
+								if file != "" {
+									originFiles[id][file] = true
+								}
+							}
+						}
+					}
+					valid := true
+					for _, file := range strings.Split(changed, "\x00") {
+						if file != "" && !originFiles[id][file] {
+							valid = false
+							break
+						}
+					}
+					if valid {
+						ids = append(ids, id)
+					}
+				}
+				if len(ids) > 0 {
+					// Only the first-parent delta belongs to this landing. Main's
+					// changes relative to other parents retain their own origins.
+					files = nil
+					for _, file := range strings.Split(changed, "\x00") {
+						if file != "" && owns(file) {
+							files = append(files, file)
+						}
+					}
+				}
+			}
+			if len(ids) == 0 {
+				return nil, refusal("owned-conflict", fmt.Sprintf("%s changed by commit %s outside closed blocks of run %s", files[0], commit, runID))
+			}
 		}
 		for _, file := range files {
 			if accepted[file] == nil {
