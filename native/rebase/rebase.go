@@ -347,6 +347,37 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		if err != nil {
 			return err
 		}
+		// A credited sibling may have been rewritten before its landing merge.
+		// Its pre-land branch can still be an ancestor of this block even though
+		// those commit IDs are absent from newBase. Replay only after that tip.
+		replayFrom := oldBase
+		credited := map[string]bool{}
+		for _, file := range accepted {
+			for _, id := range file.Blocks {
+				credited[id] = true
+			}
+		}
+		for _, field := range blocks {
+			if !credited[field.Key] {
+				continue
+			}
+			b, _ := field.Value.(ledger.Object)
+			for _, branch := range []string{"forge/" + runID + "/" + field.Key, text(object(b, "worktree"), "branch")} {
+				if branch == "" {
+					continue
+				}
+				tip, err := resolve(tree, "refs/heads/"+branch)
+				if err != nil {
+					continue
+				}
+				if _, err := git(tree, "merge-base", "--is-ancestor", replayFrom, tip); err != nil {
+					continue
+				}
+				if _, err := git(tree, "merge-base", "--is-ancestor", tip, oldHead); err == nil {
+					replayFrom = tip
+				}
+			}
+		}
 		// No mutation occurs until all origin checks pass. Every failure from
 		// replay through publication must restore the exact original HEAD.
 		defer func() {
@@ -356,7 +387,7 @@ func Run(home, runID, blockID string) (result Result, err error) {
 				}
 			}
 		}()
-		if err := replay(tree, oldBase, newBase, oldHead); err != nil {
+		if err := replay(tree, replayFrom, newBase, oldHead); err != nil {
 			_, _ = git(tree, "cherry-pick", "--abort")
 			_, _ = git(tree, "rebase", "--abort")
 			return refusal("rebase-conflict", "rebase-conflict")

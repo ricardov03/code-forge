@@ -1,7 +1,9 @@
 import { cfgFor, freshDir, git, writeFile } from '../review/helpers.mjs';
 import assert from 'node:assert/strict';
-import { copyFileSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { mock, test } from 'node:test';
 import { startGrant } from '../../src/autopilot/grant.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
@@ -9,14 +11,19 @@ import { readRun, saveRun, startRun, writeSigned } from '../../src/state/run.mjs
 import { loadKey, verifyRow } from '../../src/state/signer.mjs';
 import { exec } from '../../src/util/exec.mjs';
 import * as native from '../../src/util/native.mjs';
+import { registerSecret } from '../../src/util/redact.mjs';
 import { blockTickets, readTicket, resolveTicket } from '../../src/worker/queue.mjs';
 import { contentHash } from '../../src/worker/ticket.mjs';
 
-// Installation compatibility tests rename/chmod the release binary in parallel.
-// Exercise the CLI against a private copy for the lifetime of this test file.
-const binary = native.nativePath();
-const testBinary = binary ? path.join(freshDir('native'), 'code-forge-native') : null;
-if (binary && testBinary) copyFileSync(binary, testBinary);
+// Never inherit the coder's run/ownership context into fixture children. Build
+// the current source privately, independent of installed release binaries.
+for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete process.env[key];
+const testBinary = path.join(freshDir('native'), 'code-forge-native');
+const built = spawnSync('go', ['build', '-o', testBinary, './cmd/code-forge-native'], {
+  cwd: fileURLToPath(new URL('../../native/', import.meta.url)), encoding: 'utf8',
+  env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
+});
+assert.equal(built.status, 0, `private native build: ${built.error?.message ?? built.stderr}`);
 mock.module('../../src/util/native.mjs', { namedExports: { ...native,
   runNative: async (/** @type {string[]} */ args) => testBinary && process.env.CODE_FORGE_NATIVE !== '0'
     ? exec([testBinary, 'internal', ...args], { timeoutMs: 30_000 }) : null,
@@ -31,6 +38,32 @@ async function cli(args, deps = {}) {
   const code = await runBlock(args, { probe, isTTY: false, stdout: { write: (s) => { out += s; } }, stderr: { write: (s) => { err += s; } }, ...deps });
   return { code, out, err };
 }
+
+/** @param {Awaited<ReturnType<typeof fixture>>} f @param {boolean} [landed] */
+function nodeCLI(f, landed = true) {
+  const nativeURL = new URL('../../src/util/native.mjs', import.meta.url).href;
+  const blockURL = new URL('../../src/cli/block.mjs', import.meta.url).href;
+  const script = `
+    import { mock } from 'node:test';
+    import { spawnSync } from 'node:child_process';
+    const native = await import(${JSON.stringify(nativeURL)});
+    mock.module(${JSON.stringify(nativeURL)}, { namedExports: { ...native,
+      runNative: async (args) => {
+        const result = spawnSync(${JSON.stringify(testBinary)}, ['internal', ...args], { env: process.env, encoding: 'utf8' });
+        return { result: result.status === 0 ? 'ok' : 'failed', code: result.status, stdout: result.stdout, stderr: result.stderr };
+      },
+    } });
+    const { runBlock } = await import(${JSON.stringify(blockURL)});
+    process.exitCode = await runBlock(process.argv.slice(1));
+  `;
+  return spawnSync(process.execPath, ['--disable-warning=ExperimentalWarning', '--disable-warning=DeprecationWarning', '--experimental-test-module-mocks', '--input-type=module', '-e', script,
+    'rebase', 'B205b', '--run', f.runId, ...(landed ? ['--accept-landed'] : []), '--json'], {
+    cwd: f.repo, encoding: 'utf8', env: process.env, timeout: 30_000,
+  });
+}
+
+/** @param {string} runId */
+const lockExists = (runId) => existsSync(path.join(process.env.HOME ?? '', '.code-forge', 'runs', `${runId}.lock`));
 
 /** Closed sibling branches model B228/B231 landing while B205b remains open. */
 async function fixture(label, prefix = '') {
@@ -90,6 +123,69 @@ async function fixture(label, prefix = '') {
     },
   };
 }
+
+test('Node landed rebase releases refused locks and replays only X after the credited pre-land Y tip', available, async () => {
+  const f = await fixture('chained');
+  const own = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.tree.path)).trim().split('\n');
+  const oldBranch = 'pre-land-Y';
+  const branch = `forge/${f.runId}/B228`;
+  await git(['checkout', '-qb', oldBranch], f.repo);
+  for (const stage of ['intermediate', 'final']) {
+    writeFile(f.repo, f.files[0], `// Y ${stage}\n`);
+    await git(['add', '-A'], f.repo);
+    await git(['commit', '-qm', `Y ${stage}`], f.repo);
+  }
+  const oldTip = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+  const inherited = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.repo)).trim().split('\n');
+  await git(['reset', '--hard', oldTip], f.tree.path);
+  await git(['cherry-pick', ...own], f.tree.path);
+  await git(['checkout', '-qb', branch, 'main'], f.repo);
+  // Landing rebases Y first: new commit IDs, identical content, then --no-ff.
+  for (const commit of inherited) await git(['-c', 'user.name=Landing', 'cherry-pick', commit], f.repo);
+  assert.notEqual((await git(['rev-parse', 'HEAD'], f.repo)).trim(), oldTip, 'Y landing has new commit IDs');
+  assert.equal(await git(['diff', oldTip, 'HEAD'], f.repo), '', 'Y landing preserves exactly the old tip content');
+  await git(['checkout', '-q', 'main'], f.repo);
+  await git(['merge', '--no-ff', '-m', 'land Y', branch], f.repo);
+  const merged = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+  const record = await readRun(f.runId);
+  record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch: oldBranch, base_sha: f.base } };
+  await saveRun(record);
+
+  const plain = nodeCLI(f, false);
+  assert.equal(plain.status, 1, plain.stderr);
+  assert.match(plain.stderr, /commits since its base changed owned files: src\/shared0\.mjs/);
+  assert.equal(plain.stdout, '', 'plain refusal has zero stdout bytes');
+  assert.equal(lockExists(f.runId), false, 'plain refusal leaves zero run lock directories');
+
+  const result = nodeCLI(f);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr, '', 'successful Node rebase has zero stderr bytes');
+  assert.deepEqual(JSON.parse(result.stdout), { block: 'B205b', event: 'rebased', old_base: f.base, new_base: merged, accepted_landed: [{ file: f.files[0], blocks: ['B228'] }] });
+  assert.equal((await git(['rev-parse', 'HEAD~2'], f.tree.path)).trim(), merged, 'exactly two X commits sit on main');
+  assert.deepEqual((await git(['log', '--reverse', '--format=%s', `${merged}..HEAD`], f.tree.path)).trim().split('\n'), ['local 0', 'local 1'], 'zero pre-land Y commits are replayed');
+  assert.equal(lockExists(f.runId), false, 'success leaves zero run lock directories');
+});
+
+test('native refusal reports one redacted reason line, releases its lock, and preserves exact state', available, async () => {
+  const f = await fixture('refusal-line');
+  const secret = 'fixture-private-diagnostic';
+  registerSecret(secret);
+  const file = `src/${secret}\nsecond-line.mjs`;
+  writeFile(f.repo, file, '// foreign\n');
+  await git(['add', '-A'], f.repo);
+  await git(['commit', '-qm', 'foreign owned file'], f.repo);
+  const foreign = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+  const before = [await f.head(), await f.entry(), await f.rows()];
+  const result = await f.rebase();
+  assert.equal(result.code, 1, 'native refusal preserves exit 1');
+  assert.equal(result.out, '', 'native refusal has zero stdout bytes');
+  assert.match(result.err, /owned-conflict/);
+  assert.ok(result.err.includes(foreign), 'reason identifies the refused commit');
+  assert.equal(result.err.includes(secret), false, 'reason has zero registered secret occurrences');
+  assert.equal(result.err.trimEnd().split('\n').length, 1, 'native reason occupies exactly one stderr line');
+  assert.equal(lockExists(f.runId), false, 'native refusal leaves zero run lock directories');
+  assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'refusal changes zero HEADs, bases or ledger rows');
+});
 
 test('landed siblings: five owned files queue again, bases move, row verifies and committers survive without identity', available, async () => {
   const f = await fixture('siblings', 'project');

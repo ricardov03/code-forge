@@ -507,13 +507,16 @@ export async function runBlock(args, deps = {}) {
     if (!id || !runId) throw new StateError('usage', 'a block id and --run are required');
     if (sub === 'rebase' && flags['accept-landed'] === true) {
       if (positionals.length !== 1 || Object.keys(flags).some((key) => !['run', 'json', 'accept-landed'].includes(key))) throw new StateError('usage', '--accept-landed takes one block id, --run and optional --json');
+      // Native owns the run lock through validation, replay and publication.
+      // Do not wrap this call in a Node run lock: the helper takes the same lock.
       const result = await runNative(['block-rebase-landed', '--home', os.homedir(), '--run', runId, '--block', id, '--json']);
       if (result === null) {
         err('block rebase --accept-landed needs the native binary (native/bin/<platform>-<arch>)\n');
         return 1;
       }
       if (result.result !== 'ok') {
-        err(result.stderr || 'block rebase --accept-landed: native command failed\n');
+        const reason = redact(result.stderr).replace(/[\r\n\u2028\u2029]+/g, ' ').trim();
+        err(`${reason || 'block rebase --accept-landed: native command failed'}\n`);
         return result.code ?? 1;
       }
       const moved = JSON.parse(result.stdout);
