@@ -122,6 +122,87 @@ test('landed siblings: five owned files queue again, bases move, row verifies an
   assert.deepEqual(verifyRow(rows[0], await loadKey(f.runId)), { ok: true });
 });
 
+test('no-ff landing credits the closed block exactly; an extra owned-file merge edit refuses without mutation', available, async () => {
+  for (const evil of [true, false]) {
+    const f = await fixture(`merge-${evil}`, 'project');
+    const branch = `forge/${f.runId}/B228`;
+    await git(['checkout', '-qb', branch], f.repo);
+    writeFile(f.repo, f.files[0], '// B228\n');
+    await git(['add', '-A'], f.repo);
+    await git(['commit', '-qm', 'closed block change'], f.repo);
+    const tip = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+    await git(['checkout', '-q', 'main'], f.repo);
+    // Diverge main so the merge's diff against its second parent also has files
+    // that the sibling did not change. Eligibility uses the first parent only.
+    writeFile(f.repo, 'upstream.md', 'unowned main change\n');
+    await git(['add', '-A'], f.repo);
+    await git(['commit', '-qm', 'advance main'], f.repo);
+    await git(['merge', '--no-ff', '--no-commit', branch], f.repo);
+    if (evil) writeFile(f.repo, f.files[1], '// extra merge edit\n');
+    await git(['add', '-A'], f.repo);
+    await git(['commit', '-qm', 'land closed block'], f.repo);
+    const merged = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+    assert.equal((await git(['rev-parse', 'HEAD^2'], f.repo)).trim(), tip, 'second parent is the closed block tip');
+    const record = await readRun(f.runId);
+    record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch, base_sha: f.base } };
+    await saveRun(record);
+    const before = [await f.head(), await f.entry(), await f.rows()];
+    const result = await f.rebase();
+    if (evil) {
+      assert.equal(result.code, 1, result.err || result.out);
+      assert.equal(result.out, '');
+      assert.match(result.err, /owned-conflict/);
+      assert.ok(result.err.includes(merged), 'refusal names the evil merge commit');
+      assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'evil merge changes no HEAD, bases or rows');
+    } else {
+      assert.equal(result.code, 0, result.err);
+      const accepted = [{ file: f.files[0], blocks: ['B228'] }];
+      assert.deepEqual(JSON.parse(result.out), { block: 'B205b', event: 'rebased', old_base: f.base, new_base: merged, accepted_landed: accepted });
+      const rows = (await f.rows()).filter((row) => row.event === 'block.rebase');
+      assert.equal(rows.length, 1, 'exactly one rebase row');
+      assert.deepEqual(rows[0].accepted_landed, accepted, 'row credits exactly the closed block and its one changed owned file');
+      assert.equal((await git(['rev-parse', 'HEAD~2'], f.tree.path)).trim(), merged, 'local commits replay onto the landing merge');
+    }
+  }
+});
+
+test('a sync merge cannot credit an evil landing edit to a file changed only on main', available, async () => {
+  const f = await fixture('sync-merge', 'project');
+  const branch = `forge/${f.runId}/B228`;
+  await git(['checkout', '-qb', branch], f.repo);
+  writeFile(f.repo, f.files[0], '// B228\n');
+  await git(['add', '-A'], f.repo);
+  await git(['commit', '-qm', 'block change'], f.repo);
+  await git(['checkout', '-q', 'main'], f.repo);
+  writeFile(f.repo, f.files[1], '// main sibling change\n');
+  await git(['add', '-A'], f.repo);
+  await git(['commit', '-qm', 'main sibling change'], f.repo);
+  const syncedBase = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+  const mainBranch = `forge/${f.runId}/B231`;
+  await git(['branch', mainBranch], f.repo);
+  await git(['checkout', '-q', branch], f.repo);
+  await git(['merge', '--no-ff', '-m', 'sync main', 'main'], f.repo);
+  await git(['checkout', '-q', 'main'], f.repo);
+  await git(['merge', '--no-ff', '--no-commit', branch], f.repo);
+  writeFile(f.repo, f.files[1], '// evil landing edit\n');
+  await git(['add', '-A'], f.repo);
+  await git(['commit', '-qm', 'evil landing'], f.repo);
+  const merged = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+  const record = await readRun(f.runId);
+  // The recorded synced base excludes main's commit from B228's origins, but
+  // diffing the sync merge against every parent still exposes main's file.
+  record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch, base_sha: syncedBase } };
+  record.blocks.B231 = { status: 'closed', base_sha: f.base, owned_files: [f.files[1]], worktree: { branch: mainBranch, base_sha: f.base } };
+  await saveRun(record);
+  const before = [await f.head(), await f.entry(), await f.rows()];
+  const result = await f.rebase();
+  assert.equal(result.code, 1, result.err || result.out);
+  assert.equal(result.out, '');
+  assert.match(result.err, /owned-conflict/);
+  assert.ok(result.err.includes(merged), 'refusal names the evil landing merge, not the credited main commit');
+  assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'HEAD, bases and ledger stay unchanged');
+});
+
 test('foreign owned commits before a sibling fork or recorded worktree base refuse without mutation', available, async (t) => {
   for (const base of ['block', 'worktree']) {
     await t.test(base, async () => {
