@@ -631,6 +631,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 					oldBase, _ := previous["test_base"].(string)
 					safeBase := gates.ReusableBaseMove(cwd, oldBase, base)
 					if oldBase != "" && oldBase != base && !safeBase {
+						scope.Kind = "full"
 						scope.Files = []string{}
 						scope.Report, scope.Reason = "full", "no_baseline"
 					}

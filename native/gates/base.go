@@ -38,7 +38,7 @@ func MergeBase(cwd string, block ledger.Object) string {
 // BaseDelta counts only the block's changes after a rebase, including untracked
 // paths and deletions, rather than every owned file inherited from the base.
 func BaseDelta(cwd, base string, block ledger.Object) ([]string, error) {
-	tracked, err := gitx.Run(cwd, "diff", "--name-only", "-z", base)
+	tracked, err := gitx.Run(cwd, "diff", "--no-renames", "--name-only", "-z", base)
 	if err != nil {
 		return nil, err
 	}

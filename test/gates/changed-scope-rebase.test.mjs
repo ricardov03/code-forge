@@ -131,6 +131,29 @@ test('a source base move invalidates a green full suite and prints why it runs',
   }
 });
 
+test('native source base moves reset related scope and run the full command without Node', async () => {
+  const f = await fixture(true);
+  f.noNode = true;
+  await put(f, 'test/a.test.mjs', '// changed block test\n');
+  await put(f, 'test/other.test.mjs', '// empty graph\n');
+  await put(f, 'src/a.mjs', 'export const a = 2;\n');
+  const config = JSON.parse(await readFile(path.join(f.repo, '.code-forge.yml'), 'utf8'));
+  config.gates.test.push('{changed_files}');
+  await put(f, '.code-forge.yml', JSON.stringify(config));
+  commit(f);
+  assert.equal(gate(f).scope, 'related', 'the first run selects the block pair');
+  await release(f, true);
+  const result = gate(f);
+  assert.deepEqual(JSON.parse(result.stdout), [], 'full command receives no test or changed-file filters');
+  assert.deepEqual([result.scope, result.reason], ['full', 'no_baseline']);
+  assert.equal(result.reused ?? false, false);
+  assert.equal(result.skipped, false);
+  const logged = await rows(f);
+  assert.equal(logged.length, 2);
+  assert.deepEqual([logged[1].scope, logged[1].reason], ['full', 'no_baseline']);
+  assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\nrun\n');
+});
+
 test('native Go-only changes select exactly all binary parity tests and print the dependency reason', async () => {
   for (const native of [false, true]) {
     for (const baseAware of [false, true]) {
@@ -227,7 +250,7 @@ test('native base-aware empty graphs scope and reuse with Node unavailable', asy
     await put(f, 'test/other.test.mjs', '// other test\n');
     // Commit the empty import graph on main before changing the block pair.
     git(f, 'checkout', '-q', 'main'); commit(f); git(f, 'checkout', '-q', 'block');
-    git(f, 'rebase', 'main');
+    git(f, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'rebase', 'main');
     await put(f, 'src/a.mjs', 'export const a = 2;\n');
     await put(f, 'test/a.test.mjs', '// changed block test\n'); commit(f);
     await release(f);
@@ -238,7 +261,8 @@ test('native base-aware empty graphs scope and reuse with Node unavailable', asy
       assert.equal(gate(f).reused, true);
       git(f, 'checkout', '-q', 'main');
       await put(f, 'docs/next-release.md', 'next release\n'); commit(f);
-      git(f, 'checkout', '-q', 'block'); git(f, 'rebase', 'main');
+      git(f, 'checkout', '-q', 'block');
+      git(f, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'rebase', 'main');
       assert.equal(gate(f).reused, true);
       assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\n');
       await release(f, true);
@@ -256,6 +280,8 @@ test('native base-aware empty graphs scope and reuse with Node unavailable', asy
 test('empty-graph full-suite stamps are reusable across Go and Node', async () => {
   for (const native of [false, true]) {
     const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
+    // Keep the stamped environment identical across engines and forbid Go handovers.
+    f.noNode = true;
     await put(f, 'test/a.test.mjs', '// block test\n');
     await put(f, 'test/other.test.mjs', '// other test\n');
     await put(f, 'src/a.mjs', 'export const a = 2;\n'); commit(f);
