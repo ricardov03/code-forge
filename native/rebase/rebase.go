@@ -349,7 +349,8 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		}
 		// A credited sibling may have been rewritten before its landing merge.
 		// Its pre-land branch can still be an ancestor of this block even though
-		// those commit IDs are absent from newBase. Replay only after that tip.
+		// those commit IDs are absent from newBase. Skip a tip only after proving
+		// its skipped commits are represented on newBase, not just its sibling tip.
 		replayFrom := oldBase
 		for _, field := range blocks {
 			b, _ := field.Value.(ledger.Object)
@@ -400,9 +401,33 @@ func Run(home, runID, blockID string) (result Result, err error) {
 				if _, err := git(tree, "merge-base", "--is-ancestor", replayFrom, tip); err != nil {
 					continue
 				}
-				if _, err := git(tree, "merge-base", "--is-ancestor", tip, oldHead); err == nil {
-					replayFrom = tip
+				if _, err := git(tree, "merge-base", "--is-ancestor", tip, oldHead); err != nil {
+					continue
 				}
+				patches, err := git(tree, "cherry", newBase, tip, replayFrom)
+				if err != nil {
+					return err
+				}
+				unlanded := false
+				for _, line := range strings.Split(patches, "\n") {
+					if strings.HasPrefix(line, "+ ") {
+						unlanded = true
+						break
+					}
+				}
+				if unlanded {
+					continue
+				}
+				// Cherry ignores merges, whose resolutions can contain unique work.
+				// Leave unrepresented merges for replay to refuse without mutation.
+				merges, err := git(tree, "rev-list", "--merges", replayFrom+".."+tip, "--not", newBase)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(merges) != "" {
+					continue
+				}
+				replayFrom = tip
 			}
 		}
 		// No mutation occurs until all origin checks pass. Every failure from

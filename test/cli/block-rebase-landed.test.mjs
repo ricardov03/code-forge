@@ -17,7 +17,7 @@ import { contentHash } from '../../src/worker/ticket.mjs';
 
 // Never inherit the coder's run/ownership context into fixture children. Build
 // the current source privately, independent of installed release binaries.
-for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete process.env[key];
+for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete process.env[key];
 const testBinary = path.join(freshDir('native'), 'code-forge-native');
 const built = spawnSync('go', ['build', '-o', testBinary, './cmd/code-forge-native'], {
   cwd: fileURLToPath(new URL('../../native/', import.meta.url)), encoding: 'utf8',
@@ -124,7 +124,7 @@ async function fixture(label, prefix = '') {
   };
 }
 
-test('Node landed rebase releases refused locks and replays only X after the credited pre-land Y tip', available, async (t) => {
+test('Node landed rebase succeeds end to end from no stale lock, releases plain refusal locks, and replays only X after Y', available, async (t) => {
   for (const ownsY of [false, true]) await t.test(`owns Y files: ${ownsY}`, async () => {
     const f = await fixture(`chained-${ownsY}`);
     const own = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.tree.path)).trim().split('\n');
@@ -157,6 +157,7 @@ test('Node landed rebase releases refused locks and replays only X after the cre
     await saveRun(record);
 
     if (ownsY) {
+      assert.equal(lockExists(f.runId), false, 'plain rebase starts with zero run lock directories');
       const plain = nodeCLI(f, false);
       assert.equal(plain.status, 1, plain.stderr);
       assert.match(plain.stderr, /commits since its base changed owned files: src\/shared0\.mjs/);
@@ -164,6 +165,7 @@ test('Node landed rebase releases refused locks and replays only X after the cre
       assert.equal(lockExists(f.runId), false, 'plain refusal leaves zero run lock directories');
     }
 
+    assert.equal(lockExists(f.runId), false, 'Node landed rebase starts with zero run lock directories');
     const result = nodeCLI(f);
     assert.equal(result.status, 0, result.stderr);
     assert.equal(result.stderr, '', 'successful Node rebase has zero stderr bytes');
@@ -172,6 +174,78 @@ test('Node landed rebase releases refused locks and replays only X after the cre
     assert.deepEqual((await git(['log', '--reverse', '--format=%s', `${merged}..HEAD`], f.tree.path)).trim().split('\n'), ['local 0', 'local 1'], 'zero pre-land Y commits are replayed');
     assert.equal(lockExists(f.runId), false, 'success leaves zero run lock directories');
   });
+});
+
+test('Node landed rebase preserves every unlanded change on the sibling other branch', available, async (t) => {
+  for (const landed of ['default', 'custom']) await t.test(`landed branch: ${landed}`, async () => {
+    const f = await fixture(`unlanded-tip-${landed}`);
+    const own = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.tree.path)).trim().split('\n');
+    const defaultBranch = `forge/${f.runId}/B228`;
+    const customBranch = 'other-Y';
+    const landedBranch = landed === 'default' ? defaultBranch : customBranch;
+    const unlandedBranch = landed === 'default' ? customBranch : defaultBranch;
+    await git(['checkout', '-qb', landedBranch], f.repo);
+    writeFile(f.repo, f.files[0], '// landed Y\n');
+    await git(['add', '-A'], f.repo);
+    await git(['commit', '-qm', 'landed Y'], f.repo);
+    await git(['checkout', '-qb', unlandedBranch], f.repo);
+    for (const i of [1, 2]) {
+      writeFile(f.repo, f.files[i], `// unlanded ${i}\n`);
+      await git(['add', '-A'], f.repo);
+      await git(['commit', '-qm', `unlanded ${i}`], f.repo);
+    }
+    await git(['reset', '--hard', unlandedBranch], f.tree.path);
+    await git(['cherry-pick', ...own], f.tree.path);
+    await git(['checkout', '-q', 'main'], f.repo);
+    await git(['merge', '--no-ff', '-m', 'land only Y', landedBranch], f.repo);
+    const merged = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+    const record = await readRun(f.runId);
+    record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch: customBranch, base_sha: f.base } };
+    await saveRun(record);
+
+    assert.equal(lockExists(f.runId), false, 'rebase starts with zero run lock directories');
+    const result = nodeCLI(f);
+    assert.equal(result.status, 0, result.stderr);
+    assert.deepEqual((await git(['log', '--reverse', '--format=%s', `${merged}..HEAD`], f.tree.path)).trim().split('\n'),
+      ['unlanded 1', 'unlanded 2', 'local 0', 'local 1'], 'both unlanded commits and both local commits survive');
+    for (const i of [1, 2]) assert.equal(readFileSync(path.join(f.tree.path, f.files[i]), 'utf8'), `// unlanded ${i}\n`, `unlanded change ${i} survives on the block branch`);
+    assert.equal(readFileSync(path.join(f.tree.path, 'src/local.mjs'), 'utf8'), '// local 1\n');
+    assert.equal(lockExists(f.runId), false, 'success leaves zero run lock directories');
+  });
+});
+
+test('Node landed rebase refuses an unlanded merge edit without dropping it', available, async () => {
+  const f = await fixture('unlanded-merge-edit');
+  const own = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.tree.path)).trim().split('\n');
+  const branch = `forge/${f.runId}/B228`;
+  const other = 'unlanded-merge-Y';
+  await git(['checkout', '-qb', branch], f.repo);
+  writeFile(f.repo, f.files[0], '// landed Y\n');
+  await git(['add', '-A'], f.repo);
+  await git(['commit', '-qm', 'landed Y'], f.repo);
+  await git(['checkout', '-qb', other, f.base], f.repo);
+  await git(['merge', '--no-ff', '--no-commit', branch], f.repo);
+  writeFile(f.repo, f.files[1], '// unlanded merge edit\n');
+  await git(['add', '-A'], f.repo);
+  await git(['commit', '-qm', 'unlanded merge edit'], f.repo);
+  await git(['reset', '--hard', other], f.tree.path);
+  await git(['cherry-pick', ...own], f.tree.path);
+  await git(['checkout', '-q', 'main'], f.repo);
+  await git(['merge', '--no-ff', '-m', 'land only Y', branch], f.repo);
+  const record = await readRun(f.runId);
+  record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch: other, base_sha: f.base } };
+  await saveRun(record);
+  const before = [await f.head(), await f.entry(), await f.rows()];
+  assert.equal(await git(['cherry', 'main', other], f.repo), '', 'git cherry alone cannot see the unlanded merge edit');
+
+  const result = nodeCLI(f);
+  assert.equal(result.status, 1, 'unlanded merge must refuse instead of silently dropping its edit');
+  assert.equal(result.stdout, '');
+  assert.match(result.stderr, /rebase-conflict/);
+  assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'refusal preserves exact HEAD, both bases and ledger');
+  assert.equal(readFileSync(path.join(f.tree.path, f.files[1]), 'utf8'), '// unlanded merge edit\n');
+  assert.equal(await git(['status', '--porcelain'], f.tree.path), '');
+  assert.equal(lockExists(f.runId), false, 'merge refusal leaves zero run lock directories');
 });
 
 test('native refusal reports one redacted reason line, releases its lock, and preserves exact state', available, async () => {
@@ -184,6 +258,7 @@ test('native refusal reports one redacted reason line, releases its lock, and pr
   await git(['commit', '-qm', 'foreign owned file'], f.repo);
   const foreign = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
   const before = [await f.head(), await f.entry(), await f.rows()];
+  assert.equal(lockExists(f.runId), false, 'native refusal starts with zero run lock directories');
   const result = await f.rebase();
   assert.equal(result.code, 1, 'native refusal preserves exit 1');
   assert.equal(result.out, '', 'native refusal has zero stdout bytes');
@@ -254,6 +329,7 @@ test('no-ff landing credits the closed block exactly; an extra owned-file merge 
     const result = await f.rebase();
     if (evil) {
       assert.equal(result.code, 1, result.err || result.out);
+      assert.equal(lockExists(f.runId), false, 'evil landing refusal leaves zero run lock directories');
       assert.equal(result.out, '');
       assert.match(result.err, /owned-conflict/);
       assert.ok(result.err.includes(merged), 'refusal names the evil merge commit');
@@ -301,6 +377,7 @@ test('a sync merge cannot credit an evil landing edit to a file changed only on 
   const before = [await f.head(), await f.entry(), await f.rows()];
   const result = await f.rebase();
   assert.equal(result.code, 1, result.err || result.out);
+  assert.equal(lockExists(f.runId), false, 'sync merge refusal leaves zero run lock directories');
   assert.equal(result.out, '');
   assert.match(result.err, /owned-conflict/);
   assert.ok(result.err.includes(merged), 'refusal names the evil landing merge, not the credited main commit');
@@ -329,6 +406,7 @@ test('foreign owned commits before a sibling fork or recorded worktree base refu
       const before = [await f.head(), await f.entry(), await f.rows()];
       const result = await f.rebase();
       assert.equal(result.code, 1, result.err || result.out);
+      assert.equal(lockExists(f.runId), false, 'foreign origin refusal leaves zero run lock directories');
       assert.equal(result.out, '');
       assert.match(result.err, /owned-conflict/);
       assert.ok(result.err.includes(file) && result.err.includes(foreign), 'refusal names the foreign commit and owned file');
@@ -356,6 +434,7 @@ test('errors after replay restore HEAD and leave bases and ledger unchanged', av
         else writeFileSync(key, keyBytes, { mode: 0o600 });
       }
       assert.equal(result.code, 1);
+      assert.equal(lockExists(f.runId), false, `${failure} failure leaves zero run lock directories`);
       assert.equal(result.out, '');
       assert.match(result.err, failure === 'queue' ? /queue-unreadable/ : /no signer key/);
       assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'post-replay failure restores HEAD and publishes no rebase');
@@ -385,6 +464,7 @@ test('foreign owned commits, including a reverted change after a landed commit, 
     const before = [await f.head(), await f.entry(), await f.rows()];
     const result = await f.rebase();
     assert.equal(result.code, 1);
+    assert.equal(lockExists(f.runId), false, 'foreign commit refusal leaves zero run lock directories');
     assert.equal(result.out, '');
     assert.match(result.err, /owned-conflict/);
     assert.ok(result.err.includes(file) && result.err.includes(foreign), 'refusal identifies the file and foreign commit');
@@ -398,6 +478,7 @@ test('foreign owned commits, including a reverted change after a landed commit, 
   const before = [await f.head(), await f.entry(), await f.rows()];
   const result = await f.rebase();
   assert.equal(result.code, 1);
+  assert.equal(lockExists(f.runId), false, 'replay conflict leaves zero run lock directories');
   assert.equal(result.out, '');
   assert.match(result.err, /rebase-conflict/);
   assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'conflict after replay restores exact head and both bases, with zero rows');
@@ -415,8 +496,10 @@ test('under an active grant landed rebase needs no TTY, human acceptance stays r
   const humanArgs = ['rebase', 'B205b', '--run', f.runId, '--accept-changed', f.files[0], '--reason', 'owner acceptance'];
   const human = await cli(humanArgs, { isTTY: true, confirm: async () => true });
   assert.equal(human.code, 1);
+  assert.equal(lockExists(f.runId), false, 'active grant refusal leaves zero run lock directories');
   assert.match(human.err, /refused while an autopilot grant is active/);
   assert.equal((await cli(humanArgs)).code, 2, 'human acceptance still requires a terminal');
+  assert.equal(lockExists(f.runId), false, 'no-terminal refusal leaves zero run lock directories');
   assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before);
   const result = await f.rebase();
   assert.equal(result.code, 0, result.err);
@@ -437,5 +520,6 @@ test('disabled native binary requires the native binary and changes nothing', as
     if (previous === undefined) delete process.env.CODE_FORGE_NATIVE; else process.env.CODE_FORGE_NATIVE = previous;
   }
   assert.deepEqual(result, { code: 1, out: '', err: 'block rebase --accept-landed needs the native binary (native/bin/<platform>-<arch>)\n' });
+  assert.equal(lockExists(f.runId), false, 'disabled native refusal leaves zero run lock directories');
   assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before);
 });
