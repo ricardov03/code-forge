@@ -31,6 +31,7 @@ import { lstat, readFile } from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from '../util/exec.mjs';
 import { diffNoIndexArgv } from '../util/git.mjs';
+import { canonicalJSON } from '../state/signer.mjs';
 
 export { computeScopes, ownsFile, scopeGate } from '../state/registry.mjs';
 
@@ -177,7 +178,7 @@ function withoutVersion(bytes) {
   const value = JSON.parse(bytes.toString('utf8'));
   delete value.version;
   if (value.packages?.['']) delete value.packages[''].version;
-  return Buffer.from(JSON.stringify(value));
+  return Buffer.from(canonicalJSON(value));
 }
 
 /** Only documentation outside known graph edges and version-only manifest changes can

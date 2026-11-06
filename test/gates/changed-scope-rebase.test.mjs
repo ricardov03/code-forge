@@ -16,7 +16,7 @@ before(async () => {
   await mkdir(path.dirname(binary), { recursive: true });
   await mkdir(path.join(scratch, 'pkg/bin'), { recursive: true });
   await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(scratch, 'pkg/bin/code-forge.mjs'));
-  const build = spawnSync('go', ['build', '-o', binary, './cmd/code-forge-native'], {
+  const build = spawnSync('go', ['build', '-ldflags', `-X main.reviewWaitNodeVersion=${process.version}`, '-o', binary, './cmd/code-forge-native'], {
     cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...cleanEnv(), GOCACHE: path.join(scratch, 'go-cache'), GOPROXY: 'off', GOTOOLCHAIN: 'local', CGO_ENABLED: '0' },
   });
   assert.equal(build.status, 0, build.stderr);
@@ -39,7 +39,7 @@ function commit(f) {
 }
 async function fixture(native, owned = ['src/a.mjs', 'test/a.test.mjs'], threshold = 10) {
   const root = await mkdtemp(path.join(scratch, 'case-'));
-  const f = { repo: path.join(root, 'repo'), home: path.join(root, 'home'), native, record: null };
+  const f = { repo: path.join(root, 'repo'), home: path.join(root, 'home'), native, record: null, noNode: false, logHandover: false };
   await mkdir(f.repo); await mkdir(f.home);
   git(f, 'init', '-q', '-b', 'main');
   await put(f, '.gitignore', '.code-forge/\nexecutions\n');
@@ -68,7 +68,7 @@ async function fixture(native, owned = ['src/a.mjs', 'test/a.test.mjs'], thresho
 function gate(f, changed = true) {
   const args = ['gates', 'run', '--run', 'fixture', '--block', 'B1', '--json', ...(changed ? ['--changed'] : [])];
   const child = spawnSync(f.native ? binary : process.execPath, f.native ? args : [path.join(ROOT, 'bin/code-forge.mjs'), ...args], {
-    cwd: f.repo, encoding: 'utf8', env: { ...cleanEnv(), HOME: f.home, TMPDIR: scratch, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '1' },
+    cwd: f.repo, encoding: 'utf8', env: { ...cleanEnv(), HOME: f.home, TMPDIR: scratch, CODE_FORGE_NATIVE: f.logHandover ? '1' : '0', CODE_FORGE_NODE: f.noNode ? '/nonexistent' : process.execPath, CODE_FORGE_HANDOVER_LOG: f.logHandover ? '1' : '0', CODE_FORGE_NO_ERROR_LOG: '1' },
   });
   assert.equal(child.status, 0, child.stderr + child.stdout);
   return JSON.parse(child.stdout).results.find((r) => r.gate === 'test');
@@ -107,7 +107,7 @@ test('green full suite is reused for the same tree and a release-only base move,
   for (const native of [false, true]) {
     const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
     await put(f, 'src/a.mjs', 'export const a = 2;\n'); commit(f);
-    assert.deepEqual(JSON.parse(gate(f, false).stdout), [], 'first call runs the full suite');
+    assert.deepEqual(JSON.parse(gate(f).stdout), [], 'first changed call runs the full suite');
     assert.equal(gate(f).reused, true, 'same-tree full result reused');
     await release(f);
     assert.equal(gate(f).reused, true, 'docs and version-only base move reused');
@@ -122,7 +122,7 @@ test('a source base move invalidates a green full suite and prints why it runs',
   for (const native of [false, true]) {
     const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
     await put(f, 'src/a.mjs', 'export const a = 2;\n'); commit(f);
-    gate(f, false);
+    gate(f);
     await release(f, true);
     const result = gate(f);
     assert.equal(result.reused ?? false, false, 'source changes cannot reuse green');
@@ -176,7 +176,7 @@ test('moving a source file into docs invalidates the green full suite across a r
     const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
     await put(f, 'src/a.mjs', 'export const a = 2;\n');
     commit(f);
-    gate(f, false);
+    gate(f);
     git(f, 'checkout', '-q', 'main');
     await mkdir(path.join(f.repo, 'docs'));
     git(f, 'mv', 'src/x.txt', 'docs/x.txt');
@@ -200,5 +200,83 @@ test('doc-only block selects its declared test without adding binary parity test
     const result = gate(f);
     assert.deepEqual(JSON.parse(result.stdout), ['test/a.test.mjs'], 'one declared test and zero parity tests');
     assert.equal(result.reason, 'unpaired', 'safe fallback explains the doc without a pair');
+  }
+});
+
+test('plain worktree-branch gates keep legacy rows and cannot seed changed full-suite reuse', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
+    const config = JSON.parse(await readFile(path.join(f.repo, '.code-forge.yml'), 'utf8'));
+    config.gates.test = config.gates.test.slice(0, -1);
+    await put(f, '.code-forge.yml', JSON.stringify(config));
+    gate(f, false);
+    const [plain] = await rows(f);
+    assert.equal(Object.hasOwn(plain, 'files'), false);
+    assert.equal(Object.hasOwn(plain, 'test_base'), false);
+    assert.equal(Object.hasOwn(plain.results[0], 'full_stamp'), false);
+    assert.equal(gate(f).reused ?? false, false, 'a changed run must measure its own full-suite evidence');
+    assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\nrun\n');
+  }
+});
+
+test('native base-aware empty graphs scope and reuse with Node unavailable', async () => {
+  for (const threshold of [0, 2]) {
+    const f = await fixture(true, ['src/a.mjs', 'test/a.test.mjs', 'package.json', 'CHANGELOG.md', 'docs/release.md'], threshold);
+    f.noNode = true;
+    await put(f, 'test/a.test.mjs', '// block test\n');
+    await put(f, 'test/other.test.mjs', '// other test\n');
+    // Commit the empty import graph on main before changing the block pair.
+    git(f, 'checkout', '-q', 'main'); commit(f); git(f, 'checkout', '-q', 'block');
+    git(f, 'rebase', 'main');
+    await put(f, 'src/a.mjs', 'export const a = 2;\n');
+    await put(f, 'test/a.test.mjs', '// changed block test\n'); commit(f);
+    await release(f);
+    const first = gate(f);
+    assert.deepEqual(JSON.parse(first.stdout), threshold ? ['test/a.test.mjs'] : []);
+    assert.deepEqual([first.scope, first.reason], threshold ? ['related', 'no_baseline'] : ['full', 'threshold']);
+    if (!threshold) {
+      assert.equal(gate(f).reused, true);
+      git(f, 'checkout', '-q', 'main');
+      await put(f, 'docs/next-release.md', 'next release\n'); commit(f);
+      git(f, 'checkout', '-q', 'block'); git(f, 'rebase', 'main');
+      assert.equal(gate(f).reused, true);
+      assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\n');
+      await release(f, true);
+      const moved = gate(f);
+      assert.equal(moved.reused ?? false, false, 'a source base move invalidates native evidence');
+      assert.deepEqual([moved.scope, moved.reason, moved.reuse_reason], ['full', 'no_baseline', 'tree_changed']);
+      assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\nrun\n');
+    }
+    const logged = await rows(f);
+    assert.equal(logged.length, threshold ? 1 : 4);
+    assert.ok(logged.every((row) => /^[a-f0-9]{40,64}$/.test(row.test_base)));
+  }
+});
+
+test('empty-graph full-suite stamps are reusable across Go and Node', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
+    await put(f, 'test/a.test.mjs', '// block test\n');
+    await put(f, 'test/other.test.mjs', '// other test\n');
+    await put(f, 'src/a.mjs', 'export const a = 2;\n'); commit(f);
+    gate(f);
+    f.native = !native;
+    assert.equal(gate(f).reused, true, 'the other engine recognizes the same full stamp');
+    assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\n');
+  }
+});
+
+test('direct Go changed handovers log the unsupported dependency reason', async () => {
+  for (const graph of ['imports', 'native']) {
+    const f = await fixture(true, graph === 'native' ? ['native/main.go'] : ['src/a.mjs']);
+    f.logHandover = true;
+    if (graph === 'native') {
+      await put(f, 'test/a.test.mjs', '// empty graph\n');
+      await put(f, 'test/other.test.mjs', '// empty graph\n');
+    }
+    gate(f);
+    const logged = (await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+    assert.deepEqual(logged.map(({ verb, sub, reason }) => [verb, sub, reason]),
+      [['gates', 'run', graph === 'native' ? 'gates-changed-native-dependencies' : 'gates-changed-import-graph']]);
   }
 });

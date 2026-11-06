@@ -299,7 +299,13 @@ func gatesNumber(v any) (float64, bool) {
 }
 func gatesNative(args []string, o gatesOptions) (int, bool) { return gatesNativeStep(args, o, nil) }
 
-func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) {
+func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*handoverReason) (int, bool) {
+	handoverReason := func(reason handoverReason) (int, bool) {
+		if len(reasons) > 0 {
+			*reasons[0] = reason
+		}
+		return 0, false
+	}
 	stdout, stderr := step.writers()
 	gatesErrf := func(format string, args ...any) {
 		if step == nil {
@@ -492,23 +498,16 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				continue
 			}
 			if strings.HasPrefix(file, "test/config/") || strings.HasPrefix(file, "test/doctor/") || !gatesEmptyTest(cwd, file) {
-				return 0, false
+				return handoverReason(hGatesChangedGraph)
 			}
 		}
 	}
-	// Base-aware tree stamps and native binary subprocess dependencies belong to the
-	// oracle's graph. Delegate before taking the slot or running any command, just as
-	// executable JS import graphs above do; never use ChangedEmptyGraph for these.
-	if baseBranch, ok := block.Get("base_branch").(string); ok && baseBranch != "" {
-		branch, err := gitx.Run(cwd, "symbolic-ref", "--quiet", "--short", "HEAD")
-		if err != nil || strings.TrimSpace(branch) != baseBranch {
-			return 0, false
-		}
-	}
+	// Implicit binary dependencies still require the oracle's graph. Base-aware
+	// scoping itself is native, including when composed by block land.
 	if o.changed {
 		for _, file := range gates.Strings(block.Get("owned_files")) {
 			if strings.HasPrefix(file, "native/") || file == "native" || file == "scripts/build-native.mjs" {
-				return 0, false
+				return handoverReason(hGatesChangedNative)
 			}
 		}
 	}
@@ -542,6 +541,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	all := false
 	var files ledger.Object
 	var changedScope *gates.Scope
+	base := ""
 	slug := o.slug
 	holder, e := proof.WithSlot(home, o.run, o.block, func(r, b ledger.Object) error {
 		if !o.slugGiven {
@@ -549,6 +549,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		}
 		scope := gates.Scope{Kind: "full", Reason: "no_tests"}
 		var current ledger.Object
+		treeStamp, fullStamp := "", ""
 		if gates.Scoped(p) || o.changed {
 			scope = gates.TestScope(b, listed, threshold)
 			if listErr != nil {
@@ -557,11 +558,22 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				current = gates.Baseline(cwd, b, listed)
 			}
 			if o.changed {
+				base = gates.MergeBase(cwd, b)
+				var delta []string
+				if base != "" {
+					var err error
+					delta, err = gates.BaseDelta(cwd, base, b)
+					if err != nil {
+						return err
+					}
+					scope = gates.TestScopeCount(b, len(delta), threshold)
+				}
 				rows, e := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug)
 				if e != nil {
 					return e
 				}
 				var old map[string]any
+				var previous map[string]any
 				for _, value := range rows {
 					row, ok := value.(map[string]any)
 					if !ok {
@@ -570,9 +582,17 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 					if row["event"] == "gate.done" && row["run"] == o.run && row["block"] == o.block && row["all_ok"] == true {
 						wt := gatesObj(b.Get("worktree")).Get("path")
 						if row["worktree"] == wt {
+							previous = row
 							old, _ = row["files"].(map[string]any)
 						}
 					}
+				}
+				if base != "" && current != nil && previous["test_base"] != base {
+					paths := append([]string{}, delta...)
+					for _, file := range current {
+						paths = append(paths, file.Key)
+					}
+					old = gates.BaseHashes(cwd, base, paths)
 				}
 				// Malformed/foreign baselines require Node's full validation.
 				if old != nil {
@@ -596,6 +616,42 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 					}
 				}
 				scope = gates.ChangedEmptyGraph(old, current, scope, candidates, threshold)
+				if base != "" {
+					scope.Report = "full"
+					if len(scope.Files) > 0 {
+						scope.Report = "related"
+					}
+					if previous == nil && scope.Reason == "" {
+						scope.Reason = "no_baseline"
+					}
+					if current != nil {
+						treeStamp = gates.TreeStamp(cwd)
+						fullStamp = gatesFullStamp(treeStamp, p, configured, b)
+					}
+					oldBase, _ := previous["test_base"].(string)
+					safeBase := gates.ReusableBaseMove(cwd, oldBase, base)
+					if oldBase != "" && oldBase != base && !safeBase {
+						scope.Files = []string{}
+						scope.Report, scope.Reason = "full", "no_baseline"
+					}
+					var prior map[string]any
+					if results, ok := previous["results"].([]any); ok {
+						for _, result := range results {
+							if result, ok := result.(map[string]any); ok && result["gate"] == "test" {
+								prior = result
+							}
+						}
+					}
+					p.ReuseTest = safeBase && fullStamp != "" && prior["full_stamp"] == fullStamp && prior["ok"] == true && prior["skipped"] != true && p.Repeat == nil && ctx.Err() == nil
+					p.ReuseReason = "no_full_baseline"
+					if p.ReuseTest {
+						p.ReuseReason = "same_tree"
+					} else if fullStamp == "" {
+						p.ReuseReason = "no_stamp"
+					} else if prior["full_stamp"] != nil {
+						p.ReuseReason = "tree_changed"
+					}
+				}
 				changedScope = &scope
 			}
 		}
@@ -613,6 +669,15 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 				z, _ := ledger.Stringify(after, false)
 				if string(a) == string(z) {
 					files = after
+					if fullStamp != "" && p.Repeat == nil && treeStamp == gates.TreeStamp(cwd) && base == gates.MergeBase(cwd, b) {
+						for i, result := range results {
+							r := result.(ledger.Object)
+							if r.Get("gate") == "test" && r.Get("ok") == true && r.Get("skipped") != true && r.Get("scope") == "full" && r.Get("flaky") == nil {
+								r.Set("full_stamp", fullStamp)
+								results[i] = r
+							}
+						}
+					}
 				}
 			}
 		}
@@ -677,6 +742,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		if r.Get("flaky") != nil {
 			summary.Set("flaky", r.Get("flaky"))
 		}
+		for _, key := range []string{"full_stamp", "reused", "reuse_reason"} {
+			if value := r.Get(key); value != nil {
+				summary.Set(key, value)
+			}
+		}
 		if r.Get("custom") == true {
 			items, _ := r.Get("evidence").([]any)
 			entry := ledger.Object{{Key: "name", Value: r.Get("gate")}, {Key: "ok", Value: r.Get("ok")}, {Key: "evidence_count", Value: len(items)}}
@@ -726,7 +796,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 		}
 		row.Set("duration_ms", duration)
 		row.Set("results", summaries)
-		if changedScope != nil {
+		if base != "" {
+			row.Set("test_base", base)
+		}
+		if p.ReuseTest && scoped != nil {
+			gatesAdd(&row, scoped)
+		} else if changedScope != nil {
 			gatesAdd(&row, changedScope.Fields(true))
 		} else {
 			gatesAdd(&row, scoped)

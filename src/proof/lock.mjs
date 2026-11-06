@@ -26,6 +26,7 @@ import { StateError } from '../state/paths.mjs';
 import { readRun, saveRun, withRunLock } from '../state/run.mjs';
 import { isAlive } from '../util/reaper.mjs';
 import { recordProof } from './export.mjs';
+import { canonicalJSON } from '../state/signer.mjs';
 
 /** @typedef {import('../state/run.mjs').WriteRow} WriteRow */
 
@@ -154,12 +155,12 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, s
       const record = await readRun(runId);
       const block = record.blocks?.[blockId];
       if (!block) throw new StateError('no-block', `block ${blockId} is not in run ${runId}`);
-      const base = await blockMergeBase(cwd, block);
       // Plain gates without --changed need no scope or baseline.
-      if (!hasScopeItem(gates) && !changed && !base) {
+      if (!hasScopeItem(gates) && !changed) {
         const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}) });
         return { ...ran, ledger_slug: slug ?? record.project };
       }
+      const base = changed ? await blockMergeBase(cwd, block) : null;
       // the slot checked the block is open; it may still be gone by the time it is read again
       const delta = base ? (await computeFileSet({ cwd, base })).all.filter((file) => ownsFile(block.owned_files, file, block.owned_kinds)) : null;
       const ownedFiles = changed && delta ? delta.length : await ownedFileCount(cwd, block.owned_files, block.owned_kinds);
@@ -179,9 +180,9 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, s
         if (!previous && !scope.reason) scope.reason = 'no_baseline';
       }
       const tree = base && current ? await testTreeStamp(cwd, current.dependents) : null;
-      const environment = Object.entries(process.env).filter(([key]) =>
-        !['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK'].includes(key)).sort(([a], [b]) => a.localeCompare(b));
-      const stamp = tree ? createHash('sha256').update(JSON.stringify([tree, gates, environment, process.version])).digest('hex') : null;
+      const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+        !['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK'].includes(key)));
+      const stamp = tree ? createHash('sha256').update(canonicalJSON(['gate-tree-v2', tree, JSON.parse(JSON.stringify(gates)), environment, process.version])).digest('hex') : null;
       const priorTest = previous?.results?.find((result) => result.gate === 'test');
       const safeBase = base && previous ? await reusableBaseMove(cwd, previous.test_base, base, current?.dependents) : false;
       if (base && previous?.test_base && previous.test_base !== base && !safeBase && scope.scope === 'changed') {
