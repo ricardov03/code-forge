@@ -46,11 +46,14 @@ async function fixture(shape) {
   const root = await mkdtemp(path.join(scratch, 'f-'));
   const f = { repo: path.join(root, 'repo'), home: path.join(root, 'home') };
   await mkdir(f.repo); await mkdir(f.home);
+  if (shape === 'symlink') await writeFile(path.join(f.home, 'gate-cwds.txt'), '');
   const live = { version: 1, project: { slug: SLUG }, provider: 'anthropic', engine: 'harness',
     levels: { L0: { model: 'claude-haiku-4-5-20251001' }, L1: { model: 'claude-sonnet-5' }, L2: { model: 'claude-opus-5-5' }, L3: { model: 'claude-fable-5-1' } },
     gates: { test: shape === 'no-suite' ? null : ['/usr/bin/true'], lint: null, types: null, format: null },
     ...(shape === 'grant' ? { close: { require_human: true } } : {}),
     ...(shape === 'hook' ? { hooks: { on_block_end: { argv: ['/bin/sh', '-c', 'test -f "$CODE_FORGE_DONE_FILE" && printf "%s\\n" "$CODE_FORGE_BLOCK_STATUS" >> .code-forge/hook-calls.txt'] } } } : {}) };
+  if (shape === 'symlink') live.gates.test = ['/bin/sh', '-c',
+    `IFS= read -r content < sample.mjs && test "$content" = 'export const value = 2;' && printf '%s\\n' "$PWD" >> "$HOME/gate-cwds.txt"`];
   await writeFile(path.join(f.repo, '.code-forge.yml'), JSON.stringify(live) + '\n');
   await writeFile(path.join(f.repo, '.gitignore'), '.code-forge/\nreport.txt\ntranscript.txt\n');
   await writeFile(path.join(f.repo, 'sample.mjs'), 'export const value = 1;\n');
@@ -92,6 +95,16 @@ async function parity(shape, extra, json, expectedCode = 0) {
   const result = await runParity([...argv, ...extra, ...(json ? ['--json'] : [])], { fixture: await fixture(shape),
     goCommand: BINARY, tempRoot: '/tmp', samePaths: true, env,
     prepare: async (copy) => {
+      if (shape === 'symlink') {
+        const alias = copy.repo + '-link';
+        await symlink(copy.repo, alias);
+        const record = JSON.parse(await readFile(runFile(copy), 'utf8'));
+        record.workspace = alias;
+        for (const file of [runFile(copy), path.join(copy.repo, '.code-forge/runs', RUN + '.json')]) {
+          await writeFile(file, JSON.stringify(record) + '\n');
+        }
+        assert.notEqual(record.workspace, git(record.workspace, ['rev-parse', '--show-toplevel']), 'workspace uses the symlink spelling');
+      }
       const main = git(copy.repo, ['rev-parse', 'main']), tip = git(copy.repo, ['rev-parse', 'block-B1']);
       const daemon = await serveDaemon(copy, RUN, async (req) => {
         const rows = (await readFile(ledgerFile(copy), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
@@ -110,6 +123,8 @@ async function parity(shape, extra, json, expectedCode = 0) {
         const rows = (await readFile(ledgerFile(copy), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
         observed.push({ handovers, record, rows, main, tip, after: git(copy.repo, ['rev-parse', 'main']),
           parents: git(copy.repo, ['rev-list', '--parents', '-n', '1', 'main']).split(' '),
+          gateCwds: shape === 'symlink' ? (await readFile(path.join(copy.home, 'gate-cwds.txt'), 'utf8')).trim().split('\n') : [],
+          worktrees: git(copy.repo, ['worktree', 'list', '--porcelain']),
           hooks: shape === 'hook' && record.blocks.B1.status === 'closed' ? await readFile(path.join(copy.repo, '.code-forge/hook-calls.txt'), 'utf8') : '' });
       };
     },
@@ -131,6 +146,14 @@ async function parity(shape, extra, json, expectedCode = 0) {
       if (merged) assert.deepEqual(actual.parents, [actual.after, actual.main, actual.tip], `${engine}: merged exactly the checked parents`);
       else assert.equal(actual.after, actual.main, `${engine}: main did not move`);
       if (shape === 'hook') assert.equal(actual.hooks, 'closed\n', `${engine}: hook ran once after done publication`);
+      if (shape === 'symlink') {
+        assert.equal(actual.gateCwds.length, 2, `${engine}: scoped and full suite each ran once`);
+        const tree = actual.record.blocks.B1.worktree.path;
+        assert.equal(actual.gateCwds[0], tree, `${engine}: scoped suite ran in block worktree`);
+        assert.equal(path.dirname(actual.gateCwds[1]), path.dirname(tree), `${engine}: full suite ran in a sibling trial worktree`);
+        assert.match(path.basename(actual.gateCwds[1]), /^\.merge-gate-/, `${engine}: full suite ran inside the trial tree`);
+        assert.equal(actual.worktrees.includes('.merge-gate-'), false, `${engine}: trial worktree was removed`);
+      }
       if (expectedCode) assert.match(String(out.stderr), /land stopped at merge-gate: full suite unavailable: configure gates.test before merging/);
     } });
   assert.deepEqual(result.diffs, [], `${shape} json=${json}: exact Node/Go bytes, exit, state and rows`);
@@ -145,6 +168,10 @@ test('block land runs fully in Go for plain, --merge, --no-merge-gate, grant and
 
 test('land refuses a merge without a configured full test suite in Go with exact Node parity', async () => {
   for (const json of [false, true]) await parity('no-suite', ['--merge'], json, 1);
+});
+
+test('land through a symlink workspace runs the merge gate inside the trial worktree with Node parity', async () => {
+  for (const json of [false, true]) await parity('symlink', ['--merge'], json);
 });
 
 test('land records the specific close preflight hand-over reason without private arguments', async () => {

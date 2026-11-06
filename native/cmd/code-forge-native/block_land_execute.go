@@ -396,6 +396,16 @@ func landMergeGate(main, treePath, workspace, branch, base string) (result landM
 		result.reason = "cannot resolve merge parents"
 		return
 	}
+	prefix, err := gitx.Run(workspace, "rev-parse", "--show-prefix")
+	if err != nil {
+		result.reason = "cannot resolve merge-gate workspace prefix"
+		return
+	}
+	prefix = strings.TrimSuffix(prefix, "\n")
+	if strings.HasPrefix(prefix, "..") || filepath.IsAbs(prefix) {
+		result.reason = "merge-gate workspace prefix is outside the repository"
+		return
+	}
 	started := time.Now()
 	temporary, err := os.MkdirTemp(filepath.Dir(treePath), ".merge-gate-")
 	if err != nil {
@@ -428,8 +438,7 @@ func landMergeGate(main, treePath, workspace, branch, base string) (result landM
 			}
 			return
 		}
-		relative, _ := filepath.Rel(main, workspace)
-		fullArgs := []string{"run", "--cwd", filepath.Join(temporary, relative)}
+		fullArgs := []string{"run", "--cwd", filepath.Join(temporary, prefix)}
 		options, _ := gatesParse(fullArgs)
 		suite := landCapture(func(s *landStep) int {
 			code, safe := gatesNativeStep(fullArgs, options, s)
