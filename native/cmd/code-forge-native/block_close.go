@@ -54,7 +54,7 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 		if handover != nil {
 			*handover = reason
 		}
-		if step != nil {
+		if confirmed || step != nil {
 			return landHandover
 		}
 		return blockHandover(original, reason)
@@ -249,7 +249,12 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 				if code := humanConfirm(stderr, "close", id, fmt.Sprintf("Close block %s of run %s? Only the owner may say yes.", id, run)); code != 0 {
 					return code
 				}
-				return blockCloseHumanStep(args, step, handover, true, endHook...)
+				code := blockCloseHumanStep(args, step, handover, true, endHook...)
+				if code == landHandover {
+					fmt.Fprintln(stderr, "block close: state changed after human confirmation")
+					return 1
+				}
+				return code
 			}
 		}
 	}
@@ -475,7 +480,7 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 				}
 			}
 			code := blockCloseHumanStep(args, step, handover, true, endHook...)
-			if code == landHandover && len(decisions) > 0 {
+			if code == landHandover {
 				fmt.Fprintln(stderr, "block close: state changed after human confirmation")
 				return 1
 			}

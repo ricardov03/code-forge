@@ -3,6 +3,7 @@ import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { mkdir, mkdtemp, readFile, rm, writeFile } from 'node:fs/promises';
 import path from 'node:path';
+import { tmpdir } from 'node:os';
 import { after, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { isolatedEnv, runParity } from '../helpers/parity.mjs';
@@ -10,11 +11,12 @@ import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
+import { announceWorker, enqueue, writeResult } from '../../src/worker/queue.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
 const BIN = path.join(ROOT, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
-const scratch = await mkdtemp('/tmp/cf-human-');
+const scratch = await mkdtemp(path.join(tmpdir(), 'cf-human-'));
 const RUN = 'r-human', KEY = Buffer.alloc(32, 29);
 after(() => rm(scratch, { recursive: true, force: true }));
 
@@ -22,7 +24,7 @@ after(() => rm(scratch, { recursive: true, force: true }));
 // then send one key at a time; capture stdout and stderr separately. No env
 // override can confirm a production prompt, and no implementation text is read.
 const PTY = String.raw`
-import os, pty, select, struct, subprocess, sys, termios, time
+import json, os, pty, select, struct, subprocess, sys, termios, time
 master, slave = pty.openpty()
 termios.tcsetwinsize(slave, (24, int(os.environ.get('HUMAN_COLUMNS', '240'))))
 p = subprocess.Popen(sys.argv[1:], stdin=slave, stdout=slave, stderr=subprocess.PIPE)
@@ -33,7 +35,7 @@ fds = [master, p.stderr.fileno()]
 while fds:
     if time.monotonic() > deadline:
         p.kill()
-        raise RuntimeError('terminal prompt timed out')
+        sys.exit(124)
     ready, _, _ = select.select(fds, [], [], .05)
     for fd in ready:
         try: data = os.read(fd, 65536)
@@ -44,6 +46,14 @@ while fds:
         if fd == master: out += data
         else: err += data
     if not sent and out.endswith(b'\r\n') and b'Only the owner may say yes.' in out:
+        mutation = os.environ.get('HUMAN_MUTATION')
+        if mutation == 'remove-proof':
+            os.unlink('sample.mjs')
+        elif mutation == 'change-close-state':
+            filename = os.path.join(os.environ['HOME'], '.code-forge/runs/r-human.json')
+            with open(filename) as stream: record = json.load(stream)
+            record['blocks']['B1']['acceptance_revision'] = 'changed-during-confirmation'
+            with open(filename, 'w') as stream: json.dump(record, stream)
         for key in bytes.fromhex(os.environ['HUMAN_KEYS']).split(b'|'):
             os.write(master, key)
             time.sleep(.08)
@@ -51,6 +61,8 @@ while fds:
 os.close(master)
 sys.stdout.buffer.write(out)
 sys.stderr.buffer.write(err)
+if not sent:
+    sys.exit(125)
 sys.exit(p.wait())
 `;
 function launch(command, argv, f, extra = {}) {
@@ -101,7 +113,7 @@ function argv(kind) {
 async function parity(f, args, keys, expected, extra = {}) {
   const terminal = keys !== undefined;
   const r = await runParity(args, { fixture: f, goCommand: terminal ? ['python3', '-c', PTY, BIN] : BIN,
-    nodeCommand: terminal ? ['python3', '-c', PTY, process.execPath, CLI] : [process.execPath, CLI], samePaths: true,
+    nodeCommand: terminal ? ['python3', '-c', PTY, process.execPath, CLI] : [process.execPath, CLI], samePaths: true, tempRoot: scratch,
     env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent', NO_COLOR: '1', TERM: 'xterm-256color', HUMAN_KEYS: keys ?? '', ...extra },
     checkProcess(engine, result) { assert.equal(result.code, expected, `${engine}: exact exit ${expected}: ${result.stderr}`); } });
   assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero stdout, stderr, state and signed-row differences`);
@@ -126,15 +138,92 @@ test('human close, decide and human-pass have terminal, state, signed-row and ze
   await parity(await fixture('human-pass'), ['block', 'human-pass', 'B1', '--run', RUN, '--note', 'checked'], '79', 0, { TERM: 'linux' });
 });
 
+async function assertNoClose(f) {
+  const rows = (await readFile(path.join(f.home, '.code-forge/ledger/human.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.equal(rows.filter((r) => r.event === 'block.close' || r.event === 'block.human_pass').length, 0, 'no signed close or human-pass rows');
+  return rows;
+}
+async function rejected(kind, args, keys, expected, extra = {}) {
+  const f = await fixture(kind);
+  await parity(f, args, keys, expected, extra);
+  const result = keys === undefined ? launch(BIN, args, f, extra)
+    : launch('python3', ['-c', PTY, BIN, ...args], f, { HUMAN_KEYS: keys, ...extra });
+  assert.equal(result.status, expected, `${kind}: exact native rejection: ${result.stderr}`);
+  await assertNoClose(f);
+}
+
 test('human prompts reject no terminal, cancellation and bad reason without recording a close', async () => {
   for (const kind of ['decide', 'decide-finding', 'close', 'human-pass']) {
-    const f = await fixture(kind);
-    await parity(f, argv(kind), undefined, 2);
-    await parity(f, argv(kind), undefined, 2, { CODE_FORGE_NO_ERROR_LOG: '0' });
-    for (const keys of ['03', '1b', '6e', '0d', '20|0d', '09|0d']) await parity(f, argv(kind), keys.replace('|', '7c'), keys === '20|0d' ? 0 : 1);
+    await rejected(kind, argv(kind), undefined, 2);
+    await rejected(kind, argv(kind), undefined, 2, { CODE_FORGE_NO_ERROR_LOG: '0' });
+    for (const keys of ['03', '1b', '6e', '0d', '09|0d']) await rejected(kind, argv(kind), keys.replace('|', '7c'), 1);
   }
   for (const reason of ['', ' ', 'bad\nreason']) {
-    await parity(await fixture('decide'), ['block', 'close', 'B1', '--run', RUN, '--decide', '--reason', reason], undefined, 2);
+    await rejected('decide', ['block', 'close', 'B1', '--run', RUN, '--decide', '--reason', reason], undefined, 2);
   }
-  await parity(await fixture('human-pass'), ['block', 'human-pass', 'B1', '--run', RUN, '--note', 'checked', '--proof', 'missing'], undefined, 2);
+  await rejected('human-pass', ['block', 'human-pass', 'B1', '--run', RUN, '--note', 'checked', '--proof', 'missing'], undefined, 2);
+});
+
+test('Space then Enter confirms human close, decide and human-pass', async () => {
+  for (const kind of ['decide', 'decide-finding', 'close', 'human-pass']) {
+    await parity(await fixture(kind), argv(kind), '207c0d', 0);
+  }
+});
+
+test('human-pass proof removed during confirmation is a usage error without Node fallback', async () => {
+  await rejected('human-pass', argv('human-pass'), '79', 2, { HUMAN_MUTATION: 'remove-proof' });
+});
+
+test('close state changes after confirmation exit 1 without a second prompt or handover', async () => {
+  for (const kind of ['close', 'decide', 'decide-finding']) {
+    const f = await fixture(kind);
+    const result = launch('python3', ['-c', PTY, BIN, ...argv(kind)], f,
+      { HUMAN_KEYS: '79', HUMAN_MUTATION: 'change-close-state', CODE_FORGE_HANDOVER_LOG: '1' });
+    assert.equal(result.status, 1, `${kind}: ${result.stderr}`);
+    assert.equal(result.stderr, 'block close: state changed after human confirmation\n');
+    assert.equal(result.stdout.split('\x1b[?25l').length - 1, 1, 'exactly one prompt start');
+    await assertNoClose(f);
+    const report = launch(BIN, ['logs', 'handovers', '--json'], f);
+    assert.deepEqual(JSON.parse(report.stdout), { total: 0, rows: [] });
+  }
+});
+
+test('decide with auto-claim matches Node claims before cancellation', async () => {
+  const f = await fixture('decide');
+  const content = 'export const outsider = true;\n';
+  await writeFile(path.join(f.repo, 'outsider.mjs'), content);
+  const record = JSON.parse(await readFile(path.join(f.home, '.code-forge/runs', `${RUN}.json`), 'utf8'));
+  const mirror = { ...record }; delete mirror.worker;
+  await writeFile(path.join(f.repo, '.code-forge/runs', `${RUN}.json`), JSON.stringify(mirror) + '\n');
+  const saved = process.env.HOME;
+  try {
+    process.env.HOME = f.home;
+    await appendRow(signRow({ run: RUN, event: 'review.approved', block: 'B1', file: 'outsider.mjs',
+      content_hash: createHash('sha256').update(content).digest('hex') }, KEY), { slug: 'human' });
+    announceWorker(f.repo, { pid: process.pid, run: RUN });
+  } finally { process.env.HOME = saved; }
+  const prepare = async (copy) => {
+    const oldHome = process.env.HOME;
+    try {
+      process.env.HOME = copy.home;
+      for (const file of ['sample.mjs', 'outsider.mjs']) {
+        const queued = enqueue({ repoRoot: copy.repo, run: RUN, block: 'B1', file });
+        assert.equal(queued.status, 'queued');
+        writeResult({ repoRoot: copy.repo, runId: RUN, ticket: queued.ticket, key: KEY,
+          result: { status: 'reviewed', approved: true, ts: '2020-01-01T00:00:00.000Z', findings: [] } });
+      }
+    } finally { process.env.HOME = oldHome; }
+    return async () => {
+      const rows = await assertNoClose(copy);
+      assert.equal(rows.filter((r) => r.event === 'block.claim' && r.path === 'outsider.mjs').length, 1, 'Node and Go retain the automatic claim after cancellation');
+    };
+  };
+  for (const json of [false, true]) {
+    const args = [...argv('decide'), '--auto-claim', ...(json ? ['--json'] : [])];
+    const result = await runParity(args, { fixture: f, goCommand: ['python3', '-c', PTY, BIN],
+      nodeCommand: ['python3', '-c', PTY, process.execPath, CLI], samePaths: true, prepare, tempRoot: scratch,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent', NO_COLOR: '1', TERM: 'xterm-256color', HUMAN_KEYS: '6e' },
+      checkProcess(engine, processResult) { assert.equal(processResult.code, 1, `${engine}: ${processResult.stderr}`); } });
+    assert.deepEqual(result.diffs, [], `auto-claim before decide prompt matches Node exactly, json=${json}`);
+  }
 });

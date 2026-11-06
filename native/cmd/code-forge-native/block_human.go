@@ -2,6 +2,7 @@ package main
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -262,6 +263,10 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 	// Publication has begun: errors can never retry through Node.
 	if err != nil {
 		fmt.Fprintln(stderr, "block human-pass:", blockIOMessage(err))
+		var se *state.Error
+		if errors.As(err, &se) && se.Code == "usage" {
+			return 2
+		}
 		return 1
 	}
 	key, _ := blockclose.ReadKey(home, run)

@@ -203,6 +203,14 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHo
 	if flags["json"] == true {
 		print = stderr
 	}
+	// Decide renders its terminal prompt directly. Publish claim progress before
+	// that prompt too, matching Node's claim-before-confirmation ordering.
+	if flags["decide"] == true {
+		print = os.Stdout
+		if flags["json"] == true {
+			print = os.Stderr
+		}
+	}
 	if err := closeAutoClaim(home, run, id, top, record, files, print, false); err != nil {
 		return fail(err)
 	}
