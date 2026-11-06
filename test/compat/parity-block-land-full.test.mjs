@@ -109,11 +109,13 @@ async function parity(shape, extra, json, expectedCode = 0) {
       const daemon = await serveDaemon(copy, RUN, async (req) => {
         const rows = (await readFile(ledgerFile(copy), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
         if (req.method === 'rows') return { rows };
-        assert.equal(req.method, 'wait-block');
+        if (req.method !== 'wait-block') return null;
         return { block: 'B1', done: true, files: [{ file: 'sample.mjs', status: 'reviewed', outcome: 'approved' }] };
       });
       return async () => {
         await daemon.cleanup();
+        assert.deepEqual(daemon.requests.map((req) => req.method).filter((method) => !['ping', 'rows', 'wait-block'].includes(method)),
+          [], 'land daemon receives only ping, rows or wait-block requests');
         // handovers is a native-only logs subcommand; query the public Go route.
         const logs = spawnSync(BINARY, ['logs', 'handovers', '--json'], { cwd: copy.repo, encoding: 'utf8',
           env: isolatedEnv({ PATH: process.env.PATH, HOME: copy.home, ...env }) });
@@ -179,9 +181,7 @@ test('land records the specific close preflight hand-over reason without private
   const record = JSON.parse(await readFile(runFile(f), 'utf8'));
   record.blocks.B1.kind = 'light';
   await writeFile(runFile(f), JSON.stringify(record) + '\n');
-  const daemon = await serveDaemon(f, RUN, async () => {
-    assert.fail('close preflight must hand over before executing child steps');
-  });
+  const daemon = await serveDaemon(f, RUN, async () => null);
   try {
     const args = ['block', 'land', 'B1', '--run', RUN, '--report', '/private/customer/secret-report',
       '--transcript', '/private/customer/secret-transcript', '--json'];
@@ -193,6 +193,8 @@ test('land records the specific close preflight hand-over reason without private
       child.on('error', reject);
       child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
     });
+    assert.deepEqual(daemon.requests.map((req) => req.method).filter((method) => method !== 'ping'),
+      [], 'close preflight must hand over before executing child steps');
     assert.equal(out.code, 127, out.stderr);
     assert.equal(out.signal, null);
     assert.equal(out.stdout, '', 'failed hand-over emits no refusal JSON');
