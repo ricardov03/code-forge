@@ -36,8 +36,7 @@
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
-import { existsSync, statSync, watch } from 'node:fs';
-import os from 'node:os';
+import { statSync, watch } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { expiryChecks } from '../autopilot/limits.mjs';
@@ -755,9 +754,8 @@ export async function createWorker(opts, deps = {}) {
         } catch (err) {
           if (err.code === 'ENOENT' || err.code === 'ENOTDIR') {
             stop();
-            // The error log lives under HOME: never write it when HOME itself is gone, or the
-            // log write would create the removed HOME again.
-            if (existsSync(os.homedir())) await logWarning({ warning: 'worker_orphan_stop', message: `run record missing: ${opts.guardRunRecordPath}` }).catch(() => null);
+            // HOME may disappear during logging; the warning must never create it again.
+            await logWarning({ warning: 'worker_orphan_stop', message: `run record missing: ${opts.guardRunRecordPath}`, neverCreateHome: true }).catch(() => null);
           }
         }
       }
