@@ -143,7 +143,7 @@ func landAutoClaim(home, run, id, top string, record ledger.Object, files []stri
 		return nil
 	}
 	for _, file := range files {
-		if err := blockops.ClaimAuto(home, run, id, file, guarded, why, func(r ledger.Object) bool { return blockSafe(r) && blockStorageSafe(home, run, r) }, true); err != nil {
+		if err := blockops.ClaimAuto(home, run, id, file, guarded, why, func(r ledger.Object) bool { return blockGrantEndSafe(r) && blockStorageSafe(home, run, r) }, true); err != nil {
 			return err
 		}
 		fmt.Fprintf(print, "block %s auto-claimed %s\n", id, file)
@@ -155,6 +155,44 @@ func landAutoClaim(home, run, id, top string, record ledger.Object, files []stri
 		}
 	}
 	return nil
+}
+
+func landSuiteFailure(suite landResult) string {
+	values, _ := suite.data.Get("results").([]any)
+	if suite.code == 0 && suite.data.Get("allOk") == true {
+		for _, value := range values {
+			r := blockObject(value)
+			if r.Get("gate") == "test" && r.Get("skipped") != true {
+				return ""
+			}
+		}
+		return "full suite unavailable: configure gates.test before merging"
+	}
+	outputs := []string{}
+	for _, value := range values {
+		r := blockObject(value)
+		if r.Get("ok") != true {
+			outputs = append(outputs, blockString(r.Get("stdout"))+"\n"+blockString(r.Get("stderr")))
+		}
+	}
+	output := strings.Join(outputs, "\n")
+	failed, seen := []string{}, map[string]bool{}
+	linePattern := regexp.MustCompile(`^not ok\s+\d+\s+-\s+(.+)$`)
+	directive := regexp.MustCompile(`(?i)\s*#\s*(SKIP|TODO)\b`)
+	for _, line := range strings.Split(output, "\n") {
+		if match := linePattern.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
+			name := strings.TrimSpace(directive.Split(match[1], 2)[0])
+			if !seen[name] && len(failed) < 10 {
+				failed = append(failed, name)
+				seen[name] = true
+			}
+		}
+	}
+	if len(failed) > 0 {
+		return "full suite failed:\n" + strings.Join(failed, "\n")
+	}
+	lines := strings.Split(strings.TrimSpace(landFirst(suite.error, output, suite.output)), "\n")
+	return "full suite failed:\n" + strings.Join(lines[max(0, len(lines)-20):], "\n")
 }
 
 func landFirst(values ...string) string {

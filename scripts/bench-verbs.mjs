@@ -17,7 +17,16 @@ const CASES = [
   { name: 'ledger tail', args: ['ledger', 'tail', '--slug', 'bench-verbs', '--n', '5'] },
   { name: '--version', args: ['--version'] },
   { name: 'status --json', args: ['status', '--json', '--run', 'r-bench-verbs'] },
+  { name: 'block land', args: ['block', 'land', 'B1', '--run', 'r-bench-verbs', '--report', 'report.txt', '--transcript', 'transcript.txt', '--json'], code: 1,
+    stdout: JSON.stringify({ block: 'B1', event: 'refused', step: 'join', reason: 'block is closed, not open', next: 'code-forge review-file --wait-block B1 --run r-bench-verbs' }) + '\n' },
 ];
+
+export function engineFromProbe(probe, expectedCode = 0, expectedStdout) {
+  // Hand-over setup can also exit 1 (for example, resolving the package path).
+  // A refusal proves native execution only with its expected JSON bytes.
+  return probe.code === expectedCode && (expectedCode === 0 || typeof expectedStdout === 'string' && probe.stdout === expectedStdout)
+    ? 'go' : 'node-handover';
+}
 
 function parseArgs(argv) {
   const params = { runs: 15, warmups: 2, cases: [] };
@@ -120,7 +129,8 @@ function fixture(dir) {
   writeFileSync(path.join(repo, '.code-forge.yml'), 'version: 1\nproject:\n  slug: bench-verbs\nprovider: anthropic\nlevels:\n  L2:\n    model: claude-opus-5-5\nnative:\n  daemon: false\n');
   const state = path.join(home, '.code-forge');
   for (const sub of ['runs', 'logs', 'ledger']) mkdirSync(path.join(state, sub), { recursive: true });
-  writeFileSync(path.join(state, 'runs/r-bench-verbs.json'), JSON.stringify({ run_id: 'r-bench-verbs', project: 'bench-verbs', workspace: repo, status: 'active', mode: 'plan', started_at: '2099-01-02T03:04:05.000Z', blocks: {} }));
+  writeFileSync(path.join(state, 'runs/r-bench-verbs.json'), JSON.stringify({ run_id: 'r-bench-verbs', project: 'bench-verbs', workspace: repo, status: 'active', mode: 'plan', started_at: '2099-01-02T03:04:05.000Z', blocks: { B1: { status: 'closed', owned_files: [] } } }));
+  writeFileSync(path.join(state, 'runs/r-bench-verbs.key'), Buffer.alloc(32, 29), { mode: 0o600 });
   writeFileSync(path.join(state, 'ledger/bench-verbs.jsonl'), Array.from({ length: 25 }, (_, index) => JSON.stringify({ event: 'bench.padding', run: 'r-bench-verbs', index })).join('\n') + '\n');
   writeFileSync(path.join(state, 'logs/errors.jsonl'), Array.from({ length: 12 }, (_, index) => JSON.stringify({ ts: '2099-01-02T03:04:05.000Z', verb: 'run', sub: null, kind: 'exit', exit: 2, message: `fixture error ${index}`, fp: String(index % 4).padStart(12, '0') })).join('\n') + '\n');
   cpSync(home, seed, { recursive: true });
@@ -185,7 +195,7 @@ async function main() {
     for (const entry of CASES.filter((entry) => !opts.params.cases.length || opts.params.cases.includes(entry.name))) {
       const samples = { node: [], go: [] };
       let parity = native ? true : null, engine = null;
-      if (native) engine = invoke(entry.args, 'go', '/nonexistent').code === 0 ? 'go' : 'node-handover';
+      if (native) engine = engineFromProbe(invoke(entry.args, 'go', '/nonexistent'), entry.code ?? 0, entry.stdout);
       for (let i = 0; i < opts.params.warmups + opts.params.runs; i++) {
         const lanes = native ? (i % 2 ? ['go', 'node'] : ['node', 'go']) : ['node'];
         const pair = {};

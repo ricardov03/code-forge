@@ -328,13 +328,17 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		}
 	}
 	home := os.Getenv("HOME")
-	record, readErr := state.ReadRun(home, o.run)
+	var record ledger.Object
+	var readErr error
+	if o.run != "" {
+		record, readErr = state.ReadRun(home, o.run)
+	}
 	if readErr != nil {
 		var stateErr *state.Error
 		if !errors.As(readErr, &stateErr) {
 			return 0, false
 		}
-	} else {
+	} else if o.run != "" {
 		if record.Get("run_id") != o.run {
 			return 0, false
 		}
@@ -347,7 +351,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	cwd := o.cwd
 	main := cwd
 	var tree *proof.Tree
-	if readErr == nil {
+	if readErr == nil && o.run != "" {
 		workspace, _ := record.Get("workspace").(string)
 		var e error
 		tree, e = proof.BlockTree(workspace, block)
@@ -436,7 +440,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 				}
 			}
 		}
-		if names, ok := kinds[kind].([]any); ok && !light {
+		if names, ok := kinds[kind].([]any); ok && !light && o.run != "" {
 			p.Kind = kind
 			p.Restricted = true
 			p.Names = gates.Strings(names)
@@ -453,7 +457,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		p.Light = scope.Files
 		o.changed = false
 	}
-	if v, exists := configured["repeat_new_tests"]; exists {
+	if v, exists := configured["repeat_new_tests"]; exists && o.run != "" {
 		n, ok := gatesNumber(v)
 		if !ok || n < 2 || n > 10 || n != math.Trunc(n) {
 			return 0, false
@@ -483,7 +487,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	}
 	var listed []string
 	var listErr error
-	if gates.Scoped(p) || o.changed {
+	if o.run != "" && (gates.Scoped(p) || o.changed) {
 		listed, listErr = gates.List(cwd)
 		if listErr != nil {
 			return 0, false
@@ -543,14 +547,20 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	var changedScope *gates.Scope
 	base := ""
 	slug := o.slug
-	holder, e := proof.WithSlot(home, o.run, o.block, func(r, b ledger.Object) error {
+	withSlot := func(fn func(ledger.Object, ledger.Object) error) (string, error) {
+		if o.run == "" {
+			return "", fn(nil, nil)
+		}
+		return proof.WithSlot(home, o.run, o.block, fn)
+	}
+	holder, e := withSlot(func(r, b ledger.Object) error {
 		if !o.slugGiven {
 			slug, _ = r.Get("project").(string)
 		}
 		scope := gates.Scope{Kind: "full", Reason: "no_tests"}
 		var current ledger.Object
 		treeStamp, fullStamp := "", ""
-		if gates.Scoped(p) || o.changed {
+		if o.run != "" && (gates.Scoped(p) || o.changed) {
 			scope = gates.TestScope(b, listed, threshold)
 			if listErr != nil {
 				scope = gates.Scope{Kind: "full", Reason: "threshold"}
