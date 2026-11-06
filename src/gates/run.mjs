@@ -15,7 +15,8 @@ import { customGateMessages } from '../config/validate.mjs';
 import { exec } from '../util/exec.mjs';
 import { registerSecret } from '../util/redact.mjs';
 import { CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
-import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, maskableEnvValues, scopeFields, testsForRunner } from './expand.mjs';
+import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, maskableEnvValues, scopeFields, testsForRunner, testsForStack } from './expand.mjs';
+import { detectGates } from './detect.mjs';
 
 /** @typedef {import('./detect.mjs').Gate} Gate */
 /** @typedef {import('./detect.mjs').GateCommand} GateCommand */
@@ -49,7 +50,7 @@ import { NO_BLOCK_SCOPE, TEST_FILES_TOKEN, changedTestFiles, envOf, expandArgv, 
  * @property {string} [message] - termination diagnostic with the last lines of both streams.
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'|'runner-filter'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
+ * @property {'threshold'|'no_tests'|'runner-filter'|'foreign-tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
  * @property {Repeats} [repeats]
  * @property {string[]} [flaky] - failed files recovered by one serial rerun.
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
@@ -414,9 +415,13 @@ export async function runGates(gates, opts) {
     throw new TypeError('runGates: gates must be an object with test/lint/types/format');
   }
   const { cwd, timeoutMs = 300000, signal } = opts ?? {};
-  const scope = gates.lightTestFiles ? { scope: /** @type {const} */ ('related'), files: gates.lightTestFiles } : opts?.scope ?? NO_BLOCK_SCOPE;
+  let scope = gates.lightTestFiles ? { scope: /** @type {const} */ ('related'), files: gates.lightTestFiles } : opts?.scope ?? NO_BLOCK_SCOPE;
   if (typeof cwd !== 'string' || cwd.length === 0) {
     throw new TypeError('runGates: opts.cwd must be a non-empty string');
+  }
+  // Also guard shell wrappers when a missing baseline could not identify the stack.
+  if (scope.scope === 'changed' && testsForStack(detectGates(cwd).stack, scope.files).length !== scope.files.length) {
+    scope = { ...scope, files: [], reason: 'foreign-tests' };
   }
   const customErrors = customGateMessages(gates.custom);
   if (customErrors.length > 0) throw new TypeError(customErrors.join('; '));

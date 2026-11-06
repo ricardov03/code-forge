@@ -31,25 +31,36 @@ cf_validate_path() {
 cf_has_tests=false
 cf_flag_value=false
 cf_options=true
-for cf_arg do
+cf_arg_count=$#
+while [ "$cf_arg_count" -gt 0 ]; do
+  cf_arg=$1
+  shift
+  cf_arg_count=$((cf_arg_count - 1))
   if [ "$cf_flag_value" = true ]; then
     cf_flag_value=false
+    set -- "$@" "$cf_arg"
     continue
   fi
   if [ "$cf_options" = true ]; then
     case "$cf_arg" in
-      --) cf_options=false; continue ;;
+      --) cf_options=false; set -- "$@" "$cf_arg"; continue ;;
       --test-name-pattern|--test-skip-pattern|--test-reporter|--test-reporter-destination|\
       --test-timeout|--test-concurrency|--test-shard|--test-isolation|--experimental-test-isolation|\
       --test-coverage-branches|--test-coverage-functions|--test-coverage-lines|\
       --test-coverage-include|--test-coverage-exclude|--test-global-setup|\
       --test-rerun-failures|--test-random-seed|--experimental-test-tag-filter|\
       --import|--require|-r|--conditions|-C|--loader|--experimental-loader)
-        cf_flag_value=true; continue ;;
-      -*) continue ;;
+        cf_flag_value=true; set -- "$@" "$cf_arg"; continue ;;
+      -*) set -- "$@" "$cf_arg"; continue ;;
     esac
   fi
   cf_validate_path "$cf_arg"
+  # Node 24 rejects directory imports; use the suite's test glob within each directory.
+  if [ -d "$cf_arg" ]; then
+    set -- "$@" "${cf_arg%/}/**/*.test.mjs"
+  else
+    set -- "$@" "$cf_arg"
+  fi
   # Preserve the B115 bare-wildcard argv contract: it is forwarded verbatim,
   # but does not replace the default suite glob. Other paths select the scope.
   if [ "$cf_arg" != '*' ]; then

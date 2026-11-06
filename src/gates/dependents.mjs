@@ -136,12 +136,50 @@ function specifiers(source) {
 /** @param {string} file */
 const testPath = (file) => /(?:^|\/)(?:test|tests|__tests__|spec)\//.test(file) || /\.(?:test|spec)\.[^/]+$/.test(file);
 
+/** Recognize literal Go suite subprocesses and their module-relative working directory.
+ * Dynamic commands/paths or package-limited runs are deliberately left uncovered.
+ * @param {string} source @param {string} file @returns {string[]}
+ */
+function goSuiteDirectories(source, file) {
+  const list = tokens(source);
+  const directories = [];
+  for (let i = 0; i < list.length; i++) {
+    if (!['spawn', 'spawnSync', 'execFile', 'execFileSync'].includes(list[i].value) || list[i].string) continue;
+    const at = (/** @type {number} */ offset, /** @type {string} */ value) => list[i + offset]?.value === value;
+    if (!at(1, '(') || !at(2, 'go') || !list[i + 2].string || !at(3, ',') || !at(4, '[')) continue;
+    let end = i + 5;
+    while (end < list.length && (list[end].string || list[end].value === ',')) end++;
+    const args = list.slice(i + 5, end).filter((token) => token.string).map((token) => token.value);
+    // -run, -skip and other test selectors cannot prove every changed Go test.
+    if (list[end]?.value !== ']' || args[0] !== 'test' || args.at(-1) !== './...' ||
+        args.slice(1, -1).some((arg) => !/^(?:-count=[1-9]\d*|-json|-v|-race|-cover)$/.test(arg)) ||
+        list[end + 1]?.value !== ',' || list[end + 2]?.value !== '{') continue;
+    let depth = 1;
+    for (let j = end + 3; j < list.length && depth > 0; j++) {
+      if (list[j].value === '{' && !list[j].string) depth++;
+      if (list[j].value === '}' && !list[j].string) depth--;
+      if (depth !== 1 || list[j].value !== 'cwd' || list[j + 1]?.value !== ':') continue;
+      let start = j + 2;
+      const wrapped = list[start]?.value === 'fileURLToPath' && list[start + 1]?.value === '(';
+      if (wrapped) start += 2;
+      const url = list.slice(start, start + 11);
+      if (url.map((token) => token.string ? '<string>' : token.value).join(' ') !==
+          'new URL ( <string> , import . meta . url )' || !url[3].value.endsWith('/')) continue;
+      if (wrapped && list[start + 11]?.value !== ')') continue;
+      if (![',', '}'].includes(list[start + (wrapped ? 12 : 11)]?.value)) continue;
+      const directory = path.posix.normalize(path.posix.join(path.posix.dirname(file), url[3].value)).replace(/\/$/, '');
+      if (directory !== '..' && !directory.startsWith('../') && !path.posix.isAbsolute(directory)) directories.push(directory);
+    }
+  }
+  return directories;
+}
+
 /** Build a reverse transitive graph, shared by the async selector and the synchronous scope.
  * Every module is read and parsed at most once. Missing/deleted targets remain graph edges.
- * @param {{cwd: string, testFiles: string[]}} opts
+ * @param {{cwd: string, testFiles: string[], files?: string[]}} opts
  * @returns {Promise<Record<string, string[]>>}
  */
-export async function testDependents({ cwd, testFiles }) {
+export async function testDependents({ cwd, testFiles, files = [] }) {
   const root = path.resolve(cwd);
   const reads = new Map();
   const stats = new Map();
@@ -155,8 +193,11 @@ export async function testDependents({ cwd, testFiles }) {
   function imports(file) {
     if (!reads.has(file)) reads.set(file, (async () => {
       try {
-        const specs = specifiers(await readFile(path.join(root, file), 'utf8'));
-        const edges = [];
+        const source = await readFile(path.join(root, file), 'utf8');
+        const specs = specifiers(source);
+        const directories = goSuiteDirectories(source, file);
+        const edges = files.filter((candidate) => candidate.endsWith('.go') && directories.some((directory) =>
+          directory === '.' || candidate.startsWith(directory + '/')));
         for (const spec of specs) {
           const relative = path.relative(root, path.resolve(root, path.dirname(file), spec)).split(path.sep).join('/');
           if (relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) continue;

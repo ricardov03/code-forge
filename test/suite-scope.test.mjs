@@ -91,6 +91,7 @@ test('suite file arguments select only those tests with both leak steps; no file
     assert.deepEqual(f.calls(), [{ mode: 'snapshot', guard: 'snapshot' }, { mode: 'final', guard: 'snapshot' }]);
   }
   for (const args of [[], ['--test-timeout=10000', '--test-concurrency=1'],
+    ['test/'], [path.join(f.repo, 'test')], ['--test-concurrency', '1', 'test/'],
     ['--test-name-pattern', '.*|../not-a-path'],
     ['--test-skip-pattern', '../not-a-test', '--test-timeout', '10000']]) {
     f.clear();

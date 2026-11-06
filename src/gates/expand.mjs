@@ -29,6 +29,7 @@ import { isExactEntry, ownsFile } from '../state/registry.mjs';
 import { pairsFor } from '../review/paired.mjs';
 import { computeFileSet } from './scope.mjs';
 import { dependentTests, testDependents } from './dependents.mjs';
+import { detectGates } from './detect.mjs';
 import { exec } from '../util/exec.mjs';
 import { TEST_FILES_TOKEN, CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
 
@@ -96,6 +97,15 @@ export function testsForRunner(argv, files) {
   return files.filter((file) => extensions.test(file));
 }
 
+/** A project's stack also identifies shell wrappers whose executable is not the runner.
+ * @param {string} stack @param {ReadonlyArray<string>} files @returns {string[]}
+ */
+export function testsForStack(stack, files) {
+  if (stack === 'node') return testsForRunner(['node'], files);
+  const runner = { 'php-pest': 'php', 'php-phpunit': 'php', python: 'pytest', rust: 'cargo', go: 'go' }[stack];
+  return runner ? testsForRunner([runner], files) : [...files];
+}
+
 /**
  * Existing owned changed tests plus every test importing an owned changed source since base.
  * Deleted tests are omitted; ownership limits changed inputs, not their test callers.
@@ -125,8 +135,8 @@ export async function changedTestFiles({ cwd, base, owned, kinds }) {
 const isConcreteFile = (p) => typeof p === 'string' && p.length > 0 && isExactEntry(p) && !p.endsWith('/');
 
 /**
- * @typedef {{scope: 'related', files: string[]} | {scope: 'full', files?: string[], reason: 'threshold' | 'no_tests' | 'runner-filter'}} TestScope
- * @typedef {{scope: 'changed', files: string[], changedFiles: string[], dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'}} ChangedScope
+ * @typedef {{scope: 'related', files: string[]} | {scope: 'full', files?: string[], reason: 'threshold' | 'no_tests' | 'runner-filter' | 'foreign-tests'}} TestScope
+ * @typedef {{scope: 'changed', files: string[], changedFiles: string[], dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'|'foreign-tests'}} ChangedScope
  */
 
 /** A gate run with no block: no test file is known. */
@@ -195,7 +205,7 @@ async function repositoryFiles(cwd) {
  * non-regular owned file, a path outside the root or another read error means no record;
  * callers retain the old scope. Git sees only argv and an isolated git environment.
  * @param {string} cwd @param {string[]} owned @param {Record<string, string>} [kinds]
- * @returns {Promise<{files: Record<string, string>, candidates: string[], dependents?: Record<string, string[]>} | null>}
+ * @returns {Promise<{files: Record<string, string>, candidates: string[], dependents?: Record<string, string[]>, stack?: string} | null>}
  */
 export async function fileBaseline(cwd, owned, kinds) {
   const listedFiles = await repositoryFiles(cwd);
@@ -226,9 +236,10 @@ export async function fileBaseline(cwd, owned, kinds) {
       files[file] = createHash('sha256').update(await readFile(absolute)).digest('hex');
     }
   } catch { return null; }
-  const dependents = await testDependents({ cwd, testFiles: candidates.filter(isChangedTest) });
+  const stack = detectGates(cwd).stack;
+  const dependents = await testDependents({ cwd, testFiles: candidates.filter(isChangedTest), files: listedFiles });
   // The graph is transient: keep the baseline's public/serialized hash-and-candidate shape.
-  return Object.defineProperty({ files, candidates }, 'dependents', { value: dependents });
+  return Object.defineProperties({ files, candidates }, { dependents: { value: dependents }, stack: { value: stack } });
 }
 
 /**
@@ -239,17 +250,25 @@ export async function fileBaseline(cwd, owned, kinds) {
 export function changedScope({ baseline, current, fallback, threshold = DEFAULT_FULL_SUITE_THRESHOLD, owned, kinds }) {
   const old = /** @type {Record<string, string> | null} */ (baseline);
   const candidates = new Set(current?.candidates);
+  const supported = (/** @type {string} */ file) => testsForStack(current?.stack ?? 'unknown', [file]).length > 0;
   const fallbackFiles = fallback.scope === 'related' ? fallback.files.filter((file) => !current || candidates.has(file)) : [];
   /** Merge callers while preserving the legacy fallback for sources with no known callers.
    * @param {string[]} files @param {string[]} sources @param {string[]} changedFiles
    * @param {ChangedScope['reason']} [reason] @returns {ChangedScope}
    */
   function withDependents(files, sources, changedFiles, reason) {
-    const dependents = [...new Set(sources.filter((file) => !isChangedTest(file)).flatMap((file) => current?.dependents?.[file] ?? []))]
-      .filter((file) => !files.includes(file)).sort();
+    const callers = [...new Set(sources.filter((file) => !isChangedTest(file) || !supported(file)).flatMap((file) => current?.dependents?.[file] ?? []))];
+    const dependents = callers.filter((file) => supported(file) && !files.includes(file)).sort();
+    const foreign = [...new Set([...files.filter((file) => !supported(file)), ...callers.filter((file) => !supported(file)),
+      ...sources.filter((file) => !supported(file) && (isChangedTest(file) || file.endsWith('.go')))])];
+    if (foreign.some((file) => !current?.dependents?.[file]?.some(supported))) {
+      return { scope: 'changed', files: [], changedFiles, dependents, reason: 'foreign-tests' };
+    }
+    const covering = foreign.flatMap((file) => current?.dependents?.[file] ?? []).filter(supported);
     // An empty full fallback means every test; adding callers would narrow that run.
-    const fullFallback = fallback.scope === 'full' && (reason === 'unpaired' || reason === 'no_baseline');
-    const union = fullFallback ? [] : [...new Set([...files, ...dependents])].sort();
+    const foreignOnly = sources.length > 0 && sources.every((file) => foreign.includes(file));
+    const fullFallback = fallback.scope === 'full' && (reason === 'unpaired' || reason === 'no_baseline') && !foreignOnly;
+    const union = fullFallback ? [] : [...new Set([...files.filter(supported), ...dependents, ...covering])].sort();
     const overThreshold = union.length > threshold || reason === 'threshold';
     return { scope: 'changed', files: overThreshold ? [] : union, changedFiles,
       ...(current?.dependents || current === null ? { dependents } : {}),
@@ -279,7 +298,7 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
  * test files, or dropped for a full run. Always a new array; `scoped` records whether a scope
  * placeholder was handled, including full runs. `full` signals a runner-filter fallback.
  * @param {ReadonlyArray<string>} argv @param {TestScope | ChangedScope} scope
- * @returns {{argv: string[], scoped: boolean, full?: true, reason?: 'runner-filter'}}
+ * @returns {{argv: string[], scoped: boolean, full?: true, reason?: 'runner-filter'|'foreign-tests'}}
  * @throws {TypeError} a test path that starts with `-` (it would be read as an option; `block
  *   open --tests` refuses one too).
  */
@@ -291,9 +310,10 @@ export function expandArgv(argv, scope) {
   const dashed = files.find((f) => f.startsWith('-'));
   if (dashed !== undefined) throw new TypeError(`expandArgv: test path ${JSON.stringify(dashed)} starts with "-"`);
   const runnerFiles = testsForRunner(argv, files);
-  const full = argv.includes(TEST_FILES_TOKEN) && files.length > 0 && runnerFiles.length === 0;
+  const foreign = scope.scope === 'changed' && scope.reason === 'foreign-tests';
+  const full = argv.includes(TEST_FILES_TOKEN) && (foreign || files.length > 0 && runnerFiles.length === 0);
   return { argv: argv.flatMap((item) => item === TEST_FILES_TOKEN ? runnerFiles : item === CHANGED_FILES_TOKEN ? changed : [item]), scoped: true,
-    ...(full ? { full: /** @type {const} */ (true), reason: /** @type {const} */ ('runner-filter') } : {}),
+    ...(full ? { full: /** @type {const} */ (true), reason: foreign ? /** @type {const} */ ('foreign-tests') : /** @type {const} */ ('runner-filter') } : {}),
   };
 }
 
@@ -301,7 +321,7 @@ export function expandArgv(argv, scope) {
  * The fields a scoped gate's result and ledger row carry: `scope`, plus `test_count` when related
  * or `reason` when full.
  * @param {TestScope | ChangedScope} scope
- * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'|'runner-filter'}}
+ * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: ChangedScope['reason']} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'|'runner-filter'|'foreign-tests'}}
  */
 export function scopeFields(scope) {
   if (scope.scope === 'changed') return { scope: 'changed', test_count: scope.files.length, ...(scope.dependents ? { dependents: scope.dependents } : {}), ...(scope.reason ? { reason: scope.reason } : {}) };
