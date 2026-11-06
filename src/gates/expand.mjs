@@ -101,7 +101,7 @@ export function testsForRunner(argv, files) {
  * @param {string} stack @param {ReadonlyArray<string>} files @returns {string[]}
  */
 export function testsForStack(stack, files) {
-  if (stack === 'node') return files.filter((file) => /\.(?:mjs|js|cjs|ts|mts|cts)$/.test(file));
+  if (stack === 'node') return testsForRunner(['node'], files);
   const runner = { 'php-pest': 'php', 'php-phpunit': 'php', python: 'pytest', rust: 'cargo', go: 'go' }[stack];
   return runner ? testsForRunner([runner], files) : [...files];
 }
@@ -257,9 +257,9 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
    * @param {ChangedScope['reason']} [reason] @returns {ChangedScope}
    */
   function withDependents(files, sources, changedFiles, reason) {
-    const dependents = [...new Set(sources.filter((file) => !isChangedTest(file) || !supported(file)).flatMap((file) => current?.dependents?.[file] ?? []))]
-      .filter((file) => supported(file) && !files.includes(file)).sort();
-    const foreign = [...new Set([...files.filter((file) => !supported(file)),
+    const callers = [...new Set(sources.filter((file) => !isChangedTest(file) || !supported(file)).flatMap((file) => current?.dependents?.[file] ?? []))];
+    const dependents = callers.filter((file) => supported(file) && !files.includes(file)).sort();
+    const foreign = [...new Set([...files.filter((file) => !supported(file)), ...callers.filter((file) => !supported(file)),
       ...sources.filter((file) => !supported(file) && (isChangedTest(file) || file.endsWith('.go')))])];
     if (foreign.some((file) => !current?.dependents?.[file]?.some(supported))) {
       return { scope: 'changed', files: [], changedFiles, dependents, reason: 'foreign-tests' };

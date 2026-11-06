@@ -102,3 +102,58 @@ test('uncovered foreign tests force a full suite with a visible reason, includin
     });
   }
 });
+
+test('a root Go module routes changed Go tests through a Node wrapper in test/', async () => {
+  await withTempDir(async (cwd) => {
+    await fixture(cwd, false);
+    const goTest = 'pkg/a_test.go';
+    const wrapper = 'test/root-go.test.mjs';
+    await put(cwd, 'go.mod', 'module rootfixture\ngo 1.22\n');
+    await put(cwd, goTest, 'package pkg\n// root module test fixture\n');
+    await put(cwd, wrapper, `import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+const result = spawnSync('go', ['test', '-count=1', './...'], {
+  cwd: new URL('../', import.meta.url), encoding: 'utf8',
+});
+assert.equal(result.status, 0, result.stderr);
+console.log(result.stdout);
+`);
+    const result = await changedGate(cwd, [goTest]);
+    assert.deepEqual(result.argv, ['sh', 'suite.sh', wrapper]);
+    assert.equal(result.ok, true, result.stderr);
+    assert.deepEqual([result.scope, result.test_count], ['changed', 1]);
+    assert.equal((result.stdout.match(/GO-SUITE/g) ?? []).length, 1);
+    assert.equal((result.stdout.match(/FULL-SUITE/g) ?? []).length, 0);
+  });
+});
+
+test('Node scope retains JSX and TSX dependents and changed tests', async () => {
+  for (const extension of ['tsx', 'jsx']) await withTempDir(async (cwd) => {
+    await fixture(cwd, false);
+    const source = 'src/value.mjs';
+    const dependent = `test/consumer.test.${extension}`;
+    await put(cwd, source, 'export const value = 1;\n');
+    await put(cwd, dependent, "import { value } from '../src/value.mjs';\n");
+    for (const changed of [source, dependent]) {
+      const before = await fileBaseline(cwd, [changed]);
+      await put(cwd, changed, (await readFile(path.join(cwd, changed), 'utf8')) + '\n// changed\n');
+      const scope = changedScope({ baseline: before.files, current: await fileBaseline(cwd, [changed]),
+        fallback: testScope({ owned: [changed] }), owned: [changed] });
+      assert.deepEqual(scope.files, [dependent], `${extension}: changing ${changed} retains the test`);
+      assert.equal(scope.reason, undefined);
+      assert.deepEqual(scope.dependents, changed === source ? [dependent] : []);
+    }
+  });
+});
+
+test('unsupported dependents force a full suite with a visible foreign-tests reason', () => {
+  const source = 'src/value.mjs';
+  const supported = 'test/value.test.mjs';
+  const foreign = 'test/test_value.py';
+  const scope = changedScope({ baseline: { [source]: 'a'.repeat(64) },
+    current: { files: { [source]: 'b'.repeat(64) }, candidates: [source, supported, foreign],
+      stack: 'node', dependents: { [source]: [supported, foreign] } },
+    fallback: testScope({ owned: [source] }), owned: [source] });
+  assert.deepEqual(scope.files, [], 'a supported sibling cannot hide an unsupported dependent');
+  assert.equal(scope.reason, 'foreign-tests');
+});

@@ -167,7 +167,7 @@ function goSuiteDirectories(source, file) {
           'new URL ( <string> , import . meta . url )' || !url[3].value.endsWith('/')) continue;
       if (wrapped && list[start + 11]?.value !== ')') continue;
       if (![',', '}'].includes(list[start + (wrapped ? 12 : 11)]?.value)) continue;
-      const directory = path.posix.normalize(path.posix.join(path.posix.dirname(file), url[3].value));
+      const directory = path.posix.normalize(path.posix.join(path.posix.dirname(file), url[3].value)).replace(/\/$/, '');
       if (directory !== '..' && !directory.startsWith('../') && !path.posix.isAbsolute(directory)) directories.push(directory);
     }
   }
@@ -197,7 +197,7 @@ export async function testDependents({ cwd, testFiles, files = [] }) {
         const specs = specifiers(source);
         const directories = goSuiteDirectories(source, file);
         const edges = files.filter((candidate) => candidate.endsWith('.go') && directories.some((directory) =>
-          directory === '.' || candidate.startsWith(directory.replace(/\/$/, '') + '/')));
+          directory === '.' || candidate.startsWith(directory + '/')));
         for (const spec of specs) {
           const relative = path.relative(root, path.resolve(root, path.dirname(file), spec)).split(path.sep).join('/');
           if (relative === '..' || relative.startsWith('../') || path.isAbsolute(relative)) continue;
