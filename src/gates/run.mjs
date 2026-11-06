@@ -50,7 +50,7 @@ import { detectGates } from './detect.mjs';
  * @property {string} [message] - termination diagnostic with the last lines of both streams.
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
- * @property {'threshold'|'no_tests'|'runner-filter'|'foreign-tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
+ * @property {'threshold'|'no_tests'|'runner-filter'|'foreign-tests'|'no_baseline'|'unpaired'|'no_changes'|'native-binary'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
  * @property {boolean} [reused]
  * @property {string} [reuse_reason]
  * @property {string} [full_stamp]
@@ -477,12 +477,14 @@ export async function runGates(gates, opts) {
     const { argv, batches = [argv], scoped, failOnStdout, env } = command;
     if (gate === 'test' && opts.reuseTest) {
       results.push({ gate, duration_ms: 0, argv, skipped: false, ok: true, code: 0, stdout: '', stderr: '',
-        scope: 'full', reused: true, reuse_reason: opts.reuseReason });
+        scope: 'full', ...(command.scope.reason ? { reason: command.scope.reason } : {}), reused: true, reuse_reason: opts.reuseReason });
       continue;
     }
     // Each command is run and its exit status read on its own — never `&&`-chained with the
     // next, so a red gate is reported red without swallowing the gates that follow it.
-    const execOpts = { cwd, timeoutMs, signal, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } };
+    const inherited = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+      !['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK'].includes(key)));
+    const execOpts = { cwd, timeoutMs, signal, env: { ...inherited, CI: '1', npm_config_yes: 'false', ...env } };
     const started = performance.now();
     const outcomes = [];
     for (const batch of batches) {

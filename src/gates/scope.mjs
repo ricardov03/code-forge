@@ -168,6 +168,40 @@ export async function baseFileHashes(cwd, base, files) {
   return hashes;
 }
 
+/** @param {string} file */
+const documentation = (file) => /^docs\/.*\.(?:md|mdx|rst|txt)$/.test(file) || /^(?:CHANGELOG|README|LICENSE)(?:\.(?:md|rst|txt))?$/.test(file);
+/** @param {string} file */
+const releaseManifest = (file) => ['package.json', 'npm-shrinkwrap.json', 'package-lock.json', '.claude-plugin/plugin.json'].includes(file);
+/** @param {Buffer} bytes */
+function withoutVersion(bytes) {
+  const value = JSON.parse(bytes.toString('utf8'));
+  delete value.version;
+  if (value.packages?.['']) delete value.packages[''].version;
+  return Buffer.from(JSON.stringify(value));
+}
+
+/** Only documentation outside known graph edges and version-only manifest changes can
+ * carry full-suite evidence across bases. Any missing Git evidence requires a run.
+ * @param {string} cwd @param {string} oldBase @param {string} base
+ * @param {Record<string, string[]>} [dependents] @returns {Promise<boolean>}
+ */
+export async function reusableBaseMove(cwd, oldBase, base, dependents = {}) {
+  if (typeof oldBase !== 'string' || !/^[a-f0-9]{40,64}$/.test(oldBase)) return false;
+  if (oldBase === base) return true;
+  try {
+    const diff = await exec(['git', 'diff', '--name-only', '-z', oldBase, base], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    if (diff.result !== 'ok') return false;
+    for (const file of splitNul(diff.stdout)) {
+      if (documentation(file) && !dependents[file]?.length) continue;
+      if (!releaseManifest(file)) return false;
+      const before = await exec(['git', 'show', `${oldBase}:${file}`], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+      const after = await exec(['git', 'show', `${base}:${file}`], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+      if (before.result !== 'ok' || after.result !== 'ok' || !withoutVersion(Buffer.from(before.stdout)).equals(withoutVersion(Buffer.from(after.stdout)))) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
 /** Hash the complete test input tree, not just owned files. Only conventional documentation
  * outside known graph edges and release version fields are ignored. Unknown files, modes,
  * config, lock dependencies and untracked inputs all invalidate reuse. Symlinks fail closed.
@@ -180,7 +214,7 @@ export async function testTreeStamp(cwd, dependents = {}) {
     if (listed.result !== 'ok') return null;
     const hash = createHash('sha256');
     for (const file of [...new Set(splitNul(listed.stdout))].sort()) {
-      if (!dependents[file]?.length && (/^(?:docs\/|CHANGELOG(?:\.|$))/.test(file) || /^(?:README|LICENSE)(?:\.|$)/.test(file))) continue;
+      if (!dependents[file]?.length && documentation(file)) continue;
       const absolute = path.resolve(cwd, file);
       const stat = await lstat(absolute).catch((error) => {
         if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
@@ -189,12 +223,7 @@ export async function testTreeStamp(cwd, dependents = {}) {
       if (!stat) { hash.update(JSON.stringify([file, 'deleted'])); continue; }
       if (!stat.isFile()) return null;
       let bytes = await readFile(absolute);
-      if (['package.json', 'npm-shrinkwrap.json', 'package-lock.json', '.claude-plugin/plugin.json'].includes(file)) {
-        const value = JSON.parse(bytes.toString('utf8'));
-        delete value.version;
-        if (value.packages?.['']) delete value.packages[''].version;
-        bytes = Buffer.from(JSON.stringify(value));
-      }
+      if (releaseManifest(file)) bytes = withoutVersion(bytes);
       hash.update(JSON.stringify([file, stat.mode & 0o111, bytes.length]));
       hash.update(bytes);
     }

@@ -245,6 +245,6 @@ export async function testDependents({ cwd, testFiles, files = [] }) {
 export async function dependentTests({ cwd, changed, testFiles }) {
   const sources = changed.filter((file) => !testPath(file) && !testFiles.includes(file));
   if (!sources.length) return [];
-  const graph = await testDependents({ cwd, testFiles });
+  const graph = await testDependents({ cwd, testFiles, files: sources });
   return [...new Set(sources.flatMap((file) => graph[file] ?? []))].sort();
 }

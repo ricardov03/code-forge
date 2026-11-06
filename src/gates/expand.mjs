@@ -267,9 +267,10 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
     const covering = foreign.flatMap((file) => current?.dependents?.[file] ?? []).filter(supported);
     // An empty full fallback means every test; adding callers would narrow that run.
     const foreignOnly = sources.length > 0 && sources.every((file) => foreign.includes(file));
-    const fullFallback = fallback.scope === 'full' && (reason === 'unpaired' || reason === 'no_baseline') && !foreignOnly;
-    const union = fullFallback ? [] : [...new Set([...files.filter(supported), ...dependents, ...covering])].sort();
     const native = sources.some(isNativeBuildInput) && callers.some((file) => /^test\/compat\/parity-[^/]+\.test\.mjs$/.test(file));
+    const nativeCovered = native && sources.every((file) => isNativeBuildInput(file) && current?.dependents?.[file]?.some(supported) || isChangedTest(file) && supported(file));
+    const fullFallback = fallback.scope === 'full' && (reason === 'unpaired' || reason === 'no_baseline') && !foreignOnly && !nativeCovered;
+    const union = fullFallback ? [] : [...new Set([...files.filter(supported), ...dependents, ...covering])].sort();
     const overThreshold = (!native && union.length > threshold) || reason === 'threshold';
     return { scope: 'changed', files: overThreshold ? [] : union, changedFiles,
       ...(current?.dependents || current === null ? { dependents } : {}),

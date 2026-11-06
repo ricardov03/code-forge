@@ -499,8 +499,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 	// Base-aware tree stamps and native binary subprocess dependencies belong to the
 	// oracle's graph. Delegate before taking the slot or running any command, just as
 	// executable JS import graphs above do; never use ChangedEmptyGraph for these.
-	if block.Get("base_branch") != nil && block.Get("base_branch") != "" {
-		return 0, false
+	if baseBranch, ok := block.Get("base_branch").(string); ok && baseBranch != "" {
+		branch, err := gitx.Run(cwd, "symbolic-ref", "--quiet", "--short", "HEAD")
+		if err != nil || strings.TrimSpace(branch) != baseBranch {
+			return 0, false
+		}
 	}
 	if o.changed {
 		for _, file := range gates.Strings(block.Get("owned_files")) {

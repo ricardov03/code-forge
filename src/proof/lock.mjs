@@ -18,7 +18,7 @@
 
 import { createHash } from 'node:crypto';
 import { changedScope, fileBaseline, hasScopeItem, testScope } from '../gates/expand.mjs';
-import { baseFileHashes, blockMergeBase, computeFileSet, ownsFile, testTreeStamp } from '../gates/scope.mjs';
+import { baseFileHashes, blockMergeBase, computeFileSet, ownsFile, reusableBaseMove, testTreeStamp } from '../gates/scope.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { ownedFileCount } from '../gates/owned-count.mjs';
 import { runGates } from '../gates/run.mjs';
@@ -179,11 +179,17 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, s
         if (!previous && !scope.reason) scope.reason = 'no_baseline';
       }
       const tree = base && current ? await testTreeStamp(cwd, current.dependents) : null;
-      const environment = Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_') &&
+      const environment = Object.entries(process.env).filter(([key]) =>
         !['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK'].includes(key)).sort(([a], [b]) => a.localeCompare(b));
       const stamp = tree ? createHash('sha256').update(JSON.stringify([tree, gates, environment, process.version])).digest('hex') : null;
       const priorTest = previous?.results?.find((result) => result.gate === 'test');
-      const reuse = changed && stamp && priorTest?.full_stamp === stamp && priorTest.ok === true && !priorTest.skipped && !gates.repeatNewTests && !signal?.aborted;
+      const safeBase = base && previous ? await reusableBaseMove(cwd, previous.test_base, base, current?.dependents) : false;
+      if (base && previous?.test_base && previous.test_base !== base && !safeBase && scope.scope === 'changed') {
+        scope.files = [];
+        scope.reportScope = 'full';
+        scope.reason = 'no_baseline';
+      }
+      const reuse = changed && safeBase && stamp && priorTest?.full_stamp === stamp && priorTest.ok === true && !priorTest.skipped && !gates.repeatNewTests && !signal?.aborted;
       const reuseReason = base && changed ? reuse ? 'same_tree' : !stamp ? 'no_stamp' : priorTest?.full_stamp ? 'tree_changed' : 'no_full_baseline' : undefined;
       const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}), scope, reuseTest: Boolean(reuse), reuseReason });
       // A command that changed an input did not measure the resulting bytes. Do not baseline it.
@@ -192,7 +198,7 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, s
       const test = ran.results.find((result) => result.gate === 'test');
       if (test?.ok && !test.skipped && ran.allOk && files && stamp && !gates.repeatNewTests && !test.flaky &&
           test.scope === 'full' &&
-          tree === await testTreeStamp(cwd, after.dependents)) test.full_stamp = stamp;
+          tree === await testTreeStamp(cwd, after.dependents) && base === await blockMergeBase(cwd, block)) test.full_stamp = stamp;
       return { ...ran, ledger_slug: slug ?? record.project, ...(files ? { files } : {}), ...(base ? { test_base: base } : {}), ...(changed ? { changed_scope: scope } : {}) };
     },
   });

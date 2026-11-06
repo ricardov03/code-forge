@@ -131,12 +131,19 @@ test('a source base move invalidates a green full suite and prints why it runs',
 
 test('native Go-only changes select exactly all binary parity tests and print the dependency reason', async () => {
   for (const native of [false, true]) {
-    const f = await fixture(native, ['native/main.go']);
-    await put(f, 'native/main.go', 'package main\n// block\n'); commit(f);
-    const result = gate(f);
-    assert.deepEqual(JSON.parse(result.stdout), ['test/compat/parity-a.test.mjs', 'test/compat/parity-b.test.mjs'], 'both parity tests selected without import edges');
-    assert.equal(result.reason, 'native-binary', 'implicit binary dependency is visible');
-    assert.deepEqual((await rows(f))[0].reason, 'native-binary');
+    for (const baseAware of [false, true]) {
+      const f = await fixture(native, ['native/main.go']);
+      if (!baseAware) {
+        delete f.record.blocks.B1.base_branch;
+        delete f.record.blocks.B1.base_sha;
+        await writeFile(path.join(f.home, '.code-forge/runs/fixture.json'), JSON.stringify(f.record));
+      }
+      await put(f, 'native/main.go', 'package main\n// block\n'); commit(f);
+      const result = gate(f);
+      assert.deepEqual(JSON.parse(result.stdout), ['test/compat/parity-a.test.mjs', 'test/compat/parity-b.test.mjs'], 'both parity tests selected without import edges');
+      assert.equal(result.reason, 'native-binary', 'implicit binary dependency is visible');
+      assert.deepEqual((await rows(f))[0].reason, 'native-binary');
+    }
   }
 });
 

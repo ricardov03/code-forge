@@ -238,7 +238,8 @@ async function warnMissingDependencies(cwd, err) {
 function scopeOf({ scope, test_count: testCount, reason }) {
   if (scope === undefined) return {};
   if (scope === 'changed') return { scope, test_count: testCount, ...(reason ? { reason } : {}) };
-  return scope === 'related' ? { scope, test_count: testCount, ...(reason ? { reason } : {}) } : { scope, reason };
+  const selectionReason = ['threshold', 'no_tests', 'no_baseline', 'unpaired', 'no_changes', 'native-binary'].includes(reason);
+  return scope === 'related' ? { scope, test_count: testCount, ...(selectionReason ? { reason } : {}) } : { scope, reason };
 }
 
 /**
@@ -402,7 +403,7 @@ export async function runGatesVerb(args, deps = {}) {
           results: results.map(({ gate, ok, skipped, duration_ms, flaky, full_stamp, reused, reuse_reason }) => ({ gate, ok, skipped, duration_ms, ...(flaky ? { flaky } : {}),
             ...(full_stamp ? { full_stamp } : {}), ...(reused ? { reused } : {}), ...(reuse_reason ? { reuse_reason } : {}) })),
           ...(ran.test_base ? { test_base: ran.test_base } : {}),
-          ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
+          ...(results.some((r) => r.reused) && scoped ? scopeOf(scoped) : ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
           ...(custom.length ? {
             custom: custom.map((r) => ({ name: r.gate, ok: r.ok, evidence_count: r.evidence.length, ...(r.missing ? { missing: r.missing } : {}) })),
             ...(runFlag.value !== undefined ? { evidence: Object.fromEntries(custom.map((r) => [r.gate, r.evidence])) } : {}),
