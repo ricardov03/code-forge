@@ -124,47 +124,55 @@ async function fixture(label, prefix = '') {
   };
 }
 
-test('Node landed rebase releases refused locks and replays only X after the credited pre-land Y tip', available, async () => {
-  const f = await fixture('chained');
-  const own = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.tree.path)).trim().split('\n');
-  const oldBranch = 'pre-land-Y';
-  const branch = `forge/${f.runId}/B228`;
-  await git(['checkout', '-qb', oldBranch], f.repo);
-  for (const stage of ['intermediate', 'final']) {
-    writeFile(f.repo, f.files[0], `// Y ${stage}\n`);
-    await git(['add', '-A'], f.repo);
-    await git(['commit', '-qm', `Y ${stage}`], f.repo);
-  }
-  const oldTip = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
-  const inherited = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.repo)).trim().split('\n');
-  await git(['reset', '--hard', oldTip], f.tree.path);
-  await git(['cherry-pick', ...own], f.tree.path);
-  await git(['checkout', '-qb', branch, 'main'], f.repo);
-  // Landing rebases Y first: new commit IDs, identical content, then --no-ff.
-  for (const commit of inherited) await git(['-c', 'user.name=Landing', 'cherry-pick', commit], f.repo);
-  assert.notEqual((await git(['rev-parse', 'HEAD'], f.repo)).trim(), oldTip, 'Y landing has new commit IDs');
-  assert.equal(await git(['diff', oldTip, 'HEAD'], f.repo), '', 'Y landing preserves exactly the old tip content');
-  await git(['checkout', '-q', 'main'], f.repo);
-  await git(['merge', '--no-ff', '-m', 'land Y', branch], f.repo);
-  const merged = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
-  const record = await readRun(f.runId);
-  record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch: oldBranch, base_sha: f.base } };
-  await saveRun(record);
+test('Node landed rebase releases refused locks and replays only X after the credited pre-land Y tip', available, async (t) => {
+  for (const ownsY of [false, true]) await t.test(`owns Y files: ${ownsY}`, async () => {
+    const f = await fixture(`chained-${ownsY}`);
+    const own = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.tree.path)).trim().split('\n');
+    const oldBranch = 'pre-land-Y';
+    const branch = `forge/${f.runId}/B228`;
+    await git(['checkout', '-qb', oldBranch], f.repo);
+    for (const stage of ['intermediate', 'final']) {
+      writeFile(f.repo, f.files[0], `// Y ${stage}\n`);
+      await git(['add', '-A'], f.repo);
+      await git(['commit', '-qm', `Y ${stage}`], f.repo);
+    }
+    const oldTip = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+    const inherited = (await git(['rev-list', '--reverse', `${f.base}..HEAD`], f.repo)).trim().split('\n');
+    await git(['reset', '--hard', oldTip], f.tree.path);
+    await git(['cherry-pick', ...own], f.tree.path);
+    await git(['checkout', '-qb', branch, 'main'], f.repo);
+    // Landing rebases Y first: new commit IDs, identical content, then --no-ff.
+    for (const commit of inherited) await git(['-c', 'user.name=Landing', 'cherry-pick', commit], f.repo);
+    assert.notEqual((await git(['rev-parse', 'HEAD'], f.repo)).trim(), oldTip, 'Y landing has new commit IDs');
+    assert.equal(await git(['diff', oldTip, 'HEAD'], f.repo), '', 'Y landing preserves exactly the old tip content');
+    await git(['checkout', '-q', 'main'], f.repo);
+    await git(['merge', '--no-ff', '-m', 'land Y', branch], f.repo);
+    const merged = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+    const record = await readRun(f.runId);
+    record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch: oldBranch, base_sha: f.base } };
+    if (!ownsY) {
+      record.blocks.B205b.owned_files = ['src/local.mjs'];
+      delete record.blocks.B205b.owned_kinds;
+    }
+    await saveRun(record);
 
-  const plain = nodeCLI(f, false);
-  assert.equal(plain.status, 1, plain.stderr);
-  assert.match(plain.stderr, /commits since its base changed owned files: src\/shared0\.mjs/);
-  assert.equal(plain.stdout, '', 'plain refusal has zero stdout bytes');
-  assert.equal(lockExists(f.runId), false, 'plain refusal leaves zero run lock directories');
+    if (ownsY) {
+      const plain = nodeCLI(f, false);
+      assert.equal(plain.status, 1, plain.stderr);
+      assert.match(plain.stderr, /commits since its base changed owned files: src\/shared0\.mjs/);
+      assert.equal(plain.stdout, '', 'plain refusal has zero stdout bytes');
+      assert.equal(lockExists(f.runId), false, 'plain refusal leaves zero run lock directories');
+    }
 
-  const result = nodeCLI(f);
-  assert.equal(result.status, 0, result.stderr);
-  assert.equal(result.stderr, '', 'successful Node rebase has zero stderr bytes');
-  assert.deepEqual(JSON.parse(result.stdout), { block: 'B205b', event: 'rebased', old_base: f.base, new_base: merged, accepted_landed: [{ file: f.files[0], blocks: ['B228'] }] });
-  assert.equal((await git(['rev-parse', 'HEAD~2'], f.tree.path)).trim(), merged, 'exactly two X commits sit on main');
-  assert.deepEqual((await git(['log', '--reverse', '--format=%s', `${merged}..HEAD`], f.tree.path)).trim().split('\n'), ['local 0', 'local 1'], 'zero pre-land Y commits are replayed');
-  assert.equal(lockExists(f.runId), false, 'success leaves zero run lock directories');
-});
+    const result = nodeCLI(f);
+    assert.equal(result.status, 0, result.stderr);
+    assert.equal(result.stderr, '', 'successful Node rebase has zero stderr bytes');
+    assert.deepEqual(JSON.parse(result.stdout), { block: 'B205b', event: 'rebased', old_base: f.base, new_base: merged, accepted_landed: ownsY ? [{ file: f.files[0], blocks: ['B228'] }] : [] });
+    assert.equal((await git(['rev-parse', 'HEAD~2'], f.tree.path)).trim(), merged, 'exactly two X commits sit on main');
+    assert.deepEqual((await git(['log', '--reverse', '--format=%s', `${merged}..HEAD`], f.tree.path)).trim().split('\n'), ['local 0', 'local 1'], 'zero pre-land Y commits are replayed');
+    assert.equal(lockExists(f.runId), false, 'success leaves zero run lock directories');
+    });
+  });
 
 test('native refusal reports one redacted reason line, releases its lock, and preserves exact state', available, async () => {
   const f = await fixture('refusal-line');

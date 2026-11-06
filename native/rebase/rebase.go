@@ -351,17 +351,25 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		// Its pre-land branch can still be an ancestor of this block even though
 		// those commit IDs are absent from newBase. Replay only after that tip.
 		replayFrom := oldBase
-		credited := map[string]bool{}
-		for _, file := range accepted {
-			for _, id := range file.Blocks {
-				credited[id] = true
-			}
-		}
 		for _, field := range blocks {
-			if !credited[field.Key] {
+			b, _ := field.Value.(ledger.Object)
+			if text(b, "status") != "closed" {
 				continue
 			}
-			b, _ := field.Value.(ledger.Object)
+			base, err := resolve(tree, text(b, "base_sha"))
+			if err != nil {
+				continue
+			}
+			bases := []string{base}
+			if recorded := text(object(b, "worktree"), "base_sha"); recorded != "" {
+				base, err := resolve(tree, recorded)
+				if err != nil {
+					continue
+				}
+				bases = append(bases, base)
+			}
+			tips := []string{}
+			landed := false
 			for _, branch := range []string{"forge/" + runID + "/" + field.Key, text(object(b, "worktree"), "branch")} {
 				if branch == "" {
 					continue
@@ -370,6 +378,25 @@ func Run(home, runID, blockID string) (result Result, err error) {
 				if err != nil {
 					continue
 				}
+				// Like origins, exclude history at or before either recorded base.
+				commits, err := git(tree, append([]string{"rev-list", "--max-count=1", tip, "--not"}, bases...)...)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(commits) == "" {
+					continue
+				}
+				tips = append(tips, tip)
+				if _, err := git(tree, "merge-base", "--is-ancestor", tip, newBase); err == nil {
+					landed = true
+				}
+			}
+			// File ownership controls acceptance reporting, not inherited history.
+			// Require a verified landing even when Y changed no files X owns.
+			if !landed {
+				continue
+			}
+			for _, tip := range tips {
 				if _, err := git(tree, "merge-base", "--is-ancestor", replayFrom, tip); err != nil {
 					continue
 				}
