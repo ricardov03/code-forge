@@ -171,8 +171,8 @@ test('Node landed rebase releases refused locks and replays only X after the cre
     assert.equal((await git(['rev-parse', 'HEAD~2'], f.tree.path)).trim(), merged, 'exactly two X commits sit on main');
     assert.deepEqual((await git(['log', '--reverse', '--format=%s', `${merged}..HEAD`], f.tree.path)).trim().split('\n'), ['local 0', 'local 1'], 'zero pre-land Y commits are replayed');
     assert.equal(lockExists(f.runId), false, 'success leaves zero run lock directories');
-    });
   });
+});
 
 test('native refusal reports one redacted reason line, releases its lock, and preserves exact state', available, async () => {
   const f = await fixture('refusal-line');
