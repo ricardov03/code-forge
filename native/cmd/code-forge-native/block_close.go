@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockclose"
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gatecheck"
@@ -43,6 +44,7 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	stdout, stderr := step.writers()
 
 	original := append([]string{"close"}, args...)
+	var expiryOnFailure func()
 	fallback := func(reason handoverReason) int {
 		if handover != nil {
 			*handover = reason
@@ -60,6 +62,9 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 		var se *state.Error
 		if !errors.As(err, &se) {
 			return fallback(hCloseError)
+		}
+		if expiryOnFailure != nil {
+			expiryOnFailure()
 		}
 		fmt.Fprintln(stderr, "block close:", err)
 		if se.Code == "usage" {
@@ -94,16 +99,28 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	if step != nil && step.preflight && step.record != nil {
 		record = step.record
 	}
+	if record.Get("autopilot") != nil && flags["auto-claim"] == true {
+		return fallback(hCloseAutoClaim)
+	}
 	// This is the hand-over boundary. Everything through preflight is read-only;
 	// it must finish before a transcript warning or a stopped-block row is signed.
-	if !blockEndSafe(record) || !blockStorageSafe(home, run, record) {
+	safeGrant := blockGrantEndSafe(record)
+	if step != nil && handover == nil {
+		safeGrant = blockEndSafe(record)
+	}
+	if !safeGrant || !blockStorageSafe(home, run, record) {
 		return fallback(blockStateHandoverReason(record, "close", hCloseStateStorage))
 	}
 	cfg, ok := blockSnapshot(record)
 	if !ok {
 		return fallback(hCloseConfig)
 	}
-	if blockMap(cfg["close"])["require_human"] == true {
+	requireHuman := blockMap(cfg["close"])["require_human"] == true
+	if !requireHuman && flags["no-require-reviews"] != true && (step == nil || !step.preflight) {
+		expiryOnFailure = func() { blockGrantExpiry(home, run, stderr) }
+	}
+	var routineGrant ledger.Object
+	if requireHuman && record.Get("autopilot") == nil {
 		return fallback(hCloseHuman)
 	}
 	external := closeExternalReviewer(cfg)
@@ -180,6 +197,26 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 		}
 		top, base, inTree = real, sha, true
 	}
+	if requireHuman && flags["no-require-reviews"] != true {
+		grant, _ := autopilot.Read(record, time.Now())
+		active := false
+		if grant.Grant != nil {
+			s, _ := autopilot.GrantState(grant.Grant, time.Now())
+			active = s == "active"
+		}
+		if active {
+			if why := autopilot.RoutineRefusal(grant); why != "" {
+				return fail(&state.Error{Code: "close-not-routine", Message: "close-not-routine: " + why})
+			}
+			routineGrant = grant.Grant
+		} else {
+			if closeMayHaveTerminal() {
+				return fallback(hCloseHuman)
+			}
+			fmt.Fprintln(stderr, "block close needs the human at a terminal to confirm; nothing was recorded (there is no --yes)")
+			return 2
+		}
+	}
 	if flags["no-require-reviews"] == true {
 		// A terminal confirmation remains a human close, owned by Node. Pipes
 		// refuse before confirmation, expiry, claims, or any signed writes.
@@ -187,6 +224,9 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 			return fallback(hCloseNoRequireReviews)
 		}
 		return usage("--no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)")
+	}
+	if record.Get("status") != "active" {
+		return fail(&state.Error{Code: "run-ended", Message: "run " + run + " has ended"})
 	}
 	all, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), blockString(record.Get("project")))
 	if err != nil {
@@ -330,6 +370,12 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 		}
 		closeRows = append(closeRows, r)
 	}
+	if routineGrant != nil {
+		problem := closeRoutineProblem(external, run, id, rows, key, files, gate, hits)
+		if problem != "" {
+			checks = append(checks, closeCheck{problem, []gatecheck.Blocker{{Code: "close-not-routine", Detail: problem}}})
+		}
+	}
 	event, reason := blockclose.Pin(record, live, statusStart)
 	if !closeQueuePins(home, run, id, record, rows, &event, &reason, mainTop) {
 		return fallback(hCloseQueuePins)
@@ -344,11 +390,42 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	if step != nil && step.preflight {
 		return 0
 	}
+	if !requireHuman {
+		blockGrantExpiry(home, run, stderr)
+	}
 	if step == nil {
 		blockBreadcrumb("close")
 	}
 	publishError := func(err error) int { fmt.Fprintln(stderr, "block close:", blockIOMessage(err)); return 1 }
 	var result blockclose.Result
+	if routineGrant != nil {
+		preview := blockclose.Result{Status: "open", Blockers: []gatecheck.Blocker{}}
+		for _, check := range checks {
+			if preview.Reason == "" && check.Reason != "" {
+				preview.Reason = check.Reason
+			}
+			preview.Blockers = append(preview.Blockers, check.Blockers...)
+		}
+		if event != "" {
+			preview.Reason, preview.Blockers = reason, []gatecheck.Blocker{}
+		}
+		if preview.Reason != "" {
+			blockers := closeBlockersJSON(preview.Blockers, id, run, flags, entry)
+			if flags["json"] == true {
+				out := ledger.Object{{Key: "block", Value: id}, {Key: "ok", Value: false}, {Key: "reason", Value: preview.Reason}, {Key: "blockers", Value: blockers}}
+				data, _ := ledger.Stringify(out, false)
+				fmt.Fprintln(stdout, string(data))
+			} else {
+				for _, value := range blockers {
+					o := value.(ledger.Object)
+					fmt.Fprintf(stdout, "%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
+				}
+			}
+			fmt.Fprintf(stderr, "close-not-routine: %s\n", preview.Reason)
+			return 1
+		}
+		closeRows = []ledger.Object{{{Key: "event", Value: "autopilot.close"}, {Key: "block", Value: id}, {Key: "grant", Value: routineGrant.Get("grant_id")}}}
+	}
 	if event != "" {
 		result, err = blockclose.Stop(home, run, id, event, reason)
 		if err != nil {
@@ -552,6 +629,54 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 type closeCheck struct {
 	Reason   string
 	Blockers []gatecheck.Blocker
+}
+
+// Node's routineCloseProblem runs after the ordinary review gate. Its policy
+// never promotes a waived/answered file to an approved file.
+func closeRoutineProblem(external, run, id string, rows []gatecheck.Row, key []byte, files []gatecheck.File, gate gatecheck.Result, hits []gatecheck.Blocker) string {
+	if external != "" {
+		return "external reviews"
+	}
+	problems := []string{}
+	waiver, rule, green := false, false, false
+	for _, row := range rows {
+		if row["run"] != run || row["block"] != id {
+			continue
+		}
+		event := blockString(row["event"])
+		waiver = waiver || strings.Contains(event, "waiv")
+		rule = rule || event == "rule_break" || event == "rule_break.accepted"
+		green = green || event == "gate.done" && row["all_ok"] == true && gatecheck.Verified(row, key)
+	}
+	if waiver {
+		problems = append(problems, "waiver rows for block")
+	}
+	if rule {
+		problems = append(problems, "rule_break or accepted hit for block")
+	}
+	for _, hit := range hits {
+		problems = append(problems, "rule_break "+hit.Detail)
+	}
+	if !green {
+		problems = append(problems, "no signed green gate row")
+	}
+	for _, b := range gate.Blockers {
+		if b.Code == "rule_break" && slices.ContainsFunc(hits, func(h gatecheck.Blocker) bool { return h.Detail == b.Detail }) {
+			continue
+		}
+		problem := b.Code
+		if b.File != "" {
+			problem += " " + b.File
+		}
+		problems = append(problems, problem)
+	}
+	if len(gate.Waived) > 0 {
+		problems = append(problems, "reviewed_by_waiver or answered-only file")
+	}
+	if len(files) == 0 {
+		problems = append(problems, "no approved changed files")
+	}
+	return strings.Join(problems, "; ")
 }
 
 func closeTranscript(record, entry ledger.Object, id, given string) (string, bool, error) {
