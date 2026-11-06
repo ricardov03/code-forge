@@ -20,6 +20,8 @@ import { splitLines } from './context.mjs';
 import { grantState } from '../autopilot/grant.mjs';
 import { lastGate } from '../state/brief-status.mjs';
 import { fileBaseline, testScope } from '../gates/expand.mjs';
+import { computeFileSet } from '../gates/scope.mjs';
+import { crossFileEvidence } from './packet.mjs';
 
 const SCHEMA = {
   type: 'object', additionalProperties: false, required: ['verdict', 'reason'],
@@ -156,10 +158,11 @@ async function findingText(rows, { root, runId, id, file, finding, key }) {
       }
     }
     if (full && (typeof full.claim === 'string' || typeof full.evidence === 'string')) {
-      return { claim: full.claim ?? null, evidence: full.evidence ?? null };
+      return { claim: full.claim ?? null, evidence: full.evidence ?? null,
+        references: [full.fix, full.answer].filter((value) => typeof value === 'string').join('\n') };
     }
   }
-  return { claim: null, evidence: null };
+  return { claim: null, evidence: null, references: '' };
 }
 
 /** Same fresh, closed-book session runner and L3 resolution as the review engine; never a resume.
@@ -220,13 +223,18 @@ export async function waiveAsAgent({ runId, id, finding, file, reason, record, w
   }
   const bytes = readRegularFileNoFollow(contentRoot, file);
   if (bytes === null) refuse('waive-yes-disagreed', 'The current file cannot be read');
-  const text = await findingText(rows, { root, runId, id, file, finding, key });
+  const { references, ...text } = await findingText(rows, { root, runId, id, file, finding, key });
   const evidence = citedEvidence(reason, contentRoot);
-  const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') }, ...(evidence.length > 0 ? { evidence } : {}) }, { record, runId, id, judge });
+  const base = entry.worktree?.base_sha ?? entry.base_sha;
+  const peers = typeof base === 'string' ? (await computeFileSet({ cwd: contentRoot, base }).then((set) => set.all).catch(() => []))
+    .filter((p) => p !== file && ownsAt(prefix)(entry.owned_files ?? [], p, entry.owned_kinds)) : [];
+  const extra = await crossFileEvidence({ repoRoot: contentRoot, file, base, peers, content: bytes.toString('utf8'), findings: [text], answer: `${reason}\n${references}`, cfg: configInForce(record) });
+  const extraRecord = extra.files.length > 0 || extra.omitted > 0 ? { extra_files: extra.files, extra_files_omitted: extra.omitted, extra_files_trimmed: extra.trimmed } : {};
+  const answer = await judgeAgentReview({ finding: { id: finding, severity: recorded.severity, ...text }, reason, file: { path: file, content: bytes.toString('utf8') }, ...(evidence.length > 0 ? { evidence } : {}), ...(Object.keys(extraRecord).length > 0 ? { extra_files: extra } : {}) }, { record, runId, id, judge });
   if (answer.verdict === 'broken') refuse('waive-yes-broken', answer.reason);
   if (answer.verdict !== 'agree') refuse('waive-yes-disagreed', answer.reason);
   if (critical && !activeGrant(await readRun(runId))) refuse('waive-yes-critical', 'the critical finding still needs an active autopilot grant after the judge returns');
-  return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason, ...(critical ? { autopilot: true, test } : {}) } });
+  return waiveFinding({ runId, id, finding, file, reason, writeRow, by: 'agent', extra: { severity: recorded.severity, verdict: 'agree', judge_reason: answer.reason, ...extraRecord, ...(critical ? { autopilot: true, test } : {}) } });
 }
 
 /** Verified ledger-order cancellation, scoped to one run, block, file and finding.

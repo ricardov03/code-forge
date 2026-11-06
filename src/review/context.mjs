@@ -17,6 +17,62 @@ export const CONTEXT_MODES = Object.freeze(['whole', 'hunks', 'minimal', 'rechec
 
 export const DEFAULT_CONTEXT = Object.freeze({ whole_file_max_lines: 400, hunk_context_lines: 40, min_context_lines: 10 });
 
+/** Cross-file evidence is optional: bound the entire addition, including its audit text. */
+export const EXTRA_FILE_CAP = 4;
+export const EXTRA_BYTE_CAP = 16000;
+
+/** Pack base diffs, never whole peer files. Each selected peer gets an equal byte share.
+ * Complete lines are retained where possible; an oversized line is cut on a UTF-8 boundary.
+ * @param {ReadonlyArray<{file: string, diffText: string}>} peers @param {number} byteCap
+ */
+export function packExtraDiffs(peers, byteCap) {
+  const empty = { text: '', files: [], omitted: peers.length, trimmed: [], bytes: 0 };
+  const head = '## cross-file evidence\n';
+  const advice = 'Evidence only: decide whether these changes fix the open findings.\n';
+  const marker = '\n(trimmed: over budget)';
+  const selected = peers.slice(0, EXTRA_FILE_CAP);
+  while (selected.length > 0) {
+    const omitted = peers.length - selected.length;
+    const tail = omitted > 0 ? `(${omitted} other files omitted: cap)\n` : '';
+    const overhead = head + advice + tail + selected.map((p) => `### ${p.file}\n${marker}\n`).join('');
+    const share = Math.floor((byteCap - Buffer.byteLength(overhead)) / selected.length);
+    if (share < 64) { selected.pop(); continue; }
+    const trimmed = [];
+    const parts = selected.map((p) => {
+      let body = p.diffText.trimEnd();
+      if (Buffer.byteLength(body) > share) {
+        trimmed.push(p.file);
+        const bytes = Buffer.from(body);
+        let end = share;
+        while (end > 0 && (bytes[end] & 0xc0) === 0x80) end--;
+        body = bytes.subarray(0, end).toString('utf8');
+        const newline = body.lastIndexOf('\n');
+        if (newline >= share / 2) body = body.slice(0, newline);
+        body += marker;
+      }
+      return `### ${p.file}\n${body}\n`;
+    });
+    const text = head + advice + parts.join('') + tail;
+    return { text, files: selected.map((p) => p.file), omitted, trimmed, bytes: Buffer.byteLength(text) };
+  }
+  return empty;
+}
+
+/** Current-side lines of the diffs actually sent, for the recheck's stale-quote guard.
+ * Removed lines and file headers are never current evidence.
+ * @param {string} text @returns {string}
+ */
+export function currentDiffLines(text) {
+  const lines = [];
+  let inHunk = false;
+  for (const line of text.split('\n')) {
+    if (line.startsWith('diff --git ') || line.startsWith('### ')) inHunk = false;
+    else if (/^@@ -\d+(?:,\d+)? \+\d+(?:,\d+)? @@/.test(line)) inHunk = true;
+    else if (inHunk && (line.startsWith('+') || line.startsWith(' '))) lines.push(line.slice(1));
+  }
+  return lines.join('\n');
+}
+
 /** `@@ -a[,b] +c[,d] @@` — the part of a hunk header a reviewer must echo (no function context). */
 const HUNK_RE = /^@@ -(\d+)(?:,(\d+))? \+(\d+)(?:,(\d+))? @@/;
 

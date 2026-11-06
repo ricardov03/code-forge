@@ -39,9 +39,10 @@ import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { exec } from '../util/exec.mjs';
 import { assertInsideRoot, assertRowPath, gitChildEnv, readRegularFileNoFollow, WorkerError } from '../worker/ticket.mjs';
-import { buildContext, parseDiff, splitLines } from './context.mjs';
+import { buildContext, EXTRA_BYTE_CAP, packExtraDiffs, parseDiff, splitLines } from './context.mjs';
 import { findDefinitions } from './definitions.mjs';
 import { relatedFiles } from './related.mjs';
+import { peerDiffReader } from './moved.mjs';
 
 export const LENSES = Object.freeze(['quick', 'full', 'recheck', 'A', 'B', 'judge']);
 
@@ -146,6 +147,45 @@ export function loadLens(name) {
 export function budgetFor(cfg, key) {
   const v = cfg?.review?.budgets?.[key];
   return Number.isInteger(v) && v > 0 ? v : DEFAULT_BUDGETS[key];
+}
+
+/** Other changed files of this block named by a finding/answer or imported/called by its file.
+ * The caller supplies the block's concrete changed paths; never discover unrelated repo files.
+ * Reuse the existing import/call parsers and bounded, base-relative peer diff reader.
+ * @param {{repoRoot: string, file: string, base?: string | null, peers?: ReadonlyArray<string>,
+ *   peerDiffs?: () => Promise<import('./moved.mjs').PeerDiff[]>, content: string | null,
+ *   findings?: ReadonlyArray<Record<string, any>>, answer?: string, cfg?: Record<string, any>}} opts
+ */
+export async function crossFileEvidence({ repoRoot, file, base, peers = [], peerDiffs, content, findings = [], answer = '', cfg }) {
+  const empty = packExtraDiffs([], 0);
+  if ((!peerDiffs && peers.length === 0) || findings.length === 0) return empty;
+  const safe = (rel) => {
+    try { return !isSecretLike(rel) && assertPacketPath(repoRoot, rel) === rel; }
+    catch { return false; }
+  };
+  const reader = peerDiffs ?? peerDiffReader({ repoRoot, base, file, peers });
+  const diffs = (await reader().catch(() => [])).filter((p) => p.file !== file && safe(p.file));
+  if (diffs.length === 0) return empty;
+  const allowed = new Set(diffs.map((p) => p.file));
+  const readFile = (full) => {
+    const rel = path.relative(repoRoot, full).split(path.sep).join('/');
+    if (rel === file) return content;
+    return allowed.has(rel) && safe(rel) ? readRepoText(repoRoot, rel) : null;
+  };
+  // No importers: only relationships going OUT of the reviewed file qualify.
+  const imports = await relatedFiles({ repoRoot, file, listFiles: () => [], readFile });
+  const calls = await findDefinitions({ path: file, header: content ?? '',
+    diffLines: ['@@ -0,0 +1 @@', ...splitLines(content).map((line) => `+${line}`)],
+    io: { repoRoot, listFiles: () => [...allowed], readFile } });
+  const linked = new Set([...imports, ...calls.map((d) => d.path)]);
+  const mentions = [answer, ...findings.flatMap((f) => Object.values(f).filter((v) => typeof v === 'string'))].join('\n');
+  const tokens = new Set((mentions.match(/[\w./-]+/gu) ?? []).map((s) => s.replace(/^\.\//, '').replace(/[.!?]+$/, '')));
+  const named = new Set(diffs.filter((p) => tokens.has(p.file) || tokens.has(path.posix.basename(p.file))).map((p) => p.file));
+  const selected = diffs.filter((p) => named.has(p.file) || linked.has(p.file))
+    .sort((a, b) => Number(named.has(b.file)) - Number(named.has(a.file))
+      || (a.file < b.file ? -1 : a.file > b.file ? 1 : 0));
+  const cap = Math.min(EXTRA_BYTE_CAP, Math.floor(budgetFor(cfg, 'full_in') / 8) * 4);
+  return packExtraDiffs(selected, cap);
 }
 
 /**
