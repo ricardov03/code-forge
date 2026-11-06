@@ -16,7 +16,9 @@
  * with `isolation: lock` through the B6 writer.
  */
 
+import { createHash } from 'node:crypto';
 import { changedScope, fileBaseline, hasScopeItem, testScope } from '../gates/expand.mjs';
+import { baseFileHashes, blockMergeBase, computeFileSet, ownsFile, reusableBaseMove, testTreeStamp } from '../gates/scope.mjs';
 import { readAllRows } from '../ledger/write.mjs';
 import { ownedFileCount } from '../gates/owned-count.mjs';
 import { runGates } from '../gates/run.mjs';
@@ -24,6 +26,7 @@ import { StateError } from '../state/paths.mjs';
 import { readRun, saveRun, withRunLock } from '../state/run.mjs';
 import { isAlive } from '../util/reaper.mjs';
 import { recordProof } from './export.mjs';
+import { canonicalJSON } from '../state/signer.mjs';
 
 /** @typedef {import('../state/run.mjs').WriteRow} WriteRow */
 
@@ -149,30 +152,55 @@ export async function runGatesGuarded({ runId, blockId, gates, cwd, timeoutMs, s
     runId,
     blockId,
     fn: async () => {
-      // Plain gates without --changed need no scope or baseline.
-      if (!hasScopeItem(gates) && !changed) {
-        const record = await readRun(runId);
-        const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}) });
-        return { ...ran, ledger_slug: slug ?? record.project };
-      }
-      // the slot checked the block is open; it may still be gone by the time it is read again
       const record = await readRun(runId);
       const block = record.blocks?.[blockId];
       if (!block) throw new StateError('no-block', `block ${blockId} is not in run ${runId}`);
-      const ownedFiles = await ownedFileCount(cwd, block.owned_files, block.owned_kinds);
+      // Plain gates without --changed need no scope or baseline.
+      if (!hasScopeItem(gates) && !changed) {
+        const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}) });
+        return { ...ran, ledger_slug: slug ?? record.project };
+      }
+      const base = changed ? await blockMergeBase(cwd, block) : null;
+      // the slot checked the block is open; it may still be gone by the time it is read again
+      const delta = base ? (await computeFileSet({ cwd, base })).all.filter((file) => ownsFile(block.owned_files, file, block.owned_kinds)) : null;
+      const ownedFiles = changed && delta ? delta.length : await ownedFileCount(cwd, block.owned_files, block.owned_kinds);
       const fallback = testScope({ testFiles: block.test_files, owned: block.owned_files, ownedFiles, ...(threshold === undefined ? {} : { threshold }) });
       const current = await fileBaseline(cwd, block.owned_files, block.owned_kinds);
       let baseline;
+      let previous;
       if (changed) {
         const rows = await readAllRows(slug ?? record.project);
-        baseline = rows.filter((row) => row.event === 'gate.done' && row.run === runId && row.block === blockId && row.all_ok === true && row.worktree === block.worktree?.path).at(-1)?.files;
+        previous = rows.filter((row) => row.event === 'gate.done' && row.run === runId && row.block === blockId && row.all_ok === true && row.worktree === block.worktree?.path).at(-1);
+        baseline = previous?.files;
+        if (base && current && previous?.test_base !== base) baseline = await baseFileHashes(cwd, base, [...new Set([...Object.keys(current.files), ...delta])]);
       }
       const scope = changed ? changedScope({ baseline, current, fallback, owned: block.owned_files, kinds: block.owned_kinds, ...(threshold === undefined ? {} : { threshold }) }) : fallback;
-      const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}), scope });
+      if (base && scope.scope === 'changed') {
+        scope.reportScope = scope.files.length ? 'related' : 'full';
+        if (!previous && !scope.reason) scope.reason = 'no_baseline';
+      }
+      const tree = base && current ? await testTreeStamp(cwd, current.dependents) : null;
+      const environment = Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+        !['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK'].includes(key)));
+      const stamp = tree ? createHash('sha256').update(canonicalJSON(['gate-tree-v2', tree, JSON.parse(JSON.stringify(gates)), environment, process.version])).digest('hex') : null;
+      const priorTest = previous?.results?.find((result) => result.gate === 'test');
+      const safeBase = base && previous ? await reusableBaseMove(cwd, previous.test_base, base, current?.dependents) : false;
+      if (base && previous?.test_base && previous.test_base !== base && !safeBase && scope.scope === 'changed') {
+        scope.files = [];
+        scope.reportScope = 'full';
+        scope.reason = 'no_baseline';
+      }
+      const reuse = changed && safeBase && stamp && priorTest?.full_stamp === stamp && priorTest.ok === true && !priorTest.skipped && !gates.repeatNewTests && !signal?.aborted;
+      const reuseReason = base && changed ? reuse ? 'same_tree' : !stamp ? 'no_stamp' : priorTest?.full_stamp ? 'tree_changed' : 'no_full_baseline' : undefined;
+      const ran = await runGates(gates, { cwd, signal, ...(timeoutMs ? { timeoutMs } : {}), scope, reuseTest: Boolean(reuse), reuseReason });
       // A command that changed an input did not measure the resulting bytes. Do not baseline it.
       const after = ran.allOk && current ? await fileBaseline(cwd, block.owned_files, block.owned_kinds) : null;
       const files = after && JSON.stringify(current?.files) === JSON.stringify(after.files) ? after.files : undefined;
-      return { ...ran, ledger_slug: slug ?? record.project, ...(files ? { files } : {}), ...(changed ? { changed_scope: scope } : {}) };
+      const test = ran.results.find((result) => result.gate === 'test');
+      if (test?.ok && !test.skipped && ran.allOk && files && stamp && !gates.repeatNewTests && !test.flaky &&
+          test.scope === 'full' &&
+          tree === await testTreeStamp(cwd, after.dependents) && base === await blockMergeBase(cwd, block)) test.full_stamp = stamp;
+      return { ...ran, ledger_slug: slug ?? record.project, ...(files ? { files } : {}), ...(base ? { test_base: base } : {}), ...(changed ? { changed_scope: scope } : {}) };
     },
   });
 }

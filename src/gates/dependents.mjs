@@ -136,6 +136,13 @@ function specifiers(source) {
 /** @param {string} file */
 const testPath = (file) => /(?:^|\/)(?:test|tests|__tests__|spec)\//.test(file) || /\.(?:test|spec)\.[^/]+$/.test(file);
 
+/** Native compilation has no JS import edge. Until package-specific binary coverage is
+ * proven, every parity test can exercise every production native input.
+ * @param {string} file @returns {boolean}
+ */
+export const isNativeBuildInput = (file) => file === 'scripts/build-native.mjs' ||
+  (file.startsWith('native/') && !testPath(file) && !file.endsWith('_test.go') && !/\.(?:md|markdown)$/.test(file));
+
 /** Recognize literal Go suite subprocesses and their module-relative working directory.
  * Dynamic commands/paths or package-limited runs are deliberately left uncovered.
  * @param {string} source @param {string} file @returns {string[]}
@@ -226,6 +233,8 @@ export async function testDependents({ cwd, testFiles, files = [] }) {
     if (/^test\/(?:config|doctor)\//.test(test)) (graph['schema/code-forge.schema.json'] ??= []).push(test);
   }
   for (const file of Object.keys(graph)) graph[file] = [...new Set(graph[file])].sort();
+  const parity = testFiles.filter((file) => /^test\/compat\/parity-[^/]+\.test\.mjs$/.test(file));
+  for (const file of files.filter(isNativeBuildInput)) graph[file] = [...new Set([...(graph[file] ?? []), ...parity])].sort();
   return graph;
 }
 
@@ -236,6 +245,6 @@ export async function testDependents({ cwd, testFiles, files = [] }) {
 export async function dependentTests({ cwd, changed, testFiles }) {
   const sources = changed.filter((file) => !testPath(file) && !testFiles.includes(file));
   if (!sources.length) return [];
-  const graph = await testDependents({ cwd, testFiles });
+  const graph = await testDependents({ cwd, testFiles, files: sources });
   return [...new Set(sources.flatMap((file) => graph[file] ?? []))].sort();
 }

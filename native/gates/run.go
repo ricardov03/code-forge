@@ -288,11 +288,22 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			continue
 		}
 		c := item.c
+		if item.name == "test" && p.ReuseTest {
+			r = ledger.Object{{Key: "gate", Value: item.name}, {Key: "duration_ms", Value: int64(0)}, {Key: "argv", Value: item.argv}, {Key: "skipped", Value: false}, {Key: "ok", Value: true}, {Key: "code", Value: 0}, {Key: "stdout", Value: ""}, {Key: "stderr", Value: ""}, {Key: "scope", Value: "full"}, {Key: "reused", Value: true}, {Key: "reuse_reason", Value: p.ReuseReason}}
+			if reason := item.scope.Get("reason"); reason != nil {
+				r.Set("reason", reason)
+			}
+			results = append(results, r)
+			continue
+		}
 		r = ledger.Object{{Key: "gate", Value: item.name}, {Key: "duration_ms", Value: int64(0)}, {Key: "argv", Value: item.argv}, {Key: "skipped", Value: false}}
 		merge(&r, item.scope)
 		started := time.Now()
 		outcome := execute(ctx, item.argv, c.Env, cwd, run, timeout, c.FailOnStdout)
 		merge(&r, outcome)
+		if item.name == "test" && p.ReuseReason != "" {
+			r.Set("reuse_reason", p.ReuseReason)
+		}
 		if len(c.Env) > 0 {
 			keys := []string{}
 			for k := range c.Env {

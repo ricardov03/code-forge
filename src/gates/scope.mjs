@@ -26,8 +26,12 @@
  */
 
 import os from 'node:os';
+import { createHash } from 'node:crypto';
+import { lstat, readFile } from 'node:fs/promises';
+import path from 'node:path';
 import { exec } from '../util/exec.mjs';
 import { diffNoIndexArgv } from '../util/git.mjs';
+import { canonicalJSON } from '../state/signer.mjs';
 
 export { computeScopes, ownsFile, scopeGate } from '../state/registry.mjs';
 
@@ -129,6 +133,103 @@ export async function untrackedFiles(cwd) {
 export async function computeFileSet({ cwd, base }) {
   const [tracked, untracked] = await Promise.all([trackedChangedFiles(base, cwd), untrackedFiles(cwd)]);
   return { tracked, untracked, all: [...new Set([...tracked, ...untracked])].sort() };
+}
+
+/** Resolve the block against the current base branch, never the pre-rebase fork point.
+ * A missing/unresolvable base is deliberately not evidence for reuse.
+ * @param {string} cwd @param {{base_branch?: string, base_sha?: string, worktree?: {base_sha?: string}}} block
+ * @returns {Promise<string | null>}
+ */
+export async function blockMergeBase(cwd, block) {
+  // In a shared checkout the current branch is also base_branch; it is not a separate
+  // upstream and cannot distinguish another block's commits. Retain the hash baseline there.
+  if (!block.base_branch) return null;
+  const branch = await exec(['git', 'symbolic-ref', '--quiet', '--short', 'HEAD'], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+  if (branch.result === 'ok' && branch.stdout.trim() === block.base_branch) return null;
+  const ref = `refs/heads/${block.base_branch}`;
+  if (!ref || ref.startsWith('-')) return null;
+  const result = await exec(['git', 'merge-base', 'HEAD', ref], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+  return result.result === 'ok' && /^[a-f0-9]{40,64}$/.test(result.stdout.trim()) ? result.stdout.trim() : null;
+}
+
+/** Git bytes at the effective base, including deleted block paths.
+ * @param {string} cwd @param {string} base @param {string[]} files
+ * @returns {Promise<Record<string, string> | null>}
+ */
+export async function baseFileHashes(cwd, base, files) {
+  const hashes = {};
+  for (const file of files) {
+    const result = await exec(['git', 'show', `${base}:${file}`], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    if (result.result === 'ok') hashes[file] = createHash('sha256').update(result.stdout).digest('hex');
+    else {
+      const exists = await exec(['git', 'ls-tree', '-z', base, '--', file], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+      if (exists.result !== 'ok' || exists.stdout) return null;
+    }
+  }
+  return hashes;
+}
+
+/** @param {string} file */
+const documentation = (file) => /^docs\/.*\.(?:md|mdx|rst|txt)$/.test(file) || /^(?:CHANGELOG|README|LICENSE)(?:\.(?:md|rst|txt))?$/.test(file);
+/** @param {string} file */
+const releaseManifest = (file) => ['package.json', 'npm-shrinkwrap.json', 'package-lock.json', '.claude-plugin/plugin.json'].includes(file);
+/** @param {Buffer} bytes */
+function withoutVersion(bytes) {
+  const value = JSON.parse(bytes.toString('utf8'));
+  delete value.version;
+  if (value.packages?.['']) delete value.packages[''].version;
+  return Buffer.from(canonicalJSON(value));
+}
+
+/** Only documentation outside known graph edges and version-only manifest changes can
+ * carry full-suite evidence across bases. Any missing Git evidence requires a run.
+ * @param {string} cwd @param {string} oldBase @param {string} base
+ * @param {Record<string, string[]>} [dependents] @returns {Promise<boolean>}
+ */
+export async function reusableBaseMove(cwd, oldBase, base, dependents = {}) {
+  if (typeof oldBase !== 'string' || !/^[a-f0-9]{40,64}$/.test(oldBase)) return false;
+  if (oldBase === base) return true;
+  try {
+    const diff = await exec(['git', 'diff', '--no-renames', '--name-only', '-z', oldBase, base], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    if (diff.result !== 'ok') return false;
+    for (const file of splitNul(diff.stdout)) {
+      if (documentation(file) && !dependents[file]?.length) continue;
+      if (!releaseManifest(file)) return false;
+      const before = await exec(['git', 'show', `${oldBase}:${file}`], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+      const after = await exec(['git', 'show', `${base}:${file}`], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+      if (before.result !== 'ok' || after.result !== 'ok' || !withoutVersion(Buffer.from(before.stdout)).equals(withoutVersion(Buffer.from(after.stdout)))) return false;
+    }
+    return true;
+  } catch { return false; }
+}
+
+/** Hash the complete test input tree, not just owned files. Only conventional documentation
+ * outside known graph edges and release version fields are ignored. Unknown files, modes,
+ * config, lock dependencies and untracked inputs all invalidate reuse. Symlinks fail closed.
+ * @param {string} cwd @param {Record<string, string[]>} [dependents]
+ * @returns {Promise<string | null>}
+ */
+export async function testTreeStamp(cwd, dependents = {}) {
+  try {
+    const listed = await exec(['git', 'ls-files', '-z', '--cached', '--others', '--exclude-standard'], { cwd, env: gitEnv(), timeoutMs: GIT_TIMEOUT_MS });
+    if (listed.result !== 'ok') return null;
+    const hash = createHash('sha256');
+    for (const file of [...new Set(splitNul(listed.stdout))].sort()) {
+      if (!dependents[file]?.length && documentation(file)) continue;
+      const absolute = path.resolve(cwd, file);
+      const stat = await lstat(absolute).catch((error) => {
+        if (error.code === 'ENOENT' || error.code === 'ENOTDIR') return null;
+        throw error;
+      });
+      if (!stat) { hash.update(JSON.stringify([file, 'deleted'])); continue; }
+      if (!stat.isFile()) return null;
+      let bytes = await readFile(absolute);
+      if (releaseManifest(file)) bytes = withoutVersion(bytes);
+      hash.update(JSON.stringify([file, stat.mode & 0o111, bytes.length]));
+      hash.update(bytes);
+    }
+    return hash.digest('hex');
+  } catch { return null; }
 }
 
 /**

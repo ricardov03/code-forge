@@ -19,15 +19,17 @@ type Command struct {
 	Formatter    string
 }
 type Plan struct {
-	Stack      string
-	Commands   map[string]*Command
-	Kind       string
-	Names      []string
-	Restricted bool
-	Custom     []Custom
-	Rerun      bool
-	Repeat     *Repeat
-	Light      []string
+	Stack       string
+	Commands    map[string]*Command
+	Kind        string
+	Names       []string
+	Restricted  bool
+	Custom      []Custom
+	Rerun       bool
+	Repeat      *Repeat
+	Light       []string
+	ReuseTest   bool
+	ReuseReason string
 }
 
 type Custom struct {

@@ -53,11 +53,15 @@ func IsChangedTest(p string) bool {
 
 type Scope struct {
 	Kind, Reason               string
+	Report                     string
 	Files, Changed, Dependents []string
 }
 
 func (s Scope) Fields(dependents bool) ledger.Object {
 	o := ledger.Object{{Key: "scope", Value: s.Kind}}
+	if s.Report != "" {
+		o.Set("scope", s.Report)
+	}
 	if s.Kind == "full" {
 		o.Set("reason", s.Reason)
 	} else {
@@ -109,7 +113,11 @@ func Count(entries []any, kinds ledger.Object, listed []string) int {
 func TestScope(block ledger.Object, listed []string, threshold int) Scope {
 	entries, _ := block.Get("owned_files").([]any)
 	kinds, _ := block.Get("owned_kinds").(ledger.Object)
-	if Count(entries, kinds, listed) > threshold {
+	return TestScopeCount(block, Count(entries, kinds, listed), threshold)
+}
+
+func TestScopeCount(block ledger.Object, count, threshold int) Scope {
+	if count > threshold {
 		return Scope{Kind: "full", Reason: "threshold"}
 	}
 	files := Strings(block.Get("test_files"))

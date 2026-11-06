@@ -132,9 +132,10 @@ func runGates(args []string) int {
 	if o.run == "" && o.block == "" {
 		return gatesHandover(args, hGatesEmptyScope)
 	}
-	code, safe := gatesNative(args, o)
+	reason := hGatesCustom
+	code, safe := gatesNativeStep(args, o, nil, &reason)
 	if !safe {
-		return gatesHandover(args, hGatesCustom)
+		return gatesHandover(args, reason)
 	}
 	gatesFinish(args, code)
 	return code
