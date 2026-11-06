@@ -17,6 +17,7 @@ const RUN = 'r-grant-parity', KEY = Buffer.alloc(32, 29);
 const env = { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_HANDOVER_LOG: '0' };
 function childEnv(extra = {}) {
   const clean = { ...process.env, ...env, ...extra };
+  for (const key of Object.keys(clean)) if (key.startsWith('GIT_')) delete clean[key];
   for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete clean[key];
   return clean;
 }
@@ -97,6 +98,14 @@ async function parity(f, argv, extra = {}) {
 function launch(f, argv, extra = {}) {
   return spawnSync(BINARY, argv, { cwd: f.repo, env: childEnv({ HOME: f.home, ...extra }), encoding: 'utf8' });
 }
+
+test('fixture git ignores caller git routing', async () => {
+  const f = await fixture('active');
+  const result = spawnSync('git', ['status', '--porcelain'], { cwd: f.repo, encoding: 'utf8',
+    env: childEnv({ GIT_DIR: path.join(scratch, 'caller.git'), GIT_WORK_TREE: scratch, GIT_INDEX_FILE: path.join(scratch, 'caller.index') }) });
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stdout, ' M sample.mjs\n');
+});
 
 test('claim/stop/open/close grants have Node byte, exit, state and signed-row parity without Node', async () => {
   for (const state of ['active', 'expired', 'run-ended', 'none', 'stopped']) {
