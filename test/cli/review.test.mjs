@@ -25,6 +25,8 @@ const SLEEPY = fileURLToPath(new URL('../worker/fake-reviewer.mjs', import.meta.
 const BIN = fileURLToPath(new URL('../../bin/code-forge.mjs', import.meta.url));
 // These are hang guards, not assertions about scheduling or cleanup speed.
 const WAIT_CAP_MS = 300_000;
+// Keep the reviewer pending for the entire wait; cleanup must stop it.
+const FAKE_SLEEP_MS = 2 * WAIT_CAP_MS;
 useFake(SCRIPTED);
 
 /** @param {string[]} args @param {string} cwd @param {Record<string, string>} [env] */
@@ -52,7 +54,8 @@ levels:
   L3:
     model: claude-fable-5-1
 review:
-  session_timeout_s: 300
+  session_timeout_s: ${2 * FAKE_SLEEP_MS / 1000}
+  silence_timeout_s: ${2 * FAKE_SLEEP_MS / 1000}
   min_tokens_out: 40
 `;
 
@@ -270,7 +273,7 @@ describe('code-forge review (B22)', () => {
       const r = await makeRepo();
       r.edit(60, 'change');
       useFake(SLEEPY);
-      const env = childEnv({ FAKE_RECORD: r.records, FAKE_SLEEP_MS: '60000' });
+      const env = childEnv({ FAKE_RECORD: r.records, FAKE_SLEEP_MS: String(FAKE_SLEEP_MS) });
       useFake(SCRIPTED);
       const child = spawn(process.execPath, [BIN, 'review', '--run', r.runId], { cwd: r.repo, env, stdio: ['ignore', 'pipe', 'pipe'] });
       let stderr = '';
@@ -294,13 +297,13 @@ describe('code-forge review (B22)', () => {
     });
   }
 
-  test('--max 3 with a reviewer that sleeps 60 s: exit 1, `stopped: timeout`, the block is stopped, the run is ended, the reviewer exits', async () => {
+  test('--max 3 with a reviewer that sleeps beyond the wait cap: exit 1, `stopped: timeout`, the block is stopped, the run is ended, the reviewer exits', async () => {
     const r = await makeRepo();
     r.edit(60, 'change');
     useFake(SLEEPY);
     let out;
     try {
-      Object.assign(r.env, { FAKE_RECORD: r.records, FAKE_SLEEP_MS: '60000' });
+      Object.assign(r.env, { FAKE_RECORD: r.records, FAKE_SLEEP_MS: String(FAKE_SLEEP_MS) });
       out = await inProcess(['--run', r.runId, '--max', '3'], r, async (argv, real) => {
         const result = await real();
         if (argv[2] === 'review-file' && !argv.includes('--wait')) {

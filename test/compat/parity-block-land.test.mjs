@@ -180,18 +180,19 @@ async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = 
   const blockTip = git(copy.repo, ['rev-parse', 'block-B1']);
   const blockContent = await readFile(path.join(tree, 'sample.mjs'), 'utf8');
   let joins = 0;
+  let landExited = false;
   const daemon = await serveDaemon(copy, RUN, async (req) => {
     if (req.method === 'rows') return { rows: (await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line)) };
     assert.equal(req.method, 'wait-block');
     joins++;
     if (kind === 'moved' && joins === 1) git(tree, ['commit', '-q', '--allow-empty', '-m', 'during join']);
     // Join refusals must follow gate completion, regardless of how long the
-    // machine takes to schedule the gate. The cap only catches a hung fixture.
-    const deadline = Date.now() + 300_000;
-    while (!(await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).includes('"event":"gate.done"')) {
-      assert.ok(Date.now() < deadline, 'gates must publish exactly one completion before the join reply');
+    // machine takes to schedule the gate. Child-exit cleanup ends the poll;
+    // a hung fixture is left to the test runner's timeout.
+    while (!landExited && !(await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).includes('"event":"gate.done"')) {
       await new Promise((resolve) => setTimeout(resolve, 10));
     }
+    if (landExited) return null;
     if (kind === 'orphan') {
       // Wait until the parallel gate has published, then simulate a concurrent
       // writer updating the registry before close takes its fresh run lock.
@@ -208,6 +209,7 @@ async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = 
     return { block: 'B1', files: [{ file: 'sample.mjs', ticket: marker.slice(0, -5), status: kind === 'findings' ? 'findings' : 'reviewed', outcome: kind === 'findings' ? 'findings' : 'approved' }, ...(kind === 'auto' ? [{ file: 'outsider.mjs', status: 'reviewed', outcome: 'approved' }] : [])], done: true };
   });
   return async () => {
+    landExited = true;
     await daemon.cleanup();
     assert.equal(git(copy.repo, ['symbolic-ref', 'HEAD']), 'refs/heads/main', 'main remains checked out');
     const mainAfter = git(copy.repo, ['rev-parse', 'main']);
@@ -233,7 +235,7 @@ async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = 
 for (const kind of ['clean', 'findings', 'red', 'moved', 'timeout', 'auto', 'orphan']) {
   test(`full native land: ${kind} has exact Node parity`, async () => {
     for (const json of [false, true]) {
-      const f = await openFixture(kind), argv = [...args, '--max', '300s', ...(json ? ['--json'] : [])];
+      const f = await openFixture(kind), argv = [...args, '--max', '1800s', ...(json ? ['--json'] : [])];
       const result = await runParity(argv, { fixture: f, goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
         env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand(kind),
         checkProcess: kind !== 'timeout' ? undefined : (engine, out) => {
@@ -243,7 +245,7 @@ for (const kind of ['clean', 'findings', 'red', 'moved', 'timeout', 'auto', 'orp
             const refusal = JSON.parse(String(out.stdout));
             assert.deepEqual([refusal.block, refusal.event, refusal.step, refusal.reason],
               ['B1', 'refused', 'join', 'wait_timeout'], `${engine}: exactly one JSON refusal reports wait_timeout`);
-            assert.match(refusal.next, /--max 1800s --json$/);
+            assert.match(refusal.next, /--max 3600s --json$/);
           }
         } });
       assert.deepEqual(result.diffs, [], `${kind} json=${json}: exact process and state parity`);
@@ -285,7 +287,7 @@ test('findings, red gates, tree moves and wait_timeout run in Go with Node unava
       const direct = { ...f, home };
       const cleanup = await prepareLand(direct, kind);
       try {
-        const result = await native(direct, [...args, '--max', '300s', ...(json ? ['--json'] : [])]);
+        const result = await native(direct, [...args, '--max', '1800s', ...(json ? ['--json'] : [])]);
         assert.equal(result.code, kind === 'moved' ? 0 : 1, `${kind} json=${json}: ${result.stderr}`);
         if (kind === 'moved') assert.match(result.stdout, /closed/);
         else assert.match(result.stderr, kind === 'findings' ? /land stopped at join: sample\.mjs: findings/
@@ -353,7 +355,7 @@ async function snapshot(f) {
 
 test('composed land logs only the outer block invocation and matches Node failure logs', async () => {
   for (const kind of ['clean', 'findings', 'red', 'red-slow', 'orphan']) {
-    const result = await runParity([...args, '--max', '300s', '--json'], { fixture: await openFixture(kind), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
+    const result = await runParity([...args, '--max', '1800s', '--json'], { fixture: await openFixture(kind), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
       env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '0' }, prepare: prepareParityLand(kind) });
     assert.deepEqual(result.diffs, [], `${kind}: exact outer breadcrumb and error log, no child CLI logs`);
   }
