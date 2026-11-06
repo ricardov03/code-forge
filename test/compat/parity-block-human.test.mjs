@@ -115,7 +115,14 @@ async function parity(f, args, keys, expected, extra = {}) {
   const r = await runParity(args, { fixture: f, goCommand: terminal ? ['python3', '-c', PTY, BIN] : BIN,
     nodeCommand: terminal ? ['python3', '-c', PTY, process.execPath, CLI] : [process.execPath, CLI], samePaths: true, tempRoot: scratch,
     env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent', NO_COLOR: '1', TERM: 'xterm-256color', HUMAN_KEYS: keys ?? '', ...extra },
-    checkProcess(engine, result) { assert.equal(result.code, expected, `${engine}: exact exit ${expected}: ${result.stderr}`); } });
+    checkProcess(engine, result) {
+      assert.equal(result.code, expected, `${engine}: exact exit ${expected}: ${result.stderr}`);
+      if (extra.FORCE_COLOR === '1') {
+        assert.match(String(result.stdout), /\x1b\[\d+(?:;\d+)*m/, `${engine}: forced-colour stdout contains SGR colour escapes`);
+      } else {
+        assert.doesNotMatch(String(result.stdout), /\x1b\[\d+(?:;\d+)*m/, `${engine}: NO_COLOR stdout contains zero SGR colour escapes`);
+      }
+    } });
   assert.deepEqual(r.diffs, [], `${args.join(' ')}: zero stdout, stderr, state and signed-row differences`);
 }
 
@@ -134,7 +141,9 @@ test('human close, decide and human-pass have terminal, state, signed-row and ze
       assert.equal(rows.filter((r) => r.event === 'review.waived').length, kind === 'decide-finding' ? 1 : 0, `${kind}: exact signed human decision count`);
     }
   }
-  await parity(await fixture('close'), argv('close'), '79', 0, { HUMAN_COLUMNS: '80', NO_COLOR: '', FORCE_COLOR: '1' });
+  for (const kind of ['close', 'human-pass']) {
+    await parity(await fixture(kind), argv(kind), '79', 0, { HUMAN_COLUMNS: kind === 'close' ? '80' : '240', NO_COLOR: undefined, FORCE_COLOR: '1' });
+  }
   await parity(await fixture('human-pass'), ['block', 'human-pass', 'B1', '--run', RUN, '--note', 'checked'], '79', 0, { TERM: 'linux' });
 });
 
