@@ -23,6 +23,6 @@ test('B113: orphan stop logs its reason and path once and performs no more guard
     assert.equal(await worker.drain(), 0);
     assert.equal(await worker.drain(), 0);
     assert.equal(stats, 1);
-    assert.deepEqual(warnings, [{ warning: 'worker_orphan_stop', message: `run record missing: ${missing}` }]);
+    assert.deepEqual(warnings, [{ warning: 'worker_orphan_stop', message: `run record missing: ${missing}`, neverCreateHome: true }]);
   } finally { worker.stop(); worker.release(); }
 });

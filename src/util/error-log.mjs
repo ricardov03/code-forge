@@ -310,9 +310,21 @@ export function captureStderr(stream) {
  * Append one line, then cut the file to its newest half when it is over `maxBytes`.
  * @param {string} file @param {string} line - one JSON text, no newline.
  * @param {number} [maxBytes]
+ * @param {boolean} [neverCreateHome] - for an errorLogPath: create only .code-forge and logs, never HOME.
  */
-export async function appendLine(file, line, maxBytes = ERROR_LOG_MAX_BYTES) {
-  await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+export async function appendLine(file, line, maxBytes = ERROR_LOG_MAX_BYTES, neverCreateHome = false) {
+  if (neverCreateHome) {
+    // Non-recursive mkdir fails if its parent vanished, even during a concurrent HOME removal.
+    for (const dir of [path.dirname(path.dirname(file)), path.dirname(file)]) {
+      try {
+        await mkdir(dir, { mode: 0o700 });
+      } catch (err) {
+        if (err.code !== 'EEXIST') throw err;
+      }
+    }
+  } else {
+    await mkdir(path.dirname(file), { recursive: true, mode: 0o700 });
+  }
   await appendFile(file, `${line}\n`, { encoding: 'utf8', mode: 0o600 });
   const { size } = await stat(file);
   if (size <= maxBytes) return;
@@ -488,6 +500,7 @@ export function resetWarnings() {
  * @property {string} [verb] - default: the command the router noted, else `unknown`.
  * @property {string} warning - what happened: a short snake_case word (`op_retry`); else `warning`.
  * @property {string} message - plain text; never a value (it is cleaned and capped anyway).
+ * @property {boolean} [neverCreateHome] - create directories only below HOME; return null if HOME is absent.
  * @property {NodeJS.ProcessEnv} [env]
  * @property {string} [cwd]
  * @property {Date} [now]
@@ -536,7 +549,7 @@ export async function logWarning(input) {
       fp,
       before: cleanList(previousCommands()),
     };
-    await appendLine(file, JSON.stringify(entry));
+    await appendLine(file, JSON.stringify(entry), ERROR_LOG_MAX_BYTES, input.neverCreateHome);
     warned.add(fp); // only after the line is written: a failed write may be retried later
     return entry;
   } catch {

@@ -14,7 +14,7 @@ process.env.HOME = path.join(PARENT, 'home');
 mkdirSync(process.env.HOME, { recursive: true });
 after(() => rmSync(PARENT, { recursive: true, force: true }));
 
-const { appendLine, capBytes, createScrubber, describeCounts, fingerprint, fingerprintOf, flagNames, logVerbFailure, normalizeMessage, subcommandOf } = await import('../../src/util/error-log.mjs');
+const { appendLine, capBytes, createScrubber, describeCounts, fingerprint, fingerprintOf, flagNames, logVerbFailure, logWarning, normalizeMessage, subcommandOf } = await import('../../src/util/error-log.mjs');
 const { HINT_LINE, maybeHint } = await import('../../src/util/error-hint.mjs');
 const { clearErrorKind, reportErrorKind, takeErrorKind } = await import('../../src/util/error-kind.mjs');
 
@@ -365,6 +365,44 @@ describe('the hint after a failure (B28)', () => {
     const install = await import('../../src/install/agent-env.mjs');
     assert.deepEqual(AGENT_ENV_VARS, install.AGENT_ENV_VARS);
   });
+});
+
+test('neverCreateHome skips a removed HOME, writes under an existing HOME, and remembers only successful warnings; default logging still creates HOME', async () => {
+  const w = fresh();
+  const input = {
+    verb: 'worker', warning: 'home_guard', message: 'run record missing',
+    env: { HOME: w.home }, cwd: PARENT, neverCreateHome: true,
+  };
+  rmSync(w.home, { recursive: true });
+  assert.equal(await logWarning(input), null, 'a warning with neverCreateHome must skip a removed HOME');
+  assert.equal(existsSync(w.home), false, 'the skipped warning must leave HOME absent');
+
+  mkdirSync(w.home);
+  assert.equal(existsSync(path.join(w.home, '.code-forge')), false);
+  const entry = await logWarning(input);
+  assert.equal(entry?.kind, 'warning', 'the identical warning must succeed after HOME is restored');
+  assert.equal(entry?.warning, 'home_guard');
+  assert.equal(entry?.message, 'run record missing');
+  assert.deepEqual(lines(w.log).map((line) => JSON.parse(line)), [entry], 'exactly one warning line must be written');
+  assert.equal(await logWarning(input), null, 'a successfully written warning is remembered');
+  assert.equal(lines(w.log).length, 1, 'a duplicate warning must not append a second line');
+
+  rmSync(w.log);
+  mkdirSync(w.log); // A directory at the log path makes append fail without relying on permissions.
+  const retryInput = { ...input, message: 'warning append failed' };
+  assert.equal(await logWarning(retryInput), null, 'an append failure must not throw');
+  assert.deepEqual(readdirSync(w.log), [], 'the failed append must leave the blocking directory empty');
+  rmSync(w.log, { recursive: true });
+  const retried = await logWarning(retryInput);
+  assert.equal(retried?.message, 'warning append failed', 'a failed append must not consume the warning fingerprint');
+  assert.deepEqual(lines(w.log).map((line) => JSON.parse(line)), [retried], 'the retry must write exactly one warning line');
+
+  rmSync(w.home, { recursive: true });
+  const { neverCreateHome, ...defaultInput } = input;
+  const defaultEntry = await logWarning({ ...defaultInput, message: 'default warning recreates home' });
+  assert.equal(defaultEntry?.message, 'default warning recreates home');
+  assert.equal(existsSync(w.home), true, 'without the option, warning logging still creates HOME');
+  assert.deepEqual(lines(w.log).map((line) => JSON.parse(line)), [defaultEntry], 'default logging must write exactly one warning line');
 });
 
 describe('size cap', () => {
