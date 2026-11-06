@@ -21,6 +21,17 @@ func TestBlockCloseNativeUsage(t *testing.T) {
 	}
 }
 
+func TestConfirmedBlockCloseNeverHandsOverToNode(t *testing.T) {
+	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
+	for _, step := range []*landStep{nil, {}} {
+		var reason handoverReason
+		code := blockCloseHumanStep([]string{"--help"}, step, &reason, true)
+		if code != landHandover || reason != handoverFlagReason("close", "--help", hCloseUnsupportedFlag) {
+			t.Fatalf("step=%v: code=%d reason=%v; want handover sentinel without invoking Node", step, code, reason)
+		}
+	}
+}
+
 func TestCloseDoneRowsDaemonAndFallback(t *testing.T) {
 	home, err := os.MkdirTemp("/tmp", "cf-close-unit-")
 	if err != nil {

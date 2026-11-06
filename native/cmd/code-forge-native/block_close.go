@@ -21,6 +21,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/runstatus"
@@ -41,6 +42,10 @@ func blockCloseStep(args []string, step *landStep) int {
 // Preflight returns its reason to the caller, which records only the final
 // whole-command handover. Shared land preflights keep their existing sentinel.
 func blockCloseStepWithReason(args []string, step *landStep, handover *handoverReason, endHook ...*func()) int {
+	return blockCloseHumanStep(args, step, handover, false, endHook...)
+}
+
+func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason, confirmed bool, endHook ...*func()) int {
 	stdout, stderr := step.writers()
 
 	original := append([]string{"close"}, args...)
@@ -49,7 +54,7 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 		if handover != nil {
 			*handover = reason
 		}
-		if step != nil {
+		if confirmed || step != nil {
 			return landHandover
 		}
 		return blockHandover(original, reason)
@@ -75,7 +80,7 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	usage := func(text string) int { return fail(&state.Error{Code: "usage", Message: text}) }
 	for _, arg := range args {
 		name, _, _ := strings.Cut(arg, "=")
-		if slices.Contains([]string{"--decide", "--help", "-h"}, name) {
+		if slices.Contains([]string{"--help", "-h"}, name) {
 			return fallback(handoverFlagReason("close", name, hCloseUnsupportedFlag))
 		}
 	}
@@ -95,6 +100,28 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	record, err := state.ReadRun(home, run)
 	if err != nil {
 		return fail(err)
+	}
+	deciding := flags["decide"] == true
+	if deciding {
+		reason, ok := flags["reason"].(string)
+		if len(pos) != 1 || !ok || humanTrim(reason) == "" || strings.ContainsFunc(reason, func(r rune) bool { return r < 32 || r == 127 }) {
+			return usage("--decide needs one block id and a nonblank --reason without control characters")
+		}
+		if flags["no-require-reviews"] == true {
+			return usage("--decide cannot skip reviews")
+		}
+		if !humanask.Available() {
+			return humanNoTTY(stderr, "close")
+		}
+		if grant := blockObject(record.Get("autopilot")); grant != nil {
+			s, err := autopilot.GrantState(grant, time.Now())
+			if err != nil {
+				return fallback(hCloseDecide)
+			}
+			if s == "active" {
+				return fail(&state.Error{Code: "autopilot-active", Message: "block close --decide is refused while an autopilot grant is active"})
+			}
+		}
 	}
 	if step != nil && step.preflight && step.record != nil {
 		record = step.record
@@ -116,13 +143,18 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 		return fallback(hCloseConfig)
 	}
 	requireHuman := blockMap(cfg["close"])["require_human"] == true
-	if !requireHuman && flags["no-require-reviews"] != true && (step == nil || !step.preflight) {
+	if requireHuman && step != nil && handover == nil {
+		return fallback(hCloseHuman)
+	}
+	// Auto-claim's speculative close must not sign claims before a human can
+	// cancel the ordinary require_human prompt. Retain that composed boundary.
+	if !deciding && requireHuman && flags["auto-claim"] == true && humanask.Available() {
+		return fallback(hCloseHuman)
+	}
+	if !deciding && !requireHuman && flags["no-require-reviews"] != true && (step == nil || !step.preflight) {
 		expiryOnFailure = func() { blockGrantExpiry(home, run, stderr) }
 	}
 	var routineGrant ledger.Object
-	if requireHuman && record.Get("autopilot") == nil {
-		return fallback(hCloseHuman)
-	}
 	external := closeExternalReviewer(cfg)
 	// Land's composed close has no reason receiver. Keep its existing whole-
 	// command handover; only the direct close and close-flags caller opt in.
@@ -197,7 +229,7 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 		}
 		top, base, inTree = real, sha, true
 	}
-	if requireHuman && flags["no-require-reviews"] != true {
+	if !deciding && requireHuman && flags["no-require-reviews"] != true {
 		grant, _ := autopilot.Read(record, time.Now())
 		active := false
 		if grant.Grant != nil {
@@ -210,11 +242,20 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 			}
 			routineGrant = grant.Grant
 		} else {
-			if closeMayHaveTerminal() {
-				return fallback(hCloseHuman)
+			if !humanask.Available() {
+				return humanNoTTY(stderr, "close")
 			}
-			fmt.Fprintln(stderr, "block close needs the human at a terminal to confirm; nothing was recorded (there is no --yes)")
-			return 2
+			if !confirmed && (step == nil || !step.preflight) {
+				if code := humanConfirm(stderr, "close", id, fmt.Sprintf("Close block %s of run %s? Only the owner may say yes.", id, run)); code != 0 {
+					return code
+				}
+				code := blockCloseHumanStep(args, step, handover, true, endHook...)
+				if code == landHandover {
+					fmt.Fprintln(stderr, "block close: state changed after human confirmation")
+					return 1
+				}
+				return code
+			}
 		}
 	}
 	if flags["no-require-reviews"] == true {
@@ -342,7 +383,19 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	}
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, id, run, blockObject(record.Get("blocks")), changed, rows, key, inTree)
 	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedFiles(rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
+	if deciding && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
+		return fallback(hCloseDecide)
+	}
 	gate := gatecheck.CheckTranscript(run, id, files, rows, key, highPaths, unowned, noChanges, hits)
+	var decisions []humanDecision
+	if deciding && !confirmed {
+		var supported bool
+		decisions, rows, supported = humanDecisions(run, id, blockString(flags["reason"]), gate, rows, key)
+		if !supported {
+			return fallback(hCloseDecide)
+		}
+		gate = gatecheck.CheckTranscript(run, id, files, rows, key, highPaths, unowned, noChanges, hits)
+	}
 	if external != "" {
 		gate.Blockers = slices.DeleteFunc(gate.Blockers, func(b gatecheck.Blocker) bool {
 			return b.Code == "unreviewed" || b.Code == "unsigned" || b.Code == "not_approved"
@@ -385,12 +438,61 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 			event, reason = "ledger.tamper", why
 		}
 	}
+	if deciding && !confirmed {
+		// Decision dialects not yet understood must hand over before asking or
+		// signing. The existing B282 code describes that boundary.
+		if step == nil || !step.preflight {
+			print := io.Writer(os.Stdout)
+			if flags["json"] == true {
+				print = os.Stderr
+			}
+			for i, decision := range decisions {
+				fmt.Fprintf(print, "%d. %s\n", i+1, decision.label)
+			}
+			why := ""
+			for _, check := range checks {
+				if why == "" {
+					why = check.Reason
+				}
+			}
+			orphans, _ := record.Get("orphans").([]any)
+			if why == "" && len(orphans) > 0 {
+				names := []string{}
+				for _, v := range orphans {
+					names = append(names, blockString(v))
+				}
+				why = "orphans: " + strings.Join(names, ", ")
+			}
+			if event != "" {
+				why = reason
+			}
+			if why != "" {
+				fmt.Fprintln(stderr, "cannot decide here: "+why)
+				return 1
+			}
+			if code := humanConfirm(stderr, "close", id, fmt.Sprintf("Apply these decisions and close block %s of run %s? Only the owner may say yes.", id, run)); code != 0 {
+				return code
+			}
+			for _, decision := range decisions {
+				if _, err := state.WriteSigned(home, run, decision.row); err != nil {
+					fmt.Fprintln(stderr, "block close:", blockIOMessage(err))
+					return 1
+				}
+			}
+			code := blockCloseHumanStep(args, step, handover, true, endHook...)
+			if code == landHandover {
+				fmt.Fprintln(stderr, "block close: state changed after human confirmation")
+				return 1
+			}
+			return code
+		}
+	}
 	// No deferred read may hand over past here. From the first append onward an
 	// error is reported directly, never retried through Node.
 	if step != nil && step.preflight {
 		return 0
 	}
-	if !requireHuman {
+	if !deciding && !requireHuman {
 		blockGrantExpiry(home, run, stderr)
 	}
 	if step == nil {

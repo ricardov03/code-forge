@@ -274,10 +274,10 @@ async function normalizeSignatures(a, b, left, right, node, go) {
  * even on errors. Diffs identify process streams or home/repo-relative state files and JSON
  * paths ($.field, $[row].field); raw files use $. Missing files use $file.
  * @param {string[]} verbArgs
- * @param {{fixture: Fixture, goCommand: string | string[], env?: Record<string, string>, stdin?: string | Buffer, tempRoot?: string, samePaths?: boolean, prepare?: (copy: Fixture) => Promise<(() => Promise<void>) | void>, checkProcess?: (engine: 'Node' | 'Go', result: Awaited<ReturnType<typeof execute>>) => void}} options
+ * @param {{fixture: Fixture, goCommand: string | string[], nodeCommand?: string | string[], env?: Record<string, string>, stdin?: string | Buffer, tempRoot?: string, samePaths?: boolean, prepare?: (copy: Fixture) => Promise<(() => Promise<void>) | void>, checkProcess?: (engine: 'Node' | 'Go', result: Awaited<ReturnType<typeof execute>>) => void}} options
  * @returns {Promise<{equal: boolean, diffs: Diff[]}>}
  */
-export async function runParity(verbArgs, { fixture, goCommand, env = {}, stdin = '', tempRoot = os.tmpdir(), samePaths = false, prepare, checkProcess }) {
+export async function runParity(verbArgs, { fixture, goCommand, nodeCommand = [process.execPath, CLI], env = {}, stdin = '', tempRoot = os.tmpdir(), samePaths = false, prepare, checkProcess }) {
   const root = await realpath(await mkdtemp(path.join(tempRoot, 'cf-parity-')));
   try {
     const node = await copyFixture(fixture, path.join(root, 'node'));
@@ -289,7 +289,7 @@ export async function runParity(verbArgs, { fixture, goCommand, env = {}, stdin 
       try { return await execute(command, verbArgs.map((arg) => replacePaths(arg, fixture, copy)), copy.repo, childEnv(copy.home, path.join(copy.home, 'tmp'), env), stdin); }
       finally { if (typeof cleanup === 'function') await cleanup(); }
     };
-    const nodeResult = await runCopy(node, [process.execPath, CLI]);
+    const nodeResult = await runCopy(node, nodeCommand);
     checkProcess?.('Node', nodeResult);
     // Path-derived worktree ticket identities must see the very same absolute paths.
     // Restore a fresh copy after snapshotting Node, so no mutation carries over.
