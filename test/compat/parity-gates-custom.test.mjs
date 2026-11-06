@@ -16,6 +16,12 @@ const BINARY = path.join(scratch, 'pkg/native/bin', `${process.platform}-${proce
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
 const ARGS = ['gates', 'run', '--run', 'fixture', '--block', 'B1'];
 const NO_NODE = '/nonexistent';
+// Fixture children must not inherit the enclosing gate's run or ownership.
+function isolatedEnv(env) {
+  const clean = { ...env };
+  for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete clean[key];
+  return clean;
+}
 after(() => rm(scratch, { recursive: true, force: true }));
 before(async () => {
   await mkdir(path.dirname(BINARY), { recursive: true });
@@ -47,13 +53,13 @@ async function fixture(gates = {}, block = {}) {
   return f;
 }
 function launch(f, args = ARGS, env = {}, program = BINARY, prefix = []) {
-  const child = spawn(program, [...prefix, ...args], { cwd: f.repo, env: { ...process.env, NODE_TEST_CONTEXT: undefined, HOME: f.home, CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', ...env }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(program, [...prefix, ...args], { cwd: f.repo, env: isolatedEnv({ ...process.env, NODE_TEST_CONTEXT: undefined, HOME: f.home, CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', ...env }), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', (s) => { stdout += s; }); child.stderr.on('data', (s) => { stderr += s; });
   return { child, ended: once(child, 'close').then(([code, signal]) => ({ code, signal, stdout, stderr })) };
 }
 async function parity(f, args = ARGS, fallback = false, extra = {}) {
-  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE }, ...extra });
+  const result = await runParity(args, { fixture: f, goCommand: BINARY, ...extra, env: isolatedEnv({ CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE, ...extra.env }) });
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero differences in exit, streams and every state file`);
 }
 async function rows(f) {
@@ -122,7 +128,7 @@ test('B289 gates run: native custom, repeats, light and flaky cases match Node i
   await parity(timed, [...ARGS, '--timeout-ms', '100']);
 
   const concurrent = await fixture({ custom: [{ name: 'extra', argv: command('') }] });
-  const writer = spawn(BINARY, ['internal', 'state-golden', '--home', concurrent.home, '--run', 'fixture', '--op', 'lock'], { env: { ...process.env, HOME: concurrent.home }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const writer = spawn(BINARY, ['internal', 'state-golden', '--home', concurrent.home, '--run', 'fixture', '--op', 'lock'], { env: isolatedEnv({ ...process.env, HOME: concurrent.home }), stdio: ['pipe', 'pipe', 'pipe'] });
   await once(writer.stdout, 'data');
   const running = launch(concurrent);
   await delay(100);
