@@ -347,6 +347,89 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		if err != nil {
 			return err
 		}
+		// A credited sibling may have been rewritten before its landing merge.
+		// Its pre-land branch can still be an ancestor of this block even though
+		// those commit IDs are absent from newBase. Skip a tip only after proving
+		// its skipped commits are represented on newBase, not just its sibling tip.
+		replayFrom := oldBase
+		for _, field := range blocks {
+			b, _ := field.Value.(ledger.Object)
+			if text(b, "status") != "closed" {
+				continue
+			}
+			base, err := resolve(tree, text(b, "base_sha"))
+			if err != nil {
+				continue
+			}
+			bases := []string{base}
+			if recorded := text(object(b, "worktree"), "base_sha"); recorded != "" {
+				base, err := resolve(tree, recorded)
+				if err != nil {
+					continue
+				}
+				bases = append(bases, base)
+			}
+			tips := []string{}
+			landed := false
+			for _, branch := range []string{"forge/" + runID + "/" + field.Key, text(object(b, "worktree"), "branch")} {
+				if branch == "" {
+					continue
+				}
+				tip, err := resolve(tree, "refs/heads/"+branch)
+				if err != nil {
+					continue
+				}
+				// Like origins, exclude history at or before either recorded base.
+				commits, err := git(tree, append([]string{"rev-list", "--max-count=1", tip, "--not"}, bases...)...)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(commits) == "" {
+					continue
+				}
+				tips = append(tips, tip)
+				if _, err := git(tree, "merge-base", "--is-ancestor", tip, newBase); err == nil {
+					landed = true
+				}
+			}
+			// File ownership controls acceptance reporting, not inherited history.
+			// Require a verified landing even when Y changed no files X owns.
+			if !landed {
+				continue
+			}
+			for _, tip := range tips {
+				if _, err := git(tree, "merge-base", "--is-ancestor", replayFrom, tip); err != nil {
+					continue
+				}
+				if _, err := git(tree, "merge-base", "--is-ancestor", tip, oldHead); err != nil {
+					continue
+				}
+				patches, err := git(tree, "cherry", newBase, tip, replayFrom)
+				if err != nil {
+					return err
+				}
+				unlanded := false
+				for _, line := range strings.Split(patches, "\n") {
+					if strings.HasPrefix(line, "+ ") {
+						unlanded = true
+						break
+					}
+				}
+				if unlanded {
+					continue
+				}
+				// Cherry ignores merges, whose resolutions can contain unique work.
+				// Leave unrepresented merges for replay to refuse without mutation.
+				merges, err := git(tree, "rev-list", "--merges", replayFrom+".."+tip, "--not", newBase)
+				if err != nil {
+					return err
+				}
+				if strings.TrimSpace(merges) != "" {
+					continue
+				}
+				replayFrom = tip
+			}
+		}
 		// No mutation occurs until all origin checks pass. Every failure from
 		// replay through publication must restore the exact original HEAD.
 		defer func() {
@@ -356,7 +439,7 @@ func Run(home, runID, blockID string) (result Result, err error) {
 				}
 			}
 		}()
-		if err := replay(tree, oldBase, newBase, oldHead); err != nil {
+		if err := replay(tree, replayFrom, newBase, oldHead); err != nil {
 			_, _ = git(tree, "cherry-pick", "--abort")
 			_, _ = git(tree, "rebase", "--abort")
 			return refusal("rebase-conflict", "rebase-conflict")
