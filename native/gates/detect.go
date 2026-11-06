@@ -6,6 +6,8 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+
+	"github.com/ricardov03/code-forge/native/ledger"
 )
 
 var Order = []string{"test", "lint", "types", "format"}
@@ -22,6 +24,22 @@ type Plan struct {
 	Kind       string
 	Names      []string
 	Restricted bool
+	Custom     []Custom
+	Rerun      bool
+	Repeat     *Repeat
+	Light      []string
+}
+
+type Custom struct {
+	Name     string
+	Command  *Command
+	Evidence []string
+}
+type Repeat struct {
+	N      int
+	Base   string
+	Block  ledger.Object
+	OnSkip func(string)
 }
 
 func argv(a ...string) *Command  { return &Command{Argv: a} }
@@ -127,6 +145,7 @@ func Detect(root string) Plan {
 // Resolve refuses shapes outside the runner's exact command representation.
 func Resolve(cwd string, configured map[string]any) (Plan, bool) {
 	p := Detect(cwd)
+	p.Rerun = configured["rerun_failed"] != float64(0) && configured["rerun_failed"] != json.Number("0")
 	for _, name := range Order {
 		v, present := configured[name]
 		if !present {

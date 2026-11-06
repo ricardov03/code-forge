@@ -15,6 +15,12 @@ const scratch = await mkdtemp(path.join(os.tmpdir(), 'cf-gates-'));
 const BINARY = path.join(scratch, 'pkg/native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
 const NO_NODE = '/nonexistent-code-forge-node';
 const ARGS = ['gates', 'run', '--run', 'fixture', '--block', 'B1'];
+// Fixture children must not inherit the enclosing gate's run or ownership.
+function isolatedEnv(env) {
+  const clean = { ...env };
+  for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete clean[key];
+  return clean;
+}
 after(() => rm(scratch, { recursive: true, force: true }));
 before(async () => {
   await mkdir(path.dirname(BINARY), { recursive: true });
@@ -23,7 +29,7 @@ before(async () => {
   const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const build = spawnSync('go', ['build', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') },
+    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: isolatedEnv({ ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') }),
   });
   assert.equal(build.status, 0, `private native binary builds: ${build.stderr}`);
 });
@@ -44,7 +50,7 @@ async function fixture(gates = {}, block = {}, extra = {}) {
   return f;
 }
 function git(f, args) {
-  const result = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8' });
+  const result = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8', env: isolatedEnv(process.env) });
   assert.equal(result.status, 0, `fixture git ${args[0]}: ${result.stderr}`);
   return result.stdout.trim();
 }
@@ -54,13 +60,13 @@ async function record(f, value) {
   await writeFile(path.join(dir, 'fixture.json'), JSON.stringify(value));
 }
 function launch(f, args = ARGS, extra = {}, program = BINARY, prefix = []) {
-  const child = spawn(program, [...prefix, ...args], { cwd: f.repo, env: { ...process.env, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', ...extra }, stdio: ['ignore', 'pipe', 'pipe'] });
+  const child = spawn(program, [...prefix, ...args], { cwd: f.repo, env: isolatedEnv({ ...process.env, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, CODE_FORGE_NO_ERROR_LOG: '1', ...extra }), stdio: ['ignore', 'pipe', 'pipe'] });
   let stdout = '', stderr = '';
   child.stdout.on('data', (s) => { stdout += s; }); child.stderr.on('data', (s) => { stderr += s; });
   return { child, ended: once(child, 'close').then(([code, signal]) => ({ code, signal, stdout, stderr })) };
 }
 async function parity(f, args = ARGS, fallback = false, env = {}) {
-  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE, ...env } });
+  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: isolatedEnv({ CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE, ...env }) });
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero stream, exit and state differences`);
 }
 const normalizeRows = (bytes) => bytes.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<time>').replace(/("(?:total_)?duration_ms":)\d+/g, '$1<duration>');
@@ -132,6 +138,44 @@ test('review F1 scope: changed Swift pairs, Python suffix follows Node filtering
   }
 });
 
+test('review F1 rerun_failed: Node and Go recover a failing gate with zero parity differences', async () => {
+  const f = await fixture({ rerun_failed: 1, test: command('const fs=require("node:fs");if(!fs.existsSync("retried")){fs.writeFileSync("retried","1");console.log("FAIL sample.test.mjs");process.exit(1)}', '{test_files}') });
+  const result = await runParity(ARGS, {
+    fixture: f, goCommand: BINARY, env: isolatedEnv({ CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE }),
+    prepare: async (copy) => async () => {
+      assert.equal(await readFile(path.join(copy.repo, 'retried'), 'utf8'), '1', 'the initial gate failed and created its marker');
+      const rows = (await readFile(path.join(copy.home, '.code-forge/ledger/fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].event, 'gate.done');
+      assert.equal(rows[0].all_ok, true, 'the failed gate recovered');
+      assert.deepEqual(rows[0].flaky, ['sample.test.mjs'], 'each implementation ran flaky detection');
+      assert.deepEqual(rows[0].results[0].flaky, ['sample.test.mjs'], 'the test gate reran successfully');
+    },
+  });
+  assert.deepEqual(result.diffs, [], 'rerun_failed: zero stream, exit and state differences');
+});
+
+test('review F1 repeat_new_tests: Node and Go repeat a changed test with zero parity differences', async () => {
+  const f = await fixture({ repeat_new_tests: 2, test: command('const fs=require("node:fs");const n=Number(fs.existsSync("repeat-count")?fs.readFileSync("repeat-count","utf8"):0)+1;fs.writeFileSync("repeat-count",String(n))', '{test_files}') }, { owned_files: ['sample.test.mjs'] });
+  const run = JSON.parse(await readFile(path.join(f.home, '.code-forge/runs/fixture.json'), 'utf8'));
+  run.blocks.B1.base_sha = git(f, ['rev-parse', 'HEAD']);
+  await record(f, run);
+  await writeFile(path.join(f.home, '.code-forge/runs/fixture.key'), Buffer.alloc(32, 7), { mode: 0o600 });
+  await writeFile(path.join(f.repo, 'sample.test.mjs'), '// changed test\n');
+  const result = await runParity(ARGS, {
+    fixture: f, goCommand: BINARY, env: isolatedEnv({ CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE }),
+    prepare: async (copy) => async () => {
+      assert.equal(await readFile(path.join(copy.repo, 'repeat-count'), 'utf8'), '3', 'each implementation ran the initial gate and exactly two repeats');
+      const rows = (await readFile(path.join(copy.home, '.code-forge/ledger/fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+      assert.equal(rows.length, 1);
+      assert.equal(rows[0].event, 'gate.done');
+      assert.equal(rows[0].all_ok, true);
+      assert.deepEqual(rows[0].repeats, { n: 2, files: ['sample.test.mjs'], failed: false }, 'each implementation recorded both repeats');
+    },
+  });
+  assert.deepEqual(result.diffs, [], 'repeat_new_tests: zero stream, exit and state differences');
+});
+
 test('gates run: native speed and byte parity for gates, scope, lock, worktrees, usage and fallback', async () => {
   const green = await fixture();
   const speed = await launch(green).ended;
@@ -181,10 +225,19 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
     await parity(green, [...ARGS, ...flags], false, { CODE_FORGE_NO_ERROR_LOG: '0' });
   }
   for (const args of [['gates', 'run', '--run', 'fixture'], ['gates', 'run', '--block', 'B1']]) await parity(green, args);
+  /** @type {[Record<string, any>, Record<string, any>, number][]} */
+  const ported = [
+    [{ custom: [{ name: 'extra', argv: command('') }] }, {}, 0],
+    [{}, { kind: 'light' }, 1],
+  ];
+  for (const [gates, block, code] of ported) {
+    const f = await fixture(gates, block);
+    assert.equal((await launch(f).ended).code, code, 'ported case runs in Go with unavailable Node');
+    await parity(f);
+  }
   /** @type {[Record<string, any>, Record<string, any>, string[]][]} */
   const handovers = [
-    [{ repeat_new_tests: 2 }, {}, ARGS], [{ custom: [{ name: 'extra', argv: command('') }] }, {}, ARGS],
-    [{}, { kind: 'light' }, ARGS], [{ rerun_failed: 1 }, {}, ARGS], [{ test: ['/nonexistent-gate-tool'] }, {}, ARGS], [{}, {}, ['gates', 'detect']], [{}, {}, ['gates', 'run']],
+    [{ test: ['/nonexistent-gate-tool'] }, {}, ARGS], [{}, {}, ['gates', 'detect']], [{}, {}, ['gates', 'run']],
   ];
   for (const [gates, block, args] of handovers) {
     const f = await fixture(gates, block);
@@ -195,7 +248,7 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
 
 test('gates run waits for a concurrent run writer and preserves its new proof lock', async () => {
   const f = await fixture();
-  const writer = spawn(BINARY, ['internal', 'state-golden', '--home', f.home, '--run', 'fixture', '--op', 'lock'], { cwd: f.repo, env: { ...process.env, HOME: f.home }, stdio: ['pipe', 'pipe', 'pipe'] });
+  const writer = spawn(BINARY, ['internal', 'state-golden', '--home', f.home, '--run', 'fixture', '--op', 'lock'], { cwd: f.repo, env: isolatedEnv({ ...process.env, HOME: f.home }), stdio: ['pipe', 'pipe', 'pipe'] });
   await once(writer.stdout, 'data');
   const run = launch(f);
   await delay(100);
