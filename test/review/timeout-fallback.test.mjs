@@ -23,8 +23,10 @@ const FAST = 'claude-sonnet-5';
 for (const name of Object.keys(process.env)) if (name.startsWith('CODE_FORGE_')) delete process.env[name];
 
 /** @param {string} slug @param {boolean} alternatives @param {boolean} [fallbackTimeout]
- * @param {{worktree?: boolean, ledgerFailure?: 'history' | 'performance', ledgerOnly?: boolean, projectShape?: boolean}} [options] */
-async function review(slug, alternatives, fallbackTimeout = false, { worktree = false, ledgerFailure, ledgerOnly = false, projectShape = false } = {}) {
+ * @param {{worktree?: boolean, ledgerFailure?: 'history' | 'performance', ledgerOnly?: boolean, projectShape?: boolean,
+ * historyEvent?: 'session' | 'review.result', historyRole?: string}} [options] */
+async function review(slug, alternatives, fallbackTimeout = false, { worktree = false, ledgerFailure, ledgerOnly = false,
+  projectShape = false, historyEvent, historyRole = 'reviewer' } = {}) {
   const repo = await makeRepo();
   writeFile(repo, FILE, 'export const small = 1;\n');
   const runId = `r-${slug}`;
@@ -55,11 +57,15 @@ async function review(slug, alternatives, fallbackTimeout = false, { worktree = 
   const writeRow = (row) => appendRow(row, { slug });
   if (alternatives) {
     for (const [model, duration_ms] of (projectShape ? [[FAST, 1000]] : [[SLOW, 100000], [FAST, 1000]])) {
-      for (let i = 0; i < 10; i++) await writeRow(signRow({ event: 'session', run: runId, role: 'reviewer', provider: cfg.provider, model, status: 'ok', duration_ms, ts: new Date().toISOString() }, key));
+      if (historyEvent !== 'review.result') {
+        for (let i = 0; i < 10; i++) await writeRow(signRow({ event: 'session', run: runId, role: historyRole, provider: cfg.provider, model, status: 'ok', duration_ms, ts: new Date().toISOString() }, key));
+      }
       const block = `history-${model}`;
-      await writeRow(signRow({ event: 'review.result', run: runId, block, file: FILE, ts: new Date().toISOString(),
-        sessions: [{ role: 'reviewer', model, findings: [{ id: 'F1', severity: 'warning' }] }],
-      }, key));
+      if (historyEvent !== 'session') {
+        await writeRow(signRow({ event: 'review.result', run: runId, block, file: FILE, ts: new Date().toISOString(),
+          sessions: [{ role: historyRole, provider: cfg.provider, model, findings: [{ id: 'F1', severity: 'warning' }] }],
+        }, key));
+      }
       if (model === SLOW) await writeRow(signRow({ event: 'review.waived', run: runId, block, file: FILE, finding: 'F1', ts: new Date().toISOString() }, key));
     }
   }
@@ -117,31 +123,38 @@ test('worktree reviews without project.slug use the run project ledger for measu
   assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
 });
 
-test('project ledger reviewer models absent from config cannot recover a timed out reviewer', async () => {
-  const { result, calls, rows } = await review('timeout-ledger-only', true, false, { ledgerOnly: true });
-  assert.deepEqual(calls, [PRIMARY, PRIMARY]);
-  assert.deepEqual([result.status, result.reason, result.approved, result.next.action, result.sessions[0].attempts],
-    ['unavailable', 'timeout', false, 'retry', 2]);
-  assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0);
-});
+for (const historyEvent of /** @type {const} */ (['session', 'review.result'])) {
+  const historySlug = historyEvent.replace('.', '-');
+  test(`project ledger ${historyEvent} reviewer models absent from config cannot recover a timed out reviewer`, async () => {
+    const { result, calls, rows } = await review(`timeout-ledger-only-${historySlug}`, true, false, { ledgerOnly: true, historyEvent });
+    assert.deepEqual(calls, [PRIMARY, PRIMARY]);
+    assert.deepEqual([result.status, result.reason, result.approved, result.next.action, result.sessions[0].attempts],
+      ['unavailable', 'timeout', false, 'retry', 2]);
+    assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0);
+  });
 
-test('a configured L1 model with project reviewer history recovers without review keys', async () => {
-  const { result, calls, rows, key } = await review('timeout-project-reviewer-history', true, false, { projectShape: true });
-  assert.deepEqual(calls, [PRIMARY, PRIMARY, FAST]);
-  assert.deepEqual([result.status, result.approved, result.sessions[0].attempts], ['reviewed', true, 3]);
-  const fallback = rows.filter((row) => row.event === 'review.schema_fallback' && row.trigger === 'timeout');
-  assert.equal(fallback.length, 1);
-  assert.deepEqual([fallback[0].to_model, fallback[0].routing_reason], [FAST, 'performance']);
-  assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
-});
+  test(`a configured L1 model with project ${historyEvent} reviewer history recovers without review keys`, async () => {
+    const { result, calls, rows, key } = await review(`timeout-project-reviewer-history-${historySlug}`, true, false, { projectShape: true, historyEvent });
+    assert.deepEqual(calls, [PRIMARY, PRIMARY, FAST]);
+    assert.deepEqual([result.status, result.approved, result.sessions[0].attempts], ['reviewed', true, 3]);
+    const fallback = rows.filter((row) => row.event === 'review.schema_fallback' && row.trigger === 'timeout');
+    assert.equal(fallback.length, 1);
+    assert.deepEqual([fallback[0].to_model, fallback[0].routing_reason],
+      [FAST, historyEvent === 'session' ? 'performance' : 'configured-order']);
+    assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
+  });
+}
 
-test('distinct project levels without reviewer history preserve the original timeout result', async () => {
-  const { result, calls, rows } = await review('timeout-project-no-reviewer-history', false, false, { projectShape: true });
-  assert.deepEqual(calls, [PRIMARY, PRIMARY]);
-  assert.deepEqual([result.status, result.reason, result.approved, result.next.action, result.sessions[0].attempts],
-    ['unavailable', 'timeout', false, 'retry', 2]);
-  assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0);
-});
+for (const hasCoderHistory of [false, true]) {
+  test(`distinct project levels with ${hasCoderHistory ? 'coder history only' : 'no history'} preserve the original timeout result`, async () => {
+    const { result, calls, rows } = await review(`timeout-project-no-reviewer-history-${hasCoderHistory}`, hasCoderHistory, false,
+      { projectShape: true, historyRole: 'coder' });
+    assert.deepEqual(calls, [PRIMARY, PRIMARY]);
+    assert.deepEqual([result.status, result.reason, result.approved, result.next.action, result.sessions[0].attempts],
+      ['unavailable', 'timeout', false, 'retry', 2]);
+    assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0);
+  });
+}
 
 for (const ledgerFailure of /** @type {const} */ (['history', 'performance'])) {
   test(`a failed ${ledgerFailure} ledger read still recovers once in configured order and records why`, async () => {

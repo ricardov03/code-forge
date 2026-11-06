@@ -322,6 +322,9 @@ export function timeoutFallbackFor(cfg, level, from, { rows, ticketId, role }) {
     add(entryOf(rule), provider);
     add(rule.second, cfg.review?.second_provider ?? cfg.provider);
   }
+  // Defaults at other levels authorize a provider/model pair, but become candidates only
+  // after this project's ledger confirms the requested role. Explicit review alternatives
+  // above remain candidates even without history.
   for (const entry of Object.values(cfg.levels ?? {})) add(entry, cfg.provider, configured);
   for (const entry of Object.values(cfg.review?.second_levels ?? {})) {
     add(entry, cfg.review?.second_provider ?? cfg.provider, configured);
@@ -334,6 +337,7 @@ export function timeoutFallbackFor(cfg, level, from, { rows, ticketId, role }) {
   const confirm = (session) => {
     if (session?.role !== role) return;
     const entry = configured.find((entry) => entry.model === session.model && entry.provider === session.provider);
+    // Retain the current config's effort/settings, never the stale ledger's model entry.
     if (entry) entries.push(entry);
   };
   for (const row of rows) {
