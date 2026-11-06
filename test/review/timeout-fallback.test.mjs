@@ -23,21 +23,24 @@ const FAST = 'claude-sonnet-5';
 for (const name of Object.keys(process.env)) if (name.startsWith('CODE_FORGE_')) delete process.env[name];
 
 /** @param {string} slug @param {boolean} alternatives @param {boolean} [fallbackTimeout]
- * @param {{worktree?: boolean, ledgerFailure?: 'history' | 'performance', ledgerOnly?: boolean}} [options] */
-async function review(slug, alternatives, fallbackTimeout = false, { worktree = false, ledgerFailure, ledgerOnly = false } = {}) {
+ * @param {{worktree?: boolean, ledgerFailure?: 'history' | 'performance', ledgerOnly?: boolean, projectShape?: boolean}} [options] */
+async function review(slug, alternatives, fallbackTimeout = false, { worktree = false, ledgerFailure, ledgerOnly = false, projectShape = false } = {}) {
   const repo = await makeRepo();
   writeFile(repo, FILE, 'export const small = 1;\n');
   const runId = `r-${slug}`;
   const cfg = {
     provider: 'anthropic', ...(worktree ? {} : { project: { slug } }),
-    levels: {
+    levels: projectShape ? {
+      L0: { model: 'claude-haiku-4-5-20251001' }, L1: { model: FAST },
+      L2: { model: PRIMARY }, L3: { model: SLOW },
+    } : {
       L0: { model: PRIMARY }, L1: { model: PRIMARY }, L2: { model: PRIMARY },
       L3: ledgerOnly ? { model: PRIMARY } : { model: SLOW, fallback: [{ model: FAST }] },
     },
-    review: { min_tokens_out: 40, adaptive: { explore: 0 },
+    ...(projectShape ? {} : { review: { min_tokens_out: 40, adaptive: { explore: 0 },
       // These models are configured as reviewers even when this small file does not match.
       ...(alternatives && !ledgerOnly ? { routes: [{ min_lines: 10000, model: SLOW, fallback: [{ model: FAST }] }] } : {}),
-    },
+    } }),
   };
   await startRun({ workspace: repo, project: slug, runId, config: cfg, writeRow: async () => {} });
   const tree = worktree ? path.join(repo, '.claude/worktrees/cf/B1') : null;
@@ -51,7 +54,7 @@ async function review(slug, alternatives, fallbackTimeout = false, { worktree = 
   const key = await loadKey(runId);
   const writeRow = (row) => appendRow(row, { slug });
   if (alternatives) {
-    for (const [model, duration_ms] of [[SLOW, 100000], [FAST, 1000]]) {
+    for (const [model, duration_ms] of (projectShape ? [[FAST, 1000]] : [[SLOW, 100000], [FAST, 1000]])) {
       for (let i = 0; i < 10; i++) await writeRow(signRow({ event: 'session', run: runId, role: 'reviewer', provider: cfg.provider, model, status: 'ok', duration_ms, ts: new Date().toISOString() }, key));
       const block = `history-${model}`;
       await writeRow(signRow({ event: 'review.result', run: runId, block, file: FILE, ts: new Date().toISOString(),
@@ -114,14 +117,30 @@ test('worktree reviews without project.slug use the run project ledger for measu
   assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
 });
 
-test('project ledger reviewer models can recover without an explicit reviewer route', async () => {
-  const { result, calls, rows, key } = await review('timeout-ledger-only', true, false, { ledgerOnly: true });
+test('project ledger reviewer models absent from config cannot recover a timed out reviewer', async () => {
+  const { result, calls, rows } = await review('timeout-ledger-only', true, false, { ledgerOnly: true });
+  assert.deepEqual(calls, [PRIMARY, PRIMARY]);
+  assert.deepEqual([result.status, result.reason, result.approved, result.next.action, result.sessions[0].attempts],
+    ['unavailable', 'timeout', false, 'retry', 2]);
+  assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0);
+});
+
+test('a configured L1 model with project reviewer history recovers without review keys', async () => {
+  const { result, calls, rows, key } = await review('timeout-project-reviewer-history', true, false, { projectShape: true });
   assert.deepEqual(calls, [PRIMARY, PRIMARY, FAST]);
   assert.deepEqual([result.status, result.approved, result.sessions[0].attempts], ['reviewed', true, 3]);
   const fallback = rows.filter((row) => row.event === 'review.schema_fallback' && row.trigger === 'timeout');
   assert.equal(fallback.length, 1);
   assert.deepEqual([fallback[0].to_model, fallback[0].routing_reason], [FAST, 'performance']);
   assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
+});
+
+test('distinct project levels without reviewer history preserve the original timeout result', async () => {
+  const { result, calls, rows } = await review('timeout-project-no-reviewer-history', false, false, { projectShape: true });
+  assert.deepEqual(calls, [PRIMARY, PRIMARY]);
+  assert.deepEqual([result.status, result.reason, result.approved, result.next.action, result.sessions[0].attempts],
+    ['unavailable', 'timeout', false, 'retry', 2]);
+  assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0);
 });
 
 for (const ledgerFailure of /** @type {const} */ (['history', 'performance'])) {
@@ -187,6 +206,53 @@ test('judge levels, routes, second levels and ledger rows never configure review
   assert.equal(timeoutFallbackFor(cfg, 'L2', { model: PRIMARY, provider: 'anthropic' }, {
     rows, ticketId: 'role-boundary', role: 'reviewer',
   }), null);
+});
+
+test('ledger confirmation requires the configured provider and reviewer role for every config location', () => {
+  const alternative = { model: FAST, effort: 'high' };
+  const configs = [
+    { levels: { L1: alternative } },
+    { levels: { L3: { model: SLOW, fallback: [alternative] } } },
+    { review: { second_levels: { L3: alternative } } },
+    { review: { routes: [{ level: 'L3', min_lines: 0, ...alternative }] } },
+    { review: { routes: [{ level: 'L3', min_lines: 0, model: SLOW, fallback: [alternative] }] } },
+    { review: { routes: [{ level: 'L3', min_lines: 0, model: SLOW, second: alternative }] } },
+    { review: { routes: [{ level: 'L3', min_lines: 0, model: SLOW, second: { model: SLOW, fallback: [alternative] } }] } },
+  ];
+  for (const extra of configs) {
+    const cfg = { ...extra, provider: 'anthropic', levels: { L2: { model: PRIMARY }, ...extra.levels } };
+    const pick = (rows) => timeoutFallbackFor(cfg, 'L2', { model: PRIMARY, provider: 'anthropic' }, {
+      rows, ticketId: 'config-confirmation', role: 'reviewer',
+    });
+    assert.equal(pick([]), null, 'another role or level alone does not configure a reviewer');
+    for (const event of ['session', 'review.result']) {
+      for (const [provider, role] of [['anthropic', 'reviewer'], ['xai', 'reviewer'], ['anthropic', 'judge']]) {
+        const session = { provider, role, model: FAST };
+        const choice = pick([event === 'session' ? { event, ...session } : { event, sessions: [session] }]);
+        if (provider !== 'anthropic' || role !== 'reviewer') {
+          assert.equal(choice, null, 'neither a different provider nor a different role confirms the model');
+        } else {
+          assert.deepEqual([choice.model, choice.provider, choice.cfg.levels.L2.effort], [FAST, 'anthropic', 'high']);
+        }
+      }
+    }
+  }
+});
+
+test('explicit reviewer alternatives remain eligible without ledger history', () => {
+  for (const extra of [
+    { levels: { L2: { model: PRIMARY, fallback: [{ model: FAST }] } } },
+    { review: { second_levels: { L2: { model: FAST } } } },
+    { review: { routes: [{ min_lines: 10000, model: FAST }] } },
+    { review: { routes: [{ min_lines: 10000, model: PRIMARY, fallback: [{ model: FAST }] }] } },
+    { review: { routes: [{ min_lines: 10000, model: PRIMARY, second: { model: FAST } }] } },
+  ]) {
+    const cfg = { provider: 'anthropic', levels: { L2: { model: PRIMARY } }, ...extra };
+    const choice = timeoutFallbackFor(cfg, 'L2', { model: PRIMARY, provider: 'anthropic' }, {
+      rows: [], ticketId: 'explicit-reviewer', role: 'reviewer',
+    });
+    assert.deepEqual([choice.model, choice.provider, choice.reason], [FAST, 'anthropic', 'configured-order']);
+  }
 });
 
 test('a configured timeout ladder never retries a stalled model, even with duplicates or reported aliases', async () => {

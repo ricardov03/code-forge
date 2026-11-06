@@ -287,10 +287,9 @@ function providerOf(cfg, rule) {
 }
 
 /**
- * A stalled session may borrow one other model configured for its review role. Other levels
- * (especially the default L3 judge) do not configure reviewer candidates. Project ledger
- * attempts/results can also establish that a model has run in this role; never guess a model
- * or provider from built-in defaults. Use the same measured
+ * A stalled session may borrow one other model explicitly configured for its review role.
+ * Project ledger attempts/results can confirm a model named elsewhere in the config has run
+ * in this role, but never introduce an unconfigured provider/model. Use the same measured
  * speed/availability/accuracy policy as normal routing, excluding the stalled model entirely.
  * The recovery entry has no ladder: it is one attempt, never another chain of retries.
  * @param {Record<string, any>} cfg @param {string} level
@@ -301,11 +300,14 @@ function providerOf(cfg, rule) {
 export function timeoutFallbackFor(cfg, level, from, { rows, ticketId, role }) {
   /** @type {Array<Record<string, any>>} */
   const entries = [];
-  /** @param {Record<string, any> | undefined} entry @param {string | undefined} provider */
-  const add = (entry, provider) => {
+  /** @type {Array<Record<string, any>>} */
+  const configured = [];
+  /** @param {Record<string, any> | undefined} entry @param {string | undefined} provider
+   * @param {Array<Record<string, any>>} [target] */
+  const add = (entry, provider, target = entries) => {
     if (!entry) return;
     const ownProvider = entry.provider ?? provider;
-    entries.push({ ...entry, provider: ownProvider }, ...(entry.fallback ?? []).map((fallback) => ({
+    target.push({ ...entry, provider: ownProvider }, ...(entry.fallback ?? []).map((fallback) => ({
       ...fallback, provider: fallback.provider ?? ownProvider,
     })));
   };
@@ -314,15 +316,30 @@ export function timeoutFallbackFor(cfg, level, from, { rows, ticketId, role }) {
   // older/custom spawners may omit its identity or report an alias in their timeout result.
   for (const fallback of primary?.fallback ?? []) add(fallback, primary.provider ?? cfg.provider);
   add(cfg.review?.second_levels?.[level], cfg.review?.second_provider ?? cfg.provider);
-  for (const rule of routeRules(cfg).filter((rule) => (rule.level ?? DEFAULT_ROUTE_LEVEL) === level)) {
+  const rules = routeRules(cfg);
+  for (const rule of rules.filter((rule) => (rule.level ?? DEFAULT_ROUTE_LEVEL) === level)) {
     const provider = providerOf(cfg, rule);
     add(entryOf(rule), provider);
     add(rule.second, cfg.review?.second_provider ?? cfg.provider);
   }
+  for (const entry of Object.values(cfg.levels ?? {})) add(entry, cfg.provider, configured);
+  for (const entry of Object.values(cfg.review?.second_levels ?? {})) {
+    add(entry, cfg.review?.second_provider ?? cfg.provider, configured);
+  }
+  for (const rule of rules) {
+    add(entryOf(rule), providerOf(cfg, rule), configured);
+    add(rule.second, cfg.review?.second_provider ?? cfg.provider, configured);
+  }
+  /** @param {Record<string, any>} session */
+  const confirm = (session) => {
+    if (session?.role !== role) return;
+    const entry = configured.find((entry) => entry.model === session.model && entry.provider === session.provider);
+    if (entry) entries.push(entry);
+  };
   for (const row of rows) {
-    if (row.event === 'session' && row.role === role) entries.push(row);
+    if (row.event === 'session') confirm(row);
     if (row.event === 'review.result' && Array.isArray(row.sessions)) {
-      entries.push(...row.sessions.filter((session) => session?.role === role));
+      for (const session of row.sessions) confirm(session);
     }
   }
   const candidates = entries.filter((entry, i, all) => isText(entry.model) && isText(entry.provider)
