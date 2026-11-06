@@ -195,11 +195,8 @@ test('close flags run natively with byte parity for process, signed state and gi
 test('still-handed-over close flags record exactly one row with the boundary reason', async () => {
   /** @type {[Record<string, any>, string[], string][]} */
   const cases = [
-    [{}, ['--decide'], 'close-decide'],
-    [{}, ['--auto-claim', '--decide'], 'close-decide'],
-    [{}, ['--remove-worktree', '--decide'], 'close-decide'],
-    [{}, ['--no-require-reviews', '--decide'], 'close-decide'],
-    [{ close: { require_human: true } }, ['--auto-claim'], 'close-human'],
+    [{}, ['--auto-claim', '--help'], 'close-help'],
+    [{}, ['--remove-worktree', '--help'], 'close-help'],
   ];
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   for (const [config, flags, reason] of cases) {
@@ -265,8 +262,7 @@ test('close flag refusals, concurrent claims and whole-command handovers preserv
   for (const flags of [['--auto-claim'], ['--remove-worktree'], ['--no-require-reviews'], ['--auto-claim', '--remove-worktree', '--no-require-reviews']]) {
     /** @type {[Record<string, any>, string[], boolean][]} */
     const handovers = [
-      [{ close: { require_human: true } }, [], false],
-      [{}, ['--decide'], false], [{}, [], true],
+      [{}, [], true],
     ];
     for (const [config, extra, grant] of handovers) {
       const f = await fixture('auto-tree', config);

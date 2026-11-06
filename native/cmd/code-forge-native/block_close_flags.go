@@ -10,6 +10,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
@@ -18,7 +19,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ticket"
 )
 
-// Extend the shared parser only for close's auto-claim boolean. Complete token
+// Extend the shared parser for close's auto-claim and decide booleans. Complete token
 // groups retain the shared usage precedence, duplicate and inline-value rules.
 func closeFlags(args []string) (map[string]any, []string, string) {
 	flags, pos := map[string]any{}, []string{}
@@ -33,9 +34,9 @@ func closeFlags(args []string) (map[string]any, []string, string) {
 		if _, has := flags[name]; has && !multi {
 			return flags, pos, "--" + name + " given more than once"
 		}
-		if name == "auto-claim" {
+		if name == "auto-claim" || name == "decide" {
 			if inline {
-				return flags, pos, "--auto-claim takes no value"
+				return flags, pos, "--" + name + " takes no value"
 			}
 			flags[name] = true
 			continue
@@ -68,26 +69,10 @@ func closeFlags(args []string) (map[string]any, []string, string) {
 }
 
 func closeMayHaveTerminal() bool {
-	for _, file := range []*os.File{os.Stdin, os.Stdout} {
-		st, err := file.Stat()
-		if err != nil || st.Mode()&os.ModeCharDevice == 0 {
-			return false
-		}
-	}
-	return true
+	return humanask.Available()
 }
 
 func closeWithFlags(args []string) int {
-	nativeFlags := false
-	for _, arg := range args {
-		name, _, _ := strings.Cut(arg, "=")
-		if name == "--auto-claim" || name == "--remove-worktree" || name == "--no-require-reviews" {
-			nativeFlags = true
-		}
-	}
-	if !nativeFlags {
-		return blockCloseStep(args, nil)
-	}
 	if !closeTextSafe(strings.Join(args, "\n")) {
 		return blockHandover(append([]string{"close"}, args...), hCloseUnsupportedFlag)
 	}
