@@ -12,6 +12,7 @@ const { loadKey, signRow, verifyRow } = await import('../../src/state/signer.mjs
 const { appendRow, readAllRows } = await import('../../src/ledger/write.mjs');
 const { createKeyStore } = await import('../../src/keys/store.mjs');
 const { timeoutFallbackFor } = await import('../../src/review/route.mjs');
+const { spawnWithTimeoutRetry } = await import('../../src/review/session-retry.mjs');
 
 const FILE = 'src/small.mjs';
 const PRIMARY = 'claude-opus-5-5';
@@ -144,6 +145,30 @@ test('without another configured reviewer two timeouts remain unavailable with r
   assert.deepEqual(calls, [PRIMARY, PRIMARY], 'exactly two original-model attempts');
   assert.deepEqual([result.status, result.reason, result.approved, result.next.action], ['unavailable', 'timeout', false, 'retry']);
   assert.equal(rows.filter((row) => row.event === 'review.schema_fallback').length, 0, 'no fallback row without another model');
+});
+
+test('a ladder without another runnable model preserves the original attempts and timeout notes', async () => {
+  for (const fallback of [[], [{ model: PRIMARY }], [{ provider: 'openai', model: 'gpt-6-astra' }]]) {
+    const cfg = { provider: 'anthropic', levels: { L2: { model: PRIMARY, fallback } } };
+    const opts = { cfg, level: 'L2', role: 'reviewer', rowExtra: { lens: 'quick' } };
+    const timeout = { status: 'timeout', provider: cfg.provider, model: PRIMARY,
+      duration_ms: 300000, stderr_tail: 'stalled', stdout_bytes: 0, stdout_events: [] };
+    const calls = [];
+    const notes = [];
+    const result = await spawnWithTimeoutRetry(async (attempt) => {
+      calls.push(attempt);
+      return timeout;
+    }, opts, async (row) => void notes.push(row));
+    assert.deepEqual(result, { res: timeout, attempts: 2 });
+    assert.equal(calls.length, 2);
+    for (const call of calls) assert.equal(call, opts, 'both attempts receive the original options');
+    assert.deepEqual(notes, [1, 2].map((attempt) => ({
+      event: 'review.session_timeout', lens: 'quick', role: 'reviewer', level: 'L2',
+      provider: cfg.provider, model: PRIMARY, attempt, retried: attempt === 1,
+      duration_ms: 300000, stderr_tail: 'stalled', stdout_bytes: 0, stdout_events: [],
+    })));
+    assert.equal(timeoutFallbackFor(cfg, 'L2', timeout, { rows: [], ticketId: 'no-runnable-model', role: 'reviewer' }), null);
+  }
 });
 
 test('judge levels, routes, second levels and ledger rows never configure reviewer fallback models', () => {

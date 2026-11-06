@@ -115,7 +115,12 @@ export async function spawnWithBrokenFallback(spawn, opts, isBroken, onBroken = 
  *   (and `broken`) when a timed-out attempt started the second-level try.
  */
 export async function spawnWithTimeoutRetry(spawn, opts, note, onAttempt = () => {}, broken = {}) {
-  const hasLadder = opts.cfg?.levels?.[opts.level]?.fallback?.length > 0;
+  const configured = opts.cfg?.levels?.[opts.level];
+  // Only a different, runnable model can replace B30's same-model retry. Duplicate entries
+  // and closed-book refusals do not configure another reviewer for this role.
+  const hasLadder = configured?.fallback?.some((entry) => entry.model !== configured.model
+    && !closedBookRefused(entry.provider ?? configured.provider ?? opts.cfg.provider,
+      opts.role, openBookCodexAllowed(opts.cfg))) === true;
   let currentOpts = opts;
   let attempts = 0;
   for (;;) {
