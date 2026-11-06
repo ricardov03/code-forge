@@ -1,0 +1,153 @@
+import assert from 'node:assert/strict';
+import { spawnSync } from 'node:child_process';
+import { mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import path from 'node:path';
+import { after, before, test } from 'node:test';
+import { fileURLToPath } from 'node:url';
+
+const ROOT = fileURLToPath(new URL('../../', import.meta.url));
+const SCRATCH = '/Users/ricardov/Code/Herd/SEISIGMA/coder-forge/plans/tools/forge/b294';
+const scratch = await mkdtemp(path.join(SCRATCH, 'changed-scope-'));
+const binary = path.join(scratch, 'pkg/native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+const cleanEnv = () => Object.fromEntries(Object.entries(process.env).filter(([key]) =>
+  !key.startsWith('GIT_') && !['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK'].includes(key)));
+before(async () => {
+  await mkdir(path.dirname(binary), { recursive: true });
+  await mkdir(path.join(scratch, 'pkg/bin'), { recursive: true });
+  await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(scratch, 'pkg/bin/code-forge.mjs'));
+  const build = spawnSync('go', ['build', '-o', binary, './cmd/code-forge-native'], {
+    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...cleanEnv(), GOCACHE: path.join(SCRATCH, 'go-cache'), GOPROXY: 'off', GOTOOLCHAIN: 'local', CGO_ENABLED: '0' },
+  });
+  assert.equal(build.status, 0, build.stderr);
+});
+after(() => rm(scratch, { recursive: true, force: true }));
+
+async function put(f, file, text) {
+  await mkdir(path.dirname(path.join(f.repo, file)), { recursive: true });
+  await writeFile(path.join(f.repo, file), text);
+}
+function git(f, ...args) {
+  const result = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8', env: { ...cleanEnv(), GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: '/dev/null' } });
+  assert.equal(result.status, 0, `${args.join(' ')}: ${result.stderr}`);
+  return result.stdout.trim();
+}
+function commit(f) {
+  git(f, 'add', '.');
+  git(f, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'commit', '-qm', 'fixture');
+  return git(f, 'rev-parse', 'HEAD');
+}
+async function fixture(native, owned = ['src/a.mjs', 'test/a.test.mjs'], threshold = 10) {
+  const root = await mkdtemp(path.join(scratch, 'case-'));
+  const f = { repo: path.join(root, 'repo'), home: path.join(root, 'home'), native, record: null };
+  await mkdir(f.repo); await mkdir(f.home);
+  git(f, 'init', '-q', '-b', 'main');
+  await put(f, '.gitignore', '.code-forge/\nexecutions\n');
+  await put(f, 'package.json', '{"type":"module","version":"1.0.0"}\n');
+  await put(f, 'src/a.mjs', 'export const a = 1;\n');
+  await put(f, 'src/other.mjs', 'export const other = 1;\n');
+  await put(f, 'test/a.test.mjs', "import '../src/a.mjs';\n");
+  await put(f, 'test/other.test.mjs', "import '../src/other.mjs';\n");
+  await put(f, 'native/main.go', 'package main\n');
+  await put(f, 'test/compat/parity-a.test.mjs', '// starts the binary\n');
+  await put(f, 'test/compat/parity-b.test.mjs', '// starts the binary too\n');
+  const probe = "const fs=require('node:fs');fs.appendFileSync('executions','run\\n');console.log(JSON.stringify(process.argv.slice(1)))";
+  await put(f, '.code-forge.yml', JSON.stringify({ project: { slug: 'fixture' }, gates: {
+    test: [process.execPath, '-e', probe, '{test_files}'], lint: null, types: null, format: null, rerun_failed: 0, full_suite_threshold_files: threshold,
+  } }));
+  const base = commit(f);
+  git(f, 'checkout', '-qb', 'block');
+  f.record = { run_id: 'fixture', project: 'fixture', workspace: f.repo, status: 'active', blocks: { B1: {
+    status: 'open', kind: 'code', base_sha: base, base_branch: 'main', owned_files: owned, test_files: [],
+  } } };
+  await mkdir(path.join(f.home, '.code-forge/runs'), { recursive: true });
+  await writeFile(path.join(f.home, '.code-forge/runs/fixture.json'), JSON.stringify(f.record));
+  return f;
+}
+function gate(f, changed = true) {
+  const args = ['gates', 'run', '--run', 'fixture', '--block', 'B1', '--json', ...(changed ? ['--changed'] : [])];
+  const child = spawnSync(f.native ? binary : process.execPath, f.native ? args : [path.join(ROOT, 'bin/code-forge.mjs'), ...args], {
+    cwd: f.repo, encoding: 'utf8', env: { ...cleanEnv(), HOME: f.home, TMPDIR: scratch, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '1' },
+  });
+  assert.equal(child.status, 0, child.stderr + child.stdout);
+  return JSON.parse(child.stdout).results.find((r) => r.gate === 'test');
+}
+async function rows(f) {
+  return (await readFile(path.join(f.home, '.code-forge/ledger/fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+}
+async function release(f, source = false) {
+  git(f, 'checkout', '-q', 'main');
+  await put(f, 'CHANGELOG.md', 'release\n');
+  await put(f, 'docs/release.md', 'release docs\n');
+  await put(f, 'package.json', '{"type":"module","version":"1.1.0"}\n');
+  if (source) await put(f, 'src/other.mjs', 'export const other = 2;\n');
+  commit(f);
+  git(f, 'checkout', '-q', 'block');
+  git(f, '-c', 'user.name=Fixture', '-c', 'user.email=fixture@example.invalid', 'rebase', 'main');
+}
+
+test('release rebase selects exactly the block pair and records related scope and reason', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs', 'package.json', 'CHANGELOG.md', 'docs/release.md'], 2);
+    await put(f, 'src/a.mjs', 'export const a = 2;\n');
+    await put(f, 'test/a.test.mjs', "import '../src/a.mjs'; // block\n");
+    commit(f);
+    await release(f);
+    const result = gate(f);
+    assert.deepEqual(JSON.parse(result.stdout), ['test/a.test.mjs'], 'only one related test, no release files');
+    assert.deepEqual([result.scope, result.reason], ['related', 'no_baseline']);
+    const logged = await rows(f);
+    assert.equal(logged.length, 1, 'exactly one gate row');
+    assert.deepEqual([logged[0].scope, logged[0].reason, logged[0].test_count], ['related', 'no_baseline', 1]);
+  }
+});
+
+test('green full suite is reused for the same tree and a release-only base move, with one row per call', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
+    await put(f, 'src/a.mjs', 'export const a = 2;\n'); commit(f);
+    assert.deepEqual(JSON.parse(gate(f, false).stdout), [], 'first call runs the full suite');
+    assert.equal(gate(f).reused, true, 'same-tree full result reused');
+    await release(f);
+    assert.equal(gate(f).reused, true, 'docs and version-only base move reused');
+    assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\n', 'test process starts exactly once');
+    const logged = await rows(f);
+    assert.equal(logged.length, 3, 'all three calls have ledger rows');
+    assert.deepEqual(logged.map((row) => row.results[0].reused ?? false), [false, true, true]);
+  }
+});
+
+test('a source base move invalidates a green full suite and prints why it runs', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['src/a.mjs', 'test/a.test.mjs'], 0);
+    await put(f, 'src/a.mjs', 'export const a = 2;\n'); commit(f);
+    gate(f, false);
+    await release(f, true);
+    const result = gate(f);
+    assert.equal(result.reused ?? false, false, 'source changes cannot reuse green');
+    assert.equal(result.reuse_reason, 'tree_changed', 'rerun reason is visible');
+    assert.equal(await readFile(path.join(f.repo, 'executions'), 'utf8'), 'run\nrun\n', 'exactly two real test executions');
+  }
+});
+
+test('native Go-only changes select exactly all binary parity tests and print the dependency reason', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['native/main.go']);
+    await put(f, 'native/main.go', 'package main\n// block\n'); commit(f);
+    const result = gate(f);
+    assert.deepEqual(JSON.parse(result.stdout), ['test/compat/parity-a.test.mjs', 'test/compat/parity-b.test.mjs'], 'both parity tests selected without import edges');
+    assert.equal(result.reason, 'native-binary', 'implicit binary dependency is visible');
+    assert.deepEqual((await rows(f))[0].reason, 'native-binary');
+  }
+});
+
+test('doc-only block selects its declared test without adding binary parity tests', async () => {
+  for (const native of [false, true]) {
+    const f = await fixture(native, ['docs/guide.md']);
+    f.record.blocks.B1.test_files = ['test/a.test.mjs'];
+    await writeFile(path.join(f.home, '.code-forge/runs/fixture.json'), JSON.stringify(f.record));
+    await put(f, 'docs/guide.md', 'guide\n'); commit(f);
+    const result = gate(f);
+    assert.deepEqual(JSON.parse(result.stdout), ['test/a.test.mjs'], 'one declared test and zero parity tests');
+    assert.equal(result.reason, 'unpaired', 'safe fallback explains the doc without a pair');
+  }
+});

@@ -496,6 +496,19 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) 
 			}
 		}
 	}
+	// Base-aware tree stamps and native binary subprocess dependencies belong to the
+	// oracle's graph. Delegate before taking the slot or running any command, just as
+	// executable JS import graphs above do; never use ChangedEmptyGraph for these.
+	if block.Get("base_branch") != nil && block.Get("base_branch") != "" {
+		return 0, false
+	}
+	if o.changed {
+		for _, file := range gates.Strings(block.Get("owned_files")) {
+			if strings.HasPrefix(file, "native/") || file == "native" || file == "scripts/build-native.mjs" {
+				return 0, false
+			}
+		}
+	}
 	// Child spawn errors and cwd errors have platform-specific Node text.
 	if st, e := os.Stat(cwd); e != nil || !st.IsDir() {
 		return 0, false

@@ -238,7 +238,7 @@ async function warnMissingDependencies(cwd, err) {
 function scopeOf({ scope, test_count: testCount, reason }) {
   if (scope === undefined) return {};
   if (scope === 'changed') return { scope, test_count: testCount, ...(reason ? { reason } : {}) };
-  return scope === 'related' ? { scope, test_count: testCount } : { scope, reason };
+  return scope === 'related' ? { scope, test_count: testCount, ...(reason ? { reason } : {}) } : { scope, reason };
 }
 
 /**
@@ -360,7 +360,7 @@ export async function runGatesVerb(args, deps = {}) {
           out({ result: 'proof.busy', holder: /** @type {{holder: string}} */ (guarded).holder });
           return 1;
         }
-        ran = /** @type {{value: {results: any[], allOk: boolean, ledger_slug?: string, files?: Record<string, string>, changed_scope?: import('../gates/expand.mjs').ChangedScope}}} */ (guarded).value;
+        ran = /** @type {{value: {results: any[], allOk: boolean, ledger_slug?: string, files?: Record<string, string>, test_base?: string, changed_scope?: import('../gates/expand.mjs').ChangedScope}}} */ (guarded).value;
       } else {
         ran = await runGates(gates, { cwd, timeoutMs, signal });
       }
@@ -399,7 +399,9 @@ export async function runGatesVerb(args, deps = {}) {
         await writeGateRow({ ...owner, event: cancelled ? 'gate.cancelled' : 'gate.done', stack: gates.stack, all_ok: allOk,
           ...(cancelled ? { cancelled: true } : {}),
           duration_ms: durationMs,
-          results: results.map(({ gate, ok, skipped, duration_ms, flaky }) => ({ gate, ok, skipped, duration_ms, ...(flaky ? { flaky } : {}) })),
+          results: results.map(({ gate, ok, skipped, duration_ms, flaky, full_stamp, reused, reuse_reason }) => ({ gate, ok, skipped, duration_ms, ...(flaky ? { flaky } : {}),
+            ...(full_stamp ? { full_stamp } : {}), ...(reused ? { reused } : {}), ...(reuse_reason ? { reuse_reason } : {}) })),
+          ...(ran.test_base ? { test_base: ran.test_base } : {}),
           ...(ran.changed_scope ? scopeFields(ran.changed_scope) : scoped ? scopeOf(scoped) : {}),
           ...(custom.length ? {
             custom: custom.map((r) => ({ name: r.gate, ok: r.ok, evidence_count: r.evidence.length, ...(r.missing ? { missing: r.missing } : {}) })),

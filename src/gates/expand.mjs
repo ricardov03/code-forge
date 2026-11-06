@@ -28,7 +28,7 @@ import path from 'node:path';
 import { isExactEntry, ownsFile } from '../state/registry.mjs';
 import { pairsFor } from '../review/paired.mjs';
 import { computeFileSet } from './scope.mjs';
-import { dependentTests, testDependents } from './dependents.mjs';
+import { dependentTests, isNativeBuildInput, testDependents } from './dependents.mjs';
 import { detectGates } from './detect.mjs';
 import { exec } from '../util/exec.mjs';
 import { TEST_FILES_TOKEN, CHANGED_FILES_TOKEN } from '../util/gate-token.mjs';
@@ -136,7 +136,7 @@ const isConcreteFile = (p) => typeof p === 'string' && p.length > 0 && isExactEn
 
 /**
  * @typedef {{scope: 'related', files: string[]} | {scope: 'full', files?: string[], reason: 'threshold' | 'no_tests' | 'runner-filter' | 'foreign-tests'}} TestScope
- * @typedef {{scope: 'changed', files: string[], changedFiles: string[], dependents?: string[], reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'|'foreign-tests'}} ChangedScope
+ * @typedef {{scope: 'changed', files: string[], changedFiles: string[], dependents?: string[], reportScope?: 'related'|'full', reason?: 'no_baseline'|'unpaired'|'threshold'|'no_changes'|'foreign-tests'|'native-binary'}} ChangedScope
  */
 
 /** A gate run with no block: no test file is known. */
@@ -269,10 +269,11 @@ export function changedScope({ baseline, current, fallback, threshold = DEFAULT_
     const foreignOnly = sources.length > 0 && sources.every((file) => foreign.includes(file));
     const fullFallback = fallback.scope === 'full' && (reason === 'unpaired' || reason === 'no_baseline') && !foreignOnly;
     const union = fullFallback ? [] : [...new Set([...files.filter(supported), ...dependents, ...covering])].sort();
-    const overThreshold = union.length > threshold || reason === 'threshold';
+    const native = sources.some(isNativeBuildInput) && callers.some((file) => /^test\/compat\/parity-[^/]+\.test\.mjs$/.test(file));
+    const overThreshold = (!native && union.length > threshold) || reason === 'threshold';
     return { scope: 'changed', files: overThreshold ? [] : union, changedFiles,
       ...(current?.dependents || current === null ? { dependents } : {}),
-      ...(overThreshold ? { reason: /** @type {const} */ ('threshold') } : reason ? { reason } : {}),
+      ...(overThreshold ? { reason: /** @type {const} */ ('threshold') } : native ? { reason: /** @type {const} */ ('native-binary') } : reason ? { reason } : {}),
     };
   }
   if (!current || !old || typeof old !== 'object' || Array.isArray(old) || Object.keys(old).length > 200 ||
@@ -321,10 +322,10 @@ export function expandArgv(argv, scope) {
  * The fields a scoped gate's result and ledger row carry: `scope`, plus `test_count` when related
  * or `reason` when full.
  * @param {TestScope | ChangedScope} scope
- * @returns {{scope: 'changed', test_count: number, dependents?: string[], reason?: ChangedScope['reason']} | {scope: 'related', test_count: number} | {scope: 'full', reason: 'threshold'|'no_tests'|'runner-filter'|'foreign-tests'}}
+ * @returns {{scope: 'changed'|'related'|'full', test_count?: number, dependents?: string[], reason?: string}}
  */
 export function scopeFields(scope) {
-  if (scope.scope === 'changed') return { scope: 'changed', test_count: scope.files.length, ...(scope.dependents ? { dependents: scope.dependents } : {}), ...(scope.reason ? { reason: scope.reason } : {}) };
+  if (scope.scope === 'changed') return { scope: scope.reportScope ?? 'changed', test_count: scope.files.length, ...(scope.dependents ? { dependents: scope.dependents } : {}), ...(scope.reason ? { reason: scope.reason } : {}) };
   return scope.scope === 'related' ? { scope: 'related', test_count: scope.files.length } : { scope: 'full', reason: scope.reason };
 }
 

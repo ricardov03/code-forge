@@ -51,6 +51,9 @@ import { detectGates } from './detect.mjs';
  * @property {'related'|'full'|'changed'} [scope] - only on a gate with a scope token.
  * @property {number} [test_count] - B60: with `scope: related`, how many test files it ran.
  * @property {'threshold'|'no_tests'|'runner-filter'|'foreign-tests'|'no_baseline'|'unpaired'|'no_changes'|'flaky-test'|'timeout'|'prompt'|'spawn-error'|'terminated'|NodeJS.Signals|`not in gates.kinds.${string}`} [reason] - fallback, exclusion or gate failure.
+ * @property {boolean} [reused]
+ * @property {string} [reuse_reason]
+ * @property {string} [full_stamp]
  * @property {Repeats} [repeats]
  * @property {string[]} [flaky] - failed files recovered by one serial rerun.
  * @property {string[]} [env_keys] - B60: only on a gate given with a non-empty `env`: the variable
@@ -407,7 +410,7 @@ function failedFileArgv(original, file) {
  * no test file is known (`scope: full, reason: no_tests`). A gate with `env` runs with those
  * variables added to the inherited environment, overriding the CI=1/npm_config_yes=false defaults.
  * @param {{test?: Gate, lint?: Gate, types?: Gate, format?: Gate, custom?: CustomGate[], rerun_failed?: 0 | 1, repeatNewTests?: RepeatNewTests, lightTestFiles?: string[], kindGates?: KindGates}} gates
- * @param {{cwd: string, timeoutMs?: number, signal?: AbortSignal, scope?: TestScope | import('./expand.mjs').ChangedScope, formatArgvBudgetBytes?: number}} opts - formatArgvBudgetBytes overrides the detected formatter batch budget (default 100 KiB).
+ * @param {{cwd: string, timeoutMs?: number, signal?: AbortSignal, scope?: TestScope | import('./expand.mjs').ChangedScope, formatArgvBudgetBytes?: number, reuseTest?: boolean, reuseReason?: string}} opts - formatArgvBudgetBytes overrides the detected formatter batch budget (default 100 KiB).
  * @returns {Promise<{results: GateResult[], allOk: boolean, duration_ms: number, repeats?: Repeats}>}
  */
 export async function runGates(gates, opts) {
@@ -472,6 +475,11 @@ export async function runGates(gates, opts) {
       continue;
     }
     const { argv, batches = [argv], scoped, failOnStdout, env } = command;
+    if (gate === 'test' && opts.reuseTest) {
+      results.push({ gate, duration_ms: 0, argv, skipped: false, ok: true, code: 0, stdout: '', stderr: '',
+        scope: 'full', reused: true, reuse_reason: opts.reuseReason });
+      continue;
+    }
     // Each command is run and its exit status read on its own — never `&&`-chained with the
     // next, so a red gate is reported red without swallowing the gates that follow it.
     const execOpts = { cwd, timeoutMs, signal, env: { ...process.env, CI: '1', npm_config_yes: 'false', ...env } };
@@ -499,6 +507,7 @@ export async function runGates(gates, opts) {
       ...(scoped ? scopeFields(command.scope) : {}),
       ...outcome,
       ...(env ? { env_keys: Object.keys(env).sort() } : {}),
+      ...(gate === 'test' && opts.reuseReason ? { reuse_reason: opts.reuseReason } : {}),
     });
     if (gate === 'test' && !result.ok && result.code !== null && !outcome.reason && gates.rerun_failed !== 0 && !signal?.aborted) {
       const files = await failedTestFiles(`${result.stdout}\n${result.stderr}`, cwd);
