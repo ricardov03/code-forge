@@ -148,7 +148,11 @@ func runBlockOpen(args []string) int {
 		return fallback(blockStateHandoverReason(record, "open", hOpenState))
 	}
 	grant, _ := autopilot.Read(record, time.Now())
-	if grant.State == "active" {
+	grantState := ""
+	if grant.Grant != nil {
+		grantState, _ = autopilot.GrantState(grant.Grant, time.Now())
+	}
+	if grantState == "active" {
 		data, err := os.ReadFile(acceptanceFile)
 		if err != nil {
 			return fallback(hOpenAcceptanceRead)
@@ -168,7 +172,7 @@ func runBlockOpen(args []string) int {
 				human = append(human, statusQuote(blockString(c.Get("clause"))))
 			}
 		}
-		if len(human) > 0 {
+		if grant.State == "active" && len(human) > 0 {
 			return failure(&state.Error{Code: "autopilot-human-check", Message: "autopilot-human-check: an active autopilot grant cannot wait on human_check clauses: " + strings.Join(human, ", ") + "; turn each into a clause with tests or ask the owner"})
 		}
 	}

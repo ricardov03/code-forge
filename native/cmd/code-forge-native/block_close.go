@@ -424,7 +424,15 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 			fmt.Fprintf(stderr, "close-not-routine: %s\n", preview.Reason)
 			return 1
 		}
-		closeRows = []ledger.Object{{{Key: "event", Value: "autopilot.close"}, {Key: "block", Value: id}, {Key: "grant", Value: routineGrant.Get("grant_id")}}}
+		// Node replaces preview rows, then the real close re-runs coderTests.
+		// Our checks are already measured, so retain that row after the grant row.
+		audit := []ledger.Object{{{Key: "event", Value: "autopilot.close"}, {Key: "block", Value: id}, {Key: "grant", Value: routineGrant.Get("grant_id")}}}
+		for _, row := range closeRows {
+			if row.Get("event") == "coder.tests" {
+				audit = append(audit, row)
+			}
+		}
+		closeRows = audit
 	}
 	if event != "" {
 		result, err = blockclose.Stop(home, run, id, event, reason)

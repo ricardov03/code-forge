@@ -24,13 +24,13 @@ after(() => rm(scratch, { recursive: true, force: true }));
 const recordFile = (f) => path.join(f.home, '.code-forge/runs', `${RUN}.json`);
 const ledgerFile = (f) => path.join(f.home, '.code-forge/ledger/grants.jsonl');
 const hash = (s) => createHash('sha256').update(s).digest('hex');
-async function fixture(state, { human = false, scope = true, acceptanceHuman = false, unknown = false } = {}) {
+async function fixture(state, { human = false, scope = true, acceptanceHuman = false, unknown = false, badAcceptance = false } = {}) {
   const root = await mkdtemp(path.join(scratch, 'f-'));
   const f = { repo: path.join(root, 'repo'), home: path.join(root, 'home') };
   await mkdir(f.repo); await mkdir(f.home);
   await writeFile(path.join(f.repo, '.gitignore'), '.code-forge/\n');
   await writeFile(path.join(f.repo, 'sample.mjs'), 'export const n = 1;\n');
-  await writeFile(path.join(f.repo, 'acceptance.json'), JSON.stringify([{ clause: 'works', ...(acceptanceHuman ? { kind: 'human_check' } : { tests: ['sample'] }) }]));
+  await writeFile(path.join(f.repo, 'acceptance.json'), JSON.stringify([{ clause: 'works', ...(acceptanceHuman ? { kind: 'human_check' } : { tests: badAcceptance ? [] : ['sample'] }) }]));
   const git = (args) => {
     const result = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8', env: childEnv() });
     assert.equal(result.status, 0, `fixture git: ${result.stderr}`);
@@ -140,6 +140,20 @@ test('grant boundaries preserve refusals and unsupported shapes hand over withou
   await writeFile(ledgerFile(routine), rows.filter((r) => r.event !== 'gate.done').map((r) => JSON.stringify(r)).join('\n') + '\n');
   await parity(routine, args('close', true));
   assert.equal(launch(routine, args('close', true)).status, 1, 'routine close requires one signed green gate row');
+  const reported = await fixture('active', { human: true });
+  const record = JSON.parse(await readFile(recordFile(reported), 'utf8'));
+  record.config = initialConfigState({ close: { require_human: true }, context: { require_coder_tests: true } });
+  await writeFile(recordFile(reported), JSON.stringify(record, null, 2) + '\n');
+  const report = path.join(reported.home, 'report.txt');
+  await writeFile(report, `reviewed sample.mjs ticket ${'a'.repeat(24)}\nTESTS node --test exit=0\n===BLOCK B1 COMPLETE===\n`);
+  const reportArgs = [...args('close', true), '--report', report];
+  await parity(reported, reportArgs);
+  assert.equal(launch(reported, reportArgs).status, 0, 'routine close accepts a green coder report');
+  const reportedRows = (await readFile(ledgerFile(reported), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
+  assert.deepEqual(reportedRows.slice(-3).map((r) => r.event), ['autopilot.close', 'coder.tests', 'block.close'], 'routine close signs exactly three final audit rows in Node order');
+  const invalid = args('open', true);
+  invalid[2] = 'B3';
+  await parity(await fixture('run-ended', { badAcceptance: true }), invalid);
   // B196 clearing remains with Node until the native review gate ports agent
   // waiver evidence. An active grant must not make Go guess at a critical.
   const critical = await fixture('active');
