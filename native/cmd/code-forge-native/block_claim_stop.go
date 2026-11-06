@@ -92,7 +92,7 @@ func blockSnapshot(record ledger.Object) (map[string]any, bool) {
 }
 func blockMap(v any) map[string]any { m, _ := v.(map[string]any); return m }
 
-func blockSafe(record ledger.Object) bool {
+func blockEndSafe(record ledger.Object) bool {
 	if !blockops.QuietExpiry(record) {
 		return false
 	}
@@ -124,11 +124,11 @@ func blockSafe(record ledger.Object) bool {
 			return false
 		}
 	}
-	cfg, ok := blockSnapshot(record)
-	return ok && blockMap(cfg["hooks"])["on_block_end"] == nil
+	_, ok = blockSnapshot(record)
+	return ok
 }
 
-// Explain the guarded cases without changing the existing safety predicate.
+// Explain the guarded cases, including the hook boundary retained by land.
 func blockStateHandoverReason(record ledger.Object, scope string, fallback handoverReason) handoverReason {
 	condition := ""
 	if record.Get("autopilot") != nil {
@@ -268,13 +268,13 @@ func blockClaimStop(sub string, args []string) int {
 	if err != nil {
 		return failure(err)
 	}
-	if !blockSafe(record) {
+	if !blockEndSafe(record) {
 		return fallback(blockStateHandoverReason(record, sub, hClaimStopState))
 	}
 	if !blockStorageSafe(home, run, record) {
 		return fallback(hClaimStopStorage)
 	}
-	safe := func(current ledger.Object) bool { return blockSafe(current) && blockStorageSafe(home, run, current) }
+	safe := func(current ledger.Object) bool { return blockEndSafe(current) && blockStorageSafe(home, run, current) }
 	// A serving daemon can return a different rows snapshot. Let Node negotiate
 	// its protocol rather than mixing that snapshot with a direct ledger read.
 	if sub == "stop" && os.Getenv("CODE_FORGE_NATIVE") != "0" {
@@ -311,14 +311,18 @@ func blockClaimStop(sub string, args []string) int {
 		return failure(err)
 	}
 	blockBreadcrumb(sub)
+	doneFile := ""
 	if sub == "stop" {
-		blockWriteDone(home, run, id, reason, record)
+		doneFile = blockWriteDone(home, run, id, reason, record)
+		defer blockRunEndHook(home, run, id, "stopped", doneFile, record, os.Stderr)
 	}
 	if flags["json"] == true {
 		out := ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "stopped"}}
 		if sub == "claim" {
 			out.Set("event", "claimed")
 			out.Set("path", positionals[1])
+		} else {
+			blockDoneJSON(&out, record, doneFile)
 		}
 		data, _ := ledger.Stringify(out, false)
 		fmt.Fprintln(os.Stdout, string(data))
@@ -390,11 +394,11 @@ func blockDoneFacts(home, run, id string, record ledger.Object) (ledger.Object, 
 
 var blockCommit = regexp.MustCompile(`^[0-9a-f]{40,64}$`)
 
-func blockWriteDone(home, run, id, reason string, record ledger.Object) {
+func blockWriteDone(home, run, id, reason string, record ledger.Object) string {
 	at := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	if id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
 		fmt.Fprintf(os.Stderr, "warning: done file not written: block id %s cannot name a done file\n", statusQuote(id))
-		return
+		return ""
 	}
 	facts, _ := blockDoneFacts(home, run, id, record)
 	var commit any
@@ -442,7 +446,9 @@ func blockWriteDone(home, run, id, reason string, record ledger.Object) {
 			code = blockErrno(errno)
 		}
 		fmt.Fprintln(os.Stderr, "warning: done file not written:", code)
+		return ""
 	}
+	return file
 }
 
 func blockErrno(err syscall.Errno) string {

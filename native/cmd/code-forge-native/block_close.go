@@ -39,7 +39,7 @@ func blockCloseStep(args []string, step *landStep) int {
 
 // Preflight returns its reason to the caller, which records only the final
 // whole-command handover. Shared land preflights keep their existing sentinel.
-func blockCloseStepWithReason(args []string, step *landStep, handover *handoverReason) int {
+func blockCloseStepWithReason(args []string, step *landStep, handover *handoverReason, endHook ...*func()) int {
 	stdout, stderr := step.writers()
 
 	original := append([]string{"close"}, args...)
@@ -96,7 +96,7 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	}
 	// This is the hand-over boundary. Everything through preflight is read-only;
 	// it must finish before a transcript warning or a stopped-block row is signed.
-	if !blockSafe(record) || !blockStorageSafe(home, run, record) {
+	if !blockEndSafe(record) || !blockStorageSafe(home, run, record) {
 		return fallback(blockStateHandoverReason(record, "close", hCloseStateStorage))
 	}
 	cfg, ok := blockSnapshot(record)
@@ -106,8 +106,10 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	if blockMap(cfg["close"])["require_human"] == true {
 		return fallback(hCloseHuman)
 	}
-	external := blockMap(blockMap(cfg["review"])["external"])
-	if external["required"] == true && strings.TrimSpace(blockString(external["name"])) != "" {
+	external := closeExternalReviewer(cfg)
+	// Land's composed close has no reason receiver. Keep its existing whole-
+	// command handover; only the direct close and close-flags caller opt in.
+	if external != "" && step != nil && handover == nil {
 		return fallback(hCloseExternalReview)
 	}
 	entry := blockObject(blockObject(record.Get("blocks")).Get(id))
@@ -271,6 +273,9 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 		return fallback(hCloseReportRedaction)
 	}
 	checks, closeRows := []closeCheck{}, []ledger.Object{}
+	if external != "" {
+		closeRows = append(closeRows, ledger.Object{{Key: "event", Value: "gate.reviews_waived"}, {Key: "block", Value: id}, {Key: "by", Value: "config"}, {Key: "reviewer", Value: external}})
+	}
 	if blockMap(cfg["context"])["require_coder_tests"] == true {
 		command, reason, supported := closeCoderTests(flags["report"], id, reportData, reportErr)
 		if !supported {
@@ -298,11 +303,17 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, id, run, blockObject(record.Get("blocks")), changed, rows, key, inTree)
 	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedFiles(rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
 	gate := gatecheck.CheckTranscript(run, id, files, rows, key, highPaths, unowned, noChanges, hits)
+	if external != "" {
+		gate.Blockers = slices.DeleteFunc(gate.Blockers, func(b gatecheck.Blocker) bool {
+			return b.Code == "unreviewed" || b.Code == "unsigned" || b.Code == "not_approved"
+		})
+		gate.Waived = []gatecheck.Waived{}
+	}
 	gateReason := gatecheck.Reason(gate.Blockers)
 	gateIndex := len(checks)
 	checks = append(checks, closeCheck{gateReason, gate.Blockers})
-	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, files, gate.Waived, inTree, len(gate.Blockers) == 0)
-	if _, has := flags["report"].(string); has {
+	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, files, gate.Waived, inTree, external == "" && len(gate.Blockers) == 0)
+	if _, has := flags["report"].(string); has && external == "" {
 		if reportErr != nil {
 			reason := "coder report FAILED: --report cannot be read"
 			checks = append(checks, closeCheck{reason, []gatecheck.Blocker{{Code: "coder_report_failed", Detail: reason}}})
@@ -406,8 +417,16 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 			fmt.Fprintf(stdout, "%s %s %s\n  fix: %s\n", o.Get("code"), closeDash(o.Get("file")), o.Get("detail"), o.Get("fix"))
 		}
 	}
-	if result.Status == "closed" || result.Status == "stopped" {
-		closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
+	doneFile := ""
+	ended := result.Status == "closed" || result.Status == "stopped"
+	if ended {
+		doneFile = closeWriteDone(home, run, id, record, result, lines, rows, key, stderr)
+		if len(endHook) > 0 {
+			// The flags caller flushes its buffered output before invoking this.
+			*endHook[0] = func() { blockRunEndHook(home, run, id, result.Status, doneFile, record, os.Stderr) }
+		} else {
+			defer blockRunEndHook(home, run, id, result.Status, doneFile, record, stderr)
+		}
 	}
 	if result.OK {
 		closeWarnMovedBase(workspace, entry, id, run, stderr)
@@ -501,6 +520,9 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 				out.Set("human_checks", entry.Get("human_checks"))
 				out.Set("next_command", fmt.Sprintf("code-forge block human-pass %s --run %s --note \"<device check note>\"", id, run))
 			}
+			if ended {
+				blockDoneJSON(&out, record, doneFile)
+			}
 			if len(gate.Waived) > 0 {
 				ws := []any{}
 				for _, w := range gate.Waived {
@@ -514,6 +536,9 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 			if removedTree != nil {
 				out.Set("worktree", removedTree)
 			}
+		}
+		if !result.OK && ended {
+			blockDoneJSON(&out, record, doneFile)
 		}
 		data, _ := ledger.Stringify(out, false)
 		fmt.Fprintln(stdout, string(data))
@@ -1070,7 +1095,7 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 	return out
 }
 
-func closeWriteDone(home, run, id string, record ledger.Object, result blockclose.Result, lines []any, rows []gatecheck.Row, key []byte, writers ...io.Writer) {
+func closeWriteDone(home, run, id string, record ledger.Object, result blockclose.Result, lines []any, rows []gatecheck.Row, key []byte, writers ...io.Writer) string {
 	stderr := io.Writer(os.Stderr)
 	if len(writers) > 0 {
 		stderr = writers[0]
@@ -1078,7 +1103,7 @@ func closeWriteDone(home, run, id string, record ledger.Object, result blockclos
 	at := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
 	if id == "." || id == ".." || strings.ContainsAny(id, "/\\\x00") {
 		fmt.Fprintf(stderr, "warning: done file not written: block id %s cannot name a done file\n", statusQuote(id))
-		return
+		return ""
 	}
 	var spent, unknown, findings any
 	values, err := closeDoneRows(home, run, id, record)
@@ -1156,7 +1181,9 @@ func closeWriteDone(home, run, id string, record ledger.Object, result blockclos
 			code = blockErrno(errno)
 		}
 		fmt.Fprintln(stderr, "warning: done file not written:", code)
+		return ""
 	}
+	return file
 }
 
 func closeWarnMovedBase(workspace string, entry ledger.Object, id, run string, writers ...io.Writer) {

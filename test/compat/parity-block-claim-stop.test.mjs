@@ -193,13 +193,18 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
   for (const mutate of [
     (r) => { r.autopilot = { status: 'active', until: '2099-01-01T00:00:00.000Z' }; },
     (r) => { r.autopilot_approvals = [{ status: 'active', until: '2000-01-01T00:00:00.000Z', approval_id: 'apr-test', key: 'budget.usd' }]; },
-    (r) => snapshot(r, { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }),
   ]) {
     const delegated = await fixture(mutate);
     for (const args of [claim(), stop]) {
-      await assertHandoverWithoutMutation(delegated, args, 'grant, pending approval or hook delegates without mutation');
+      await assertHandoverWithoutMutation(delegated, args, 'grant or pending approval delegates without mutation');
       await parity(delegated, args, { CODE_FORGE_NODE: process.execPath });
     }
+  }
+  const hooked = await fixture((r) => snapshot(r, { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }));
+  for (const args of [claim(), stop]) {
+    await parity(hooked, args);
+    const native = await launch(hooked, args);
+    assert.equal(native.code, 0, `snapshot hook stays native: ${native.stderr}`);
   }
   // Use Go's observed serialization order as the Node oracle order. Both distinct
   // changes must survive, and the record and signed ledger must match those Node writes.
