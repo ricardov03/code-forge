@@ -18,6 +18,11 @@ const BINARY = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}
 const NO_NODE = '/nonexistent';
 const RUN = 'r-claim-stop';
 const KEY = Buffer.alloc(32, 7);
+function childEnv(env = process.env) {
+  const clean = { ...env };
+  for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete clean[key];
+  return clean;
+}
 after(() => rm(scratch, { recursive: true, force: true }));
 before(async () => {
   await mkdir(path.dirname(BINARY), { recursive: true });
@@ -27,7 +32,7 @@ before(async () => {
   const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
   const cache = path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build');
   const built = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: cache },
+    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: childEnv({ ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: cache }),
   });
   assert.equal(built.status, 0, `private native binary builds: ${built.stderr}`);
 });
@@ -39,7 +44,7 @@ async function fixture(change = () => {}) {
   await mkdir(f.repo); await mkdir(f.home);
   await writeFile(path.join(f.repo, 'sample.mjs'), 'export const value = 1;\n');
   for (const args of [['init', '-q', '-b', 'main'], ['add', '.'], ['-c', 'user.name=Fixture', '-c', 'user.email=f@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'fixture']]) {
-    const git = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8' });
+    const git = spawnSync('git', args, { cwd: f.repo, encoding: 'utf8', env: childEnv() });
     assert.equal(git.status, 0, `git fixture ${args[0]}: ${git.stderr}`);
   }
   const record = { run_id: RUN, project: 'claim-stop', workspace: f.repo, status: 'active', blocks: {
@@ -59,10 +64,10 @@ function snapshot(record, config) {
 }
 function launch(f, args, { node = false, env = {} } = {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(node ? process.execPath : BINARY, node ? [CLI, ...args] : args, { cwd: f.repo, env: {
+    const child = spawn(node ? process.execPath : BINARY, node ? [CLI, ...args] : args, { cwd: f.repo, env: childEnv({
       PATH: process.env.PATH, HOME: f.home, CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE,
       CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NO_ERROR_LOG: '1', ...env,
-    }, stdio: ['ignore', 'pipe', 'pipe'] });
+    }), stdio: ['ignore', 'pipe', 'pipe'] });
     let stdout = '', stderr = '';
     child.stdout.on('data', (b) => { stdout += b; }); child.stderr.on('data', (b) => { stderr += b; });
     child.on('error', reject); child.on('close', (code, signal) => resolve({ code, signal, stdout, stderr }));
@@ -100,7 +105,7 @@ async function assertHandoverWithoutMutation(f, args, message, env = {}) {
 const claim = (file = 'new') => ['block', 'claim', 'B1', file, '--run', RUN];
 const stop = ['block', 'stop', 'B1', '--run', RUN, '--reason', 'finished <&> café\nnext'];
 async function parity(f, args, env = {}) {
-  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, ...env } });
+  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: childEnv({ CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: NO_NODE, ...env }) });
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero stream, exit, signature or state diffs`);
   assert.equal(result.equal, true, 'parity reports equality');
 }
@@ -171,7 +176,7 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
     const ended = await launch(end, stop);
     assert.deepEqual([ended.code, ended.stdout, ended.stderr], [0, 'block B1 stopped\n', ''], `${status}: native stop succeeds without expiry output`);
     const bytes = await readFile(path.join(end.home, '.code-forge/runs', RUN, 'blocks/B1.done.json'), 'utf8');
-    const commit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: end.repo, encoding: 'utf8' }).stdout.trim();
+    const commit = spawnSync('git', ['rev-parse', 'HEAD'], { cwd: end.repo, encoding: 'utf8', env: childEnv() }).stdout.trim();
     assert.equal(bytes.replace(/"at":"[^"]+"/, '"at":"<time>"'), JSON.stringify({ block: 'B1', run_id: RUN, status: 'stopped', event: 'block.stop', reason: stop.at(-1), commit, spent_usd: 0, unknown_usd_sessions: 0, findings: 0, at: '<time>' }) + '\n', 'done file has exact ordered bytes and trailing newline');
   }
   for (const cfg of [{ review: { external: { required: true, name: 'owner' } } }, { proof: { runners: [] } }]) {
@@ -196,12 +201,6 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
       await parity(delegated, args, { CODE_FORGE_NODE: process.execPath });
     }
   }
-  const delegated = await fixture();
-  for (const args of [...['open', 'ready', 'attempt', 'rebase', 'status'].map((sub) => ['block', sub]), [...claim(), '--auto']]) {
-    await assertHandoverWithoutMutation(delegated, args, 'other subcommands and internal flags delegate');
-    await parity(delegated, args, { CODE_FORGE_NODE: process.execPath });
-  }
-
   // Use Go's observed serialization order as the Node oracle order. Both distinct
   // changes must survive, and the record and signed ledger must match those Node writes.
   const concurrent = await fixture();
@@ -229,6 +228,16 @@ test('claim and stop run natively with byte parity, signed concurrent writes and
     assert.deepEqual(side.map((r) => verifyRow(r, KEY).ok), [true, true], 'both concurrent rows have valid signatures');
   }
   assert.deepEqual(rows[1].map(({ ts, mac, ...r }) => r), rows[0].map(({ ts, mac, ...r }) => r), 'all nonvolatile concurrent ledger fields match Node');
+});
+
+test('claim --auto and --auto-claim delegate without mutation and match Node', async () => {
+  const f = await fixture();
+  // Assert specific fallback flags; unrelated subcommands can become native.
+  for (const flag of ['--auto', '--auto-claim']) {
+    const args = [...claim(), flag];
+    await assertHandoverWithoutMutation(f, args, `claim ${flag} delegates`);
+    await parity(f, args, { CODE_FORGE_NODE: process.execPath });
+  }
 });
 
 test('claim and stop refusals and usage boundaries match Node without starting Node', async () => {
