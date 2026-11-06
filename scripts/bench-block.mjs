@@ -39,9 +39,8 @@ function parseArgs(argv) {
 }
 
 // RSS includes the measured child, which hosts the fake worker, but excludes this observer;
-// processes counts only sampled descendants. Short-lived children between ticks can be missed.
-function sampler(rootPid) {
-  const seen = new Set();
+// processes counts distinct started CLI child pids plus sampled descendants, including children between ticks.
+function sampler(rootPid, seen) {
   let peak = 0;
   let failure;
   let inFlight;
@@ -174,6 +173,7 @@ async function mode(name, dir, params) {
   const cli = async (args) => {
     if (workerError) throw workerError;
     active = name === 'entry' ? child(ENTRY, [...args, '--run', run], repo) : child(process.execPath, [CLI, ...args, '--run', run], repo);
+    if (active.proc.pid) process.send?.({ type: 'bench:cli', pid: active.proc.pid });
     cliRuns++;
     const timer = setTimeout(() => active.proc.kill('SIGKILL'), 60_000);
     let result;
@@ -227,12 +227,15 @@ async function observeMode(name, params) {
   const args = [SCRIPT, '--mode', name, '--json'];
   for (const [key, value] of Object.entries(params)) args.push(`--${key.replaceAll('_', '-')}`, String(value));
   const running = child(process.execPath, args, process.cwd(), true);
+  const seen = new Set();
   let finishSampling;
   let measurements;
   running.proc.on('message', (message) => {
     if (message === 'bench:start') {
-      finishSampling = sampler(running.proc.pid);
+      finishSampling = sampler(running.proc.pid, seen);
       running.proc.send('bench:ready');
+    } else if (message?.type === 'bench:cli') {
+      seen.add(message.pid);
     } else if (message === 'bench:stop' && finishSampling) {
       measurements = finishSampling();
       measurements.catch(() => {});

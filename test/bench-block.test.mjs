@@ -72,6 +72,25 @@ test('block bench measures Node, Go and npm entry lanes with no leftover process
   }
 });
 
+test('block bench counts CLI children that exit before the first periodic sample', () => {
+  // Only the observer runs in this process. Keep its initial RSS snapshot, but
+  // postpone periodic snapshots until after every CLI child has exited.
+  const bootstrap = `
+    const interval = globalThis.setInterval;
+    globalThis.setInterval = (callback, ms, ...args) =>
+      interval(callback, ms === 10 ? 120_000 : ms, ...args);
+    await import(${JSON.stringify(new URL('../scripts/bench-block.mjs', import.meta.url).href)});
+  `;
+  const result = run(process.execPath, ['--input-type=module', '--eval', bootstrap, script, '--files', '2', '--review-ms', '0', '--ledger-rows', '0', '--json']);
+  assert.equal(result.status, 0, result.stderr || result.stdout);
+  const { node: metrics } = JSON.parse(result.stdout);
+  assert.equal(metrics.cli_runs, 4, 'Node starts two enqueues, one block wait and one status before the next sample');
+  assert.ok(metrics.wall_ms < 120_000, `Node finishes before the first periodic sample, took ${metrics.wall_ms} ms`);
+  assert.ok(metrics.processes >= metrics.cli_runs, `Node counts at least ${metrics.cli_runs} started CLI children between samples, got ${metrics.processes}`);
+  assert.deepEqual(metrics.leftover_processes, { count: 0, list: [] }, 'Node leaves zero fixture workers or live descendants between samples');
+  assert.deepEqual(metrics.native_sockets, [], 'Node leaves zero native sockets between samples');
+});
+
 test('block bench refuses a zero-file block with usage and no JSON report', () => {
   registered();
   const result = run(process.execPath, [script, '--files', '0', '--json']);
