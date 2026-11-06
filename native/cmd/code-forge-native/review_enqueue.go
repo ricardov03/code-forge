@@ -231,11 +231,7 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	for _, arg := range args {
 		name, _, _ := strings.Cut(arg, "=")
 		switch name {
-		case "--wait", "--wait-block", "--answers", "--of", "--rebase-check", "--fresh":
-			// A boolean with a value is still an enqueue parser usage error.
-			if (name == "--fresh" || name == "--rebase-check") && strings.Contains(arg, "=") {
-				continue
-			}
+		case "--wait", "--wait-block":
 			return reviewWaitHandover(args, handoverFlagReason("enqueue", name, hEnqueueMode))
 		}
 	}
@@ -271,6 +267,12 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	if !ok {
 		return reviewWaitHandover(args, hEnqueueRoot)
 	}
+	if flags["rebase-check"] == "true" {
+		if step != nil {
+			return reviewWaitHandover(args, hEnqueueRebaseCheck)
+		}
+		return reviewEnqueueRebase(args, flags, paths, root)
+	}
 	_, blockGiven := flags["block"]
 	_, maxGiven := flags["max"]
 	if len(paths) != 1 || !blockGiven || maxGiven {
@@ -280,6 +282,11 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	if !reviewBlockID.MatchString(block) {
 		return reviewWaitUsageError(args, "block id must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/")
 	}
+	_, answersGiven := flags["answers"]
+	_, ofGiven := flags["of"]
+	if flags["fresh"] == "true" && (answersGiven || ofGiven) {
+		return reviewWaitUsageError(args, "--fresh takes no --answers or --of")
+	}
 	top, err := gitx.RepoTop(cwd)
 	if err != nil {
 		return reviewWaitHandover(args, hEnqueueRepo)
@@ -287,6 +294,13 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	file, err := reviewq.Normalize(paths[0], cwd, top)
 	if err != nil {
 		return reviewEnqueueError(args, err)
+	}
+	byFile := file
+	if ofGiven {
+		file, err = reviewq.Normalize(flags["of"], cwd, top)
+		if err != nil {
+			return reviewEnqueueError(args, err)
+		}
 	}
 	worker, ok := reviewEnqueueWorker(root)
 	if !ok {
@@ -300,19 +314,35 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	if home == "" {
 		return reviewWaitHandover(args, hEnqueueHome)
 	}
-	rule, ok := reviewEnqueueExclusion(home, root, run, file)
-	if !ok {
-		return reviewWaitHandover(args, hEnqueueExclusion)
-	}
-	if rule != "" {
-		if step != nil && step.preflight {
+	for _, candidate := range []string{byFile, file} {
+		rule, ok := reviewEnqueueExclusion(home, root, run, candidate)
+		if !ok {
+			return reviewWaitHandover(args, hEnqueueExclusion)
+		}
+		if rule != "" {
+			if step != nil && step.preflight {
+				return 0
+			}
+			if step == nil {
+				reviewWaitBreadcrumb()
+			}
+			fmt.Fprintf(stdout, "not reviewed (review.exclude %s): %s\n", rule, candidate)
 			return 0
 		}
-		if step == nil {
-			reviewWaitBreadcrumb()
+	}
+	var answerIDs []string
+	if answersGiven || ofGiven {
+		if step != nil {
+			return reviewWaitHandover(args, hEnqueueAnswers)
 		}
-		fmt.Fprintf(stdout, "not reviewed (review.exclude %s): %s\n", rule, file)
-		return 0
+		var usage string
+		answerIDs, usage = reviewEnqueueAnswersFlags(flags)
+		if usage != "" {
+			return reviewWaitUsageError(args, usage)
+		}
+		if file == byFile {
+			return reviewEnqueueSay(args, reviewEnqueueRefusal("answers-same-file", file+" cannot answer its own findings: give the file that resolves them"), 1)
+		}
 	}
 	if worker == nil || requested && run != worker.Get("run") {
 		return reviewEnqueueSay(args, ledger.Object{{Key: "status", Value: "worker_down"}, {Key: "file", Value: file}}, 3)
@@ -351,6 +381,16 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	if err := reviewq.Inside(tree, file); err != nil {
 		return reviewEnqueueError(args, err)
 	}
+	if answersGiven || ofGiven {
+		if err := reviewq.Inside(tree, byFile); err != nil {
+			return reviewEnqueueError(args, err)
+		}
+		out, code, supported := reviewEnqueueAnswers(home, root, run, block, tree, file, byFile, answerIDs)
+		if !supported {
+			return reviewWaitHandover(args, hEnqueueAnswers)
+		}
+		return reviewEnqueueSay(args, out, code)
+	}
 	hash, err := gitx.ContentHash(tree, file)
 	if err != nil {
 		return reviewEnqueueError(args, err)
@@ -373,10 +413,17 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	if err != nil {
 		return reviewWaitHandover(args, hEnqueueIdentity)
 	}
-	// Check before publication and again after: freshTicket is wholly Node's
-	// responsibility, including markers installed by a concurrent worker.
-	if !reviewEnqueueCached(root, id) {
+	// Preflight every fallback before publishing a ticket. In particular a
+	// land preflight cannot consume a cached result's rename claim.
+	if !reviewEnqueueCacheSupported(root, id, identityRecord) {
 		return reviewWaitHandover(args, hEnqueueCached)
+	}
+	if flags["fresh"] == "true" || !reviewEnqueueCached(root, id) {
+		if step != nil {
+			return reviewWaitHandover(args, hEnqueueFresh)
+		}
+		out, code := reviewEnqueueFresh(root, p, id, flags["fresh"] != "true")
+		return reviewEnqueueSay(args, out, code)
 	}
 	if step != nil && step.preflight {
 		return 0
@@ -385,7 +432,10 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 		return reviewWaitHandover(args, hEnqueuePublish)
 	}
 	if !reviewEnqueueCached(root, id) {
-		return reviewWaitHandover(args, hEnqueueCachedAfterPublish)
+		// A worker can finish between publication and the cache read. All
+		// byte-checked claims remain native after the first queue write.
+		out, code := reviewEnqueueFresh(root, p, id, true)
+		return reviewEnqueueSay(args, out, code)
 	}
 	status := "queued"
 	if _, err := os.Stat(filepath.Join(dir, id+".done")); err == nil {

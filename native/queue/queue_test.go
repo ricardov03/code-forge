@@ -11,6 +11,40 @@ import (
 	"github.com/ricardov03/code-forge/native/ticket"
 )
 
+func TestPublishAfterReopenedMillisecond(t *testing.T) {
+	reopened := "2026-11-05T12:00:00.123Z"
+	boundary, err := time.Parse(time.RFC3339Nano, reopened)
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, offset := range []time.Duration{-time.Millisecond, 0, time.Nanosecond, time.Millisecond - time.Nanosecond, time.Millisecond, 2 * time.Millisecond} {
+		t.Run(offset.String(), func(t *testing.T) {
+			dir := t.TempDir()
+			p := ticket.Parts{Run: "r-test", Block: "B1", File: "a.go", ContentHash: "hash", ReopenedAt: &reopened}
+			id := ticket.ReviewID(p)
+			if err := Publish(dir, p, id, boundary.Add(offset)); err != nil {
+				t.Fatal(err)
+			}
+			data, err := os.ReadFile(filepath.Join(dir, id+".json"))
+			if err != nil {
+				t.Fatal(err)
+			}
+			var value Object
+			if err := json.Unmarshal(data, &value); err != nil {
+				t.Fatal(err)
+			}
+			want := boundary.Add(time.Millisecond)
+			if offset > time.Millisecond {
+				want = boundary.Add(offset).Truncate(time.Millisecond)
+			}
+			stamp := want.Format("2006-01-02T15:04:05.000Z")
+			if value["enqueued_at"] != stamp || value["queued_at"] != stamp {
+				t.Fatalf("ticket stamps = %v, %v; want %s", value["enqueued_at"], value["queued_at"], stamp)
+			}
+		})
+	}
+}
+
 func retryFixture(t *testing.T) (*Index, string, string, Object) {
 	t.Helper()
 	repo := t.TempDir()

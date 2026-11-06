@@ -111,14 +111,26 @@ test('plain enqueue runs without Node and has byte parity across queue states, t
   await done(f, queued.ticket, { status: 'reviewed', approved: true });
   await parity(f);
   assert.equal(JSON.parse((await execute(f)).stdout).status, 'done', 'cached review returns done');
-  for (const result of [{ status: 'unavailable' }, { status: 'split_required', round: 1 }, { status: 'stopped', stopped: 'split_required', lens: 'full', budget: 1 }]) {
+  for (const result of [{ status: 'unavailable' }, { status: 'split_required', round: 1 }]) {
     await done(f, queued.ticket, result);
-    assert.equal((await execute(f)).code, 127, `cached ${result.status} hands over`);
-    await parity(f, ARGS, { CODE_FORGE_NODE: process.execPath });
+    await parity(f);
+    const retried = await execute(f);
+    assert.equal(retried.code, 0, `cached ${result.status} retries without Node`);
+    assert.equal(JSON.parse(retried.stdout).retry, true, 'native retry drops the stale cache');
   }
-  for (const args of [[...ARGS, '--fresh'], [...ARGS, '--answers', 'f1', '--of', 'source.mjs'], [...ARGS, '--rebase-check']]) {
-    assert.equal((await execute(f, args)).code, 127, 'unported flags require Node');
-    await parity(f, args, { CODE_FORGE_NODE: process.execPath });
+  await done(f, queued.ticket, { status: 'stopped', stopped: 'split_required', lens: 'full', budget: 1 });
+  assert.equal((await execute(f)).code, 127, 'budget-sensitive split still hands over');
+  await parity(f, ARGS, { CODE_FORGE_NODE: process.execPath });
+  await done(f, queued.ticket, { status: 'reviewed', approved: true });
+  for (const { args, code } of [
+    { args: [...ARGS, '--fresh'], code: 1 },
+    { args: [...ARGS, '--answers', 'f1', '--of', 'source.mjs'], code: 1 },
+    { args: [...ARGS, '--rebase-check'], code: 2 },
+  ]) {
+    await parity(f, args);
+    const result = await execute(f, args);
+    assert.equal(result.code, code, 'ported flag refusal runs without Node');
+    assert.deepEqual(result, await execute(f, args, true), 'ported flag has exact Node output and exit');
   }
   await parity(f, [...ARGS.slice(0, -1), 'wrong-run']);
   await rm(path.join(f.repo, '.code-forge/workers'), { recursive: true });
