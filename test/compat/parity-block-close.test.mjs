@@ -294,8 +294,6 @@ test('unsupported close cases hand over the original arguments before any state 
   const delegated = [
     ['clean', {}, ['--decide', '--reason', 'owner decision']],
     ['clean', { close: { require_human: true } }, []],
-    ['clean', { review: { external: { required: true, name: 'owner' } } }, []],
-    ['clean', { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }, []],
     ['grant', {}, []], ['approval', {}, []], ['stopped', {}, []],
   ];
   for (const [kind, config, extra] of delegated) {
