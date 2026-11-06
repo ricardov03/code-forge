@@ -64,8 +64,6 @@ import { randomBytes } from 'node:crypto';
 import path from 'node:path';
 import { resolveLevel } from '../config/known-ids.mjs';
 import { closedBookRefused, openBookCodexAllowed } from '../config/closed-book.mjs';
-import { slugFor } from '../config/load.mjs';
-import { readAllRows } from '../ledger/write.mjs';
 import { blockKind, isDocsKind } from '../decide/escalation.mjs';
 import { fallbackRisk } from '../decide/fallback-rules.mjs';
 import { isMigrationPath, isPolicyPath } from '../decide/lane-facts.mjs';
@@ -207,6 +205,9 @@ export function rulesRisk({ file, plusCount, minusCount = 0, cfg }) {
  * @property {(row: Record<string, any>) => Promise<unknown>} [writeRow] - ledger rows
  *   (`review.plan`, `review.unavailable`, `review.schema_invalid`, `review.schema_fallback`); a
  *   failed write never fails the review (a failed `review.schema_fallback` write means no try).
+ * @property {() => Promise<Array<Record<string, any>>>} [readRows] - the run's project ledger,
+ *   supplied by the caller; the reviewed tree does not determine the project identity.
+ *   Missing or unreadable rows keep timeout recovery in configured order.
  * @property {(opts: {repoRoot: string, file: string}) => Promise<string>} [deletionNote] - B74: the
  *   deletion note reader (default `deletionNote`, `deletion.mjs`); a throw gives `references not checked`.
  * @property {import('./schema-fallback.mjs').SchemaHistory} [schemaHistory] - B55: the packet's
@@ -312,7 +313,7 @@ export async function reviewFile(input, deps) {
   /** @param {SessionSpec} spec @param {{text: string, hunkHeaders: string[], tokensIn: number, contextMode: string | null}} packet */
   const run = async (spec, packet) => {
     /** @type {Record<string, any>} */
-    let summary = await runOne(spec, packet.text, packet, { deps, repoRoot, workDir, min, cfg, schemaFallback });
+    let summary = await runOne(spec, packet.text, packet, { deps, workDir, min, cfg, schemaFallback });
     const needs = summary.review?.needs_file;
     if (spec.role === 'reviewer' && summary.status === 'ok' && Array.isArray(needs) && needs.length > 0) {
       const paths = safeNeeds(needs);
@@ -323,7 +324,7 @@ export async function reviewFile(input, deps) {
         extra = null;
       }
       if (extra === null) return { ...summary, status: 'unavailable', reason: 'needs_file-refused', review: null };
-      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, repoRoot, workDir, min, cfg, schemaFallback })), needs_file_round: true };
+      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, cfg, schemaFallback })), needs_file_round: true };
     }
     return summary;
   };
@@ -353,7 +354,7 @@ export async function reviewFile(input, deps) {
     if (judgeSpec) {
       const bySlot = Object.fromEntries(done.map((s) => [s.slot, s.review]));
       const packet = assembleJudgePacket({ diff: part, reports: { A: bySlot.A, B: bySlot.B }, cfg, moved: movedOf(keys) });
-      final = await runOne(judgeSpec, packet.text, packet, { deps, repoRoot, workDir, min, cfg, schemaFallback });
+      final = await runOne(judgeSpec, packet.text, packet, { deps, workDir, min, cfg, schemaFallback });
       sessions.push(publicSummary(final));
       if (final.status !== 'ok') {
         await note(deps, { event: 'review.unavailable', reason: final.reason, lens: 'judge', ...rowExtra });
@@ -459,7 +460,7 @@ export async function reviewLightBatch(input, deps) {
   if (packet.status !== 'ok') return { ...head, status: 'split_required', approved: false, tokens_in: packet.tokensIn, budget: packet.budget, sessions: [] };
   mkdirSync(input.workDir, { recursive: true, mode: 0o700 });
   const final = await runOne({ lens: 'full', role: 'reviewer', level: 'L2', slot: null }, packet.text, packet,
-    { deps, repoRoot: input.repoRoot, workDir: input.workDir, min: minTokensOut(input.cfg), cfg: input.cfg, schemaFallback: false });
+    { deps, workDir: input.workDir, min: minTokensOut(input.cfg), cfg: input.cfg, schemaFallback: false });
   const sessions = [publicSummary(final)];
   if (final.status !== 'ok') return { ...head, status: 'unavailable', reason: final.reason, approved: false, sessions };
   if (final.review.findings.some((f) => !input.files.includes(f.file))) return { ...head, status: 'unavailable', reason: 'finding-file', approved: false, sessions };
@@ -473,10 +474,10 @@ export async function reviewLightBatch(input, deps) {
  * file before it is removed.
  * @param {SessionSpec} spec @param {string} text
  * @param {{hunkHeaders: string[], tokensIn: number, contextMode: string | null}} packet
- * @param {{deps: ReviewDeps, repoRoot: string, workDir: string, min: number, cfg: Record<string, any>, schemaFallback?: boolean}} env -
+ * @param {{deps: ReviewDeps, workDir: string, min: number, cfg: Record<string, any>, schemaFallback?: boolean}} env -
  *   `schemaFallback: false` (consensus mode: its providers ARE the check) never tries.
  */
-async function runOne(spec, text, packet, { deps, repoRoot, workDir, min, cfg, schemaFallback = true }) {
+async function runOne(spec, text, packet, { deps, workDir, min, cfg, schemaFallback = true }) {
   const promptPath = path.join(workDir, `${spec.lens}-${randomBytes(6).toString('hex')}.md`);
   const base = { lens: spec.lens, role: spec.role, level: spec.level, slot: spec.slot, context_mode: packet.contextMode, ctx_tokens_in: packet.tokensIn };
   writeFileSync(promptPath, text, { mode: 0o600 });
@@ -512,17 +513,25 @@ async function runOne(spec, text, packet, { deps, repoRoot, workDir, min, cfg, s
       const count = (timeouts.get(identity) ?? 0) + 1;
       timeouts.set(identity, count);
       if (count < 2 || tried) return null;
-      let fallback;
+      /** @type {Array<Record<string, any>>} */
+      let rows = [];
+      let routingError = null;
       try {
         if (deps.schemaHistory && (await deps.schemaHistory(hash, session)).fellBack) return null;
-        fallback = timeoutFallbackFor(cfg, spec.level, from, {
-          rows: await readAllRows(slugFor(cfg, repoRoot)), ticketId: hash, role: spec.role,
-        });
+        rows = await deps.readRows?.() ?? [];
+      } catch {
+        // Read failures must not strand this ticket. The local count still proves two
+        // timeouts; record the degraded choice before trying one configured alternative.
+        routingError = 'ledger-read-failed';
+      }
+      const fallback = timeoutFallbackFor(cfg, spec.level, from, { rows, ticketId: hash, role: spec.role });
+      try {
         if (!fallback) return null;
         await write({ event: 'review.schema_fallback', ...session, packet_hash: hash,
           from_provider: from.provider, from_model: from.model, to: 'review.timeout_fallback',
           to_provider: fallback.provider, to_model: fallback.model, attempts: count,
-          trigger: 'timeout', reason: 'repeated-timeout', routing_reason: fallback.reason });
+          trigger: 'timeout', reason: 'repeated-timeout', routing_reason: fallback.reason,
+          ...(routingError ? { routing_error: routingError } : {}) });
       } catch {
         return null; // never run a recovery that could not be recorded
       }

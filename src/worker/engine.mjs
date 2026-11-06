@@ -426,7 +426,7 @@ export async function reviewTicket(ticket, ctx) {
     if (!ctx.key) {
       return await reviewFile(
         { repoRoot: contentRoot, file: ticket.file, base: entry.base, cfg: ctx.cfg, kind: entry.kind, workDir, factsExcerpt, ...digest, peerDiffs, ...(await fileContext()) },
-        { spawn: ctx.spawn, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
+        { spawn: ctx.spawn, readRows: ctx.readRows, ...(ctx.writeRow ? { writeRow: ctx.writeRow } : {}) },
       );
     }
     return await fixLoopRound(ticket, tctx, { base: entry.base, level: entry.level, owned: entry.owned, ownedKinds: entry.ownedKinds, blockKindOf: entry.kind, key: ctx.key, workDir, factsExcerpt, rulesDigest, peerDiffs, fileContext });
@@ -459,7 +459,7 @@ async function lightRound(ticket, ctx, { entry, workDir, factsExcerpt, rulesDige
     const round = count + 1;
     // Reserve before the session: a crash cannot reset the cap on a worker restart.
     await writeRow({ event: 'review.light_batch', round, signature });
-    const batch = await reviewLightBatch({ repoRoot: root, files, base: entry.base, cfg: ctx.cfg, workDir, factsExcerpt, rulesDigest }, { spawn: ctx.spawn, writeRow });
+    const batch = await reviewLightBatch({ repoRoot: root, files, base: entry.base, cfg: ctx.cfg, workDir, factsExcerpt, rulesDigest }, { spawn: ctx.spawn, writeRow, readRows });
     const moved = hashes.some((f) => contentHash(root, f.file) !== f.content_hash);
     const findings = batch.findings ?? [];
     const blocking = findings.some((f) => f.severity === 'critical' || f.severity === 'warning');
@@ -723,7 +723,7 @@ async function playRound(ticket, ctx, { state, kind, where, seq, base, blockKind
         ...(jev ? { jev } : {}),
         ...(schemaHistory ? { schemaHistory } : {}),
         review: async () => {
-          engineOutcome = await reviewFile({ repoRoot: ctx.contentRoot ?? ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...files, ...(rulesDigest !== '' ? { rulesDigest } : {}), ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, ...(schemaHistory ? { schemaHistory } : {}) });
+          engineOutcome = await reviewFile({ repoRoot: ctx.contentRoot ?? ctx.repoRoot, file: ticket.file, base, cfg: ctx.cfg, kind: blockKindOf, workDir, factsExcerpt, ...files, ...(rulesDigest !== '' ? { rulesDigest } : {}), ...(peerDiffs ? { peerDiffs } : {}) }, { spawn: ctx.spawn, writeRow, readRows: ctx.readRows, ...(schemaHistory ? { schemaHistory } : {}) });
           return engineOutcome;
         },
         spawn: async (opts) => {
