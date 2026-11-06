@@ -10,9 +10,31 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - The Go engine records each hand-over to Node in `~/.code-forge/native/handovers.jsonl`: the command, the known subcommand and a reason code. Unknown words are stored as `unknown`, never as typed. Set `CODE_FORGE_HANDOVER_LOG=0` to turn it off (B282)
 
+### Changed
+
+- More commands run fully in Go, with the same output and exit codes as Node. `docs/native-engine.md` lists the few cases that still hand over. These cases no longer hand over to Node:
+  - `block close` with `--auto-claim`, `--remove-worktree` and `--no-require-reviews` (B283), and with external review (B284)
+  - `hooks.on_block_end` on block claim, stop and close (B284)
+  - active autopilot grants on block claim, stop, open and close (B285)
+  - `block open` with `--after`, `--after-outcome` and no `--level` (B286)
+  - `block ready`, `block waive` and `block reopen` (B287)
+  - `review-file` with `--fresh`, `--answers`, `--of`, `--rebase-check` and a cached result that needs a fresh ticket (B288)
+  - `gates run` with custom gates, `repeat_new_tests`, light blocks and flaky detection (B289)
+  - `context pack` (B290)
+  - `block land` with plain, `--merge`, `--no-merge-gate`, grant and hook shapes (B291, B307)
+  - `block close --decide`, `block human close` and `block human-pass` (B292)
+
 ### Fixed
 
 - `npm run bench:block` counts every command it starts, so the process count no longer drops below the number of runs when fast Go commands end between two samples. This made CI fail on Linux (B297)
+- A review recheck and the agent waiver judge now see the block's other changed files that a finding names or calls. The context is bounded and recorded. Before, a fix in another file of the block was not seen (B280, B306)
+- `gates run --changed` keeps its scope after a rebase when the base move is safe, so one block no longer runs the full suite twice. It resets the scope when the base move is not safe and records the real fallback reason. A change in Go code now selects the affected parity tests (B294, B305)
+- `gates run --changed` no longer passes Go `_test.go` files to the Node test runner. Before, every Go-only block failed to land (B301)
+- A reviewer that times out twice on the same file now falls back once to another configured model, chosen by measured speed and accuracy. `run reload` now applies review-only keys when frozen keys differ, keeps the frozen keys and prints their names (B296)
+- `block rebase --accept-landed` no longer deadlocks on the run lock, shows the Go error, leaves no lock after a refusal and no longer replays the commits of an earlier block (B299)
+- A stopping worker no longer creates a removed `HOME` again (B303)
+- The merge gate of `block land` now runs in the right folder when the workspace path goes through a symlink, in Node and in Go (B307)
+- Tests no longer fail on a busy machine because of wall-clock limits (B300, B302)
 
 ## [0.19.1] — 2026-11-05
 

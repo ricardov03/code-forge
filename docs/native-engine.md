@@ -36,12 +36,14 @@ locks and signed ledger rows as Node.
 
 | Command | Runs in Go | Hands over to Node |
 |---|---|---|
-| `review-file <file> --block <id>` | Plain enqueue. | `--fresh`, `--answers`, `--of`, `--rebase-check`, and a cached result that needs a fresh ticket. |
-| `block claim`, `block stop` | Plain claim and stop. | An autopilot grant, a pending approval, or `hooks.on_block_end`. |
-| `block open` | Open with `--level`, including the worktree. | No `--level`, `--after`, `--after-outcome`, or autopilot. |
-| `block close` | Plain agent close. | `--decide`, `--no-require-reviews`, `--auto-claim`, `--remove-worktree`, `ready`, a human close, an external reviewer, hooks, or autopilot. |
-| `gates run` | Built-in gates. A stop signal (SIGINT or SIGTERM) writes the same cancel rows. | Custom gates, `repeat_new_tests`, light blocks, flaky detection, and other `gates` subcommands. |
-| `block land` | Go: plain land, `--merge` with the full merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | An unavailable compatible join daemon, unsupported state or a child step Go cannot execute. Read-only pre-checks finish before the first write; the B282 reason code identifies the unsupported step. |
+| `review-file <file> --block <id>` | Enqueue, with `--fresh`, `--answers`, `--of` and `--rebase-check`, and a cached result that needs a fresh ticket. | State that Go cannot read or does not expect. |
+| `block claim`, `block stop` | Plain claim and stop, active autopilot grants, pending approvals and `hooks.on_block_end`. | State that Go cannot read or does not expect. |
+| `block open` | Open with or without `--level`, `--after`, `--after-outcome` and autopilot grants, including the worktree. | State that Go cannot read or does not expect. |
+| `block close` | Agent close, `--decide`, `--no-require-reviews`, `--auto-claim`, `--remove-worktree`, human close, external review, hooks and grants. | A light block, `--auto-claim` on a run with an autopilot record, and `--auto-claim` with `close.require_human` at a terminal. |
+| `block ready`, `block waive`, `block reopen`, `block human close`, `block human-pass` | These commands. | State that Go cannot read or does not expect. |
+| `context pack` | This command. | Other `context` subcommands and state that Go cannot read. |
+| `gates run` | Built-in and custom gates, `repeat_new_tests`, light blocks and flaky detection. A stop signal (SIGINT or SIGTERM) writes the same cancel rows. | A run with no `--run` and no `--block`, and other `gates` subcommands. |
+| `block land` | Plain land, `--merge` with the full merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | No compatible join daemon, unsupported state, a light block, or a run with `close.require_human` or an external reviewer. Read-only pre-checks finish before the first write. The B282 reason code names the step. |
 
 A hand-over always passes the original arguments. Node then runs the command
 exactly as before. When Go is not sure it gives the same answer, it hands over.
