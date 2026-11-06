@@ -17,7 +17,7 @@ import { mkdir, readFile, rename, rmdir, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { exec } from '../util/exec.mjs';
 import { StateError, assertRunId, assertWorkspaceOutsideRuns, mirrorPath, newRunId, runRecordPath, runsDir } from './paths.mjs';
-import { changedKeyPaths, configHash, externalReviewer, IMMUTABLE_KEYS, immutableChanges, initialConfigState } from './config-snapshot.mjs';
+import { changedKeyPaths, configHash, externalReviewer, IMMUTABLE_KEYS, immutableChanges, initialConfigState, reviewOnlyReload } from './config-snapshot.mjs';
 import { generateKey, loadKey, signRow } from './signer.mjs';
 
 /** @typedef {(row: Record<string, any>) => Promise<unknown>} WriteRow */
@@ -242,7 +242,7 @@ export async function startRun(opts) {
  *   writeRow: WriteRow, now?: Date,
  *   guard?: (record: Record<string, any>, before: Record<string, any> | undefined, config: Record<string, any>, changed: string[] | null) => void | Promise<void>,
  * }} opts
- * @returns {Promise<{changed: string[] | null, oldHash: string | null, newHash: string, pinned: number, rowError: string | null}>}
+ * @returns {Promise<{changed: string[] | null, oldHash: string | null, newHash: string, pinned: number, rowError: string | null, keptKeys?: string[]}>}
  *   `changed` is `[]` when nothing changed.
  */
 export async function reloadRun({ runId, config, readPending = () => [], effectiveSlug, writeRow, now = new Date(), guard }) {
@@ -251,7 +251,7 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
     if (current.status !== 'active') throw new StateError('run-ended', `run ${runId} has ended`);
     const state = current.config && typeof current.config === 'object' && typeof current.config.hash === 'string' ? current.config : null;
     const stored = state && state.snapshots && typeof state.snapshots === 'object' ? state.snapshots : {};
-    const newHash = configHash(config);
+    let newHash = configHash(config);
     const oldHash = state ? state.hash : null;
     if (oldHash === newHash) return { changed: [], oldHash, newHash, pinned: 0, rowError: null };
     const before = state && Object.hasOwn(stored, state.hash) ? stored[state.hash] : undefined;
@@ -283,7 +283,11 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
       // B93: and never had a coder sandbox profile
       if (config.coder?.sandbox !== undefined) frozen.push('coder.sandbox');
     }
-    if (frozen.length > 0) {
+    const reviewOnly = state && frozen.length > 0 ? reviewOnlyReload(before, config, frozen) : null;
+    if (reviewOnly) {
+      config = reviewOnly;
+      newHash = configHash(config);
+    } else if (frozen.length > 0) {
       const why = frozen.map((key) => `${key} cannot change mid-run (${IMMUTABLE_KEYS[/** @type {keyof typeof IMMUTABLE_KEYS} */ (key)]})`);
       throw new StateError('immutable-key', `${why.join('; ')} — put ${frozen.length === 1 ? 'it' : 'them'} back, or end the run and start a new one`);
     }
@@ -308,11 +312,12 @@ export async function reloadRun({ runId, config, readPending = () => [], effecti
     const pinned = Object.keys(pins).length;
     let rowError = null;
     try {
-      await writeSigned(runId, writeRow, { event: 'run.reload', changed_keys: changed, old_hash: oldHash, new_hash: newHash, pinned_tickets: pinned });
+      await writeSigned(runId, writeRow, { event: 'run.reload', changed_keys: changed, old_hash: oldHash, new_hash: newHash, pinned_tickets: pinned,
+        ...(reviewOnly ? { kept_keys: frozen } : {}) });
     } catch (err) {
       rowError = err?.code ?? err?.name ?? 'error';
     }
-    return { changed, oldHash, newHash, pinned, rowError };
+    return { changed, oldHash, newHash, pinned, rowError, ...(reviewOnly ? { keptKeys: frozen } : {}) };
   });
 }
 

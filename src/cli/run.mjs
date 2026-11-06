@@ -253,6 +253,9 @@ async function reloadVerb(runId, { out, err }) {
     out(`run ${runId}: config reloaded · ${reloaded.changed.length} key${reloaded.changed.length === 1 ? '' : 's'} changed\n`);
     for (const key of reloaded.changed) out(`  ${key}\n`);
   }
+  if ('keptKeys' in reloaded && Array.isArray(reloaded.keptKeys) && reloaded.keptKeys.length > 0) {
+    out(`kept frozen keys from the run snapshot: ${reloaded.keptKeys.join(', ')}\n`);
+  }
   out(`queued review tickets (${reloaded.pinned}) keep the config they were enqueued with; new tickets use the new config\n`);
   if (reloaded.rowError !== null) err(`run reload: WARN the run.reload ledger row could not be written (${reloaded.rowError}); the run record holds the new config\n`);
   return 0;
