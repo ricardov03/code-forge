@@ -23,17 +23,20 @@ func init() { blockSubs["open"] = runBlockOpen }
 
 // Keep the original argv until every pre-publication check has been mapped.
 func runBlockOpen(args []string) int {
-	fallback := func() int { return blockHandover(append([]string{"open"}, args...)) }
+	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"open"}, args...), reason) }
 	failure := func(err error) int {
 		var publishing *blockops.PublicationError
 		if errors.As(err, &publishing) {
 			fmt.Fprintln(os.Stderr, "block open:", blockIOMessage(err))
 			return 1
 		}
+		if errors.Is(err, blockops.ErrHandover) {
+			return fallback(hOpenStateChanged)
+		}
 		var se *state.Error
 		var ge *gitx.Error
 		if reviewWaitLogging() || !errors.As(err, &se) && !errors.As(err, &ge) {
-			return fallback()
+			return fallback(hOpenErrorLog)
 		}
 		fmt.Fprintln(os.Stderr, "block open:", err.Error())
 		if se != nil && se.Code == "usage" {
@@ -45,7 +48,7 @@ func runBlockOpen(args []string) int {
 	hasLevel := false
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			return fallback()
+			return fallback(hOpenHelp)
 		}
 		if !strings.HasPrefix(arg, "--") {
 			continue
@@ -55,11 +58,11 @@ func runBlockOpen(args []string) int {
 			hasLevel = true
 		}
 		if !slices.Contains([]string{"run", "level", "owned", "acceptance", "tests", "brief", "base", "attempt", "lines", "kind", "json", "remove-worktree"}, name) {
-			return fallback()
+			return fallback(handoverFlagReason("open", name, hOpenUnsupportedFlag))
 		}
 	}
 	if !hasLevel {
-		return fallback()
+		return fallback(hOpenNoLevel)
 	}
 	flags, positionals, message := blockFlags(args)
 	if message != "" {
@@ -81,7 +84,7 @@ func runBlockOpen(args []string) int {
 	id := positionals[0]
 	// JS regexp end anchors and inherited object keys need Node's semantics.
 	if id == "__proto__" || strings.HasSuffix(id, "\n") || strings.HasSuffix(blockString(flags["level"]), "\n") {
-		return fallback()
+		return fallback(hOpenJsSemantics)
 	}
 	files, hasOwned := flags["owned"].([]string)
 	acceptanceFile, hasAcceptance := flags["acceptance"].(string)
@@ -93,7 +96,7 @@ func runBlockOpen(args []string) int {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fallback()
+		return fallback(hOpenHome)
 	}
 	record, err := state.ReadRun(home, run)
 	if err != nil {
@@ -139,7 +142,7 @@ func runBlockOpen(args []string) int {
 		return true
 	}
 	if !safe(record) {
-		return fallback()
+		return fallback(blockStateHandoverReason(record, "open", hOpenState))
 	}
 	root := blockString(blockObject(blockObject(blockObject(record.Get("blocks")).Get(id)).Get("worktree")).Get("path"))
 	if root == "" {
@@ -155,32 +158,32 @@ func runBlockOpen(args []string) int {
 	// active approval, so neither check takes a lock, signs a row or emits text.
 	data, err := os.ReadFile(acceptanceFile)
 	if err != nil {
-		return fallback()
+		return fallback(hOpenAcceptanceRead)
 	}
 	acceptance, err := blockopen.ParseAcceptance(data)
 	if err != nil {
-		return fallback()
+		return fallback(hOpenAcceptanceFormat)
 	}
 	opts := blockopen.Options{Home: home, Run: run, ID: id, Level: blockString(flags["level"]), Kind: blockString(flags["kind"]), Owned: files, Tests: tests, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: safe}
 	if brief, ok := flags["brief"].(string); ok {
 		absolute, err := filepath.EvalSymlinks(brief)
 		if err != nil {
-			return fallback()
+			return fallback(hOpenBriefResolve)
 		}
 		absolute, err = filepath.Abs(absolute)
 		if err != nil {
-			return fallback()
+			return fallback(hOpenBriefAbsolute)
 		}
 		relative, err := filepath.Rel(blockString(record.Get("workspace")), absolute)
 		if err != nil {
-			return fallback()
+			return fallback(hOpenBriefRelative)
 		}
 		if strings.HasPrefix(relative, "..") || filepath.IsAbs(relative) {
 			return usage("--brief must be a file inside the workspace")
 		}
 		body, err := os.ReadFile(absolute)
 		if err != nil {
-			return fallback()
+			return fallback(hOpenBriefRead)
 		}
 		opts.BriefPath, opts.BriefData = relative, body
 	}
@@ -194,7 +197,7 @@ func runBlockOpen(args []string) int {
 		}
 		// Empty configured values have semantics distinct from an absent setting.
 		if wt["dir"] == "" || wt["base"] == "" {
-			return fallback()
+			return fallback(hOpenWorktreeSettings)
 		}
 		opts.Settings = &worktree.Settings{Dir: blockString(wt["dir"]), Branch: branch, Base: blockString(wt["base"])}
 	}

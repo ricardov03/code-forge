@@ -40,7 +40,7 @@ function execute(command, args, cwd, env, stdin = '') {
 
 // Do not inherit a caller's git routing, Node preloads, native overrides, or error-log path.
 function childEnv(home, tmp, extra = {}) {
-  const env = { PATH: process.env.PATH, ...extra, HOME: home, TMPDIR: tmp, CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NO_ERROR_LOG: extra.CODE_FORGE_NO_ERROR_LOG ?? '1' };
+  const env = { PATH: process.env.PATH, CODE_FORGE_HANDOVER_LOG: '0', ...extra, HOME: home, TMPDIR: tmp, CODE_FORGE_KEY_BACKEND: 'file', CODE_FORGE_NO_ERROR_LOG: extra.CODE_FORGE_NO_ERROR_LOG ?? '1' };
   return env;
 }
 

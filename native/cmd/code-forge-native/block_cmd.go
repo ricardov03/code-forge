@@ -16,11 +16,11 @@ func runBlock(args []string) int {
 			return sub(args[1:])
 		}
 	}
-	return blockHandover(args)
+	return blockHandover(args, hBlockUnportedSubcommand)
 }
 
-func blockHandover(args []string) int {
-	code, err := handover(append([]string{"block"}, args...))
+func blockHandover(args []string, reason handoverReason) int {
+	code, err := handover(append([]string{"block"}, args...), reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
 	}

@@ -17,7 +17,11 @@ import (
 	"github.com/ricardov03/code-forge/native/state"
 )
 
-func landExecute(args []string, flags map[string]any, home, run, id string, record, entry ledger.Object, fallback func() int) (code int) {
+func landExecute(args []string, flags map[string]any, home, run, id string, record, entry ledger.Object, fallback func() int) int {
+	return landExecuteWithReason(args, flags, home, run, id, record, entry, func(handoverReason) int { return fallback() })
+}
+
+func landExecuteWithReason(args []string, flags map[string]any, home, run, id string, record, entry ledger.Object, fallback func(handoverReason) int) (code int) {
 	stderr := &landErrorStream{}
 	beforeLog := []any{}
 	begin := func() { beforeLog = gatesBreadcrumbName("block") }
@@ -78,7 +82,7 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 		return stop("unknown block in run " + run)
 	}
 	if _, ok := entry.Get("status").(string); !ok {
-		return fallback()
+		return fallback(hLandStatusShape)
 	}
 	if entry.Get("status") != "open" {
 		begin()
@@ -87,7 +91,7 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 		return stop("block is " + blockString(entry.Get("status")) + ", not open")
 	}
 	if !blockSafe(record) || !blockStorageSafe(home, run, record) {
-		return fallback()
+		return fallback(blockStateHandoverReason(record, "land", hLandStateStorage))
 	}
 	workspace := blockString(record.Get("workspace"))
 	tree, err := proof.BlockTree(workspace, entry)
@@ -105,35 +109,35 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 	}
 	top, err := gitx.RepoTop(tree.Path)
 	if err != nil {
-		return fallback()
+		return fallback(hLandWorktreeRepo)
 	}
 	main, err := gitx.RepoTop(workspace)
 	if err != nil {
-		return fallback()
+		return fallback(hLandMainRepo)
 	}
 	cfg, ok := blockSnapshot(record)
 	if !ok || !blockSafe(record) || !blockStorageSafe(home, run, record) || !daemonclient.Enabled(cfg) {
-		return fallback()
+		return fallback(hLandConfigDaemon)
 	}
 	// The shared gates route delegates all unscoped runs, including merge gates.
 	if merge && !skip && blockMap(cfg["gates"])["merge_gate"] != false {
-		return fallback()
+		return fallback(hLandMergeGate)
 	}
 	dry := &landStep{preflight: true}
 	if reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", "0ms", "--cwd", tree.Workspace}, dry) == landHandover {
-		return fallback()
+		return fallback(hLandStepHandoverJoin)
 	}
 	gateArgs := []string{"run", "--run", run, "--block", id, "--changed", "--cwd", tree.Workspace}
 	gateOptions, message := gatesParse(gateArgs)
 	if message != "" {
-		return fallback()
+		return fallback(hLandGatesParse)
 	}
 	if _, safe := gatesNativeStep(gateArgs, gateOptions, dry); !safe {
-		return fallback()
+		return fallback(hLandStepHandoverGates)
 	}
 	files, err := landClaimFiles(home, run, id, top, main, record, entry)
 	if err != nil {
-		return fallback()
+		return fallback(hLandClaimFiles)
 	}
 	// Close must also accept the ownership that auto-claim will publish.
 	encoded, _ := ledger.Stringify(record, false)
@@ -153,10 +157,10 @@ func landExecute(args []string, flags map[string]any, home, run, id string, reco
 	dry.record = predicted
 	closeArgs := []string{id, "--run", run, "--report", report, "--transcript", transcript, "--json"}
 	if blockCloseStep(closeArgs, dry) == landHandover {
-		return fallback()
+		return fallback(hLandStepHandoverClose)
 	}
 	if err := landAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
-		return fallback()
+		return fallback(hLandStepHandoverClaim)
 	}
 	// All hand-over predicates are settled. No code below this point starts Node.
 	begin()

@@ -85,10 +85,10 @@ func landMax(raw string) (int64, bool) {
 }
 
 func runBlockLand(args []string) int {
-	fallback := func() int { return blockHandover(append([]string{"land"}, args...)) }
+	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"land"}, args...), reason) }
 	fail := func(message string, code int) int {
 		if reviewWaitLogging() && !closeTextSafe(message) {
-			return fallback()
+			return fallback(hLandErrorLog)
 		}
 		before := gatesBreadcrumbName("block")
 		text := "block land: " + message + "\n"
@@ -98,7 +98,7 @@ func runBlockLand(args []string) int {
 	}
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			return fallback()
+			return fallback(hLandHelp)
 		}
 	}
 	flags, pos, message := landFlags(args)
@@ -126,13 +126,13 @@ func runBlockLand(args []string) int {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fallback()
+		return fallback(hLandHome)
 	}
 	record, err := state.ReadRun(home, run)
 	if err != nil {
 		var se *state.Error
 		if !errors.As(err, &se) {
-			return fallback()
+			return fallback(hLandReadRun)
 		}
 		return fail(err.Error(), 1)
 	}
@@ -140,7 +140,7 @@ func runBlockLand(args []string) int {
 	value := blockObject(record.Get("blocks")).Get(id)
 	entry := blockObject(value)
 	if value != nil && entry == nil {
-		return fallback()
+		return fallback(hLandEntryShape)
 	}
-	return landExecute(args, flags, home, run, id, record, entry, fallback)
+	return landExecuteWithReason(args, flags, home, run, id, record, entry, fallback)
 }

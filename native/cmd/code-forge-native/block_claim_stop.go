@@ -128,6 +128,22 @@ func blockSafe(record ledger.Object) bool {
 	return ok && blockMap(cfg["hooks"])["on_block_end"] == nil
 }
 
+// Explain the guarded cases without changing the existing safety predicate.
+func blockStateHandoverReason(record ledger.Object, scope string, fallback handoverReason) handoverReason {
+	condition := ""
+	if record.Get("autopilot") != nil {
+		condition = "autopilot-grant"
+	} else if !blockops.QuietExpiry(record) {
+		condition = "pending-approval"
+	} else if cfg, ok := blockSnapshot(record); ok && blockMap(cfg["hooks"])["on_block_end"] != nil {
+		condition = "end-hook"
+	}
+	if condition != "" {
+		return handoverFlagReason(scope, condition, fallback)
+	}
+	return fallback
+}
+
 // Abnormal publication paths stay with Node before a row can be appended.
 // In particular a mirror obstruction must never cause a retry after signing.
 func blockStorageSafe(home, run string, record ledger.Object) bool {
@@ -177,7 +193,7 @@ func blockStorageSafe(home, run string, record ledger.Object) bool {
 
 func blockClaimStop(sub string, args []string) int {
 	original := append([]string{sub}, args...)
-	fallback := func() int { return blockHandover(original) }
+	fallback := func(reason handoverReason) int { return blockHandover(original, reason) }
 	failure := func(err error) int {
 		var publication *blockops.PublicationError
 		var se *state.Error
@@ -190,13 +206,16 @@ func blockClaimStop(sub string, args []string) int {
 			fmt.Fprintf(os.Stderr, "block %s: %s\n", sub, blockIOMessage(err))
 			return 1
 		}
+		if errors.Is(err, blockops.ErrHandover) {
+			return fallback(hClaimStopStateChanged)
+		}
 		// The native error-log scrubber does not yet cover block messages with
 		// arbitrary user paths. Delegate before emitting or changing state.
 		if reviewWaitLogging() {
-			return fallback()
+			return fallback(hClaimStopErrorLog)
 		}
 		if !isState && !errors.As(err, &ge) {
-			return fallback()
+			return fallback(hClaimStopError)
 		}
 		fmt.Fprintf(os.Stderr, "block %s: %s\n", sub, err.Error())
 		if se != nil && se.Code == "usage" {
@@ -219,7 +238,7 @@ func blockClaimStop(sub string, args []string) int {
 	for _, arg := range args {
 		name, _, _ := strings.Cut(arg, "=")
 		if name == "--auto" || name == "--auto-claim" {
-			return fallback()
+			return fallback(handoverFlagReason(sub, name, hClaimStopAuto))
 		}
 	}
 	flags, positionals, message := blockFlags(args)
@@ -243,24 +262,24 @@ func blockClaimStop(sub string, args []string) int {
 	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return fallback()
+		return fallback(hClaimStopHome)
 	}
 	record, err := state.ReadRun(home, run)
 	if err != nil {
 		return failure(err)
 	}
 	if !blockSafe(record) {
-		return fallback()
+		return fallback(blockStateHandoverReason(record, sub, hClaimStopState))
 	}
 	if !blockStorageSafe(home, run, record) {
-		return fallback()
+		return fallback(hClaimStopStorage)
 	}
 	safe := func(current ledger.Object) bool { return blockSafe(current) && blockStorageSafe(home, run, current) }
 	// A serving daemon can return a different rows snapshot. Let Node negotiate
 	// its protocol rather than mixing that snapshot with a direct ledger read.
 	if sub == "stop" && os.Getenv("CODE_FORGE_NATIVE") != "0" {
 		if _, err := os.Lstat(filepath.Join(home, ".code-forge", "runs", run, "native.sock")); err == nil {
-			return fallback()
+			return fallback(hStopDaemon)
 		}
 	}
 	if sub == "claim" {
@@ -284,7 +303,7 @@ func blockClaimStop(sub string, args []string) int {
 		err = blockops.Claim(home, run, id, file, guarded, why, safe)
 	} else {
 		if _, ok := blockDoneFacts(home, run, id, record); !ok {
-			return fallback()
+			return fallback(hStopDoneFacts)
 		}
 		err = blockops.Stop(home, run, id, reason, safe)
 	}

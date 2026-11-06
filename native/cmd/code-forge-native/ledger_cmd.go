@@ -27,8 +27,8 @@ var ledgerBreadcrumbPattern = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}(?: [a-z]
 
 func init() { routes["ledger"] = runLedger }
 
-func ledgerHandover(args []string) int {
-	code, err := handover(append([]string{"ledger"}, args...))
+func ledgerHandover(args []string, reason handoverReason) int {
+	code, err := handover(append([]string{"ledger"}, args...), reason)
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
 	}
@@ -57,7 +57,7 @@ func runLedger(args []string) int {
 	// Keep unported subcommands intact, including their help and argument errors.
 	switch sub {
 	case "calibration", "outcome", "add", "outside-review":
-		return ledgerHandover(args)
+		return ledgerHandover(args, hLedgerUnportedSubcommand)
 	}
 	help := func(s string) bool { return s == "--help" || s == "-h" }
 	if help(sub) {
@@ -94,7 +94,7 @@ func runLedger(args []string) int {
 				var supported bool
 				code, output, message, supported = ledgerTail(slug, n)
 				if !supported {
-					return ledgerHandover(args)
+					return ledgerHandover(args, hLedgerTailFormat)
 				}
 			}
 		}
@@ -102,7 +102,7 @@ func runLedger(args []string) int {
 	// Resolve all fallback decisions before emitting output or modifying state.
 	if !ledgerLoggingOff() {
 		if !ledgerLog(args, code, message) {
-			return ledgerHandover(args)
+			return ledgerHandover(args, hLedgerErrorLog)
 		}
 	}
 	fmt.Fprint(os.Stdout, output)

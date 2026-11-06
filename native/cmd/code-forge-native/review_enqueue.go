@@ -67,7 +67,7 @@ func reviewEnqueueFlags(args []string) (map[string]string, []string, string) {
 func reviewEnqueueSay(args []string, out ledger.Object, code int) int {
 	data, err := ledger.Stringify(out, false)
 	if err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueEncoding)
 	}
 	before := reviewWaitBreadcrumb()
 	fmt.Fprintln(os.Stdout, string(data))
@@ -80,7 +80,7 @@ func reviewEnqueueSay(args []string, out ledger.Object, code int) int {
 func reviewEnqueueError(args []string, err error) int {
 	var pathError *gitx.Error
 	if !errors.As(err, &pathError) || pathError.Code != "bad-path" {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueuePathError)
 	}
 	return reviewEnqueueSay(args, ledger.Object{{Key: "status", Value: "refused"}, {Key: "reason", Value: pathError.Code}, {Key: "message", Value: pathError.Message}}, 1)
 }
@@ -187,11 +187,11 @@ func runReviewEnqueue(args []string) int { return reviewEnqueueStep(args, nil) }
 
 func reviewEnqueueStep(args []string, step *landStep) int {
 	stdout, stderr := step.writers()
-	reviewWaitHandover := func(args []string) int {
+	reviewWaitHandover := func(args []string, reason handoverReason) int {
 		if step != nil {
 			return landHandover
 		}
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, reason)
 	}
 	reviewEnqueueSay := func(args []string, out ledger.Object, code int) int {
 		if step == nil {
@@ -224,7 +224,7 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	}
 	for i, arg := range args {
 		if !utf8.ValidString(arg) || i < 2 && (arg == "--help" || arg == "-h") {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hEnqueueHelpEncoding)
 		}
 	}
 	// Modes owned by Node or the wait dispatchers must retain original argv.
@@ -236,7 +236,7 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 			if (name == "--fresh" || name == "--rebase-check") && strings.Contains(arg, "=") {
 				continue
 			}
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, handoverFlagReason("enqueue", name, hEnqueueMode))
 		}
 	}
 	flags, paths, usage := reviewEnqueueFlags(args)
@@ -247,14 +247,14 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 			var arg string
 			_ = json.Unmarshal([]byte(strings.TrimPrefix(usage, "unknown flag ")), &arg)
 			if arg != "--" && !reviewEnqueueSafeUnknown.MatchString(arg) {
-				return reviewWaitHandover(args)
+				return reviewWaitHandover(args, hEnqueueFlagRedaction)
 			}
 		}
 		return reviewWaitUsageError(args, usage)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueGetcwd)
 	}
 	if dir, exists := flags["cwd"]; exists {
 		if !filepath.IsAbs(dir) {
@@ -269,7 +269,7 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	ctx := context.Background()
 	root, ok := reviewWaitRoot(ctx, cwd)
 	if !ok {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueRoot)
 	}
 	_, blockGiven := flags["block"]
 	_, maxGiven := flags["max"]
@@ -282,7 +282,7 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	}
 	top, err := gitx.RepoTop(cwd)
 	if err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueRepo)
 	}
 	file, err := reviewq.Normalize(paths[0], cwd, top)
 	if err != nil {
@@ -290,7 +290,7 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	}
 	worker, ok := reviewEnqueueWorker(root)
 	if !ok {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueWorker)
 	}
 	run, requested := flags["run"]
 	if !requested {
@@ -298,11 +298,11 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	}
 	home := os.Getenv("HOME")
 	if home == "" {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueHome)
 	}
 	rule, ok := reviewEnqueueExclusion(home, root, run, file)
 	if !ok {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueExclusion)
 	}
 	if rule != "" {
 		if step != nil && step.preflight {
@@ -321,31 +321,31 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	// content tree. An existing record with no worktree selects the main tree.
 	private, matched := reviewWaitJSON(filepath.Join(home, ".code-forge", "runs", run+".json"))
 	if !matched {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueuePrivateRecord)
 	}
 	record, readErr := state.ReadRun(home, run)
 	tree := top
 	if readErr == nil {
 		if private == nil {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hEnqueueRunMirror)
 		}
 		tree = root
 		blocks, _ := record.Get("blocks").(ledger.Object)
 		entry, _ := blocks.Get(block).(ledger.Object)
 		if entry.Get("worktree") != nil {
 			if !reviewBlockTree(ctx, root, record, entry) {
-				return reviewWaitHandover(args)
+				return reviewWaitHandover(args, hEnqueueWorktree)
 			}
 			worktree, _ := entry.Get("worktree").(ledger.Object)
 			tree, err = filepath.EvalSymlinks(worktree.Get("path").(string))
 			if err != nil {
-				return reviewWaitHandover(args)
+				return reviewWaitHandover(args, hEnqueueWorktreeResolve)
 			}
 		}
 	} else {
 		var stateErr *state.Error
 		if !(errors.As(readErr, &stateErr) && stateErr.Code == "no-run") && !os.IsPermission(readErr) {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hEnqueueRunRead)
 		}
 	}
 	if err := reviewq.Inside(tree, file); err != nil {
@@ -361,7 +361,7 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	}
 	identityRecord, ok := reviewEnqueueRecord(home, root, run)
 	if !ok {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueIdentityRecord)
 	}
 	blocks, _ := identityRecord.Get("blocks").(ledger.Object)
 	entry, _ := blocks.Get(block).(ledger.Object)
@@ -371,21 +371,21 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 	dir := filepath.Join(root, ".code-forge", "queue")
 	id, err := queue.Identity(dir, p)
 	if err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueIdentity)
 	}
 	// Check before publication and again after: freshTicket is wholly Node's
 	// responsibility, including markers installed by a concurrent worker.
 	if !reviewEnqueueCached(root, id) {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueCached)
 	}
 	if step != nil && step.preflight {
 		return 0
 	}
 	if err := queue.Publish(dir, p, id, time.Now()); err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueuePublish)
 	}
 	if !reviewEnqueueCached(root, id) {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hEnqueueCachedAfterPublish)
 	}
 	status := "queued"
 	if _, err := os.Stat(filepath.Join(dir, id+".done")); err == nil {

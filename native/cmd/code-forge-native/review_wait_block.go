@@ -38,21 +38,21 @@ func runReviewWaitBlock(args []string) int { return reviewWaitBlockStep(args, ni
 
 func reviewWaitBlockStep(args []string, step *landStep) int {
 	stdout, _ := step.writers()
-	reviewWaitHandover := func(args []string) int {
+	reviewWaitHandover := func(args []string, reason handoverReason) int {
 		if step != nil {
 			return landHandover
 		}
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, reason)
 	}
 	flags, ok := reviewBlockFlags(args)
 	if !ok || !daemonclient.Enabled(nil) {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hWaitBlockFlagsDaemon)
 	}
 	maxMs := int64(90000)
 	if raw, exists := flags["max"]; exists {
 		match := reviewWaitMax.FindStringSubmatch(raw)
 		if match == nil {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hWaitBlockMax)
 		}
 		maxMs, _ = strconv.ParseInt(match[1], 10, 64)
 		if match[2] != "ms" {
@@ -61,7 +61,7 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hWaitBlockGetcwd)
 	}
 	if dir, exists := flags["cwd"]; exists {
 		if !filepath.IsAbs(dir) {
@@ -71,19 +71,19 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 	}
 	cwd, err = filepath.EvalSymlinks(cwd)
 	if err != nil {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hWaitBlockCwd)
 	}
 	ctx := context.Background()
 	root, ok := reviewWaitRoot(ctx, cwd)
 	if !ok {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hWaitBlockRoot)
 	}
 	block, run := flags["wait"], flags["run"]
 	// Like waitBlockScope, validate scope/config before starting the deadline,
 	// and re-read the workspace mirror on each join (run reload can change it).
 	cfg, ok := reviewBlockConfig(ctx, root, cwd, run, block)
 	if !ok || !daemonclient.Enabled(cfg) {
-		return reviewWaitHandover(args)
+		return reviewWaitHandover(args, hWaitBlockConfig)
 	}
 	if step != nil && step.preflight {
 		_, err := daemonclient.Request(run, map[string]any{"method": "ping"}, 6500*time.Millisecond)
@@ -96,16 +96,16 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 	for {
 		cfg, ok = reviewBlockConfig(ctx, root, cwd, run, block)
 		if !ok || !daemonclient.Enabled(cfg) {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hWaitBlockConfigReload)
 		}
 		remaining := max(int64(0), deadline-time.Now().UnixMilli())
 		answer, err := daemonclient.Request(run, map[string]any{"method": "wait-block", "block": block, "max_ms": remaining}, time.Duration(remaining+2500)*time.Millisecond)
 		if err != nil {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hWaitBlockRequest)
 		}
 		out, ok := reviewBlockAnswer(block, answer)
 		if !ok {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hWaitBlockAnswer)
 		}
 		if answer["reason"] == "wait_timeout" && time.Now().UnixMilli() < deadline {
 			continue
@@ -113,7 +113,7 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 		// Validate encoding before publishing a breadcrumb or a partial answer.
 		data, err := ledger.Stringify(out, false)
 		if err != nil {
-			return reviewWaitHandover(args)
+			return reviewWaitHandover(args, hWaitBlockEncoding)
 		}
 		before := []any{}
 		if step == nil {
