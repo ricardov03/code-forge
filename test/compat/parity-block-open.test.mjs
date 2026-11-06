@@ -154,7 +154,12 @@ test('block open refusals and usage match Node; unsupported lanes hand over unch
   await parity(f, open().map((arg) => arg === 'L0' ? 'L9' : arg));
   for (const extra of [['--json=true'], ['--owned='], ['--acceptance'], ['--attempt', '01'], ['--lines', '9007199254740992'], ['--owned', 'a\\b'], ['--owned', '*[x]'], ['--owned', 'a/{b'], ['--tests', 'a b']]) await parity(f, open(extra));
   await parity(docs, ['block', 'open', 'Docs', '--run', RUN, '--level', 'L0', '--owned', 'README.md', '--acceptance', 'acceptance.yml', '--json']);
-  for (const args of [open().filter((a, i, all) => a !== '--level' && all[i - 1] !== '--level'), open(['--after', 'B0']), open(['--after-outcome', 'S1']), open(['--head', 'HEAD'])]) {
+  for (const args of [open().filter((a, i, all) => a !== '--level' && all[i - 1] !== '--level'), open(['--after', 'B0']), open(['--after-outcome', 'S1'])]) {
+    const result = await launch(f, args);
+    assert.equal(result.code, args.includes('--level') ? 1 : 2, `${args.join(' ')} refuses natively without Node`);
+    await parity(f, args);
+  }
+  for (const args of [open(['--head', 'HEAD'])]) {
     assert.equal((await launch(f, args)).code, 127, `${args.join(' ')} hands original argv to missing Node`);
     await parity(f, args, true);
   }
