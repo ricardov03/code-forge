@@ -255,6 +255,30 @@ test('explicit reviewer alternatives remain eligible without ledger history', ()
   }
 });
 
+test('removing a configured reviewer or changing its provider invalidates its ledger history', () => {
+  const cfg = { provider: 'anthropic', levels: {
+    L1: { model: FAST }, L2: { model: PRIMARY },
+  } };
+  for (const event of ['session', 'review.result']) {
+    const session = { role: 'reviewer', provider: 'anthropic', model: FAST };
+    const rows = [event === 'session' ? { event, ...session } : { event, sessions: [session] }];
+    const performance = { rows, ticketId: 'removed-reviewer', role: 'reviewer' };
+    const from = { model: PRIMARY, provider: 'anthropic' };
+    assert.equal(timeoutFallbackFor(cfg, 'L2', from, performance)?.model, FAST);
+
+    for (const levels of [
+      { L2: cfg.levels.L2 },
+      { L2: cfg.levels.L2, L1: { model: SLOW } },
+      { L2: cfg.levels.L2, L1: { model: FAST, provider: 'xai' } },
+    ]) {
+      assert.equal(timeoutFallbackFor({ ...cfg, levels }, 'L2', from, performance), null,
+        'stale history cannot restore a removed provider/model pair');
+    }
+    assert.equal(timeoutFallbackFor(cfg, 'L2', from, performance)?.model, FAST,
+      'candidate selection does not change the config or ledger history');
+  }
+});
+
 test('a configured timeout ladder never retries a stalled model, even with duplicates or reported aliases', async () => {
   for (const alias of [false, true]) {
     const cfg = { provider: 'anthropic', levels: { L2: { model: PRIMARY,
