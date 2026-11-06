@@ -94,13 +94,17 @@ func closeWithFlags(args []string) int {
 	var stdout bytes.Buffer
 	stderr := &closeErrorBuffer{}
 	reason := hCloseAutoClaim
-	code := closeFlagsStep(args, &landStep{stdout: &stdout, stderr: stderr}, &reason)
+	var endHook func()
+	code := closeFlagsStep(args, &landStep{stdout: &stdout, stderr: stderr}, &reason, &endHook)
 	if code == landHandover {
 		return blockHandover(append([]string{"close"}, args...), reason)
 	}
 	before := gatesBreadcrumbName("block close")
 	fmt.Fprint(os.Stdout, stdout.String())
 	fmt.Fprint(os.Stderr, stderr.String())
+	if endHook != nil {
+		endHook()
+	}
 	if code != 0 {
 		var message any
 		if stderr.last != "" {
@@ -125,9 +129,9 @@ func (b *closeErrorBuffer) Write(data []byte) (int, error) {
 	return b.Buffer.Write(data)
 }
 
-func closeFlagsStep(args []string, step *landStep, reason *handoverReason) int {
+func closeFlagsStep(args []string, step *landStep, reason *handoverReason, endHook ...*func()) int {
 	stdout, stderr := step.writers()
-	closeStep := func(s *landStep) int { return blockCloseStepWithReason(args, s, reason) }
+	closeStep := func(s *landStep) int { return blockCloseStepWithReason(args, s, reason, endHook...) }
 	flags, pos, message := closeFlags(args)
 	if flags["auto-claim"] != true || message != "" || len(pos) == 0 {
 		return closeStep(step)
@@ -187,7 +191,7 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason) int {
 	if closeStep(dry) == landHandover {
 		return landHandover
 	}
-	if err := landAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
+	if err := closeAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
 		return fallback(hCloseAutoClaim)
 	}
 	// An enqueue refusal ends auto-claim immediately; it needs no join support.
@@ -214,7 +218,7 @@ func closeFlagsStep(args []string, step *landStep, reason *handoverReason) int {
 	if flags["json"] == true {
 		print = stderr
 	}
-	if err := landAutoClaim(home, run, id, top, record, files, print, false); err != nil {
+	if err := closeAutoClaim(home, run, id, top, record, files, print, false); err != nil {
 		return fail(err)
 	}
 	var joined landResult

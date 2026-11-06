@@ -22,6 +22,11 @@ const RUN = 'r-close-flags', SLUG = 'close-flags', KEY = Buffer.alloc(32, 27);
 const args = ['block', 'close', 'B1', '--run', RUN];
 const hash = (text) => createHash('sha256').update(text).digest('hex');
 const lockSignal = 'TEST waiting on run lock\n';
+function childEnv(env = process.env) {
+  const clean = { ...env };
+  for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete clean[key];
+  return clean;
+}
 after(() => rm(scratch, { recursive: true, force: true }));
 before(async () => {
   await mkdir(path.dirname(BINARY), { recursive: true });
@@ -37,14 +42,14 @@ before(async () => {
   await writeFile(overlay, JSON.stringify({ Replace: { [source]: overlaySource } }));
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const built = spawnSync('go', ['build', '-overlay', overlay, '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
+    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: childEnv({ ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' }),
   });
   assert.equal(built.status, 0, built.stderr);
 });
 
 function git(repo, argv) {
-  const result = spawnSync('git', argv, { cwd: repo, encoding: 'utf8', env: { ...process.env,
-    GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z' } });
+  const result = spawnSync('git', argv, { cwd: repo, encoding: 'utf8', env: childEnv({ ...process.env,
+    GIT_AUTHOR_DATE: '2020-01-01T00:00:00Z', GIT_COMMITTER_DATE: '2020-01-01T00:00:00Z' }) });
   assert.equal(result.status, 0, result.stderr);
   return result.stdout.trim();
 }
@@ -106,8 +111,8 @@ async function snapshot(root) {
 }
 function launch(f, argv, env = {}, onLock = () => {}) {
   return new Promise((resolve, reject) => {
-    const child = spawn(BINARY, argv, { cwd: f.repo, env: { PATH: process.env.PATH, HOME: f.home,
-      CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', ...env } });
+    const child = spawn(BINARY, argv, { cwd: f.repo, env: childEnv({ PATH: process.env.PATH, HOME: f.home,
+      CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NO_ERROR_LOG: '1', CODE_FORGE_KEY_BACKEND: 'file', ...env }) });
     let stdout = '', stderr = '';
     child.stdout.on('data', (b) => { stdout += b; });
     child.stderr.on('data', (b) => { stderr += b; if (stderr.includes(lockSignal)) onLock(); });
@@ -194,9 +199,7 @@ test('still-handed-over close flags record exactly one row with the boundary rea
     [{}, ['--auto-claim', '--decide'], 'close-decide'],
     [{}, ['--remove-worktree', '--decide'], 'close-decide'],
     [{}, ['--no-require-reviews', '--decide'], 'close-decide'],
-    [{ hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }, ['--auto-claim'], 'close-end-hook'],
     [{ close: { require_human: true } }, ['--auto-claim'], 'close-human'],
-    [{ review: { external: { required: true, name: 'owner' } } }, ['--auto-claim'], 'close-external-review'],
   ];
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   for (const [config, flags, reason] of cases) {
@@ -214,6 +217,17 @@ test('still-handed-over close flags record exactly one row with the boundary rea
     assert.equal(report.code, 0, report.stderr);
     assert.deepEqual(JSON.parse(report.stdout), { total: 1, rows: [{ verb: 'block', sub: 'close', reason, count: 1, last_at: rows[0].at }] }, 'public hand-over report exposes the same single reason');
     assert.deepEqual(await snapshot(path.join(f.repo, '.code-forge')), before, 'preflight writes no repository state');
+  }
+  for (const config of [
+    { hooks: { on_block_end: { argv: ['/usr/bin/true'] } } },
+    { review: { external: { required: true, name: 'owner' } } },
+  ]) {
+    const f = await fixture('plain', config);
+    const parity = await runParity([...args, '--auto-claim', '--json'], { fixture: f, goCommand: BINARY,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], 'hook and external-review close flags match Node natively');
+    const native = await launch(f, [...args, '--auto-claim', '--json'], { CODE_FORGE_NATIVE: '0' });
+    assert.equal(native.code, 0, `close flags no longer delegate for hook or external review: ${native.stderr}`);
   }
 });
 
@@ -251,9 +265,7 @@ test('close flag refusals, concurrent claims and whole-command handovers preserv
   for (const flags of [['--auto-claim'], ['--remove-worktree'], ['--no-require-reviews'], ['--auto-claim', '--remove-worktree', '--no-require-reviews']]) {
     /** @type {[Record<string, any>, string[], boolean][]} */
     const handovers = [
-      [{ hooks: { on_block_end: { argv: ['/usr/bin/true'] } } }, [], false],
       [{ close: { require_human: true } }, [], false],
-      [{ review: { external: { required: true, name: 'owner' } } }, [], false],
       [{}, ['--decide'], false], [{}, [], true],
     ];
     for (const [config, extra, grant] of handovers) {
