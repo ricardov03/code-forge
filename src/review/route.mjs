@@ -21,6 +21,7 @@
  */
 
 import { resolveLevel } from '../config/known-ids.mjs';
+import { closedBookRefused, openBookCodexAllowed } from '../config/closed-book.mjs';
 import { modelStats, pickReviewer } from './model-stats.mjs';
 
 export { modelStats, pickReviewer } from './model-stats.mjs';
@@ -283,4 +284,35 @@ function providerOf(cfg, rule) {
   const provider = ruleProvider(cfg, rule);
   if (provider === undefined) throw new RouteError();
   return provider;
+}
+
+/**
+ * A stalled reviewer may borrow one other configured review model. Use the same measured
+ * speed/availability/accuracy policy as normal routing, excluding the stalled model entirely.
+ * The recovery entry has no ladder: it is one attempt, never another chain of retries.
+ * @param {Record<string, any>} cfg @param {string} level
+ * @param {{model: string, provider: string}} from
+ * @param {{rows: Array<Record<string, any>>, ticketId: string, role: string}} performance
+ * @returns {{cfg: Record<string, any>, model: string, provider: string, reason: string} | null}
+ */
+export function timeoutFallbackFor(cfg, level, from, { rows, ticketId, role }) {
+  const entries = [];
+  for (const reviewer of ROUTE_LEVELS) {
+    if (!cfg.levels?.[reviewer]?.model) continue;
+    const resolved = resolveLevel(cfg, /** @type {any} */ (reviewer));
+    entries.push(resolved, ...resolved.fallback.map((entry) => ({ ...entry, provider: entry.provider ?? resolved.provider })));
+  }
+  for (const rule of routeRules(cfg)) {
+    const provider = providerOf(cfg, rule);
+    entries.push({ ...entryOf(rule), provider }, ...(rule.fallback ?? []).map((entry) => ({ ...entry, provider: entry.provider ?? provider })));
+  }
+  const candidates = entries.filter((entry, i, all) => entry.model !== from.model
+    && !closedBookRefused(entry.provider, role, openBookCodexAllowed(cfg))
+    && all.findIndex((other) => other.model === entry.model && other.provider === entry.provider) === i);
+  if (candidates.length === 0) return null;
+  const choice = pickReviewer(candidates, modelStats(rows, cfg.review?.adaptive), { ...cfg.review?.adaptive, ticketId });
+  const { model, provider, effort } = choice.candidate;
+  return { cfg: { ...cfg, levels: { ...cfg.levels, [level]: {
+    model, provider, ...(effort !== undefined ? { effort } : {}), fallback: [],
+  } } }, model, provider, reason: choice.reason };
 }
