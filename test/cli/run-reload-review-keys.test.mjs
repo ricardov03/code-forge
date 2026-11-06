@@ -34,9 +34,10 @@ test('reload applies review recovery keys despite frozen proof differences and n
     const after = configInForce(await readRun('r-review-frozen'));
     assert.deepEqual(after.review, review, 'all three review-only keys applied');
     assert.deepEqual(after.proof, before.proof, 'both frozen proof values retained');
-    assert.equal(res.out, 'run r-review-frozen: config reloaded · 3 keys changed\n  review.routes\n  review.second_levels\n  review.session_timeout_s\n' +
+    const expected = 'run r-review-frozen: config reloaded · 3 keys changed\n  review.routes\n  review.second_levels\n  review.session_timeout_s\n' +
       'kept frozen keys from the run snapshot: proof.isolation, proof.worktree\n' +
-      'queued review tickets (0) keep the config they were enqueued with; new tickets use the new config\n');
+      'queued review tickets (0) keep the config they were enqueued with; new tickets use the new config\n';
+    assert.equal(res.out, expected);
   });
 });
 
@@ -46,9 +47,9 @@ test('reload without frozen differences preserves its exact success and no-chang
     const before = { ...loaded.config, review: { session_timeout_s: 60 } };
     await startRun({ workspace: ws, project: 'two-blocks', engine: 'harness', runId: 'r-review-normal', config: before, writeRow: async () => {} });
     await writeFile(path.join(ws, '.code-forge.yml'), stringify({ ...before, review: { ...before.review, second_levels: { L2: SECOND } } }));
-    assert.deepEqual(await reload('r-review-normal'), { code: 0, err: '', out:
-      'run r-review-normal: config reloaded · 1 key changed\n  review.second_levels\n' +
-      'queued review tickets (0) keep the config they were enqueued with; new tickets use the new config\n' });
+    const expected = 'run r-review-normal: config reloaded · 1 key changed\n  review.second_levels\n' +
+      'queued review tickets (0) keep the config they were enqueued with; new tickets use the new config\n';
+    assert.deepEqual(await reload('r-review-normal'), { code: 0, err: '', out: expected });
     assert.deepEqual(await reload('r-review-normal'), { code: 0, err: '', out: 'run r-review-normal: no config change\n' });
   });
 });

@@ -26,7 +26,10 @@ async function review(slug, alternatives, fallbackTimeout = false) {
   const runId = `r-${slug}`;
   const cfg = {
     provider: 'anthropic', project: { slug },
-    levels: { L2: { model: PRIMARY }, ...(alternatives ? { L3: { model: SLOW, fallback: [{ model: FAST }] } } : {}) },
+    levels: {
+      L0: { model: PRIMARY }, L1: { model: PRIMARY }, L2: { model: PRIMARY },
+      L3: alternatives ? { model: SLOW, fallback: [{ model: FAST }] } : { model: PRIMARY },
+    },
     review: { min_tokens_out: 40, adaptive: { explore: 0 } },
   };
   await startRun({ workspace: repo, project: slug, runId, config: cfg, writeRow: async () => {} });
@@ -67,8 +70,8 @@ test('second timeout selects one different configured reviewer by measured perfo
     assert.deepEqual([result.status, result.approved], fallbackTimeout ? ['unavailable', false] : ['reviewed', true]);
     const fallback = rows.filter((row) => row.event === 'review.schema_fallback' && row.trigger === 'timeout');
     assert.equal(fallback.length, 1, 'exactly one signed timeout fallback row');
-    assert.deepEqual([fallback[0].file, fallback[0].level, fallback[0].from_model, fallback[0].to_model, fallback[0].reason, fallback[0].routing_reason],
-      [FILE, 'L2', PRIMARY, FAST, 'repeated-timeout', 'performance']);
+    const recorded = [fallback[0].file, fallback[0].level, fallback[0].from_model, fallback[0].to_model, fallback[0].reason, fallback[0].routing_reason];
+    assert.deepEqual(recorded, [FILE, 'L2', PRIMARY, FAST, 'repeated-timeout', 'performance']);
     assert.deepEqual(verifyRow(fallback[0], key), { ok: true });
   }
 });
