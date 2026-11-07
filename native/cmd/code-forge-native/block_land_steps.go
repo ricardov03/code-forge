@@ -46,15 +46,13 @@ type landResult struct {
 	code          int
 	output, error string
 	data          ledger.Object
-	// Exact clean Git tree observed before and after this gate invocation.
-	tree string
 }
 
 func landCapture(run func(*landStep) int, ctx context.Context) landResult {
 	var out, err bytes.Buffer
 	code := run(&landStep{stdout: &out, stderr: &err, ctx: ctx})
 	data, _ := ledger.DecodeObject(out.Bytes())
-	return landResult{code: code, output: out.String(), error: err.String(), data: data}
+	return landResult{code, out.String(), err.String(), data}
 }
 
 // Findings detail uses the same result decoder and ordered summary as --wait.

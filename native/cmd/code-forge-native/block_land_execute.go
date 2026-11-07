@@ -210,18 +210,13 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	runGates := func() landResult {
 		started := time.Now()
 		defer func() { gatesMs += time.Since(started).Milliseconds() }()
-		beforeTree := gatesCleanTree(top)
-		result := landCapture(func(s *landStep) int {
+		return landCapture(func(s *landStep) int {
 			code, safe := gatesNativeStep(gateArgs, gateOptions, s)
 			if !safe {
 				return landHandover
 			}
 			return code
 		}, ctx)
-		if beforeTree != "" && beforeTree == gatesCleanTree(top) {
-			result.tree = beforeTree
-		}
-		return result
 	}
 	go func() { gating <- runGates() }()
 	join := func() string {
@@ -363,7 +358,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
 		started := time.Now()
-		failure := landMergeGate(main, tree.Path, workspace, branch, base, gates)
+		failure := landMergeGate(main, tree.Path, workspace, branch, base)
 		if failure.elapsed != nil {
 			mergeGateMs = *failure.elapsed
 		}
@@ -402,7 +397,7 @@ type landMergeResult struct {
 
 // The trial merge and full suite run in an isolated sibling worktree. Cleanup
 // finishes before the checked parent identities are compared or main is merged.
-func landMergeGate(main, treePath, workspace, branch, base string, green landResult) (result landMergeResult) {
+func landMergeGate(main, treePath, workspace, branch, base string) (result landMergeResult) {
 	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		result.reason = "cannot resolve merge parents"
@@ -461,7 +456,7 @@ func landMergeGate(main, treePath, workspace, branch, base string, green landRes
 			return
 		}
 		mergedTree = strings.TrimSpace(mergedTree)
-		if mergedTree == green.tree && gatesReusableFull(filepath.Join(temporary, prefix), green) {
+		if gatesReusableFull(filepath.Join(temporary, prefix)) {
 			result.reusedTree = mergedTree
 			return
 		}

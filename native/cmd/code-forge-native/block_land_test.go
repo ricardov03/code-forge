@@ -55,7 +55,7 @@ func TestBlockLandFullDaemonChain(t *testing.T) {
 }
 
 func TestBlockLandMergeGateReuse(t *testing.T) {
-	for _, shape := range []string{"same-tree", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed", "red", "skipped"} {
+	for _, shape := range []string{"same-tree", "prior-green", "prior-docs", "prior-red", "prior-skipped", "prior-timeout", "prior-partial", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed"} {
 		t.Run(shape, func(t *testing.T) { blockLandChain(t, shape) })
 	}
 }
@@ -102,15 +102,23 @@ func blockLandChain(t *testing.T, shape string) {
 	git(repo, "config", "commit.gpgsign", "false")
 	must(os.WriteFile(filepath.Join(repo, "sample.mjs"), []byte("old\n"), 0600))
 	must(os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".code-forge/\n"), 0600))
+	if shape == "prior-docs" {
+		must(os.WriteFile(filepath.Join(repo, "README.md"), []byte("base docs\n"), 0600))
+	}
+	if shape == "prior-partial" {
+		must(os.WriteFile(filepath.Join(repo, "sample.test.mjs"), []byte("// fixture\n"), 0600))
+	}
 	if shape != "plain" {
 		command := `printf '%s\n' "$PWD" >> "$HOME/gate-cwds"`
-		if shape == "red" {
-			command += "; exit 1"
+		if shape == "prior-red" || shape == "prior-timeout" {
+			command += `; if [ ! -f "$HOME/first-gate" ]; then : > "$HOME/first-gate"; `
+			if shape == "prior-red" {
+				command += "exit 1; fi"
+			} else {
+				command += "exec sleep 60; fi"
+			}
 		}
-		gate := any([]string{"/bin/sh", "-c", command, "gate", "{test_files}"})
-		if shape == "skipped" {
-			gate = nil
-		}
+		gate := []string{"/bin/sh", "-c", command, "gate", "{test_files}"}
 		cfg, err := json.Marshal(landTestConfig(gate))
 		must(err)
 		must(os.WriteFile(filepath.Join(repo, ".code-forge.yml"), cfg, 0600))
@@ -146,16 +154,61 @@ func blockLandChain(t *testing.T, shape string) {
 	}
 	run := "r-land-unit"
 	entry := ledger.Object{{Key: "status", Value: "open"}, {Key: "owned_files", Value: []any{"sample.mjs"}}, {Key: "base_sha", Value: base}, {Key: "base_branch", Value: "main"}, {Key: "tree_at_open", Value: ledger.Object{}}, {Key: "kind", Value: "code"}, {Key: "test_files", Value: []any{}}, {Key: "worktree", Value: ledger.Object{{Key: "path", Value: tree}, {Key: "branch", Value: "block-B1"}, {Key: "base_sha", Value: base}}}}
-	if shape == "partial" {
-		entry.Set("owned_files", []any{"sample.mjs", "sample.test.mjs"})
+	if shape == "partial" || shape == "prior-partial" {
+		if shape == "partial" {
+			entry.Set("owned_files", []any{"sample.mjs", "sample.test.mjs"})
+		}
 		entry.Set("test_files", []any{"sample.test.mjs"})
 	}
 	if shape == "commands-changed" {
 		entry.Set("owned_files", []any{"sample.mjs", ".code-forge.yml"})
 	}
+	if shape == "prior-docs" {
+		entry.Set("owned_files", []any{"sample.mjs", "README.md"})
+	}
 	record := ledger.Object{{Key: "run_id", Value: run}, {Key: "project", Value: "fixture"}, {Key: "workspace", Value: repo}, {Key: "status", Value: "active"}, {Key: "worker", Value: ledger.Object{{Key: "pid", Value: float64(os.Getpid())}, {Key: "started_at", Value: statusStart(float64(os.Getpid()))}}}, {Key: "blocks", Value: ledger.Object{{Key: "B1", Value: entry}}}, {Key: "orphans", Value: []any{}}}
 	must(state.SaveRun(home, record))
 	must(os.WriteFile(filepath.Join(home, ".code-forge/runs", run+".key"), make([]byte, 32), 0600))
+	if strings.HasPrefix(shape, "prior-") && shape != "prior-skipped" {
+		args := []string{"run", "--run", run, "--block", "B1", "--changed", "--cwd", tree}
+		if shape == "prior-timeout" {
+			args = append(args, "--timeout-ms", "100")
+		}
+		options, _ := gatesParse(args)
+		prior := landCapture(func(s *landStep) int {
+			code, safe := gatesNativeStep(args, options, s)
+			if !safe {
+				t.Error("prior gates must run natively")
+			}
+			return code
+		}, nil)
+		badPrior := shape == "prior-red" || shape == "prior-timeout"
+		if (prior.code != 0) != badPrior || (prior.data.Get("allOk") == true) == badPrior {
+			t.Fatalf("prior full run failed: %+v", prior)
+		}
+		if shape == "prior-timeout" {
+			results, _ := prior.data.Get("results").([]any)
+			if len(results) != 4 || blockObject(results[0]).Get("reason") != "timeout" {
+				t.Fatalf("prior run must contain exactly 4 gate results and a timed-out test: %v", results)
+			}
+		}
+		if shape == "prior-partial" {
+			entry.Set("test_files", []any{})
+			blocks := blockObject(record.Get("blocks"))
+			blocks.Set("B1", entry)
+			record.Set("blocks", blocks)
+			must(state.SaveRun(home, record))
+		}
+		if shape == "prior-docs" {
+			must(os.WriteFile(filepath.Join(tree, "README.md"), []byte("changed docs\n"), 0600))
+			git(tree, "commit", "-qam", "docs after full run")
+			blockTree = git(tree, "rev-parse", "HEAD^{tree}")
+		}
+	}
+	if shape == "prior-skipped" {
+		_, err := ledger.AppendObject(filepath.Join(home, ".code-forge/ledger"), "fixture", ledger.Object{{Key: "event", Value: "gate.done"}, {Key: "run", Value: run}, {Key: "block", Value: "B1"}, {Key: "worktree", Value: tree}, {Key: "all_ok", Value: true}, {Key: "results", Value: []any{ledger.Object{{Key: "gate", Value: "test"}, {Key: "ok", Value: true}, {Key: "skipped", Value: true}}}}}, ledger.DefaultRotateAtBytes)
+		must(err)
+	}
 	hash, err := gitx.ContentHash(tree, "sample.mjs")
 	must(err)
 	owned, _ := entry.Get("owned_files").([]any)
@@ -172,6 +225,52 @@ func blockLandChain(t *testing.T, shape string) {
 	report, transcript := filepath.Join(home, "report"), filepath.Join(home, "transcript")
 	must(os.WriteFile(report, []byte("TESTS go test exit=0\n===BLOCK B1 COMPLETE===\n"), 0600))
 	must(os.WriteFile(transcript, []byte("Completed implementation.\n"), 0600))
+	if shape != "plain" && shape != "same-tree" {
+		if !strings.HasPrefix(shape, "prior-") {
+			args := []string{"run", "--run", run, "--block", "B1", "--changed", "--cwd", tree}
+			options, _ := gatesParse(args)
+			gate := landCapture(func(s *landStep) int {
+				code, safe := gatesNativeStep(args, options, s)
+				if !safe {
+					t.Error("block gates must run natively")
+				}
+				return code
+			}, nil)
+			if gate.code != 0 || gate.data.Get("allOk") != true {
+				t.Fatalf("block gates failed: %+v", gate)
+			}
+		}
+		result := landMergeGate(repo, tree, repo, "block-B1", "main")
+		if result.reason != "" {
+			t.Fatalf("merge gate failed: %s", result.reason)
+		}
+		cwds, err := os.ReadFile(filepath.Join(home, "gate-cwds"))
+		must(err)
+		calls := strings.Fields(string(cwds))
+		reused := shape == "prior-green" || shape == "main-empty-commit"
+		wantCalls := 2
+		if reused || shape == "prior-skipped" {
+			wantCalls = 1
+		}
+		if len(calls) != wantCalls {
+			t.Errorf("suite executions=%d (%v), want %d", len(calls), calls, wantCalls)
+		}
+		for _, cwd := range calls {
+			if reused && cwd != tree {
+				t.Errorf("reused merge gate must execute 0 trial suites; got cwd %s", cwd)
+			}
+		}
+		if !reused && len(calls) > 0 {
+			last := calls[len(calls)-1]
+			if filepath.Dir(last) != filepath.Dir(tree) || !strings.HasPrefix(filepath.Base(last), ".merge-gate-") {
+				t.Errorf("last suite cwd=%s, want exactly one sibling trial worktree", last)
+			}
+		}
+		if strings.Contains(git(repo, "worktree", "list", "--porcelain"), ".merge-gate-") {
+			t.Error("trial worktree count must be 0 after merge gate")
+		}
+		return
+	}
 	socketDir := filepath.Join(home, ".code-forge/runs", run)
 	must(os.MkdirAll(socketDir, 0700))
 	listener, err := net.Listen("unix", filepath.Join(socketDir, "native.sock"))
@@ -216,7 +315,7 @@ func blockLandChain(t *testing.T, shape string) {
 		}
 	}()
 	defer func() { listener.Close(); <-serving; connections.Wait() }()
-	flags := map[string]any{"report": report, "transcript": transcript, "max": "10s", "json": true}
+	flags := map[string]any{"report": report, "transcript": transcript, "max": "60s", "json": true}
 	if shape != "plain" {
 		flags["merge"] = true
 	}
@@ -232,21 +331,13 @@ func blockLandChain(t *testing.T, shape string) {
 	must(capture.Close())
 	output, err := os.ReadFile(capture.Name())
 	must(err)
-	wantCode := 0
-	if shape == "red" || shape == "skipped" {
-		wantCode = 1
-	}
-	if code != wantCode {
-		t.Fatalf("land exit=%d, want %d: %s", code, wantCode, output)
+	if code != 0 {
+		t.Fatalf("land exit=%d, want 0: %s", code, output)
 	}
 	fresh, err := state.ReadRun(home, run)
 	must(err)
-	wantStatus := "closed"
-	if shape == "red" {
-		wantStatus = "open"
-	}
-	if got := blockObject(blockObject(fresh.Get("blocks")).Get("B1")).Get("status"); got != wantStatus {
-		t.Fatalf("block status=%v, want %s", got, wantStatus)
+	if got := blockObject(blockObject(fresh.Get("blocks")).Get("B1")).Get("status"); got != "closed" {
+		t.Fatalf("block status=%v, want closed", got)
 	}
 	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), "fixture")
 	must(err)
@@ -260,46 +351,27 @@ func blockLandChain(t *testing.T, shape string) {
 		}
 	}
 	for _, event := range []string{"gate.done", "block.close", "land.timing"} {
-		want := 1
-		if event == "block.close" && shape == "red" {
-			want = 0
-		}
-		if counts[event] != want {
-			t.Errorf("%s count=%d, want %d", event, counts[event], want)
+		if counts[event] != 1 {
+			t.Errorf("%s count=%d, want 1", event, counts[event])
 		}
 	}
 	if shape != "plain" {
-		reused := shape == "same-tree" || shape == "main-empty-commit"
 		line := "merge gate: reused green full suite on tree " + blockTree[:12] + "\n"
-		wantLines := 0
-		if reused {
-			wantLines = 1
+		if got := strings.Count(string(output), "merge gate: reused green full suite on tree "); got != 1 || strings.Count(string(output), line) != 1 {
+			t.Errorf("reuse line count=%d, want 1 with exact tree %s: %s", got, blockTree[:12], output)
 		}
-		if got := strings.Count(string(output), "merge gate: reused green full suite on tree "); got != wantLines || reused && strings.Count(string(output), line) != 1 {
-			t.Errorf("reuse line count=%d, want %d with exact tree %s: %s", got, wantLines, blockTree[:12], output)
-		}
-		if (timing["merge_gate_reused"] == true) != reused || reused && timing["merge_gate_tree"] != blockTree {
-			t.Errorf("land.timing reuse=%v tree=%v, want reuse=%v tree=%s", timing["merge_gate_reused"], timing["merge_gate_tree"], reused, blockTree)
+		if timing["merge_gate_reused"] != true || timing["merge_gate_tree"] != blockTree {
+			t.Errorf("land.timing reuse=%v tree=%v, want reuse=true tree=%s", timing["merge_gate_reused"], timing["merge_gate_tree"], blockTree)
 		}
 		cwds, err := os.ReadFile(filepath.Join(home, "gate-cwds"))
-		if shape != "skipped" {
-			must(err)
-		}
+		must(err)
 		calls := strings.Fields(string(cwds))
-		wantCalls := 2
-		if reused || shape == "red" {
-			wantCalls = 1
-		} else if shape == "skipped" {
-			wantCalls = 0
+		if len(calls) != 1 || calls[0] != tree {
+			t.Errorf("suite cwds=%v, want exactly one run in %s", calls, tree)
 		}
-		if len(calls) != wantCalls {
-			t.Errorf("suite executions=%d (%v), want %d", len(calls), calls, wantCalls)
-		}
-		if wantCode == 0 {
-			parents := strings.Fields(git(repo, "rev-list", "--parents", "-n", "1", "HEAD"))
-			if len(parents) != 3 || parents[2] != git(tree, "rev-parse", "HEAD") {
-				t.Errorf("merge parents=%v, want exactly main and block tips", parents)
-			}
+		parents := strings.Fields(git(repo, "rev-list", "--parents", "-n", "1", "HEAD"))
+		if len(parents) != 3 || parents[2] != git(tree, "rev-parse", "HEAD") {
+			t.Errorf("merge parents=%v, want exactly main and block tips", parents)
 		}
 		if strings.Contains(git(repo, "worktree", "list", "--porcelain"), ".merge-gate-") {
 			t.Error("trial worktree count must be 0 after land")
@@ -309,11 +381,7 @@ func blockLandChain(t *testing.T, shape string) {
 	for len(requests) > 0 {
 		seen[<-requests]++
 	}
-	wantRows := 1
-	if shape == "red" {
-		wantRows = 0
-	}
-	if seen["wait-block"] != 1 || seen["rows"] != wantRows {
+	if seen["wait-block"] != 1 || seen["rows"] != 1 {
 		t.Fatalf("unexpected daemon steps: %v", seen)
 	}
 }
