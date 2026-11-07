@@ -18,6 +18,7 @@ const KOTLIN = 'Tests/PaymentReportFlowTest.kt';
 const ABSOLUTE = '/Users/someone/Code/iOS/reference-repo/Tests/FooTests.swift';
 const SAMPLE = [ABSOLUTE, SWIFT];
 const HUNKS = ['@@ -0,0 +1 @@'];
+const FINDING_TEXT = 'issue33-private-review-finding-text';
 
 async function fixture() {
   const repo = await makeRepo();
@@ -39,7 +40,10 @@ function model(requested, firstCall = () => {}) {
     if (packets.length === 1) firstCall(packet);
     return { status: 'ok', exit_code: 0, provider: 'anthropic', model: 'fake',
       usage: { tokens_in: 1000, tokens_out: 300 },
-      answer: answerFor(HUNKS, { needs_file: packets.length === 1 ? requested : [] }) };
+      answer: answerFor(HUNKS, {
+        needs_file: packets.length === 1 ? requested : [],
+        findings: [{ id: 'N1', file: FILE, line_start: 1, line_end: 1, severity: 'nit', category: 'correctness', claim: FINDING_TEXT, evidence: 'e', fix: 'f' }],
+      }) };
   };
   return { spawn, packets };
 }
@@ -134,6 +138,7 @@ async function workerRow(requested) {
 test('worker review row stores requested paths in refused and second-round cases without file content', async () => {
   for (const requested of [[ABSOLUTE], SAMPLE]) {
     const { row, result, calls } = await workerRow(requested);
+    assert.equal(JSON.stringify(row).includes(FINDING_TEXT), false);
     for (const output of [row, result]) {
       assert.deepEqual([output.status, output.approved, calls], requested.length === 1 ? ['unavailable', false, 1] : ['reviewed', true, 2]);
       assert.deepEqual(output.sessions[0].needs_file_requested, requested);
