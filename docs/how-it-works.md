@@ -643,6 +643,14 @@ and review engine now pass these lists on the request path. It refuses
 unowned, unchanged, git-ignored and secret paths, and fails closed on a git error. Without those
 lists it attaches tracked files only. The reviewer can request a paired file's body when its
 name and summary are insufficient; all existing path and read-only checks still apply.
+Only repo-relative paths inside this repo can be attached; absolute paths and files in other
+repos are refused. Up to ten requested entries are handled independently. Invalid paths get
+an anonymous refusal line without their path text, read errors get `(error: <ErrorClass>)`,
+and usable files still attach for one second round (two model calls total, no repeat request).
+If none is usable, the review is `unavailable` with `reason: needs_file-refused` and
+`approved: false`, after one call. The session summary and the worker's signed review result
+store `needs_file_requested` as at most ten redacted paths of at most 200 characters each,
+plus `needs_file_errors` for read error classes; these diagnostics store no file content.
 
 Over budget, drop `## paired` first, then shrink the context to minimal
 (`review.context.min_context_lines`), then trim the rules digest from the end. The diff is never

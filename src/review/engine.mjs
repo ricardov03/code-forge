@@ -14,9 +14,13 @@
  *     the packet on stdin (`spawnSession`, B9a; `--safe-mode --tools ""` from the B4 builder);
  *  4. passes each answer through the stub guard (`validate-review.mjs`); an answer that fails it
  *     is `unavailable` with its reason and is NEVER approval; a failed lens means no judge;
- *  5. a valid answer with `needs_file` gets ONE more round with those files attached (git-tracked
- *     files only, never secret-like paths — `attachFiles`); a second `needs_file` is ignored; a
- *     request with a non-repo-relative path is refused (`needs_file-refused`, never approval);
+ *  5. a valid answer with `needs_file` gets ONE more round with eligible tracked or block-owned
+ *     changed files attached (never secret-like paths — `attachFiles`); a second `needs_file`
+ *     is ignored. Bad entries get anonymous refusal lines and read failures get error-class lines, while
+ *     good files still attach. Policy refusals are answered in the second round; only a request
+ *     consisting entirely of bad paths or unreadable files is refused
+ *     (`needs_file-refused`, never approval). Session summaries retain bounded, redacted
+ *     `needs_file_requested` paths and `needs_file_errors` classes, never attachment content;
  *  6. a session that ends in `timeout` is spawned ONCE more on the same packet and level
  *     (`session-retry.mjs`, B30); a second timeout is `unavailable: timeout`. The summary's
  *     `attempts` says how many ran. B91: a timed-out attempt is a broken result like a schema
@@ -224,20 +228,6 @@ async function note(deps, row) {
 }
 
 /**
- * The `needs_file` request of a model answer, or null when any entry is not a plain
- * repo-relative path (absolute, `..`, `.git/`, `.code-forge/`, not a string).
- * @param {unknown} needs @returns {string[] | null}
- */
-function safeNeeds(needs) {
-  if (!Array.isArray(needs)) return null;
-  try {
-    return needs.map((p) => assertRowPath(p));
-  } catch {
-    return null;
-  }
-}
-
-/**
  * B98: names only, from owned changed peers and explicit tests in the reviewed tree.
  * Missing, unsafe or unreadable pairs give no hint, never a failed review.
  * @param {{repoRoot: string, file: string, peers?: ReadonlyArray<string>, ownedFiles?: ReadonlyArray<string>, changedFiles?: ReadonlyArray<string>, testFiles?: ReadonlyArray<string>}} input
@@ -316,15 +306,13 @@ export async function reviewFile(input, deps) {
     let summary = await runOne(spec, packet.text, packet, { deps, workDir, min, cfg, schemaFallback });
     const needs = summary.review?.needs_file;
     if (spec.role === 'reviewer' && summary.status === 'ok' && Array.isArray(needs) && needs.length > 0) {
-      const paths = safeNeeds(needs);
-      let extra = null;
-      try {
-        extra = paths ? await attachFiles({ repoRoot, paths, budgetTokens: budgetFor(cfg, 'full_in'), ownedFiles: input.ownedFiles, changedFiles: input.changedFiles ?? input.peers ?? [] }) : null;
-      } catch {
-        extra = null;
-      }
-      if (extra === null) return { ...summary, status: 'unavailable', reason: 'needs_file-refused', review: null };
-      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, cfg, schemaFallback })), needs_file_round: true };
+      // Validate each entry in attachFiles; rejecting one must not discard its good siblings.
+      const diagnostics = { attached: 0, policyRefused: 0, errors: /** @type {string[]} */ ([]) };
+      const requested = needs.slice(0, 10).map((/** @type {string} */ p) => redact(p).slice(0, 200));
+      const extra = await attachFiles({ repoRoot, paths: needs, budgetTokens: budgetFor(cfg, 'full_in'), ownedFiles: input.ownedFiles, changedFiles: input.changedFiles ?? input.peers ?? [], diagnostics });
+      const fields = { needs_file_requested: requested, ...(diagnostics.errors.length ? { needs_file_errors: diagnostics.errors } : {}) };
+      if (diagnostics.attached + diagnostics.policyRefused === 0) return { ...summary, ...fields, status: 'unavailable', reason: 'needs_file-refused', review: null };
+      summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, cfg, schemaFallback })), ...fields, needs_file_round: true };
     }
     return summary;
   };

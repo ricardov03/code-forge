@@ -20,6 +20,7 @@ Code or tests beyond what the change needs (unused options, extra layers, specul
 ## Rules for every answer
 
 - Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.
+- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.
 - You have no tools and no project files. The packet is everything you get.
 - `reviewed_hunks`: copy every `@@ … @@` hunk header listed under "hunks" in the packet, exactly and in the same order.
 - Answer with ONE JSON object that matches the answer schema.

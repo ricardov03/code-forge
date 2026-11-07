@@ -583,6 +583,11 @@ export async function createWorker(opts, deps = {}) {
     /** @type {Record<string, any>} */
     const result = { ...(attempt.ticket ? { block: attempt.ticket.block, file: attempt.ticket.file, content_hash: attempt.ticket.content_hash } : {}), ...recordedVerdict(outcome), ...timings, worker: identity };
     const signed = writeResult({ repoRoot, runId, ticket: id, result, key });
+    const needsFileFields = ['needs_file_round', 'needs_file_requested', 'needs_file_errors'];
+    const sessions = (Array.isArray(result.sessions) ? result.sessions : [])
+      .filter((session) => needsFileFields.some((name) => session[name] !== undefined))
+      .map((session) => Object.fromEntries(['lens', 'status', ...needsFileFields]
+        .filter((name) => session[name] !== undefined).map((name) => [name, session[name]])));
     try {
       await ledger({
         event: 'review.result',
@@ -596,6 +601,8 @@ export async function createWorker(opts, deps = {}) {
         // B52: the gate reads the verdict from the ledger, never from the result file
         approved: result.approved,
         open: result.open,
+        // Keep only needs_file diagnostics on the ledger; full sessions stay in the signed result.
+        ...(sessions.length ? { sessions } : {}),
         // the gate tells `refused: other-run` (never reviewed) from other refusals by it
         ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
         ...(typeof result.trigger === 'string' ? { trigger: result.trigger } : {}),

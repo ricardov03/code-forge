@@ -528,26 +528,26 @@ function readRepoText(repoRoot, rel) {
 /**
  * Why `rel` may not be attached, or null.
  * @param {string} repoRoot @param {string} rel @param {ReadonlyArray<string>} ownedFiles
- * @param {ReadonlyArray<string>} changedFiles @returns {Promise<string | null>}
+ * @param {ReadonlyArray<string>} changedFiles @returns {Promise<{reason: string, policy: boolean} | null>}
  */
 async function attachRefusal(repoRoot, rel, ownedFiles, changedFiles) {
-  if (isSecretLike(rel)) return 'refused: secret-like path';
+  if (isSecretLike(rel)) return { reason: 'refused: secret-like path', policy: true };
   let st;
   try {
     st = lstatSync(path.join(repoRoot, rel));
   } catch {
-    return 'missing';
+    return { reason: 'missing', policy: false };
   }
-  if (!st.isFile()) return 'not a file';
+  if (!st.isFile()) return { reason: 'not a file', policy: false };
   const res = await exec(['git', 'ls-files', '-z', '--', rel], { cwd: repoRoot, env: reviewGitEnv(), timeoutMs: GIT_TIMEOUT_MS });
-  if (res.result !== 'ok') return 'refused: git failed';
+  if (res.result !== 'ok') return { reason: 'refused: git failed', policy: true };
   if (res.stdout === `${rel}\0`) return null;
-  if (res.stdout.length > 0) return 'refused: git failed';
-  if (!ownedFiles.includes(rel)) return 'refused: untracked, not owned by this block';
-  if (!changedFiles.includes(rel)) return 'refused: untracked, not changed in this block';
+  if (res.stdout.length > 0) return { reason: 'refused: git failed', policy: true };
+  if (!ownedFiles.includes(rel)) return { reason: 'refused: untracked, not owned by this block', policy: true };
+  if (!changedFiles.includes(rel)) return { reason: 'refused: untracked, not changed in this block', policy: true };
   const ignored = await exec(['git', 'check-ignore', '-q', '--', rel], { cwd: repoRoot, env: plainGitEnv(), timeoutMs: GIT_TIMEOUT_MS, okExitCodes: [0, 1] });
-  if (ignored.result !== 'ok' || (ignored.code !== 0 && ignored.code !== 1)) return 'refused: git failed';
-  if (ignored.code === 0) return 'refused: gitignored';
+  if (ignored.result !== 'ok' || (ignored.code !== 0 && ignored.code !== 1)) return { reason: 'refused: git failed', policy: true };
+  if (ignored.code === 0) return { reason: 'refused: gitignored', policy: true };
   return null;
 }
 
@@ -557,11 +557,12 @@ async function attachRefusal(repoRoot, rel, ownedFiles, changedFiles) {
  * concrete path lists of this block, are attached. Ignored untracked files never reach a provider,
  * and secret-like paths are refused even
  * when tracked; every refusal is named in the section. The attachment is trimmed to `budgetTokens`.
- * @param {{repoRoot: string, paths: ReadonlyArray<unknown>, budgetTokens: number, ownedFiles?: ReadonlyArray<string>, changedFiles?: ReadonlyArray<string>}} opts
+ * @param {{repoRoot: string, paths: ReadonlyArray<unknown>, budgetTokens: number, ownedFiles?: ReadonlyArray<string>, changedFiles?: ReadonlyArray<string>, diagnostics?: {attached: number, policyRefused: number, errors: string[]}}} opts
  * `ownedFiles` and `changedFiles`: resolved paths from the SAME block in this repoRoot; no globs.
+ * `diagnostics`: counts readable attachments and policy refusals separately, and records read error classes, never content.
  * @returns {Promise<string>} the section to append.
  */
-export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = [], changedFiles = [] }) {
+export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = [], changedFiles = [], diagnostics = { attached: 0, policyRefused: 0, errors: [] } }) {
   const out = ['## attached files (read-only, requested in needs_file)'];
   let left = budgetTokens * 4;
   for (const raw of paths.slice(0, 10)) {
@@ -576,15 +577,21 @@ export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = 
     }
     const refusal = await attachRefusal(repoRoot, rel, ownedFiles, changedFiles);
     if (refusal) {
-      out.push(`### ${rel} (${refusal})`);
+      if (refusal.policy) diagnostics.policyRefused += 1;
+      out.push(`### ${rel} (${refusal.reason})`);
       continue;
     }
     let text;
     try {
       text = readRepoText(repoRoot, rel);
     } catch (err) {
-      if (!(err instanceof PacketError)) throw err;
-      out.push(`### ${rel} (refused: ${err.message})`);
+      if (err instanceof PacketError) {
+        out.push(`### ${rel} (refused: ${err.message})`);
+      } else {
+        const errorClass = err instanceof Error ? err.constructor.name : 'Error';
+        diagnostics.errors.push(errorClass);
+        out.push(`### ${rel} (error: ${errorClass})`);
+      }
       continue;
     }
     if (text === null) {
@@ -592,13 +599,14 @@ export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = 
       continue;
     }
     const lines = splitLines(text);
+    diagnostics.attached += 1;
     out.push(`### ${rel}`);
     for (let i = 0; i < lines.length; i += 1) {
       const line = `${i + 1}| ${lines[i]}`;
       left -= Buffer.byteLength(line) + 1;
       if (left < 0) {
         out.push('(trimmed: over budget)');
-        return `${out.join('\n')}\n`;
+        break;
       }
       out.push(line);
     }
