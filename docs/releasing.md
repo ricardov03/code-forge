@@ -162,8 +162,9 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    **README.** Only the version in the optional `Latest:` line is updated; all other bytes stay the same.
    Without that line, README is unchanged and omitted from the release commit.
    Per-version notes live only in CHANGELOG, with no per-block additions to README.
-4. **Checks.** `node scripts/gen-config-doc.mjs --check` first (a stale
-   `docs/reference/config.md` or a missing script fails), then `npm test`, `npm run typecheck`,
+4. **Checks.** `node scripts/gen-config-doc.mjs --check` first, immediately followed by
+   `node scripts/gen-commands-doc.mjs --check` (a stale reference or a missing script fails),
+   then `npm test`, `npm run typecheck`,
    `npm pack --dry-run` (the name and version must match; the file count is printed),
    `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the `claude` CLI
    is installed (otherwise a warning).
@@ -175,6 +176,27 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    the release notes already written to a temp file.
 
 The tool never pushes, never publishes and never creates a GitHub release.
+
+## Local site data
+
+After tagging a release, run this maintainer tool from the repository:
+
+```sh
+node scripts/gen-site-data.mjs --tag vX.Y.Z --out site-data.json
+```
+
+Omit `--out` to print JSON to stdout. Version, date, released changelog entries and commands
+come from the tag's `CHANGELOG.md` and `docs/reference/commands.md`, even with local edits.
+Changelog sections contain `name` and Markdown `entries`; commands contain `name`, `description`,
+`usage` and `subcommands` (`name` and `usage`).
+
+Proof reads `code-forge.jsonl` and its numbered rotations in `~/.code-forge/ledger`; use
+`--ledger-dir <dir>` for another directory. A missing directory fails. It exports only distinct
+run counts, distinct run/block pairs with a `block.close` status of `complete`, and estimated
+USD using the report's `buildSpend` pricing, rounded to two decimals. Unknown-price sessions
+contribute no spend. Proof uses the release date, so identical inputs give identical bytes;
+it includes all supplied ledger history, including work after the tag. No other ledger fields
+are copied. The script is excluded from the npm package.
 
 ## Rollback
 
