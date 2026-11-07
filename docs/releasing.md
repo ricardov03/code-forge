@@ -80,8 +80,44 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 |---|---|
 | `--dry-run` | run the preflight, print the plan and the diffs, change nothing (no file, no commit, no tag, no fetch). Preflight failures are listed and the exit code is 1 |
 | `--date YYYY-MM-DD` | the date for the CHANGELOG heading (default: today, local time) |
-| `--no-checks` | skip the checks in step 4, with a loud warning. For emergencies only |
+| `--no-checks` | skip the docs block preflight and the checks in step 4, with loud warnings. For emergencies only |
 | `--allow-branch <name>` | release from a branch other than `main` |
+
+## The docs block
+
+Before each release, open a docs block after the code blocks have landed. Use `--kind docs`
+and own the documentation and stamp, for example:
+
+```
+code-forge block open DOCS --run <run> --level L1 --kind docs --owned README.md docs CHANGELOG.md --acceptance <acceptance-file>
+npm run docs-block -- brief
+```
+
+Feed the brief's stdout to the docs coder. It includes the latest ancestor `v*` tag, commits and
+changed files since that tag, `[Unreleased]` entries, existing Markdown docs, generated-doc checks,
+and **Site pages a person must check**. Review every listed `src/pages/*.astro` page in
+`CODE_FORGE_SITE_DIR`, or the sibling `../code-forge-site` by default. A missing site folder is
+reported in one line and does not fail the brief. With no release tag, the brief covers the
+repository's history and files.
+
+Update the docs and run both the config-doc check in step 4 below and
+`node scripts/gen-commands-doc.mjs --check`. Commit those changes so the tree is clean, then run:
+
+```
+npm run docs-block -- stamp
+git add docs/release-docs.json
+git commit -m "Stamp release docs"
+```
+
+The stamp records the full HEAD SHA in `through` and the latest release tag in `tag`. Commit it
+as the docs block's **last commit**, then close and land the block on `main` before releasing.
+Landing happens only after a block closes, so a stamp on `main` is the proof of closure; release
+preflight does not read the ledger. The first real docs block creates this file.
+
+After the stamp, only `docs/**`, `README.md` and `CHANGELOG.md` may change. Any other changed
+file requires another docs block; start with `npm run docs-block -- brief` and commit a new stamp.
+With no ancestor `v*` tag, release preflight skips the docs check with a warning. The emergency
+`--no-checks` flag also skips it and prints a loud warning naming the docs block.
 
 ## Releasing checklist
 
@@ -91,10 +127,11 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
 
 1. Every landed block has a CHANGELOG entry under `## [Unreleased]`.
 2. `npm run known-fix -- check` when the release fixes reported errors.
-3. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
-4. `npm run release -- <bump>`.
-5. `npm publish`, then `git push origin main --follow-tags`.
-6. Comment the fixed version on each issue, and close it when all its items are done.
+3. Complete [the docs block](#the-docs-block), commit its stamp last, and land it on `main`.
+4. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
+5. `npm run release -- <bump>`.
+6. `npm publish`, then `git push origin main --follow-tags`.
+7. Comment the fixed version on each issue, and close it when all its items are done.
 
 ## What it does, in order
 
@@ -104,7 +141,12 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    the current one and the latest on npm (`npm view`; a network failure only warns), and the tag
    `vX.Y.Z` exists neither locally nor on origin. Every version location must also agree with
    `package.json` before anything is bumped. README must be readable, but needs no release anchor.
-   `--dry-run` shows the same preflight failures.
+   `docs/release-docs.json` must contain a valid `through` commit that is an ancestor of HEAD,
+   with the latest ancestor `v*` tag also an ancestor of `through` and recorded in `tag`. Only
+   `docs/**`, `README.md` and `CHANGELOG.md` may have changed since `through`. A refusal names up
+   to five disallowed files and directs you to `npm run docs-block -- brief`. No earlier release
+   tag skips this check with a warning; `--no-checks` skips it with a loud warning.
+   `--dry-run` lists the same preflight failures and exits 1 without a commit or tag.
 2. **Bump** every place that holds the version:
    - `package.json` `version`
    - `npm-shrinkwrap.json` `version` and `packages[""].version` (and `package-lock.json` if present)
