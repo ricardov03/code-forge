@@ -70,7 +70,7 @@ after(() => rmSync(PARENT, { recursive: true, force: true }));
 test('brief lists exactly the release delta, Unreleased, docs, checks and every site page', () => {
   const { dir, work, feature, docs } = makeRepo();
   const site = path.join(dir, 'custom site');
-  for (const page of ['index.astro', 'guide.astro', 'pricing.astro', 'ignore.md', 'nested/skip.astro']) {
+  for (const page of ['index.astro', 'guide.astro', 'pricing.astro', 'ignore.md', 'docs/x.astro', 'docs/ignore.md']) {
     put(site, `src/pages/${page}`, 'page\n');
   }
   const r = docsBlock(work, ['brief'], { CODE_FORGE_SITE_DIR: site });
@@ -84,7 +84,7 @@ test('brief lists exactly the release delta, Unreleased, docs, checks and every 
   assert.equal(r.stdout.includes('Old entry.'), false, 'zero released entries');
   assert.deepEqual(section(r.stdout, 'Docs:'), ['- README.md', '- docs/guide.md', '- docs/reference/nested.md']);
   assert.deepEqual(section(r.stdout, 'Generated-doc checks:'), ['- node scripts/gen-config-doc.mjs --check', '- node scripts/gen-commands-doc.mjs --check']);
-  assert.deepEqual(section(r.stdout, 'Site pages a person must check:'), ['- src/pages/guide.astro', '- src/pages/index.astro', '- src/pages/pricing.astro']);
+  assert.deepEqual(section(r.stdout, 'Site pages a person must check:'), ['- src/pages/docs/x.astro', '- src/pages/guide.astro', '- src/pages/index.astro', '- src/pages/pricing.astro']);
   assert.equal(git(work, ['status', '--porcelain']), '', 'brief writes zero files');
 });
 

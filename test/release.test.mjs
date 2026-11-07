@@ -725,6 +725,28 @@ describe('B312 release docs preflight', () => {
     }
   });
 
+  test('code renamed into docs after a stamp refuses and names the original code path', () => {
+    const { work, origin } = makeRepo();
+    git(work, ['tag', 'v0.1.0']);
+    commitFile(work, 'src/feature.mjs', 'export const feature = true;\n');
+    stampRepo(work);
+    git(work, ['config', 'diff.renames', 'true']);
+    git(work, ['mv', 'src/feature.mjs', 'docs/feature.mjs']);
+    git(work, ['commit', '-qm', 'move code into docs']);
+    const st = state(work);
+    const files = snapshot(work);
+    const refs = originRefs(origin);
+    for (const args of [['patch'], ['patch', '--dry-run']]) {
+      const r = release(work, args);
+      assert.equal(r.code, 1, r.stdout + r.stderr);
+      assert.match(r.stderr, /files changed after the stamp: src\/feature\.mjs/);
+      assert.match(r.stderr, /run the docs block again.*npm run docs-block -- brief/);
+      assert.deepEqual(state(work), st, 'rename refusal makes zero commits, tags or worktree changes');
+      assert.deepEqual(snapshot(work), files, 'zero release file edits');
+      assert.equal(originRefs(origin), refs, 'zero remote mutations');
+    }
+  });
+
   test('boundary: disallowed docs-like paths fail and the refusal lists at most five changed files', () => {
     const { work } = makeRepo();
     git(work, ['tag', 'v0.1.0']);

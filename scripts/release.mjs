@@ -342,7 +342,7 @@ function docsBlockFailure(root) {
     return `${file} is older than the latest release ${tag}; ${again}`;
   }
   if (stamp.tag !== tag) return `${file}: tag must be the latest release ${tag}; ${again}`;
-  const changed = gitOk(root, ['diff', '--name-only', '-z', through, 'HEAD']).split('\0').filter(Boolean);
+  const changed = gitOk(root, ['diff', '--no-renames', '--name-only', '-z', through, 'HEAD']).split('\0').filter(Boolean);
   const code = changed.filter((name) => !name.startsWith('docs/') && name !== 'README.md' && name !== 'CHANGELOG.md');
   if (code.length) return `${file}: files changed after the stamp: ${code.slice(0, 5).join(', ')}; ${again}`;
   ok(`docs block covers ${through} since ${tag}`);

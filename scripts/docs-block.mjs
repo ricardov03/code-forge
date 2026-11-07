@@ -32,12 +32,12 @@ export function latestReleaseTag(root) {
   return tags ? gitOk(root, ['describe', '--tags', '--match', 'v*', '--abbrev=0', 'HEAD']) : '';
 }
 
-/** @param {string} root @param {string} dir @returns {string[]} */
-function markdownDocs(root, dir) {
+/** @param {string} root @param {string} dir @param {string} extension @returns {string[]} */
+function filesWithExtension(root, dir, extension) {
   if (!existsSync(path.join(root, dir))) return [];
   return readdirSync(path.join(root, dir), { withFileTypes: true }).flatMap((entry) => {
     const file = `${dir}/${entry.name}`;
-    return entry.isDirectory() ? markdownDocs(root, file) : entry.isFile() && file.endsWith('.md') ? [file] : [];
+    return entry.isDirectory() ? filesWithExtension(root, file, extension) : entry.isFile() && file.endsWith(extension) ? [file] : [];
   }).sort();
 }
 
@@ -58,18 +58,14 @@ function brief(root, tag) {
   const lines = readFileSync(path.join(root, 'CHANGELOG.md'), 'utf8').split('\n');
   const unreleased = findUnreleased(lines);
   section('CHANGELOG [Unreleased]', unreleased ? [lines.slice(unreleased.start + 1, unreleased.end).join('\n').trim()] : []);
-  section('Docs', [...(existsSync(path.join(root, 'README.md')) ? ['README.md'] : []), ...markdownDocs(root, 'docs')].map((file) => `- ${file}`));
+  section('Docs', [...(existsSync(path.join(root, 'README.md')) ? ['README.md'] : []), ...filesWithExtension(root, 'docs', '.md')].map((file) => `- ${file}`));
   section('Generated-doc checks', ['- node scripts/gen-config-doc.mjs --check', '- node scripts/gen-commands-doc.mjs --check']);
   const site = path.resolve(root, process.env.CODE_FORGE_SITE_DIR || '../code-forge-site');
   if (!existsSync(site)) {
     section('Site pages a person must check', [`Site folder absent: ${site}`]);
     return;
   }
-  const pages = path.join(site, 'src/pages');
-  section('Site pages a person must check', existsSync(pages)
-    ? readdirSync(pages, { withFileTypes: true }).filter((entry) => entry.isFile() && entry.name.endsWith('.astro'))
-      .map((entry) => `- src/pages/${entry.name}`).sort()
-    : []);
+  section('Site pages a person must check', filesWithExtension(site, 'src/pages', '.astro').map((file) => `- ${file}`));
 }
 
 /** @param {string[]} argv @param {string} [root] */
