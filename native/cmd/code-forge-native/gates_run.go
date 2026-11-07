@@ -624,6 +624,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 							break
 						}
 					}
+					if old == nil {
+						textBaseline = nil
+					}
 				}
 				candidates := []string{}
 				for _, file := range listed {
@@ -668,17 +671,19 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 					} else if prior["full_stamp"] != nil {
 						p.ReuseReason = "tree_changed"
 					}
-					if !p.ReuseTest {
-						scope.Kind, scope.Report = "full", "full"
-						scope.Files = []string{}
-						scope.Reason = p.ReuseReason
-					}
 				}
 				if textScope, ok := gates.TextOnlyScope(textBaseline, current, b, candidates); ok && (previous == nil || textBaseline != nil) {
 					scope = textScope
 					p.ReuseTest = false
 				}
-				changedScope = &scope
+				// Preserve the legacy ledger selection before widening execution.
+				// A failed reuse check must not replace its fields or reason.
+				reportedScope := scope
+				changedScope = &reportedScope
+				if base != "" && !p.ReuseTest && scope.Reason != "text_only" {
+					scope.Kind, scope.Report = "full", "full"
+					scope.Files = []string{}
+				}
 			}
 		}
 		var err error
