@@ -169,7 +169,7 @@ func blockLandChain(t *testing.T, shape string) {
 	record := ledger.Object{{Key: "run_id", Value: run}, {Key: "project", Value: "fixture"}, {Key: "workspace", Value: repo}, {Key: "status", Value: "active"}, {Key: "worker", Value: ledger.Object{{Key: "pid", Value: float64(os.Getpid())}, {Key: "started_at", Value: statusStart(float64(os.Getpid()))}}}, {Key: "blocks", Value: ledger.Object{{Key: "B1", Value: entry}}}, {Key: "orphans", Value: []any{}}}
 	must(state.SaveRun(home, record))
 	must(os.WriteFile(filepath.Join(home, ".code-forge/runs", run+".key"), make([]byte, 32), 0600))
-	if strings.HasPrefix(shape, "prior-") && shape != "prior-skipped" {
+	if strings.HasPrefix(shape, "prior-") {
 		args := []string{"run", "--run", run, "--block", "B1", "--changed", "--cwd", tree}
 		if shape == "prior-timeout" {
 			args = append(args, "--timeout-ms", "100")
@@ -185,6 +185,43 @@ func blockLandChain(t *testing.T, shape string) {
 		badPrior := shape == "prior-red" || shape == "prior-timeout"
 		if (prior.code != 0) != badPrior || (prior.data.Get("allOk") == true) == badPrior {
 			t.Fatalf("prior full run failed: %+v", prior)
+		}
+		if shape == "prior-skipped" {
+			if !gatesReusableFull(tree) {
+				t.Fatal("real prior-green row must be reusable before changing skipped")
+			}
+			file := filepath.Join(home, ".code-forge/ledger/fixture.jsonl")
+			data, err := os.ReadFile(file)
+			must(err)
+			lines := strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+			changed := 0
+			for i, line := range lines {
+				row, err := ledger.DecodeObject([]byte(line))
+				must(err)
+				if row.Get("event") != "gate.done" || row.Get("run") != run || row.Get("block") != "B1" {
+					continue
+				}
+				results, _ := row.Get("results").([]any)
+				for _, value := range results {
+					result := blockObject(value)
+					if result.Get("gate") == "test" {
+						if result.Get("skipped") != false || result.Get("ok") != true || blockString(result.Get("full_stamp")) == "" {
+							t.Fatalf("expected a stamped green test result: %v", result)
+						}
+						// Preserve the real tree/command stamp and every other field.
+						result.Set("skipped", true)
+						changed++
+					}
+				}
+				copy, err := ledger.Stringify(row, false)
+				must(err)
+				lines[i] = string(copy)
+			}
+			if changed != 1 {
+				t.Fatalf("changed %d prior test results, want exactly 1", changed)
+			}
+			// Replace the original green row so it cannot authorize reuse itself.
+			must(os.WriteFile(file, []byte(strings.Join(lines, "\n")+"\n"), 0600))
 		}
 		if shape == "prior-timeout" {
 			results, _ := prior.data.Get("results").([]any)
@@ -204,10 +241,6 @@ func blockLandChain(t *testing.T, shape string) {
 			git(tree, "commit", "-qam", "docs after full run")
 			blockTree = git(tree, "rev-parse", "HEAD^{tree}")
 		}
-	}
-	if shape == "prior-skipped" {
-		_, err := ledger.AppendObject(filepath.Join(home, ".code-forge/ledger"), "fixture", ledger.Object{{Key: "event", Value: "gate.done"}, {Key: "run", Value: run}, {Key: "block", Value: "B1"}, {Key: "worktree", Value: tree}, {Key: "all_ok", Value: true}, {Key: "results", Value: []any{ledger.Object{{Key: "gate", Value: "test"}, {Key: "ok", Value: true}, {Key: "skipped", Value: true}}}}}, ledger.DefaultRotateAtBytes)
-		must(err)
 	}
 	hash, err := gitx.ContentHash(tree, "sample.mjs")
 	must(err)
@@ -249,7 +282,7 @@ func blockLandChain(t *testing.T, shape string) {
 		calls := strings.Fields(string(cwds))
 		reused := shape == "prior-green" || shape == "main-empty-commit"
 		wantCalls := 2
-		if reused || shape == "prior-skipped" {
+		if reused {
 			wantCalls = 1
 		}
 		if len(calls) != wantCalls {
