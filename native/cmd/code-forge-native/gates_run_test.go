@@ -145,10 +145,14 @@ func (f *changedTextFixture) check(textOnly bool, changed ...string) {
 }
 
 func TestGatesChangedMarkdownWithoutFullBaseline(t *testing.T) {
-	for _, stale := range []bool{false, true} {
-		t.Run(map[bool]string{false: "missing", true: "stale"}[stale], func(t *testing.T) {
+	for _, baseline := range []string{"missing", "stale", "shared"} {
+		t.Run(baseline, func(t *testing.T) {
 			f := newChangedTextFixture(t, []string{"README.md", "guide.md"}, nil)
-			if stale {
+			if baseline == "shared" {
+				delete(f.block, "base_branch")
+				f.record()
+			}
+			if baseline == "stale" {
 				f.run(false)
 				f.write("engine.go", "// moved base\n")
 				f.git("add", "engine.go")

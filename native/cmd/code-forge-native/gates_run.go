@@ -674,7 +674,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 						scope.Reason = p.ReuseReason
 					}
 				}
-				if textScope, ok := gates.TextOnlyScope(textBaseline, current, b, candidates); ok {
+				if textScope, ok := gates.TextOnlyScope(textBaseline, current, b, candidates); ok && (previous == nil || textBaseline != nil) {
 					scope = textScope
 					p.ReuseTest = false
 				}
