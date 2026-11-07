@@ -4,19 +4,94 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"os"
+	"path/filepath"
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gates"
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
-// Use the oracle's resolved gate configuration, not the Go execution plan, so
-// green full-suite evidence can be exchanged between engines. Canonical JSON
-// avoids depending on YAML map order or locale-specific environment sorting.
+func gatesCleanTree(cwd string) string {
+	status, err := gitx.Run(cwd, "status", "--porcelain", "--untracked-files=all")
+	if err != nil || status != "" {
+		return ""
+	}
+	tree, err := gitx.Run(cwd, "rev-parse", "HEAD^{tree}")
+	if err != nil {
+		return ""
+	}
+	return strings.TrimSpace(tree)
+}
+
+// Match the existing gate.done full_stamp against this exact trial tree and its
+// resolved commands. Legacy, partial and unsuccessful runs fail closed.
+func gatesReusableFull(cwd string) bool {
+	loaded, err := config.Load(cwd)
+	if err != nil {
+		return false
+	}
+	configured, _ := loaded["gates"].(map[string]any)
+	p, safe := gates.Resolve(cwd, configured)
+	if !safe || !gates.ResolveCustom(&p, configured) || p.Commands["test"] == nil {
+		return false
+	}
+	block := ledger.Object{{Key: "worktree", Value: ledger.Object{{Key: "path", Value: cwd}}}}
+	stamp := gatesFullStamp(gates.TreeStamp(cwd), p, configured, block)
+	if stamp == "" {
+		return false
+	}
+	project, _ := loaded["project"].(map[string]any)
+	slug, _ := project["slug"].(string)
+	if slug == "" {
+		return false
+	}
+	rows, err := ledger.ReadAllRows(filepath.Join(os.Getenv("HOME"), ".code-forge", "ledger"), slug)
+	if err != nil {
+		return false
+	}
+	for _, value := range rows {
+		row, ok := value.(map[string]any)
+		if !ok || row["event"] != "gate.done" || row["all_ok"] != true || row["scope"] != "full" || row["cancelled"] == true || row["flaky"] != nil {
+			continue
+		}
+		results, _ := row["results"].([]any)
+		tests, green := 0, true
+		for _, value := range results {
+			r, ok := value.(map[string]any)
+			if !ok || r["ok"] != true || r["flaky"] != nil || r["timed_out"] == true || r["cancelled"] == true {
+				green = false
+				break
+			}
+			if r["gate"] == "test" {
+				green = green && r["skipped"] == false && r["full_stamp"] == stamp
+				tests++
+			}
+		}
+		if green && tests == 1 {
+			return true
+		}
+	}
+	return false
+}
+
+// Keep the resolved configuration in the existing full_stamp record. Worktree
+// stamps use version 3 to bind an exact clean Git tree, including docs and
+// release versions. Legacy normalized stamps cannot authorize merge-gate reuse.
+// Canonical JSON avoids YAML map order and environment sorting differences.
 func gatesFullStamp(tree string, p gates.Plan, configured map[string]any, block ledger.Object) string {
 	if tree == "" || reviewWaitNodeVersion == "" || reviewWaitNodeVersion == "unknown" {
 		return ""
+	}
+	path := blockString(blockObject(block.Get("worktree")).Get("path"))
+	exactTree := ""
+	if path != "" {
+		exactTree = gatesCleanTree(path)
+		if exactTree == "" {
+			return ""
+		}
 	}
 	planned := map[string]any{"stack": p.Stack}
 	for _, name := range gates.Order {
@@ -58,7 +133,11 @@ func gatesFullStamp(tree string, p gates.Plan, configured map[string]any, block 
 			environment[key] = value
 		}
 	}
-	data, err := canon.Marshal([]any{"gate-tree-v2", tree, planned, environment, reviewWaitNodeVersion})
+	input := []any{"gate-tree-v2", tree, planned, environment, reviewWaitNodeVersion}
+	if exactTree != "" {
+		input = []any{"gate-tree-v3", exactTree, tree, planned, environment, reviewWaitNodeVersion}
+	}
+	data, err := canon.Marshal(input)
 	if err != nil {
 		return ""
 	}
