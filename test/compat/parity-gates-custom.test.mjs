@@ -129,18 +129,6 @@ test('B289 gates run: native custom, repeats, light and flaky cases match Node i
     },
   });
 
-  const concurrent = await fixture({ custom: [{ name: 'extra', argv: command('') }] });
-  const writer = spawn(BINARY, ['internal', 'state-golden', '--home', concurrent.home, '--run', 'fixture', '--op', 'lock'], { env: isolatedEnv({ ...process.env, HOME: concurrent.home }), stdio: ['pipe', 'pipe', 'pipe'] });
-  await once(writer.stdout, 'data');
-  const running = launch(concurrent);
-  const file = path.join(concurrent.home, '.code-forge/runs/fixture.json');
-  const record = JSON.parse(await readFile(file, 'utf8')); record.proof_lock = { block: 'writer' };
-  await writeFile(file, JSON.stringify(record));
-  writer.stdin.end(); await once(writer, 'close');
-  const busy = await running.ended;
-  assert.equal(busy.code, 1); assert.equal(busy.stdout, '{"result":"proof.busy","holder":"writer"}\n');
-  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')), record);
-
   const cancelled = await fixture({ custom: [{ name: 'slow', argv: command('require("node:fs").writeFileSync("ready","1");setInterval(()=>{},1000)') }] });
   const nodeScript = `import {existsSync} from 'node:fs';import {runGatesVerb} from ${JSON.stringify(new URL('../../src/cli/gates.mjs', import.meta.url).href)};const c=new AbortController();const t=setInterval(()=>{if(existsSync('ready')){clearInterval(t);c.abort()}},5);try{process.exitCode=await runGatesVerb(process.argv.slice(1),{signal:c.signal})}finally{clearInterval(t)}`;
   const goScript = `import {spawn} from 'node:child_process';import {existsSync} from 'node:fs';const p=spawn(${JSON.stringify(BINARY)},process.argv.slice(1),{stdio:'inherit'});const t=setInterval(()=>{if(existsSync('ready')){clearInterval(t);p.kill('SIGTERM')}},5);p.on('close',code=>{clearInterval(t);process.exitCode=code})`;
@@ -155,6 +143,37 @@ test('B289 gates run: native custom, repeats, light and flaky cases match Node i
   assert.equal(native.stderr, reference.stderr);
   assert.equal(normalize(await readFile(path.join(cancelled.home, '.code-forge/ledger/fixture.jsonl'), 'utf8')), normalize(expectedRows), 'one byte-equal cancelled ledger row');
   assert.deepEqual((await rows(cancelled)).map((r) => r.event), ['gate.cancelled']);
+});
+
+test('gates run: proof.busy exits 1 with exact bytes and leaves the run file unchanged', async () => {
+  const concurrent = await fixture({ custom: [{ name: 'extra', argv: command('') }] });
+  const writer = spawn(BINARY, ['internal', 'state-golden', '--home', concurrent.home, '--run', 'fixture', '--op', 'lock'], { env: isolatedEnv({ ...process.env, HOME: concurrent.home }), stdio: ['pipe', 'pipe', 'pipe'] });
+  await once(writer.stdout, 'data');
+  const file = path.join(concurrent.home, '.code-forge/runs/fixture.json');
+  const record = JSON.parse(await readFile(file, 'utf8')); record.proof_lock = { block: 'writer' };
+  const expected = JSON.stringify(record);
+  await writeFile(file, expected);
+  // Native preflight reads before taking the run lock. Finish the fixture write
+  // before launch so it cannot see the file between truncation and completion.
+  const running = launch(concurrent);
+  writer.stdin.end(); await once(writer, 'close');
+  const busy = await running.ended;
+  assert.equal(busy.code, 1, 'another proof holder refuses the gate natively');
+  assert.equal(busy.stdout, '{"result":"proof.busy","holder":"writer"}\n', 'exact proof.busy stdout including its newline');
+  assert.equal(busy.stderr, '', 'native proof.busy emits no stderr');
+  assert.equal(await readFile(file, 'utf8'), expected, 'proof.busy preserves every run-file byte');
+});
+
+test('gates run boundary: the proof holder may run its own gates', async () => {
+  const f = await fixture({ custom: [{ name: 'extra', argv: command('') }] });
+  const file = path.join(f.home, '.code-forge/runs/fixture.json');
+  const record = JSON.parse(await readFile(file, 'utf8')); record.proof_lock = { block: 'B1' };
+  await writeFile(file, JSON.stringify(record));
+  const result = await launch(f).ended;
+  assert.equal(result.code, 0, `the proof holder is allowed to run natively: ${result.stderr}${result.stdout}`);
+  assert.equal(JSON.parse(result.stdout).allOk, true, 'all gates succeed for the proof holder');
+  assert.equal(JSON.parse(result.stdout).results.length, 5, 'four fixed gates and one custom gate');
+  assert.deepEqual(JSON.parse(await readFile(file, 'utf8')).proof_lock, { block: 'B1' }, 'the holder retains its proof lock');
 });
 
 test('B289 telemetry: an unsupported flag records exactly one hand-over with its reason', async () => {
