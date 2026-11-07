@@ -14,9 +14,9 @@
  *     the packet on stdin (`spawnSession`, B9a; `--safe-mode --tools ""` from the B4 builder);
  *  4. passes each answer through the stub guard (`validate-review.mjs`); an answer that fails it
  *     is `unavailable` with its reason and is NEVER approval; a failed lens means no judge;
- *  5. a valid answer with `needs_file` gets ONE more round with those files attached (git-tracked
- *     files only, never secret-like paths — `attachFiles`); a second `needs_file` is ignored; a
- *     bad entries get anonymous refusal lines and read failures get error-class lines, while
+ *  5. a valid answer with `needs_file` gets ONE more round with eligible tracked or block-owned
+ *     changed files attached (never secret-like paths — `attachFiles`); a second `needs_file`
+ *     is ignored. Bad entries get anonymous refusal lines and read failures get error-class lines, while
  *     good files still attach. Only a request with no usable file is refused
  *     (`needs_file-refused`, never approval). Session summaries retain bounded, redacted
  *     `needs_file_requested` paths and `needs_file_errors` classes, never attachment content;
