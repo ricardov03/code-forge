@@ -144,6 +144,58 @@ func SafeFile(f string) bool {
 	}
 	return !regexp.MustCompile(`[\x00-\x1f]`).MatchString(f)
 }
+
+// TextOnlyKinds is the complete allowlist for changes that need no test gate.
+const TextOnlyKinds = ".md .mdx .txt .png .jpg .jpeg .gif .svg .webp"
+
+// TextOnlyScope compares hashes, or conservatively checks every exact owned
+// entry when no baseline exists. Test inputs take precedence over extensions,
+// including explicit --tests directories and globs.
+func TextOnlyScope(old map[string]any, current ledger.Object, block ledger.Object, listed []string) (Scope, bool) {
+	s := Scope{Kind: "changed", Reason: "text_only", Files: []string{}, Changed: []string{}, Dependents: []string{}}
+	if current == nil || len(old) > 200 {
+		return s, false
+	}
+	entries, _ := block.Get("owned_files").([]any)
+	kinds, _ := block.Get("owned_kinds").(ledger.Object)
+	tests, _ := block.Get("test_files").([]any)
+	keys := map[string]bool{}
+	if old == nil {
+		for _, entry := range entries {
+			file, ok := entry.(string)
+			if !ok || !owned.IsExactEntry(file) || !SafeFile(file) {
+				return s, false
+			}
+			keys[file] = true
+		}
+	}
+	for file, value := range old {
+		hash, ok := value.(string)
+		if !SafeFile(file) || !owned.OwnsFile(entries, kinds, file) || !ok || !regexp.MustCompile(`^[a-f0-9]{64}$`).MatchString(hash) {
+			return s, false
+		}
+		keys[file] = true
+	}
+	for _, file := range current {
+		keys[file.Key] = true
+	}
+	changed := 0
+	for file := range keys {
+		if old != nil && old[file] == current.Get(file) {
+			continue
+		}
+		if !SafeFile(file) || IsChangedTest(file) || owned.OwnsFile(tests, nil, file) || !Has(strings.Fields(TextOnlyKinds), filepath.Ext(file)) {
+			return s, false
+		}
+		changed++
+		if Has(listed, file) {
+			s.Changed = append(s.Changed, file)
+		}
+	}
+	sort.Strings(s.Changed)
+	return s, changed > 0
+}
+
 func Baseline(cwd string, block ledger.Object, listed []string) ledger.Object {
 	entries, _ := block.Get("owned_files").([]any)
 	kinds, _ := block.Get("owned_kinds").(ledger.Object)
