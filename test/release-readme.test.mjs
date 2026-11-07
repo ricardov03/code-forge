@@ -123,6 +123,7 @@ function makeRepo({ version, readme, changelog = CHANGELOG }) {
   writeFileSync(path.join(work, 'skill', 'scripts', 'forge'), `#!/bin/sh\nPINNED_VERSION="${version}"\n`);
   writeFileSync(path.join(work, 'CHANGELOG.md'), changelog);
   writeFileSync(path.join(work, 'scripts', 'gen-config-doc.mjs'), "process.exit(process.argv.slice(2).join(' ') === '--check' ? 0 : 3);\n");
+  writeFileSync(path.join(work, 'scripts', 'gen-commands-doc.mjs'), "process.exit(process.argv.slice(2).join(' ') === '--check' ? 0 : 3);\n");
   if (readme !== null) writeFileSync(path.join(work, 'README.md'), readme);
   git(work, ['add', '-A']);
   git(work, ['commit', '-q', '-m', 'base']);
