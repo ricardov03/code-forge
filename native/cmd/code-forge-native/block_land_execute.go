@@ -45,6 +45,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	next := closeCommand([]string{"code-forge", "review-file", "--wait-block", id, "--run", run})
 	joinMs, gatesMs := int64(0), int64(0)
 	var mergeGateMs any
+	mergeGateTree := ""
 	emit := func(out ledger.Object) {
 		data, _ := ledger.Stringify(out, false)
 		fmt.Fprintln(os.Stdout, string(data))
@@ -72,7 +73,12 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	}
 	// Refusals before a child step still append Node's timing row.
 	timing := func() {
-		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.timing"}, {Key: "block", Value: id}, {Key: "join_ms", Value: joinMs}, {Key: "gates_ms", Value: gatesMs}, {Key: "merge_gate_ms", Value: mergeGateMs}, {Key: "parallel", Value: true}}); err != nil {
+		row := ledger.Object{{Key: "event", Value: "land.timing"}, {Key: "block", Value: id}, {Key: "join_ms", Value: joinMs}, {Key: "gates_ms", Value: gatesMs}, {Key: "merge_gate_ms", Value: mergeGateMs}, {Key: "parallel", Value: true}}
+		if mergeGateTree != "" {
+			row.Set("merge_gate_reused", true)
+			row.Set("merge_gate_tree", mergeGateTree)
+		}
+		if _, err := state.WriteSigned(home, run, row); err != nil {
 			fmt.Fprintln(stderr, "block land:", err)
 			code = 1
 		}
@@ -204,13 +210,18 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	runGates := func() landResult {
 		started := time.Now()
 		defer func() { gatesMs += time.Since(started).Milliseconds() }()
-		return landCapture(func(s *landStep) int {
+		beforeTree := gatesCleanTree(top)
+		result := landCapture(func(s *landStep) int {
 			code, safe := gatesNativeStep(gateArgs, gateOptions, s)
 			if !safe {
 				return landHandover
 			}
 			return code
 		}, ctx)
+		if beforeTree != "" && beforeTree == gatesCleanTree(top) {
+			result.tree = beforeTree
+		}
+		return result
 	}
 	go func() { gating <- runGates() }()
 	join := func() string {
@@ -352,14 +363,19 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
 		started := time.Now()
-		failure := landMergeGate(main, tree.Path, workspace, branch, base)
+		failure := landMergeGate(main, tree.Path, workspace, branch, base, gates)
 		if failure.elapsed != nil {
 			mergeGateMs = *failure.elapsed
 		}
 		if failure.reason != "" {
 			return stop(failure.reason)
 		}
-		fmt.Fprintf(print, "merge gate: full suite passed (%.1fs)\n", float64(time.Since(started).Milliseconds())/1000)
+		if failure.reusedTree != "" {
+			mergeGateTree = failure.reusedTree
+			fmt.Fprintf(print, "merge gate: reused green full suite on tree %.12s\n", mergeGateTree)
+		} else {
+			fmt.Fprintf(print, "merge gate: full suite passed (%.1fs)\n", float64(time.Since(started).Milliseconds())/1000)
+		}
 	} else {
 		fmt.Fprintln(stderr, "warning: merge gate skipped; merged full suite was not checked")
 	}
@@ -379,13 +395,14 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 }
 
 type landMergeResult struct {
-	reason  string
-	elapsed *int64
+	reason     string
+	elapsed    *int64
+	reusedTree string
 }
 
 // The trial merge and full suite run in an isolated sibling worktree. Cleanup
 // finishes before the checked parent identities are compared or main is merged.
-func landMergeGate(main, treePath, workspace, branch, base string) (result landMergeResult) {
+func landMergeGate(main, treePath, workspace, branch, base string, green landResult) (result landMergeResult) {
 	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		result.reason = "cannot resolve merge parents"
@@ -436,6 +453,16 @@ func landMergeGate(main, treePath, workspace, branch, base string) (result landM
 			} else {
 				result.reason = landFirst(landGitError(err, ""), output, "trial merge failed")
 			}
+			return
+		}
+		mergedTree, err := gitx.Run(temporary, "rev-parse", "HEAD^{tree}")
+		if err != nil {
+			result.reason = "cannot resolve merge-gate tree"
+			return
+		}
+		mergedTree = strings.TrimSpace(mergedTree)
+		if mergedTree == green.tree && gatesReusableFull(filepath.Join(temporary, prefix), green) {
+			result.reusedTree = mergedTree
 			return
 		}
 		fullArgs := []string{"run", "--cwd", filepath.Join(temporary, prefix)}

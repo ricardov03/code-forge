@@ -51,6 +51,18 @@ func TestBlockLandNativeUsage(t *testing.T) {
 }
 
 func TestBlockLandFullDaemonChain(t *testing.T) {
+	blockLandChain(t, "plain")
+}
+
+func TestBlockLandMergeGateReuse(t *testing.T) {
+	for _, shape := range []string{"same-tree", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed", "red", "skipped"} {
+		t.Run(shape, func(t *testing.T) { blockLandChain(t, shape) })
+	}
+}
+
+func blockLandChain(t *testing.T, shape string) {
+	t.Helper()
+	// The daemon's Unix socket needs a short private HOME on macOS.
 	home, err := os.MkdirTemp("/tmp", "cf-land-unit-")
 	if err != nil {
 		t.Fatal(err)
@@ -60,6 +72,9 @@ func TestBlockLandFullDaemonChain(t *testing.T) {
 	t.Setenv("CODE_FORGE_NATIVE", "1")
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
 	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
+	nodeVersion := reviewWaitNodeVersion
+	reviewWaitNodeVersion = "v24.22.1"
+	t.Cleanup(func() { reviewWaitNodeVersion = nodeVersion })
 	repo, err := filepath.EvalSymlinks(t.TempDir())
 	if err != nil {
 		t.Fatal(err)
@@ -87,21 +102,69 @@ func TestBlockLandFullDaemonChain(t *testing.T) {
 	git(repo, "config", "commit.gpgsign", "false")
 	must(os.WriteFile(filepath.Join(repo, "sample.mjs"), []byte("old\n"), 0600))
 	must(os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".code-forge/\n"), 0600))
+	if shape != "plain" {
+		command := `printf '%s\n' "$PWD" >> "$HOME/gate-cwds"`
+		if shape == "red" {
+			command += "; exit 1"
+		}
+		gate := any([]string{"/bin/sh", "-c", command, "gate", "{test_files}"})
+		if shape == "skipped" {
+			gate = nil
+		}
+		cfg, err := json.Marshal(landTestConfig(gate))
+		must(err)
+		must(os.WriteFile(filepath.Join(repo, ".code-forge.yml"), cfg, 0600))
+	}
 	git(repo, "add", ".")
 	git(repo, "commit", "-qm", "base")
 	base := git(repo, "rev-parse", "HEAD")
 	tree := filepath.Join(repo, ".code-forge/worktrees/B1")
 	git(repo, "worktree", "add", "-qb", "block-B1", tree, base)
 	must(os.WriteFile(filepath.Join(tree, "sample.mjs"), []byte("new\n"), 0600))
+	if shape == "partial" {
+		must(os.WriteFile(filepath.Join(tree, "sample.test.mjs"), []byte("// fixture\n"), 0600))
+	}
+	if shape == "commands-changed" {
+		cfg, err := json.Marshal(landTestConfig([]string{"/bin/sh", "-c", `printf '%s\n' "$PWD" >> "$HOME/gate-cwds"`, "changed", "{test_files}"}))
+		must(err)
+		must(os.WriteFile(filepath.Join(tree, ".code-forge.yml"), cfg, 0600))
+	}
 	git(tree, "add", ".")
 	git(tree, "commit", "-qm", "change")
+	blockTree := git(tree, "rev-parse", "HEAD^{tree}")
+	if shape == "main-empty-commit" {
+		git(repo, "commit", "--allow-empty", "-qm", "no content change")
+	}
+	if shape == "main-moved" || shape == "docs-moved" {
+		file := "other.mjs"
+		if shape == "docs-moved" {
+			file = "README.md"
+		}
+		must(os.WriteFile(filepath.Join(repo, file), []byte("main moved\n"), 0600))
+		git(repo, "add", file)
+		git(repo, "commit", "-qm", "main change")
+	}
 	run := "r-land-unit"
 	entry := ledger.Object{{Key: "status", Value: "open"}, {Key: "owned_files", Value: []any{"sample.mjs"}}, {Key: "base_sha", Value: base}, {Key: "base_branch", Value: "main"}, {Key: "tree_at_open", Value: ledger.Object{}}, {Key: "kind", Value: "code"}, {Key: "test_files", Value: []any{}}, {Key: "worktree", Value: ledger.Object{{Key: "path", Value: tree}, {Key: "branch", Value: "block-B1"}, {Key: "base_sha", Value: base}}}}
+	if shape == "partial" {
+		entry.Set("owned_files", []any{"sample.mjs", "sample.test.mjs"})
+		entry.Set("test_files", []any{"sample.test.mjs"})
+	}
+	if shape == "commands-changed" {
+		entry.Set("owned_files", []any{"sample.mjs", ".code-forge.yml"})
+	}
 	record := ledger.Object{{Key: "run_id", Value: run}, {Key: "project", Value: "fixture"}, {Key: "workspace", Value: repo}, {Key: "status", Value: "active"}, {Key: "worker", Value: ledger.Object{{Key: "pid", Value: float64(os.Getpid())}, {Key: "started_at", Value: statusStart(float64(os.Getpid()))}}}, {Key: "blocks", Value: ledger.Object{{Key: "B1", Value: entry}}}, {Key: "orphans", Value: []any{}}}
 	must(state.SaveRun(home, record))
 	must(os.WriteFile(filepath.Join(home, ".code-forge/runs", run+".key"), make([]byte, 32), 0600))
 	hash, err := gitx.ContentHash(tree, "sample.mjs")
 	must(err)
+	owned, _ := entry.Get("owned_files").([]any)
+	for _, file := range owned[1:] {
+		hash, err := gitx.ContentHash(tree, file.(string))
+		must(err)
+		_, err = state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "review.approved"}, {Key: "block", Value: "B1"}, {Key: "file", Value: file}, {Key: "content_hash", Value: hash}})
+		must(err)
+	}
 	_, err = state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "dispatch"}, {Key: "block", Value: "B1"}, {Key: "level", Value: "L2"}})
 	must(err)
 	_, err = state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "review.approved"}, {Key: "block", Value: "B1"}, {Key: "file", Value: "sample.mjs"}, {Key: "content_hash", Value: hash}})
@@ -153,33 +216,112 @@ func TestBlockLandFullDaemonChain(t *testing.T) {
 		}
 	}()
 	defer func() { listener.Close(); <-serving; connections.Wait() }()
-	code := landExecute(nil, map[string]any{"report": report, "transcript": transcript, "max": "10s", "json": true}, home, run, "B1", record, entry, func() int { t.Error("the complete chain must not hand over"); return 127 })
-	if code != 0 {
-		t.Fatalf("land exit=%d", code)
+	flags := map[string]any{"report": report, "transcript": transcript, "max": "10s", "json": true}
+	if shape != "plain" {
+		flags["merge"] = true
+	}
+	out, stderr := os.Stdout, os.Stderr
+	capture, err := os.CreateTemp(home, "land-output-")
+	must(err)
+	os.Stdout, os.Stderr = capture, capture
+	code := landExecuteWithReason(nil, flags, home, run, "B1", record, entry, func(reason handoverReason) int {
+		t.Errorf("the complete chain must not hand over: %v", reason)
+		return 127
+	})
+	os.Stdout, os.Stderr = out, stderr
+	must(capture.Close())
+	output, err := os.ReadFile(capture.Name())
+	must(err)
+	wantCode := 0
+	if shape == "red" || shape == "skipped" {
+		wantCode = 1
+	}
+	if code != wantCode {
+		t.Fatalf("land exit=%d, want %d: %s", code, wantCode, output)
 	}
 	fresh, err := state.ReadRun(home, run)
 	must(err)
-	if blockObject(blockObject(fresh.Get("blocks")).Get("B1")).Get("status") != "closed" {
-		t.Fatal("block did not close")
+	wantStatus := "closed"
+	if shape == "red" {
+		wantStatus = "open"
+	}
+	if got := blockObject(blockObject(fresh.Get("blocks")).Get("B1")).Get("status"); got != wantStatus {
+		t.Fatalf("block status=%v, want %s", got, wantStatus)
 	}
 	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), "fixture")
 	must(err)
 	counts := map[string]int{}
+	var timing map[string]any
 	for _, v := range rows {
-		counts[v.(map[string]any)["event"].(string)]++
+		row := v.(map[string]any)
+		counts[row["event"].(string)]++
+		if row["event"] == "land.timing" {
+			timing = row
+		}
 	}
 	for _, event := range []string{"gate.done", "block.close", "land.timing"} {
-		if counts[event] != 1 {
-			t.Errorf("%s count=%d, want 1", event, counts[event])
+		want := 1
+		if event == "block.close" && shape == "red" {
+			want = 0
+		}
+		if counts[event] != want {
+			t.Errorf("%s count=%d, want %d", event, counts[event], want)
+		}
+	}
+	if shape != "plain" {
+		reused := shape == "same-tree" || shape == "main-empty-commit"
+		line := "merge gate: reused green full suite on tree " + blockTree[:12] + "\n"
+		wantLines := 0
+		if reused {
+			wantLines = 1
+		}
+		if got := strings.Count(string(output), "merge gate: reused green full suite on tree "); got != wantLines || reused && strings.Count(string(output), line) != 1 {
+			t.Errorf("reuse line count=%d, want %d with exact tree %s: %s", got, wantLines, blockTree[:12], output)
+		}
+		if (timing["merge_gate_reused"] == true) != reused || reused && timing["merge_gate_tree"] != blockTree {
+			t.Errorf("land.timing reuse=%v tree=%v, want reuse=%v tree=%s", timing["merge_gate_reused"], timing["merge_gate_tree"], reused, blockTree)
+		}
+		cwds, err := os.ReadFile(filepath.Join(home, "gate-cwds"))
+		if shape != "skipped" {
+			must(err)
+		}
+		calls := strings.Fields(string(cwds))
+		wantCalls := 2
+		if reused || shape == "red" {
+			wantCalls = 1
+		} else if shape == "skipped" {
+			wantCalls = 0
+		}
+		if len(calls) != wantCalls {
+			t.Errorf("suite executions=%d (%v), want %d", len(calls), calls, wantCalls)
+		}
+		if wantCode == 0 {
+			parents := strings.Fields(git(repo, "rev-list", "--parents", "-n", "1", "HEAD"))
+			if len(parents) != 3 || parents[2] != git(tree, "rev-parse", "HEAD") {
+				t.Errorf("merge parents=%v, want exactly main and block tips", parents)
+			}
+		}
+		if strings.Contains(git(repo, "worktree", "list", "--porcelain"), ".merge-gate-") {
+			t.Error("trial worktree count must be 0 after land")
 		}
 	}
 	seen := map[string]int{}
 	for len(requests) > 0 {
 		seen[<-requests]++
 	}
-	if seen["wait-block"] != 1 || seen["rows"] != 1 {
+	wantRows := 1
+	if shape == "red" {
+		wantRows = 0
+	}
+	if seen["wait-block"] != 1 || seen["rows"] != wantRows {
 		t.Fatalf("unexpected daemon steps: %v", seen)
 	}
+}
+
+func landTestConfig(test any) map[string]any {
+	return map[string]any{"version": 1, "project": map[string]any{"slug": "fixture"}, "provider": "anthropic", "engine": "harness",
+		"levels": map[string]any{"L0": map[string]any{"model": "claude-haiku-4-5-20251001"}, "L1": map[string]any{"model": "claude-sonnet-5"}, "L2": map[string]any{"model": "claude-opus-5-5"}, "L3": map[string]any{"model": "claude-fable-5-1"}},
+		"gates":  map[string]any{"test": test, "lint": nil, "types": nil, "format": nil}}
 }
 
 func TestBlockLandDurationRefusals(t *testing.T) {
