@@ -16,6 +16,9 @@ func TestGatesProcess(t *testing.T) {
 	if os.Getenv("CF_GATES_PROCESS") != "1" {
 		return
 	}
+	if version := os.Getenv("CF_GATES_NODE_VERSION"); version != "" {
+		reviewWaitNodeVersion = version
+	}
 	var args []string
 	if err := json.Unmarshal([]byte(os.Getenv("CF_GATES_ARGS")), &args); err != nil {
 		os.Exit(99)
@@ -88,6 +91,7 @@ type changedTextResult struct {
 	AllOK   bool `json:"allOk"`
 	Results []struct {
 		Gate, Reason, Scope, Stdout string
+		FullStamp                   string `json:"full_stamp"`
 		Skipped, OK, Reused         bool
 		Argv                        []string
 	}
@@ -106,7 +110,7 @@ func (f *changedTextFixture) run(changed bool) changedTextResult {
 	encoded, _ := json.Marshal(args)
 	cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 	cmd.Dir = f.repo
-	cmd.Env = append(os.Environ(), "HOME="+f.home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
+	cmd.Env = append(os.Environ(), "HOME="+f.home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		f.t.Fatalf("gates run: %v: %s", err, out)
@@ -132,10 +136,10 @@ func (f *changedTextFixture) check(textOnly bool, changed ...string) {
 		if test.Reason != "text_only" || test.Stdout != "" {
 			f.t.Fatalf("test gate: want reason=text_only and no suite output, got %+v", test)
 		}
-		for _, index := range []int{1, 3} {
+		for index, name := range map[int]string{1: "lint", 3: "format"} {
 			gate := r.Results[index]
-			want := append([]string{"/bin/echo", gate.Gate}, changed...)
-			if gate.Skipped || !gate.OK || !reflect.DeepEqual(gate.Argv, want) {
+			want := append([]string{"/bin/echo", name}, changed...)
+			if gate.Gate != name || gate.Skipped || !gate.OK || !reflect.DeepEqual(gate.Argv, want) {
 				f.t.Fatalf("%s gate: want executed argv=%v, got %+v", gate.Gate, want, gate)
 			}
 		}
@@ -153,7 +157,7 @@ func TestGatesChangedMarkdownWithoutFullBaseline(t *testing.T) {
 				f.record()
 			}
 			if baseline == "stale" {
-				f.run(false)
+				f.run(true)
 				f.write("engine.go", "// moved base\n")
 				f.git("add", "engine.go")
 				f.git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "move base")
@@ -193,6 +197,10 @@ func TestGatesChangedTextTestInputsRunFullSuite(t *testing.T) {
 			// The input must never qualify for text-only skipping, even after a green run.
 			f.write("README.md", "// changed\n")
 			f.check(true, "README.md")
+			baseline := f.run(true)
+			if baseline.Results[0].FullStamp == "" {
+				t.Fatalf("test gate: want a full stamp before changing a protected input, got %+v", baseline.Results[0])
+			}
 			f.write(input.file, "// changed\n")
 			f.check(false)
 		})
