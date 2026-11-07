@@ -11,6 +11,11 @@ waits on a second real consumer (plan §10.4, Q17).
 - `npm run docs-block` writes the docs brief for a release and stamps `docs/release-docs.json` when the docs block ends. `npm run release` refuses when the docs stamp is not current (B312)
 - `npm run release:site` updates the website from the release, on your machine, with no CI and no tokens. The site numbers (runs, blocks, spend) come from the tagged release data and are the same on every run (B313)
 
+### Changed
+
+- `block land` does not run the full test suite again in the merge gate when the merged tree is the same as a tree that already had a green full run. It prints the reused tree id and records it on the land.timing row (B317)
+- `gates run --changed` runs only the gates that apply when every changed file is text (`.md`, `.mdx`, `.txt` and image files), even with no full baseline. The test gate is skipped with the reason `text_only`. A text file under a test path, or named in the block's tests, still runs the full suite (B318)
+
 ### Fixed
 
 - A review that asked for a file the policy refuses now goes on to round 2 with the refusal line, instead of stopping as unavailable. The worker's review ledger row keeps only the needs_file diagnostics, never finding text (B311, #33)
