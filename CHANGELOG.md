@@ -6,6 +6,16 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- `npm run docs-block` writes the docs brief for a release and stamps `docs/release-docs.json` when the docs block ends. `npm run release` refuses when the docs stamp is not current (B312)
+- `npm run release:site` updates the website from the release, on your machine, with no CI and no tokens. The site numbers (runs, blocks, spend) come from the tagged release data and are the same on every run (B313)
+
+### Fixed
+
+- A review that asked for a file the policy refuses now goes on to round 2 with the refusal line, instead of stopping as unavailable. The worker's review ledger row keeps only the needs_file diagnostics, never finding text (B311, #33)
+- `parity-gates-custom` no longer fails at random under load: the test writes its fixture files completely before the Go engine reads them (B309)
+
 ## [0.20.0] — 2026-11-06
 
 ### Added
