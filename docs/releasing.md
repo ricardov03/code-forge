@@ -100,7 +100,7 @@ and **Site pages a person must check**. Review every listed `src/pages/*.astro` 
 reported in one line and does not fail the brief. With no release tag, the brief covers the
 repository's history and files.
 
-Update the docs and run both `node scripts/gen-config-doc.mjs --check` and
+Update the docs and run both the config-doc check in step 4 below and
 `node scripts/gen-commands-doc.mjs --check`. Commit those changes so the tree is clean, then run:
 
 ```
