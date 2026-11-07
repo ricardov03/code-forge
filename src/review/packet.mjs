@@ -557,11 +557,12 @@ async function attachRefusal(repoRoot, rel, ownedFiles, changedFiles) {
  * concrete path lists of this block, are attached. Ignored untracked files never reach a provider,
  * and secret-like paths are refused even
  * when tracked; every refusal is named in the section. The attachment is trimmed to `budgetTokens`.
- * @param {{repoRoot: string, paths: ReadonlyArray<unknown>, budgetTokens: number, ownedFiles?: ReadonlyArray<string>, changedFiles?: ReadonlyArray<string>}} opts
+ * @param {{repoRoot: string, paths: ReadonlyArray<unknown>, budgetTokens: number, ownedFiles?: ReadonlyArray<string>, changedFiles?: ReadonlyArray<string>, diagnostics?: {attached: number, errors: string[]}}} opts
  * `ownedFiles` and `changedFiles`: resolved paths from the SAME block in this repoRoot; no globs.
+ * `diagnostics`: counts readable attachments and records read error classes, never content.
  * @returns {Promise<string>} the section to append.
  */
-export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = [], changedFiles = [] }) {
+export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = [], changedFiles = [], diagnostics = { attached: 0, errors: [] } }) {
   const out = ['## attached files (read-only, requested in needs_file)'];
   let left = budgetTokens * 4;
   for (const raw of paths.slice(0, 10)) {
@@ -583,8 +584,13 @@ export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = 
     try {
       text = readRepoText(repoRoot, rel);
     } catch (err) {
-      if (!(err instanceof PacketError)) throw err;
-      out.push(`### ${rel} (refused: ${err.message})`);
+      if (err instanceof PacketError) {
+        out.push(`### ${rel} (refused: ${err.message})`);
+      } else {
+        const errorClass = err instanceof Error ? err.constructor.name : 'Error';
+        diagnostics.errors.push(errorClass);
+        out.push(`### ${rel} (error: ${errorClass})`);
+      }
       continue;
     }
     if (text === null) {
@@ -592,13 +598,14 @@ export async function attachFiles({ repoRoot, paths, budgetTokens, ownedFiles = 
       continue;
     }
     const lines = splitLines(text);
+    diagnostics.attached += 1;
     out.push(`### ${rel}`);
     for (let i = 0; i < lines.length; i += 1) {
       const line = `${i + 1}| ${lines[i]}`;
       left -= Buffer.byteLength(line) + 1;
       if (left < 0) {
         out.push('(trimmed: over budget)');
-        return `${out.join('\n')}\n`;
+        break;
       }
       out.push(line);
     }
