@@ -28,6 +28,7 @@ import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 
 import { findSection, findUnreleased, parseSubsections } from './changelog.mjs';
+import { latestReleaseTag } from './docs-block.mjs';
 
 const USAGE =
   'usage: npm run release -- <patch|minor|major|x.y.z> [--dry-run] [--date YYYY-MM-DD] [--no-checks] [--allow-branch <name>]';
@@ -313,9 +314,44 @@ const ok = (msg) => process.stdout.write(`ok    ${msg}\n`);
 
 // ── preflight ───────────────────────────────────────────────────────────────────────────────
 
+/** @param {string} root @returns {string | null} */
+function docsBlockFailure(root) {
+  const tag = latestReleaseTag(root);
+  if (!tag) {
+    warn('docs block check skipped: no earlier v* tag is an ancestor of HEAD');
+    return null;
+  }
+  const file = 'docs/release-docs.json';
+  const again = 'run the docs block again: npm run docs-block -- brief';
+  let stamp;
+  try {
+    stamp = JSON.parse(readFileSync(path.join(root, file), 'utf8'));
+  } catch {
+    return `${file} is missing or invalid; ${again}`;
+  }
+  if (!stamp || typeof stamp.through !== 'string' || !/^(?:[0-9a-f]{40}|[0-9a-f]{64})$/.test(stamp.through) ||
+      typeof stamp.tag !== 'string' || !stamp.tag.startsWith('v')) {
+    return `${file} is invalid (expected through commit SHA and release tag); ${again}`;
+  }
+  const { through } = stamp;
+  if (git(root, ['cat-file', '-t', through]).stdout.trim() !== 'commit' ||
+      git(root, ['merge-base', '--is-ancestor', through, 'HEAD']).code !== 0) {
+    return `${file}: through is not a commit that is an ancestor of HEAD; ${again}`;
+  }
+  if (git(root, ['merge-base', '--is-ancestor', `refs/tags/${tag}`, through]).code !== 0) {
+    return `${file} is older than the latest release ${tag}; ${again}`;
+  }
+  if (stamp.tag !== tag) return `${file}: tag must be the latest release ${tag}; ${again}`;
+  const changed = gitOk(root, ['diff', '--name-only', '-z', through, 'HEAD']).split('\0').filter(Boolean);
+  const code = changed.filter((name) => !name.startsWith('docs/') && name !== 'README.md' && name !== 'CHANGELOG.md');
+  if (code.length) return `${file}: files changed after the stamp: ${code.slice(0, 5).join(', ')}; ${again}`;
+  ok(`docs block covers ${through} since ${tag}`);
+  return null;
+}
+
 /**
  * @param {string} root
- * @param {{ branch: string, allowBranch: string, tag: string, current: string, next: string, name: string }} p
+ * @param {{ branch: string, allowBranch: string, tag: string, current: string, next: string, name: string, checks: boolean }} p
  * @param {(msg: string) => void} fail - throws a Refusal, or (dry run) records it and lets the next check run
  */
 function preflight(root, p, fail) {
@@ -361,6 +397,11 @@ function preflight(root, p, fail) {
   else if (remoteTag.code !== 0) fail(`cannot read origin's tags: ${remoteTag.stderr.trim()}`);
   else if (remoteTag.stdout.trim()) fail(`the tag ${p.tag} already exists on origin`);
   else ok(`tag ${p.tag} is free (local and origin)`);
+
+  if (p.checks) {
+    const failure = docsBlockFailure(root);
+    if (failure) fail(failure);
+  } else warn('!!! --no-checks: docs block preflight check was NOT run !!!');
 }
 
 // ── checks ──────────────────────────────────────────────────────────────────────────────────
@@ -598,7 +639,7 @@ export function main(argv, root = process.cwd()) {
       .replace(new RegExp(`^(@codedology/code-forge )${versionPattern}(\\r?)$`, 'gm'), `$1${next}$2`);
     /** @type {string[]} */
     const refusals = [];
-    preflight(root, { branch, allowBranch: opts.allowBranch, tag, current, next, name }, (msg) => {
+    preflight(root, { branch, allowBranch: opts.allowBranch, tag, current, next, name, checks: opts.checks }, (msg) => {
       if (!opts.dryRun) throw new Refusal(msg);
       refusals.push(msg);
       process.stdout.write(`FAIL  ${msg}\n`);

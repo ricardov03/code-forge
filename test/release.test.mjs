@@ -262,6 +262,7 @@ describe('scripts/release.mjs (B23)', () => {
     const changelog = path.join(work, 'CHANGELOG.md');
     writeFileSync(changelog, readFileSync(changelog, 'utf8').replace('## [Unreleased]\n', '## [Unreleased]\n\n### Fixed\n\n- Next fix.\n'));
     git(work, ['commit', '-q', '-am', 'next release entry']);
+    stampRepo(work, 'v0.2.0');
     const st = state(work);
     const failed = release(work, ['patch'], { FAKE_NPM_TEST_EXIT: '1' });
     assert.equal(failed.code, 1, failed.stderr);
@@ -608,6 +609,186 @@ describe('scripts/release.mjs (B23)', () => {
     assert.equal(res.status, 0, res.stderr);
     const paths = JSON.parse(res.stdout)[0].files.map((/** @type {{path: string}} */ f) => f.path);
     assert.deepEqual(paths.filter((p) => p.startsWith('scripts/')).sort(), ['scripts/first-use.mjs', 'scripts/gen-config-doc.mjs']);
+  });
+});
+
+/** Commit a fixture stamp, covering the current HEAD and its latest release tag. @param {string} work @param {string} [tag] */
+function stampRepo(work, tag = 'v0.1.0') {
+  const through = git(work, ['rev-parse', 'HEAD']).trim();
+  mkdirSync(path.join(work, 'docs'), { recursive: true });
+  writeFileSync(path.join(work, 'docs/release-docs.json'), JSON.stringify({ through, tag }) + '\n');
+  git(work, ['add', 'docs/release-docs.json']);
+  git(work, ['commit', '-qm', 'docs stamp']);
+  return through;
+}
+
+/** @param {string} work @param {string} file @param {string} text */
+function commitFile(work, file, text) {
+  mkdirSync(path.dirname(path.join(work, file)), { recursive: true });
+  writeFileSync(path.join(work, file), text);
+  git(work, ['add', '--', file]);
+  git(work, ['commit', '-qm', `change ${file}`]);
+}
+
+describe('B312 release docs preflight', () => {
+  test('refuses missing, invalid and pre-release stamps in real and dry-run mode with zero commits and tags', () => {
+    for (const kind of ['missing', 'invalid JSON', 'null', 'missing fields', 'wrong field type', 'older than release']) {
+      const { work, origin } = makeRepo();
+      const through = git(work, ['rev-parse', 'HEAD']).trim();
+      git(work, ['tag', 'v0.1.0']);
+      if (kind === 'older than release') {
+        git(work, ['tag', '-d', 'v0.1.0']);
+        git(work, ['tag', 'v0.0.9']);
+        commitFile(work, 'README.md', README + '\nReleased update.\n');
+        git(work, ['tag', '-a', 'v0.1.0', '-m', 'latest release']);
+      }
+      if (kind !== 'missing') {
+        const text = kind === 'invalid JSON' ? '{broken' : kind === 'null' ? 'null' :
+          kind === 'missing fields' ? '{}' : kind === 'wrong field type' ? JSON.stringify({ through: 42, tag: 'v0.1.0' }) :
+            JSON.stringify({ through, tag: 'v0.0.9' });
+        commitFile(work, 'docs/release-docs.json', text);
+      }
+      const st = state(work);
+      const files = snapshot(work);
+      const refs = originRefs(origin);
+      for (const args of [['patch'], ['patch', '--dry-run']]) {
+        const r = release(work, args);
+        assert.equal(r.code, 1, `${kind}: ${r.stdout}\n${r.stderr}`);
+        assert.match(r.stderr, /npm run docs-block -- brief/, kind);
+        assert.match(r.stderr, /docs\/release-docs\.json/, kind);
+        if (kind === 'older than release') assert.match(r.stderr, /older than.*v0\.1\.0/, kind);
+        if (args.includes('--dry-run')) {
+          assert.equal(r.stdout.split('\n').filter((line) => line.startsWith('FAIL  ') && line.includes('docs/release-docs.json')).length, 1, 'one docs preflight failure in dry-run list');
+          assert.match(r.stdout, /dry run: 0 files changed, 0 commits, 0 tags/);
+        }
+        assert.deepEqual(state(work), st, `${kind}: zero commits, zero tags, zero worktree changes`);
+        assert.deepEqual(snapshot(work), files, `${kind}: zero release file edits`);
+        assert.equal(originRefs(origin), refs, 'zero remote mutations');
+      }
+    }
+  });
+
+  test('boundary: refuses unknown, non-commit and non-ancestor through values and a mismatched stamp tag', () => {
+    for (const kind of ['unknown', 'blob', 'future commit', 'wrong tag']) {
+      const { work } = makeRepo();
+      git(work, ['tag', 'v0.1.0']);
+      let through = git(work, ['rev-parse', 'HEAD']).trim();
+      if (kind === 'unknown') through = '0'.repeat(40);
+      if (kind === 'blob') through = git(work, ['rev-parse', 'HEAD:README.md']).trim();
+      if (kind === 'future commit') {
+        git(work, ['checkout', '-qb', 'future']);
+        git(work, ['commit', '--allow-empty', '-qm', 'future']);
+        through = git(work, ['rev-parse', 'HEAD']).trim();
+        git(work, ['checkout', '-q', 'main']);
+      }
+      commitFile(work, 'docs/release-docs.json', JSON.stringify({ through, tag: kind === 'wrong tag' ? 'v0.0.9' : 'v0.1.0' }));
+      const st = state(work);
+      for (const args of [['patch'], ['patch', '--dry-run']]) {
+        const r = release(work, args);
+        assert.equal(r.code, 1, `${kind}: ${r.stdout}\n${r.stderr}`);
+        assert.match(r.stderr, /npm run docs-block -- brief/, kind);
+        assert.deepEqual(state(work), st, `${kind}: zero commits and tags`);
+      }
+    }
+  });
+
+  test('code after a stamp refuses and names the file; only docs, README and CHANGELOG changes pass', () => {
+    for (const code of [true, false]) {
+      const { work } = makeRepo();
+      git(work, ['tag', 'v0.1.0']);
+      stampRepo(work);
+      if (code) commitFile(work, 'src/feature.mjs', 'export const feature = true;\n');
+      else {
+        commitFile(work, 'docs/reference/guide.md', '# New guide\n');
+        commitFile(work, 'README.md', README + '\nNew usage.\n');
+        commitFile(work, 'CHANGELOG.md', CHANGELOG.replace('- A new verb.', '- A documented new verb.'));
+      }
+      const st = state(work);
+      const files = snapshot(work);
+      for (const args of [['patch', '--dry-run'], ['patch']]) {
+        const r = release(work, args);
+        assert.equal(r.code, code ? 1 : 0, r.stdout + r.stderr);
+        if (code) {
+          assert.match(r.stderr, /src\/feature\.mjs/);
+          assert.match(r.stderr, /run the docs block again.*npm run docs-block -- brief/);
+          assert.deepEqual(state(work), st, 'code refusal makes zero commits and tags');
+          assert.deepEqual(snapshot(work), files);
+        } else {
+          assert.match(r.stdout, /^ok {4}docs block covers.*v0\.1\.0/m);
+          if (args.includes('--dry-run')) assert.deepEqual(state(work), st);
+          else {
+            assert.equal(state(work).commits, st.commits + 1, 'one release commit after allowed docs changes');
+            assert.equal(state(work).tags, 'v0.1.0\nv0.1.1', 'one new release tag');
+          }
+        }
+      }
+    }
+  });
+
+  test('boundary: disallowed docs-like paths fail and the refusal lists at most five changed files', () => {
+    const { work } = makeRepo();
+    git(work, ['tag', 'v0.1.0']);
+    stampRepo(work);
+    const files = ['README.md.bak', 'docs-other.mjs', 'src/a.mjs', 'src/b.mjs', 'src/c.mjs', 'src/d.mjs'];
+    for (const file of files) {
+      mkdirSync(path.dirname(path.join(work, file)), { recursive: true });
+      writeFileSync(path.join(work, file), 'changed\n');
+    }
+    git(work, ['add', '-A']);
+    git(work, ['commit', '-qm', 'six changes']);
+    const st = state(work);
+    const r = release(work, ['patch']);
+    assert.equal(r.code, 1, r.stdout + r.stderr);
+    assert.match(r.stderr, /npm run docs-block -- brief/);
+    assert.deepEqual(files.filter((file) => r.stderr.includes(file)), files.slice(0, 5), 'exactly the first five disallowed paths, no sixth');
+    assert.deepEqual(state(work), st, 'zero commits and tags');
+  });
+
+  test('no earlier v* tag warns and skips; --no-checks skips the docs block with a loud named warning', () => {
+    const first = makeRepo();
+    const dry = release(first.work, ['patch', '--dry-run']);
+    assert.equal(dry.code, 0, dry.stderr);
+    assert.equal(dry.stdout.split('\n').filter((line) => /^WARN .*docs block.*no.*v\* tag/i.test(line)).length, 1, 'exactly one no-tag docs warning');
+    const real = release(first.work, ['patch']);
+    assert.equal(real.code, 0, real.stderr);
+    assert.match(real.stdout, /^WARN .*docs block.*no.*v\* tag/im);
+    assert.equal(state(first.work).commits, 2, 'one first-release commit');
+    assert.equal(state(first.work).tags, 'v0.1.1', 'one first-release tag');
+    for (const dryRun of [true, false]) {
+      const { work } = makeRepo();
+      git(work, ['tag', 'v0.1.0']);
+      const st = state(work);
+      const r = release(work, ['patch', '--no-checks', ...(dryRun ? ['--dry-run'] : [])]);
+      assert.equal(r.code, 0, r.stderr);
+      assert.equal(r.stdout.split('\n').filter((line) => /^WARN .*!!!.*--no-checks.*docs block.*!!!/.test(line)).length, 1, 'exactly one loud warning naming the skipped docs block');
+      if (dryRun) assert.deepEqual(state(work), st);
+      else {
+        assert.equal(state(work).commits, st.commits + 1);
+        assert.equal(state(work).tags, 'v0.1.0\nv0.1.1');
+      }
+    }
+  });
+
+  test('boundary: ignores v* tags outside HEAD ancestry and non-v tags on HEAD', () => {
+    const { work } = makeRepo();
+    git(work, ['checkout', '-qb', 'other']);
+    git(work, ['commit', '--allow-empty', '-qm', 'unmerged release']);
+    git(work, ['tag', 'v9.0.0']);
+    git(work, ['checkout', '-q', 'main']);
+    git(work, ['tag', 'preview']);
+    const st = state(work);
+    const noRelease = release(work, ['patch', '--dry-run']);
+    assert.equal(noRelease.code, 0, noRelease.stderr);
+    assert.match(noRelease.stdout, /^WARN .*docs block.*no.*v\* tag/im);
+    git(work, ['tag', '-a', 'v0.1.0', '-m', 'reachable release']);
+    stampRepo(work);
+    const covered = state(work);
+    const r = release(work, ['patch', '--dry-run']);
+    assert.equal(r.code, 0, r.stdout + r.stderr);
+    assert.match(r.stdout, /^ok {4}docs block covers.*v0\.1\.0/m);
+    assert.equal(r.stdout.split('\n').filter((line) => /^WARN .*docs block/.test(line)).length, 0, 'zero docs skip warnings once a release is reachable');
+    assert.deepEqual(state(work), covered);
+    assert.equal(covered.commits, st.commits + 1, 'only the fixture stamp commit was made');
   });
 });
 

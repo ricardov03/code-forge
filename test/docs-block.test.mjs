@@ -9,6 +9,7 @@ import { after, test } from 'node:test';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(REPO, 'scripts/docs-block.mjs');
 const PARENT = mkdtempSync(path.join(os.tmpdir(), 'docs-block-test-'));
+/** @type {NodeJS.ProcessEnv} */
 const ENV = { ...process.env, GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull,
   GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid',
   GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
