@@ -596,6 +596,8 @@ export async function createWorker(opts, deps = {}) {
         // B52: the gate reads the verdict from the ledger, never from the result file
         approved: result.approved,
         open: result.open,
+        // Preserve public session diagnostics, including needs_file requests, without packets.
+        ...(Array.isArray(result.sessions) ? { sessions: result.sessions } : {}),
         // the gate tells `refused: other-run` (never reviewed) from other refusals by it
         ...(typeof result.reason === 'string' ? { reason: result.reason } : {}),
         ...(typeof result.trigger === 'string' ? { trigger: result.trigger } : {}),

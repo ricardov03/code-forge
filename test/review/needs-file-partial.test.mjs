@@ -125,7 +125,7 @@ async function workerRow(requested) {
     assert.equal(resultRows.length, 1);
     const result = readResult(repo, runId, ticket.ticket);
     assert.deepEqual([resultRows[0].status, resultRows[0].approved], [result.status, result.approved]);
-    return { row: result, calls: fake.packets.length };
+    return { row: resultRows[0], result, calls: fake.packets.length };
   } finally {
     await worker.stop();
   }
@@ -133,11 +133,13 @@ async function workerRow(requested) {
 
 test('worker review row stores requested paths in refused and second-round cases without file content', async () => {
   for (const requested of [[ABSOLUTE], SAMPLE]) {
-    const { row, calls } = await workerRow(requested);
-    assert.deepEqual([row.status, row.approved, calls], requested.length === 1 ? ['unavailable', false, 1] : ['reviewed', true, 2]);
-    assert.deepEqual(row.sessions[0].needs_file_requested, requested);
-    assert.equal(JSON.stringify(row).includes('XCTAssertEqual'), false);
-    assert.equal(JSON.stringify(row).includes('invoice-0042'), false);
+    const { row, result, calls } = await workerRow(requested);
+    for (const output of [row, result]) {
+      assert.deepEqual([output.status, output.approved, calls], requested.length === 1 ? ['unavailable', false, 1] : ['reviewed', true, 2]);
+      assert.deepEqual(output.sessions[0].needs_file_requested, requested);
+      assert.equal(JSON.stringify(output).includes('XCTAssertEqual'), false);
+      assert.equal(JSON.stringify(output).includes('invoice-0042'), false);
+    }
   }
 });
 
@@ -147,12 +149,14 @@ test('requested path diagnostics cap ten entries at 200 characters after row red
   try {
     const long = `/Users/${secret}/${'x'.repeat(250)}`;
     const requested = [long, ...Array.from({ length: 10 }, (_, i) => `/outside/${i}.swift`)];
-    const { row, calls } = await workerRow(requested);
+    const { row, result, calls } = await workerRow(requested);
     const expected = [`/Users/[REDACTED]/${'x'.repeat(250)}`.slice(0, 200), ...requested.slice(1, 10)];
-    assert.deepEqual([row.status, row.reason, row.approved, calls], ['unavailable', 'needs_file-refused', false, 1]);
-    assert.deepEqual(row.sessions[0].needs_file_requested, expected);
-    assert.deepEqual(row.sessions[0].needs_file_requested.map((p) => p.length), [200, ...Array(9).fill(16)]);
-    assert.equal(JSON.stringify(row).includes(secret), false);
+    for (const output of [row, result]) {
+      assert.deepEqual([output.status, output.reason, output.approved, calls], ['unavailable', 'needs_file-refused', false, 1]);
+      assert.deepEqual(output.sessions[0].needs_file_requested, expected);
+      assert.deepEqual(output.sessions[0].needs_file_requested.map((p) => p.length), [200, ...Array(9).fill(16)]);
+      assert.equal(JSON.stringify(output).includes(secret), false);
+    }
   } finally {
     clearSecrets();
   }
