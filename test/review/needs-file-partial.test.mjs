@@ -95,7 +95,7 @@ test('Kotlin sample keeps the second attachment after a read error and records i
 
 test('no usable entry stays refused with one call for bad paths, unreadable files and missing files', async (t) => {
   const repo = await fixture();
-  for (const requested of [[ABSOLUTE, '../etc/passwd'], [KOTLIN, SWIFT], ['Tests/missing.swift', '.env']]) {
+  for (const requested of [[ABSOLUTE, '../etc/passwd'], [KOTLIN, SWIFT], ['Tests/missing.swift']]) {
     const unreadable = requested[0] === KOTLIN;
     const fake = model(requested, () => { if (unreadable) failReads(t, repo, requested); });
     const out = await review(repo, fake);
@@ -105,6 +105,20 @@ test('no usable entry stays refused with one call for bad paths, unreadable file
     t.mock.restoreAll();
     syncBuiltinESMExports();
   }
+});
+
+test('every entry refused by policy still answers needs_file in a second round without file content', async () => {
+  const repo = await fixture();
+  const requested = ['test/a.test.mjs', '.env'];
+  const content = 'policy-refused-private-file-content';
+  for (const rel of requested) writeFile(repo, rel, `${content}\n`);
+  const fake = model(requested);
+  const out = await review(repo, fake);
+  assert.deepEqual([out.status, out.approved, fake.packets.length, out.sessions[0].needs_file_round], ['reviewed', true, 2, true]);
+  assert.deepEqual(out.sessions[0].needs_file_requested, requested);
+  assert.equal(fake.packets[1].slice(fake.packets[0].length), '## attached files (read-only, requested in needs_file)\n### test/a.test.mjs (refused: untracked, not owned by this block)\n### .env (refused: secret-like path)\n');
+  assert.equal(fake.packets.some((packet) => packet.includes(content)), false);
+  assert.equal(JSON.stringify(out).includes(content), false);
 });
 
 /** Drive the real worker's signed result and row writer, using the ordinary engine without fix-loop triage.

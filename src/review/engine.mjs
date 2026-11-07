@@ -17,7 +17,8 @@
  *  5. a valid answer with `needs_file` gets ONE more round with eligible tracked or block-owned
  *     changed files attached (never secret-like paths — `attachFiles`); a second `needs_file`
  *     is ignored. Bad entries get anonymous refusal lines and read failures get error-class lines, while
- *     good files still attach. Only a request with no usable file is refused
+ *     good files still attach. Policy refusals are answered in the second round; only a request
+ *     consisting entirely of bad paths or unreadable files is refused
  *     (`needs_file-refused`, never approval). Session summaries retain bounded, redacted
  *     `needs_file_requested` paths and `needs_file_errors` classes, never attachment content;
  *  6. a session that ends in `timeout` is spawned ONCE more on the same packet and level
@@ -306,11 +307,11 @@ export async function reviewFile(input, deps) {
     const needs = summary.review?.needs_file;
     if (spec.role === 'reviewer' && summary.status === 'ok' && Array.isArray(needs) && needs.length > 0) {
       // Validate each entry in attachFiles; rejecting one must not discard its good siblings.
-      const diagnostics = { attached: 0, errors: /** @type {string[]} */ ([]) };
+      const diagnostics = { attached: 0, policyRefused: 0, errors: /** @type {string[]} */ ([]) };
       const requested = needs.slice(0, 10).map((/** @type {string} */ p) => redact(p).slice(0, 200));
       const extra = await attachFiles({ repoRoot, paths: needs, budgetTokens: budgetFor(cfg, 'full_in'), ownedFiles: input.ownedFiles, changedFiles: input.changedFiles ?? input.peers ?? [], diagnostics });
       const fields = { needs_file_requested: requested, ...(diagnostics.errors.length ? { needs_file_errors: diagnostics.errors } : {}) };
-      if (diagnostics.attached === 0) return { ...summary, ...fields, status: 'unavailable', reason: 'needs_file-refused', review: null };
+      if (diagnostics.attached + diagnostics.policyRefused === 0) return { ...summary, ...fields, status: 'unavailable', reason: 'needs_file-refused', review: null };
       summary = { ...(await runOne(spec, `${packet.text}${extra}`, packet, { deps, workDir, min, cfg, schemaFallback })), ...fields, needs_file_round: true };
     }
     return summary;
