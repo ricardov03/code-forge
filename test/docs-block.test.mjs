@@ -50,6 +50,7 @@ function makeRepo() {
   put(work, 'docs/ignore.txt', 'not markdown\n');
   put(work, 'package.json', JSON.stringify({ name: '@example/pkg', version: '0.1.0' }, null, 2) + '\n');
   put(work, 'scripts/gen-config-doc.mjs', 'process.exit(0);\n');
+  put(work, 'scripts/gen-commands-doc.mjs', 'process.exit(0);\n');
   git(work, ['add', '-A']);
   git(work, ['commit', '-qm', 'old release']);
   git(work, ['tag', '-a', 'v0.1.0', '-m', 'release']);

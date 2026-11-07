@@ -11,7 +11,7 @@
  * Steps: 1 preflight (clean tree, branch, up to date with origin, `[Unreleased]` has entries,
  * new version beats the current one and npm's latest, the tag is free locally and on origin),
  * 2 bump, 3 CHANGELOG and the README's optional Latest line,
- * 4 checks (`gen-config-doc --check` first; any failure restores every changed file byte-for-byte),
+ * 4 checks (config-doc then commands-doc; any failure restores every changed file byte-for-byte),
  * 5 commit + tag, 6 next steps. `--dry-run` runs the preflight, prints the plan and the diffs, and
  * writes nothing (it never fetches either: origin is read with `git ls-remote`).
  *
@@ -483,6 +483,12 @@ function runChecks(root, name, version) {
   if (r.code !== 0) return failed('gen-config-doc --check', r);
   ok('gen-config-doc --check');
 
+  const commandsDoc = path.join(root, 'scripts', 'gen-commands-doc.mjs');
+  if (!existsSync(commandsDoc)) return 'gen-commands-doc --check failed: scripts/gen-commands-doc.mjs not found';
+  r = run(process.execPath, [commandsDoc, '--check'], { cwd: root, timeout: 120000 });
+  if (r.code !== 0) return failed('gen-commands-doc --check', r);
+  ok('gen-commands-doc --check');
+
   process.stdout.write('check npm test …\n');
   r = run('npm', ['test'], { cwd: root });
   if (r.code !== 0) return failed('npm test', r);
@@ -667,7 +673,7 @@ export function main(argv, root = process.cwd()) {
     if (opts.dryRun) {
       process.stdout.write('\n== plan (dry run) ==\n');
       if (existsSync(path.join(root, 'native', 'go.mod'))) process.stdout.write('would build-native: four release targets; package size must be under 20 MB\n');
-      process.stdout.write(`would run the checks: ${opts.checks ? 'gen-config-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate .' : 'none (--no-checks)'}\n`);
+      process.stdout.write(`would run the checks: ${opts.checks ? 'gen-config-doc --check, gen-commands-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate .' : 'none (--no-checks)'}\n`);
       process.stdout.write(`would commit "Release ${tag}" (${plan.length} files) and create the annotated tag ${tag}\n`);
       process.stdout.write(`would print: git push origin ${branch} --follow-tags\n`);
       process.stdout.write('dry run: 0 files changed, 0 commits, 0 tags\n');
@@ -707,8 +713,8 @@ export function main(argv, root = process.cwd()) {
         }
       }
       warn(existsSync(path.join(root, 'native', 'go.mod'))
-        ? '!!! --no-checks: gen-config-doc --check, npm test, typecheck, npm ls and plugin validate were NOT run; native build and package size checked !!!'
-        : '!!! --no-checks: gen-config-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!');
+        ? '!!! --no-checks: gen-config-doc --check, gen-commands-doc --check, npm test, typecheck, npm ls and plugin validate were NOT run; native build and package size checked !!!'
+        : '!!! --no-checks: gen-config-doc --check, gen-commands-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!');
     }
 
     process.stdout.write('\n== 5. commit + tag ==\n');

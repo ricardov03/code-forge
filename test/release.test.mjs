@@ -169,6 +169,8 @@ function makeRepo({ changelog = CHANGELOG, genDoc = GEN_DOC_OK, lock = false, re
     mkdirSync(path.join(work, 'scripts'));
     writeFileSync(path.join(work, 'scripts', 'gen-config-doc.mjs'), genDoc);
   }
+  mkdirSync(path.join(work, 'scripts'), { recursive: true });
+  writeFileSync(path.join(work, 'scripts', 'gen-commands-doc.mjs'), GEN_DOC_OK);
   git(work, ['add', '-A']);
   git(work, ['commit', '-q', '-m', 'base']);
   git(work, ['remote', 'add', 'origin', origin]);
@@ -295,7 +297,7 @@ describe('scripts/release.mjs (B23)', () => {
       '    + Latest: 0.2.0 - see [CHANGELOG.md](CHANGELOG.md)',
       '',
     ].join('\n'));
-    assert.match(r.stdout, /^would run the checks: gen-config-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate \.$/m);
+    assert.match(r.stdout, /^would run the checks: gen-config-doc --check, gen-commands-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate \.$/m);
     assert.match(r.stdout, /^would commit "Release v0\.2\.0" \(6 files\)/m);
     // nothing written: every file byte-equal, no commit, no tag, origin untouched
     assert.deepEqual(snapshot(work), files);
@@ -502,6 +504,50 @@ describe('scripts/release.mjs (B23)', () => {
     }
   });
 
+  test('B313: stale command reference fails after config check and restores all eight changed files', () => {
+    const { work, origin } = makeRepo({ lock: true, docs: '@codedology/code-forge 0.1.0\n' });
+    const files = {
+      'scripts/gen-commands-doc.mjs': readFileSync(path.join(REPO, 'scripts/gen-commands-doc.mjs'), 'utf8'),
+      'bin/code-forge.mjs': "export async function listVerbs() { return ['sample']; }\n",
+      'src/cli/sample.mjs': "export const USAGE = 'usage: sample'; export const SUMMARY = 'Sample command.';\n",
+      'docs/reference/commands.md': '# Stale command reference\n',
+    };
+    for (const [file, text] of Object.entries(files)) {
+      mkdirSync(path.dirname(path.join(work, file)), { recursive: true });
+      writeFileSync(path.join(work, file), text);
+    }
+    git(work, ['add', '-A']);
+    git(work, ['commit', '-qm', 'stale command reference']);
+    const before = snapshot(work);
+    const st = state(work);
+    const refs = originRefs(origin);
+    const r = release(work, ['minor']);
+    assert.equal(r.code, 1, 'stale commands must fail the release');
+    assert.match(r.stdout, /^ok {4}gen-config-doc --check$/m, 'config check runs first');
+    assert.match(r.stderr, /gen-commands-doc --check failed \(exit 1\):\ngen-commands-doc --check: command reference is stale/);
+    assert.match(r.stderr, /rolled back 8 files; nothing was committed or tagged/);
+    assert.equal(r.stdout.includes('check npm test'), false, 'zero npm tests after stale docs');
+    assert.deepEqual(snapshot(work), before, 'all seven version/README files restored');
+    assert.equal(readFileSync(path.join(work, 'docs/step-by-step.md'), 'utf8'), '@codedology/code-forge 0.1.0\n', 'eighth file restored');
+    for (const [file, text] of Object.entries(files)) assert.equal(readFileSync(path.join(work, file), 'utf8'), text, file);
+    assert.deepEqual(state(work), st, 'zero new commits, tags or changed files');
+    assert.equal(originRefs(origin), refs, 'zero remote changes');
+  });
+
+  test('B313 boundary: missing command generator refuses and restores every release file', () => {
+    const { work } = makeRepo();
+    git(work, ['rm', 'scripts/gen-commands-doc.mjs']);
+    git(work, ['commit', '-qm', 'missing command generator']);
+    const before = snapshot(work);
+    const st = state(work);
+    const r = release(work, ['minor']);
+    assert.equal(r.code, 1, 'missing generator must fail the release');
+    assert.match(r.stderr, /gen-commands-doc --check failed: scripts\/gen-commands-doc.mjs not found/);
+    assert.match(r.stderr, /rolled back 6 files/);
+    assert.deepEqual(snapshot(work), before, 'all six changed files restored');
+    assert.deepEqual(state(work), st, 'zero new commits, tags or changed files');
+  });
+
   test('notes <vX.Y.Z> prints the section plus the npm and changelog links; --out writes it; a missing version exits 1', () => {
     const { work } = makeRepo();
     let r = release(work, ['notes', 'v0.1.0']);
@@ -542,7 +588,7 @@ describe('scripts/release.mjs (B23)', () => {
     const shim = readFileSync(path.join(work, 'skill', 'scripts', 'forge'), 'utf8');
     assert.equal(shim, '#!/bin/sh\n# shim: PINNED_VERSION="0.1.0" is set below\nPINNED_VERSION="0.1.1"\nset -eu\necho "npx pkg@$PINNED_VERSION"\n');
     assert.equal(shim.split('\n').filter((l) => l.startsWith('PINNED_VERSION=')).length, 1);
-    assert.match(r.stdout, /--no-checks: gen-config-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run/);
+    assert.match(r.stdout, /--no-checks: gen-config-doc --check, gen-commands-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run/);
   });
 
   test('patch updates only Latest in README (exact bytes), releases CHANGELOG, and creates 1 commit of 6 files and 1 tag', () => {
