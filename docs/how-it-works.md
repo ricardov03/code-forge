@@ -61,7 +61,38 @@ flowchart TD
 | 11 | Close | `code-forge block close B1 --run <run> --report <coder report>` | `block B1 closed`, or the reason it stays open. The report needs no ticket line for a file whose current bytes have a recorded review in this block and run. |
 | 12 | Report | `code-forge run end --run <run>` then `code-forge report --slug <slug>` | the worker stops; 15 report sections, from `cost_per_block` to `agent_waivers`, then the spend per run and the total |
 
-In fix rounds, the coder may use `code-forge gates run --run <r> --block <id> --changed` for the fresh TESTS line (B99). Any green `code-forge gates run --run <r> --block <id>` records the owned file hashes on `gate.done`, including runs without `--changed`; when `--slug` is omitted, these rows go to the run's project ledger. More than 200 owned files means no record, so the next `--changed` falls back with `no_baseline`; unreadable inputs also leave no record. `{test_files}` expands to changed tests and stem-paired tests of changed sources; `{changed_files}` expands to changed lint/format paths. Deleted files still count for pairing and the threshold, but both tokens receive only files that exist now. Both tokens must be whole argv items and cannot be the command or the only item; config validation refuses a gate whose command or only item is `{changed_files}`. Without `--changed`, `{changed_files}` is dropped. Gates without tokens run as before. Rows carry `scope: changed`, including fallback rows with a `reason`: `no_baseline` uses today's scope, `unpaired` uses today's test scope when a changed source has no test pair, `threshold` runs the full suite above `gates.full_suite_threshold_files` changed files, and `no_changes` uses today's scope when nothing is left to run. The orchestrator runs the full `code-forge gates run` before `block close` (D2).
+In fix rounds, the coder may use `code-forge gates run --run <r> --block <id> --changed`
+for the fresh TESTS line (B99). Any green gates run with `--run` and `--block` records the
+owned file hashes on `gate.done`. This includes runs without `--changed`. Without `--slug`,
+these rows go to the run's project ledger. More than 200 owned files means no record.
+Unreadable inputs also leave no record. The next `--changed` falls back with `no_baseline`,
+unless the text-only rule below applies.
+
+`{test_files}` expands to changed tests and stem-paired tests of changed sources.
+`{changed_files}` expands to changed lint/format paths. Deleted files count for pairing and
+the threshold. Both tokens receive only files that exist now. Each token must be a whole
+argv item. It cannot be the command or the only item. Config validation checks these rules.
+Without `--changed`, `{changed_files}` is dropped. Outside the text-only rule below, gates
+without tokens run as before.
+
+Rows carry `scope: changed`. Fallback rows also carry a reason:
+
+- `no_baseline` uses the normal block scope.
+- `unpaired` uses the normal test scope when a changed source has no test pair.
+- `threshold` runs the full suite above `gates.full_suite_threshold_files` changed files.
+- `no_changes` uses the normal block scope when nothing is left to run.
+
+The orchestrator runs full gates before `block close` (D2).
+
+With the Go engine, `--changed` skips the test gate when every changed file has one of these
+endings: `.md`, `.mdx`, `.txt`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg` or `.webp`.
+The test result has `skipped: true` and `reason: text_only`. Lint, types, format and custom
+gates still follow their configured rules. `{changed_files}` gets the changed paths that still
+exist. A test path or a path named by the block's `--tests` prevents this skip, even for a text
+file. This works without a full baseline. With no saved hashes, all owned entries must be exact
+paths with allowed endings; a directory or glob cannot prove that the change is text only.
+Unreadable inputs or a stale baseline keep the normal fallback. This rule also applies to the
+changed gates that `block land` runs. Plain gates without `--changed` keep their usual scope.
 
 To overlap reviews with coding, set `review.file_loop: overlap` (`wait` is the default; `watch` uses the commit loop below). Enqueue each green file with `code-forge review-file <path> --block <id> --run <r>` and continue coding. Before the completion sentinel, including in fix rounds, run `code-forge review-file --wait-block <id> --run <r> [--max 90s]`. It reads the workspace scope mirror, the queue and owned changed files; it never runs a review itself. It prints one JSON line `{block, files: [{file, ticket, status, outcome}], done}` with `done`, `findings`, `pending` or `not_queued` per file. Changed content with an earlier ticket gets a new current-content ticket after any unseen findings are delivered; the worker marks an old pending ticket stale at start. Timeout returns exit 0 with `done: false`, `reason: wait_timeout`; wait again. No live worker for the run returns exit 3 with `status: worker_down`, always `done: false`, even with completed markers; print the FAILED sentinel. An unreadable scope, ticket or completion marker refuses (exit 1). `done: true` means reviews finished or findings were delivered, not approved: inspect the tickets with `--wait` and fix findings. The close still checks signed approvals independently.
 
@@ -419,7 +450,8 @@ Then it runs the normal close checks with the report and transcript. It stops at
 failure with exit 1, the step, findings or gate output or close refusal, and the next command.
 A close awaiting a human check also stops before merging. Each land, pass or stop, writes one
 signed `land.timing` row with `join_ms`, `gates_ms` and `merge_gate_ms` (null without a merge
-gate). Per-gate times stay in `gate.done`.
+gate). A reused merge gate also records `merge_gate_reused: true` and the full tree id in
+`merge_gate_tree`. Per-gate times stay in `gate.done`.
 
 `--max` sets the total review wait, defaulting to `30m` (also accepts `90s` or `1500ms`).
 Land makes up to three join attempts while a held findings round remains open, sharing that
@@ -435,14 +467,22 @@ Findings stop the operation. A path owned or claimed by another open block refus
 Paths under `.git/` or `.code-forge/`, and paths outside the repository, are never auto-claimed.
 
 With `--merge`, after the block closes, land creates a temporary detached worktree at the current
-base branch HEAD under the run's worktree root, merges the block branch there with
-`git merge --no-ff --no-edit`, and runs the configured full gates through the shared gate runner
-without block scope or `--changed`. The main checkout must be clean and on the recorded base
-branch; the block worktree must be clean too. Only a green full suite permits the real merge.
-Land removes the temporary worktree before merging and prints
-`merge gate: full suite passed (<n>s)`. A red suite or conflict stops at `merge-gate`, names the
-first ten failing TAP tests (or gate diagnostics) or the conflict files, and prints a `next:`
-action. The temporary worktree is removed on failure too; main stays at the same HEAD and clean.
+base branch HEAD under the run's worktree root. It merges the block branch there with
+`git merge --no-ff --no-edit`. The main checkout must be clean and on the recorded base branch.
+The block worktree must be clean too.
+
+The Go engine can reuse a green full gate run for this exact merged Git tree. The saved evidence
+must match the resolved gate configuration, environment and Node version. The full run must
+include a test gate that ran and passed. Partial, skipped, cancelled, timed-out or flaky results
+cannot authorize reuse. Old stamps that do not bind the exact tree cannot authorize it either.
+Reuse prints `merge gate: reused green full suite on tree <tree-id>` with a 12-character tree id.
+
+Otherwise, land runs the configured full gates through the shared gate runner without block
+scope or `--changed`. A passing run prints `merge gate: full suite passed (<n>s)`.
+A red suite or conflict stops at `merge-gate`. It names the first ten failing TAP tests
+(or gate diagnostics) or the conflict files, and prints a `next:` action.
+Land removes the temporary worktree on success or failure. It checks that both merge parents
+and the main checkout stayed unchanged before the real merge. A failed check leaves main unmerged.
 `gates.merge_gate` defaults to `true` in the run config. Setting it to `false`, or passing
 `--no-merge-gate`, skips the merged-suite check and prints a warning.
 It never forces or switches main's branch. Success ends with
@@ -647,10 +687,15 @@ Only repo-relative paths inside this repo can be attached; absolute paths and fi
 repos are refused. Up to ten requested entries are handled independently. Invalid paths get
 an anonymous refusal line without their path text, read errors get `(error: <ErrorClass>)`,
 and usable files still attach for one second round (two model calls total, no repeat request).
-If none is usable, the review is `unavailable` with `reason: needs_file-refused` and
-`approved: false`, after one call. The session summary and the worker's signed review result
-store `needs_file_requested` as at most ten redacted paths of at most 200 characters each,
-plus `needs_file_errors` for read error classes; these diagnostics store no file content.
+A policy refusal also starts that second round, even when no file body can be attached.
+The reviewer sees the refusal line and can finish from the evidence it has.
+When every entry is invalid, missing or unreadable, with no policy refusal, the review is
+`unavailable` with `reason: needs_file-refused` and `approved: false`, after one call.
+The session summary and the worker's signed review result store `needs_file_requested` as at
+most ten redacted paths of at most 200 characters each. `needs_file_errors` holds read error
+classes. These diagnostics store no file content. The worker's `review.result` ledger row
+keeps only sessions with needs-file diagnostics. Each stores `lens`, `status`, `needs_file_round`,
+`needs_file_requested` and `needs_file_errors` when present. Finding text stays out of this row.
 
 Over budget, drop `## paired` first, then shrink the context to minimal
 (`review.context.min_context_lines`), then trim the rules digest from the end. The diff is never

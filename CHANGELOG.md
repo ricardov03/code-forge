@@ -9,7 +9,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Added
 
 - `npm run docs-block` writes the docs brief for a release and stamps `docs/release-docs.json` when the docs block ends. `npm run release` refuses when the docs stamp is not current (B312)
-- `npm run release:site` updates the website from the release, on your machine, with no CI and no tokens. The site numbers (runs, blocks, spend) come from the tagged release data and are the same on every run (B313)
+- `node scripts/gen-site-data.mjs --tag vX.Y.Z` exports release notes and commands from the tag for a local website update. It exports only run, completed-block and spend totals from the local ledger. The same tag and ledger inputs give the same JSON (B313)
 
 ### Changed
 
