@@ -110,13 +110,13 @@ func runBlockLand(args []string) int {
 		return fail("a block id and --run are required", 2)
 	}
 	allowed := " run report transcript max merge no-merge-gate json "
-	valid := len(pos) == 1
+	valid := true
 	for name := range flags {
 		valid = valid && strings.Contains(allowed, " "+name+" ")
 	}
 	_, report := flags["report"].(string)
 	_, transcript := flags["transcript"].(string)
-	if !valid || !report || !transcript {
+	if !valid || len(pos) == 1 && (!report || !transcript) {
 		return fail(landArguments, 2)
 	}
 	if raw, ok := flags["max"].(string); ok {
@@ -135,6 +135,9 @@ func runBlockLand(args []string) int {
 			return fallback(hLandReadRun)
 		}
 		return fail(err.Error(), 1)
+	}
+	if len(pos) > 1 {
+		return landBatch(flags, home, run, pos)
 	}
 	id := pos[0]
 	value := blockObject(record.Get("blocks")).Get(id)
