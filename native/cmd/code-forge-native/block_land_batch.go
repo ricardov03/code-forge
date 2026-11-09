@@ -21,6 +21,7 @@ type landBatchBlock struct {
 	tree                   *proof.Tree
 	entry                  ledger.Object
 	gatesMs                int64
+	fullScope              bool
 }
 
 // Batch landing consumes closed blocks. Keep the open/join/close single-block
@@ -114,7 +115,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			}
 			args := []string{"run", "--run", run, "--block", id, "--changed", "--cwd", tree.Workspace}
 			options, _ := gatesParse(args)
-			if _, safe := gatesNativeStep(args, options, &landStep{preflight: true}); !safe {
+			if _, safe := landBatchGateScope(args, options); !safe {
 				return fmt.Errorf("block %s changed gates are unsupported by native batch landing", id)
 			}
 			wt := blockObject(entry.Get("worktree"))
@@ -182,9 +183,11 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			step = "gates"
 			args := []string{"run", "--run", run, "--block", block.id, "--changed", "--cwd", block.tree.Workspace}
 			options, _ := gatesParse(args)
-			if _, safe := gatesNativeStep(args, options, &landStep{preflight: true}); !safe {
+			full, safe := landBatchGateScope(args, options)
+			if !safe {
 				return fmt.Errorf("block %s changed gates are unsupported after rebasing", block.id)
 			}
+			block.fullScope = full
 			started := time.Now()
 			err = landBatchChanged(ctx, home, workspace, run, block)
 			block.gatesMs = time.Since(started).Milliseconds()
@@ -319,6 +322,23 @@ func landBatchCheckout(main, head, branch string) error {
 	return nil
 }
 
+// A closed batch cannot hand the whole command to Node. When native imports
+// or an executable test graph require the Node scope expander, running all
+// block gates is the conservative fallback. Other unsupported dialects refuse.
+func landBatchGateScope(args []string, options gatesOptions) (full, safe bool) {
+	reason := hLandStepHandoverGates
+	code, safe := gatesNativeStep(args, options, &landStep{preflight: true}, &reason)
+	if safe {
+		return false, code == 0
+	}
+	if reason != hGatesChangedGraph && reason != hGatesChangedNative {
+		return false, false
+	}
+	options.changed = false
+	code, safe = gatesNativeStep(args, options, &landStep{preflight: true})
+	return true, safe && code == 0
+}
+
 // Reuse the native changed-scope planner without the open-block proof slot.
 // Its dialect is checked for every block before the batch begins mutating Git.
 func landBatchChanged(ctx context.Context, home, workspace, run string, block *landBatchBlock) error {
@@ -365,6 +385,9 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	scope.Report = "full"
 	if len(scope.Files) > 0 {
 		scope.Report = "related"
+	}
+	if block.fullScope {
+		scope = gates.Scope{Kind: "full", Reason: "native_scope_fallback"}
 	}
 	timeout := 300000.0
 	if n, ok := gatesNumber(configured["timeout_s"]); ok {

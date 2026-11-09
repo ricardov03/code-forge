@@ -12,6 +12,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -246,6 +247,46 @@ func TestBlockLandBatchBisectPrefix(t *testing.T) {
 				}
 			}
 		})
+	}
+}
+
+func TestBlockLandBatchNativeScopeReusesFinalTree(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	record, err := state.ReadRun(f.home, "r-batch-unit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := blockObject(record.Get("blocks"))
+	ids := []string{"B1", "B2", "B3"}
+	for _, id := range ids {
+		tree := filepath.Join(f.repo, ".code-forge/worktrees", id)
+		if err := os.Mkdir(filepath.Join(tree, "native"), 0700); err != nil {
+			t.Fatal(err)
+		}
+		f.git(tree, "mv", id+".mjs", "native/"+id+".mjs")
+		f.git(tree, "commit", "-qm", "native scope")
+		entry := blockObject(blocks.Get(id))
+		entry.Set("owned_files", []any{"native/" + id + ".mjs"})
+		blocks.Set(id, entry)
+	}
+	record.Set("blocks", blocks)
+	if err := state.SaveRun(f.home, record); err != nil {
+		t.Fatal(err)
+	}
+	code, output := f.land(ids...)
+	if code != 0 {
+		t.Fatalf("native-owned batch exit=%d, want 0: %s", code, output)
+	}
+	f.checkMain(ids)
+	// Native imports cannot be narrowed by the empty-graph planner. Its safe
+	// fallback checks each rebased block fully; the last tree is the final
+	// merge tree, so B317 must prevent a fourth suite in the trial worktree.
+	wantCalls := []string{}
+	for _, id := range ids {
+		wantCalls = append(wantCalls, proof.Real(filepath.Join(f.repo, ".code-forge/worktrees", id)))
+	}
+	if calls := f.lines("full-calls"); !reflect.DeepEqual(calls, wantCalls) || len(f.lines("changed-calls")) != 0 {
+		t.Errorf("native full calls=%v changed calls=%v, want %v and zero (reuse final tree)", calls, f.lines("changed-calls"), wantCalls)
 	}
 }
 
