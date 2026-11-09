@@ -100,8 +100,17 @@ and **Site pages a person must check**. Review every listed `src/pages/*.astro` 
 reported in one line and does not fail the brief. With no release tag, the brief covers the
 repository's history and files.
 
-Update the docs and run both the config-doc check in step 4 below and
-`node scripts/gen-commands-doc.mjs --check`. Commit those changes so the tree is clean, then run:
+Describe every user-visible `[Unreleased]` change in the page that explains the feature.
+Remove stale instructions. Keep version history in CHANGELOG, not README.
+Run both generated-doc checks:
+
+```sh
+node scripts/gen-config-doc.mjs --check
+node scripts/gen-commands-doc.mjs --check
+```
+
+List the site pages from the brief in the final report so a person can check them.
+If the site folder is absent, report that instead. Commit the docs so the tree is clean, then run:
 
 ```
 npm run docs-block -- stamp
@@ -179,7 +188,8 @@ The tool never pushes, never publishes and never creates a GitHub release.
 
 ## Local site data
 
-After tagging a release, run this maintainer tool from the repository:
+After tagging a release, run this maintainer tool from the repository. It writes data for a
+local website update. It does not edit or publish the site. No CI job or token is needed.
 
 ```sh
 node scripts/gen-site-data.mjs --tag vX.Y.Z --out site-data.json
@@ -194,9 +204,9 @@ Proof reads `code-forge.jsonl` and its numbered rotations in `~/.code-forge/ledg
 `--ledger-dir <dir>` for another directory. A missing directory fails. It exports only distinct
 run counts, distinct run/block pairs with a `block.close` status of `complete`, and estimated
 USD using the report's `buildSpend` pricing, rounded to two decimals. Unknown-price sessions
-contribute no spend. Proof uses the release date, so identical inputs give identical bytes;
-it includes all supplied ledger history, including work after the tag. No other ledger fields
-are copied. The script is excluded from the npm package.
+contribute no spend. Proof uses the release date. Identical tag and ledger inputs give identical
+bytes. It includes all supplied ledger history, including work after the tag. No other ledger
+fields are copied. The script is excluded from the npm package.
 
 ## Rollback
 

@@ -45,6 +45,10 @@ locks and signed ledger rows as Node.
 | `gates run` | Built-in and custom gates, `repeat_new_tests`, light blocks and flaky detection. A stop signal (SIGINT or SIGTERM) writes the same cancel rows. | A run with no `--run` and no `--block`, and other `gates` subcommands. |
 | `block land` | Plain land, `--merge` with the full merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | No compatible join daemon, unsupported state, a light block, or a run with `close.require_human` or an external reviewer. Read-only pre-checks finish before the first write. The B282 reason code names the step. |
 
+The Go engine skips the test gate for proven text-only `gates run --changed` changes.
+Its merge gate can also reuse a green full run for the exact merged tree.
+See [how it works](how-it-works.md) for the scope rules and reuse checks.
+
 A hand-over always passes the original arguments. Node then runs the command
 exactly as before. When Go is not sure it gives the same answer, it hands over.
 Commands such as `code-forge version` and `code-forge doctor` also go through
@@ -236,3 +240,6 @@ They allow only known changes such as timestamps. Entry tests also check
 arguments, standard input, the working directory, environment settings,
 symbolic links, Node-only mode and missing executables. Daemon tests compare
 status and block waits with Node and check fallback when the daemon fails.
+
+`parity-gates-custom` waits for all fixture files to be written before starting Go.
+This prevents random failures under load from reading a partial fixture.
