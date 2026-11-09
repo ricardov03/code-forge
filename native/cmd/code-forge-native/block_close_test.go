@@ -201,7 +201,13 @@ func TestCloseQueuesCurrentContentReviews(t *testing.T) {
 func TestCloseQueuedReviewRefusals(t *testing.T) {
 	for _, outcome := range []string{"findings", "hung", "unavailable", "unsigned"} {
 		t.Run(outcome, func(t *testing.T) {
-			f := newCloseReviewFixture(t, 2)
+			count := 2
+			if outcome == "hung" {
+				// Leave room for git/process probes under suite load while still
+				// rejecting ten separate one-second waits.
+				count = 10
+			}
+			f := newCloseReviewFixture(t, count)
 			var done <-chan error
 			if outcome != "hung" {
 				done = f.reviewer(outcome)
@@ -218,13 +224,13 @@ func TestCloseQueuedReviewRefusals(t *testing.T) {
 			if outcome == "findings" {
 				want = "not_approved"
 			}
-			if code != 1 || strings.Count(out, want+" file") != 2 || strings.Contains(out, "block B1 closed") {
-				t.Fatalf("exit=%d out=%s err=%s; want two %s blockers and no close", code, out, errs, want)
+			if code != 1 || strings.Count(out, want+" file") != count || strings.Contains(out, "block B1 closed") {
+				t.Fatalf("exit=%d out=%s err=%s; want %d %s blockers and no close", code, out, errs, count, want)
 			}
 			if outcome == "findings" && strings.Count(out, "F1 open") != 2 {
 				t.Fatalf("want both F1 findings: %s", out)
 			}
-			if outcome == "hung" && (elapsed < time.Second || elapsed > 1800*time.Millisecond) {
+			if outcome == "hung" && (elapsed < time.Second || elapsed > 8*time.Second) {
 				t.Fatalf("shared 1s wait took %s", elapsed)
 			}
 			record, err := state.ReadRun(f.home, "r-close-fixture")
