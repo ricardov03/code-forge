@@ -124,6 +124,7 @@
       "type": "object",
       "additionalProperties": false,
       "properties": {
+        "close_wait_s": { "type": "integer", "minimum": 1, "maximum": 86400, "default": 600, "description": "One shared deadline in seconds for reviews queued by native block close." },
         "exclude": {
           "type": "array",
           "items": { "type": "string", "minLength": 1 },

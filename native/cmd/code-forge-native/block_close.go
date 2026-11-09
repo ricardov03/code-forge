@@ -46,11 +46,19 @@ func blockCloseStepWithReason(args []string, step *landStep, handover *handoverR
 }
 
 func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason, confirmed bool, endHook ...*func()) int {
+	return blockCloseReviewedStep(args, step, handover, confirmed, nil, endHook...)
+}
+
+func blockCloseReviewedStep(args []string, step *landStep, handover *handoverReason, confirmed bool, waited closeReviewWait, endHook ...*func()) int {
 	stdout, stderr := step.writers()
 
 	original := append([]string{"close"}, args...)
 	var expiryOnFailure func()
 	fallback := func(reason handoverReason) int {
+		if waited != nil {
+			fmt.Fprintln(stderr, "block close: review_pending: state changed while waiting for reviews; close again")
+			return 1
+		}
 		if handover != nil {
 			*handover = reason
 		}
@@ -457,6 +465,9 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 			return fallback(hCloseGatesFormat)
 		}
 	}
+	if waited != nil {
+		gate.Blockers = waited.blockers(gate.Blockers)
+	}
 	gateReason := gatecheck.Reason(gate.Blockers)
 	gateIndex := len(checks)
 	checks = append(checks, closeCheck{gateReason, gate.Blockers})
@@ -567,6 +578,25 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 	// error is reported directly, never retried through Node.
 	if step != nil && step.preflight {
 		return 0
+	}
+	if waited == nil && external == "" && event == "" {
+		prerequisites := true
+		for _, check := range checks[:gateIndex] {
+			prerequisites = prerequisites && check.Reason == ""
+		}
+		if prerequisites {
+			print := stdout
+			if flags["json"] == true {
+				print = stderr
+			}
+			waited = closeWaitReviews(run, id, top, qdir, files, changed, gate.Blockers, cfg, inTree, print)
+			if len(waited) > 0 {
+				// Re-measure everything, including hashes, signatures, worker pins,
+				// report, human requirements and grant rules after the single wait.
+				// Queue publication is a write: this pass must never hand over.
+				return blockCloseReviewedStep(args, step, handover, confirmed, waited, endHook...)
+			}
+		}
 	}
 	if !deciding && !requireHuman {
 		blockGrantExpiry(home, run, stderr)
