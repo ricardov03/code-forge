@@ -581,10 +581,6 @@ set `gates.test: [node, --test, "{test_files}"]` in the config. Without that who
 the configured test command runs as written. `{changed_files}` can narrow lint and format checks.
 The **baseline** is the saved file content from the last passing checks.
 Missing test pairs, too many files, or no baseline usually make changed checks use broader checks.
-The Go engine can skip the test gate for proven text-only changes, even without a full baseline.
-The result says `skipped: true` and `reason: text_only`. Test paths and paths named by `--tests`
-prevent this skip. Other gates still follow their configured rules. See the
-[text-only rules](how-it-works.md#step-by-step) for allowed file endings and limits.
 
 **You see** — Output shortened (local gates check; fields trimmed):
 

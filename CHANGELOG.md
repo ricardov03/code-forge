@@ -14,7 +14,6 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Changed
 
 - `block land` does not run the full test suite again in the merge gate when the merged tree is the same as a tree that already had a green full run. It prints the reused tree id and records it on the land.timing row (B317)
-- `gates run --changed` runs only the gates that apply when every changed file is text (`.md`, `.mdx`, `.txt` and image files), even with no full baseline. The test gate is skipped with the reason `text_only`. A text file under a test path, or named in the block's tests, still runs the full suite (B318)
 
 ### Fixed
 

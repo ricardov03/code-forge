@@ -84,16 +84,6 @@ Rows carry `scope: changed`. Fallback rows also carry a reason:
 
 The orchestrator runs full gates before `block close` (D2).
 
-With the Go engine, `--changed` skips the test gate when every changed file has one of these
-endings: `.md`, `.mdx`, `.txt`, `.png`, `.jpg`, `.jpeg`, `.gif`, `.svg` or `.webp`.
-The test result has `skipped: true` and `reason: text_only`. Lint, types, format and custom
-gates still follow their configured rules. `{changed_files}` gets the changed paths that still
-exist. A test path or a path named by the block's `--tests` prevents this skip, even for a text
-file. This works without a full baseline. With no saved hashes, all owned entries must be exact
-paths with allowed endings; a directory or glob cannot prove that the change is text only.
-Unreadable inputs or a stale baseline keep the normal fallback. This rule also applies to the
-changed gates that `block land` runs. Plain gates without `--changed` keep their usual scope.
-
 To overlap reviews with coding, set `review.file_loop: overlap` (`wait` is the default; `watch` uses the commit loop below). Enqueue each green file with `code-forge review-file <path> --block <id> --run <r>` and continue coding. Before the completion sentinel, including in fix rounds, run `code-forge review-file --wait-block <id> --run <r> [--max 90s]`. It reads the workspace scope mirror, the queue and owned changed files; it never runs a review itself. It prints one JSON line `{block, files: [{file, ticket, status, outcome}], done}` with `done`, `findings`, `pending` or `not_queued` per file. Changed content with an earlier ticket gets a new current-content ticket after any unseen findings are delivered; the worker marks an old pending ticket stale at start. Timeout returns exit 0 with `done: false`, `reason: wait_timeout`; wait again. No live worker for the run returns exit 3 with `status: worker_down`, always `done: false`, even with completed markers; print the FAILED sentinel. An unreadable scope, ticket or completion marker refuses (exit 1). `done: true` means reviews finished or findings were delivered, not approved: inspect the tickets with `--wait` and fix findings. The close still checks signed approvals independently.
 
 Each file's `outcome` is `approved`, `findings`, `stopped`, `split_required` or `unavailable` from its completion marker, and `null` while `pending` or `not_queued`; a live join queues an owned changed file even if it has no earlier ticket. A `split_required` outcome returns `done: false`, `reason: split_required` and `next` naming the file: the owner raises `review.budgets`, runs `run reload`, then runs `review-file <path> --fresh`.
