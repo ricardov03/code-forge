@@ -1100,7 +1100,14 @@ function transcriptCommandText(command, unwrapShell = true) {
  * substitutions in double-quoted wrapper segments keep the entire command scanned; single-quoted
  * splices are literal at that layer. Unquoted splices, nested wrappers,
  * malformed wrappers, shell/unknown heredocs and
- * unterminated bodies scan whole. Any other log uses the plain-text grep above, also treating
+ * unterminated bodies scan whole. Claude Code sub-agent JSONL logs (B361: every non-empty line an
+ * object with a known Claude line `type` and a string `sessionId`, user/assistant lines with a
+ * `message` object, at least one of them, no stdin banner) scan only assistant tool_use items:
+ * a Bash string `command` as a command (with the same heredoc/inline/wrapper handling as above),
+ * Write/Edit/MultiEdit/NotebookEdit as `Write(<file_path>)`, any other tool's whole `input`
+ * (fail closed); user text, tool_result content, assistant text/thinking and system, attachment
+ * and api-request lines are not scanned. An assistant `message.content` that is neither a string
+ * nor an array scans the whole message. Any other log uses the plain-text grep above, also treating
  * backslash-escaped quotes as quote delimiters and escaped n/r/t as whitespace without losing any original-text hits.
  *
  * Linear in the line length: `contains` and `path` entries are evaluated once per text variant over its
@@ -1116,19 +1123,29 @@ export function scanTranscript(text, list = FORBIDDEN) {
   const lines = String(text).split('\n');
   /** @type {any[] | null} */
   let events = null;
+  let claude = false;
   try {
     let beforeJson = true;
+    let banner = false;
     const parsed = lines.map((line) => {
       const trimmed = line.trim();
       if (trimmed === '') return undefined;
-      if (beforeJson && /^Reading additional input from stdin\.\.\.$/.test(trimmed)) return undefined;
+      if (beforeJson && /^Reading additional input from stdin\.\.\.$/.test(trimmed)) { banner = true; return undefined; }
       const event = JSON.parse(line);
       beforeJson = false;
       return event;
     });
     const nonEmpty = parsed.filter((event) => event !== undefined);
-    if (nonEmpty[0]?.type === 'thread.started' && nonEmpty.every((event) =>
-      event !== null && typeof event === 'object' && !Array.isArray(event) && typeof event.type === 'string')) events = parsed;
+    const objects = nonEmpty.every((event) =>
+      event !== null && typeof event === 'object' && !Array.isArray(event) && typeof event.type === 'string');
+    if (nonEmpty[0]?.type === 'thread.started' && objects) events = parsed;
+    else if (objects && !banner && nonEmpty.some((event) => event.type === 'user' || event.type === 'assistant')
+      && nonEmpty.every((event) => CLAUDE_LINE_TYPES.has(event.type) && typeof event.sessionId === 'string'
+        && (event.type !== 'user' && event.type !== 'assistant'
+          || (event.message !== null && typeof event.message === 'object' && !Array.isArray(event.message))))) {
+      events = parsed;
+      claude = true;
+    }
   } catch {
     // One bad JSONL line makes the entire transcript a plain-text, fail-closed grep.
   }
@@ -1145,7 +1162,33 @@ export function scanTranscript(text, list = FORBIDDEN) {
   lines
     .forEach((lineText, index) => {
       let commandText;
-      if (events !== null) {
+      if (claude) {
+        const event = events?.[index];
+        if (event?.type !== 'assistant') return;
+        const content = event.message.content;
+        if (typeof content === 'string') return;
+        const texts = [];
+        const commands = [];
+        // content that is not an array is scanned whole (fail closed)
+        for (const part of Array.isArray(content) ? content : [{ type: 'tool_use', input: event.message }]) {
+          if (part?.type !== 'tool_use') continue;
+          const input = part.input;
+          let text = JSON.stringify(input) ?? '';
+          let command = text;
+          if (part.name === 'Bash' && typeof input?.command === 'string') {
+            text = input.command;
+            command = transcriptCommandText(text);
+          } else if (CLAUDE_WRITE_TOOLS.has(part.name)) {
+            const path = input?.file_path ?? input?.notebook_path;
+            if (typeof path === 'string') text = command = `Write(${JSON.stringify(path)})`;
+          }
+          texts.push(text);
+          commands.push(command);
+        }
+        if (texts.length === 0) return;
+        lineText = texts.join('\n');
+        commandText = commands.join('\n');
+      } else if (events !== null) {
         const event = events[index];
         if (!event?.type.startsWith('item.') || !event.item) return;
         const item = event.item;
@@ -1194,3 +1237,12 @@ export function scanTranscript(text, list = FORBIDDEN) {
 
 /** How many tokens after a command start `scanTranscript` looks at. */
 const TRANSCRIPT_WINDOW = 64;
+
+/** Top-level `type` values of a Claude Code (sub-agent) JSONL transcript line. */
+const CLAUDE_LINE_TYPES = new Set([
+  'user', 'assistant', 'system', 'summary', 'attachment', 'api-request', 'api-request-shape', 'api-request-blob',
+  'file-history-snapshot', 'progress', 'queue-operation',
+]);
+
+/** Claude Code tools whose tool_use is scanned as a write of its file path only. */
+const CLAUDE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
