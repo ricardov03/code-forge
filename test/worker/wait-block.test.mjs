@@ -4,6 +4,7 @@ import { test } from 'node:test';
 import { mkdirSync, readFileSync, writeFileSync, rmSync, readdirSync, statSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { loadedMs } from '../helpers/load.mjs';
 
 const { announceWorker, retractWorker, enqueue, queueDir, readResult, writeResult, enqueueAnswers, blockTickets, resolveTicket, dropDoneIf } = await import('../../src/worker/queue.mjs');
 const { runReviewFile } = await import('../../src/cli/review-file.mjs');
@@ -44,7 +45,7 @@ test('(1) reproduction: three files enqueue without waiting, then one block wait
       tickets.push({ file, ticket: res.json.ticket, status: 'done', outcome: 'approved' });
     }
     assert.equal(queued(repo, 'json').length, 3);
-    const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', '20s'], repo);
+    const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', `${loadedMs(20000)}ms`], repo);
     assert.equal(res.code, 0, res.stderr);
     assert.equal(res.stdout.trim().split('\n').length, 1);
     assert.deepEqual(res.json, { block: BLOCK, files: tickets.map((t) => ({ ...t, ...timingsOf(repo, runId, t.ticket) })), done: true });
@@ -226,7 +227,7 @@ test('unreadable scope or corrupt tickets fail closed; no files are silently ski
 test('worktree scope and ticket IDs use only that tree, sharing the main queue', async () => {
   const { repo, runId } = await makeRepo();
   const tree = path.join(freshDir('trees'), 'block');
-  const added = await exec(['git', 'worktree', 'add', '-b', 'fake-block', tree], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 });
+  const added = await exec(['git', 'worktree', 'add', '-b', 'fake-block', tree], { cwd: repo, env: gitChildEnv(), timeoutMs: loadedMs(20000) });
   assert.equal(added.code, 0, added.stderr);
   mkdirSync(path.join(tree, 'src'));
   writeFileSync(path.join(tree, 'src/a.mjs'), 'export const a = 9;\n');
@@ -309,7 +310,7 @@ async function scriptedWatch() {
   const commit = async (text) => {
     writeFileSync(path.join(repo, FILE), text);
     for (const args of [['add', '--', FILE], ['-c', 'user.name=Fake', '-c', 'user.email=fake@example.invalid', '-c', 'commit.gpgsign=false', 'commit', '-qm', 'content']]) {
-      assert.equal((await exec(['git', ...args], { cwd: repo, env: gitChildEnv(), timeoutMs: 20000 })).code, 0);
+      assert.equal((await exec(['git', ...args], { cwd: repo, env: gitChildEnv(), timeoutMs: loadedMs(20000) })).code, 0);
     }
     const observed = Date.now() - 15000;
     await watchTick({ repoRoot: repo, runId, cfg, writeRow, now: () => observed });
