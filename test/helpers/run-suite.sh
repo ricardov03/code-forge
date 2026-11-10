@@ -34,6 +34,7 @@ cf_validate_path() {
 }
 cf_has_tests=false
 cf_has_concurrency=false
+cf_concurrency_flag=
 cf_flag_value=false
 cf_options=true
 cf_arg_count=$#
@@ -141,14 +142,25 @@ if [ "$cf_has_concurrency" = false ]; then
     esac
     cf_concurrency=$CODE_FORGE_TEST_CONCURRENCY
   else
-    cf_cores=$(node -p 'require("node:os").availableParallelism()') || exit 2
+    # Node's availableParallelism honours CPU affinity and cgroup limits; use it
+    # only when it prints a positive integer (a stub `node` may print anything),
+    # then try getconf, then fall back to 1.
+    cf_cores=$(node -p 'require("node:os").availableParallelism()' 2>/dev/null) || cf_cores=
+    case "$cf_cores" in
+      ''|*[!0-9]*|0*) cf_cores=$(getconf _NPROCESSORS_ONLN 2>/dev/null) || cf_cores= ;;
+    esac
+    case "$cf_cores" in
+      ''|*[!0-9]*|0*) cf_cores=1 ;;
+    esac
     cf_concurrency=$((cf_cores / 2))
     [ "$cf_concurrency" -ge 1 ] || cf_concurrency=1
   fi
-  set -- "--test-concurrency=$cf_concurrency" "$@"
+  cf_concurrency_flag="--test-concurrency=$cf_concurrency"
 fi
+# The default flag goes before --test so the argv after --test is only the
+# caller's own arguments and the selected test files.
 CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && {
-  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@"
+  node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks ${cf_concurrency_flag:+"$cf_concurrency_flag"} --test "$@"
   cf_test_status=$?
   CODE_FORGE_NO_LEAK=final node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs
   cf_leak_status=$?
