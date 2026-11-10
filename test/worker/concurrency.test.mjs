@@ -133,7 +133,7 @@ async function join(p, deps = {}) {
   return stdout;
 }
 
-test('wait-block cancels its five-second backoff on the last completion notification', async (t) => {
+test('wait-block wakes within one product second of the last completion at the five-second backoff', async (t) => {
   const p = await fixture(['anthropic', 'openai', 'anthropic']);
   announceWorker(p.repo, { pid: process.pid, run: p.runId });
   let notify;
@@ -146,25 +146,29 @@ test('wait-block cancels its five-second backoff on the last completion notifica
   let time = 0;
   const sleeps = [];
   let cancelled = 0;
+  let completedAt;
   let drained;
   try {
     const output = await join(p, {
       now: () => time,
       sleep: async (ms, signal) => {
         sleeps.push(ms);
-        time += ms;
-        if (ms < 5000) return;
+        // Charge every later product wait to the wakeup limit, including another capped wait.
+        if (completedAt !== undefined || ms < 5000) { time += ms; return; }
         const interrupted = new Promise((resolve) => {
           signal.addEventListener('abort', () => { cancelled += 1; resolve(undefined); }, { once: true });
         });
         p.release();
         drained = p.worker.drain();
         await drained;
+        completedAt = time;
         notify('rename', 'last-ticket.done');
         await interrupted;
       },
     });
     await drained;
+    assert.notEqual(completedAt, undefined, 'all reviews complete during the capped product wait');
+    assert.ok(time - completedAt < 1000, `join waits ${time - completedAt} product ms after completion; limit is 1000 ms`);
     assert.deepEqual(sleeps, [200, 400, 800, 1600, 3200, 5000], 'six product backoff steps reach the cap; no extra poll follows completion');
     assert.equal(cancelled, 1, 'the completion notification cancels exactly one capped product wait');
     assert.deepEqual(JSON.parse(output).files.map((f) => f.status), ['done', 'done', 'done']);
