@@ -149,6 +149,41 @@ func TestAPIFitAllowMismatchOpensWithNote(t *testing.T) {
 	}
 }
 
+func TestAPIFitLanguageDefinitions(t *testing.T) {
+	repo := newFitFixture(t)
+	files := map[string]string{
+		// A call statement is not a definition, so the missing name stays missing.
+		"Calls.java": "class Calls {\n  int run() {\n    return render(title, slot);\n  }\n  void render(String title) {}\n}\n",
+		// Abstract and interface signatures end with ";" after a return type.
+		"view.ts": "abstract class View {\n  abstract render(title: string, slot?: Node): void;\n}\n",
+	}
+	cases := []struct {
+		use  APIUse
+		want []string
+	}{
+		{APIUse{File: "Calls.java", Symbol: "render", Params: []string{"title", "slot"}}, []string{"api-fit: Calls.java render expects (title,slot) found (title)"}},
+		{APIUse{File: "view.ts", Symbol: "View.render", Params: []string{"title", "slot"}}, nil},
+	}
+	for name, body := range files {
+		if err := os.WriteFile(filepath.Join(repo.repo, name), []byte(body), 0644); err != nil {
+			t.Fatal(err)
+		}
+	}
+	cmd := exec.Command("sh", "-c", "git add . && git -c user.name=F -c user.email=f@example.invalid -c commit.gpgsign=false commit -qm langs && git rev-parse HEAD")
+	cmd.Dir = repo.repo
+	out, err := cmd.CombinedOutput()
+	if err != nil {
+		t.Fatalf("commit: %v %s", err, out)
+	}
+	base := strings.TrimSpace(string(out))
+	for _, tc := range cases {
+		mismatches, notes := CheckAPIFit(repo.repo, base, []APIUse{tc.use})
+		if len(notes) != 0 || len(mismatches) != len(tc.want) || len(tc.want) > 0 && mismatches[0] != tc.want[0] {
+			t.Errorf("%s %s: mismatches=%q notes=%q; want %q", tc.use.File, tc.use.Symbol, mismatches, notes, tc.want)
+		}
+	}
+}
+
 func TestAPIFitSkipsUnknownExtensionWithNote(t *testing.T) {
 	f := newFitFixture(t)
 	result, err := f.open(t, "```uses\nlib/card.rb: card(title, slot)\n```\n")

@@ -170,8 +170,13 @@ var fitLangs = map[string]fitLang{
 
 var (
 	jsDefs = []string{`\bfunction\s*\*?\s*%s\s*(?:<[^>]*>)?\s*\(`, `\b(?:const|let|var)\s+%s\s*(?::[^=]*)?=\s*(?:async\s+)?(?:function\b\s*\*?\s*[\w$]*\s*)?(?:<[^>]*>\s*)?\(`, `(?m)^[ \t]*(?:(?:public|private|protected|static|async|readonly|override|abstract|get|set)\s+)*\*?%s\s*(?:<[^>]*>)?\s*\(`}
-	jsBody = regexp.MustCompile(`^\s*(?::[^;{=]*)?(?:\{|=>)`)
+	// A body or arrow, or ";" after a return type (abstract, interface and
+	// overload signatures); a bare `f(a);` is a call.
+	jsBody = regexp.MustCompile(`^\s*(?:(?::[^;{=]*)?(?:\{|=>)|:[^;{=]*;)`)
 	fitAnn = regexp.MustCompile(`@[\w.]+(?:\([^)]*\))?\s*`)
+	// A word right before the symbol that makes the match a call, not a
+	// definition (`return f(`, `throw new F(`).
+	fitCallWords = []string{"return", "throw", "new", "else", "case", "yield", "await", "do"}
 )
 
 // CheckAPIFit reads each used file at base and compares the symbol's
@@ -186,7 +191,18 @@ func CheckAPIFit(workspace, base string, uses []APIUse) (mismatches, notes []str
 			continue
 		}
 		found := "no file at base"
-		if source, err := gitx.Run(workspace, "show", base+":"+use.File); err == nil {
+		source, err := gitx.Run(workspace, "show", base+":"+use.File)
+		if err != nil {
+			// Only a path missing from the base tree is "no file"; any other
+			// git failure is named so a bad base is not read as a missing file.
+			if listed, lsErr := gitx.Run(workspace, "ls-tree", "--name-only", base, "--", use.File); lsErr != nil || strings.TrimSpace(listed) != "" {
+				code := -1
+				if e, ok := err.(*gitx.CommandError); ok {
+					code = e.Code
+				}
+				found = fmt.Sprintf("git show failed (exit %d)", code)
+			}
+		} else {
 			found = "no definition"
 			if lists := definitions(lang, source, use.Symbol); len(lists) > 0 {
 				found = strings.Join(lists[0], ",")
@@ -228,6 +244,10 @@ func definitions(lang fitLang, source, symbol string) [][]string {
 				continue
 			}
 			if lang.body != nil && !lang.body.MatchString(source[end+1:]) {
+				continue
+			}
+			before := strings.TrimRight(source[loc[0]:open], " \t")
+			if slices.Contains(fitCallWords, lastWord(strings.TrimSuffix(before, name))) {
 				continue
 			}
 			seen[open] = true
