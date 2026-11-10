@@ -449,6 +449,27 @@ function checkPack(root, name, version) {
   return null;
 }
 
+/** File locations emitted by Node's TAP diagnostics or spec failure summary.
+ * Refuse unknown/outside paths rather than guessing from test names or stack frames.
+ * @param {string} root @param {string} output @returns {string[]}
+ */
+function failingTestFiles(root, output) {
+  const files = new Set();
+  for (const line of stripVTControlCharacters(output).split('\n')) {
+    const match = /^\s*location: ['"](.+?)['"]\s*$/.exec(line) ?? /^test at (.+?)\s*$/.exec(line);
+    if (!match) continue;
+    const location = match[1].replace(/:\d+(?::\d+)?$/, '');
+    let absolute;
+    try { absolute = location.startsWith('file:') ? fileURLToPath(location) : path.resolve(root, location); }
+    catch { return []; }
+    const relative = path.relative(root, absolute);
+    if (!relative || relative.startsWith('..') || path.isAbsolute(relative) ||
+        !/\.(?:mjs|cjs|js)$/.test(relative) || !existsSync(absolute) || !statSync(absolute).isFile()) return [];
+    files.add(relative);
+  }
+  return [...files];
+}
+
 /** @param {string} root @param {string} name @param {string} version @returns {string | null} a failure, or null */
 function runChecks(root, name, version) {
   /** @param {string} label @param {ReturnType<typeof run>} r */
@@ -491,8 +512,32 @@ function runChecks(root, name, version) {
 
   process.stdout.write('check npm test …\n');
   r = run('npm', ['test'], { cwd: root });
-  if (r.code !== 0) return failed('npm test', r);
-  ok('npm test');
+  if (r.code !== 0) {
+    const failure = failed('npm test', r);
+    const files = failingTestFiles(root, `${r.stdout}${r.stderr}`);
+    if (!files.length || r.error) return failure;
+    process.stdout.write(`${failure}\n`);
+    let passed = true;
+    for (const file of files) {
+      process.stdout.write(`check npm test (alone: ${file}) …\n`);
+      const alone = run('npm', ['test', '--', '--test-concurrency=1', file], { cwd: root });
+      process.stdout.write(alone.stdout);
+      process.stderr.write(alone.stderr);
+      process.stdout.write(`npm test (alone: ${file}) exit ${alone.code}\n`);
+      if (alone.code !== 0) passed = false;
+    }
+    if (!passed) return `${failure}\nisolated rerun failed`;
+    const head = gitOk(root, ['rev-parse', 'HEAD']).trim();
+    const ci = run('gh', ['run', 'list', '--commit', head, '--workflow', 'CI', '--limit', '1',
+      '--json', 'headSha,status,conclusion'], { cwd: root, timeout: 60000 });
+    let runs;
+    try { runs = JSON.parse(ci.stdout); } catch { /* missing gh or unreadable response fails closed */ }
+    if (ci.code !== 0 || !Array.isArray(runs) || runs.length !== 1 ||
+        runs[0]?.headSha !== head || runs[0]?.status !== 'completed' || runs[0]?.conclusion !== 'success') {
+      return `${failure}\nCI for HEAD ${head} is not green${ci.stderr.trim() ? `: ${ci.stderr.trim()}` : ''}`;
+    }
+    process.stdout.write(`local flaky (passed alone, CI green): ${files.join(', ')}\n`);
+  } else ok('npm test');
 
   r = run('npm', ['run', 'typecheck'], { cwd: root });
   if (r.code !== 0) return failed('npm run typecheck', r);

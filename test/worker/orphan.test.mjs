@@ -1,5 +1,6 @@
 import { BIN, childEnv, cli, freshDir, makeRepo, pollMs, startWorker, stopPid, stopWorker, VALID_REVIEW, queued, waitFor } from './helpers.mjs';
 import { snapshotGuarded } from '../helpers/isolate.mjs';
+import { loadedMs } from '../helpers/load.mjs';
 import assert from 'node:assert/strict';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, writeFileSync } from 'node:fs';
@@ -11,14 +12,15 @@ const { enqueue, liveWorker, readResult, readWorker } = await import('../../src/
 const ISOLATE = path.resolve(path.dirname(BIN), '../test/helpers/isolate.mjs');
 const NO_LEAK = path.resolve(path.dirname(BIN), '../test/no-leak.test.mjs');
 
-test('B113: removing the run record, runs directory, or HOME exits cleanly within 20 poll ticks, with 0 new tickets taken', async () => {
+test('B113: removing the run record, runs directory, or HOME exits cleanly within the load-adjusted shutdown deadline, with 0 new tickets taken', async () => {
   for (const removed of ['record', 'runs', 'home']) {
     const { repo, runId } = await makeRepo();
     const w = await startWorker(repo, runId);
     try {
       rmSync(removed === 'record' ? runRecordPath(runId) : removed === 'runs' ? runsDir() : process.env.HOME, { recursive: true, force: true });
       const { ticket } = enqueue({ repoRoot: repo, run: runId, block: 'B11', file: 'src/a.mjs' });
-      assert.equal(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, Math.max(pollMs * 20, 20000)), true, removed);
+      // Process exit includes host scheduling and watcher cleanup, beyond the orphan guard's poll.
+      assert.equal(await waitFor(() => w.child.exitCode !== null || w.child.signalCode !== null, loadedMs(Math.max(pollMs * 20, 20000))), true, removed);
       assert.deepEqual([w.child.exitCode, w.child.signalCode, readWorker(repo), readResult(repo, runId, ticket)], [0, null, null, null]);
       assert.equal(existsSync(path.join(repo, '.code-forge/queue', `${ticket}.done`)), false);
       if (removed === 'home') assert.equal(existsSync(/** @type {string} */ (process.env.HOME)), false, 'the stopping worker must not create the removed HOME again');

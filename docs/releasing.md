@@ -177,6 +177,20 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    `npm pack --dry-run` (the name and version must match; the file count is printed),
    `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the `claude` CLI
    is installed (otherwise a warning).
+   If local `npm test` fails with identifiable Node TAP/spec file locations, the tool prints
+   the original result and reruns only those files, once each in separate serial invocations
+   (`npm test -- --test-concurrency=1 <file>`). It prints each rerun's output and exit code.
+   It accepts the failure only when every isolated rerun passes and the latest `CI` workflow
+   run returned by `gh run list --commit <HEAD>` is completed with conclusion `success` for
+   that exact pre-release HEAD. It then prints
+   `local flaky (passed alone, CI green): <files>`. Missing `gh`, unreadable or absent CI,
+   pending/failed CI, unknown file locations, or any failing rerun still fail and roll back.
+   No retry runs after a green local test run.
+
+   Real-process worker test deadlines use `test/helpers/load.mjs`: the one-minute host load
+   divided by available CPUs, rounded up with a minimum of one (load 25 on 10 CPUs gives
+   three). This scales scheduling allowances while preserving the one-second coder wait
+   and injected backoff behavior. The helper performs no calibration sleep.
 5. **Commit and tag.** One commit `Release vX.Y.Z` with only the changed version files,
    `CHANGELOG.md`, and `README.md` when its Latest line changed, then the annotated tag `vX.Y.Z`,
    whose message is that version's CHANGELOG section.
