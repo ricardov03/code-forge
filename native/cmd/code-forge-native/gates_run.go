@@ -387,6 +387,15 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	if !gates.ResolveCustom(&p, configured) {
 		return 0, false
 	}
+	// B335: {test_classes} in a fixed gate's argv takes the block's own test
+	// classes from gates.test_class_map; an empty filter drops the item.
+	classRules, classErr := gates.ParseClassMap(configured["test_class_map"])
+	if classErr != nil {
+		return gatesError(classErr)
+	}
+	if _, e := gates.WithClasses(p, ""); e != nil {
+		return gatesError(e)
+	}
 	timeout := 300000.0
 	if v, ok := configured["timeout_s"]; ok {
 		n, number := gatesNumber(v)
@@ -694,6 +703,15 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 				if name != "test" {
 					runPlan.Commands[name] = command
 				}
+			}
+		}
+		if gates.HasClasses(runPlan) {
+			filter := ""
+			if o.run != "" {
+				filter = gates.BlockClassFilter(classRules, b)
+			}
+			if runPlan, err = gates.WithClasses(runPlan, filter); err != nil {
+				return err
 			}
 		}
 		// B352: the machine-wide FIFO test queue; full scope waits for the

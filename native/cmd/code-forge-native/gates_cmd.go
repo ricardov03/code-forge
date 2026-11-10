@@ -1,13 +1,17 @@
 package main
 
 import (
+	"errors"
 	"fmt"
+	"io"
 	"math"
 	"os"
 	"strconv"
 	"strings"
 
+	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gates"
+	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/rebase"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -178,10 +182,63 @@ func gatesShort(sha string) string {
 	return sha
 }
 
+const gatesClassesUsage = "usage: code-forge gates classes --run <id> --block <id>"
+
+// gatesClasses (B335) prints the block's test-class filter from
+// gates.test_class_map: the value {test_classes} takes in gates.test. An empty
+// filter prints nothing on stdout and a note on stderr: the full suite runs.
+func gatesClasses(args []string, home string, stdout, stderr io.Writer) int {
+	run, hasRun, okRun := gatesFlag(args, "--run")
+	block, hasBlock, okBlock := gatesFlag(args, "--block")
+	if !hasRun || !hasBlock || !okRun || !okBlock || len(args) != 4 {
+		fmt.Fprintln(stderr, gatesClassesUsage)
+		return 2
+	}
+	if home == "" {
+		fmt.Fprintln(stderr, "gates classes: HOME is not set")
+		return 1
+	}
+	record, err := state.ReadRun(home, run)
+	if err != nil {
+		fmt.Fprintf(stderr, "gates classes: %s\n", err)
+		return 1
+	}
+	entry, found := gatesObj(record.Get("blocks")).Get(block).(ledger.Object)
+	if !found {
+		fmt.Fprintf(stderr, "gates classes: run %s has no block %s\n", run, block)
+		return 1
+	}
+	workspace, _ := record.Get("workspace").(string)
+	loaded, err := config.Load(workspace)
+	if err != nil {
+		var missing *config.Error
+		if !errors.As(err, &missing) || missing.Kind != "not-found" {
+			fmt.Fprintf(stderr, "gates classes: %s\n", err)
+			return 1
+		}
+	}
+	configured, _ := loaded["gates"].(map[string]any)
+	rules, err := gates.ParseClassMap(configured["test_class_map"])
+	if err != nil {
+		fmt.Fprintf(stderr, "gates classes: %s\n", err)
+		return 1
+	}
+	filter := gates.BlockClassFilter(rules, entry)
+	if filter == "" {
+		fmt.Fprintf(stderr, "gates classes: block %s has no test class in gates.test_class_map; {test_classes} is dropped and the full suite runs\n", block)
+		return 0
+	}
+	fmt.Fprintln(stdout, filter)
+	return 0
+}
+
 func runGates(args []string) int {
 	gatesLastMessage = nil
 	gatesBaseChecked = false
 	_ = os.Unsetenv(gatesBaseCheckedEnv)
+	if len(args) > 0 && args[0] == "classes" {
+		return gatesClasses(args[1:], os.Getenv("HOME"), os.Stdout, os.Stderr)
+	}
 	if len(args) == 0 || args[0] != "run" {
 		return gatesHandover(args, hGatesUnportedSubcommand)
 	}

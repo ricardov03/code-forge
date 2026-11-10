@@ -232,3 +232,50 @@ func TestGatesNativeRoute(t *testing.T) {
 		t.Fatalf("detect handover exit=%d, want 127", code)
 	}
 }
+
+// B335: gates run --run --block expands {test_classes} in gates.test to the
+// block's own classes, and drops the item (full suite) for a block with none.
+func TestGatesRunExpandsTestClasses(t *testing.T) {
+	root := t.TempDir()
+	repo, home := filepath.Join(root, "repo"), filepath.Join(root, "home")
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.MkdirAll(repo, 0755))
+	must(os.MkdirAll(filepath.Join(home, ".code-forge", "runs"), 0700))
+	config := `{"gates":{"test":["/bin/sh","-c","printf '[%s]' \"$@\"","sh","run","-Pclass={test_classes}"],"lint":null,"types":null,"format":null,"rerun_failed":0,` +
+		`"test_class_map":[{"glob":"app/src/androidTest/java/**/*Test.kt","strip_prefix":"app/src/androidTest/java/","strip_suffix":".kt"}]}}`
+	must(os.WriteFile(filepath.Join(repo, ".code-forge.yml"), []byte(config), 0600))
+	record := map[string]any{"run_id": "fixture", "workspace": repo, "status": "active", "project": "fixture", "blocks": map[string]any{
+		"B1": map[string]any{"status": "open", "kind": "code", "owned_files": []string{"app/src/androidTest/java/a/b/FooTest.kt", "app/src/main/java/a/b/Foo.kt", "app/src/androidTest/java/a/b/BarTest.kt"}},
+		"B2": map[string]any{"status": "open", "kind": "code", "owned_files": []string{"app/src/main/java/a/b/Foo.kt"}},
+	}}
+	data, _ := json.Marshal(record)
+	must(os.WriteFile(filepath.Join(home, ".code-forge", "runs", "fixture.json"), data, 0600))
+	exe, err := os.Executable()
+	must(err)
+	for _, tc := range []struct{ block, stdout string }{{"B1", "[run][-Pclass=a.b.FooTest,a.b.BarTest]"}, {"B2", "[run]"}} {
+		encoded, _ := json.Marshal([]string{"gates", "run", "--run", "fixture", "--block", tc.block})
+		cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
+		out, err := cmd.CombinedOutput()
+		if err != nil {
+			t.Fatalf("%s: %v: %s", tc.block, err, out)
+		}
+		var result struct {
+			AllOK   bool `json:"allOk"`
+			Results []struct {
+				Gate   string
+				Stdout string
+			}
+		}
+		must(json.Unmarshal(out, &result))
+		if !result.AllOK || len(result.Results) != 4 || result.Results[0].Gate != "test" || result.Results[0].Stdout != tc.stdout {
+			t.Fatalf("%s: want test stdout %q; got %s", tc.block, tc.stdout, out)
+		}
+	}
+}

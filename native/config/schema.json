@@ -363,6 +363,22 @@
           "minimum": 1,
           "default": 10,
           "description": "A block that owns more files than this runs the full suite for a {test_files} gate (reason threshold), not its related tests. Owned files are counted this way. A glob or a directory counts the tracked and new (not ignored) files it covers. A path not created yet counts as 1. Outside git each entry counts 1. A git failure runs the full suite. block open --tests names the test files precisely. With gates run --changed, the threshold counts changed files since the last green gates run --run --block instead."
+        },
+        "test_class_map": {
+          "type": "array",
+          "maxItems": 50,
+          "description": "Rules that turn a block's own test files into a test-class filter for a fixed gate argv item holding {test_classes}, e.g. [gradle, connectedDebugAndroidTest, '-Pandroid.testInstrumentationRunnerArguments.class={test_classes}']. The candidates are the block open --tests paths, else the block's exact owned entries. Each path takes the first rule whose glob matches (* within a segment, ** across segments): strip_prefix and strip_suffix are removed, then each / becomes separator (default .). A path outside every rule is ignored. Classes keep path order, without duplicates, joined with a comma. gates run --run --block replaces {test_classes} inside the item with that filter; when the filter is empty the whole item is dropped and the full suite runs. The token cannot be in argv[0]. code-forge gates classes --run <id> --block <id> prints the filter. Example: [{glob: 'app/src/androidTest/java/**/*Test.kt', strip_prefix: app/src/androidTest/java/, strip_suffix: .kt}] maps app/src/androidTest/java/a/b/FooTest.kt to a.b.FooTest.",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": ["glob"],
+            "properties": {
+              "glob": { "type": "string", "minLength": 1, "description": "Path glob from the project root: * within a segment, ** across segments." },
+              "strip_prefix": { "type": "string", "description": "Removed from the start of a matching path." },
+              "strip_suffix": { "type": "string", "description": "Removed from the end of a matching path, e.g. .kt." },
+              "separator": { "type": "string", "default": ".", "description": "Replaces each / that is left." }
+            }
+          }
         }
       }
     },

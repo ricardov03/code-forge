@@ -1,0 +1,9 @@
+{
+  "status": "open",
+  "owned_files": [
+    "app/src/androidTest/java/a/b/FooTest.kt",
+    "app/src/main/java/a/b/Foo.kt",
+    "app/src/androidTest/java/a/b/BarTest.kt",
+    "docs/android/notes.md"
+  ]
+}
