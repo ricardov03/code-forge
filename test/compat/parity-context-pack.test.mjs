@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { assemblePack, packTokens } from '../../src/context/pack.mjs';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
+import { mergeForbidden } from '../../src/util/forbidden.mjs';
 import { verifyRow } from '../../src/state/signer.mjs';
 import { runParity } from '../helpers/parity.mjs';
 
@@ -95,6 +96,12 @@ test('B290 clause: local context packs match Node bytes, streams and signed writ
     codeForge: { node: process.execPath, bin: CLI, version },
   } });
   assert.equal(speed.stdout, expected.text, 'stdout equals every expected pack byte');
+  // B364: the Go pack's forbidden section names every coder-enforced rule of the Node table.
+  const goLines = speed.stdout.split('\n');
+  const start = goLines.indexOf('## forbidden');
+  assert.ok(start >= 0, 'the Go pack has a ## forbidden section');
+  const ruleLines = goLines.slice(start + 2, goLines.indexOf('safe ways:', start));
+  assert.deepEqual(ruleLines, mergeForbidden().map((e) => `- ${e.id}: ${e.description}`), 'the Go pack lists each coder-enforced rule of the Node table, in order');
   assert.equal(await readFile(file, 'utf8'), expected.text, 'saved pack equals every expected byte');
   const ledgerFile = path.join(f.home, '.code-forge/ledger/sample.jsonl');
   const first = await readFile(ledgerFile, 'utf8');

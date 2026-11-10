@@ -14,10 +14,10 @@
  * owned files, test files when the block has them, worktree path and branch when it has one,
  * code-forge command and version when supplied), the
  * commands (never run; each argv shown POSIX shell-quoted, so a pasted line expands nothing), the
- * built-in proof rule, block brief and acceptance, each rules file, then the lessons file — every file section headed by its
+ * built-in proof rule, the forbidden rules (B364), block brief and acceptance, each rules file, then the lessons file — every file section headed by its
  * source path (an empty file: the heading alone). Over `max_lines` the lessons are cut first, then the
  * rules from the last file backwards, each cut section ending in `[cut: N lines dropped]`; the
- * header, commands, proof rule, brief and acceptance are never cut; all count toward the budget.
+ * header, commands, proof rule, forbidden rules, brief and acceptance are never cut; all count toward the budget.
  *
  * `reviewDigest` is the ONE builder of the review packets' rules digest (`## project rules`, ≤ 60
  * lines, `packet.mjs`): the rules files' text, then a `### lessons` subheading and the lessons.
@@ -43,6 +43,23 @@ import { estimateTokens } from '../review/packet.mjs';
 import { splitLines } from '../review/context.mjs';
 import { redact } from '../util/redact.mjs';
 import { PROOF_RULE } from '../proof/rule.mjs';
+import { mergeForbidden } from '../util/forbidden.mjs';
+
+/**
+ * B364: the `## forbidden` section every pack carries, built from the rule table: one line per
+ * rule the block close's transcript scan enforces for a coder (`mergeForbidden()`: FORBIDDEN, then
+ * the coder-only entries; a project's production markers are covered by `production-marker`), then
+ * the safe ways. Byte-equal to `forbiddenSection` in native/contextpack/pack.go.
+ */
+export const FORBIDDEN_SECTION = Object.freeze([
+  '## forbidden',
+  'the block close scans your transcript for these rules; one hit blocks the block:',
+  ...mergeForbidden().map((entry) => `- ${entry.id}: ${entry.description}`),
+  'safe ways:',
+  '- red run on base code: `git show <base>:<file> > <file>`, or a temp `git worktree add` at the base sha; never git stash',
+  '- clean-up: delete only files you made inside your own worktree, by exact path; never rm -rf',
+  '- run facts (ledger, review state): ask the orchestrator; never read ~/.code-forge/runs or .code-forge/runs',
+]);
 
 /** The pack's line cap when `context.max_lines` is not set. */
 export const DEFAULT_MAX_LINES = 300;
@@ -326,6 +343,7 @@ export function assemblePack({ settings, sources, block }) {
   }
 
   header.push(...splitLines(PROOF_RULE));
+  header.push(...FORBIDDEN_SECTION);
   // The actual task is protected from the optional rules/lessons line budget too.
   header.push(...blockTaskLines(block));
 
