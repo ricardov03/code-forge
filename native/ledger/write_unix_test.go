@@ -143,21 +143,25 @@ func TestNodeAppendDuringGoTornTailRecovery(t *testing.T) {
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-e", `
-import { watch, existsSync } from 'node:fs';
+import fs from 'node:fs';
+import { syncBuiltinESMExports } from 'node:module';
+// Suppress filesystem notifications: this test must work when FSEvents is stalled.
+fs.watch = () => ({ close() {} });
+fs.watchFile = () => {};
+syncBuiltinESMExports();
+import { existsSync, statSync } from 'node:fs';
+import { setTimeout as delay } from 'node:timers/promises';
 import { pathToFileURL } from 'node:url';
 const { appendRow } = await import(pathToFileURL(process.argv[1]));
 const lock = process.argv[2] + '/fixture.append.lock';
-let started = false;
-const watcher = watch(process.argv[2], async () => {
-  if (started || !existsSync(lock)) return;
-  started = true;
-  watcher.close();
-  console.log('contending');
-  for (let i = 0; i < 100; i++) {
-    await appendRow({ event: 'node', id: i }, { slug: 'fixture', rotateAtBytes: 128 * 1024 * 1024 });
-  }
-});
 console.log('ready');
+while (!existsSync(lock)) await delay(1);
+// The torn tail still exists while Go holds its first recovery lock. Observing
+// a later append lock would not prove contention with recovery.
+console.log(statSync(process.argv[2] + '/fixture.jsonl').size > 64 * 1024 * 1024 ? 'contending' : 'missed recovery');
+for (let i = 0; i < 100; i++) {
+  await appendRow({ event: 'node', id: i }, { slug: 'fixture', rotateAtBytes: 128 * 1024 * 1024 });
+}
 `, module, dir)
 	cmd.Env = append(os.Environ(), "HOME="+home)
 	stdout, err := cmd.StdoutPipe()
@@ -172,7 +176,7 @@ console.log('ready');
 	t.Cleanup(func() { _ = cmd.Process.Kill() })
 	scanner := bufio.NewScanner(stdout)
 	if !scanner.Scan() || scanner.Text() != "ready" {
-		t.Fatalf("Node watcher did not start: %s (%v)", &stderr, scanner.Err())
+		t.Fatalf("Node poller did not start: %s (%v)", &stderr, scanner.Err())
 	}
 	for i := 0; i < 100; i++ {
 		if _, err := ledger.AppendRow(dir, "fixture", map[string]any{"event": "go", "id": i}, 128*1024*1024); err != nil {
