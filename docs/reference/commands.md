@@ -23,6 +23,7 @@ This page lists the CLI commands and their usage. It is generated from the CLI. 
 - [pipeline](#pipeline)
 - [plan](#plan)
 - [proof](#proof)
+- [queue](#queue)
 - [remove](#remove)
 - [report](#report)
 - [resolve](#resolve)
@@ -625,6 +626,17 @@ usage: code-forge proof restore <block> --run <r>
 
 ```text
 usage: code-forge proof red-green <block> --run <r> --test <file[::case]> [--mechanism revert|assertion-deletion]
+```
+
+## queue
+
+Show the machine-wide test queue or run a test command inside a queue slot.
+
+```text
+usage: code-forge queue [status] [--json]
+       code-forge queue run [--kind full|changed] [--label X] -- <cmd> [args]
+  The machine-wide FIFO test queue ($HOME/.code-forge/queue). Gates take a slot by themselves;
+  wrap any other test command in `queue run`. CODE_FORGE_TEST_QUEUE=off disables it.
 ```
 
 ## remove

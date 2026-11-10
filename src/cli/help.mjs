@@ -49,6 +49,7 @@ export default async function help(_args, context = {}) {
   process.stdout.write('  block open --brief <file>: a file inside the repository, not inline text.\n');
   process.stdout.write('  block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]: join reviews, run changed gates, close, then optionally merge with --no-ff.\n');
   process.stdout.write('  Configuration fallback entries must be {provider, model} objects, not model-name strings (optional effort).\n');
+  process.stdout.write('\nTest queue: gates wait in one machine-wide FIFO queue (code-forge queue shows it); wrap other test commands in `code-forge queue run -- <cmd>`.\n');
   return 0;
 }
 
