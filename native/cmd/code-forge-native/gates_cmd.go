@@ -6,10 +6,24 @@ import (
 	"os"
 	"strconv"
 	"strings"
+
+	"github.com/ricardov03/code-forge/native/gates"
+	"github.com/ricardov03/code-forge/native/rebase"
+	"github.com/ricardov03/code-forge/native/state"
 )
 
 func init() { routes["gates"] = runGates }
+
+// gatesBaseCheckedEnv tells a Node handover that the stale-base check (B363)
+// already ran in this process; Node removes it before any gate starts.
+const gatesBaseCheckedEnv = "CODE_FORGE_GATES_BASE_CHECKED"
+
+var gatesBaseChecked bool
+
 func gatesHandover(args []string, reason handoverReason) int {
+	if gatesBaseChecked {
+		_ = os.Setenv(gatesBaseCheckedEnv, "1")
+	}
 	code, e := handover(append([]string{"gates"}, args...), reason)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", e)
@@ -31,6 +45,7 @@ func gatesFlag(args []string, key string) (string, bool, bool) {
 type gatesOptions struct {
 	cwd, run, block, slug        string
 	cwdGiven, slugGiven, changed bool
+	autoRebase, allowStaleBase   bool
 	timeout                      float64
 	timeoutGiven                 bool
 }
@@ -76,17 +91,97 @@ func gatesParse(args []string) (gatesOptions, string) {
 		return o, "--run <id> and --block <id> go together, each with a value"
 	}
 	for _, s := range args {
-		if s == "--changed" {
+		switch s {
+		case "--changed":
 			o.changed = true
+		case "--auto-rebase":
+			o.autoRebase = true
+		case "--allow-stale-base":
+			o.allowStaleBase = true
 		}
 	}
 	if o.changed && !r {
 		return o, "--changed needs --run <id> and --block <id>"
 	}
+	if o.autoRebase && o.allowStaleBase {
+		return o, "--auto-rebase and --allow-stale-base cannot go together"
+	}
 	return o, ""
 }
+
+// gatesStaleBase (B363) runs before any gate command: a worktree block whose
+// base branch moved past its recorded base is refused at once with the fix
+// line, rebased first with --auto-rebase, or gated with a WARN line with
+// --allow-stale-base. stop reports that the run ends here with code.
+func gatesStaleBase(o gatesOptions) (code int, stop bool) {
+	gatesBaseChecked = true
+	home := os.Getenv("HOME")
+	stale := gatesStaleLookup(home, o.run, o.block)
+	if stale == nil {
+		return 0, false
+	}
+	fix, moved := gatesStaleText(o.run, o.block, stale)
+	switch {
+	case o.allowStaleBase:
+		fmt.Fprint(os.Stderr, gatesStaleWarnLine(o.run, o.block, stale))
+	case o.autoRebase:
+		result, err := rebase.Run(home, o.run, o.block)
+		if err != nil {
+			gatesErrf("gates run: block %s of run %s: --auto-rebase failed (%s): %s; no gate was run; fix by hand: %s\n", o.block, o.run, moved, strings.ReplaceAll(err.Error(), "\n", " "), fix)
+			return 1, true
+		}
+		fmt.Fprintf(os.Stderr, "gates run: block %s rebased %s → %s (--auto-rebase)\n", o.block, gatesShort(result.OldBase), gatesShort(result.NewBase))
+	default:
+		gatesErrf("gates run: block %s of run %s has a stale base (%s); no gate was run; fix: %s\n", o.block, o.run, moved, fix)
+		return 1, true
+	}
+	return 0, false
+}
+
+// gatesStaleLookup reads the run and reports the block's stale base, or nil
+// when the run cannot be read (the gate runner diagnoses that) or the base is
+// not stale.
+func gatesStaleLookup(home, run, block string) *gates.Stale {
+	record, err := state.ReadRun(home, run)
+	if err != nil {
+		return nil
+	}
+	workspace, _ := record.Get("workspace").(string)
+	return gates.StaleBase(workspace, gatesObj(gatesObj(record.Get("blocks")).Get(block)))
+}
+
+func gatesStaleText(run, block string, stale *gates.Stale) (fix, moved string) {
+	fix = fmt.Sprintf("code-forge block rebase %s --run %s --accept-landed", block, run)
+	moved = fmt.Sprintf("%s moved %s → %s", stale.Branch, gatesShort(stale.Recorded), gatesShort(stale.Tip))
+	return fix, moved
+}
+
+func gatesStaleWarnLine(run, block string, stale *gates.Stale) string {
+	fix, moved := gatesStaleText(run, block, stale)
+	return fmt.Sprintf("gates run: WARN block %s of run %s gates on a stale base (%s) because of --allow-stale-base; fix: %s\n", block, run, moved, fix)
+}
+
+// gatesStaleWarning is the --allow-stale-base WARN line for a stale block, or
+// "" when its base is current. block land (B363) gates a stale base on with it.
+func gatesStaleWarning(home, run, block string) string {
+	if stale := gatesStaleLookup(home, run, block); stale != nil {
+		return gatesStaleWarnLine(run, block, stale)
+	}
+	return ""
+}
+
+// gatesShort is a sha's first 12 characters, or the whole value when shorter.
+func gatesShort(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 func runGates(args []string) int {
 	gatesLastMessage = nil
+	gatesBaseChecked = false
+	_ = os.Unsetenv(gatesBaseCheckedEnv)
 	if len(args) == 0 || args[0] != "run" {
 		return gatesHandover(args, hGatesUnportedSubcommand)
 	}
@@ -114,7 +209,7 @@ func runGates(args []string) int {
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
 				i++
 			}
-		case "--changed", "--json":
+		case "--changed", "--json", "--auto-rebase", "--allow-stale-base":
 		default:
 			// Node's router passes argv through unchanged. Ordinary runs ignore
 			// --cwd=; worktree runs explicitly reject it in gatesNative.
@@ -131,6 +226,10 @@ func runGates(args []string) int {
 	}
 	if o.run == "" && o.block == "" {
 		return gatesHandover(args, hGatesEmptyScope)
+	}
+	if code, stop := gatesStaleBase(o); stop {
+		gatesFinish(args, code)
+		return code
 	}
 	reason := hGatesCustom
 	code, safe := gatesNativeStep(args, o, nil, &reason)

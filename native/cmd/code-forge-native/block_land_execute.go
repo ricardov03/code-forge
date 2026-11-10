@@ -211,6 +211,10 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		started := time.Now()
 		defer func() { gatesMs += time.Since(started).Milliseconds() }()
 		return landCapture(func(s *landStep) int {
+			// B363: land merges onto the new tip and its merge gate tests the
+			// merged tree, so a stale base gates on with the one WARN line that
+			// gates run --allow-stale-base prints (land prints the gate stderr).
+			fmt.Fprint(s.stderr, gatesStaleWarning(home, run, id))
 			code, safe := gatesNativeStep(gateArgs, gateOptions, s)
 			if !safe {
 				return landHandover

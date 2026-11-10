@@ -24,7 +24,10 @@
  *     subdirectory of the tree (then the tree's top level is refused too). Any other `--cwd`, and
  *     any `--cwd=<dir>` argument, is refused (exit 2, nothing run). A tree that is gone, malformed or off its branch is refused
  *     with exit 1 (the message on stderr, no gate run, no row). The JSON output and the `gate.red` and
- *     `gate.done` rows then carry `worktree: <tree path>`.)
+ *     `gate.done` rows then carry `worktree: <tree path>`.
+ *     B363: an open worktree block whose base branch moved past its recorded base runs no gate
+ *     (exit 1, one stderr line with the fix `code-forge block rebase <id> --run <r> --accept-landed`);
+ *     --auto-rebase runs that rebase first, --allow-stale-base gates on the old base with a WARN line.)
  *   gates secret-scan --cwd <dir> --file <path> [--file <path> ...]
  *   gates safe-edit --cwd <dir> --base <sha>
  *   gates scope --cwd <dir> --base <sha>
@@ -34,9 +37,12 @@
 
 import { realpathSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
+import os from 'node:os';
 import path from 'node:path';
 import { writeSafe, redactJSON } from '../util/redact.mjs';
 import { exec } from '../util/exec.mjs';
+import { runNative } from '../util/native.mjs';
+import { gitChildEnv } from '../worker/ticket.mjs';
 import { appendRow } from '../ledger/write.mjs';
 import { loadProjectConfig } from '../config/load.mjs';
 import { customGateMessages, kindGateMessages } from '../config/validate.mjs';
@@ -197,6 +203,58 @@ async function blockWorktree(runId, blockId) {
   return tree ? { tree, workspace: record.workspace } : null;
 }
 
+const SHA = /^[a-f0-9]{40,64}$/;
+
+/**
+ * B363 (parity with the native `gates run`): an open worktree block whose base branch moved past
+ * its recorded base (worktree `base_sha`, else `base_sha`) is refused before any gate runs, rebased
+ * first with --auto-rebase (native helper), or gated with one WARN line with --allow-stale-base.
+ * An equal base, a missing branch or a tip that does not contain the recorded base go on as before.
+ * @param {string} runId @param {string} blockId
+ * @param {{autoRebase: boolean, allowStaleBase: boolean, err: (s: string) => void}} opts
+ * @returns {Promise<number | null>} an exit code to stop with, or null to go on.
+ */
+async function staleBase(runId, blockId, { autoRebase, allowStaleBase, err }) {
+  let record;
+  try {
+    record = await readRun(runId);
+  } catch {
+    return null;
+  }
+  const block = record.blocks?.[blockId];
+  const recorded = block?.worktree?.base_sha || block?.base_sha;
+  const branch = block?.base_branch;
+  if (!block?.worktree || block.status !== 'open' || typeof record.workspace !== 'string' || typeof branch !== 'string' || branch === ''
+    || typeof recorded !== 'string' || !SHA.test(recorded)) return null;
+  const git = (/** @type {string[]} */ argv) => exec(['git', '-C', record.workspace, ...argv], { env: gitChildEnv(), timeoutMs: 10_000 });
+  const head = await git(['rev-parse', '--verify', '--quiet', `refs/heads/${branch}^{commit}`]);
+  const tip = head.stdout.trim();
+  if (head.result !== 'ok' || !SHA.test(tip) || tip === recorded) return null;
+  if ((await git(['merge-base', '--is-ancestor', recorded, tip])).result !== 'ok') return null;
+  const fix = `code-forge block rebase ${blockId} --run ${runId} --accept-landed`;
+  const moved = `${branch} moved ${recorded.slice(0, 12)} → ${tip.slice(0, 12)}`;
+  if (allowStaleBase) {
+    err(`gates run: WARN block ${blockId} of run ${runId} gates on a stale base (${moved}) because of --allow-stale-base; fix: ${fix}\n`);
+    return null;
+  }
+  if (!autoRebase) {
+    err(`gates run: block ${blockId} of run ${runId} has a stale base (${moved}); no gate was run; fix: ${fix}\n`);
+    return 1;
+  }
+  const result = await runNative(['block-rebase-landed', '--home', os.homedir(), '--run', runId, '--block', blockId, '--json']);
+  if (result === null || result.result !== 'ok') {
+    const reason = result === null ? 'it needs the native binary (native/bin/<platform>-<arch>)' : (result.stderr || result.stdout).replace(/\s+/g, ' ').trim();
+    err(`gates run: block ${blockId} of run ${runId}: --auto-rebase failed (${moved}): ${reason}; no gate was run; fix by hand: ${fix}\n`);
+    return 1;
+  }
+  /** @type {{old_base?: unknown, new_base?: unknown}} */
+  let rebased = {};
+  try { rebased = JSON.parse(result.stdout) ?? {}; } catch { /* the rebase ran; only the line loses its shas */ }
+  const short = (/** @type {unknown} */ sha, /** @type {string} */ fallback) => (typeof sha === 'string' && sha !== '' ? sha.slice(0, 12) : fallback);
+  err(`gates run: block ${blockId} rebased ${short(rebased.old_base, recorded.slice(0, 12))} → ${short(rebased.new_base, tip.slice(0, 12))} (--auto-rebase)\n`);
+  return null;
+}
+
 /** @param {string} p @returns {string} the realpath of `p`, or `p` resolved when it does not exist. */
 function realOrResolved(p) {
   try {
@@ -300,6 +358,19 @@ export async function runGatesVerb(args, deps = {}) {
       if (changed && runFlag.value === undefined) {
         err('gates run: --changed needs --run <id> and --block <id>\n');
         return 2;
+      }
+      // B363: the native router sets this after its own base check; it never reaches a gate
+      const baseChecked = process.env.CODE_FORGE_GATES_BASE_CHECKED === '1';
+      delete process.env.CODE_FORGE_GATES_BASE_CHECKED;
+      const autoRebase = args.includes('--auto-rebase');
+      const allowStaleBase = args.includes('--allow-stale-base');
+      if (autoRebase && allowStaleBase) {
+        err('gates run: --auto-rebase and --allow-stale-base cannot go together\n');
+        return 2;
+      }
+      if (!baseChecked && runFlag.value !== undefined && blockFlag.value !== undefined) {
+        const stop = await staleBase(runFlag.value, blockFlag.value, { autoRebase, allowStaleBase, err });
+        if (stop !== null) return stop;
       }
 
       // B62b: a block with a worktree runs its gates in that tree, configured by the main workspace
@@ -505,13 +576,14 @@ export default async function gates(args) {
 export const USAGE =
   'usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n' +
   `  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n` +
-  `  gates run: a gate may be {argv, env}. ${GATE_ENV_RULE}\n`;
+  `  gates run: a gate may be {argv, env}. ${GATE_ENV_RULE}\n` +
+  `  gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n`;
 
 export const SUMMARY = "Detect and run project gates or check secrets, scope, acceptance, and transcripts.";
 
 export const SUB_USAGE = {
   "detect": "usage: code-forge gates detect [--cwd <dir>]\n",
-  "run": "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed]\n",
+  "run": "usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed] [--auto-rebase | --allow-stale-base]\n",
   "secret-scan": "usage: code-forge gates secret-scan [--cwd <dir>] --file <path> [--file <path>...]\n",
   "safe-edit": "usage: code-forge gates safe-edit [--cwd <dir>] --base <sha>\n",
   "scope": "usage: code-forge gates scope [--cwd <dir>] --base <sha>\n",

@@ -120,7 +120,9 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
     const runGates = async () => {
       const started = Date.now();
       try {
-        return await capture((streams) => runGatesVerb(['run', '--run', runId, '--block', id, '--changed', '--cwd', tree.workspace], { ...streams, signal: gateController.signal }));
+        // B363: land merges onto the new tip and its merge gate tests the merged tree, so a stale
+        // base gates on as before with the one WARN line (printed below with the gate's stderr)
+        return await capture((streams) => runGatesVerb(['run', '--run', runId, '--block', id, '--changed', '--cwd', tree.workspace, '--allow-stale-base'], { ...streams, signal: gateController.signal }));
       } finally {
         gatesMs += Date.now() - started;
       }
