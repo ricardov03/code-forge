@@ -133,32 +133,40 @@ async function join(p, deps = {}) {
   return stdout;
 }
 
-test('wait-block wakes within one second of the last completion at the five-second backoff', async () => {
+test('wait-block cancels its five-second backoff on the last completion notification', async (t) => {
   const p = await fixture(['anthropic', 'openai', 'anthropic']);
   announceWorker(p.repo, { pid: process.pid, run: p.runId });
+  let notify;
+  t.mock.method(fs, 'watch', (_dir, callback) => {
+    notify = callback;
+    return { on() { return this; }, close() {} };
+  });
+  syncBuiltinESMExports();
+  t.after(() => { t.mock.restoreAll(); syncBuiltinESMExports(); });
   let time = 0;
-  let finished = 0;
+  const sleeps = [];
+  let cancelled = 0;
   let drained;
   try {
     const output = await join(p, {
       now: () => time,
       sleep: async (ms, signal) => {
+        sleeps.push(ms);
         time += ms;
         if (ms < 5000) return;
-        if (!drained) {
-          drained = p.worker.drain().then(() => { finished = performance.now(); });
-          setTimeout(p.release, 50);
-        }
-        await new Promise((resolve) => {
-          const timer = setTimeout(resolve, ms);
-          signal?.addEventListener('abort', () => { clearTimeout(timer); resolve(undefined); }, { once: true });
+        const interrupted = new Promise((resolve) => {
+          signal.addEventListener('abort', () => { cancelled += 1; resolve(undefined); }, { once: true });
         });
+        p.release();
+        drained = p.worker.drain();
+        await drained;
+        notify('rename', 'last-ticket.done');
+        await interrupted;
       },
     });
-    const returned = performance.now();
     await drained;
-    assert.ok(finished > 0, 'all fake reviews completed during the capped wait');
-    assert.ok(returned - finished < 1000, `join returned ${returned - finished} ms after completion; limit is 1000 ms`);
+    assert.deepEqual(sleeps, [200, 400, 800, 1600, 3200, 5000], 'six product backoff steps reach the cap; no extra poll follows completion');
+    assert.equal(cancelled, 1, 'the completion notification cancels exactly one capped product wait');
     assert.deepEqual(JSON.parse(output).files.map((f) => f.status), ['done', 'done', 'done']);
     assert.equal(output, await join(p), 'completion output is byte-identical to an immediate join');
   } finally { p.release(); if (drained) await drained; retractWorker(p.repo, process.pid); }
