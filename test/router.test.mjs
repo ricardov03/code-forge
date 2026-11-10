@@ -120,6 +120,7 @@ for arg do printf '|%s' "$arg"; done
 printf '\n'
 exit "$status"
 `, { mode: 0o755 });
+  /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, PATH: dir + path.delimiter + process.env.PATH, SNAPSHOT_STATUS: String(snapshot), CODE_FORGE_TEST_SUITE: suite, CODE_FORGE_NO_LEAK: '', MAIN_STATUS: String(main), FINAL_STATUS: String(final) };
   if (suite === null) delete env.CODE_FORGE_TEST_SUITE;
   if (concurrency === null) delete env.CODE_FORGE_TEST_CONCURRENCY;
