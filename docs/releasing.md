@@ -75,6 +75,7 @@ npm run known-fix -- check              # if this release fixes reported errors:
 npm run release -- minor --dry-run      # see the plan and the diffs; writes nothing
 npm run release -- minor                # bump, CHANGELOG, README, checks, commit, tag
 npm publish                             # publish to npm from your machine
+npm run release:site                    # wait for npm, check and deploy the site
 git push origin main --follow-tags      # then push; CI only creates the GitHub release
 ```
 
@@ -145,8 +146,9 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
 3. Complete [the docs block](#the-docs-block), commit its stamp last, and land it on `main`.
 4. `npm run release -- <bump> --dry-run`, and read the README and CHANGELOG diffs.
 5. `npm run release -- <bump>`.
-6. `npm publish`, then `git push origin main --follow-tags`.
-7. Comment the fixed version on each issue, and close it when all its items are done.
+6. `npm publish`, then `npm run release:site` to update the website.
+7. `git push origin main --follow-tags`; merge and push the site's release branch using the printed commands.
+8. Comment the fixed version on each issue, and close it when all its items are done.
 
 ## What it does, in order
 
@@ -200,11 +202,46 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
 5. **Commit and tag.** One commit `Release vX.Y.Z` with only the changed version files,
    `CHANGELOG.md`, and `README.md` when its Latest line changed, then the annotated tag `vX.Y.Z`,
    whose message is that version's CHANGELOG section.
-6. **Next steps.** It prints `npm publish` and then the push command (publish first; the tag push
+6. **Next steps.** It prints `npm publish`, `npm run release:site`, then the push command (publish first; the tag push
    only creates the GitHub release), and the exact `gh release create … --verify-tag` command, with
    the release notes already written to a temp file.
 
 The tool never pushes, never publishes and never creates a GitHub release.
+
+## Release the site
+
+After publishing to npm, run:
+
+```sh
+npm run release:site
+# Optional: another site checkout, or a check without committing or deploying
+npm run release:site -- --site ../code-forge-site --wait-min 20 --dry-run
+```
+
+The command reads the package name and version from `package.json` and requires its local
+`vX.Y.Z` tag. It polls `npm view <name>@<version> version` every 30 seconds until npm serves
+that exact version. `--wait-min` defaults to 20 minutes; a timeout exits 1 with a message and
+changes nothing in the site repository.
+
+Once npm serves the version, it generates data with `scripts/gen-site-data.mjs --tag vX.Y.Z`.
+The site defaults to `../code-forge-site`. A clean detached worktree of the site's HEAD is
+created at `<site>/.code-forge-tmp/release-site-X.Y.Z`; the main site's files, staging index,
+branch and open work stay untouched. The command writes `src/data/site-data.json` there,
+links the main checkout's `node_modules` if available, or runs `npm ci` when dependencies
+are missing. It runs `npm run build:site`, every `gates.custom` entry (including its environment),
+and `gates.test` from that worktree's `.code-forge.yml`.
+
+Any failing gate is named, prevents both the commit and deploy, and leaves the old site live.
+After all gates pass, it creates `release-site/vX.Y.Z`, commits only `src/data/site-data.json`,
+and runs `npx wrangler pages deploy dist --project-name code-forge-ai --branch main`, printing
+the deploy URL. Wrangler must already be authenticated. The temporary worktree is removed
+on success or failure. An existing release branch is refused; a deployment failure keeps
+the commit available for the owner to inspect and retry manually.
+
+`--dry-run` still waits for npm, generates data, installs or links dependencies, builds, and
+runs every gate; it prints the commit and deploy plan with no new branch, commit or deployment.
+The command never pushes. After a real release, run the printed commands to merge
+`release-site/vX.Y.Z` in the main site checkout and push it when your open work allows it.
 
 ## Local site data
 

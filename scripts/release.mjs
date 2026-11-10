@@ -790,6 +790,7 @@ export function main(argv, root = process.cwd()) {
     process.stdout.write(`\n== 6. next steps (nothing was pushed or published) ==\n`);
     process.stdout.write(`  publish to npm first, then push (the tag push only creates the GitHub release; CI never publishes):\n`);
     process.stdout.write(`      npm publish\n`);
+    process.stdout.write(`      npm run release:site\n`);
     process.stdout.write(`      git push origin ${branch} --follow-tags\n`);
     process.stdout.write(`  if the tag run cannot create the GitHub release, create it by hand (notes already written to ${notesFile}):\n`);
     process.stdout.write(`      gh release create ${tag} --title ${tag} --notes-file ${notesFile} --verify-tag\n`);

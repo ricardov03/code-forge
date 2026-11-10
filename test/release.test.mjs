@@ -16,6 +16,7 @@ import { parse } from 'yaml';
 const REPO = path.resolve(path.dirname(fileURLToPath(import.meta.url)), '..');
 const SCRIPT = path.join(REPO, 'scripts', 'release.mjs');
 const PARENT = mkdtempSync(path.join(os.tmpdir(), 'release-test-'));
+writeFileSync(path.join(PARENT, 'package.json'), '{"type":"commonjs"}\n');
 const FAKE_BIN = path.join(PARENT, 'bin');
 let counter = 0;
 
@@ -419,7 +420,7 @@ describe('scripts/release.mjs (B23)', () => {
     assert.equal(tagObject.slice(tagObject.indexOf('\n\n') + 2), 'Release v0.2.0\n\n### Added\n\n- A new verb.\n');
 
     // one path: publish by hand, then push (CI never publishes; the tag push only makes the GitHub release)
-    assert.match(r.stdout, /^ {2}publish to npm first, then push \(the tag push only creates the GitHub release; CI never publishes\):\n {6}npm publish\n {6}git push origin main --follow-tags$/m);
+    assert.match(r.stdout, /^ {2}publish to npm first, then push \(the tag push only creates the GitHub release; CI never publishes\):\n {6}npm publish\n {6}npm run release:site\n {6}git push origin main --follow-tags$/m);
     assert.equal(r.stdout.split('git push origin main --follow-tags').length - 1, 1);
     assert.equal(r.stdout.includes('NPM_TOKEN'), false);
     const cmd = /^ {6}(gh release create .*)$/m.exec(r.stdout)?.[1];
