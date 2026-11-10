@@ -144,6 +144,60 @@ func SafeFile(f string) bool {
 	}
 	return !regexp.MustCompile(`[\x00-\x1f]`).MatchString(f)
 }
+
+var scopeHash = regexp.MustCompile(`^[a-f0-9]{64}$`)
+
+// TextOnlyScope excludes test inputs and declared test obligations. Without a
+// baseline, every exact owned entry must qualify, including missing files.
+func TextOnlyScope(old map[string]any, current ledger.Object, block ledger.Object, listed []string) (Scope, bool) {
+	s := Scope{Kind: "changed", Reason: "text_only", Files: []string{}, Changed: []string{}, Dependents: []string{}}
+	if current == nil || len(old) > 200 || len(Strings(block.Get("test_files"))) > 0 {
+		return s, false
+	}
+	entries, _ := block.Get("owned_files").([]any)
+	kinds, _ := block.Get("owned_kinds").(ledger.Object)
+	keys := map[string]bool{}
+	if old == nil {
+		for _, entry := range entries {
+			file, ok := entry.(string)
+			if !ok || !owned.IsExactEntry(file) || !SafeFile(file) {
+				return s, false
+			}
+			keys[file] = true
+		}
+	}
+	for file, value := range old {
+		hash, ok := value.(string)
+		if !SafeFile(file) || !owned.OwnsFile(entries, kinds, file) || !ok || !scopeHash.MatchString(hash) {
+			return s, false
+		}
+		keys[file] = true
+	}
+	for _, file := range current {
+		keys[file.Key] = true
+	}
+	changed := 0
+	for file := range keys {
+		if old != nil && old[file] == current.Get(file) {
+			continue
+		}
+		if !SafeFile(file) || IsChangedTest(file) {
+			return s, false
+		}
+		switch filepath.Ext(file) {
+		case ".md", ".mdx", ".txt", ".png", ".jpg", ".jpeg", ".gif", ".svg", ".webp":
+		default:
+			return s, false
+		}
+		changed++
+		if Has(listed, file) {
+			s.Changed = append(s.Changed, file)
+		}
+	}
+	sort.Strings(s.Changed)
+	return s, changed > 0
+}
+
 func Baseline(cwd string, block ledger.Object, listed []string) ledger.Object {
 	entries, _ := block.Get("owned_files").([]any)
 	kinds, _ := block.Get("owned_kinds").(ledger.Object)
