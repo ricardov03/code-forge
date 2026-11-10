@@ -362,7 +362,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
 		started := time.Now()
-		failure := landMergeGate(main, tree.Path, workspace, branch, base)
+		failure := landMergeGate(home, run, id, main, tree.Path, workspace, branch, base)
 		if failure.elapsed != nil {
 			mergeGateMs = *failure.elapsed
 		}
@@ -401,7 +401,7 @@ type landMergeResult struct {
 
 // The trial merge and full suite run in an isolated sibling worktree. Cleanup
 // finishes before the checked parent identities are compared or main is merged.
-func landMergeGate(main, treePath, workspace, branch, base string) (result landMergeResult) {
+func landMergeGate(home, run, id, main, treePath, workspace, branch, base string) (result landMergeResult) {
 	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		result.reason = "cannot resolve merge parents"
@@ -473,7 +473,7 @@ func landMergeGate(main, treePath, workspace, branch, base string) (result landM
 			}
 			return code
 		}, nil)
-		result.reason = landSuiteFailure(suite)
+		result.reason = landSuiteFailure(home, run, id, suite)
 	}()
 	if result.reason != "" {
 		return

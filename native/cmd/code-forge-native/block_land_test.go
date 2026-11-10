@@ -273,7 +273,7 @@ func blockLandChain(t *testing.T, shape string) {
 				t.Fatalf("block gates failed: %+v", gate)
 			}
 		}
-		result := landMergeGate(repo, tree, repo, "block-B1", "main")
+		result := landMergeGate(home, run, "B1", repo, tree, repo, "block-B1", "main")
 		if result.reason != "" {
 			t.Fatalf("merge gate failed: %s", result.reason)
 		}

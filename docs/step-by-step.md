@@ -668,6 +668,7 @@ See [review rules](../skill/references/review.md).
 Close checks ownership, current reviews, proof, and the coder's report and transcript.
 **Land** means bring the finished branch into the main checkout.
 `block land --merge` joins reviews, runs changed gates, closes, tests the merged full suite, and merges.
+When the suite fails, land names up to 10 failing tests (TAP `not ok` and the node spec `✖ failing tests:` list, with file:line) and prints `full log: <path>`, the whole suite output saved under the run folder in `land-logs/`.
 
 **Run**
 
