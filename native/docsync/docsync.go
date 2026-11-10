@@ -40,6 +40,9 @@ func (r Result) Line() string {
 	case "synced":
 		return "docs: synced " + r.Version
 	case "kept-packed":
+		if r.Version == "" {
+			return "docs: kept packed unknown"
+		}
 		return "docs: kept packed " + r.Version
 	}
 	return "docs: none (" + r.Reason + ")"
