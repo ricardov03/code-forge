@@ -56,6 +56,38 @@ func TestExecuteDoesNotSearchParentPATH(t *testing.T) {
 	}
 }
 
+func niceOf(t *testing.T, pid int) int {
+	t.Helper()
+	out, err := exec.Command("/bin/ps", "-o", "nice=", "-p", strconv.Itoa(pid)).Output()
+	if err != nil {
+		t.Fatal(err)
+	}
+	n, err := strconv.Atoi(strings.TrimSpace(string(out)))
+	if err != nil {
+		t.Fatal(err)
+	}
+	return n
+}
+
+func TestExecuteRunsTestChildAtNice10(t *testing.T) {
+	// The child waits until its own nice value settles (setpriority lands just
+	// after start), then prints it. A parent already above 10 keeps its value.
+	want := 10
+	if parent := niceOf(t, os.Getpid()); parent > want {
+		want = parent
+	}
+	script := "i=0; while [ $i -lt 50 ]; do n=$(/bin/ps -o nice= -p $$ | tr -d ' '); [ \"$n\" -ge " + strconv.Itoa(want) + " ] && break; i=$((i+1)); sleep 0.1; done; printf %s \"$n\""
+	p := Plan{Commands: map[string]*Command{"test": {Argv: []string{"/bin/sh", "-c", script}}}}
+	results, _, err := Run(context.Background(), p, t.TempDir(), "fixture", 30000, Scope{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := results[0].(interface{ Get(string) any })
+	if r.Get("gate") != "test" || r.Get("ok") != true || r.Get("stdout") != strconv.Itoa(want) {
+		t.Fatalf("test gate child nice: gate=%v ok=%v stdout=%q, want %d", r.Get("gate"), r.Get("ok"), r.Get("stdout"), want)
+	}
+}
+
 func TestExecuteHelper(t *testing.T) {
 	if os.Getenv("CF_PIPE_HELPER") != "1" {
 		return
