@@ -262,7 +262,7 @@ test('B59 (3): outside brief mode no --level is the same usage error; --lines is
   assert.equal(rows[1].level, 'L1');
 });
 
-test('B59 (4): report shows each run as brief or plan, with 17 pinned sections', async () => {
+test('B59 (4): report shows each run as brief or plan, with the SECTION_NAMES sections', async () => {
   const slug = 'b59-report';
   /** @param {Record<string, any>} row */
   const add = (row) => appendRow(row, { slug });
@@ -274,14 +274,13 @@ test('B59 (4): report shows each run as brief or plan, with 17 pinned sections',
     { run: 'r-one', mode: 'brief' },
     { run: 'r-two', mode: 'plan' },
   ]);
-  assert.equal(SECTION_NAMES.length, 17);
   assert.equal(SECTION_NAMES.at(-1), 'specialist_outcomes');
   assert.deepEqual(Object.keys(buildReport(rows).sections), [...SECTION_NAMES]);
   const [code, text] = await cli(runReport, ['--slug', slug]);
   assert.equal(code, 0);
   assert.ok(text.split('== specialist_outcomes ==')[0].endsWith('run mode:\n  run r-one: brief\n  run r-two: plan\n'), text);
-  assert.equal(text.match(/^== /gm)?.length, 17);
-  // the mode is terminal text only: `--json` carries the 17 pinned sections and no mode key
+  assert.deepEqual(text.match(/^== [a-z0-9_]+ ==$/gm)?.map((l) => l.slice(3, -3)), [...SECTION_NAMES]);
+  // the mode is terminal text only: `--json` carries the SECTION_NAMES sections and no mode key
   const [jsonCode, json] = await cli(runReport, ['--slug', slug, '--json']);
   assert.equal(jsonCode, 0);
   assert.deepEqual(Object.keys(JSON.parse(json)), [...SECTION_NAMES]);
@@ -375,7 +374,7 @@ test('B59 (4): run start --mode brief, then report, shows that run as brief', as
   assert.equal(fx.started[0], 0, fx.started[1]);
   const [code, text] = await cli(runReport, ['--slug', 'b59-report-e2e']);
   assert.equal(code, 0, text);
-  assert.equal(text.match(/^== /gm)?.length, 17);
+  assert.deepEqual(text.match(/^== [a-z0-9_]+ ==$/gm)?.map((l) => l.slice(3, -3)), [...SECTION_NAMES]);
   assert.ok(text.split('== specialist_outcomes ==')[0].endsWith('run mode:\n  run r-b59-report-e2e: brief\n'), text);
 });
 
@@ -386,7 +385,7 @@ test('B59 (4): a ledger with no run.start prints no run mode header', async () =
   assert.equal(code, 0, text);
   assert.equal(buildRunModes(await readAllRows(slug)).length, 0);
   assert.doesNotMatch(text, /run mode:/);
-  assert.equal(text.match(/^== /gm)?.length, 17);
+  assert.deepEqual(text.match(/^== [a-z0-9_]+ ==$/gm)?.map((l) => l.slice(3, -3)), [...SECTION_NAMES]);
   // Spend remains before the final specialist section, with no mode lines.
   assert.equal(text.slice(text.indexOf('spend per run')).split('== specialist_outcomes ==')[0], 'spend per run (estimated USD, open blocks included):\n  total: $0.0000 · 0 session(s)\n');
 });

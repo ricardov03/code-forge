@@ -1,5 +1,5 @@
 import assert from 'node:assert/strict';
-import { mkdir, readFile, writeFile } from 'node:fs/promises';
+import { mkdir, readdir, readFile, writeFile } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { runLedger } from '../../src/cli/ledger.mjs';
@@ -207,18 +207,57 @@ test('ledger outcome --scan-git outside a git repo returns a clean error (exit 1
   });
 });
 
-test('report --json prints exactly the SECTION_NAMES keys (17 of them), with specialist_outcomes appended', async () => {
-  await withTempHome(async () => {
-    assert.equal(SECTION_NAMES.length, 17, 'SECTION_NAMES must append specialist_outcomes to the original 16');
+/**
+ * B358: one report contract. Runs `report` three ways on the same ledger and returns the section
+ * names each one carries: --json keys, text `== name ==` headers, --export file names.
+ * @param {string} slug @param {string} home
+ */
+async function reportSectionsThreeWays(slug, home) {
+  const json = captureStream(), text = captureStream(), exported = captureStream(), stderr = captureStream();
+  assert.equal(await runReport(['--slug', slug, '--json'], { stdout: json, stderr }), 0, stderr.text);
+  assert.equal(await runReport(['--slug', slug], { stdout: text, stderr }), 0, stderr.text);
+  const dir = path.join(home, `export-${slug}`);
+  assert.equal(await runReport(['--slug', slug, '--export', dir], { stdout: exported, stderr }), 0, stderr.text);
+  assert.equal(stderr.text, '');
+  return {
+    json: Object.keys(JSON.parse(json.text)),
+    text: text.text.split('\n').filter((l) => /^== [a-z0-9_]+ ==$/.test(l)).map((l) => l.slice(3, -3)),
+    exported: (await readdir(dir)).map((f) => f.replace(/\.json$/, '')).sort(),
+    exportLine: exported.text,
+    dir,
+  };
+}
+
+test('B358: report --json, the text report and report --export carry the same 18 sections, including pace', async () => {
+  await withTempHome(async (home) => {
     await appendRow({ event: 'dispatch', block: 'b1', level: 'L1', lane: 'L0' }, { slug: 'report-proj' });
-    const stdout = captureStream();
-    const code = await runReport(['--slug', 'report-proj', '--json'], { stdout });
-    assert.equal(code, 0);
-    assert.deepEqual(Object.keys(JSON.parse(stdout.text)).sort(), [...SECTION_NAMES].sort());
-    assert.deepEqual(JSON.parse(stdout.text).run_time, {
+    const got = await reportSectionsThreeWays('report-proj', home);
+    assert.equal(got.json.length, 18, `json keys: ${got.json.join(', ')}`);
+    assert.equal(got.json.filter((k) => k === 'pace').length, 1, 'json carries pace exactly once');
+    assert.deepEqual(got.json, [...SECTION_NAMES], 'json keys are SECTION_NAMES, in order');
+    assert.deepEqual(got.text, got.json, 'text headers are the json keys, in order');
+    assert.deepEqual(got.exported, [...got.json].sort(), 'export files are the json keys');
+    assert.equal(got.exportLine, `exported 18 section file(s) to ${got.dir}\n`);
+    const json = captureStream();
+    assert.equal(await runReport(['--slug', 'report-proj', '--json'], { stdout: json }), 0);
+    assert.deepEqual(JSON.parse(json.text).run_time, {
       runs: [], outside_runs: { usd: 0, rows: 1 },
       total: { runs: 0, wallMs: 0, usd: 0, blocks_closed: 0 },
     });
+  });
+});
+
+test('B358 boundary: an empty ledger still carries pace with zero totals in json, text and export', async () => {
+  await withTempHome(async (home) => {
+    await mkdir(ledgerDir(), { recursive: true });
+    await writeFile(ledgerPath('report-empty'), '');
+    const got = await reportSectionsThreeWays('report-empty', home);
+    assert.deepEqual(got.json, [...SECTION_NAMES]);
+    assert.deepEqual(got.text, got.json);
+    assert.deepEqual(got.exported, [...got.json].sort());
+    const pace = JSON.parse(await readFile(path.join(got.dir, 'pace.json'), 'utf8'));
+    assert.deepEqual([pace.blocks, pace.runs, Object.values(pace.total).filter((n) => n !== 0)], [[], [], []]);
+    assert.equal(Object.keys(pace.total).length, 14, 'pace.json total has all 14 metrics');
   });
 });
 
@@ -281,7 +320,7 @@ test('B150 clause 1: spend prints one outside-runs line after real runs and befo
     const stdout = captureStream(), stderr = captureStream();
     assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
     assert.equal(stderr.text, '');
-    assert.equal(stdout.text.match(/^== /gm)?.length, 17);
+    assert.deepEqual(stdout.text.match(/^== [a-z0-9_]+ ==$/gm)?.map((l) => l.slice(3, -3)), [...SECTION_NAMES]);
     assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0].split('== specialist_outcomes ==')[0],
       '  run z-run: $2.0000 · 1 session(s)\n' +
       '  run a-run: $0.5000 · 1 session(s)\n' +
@@ -308,7 +347,7 @@ test('B150 clause 1 boundary: outside-only unknown spend keeps the suffix; no ou
       const stdout = captureStream(), stderr = captureStream();
       assert.equal(await runReport(['--slug', slug], { stdout, stderr }), 0);
       assert.equal(stderr.text, '');
-      assert.equal(stdout.text.match(/^== /gm)?.length, 17);
+      assert.deepEqual(stdout.text.match(/^== [a-z0-9_]+ ==$/gm)?.map((l) => l.slice(3, -3)), [...SECTION_NAMES]);
       assert.equal(stdout.text.split('spend per run (estimated USD, open blocks included):\n')[1].split('run mode:')[0].split('== specialist_outcomes ==')[0], expected);
       assert.equal(stdout.text.split('run (none)').length - 1, 0);
     }

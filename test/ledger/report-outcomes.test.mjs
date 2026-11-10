@@ -26,12 +26,11 @@ test('B154 clause 2: specialist_outcomes is last, with one line per outcome and 
     rows.push({ event: 'outcome', skill: 'calibration', cost_usd: 99, minutes: 99 });
     for (const row of rows) await appendRow(row, { slug: 'specialists' });
     const expected = { outcomes, total: { count: 3, cost_usd: 2, minutes: 20 } };
-    assert.equal(SECTION_NAMES.length, 17);
     assert.deepEqual(SECTION_NAMES.slice(-2), ['run_time', 'specialist_outcomes']);
     assert.deepEqual(buildReport(rows).sections.specialist_outcomes, expected);
     assert.deepEqual(JSON.parse(await report(['--json'])).specialist_outcomes, expected);
     const text = await report([]);
-    assert.equal(text.match(/^== /gm).length, 17);
+    assert.deepEqual(text.match(/^== [a-z0-9_]+ ==$/gm)?.map((l) => l.slice(3, -3)), [...SECTION_NAMES]);
     assert.equal(text.slice(text.indexOf('== specialist_outcomes ==')), '== specialist_outcomes ==\n' +
       'skill | step | status | cost_usd | minutes\n' +
       'logo-designer | design | approved | $1.2500 | 12\n' +
@@ -39,7 +38,7 @@ test('B154 clause 2: specialist_outcomes is last, with one line per outcome and 
       'editor | edit | approved | - | -\n' +
       'total (3 outcomes): $2.0000 | 20 minutes\n');
     const dir = path.join(home, 'export');
-    assert.equal(await report(['--export', dir]), `exported 17 section file(s) to ${dir}\n`);
+    assert.equal(await report(['--export', dir]), `exported ${SECTION_NAMES.length} section file(s) to ${dir}\n`);
     assert.deepEqual(JSON.parse(await readFile(path.join(dir, 'specialist_outcomes.json'), 'utf8')), expected);
   });
 });
