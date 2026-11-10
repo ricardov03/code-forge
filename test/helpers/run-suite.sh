@@ -1,4 +1,8 @@
 #!/bin/sh
+# Test concurrency (B354): node --test runs max(1, cores/4) test files at once by
+# default, so one suite cannot overload a shared machine. An explicit
+# --test-concurrency flag from the caller wins; otherwise the environment
+# variable CODE_FORGE_TEST_CONCURRENCY (a positive integer) sets the count.
 # Validate explicit test paths before starting either leak-check step. Resolve
 # existing ancestors too, so a symlink cannot lead outside the suite's repo.
 # All runner paths below are relative to the caller's working directory, even
@@ -29,6 +33,7 @@ cf_validate_path() {
   ' "$cf_suite_root" "$1" >/dev/null || exit 2
 }
 cf_has_tests=false
+cf_has_concurrency=false
 cf_flag_value=false
 cf_options=true
 cf_arg_count=$#
@@ -44,12 +49,14 @@ while [ "$cf_arg_count" -gt 0 ]; do
   if [ "$cf_options" = true ]; then
     case "$cf_arg" in
       --) cf_options=false; set -- "$@" "$cf_arg"; continue ;;
+      --test-concurrency=*) cf_has_concurrency=true; set -- "$@" "$cf_arg"; continue ;;
       --test-name-pattern|--test-skip-pattern|--test-reporter|--test-reporter-destination|\
       --test-timeout|--test-concurrency|--test-shard|--test-isolation|--experimental-test-isolation|\
       --test-coverage-branches|--test-coverage-functions|--test-coverage-lines|\
       --test-coverage-include|--test-coverage-exclude|--test-global-setup|\
       --test-rerun-failures|--test-random-seed|--experimental-test-tag-filter|\
       --import|--require|-r|--conditions|-C|--loader|--experimental-loader)
+        [ "$cf_arg" = --test-concurrency ] && cf_has_concurrency=true
         cf_flag_value=true; set -- "$@" "$cf_arg"; continue ;;
       -*) set -- "$@" "$cf_arg"; continue ;;
     esac
@@ -126,6 +133,19 @@ fi
 export CODE_FORGE_TEST_SUITE=${CODE_FORGE_TEST_SUITE:-$(node -e 'process.stdout.write(require("node:crypto").randomUUID())')}
 if [ "$cf_has_tests" = false ]; then
   set -- "$@" 'test/**/*.test.mjs'
+fi
+if [ "$cf_has_concurrency" = false ]; then
+  if [ -n "${CODE_FORGE_TEST_CONCURRENCY:-}" ]; then
+    case "$CODE_FORGE_TEST_CONCURRENCY" in
+      *[!0-9]*|0*) echo "run-suite: CODE_FORGE_TEST_CONCURRENCY must be a positive integer" >&2; exit 2 ;;
+    esac
+    cf_concurrency=$CODE_FORGE_TEST_CONCURRENCY
+  else
+    cf_cores=$(node -p 'require("node:os").availableParallelism()') || exit 2
+    cf_concurrency=$((cf_cores / 4))
+    [ "$cf_concurrency" -ge 1 ] || cf_concurrency=1
+  fi
+  set -- "--test-concurrency=$cf_concurrency" "$@"
 fi
 CODE_FORGE_NO_LEAK=snapshot node --import ./test/helpers/isolate.mjs --test test/no-leak.test.mjs && {
   node --import ./test/helpers/isolate.mjs --experimental-test-module-mocks --test "$@"
