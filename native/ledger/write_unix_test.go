@@ -144,14 +144,15 @@ func TestNodeAppendDuringGoTornTailRecovery(t *testing.T) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-e", `
 import fs from 'node:fs';
+import { existsSync, statSync } from 'node:fs';
 import { syncBuiltinESMExports } from 'node:module';
+import { setTimeout as delay } from 'node:timers/promises';
+import { pathToFileURL } from 'node:url';
 // Suppress filesystem notifications: this test must work when FSEvents is stalled.
 fs.watch = () => ({ close() {} });
 fs.watchFile = () => {};
 syncBuiltinESMExports();
-import { existsSync, statSync } from 'node:fs';
-import { setTimeout as delay } from 'node:timers/promises';
-import { pathToFileURL } from 'node:url';
+// Keep this import dynamic so the writer receives the patched builtins.
 const { appendRow } = await import(pathToFileURL(process.argv[1]));
 const lock = process.argv[2] + '/fixture.append.lock';
 console.log('ready');
