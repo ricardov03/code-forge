@@ -116,20 +116,14 @@ func gatesParse(args []string) (gatesOptions, string) {
 func gatesStaleBase(o gatesOptions) (code int, stop bool) {
 	gatesBaseChecked = true
 	home := os.Getenv("HOME")
-	record, err := state.ReadRun(home, o.run)
-	if err != nil {
-		return 0, false // the gate runner diagnoses a missing or unreadable run
-	}
-	workspace, _ := record.Get("workspace").(string)
-	stale := gates.StaleBase(workspace, gatesObj(gatesObj(record.Get("blocks")).Get(o.block)))
+	stale := gatesStaleLookup(home, o.run, o.block)
 	if stale == nil {
 		return 0, false
 	}
-	fix := fmt.Sprintf("code-forge block rebase %s --run %s --accept-landed", o.block, o.run)
-	moved := fmt.Sprintf("%s moved %s → %s", stale.Branch, gatesShort(stale.Recorded), gatesShort(stale.Tip))
+	fix, moved := gatesStaleText(o.run, o.block, stale)
 	switch {
 	case o.allowStaleBase:
-		fmt.Fprintf(os.Stderr, "gates run: WARN block %s of run %s gates on a stale base (%s) because of --allow-stale-base; fix: %s\n", o.block, o.run, moved, fix)
+		fmt.Fprint(os.Stderr, gatesStaleWarnLine(o.run, o.block, stale))
 	case o.autoRebase:
 		result, err := rebase.Run(home, o.run, o.block)
 		if err != nil {
@@ -142,6 +136,38 @@ func gatesStaleBase(o gatesOptions) (code int, stop bool) {
 		return 1, true
 	}
 	return 0, false
+}
+
+// gatesStaleLookup reads the run and reports the block's stale base, or nil
+// when the run cannot be read (the gate runner diagnoses that) or the base is
+// not stale.
+func gatesStaleLookup(home, run, block string) *gates.Stale {
+	record, err := state.ReadRun(home, run)
+	if err != nil {
+		return nil
+	}
+	workspace, _ := record.Get("workspace").(string)
+	return gates.StaleBase(workspace, gatesObj(gatesObj(record.Get("blocks")).Get(block)))
+}
+
+func gatesStaleText(run, block string, stale *gates.Stale) (fix, moved string) {
+	fix = fmt.Sprintf("code-forge block rebase %s --run %s --accept-landed", block, run)
+	moved = fmt.Sprintf("%s moved %s → %s", stale.Branch, gatesShort(stale.Recorded), gatesShort(stale.Tip))
+	return fix, moved
+}
+
+func gatesStaleWarnLine(run, block string, stale *gates.Stale) string {
+	fix, moved := gatesStaleText(run, block, stale)
+	return fmt.Sprintf("gates run: WARN block %s of run %s gates on a stale base (%s) because of --allow-stale-base; fix: %s\n", block, run, moved, fix)
+}
+
+// gatesStaleWarning is the --allow-stale-base WARN line for a stale block, or
+// "" when its base is current. block land (B363) gates a stale base on with it.
+func gatesStaleWarning(home, run, block string) string {
+	if stale := gatesStaleLookup(home, run, block); stale != nil {
+		return gatesStaleWarnLine(run, block, stale)
+	}
+	return ""
 }
 
 // gatesShort is a sha's first 12 characters, or the whole value when shorter.
