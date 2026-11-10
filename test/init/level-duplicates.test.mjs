@@ -94,7 +94,7 @@ test('bad text is re-asked; unchanged prefill still checks default provider and 
     L0: { model: 'claude-sonnet-5', provider: 'anthropic' },
     L1: { model: 'claude-haiku-4-5-20251001' },
     L2: { model: 'claude-opus-5-5' },
-    L3: { model: 'claude-fable-5-1' },
+    L3: { model: 'claude-fable-5-2' },
   });
 });
 
