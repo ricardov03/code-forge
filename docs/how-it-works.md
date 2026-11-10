@@ -1214,7 +1214,7 @@ writes a ticket (pid, process start time, kind, label) and checks the queue unde
   core count and more than 1 GB is free. When nothing holds a slot, the first waiter starts at once:
   the load is then not the queue's, or was left by the run that just ended.
 - A ticket whose process died, or whose pid now belongs to another process, is removed at the next
-  check, so a killed run frees its slot within a second.
+  check, so a killed run frees its slot within 2 seconds.
 
 A waiting gate prints `queued #k (holders: …)` and, once it starts, `queue: admitted after …`;
 `code-forge status` shows `queued #k (gates <block>)` under the run. `code-forge queue` lists

@@ -173,13 +173,10 @@ func (q *Queue) Acquire(ctx context.Context, r Request) (func(), error) {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	now := time.Now()
 	me := Ticket{
-		ID:    fmt.Sprintf("%020d-%d-%d", now.UnixNano(), os.Getpid(), sequence.Add(1)),
 		PID:   os.Getpid(),
 		Start: selfStart(),
 		Kind:  r.Kind, Cwd: cwd, Label: r.Label, Run: r.Run, Block: r.Block,
-		EnqueuedAt: now,
 	}
 	var (
 		admitted bool
@@ -188,15 +185,23 @@ func (q *Queue) Acquire(ctx context.Context, r Request) (func(), error) {
 	)
 	check := func() error {
 		return q.locked(func(st *state) (err error) {
-			admitted, position, holders, err = q.check(&me, st, time.Now())
+			now := time.Now()
+			if me.ID == "" {
+				// Stamped under the lock, so arrival order is lock order.
+				me.ID = fmt.Sprintf("%020d-%d-%d", now.UnixNano(), me.PID, sequence.Add(1))
+				me.EnqueuedAt = now
+			}
+			admitted, position, holders, err = q.check(&me, st, now)
 			return err
 		})
 	}
 	if err := check(); err != nil {
-		q.drop(me.ID)
+		if me.ID != "" {
+			q.drop(me.ID)
+		}
 		return nil, err
 	}
-	wait, waited := q.MinWait, false
+	wait, waited := max(q.MinWait, 10*time.Millisecond), false
 	for !admitted {
 		if !waited && r.OnWait != nil {
 			r.OnWait(position, holders)
