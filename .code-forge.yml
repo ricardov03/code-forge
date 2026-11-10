@@ -22,6 +22,7 @@ harnesses:
 system1:
   fallback: rules
 gates:
+  timeout_s: 3600
   test:
     - sh
     - test/helpers/run-suite.sh
