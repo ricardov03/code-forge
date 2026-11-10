@@ -455,7 +455,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B200: +2 = worker{,.idle_exit_hours} ⇒ 247.
 // B240: +1 = review.silence_timeout_s ⇒ 248.
 // B255: +1 = gates.rerun_failed ⇒ 249.
-const EXPECTED_SCHEMA_PATH_COUNT = 249;
+// B342: +5 = coder.cloud{,.submit,.fetch,.timeout_s,.poll_s} ⇒ 254.
+const EXPECTED_SCHEMA_PATH_COUNT = 254;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;

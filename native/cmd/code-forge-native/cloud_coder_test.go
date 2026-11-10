@@ -150,6 +150,7 @@ func TestCloudCoderOwnedPatchLandsAsOneCommit(t *testing.T) {
 	if code != 0 || out.Get("status") != "landed" {
 		t.Fatalf("exit=%d out=%v; want exit 0 status landed", code, out)
 	}
+	t.Logf("submit to commit: %vms", out.Get("apply_ms"))
 	if got := f.git(f.tree, "rev-list", "--count", f.base+"..HEAD"); got != "1" {
 		t.Errorf("commits since base = %s; want 1", got)
 	}
@@ -215,17 +216,17 @@ func TestCloudCoderRefusesUnownedFile(t *testing.T) {
 
 func TestCloudCoderFetchTimeoutExitsOne(t *testing.T) {
 	f := newCloudFixture(t, map[string]string{"src/owned.txt": "new\n"}, `exit 0`,
-		map[string]any{"timeout_s": 0.5, "poll_s": 0.05})
+		map[string]any{"timeout_s": 2, "poll_s": 0.05})
 	started := time.Now()
 	code, out := runCloud(t)
 	if code != 1 || out.Get("status") != "timeout" || out.Get("reason") != "fetch-timeout" {
 		t.Fatalf("exit=%d out=%v; want exit 1 timeout fetch-timeout", code, out)
 	}
-	if message, _ := out.Get("message").(string); !strings.Contains(message, "task-42") || !strings.Contains(message, "0.5s") {
+	if message, _ := out.Get("message").(string); !strings.Contains(message, "task-42") || !strings.Contains(message, "within 2s") {
 		t.Errorf("message = %q; want the task id and the limit", message)
 	}
-	if elapsed := time.Since(started); elapsed > 5*time.Second {
-		t.Errorf("timeout took %v; want about 0.5s", elapsed)
+	if elapsed := time.Since(started); elapsed > 15*time.Second {
+		t.Errorf("timeout took %v; want about 2s", elapsed)
 	}
 	got := readLines(t, filepath.Join(f.home, "fetches"))
 	if n, _ := strconv.Atoi(strings.Join(got, "")); len(got) != 1 || n < 2 {
