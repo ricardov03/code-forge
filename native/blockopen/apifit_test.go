@@ -62,11 +62,16 @@ func newFitFixture(t *testing.T) fitFixture {
 
 func (f fitFixture) open(t *testing.T, brief string) (Result, error) {
 	t.Helper()
+	return Open(f.options(t, brief))
+}
+
+func (f fitFixture) options(t *testing.T, brief string) Options {
+	t.Helper()
 	acceptance, err := ParseAcceptance([]byte("- clause: screen shows the card\n  tests: [app/ScreenTest.kt]\n"))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return Open(Options{Home: f.home, Run: f.run, ID: "B1", Level: "L2", Owned: []string{"app/Screen.kt"}, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: func(ledger.Object) bool { return true }, BriefPath: "brief.md", BriefData: []byte(brief)})
+	return Options{Home: f.home, Run: f.run, ID: "B1", Level: "L2", Owned: []string{"app/Screen.kt"}, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: func(ledger.Object) bool { return true }, BriefPath: "brief.md", BriefData: []byte(brief)}
 }
 
 func (f fitFixture) status(t *testing.T) any {
@@ -121,6 +126,26 @@ func TestAPIFitExtendsOwnsFileAsAdditive(t *testing.T) {
 	additive, _ := result.Block.Get("additive").([]any)
 	if len(additive) != 1 || object(additive[0]).Get("path") != "ui/Card.kt" || object(additive[0]).Get("symbol") != "Card" {
 		t.Errorf("additive = %v; want one entry {path: ui/Card.kt, symbol: Card}", additive)
+	}
+}
+
+func TestAPIFitAllowMismatchOpensWithNote(t *testing.T) {
+	f := newFitFixture(t)
+	options := f.options(t, "```uses\nui/Card.kt: Card(title, slot)\nui/Missing.kt: Gone(x)\n```\n")
+	options.AllowAPIMismatch = true
+	result, err := Open(options)
+	if err != nil {
+		t.Fatalf("open with --allow-api-mismatch: %v", err)
+	}
+	want := []string{
+		"api-fit: ui/Card.kt Card expects (title,slot) found (title,modifier) (allowed by --allow-api-mismatch)",
+		"api-fit: ui/Missing.kt Gone expects (x) found (no file at base) (allowed by --allow-api-mismatch)",
+	}
+	if len(result.Notes) != 2 || result.Notes[0] != want[0] || result.Notes[1] != want[1] {
+		t.Errorf("notes = %q; want %q", result.Notes, want)
+	}
+	if got := f.status(t); got != "open" {
+		t.Errorf("run record status = %v; want open", got)
 	}
 }
 
