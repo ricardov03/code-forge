@@ -227,8 +227,9 @@ Once npm serves the version, it generates data with `scripts/gen-site-data.mjs -
 The site defaults to `../code-forge-site`. A clean detached worktree of the site's HEAD is
 created at `<site>/.code-forge-tmp/release-site-X.Y.Z`; the main site's files, staging index,
 branch and open work stay untouched. The command writes `src/data/site-data.json` there,
-links the main checkout's `node_modules` if available, or runs `npm ci` when dependencies
-are missing. It runs `npm run build:site`, every `gates.custom` entry (including its environment),
+links installed dependencies from the main checkout's `node_modules` if available, or runs
+`npm ci` when dependencies are missing. Cache directories such as `node_modules/.vite`,
+`.astro`, and `.cache` stay local to the temporary tree. It runs `npm run build:site`, every `gates.custom` entry (including its environment),
 and `gates.test` from that worktree's `.code-forge.yml`.
 
 Any failing gate is named, prevents both the commit and deploy, and leaves the old site live.

@@ -35,6 +35,10 @@ if (a[0] === 'view') {
   log('npm:ci'); fs.mkdirSync('node_modules');
 } else if (a.join(' ') === 'run build:site') {
   log('build:site');
+  for (const cache of ['.vite', '.astro', '.cache', '.vite-temp']) {
+    fs.mkdirSync(path.join('node_modules', cache), {recursive: true});
+    fs.writeFileSync(path.join('node_modules', cache, 'state'), 'new build cache');
+  }
   fs.mkdirSync('dist', {recursive: true}); fs.writeFileSync('dist/index.html', 'new site');
   // A build changing unrelated tracked files must never put them in the release commit.
   fs.writeFileSync('README.md', 'build changed this file');
@@ -130,7 +134,10 @@ if (process.env.FAIL_GATE === name) process.exit(3);
     git(dir, ['commit', '-qm', 'initial']);
   }
   git(work, ['tag', 'v0.21.0']);
-  if (modules) put(site, 'node_modules/local.txt', 'existing dependencies\n');
+  if (modules) {
+    put(site, 'node_modules/local.txt', 'existing dependencies\n');
+    put(site, 'node_modules/.vite/state', 'existing build cache\n');
+  }
   const initialHead = git(site, ['rev-parse', 'HEAD']);
   /** @param {string[]} [args] */
   const run = (args = []) => spawnSync(process.execPath, [NPM, 'run', 'release:site', '--if-present', '--', ...args],

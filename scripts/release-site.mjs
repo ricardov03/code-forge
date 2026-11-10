@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /** Maintainer release automation stays in Node, alongside release.mjs and gen-site-data.mjs. */
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, realpathSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
@@ -103,6 +103,20 @@ function siteGates(tree) {
 /** @param {string} value */
 const quote = (value) => `'${value.replaceAll("'", "'\\''")}'`;
 
+/** Link installed dependencies, keeping root and scoped cache directories local to the tree.
+ * @param {string} source @param {string} target
+ */
+function linkModules(source, target) {
+  mkdirSync(target);
+  for (const entry of readdirSync(source, { withFileTypes: true })) {
+    if (entry.name.startsWith('.') && entry.name !== '.bin') continue;
+    const from = path.join(source, entry.name);
+    const to = path.join(target, entry.name);
+    if (entry.name.startsWith('@') && entry.isDirectory()) linkModules(from, to);
+    else symlinkSync(from, to);
+  }
+}
+
 async function main() {
   try {
     const opts = options(process.argv.slice(2));
@@ -135,7 +149,7 @@ async function main() {
       writeFileSync(path.join(tree, DATA), data);
       const { custom, timeout } = siteGates(tree);
       if (!existsSync(path.join(tree, 'node_modules'))) {
-        if (existsSync(path.join(site, 'node_modules'))) symlinkSync(path.join(site, 'node_modules'), path.join(tree, 'node_modules'), 'dir');
+        if (existsSync(path.join(site, 'node_modules'))) linkModules(path.join(site, 'node_modules'), path.join(tree, 'node_modules'));
         else checked(tree, ['npm', 'ci'], 600000);
       }
       const failures = [];
