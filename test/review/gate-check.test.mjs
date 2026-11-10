@@ -524,3 +524,29 @@ test('B365 guard: an owned file unchanged since base whose current hash also has
   assert.equal(code, 1, text);
   assert.deepEqual(text.split('\n').filter((l) => l.startsWith('block B1 open:')), ['block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs F1']);
 });
+
+test('B365: a block with an empty diff since base whose only review is a no_change result refuses no_changes; a findings refusal of the same bytes refuses as before', async () => {
+  const closeWith = async (/** @type {string} */ slug, /** @type {Array<Record<string, any>>} */ extra) => {
+    const run = `r-${slug}`;
+    const repo = await makeRepo();
+    writeFile(repo, 'src/a.mjs', 'export const a = 1;\n');
+    writeFile(repo, '.gitignore', '.code-forge/\n');
+    await commitAll(repo);
+    const probe = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
+    const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
+    await startRun({ workspace: repo, project: slug, runId: run, workerPid: 4242, writeRow, probe });
+    await openBlock({ runId: run, id: 'B1', level: 'L2', owned: ['src/a.mjs'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
+    const hash = contentHash(repo, 'src/a.mjs');
+    for (const fields of [NO_CHANGE(hash), ...extra.map((row) => ({ ...row, content_hash: hash }))]) await writeSigned(run, writeRow, { block: 'B1', file: 'src/a.mjs', ...fields });
+    writeFile(repo, '.code-forge/coder.log', '$ node --test\n');
+    const stream = capture();
+    const code = await runBlock(['close', 'B1', '--run', run, '--worker-pid', '4242', '--transcript', `${repo}/.code-forge/coder.log`], { stdout: stream, stderr: stream, probe });
+    return /** @type {[number, string]} */ ([code, stream.text]);
+  };
+  const [code, text] = await closeWith('gate-b365-empty', []);
+  assert.equal(code, 1, text);
+  assert.deepEqual(text.split('\n').filter((l) => l.startsWith('block B1 open:')), ['block B1 open: no_changes'], text);
+  const [findingCode, findingText] = await closeWith('gate-b365-empty-finding', [{ event: 'review.result', ticket: 'finding-ticket', status: 'reviewed', approved: false, open: [{ id: 'F1', severity: 'warning' }] }]);
+  assert.equal(findingCode, 1, findingText);
+  assert.deepEqual(findingText.split('\n').filter((l) => l.startsWith('block B1 open:')), ['block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs F1'], findingText);
+});

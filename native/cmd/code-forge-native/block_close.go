@@ -382,7 +382,7 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 		}
 	}
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, id, run, blockObject(record.Get("blocks")), changed, rows, key, inTree)
-	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedFiles(rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
+	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedWork(top, rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
 	if deciding && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
 		return fallback(hCloseDecide)
 	}

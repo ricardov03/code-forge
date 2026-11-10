@@ -1060,6 +1060,35 @@ const noChangeOnly = (row, hash) =>
   row.event === 'review.result' && row.status === 'no_change' && row.content_hash === hash && (row.open === undefined || (Array.isArray(row.open) && row.open.length === 0));
 
 /**
+ * B365: the files of {@link reviewedFiles} that count as the block's reviewed work for the close's
+ * `no_changes` check — less each file whose review rows of its CURRENT bytes (`content_hash` equal
+ * to them, or none) exist and are all `no_change` results ({@link noChangeOnly}): such a file only
+ * says main changed it, not that the block did. A path that cannot be hashed stays (as before).
+ * @param {{repoRoot: string, rows: Array<Record<string, any>>, block: string}} opts @returns {string[]}
+ */
+export function reviewedWorkFiles({ repoRoot, rows, block }) {
+  return reviewedFiles(rows, block).filter((file) => {
+    let hash;
+    try {
+      hash = currentHash(repoRoot, file);
+    } catch {
+      return true;
+    }
+    const atHash = rows.filter((r) => r?.block === block && REVIEW_EVENTS.has(r.event) && typeof r.file === 'string' && safeReviewPath(r.file) === file && (r.content_hash === undefined || r.content_hash === hash));
+    return atHash.length === 0 || !atHash.every((r) => noChangeOnly(r, hash));
+  });
+}
+
+/** @param {string} file @returns {string | null} the repo path {@link reviewedFiles} keys a row by, null when it refuses it */
+const safeReviewPath = (file) => {
+  try {
+    return repoRelativePath(file);
+  } catch {
+    return null;
+  }
+};
+
+/**
  * Reviewed paths back at their base bytes, with no review of those current bytes — B365: or whose
  * every review row of those bytes is a `no_change` result ({@link noChangeOnly}); any other row of
  * the current bytes (an approval, a refusal, a hash-less row) keeps the path. Reuses the

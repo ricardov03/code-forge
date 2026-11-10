@@ -135,3 +135,76 @@ func TestB365UnchangedFileWithFindingIsRefused(t *testing.T) {
 		t.Fatalf("blockers = %v, want [unreviewed src/a.mjs, not_approved src/a.mjs F1]", blockers)
 	}
 }
+
+// B365: a block with an empty diff since base whose only review of its owned
+// file is a no_change result has no reviewed work, so the close refuses
+// no_changes; a refusal row of the same bytes keeps the file as work.
+func TestB365NoChangeOnlyIsNoWork(t *testing.T) {
+	repo := t.TempDir()
+	gitInit := exec.Command("git", "init", "-q", repo)
+	gitInit.Env = gitx.ChildEnv()
+	if out, err := gitInit.CombinedOutput(); err != nil {
+		t.Fatalf("git init: %v: %s", err, out)
+	}
+	if err := os.MkdirAll(filepath.Join(repo, "src"), 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "src/a.mjs"), []byte("export const a = 1;\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"add", "-A"}, {"-c", "user.name=t", "-c", "user.email=t@example.com", "commit", "-q", "-m", "base"}} {
+		if _, err := gitx.Run(repo, args...); err != nil {
+			t.Fatalf("git %v: %v", args, err)
+		}
+	}
+	base, err := gitx.Run(repo, "rev-parse", "HEAD")
+	if err != nil {
+		t.Fatal(err)
+	}
+	base = strings.TrimSpace(base)
+	hash, err := gitx.ContentHash(repo, "src/a.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	key := []byte(strings.Repeat("k", 32))
+	signAll := func(raw ...Row) []Row {
+		rows := []Row{}
+		for _, r := range raw {
+			r["run"], r["block"] = "r1", "B1"
+			signed, err := sign.SignRow(r, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			rows = append(rows, signed)
+		}
+		return rows
+	}
+	block := ledger.Object{{Key: "owned_files", Value: []any{"src/a.mjs"}}}
+	gate := func(rows []Row) ([]string, []string) {
+		changed, err := gitx.ChangedFiles(repo, base)
+		if err != nil {
+			t.Fatal(err)
+		}
+		files, _, err := FileSet(repo, base, "", "B1", block, rows, changed)
+		if err != nil {
+			t.Fatal(err)
+		}
+		work := ReviewedWork(repo, rows, "B1")
+		// the close's own rule (block_ready.go, block_close.go)
+		noChanges := len(files) == 0 && !slices.ContainsFunc(work, func(f string) bool { return Owns("", block, f) })
+		blockers := []string{}
+		for _, b := range Check("r1", "B1", files, rows, key, []any{}, []string{}, noChanges).Blockers {
+			blockers = append(blockers, strings.TrimSpace(b.Code+" "+b.File+" "+b.Finding))
+		}
+		return work, blockers
+	}
+	work, blockers := gate(signAll(noChangeRow(hash)))
+	if len(work) != 0 || !slices.Equal(blockers, []string{"no_changes"}) {
+		t.Fatalf("no_change only: work = %v, blockers = %v; want [], [no_changes]", work, blockers)
+	}
+	refusal := Row{"event": "review.result", "ticket": "finding-ticket", "file": "src/a.mjs", "content_hash": hash, "status": "reviewed", "approved": false, "open": []any{map[string]any{"id": "F1", "severity": "warning"}}}
+	work, blockers = gate(signAll(noChangeRow(hash), refusal))
+	if !slices.Equal(work, []string{"src/a.mjs"}) || !slices.Equal(blockers, []string{"unreviewed src/a.mjs", "not_approved src/a.mjs F1"}) {
+		t.Fatalf("with a refusal: work = %v, blockers = %v; want [src/a.mjs], [unreviewed src/a.mjs, not_approved src/a.mjs F1]", work, blockers)
+	}
+}

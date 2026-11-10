@@ -61,6 +61,32 @@ func noChangeOnly(r Row, hash string) bool {
 	return ok && len(list) == 0
 }
 
+// ReviewedWork (B365, twin of Node's reviewedWorkFiles) is ReviewedFiles less
+// each file whose review rows of its current bytes (that hash, or none) exist
+// and are all no_change results: main changed it, not the block. It is the
+// evidence the close's no_changes check counts. A path that cannot be hashed stays.
+func ReviewedWork(top string, rows []Row, id string) []string {
+	work := []string{}
+	for _, f := range ReviewedFiles(rows, id) {
+		current, err := gitx.ContentHash(top, f)
+		if err != nil {
+			work = append(work, f)
+			continue
+		}
+		matching, onlyNoChange := 0, true
+		for _, r := range rows {
+			if r["block"] == id && reviewEvent(r["event"]) && ReviewPath(Text(r["file"])) == f && (r["content_hash"] == nil || r["content_hash"] == current) {
+				matching++
+				onlyNoChange = onlyNoChange && noChangeOnly(r, current)
+			}
+		}
+		if matching == 0 || !onlyNoChange {
+			work = append(work, f)
+		}
+	}
+	return work
+}
+
 // FileSet reuses one diff and retains reviewed paths that are absent from it,
 // except paths back at their base bytes with no review of those current bytes
 // (B365: or whose every review of those bytes is a no_change result).
