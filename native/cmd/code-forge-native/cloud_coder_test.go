@@ -151,7 +151,7 @@ func TestCloudCoderOwnedPatchLandsAsOneCommit(t *testing.T) {
 	if code != 0 || out.Get("status") != "landed" {
 		t.Fatalf("exit=%d out=%v; want exit 0 status landed", code, out)
 	}
-	t.Logf("submit to commit: %vms", out.Get("apply_ms"))
+	t.Logf("submit to commit: %vms", out.Get("elapsed_ms"))
 	if got := f.git(f.tree, "rev-list", "--count", f.base+"..HEAD"); got != "1" {
 		t.Errorf("commits since base = %s; want 1", got)
 	}

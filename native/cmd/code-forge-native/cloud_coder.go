@@ -164,7 +164,7 @@ func cloudCoder(run, block string) int {
 	}
 	values["task"] = task
 
-	usd := ""
+	usd, fetched := "", false
 	for {
 		out, code, err = cloudExec(ctx, tree, cloud.Fetch, values)
 		if ctx.Err() != nil {
@@ -179,6 +179,7 @@ func cloudCoder(run, block string) int {
 					usd = m[1]
 				}
 			}
+			fetched = true
 			break
 		}
 		select {
@@ -189,7 +190,7 @@ func cloudCoder(run, block string) int {
 			break
 		}
 	}
-	if ctx.Err() != nil {
+	if !fetched {
 		return cloudFail(block, "timeout", "fetch-timeout", fmt.Sprintf("no patch for task %s within %gs (coder.cloud.timeout_s)", task, cloud.TimeoutS))
 	}
 
@@ -219,7 +220,7 @@ func cloudCoder(run, block string) int {
 		return cloudFail(block, "failed", "commit-failed", "git commit failed; the worktree was reset")
 	}
 	head, _ := gitx.Run(tree, "rev-parse", "HEAD")
-	applied := time.Since(started)
+	elapsed := time.Since(started)
 
 	reviews := []any{}
 	failed := 0
@@ -239,7 +240,7 @@ func cloudCoder(run, block string) int {
 		}
 		reviews = append(reviews, row)
 	}
-	result := ledger.Object{{Key: "block", Value: block}, {Key: "status", Value: "landed"}, {Key: "task", Value: task}, {Key: "commit", Value: strings.TrimSpace(head)}, {Key: "files", Value: stringsAny(files)}, {Key: "reviews", Value: reviews}, {Key: "apply_ms", Value: float64(applied.Milliseconds())}}
+	result := ledger.Object{{Key: "block", Value: block}, {Key: "status", Value: "landed"}, {Key: "task", Value: task}, {Key: "commit", Value: strings.TrimSpace(head)}, {Key: "files", Value: stringsAny(files)}, {Key: "reviews", Value: reviews}, {Key: "elapsed_ms", Value: float64(elapsed.Milliseconds())}}
 	if usd != "" {
 		_, code := cloudNode(tree, "ledger", "add", "coder", "--run", run, "--block", block, "--usd", usd, "--note", "cloud coder task "+task)
 		result.Set("usd", usd)
