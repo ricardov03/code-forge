@@ -637,7 +637,7 @@ usage: code-forge remove [<harness>] [--scope project|global]
 
 ## report
 
-Display or export project ledger reports, including per-block pace and run totals. Pace durations are minutes; absent row kinds contribute 0. JSON includes the same pace numbers. Report currently runs in Node; no Go report exists yet.
+Display or export project ledger reports, including per-block pace and run totals. Text, JSON and export carry the same 18 sections; pace comes before run_time. Pace durations are minutes; absent row kinds contribute 0. JSON includes the same pace numbers. Report currently runs in Node; no Go report exists yet.
 
 ```text
 usage: code-forge report --slug <slug> [--json] [--export <dir>]

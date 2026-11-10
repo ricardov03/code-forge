@@ -5,12 +5,14 @@
  * before the final specialist_outcomes section. Spend and mode are text only, never in
  * `--json` or `--export`. The 14th section, `outside_review` (B66), is
  * printed as text lines under its header (`outside review: none`, or one line per PR).
+ * B358: text, `--json` and `--export` all carry exactly the `SECTION_NAMES` sections (18, with
+ * B341's `pace` table before `run_time`); `--json`/`--export` add `flaky` only when a gate recovered one.
  */
 
 import { readdir, stat } from 'node:fs/promises';
 import { writeSafe } from '../util/redact.mjs';
 import { ledgerDir, ledgerPath } from '../ledger/paths.mjs';
-import { buildReport, buildRunModes, buildSpend } from '../ledger/report.mjs';
+import { buildReport, buildRunModes, buildSpend, PACE_COLUMNS } from '../ledger/report.mjs';
 import { exportReportSections } from '../ledger/export.mjs';
 import { outsideReviewLines } from '../ledger/outside-review.mjs';
 import { readAllRows } from '../ledger/write.mjs';
@@ -62,10 +64,8 @@ export async function runReport(args, deps = {}) {
       throw new Error(`no ledger for slug "${slug}"; known slugs: ${slugs.join(', ') || 'none'}`);
     }
     const rows = await readAllRows(slug);
+    // B358: `pace` (B341) is one of the SECTION_NAMES sections, built by `buildReport` like the rest.
     const { sections } = buildReport(rows);
-    // There is no native Go report path yet. Keep pace in this existing Node module:
-    // its aggregation visits the ledger once, independently of the older sections.
-    sections.pace = buildPace(rows);
     /** @type {Map<string | null, Set<string>>} */
     const recovered = new Map();
     for (const row of rows) {
@@ -111,110 +111,7 @@ export async function runReport(args, deps = {}) {
   }
 }
 
-const PACE_COLUMNS = Object.freeze({
-  openToCloseMinutes: 'open->close min', coderMinutes: 'coder min',
-  reviewWaitMinutes: 'review wait min', reviewTimeouts: 'review timeouts',
-  reviewUnavailable: 'unavailable answers', gateMinutes: 'gate min', gateRedCount: 'gate reds',
-  landWaitMinutes: 'close->land min', claimsAfterOpen: 'claims after open', stopCount: 'stops',
-  machineWaitMinutes: 'machine.wait min', deviceMinutes: 'device min',
-  lockWaitMinutes: 'lock wait min', lockWaitCount: 'lock waits',
-});
-
-/** @returns {Record<string, number>} */
-function emptyPace() {
-  return Object.fromEntries(Object.keys(PACE_COLUMNS).map((key) => [key, 0]));
-}
-
-/** @param {unknown} value @returns {number | null} */
-function paceTimestamp(value) {
-  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
-  const ms = Date.parse(value), day = Date.parse(`${value.slice(0, 10)}T00:00:00Z`);
-  return Number.isFinite(ms) && Number.isFinite(day)
-    && new Date(day).toISOString().slice(0, 10) === value.slice(0, 10) ? ms : null;
-}
-
-/** Missing, invalid and reversed endpoints contribute zero. @param {number | null} start @param {number | null} end */
-function paceElapsed(start, end) {
-  return start !== null && end !== null && end >= start ? end - start : 0;
-}
-
-/**
- * One pass over raw ledger rows; only the smaller aggregate maps are visited afterwards.
- * Durations accumulate as milliseconds and convert once, avoiding fractional-minute drift.
- * Open means first dispatch (or block.open); close means latest close in that lifecycle;
- * land.timing is the existing landing row. Claims count in ledger order after open.
- * Review wait comes from each result's queued_at -> started_at; unavailable/timeout
- * counts come from their diagnostic row kinds, never session/result duplicates.
- * Runless rows stay outside runs; run-only waits contribute to run/ledger totals.
- * @param {Array<Record<string, any>>} rows
- */
-export function buildPace(rows) {
-  /** @type {Map<string | null, {run: string | null, metrics: Record<string, number>}>} */
-  const runs = new Map();
-  /** @type {Map<string, {run: string | null, block: string, metrics: Record<string, number>, opened: boolean, start: number | null, close: number | null, land: number | null}>} */
-  const blocks = new Map();
-  /** @param {unknown} ms */
-  const measured = (ms) => typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? ms : 0;
-  for (const row of rows) {
-    if (row.source === 'shadow') continue;
-    const run = typeof row.run === 'string' ? row.run : null;
-    if (!runs.has(run)) runs.set(run, { run, metrics: emptyPace() });
-    let metrics = runs.get(run).metrics;
-    const event = typeof row.event === 'string' ? row.event : '';
-    if (typeof row.block === 'string' && row.block.length > 0) {
-      const key = JSON.stringify([run, row.block]);
-      if (!blocks.has(key)) blocks.set(key, { run, block: row.block, metrics: emptyPace(), opened: false, start: null, close: null, land: null });
-      const block = blocks.get(key);
-      metrics = block.metrics;
-      if (event === 'dispatch' || event === 'block.open') {
-        block.opened = true;
-        block.start ??= paceTimestamp(row.ts);
-        block.close = null;
-        block.land = null;
-      }
-      if (event === 'block.close') block.close = paceTimestamp(row.ts) ?? block.close;
-      if (event === 'land.timing') block.land = paceTimestamp(row.ts) ?? block.land;
-      if (event === 'block.claim' && block.opened) metrics.claimsAfterOpen++;
-    }
-    if (event === 'session' && row.role === 'coder') metrics.coderMinutes += measured(row.duration_ms);
-    if (event === 'review.result') metrics.reviewWaitMinutes += paceElapsed(paceTimestamp(row.queued_at), paceTimestamp(row.started_at));
-    if (event === 'review.session_timeout') metrics.reviewTimeouts++;
-    if (event === 'review.unavailable') metrics.reviewUnavailable++;
-    if (event === 'gate.done') metrics.gateMinutes += measured(row.duration_ms);
-    if (event === 'gate.red') metrics.gateRedCount++;
-    if (event === 'block.stop') metrics.stopCount++;
-    if (event === 'machine.wait') metrics.machineWaitMinutes += measured(row.duration_ms ?? row.wait_ms);
-    if (event.startsWith('device.')) metrics.deviceMinutes += measured(row.duration_ms);
-    if (event === 'lock.wait') {
-      metrics.lockWaitCount++;
-      metrics.lockWaitMinutes += measured(row.wait_ms ?? row.duration_ms);
-    }
-  }
-  /** @param {Record<string, number>} target @param {Record<string, number>} source */
-  const add = (target, source) => {
-    for (const key of Object.keys(PACE_COLUMNS)) target[key] += source[key];
-  };
-  /** @param {Record<string, number>} metrics */
-  const minutes = (metrics) => Object.fromEntries(Object.entries(metrics)
-    .map(([key, value]) => [key, key.endsWith('Minutes') ? value / 60000 : value]));
-  const perBlock = [];
-  for (const block of blocks.values()) {
-    const { run, metrics } = block;
-    metrics.openToCloseMinutes = paceElapsed(block.start, block.close);
-    metrics.landWaitMinutes = paceElapsed(block.close, block.land);
-    add(runs.get(run).metrics, metrics);
-    perBlock.push({ run, block: block.block, ...minutes(metrics) });
-  }
-  const total = emptyPace();
-  const perRun = [];
-  for (const { run, metrics } of runs.values()) {
-    add(total, metrics);
-    perRun.push({ run, ...minutes(metrics) });
-  }
-  return { blocks: perBlock, runs: perRun, total: minutes(total) };
-}
-
-/** @param {ReturnType<typeof buildPace>} pace */
+/** @param {ReturnType<typeof import('../ledger/report.mjs').buildPace>} pace */
 function paceLines(pace) {
   const keys = Object.keys(PACE_COLUMNS);
   /** @param {string | null} run @param {string} block @param {Record<string, any>} metrics */
@@ -298,4 +195,4 @@ export default async function report(args) {
 
 export const USAGE = 'usage: code-forge report --slug <slug> [--json] [--export <dir>]\n';
 
-export const SUMMARY = "Display or export project ledger reports, including per-block pace and run totals. Pace durations are minutes; absent row kinds contribute 0. JSON includes the same pace numbers. Report currently runs in Node; no Go report exists yet.";
+export const SUMMARY = "Display or export project ledger reports, including per-block pace and run totals. Text, JSON and export carry the same 18 sections; pace comes before run_time. Pace durations are minutes; absent row kinds contribute 0. JSON includes the same pace numbers. Report currently runs in Node; no Go report exists yet.";

@@ -408,9 +408,117 @@ function specialistOutcomes(rows) {
   };
 }
 
+/** B341 pace metrics, in column order, with their text-table labels (`src/cli/report.mjs`). */
+export const PACE_COLUMNS = Object.freeze({
+  openToCloseMinutes: 'open->close min', coderMinutes: 'coder min',
+  reviewWaitMinutes: 'review wait min', reviewTimeouts: 'review timeouts',
+  reviewUnavailable: 'unavailable answers', gateMinutes: 'gate min', gateRedCount: 'gate reds',
+  landWaitMinutes: 'close->land min', claimsAfterOpen: 'claims after open', stopCount: 'stops',
+  machineWaitMinutes: 'machine.wait min', deviceMinutes: 'device min',
+  lockWaitMinutes: 'lock wait min', lockWaitCount: 'lock waits',
+});
+
+/** @returns {Record<string, number>} */
+function emptyPace() {
+  return Object.fromEntries(Object.keys(PACE_COLUMNS).map((key) => [key, 0]));
+}
+
+/** @param {unknown} value @returns {number | null} */
+function paceTimestamp(value) {
+  if (typeof value !== 'string' || !/^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}(?:\.\d+)?(?:Z|[+-]\d{2}:\d{2})$/.test(value)) return null;
+  const ms = Date.parse(value), day = Date.parse(`${value.slice(0, 10)}T00:00:00Z`);
+  return Number.isFinite(ms) && Number.isFinite(day)
+    && new Date(day).toISOString().slice(0, 10) === value.slice(0, 10) ? ms : null;
+}
+
+/** Missing, invalid and reversed endpoints contribute zero. @param {number | null} start @param {number | null} end */
+function paceElapsed(start, end) {
+  return start !== null && end !== null && end >= start ? end - start : 0;
+}
+
+/**
+ * B341 `pace` section (B358: a `SECTION_NAMES` section, so --json, text and --export all carry it).
+ * One pass over raw ledger rows; only the smaller aggregate maps are visited afterwards.
+ * Durations accumulate as milliseconds and convert once, avoiding fractional-minute drift.
+ * Open means first dispatch (or block.open); close means latest close in that lifecycle;
+ * land.timing is the existing landing row. Claims count in ledger order after open.
+ * Review wait comes from each result's queued_at -> started_at; unavailable/timeout
+ * counts come from their diagnostic row kinds, never session/result duplicates.
+ * Runless rows stay outside runs; run-only waits contribute to run/ledger totals.
+ * @param {Array<Record<string, any>>} rows
+ */
+export function buildPace(rows) {
+  /** @type {Map<string | null, {run: string | null, metrics: Record<string, number>}>} */
+  const runs = new Map();
+  /** @type {Map<string, {run: string | null, block: string, metrics: Record<string, number>, opened: boolean, start: number | null, close: number | null, land: number | null}>} */
+  const blocks = new Map();
+  /** @param {unknown} ms */
+  const measured = (ms) => typeof ms === 'number' && Number.isFinite(ms) && ms >= 0 ? ms : 0;
+  for (const row of rows) {
+    if (row.source === 'shadow') continue;
+    const run = typeof row.run === 'string' ? row.run : null;
+    if (!runs.has(run)) runs.set(run, { run, metrics: emptyPace() });
+    let metrics = runs.get(run).metrics;
+    const event = typeof row.event === 'string' ? row.event : '';
+    if (typeof row.block === 'string' && row.block.length > 0) {
+      const key = JSON.stringify([run, row.block]);
+      if (!blocks.has(key)) blocks.set(key, { run, block: row.block, metrics: emptyPace(), opened: false, start: null, close: null, land: null });
+      const block = blocks.get(key);
+      metrics = block.metrics;
+      if (event === 'dispatch' || event === 'block.open') {
+        block.opened = true;
+        block.start ??= paceTimestamp(row.ts);
+        block.close = null;
+        block.land = null;
+      }
+      if (event === 'block.close') block.close = paceTimestamp(row.ts) ?? block.close;
+      if (event === 'land.timing') block.land = paceTimestamp(row.ts) ?? block.land;
+      if (event === 'block.claim' && block.opened) metrics.claimsAfterOpen++;
+    }
+    if (event === 'session' && row.role === 'coder') metrics.coderMinutes += measured(row.duration_ms);
+    if (event === 'review.result') metrics.reviewWaitMinutes += paceElapsed(paceTimestamp(row.queued_at), paceTimestamp(row.started_at));
+    if (event === 'review.session_timeout') metrics.reviewTimeouts++;
+    if (event === 'review.unavailable') metrics.reviewUnavailable++;
+    if (event === 'gate.done') metrics.gateMinutes += measured(row.duration_ms);
+    if (event === 'gate.red') metrics.gateRedCount++;
+    if (event === 'block.stop') metrics.stopCount++;
+    if (event === 'machine.wait') metrics.machineWaitMinutes += measured(row.duration_ms ?? row.wait_ms);
+    if (event.startsWith('device.')) metrics.deviceMinutes += measured(row.duration_ms);
+    if (event === 'lock.wait') {
+      metrics.lockWaitCount++;
+      metrics.lockWaitMinutes += measured(row.wait_ms ?? row.duration_ms);
+    }
+  }
+  /** @param {Record<string, number>} target @param {Record<string, number>} source */
+  const add = (target, source) => {
+    for (const key of Object.keys(PACE_COLUMNS)) target[key] += source[key];
+  };
+  /** @param {Record<string, number>} metrics */
+  const minutes = (metrics) => Object.fromEntries(Object.entries(metrics)
+    .map(([key, value]) => [key, key.endsWith('Minutes') ? value / 60000 : value]));
+  const perBlock = [];
+  for (const block of blocks.values()) {
+    const { run, metrics } = block;
+    metrics.openToCloseMinutes = paceElapsed(block.start, block.close);
+    metrics.landWaitMinutes = paceElapsed(block.close, block.land);
+    add(runs.get(run).metrics, metrics);
+    perBlock.push({ run, block: block.block, ...minutes(metrics) });
+  }
+  const total = emptyPace();
+  const perRun = [];
+  for (const { run, metrics } of runs.values()) {
+    add(total, metrics);
+    perRun.push({ run, ...minutes(metrics) });
+  }
+  return { blocks: perBlock, runs: perRun, total: minutes(total) };
+}
+
 /** The exact, ordered set of section keys `buildReport` produces (plan §6.2; B66 appended
  * `outside_review`, B124b `agent_waivers`, B147 `run_time`, B154 `specialist_outcomes` — append new sections, never reorder) —
- * exported so tests (and `--export`) can assert against ONE source of truth instead of a copy. */
+ * exported so tests (and `--export`) can assert against ONE source of truth instead of a copy.
+ * B358 exception: B341's `pace` sits before `run_time`, because `run_time` and `specialist_outcomes`
+ * are the pinned last two (the text report runs `run_time` straight into the spend lines and ends
+ * with `specialist_outcomes`). Every section after `agent_waivers` keeps its relative order. */
 export const SECTION_NAMES = Object.freeze([
   'cost_per_block',
   'lane_distribution',
@@ -427,6 +535,7 @@ export const SECTION_NAMES = Object.freeze([
   'run_stop_counts',
   'outside_review',
   'agent_waivers',
+  'pace',
   'run_time',
   'specialist_outcomes',
 ]);
@@ -461,6 +570,7 @@ export function buildReport(rows) {
         unwaived: r.slice(i + 1).some((undo) => undo.event === 'review.unwaived' && undo.by === 'human'
           && undo.run === row.run && undo.block === row.block && undo.file === row.file && undo.finding === row.finding) }]
       : []),
+    pace: buildPace,
     run_time: (/** @type {any[]} */ r) => runTime(r, costs),
     specialist_outcomes: specialistOutcomes,
   };

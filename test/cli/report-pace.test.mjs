@@ -71,7 +71,8 @@ test('report prints and JSON carries exact fixture pace per block and run, inclu
   };
   assert.deepEqual((await report(rows)).pace, expected, 'all 14 pace numbers for three block entries, two runs and total');
   const text = await report(rows, false);
-  assert.equal(text.split('== pace ==\n')[1]?.split('spend per run')[0], [header,
+  // B358: pace is a SECTION_NAMES section printed before run_time, so its table ends at that header
+  assert.equal(text.split('== pace ==\n')[1]?.split('== run_time ==\n')[0], [header,
     'r1 | A | 20 | 5 | 5 | 2 | 1 | 2.5 | 1 | 5 | 2 | 2 | 1.5 | 2.5 | 1 | 2',
     'r1 | B | 2 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0',
     'r2 | A | 3 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0 | 0',

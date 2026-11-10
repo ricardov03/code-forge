@@ -9,7 +9,7 @@ import { buildReport, SECTION_NAMES } from '../../src/ledger/report.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { captureStream, withTempHome } from './helpers.mjs';
 
-test('exportReportSections writes exactly the SECTION_NAMES files (17), including block times and run_time totals', async () => {
+test('exportReportSections writes exactly the SECTION_NAMES files (18), including block times, pace and run_time totals', async () => {
   await withTempHome(async () => {
     const dir = await mkdtemp(path.join(os.tmpdir(), 'code-forge-export-'));
     try {
@@ -18,8 +18,9 @@ test('exportReportSections writes exactly the SECTION_NAMES files (17), includin
         { event: 'session', run: 'r1', block: 'b1', usd: 2 },
         { event: 'block.close', run: 'r1', block: 'b1', ts: '2026-10-20T00:12:30.000Z' },
       ]);
-      assert.equal(Object.keys(sections).length, 17);
-      assert.equal(SECTION_NAMES.at(-1), 'specialist_outcomes');
+      assert.deepEqual(Object.keys(sections), [...SECTION_NAMES]);
+      assert.deepEqual([Object.keys(sections).length, SECTION_NAMES.at(-1)], [18, 'specialist_outcomes']);
+      assert.deepEqual(sections.pace.total.openToCloseMinutes, 12.5, 'pace is a built section: b1 open->close is 12.5 min');
 
       const paths = await exportReportSections(dir, sections);
 
