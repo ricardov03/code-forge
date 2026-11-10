@@ -32,7 +32,8 @@
  * every ticket without a done marker. A worker that is stopping waits for its in-flight tickets: one
  * whose session the stop killed (an `unavailable` outcome) is abandoned (no done marker) instead of
  * recorded as a failure; one that reached a real outcome is recorded. The new worker's pid is
- * re-pinned in the run record by the orchestrator (`repinWorker`, = `run start --reattach`).
+ * re-pinned in the run record by the orchestrator (`repinWorker`, = `run start --reattach`), or
+ * by the new worker itself at boot when every pinned worker is dead (B355, `pinAtBoot`).
  */
 
 import { spawn as nodeSpawn } from 'node:child_process';
@@ -49,7 +50,7 @@ import { appendRow } from '../ledger/write.mjs';
 import { providerLimit, spawnSession } from '../session/spawn.mjs';
 import { snapshotFor } from '../state/config-snapshot.mjs';
 import { runRecordPath } from '../state/paths.mjs';
-import { processStartTime, readRun, reattachWorker } from '../state/run.mjs';
+import { isSignalablePid, normalizeStartTime, processStartTime, readRun, reattachWorker } from '../state/run.mjs';
 import { loadKey, signRow } from '../state/signer.mjs';
 import { logWarning } from '../util/error-log.mjs';
 import { withLock, tryLock } from '../util/file-locks.mjs';
@@ -1046,6 +1047,8 @@ export async function bootWorker(opts, deps = {}) {
   setRunRoot(runRootDir);
   const key = await loadKey(opts.runId);
   const worker = await createWorker({ runId: opts.runId, repoRoot, cfg, runRootDir, slug: record.project, key, pollMs: opts.pollMs, guardRunRecordPath: runRecordPath(opts.runId) }, deps);
+  /** @type {{from: number[], to: number} | null} */
+  let repinned = null;
   deps.hooks?.beforeLock?.();
   await withLock(`worker-boot:${repoRoot}`, async () => {
     const entries = workerRegistry(repoRoot, { prune: true });
@@ -1058,10 +1061,17 @@ export async function bootWorker(opts, deps = {}) {
     if (entries.some((entry) => entry.live && !entry.worker) || (legacy && legacy.run !== opts.runId) || entries.some((entry) => entry.live && entry.worker?.run !== opts.runId) || count >= limit) {
       throw new WorkerError('worker-running', `review.workers limit ${limit}: a live or unreadable worker entry already serves this queue`);
     }
+    const pins = await pinAtBoot(opts.runId, repoRoot);
+    if (pins.alivePid !== null) throw new WorkerError('worker-running', `another worker (pid ${pins.alivePid}) is pinned to run ${opts.runId} and still alive`);
     // Startup must finish before worker.json signals readiness: an owner may
     // remove HOME immediately after that announcement to stop an orphan worker.
     try {
       await worker.startDaemon();
+      if (pins.deadPids.length > 0) {
+        const write = deps.writeRow ?? ((/** @type {Record<string, any>} */ row) => appendRow(row, { slug: record.project }));
+        await reattachWorker({ runId: opts.runId, workerPid: process.pid, writeRow: write });
+        repinned = { from: pins.deadPids, to: process.pid };
+      }
       worker.announce();
     } catch (error) {
       worker.stop();
@@ -1070,7 +1080,39 @@ export async function bootWorker(opts, deps = {}) {
       throw error;
     }
   });
-  return { ...worker, repoRoot, runRootDir };
+  return { ...worker, repoRoot, runRootDir, repinned };
+}
+
+/**
+ * B355: the run's worker pins as seen by a booting worker (called under the boot lock). A pin is
+ * alive when its pid runs with the pinned start time. Every pin dead ⇒ `deadPids` lists them and
+ * the booting worker re-pins the run to itself (= `run start --reattach`). A live pin that is this
+ * process, or a live worker announced for this run (the registry limit already admitted this boot,
+ * e.g. `run start --add-worker`), changes nothing. Any other live pin ⇒ `alivePid`: the boot is
+ * refused, a pin is never taken from a live process. No pin ⇒ nothing to do.
+ * @param {string} runId @param {string} repoRoot
+ * @returns {Promise<{alivePid: number | null, deadPids: number[]}>}
+ */
+async function pinAtBoot(runId, repoRoot) {
+  const record = await readRun(runId);
+  const pins = record.workers ?? (record.worker ? [record.worker] : []);
+  /** @type {number[]} */
+  const deadPids = [];
+  /** @type {number | null} */
+  let alivePid = null;
+  let served = false;
+  for (const pin of pins) {
+    const startedAt = isSignalablePid(pin?.pid) ? await processStartTime(pin.pid) : null;
+    const pinnedAt = typeof pin?.started_at === 'string' ? normalizeStartTime(pin.started_at) : null;
+    if (startedAt === null || startedAt !== pinnedAt) {
+      deadPids.push(pin?.pid);
+      continue;
+    }
+    if (pin.pid === process.pid || liveWorker(repoRoot, { pid: pin.pid })?.run === runId) served = true;
+    else alivePid ??= pin.pid;
+  }
+  if (alivePid !== null) return { alivePid, deadPids: [] };
+  return { alivePid: null, deadPids: served ? [] : deadPids };
 }
 
 /**

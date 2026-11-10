@@ -358,6 +358,7 @@ After a worker stops, start its replacement in another terminal; leave that term
 code-forge worker --run demo-1
 ```
 
+When the pinned worker is dead, the new worker re-pins the run to itself and prints `worker: re-pinned run <id> from dead pid <old> to <new>`; a pinned worker that is still alive is never replaced.
 Then attach the run to that live worker from your first terminal:
 
 ```sh
