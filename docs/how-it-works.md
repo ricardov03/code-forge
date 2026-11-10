@@ -1197,6 +1197,32 @@ such row.
 A file is **high tier** when S1 risk ≥ 2, when it matches `proof.tiers.high.paths`, or when it is
 security-sensitive. Everything else is **light tier**.
 
+### Test queue
+
+Several coders, the land line and your own terminals can all start tests on one machine. To keep
+them from slowing each other down, every `gates run` that runs a test command first takes a slot
+in one machine-wide FIFO queue under `$HOME/.code-forge/queue/`. There is no daemon: each run
+writes a ticket (pid, process start time, kind, label) and checks the queue under a file lock.
+
+- **Full** runs (full test scope, no reuse) need the whole machine: no other holder.
+- **Changed** runs (changed, related or text-only scope) share up to
+  `N = max(1, min(cores / 4, free GB / 2))` slots. Free memory is what the system can give without
+  swapping: free, speculative, purgeable and file-backed pages on macOS, `MemAvailable` on Linux.
+- Runs start in arrival order. A changed run may pass waiting full runs only while a full run could
+  not start anyway and a changed slot is free, and at most `N` times in a row.
+- While others are queued, a run starts only when the 1-minute load is below the core count and
+  more than 1 GB is free (after 10 minutes with no holder it starts anyway). A lone run on an
+  empty queue starts at once.
+- A ticket whose process died, or whose pid now belongs to another process, is removed at the next
+  check, so a killed run frees its slot within a second.
+
+A waiting gate prints `queued #k (holders: …)` and, once it starts, `queue: admitted after …`;
+`code-forge status` shows `queued #k (gates <block>)` under the run. `code-forge queue` lists
+holders and waiters with their wait times (`--json` for scripts). Wrap any other test command in
+`code-forge queue run [--kind full|changed] -- <cmd>` so it waits its turn too. Processes inside a
+slot get `CODE_FORGE_TEST_QUEUE_HELD=1`, so a nested gate never waits on its parent.
+`CODE_FORGE_TEST_QUEUE=off` turns the queue off.
+
 ### Rules the orchestrator keeps
 
 These come from real runs. The skill states each one (`skill/references/`):
