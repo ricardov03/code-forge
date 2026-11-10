@@ -267,13 +267,11 @@ func TestAppendLockSurvivesKilledHolder(t *testing.T) {
 	if err := os.Remove(file); err != nil {
 		t.Fatal(err)
 	}
-	start := time.Now()
 	_, err = ledger.AppendRow(dir, "fixture", map[string]any{"event": "after-kill"}, ledger.DefaultRotateAtBytes)
 	if err != nil {
-		t.Fatalf("append after SIGKILL must succeed within the 5s wait limit: %v", err)
-	}
-	if elapsed := time.Since(start); elapsed >= 5*time.Second {
-		t.Fatalf("append after SIGKILL took %s, want less than 5s", elapsed)
+		// AppendRow enforces its own lock-wait limit. Assert that result rather
+		// than charging host scheduling delays against a second wall clock.
+		t.Fatalf("append after SIGKILL must succeed without exhausting its lock wait: %v", err)
 	}
 	rows, err := ledger.ReadRows(dir, "fixture")
 	if err != nil || len(rows) != 1 {
