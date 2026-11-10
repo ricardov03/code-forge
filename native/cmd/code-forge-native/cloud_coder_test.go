@@ -114,9 +114,10 @@ func runCloud(t *testing.T) (int, ledger.Object) {
 	}
 	before := os.Stdout
 	os.Stdout = w
-	code := route([]string{"--run", "r-cloud-unit", "--block", "B1"})
-	os.Stdout = before
-	_ = w.Close()
+	code := func() int {
+		defer func() { os.Stdout = before; _ = w.Close() }()
+		return route([]string{"--run", "r-cloud-unit", "--block", "B1"})
+	}()
 	data, err := io.ReadAll(r)
 	_ = r.Close()
 	if err != nil {

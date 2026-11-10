@@ -258,14 +258,17 @@ func cloudCoder(run, block string) int {
 // cloudExec runs one argv template with its placeholders filled in. It runs in
 // the block worktree with no stdin, and is killed when ctx ends.
 func cloudExec(ctx context.Context, dir string, template []string, values map[string]string) (string, int, error) {
+	// One pass, so a value that holds a placeholder is never rewritten.
+	var pairs []string
+	for _, key := range []string{"block", "base", "brief", "task", "patch_out"} {
+		if value, ok := values[key]; ok {
+			pairs = append(pairs, "{"+key+"}", value)
+		}
+	}
+	replacer := strings.NewReplacer(pairs...)
 	argv := make([]string, len(template))
 	for i, arg := range template {
-		for _, key := range []string{"block", "base", "brief", "task", "patch_out"} {
-			if value, ok := values[key]; ok {
-				arg = strings.ReplaceAll(arg, "{"+key+"}", value)
-			}
-		}
-		argv[i] = arg
+		argv[i] = replacer.Replace(arg)
 	}
 	cmd := exec.CommandContext(ctx, argv[0], argv[1:]...)
 	cmd.Dir = dir

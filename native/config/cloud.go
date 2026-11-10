@@ -1,6 +1,9 @@
 package config
 
-import "fmt"
+import (
+	"fmt"
+	"math"
+)
 
 // Defaults for coder.cloud (B342). The schema carries the same values.
 const (
@@ -63,7 +66,7 @@ func CloudCoderFrom(cfg map[string]any) (*CloudCoder, error) {
 			continue
 		}
 		n, ok := value.(float64)
-		if !ok || n <= 0 {
+		if !ok || !(n > 0) || math.IsInf(n, 0) {
 			return nil, fmt.Errorf("coder.cloud.%s must be a number > 0", field.key)
 		}
 		*field.dest = n
