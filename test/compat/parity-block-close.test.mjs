@@ -14,6 +14,7 @@ import { processStartTime } from '../../src/state/run.mjs';
 import { macFor, signRow, verifyRow } from '../../src/state/signer.mjs';
 import { newFileState } from '../../src/review/fixloop.mjs';
 import { saveState } from '../../src/worker/review-state.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
@@ -53,10 +54,7 @@ before(async () => {
   const overlayFile = path.join(scratch, 'overlay.json');
   await writeFile(overlayFile, JSON.stringify({ Replace: overlay }));
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const built = spawnSync('go', ['build', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-overlay', overlayFile, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
-  });
-  assert.equal(built.status, 0, `private binary builds: ${built.stderr}`);
+  linkGoBinary(BINARY, { overlay: overlayFile, ldflags: `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 
 async function fixture(kind = 'clean', config = {}) {

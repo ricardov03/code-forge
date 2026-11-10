@@ -7,6 +7,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 import { signRow } from '../../src/state/signer.mjs';
 import { announceWorker } from '../../src/worker/queue.mjs';
 import { denialOf } from '../../src/review/gate-check.mjs';
@@ -20,10 +21,7 @@ before(async () => {
   await mkdir(path.join(pkg, 'bin'));
   await symlink(path.join(root, 'bin/code-forge.mjs'), path.join(pkg, 'bin/code-forge.mjs'));
   const { version } = JSON.parse(await readFile(path.join(root, 'package.json'), 'utf8'));
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', binary, './cmd/code-forge-native'], {
-    cwd: path.join(root, 'native'), encoding: 'utf8', env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local', CGO_ENABLED: '0' },
-  });
-  assert.equal(build.status, 0, build.stderr);
+  linkGoBinary(binary, { trimpath: true, ldflags: `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 after(() => rm(pkg, { recursive: true, force: true }));
 

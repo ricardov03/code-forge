@@ -11,6 +11,7 @@ import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
 import { announceWorker } from '../../src/worker/queue.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = await realpath(await mkdtemp('/tmp/cf-lfull-'));
@@ -29,9 +30,7 @@ before(async () => {
   await mkdir(path.join(scratch, 'package/bin'));
   await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(scratch, 'package/bin/code-forge.mjs'));
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const built = spawnSync('go', ['build', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'],
-    { cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: isolatedEnv({ ...process.env, CGO_ENABLED: '0', GOPROXY: 'off', GOTOOLCHAIN: 'local' }) });
-  assert.equal(built.status, 0, built.stderr);
+  linkGoBinary(BINARY, { ldflags: `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 
 function git(repo, args) {

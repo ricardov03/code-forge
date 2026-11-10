@@ -104,7 +104,8 @@ describe('run-suite test concurrency', () => {
     const argvLog = path.join(repo, 'argv.log');
     writeFileSync(path.join(repo, 'bin/node'), `#!/bin/sh\nfor a; do printf '%s\\n' "$a"; done >> '${argvLog}'\nprintf '%s\\n' '--END--' >> '${argvLog}'\nexec '${process.execPath}' "$@"\n`);
     chmodSync(path.join(repo, 'bin/node'), 0o755);
-    const run = (/** @type {string[]} */ args, extra = {}) => {
+    const run = (/** @type {string[]} */ args, /** @type {Record<string, string>} */ extra = {}) => {
+      /** @type {Record<string, string | undefined>} */
       const env = { ...process.env, CODE_FORGE_LEAK_GUARD: 'snapshot', PATH: `${path.join(repo, 'bin')}${path.delimiter}${process.env.PATH}`, ...extra };
       delete env.NODE_TEST_CONTEXT;
       if (!('CODE_FORGE_TEST_CONCURRENCY' in extra)) delete env.CODE_FORGE_TEST_CONCURRENCY;

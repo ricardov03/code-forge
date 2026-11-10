@@ -12,6 +12,7 @@ import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
 import { newFileState } from '../../src/review/fixloop.mjs';
 import { saveState } from '../../src/worker/review-state.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete process.env[key];
@@ -33,8 +34,7 @@ before(async () => {
     process.exitCode = await run(process.argv.slice(2), { configureTmpRoot: true });
   }\n`);
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const build = spawnSync('go', ['build', '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], { cwd: path.join(ROOT, 'native'), env, encoding: 'utf8' });
-  assert.equal(build.status, 0, build.stderr);
+  linkGoBinary(BINARY, { ldflags: `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 async function fixture(kind = 'clean', config = {}) {
   const dir = await mkdtemp(path.join(scratch, 'f-'));

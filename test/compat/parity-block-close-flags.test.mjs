@@ -12,6 +12,7 @@ import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { processStartTime } from '../../src/state/run.mjs';
 import { signRow, verifyRow } from '../../src/state/signer.mjs';
 import { announceWorker, enqueue, writeResult } from '../../src/worker/queue.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
@@ -41,10 +42,7 @@ before(async () => {
   const overlay = path.join(scratch, 'overlay.json');
   await writeFile(overlay, JSON.stringify({ Replace: { [source]: overlaySource } }));
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const built = spawnSync('go', ['build', '-overlay', overlay, '-ldflags', `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: childEnv({ ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' }),
-  });
-  assert.equal(built.status, 0, built.stderr);
+  linkGoBinary(BINARY, { overlay, ldflags: `-X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 
 function git(repo, argv) {

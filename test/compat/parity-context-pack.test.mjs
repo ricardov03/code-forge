@@ -11,6 +11,7 @@ import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { mergeForbidden } from '../../src/util/forbidden.mjs';
 import { verifyRow } from '../../src/state/signer.mjs';
 import { runParity } from '../helpers/parity.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
@@ -30,11 +31,7 @@ before(async () => {
   await mkdir(path.dirname(binary), { recursive: true });
   await mkdir(path.join(pkg, 'bin'));
   await symlink(CLI, path.join(pkg, 'bin/code-forge.mjs'));
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-X main.version=${version}`, '-o', binary, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', timeout: 120_000,
-    env: env({ CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: path.join(scratch, 'go-cache') }),
-  });
-  assert.equal(build.status, 0, 'private binary builds: ' + build.stderr);
+  linkGoBinary(binary, { trimpath: true, ldflags: `-X main.version=${version}` });
 });
 
 async function fixture() {
