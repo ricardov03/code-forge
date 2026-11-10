@@ -140,7 +140,13 @@ func TestNodeAppendDuringGoTornTailRecovery(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Second)
+	// No fixed stopwatch: a busy machine may take far longer than an idle one.
+	// The only bound is go test's own -timeout; stop Node shortly before it so a
+	// real hang still fails here with Node's stderr instead of a bare panic.
+	ctx, cancel := context.Background(), context.CancelFunc(func() {})
+	if deadline, ok := t.Deadline(); ok {
+		ctx, cancel = context.WithDeadline(ctx, deadline.Add(-time.Until(deadline)/10))
+	}
 	defer cancel()
 	cmd := exec.CommandContext(ctx, node, "--input-type=module", "-e", `
 import fs from 'node:fs';

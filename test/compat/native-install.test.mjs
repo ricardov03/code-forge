@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { randomUUID } from 'node:crypto';
-import { chmod, cp, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, cp, lstat, mkdir, mkdtemp, readFile, readdir, realpath, rename, rm, symlink, writeFile } from 'node:fs/promises';
 import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
@@ -20,6 +20,33 @@ const goEnv = {
   ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off',
   GOCACHE: path.join(process.env.CODE_FORGE_REAL_HOME ?? os.homedir(), process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build'),
 };
+
+/**
+ * Copy the files npm would consider into a private directory. An entry that
+ * vanishes between readdir and copy belonged to another running test, never to
+ * the package, so it is skipped; every other error fails the test.
+ * @param {{ files: string[] }} pkg
+ */
+async function packageSnapshot(pkg) {
+  const dest = await mkdtemp(path.join(os.tmpdir(), 'native-pack-'));
+  async function copy(relative) {
+    const from = path.join(root, relative), to = path.join(dest, relative);
+    let info;
+    try { info = await lstat(from); } catch (err) { if (err.code === 'ENOENT') return; throw err; }
+    if (info.isDirectory()) {
+      await mkdir(to, { recursive: true });
+      const names = await readdir(from).catch((err) => { if (err.code === 'ENOENT') return []; throw err; });
+      for (const name of names) await copy(path.join(relative, name));
+    } else {
+      await mkdir(path.dirname(to), { recursive: true });
+      await cp(from, to, { verbatimSymlinks: true, preserveTimestamps: true }).catch((err) => { if (err.code !== 'ENOENT') throw err; });
+    }
+  }
+  for (const entry of ['package.json', 'npm-shrinkwrap.json', '.npmrc', '.gitignore', ...pkg.files.filter((f) => !f.startsWith('!'))]) {
+    await copy(entry);
+  }
+  return dest;
+}
 
 async function doctorNative(runDoctor = runDoctorCli) {
   let output = '';
@@ -80,7 +107,15 @@ test('npm installation ships a working host binary, reports its version, and ver
     await writeFile(file, original.replace('session', 'sessioN'));
     assert.deepEqual(await verify(), { rows: 2, ok: false, bad: [{ index: 1, event: 'sessioN', reason: 'mismatch' }] });
 
-    const packed = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: root, encoding: 'utf8', timeout: 120_000 });
+    // Pack a private snapshot of the package: other test files place short-lived
+    // files in the shared native/bin (daemon-client copies the binary there), and
+    // npm pack fails with ENOENT when one vanishes during its walk. The snapshot
+    // keeps the real package.json `files` rules and everything that was present.
+    const snapshot = await packageSnapshot(pkg);
+    let packed;
+    try {
+      packed = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: snapshot, encoding: 'utf8', timeout: 120_000 });
+    } finally { await rm(snapshot, { recursive: true, force: true }); }
     assert.equal(packed.status, 0, packed.stderr);
     const [pack] = JSON.parse(packed.stdout);
     assert.equal(pack.files.filter((f) => f.path === path.relative(root, binary)).length, 1, 'npm must ship exactly one host executable');
