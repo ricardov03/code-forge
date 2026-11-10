@@ -8,6 +8,7 @@
  * (tests, or a power user working from a git checkout of the skill).
  */
 
+import { spawnSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { readFile, stat } from 'node:fs/promises';
 import os from 'node:os';
@@ -108,6 +109,8 @@ async function releaseBullets(file, version) {
  * @param {string} [deps.changelogPath] - packaged release notes, injectable for tests.
  * @param {string} [deps.cwd] - a relative `--source` is resolved against this, never against the
  *   link's own directory (which `symlink()` would otherwise silently use).
+ * @param {() => {line?: string, warning?: string}} [deps.docsSync] - best-effort docs refresh run
+ *   after a successful upgrade (B348); omitted in tests so they never touch the network.
  * @returns {Promise<number>}
  */
 export async function runUpgrade(
@@ -120,6 +123,7 @@ export async function runUpgrade(
     packageVersion = PACKAGE_VERSION,
     changelogPath = CHANGELOG_PATH,
     cwd = process.cwd(),
+    docsSync,
   } = {},
 ) {
   const out = (/** @type {string} */ s) => writeSafe(stdout, stripVTControlCharacters(s));
@@ -171,7 +175,28 @@ export async function runUpgrade(
       out(`What's new in ${packageVersion}:\n${bullets.join('\n')}\nFull notes: ${notesPath}\n`);
     }
   }
+  if (docsSync) {
+    let synced;
+    try {
+      synced = docsSync();
+    } catch (e) {
+      synced = { warning: e instanceof Error ? e.message : String(e) };
+    }
+    if (synced.line) out(`${synced.line}\n`);
+    if (synced.warning) err(`upgrade: warning: docs sync skipped (${synced.warning})\n`);
+  }
   return 0;
+}
+
+/** Run the packaged Go `docs sync`; it always exits 0 unless it cannot run at all.
+ * @returns {{line?: string, warning?: string}}
+ */
+export function nativeDocsSync() {
+  const binary = path.join(__dirname, '..', '..', 'native', 'bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+  const result = spawnSync(binary, ['docs', 'sync'], { encoding: 'utf8', timeout: 10000 });
+  if (result.error) return { warning: result.error.message };
+  if (result.status !== 0) return { warning: `exit ${result.status ?? result.signal}` };
+  return { line: result.stdout.trim() };
 }
 
 /**
@@ -179,7 +204,7 @@ export async function runUpgrade(
  * @returns {Promise<number>}
  */
 export default async function upgrade(args) {
-  return runUpgrade(args, {});
+  return runUpgrade(args, { docsSync: nativeDocsSync });
 }
 
 export const SUMMARY = "Refresh recorded skill installations from a skill source.";
