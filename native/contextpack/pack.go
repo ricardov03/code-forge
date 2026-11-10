@@ -15,6 +15,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
@@ -287,6 +288,21 @@ func argvText(argv []string) string {
 	return strings.Join(tokens, " ")
 }
 
+// forbiddenSection is B364's section, byte-equal to FORBIDDEN_SECTION in src/context/pack.mjs:
+// one line per coder-enforced rule of gatecheck.CoderRules, then the safe ways.
+func forbiddenSection() []string {
+	out := []string{"## forbidden", "the block close scans your transcript for these rules; one hit blocks the block:"}
+	for _, r := range gatecheck.CoderRules {
+		out = append(out, "- "+r.ID+": "+r.Description)
+	}
+	return append(out,
+		"safe ways:",
+		"- red run on base code: `git show <base>:<file> > <file>`, or a temp `git worktree add` at the base sha; never git stash",
+		"- clean-up: delete only files you made inside your own worktree, by exact path; never rm -rf",
+		"- run facts (ledger, review state): ask the orchestrator; never read ~/.code-forge/runs or .code-forge/runs",
+	)
+}
+
 // Keep the built-in rule byte-equal to src/proof/rule.mjs.
 const proofRule = "## proof rule (code-forge)\n" +
 	"- Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure. `code-forge proof red-green` does this with the block's base code.\n" +
@@ -435,6 +451,7 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 		}
 	}
 	header = append(header, split(proofRule)...)
+	header = append(header, forbiddenSection()...)
 	task := []string{}
 	if hasBrief {
 		task = append(task, "## brief: "+briefPath)
