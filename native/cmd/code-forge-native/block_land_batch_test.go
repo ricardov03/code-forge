@@ -41,6 +41,7 @@ func newLandBatchFixture(t *testing.T, bad int) *landBatchFixture {
 	// records main's tree too, so a failed trial cannot briefly reach main.
 	command := `if [ "$#" -gt 0 ]; then printf '%s\n' "$PWD" >> "$HOME/changed-calls"; exit 0; fi
 printf '%s\n' "$PWD" >> "$HOME/full-calls"
+if [ -f "$HOME/slow-full" ]; then sleep 30; fi
 git -C "$HOME/main-path" rev-parse HEAD >> "$HOME/observed-main"
 for id in B1 B2 B3; do
   if [ -f "$id.mjs" ] && [ "$(cat "$id.mjs")" = bad ]; then printf 'not ok 1 - %s integration contract\n' "$id"; exit 1; fi
@@ -103,6 +104,11 @@ func (f *landBatchFixture) git(dir string, args ...string) string {
 
 func (f *landBatchFixture) land(ids ...string) (int, string) {
 	f.t.Helper()
+	return f.landWith(nil, ids...)
+}
+
+func (f *landBatchFixture) landWith(extra []string, ids ...string) (int, string) {
+	f.t.Helper()
 	capture, err := os.CreateTemp(f.home, "output-")
 	if err != nil {
 		f.t.Fatal(err)
@@ -110,7 +116,8 @@ func (f *landBatchFixture) land(ids ...string) (int, string) {
 	out, stderr := os.Stdout, os.Stderr
 	os.Stdout, os.Stderr = capture, capture
 	defer func() { os.Stdout, os.Stderr = out, stderr }()
-	code := runBlockLand(append(ids, "--run", "r-batch-unit"))
+	args := append(append(append([]string{}, ids...), "--run", "r-batch-unit"), extra...)
+	code := runBlockLand(args)
 	if err := capture.Close(); err != nil {
 		f.t.Fatal(err)
 	}
@@ -291,7 +298,8 @@ func TestBlockLandBatchNativeScopeReusesFinalTree(t *testing.T) {
 }
 
 func TestBlockLandBatchRefusesUncheckedBlock(t *testing.T) {
-	for _, shape := range []string{"open", "unclaimed", "dirty", "duplicate"} {
+	reasons := map[string]string{"open": "block B2 must be closed before batch landing", "unclaimed": "block B2 has unclaimed changes", "dirty": "block B2 worktree is dirty or unreadable"}
+	for _, shape := range []string{"open", "unclaimed", "dirty"} {
 		t.Run(shape, func(t *testing.T) {
 			f := newLandBatchFixture(t, 0)
 			ids := []string{"B1", "B2", "B3"}
@@ -308,8 +316,6 @@ func TestBlockLandBatchRefusesUncheckedBlock(t *testing.T) {
 				entry.Set("owned_files", []any{})
 			case "dirty":
 				f.write(filepath.Join(f.repo, ".code-forge/worktrees/B2"), "B2.mjs", "uncommitted\n")
-			case "duplicate":
-				ids[2] = "B2"
 			}
 			blocks.Set("B2", entry)
 			record.Set("blocks", blocks)
@@ -317,9 +323,132 @@ func TestBlockLandBatchRefusesUncheckedBlock(t *testing.T) {
 				t.Fatal(err)
 			}
 			code, output := f.land(ids...)
-			if code == 0 || !strings.Contains(output, "B2") || f.git(f.repo, "rev-parse", "main") != f.base || len(f.lines("full-calls")) != 0 {
+			if code == 0 || !strings.Contains(output, "block B2 land stopped at preflight: "+reasons[shape]) || f.git(f.repo, "rev-parse", "main") != f.base || len(f.lines("full-calls")) != 0 {
 				t.Errorf("%s refusal: exit=%d main=%s full calls=%d, want nonzero, unchanged main, 0 suites: %s", shape, code, f.git(f.repo, "rev-parse", "main"), len(f.lines("full-calls")), output)
 			}
 		})
+	}
+}
+
+func (f *landBatchFixture) entry(id string) ledger.Object {
+	f.t.Helper()
+	record, err := state.ReadRun(f.home, "r-batch-unit")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return blockObject(blockObject(record.Get("blocks")).Get(id))
+}
+
+func (f *landBatchFixture) heads() map[string]string {
+	f.t.Helper()
+	heads := map[string]string{}
+	for _, id := range []string{"B1", "B2", "B3"} {
+		heads[id] = f.git(f.repo, "rev-parse", "block-"+id)
+	}
+	return heads
+}
+
+func (f *landBatchFixture) onMain(sha string) bool {
+	f.t.Helper()
+	cmd := exec.Command("git", "merge-base", "--is-ancestor", sha, "main")
+	cmd.Dir, cmd.Env = f.repo, gitx.ChildEnv()
+	return cmd.Run() == nil
+}
+
+func TestBlockLandBatchDuplicateIDUsage(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	heads := f.heads()
+	code, output := f.land("B1", "B2", "B1")
+	if code != 2 || !strings.Contains(output, landArguments) {
+		t.Errorf("duplicate ids exit=%d, want usage exit 2: %s", code, output)
+	}
+	if f.git(f.repo, "rev-parse", "main") != f.base || !reflect.DeepEqual(f.heads(), heads) || len(f.lines("full-calls")) != 0 {
+		t.Errorf("duplicate ids must not change main, branches or run a suite: %s", output)
+	}
+}
+
+func TestBlockLandBatchNotLandedKeepsOriginalBranch(t *testing.T) {
+	f := newLandBatchFixture(t, 2)
+	before := f.heads()
+	code, output := f.land("B1", "B2", "B3")
+	if code != 1 || !strings.Contains(output, "block B3 not landed (after B2)") {
+		t.Fatalf("exit=%d, want 1 with B3 not landed after B2: %s", code, output)
+	}
+	f.checkMain([]string{"B1"})
+	// B3 was rebased onto a trial merge holding failing B2; it must return to
+	// its own commits and recorded base, never carrying B2 or an off-main base.
+	if got := f.git(f.repo, "rev-parse", "block-B3"); got != before["B3"] {
+		t.Errorf("B3 head=%s, want original %s", got, before["B3"])
+	}
+	b3 := f.entry("B3")
+	if b3.Get("base_sha") != f.base || blockObject(b3.Get("worktree")).Get("base_sha") != f.base || b3.Get("landed") != nil {
+		t.Errorf("B3 record base=%v worktree base=%v landed=%v, want original %s and not landed", b3.Get("base_sha"), blockObject(b3.Get("worktree")).Get("base_sha"), b3.Get("landed"), f.base)
+	}
+	for _, id := range []string{"B1", "B2", "B3"} {
+		entry := f.entry(id)
+		if base := blockString(entry.Get("base_sha")); !f.onMain(base) {
+			t.Errorf("%s recorded base %s is not on main", id, base)
+		}
+		if (entry.Get("landed") != nil) != (id == "B1") || entry.Get("status") != "closed" {
+			t.Errorf("%s status=%v landed=%v, want closed and landed only for B1", id, entry.Get("status"), entry.Get("landed"))
+		}
+	}
+}
+
+func TestBlockLandBatchMarksLandedAndRefusesRelanding(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	ids := []string{"B1", "B2", "B3"}
+	if code, output := f.land(ids...); code != 0 {
+		t.Fatalf("batch exit=%d, want 0: %s", code, output)
+	}
+	main := f.git(f.repo, "rev-parse", "main")
+	for _, id := range ids {
+		entry := f.entry(id)
+		landed := blockObject(entry.Get("landed"))
+		if entry.Get("status") != "closed" || landed == nil || landed.Get("main") != main || !f.onMain(blockString(landed.Get("merge"))) {
+			t.Errorf("%s status=%v landed=%v, want closed with landed main=%s", id, entry.Get("status"), entry.Get("landed"), main)
+		}
+	}
+	calls := len(f.lines("full-calls"))
+	code, output := f.land("B1", "B2")
+	if code == 0 || !strings.Contains(output, "block B1 has already landed") || strings.Contains(output, "block B1 landed\n") || strings.Contains(output, "block B2 landed\n") {
+		t.Errorf("relanding exit=%d, want refusal naming B1: %s", code, output)
+	}
+	if f.git(f.repo, "rev-parse", "main") != main || len(f.lines("full-calls")) != calls {
+		t.Errorf("relanding must not move main or run a suite: %s", output)
+	}
+}
+
+func TestBlockLandBatchTimeoutRefusesWholeBatch(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	before := f.heads()
+	f.write(f.home, "slow-full", "1\n")
+	code, output := f.landWith([]string{"--max", "10s"}, "B1", "B2", "B3")
+	if code != 1 || !strings.Contains(output, "block B1 B2 B3 land stopped at merge-gate: batch timed out after 10000ms") {
+		t.Errorf("timeout exit=%d, want 1 refusing the whole batch: %s", code, output)
+	}
+	if strings.Contains(output, "not landed") || strings.Contains(output, "block B1 landed") || strings.Contains(output, "deadline exceeded") {
+		t.Errorf("a timeout must name no culprit and land nothing: %s", output)
+	}
+	if f.git(f.repo, "rev-parse", "main") != f.base {
+		t.Errorf("main moved after a timeout: %s", output)
+	}
+	if got := f.heads(); !reflect.DeepEqual(got, before) {
+		t.Errorf("block heads=%v, want original %v after a refused batch", got, before)
+	}
+}
+
+func TestBlockLandBatchRefusesZeroMaxAtPreflight(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	before := f.heads()
+	code, output := f.landWith([]string{"--max", "0s"}, "B1", "B2", "B3")
+	if code == 0 || !strings.Contains(output, "land stopped at preflight: --max must be a positive duration") {
+		t.Errorf("--max 0s exit=%d, want preflight refusal: %s", code, output)
+	}
+	if f.git(f.repo, "rev-parse", "main") != f.base || !reflect.DeepEqual(f.heads(), before) || len(f.lines("changed-calls")) != 0 {
+		t.Errorf("--max 0s must not rebase, gate or merge: %s", output)
+	}
+	if code, output := f.landWith([]string{"--max", "soon"}, "B1", "B2"); code != 2 {
+		t.Errorf("--max soon exit=%d, want usage 2: %s", code, output)
 	}
 }

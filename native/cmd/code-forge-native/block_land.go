@@ -138,11 +138,14 @@ func runBlockLand(args []string) int {
 	}
 	if len(pos) > 1 {
 		// A stray trailing argument remains a usage error. Batch operands must
-		// name blocks in this run, preserving the legacy malformed-call output.
+		// name distinct blocks in this run, preserving the legacy malformed-call
+		// output.
+		seen := map[string]bool{}
 		for _, id := range pos {
-			if blockObject(record.Get("blocks")).Get(id) == nil {
+			if seen[id] || blockObject(record.Get("blocks")).Get(id) == nil {
 				return fail(landArguments, 2)
 			}
+			seen[id] = true
 		}
 		return landBatch(flags, home, run, pos)
 	}

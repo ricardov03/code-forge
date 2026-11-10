@@ -18,10 +18,11 @@ import (
 
 type landBatchBlock struct {
 	id, branch, head, base string
+	original, entryBase    string // head and entry base_sha before the batch
 	tree                   *proof.Tree
 	entry                  ledger.Object
 	gatesMs                int64
-	fullScope              bool
+	fullScope, rebased     bool
 }
 
 // Batch landing consumes closed blocks. Keep the open/join/close single-block
@@ -43,7 +44,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	code := 0
 	// Closed-block checks cannot use proof.WithSlot (it requires open blocks).
 	// The run lock protects the recorded bases and claims through publication.
-	err := state.WithRunLock(home, run, func() error {
+	err := state.WithRunLock(home, run, func() (failed error) {
 		record, err := state.ReadRun(home, run)
 		if err != nil {
 			return err
@@ -59,6 +60,14 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		}
 		if holder := blockString(blockObject(record.Get("proof_lock")).Get("block")); holder != "" {
 			return fmt.Errorf("proof.busy: %s", holder)
+		}
+		maxMs := int64(1800000)
+		if raw, ok := flags["max"].(string); ok {
+			n, valid := landMax(raw)
+			if !valid || n <= 0 {
+				return fmt.Errorf("--max must be a positive duration like 90s, 30m or 1500ms")
+			}
+			maxMs = n
 		}
 		workspace := blockString(record.Get("workspace"))
 		main, err := gitx.RepoTop(workspace)
@@ -87,6 +96,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			entry := blockObject(blocks.Get(id))
 			if entry.Get("status") != "closed" {
 				return fmt.Errorf("block %s must be closed before batch landing", id)
+			}
+			if entry.Get("landed") != nil {
+				return fmt.Errorf("block %s has already landed", id)
 			}
 			tree, err := proof.BlockTree(workspace, entry)
 			if err != nil {
@@ -123,8 +135,20 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err != nil {
 				return err
 			}
-			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, base: blockString(wt.Get("base_sha")), tree: tree, entry: entry})
+			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry})
 		}
+		// Block i is rebased onto trial prefix i. Only prefixes that reach main
+		// may remain as a base: every later block returns to its original head
+		// and base, so a not-landed branch never carries another block's commits.
+		keep := 0
+		defer func() {
+			if err := landBatchRestore(home, run, record, blocks, batch, keep); err != nil {
+				fmt.Fprintln(os.Stderr, "cannot restore not-landed block:", err)
+				if failed == nil {
+					failed = err
+				}
+			}
+		}()
 		temporary, err := os.MkdirTemp(filepath.Dir(batch[0].tree.Path), ".merge-gate-")
 		if err != nil {
 			return err
@@ -144,10 +168,6 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			return err
 		}
 		added = true
-		maxMs := int64(1800000)
-		if raw, ok := flags["max"].(string); ok {
-			maxMs, _ = landMax(raw)
-		}
 		ctx, cancel := context.WithTimeout(context.Background(), time.Duration(maxMs)*time.Millisecond)
 		defer cancel()
 		prefixes := []string{strings.TrimSpace(mainHead)}
@@ -164,6 +184,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				_, _ = gitx.Run(block.tree.Path, "rebase", "--abort")
 				return fmt.Errorf("block %s rebase failed: %s", block.id, landGitError(err, err.Error()))
 			}
+			block.rebased = true
 			block.head, err = gitx.Run(block.tree.Path, "rev-parse", "HEAD")
 			if err != nil {
 				return err
@@ -240,11 +261,23 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			tested[n] = reason
 			return reason
 		}
+		// A suite cut short by the deadline says nothing about any block, so a
+		// timeout refuses the whole batch instead of naming a culprit.
+		timedOut := func() error {
+			if ctx.Err() == nil {
+				return nil
+			}
+			stoppedID = strings.Join(ids, " ")
+			return fmt.Errorf("batch timed out after %dms during the full suite; no block landed", maxMs)
+		}
 		green, culprit, failure := len(batch), -1, ""
 		if reason := testPrefix(len(batch)); reason != "" {
 			low, high := 0, len(batch)
 			failure = reason
 			for high-low > 1 {
+				if err := timedOut(); err != nil {
+					return err
+				}
 				mid := (low + high) / 2
 				if reason := testPrefix(mid); reason != "" {
 					high, failure = mid, reason
@@ -253,6 +286,9 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				}
 			}
 			green, culprit = low, high-1
+		}
+		if err := timedOut(); err != nil {
+			return err
 		}
 		// Only a prefix with an actual green result may advance main. The
 		// original checkout and all rebased branches must still match our trial.
@@ -272,7 +308,18 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if _, err := gitx.Run(main, "merge", "--ff-only", "--", prefixes[green]); err != nil {
 				return err
 			}
+			// Single-block land keeps a landed block "closed" (dependents test
+			// for that status); the landed marker stops a second landing.
+			for i, block := range batch[:green] {
+				block.entry.Set("landed", ledger.Object{{Key: "merge", Value: prefixes[i+1]}, {Key: "main", Value: prefixes[green]}})
+				blocks.Set(block.id, block.entry)
+			}
+			record.Set("blocks", blocks)
+			if err := state.SaveRun(home, record); err != nil {
+				return err
+			}
 		}
+		keep = green
 		for i, block := range batch {
 			row := ledger.Object{{Key: "event", Value: "land.timing"}, {Key: "block", Value: block.id}, {Key: "join_ms", Value: 0}, {Key: "gates_ms", Value: block.gatesMs}, {Key: "merge_gate_ms", Value: 0}, {Key: "parallel", Value: false}}
 			if _, err := state.WriteSigned(home, run, row); err != nil {
@@ -310,6 +357,48 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		return stop(err.Error())
 	}
 	return code
+}
+
+// landBatchRestore returns every block after index keep to the head and base
+// it had before the batch. A branch the user moved since is left untouched.
+func landBatchRestore(home, run string, record, blocks ledger.Object, batch []*landBatchBlock, keep int) error {
+	changed := false
+	var failed error
+	for i, block := range batch {
+		if i <= keep || !block.rebased {
+			continue
+		}
+		head, err := gitx.Run(block.tree.Path, "rev-parse", "HEAD")
+		if err != nil || strings.TrimSpace(head) != strings.TrimSpace(block.head) || gatesCleanTree(block.tree.Path) == "" {
+			if failed == nil {
+				failed = fmt.Errorf("block %s changed during the batch; its rebased base is not on main", block.id)
+			}
+			continue
+		}
+		if _, err := gitx.Run(block.tree.Path, "reset", "--hard", "--quiet", block.original); err != nil {
+			if failed == nil {
+				failed = err
+			}
+			continue
+		}
+		tip := blockString(block.entry.Get("base_sha"))
+		block.entry.Set("base_sha", block.entryBase)
+		wt := blockObject(block.entry.Get("worktree"))
+		wt.Set("base_sha", block.base)
+		block.entry.Set("worktree", wt)
+		blocks.Set(block.id, block.entry)
+		block.head, block.rebased, changed = block.original, false, true
+		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: block.id}, {Key: "old_base", Value: tip}, {Key: "new_base", Value: block.base}, {Key: "worktree", Value: true}}); err != nil {
+			return err
+		}
+	}
+	if changed {
+		record.Set("blocks", blocks)
+		if err := state.SaveRun(home, record); err != nil && failed == nil {
+			failed = err
+		}
+	}
+	return failed
 }
 
 func landBatchCheckout(main, head, branch string) error {
