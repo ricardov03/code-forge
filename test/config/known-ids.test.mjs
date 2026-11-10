@@ -11,17 +11,17 @@ import {
 
 // ── Catalog shape ────────────────────────────────────────────────────────────
 
-test('KNOWN_IDS holds EXACTLY the brief §3 ids (2026-09-24): 4 Anthropic, 3 OpenAI, 4 xAI — 11 total', () => {
-  assert.deepEqual(KNOWN_IDS.anthropic, ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1']);
+test('KNOWN_IDS holds EXACTLY the brief §3 ids (2026-09-24) plus B353 claude-fable-5-2: 5 Anthropic, 3 OpenAI, 4 xAI — 12 total', () => {
+  assert.deepEqual(KNOWN_IDS.anthropic, ['claude-haiku-4-5-20251001', 'claude-sonnet-5', 'claude-opus-5-5', 'claude-fable-5-1', 'claude-fable-5-2']);
   assert.deepEqual(KNOWN_IDS.openai, ['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra']);
   assert.deepEqual(KNOWN_IDS.xai, ['grok-4.7', 'grok-4.7-build-fast', 'grok-4.6', 'grok-4.5']);
   assert.deepEqual(Object.keys(KNOWN_IDS), ['anthropic', 'openai', 'xai']);
-  assert.equal(ALL_KNOWN_IDS.length, 11);
+  assert.equal(ALL_KNOWN_IDS.length, 12);
 });
 
-test('index-alignment contract: LINT_PATTERNS[i] is the catalog pattern for ALL_KNOWN_IDS[i], for every i < 11', () => {
+test('index-alignment contract: LINT_PATTERNS[i] is the catalog pattern for ALL_KNOWN_IDS[i], for every i < 12', () => {
   for (const [i, id] of ALL_KNOWN_IDS.entries()) {
-    assert.equal(LINT_PATTERNS[i].test(id), true, `LINT_PATTERNS[${i}] must match ALL_KNOWN_IDS[${i}] ("${id}") — the first 11 patterns are index-aligned with the catalog`);
+    assert.equal(LINT_PATTERNS[i].test(id), true, `LINT_PATTERNS[${i}] must match ALL_KNOWN_IDS[${i}] ("${id}") — the first 12 patterns are index-aligned with the catalog`);
   }
 });
 
@@ -48,8 +48,8 @@ test('knownIdsForProvider("openai") is strictEqual to the real catalog array ref
 
 // ── LINT_PATTERNS (C1): counted, not just "non-empty" ───────────────────────
 
-test('LINT_PATTERNS has exactly 11 catalog patterns + 4 vendor-prefix patterns + 1 alias pattern = 16, with NO g/y flags (which would carry lastIndex state across calls)', () => {
-  assert.equal(LINT_PATTERNS.length, 16);
+test('LINT_PATTERNS has exactly 12 catalog patterns + 4 vendor-prefix patterns + 1 alias pattern = 17, with NO g/y flags (which would carry lastIndex state across calls)', () => {
+  assert.equal(LINT_PATTERNS.length, 17);
   for (const pattern of LINT_PATTERNS) {
     assert.equal(pattern.global, false, `pattern ${pattern} must not have the 'g' flag`);
     assert.equal(pattern.sticky, false, `pattern ${pattern} must not have the 'y' flag`);
@@ -68,9 +68,9 @@ function matchingPatternIndices(text) {
   return indices;
 }
 
-// ── MAJOR fix: every one of the 11 catalog patterns is individually proven to match ITS OWN id ─
+// ── MAJOR fix: every one of the 12 catalog patterns is individually proven to match ITS OWN id ─
 
-test('every one of the 11 catalog ids is matched by its OWN catalog pattern, and every catalog pattern is reachable by exactly one id', () => {
+test('every one of the 12 catalog ids is matched by its OWN catalog pattern, and every catalog pattern is reachable by exactly one id', () => {
   // `grok-4.7-build-fast` legitimately ALSO matches the `grok-4.7` pattern — it is a real
   // superstring of that other real catalog id (the `\b...\b`-anchored "grok-4.7" pattern ends on
   // the word boundary right before the following "-build-fast", which is a genuine match, not a
@@ -79,23 +79,23 @@ test('every one of the 11 catalog ids is matched by its OWN catalog pattern, and
   /** @type {Set<number>} */
   const matchedCatalogPatternIndices = new Set();
   for (const [i, id] of ALL_KNOWN_IDS.entries()) {
-    const hits = matchingPatternIndices(id).filter((h) => h < 11); // the first 11 patterns are the catalog-id patterns
+    const hits = matchingPatternIndices(id).filter((h) => h < 12); // the first 12 patterns are the catalog-id patterns
     const expectedCount = KNOWN_SUBSTRING_OVERLAPS[id] ?? 1;
     assert.equal(hits.length, expectedCount, `expected ${expectedCount} catalog-pattern hit(s) for "${id}", got indices ${hits.join(',')}`);
     assert.ok(hits.includes(i), `"${id}"'s own pattern (index ${i}) must be among its hits, got ${hits.join(',')}`);
     for (const h of hits) matchedCatalogPatternIndices.add(h);
   }
-  assert.equal(matchedCatalogPatternIndices.size, 11, 'every one of the 11 catalog patterns must be reachable by its own id — a duplicate or dead pattern would leave this < 11');
+  assert.equal(matchedCatalogPatternIndices.size, 12, 'every one of the 12 catalog patterns must be reachable by its own id — a duplicate or dead pattern would leave this < 12');
 });
 
 // ── MAJOR fix: each of the 4 vendor-prefix patterns is exercised on its own, not only incidentally ─
 
-test('vendor-prefix mutation controls: claude-foo-9, gpt-9x, grok-9, gemini-9 each hit EXACTLY 1 vendor-prefix pattern (indices 11-14), and 0 hits without the digit', () => {
+test('vendor-prefix mutation controls: claude-foo-9, gpt-9x, grok-9, gemini-9 each hit EXACTLY 1 vendor-prefix pattern (indices 12-15), and 0 hits without the digit', () => {
   const cases = [
-    { text: 'Using claude-foo-9 as a stand-in id.', expectedIndex: 11 },
-    { text: 'Using gpt-9x as a stand-in id.', expectedIndex: 12 },
-    { text: 'Using grok-9 as a stand-in id.', expectedIndex: 13 },
-    { text: 'Using gemini-9 as a stand-in id.', expectedIndex: 14 },
+    { text: 'Using claude-foo-9 as a stand-in id.', expectedIndex: 12 },
+    { text: 'Using gpt-9x as a stand-in id.', expectedIndex: 13 },
+    { text: 'Using grok-9 as a stand-in id.', expectedIndex: 14 },
+    { text: 'Using gemini-9 as a stand-in id.', expectedIndex: 15 },
   ];
   for (const { text, expectedIndex } of cases) {
     const hits = matchingPatternIndices(text);
@@ -124,27 +124,27 @@ test('positive control: ordinary prose containing Solo, resolve, console, fable-
 
 // ── Mutation controls: exact hit count AND which pattern fired ──────────────
 
-test('mutation control: injecting the exact catalog id claude-opus-5-5 fires EXACTLY its own catalog pattern AND the claude vendor-prefix pattern (index 11) — nothing else', () => {
+test('mutation control: injecting the exact catalog id claude-opus-5-5 fires EXACTLY its own catalog pattern AND the claude vendor-prefix pattern (index 12) — nothing else', () => {
   const clean = 'The reviewer runs at L2 and the judge runs at L3.';
   const mutated = 'The reviewer runs claude-opus-5-5 at L2 and the judge runs at L3.';
   assert.deepEqual(matchingPatternIndices(clean), []);
-  assert.deepEqual(matchingPatternIndices(mutated), [ALL_KNOWN_IDS.indexOf('claude-opus-5-5'), 11]);
+  assert.deepEqual(matchingPatternIndices(mutated), [ALL_KNOWN_IDS.indexOf('claude-opus-5-5'), 12]);
 });
 
-test('mutation control: injecting "--model opus" fires EXACTLY the alias pattern (index 15), nothing else', () => {
+test('mutation control: injecting "--model opus" fires EXACTLY the alias pattern (index 16), nothing else', () => {
   const clean = 'Pass the model as a role, never a flag value.';
   const mutated = 'Run it with --model opus for the reviewer role.';
   assert.deepEqual(matchingPatternIndices(clean), []);
-  assert.deepEqual(matchingPatternIndices(mutated), [15]);
+  assert.deepEqual(matchingPatternIndices(mutated), [16]);
 });
 
-test('mutation control: "model: opus" (the YAML-key value-position form) fires EXACTLY the alias pattern (index 15)', () => {
-  assert.deepEqual(matchingPatternIndices('model: opus'), [15]);
+test('mutation control: "model: opus" (the YAML-key value-position form) fires EXACTLY the alias pattern (index 16)', () => {
+  assert.deepEqual(matchingPatternIndices('model: opus'), [16]);
   assert.deepEqual(matchingPatternIndices('the model of good behavior'), [], 'a bare "model" word with no colon/flag must not fire');
 });
 
 test('mutation control: "--model=sonnet" (= separator, no space) fires EXACTLY the alias pattern — the old \\s* form silently let this through unmatched', () => {
-  assert.deepEqual(matchingPatternIndices('--model=sonnet'), [15]);
+  assert.deepEqual(matchingPatternIndices('--model=sonnet'), [16]);
 });
 
 test('the alias pattern does NOT fire on the bare alias word alone (only in --model/model: value position)', () => {

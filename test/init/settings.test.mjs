@@ -22,7 +22,7 @@ const QUESTIONS = [
   'Scope',
   'Method',
   'Default provider',
-  'Keep the level matrix? L0=claude-haiku-4-5-20251001 L1=claude-sonnet-5 L2=claude-opus-5-5 L3=claude-fable-5-1',
+  'Keep the level matrix? L0=claude-haiku-4-5-20251001 L1=claude-sonnet-5 L2=claude-opus-5-5 L3=claude-fable-5-2',
   'Read model ids from the Codex/Grok CLI caches on this machine?',
   'Multimodel review (consensus)?',
   'Engine',

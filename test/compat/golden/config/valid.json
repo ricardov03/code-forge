@@ -30,7 +30,7 @@
   {
     "name": "defaults/anthropic",
     "files": {
-      "project/.code-forge.yml": "{\"provider\":\"anthropic\",\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"caps\":{\"coders\":2}}"
+      "project/.code-forge.yml": "{\"provider\":\"anthropic\",\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-2\"}},\"caps\":{\"coders\":2}}"
     },
     "group": "valid",
     "home": "home",
@@ -38,7 +38,7 @@
     "expected": {
       "ok": true,
       "path": "$ROOT/project/.code-forge.yml",
-      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-1\"}},\"provider\":\"anthropic\",\"version\":1}"
+      "canonical": "{\"caps\":{\"coders\":2},\"levels\":{\"L0\":{\"model\":\"claude-haiku-4-5-20251001\"},\"L1\":{\"model\":\"claude-sonnet-5\"},\"L2\":{\"model\":\"claude-opus-5-5\"},\"L3\":{\"model\":\"claude-fable-5-2\"}},\"provider\":\"anthropic\",\"version\":1}"
     }
   },
   {

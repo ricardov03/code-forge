@@ -30,7 +30,7 @@ const CASES = [
     L0: { model: 'claude-haiku-4-5-20251001' },
     L1: { model: 'claude-opus-5-5', effort: 'high' },
     L2: { model: 'claude-opus-5-5' },
-    L3: { model: 'claude-fable-5-1' },
+    L3: { model: 'claude-fable-5-2' },
   }],
   [['--refresh-models'], 'refresh_models', true],
   [['--multimodel', 'on'], 'multimodel', true],
