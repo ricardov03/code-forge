@@ -12,12 +12,11 @@
 //   - FIFO by enqueued_at.
 //   - A full run needs the whole machine: no other holder.
 //   - Changed runs share up to N = max(1, min(cores/4, freeGB/2)) slots.
-//   - While another live ticket is queued, admit only when the 1-minute load
-//     is below the core count and free memory is above MemFloor (1 GB), unless
-//     nothing holds a slot and the waiter has waited longer than StarveAfter
-//     (10 min). A lone request on an empty queue is admitted at once: the
-//     queue does not wait on load it did not cause, so a single gate run (and
-//     every test fixture with a private HOME) never stalls on machine load.
+//   - While another run holds a slot, admit only when the 1-minute load is
+//     below the core count and free memory is above MemFloor (1 GB). With no
+//     holder the head waiter starts at once: the load is either not the
+//     queue's or left by a run that just ended, so a lone gate run (and every
+//     test fixture with a private HOME) never stalls on machine load.
 //   - Fair skip: a changed waiter may pass waiting full runs only when a full
 //     run cannot start now (other holders exist) and a changed slot is free.
 //     The first full waiter is passed at most N times in a row.
@@ -77,13 +76,12 @@ type Ticket struct {
 // Holding reports whether the ticket holds a slot.
 func (t Ticket) Holding() bool { return t.AdmittedAt != nil }
 
-// Queue is one queue directory with its admission settings. Probe, MemFloor,
-// StarveAfter and the wait bounds are fields so tests can inject them.
+// Queue is one queue directory with its admission settings. Probe, MemFloor
+// and the wait bounds are fields so tests can inject them.
 type Queue struct {
 	Dir              string
 	Probe            func() Resources
 	MemFloor         uint64
-	StarveAfter      time.Duration
 	MinWait, MaxWait time.Duration
 }
 
@@ -105,12 +103,11 @@ var sequence atomic.Uint64
 // Open returns the queue under home/.code-forge/queue with the default rules.
 func Open(home string) *Queue {
 	return &Queue{
-		Dir:         filepath.Join(home, ".code-forge", "queue"),
-		Probe:       SystemResources,
-		MemFloor:    1 << 30,
-		StarveAfter: 10 * time.Minute,
-		MinWait:     200 * time.Millisecond,
-		MaxWait:     time.Second,
+		Dir:      filepath.Join(home, ".code-forge", "queue"),
+		Probe:    SystemResources,
+		MemFloor: 1 << 30,
+		MinWait:  200 * time.Millisecond,
+		MaxWait:  time.Second,
 	}
 }
 
@@ -252,7 +249,7 @@ func (q *Queue) check(me *Ticket, st *state, now time.Time) (bool, int, []Ticket
 			position = i + 1
 		}
 	}
-	admit := q.decide(me, holders, waiters, position-1, len(others) > 0, st, now)
+	admit := q.decide(me, holders, waiters, position-1, st)
 	if admit {
 		at := now
 		me.AdmittedAt = &at
@@ -264,14 +261,14 @@ func (q *Queue) check(me *Ticket, st *state, now time.Time) (bool, int, []Ticket
 	return admit, position, holders, nil
 }
 
-func (q *Queue) decide(me *Ticket, holders, waiters []Ticket, index int, contended bool, st *state, now time.Time) bool {
+func (q *Queue) decide(me *Ticket, holders, waiters []Ticket, index int, st *state) bool {
+	// Load and memory only hold a run back beside another holder: with no
+	// holder the load is either not ours or left by a run that just ended.
 	slots := 1
-	if contended {
+	if len(holders) > 0 {
 		res := q.Probe()
 		slots = Slots(res)
-		calm := !res.Known || (res.Load1 < float64(res.Cores) && res.FreeBytes > q.MemFloor)
-		starved := len(holders) == 0 && now.Sub(me.EnqueuedAt) > q.StarveAfter
-		if !calm && !starved {
+		if res.Known && (res.Load1 >= float64(res.Cores) || res.FreeBytes <= q.MemFloor) {
 			return false
 		}
 	}
@@ -428,6 +425,9 @@ var (
 	selfValue string
 )
 
+// selfStart is this process's start token. It is "" where no start-time probe
+// exists (or the probe failed); such tickets fall back to the pid check alone,
+// so a reused pid is not detected for them.
 func selfStart() string {
 	selfOnce.Do(func() { selfValue, _ = processStart(os.Getpid()) })
 	return selfValue

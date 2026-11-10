@@ -307,6 +307,38 @@ func TestSlotChangedPassesWaitingFullOnlyWhenSlotMathAllows(t *testing.T) {
 	}
 }
 
+// A busy machine holds waiters back while a slot is held, but the head waiter
+// starts as soon as nothing holds: the load a finished run caused never stalls
+// the next one.
+func TestSlotBusyLoadHoldsWaitersOnlyWhileASlotIsHeld(t *testing.T) {
+	busy := Resources{Cores: 16, Load1: 40, FreeBytes: 32 << 30, Known: true} // 4 changed slots
+	q := testQueue(t, busy)
+	rec := &recorder{holding: map[string]string{}}
+	h := start(t, q, rec, "H", Changed)
+	if !admittedWithin(h, time.Second) {
+		t.Fatal("a lone run on an empty queue must start at once, even on a busy machine")
+	}
+	w1 := start(t, q, rec, "W1", Changed)
+	waitTickets(t, q, 2)
+	w2 := start(t, q, rec, "W2", Changed)
+	waitTickets(t, q, 3)
+	if admittedWithin(w1, 200*time.Millisecond) {
+		t.Fatal("W1 started beside H although the load is above the core count")
+	}
+	finish(t, h)
+	if !admittedWithin(w1, time.Second) {
+		t.Fatal("W1 must start once nothing holds a slot, whatever the load")
+	}
+	if admittedWithin(w2, 200*time.Millisecond) {
+		t.Fatal("W2 started beside W1 although the load is above the core count")
+	}
+	finish(t, w1)
+	if !admittedWithin(w2, time.Second) {
+		t.Fatal("W2 must start once W1 released")
+	}
+	finish(t, w2)
+}
+
 func TestSlotIdleAcquireIsFastAndLeavesNothingBehind(t *testing.T) {
 	t.Setenv(EnvSwitch, "")
 	t.Setenv(EnvHeld, "")
@@ -331,6 +363,11 @@ func TestSlotIdleAcquireIsFastAndLeavesNothingBehind(t *testing.T) {
 	t.Logf("idle acquire+release: mean %v, worst %v over %d rounds", mean, worst, rounds)
 	if mean >= 20*time.Millisecond {
 		t.Fatalf("idle acquire+release mean = %v, want < 20ms", mean)
+	}
+	// One acquire may meet a scheduler stall on a loaded machine; a loose
+	// bound still catches an acquire that waits out a backoff (200 ms+).
+	if worst >= 150*time.Millisecond {
+		t.Fatalf("slowest idle acquire+release = %v, want < 150ms", worst)
 	}
 	if n := ticketCount(t, q); n != 0 {
 		t.Fatalf("tickets left after release = %d, want 0", n)

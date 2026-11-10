@@ -1210,9 +1210,9 @@ writes a ticket (pid, process start time, kind, label) and checks the queue unde
   swapping: free, speculative, purgeable and file-backed pages on macOS, `MemAvailable` on Linux.
 - Runs start in arrival order. A changed run may pass waiting full runs only while a full run could
   not start anyway and a changed slot is free, and at most `N` times in a row.
-- While others are queued, a run starts only when the 1-minute load is below the core count and
-  more than 1 GB is free (after 10 minutes with no holder it starts anyway). A lone run on an
-  empty queue starts at once.
+- While another run holds a slot, a run starts beside it only when the 1-minute load is below the
+  core count and more than 1 GB is free. When nothing holds a slot, the first waiter starts at once:
+  the load is then not the queue's, or was left by the run that just ended.
 - A ticket whose process died, or whose pid now belongs to another process, is removed at the next
   check, so a killed run frees its slot within a second.
 
