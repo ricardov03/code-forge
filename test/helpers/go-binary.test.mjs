@@ -87,7 +87,7 @@ describe('goBinary shared cache', { skip: realGo ? false : 'needs go' }, () => {
 
 describe('run-suite test concurrency', () => {
   const cores = os.availableParallelism();
-  const expected = Math.max(1, Math.floor(cores / 4));
+  const expected = Math.max(1, Math.floor(cores / 2));
 
   /** A tiny fixture suite; a `node` wrapper records the runner's argv. */
   function suite(t) {
@@ -125,16 +125,18 @@ describe('run-suite test concurrency', () => {
     return run;
   }
 
-  test(`no flag: the runner gets max(1, cores/4) = ${expected}`, (t) => {
+  test(`no flag: the runner gets max(1, cores/2) = ${expected}`, (t) => {
     assert.deepEqual(suite(t)(['test/a.test.mjs']), [String(expected)]);
   });
 
   test('an explicit flag is kept and no default is added', (t) => {
-    assert.deepEqual(suite(t)(['--test-concurrency', '3', 'test/a.test.mjs']), ['3']);
-    assert.deepEqual(suite(t)(['--test-concurrency=4', 'test/a.test.mjs']), ['4']);
+    const a = String(expected + 1), b = String(expected + 2);
+    assert.deepEqual(suite(t)(['--test-concurrency', a, 'test/a.test.mjs']), [a]);
+    assert.deepEqual(suite(t)(['--test-concurrency=' + b, 'test/a.test.mjs']), [b]);
   });
 
   test('CODE_FORGE_TEST_CONCURRENCY overrides the default', (t) => {
-    assert.deepEqual(suite(t)(['test/a.test.mjs'], { CODE_FORGE_TEST_CONCURRENCY: '5' }), ['5']);
+    const value = String(expected + 3);
+    assert.deepEqual(suite(t)(['test/a.test.mjs'], { CODE_FORGE_TEST_CONCURRENCY: value }), [value]);
   });
 });

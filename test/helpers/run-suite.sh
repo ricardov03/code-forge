@@ -1,5 +1,5 @@
 #!/bin/sh
-# Test concurrency (B354): node --test runs max(1, cores/4) test files at once by
+# Test concurrency (B354): node --test runs max(1, cores/2) test files at once by
 # default, so one suite cannot overload a shared machine. An explicit
 # --test-concurrency flag from the caller wins; otherwise the environment
 # variable CODE_FORGE_TEST_CONCURRENCY (a positive integer) sets the count.
@@ -142,7 +142,7 @@ if [ "$cf_has_concurrency" = false ]; then
     cf_concurrency=$CODE_FORGE_TEST_CONCURRENCY
   else
     cf_cores=$(node -p 'require("node:os").availableParallelism()') || exit 2
-    cf_concurrency=$((cf_cores / 4))
+    cf_concurrency=$((cf_cores / 2))
     [ "$cf_concurrency" -ge 1 ] || cf_concurrency=1
   fi
   set -- "--test-concurrency=$cf_concurrency" "$@"
