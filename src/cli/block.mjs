@@ -225,7 +225,7 @@ import { readFileDiff } from '../review/packet.mjs';
 import { StateError } from '../state/paths.mjs';
 import { readRun, writeSigned } from '../state/run.mjs';
 import { loadKey, signRow, verifyRow } from '../state/signer.mjs';
-import { PROOF_FINDING, blockFileSet, changedFiles, checkBlockReviews, lockfileProblem, openFindings, ownsAt, recordedSeverity, resultFilesFor, revertedToBase, reviewedFiles, reviewGateCheck, routineCloseProblem, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
+import { PROOF_FINDING, blockFileSet, changedFiles, checkBlockReviews, lockfileProblem, openFindings, ownsAt, recordedSeverity, resultFilesFor, revertedToBase, reviewedFiles, reviewedWorkFiles, reviewGateCheck, routineCloseProblem, unownedChanges, waiveFinding } from '../review/gate-check.mjs';
 import { agentWaivers, agentWaiversAcked, prepareAckWaivers, prepareUnwaive, waiveAsAgent } from '../review/agent-waiver.mjs';
 import { checkExpiry, grantFor, grantState } from '../autopilot/grant.mjs';
 import { redact, writeSafe } from '../util/redact.mjs';
@@ -1054,7 +1054,8 @@ export async function runBlock(args, deps = {}) {
           files: reviewsWaived || external !== null ? [] : fileSet.filter((f) => reviewExcludeRule(reviewConfig, f.file) === null),
           // B52: nothing changed and nothing reviewed is never a pass (the owner's way out is
           // --no-require-reviews); B58: `review.external` does not lift it
-          noChanges: !reviewsWaived && fileSet.length === 0 && !reviewedFiles(rows, id).some(isMine),
+          // B365: a file whose only reviews of its current bytes are `no_change` results is not work
+          noChanges: !reviewsWaived && fileSet.length === 0 && !reviewedWorkFiles({ repoRoot: top, rows, block: id }).some(isMine),
           // B20: high-tier files need a proven red→green row; `--no-require-reviews` does not lift it
           proofFiles: fileSet,
           highPaths,

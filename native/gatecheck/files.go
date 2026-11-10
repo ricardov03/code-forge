@@ -46,8 +46,50 @@ func ReviewedFiles(rows []Row, id string) []string {
 	return files
 }
 
+// noChangeOnly (B365, twin of Node's noChangeOnly) is a review.result that only
+// says the reviewer found these bytes equal to the base: status no_change, the
+// exact hash, and no open finding. It neither approves nor refuses the content.
+func noChangeOnly(r Row, hash string) bool {
+	if r["event"] != "review.result" || r["status"] != "no_change" || r["content_hash"] != hash {
+		return false
+	}
+	open, has := r["open"]
+	if !has {
+		return true
+	}
+	list, ok := open.([]any)
+	return ok && len(list) == 0
+}
+
+// ReviewedWork (B365, twin of Node's reviewedWorkFiles) is ReviewedFiles less
+// each file whose review rows of its current bytes (that hash, or none) exist
+// and are all no_change results: main changed it, not the block. It is the
+// evidence the close's no_changes check counts. A path that cannot be hashed stays.
+func ReviewedWork(top string, rows []Row, id string) []string {
+	work := []string{}
+	for _, f := range ReviewedFiles(rows, id) {
+		current, err := gitx.ContentHash(top, f)
+		if err != nil {
+			work = append(work, f)
+			continue
+		}
+		matching, onlyNoChange := 0, true
+		for _, r := range rows {
+			if r["block"] == id && reviewEvent(r["event"]) && ReviewPath(Text(r["file"])) == f && (r["content_hash"] == nil || r["content_hash"] == current) {
+				matching++
+				onlyNoChange = onlyNoChange && noChangeOnly(r, current)
+			}
+		}
+		if matching == 0 || !onlyNoChange {
+			work = append(work, f)
+		}
+	}
+	return work
+}
+
 // FileSet reuses one diff and retains reviewed paths that are absent from it,
-// except paths back at their base bytes with no review of those current bytes.
+// except paths back at their base bytes with no review of those current bytes
+// (B365: or whose every review of those bytes is a no_change result).
 func FileSet(top, base, prefix, id string, block ledger.Object, rows []Row, changed []string) ([]File, []string, error) {
 	reviewed := []string{}
 	for _, f := range ReviewedFiles(rows, id) {
@@ -61,7 +103,7 @@ func FileSet(top, base, prefix, id string, block ledger.Object, rows []Row, chan
 				current, _ := gitx.ContentHash(top, f)
 				matching := false
 				for _, r := range rows {
-					if r["block"] == id && reviewEvent(r["event"]) && ReviewPath(Text(r["file"])) == f && (r["content_hash"] == nil || r["content_hash"] == current) {
+					if r["block"] == id && reviewEvent(r["event"]) && ReviewPath(Text(r["file"])) == f && (r["content_hash"] == nil || r["content_hash"] == current) && !noChangeOnly(r, current) {
 						matching = true
 					}
 				}

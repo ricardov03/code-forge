@@ -200,7 +200,7 @@ func runBlockReady(args []string) int {
 	}
 	collectOnly := len(blockers) > 0
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, p.id, p.run, blockObject(p.record.Get("blocks")), changed, rows, key, inTree)
-	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedFiles(rows, p.id), func(f string) bool { return gatecheck.Owns(prefix, entry, f) })
+	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedWork(top, rows, p.id), func(f string) bool { return gatecheck.Owns(prefix, entry, f) })
 	gate := gatecheck.CheckTranscript(p.run, p.id, files, rows, key, highPaths, unowned, noChanges, hits)
 	if externalReview {
 		gate.Blockers = slices.DeleteFunc(gate.Blockers, func(b gatecheck.Blocker) bool {

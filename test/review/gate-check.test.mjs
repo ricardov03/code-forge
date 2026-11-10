@@ -465,3 +465,88 @@ test('fix 3 CLI: `proof red-green` with a ./-prefixed test (revert) and a ::case
   ]);
   assert.deepEqual(await close(), [0, `${['src/math.mjs', 'test/add.spec.mjs', 'test/clamp.spec.mjs'].map((f) => rv(repo, 'r-cov', f)).join('')}block B1 closed\n`]);
 });
+
+// ── B365: a file rebase-accepted with only a `no_change` review must not block close ──
+
+/**
+ * B365: a run whose block B1 owns src/a.mjs and src/b.mjs; src/b.mjs is changed and approved, so
+ * the close checks something. `prepare(repo, writeRow, base hash of src/a.mjs)` sets up src/a.mjs.
+ * @param {string} slug @param {(repo: string, row: (fields: Record<string, any>) => Promise<unknown>, baseHash: string) => Promise<void>} prepare
+ * @returns {Promise<[number, string]>} the close's exit code and output
+ */
+async function noChangeClose(slug, prepare) {
+  const run = `r-${slug}`;
+  const repo = await makeRepo();
+  writeFile(repo, 'src/a.mjs', 'export const a = 1;\n');
+  writeFile(repo, 'src/b.mjs', 'export const b = 1;\n');
+  writeFile(repo, '.gitignore', '.code-forge/\n');
+  await commitAll(repo);
+  const probe = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
+  const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
+  await startRun({ workspace: repo, project: slug, runId: run, workerPid: 4242, writeRow, probe });
+  await openBlock({ runId: run, id: 'B1', level: 'L2', owned: ['src/a.mjs', 'src/b.mjs'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
+  writeFile(repo, 'src/b.mjs', 'export const b = 2;\n');
+  await writeSigned(run, writeRow, { event: 'review.approved', block: 'B1', file: 'src/b.mjs', content_hash: contentHash(repo, 'src/b.mjs') });
+  await prepare(repo, (fields) => writeSigned(run, writeRow, { block: 'B1', file: 'src/a.mjs', ...fields }), contentHash(repo, 'src/a.mjs'));
+  writeFile(repo, '.code-forge/coder.log', '$ node --test\n');
+  const stream = capture();
+  const code = await runBlock(['close', 'B1', '--run', run, '--worker-pid', '4242', '--transcript', `${repo}/.code-forge/coder.log`], { stdout: stream, stderr: stream, probe });
+  return [code, stream.text];
+}
+
+/** B365: the signed row the reviewer writes for a file equal to the block's base (B362's real row, trimmed). */
+const NO_CHANGE = (/** @type {string} */ hash) => ({ event: 'review.result', ticket: 'no-change-ticket', content_hash: hash, status: 'no_change', approved: false, open: [] });
+
+test('B365: an owned file unchanged since base whose only current-hash review row is a signed no_change result closes; only the changed file is reviewed', async () => {
+  const [code, text] = await noChangeClose('gate-b365-pass', async (_repo, row, baseHash) => {
+    await row(NO_CHANGE(baseHash));
+  });
+  assert.equal(text.includes('unreviewed src/a.mjs'), false, text);
+  assert.equal(code, 0, text);
+  assert.deepEqual(text.split('\n').filter((l) => l.startsWith('reviewed ')).map((l) => l.split(' ')[1]), ['src/b.mjs']);
+  assert.equal(text.endsWith('block B1 closed\n'), true, text);
+});
+
+test('B365 guard: an owned file changed since base with only a no_change row for its old hash is still unreviewed', async () => {
+  const [code, text] = await noChangeClose('gate-b365-changed', async (repo, row, baseHash) => {
+    await row(NO_CHANGE(baseHash));
+    writeFile(repo, 'src/a.mjs', 'export const a = 2;\n');
+  });
+  assert.equal(code, 1, text);
+  assert.deepEqual(text.split('\n').filter((l) => l.startsWith('block B1 open:')), ['block B1 open: unreviewed src/a.mjs']);
+});
+
+test('B365 guard: an owned file unchanged since base whose current hash also has a refusal with a finding is still refused', async () => {
+  const [code, text] = await noChangeClose('gate-b365-finding', async (_repo, row, baseHash) => {
+    await row(NO_CHANGE(baseHash));
+    await row({ event: 'review.result', ticket: 'finding-ticket', content_hash: baseHash, status: 'reviewed', approved: false, open: [{ id: 'F1', severity: 'warning' }] });
+  });
+  assert.equal(code, 1, text);
+  assert.deepEqual(text.split('\n').filter((l) => l.startsWith('block B1 open:')), ['block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs F1']);
+});
+
+test('B365: a block with an empty diff since base whose only review is a no_change result refuses no_changes; a findings refusal of the same bytes refuses as before', async () => {
+  const closeWith = async (/** @type {string} */ slug, /** @type {Array<Record<string, any>>} */ extra) => {
+    const run = `r-${slug}`;
+    const repo = await makeRepo();
+    writeFile(repo, 'src/a.mjs', 'export const a = 1;\n');
+    writeFile(repo, '.gitignore', '.code-forge/\n');
+    await commitAll(repo);
+    const probe = async (/** @type {number} */ pid) => (pid === 4242 ? 'start-A' : null);
+    const writeRow = (/** @type {Record<string, any>} */ row) => appendRow(row, { slug });
+    await startRun({ workspace: repo, project: slug, runId: run, workerPid: 4242, writeRow, probe });
+    await openBlock({ runId: run, id: 'B1', level: 'L2', owned: ['src/a.mjs'], acceptance: [{ clause: 'c', tests: ['t'] }], writeRow });
+    const hash = contentHash(repo, 'src/a.mjs');
+    for (const fields of [NO_CHANGE(hash), ...extra.map((row) => ({ ...row, content_hash: hash }))]) await writeSigned(run, writeRow, { block: 'B1', file: 'src/a.mjs', ...fields });
+    writeFile(repo, '.code-forge/coder.log', '$ node --test\n');
+    const stream = capture();
+    const code = await runBlock(['close', 'B1', '--run', run, '--worker-pid', '4242', '--transcript', `${repo}/.code-forge/coder.log`], { stdout: stream, stderr: stream, probe });
+    return /** @type {[number, string]} */ ([code, stream.text]);
+  };
+  const [code, text] = await closeWith('gate-b365-empty', []);
+  assert.equal(code, 1, text);
+  assert.deepEqual(text.split('\n').filter((l) => l.startsWith('block B1 open:')), ['block B1 open: no_changes'], text);
+  const [findingCode, findingText] = await closeWith('gate-b365-empty-finding', [{ event: 'review.result', ticket: 'finding-ticket', status: 'reviewed', approved: false, open: [{ id: 'F1', severity: 'warning' }] }]);
+  assert.equal(findingCode, 1, findingText);
+  assert.deepEqual(findingText.split('\n').filter((l) => l.startsWith('block B1 open:')), ['block B1 open: unreviewed src/a.mjs; not_approved src/a.mjs F1'], findingText);
+});
