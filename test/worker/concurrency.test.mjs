@@ -158,6 +158,8 @@ test('wait-block wakes within one product second of the last completion at the f
         const interrupted = new Promise((resolve) => {
           signal.addEventListener('abort', () => { cancelled += 1; resolve(undefined); }, { once: true });
         });
+        // Complete halfway through the capped wait: its remaining 2500 ms exceeds the wakeup limit.
+        time += ms / 2;
         p.release();
         drained = p.worker.drain();
         await drained;
