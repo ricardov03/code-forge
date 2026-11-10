@@ -247,8 +247,11 @@ async function staleBase(runId, blockId, { autoRebase, allowStaleBase, err }) {
     err(`gates run: block ${blockId} of run ${runId}: --auto-rebase failed (${moved}): ${reason}; no gate was run; fix by hand: ${fix}\n`);
     return 1;
   }
-  const rebased = JSON.parse(result.stdout);
-  err(`gates run: block ${blockId} rebased ${rebased.old_base.slice(0, 12)} → ${rebased.new_base.slice(0, 12)} (--auto-rebase)\n`);
+  /** @type {{old_base?: unknown, new_base?: unknown}} */
+  let rebased = {};
+  try { rebased = JSON.parse(result.stdout) ?? {}; } catch { /* the rebase ran; only the line loses its shas */ }
+  const short = (/** @type {unknown} */ sha, /** @type {string} */ fallback) => (typeof sha === 'string' && sha !== '' ? sha.slice(0, 12) : fallback);
+  err(`gates run: block ${blockId} rebased ${short(rebased.old_base, recorded.slice(0, 12))} → ${short(rebased.new_base, tip.slice(0, 12))} (--auto-rebase)\n`);
   return null;
 }
 

@@ -53,7 +53,7 @@ func TestStaleBaseOnlyWhenTheBranchMovedPastTheRecordedBase(t *testing.T) {
 	if got := StaleBase(repo, noTree); got != nil {
 		t.Fatalf("a block without a worktree is not checked: %+v", got)
 	}
-	// a recorded base that is not an ancestor of the tip (main rewound) is not stale
+	// a recorded base that is not an ancestor of the tip (diverged) is not stale
 	git("checkout", "-qb", "side", base)
 	side := commit("side")
 	git("checkout", "-q", "main")

@@ -126,7 +126,7 @@ func gatesStaleBase(o gatesOptions) (code int, stop bool) {
 		return 0, false
 	}
 	fix := fmt.Sprintf("code-forge block rebase %s --run %s --accept-landed", o.block, o.run)
-	moved := fmt.Sprintf("%s moved %s → %s", stale.Branch, stale.Recorded[:12], stale.Tip[:12])
+	moved := fmt.Sprintf("%s moved %s → %s", stale.Branch, gatesShort(stale.Recorded), gatesShort(stale.Tip))
 	switch {
 	case o.allowStaleBase:
 		fmt.Fprintf(os.Stderr, "gates run: WARN block %s of run %s gates on a stale base (%s) because of --allow-stale-base; fix: %s\n", o.block, o.run, moved, fix)
@@ -136,13 +136,22 @@ func gatesStaleBase(o gatesOptions) (code int, stop bool) {
 			gatesErrf("gates run: block %s of run %s: --auto-rebase failed (%s): %s; no gate was run; fix by hand: %s\n", o.block, o.run, moved, strings.ReplaceAll(err.Error(), "\n", " "), fix)
 			return 1, true
 		}
-		fmt.Fprintf(os.Stderr, "gates run: block %s rebased %s → %s (--auto-rebase)\n", o.block, result.OldBase[:12], result.NewBase[:12])
+		fmt.Fprintf(os.Stderr, "gates run: block %s rebased %s → %s (--auto-rebase)\n", o.block, gatesShort(result.OldBase), gatesShort(result.NewBase))
 	default:
 		gatesErrf("gates run: block %s of run %s has a stale base (%s); no gate was run; fix: %s\n", o.block, o.run, moved, fix)
 		return 1, true
 	}
 	return 0, false
 }
+
+// gatesShort is a sha's first 12 characters, or the whole value when shorter.
+func gatesShort(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
+
 func runGates(args []string) int {
 	gatesLastMessage = nil
 	if len(args) == 0 || args[0] != "run" {
