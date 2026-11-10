@@ -83,8 +83,8 @@ describe('a long review session (the fake is gated; the coder waits 1 s at a tim
       assert.deepEqual([short.code, short.json.status], [0, 'pending']);
       assert.deepEqual(queued(repo, 'done'), [], 'the coder timeout completes neither gated session');
       w.release();
-      const doneA = await cli(['review-file', '--wait', a.json.ticket, '--max', `${loadedMs(30000)}ms`], repo);
-      const doneB = await cli(['review-file', '--wait', b.json.ticket, '--max', `${loadedMs(30000)}ms`], repo);
+      const doneA = await cli(['review-file', '--wait', a.json.ticket, '--max', '30s'], repo);
+      const doneB = await cli(['review-file', '--wait', b.json.ticket, '--max', '30s'], repo);
       assert.deepEqual([doneA.json.status, doneA.json.result.status, doneA.json.result.file], ['done', 'reviewed', 'src/a.mjs']);
       assert.deepEqual([doneB.json.status, doneB.json.result.status], ['done', 'reviewed']);
       assert.deepEqual(queued(repo, 'done'), queued(repo, 'json'));
@@ -102,7 +102,8 @@ describe('the sessions the worker spawns', () => {
     const w = await startWorker(repo, runId, { FAKE_RECORD: recordDir, CODE_FORGE_KEY_JEV: FAKE_JEV_KEY, JEV_API_KEY: FAKE_JEV_KEY, SNEAKY_TOKEN: FAKE_SNEAKY });
     try {
       const a = await cli(['review-file', 'src/a.mjs', '--block', 'B11'], repo);
-      assert.equal((await cli(['review-file', '--wait', a.json.ticket, '--max', `${loadedMs(30000)}ms`], repo)).json.status, 'done');
+      const done = await cli(['review-file', '--wait', a.json.ticket, '--max', '30s'], repo);
+      assert.equal(done.json.status, 'done');
       const recs = records(recordDir);
       assert.equal(recs.length, 1);
       const names = recs[0].env_keys;
@@ -128,7 +129,8 @@ describe('the sessions the worker spawns', () => {
       assert.equal(alive(pid), true);
       assert.equal(JSON.parse(readFileSync(entry, 'utf8')).pid, pid);
       w.release();
-      assert.equal((await cli(['review-file', '--wait', a.json.ticket, '--max', `${loadedMs(30000)}ms`], repo)).json.status, 'done');
+      const done = await cli(['review-file', '--wait', a.json.ticket, '--max', '30s'], repo);
+      assert.equal(done.json.status, 'done');
       assert.equal(await waitFor(() => !existsSync(entry), loadedMs(20000)), true, 'completed session leaves zero pid entries');
     } finally {
       await stopWorker(w, runId);

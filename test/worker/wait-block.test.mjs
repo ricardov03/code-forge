@@ -45,7 +45,7 @@ test('(1) reproduction: three files enqueue without waiting, then one block wait
       tickets.push({ file, ticket: res.json.ticket, status: 'done', outcome: 'approved' });
     }
     assert.equal(queued(repo, 'json').length, 3);
-    const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', `${loadedMs(20000)}ms`], repo);
+    const res = await cli(['review-file', '--wait-block', BLOCK, '--run', runId, '--max', '20s'], repo);
     assert.equal(res.code, 0, res.stderr);
     assert.equal(res.stdout.trim().split('\n').length, 1);
     assert.deepEqual(res.json, { block: BLOCK, files: tickets.map((t) => ({ ...t, ...timingsOf(repo, runId, t.ticket) })), done: true });
