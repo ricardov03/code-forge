@@ -6,6 +6,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { reusableBaseMove } from '../../src/gates/scope.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = await realpath(await mkdtemp(path.join(os.tmpdir(), 'changed-scope-')));
@@ -16,10 +17,7 @@ before(async () => {
   await mkdir(path.dirname(binary), { recursive: true });
   await mkdir(path.join(scratch, 'pkg/bin'), { recursive: true });
   await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(scratch, 'pkg/bin/code-forge.mjs'));
-  const build = spawnSync('go', ['build', '-ldflags', `-X main.reviewWaitNodeVersion=${process.version}`, '-o', binary, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...cleanEnv(), GOCACHE: path.join(scratch, 'go-cache'), GOPROXY: 'off', GOTOOLCHAIN: 'local', CGO_ENABLED: '0' },
-  });
-  assert.equal(build.status, 0, build.stderr);
+  linkGoBinary(binary, { ldflags: `-X main.reviewWaitNodeVersion=${process.version}` });
 });
 after(() => rm(scratch, { recursive: true, force: true }));
 

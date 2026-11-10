@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { initialConfigState } from '../../src/state/config-snapshot.mjs';
 import { runParity } from '../helpers/parity.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 const CLI = path.join(ROOT, 'bin/code-forge.mjs');
@@ -21,12 +22,7 @@ before(async () => {
   await mkdir(path.join(pkg, 'bin'));
   await symlink(CLI, path.join(pkg, 'bin/code-forge.mjs'));
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', timeout: 120_000,
-    env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build') },
-  });
-  assert.equal(build.status, 0, `private binary builds: ${build.stderr}`);
+  linkGoBinary(BINARY, { trimpath: true, ldflags: `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 
 function git(repo, args) {

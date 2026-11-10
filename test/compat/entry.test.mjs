@@ -7,6 +7,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const pkg = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8'));
@@ -16,11 +17,7 @@ const builtBinary = path.join(scratch, 'code-forge-native');
 const env = { ...process.env, CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_KEY_BACKEND: 'file' };
 after(() => rmSync(scratch, { recursive: true, force: true }));
 before(() => {
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${pkg.version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', builtBinary, './cmd/code-forge-native'], {
-    cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120_000,
-    env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
-  });
-  assert.equal(build.status, 0, 'host binary builds before entry assertions: ' + build.stderr);
+  linkGoBinary(builtBinary, { trimpath: true, ldflags: `-s -w -X main.version=${pkg.version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 
 function fixture(t, probe = false) {

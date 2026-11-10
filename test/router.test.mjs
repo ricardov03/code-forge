@@ -104,7 +104,7 @@ test('package.json declares no peer or bundled dependencies, under either npm sp
 });
 
 /** Run the package test entry with a fake node; inspect phase argv and statuses, not source. */
-async function testPhases(snapshot, main, final, extraArgs = [], suite = 'b115-shell') {
+async function testPhases(snapshot, main, final, extraArgs = [], suite = 'b115-shell', concurrency = '3') {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const dir = path.join(PKG, 'test-script-bin');
   await mkdir(dir, { recursive: true });
@@ -120,8 +120,11 @@ for arg do printf '|%s' "$arg"; done
 printf '\n'
 exit "$status"
 `, { mode: 0o755 });
+  /** @type {NodeJS.ProcessEnv} */
   const env = { ...process.env, PATH: dir + path.delimiter + process.env.PATH, SNAPSHOT_STATUS: String(snapshot), CODE_FORGE_TEST_SUITE: suite, CODE_FORGE_NO_LEAK: '', MAIN_STATUS: String(main), FINAL_STATUS: String(final) };
   if (suite === null) delete env.CODE_FORGE_TEST_SUITE;
+  if (concurrency === null) delete env.CODE_FORGE_TEST_CONCURRENCY;
+  else env.CODE_FORGE_TEST_CONCURRENCY = concurrency;
   if (extraArgs.length === 0) return spawnSync('sh', ['-c', pkg.scripts.test], { cwd: ROOT, timeout: 20000, encoding: 'utf8', env });
   return spawnSync(process.execPath, [npmJsPath(), 'test', '--', ...extraArgs], { cwd: ROOT, timeout: 20000, encoding: 'utf8', env: { ...env, npm_config_loglevel: 'silent' } });
 }
@@ -143,7 +146,7 @@ function npmJsPath(env = process.env) {
 
 const PHASE_ARGV = [
   'snapshot|b115-shell|--import|./test/helpers/isolate.mjs|--test|test/no-leak.test.mjs',
-  'main|b115-shell|--import|./test/helpers/isolate.mjs|--experimental-test-module-mocks|--test|test/**/*.test.mjs',
+  'main|b115-shell|--import|./test/helpers/isolate.mjs|--experimental-test-module-mocks|--test-concurrency=3|--test|test/**/*.test.mjs',
   'final|b115-shell|--import|./test/helpers/isolate.mjs|--test|test/no-leak.test.mjs',
 ];
 
@@ -167,7 +170,21 @@ test('B115: npm test forwards extra argv to main only and still runs snapshot an
   const args = ['--test-name-pattern=a b', '--test-name-pattern=x*', '*', '--test-reporter=spec'];
   const result = await testPhases(0, 0, 0, args);
   assert.equal(result.status, 0, result.stderr);
-  assert.deepEqual(result.stdout.trim().split('\n'), [PHASE_ARGV[0], 'main|b115-shell|--import|./test/helpers/isolate.mjs|--experimental-test-module-mocks|--test|' + args.join('|') + '|test/**/*.test.mjs', PHASE_ARGV[2]]);
+  assert.deepEqual(result.stdout.trim().split('\n'), [PHASE_ARGV[0], 'main|b115-shell|--import|./test/helpers/isolate.mjs|--experimental-test-module-mocks|--test-concurrency=3|--test|' + args.join('|') + '|test/**/*.test.mjs', PHASE_ARGV[2]]);
+});
+
+test('B354: with no concurrency setting and a node that prints no number, main still gets a positive --test-concurrency before --test', async () => {
+  const result = await testPhases(0, 0, 0, [], 'b115-shell', null);
+  assert.equal(result.status, 0, result.stderr);
+  assert.equal(result.stderr.includes('syntax error'), false, result.stderr);
+  const lines = result.stdout.trim().split('\n');
+  assert.deepEqual([lines[0], lines[2]], [PHASE_ARGV[0], PHASE_ARGV[2]]);
+  const main = lines[1].split('|');
+  const flags = main.filter((arg) => arg.startsWith('--test-concurrency='));
+  assert.equal(flags.length, 1, lines[1]);
+  assert.match(flags[0], /^--test-concurrency=[1-9][0-9]*$/);
+  assert.ok(main.indexOf(flags[0]) < main.indexOf('--test'), lines[1]);
+  assert.deepEqual(main.slice(main.indexOf('--test') + 1), ['test/**/*.test.mjs']);
 });
 
 test('B115: the test script generates one suite marker when unset and preserves a preset marker in all three phases', async () => {

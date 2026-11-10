@@ -8,6 +8,7 @@ import { after, before, test } from 'node:test';
 import { setTimeout as delay } from 'node:timers/promises';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
 // Installation tests rename/chmod the release binary in parallel. Build directly
@@ -20,13 +21,7 @@ before(async () => {
   await mkdir(path.join(pkg, 'bin'));
   await symlink(path.join(ROOT, 'bin/code-forge.mjs'), path.join(pkg, 'bin/code-forge.mjs'));
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  const home = process.env.CODE_FORGE_REAL_HOME ?? os.homedir();
-  const cache = path.join(home, process.platform === 'darwin' ? 'Library/Caches' : '.cache', 'go-build');
-  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', BINARY, './cmd/code-forge-native'], {
-    cwd: path.join(ROOT, 'native'), encoding: 'utf8', timeout: 120_000,
-    env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOCACHE: cache },
-  });
-  assert.equal(build.status, 0, 'private parity binary builds: ' + (build.error?.message ?? build.stderr));
+  linkGoBinary(BINARY, { trimpath: true, ldflags: `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
 });
 const TICKET = 'abcdef0123456789abcdef01';
 const WAIT = ['review-file', '--wait', TICKET];

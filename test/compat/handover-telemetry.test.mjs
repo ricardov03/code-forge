@@ -5,6 +5,7 @@ import path from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath } from 'node:url';
 import { runParity } from '../helpers/parity.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = mkdtempSync(path.join(process.env.TMPDIR || '/tmp', 'cf-handover-'));
@@ -19,10 +20,7 @@ before(() => {
 process.stdout.write(JSON.stringify({args:process.argv.slice(2),input:readFileSync(0,'utf8'),token:process.env.PROBE_TOKEN,recorded:process.env.PROBE_FILE ? existsSync(process.env.PROBE_FILE) : null}));
 process.stderr.write('probe stderr\\n'); process.exitCode=Number(process.env.PROBE_EXIT || 0);
 `);
-  const built = spawnSync('go', ['build', '-ldflags', `-X main.version=${pkg.version}`, '-o', binary, './cmd/code-forge-native'], {
-    cwd: path.join(root, 'native'), encoding: 'utf8', env: { ...process.env, GOPROXY: 'off', GOTOOLCHAIN: 'local' },
-  });
-  assert.equal(built.status, 0, 'native fixture builds: ' + built.stderr);
+  linkGoBinary(binary, { ldflags: `-X main.version=${pkg.version}` });
 });
 after(() => rmSync(scratch, { recursive: true, force: true }));
 

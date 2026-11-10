@@ -13,6 +13,7 @@ import { loadKey, signRow } from '../../src/state/signer.mjs';
 import { appendRow } from '../../src/ledger/write.mjs';
 import { announceWorker, retractWorker } from '../../src/worker/queue.mjs';
 import { waitReady } from '../helpers/wait-ready.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const scratch = mkdtempSync('/tmp/cfs-');
@@ -23,13 +24,9 @@ const version = JSON.parse(readFileSync(path.join(root, 'package.json'), 'utf8')
 before(() => {
   mkdirSync(path.dirname(binary), { recursive: true });
   mkdirSync(path.dirname(entry));
-  // Build directly into this process's private package: install tests may move
-  // the shared release binary at any time, including between build and copy.
-  const result = spawnSync('go', ['build', '-trimpath', '-ldflags', `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}`, '-o', binary, './cmd/code-forge-native'], {
-    cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 120000,
-    env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
-  });
-  assert.equal(result.status, 0, result.stderr);
+  // Link the cached test build into this process's private package: install
+  // tests may move the shared release binary at any time.
+  linkGoBinary(binary, { trimpath: true, ldflags: `-s -w -X main.version=${version} -X main.reviewWaitNodeVersion=${process.version}` });
   copyFileSync(path.join(root, 'bin/code-forge'), entry);
   symlinkSync(path.join(root, 'bin/code-forge.mjs'), path.join(pkg, 'bin/code-forge.mjs'));
   symlinkSync(path.join(root, 'src'), path.join(pkg, 'src'));

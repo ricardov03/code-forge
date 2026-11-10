@@ -428,6 +428,10 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 	}
 	return results, all && ctx.Err() == nil, nil
 }
+
+// gateNice is the CPU priority (nice value) of every gate child.
+const gateNice = 10
+
 func execute(ctx context.Context, argv []string, env map[string]string, cwd, run string, timeout float64, failOnStdout bool) ledger.Object {
 	program, resolveErr := resolveExecutable(cwd, &Command{Argv: argv, Env: env})
 	// Always give exec.Command an absolute path. It must never search the
@@ -497,6 +501,11 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		reason = "spawn-error"
 		diagnostic = "gate terminated: spawn " + argv[0] + " " + spawnErrorCode(e)
 	} else {
+		// Gate commands (the full test suite above all) run at nice 10 so a
+		// gate cannot starve the rest of the machine. The child leads its own
+		// process group, so lowering the group also covers early forks.
+		// Unprivileged callers cannot lower a higher nice; errors are ignored.
+		_ = syscall.Setpriority(syscall.PRIO_PGRP, cmd.Process.Pid, gateNice)
 		outWrite.Close()
 		errWrite.Close()
 		done := make(chan error, 1)

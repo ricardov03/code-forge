@@ -3,7 +3,6 @@ import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
 import { existsSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { mock, test } from 'node:test';
 import { startGrant } from '../../src/autopilot/grant.mjs';
 import { appendRow, readAllRows } from '../../src/ledger/write.mjs';
@@ -14,16 +13,13 @@ import * as native from '../../src/util/native.mjs';
 import { registerSecret } from '../../src/util/redact.mjs';
 import { blockTickets, readTicket, resolveTicket } from '../../src/worker/queue.mjs';
 import { contentHash } from '../../src/worker/ticket.mjs';
+import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 // Never inherit the coder's run/ownership context into fixture children. Build
 // the current source privately, independent of installed release binaries.
 for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete process.env[key];
 const testBinary = path.join(freshDir('native'), 'code-forge-native');
-const built = spawnSync('go', ['build', '-o', testBinary, './cmd/code-forge-native'], {
-  cwd: fileURLToPath(new URL('../../native/', import.meta.url)), encoding: 'utf8',
-  env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
-});
-assert.equal(built.status, 0, `private native build: ${built.error?.message ?? built.stderr}`);
+linkGoBinary(testBinary, {});
 mock.module('../../src/util/native.mjs', { namedExports: { ...native,
   runNative: async (/** @type {string[]} */ args) => testBinary && process.env.CODE_FORGE_NATIVE !== '0'
     ? exec([testBinary, 'internal', ...args], { timeoutMs: 30_000 }) : null,
