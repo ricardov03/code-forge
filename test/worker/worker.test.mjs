@@ -168,7 +168,7 @@ describe('worker restart', () => {
         assert.equal((await verifyResult(repo, runId, t)).ok, true);
       }
 
-      assert.equal((await readRun(runId)).worker.pid, first.pid); // restarting alone never re-pins
+      assert.equal((await readRun(runId)).worker.pid, second.pid); // B355: the pinned worker is dead, so the new one re-pins itself
       const reattach = await cli(['run', 'start', '--reattach', '--run', runId], repo);
       assert.equal(reattach.code, 0, reattach.stderr);
       const repinned = `run ${runId}: worker re-pinned to pid ${second.pid}\n`;

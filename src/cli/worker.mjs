@@ -5,6 +5,8 @@
  * Started detached by the orchestrator (`run start`), never by a coder — `worker` is on the
  * forbidden list (§8.4 ★). Prints one status line on stderr; never a key.
  * Exit codes: 0 stopped cleanly, 1 refused (no run, run ended, another worker, no config), 2 usage.
+ * A run whose pinned workers are all dead is re-pinned to this process at boot (one stderr line,
+ * B355); a pinned worker that is still alive is never replaced (exit 1).
  */
 
 import { bootWorker } from '../worker/loop.mjs';
@@ -41,6 +43,8 @@ export async function runWorker(args, deps = {}) {
     writeSafe(stderr, `worker: ${err?.message ?? String(err)}\n`);
     return err instanceof StateError && err.code === 'usage' ? 2 : 1;
   }
+  // B355: every pinned worker was dead, so boot re-pinned the run to this process.
+  if (worker.repinned) writeSafe(stderr, `worker: re-pinned run ${flags.run} from dead pid ${worker.repinned.from.join(',')} to ${worker.repinned.to}\n`);
   // A failure inside the loop is reported as one redacted line (`writeSafe`) with exit 1, never as
   // an unhandled rejection whose raw stack could carry a key.
   if (flags.once) {
