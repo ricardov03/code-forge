@@ -698,7 +698,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		}
 		// B352: the machine-wide FIFO test queue; full scope waits for the
 		// whole machine, changed scope shares slots that fit cores and memory.
-		releaseSlot, err := gatesQueueSlot(ctx, p, scope, cwd, o.run, o.block, stderr)
+		releaseSlot, err := gatesQueueSlot(ctx, runPlan, scope, cwd, o.run, o.block, stderr)
 		if err != nil {
 			return err
 		}

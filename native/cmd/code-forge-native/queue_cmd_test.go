@@ -7,6 +7,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"regexp"
 	"strings"
 	"syscall"
 	"testing"
@@ -83,16 +84,26 @@ func waitQueue(t *testing.T, home string, holders, waiters int) queueView {
 	}
 }
 
-// holdSlot starts `queue run --kind full -- sleep` and waits until it holds.
+// holdSlot starts `queue run --kind full -- sleep` in its own process group
+// and waits until it holds; killHolder kills the group, sleep included.
 func holdSlot(t *testing.T, home, label string) *exec.Cmd {
 	t.Helper()
 	holder := queueProc(t, home, home, "queue", "run", "--kind", "full", "--label", label, "--", "/bin/sleep", "30")
+	holder.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	if err := holder.Start(); err != nil {
 		t.Fatal(err)
 	}
-	t.Cleanup(func() { _ = holder.Process.Kill(); _ = holder.Wait() })
+	t.Cleanup(func() { _ = syscall.Kill(-holder.Process.Pid, syscall.SIGKILL); _ = holder.Wait() })
 	waitQueue(t, home, 1, 0)
 	return holder
+}
+
+func killHolder(t *testing.T, holder *exec.Cmd) {
+	t.Helper()
+	if err := syscall.Kill(-holder.Process.Pid, syscall.SIGKILL); err != nil {
+		t.Fatal(err)
+	}
+	_ = holder.Wait()
 }
 
 func TestQueueRunPassesExitCode(t *testing.T) {
@@ -112,7 +123,7 @@ func TestQueueRunPassesExitCode(t *testing.T) {
 
 func TestQueueStatusListsHolderAndWaiterWithWaitTime(t *testing.T) {
 	home := t.TempDir()
-	holder := holdSlot(t, home, "hold")
+	holder := holdSlot(t, home, "holdlabel")
 	waiter := queueProc(t, home, home, "queue", "run", "--kind", "changed", "--label", "next", "--", "/bin/sh", "-c", "exit 0")
 	var stderr strings.Builder
 	waiter.Stderr = &stderr
@@ -127,20 +138,19 @@ func TestQueueStatusListsHolderAndWaiterWithWaitTime(t *testing.T) {
 		t.Fatalf("want exactly 1 holder and 1 waiter, have %+v", v)
 	}
 	h, w := v.Holders[0], v.Waiters[0]
-	if h.Kind != "full" || h.Label != "hold" || h.PID != holder.Process.Pid || h.WaitMS == nil || *h.WaitMS < 0 || h.HeldMS == nil || *h.HeldMS < 300 {
+	if h.Kind != "full" || h.Label != "holdlabel" || h.PID != holder.Process.Pid || h.WaitMS == nil || *h.WaitMS < 0 || h.HeldMS == nil || *h.HeldMS < 300 {
 		t.Fatalf("holder row: want full/hold/pid %d with wait_ms and held_ms >= 300, got %+v", holder.Process.Pid, h)
 	}
 	if w.Position != 1 || w.Kind != "changed" || w.Label != "next" || w.PID != waiter.Process.Pid || w.WaitMS == nil || *w.WaitMS < 300 || w.HeldMS != nil {
 		t.Fatalf("waiter row: want #1 changed/next/pid %d waiting >= 300 ms, got %+v", waiter.Process.Pid, w)
 	}
 	text, err := queueProc(t, home, home, "queue").Output()
-	if err != nil || !strings.Contains(string(text), "#1 ") || !strings.Contains(string(text), "next") || !strings.Contains(string(text), "hold") {
-		t.Fatalf("queue (text): want the holder and waiter #1 listed: %v: %s", err, text)
+	holderRow := regexp.MustCompile(`(?m)^holding .*holdlabel.* held \d+s`)
+	waiterRow := regexp.MustCompile(`(?m)^#1 .*next.* waiting \d+s`)
+	if err != nil || !holderRow.Match(text) || !waiterRow.Match(text) {
+		t.Fatalf("queue (text): want the holder row and waiter #1 with its wait time: %v: %s", err, text)
 	}
-	if err := holder.Process.Signal(syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	_ = holder.Wait()
+	killHolder(t, holder)
 	if code := exitCode(t, waiter.Wait()); code != 0 {
 		t.Fatalf("waiter exit %d after the holder died, want 0: %s", code, stderr.String())
 	}
@@ -192,10 +202,7 @@ func TestQueueGatesRunWaitsForTheSlot(t *testing.T) {
 	if err != nil || !strings.Contains(string(status), "queued #1 (gates B1)") {
 		t.Fatalf("status while the gate waits: want 'queued #1 (gates B1)': %v: %s", err, status)
 	}
-	if err := holder.Process.Signal(syscall.SIGKILL); err != nil {
-		t.Fatal(err)
-	}
-	_ = holder.Wait()
+	killHolder(t, holder)
 	rest, _ := io.ReadAll(lines)
 	if code := exitCode(t, gate.Wait()); code != 0 {
 		t.Fatalf("gates run exit %d after the holder died, want 0: %s%s", code, first, rest)

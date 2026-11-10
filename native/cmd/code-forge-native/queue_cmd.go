@@ -113,7 +113,11 @@ func queueStatus(jsonFlag bool) int {
 	fmt.Fprintf(os.Stdout, "test queue: %d holding, %d waiting · changed slots %d\n", len(holders), len(waiters), view.Slots)
 	ms := func(n int64) string { return (time.Duration(n) * time.Millisecond).Round(time.Second).String() }
 	for _, e := range view.Holders {
-		fmt.Fprintf(os.Stdout, "holding  %-7s pid %-7d %s · held %s · waited %s\n", e.Kind, e.PID, e.Label, ms(*e.HeldMS), ms(e.WaitMS))
+		held := int64(0)
+		if e.HeldMS != nil {
+			held = *e.HeldMS
+		}
+		fmt.Fprintf(os.Stdout, "holding  %-7s pid %-7d %s · held %s · waited %s\n", e.Kind, e.PID, e.Label, ms(held), ms(e.WaitMS))
 	}
 	for _, e := range view.Waiters {
 		fmt.Fprintf(os.Stdout, "#%-7d %-7s pid %-7d %s · waiting %s\n", e.Position, e.Kind, e.PID, e.Label, ms(e.WaitMS))
@@ -181,9 +185,10 @@ func queueRun(args []string) int {
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt, syscall.SIGTERM)
 	onWait, onAdmit := queueNotices(os.Stderr)
 	release, err := q.Acquire(ctx, testslot.Request{Kind: kind, Label: label, OnWait: onWait, OnAdmit: onAdmit})
+	interrupted := ctx.Err() != nil // read before stop(), which cancels ctx
 	stop()
 	if err != nil {
-		if ctx.Err() != nil {
+		if interrupted {
 			return 130
 		}
 		fmt.Fprintln(os.Stderr, "queue run:", err)
@@ -192,7 +197,15 @@ func queueRun(args []string) int {
 	defer release()
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.Stdin, cmd.Stdout, cmd.Stderr = os.Stdin, os.Stdout, os.Stderr
-	cmd.Env = append(os.Environ(), testslot.EnvHeld+"=1")
+	// The Node verb's loop guard is for its own handover only: drop it so a
+	// nested `code-forge queue` inside the command still reaches this binary.
+	cmd.Env = []string{}
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, "CODE_FORGE_QUEUE_HANDOVER=") && !strings.HasPrefix(kv, testslot.EnvHeld+"=") {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, testslot.EnvHeld+"=1")
 	signals := make(chan os.Signal, 2)
 	signal.Notify(signals, os.Interrupt, syscall.SIGTERM)
 	defer signal.Stop(signals)
@@ -252,9 +265,14 @@ func gatesQueueSlot(ctx context.Context, p gates.Plan, s gates.Scope, cwd, run, 
 	if err != nil {
 		return nil, fmt.Errorf("test queue: %w", err)
 	}
+	before, had := os.LookupEnv(testslot.EnvHeld)
 	_ = os.Setenv(testslot.EnvHeld, "1")
 	return func() {
-		_ = os.Unsetenv(testslot.EnvHeld)
+		if had {
+			_ = os.Setenv(testslot.EnvHeld, before)
+		} else {
+			_ = os.Unsetenv(testslot.EnvHeld)
+		}
 		release()
 	}, nil
 }
