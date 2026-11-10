@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"reflect"
 	"strings"
 	"testing"
 )
@@ -15,12 +16,126 @@ func TestGatesProcess(t *testing.T) {
 	if os.Getenv("CF_GATES_PROCESS") != "1" {
 		return
 	}
+	if version := os.Getenv("CF_GATES_NODE_VERSION"); version != "" {
+		reviewWaitNodeVersion = version
+	}
 	var args []string
 	if err := json.Unmarshal([]byte(os.Getenv("CF_GATES_ARGS")), &args); err != nil {
 		os.Exit(99)
 	}
 	code, _ := run(args)
 	os.Exit(code)
+}
+
+func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
+	for _, baseline := range []string{"missing", "stale", "shared"} {
+		t.Run(baseline, func(t *testing.T) {
+			root := t.TempDir()
+			repo, home := filepath.Join(root, "repo"), filepath.Join(root, "home")
+			write := func(file, body string) {
+				t.Helper()
+				p := filepath.Join(repo, file)
+				if err := os.MkdirAll(filepath.Dir(p), 0755); err != nil {
+					t.Fatal(err)
+				}
+				if err := os.WriteFile(p, []byte(body), 0600); err != nil {
+					t.Fatal(err)
+				}
+			}
+			git := func(args ...string) {
+				t.Helper()
+				cmd := exec.Command("git", args...)
+				cmd.Dir = repo
+				cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+				if out, err := cmd.CombinedOutput(); err != nil {
+					t.Fatalf("git %v: %v: %s", args, err, out)
+				}
+			}
+			write(".code-forge.yml", `{"gates":{"test":["/bin/echo","suite","{test_files}"],"lint":["/bin/echo","lint","{changed_files}"],"types":null,"format":["/bin/echo","format","{changed_files}"],"rerun_failed":0}}`)
+			write("README.md", "before\n")
+			write("engine.go", "// before\n")
+			git("init", "-q", "-b", "main")
+			git("add", ".")
+			git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "base")
+			git("checkout", "-qb", "block")
+			block := map[string]any{"status": "open", "kind": "code", "owned_files": []string{"README.md", "engine.go"}, "test_files": []string{}}
+			if baseline != "shared" {
+				block["base_branch"] = "main"
+			}
+			dir := filepath.Join(home, ".code-forge", "runs")
+			if err := os.MkdirAll(dir, 0700); err != nil {
+				t.Fatal(err)
+			}
+			data, _ := json.Marshal(map[string]any{"run_id": "fixture", "workspace": repo, "status": "active", "project": "fixture", "blocks": map[string]any{"B1": block}})
+			if err := os.WriteFile(filepath.Join(dir, "fixture.json"), data, 0600); err != nil {
+				t.Fatal(err)
+			}
+			type gateResult struct {
+				Gate, Reason, Scope, Stdout string
+				Skipped, OK, Reused         bool
+				Argv                        []string
+				FullStamp                   string `json:"full_stamp"`
+			}
+			run := func(changed bool) []gateResult {
+				t.Helper()
+				exe, err := os.Executable()
+				if err != nil {
+					t.Fatal(err)
+				}
+				args := []string{"gates", "run", "--run", "fixture", "--block", "B1"}
+				if changed {
+					args = append(args, "--changed")
+				}
+				encoded, _ := json.Marshal(args)
+				cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
+				cmd.Dir = repo
+				cmd.Env = append(os.Environ(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
+				out, err := cmd.CombinedOutput()
+				if err != nil {
+					t.Fatalf("gates run: %v: %s", err, out)
+				}
+				var result struct {
+					AllOK   bool `json:"allOk"`
+					Results []gateResult
+				}
+				if err := json.Unmarshal(out, &result); err != nil {
+					t.Fatalf("gate JSON: %v: %s", err, out)
+				}
+				if !result.AllOK || len(result.Results) != 4 {
+					t.Fatalf("want allOk and exactly four gates, got %s", out)
+				}
+				return result.Results
+			}
+			if baseline != "missing" {
+				run(false)
+			}
+			if baseline == "stale" {
+				write("unrelated.go", "// moved base\n")
+				git("add", "unrelated.go")
+				git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "move base")
+				git("branch", "-f", "main", "HEAD")
+			}
+			write("README.md", "changed\n")
+			results := run(true)
+			if test := results[0]; test.Gate != "test" || !test.OK || !test.Skipped || test.Reused || test.Reason != "text_only" || test.Stdout != "" || test.FullStamp != "" {
+				t.Fatalf("test gate: want one text_only skip without execution, reuse or full stamp, got %+v", test)
+			}
+			for index, name := range map[int]string{1: "lint", 3: "format"} {
+				gate := results[index]
+				if gate.Gate != name || gate.Skipped || !gate.OK || !reflect.DeepEqual(gate.Argv, []string{"/bin/echo", name, "README.md"}) {
+					t.Fatalf("%s: want exactly README.md passed to the executed gate, got %+v", name, gate)
+				}
+			}
+			if types := results[2]; types.Gate != "types" || !types.Skipped {
+				t.Fatalf("types: want one disabled gate, got %+v", types)
+			}
+			// A subsequent code edit must invalidate the text-only decision.
+			write("engine.go", "// changed\n")
+			if test := run(true)[0]; test.Skipped || test.Reused || test.Reason == "text_only" || test.Stdout != "suite\n" || !reflect.DeepEqual(test.Argv, []string{"/bin/echo", "suite"}) {
+				t.Fatalf("mixed code change: want exactly one full suite execution, got %+v", test)
+			}
+		})
+	}
 }
 
 func TestGatesNativeRoute(t *testing.T) {

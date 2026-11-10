@@ -597,12 +597,18 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 						}
 					}
 				}
+				// Test pairing follows the current base; text-only eligibility must
+				// still account for code changes since the last green run.
+				textBaseline := old
 				if base != "" && current != nil && previous["test_base"] != base {
 					paths := append([]string{}, delta...)
 					for _, file := range current {
 						paths = append(paths, file.Key)
 					}
 					old = gates.BaseHashes(cwd, base, paths)
+				}
+				if previous == nil {
+					textBaseline = old
 				}
 				// Malformed/foreign baselines require Node's full validation.
 				if old != nil {
@@ -663,14 +669,38 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 						p.ReuseReason = "tree_changed"
 					}
 				}
+				if textScope, ok := gates.TextOnlyScope(textBaseline, current, b, candidates); ok && (previous == nil || textBaseline != nil) {
+					scope = textScope
+					p.ReuseTest = false
+				}
+				// Reuse eligibility does not widen execution: source base moves
+				// above still require full scope, while missing evidence does not.
 				changedScope = &scope
 			}
 		}
 		var err error
 		started = true
-		results, all, err = gates.Run(ctx, p, cwd, o.run, timeout, scope)
+		runPlan := p
+		if scope.Reason == "text_only" {
+			runPlan.Commands = make(map[string]*gates.Command, len(p.Commands))
+			for name, command := range p.Commands {
+				if name != "test" {
+					runPlan.Commands[name] = command
+				}
+			}
+		}
+		results, all, err = gates.Run(ctx, runPlan, cwd, o.run, timeout, scope)
 		if err != nil {
 			return err
+		}
+		if scope.Reason == "text_only" {
+			for i, result := range results {
+				r := result.(ledger.Object)
+				if r.Get("gate") == "test" {
+					gatesAdd(&r, scope.Fields(true))
+					results[i] = r
+				}
+			}
 		}
 		if all && current != nil {
 			afterList, e := gates.List(cwd)
@@ -757,6 +787,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			if value := r.Get(key); value != nil {
 				summary.Set(key, value)
 			}
+		}
+		if r.Get("reason") == "text_only" {
+			summary.Set("reason", "text_only")
 		}
 		if r.Get("custom") == true {
 			items, _ := r.Get("evidence").([]any)
