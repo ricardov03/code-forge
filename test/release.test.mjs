@@ -82,6 +82,13 @@ const seen = (check) => {
 if (a[0] === 'view') { process.stdout.write((process.env.FAKE_NPM_VIEW || '0.1.0') + '\\n'); process.exit(0); }
 if (a[0] === 'test') {
   seen('test');
+  if (process.env.FAKE_NPM_RETRY_LOG) {
+    fs.appendFileSync(process.env.FAKE_NPM_RETRY_LOG, JSON.stringify(a) + '\\n');
+    if (a.length > 1) {
+      process.stdout.write('alone ' + a.at(-1) + '\\n');
+      process.exit(Number(process.env.FAKE_NPM_ALONE_EXIT || 0));
+    }
+  }
   process.stdout.write(process.env.FAKE_NPM_TEST_STDOUT ?? 'fake npm test\\n');
   process.stderr.write(process.env.FAKE_NPM_TEST_STDERR ?? '');
   process.exit(Number(process.env.FAKE_NPM_TEST_EXIT || 0));
@@ -95,8 +102,16 @@ if (a[0] === 'pack') {
 if (a[0] === 'ls') { process.stdout.write('{"name":"x","dependencies":{}}'); process.exit(0); }
 process.stderr.write('fake npm: unexpected ' + a.join(' ') + '\\n'); process.exit(9);
 `;
-const FAKE_GH = `#!/bin/sh
-echo "fake gh: unexpected $*" >&2; exit 9
+const FAKE_GH = `#!/usr/bin/env node
+const fs = require('node:fs');
+const { execFileSync } = require('node:child_process');
+if (process.env.FAKE_GH_LOG) fs.appendFileSync(process.env.FAKE_GH_LOG, JSON.stringify(process.argv.slice(2)) + '\\n');
+if (process.env.FAKE_GH_RUNS) {
+  const headSha = execFileSync('git', ['rev-parse', 'HEAD'], { encoding: 'utf8' }).trim();
+  process.stdout.write(process.env.FAKE_GH_RUNS.replaceAll('<HEAD>', headSha));
+  process.exit(0);
+}
+process.stderr.write('fake gh: unexpected arguments\\n'); process.exit(9);
 `;
 const FAKE_CLAUDE = `#!/bin/sh
 if [ "$1" = plugin ] && [ "$2" = validate ]; then echo "Validation passed"; exit 0; fi
@@ -192,6 +207,7 @@ const originRefs = (origin) => git(origin, ['for-each-ref', '--format=%(refname)
 
 before(() => {
   mkdirSync(FAKE_BIN);
+  writeFileSync(path.join(FAKE_BIN, 'package.json'), '{"type":"commonjs"}\n');
   for (const [name, body] of [['npm', FAKE_NPM], ['gh', FAKE_GH], ['claude', FAKE_CLAUDE]]) {
     writeFileSync(path.join(FAKE_BIN, name), body);
     chmodSync(path.join(FAKE_BIN, name), 0o755);
@@ -200,6 +216,68 @@ before(() => {
 after(() => rmSync(PARENT, { recursive: true, force: true }));
 
 describe('scripts/release.mjs (B23)', () => {
+  test('B345: reruns exactly two failing files once each, serially, and accepts only green HEAD CI', () => {
+    for (const reporter of ['tap', 'spec']) {
+      const { dir, work } = makeRepo();
+      mkdirSync(path.join(work, 'test'));
+      for (const file of ['a.test.mjs', 'b.test.mjs', 'passing.test.mjs']) writeFileSync(path.join(work, 'test', file), '// fixture\n');
+      git(work, ['add', 'test']);
+      git(work, ['commit', '-q', '-m', 'tests']);
+      const head = git(work, ['rev-parse', 'HEAD']).trim();
+      const log = path.join(dir, 'npm.jsonl');
+      const ghLog = path.join(dir, 'gh.jsonl');
+      const output = reporter === 'tap'
+        ? "not ok 1 - first\n  location: 'test/a.test.mjs:2:1'\nnot ok 2 - second\n  location: 'test/b.test.mjs:3:1'\nnot ok 3 - duplicate\n  location: 'test/a.test.mjs:4:1'\n"
+        : `✖ first (1ms)\nℹ failing tests:\n\ntest at test/a.test.mjs:2:1\n✖ first (1ms)\ntest at ${path.join(work, 'test/b.test.mjs')}:3:1\n✖ second (2ms)\ntest at test/a.test.mjs:4:1\n✖ duplicate (1ms)\n`;
+      const r = release(work, ['patch'], {
+        FAKE_NPM_TEST_EXIT: '1', FAKE_NPM_TEST_STDOUT: output, FAKE_NPM_RETRY_LOG: log,
+        FAKE_GH_LOG: ghLog, FAKE_GH_RUNS: '[{"headSha":"<HEAD>","conclusion":"success","status":"completed"}]',
+      });
+      assert.equal(r.code, 0, r.stdout + r.stderr);
+      assert.deepEqual(readFileSync(log, 'utf8').trim().split('\n').map((line) => JSON.parse(line)), [
+        ['test'], ['test', '--', '--test-concurrency=1', 'test/a.test.mjs'], ['test', '--', '--test-concurrency=1', 'test/b.test.mjs'],
+      ], 'one full run, then exactly one isolated serial run per failing file; passing file never reruns');
+      assert.deepEqual(readFileSync(ghLog, 'utf8').trim().split('\n').map((line) => JSON.parse(line)), [
+        ['run', 'list', '--commit', head, '--workflow', 'CI', '--limit', '1', '--json', 'headSha,status,conclusion'],
+      ], 'one CI query for the pre-release HEAD');
+      assert.match(r.stdout, /npm test failed \(exit 1\)/);
+      for (const file of ['a', 'b']) assert.match(r.stdout, new RegExp(`alone test/${file}\\.test\\.mjs`));
+      assert.equal(r.stdout.split('\n').filter((line) => line === 'local flaky (passed alone, CI green): test/a.test.mjs, test/b.test.mjs').length, 1);
+      assert.equal(state(work).tags, 'v0.1.1', 'successful retry releases exactly one tag');
+    }
+  });
+
+  test('B345 boundary: red, absent, pending or foreign CI and a failing isolated rerun all refuse and roll back', () => {
+    const green = '[{"headSha":"<HEAD>","conclusion":"success","status":"completed"}]';
+    for (const [runs, alone] of [
+      ['[{"headSha":"<HEAD>","conclusion":"failure","status":"completed"}]', '0'],
+      ['[]', '0'],
+      ['[{"headSha":"<HEAD>","conclusion":null,"status":"in_progress"}]', '0'],
+      ['[{"headSha":"wrong","conclusion":"success","status":"completed"}]', '0'],
+      [green, '1'],
+    ]) {
+      const { dir, work } = makeRepo();
+      mkdirSync(path.join(work, 'test'));
+      writeFileSync(path.join(work, 'test/a.test.mjs'), '// fixture\n');
+      git(work, ['add', 'test']);
+      git(work, ['commit', '-q', '-m', 'test']);
+      const before = snapshot(work);
+      const head = state(work).head;
+      const log = path.join(dir, 'npm.jsonl');
+      const r = release(work, ['patch'], {
+        FAKE_NPM_TEST_EXIT: '1', FAKE_NPM_TEST_STDOUT: "not ok 1 - first\n  location: 'test/a.test.mjs:2:1'\n",
+        FAKE_NPM_RETRY_LOG: log, FAKE_NPM_ALONE_EXIT: alone, FAKE_GH_RUNS: runs,
+      });
+      assert.equal(r.code, 1, r.stdout + r.stderr);
+      assert.equal(existsSync(log), true, 'fake npm records the initial run');
+      assert.equal(readFileSync(log, 'utf8').trim().split('\n').length, 2, 'full run plus exactly one rerun even when it stays red');
+      assert.deepEqual(snapshot(work), before, 'all six release files restored byte-for-byte');
+      assert.deepEqual([state(work).head, state(work).tags], [head, ''], 'zero commits and zero tags after refusal');
+      assert.equal(r.stdout.includes('local flaky (passed alone, CI green):'), false, 'zero flaky success lines for rejected release');
+      assert.match(r.stderr, /FAILED:/);
+    }
+  });
+
   test('B263: releases plan and bump both docs pins; npm test names every failure once, saves full output, and rolls back the docs', () => {
     const docs = '# Guide\n\nnpm install --save-dev --save-exact @codedology/code-forge@0.1.0\n\n@codedology/code-forge 0.1.0\n';
     const bumped = '# Guide\n\nnpm install --save-dev --save-exact @codedology/code-forge@0.2.0\n\n@codedology/code-forge 0.2.0\n';
