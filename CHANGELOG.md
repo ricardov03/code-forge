@@ -12,6 +12,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The close transcript check reads Claude Code sub-agent JSONL logs by shape: only tool_use Bash commands, write paths and other tool inputs are scanned, so tool help, tool_result text and the coder prompt no longer give false rule_break hits; a broken or mixed log still falls back to the plain fail-closed grep (B361)
 - Test runs wait in one machine-wide FIFO queue: `gates run` takes a full or changed slot before its test command, changed runs share `max(1, min(cores/4, free GB/2))` slots, and a killed holder frees its slot within 2 seconds. `code-forge queue` shows holders and waiters, `code-forge queue run -- <cmd>` queues any other test command, `status` shows `queued #k`, and `CODE_FORGE_TEST_QUEUE=off` turns it off (B352)
 - `code-forge worker --run <id>` re-pins the run to itself when every pinned worker is dead (no process, or another start time), with the same `worker.reattach` ledger row as `run start --reattach` and one stderr line `worker: re-pinned run <id> from dead pid <old> to <new>`, so a block close after a worker restart no longer stops on `worker.replaced`; a pinned worker that is still alive and not serving this queue is never replaced (exit 1) (B355)
+- The anthropic default L3 model is now `claude-fable-5-2` in Node and Go; `claude-fable-5-2` is a known model id, and `claude-fable-5-1` stays known, so configs that name it still validate (B353)
 
 ## [0.21.0] — 2026-11-09
 

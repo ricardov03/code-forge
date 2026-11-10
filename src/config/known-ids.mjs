@@ -26,8 +26,9 @@
 
 /**
  * The full catalog, by provider, as read from each CLI's own model cache on this Mac
- * (plan brief §3, 2026-09-24; A8). Four Anthropic ids, three OpenAI ids, four xAI ids — eleven in
- * total, matching the "≥ 11 ids" the acceptance clause counts.
+ * (plan brief §3, 2026-09-24; A8). Five Anthropic ids, three OpenAI ids, four xAI ids — twelve in
+ * total, above the "≥ 11 ids" the acceptance clause counts. B353 added `claude-fable-5-2` (the new
+ * default L3) and keeps `claude-fable-5-1`, because user configs may still name it.
  * @type {Record<Provider, ReadonlyArray<string>>}
  */
 export const KNOWN_IDS = Object.freeze({
@@ -36,6 +37,7 @@ export const KNOWN_IDS = Object.freeze({
     'claude-sonnet-5',
     'claude-opus-5-5',
     'claude-fable-5-1',
+    'claude-fable-5-2',
   ]),
   openai: Object.freeze(['gpt-6-luna', 'gpt-6-sol', 'gpt-6-astra']),
   xai: Object.freeze(['grok-4.7', 'grok-4.7-build-fast', 'grok-4.6', 'grok-4.5']),

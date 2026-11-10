@@ -12,7 +12,7 @@ export default Object.freeze({
     L0: Object.freeze({ model: 'claude-haiku-4-5-20251001' }),
     L1: Object.freeze({ model: 'claude-sonnet-5' }),
     L2: Object.freeze({ model: 'claude-opus-5-5' }),
-    L3: Object.freeze({ model: 'claude-fable-5-1' }),
+    L3: Object.freeze({ model: 'claude-fable-5-2' }),
   }),
   caps: Object.freeze({ coders: 2 }),
 });
