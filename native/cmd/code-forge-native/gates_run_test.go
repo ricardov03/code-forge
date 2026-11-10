@@ -2,6 +2,7 @@ package main
 
 import (
 	"encoding/json"
+	"fmt"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -28,7 +29,7 @@ func TestGatesProcess(t *testing.T) {
 }
 
 func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
-	for _, baseline := range []string{"missing", "stale", "shared"} {
+	for _, baseline := range []string{"missing", "stale", "shared", "unsafe-move", "oversized"} {
 		t.Run(baseline, func(t *testing.T) {
 			root := t.TempDir()
 			repo, home := filepath.Join(root, "repo"), filepath.Join(root, "home")
@@ -54,6 +55,12 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 			write(".code-forge.yml", `{"gates":{"test":["/bin/echo","suite","{test_files}"],"lint":["/bin/echo","lint","{changed_files}"],"types":null,"format":["/bin/echo","format","{changed_files}"],"rerun_failed":0}}`)
 			write("README.md", "before\n")
 			write("engine.go", "// before\n")
+			if baseline == "oversized" {
+				// With README.md and engine.go the base holds 201 owned files.
+				for i := 0; i < 199; i++ {
+					write(fmt.Sprintf("docs/n%03d.md", i), "before\n")
+				}
+			}
 			git("init", "-q", "-b", "main")
 			git("add", ".")
 			git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "base")
@@ -61,6 +68,9 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 			block := map[string]any{"status": "open", "kind": "code", "owned_files": []string{"README.md", "engine.go"}, "test_files": []string{}}
 			if baseline != "shared" {
 				block["base_branch"] = "main"
+			}
+			if baseline == "oversized" {
+				block["owned_files"] = []string{"README.md", "engine.go", "docs/"}
 			}
 			dir := filepath.Join(home, ".code-forge", "runs")
 			if err := os.MkdirAll(dir, 0700); err != nil {
@@ -106,8 +116,29 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 				}
 				return result.Results
 			}
+			if baseline == "oversized" {
+				// The green ledger baseline holds 200 files; the deleted doc makes
+				// the base baseline 201 entries, which validation rejects.
+				git("rm", "-q", "docs/n000.md")
+				git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "drop doc")
+			}
 			if baseline != "missing" {
-				run(false)
+				run(baseline == "unsafe-move")
+			}
+			if baseline == "unsafe-move" || baseline == "oversized" {
+				if baseline == "unsafe-move" {
+					// A code commit moves the recorded test base unsafely.
+					write("unrelated.go", "// moved base\n")
+					git("add", "unrelated.go")
+					git("-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "move base")
+					git("branch", "-f", "main", "HEAD")
+				}
+				write("README.md", "changed\n")
+				test := run(true)[0]
+				if test.Gate != "test" || !test.OK || test.Skipped || test.Reused || test.Reason == "text_only" || test.Scope != "full" || test.Stdout != "suite\n" {
+					t.Fatalf("%s: want exactly one full suite execution instead of text_only, got %+v", baseline, test)
+				}
+				return
 			}
 			if baseline == "stale" {
 				write("unrelated.go", "// moved base\n")

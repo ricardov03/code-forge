@@ -600,6 +600,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 				// Test pairing follows the current base; text-only eligibility must
 				// still account for code changes since the last green run.
 				textBaseline := old
+				textRejected, forcedFull := false, false
 				if base != "" && current != nil && previous["test_base"] != base {
 					paths := append([]string{}, delta...)
 					for _, file := range current {
@@ -624,6 +625,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 							break
 						}
 					}
+					// A rejected baseline never qualifies for the text-only scope.
+					if old == nil {
+						textBaseline = nil
+						textRejected = true
+					}
 				}
 				candidates := []string{}
 				for _, file := range listed {
@@ -646,7 +652,8 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 					}
 					oldBase, _ := previous["test_base"].(string)
 					safeBase := gates.ReusableBaseMove(cwd, oldBase, base)
-					if oldBase != "" && oldBase != base && !safeBase {
+					forcedFull = oldBase != "" && oldBase != base && !safeBase
+					if forcedFull {
 						scope.Kind = "full"
 						scope.Files = []string{}
 						scope.Report, scope.Reason = "full", "no_baseline"
@@ -669,7 +676,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 						p.ReuseReason = "tree_changed"
 					}
 				}
-				if textScope, ok := gates.TextOnlyScope(textBaseline, current, b, candidates); ok && (previous == nil || textBaseline != nil) {
+				if textScope, ok := gates.TextOnlyScope(textBaseline, current, b, candidates); ok && !forcedFull && !textRejected && (previous == nil || textBaseline != nil) {
 					scope = textScope
 					p.ReuseTest = false
 				}
