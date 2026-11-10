@@ -180,6 +180,8 @@ func gatesShort(sha string) string {
 
 func runGates(args []string) int {
 	gatesLastMessage = nil
+	gatesBaseChecked = false
+	_ = os.Unsetenv(gatesBaseCheckedEnv)
 	if len(args) == 0 || args[0] != "run" {
 		return gatesHandover(args, hGatesUnportedSubcommand)
 	}

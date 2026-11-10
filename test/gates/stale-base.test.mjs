@@ -23,6 +23,9 @@ const built = spawnSync('go', ['build', '-o', binary, './cmd/code-forge-native']
   cwd: path.join(ROOT, 'native'), encoding: 'utf8', env: { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' },
 });
 assert.equal(built.status, 0, `private native build: ${built.error?.message ?? built.stderr}`);
+// The first exec of a just-built binary pays macOS's one-time check of the new file; pay it here,
+// so the 2 s bound below times the stale-base check, not that first exec.
+spawnSync(binary, ['--version'], { encoding: 'utf8', timeout: 60_000 });
 const { runBlock } = await import('../../src/cli/block.mjs');
 const probe = async (/** @type {number} */ pid) => (pid === 4242 ? 'fixture-worker' : null);
 

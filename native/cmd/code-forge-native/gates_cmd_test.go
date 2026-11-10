@@ -7,18 +7,20 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
-// B363: block land gates a stale base on with the --allow-stale-base WARN line.
+// B363: gatesStaleWarning is the one WARN line that gates run --allow-stale-base
+// and block land print for a stale base, and nothing for a current base.
 func TestGatesStaleWarningNamesTheFixOnlyForAStaleBase(t *testing.T) {
 	home, repo := t.TempDir(), t.TempDir()
 	git := func(args ...string) string {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+		cmd.Env = append(gitx.ChildEnv(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v\n%s", args, err, out)
