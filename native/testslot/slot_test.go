@@ -102,6 +102,30 @@ func ticketCount(t *testing.T, q *Queue) int {
 	return len(entries)
 }
 
+// filesLeft lists every regular file under the queue directory: an idle queue
+// must leave none, so a gate run leaves HOME as a Node gate run does.
+func filesLeft(t *testing.T, q *Queue) []string {
+	t.Helper()
+	var files []string
+	err := filepath.WalkDir(q.Dir, func(path string, d os.DirEntry, err error) error {
+		if err != nil {
+			if os.IsNotExist(err) {
+				return nil
+			}
+			return err
+		}
+		if !d.IsDir() {
+			rel, _ := filepath.Rel(q.Dir, path)
+			files = append(files, rel)
+		}
+		return nil
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return files
+}
+
 func waitTickets(t *testing.T, q *Queue, n int) {
 	t.Helper()
 	deadline := time.Now().Add(5 * time.Second)
@@ -305,6 +329,9 @@ func TestSlotChangedPassesWaitingFullOnlyWhenSlotMathAllows(t *testing.T) {
 	if rec.maxFull != 1 || rec.maxTotal != 2 {
 		t.Fatalf("holders with a full run = %d (want 1), most holders = %d (want 2)", rec.maxFull, rec.maxTotal)
 	}
+	if left := filesLeft(t, q); len(left) != 0 {
+		t.Fatalf("files left once the skip counter is spent and every run ended = %v, want none", left)
+	}
 }
 
 // A busy machine holds waiters back while a slot is held, but the head waiter
@@ -369,8 +396,8 @@ func TestSlotIdleAcquireIsFastAndLeavesNothingBehind(t *testing.T) {
 	if worst >= 150*time.Millisecond {
 		t.Fatalf("slowest idle acquire+release = %v, want < 150ms", worst)
 	}
-	if n := ticketCount(t, q); n != 0 {
-		t.Fatalf("tickets left after release = %d, want 0", n)
+	if left := filesLeft(t, q); len(left) != 0 {
+		t.Fatalf("files left under the queue after release = %v, want none", left)
 	}
 	if n := runtime.NumGoroutine(); n > goroutines {
 		t.Fatalf("goroutines after release = %d, want <= %d (nothing resident)", n, goroutines)

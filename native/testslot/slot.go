@@ -4,7 +4,8 @@
 //
 // Layout under $HOME/.code-forge/queue/:
 //
-//	state.json          flock'd; holds the fair-skip counter
+//	(the directory)     flock'd for every read or change of the queue
+//	state.json          the fair-skip counter; present only while it counts
 //	tickets/<id>.json   one per waiter or holder (pid, process start time,
 //	                    kind, cwd, label, enqueued_at, admitted_at once held)
 //
@@ -371,26 +372,27 @@ func split(tickets []Ticket) (holders, waiters []Ticket) {
 	return holders, waiters
 }
 
-// locked runs fn under the queue's exclusive flock and saves a changed state.
+// locked runs fn under an exclusive flock on the queue directory and saves a
+// changed state. The lock sits on the directory, not on state.json, so the
+// state file can be removed while it is empty: an idle queue leaves no file
+// behind (a Go gate run leaves HOME as a Node gate run does).
 func (q *Queue) locked(fn func(*state) error) error {
 	if err := os.MkdirAll(filepath.Join(q.Dir, "tickets"), 0o700); err != nil {
 		return err
 	}
-	f, err := os.OpenFile(filepath.Join(q.Dir, "state.json"), os.O_RDWR|os.O_CREATE, 0o600)
+	dir, err := os.Open(q.Dir)
 	if err != nil {
 		return err
 	}
-	defer f.Close()
-	if err := lockFile(f); err != nil {
+	defer dir.Close()
+	if err := lockFile(dir); err != nil {
 		return err
 	}
-	defer unlockFile(f)
+	defer unlockFile(dir)
+	file := filepath.Join(q.Dir, "state.json")
 	var st state
-	if info, err := f.Stat(); err == nil && info.Size() > 0 {
-		data := make([]byte, info.Size())
-		if _, err := f.ReadAt(data, 0); err == nil {
-			_ = json.Unmarshal(data, &st)
-		}
+	if data, err := os.ReadFile(file); err == nil {
+		_ = json.Unmarshal(data, &st)
 	}
 	before := st
 	if err := fn(&st); err != nil {
@@ -399,12 +401,18 @@ func (q *Queue) locked(fn func(*state) error) error {
 	if st == before {
 		return nil
 	}
+	if st == (state{}) {
+		if err := os.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+		return nil
+	}
 	data, _ := json.Marshal(st)
-	if err := f.Truncate(0); err != nil {
+	tmp := filepath.Join(q.Dir, ".state.tmp")
+	if err := os.WriteFile(tmp, data, 0o600); err != nil {
 		return err
 	}
-	_, err = f.WriteAt(data, 0)
-	return err
+	return os.Rename(tmp, file)
 }
 
 func (q *Queue) writeTicket(t Ticket) error {
