@@ -10,6 +10,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 - New Go verbs `code-forge docs sync|path [--json]`. `docs sync` fetches the published `llms-full.txt` and keeps it in `~/.code-forge/docs/` only when its `version:` line equals the installed version; otherwise, offline or on an HTTP error it keeps the packed copy and still exits 0. `docs path` prints the best copy, or exits 1 when there is none. `upgrade` runs `docs sync` best effort after a successful upgrade (B348)
 - The close transcript check reads Claude Code sub-agent JSONL logs by shape: only tool_use Bash commands, write paths and other tool inputs are scanned, so tool help, tool_result text and the coder prompt no longer give false rule_break hits; a broken or mixed log still falls back to the plain fail-closed grep (B361)
+- Test runs wait in one machine-wide FIFO queue: `gates run` takes a full or changed slot before its test command, changed runs share `max(1, min(cores/4, free GB/2))` slots, and a killed holder frees its slot within 2 seconds. `code-forge queue` shows holders and waiters, `code-forge queue run -- <cmd>` queues any other test command, `status` shows `queued #k`, and `CODE_FORGE_TEST_QUEUE=off` turns it off (B352)
 
 ## [0.21.0] — 2026-11-09
 

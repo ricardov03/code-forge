@@ -182,7 +182,13 @@ func directStatus(args []string) (int, bool) {
 		}
 		summaries = append(summaries, summary)
 		if !jsonFlag {
-			texts = append(texts, renderStatus(summary, statusEndHint(record)))
+			text := renderStatus(summary, statusEndHint(record))
+			if id, _ := record["run_id"].(string); id != "" {
+				for _, line := range statusQueueLines(home, id) {
+					text += "\n" + line
+				}
+			}
+			texts = append(texts, text)
 		}
 		workerWarnings, ok := statusWorkerWarnings(record)
 		if !ok {
