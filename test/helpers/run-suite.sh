@@ -1,8 +1,11 @@
 #!/bin/sh
 # Test concurrency (B354): node --test runs max(1, cores/2) test files at once by
-# default, so one suite cannot overload a shared machine. An explicit
-# --test-concurrency flag from the caller wins; otherwise the environment
-# variable CODE_FORGE_TEST_CONCURRENCY (a positive integer) sets the count.
+# default, so one suite cannot overload a shared machine. When the suite holds
+# the machine test slot (B352 queue: CODE_FORGE_TEST_QUEUE_HELD is non-empty,
+# set by gates and `code-forge queue run`), it uses all cores instead (B376).
+# An explicit --test-concurrency flag from the caller wins; otherwise the
+# environment variable CODE_FORGE_TEST_CONCURRENCY (a positive integer) sets
+# the count.
 # Validate explicit test paths before starting either leak-check step. Resolve
 # existing ancestors too, so a symlink cannot lead outside the suite's repo.
 # All runner paths below are relative to the caller's working directory, even
@@ -152,7 +155,11 @@ if [ "$cf_has_concurrency" = false ]; then
     case "$cf_cores" in
       ''|*[!0-9]*|0*) cf_cores=1 ;;
     esac
-    cf_concurrency=$((cf_cores / 2))
+    if [ -n "${CODE_FORGE_TEST_QUEUE_HELD:-}" ]; then
+      cf_concurrency=$cf_cores
+    else
+      cf_concurrency=$((cf_cores / 2))
+    fi
     [ "$cf_concurrency" -ge 1 ] || cf_concurrency=1
   fi
   cf_concurrency_flag="--test-concurrency=$cf_concurrency"

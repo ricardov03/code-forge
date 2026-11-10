@@ -102,13 +102,16 @@ describe('run-suite test concurrency', () => {
     writeFileSync(path.join(repo, 'test/a.test.mjs'), "import { test } from 'node:test'; test('a', () => {});\n");
     writeFileSync(path.join(repo, 'package.json'), JSON.stringify({ type: 'module' }));
     const argvLog = path.join(repo, 'argv.log');
-    writeFileSync(path.join(repo, 'bin/node'), `#!/bin/sh\nfor a; do printf '%s\\n' "$a"; done >> '${argvLog}'\nprintf '%s\\n' '--END--' >> '${argvLog}'\nexec '${process.execPath}' "$@"\n`);
+    // CF_STUB_CORES makes the core probe (`node -p ...`) print a fixed count.
+    writeFileSync(path.join(repo, 'bin/node'), `#!/bin/sh\nif [ "$1" = -p ] && [ -n "$CF_STUB_CORES" ]; then printf '%s\\n' "$CF_STUB_CORES"; exit 0; fi\nfor a; do printf '%s\\n' "$a"; done >> '${argvLog}'\nprintf '%s\\n' '--END--' >> '${argvLog}'\nexec '${process.execPath}' "$@"\n`);
     chmodSync(path.join(repo, 'bin/node'), 0o755);
     const run = (/** @type {string[]} */ args, /** @type {Record<string, string>} */ extra = {}) => {
       /** @type {Record<string, string | undefined>} */
       const env = { ...process.env, CODE_FORGE_LEAK_GUARD: 'snapshot', PATH: `${path.join(repo, 'bin')}${path.delimiter}${process.env.PATH}`, ...extra };
       delete env.NODE_TEST_CONTEXT;
       if (!('CODE_FORGE_TEST_CONCURRENCY' in extra)) delete env.CODE_FORGE_TEST_CONCURRENCY;
+      if (!('CODE_FORGE_TEST_QUEUE_HELD' in extra)) delete env.CODE_FORGE_TEST_QUEUE_HELD;
+      writeFileSync(argvLog, ''); // each run records only its own calls
       const r = spawnSync('/bin/sh', ['test/helpers/run-suite.sh', ...args], { cwd: repo, env, encoding: 'utf8', timeout: 60_000 });
       assert.equal(r.status, 0, r.stdout + r.stderr);
       // The test runner is the one Node call that loads test-module mocks.
@@ -138,5 +141,20 @@ describe('run-suite test concurrency', () => {
   test('CODE_FORGE_TEST_CONCURRENCY overrides the default', (t) => {
     const value = String(expected + 3);
     assert.deepEqual(suite(t)(['test/a.test.mjs'], { CODE_FORGE_TEST_CONCURRENCY: value }), [value]);
+  });
+
+  test('B376: holding the machine test slot gives all cores (8 of 8); without the slot or with an empty slot variable it stays 8/2 = 4', (t) => {
+    const run = suite(t);
+    assert.deepEqual(run(['test/a.test.mjs'], { CF_STUB_CORES: '8', CODE_FORGE_TEST_QUEUE_HELD: '1' }), ['8']);
+    assert.deepEqual(run(['test/a.test.mjs'], { CF_STUB_CORES: '8' }), ['4']);
+    assert.deepEqual(run(['test/a.test.mjs'], { CF_STUB_CORES: '8', CODE_FORGE_TEST_QUEUE_HELD: '' }), ['4']);
+  });
+
+  test('B376: with the slot held, an explicit flag and CODE_FORGE_TEST_CONCURRENCY still win over all cores', (t) => {
+    const run = suite(t);
+    const held = { CF_STUB_CORES: '8', CODE_FORGE_TEST_QUEUE_HELD: '1' };
+    assert.deepEqual(run(['--test-concurrency', '3', 'test/a.test.mjs'], held), ['3']);
+    assert.deepEqual(run(['--test-concurrency=2', 'test/a.test.mjs'], held), ['2']);
+    assert.deepEqual(run(['test/a.test.mjs'], { ...held, CODE_FORGE_TEST_CONCURRENCY: '5' }), ['5']);
   });
 });

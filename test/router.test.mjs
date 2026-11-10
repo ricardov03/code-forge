@@ -105,7 +105,7 @@ test('package.json declares no peer or bundled dependencies, under either npm sp
 });
 
 /** Run the package test entry with a fake node; inspect phase argv and statuses, not source. */
-async function testPhases(snapshot, main, final, extraArgs = [], suite = 'b115-shell', concurrency = '3') {
+async function testPhases(snapshot, main, final, extraArgs = [], suite = 'b115-shell', concurrency = '3', extraEnv = {}) {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   const dir = path.join(PKG, 'test-script-bin');
   await mkdir(dir, { recursive: true });
@@ -126,6 +126,8 @@ exit "$status"
   if (suite === null) delete env.CODE_FORGE_TEST_SUITE;
   if (concurrency === null) delete env.CODE_FORGE_TEST_CONCURRENCY;
   else env.CODE_FORGE_TEST_CONCURRENCY = concurrency;
+  delete env.CODE_FORGE_TEST_QUEUE_HELD;
+  Object.assign(env, extraEnv);
   if (extraArgs.length === 0) return spawnSync('sh', ['-c', pkg.scripts.test], { cwd: ROOT, timeout: 20000, encoding: 'utf8', env });
   return spawnSync(process.execPath, [npmJsPath(), 'test', '--', ...extraArgs], { cwd: ROOT, timeout: 20000, encoding: 'utf8', env: { ...env, npm_config_loglevel: 'silent' } });
 }
@@ -186,6 +188,24 @@ test('B354: with no concurrency setting and a node that prints no number, main s
   assert.match(flags[0], /^--test-concurrency=[1-9][0-9]*$/);
   assert.ok(main.indexOf(flags[0]) < main.indexOf('--test'), lines[1]);
   assert.deepEqual(main.slice(main.indexOf('--test') + 1), ['test/**/*.test.mjs']);
+});
+
+test('B376: the package test entry passes all cores to main when it holds the machine test slot, and cores/2 without it', async () => {
+  // The fake node prints no number for the core probe, so run-suite falls back to getconf.
+  const cores = Number(spawnSync('getconf', ['_NPROCESSORS_ONLN'], { encoding: 'utf8' }).stdout.trim());
+  assert.ok(cores >= 1);
+  for (const [extraEnv, expected] of [[{ CODE_FORGE_TEST_QUEUE_HELD: '1' }, cores], [{}, Math.max(1, Math.floor(cores / 2))]]) {
+    const result = await testPhases(0, 0, 0, [], 'b115-shell', null, extraEnv);
+    assert.equal(result.status, 0, result.stderr);
+    const main = result.stdout.trim().split('\n')[1].split('|');
+    assert.deepEqual(main.filter((arg) => arg.startsWith('--test-concurrency=')), [`--test-concurrency=${expected}`], main.join('|'));
+  }
+});
+
+test('B376: with the slot held, CODE_FORGE_TEST_CONCURRENCY still sets main concurrency', async () => {
+  const result = await testPhases(0, 0, 0, [], 'b115-shell', '3', { CODE_FORGE_TEST_QUEUE_HELD: '1' });
+  assert.equal(result.status, 0, result.stderr);
+  assert.deepEqual(result.stdout.trim().split('\n'), PHASE_ARGV);
 });
 
 test('B115: the test script generates one suite marker when unset and preserves a preset marker in all three phases', async () => {
