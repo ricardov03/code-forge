@@ -3,7 +3,8 @@
  *
  * `checkBlockReviews` refuses the block when (the file set is the close's: the diff since base ∪
  * every owned file with review rows of the block, {@link reviewedFiles}, owned through
- * {@link ownsPath}):
+ * {@link ownsPath} — less, {@link revertedToBase}, a file outside the diff at its base bytes whose
+ * current bytes have no review row, or B365 only `no_change` results):
  *  - `no_changes`: (B52) that set is empty — the block changed no owned file and has no reviews;
  *    a close that checked nothing is never a pass (`--no-require-reviews` is the owner's way out);
  *  - `unowned_change`: (B52) a changed or new file outside the block's `owned_files` that no other
@@ -1049,7 +1050,19 @@ export function reviewedFiles(rows, block) {
 }
 
 /**
- * Reviewed paths back at their base bytes, with no review of those current bytes. Reuses the
+ * B365: a `review.result` row that only says the reviewer found `bytes` equal to the block's base
+ * (`status: 'no_change'`, no open finding) — written when `block rebase --accept-landed` queues a
+ * file that main changed and the block did not. It names `hash` exactly; a hash-less row does not
+ * qualify. Such a row neither approves nor refuses the content.
+ * @param {Record<string, any>} row @param {string} hash @returns {boolean}
+ */
+const noChangeOnly = (row, hash) =>
+  row.event === 'review.result' && row.status === 'no_change' && row.content_hash === hash && (row.open === undefined || (Array.isArray(row.open) && row.open.length === 0));
+
+/**
+ * Reviewed paths back at their base bytes, with no review of those current bytes — B365: or whose
+ * every review row of those bytes is a `no_change` result ({@link noChangeOnly}); any other row of
+ * the current bytes (an approval, a refusal, a hash-less row) keeps the path. Reuses the
  * close's rows; unreadable files or git failures keep the path in the gate (fail closed).
  * @param {{repoRoot: string, base: string, files: ReadonlyArray<string>, rows: Array<Record<string, any>>, block: string}} opts
  * @returns {Promise<string[]>}
@@ -1074,7 +1087,7 @@ export async function revertedToBase({ repoRoot, base, files, rows, block }) {
     try {
       repoRelativePath(file);
       const current = contentHash(repoRoot, file);
-      if ((reviews.get(file) ?? []).some((row) => row.content_hash === undefined || row.content_hash === current)) continue;
+      if ((reviews.get(file) ?? []).some((row) => (row.content_hash === undefined || row.content_hash === current) && !noChangeOnly(row, current))) continue;
       const shown = await exec(['git', 'show', `${base}:${file}`], { cwd: repoRoot, env, stdoutEncoding: 'base64', timeoutMs: 30000 });
       if (shown.result === 'ok') {
         if (hashBytes(Buffer.from(shown.stdout, 'base64')) === current) reverted.push(file);
