@@ -6,6 +6,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Changed
+
+- New Go verbs `code-forge docs sync|path [--json]`. `docs sync` fetches the published `llms-full.txt` and keeps it in `~/.code-forge/docs/` only when its `version:` line equals the installed version; otherwise, offline or on an HTTP error it keeps the packed copy and still exits 0. `docs path` prints the best copy, or exits 1 when there is none. `upgrade` runs `docs sync` best effort after a successful upgrade (B348)
+
 ## [0.21.0] — 2026-11-09
 
 ### Added

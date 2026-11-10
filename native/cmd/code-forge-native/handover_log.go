@@ -400,6 +400,7 @@ var handoverCommands = map[string]string{
 	"autopilot":     "start status stop ask waive round level approve binnacle log",
 	"block":         "open attempt rebase claim ready close land stop waive reopen accept-hit unwaive ack-waivers human-pass amend-acceptance",
 	"context":       "pack",
+	"docs":          "sync path",
 	"doctor":        "",
 	"facts":         "",
 	"gates":         "detect run secret-scan safe-edit scope acceptance transcript-grep",
