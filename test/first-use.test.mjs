@@ -19,6 +19,7 @@ import { BLOCK, OWNED, StepFailed, blockCost, degradedBanner, parseArgs, waitFor
 const { exec } = await import('../src/util/exec.mjs');
 const { readAllRows } = await import('../src/ledger/write.mjs');
 const { estimateCostUsd } = await import('../src/ledger/prices.mjs');
+const { SECTION_NAMES } = await import('../src/ledger/report.mjs');
 const { readRun, stopPinnedWorker } = await import('../src/state/run.mjs');
 const { loadKey, verifyRow } = await import('../src/state/signer.mjs');
 const { isAlive, listEntries, readStartTime } = await import('../src/util/reaper.mjs');
@@ -246,28 +247,11 @@ describe('first real use: scripts/first-use.mjs --engine harness (B17)', () => {
     assert.equal(line[0].startsWith(`cost per completed block: ${BLOCK} $${usd} (estimated from 4 priced session row(s); facts $`), true, line[0]);
   });
 
-  // B154 appends specialist_outcomes after run_time.
-  test('report --slug prints its 17 sections, in order', () => {
+  // B358: the text headers are exactly the SECTION_NAMES sections, in order (pace included).
+  test('report --slug prints every SECTION_NAMES section, in order', () => {
     const headers = res.stdout.split('\n').filter((l) => /^== [a-z0-9_]+ ==$/.test(l)).map((l) => l.slice(3, -3));
-    assert.deepEqual(headers, [
-      'cost_per_block',
-      'lane_distribution',
-      'escalations',
-      's1_calls_per_block',
-      's2_rate',
-      'review_budget',
-      'review_depth_and_findings',
-      'fix_rounds',
-      'review_unavailable',
-      'proof_time',
-      'forecast_vs_actual_lines',
-      'blocks_stopped_at_l3',
-      'run_stop_counts',
-      'outside_review',
-      'agent_waivers',
-      'run_time',
-      'specialist_outcomes',
-    ]);
+    assert.deepEqual(headers, [...SECTION_NAMES]);
+    assert.deepEqual([headers.includes('pace'), headers.at(-1)], [true, 'specialist_outcomes']);
   });
 
   test('the outside_review section is empty: exactly one "outside review: none" line', () => {
