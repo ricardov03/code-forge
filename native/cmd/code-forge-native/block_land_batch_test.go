@@ -785,8 +785,8 @@ func TestBlockLandBatchAllConflictLandsNothing(t *testing.T) {
 	f.git(f.repo, "commit", "-qm", "main moved")
 	moved := f.git(f.repo, "rev-parse", "main")
 	code, output := f.land("B1", "B2")
-	if code == 0 {
-		t.Fatalf("all-conflict batch exit=0, want non-zero: %s", output)
+	if code != 1 {
+		t.Fatalf("all-conflict batch exit=%d, want 1\n%s", code, output)
 	}
 	for _, id := range []string{"B1", "B2"} {
 		if strings.Count(output, "block "+id+" block_rebase_conflict (notes/shared.txt)") != 1 {
@@ -799,8 +799,8 @@ func TestBlockLandBatchAllConflictLandsNothing(t *testing.T) {
 	if got := f.git(f.repo, "rev-parse", "main"); got != moved {
 		t.Errorf("main=%s, want unchanged %s", got, moved)
 	}
-	if calls := f.lines("changed-calls"); len(calls) != 0 {
-		t.Errorf("gate calls=%v, want 0", calls)
+	if changed, merge, full := f.lines("changed-calls"), f.lines("merge-calls"), f.lines("full-calls"); len(changed) != 0 || len(merge) != 0 || len(full) != 0 {
+		t.Errorf("changed gate calls=%v merge-gate calls=%v full calls=%v, want 0, 0 and 0", changed, merge, full)
 	}
 	if got := f.heads(); got["B1"] != before["B1"] || got["B2"] != before["B2"] {
 		t.Errorf("heads=%v, want unchanged %v", got, before)
