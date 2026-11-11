@@ -11,6 +11,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/gitx"
 )
 
 type reviewWaitTrace struct {
@@ -45,7 +47,7 @@ func TestReviewWaitProcess(t *testing.T) {
 func reviewWaitTestEnv(home string) []string {
 	env := []string{}
 	for _, entry := range os.Environ() {
-		if !strings.HasPrefix(entry, "HOME=") && !strings.HasPrefix(entry, "CODE_FORGE_") && !strings.HasPrefix(entry, "REVIEW_WAIT_TEST_") {
+		if !strings.HasPrefix(entry, "HOME=") && !strings.HasPrefix(entry, "GIT_") && !strings.HasPrefix(entry, "CODE_FORGE_") && !strings.HasPrefix(entry, "REVIEW_WAIT_TEST_") {
 			env = append(env, entry)
 		}
 	}
@@ -57,7 +59,7 @@ func TestReviewWaitWorkerDownLogging(t *testing.T) {
 		t.Run(mode, func(t *testing.T) {
 			repo, home := t.TempDir(), t.TempDir()
 			git := exec.Command("git", "init", "-q", repo)
-			git.Env = reviewWaitTestEnv(home)
+			git.Dir, git.Env = repo, gitx.ChildEnv()
 			if out, err := git.CombinedOutput(); err != nil {
 				t.Fatalf("git init: %v: %s", err, out)
 			}
@@ -191,7 +193,7 @@ func reviewFileRepo(t *testing.T, home string) string {
 	}
 	for _, args := range [][]string{{"init", "-q"}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "--allow-empty", "-qm", "base"}} {
 		git := exec.Command("git", args...)
-		git.Dir, git.Env = repo, reviewWaitTestEnv(home)
+		git.Dir, git.Env = repo, gitx.ChildEnv()
 		if out, err := git.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
 		}
@@ -310,7 +312,7 @@ func TestReviewFileWaitBlockLocalJoinIsNative(t *testing.T) {
 		t.Fatal(err)
 	}
 	head := exec.Command("git", "rev-parse", "HEAD")
-	head.Dir = repo
+	head.Dir, head.Env = repo, gitx.ChildEnv()
 	base, err := head.Output()
 	if err != nil {
 		t.Fatal(err)
@@ -357,7 +359,7 @@ func TestReviewFileWaitBlockStoppedReviewHandsOver(t *testing.T) {
 			home := t.TempDir()
 			repo := reviewFileRepo(t, home)
 			head := exec.Command("git", "rev-parse", "HEAD")
-			head.Dir = repo
+			head.Dir, head.Env = repo, gitx.ChildEnv()
 			base, err := head.Output()
 			if err != nil {
 				t.Fatal(err)

@@ -14,6 +14,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/daemonclient"
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -56,6 +57,7 @@ func TestStatusDirectSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	git := exec.Command("git", "init", "-q", workspace)
+	git.Dir, git.Env = workspace, gitx.ChildEnv()
 	if output, err := git.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %s: %v", output, err)
 	}
@@ -92,7 +94,7 @@ func TestStatusDirectSources(t *testing.T) {
 		t.Fatal(err)
 	}
 	child := exec.Command(os.Args[0], "-test.run=^TestStatusDirectSources$")
-	child.Env = append(os.Environ(), "CF_STATUS_DAEMON_HELPER=1")
+	child.Env = append(envWithoutGit(), "CF_STATUS_DAEMON_HELPER=1")
 	var stderr bytes.Buffer
 	child.Stderr = &stderr
 	child.Stdout = &stderr
