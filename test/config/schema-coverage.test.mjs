@@ -469,7 +469,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B430: +2 = land{,.push} ⇒ 263.
 // B343: +2 = gates.merge_gate_links and gates.merge_gate_setup ⇒ 265.
 // B339: +1 = review.close_wait_s ⇒ 266.
-const EXPECTED_SCHEMA_PATH_COUNT = 266;
+// B402: -1 = gates.extra.invariants (refused, dropped from the schema) ⇒ 265.
+const EXPECTED_SCHEMA_PATH_COUNT = 265;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;
