@@ -194,6 +194,8 @@ const (
 	hRemoveUnsafeTarget
 	hRemoveUnfinishable
 	hPipelineUnsupported
+	hOutcomeUnsupported
+	hOutcomeRecordUnported
 )
 
 var handoverReasons = [...]string{
@@ -367,6 +369,8 @@ var handoverReasons = [...]string{
 	hRemoveUnsafeTarget:        "remove-unsafe-target",
 	hRemoveUnfinishable:        "remove-unfinishable",
 	hPipelineUnsupported:       "pipeline-unsupported",
+	hOutcomeUnsupported:        "outcome-unsupported",
+	hOutcomeRecordUnported:     "outcome-record-unported",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
