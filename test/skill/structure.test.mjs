@@ -10,6 +10,7 @@ import { access, readFile, readdir } from 'node:fs/promises';
 import path from 'node:path';
 import { test } from 'node:test';
 import { listVerbs } from '../../bin/code-forge.mjs';
+import { PROOF_RULE } from '../../src/proof/rule.mjs';
 import { REFERENCES_DIR, ROOT, SKILL_DIR, listSkillFiles, readSkillFile, section, tableRows } from './helpers.mjs';
 
 const SKILL_MAX_LINES = 120;
@@ -1503,7 +1504,8 @@ const B117_RULE = [
   "- No hand mutations. Do not break the code on purpose to test the tests. Red→green is the proof.",
   "- One exact test per acceptance clause, plus one negative or boundary test where the clause can fail. Assertions say which element and how many, never only \"it exists\".",
   "- Proof scales with risk: a light-tier file needs red→green per new test; a high-tier file must have it at the gate. Do not add tests, mutants, layers, options or abstractions that the acceptance does not ask for.",
-  "- A weak assertion is fixed by a stronger assertion, not by more tests or mutants."
+  "- A weak assertion is fixed by a stronger assertion, not by more tests or mutants.",
+  "- Facts, not guesses: every cause, pass or fail you report names its proof (the error text, the log path, or the command and its exit code). No proof means \"not known yet\": get the proof now; never name load, flakiness or old tests as a cause without it. No work stops because of a guess."
 ];
 
 test('B117 (5): the consumer brief and all eight skill and docs surfaces share the proof definition', async () => {
@@ -1535,4 +1537,15 @@ test('B362: R18 "Facts, not guesses" is the last rules-core.md heading and the l
   assert.equal(section(skill, 4).split('- **R18** Facts, not guesses').length - 1, 1);
   const headings = [...core.matchAll(/^### (R\d+) — /gm)].map((m) => m[1]);
   assert.deepEqual(headings.slice(-2), ['R17', 'R18']);
+});
+
+test('B362: the coder-brief template ## Proof bullets equal the built-in PROOF_RULE bullets, same list and order', async () => {
+  const brief = await readSkillFile('templates/coder-brief.md');
+  const start = brief.indexOf('\n## Proof\n');
+  assert.notEqual(start, -1, '## Proof section');
+  const end = brief.indexOf('\n## ', start + 1);
+  const bullets = brief.slice(start, end).split('\n').filter((line) => line.startsWith('- '));
+  const rule = PROOF_RULE.split('\n').slice(1);
+  assert.equal(rule.length, 6);
+  assert.deepEqual(bullets, rule);
 });
