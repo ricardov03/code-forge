@@ -241,6 +241,12 @@ command without it. The suite wrapper keeps its sandbox and both leak checks for
 The full suite runs in CI, or locally only with `gates run --run <r> --block <id> --full` or
 with plain `code-forge gates run` (no run and no block).
 
+`gates.extra.invariants` is refused. Earlier versions accepted it, but no engine ran its
+script, so the check was skipped without a word. Config validation now rejects the key as
+unknown, and `gates run` (with or without `--run`/`--block`, and inside `block land`) exits 2
+before any gate runs, with one line: `gates.extra.invariants is not supported`. To run such a
+script as a gate, add it to `gates.custom` as `{name, argv}` (B402).
+
 ### Block help
 
 Every `block <verb>` accepts `--help` or `-h`, prints that verb's usage and exits 0 without

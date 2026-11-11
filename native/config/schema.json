@@ -362,8 +362,7 @@
           "additionalProperties": false,
           "properties": {
             "secret_scan": { "type": "boolean", "default": true },
-            "safe_edit": { "type": "boolean", "default": true },
-            "invariants": { "type": "string" }
+            "safe_edit": { "type": "boolean", "default": true }
           }
         },
         "rerun_failed": {

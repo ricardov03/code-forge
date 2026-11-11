@@ -267,6 +267,19 @@ func runGates(args []string) int {
 	if len(args) == 0 || args[0] != "run" {
 		return gatesHandover(args, hGatesUnportedSubcommand)
 	}
+	// B402: refuse gates.extra.invariants before any hand-over; Node would
+	// skip its script silently too.
+	cwd, given, _ := gatesFlag(args, "--cwd")
+	if !given {
+		cwd, _ = os.Getwd()
+	}
+	if loaded, err := config.Load(cwd); err == nil {
+		if err := config.CheckInvariants(loaded); err != nil {
+			gatesErrf("gates run: %s; no gate was run\n", err)
+			gatesFinish(args, 2)
+			return 2
+		}
+	}
 	if os.Getenv("HOME") == "" {
 		return gatesHandover(args, hGatesHome)
 	}

@@ -387,6 +387,10 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		}
 	}
 	loaded, _ := config.Load(main)
+	if err := config.CheckInvariants(loaded); err != nil {
+		gatesErrf("gates run: %s; no gate was run\n", err)
+		return 2, true
+	}
 	configured, _ := loaded["gates"].(map[string]any)
 	p, safe := gates.Resolve(cwd, configured)
 	if !safe {
