@@ -1,8 +1,11 @@
 import { BIN, cli, makeRepo } from '../worker/helpers.mjs';
 import assert from 'node:assert/strict';
-import { appendFileSync, readFileSync } from 'node:fs';
+import { spawnSync } from 'node:child_process';
+import { appendFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { test } from 'node:test';
+import { fileURLToPath } from 'node:url';
 
 const { assemblePack, ContextError } = await import('../../src/context/pack.mjs');
 const version = JSON.parse(readFileSync(new URL('../../package.json', import.meta.url), 'utf8')).version;
@@ -59,5 +62,56 @@ test('assemblePack refuses control characters in each code-forge install value',
       }), (error) => error instanceof ContextError && error.code === 'control-character'
         && error.message === `block B1: code-forge ${field} ${JSON.stringify(codeForge[field])} contains a control character`, `${field}: ${JSON.stringify(control)} must be refused`);
     }
+  }
+});
+
+const FACTS_LINE = '- Facts, not guesses: every cause, pass or fail you report names its proof (the error text, the log path, or the command and its exit code). No proof means "not known yet": get the proof now; never name load, flakiness or old tests as a cause without it. No work stops because of a guess.';
+
+test('B362: Node and Go packs are byte-equal and end the proof rule with the facts-not-guesses bullet', (t) => {
+  const root = fileURLToPath(new URL('../../', import.meta.url));
+  const cliPath = path.join(root, 'bin/code-forge.mjs');
+  const scratch = realpathSync(mkdtempSync(path.join(os.tmpdir(), 'b362-pack-')));
+  t.after(() => rmSync(scratch, { recursive: true, force: true }));
+  const env = (/** @type {Record<string, string>} */ extra) => {
+    /** @type {Record<string, string | undefined>} */
+    const out = { ...process.env, ...extra };
+    for (const key of ['CODE_FORGE_RUN_ID', 'CODE_FORGE_OWNER_PID', 'CODE_FORGE_OWNER_START_TIME', 'CODE_FORGE_RUN', 'CODE_FORGE_BLOCK']) delete out[key];
+    return out;
+  };
+  // A private Go binary laid out as in the npm package, so it names the same node and bin as Node.
+  const pkg = path.join(scratch, 'package');
+  const binary = path.join(pkg, 'native/bin', `${process.platform}-${process.arch}`, 'code-forge-native');
+  mkdirSync(path.dirname(binary), { recursive: true });
+  mkdirSync(path.join(pkg, 'bin'));
+  symlinkSync(cliPath, path.join(pkg, 'bin/code-forge.mjs'));
+  const build = spawnSync('go', ['build', '-trimpath', '-ldflags', `-X main.version=${version}`, '-o', binary, './cmd/code-forge-native'], {
+    cwd: path.join(root, 'native'), encoding: 'utf8', timeout: 180_000, env: env({ CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' }),
+  });
+  assert.equal(build.status, 0, 'go build: ' + build.stderr);
+  const repo = path.join(scratch, 'repo');
+  const home = path.join(scratch, 'home');
+  mkdirSync(path.join(home, '.code-forge/runs'), { recursive: true });
+  mkdirSync(repo);
+  assert.equal(spawnSync('git', ['init', '-q', repo], { env: env({}), encoding: 'utf8' }).status, 0, 'git init');
+  const tmpRoot = path.join(repo, '.code-forge/tmp');
+  mkdirSync(path.join(tmpRoot, 'sample'), { recursive: true, mode: 0o700 });
+  writeFileSync(path.join(repo, '.code-forge.yml'), JSON.stringify({ version: 1, tmp: { root: tmpRoot } }));
+  writeFileSync(path.join(home, '.code-forge/runs/sample.key'), Buffer.alloc(32, 7), { mode: 0o600 });
+  writeFileSync(path.join(home, '.code-forge/runs/sample.json'), JSON.stringify({ run_id: 'sample', project: 'sample', workspace: repo, blocks: { B1: {
+    level: 'L2', owned_files: ['src/a.mjs'], acceptance: [{ clause: 'works', tests: ['test/a.test.mjs'] }],
+  } } }));
+  const args = ['context', 'pack', '--run', 'sample', '--block', 'B1'];
+  const childEnv = env({ HOME: home, CODE_FORGE_NATIVE: '0', CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NODE: '/nonexistent-b362-node', CODE_FORGE_NO_ERROR_LOG: '1' });
+  const go = spawnSync(binary, args, { cwd: repo, encoding: 'utf8', env: childEnv });
+  assert.deepEqual([go.status, go.stderr], [0, ''], 'Go pack runs natively');
+  const node = spawnSync(process.execPath, [cliPath, ...args], { cwd: repo, encoding: 'utf8', env: childEnv });
+  assert.deepEqual([node.status, node.stderr], [0, ''], 'Node pack runs');
+  assert.equal(go.stdout, node.stdout, 'Go and Node packs are byte-equal');
+  for (const [name, text] of [['Node', node.stdout], ['Go', go.stdout]]) {
+    const lines = text.split('\n');
+    const proofAt = lines.indexOf('## proof rule (code-forge)');
+    const acceptanceAt = lines.indexOf('## acceptance');
+    assert.deepEqual([proofAt > 0, acceptanceAt - proofAt, lines[acceptanceAt - 1]], [true, 7, FACTS_LINE], `${name}: six bullets, facts-not-guesses last`);
+    assert.equal(lines.filter((line) => line === FACTS_LINE).length, 1, `${name}: the bullet appears exactly once`);
   }
 });
