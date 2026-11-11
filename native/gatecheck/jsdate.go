@@ -71,3 +71,8 @@ func jsDateParse(v any, present bool) (ms float64, ok, known bool) {
 	}
 	return math.NaN(), false, false
 }
+
+// JSDateParse exposes jsDateParse to callers outside the gate checker.
+func JSDateParse(v any, present bool) (ms float64, ok, known bool) {
+	return jsDateParse(v, present)
+}

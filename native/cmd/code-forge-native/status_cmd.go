@@ -22,6 +22,8 @@ func statusCommand(args []string) int {
 	if code, ok := directStatus(args); ok {
 		return code
 	}
+	// Only the cases Go cannot match byte for byte (a block id outside
+	// printable ASCII, a ledger number Go cannot read) reach Node.
 	code, err := handover(append([]string{"status"}, args...))
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", err)

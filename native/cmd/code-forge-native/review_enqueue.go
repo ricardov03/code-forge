@@ -369,19 +369,37 @@ func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int 
 		blocks, _ := record.Get("blocks").(ledger.Object)
 		entry, _ := blocks.Get(block).(ledger.Object)
 		if entry.Get("worktree") != nil {
-			if !reviewBlockTree(ctx, root, record, entry) {
+			worktree, refusal, ok := reviewEnqueueTree(ctx, record, entry, block)
+			if !ok {
 				return reviewWaitHandover(args, hEnqueueWorktree)
 			}
-			worktree, _ := entry.Get("worktree").(ledger.Object)
-			tree, err = filepath.EvalSymlinks(worktree.Get("path").(string))
-			if err != nil {
-				return reviewWaitHandover(args, hEnqueueWorktreeResolve)
+			if refusal != nil {
+				return reviewEnqueueSay(args, refusal, 1)
 			}
+			tree = worktree
 		}
 	} else {
 		var stateErr *state.Error
 		if !(errors.As(readErr, &stateErr) && stateErr.Code == "no-run") && !os.IsPermission(readErr) {
-			return reviewWaitHandover(args, hEnqueueRunRead)
+			// blockTreeOf: a record that is not JSON, or JSON that is not an
+			// object, is refused; an array reads as an object with no blocks.
+			data, err := os.ReadFile(filepath.Join(home, ".code-forge", "runs", run+".json"))
+			var value any
+			switch {
+			case err != nil:
+				return reviewWaitHandover(args, hEnqueueRunRead)
+			case !json.Valid(data):
+				return reviewEnqueueSay(args, reviewEnqueueRefusal("run-record-unreadable", "the run record of "+run+" cannot be read (corrupt or not a record); nothing was queued"), 1)
+			case json.Unmarshal(data, &value) != nil:
+				return reviewWaitHandover(args, hEnqueueRunRead)
+			}
+			if _, isArray := value.([]any); !isArray {
+				if _, isObject := value.(map[string]any); isObject {
+					return reviewWaitHandover(args, hEnqueueRunRead)
+				}
+				return reviewEnqueueSay(args, reviewEnqueueRefusal("run-record-unreadable", "the run record of "+run+" cannot be read (corrupt or not a record); nothing was queued"), 1)
+			}
+			tree = root
 		}
 	}
 	if err := reviewq.Inside(tree, file); err != nil {

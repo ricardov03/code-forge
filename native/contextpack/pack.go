@@ -10,19 +10,19 @@ import (
 	"path"
 	"path/filepath"
 	"regexp"
+	"sort"
 	"strings"
 	"syscall"
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
+	"gopkg.in/yaml.v3"
 )
-
-// ErrHandover is returned only before publication, for inputs requiring Node.
-var ErrHandover = errors.New("context pack requires Node")
 
 type Error struct{ Message string }
 
@@ -77,7 +77,7 @@ func stringsList(v any) ([]string, bool) {
 	}
 	return out, true
 }
-func settingsFor(cfg map[string]any) (*settings, error) {
+func settingsFor(cfg map[string]any, root string) (*settings, error) {
 	raw, present := cfg["context"]
 	if !present {
 		return nil, nil
@@ -127,12 +127,10 @@ func settingsFor(cfg map[string]any) (*settings, error) {
 			unknown = append(unknown, k)
 		}
 	}
-	// Go maps discard YAML insertion order; Node chooses the first invalid key.
-	if len(unknown) > 1 {
-		return nil, ErrHandover
-	}
-	if len(unknown) == 1 {
-		return nil, refusal("context.commands." + unknown[0] + " is not one of build, test, lint, format")
+	// Go maps discard YAML insertion order; Node names the first invalid key,
+	// so read the key order back from the config file itself.
+	if len(unknown) > 0 {
+		return nil, refusal("context.commands." + firstUnknownCommand(root, unknown) + " is not one of build, test, lint, format")
 	}
 	for _, k := range commandKeys {
 		if commands[k] == nil {
@@ -269,10 +267,8 @@ func readLines(root, rel, key string) ([]string, error) {
 	if err != nil {
 		return nil, refusal(shown + " cannot be read (" + errno(err) + ")")
 	}
-	if !utf8.Valid(b) {
-		return nil, ErrHandover
-	}
-	return split(trimEnd(string(b))), nil
+	// readFileSync(file, 'utf8') replaces each invalid sequence with U+FFFD.
+	return split(trimEnd(DecodeUTF8(b))), nil
 }
 
 var bareToken = regexp.MustCompile(`^[A-Za-z0-9_@%+=:,./-]+$`)
@@ -325,7 +321,7 @@ type Result struct {
 // Assemble performs all source reads and validation, before any pack is touched.
 func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, node, bin, version string) (Result, error) {
 	r := Result{}
-	s, err := settingsFor(cfg)
+	s, err := settingsFor(cfg, root)
 	if err != nil {
 		return r, err
 	}
@@ -362,18 +358,12 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 	owned, _ := entry.Get("owned_files").([]any)
 	tests, _ := entry.Get("test_files").([]any)
 	for _, v := range owned {
-		if _, ok := v.(string); !ok {
-			return r, ErrHandover
-		}
 		values = append(values, struct {
 			label string
 			value any
 		}{"owned file", v})
 	}
 	for _, v := range tests {
-		if _, ok := v.(string); !ok {
-			return r, ErrHandover
-		}
 		values = append(values, struct {
 			label string
 			value any
@@ -404,9 +394,10 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 		if v.value == nil {
 			continue
 		}
+		// Node checks only string values; others print as JS String() does.
 		text, ok := v.value.(string)
 		if !ok {
-			return r, ErrHandover
+			continue
 		}
 		if control(text) {
 			return r, refusal("block " + id + ": " + v.label + " " + quote(text) + " contains a control character")
@@ -414,27 +405,23 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 	}
 	level := "(unknown)"
 	if entry.Get("level") != nil {
-		level = str(entry.Get("level"))
+		level = gatecheck.JSString(entry.Get("level"), true)
 	}
 	header := []string{"# code-forge context pack", "## block", "run: " + run, "block: " + id, "level: " + level, "owned files:"}
 	for _, f := range owned {
-		header = append(header, "- "+str(f))
+		header = append(header, "- "+gatecheck.JSString(f, true))
 	}
 	if len(tests) > 0 {
 		header = append(header, "test files:")
 		for _, f := range tests {
-			header = append(header, "- "+str(f))
+			header = append(header, "- "+gatecheck.JSString(f, true))
 		}
 	}
 	if hasTree {
 		branch := "undefined"
-		if tree.Get("branch") != nil {
-			branch = str(tree.Get("branch"))
-		} else {
-			for _, f := range tree {
-				if f.Key == "branch" {
-					branch = "null"
-				}
+		for _, f := range tree {
+			if f.Key == "branch" {
+				branch = gatecheck.JSString(f.Value, true)
 			}
 		}
 		header = append(header, "worktree: "+str(tree.Get("path")), "branch: "+branch)
@@ -461,7 +448,7 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 	if entry.Get("acceptance") != nil {
 		clauses, ok := entry.Get("acceptance").([]any)
 		if !ok {
-			return r, ErrHandover
+			return r, refusal("block " + id + ": acceptance must be a list of clauses")
 		}
 		if len(clauses) > 0 {
 			task = append(task, "## acceptance")
@@ -469,21 +456,27 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 		for _, c := range clauses {
 			clause, ok := c.(ledger.Object)
 			if !ok {
-				return r, ErrHandover
+				return r, refusal("block " + id + ": each acceptance clause must be a mapping")
 			}
-			text, ok := clause.Get("clause").(string)
-			if !ok {
-				return r, ErrHandover
-			}
-			task = append(task, "- "+text)
+			_, present := clauseField(clause, "clause")
+			task = append(task, "- "+gatecheck.JSString(clause.Get("clause"), present))
 			if clause.Get("kind") == "human_check" {
 				task = append(task, "  kind: human_check")
 			} else {
-				tests, ok := stringsList(clause.Get("tests"))
+				tests, ok := clause.Get("tests").([]any)
 				if !ok {
-					return r, ErrHandover
+					return r, refusal("block " + id + ": an acceptance clause without kind human_check needs a tests list")
 				}
-				task = append(task, "  tests: "+strings.Join(tests, ", "))
+				names := []string{}
+				for _, t := range tests {
+					// Array.prototype.join prints null as an empty string.
+					if t == nil {
+						names = append(names, "")
+					} else {
+						names = append(names, gatecheck.JSString(t, true))
+					}
+				}
+				task = append(task, "  tests: "+strings.Join(names, ", "))
 			}
 		}
 	}
@@ -537,14 +530,14 @@ func loadKey(home, run string) ([]byte, error) {
 		return nil, &state.Error{Code: "no-key", Message: "run " + run + " has no signer key"}
 	}
 	if err != nil {
-		return nil, ErrHandover
+		return nil, &state.Error{Code: "bad-key", Message: "run " + run + " signer key cannot be read (" + nodeError(err) + ")"}
 	}
 	if st.Mode().Perm()&0077 != 0 {
 		return nil, &state.Error{Code: "bad-key-mode", Message: fmt.Sprintf("run %s signer key is accessible to other users (mode %o); expected 600", run, st.Mode().Perm())}
 	}
 	key, err := os.ReadFile(file)
 	if err != nil {
-		return nil, ErrHandover
+		return nil, &state.Error{Code: "bad-key", Message: "run " + run + " signer key cannot be read (" + nodeError(err) + ")"}
 	}
 	if len(key) != 32 {
 		return nil, &state.Error{Code: "bad-key", Message: "run " + run + " signer key is not 32 bytes"}
@@ -552,12 +545,12 @@ func loadKey(home, run string) ([]byte, error) {
 	return key, nil
 }
 
-// LastPack checks verified history before publication; corrupt/unsupported I/O
-// errors hand over so Node supplies its original stack and diagnostics.
+// LastPack checks verified history before publication; a ledger that cannot be
+// read is a refusal before anything is written.
 func LastPack(home, run, slug, id string) (map[string]any, error) {
 	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug)
 	if err != nil {
-		return nil, ErrHandover
+		return nil, refusal("the ledger cannot be read (" + nodeError(err) + ")")
 	}
 	matched := []map[string]any{}
 	for _, v := range rows {
@@ -574,11 +567,9 @@ func LastPack(home, run, slug, id string) (map[string]any, error) {
 	}
 	var last map[string]any
 	for _, row := range matched {
+		// A row the signer cannot check is not a verified pack row.
 		checked, err := sign.VerifyRow(row, key)
-		if err != nil {
-			return nil, ErrHandover
-		}
-		if checked.OK {
+		if err == nil && checked.OK {
 			last = row
 		}
 	}
@@ -619,4 +610,104 @@ func Publish(home, run, id string, r Result, last map[string]any) (string, error
 		return "context: cannot write " + file + " (" + errno(err) + "); " + after + "\n", nil
 	}
 	return "", nil
+}
+
+// NodeError is Node's fs error message ("EACCES: permission denied, mkdir '<p>'").
+func NodeError(err error) string { return nodeError(err) }
+
+// Errno is the fs error code Node reports for err ("ENOTDIR"), or "error".
+func Errno(err error) string { return errno(err) }
+
+func clauseField(o ledger.Object, key string) (any, bool) {
+	for _, f := range o {
+		if f.Key == key {
+			return f.Value, true
+		}
+	}
+	return nil, false
+}
+
+// firstUnknownCommand is the first of unknown in the config file's own key
+// order under context.commands (Node's Object.keys order).
+func firstUnknownCommand(root string, unknown []string) string {
+	sort.Strings(unknown)
+	want := map[string]bool{}
+	for _, k := range unknown {
+		want[k] = true
+	}
+	raw, err := os.ReadFile(filepath.Join(config.ProjectRootFor(root), config.Filename))
+	if err != nil {
+		return unknown[0]
+	}
+	var doc yaml.Node
+	if yaml.Unmarshal(raw, &doc) != nil || len(doc.Content) == 0 {
+		return unknown[0]
+	}
+	child := func(n *yaml.Node, key string) *yaml.Node {
+		if n == nil || n.Kind != yaml.MappingNode {
+			return nil
+		}
+		for i := 0; i+1 < len(n.Content); i += 2 {
+			if n.Content[i].Value == key {
+				return n.Content[i+1]
+			}
+		}
+		return nil
+	}
+	commands := child(child(doc.Content[0], "context"), "commands")
+	if commands == nil || commands.Kind != yaml.MappingNode {
+		return unknown[0]
+	}
+	for i := 0; i+1 < len(commands.Content); i += 2 {
+		if want[commands.Content[i].Value] {
+			return commands.Content[i].Value
+		}
+	}
+	return unknown[0]
+}
+
+// DecodeUTF8 is the WHATWG UTF-8 decoder Node's readFileSync(file, 'utf8')
+// uses: each maximal invalid subpart becomes one U+FFFD.
+func DecodeUTF8(b []byte) string {
+	if utf8.Valid(b) {
+		return string(b)
+	}
+	var out strings.Builder
+	for i := 0; i < len(b); {
+		r, n := utf8.DecodeRune(b[i:])
+		if r != utf8.RuneError || n > 1 {
+			out.WriteRune(r)
+			i += n
+			continue
+		}
+		lead := b[i]
+		need, lo, hi := 0, byte(0x80), byte(0xBF)
+		switch {
+		case lead >= 0xC2 && lead <= 0xDF:
+			need = 1
+		case lead == 0xE0:
+			need, lo = 2, 0xA0
+		case lead >= 0xE1 && lead <= 0xEC, lead == 0xEE, lead == 0xEF:
+			need = 2
+		case lead == 0xED:
+			need, hi = 2, 0x9F
+		case lead == 0xF0:
+			need, lo = 3, 0x90
+		case lead >= 0xF1 && lead <= 0xF3:
+			need = 3
+		case lead == 0xF4:
+			need, hi = 3, 0x8F
+		}
+		j := i + 1
+		for k := 0; k < need && j < len(b); k++ {
+			if b[j] < lo || b[j] > hi {
+				break
+			}
+			lo, hi = 0x80, 0xBF
+			j++
+		}
+		out.WriteRune(utf8.RuneError)
+		i = j
+	}
+	return out.String()
 }

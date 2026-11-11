@@ -17,6 +17,8 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/config"
+	"github.com/ricardov03/code-forge/native/contextpack"
+	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
@@ -93,8 +95,8 @@ func statusReal(path string) string {
 	return p
 }
 
-// directStatus stages all streams before emitting anything, so unsupported state
-// can hand over without duplicate summaries or warnings. It never takes a lock.
+// directStatus stages all streams before emitting anything. It never takes a
+// lock. Every case Node's status fails on prints "status: <cause>" and exits 1.
 func directStatus(args []string) (int, bool) {
 	run, jsonFlag, message := statusFlags(args)
 	if message != "" {
@@ -105,30 +107,53 @@ func directStatus(args []string) (int, bool) {
 		fmt.Fprint(os.Stderr, "status: "+message+"\n"+statusUsage)
 		return 2, true
 	}
+	fail := func(cause string) (int, bool) {
+		fmt.Fprintln(os.Stderr, "status: "+cause)
+		return 1, true
+	}
 	home, err := os.UserHomeDir()
 	if err != nil {
-		return 0, false
+		return fail("the home folder cannot be found (" + err.Error() + "); set HOME")
 	}
 	records := []map[string]any{}
 	if run != "" {
 		r, err := state.ReadRun(home, run)
 		if err != nil {
 			var e *state.Error
-			if errors.As(err, &e) && (e.Code == "no-run" || e.Code == "bad-run-id") {
-				fmt.Fprintln(os.Stderr, "status:", e.Message)
-				return 1, true
+			if errors.As(err, &e) {
+				return fail(e.Message)
 			}
-			return 0, false
+			if _, isFS := err.(*os.PathError); isFS {
+				return fail(contextpack.NodeError(err))
+			}
+			// JSON.parse in Node: a primitive record is "no run record"; text
+			// that is not JSON cannot be read.
+			raw, _ := os.ReadFile(filepath.Join(home, ".code-forge", "runs", run+".json"))
+			var v any
+			if json.Unmarshal(raw, &v) == nil {
+				if _, isArray := v.([]any); !isArray {
+					return fail("no run record for " + run)
+				}
+				// An array is an object to Node: every field it reads is
+				// undefined.
+				records = append(records, map[string]any{})
+			} else {
+				return fail("the run record of " + run + " is not valid JSON (" + err.Error() + "); restore the record")
+			}
+		} else {
+			m, err := statusMap(r)
+			if err != nil {
+				return fail("the run record of " + run + " cannot be read (" + err.Error() + ")")
+			}
+			records = append(records, m)
 		}
-		m, err := statusMap(r)
-		if err != nil {
-			return 0, false
-		}
-		records = append(records, m)
 	} else {
 		cwd, err := os.Getwd()
 		if err != nil {
-			return 0, false
+			if errors.Is(err, os.ErrNotExist) {
+				return fail("ENOENT: no such file or directory, uv_cwd")
+			}
+			return fail(contextpack.NodeError(err))
 		}
 		want := statusReal(config.ProjectRootFor(cwd))
 		names, err := os.ReadDir(filepath.Join(home, ".code-forge", "runs"))
@@ -143,7 +168,7 @@ func directStatus(args []string) (int, bool) {
 				}
 				m, err := statusMap(r)
 				if err != nil {
-					return 0, false
+					continue
 				}
 				w, ok := m["workspace"].(string)
 				if ok && m["status"] != "ended" && statusReal(w) == want {
@@ -157,28 +182,34 @@ func directStatus(args []string) (int, bool) {
 			if a != b {
 				return a > b
 			}
-			return fmt.Sprint(records[i]["run_id"]) > fmt.Sprint(records[j]["run_id"])
+			return statusRunID(records[i]) > statusRunID(records[j])
 		})
 	}
 	summaries := []any{}
 	texts := []string{}
 	warnings := []string{}
 	for _, record := range records {
-		slug, ok := record["project"].(string)
-		if !ok {
-			return 0, false
-		}
-		rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug)
-		if err != nil {
+		// readAllRows(record.project): a project that is not a valid slug, or a
+		// ledger that cannot be read, gives no rows (spent $?).
+		var rows []ledger.Row
+		if slug, ok := record["project"].(string); ok {
+			read, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), slug)
 			var numeric *json.UnmarshalTypeError
 			if errors.As(err, &numeric) {
+				// Node reads such a row; Go cannot: Node serves it.
 				return 0, false
 			}
-			rows = nil
+			if err == nil {
+				rows = read
+			}
 		}
-		summary, ok := runstatus.Compute(record, rows, home)
-		if !ok {
+		summary, err := runstatus.ComputeErr(record, rows, home)
+		if errors.Is(err, runstatus.ErrUnorderedBlockID) {
+			// Node orders such ids with ICU localeCompare: Node serves it.
 			return 0, false
+		}
+		if err != nil {
+			return fail(err.Error())
 		}
 		summaries = append(summaries, summary)
 		if !jsonFlag {
@@ -190,17 +221,21 @@ func directStatus(args []string) (int, bool) {
 			}
 			texts = append(texts, text)
 		}
-		workerWarnings, ok := statusWorkerWarnings(record)
-		if !ok {
-			return 0, false
-		}
+		workerWarnings, _ := statusWorkerWarnings(record)
 		warnings = append(warnings, workerWarnings...)
 	}
 	var output string
 	if jsonFlag {
+		for _, v := range summaries {
+			// JSON.stringify writes a non-finite number as null.
+			s := v.(ledger.Object)
+			if n, ok := s.Get("spent_usd").(float64); ok && (math.IsInf(n, 0) || math.IsNaN(n)) {
+				s.Set("spent_usd", nil)
+			}
+		}
 		b, err := ledger.Stringify(ledger.Object{{Key: "runs", Value: summaries}}, false)
 		if err != nil {
-			return 0, false
+			return fail("the status cannot be written as JSON (" + err.Error() + ")")
 		}
 		output = string(b) + "\n"
 	} else if len(texts) == 0 {
@@ -231,6 +266,15 @@ func statusMoney(v any) string {
 	return "$" + statusFixed(n)
 }
 func statusFixed(n float64) string {
+	// Number.prototype.toFixed of a non-finite number is its String form.
+	switch {
+	case math.IsNaN(n):
+		return "NaN"
+	case math.IsInf(n, 1):
+		return "Infinity"
+	case math.IsInf(n, -1):
+		return "-Infinity"
+	}
 	if math.Abs(n) >= 1e21 {
 		b, _ := ledger.Stringify(n, false)
 		return string(b)
@@ -370,18 +414,9 @@ func statusStart(pid float64) string {
 	}
 	return strings.Join(strings.Fields(string(b)), " ")
 }
-func statusPin(pin map[string]any) (bool, string) {
-	pid, ok := pin["pid"].(float64)
-	if !ok || pid <= 1 || pid != float64(int(pid)) {
-		return false, "replaced"
-	}
-	start := statusStart(pid)
-	if start == "" {
-		return false, "down"
-	}
-	at, _ := pin["started_at"].(string)
-	return start == strings.Join(strings.Fields(at), " "), "replaced"
-}
+
+// statusWorkerWarnings ports unpinnedWorkerWarnings: any failure Node would throw
+// (a null pin, a pin start time that is not text) gives no warnings, never an error.
 func statusWorkerWarnings(record map[string]any) ([]string, bool) {
 	if record["status"] == "ended" {
 		return nil, true
@@ -395,26 +430,16 @@ func statusWorkerWarnings(record map[string]any) ([]string, bool) {
 	if err != nil {
 		return nil, true
 	}
-	pins, _ := record["workers"].([]any)
-	if record["workers"] != nil && pins == nil {
-		return nil, false
-	}
-	if record["workers"] == nil {
-		if p, ok := record["worker"].(map[string]any); ok {
-			pins = []any{p}
+	var pins []any
+	if w, present := record["workers"]; present && w != nil {
+		arr, isArray := w.([]any)
+		if !isArray {
+			// pins.some on a non-array throws in Node: no warnings.
+			return nil, true
 		}
-	}
-	for _, v := range pins {
-		pin, ok := v.(map[string]any)
-		if !ok {
-			return nil, false
-		}
-		if _, ok := pin["started_at"].(string); !ok {
-			return nil, false
-		}
-		if _, ok := pin["pid"].(float64); !ok {
-			return nil, false
-		}
+		pins = arr
+	} else if statusTruthy(record["worker"]) {
+		pins = []any{record["worker"]}
 	}
 	unpinned := []map[string]any{}
 	for _, e := range entries {
@@ -432,17 +457,17 @@ func statusWorkerWarnings(record map[string]any) ([]string, bool) {
 		pid, pok := w["pid"].(float64)
 		start, sok := w["start_time"].(string)
 		rid, rok := w["run"].(string)
-		started, _ := w["started_at"].(string)
-		beat, _ := w["heartbeat_at"].(string)
-		if !pok || pid <= 1 || pid != float64(int(pid)) || !sok || start == "" || strings.ContainsAny(start, "/\\") || !rok || rid == "" {
+		started, startedText := w["started_at"].(string)
+		beat, beatText := w["heartbeat_at"].(string)
+		if !pok || pid <= 1 || pid != math.Trunc(pid) || !sok || start == "" || strings.ContainsAny(start, "/\\") || !rok || rid == "" {
 			continue
 		}
-		if _, err := time.Parse(time.RFC3339Nano, started); err != nil {
-			return nil, false
+		if _, ok, _ := gatecheck.JSDateParse(started, startedText); !startedText || !ok {
+			continue
 		}
-		at, err := time.Parse(time.RFC3339Nano, beat)
-		if err != nil {
-			return nil, false
+		atMs, ok, _ := gatecheck.JSDateParse(beat, beatText)
+		if !beatText || !ok {
+			continue
 		}
 		if e.Name() != fmt.Sprintf("%.0f-%s.json", pid, start) || rid != record["run_id"] {
 			continue
@@ -450,16 +475,26 @@ func statusWorkerWarnings(record map[string]any) ([]string, bool) {
 		if err := syscall.Kill(int(pid), 0); err != nil && !errors.Is(err, syscall.EPERM) {
 			continue
 		}
-		age := time.Since(at)
-		if !(age <= time.Minute && age >= -5*time.Second) && start != "unknown" && statusStart(pid) != start {
+		age := float64(time.Now().UnixMilli()) - atMs
+		if !(age <= 60000 && age >= -5000) && start != "unknown" && statusStart(pid) != start {
 			continue
 		}
 		pinned := false
 		for _, v := range pins {
-			p, _ := v.(map[string]any)
-			s, _ := p["started_at"].(string)
-			if p["pid"] == pid && strings.Join(strings.Fields(s), " ") == strings.Join(strings.Fields(start), " ") {
+			if v == nil {
+				return nil, true // pin.pid on null throws in Node
+			}
+			p, isObject := v.(map[string]any)
+			if !isObject || p["pid"] != pid {
+				continue
+			}
+			s, isText := p["started_at"].(string)
+			if !isText {
+				return nil, true // normalizeStartTime on a non-string throws
+			}
+			if statusNormal(s) == statusNormal(start) {
 				pinned = true
+				break
 			}
 		}
 		if !pinned {
@@ -468,40 +503,23 @@ func statusWorkerWarnings(record map[string]any) ([]string, bool) {
 	}
 	suffix := ""
 	if len(unpinned) == 1 && len(pins) > 0 {
-		good := false
-		reason := "down"
-		if len(pins) > 1 {
-			for _, v := range pins {
-				p, _ := v.(map[string]any)
-				if ok, r := statusPin(p); ok {
-					good = true
-				} else if r == "replaced" {
-					pid, _ := p["pid"].(float64)
-					if pid <= 1 || pid != float64(int(pid)) {
-						good = false
-						reason = "replaced"
-						break
-					}
-				}
-			}
-		} else {
-			// Match Node's checkWorkerPin: a single pin probes legacy worker,
-			// even when workers[0] is absent from or differs from that field.
-			p, _ := record["worker"].(map[string]any)
-			good, reason = statusPin(p)
-			if p == nil {
-				reason = "down"
-			}
+		good, reason, threw := statusCheckPin(record)
+		if threw {
+			return nil, true
 		}
 		if !good {
-			p, _ := pins[0].(map[string]any)
-			pid, _ := ledger.Stringify(p["pid"], false)
+			pid := "undefined"
+			if p, ok := pins[0].(map[string]any); ok {
+				if v, present := p["pid"]; present {
+					pid = gatecheck.JSString(v, true)
+				}
+			}
 			suffix = fmt.Sprintf(" (pinned pid %s is %s)", pid, reason)
 		}
 	}
 	warnings := []string{}
 	for _, w := range unpinned {
-		s := fmt.Sprintf("warning: live worker %.0f is not pinned: run start --reattach --run %v", w["pid"], record["run_id"])
+		s := fmt.Sprintf("warning: live worker %.0f is not pinned: run start --reattach --run %v", w["pid"], statusRunID(record))
 		if len(unpinned) > 1 {
 			s += fmt.Sprintf(" --worker-pid %.0f", w["pid"])
 		} else {
@@ -510,4 +528,90 @@ func statusWorkerWarnings(record map[string]any) ([]string, bool) {
 		warnings = append(warnings, s)
 	}
 	return warnings, true
+}
+
+func statusTruthy(v any) bool {
+	switch x := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return x
+	case float64:
+		return x != 0 && !math.IsNaN(x)
+	case string:
+		return x != ""
+	}
+	return true
+}
+
+// statusNormal is normalizeStartTime: trimmed, inner whitespace folded.
+func statusNormal(s string) string { return strings.Join(strings.Fields(s), " ") }
+
+// statusSignalable is isSignalablePid: an integer > 1.
+func statusSignalable(v any) bool {
+	n, ok := v.(float64)
+	return ok && n > 1 && n == math.Trunc(n)
+}
+
+// statusCheckPin ports checkWorkerPin without a live pid. threw reports a
+// case where Node throws (a null pin, a non-text start time on a running pid).
+func statusCheckPin(record map[string]any) (good bool, reason string, threw bool) {
+	pin := record["worker"]
+	if pins, ok := record["workers"].([]any); ok && len(pins) > 1 {
+		for _, p := range pins {
+			if p == nil {
+				return false, "", true
+			}
+			m, _ := p.(map[string]any)
+			if !statusSignalable(m["pid"]) {
+				return false, "replaced", false
+			}
+		}
+		alive := false
+		for _, p := range pins {
+			m := p.(map[string]any)
+			pid, _ := m["pid"].(float64)
+			start := statusStart(pid)
+			if start == "" {
+				continue
+			}
+			s, ok := m["started_at"].(string)
+			if !ok {
+				return false, "", true
+			}
+			if start == statusNormal(s) {
+				alive = true
+			}
+		}
+		if alive {
+			return true, "", false
+		}
+		return false, "down", false
+	}
+	if !statusTruthy(pin) {
+		return false, "down", false
+	}
+	m, _ := pin.(map[string]any)
+	if !statusSignalable(m["pid"]) {
+		return false, "replaced", false
+	}
+	pid, _ := m["pid"].(float64)
+	start := statusStart(pid)
+	if start == "" {
+		return false, "down", false
+	}
+	s, ok := m["started_at"].(string)
+	if !ok {
+		return false, "", true
+	}
+	if start != statusNormal(s) {
+		return false, "replaced", false
+	}
+	return true, "", false
+}
+
+// statusRunID is String(record.run_id).
+func statusRunID(record map[string]any) string {
+	v, present := record["run_id"]
+	return gatecheck.JSString(v, present)
 }
