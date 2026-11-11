@@ -444,7 +444,10 @@ func blockLandChain(t *testing.T, shape string) {
 	must(err)
 	ended := time.Now()
 	if join == "join-hung-ping" || join == "join-daemon-dies" {
-		landJoinStopped(t, home, run, join, code, string(output), started, ended, died, requests)
+		diedMu.Lock()
+		diedAt := died
+		diedMu.Unlock()
+		landJoinStopped(t, home, run, join, code, string(output), started, ended, diedAt, requests)
 		return
 	}
 	if code != 0 {
