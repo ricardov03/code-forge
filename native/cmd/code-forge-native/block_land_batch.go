@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"os"
+	"path"
 	"path/filepath"
 	"strings"
 	"time"
@@ -510,10 +511,19 @@ func landBatchPrecheck(main, head string, batch []*landBatchBlock, park func(*la
 					files = append(files, file)
 				}
 			}
-			park(block, files)
-			parked = append(parked, block.id)
-			reasons = append(reasons, fmt.Sprintf("block %s block_rebase_conflict (%s)", block.id, strings.Join(files, ", ")))
-			continue
+			// B431: a conflict only in CHANGELOG.md files to which both sides
+			// only added lines is merged the way the rebase merges it.
+			appended, ok, appendErr := landBatchAppendTree(main, strings.TrimSpace(lines[0]), block.base, running, strings.TrimSpace(block.head), files)
+			if appendErr != nil {
+				return nil, nil, appendErr
+			}
+			if !ok {
+				park(block, files)
+				parked = append(parked, block.id)
+				reasons = append(reasons, fmt.Sprintf("block %s block_rebase_conflict (%s)", block.id, strings.Join(files, ", ")))
+				continue
+			}
+			lines = []string{appended}
 		}
 		tree := strings.TrimSpace(lines[0])
 		commit, err := gitx.Run(main, "commit-tree", tree, "-p", running, "-p", strings.TrimSpace(block.head), "-m", "code-forge batch precheck "+block.id)
@@ -726,4 +736,65 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 		return fmt.Errorf("changed gates failed: %s", landSuiteFailure(home, run, block.id, landResult{code: 1, data: ledger.Object{{Key: "results", Value: results}}}))
 	}
 	return nil
+}
+
+// landBatchAppendTree takes the tree merge-tree wrote for a conflicted merge
+// and, when every conflicted file is a CHANGELOG.md that both sides only
+// added lines to, writes the append merge (running side first) into it. ok is
+// false for any other conflict.
+func landBatchAppendTree(main, tree, base, ours, theirs string, files []string) (string, bool, error) {
+	if len(files) == 0 {
+		return "", false, nil
+	}
+	merged := map[string]string{}
+	for _, file := range files {
+		if path.Base(file) != "CHANGELOG.md" {
+			return "", false, nil
+		}
+		var text [3]string
+		for i, rev := range []string{base, ours, theirs} {
+			out, err := gitx.Run(main, "cat-file", "blob", rev+":"+file)
+			if err != nil {
+				return "", false, nil
+			}
+			text[i] = out
+		}
+		body, ok, err := rebase.AppendMerge(text[0], text[1], text[2])
+		if err != nil || !ok {
+			return "", false, err
+		}
+		merged[file] = body
+	}
+	dir, err := os.MkdirTemp("", "forge-land-append-")
+	if err != nil {
+		return "", false, err
+	}
+	defer os.RemoveAll(dir)
+	env := append(gitx.ChildEnv(), "GIT_INDEX_FILE="+filepath.Join(dir, "index"))
+	if _, err := gitx.WithEnv("", env, "-C", main, "read-tree", tree); err != nil {
+		return "", false, err
+	}
+	for i, file := range files {
+		entry, err := gitx.Run(main, "ls-tree", ours, "--", file)
+		fields := strings.Fields(entry)
+		if err != nil || len(fields) < 1 {
+			return "", false, nil
+		}
+		body := filepath.Join(dir, fmt.Sprintf("body-%d", i))
+		if err := os.WriteFile(body, []byte(merged[file]), 0600); err != nil {
+			return "", false, err
+		}
+		blob, err := gitx.Run(main, "hash-object", "-w", "--", body)
+		if err != nil {
+			return "", false, err
+		}
+		if _, err := gitx.WithEnv("", env, "-C", main, "update-index", "--cacheinfo", fields[0]+","+strings.TrimSpace(blob)+","+file); err != nil {
+			return "", false, err
+		}
+	}
+	out, err := gitx.WithEnv("", env, "-C", main, "write-tree")
+	if err != nil {
+		return "", false, err
+	}
+	return strings.TrimSpace(out), true, nil
 }
