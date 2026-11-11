@@ -7,7 +7,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"strconv"
 	"strings"
+	"sync"
+	"syscall"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -36,22 +39,71 @@ func recordPath(home, runID string) (string, error) {
 	return filepath.Join(runsDir(home), runID+".json"), nil
 }
 
-// WithRunLock shares Node's mkdir lock, 5000ms deadline and 25ms polling.
-func WithRunLock(home, runID string, fn func() error) (err error) {
+// lockWait is how long WithRunLock polls a held lock before it fails. Node
+// and most verbs keep the 5000ms deadline; long verbs raise it (SetLockWait).
+var lockWait = lockTimeout
+var lockNotice func(holder string)
+var lockNoticeOnce sync.Once
+var lockVerbName string
+
+// SetLockWait makes every later WithRunLock and AwaitRunLock of this process
+// wait up to wait for a held run lock, and call notice once, the first time it
+// finds the lock held, with a description of its holder (B393).
+func SetLockWait(wait time.Duration, notice func(holder string)) {
+	lockWait, lockNotice = wait, notice
+}
+
+// SetLockVerb names this process's verb in the owner file of a lock it holds.
+func SetLockVerb(verb string) { lockVerbName = verb }
+
+func lockedError(runID, lock string) error {
+	return &Error{"locked", fmt.Sprintf("run %s is locked (%s); remove it if no forge verb is running", runID, lock)}
+}
+
+// lockHolder describes the process that holds lock from the owner file a Go
+// verb writes beside it. Node writes none, and an owner file older than the
+// lock or naming a dead process is stale.
+func lockHolder(lock string) string {
+	info, err := os.Stat(lock)
+	if err != nil {
+		return "an unknown process"
+	}
+	owner, err := os.Stat(lock + ".owner")
+	if err != nil || owner.ModTime().Before(info.ModTime().Add(-time.Second)) {
+		return "an unknown process (no owner record; a Node verb?)"
+	}
+	data, err := os.ReadFile(lock + ".owner")
+	if err != nil {
+		return "an unknown process (no owner record; a Node verb?)"
+	}
+	pid, verb, _ := strings.Cut(strings.TrimSpace(string(data)), " ")
+	n, err := strconv.Atoi(pid)
+	if err != nil || n <= 0 || syscall.Kill(n, 0) == syscall.ESRCH {
+		return "an unknown process (stale owner record)"
+	}
+	if verb == "" {
+		return "pid " + pid
+	}
+	return "pid " + pid + " (" + verb + ")"
+}
+
+func lockFile(home, runID string) (string, error) {
 	if _, err := recordPath(home, runID); err != nil {
-		return err
+		return "", err
 	}
 	if err := os.MkdirAll(runsDir(home), 0700); err != nil {
-		return err
+		return "", err
 	}
-	lock := filepath.Join(runsDir(home), runID+".lock")
-	deadline := time.Now().Add(lockTimeout)
+	return filepath.Join(runsDir(home), runID+".lock"), nil
+}
+
+// waitLock polls until try succeeds, the lock disappears error-free, or the
+// wait ends with the locked error.
+func waitLock(home, runID, lock string, try func() (bool, error)) error {
+	deadline := time.Now().Add(lockWait)
 	for {
-		err := os.Mkdir(lock, 0755)
-		if err == nil {
-			break
-		}
-		if !os.IsExist(err) {
+		done, err := try()
+		if err != nil || done {
 			return err
 		}
 		took, breakErr := breakStaleLock(runsDir(home), lock)
@@ -59,14 +111,59 @@ func WithRunLock(home, runID string, fn func() error) (err error) {
 			return breakErr
 		}
 		if took {
-			break
+			return nil
 		}
 		if time.Now().After(deadline) {
-			return &Error{"locked", fmt.Sprintf("run %s is locked (%s); remove it if no forge verb is running", runID, lock)}
+			return lockedError(runID, lock)
+		}
+		if lockNotice != nil {
+			lockNoticeOnce.Do(func() { lockNotice(lockHolder(lock)) })
 		}
 		time.Sleep(lockPoll)
 	}
+}
+
+// AwaitRunLock waits until no process holds the run lock, without taking it.
+// A verb that hands the work to another process (Node) calls it first.
+func AwaitRunLock(home, runID string) error {
+	lock, err := lockFile(home, runID)
+	if err != nil {
+		return err
+	}
+	return waitLock(home, runID, lock, func() (bool, error) {
+		_, err := os.Stat(lock)
+		if os.IsNotExist(err) {
+			return true, nil
+		}
+		return false, err
+	})
+}
+
+// WithRunLock shares Node's mkdir lock, 5000ms deadline and 25ms polling.
+func WithRunLock(home, runID string, fn func() error) (err error) {
+	lock, err := lockFile(home, runID)
+	if err != nil {
+		return err
+	}
+	err = waitLock(home, runID, lock, func() (bool, error) {
+		err := os.Mkdir(lock, 0755)
+		if err == nil {
+			return true, nil
+		}
+		if !os.IsExist(err) {
+			return false, err
+		}
+		return false, nil
+	})
+	if err != nil {
+		return err
+	}
+	owner := lock + ".owner"
+	wrote := os.WriteFile(owner, []byte(strconv.Itoa(os.Getpid())+" "+lockVerbName+"\n"), 0600) == nil
 	defer func() {
+		if wrote {
+			_ = os.Remove(owner)
+		}
 		// Release removes owner.json first, then the lock dir (B423/B426).
 		removeLockOwner(lock)
 		if releaseErr := os.Remove(lock); releaseErr != nil {

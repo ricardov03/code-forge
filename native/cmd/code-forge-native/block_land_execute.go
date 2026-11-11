@@ -10,6 +10,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
@@ -46,7 +47,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	next := closeCommand([]string{"code-forge", "review-file", "--wait-block", id, "--run", run})
 	joinMs, gatesMs := int64(0), int64(0)
 	var mergeGateMs any
-	mergeGateTree := ""
+	mergeGateTree, mergeGateReason := "", ""
 	emit := func(out ledger.Object) {
 		data, _ := ledger.Stringify(out, false)
 		fmt.Fprintln(os.Stdout, string(data))
@@ -78,6 +79,9 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if mergeGateTree != "" {
 			row.Set("merge_gate_reused", true)
 			row.Set("merge_gate_tree", mergeGateTree)
+		}
+		if mergeGateReason != "" {
+			row.Set("merge_gate_reason", mergeGateReason)
 		}
 		if _, err := state.WriteSigned(home, run, row); err != nil {
 			fmt.Fprintln(stderr, "block land:", err)
@@ -363,7 +367,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
 		started := time.Now()
-		failure := landMergeGate(home, run, id, main, tree.Path, workspace, branch, base, entry)
+		failure := landMergeGate(home, blockString(record.Get("project")), run, id, main, tree.Path, workspace, branch, base, entry)
 		if failure.elapsed != nil {
 			mergeGateMs = *failure.elapsed
 		}
@@ -373,6 +377,9 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if failure.reusedTree != "" {
 			mergeGateTree = failure.reusedTree
 			fmt.Fprintf(print, "merge gate: reused green full suite on tree %.12s\n", mergeGateTree)
+		} else if failure.gateReused != "" {
+			mergeGateTree, mergeGateReason = failure.gateReused, failure.scopeReason
+			fmt.Fprintf(print, "merge gate: reused green gate on tree %.12s (gate_reused)\n", mergeGateTree)
 		} else if failure.selected == 0 {
 			fmt.Fprintf(print, "merge gate: no test selected (%s); test gate skipped\n", failure.scopeReason)
 		} else {
@@ -397,7 +404,11 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		}
 	}
 	if json {
-		emit(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "landed"}, {Key: "merge", Value: command}})
+		landed := ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "landed"}, {Key: "merge", Value: command}}
+		if mergeGateReason != "" {
+			landed.Set("merge_gate_reason", mergeGateReason)
+		}
+		emit(landed)
 	} else {
 		fmt.Fprintf(os.Stdout, "block %s landed\n", id)
 	}
@@ -408,6 +419,7 @@ type landMergeResult struct {
 	reason      string
 	elapsed     *int64
 	reusedTree  string
+	gateReused  string // B393: tree of the block's own green gate, reused
 	selected    int    // B404: test files the scoped merge gate ran; -1 without a test command
 	scopeReason string // import_graph or go_only
 }
@@ -417,7 +429,7 @@ type landMergeResult struct {
 // is merged. B404: the gate runs the tests selected from what the merge
 // changed (landMergeScope), never the full suite; a green full suite already
 // recorded for the merged tree is still reused.
-func landMergeGate(home, run, id, main, treePath, workspace, branch, base string, entry ledger.Object) (result landMergeResult) {
+func landMergeGate(home, project, run, id, main, treePath, workspace, branch, base string, entry ledger.Object) (result landMergeResult) {
 	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		result.reason = "cannot resolve merge parents"
@@ -488,6 +500,12 @@ func landMergeGate(home, run, id, main, treePath, workspace, branch, base string
 			return
 		}
 		result.selected, result.scopeReason = -1, scope.Reason
+		// B393: the block's last gate already ran green on this exact tree
+		// and covered what the merge gate would select, so it is not rerun.
+		if last, ok := landLastGate(home, project, run, id, treePath); ok && landGateCovers(last, mergedTree, cwd, scope.Files) {
+			result.gateReused, result.scopeReason = mergedTree, "gate_reused"
+			return
+		}
 		fullArgs := []string{"run", "--cwd", cwd}
 		options, _ := gatesParse(fullArgs)
 		if landMergeSelectable(cwd) {
@@ -521,4 +539,110 @@ func landGitError(err error, fallback string) string {
 		return e.Stderr
 	}
 	return fallback
+}
+
+// landGreenGate is a block's last gate result on a clean Git tree (B393).
+type landGreenGate struct {
+	tree  string
+	full  bool     // the test gate ran the full suite
+	files []string // test files a scoped test gate ran
+	tests bool     // the test gate ran (not skipped)
+	gates map[string]bool
+}
+
+// landGateRow reads a gate.done row as a green gate, or false when the row is
+// red, cancelled, flaky or has no recorded tree.
+func landGateRow(row map[string]any) (landGreenGate, bool) {
+	g := landGreenGate{gates: map[string]bool{}}
+	tree, _ := row["tree"].(string)
+	if row["event"] != "gate.done" || row["all_ok"] != true || row["cancelled"] == true || row["flaky"] != nil || tree == "" {
+		return g, false
+	}
+	g.tree = tree
+	results, _ := row["results"].([]any)
+	for _, value := range results {
+		r, ok := value.(map[string]any)
+		if !ok || r["ok"] != true || r["flaky"] != nil || r["timed_out"] == true || r["cancelled"] == true {
+			return g, false
+		}
+		name, _ := r["gate"].(string)
+		if name == "test" {
+			g.tests = r["skipped"] != true
+		} else if r["skipped"] == true {
+			continue
+		}
+		g.gates[name] = true
+	}
+	g.full = g.tests && row["scope"] == "full"
+	for _, f := range gates.Strings(row["test_files"]) {
+		g.files = append(g.files, f)
+	}
+	return g, true
+}
+
+// landLastGate is the block's last gate.done or gate.cancelled row in its
+// worktree for this run, when that row is green on a clean tree.
+func landLastGate(home, project, run, id, worktree string) (landGreenGate, bool) {
+	if project == "" {
+		return landGreenGate{}, false
+	}
+	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge", "ledger"), project)
+	if err != nil {
+		return landGreenGate{}, false
+	}
+	var last map[string]any
+	for _, value := range rows {
+		row, ok := value.(map[string]any)
+		if !ok || (row["event"] != "gate.done" && row["event"] != "gate.cancelled") || row["run"] != run || row["block"] != id || row["worktree"] != worktree {
+			continue
+		}
+		last = row
+	}
+	if last == nil {
+		return landGreenGate{}, false
+	}
+	return landGateRow(last)
+}
+
+// landGateCovers reports that a green block gate already checked what the
+// merge gate would run on tree (B393): the same tree, every configured gate
+// green, and either the full suite or every selected test file.
+func landGateCovers(g landGreenGate, tree, cwd string, files []string) bool {
+	if g.tree == "" || g.tree != tree {
+		return false
+	}
+	loaded, err := config.Load(cwd)
+	if err != nil {
+		return false
+	}
+	configured := blockMap(loaded["gates"])
+	p, safe := gates.Resolve(cwd, configured)
+	if !safe || !gates.ResolveCustom(&p, configured) || p.Commands["test"] == nil {
+		return false
+	}
+	for name, command := range p.Commands {
+		if command != nil && name != "test" && !g.gates[name] {
+			return false
+		}
+	}
+	if g.full {
+		return true
+	}
+	if !gatesSelectable(p) {
+		return false
+	}
+	ran := map[string]bool{}
+	for _, f := range g.files {
+		ran[f] = true
+	}
+	required := gatesRunnerFiles(p.Commands["test"].Argv, files)
+	if len(required) > 0 && !g.tests {
+		return false
+	}
+	for _, f := range required {
+		if !ran[f] {
+			return false
+		}
+	}
+	return true
 }

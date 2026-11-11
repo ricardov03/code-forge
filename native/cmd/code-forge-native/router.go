@@ -5,7 +5,10 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
+
+	"github.com/ricardov03/code-forge/native/state"
 )
 
 // Only verbs explicitly registered here run in Go. Internal accelerators are
@@ -13,6 +16,7 @@ import (
 var routes = map[string]func([]string) int{}
 
 func run(args []string) (int, error) {
+	state.SetLockVerb(lockVerbOf(args))
 	if len(args) > 0 {
 		if args[0] == "internal" {
 			return runInternal(args[1:])
@@ -52,4 +56,17 @@ func handover(args []string, reasons ...handoverReason) (int, error) {
 		return 126, fmt.Errorf("exec node: %w", err)
 	}
 	return 0, nil // Exec replaces this process on success.
+}
+
+// lockVerbOf names a verb for the run-lock owner file: its first one or two
+// words, such as "block land" or "gates run" (B393).
+func lockVerbOf(args []string) string {
+	words := []string{}
+	for _, arg := range args {
+		if len(words) == 2 || strings.HasPrefix(arg, "-") {
+			break
+		}
+		words = append(words, arg)
+	}
+	return strings.Join(words, " ")
 }

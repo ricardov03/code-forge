@@ -549,6 +549,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	var files ledger.Object
 	var changedScope *gates.Scope
 	base := ""
+	ranTree := ""
 	slug := o.slug
 	withSlot := func(fn func(ledger.Object, ledger.Object) error) (string, error) {
 		if o.run == "" {
@@ -740,10 +741,18 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		if err != nil {
 			return err
 		}
+		// B393: a block gate in its worktree records the clean Git tree it
+		// ran on, so block land can skip a merge gate on that same tree.
+		if tree != nil {
+			ranTree = gatesCleanTree(cwd)
+		}
 		results, all, err = gates.Run(ctx, runPlan, cwd, o.run, timeout, scope)
 		releaseSlot()
 		if err != nil {
 			return err
+		}
+		if ranTree != "" && gatesCleanTree(cwd) != ranTree {
+			ranTree = ""
 		}
 		if scope.Reason == "text_only" || emptySelection {
 			for i, result := range results {
@@ -898,6 +907,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		row.Set("results", summaries)
 		if base != "" {
 			row.Set("test_base", base)
+		}
+		if ranTree != "" {
+			row.Set("tree", ranTree)
 		}
 		if p.ReuseTest && scoped != nil {
 			gatesAdd(&row, scoped)

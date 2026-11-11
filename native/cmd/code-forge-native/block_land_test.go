@@ -3,6 +3,7 @@ package main
 import (
 	"bufio"
 	"encoding/json"
+	"fmt"
 	"io"
 	"net"
 	"os"
@@ -62,7 +63,7 @@ func TestBlockLandPushSingle(t *testing.T) {
 }
 
 func TestBlockLandMergeGateReuse(t *testing.T) {
-	for _, shape := range []string{"same-tree", "prior-green", "prior-docs", "prior-red", "prior-skipped", "prior-timeout", "prior-partial", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed", "no-token"} {
+	for _, shape := range []string{"same-tree", "prior-green", "prior-docs", "prior-red", "prior-skipped", "prior-timeout", "prior-partial", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed", "no-token", "older-base"} {
 		t.Run(shape, func(t *testing.T) { blockLandChain(t, shape) })
 	}
 }
@@ -147,6 +148,10 @@ func blockLandChain(t *testing.T, shape string) {
 			// the selection is appended. Each call logs its arguments.
 			gate = []string{"/bin/sh", "-c", command + `; printf '%s|' "$@" >> "$HOME/gate-args"; echo >> "$HOME/gate-args"`, "gate"}
 		}
+		if shape == "older-base" {
+			// B393: the same argv log, with the {test_files} token.
+			gate = []string{"/bin/sh", "-c", command + `; printf '%s|' "$@" >> "$HOME/gate-args"; echo >> "$HOME/gate-args"`, "gate", "{test_files}"}
+		}
 		cfg, err := json.Marshal(landTestConfig(gate))
 		must(err)
 		must(os.WriteFile(filepath.Join(repo, ".code-forge.yml"), cfg, 0600))
@@ -171,7 +176,10 @@ func blockLandChain(t *testing.T, shape string) {
 	if shape == "main-empty-commit" {
 		git(repo, "commit", "--allow-empty", "-qm", "no content change")
 	}
-	if shape == "main-moved" || shape == "docs-moved" {
+	// B393: older-base and no-token land a block whose base is behind main,
+	// so the merged tree differs from the tree its gate ran on.
+	mainMoved := shape == "no-token" || shape == "older-base"
+	if shape == "main-moved" || shape == "docs-moved" || mainMoved {
 		file := "other.mjs"
 		if shape == "docs-moved" {
 			file = "README.md"
@@ -292,8 +300,8 @@ func blockLandChain(t *testing.T, shape string) {
 	report, transcript := filepath.Join(home, "report"), filepath.Join(home, "transcript")
 	must(os.WriteFile(report, []byte("TESTS go test exit=0\n===BLOCK B1 COMPLETE===\n"), 0600))
 	must(os.WriteFile(transcript, []byte("Completed implementation.\n"), 0600))
-	// same-tree, no-token and push (B430) run the whole land chain and check its output.
-	if shape != "plain" && shape != "same-tree" && shape != "no-token" && shape != "push" {
+	// same-tree, no-token, push (B430) and older-base (B393) run the whole land chain and check its output.
+	if shape != "plain" && shape != "same-tree" && shape != "no-token" && shape != "push" && shape != "older-base" {
 		if !strings.HasPrefix(shape, "prior-") {
 			mode := "--changed"
 			if shape == "main-empty-commit" {
@@ -313,17 +321,32 @@ func blockLandChain(t *testing.T, shape string) {
 				t.Fatalf("block gates failed: %+v", gate)
 			}
 		}
-		result := landMergeGate(home, run, "B1", repo, tree, repo, "block-B1", "main", entry)
+		result := landMergeGate(home, "fixture", run, "B1", repo, tree, repo, "block-B1", "main", entry)
 		if result.reason != "" {
 			t.Fatalf("merge gate failed: %s", result.reason)
 		}
 		cwds, err := os.ReadFile(filepath.Join(home, "gate-cwds"))
 		must(err)
 		calls := strings.Fields(string(cwds))
-		reused := shape == "prior-green" || shape == "main-empty-commit"
+		fullReused := shape == "prior-green" || shape == "main-empty-commit"
+		// B393: a green --changed block gate on the exact merged tree whose
+		// test files cover the merge selection is reused (gate_reused); it is
+		// never a reusable full pass. Red, timed-out, skipped, older-tree and
+		// main-moved shapes still run the merge gate.
+		gateReused := shape == "partial" || shape == "commands-changed" || shape == "prior-partial"
+		reused := fullReused || gateReused
 		wantCalls := 2
 		if reused {
 			wantCalls = 1
+		}
+		if (result.reusedTree != "") != fullReused {
+			t.Errorf("full-suite reuse tree=%q, want reuse=%v", result.reusedTree, fullReused)
+		}
+		if gateReused && (result.gateReused != blockTree || result.scopeReason != "gate_reused") {
+			t.Errorf("gate reuse tree=%q reason=%q, want %s gate_reused", result.gateReused, result.scopeReason, blockTree)
+		}
+		if !gateReused && (result.gateReused != "" || result.scopeReason == "gate_reused") {
+			t.Errorf("gate reuse tree=%q reason=%q, want no gate reuse", result.gateReused, result.scopeReason)
 		}
 		if len(calls) != wantCalls {
 			t.Errorf("suite executions=%d (%v), want %d", len(calls), calls, wantCalls)
@@ -474,18 +497,38 @@ func blockLandChain(t *testing.T, shape string) {
 			t.Errorf("%s count=%d, want 1", event, counts[event])
 		}
 	}
-	if shape != "plain" {
-		// B404: land's block gates are scoped (--changed), so nothing stamps a
-		// full pass; the merge gate runs the merged tree's selected tests in a
-		// trial worktree instead of reusing or running a full suite.
-		if got := strings.Count(string(output), "merge gate: scoped tests passed (1 files, import_graph, "); got != 1 || strings.Contains(string(output), "merge gate: reused") || strings.Contains(string(output), "full suite passed") {
-			t.Errorf("scoped merge gate line count=%d, want 1 and no reuse: %s", got, output)
+	if shape == "same-tree" {
+		// B393: main did not move, so the merged tree is the tree land's own
+		// block gate just ran green on; the merge gate reuses that gate and
+		// runs the test command 0 times.
+		reusedLine := fmt.Sprintf("merge gate: reused green gate on tree %.12s (gate_reused)", blockTree)
+		if got := strings.Count(string(output), reusedLine); got != 1 || strings.Contains(string(output), "scoped tests passed") {
+			t.Errorf("gate_reused line count=%d, want exactly 1 and no scoped merge-gate run: %s", got, output)
 		}
 		if got := git(repo, "rev-parse", "HEAD^{tree}"); got != blockTree {
 			t.Errorf("landed tree=%s, want the block tree %s", got, blockTree)
 		}
-		if timing["merge_gate_reused"] == true {
-			t.Errorf("land.timing reuse=%v, want no reuse of a scoped run", timing["merge_gate_reused"])
+		if timing["merge_gate_reason"] != "gate_reused" || timing["merge_gate_tree"] != blockTree {
+			t.Errorf("land.timing merge_gate_reason=%v tree=%v, want gate_reused on %s", timing["merge_gate_reason"], timing["merge_gate_tree"], blockTree)
+		}
+		cwds, err := os.ReadFile(filepath.Join(home, "gate-cwds"))
+		must(err)
+		if calls := strings.Fields(string(cwds)); len(calls) != 1 || calls[0] != tree {
+			t.Errorf("suite cwds=%v, want only the block gate in %s (merge gate test command 0 times)", calls, tree)
+		}
+	}
+	if mainMoved {
+		// B404: land's block gates are scoped (--changed), so nothing stamps a
+		// full pass; with main moved the merged tree is new, so the merge gate
+		// runs the merged tree's selected tests once in a trial worktree.
+		if got := strings.Count(string(output), "merge gate: scoped tests passed (1 files, import_graph, "); got != 1 || strings.Contains(string(output), "merge gate: reused") || strings.Contains(string(output), "gate_reused") || strings.Contains(string(output), "full suite passed") {
+			t.Errorf("scoped merge gate line count=%d, want 1 and no reuse: %s", got, output)
+		}
+		if got := git(repo, "rev-parse", "HEAD^{tree}"); got == blockTree {
+			t.Errorf("landed tree=%s, want a merge tree that also holds main's change", got)
+		}
+		if timing["merge_gate_reused"] == true || timing["merge_gate_reason"] != nil {
+			t.Errorf("land.timing reuse=%v reason=%v, want no reuse of an older-base gate", timing["merge_gate_reused"], timing["merge_gate_reason"])
 		}
 		cwds, err := os.ReadFile(filepath.Join(home, "gate-cwds"))
 		must(err)
@@ -493,7 +536,9 @@ func blockLandChain(t *testing.T, shape string) {
 		if len(calls) != 2 || calls[0] != tree || filepath.Dir(calls[1]) != filepath.Dir(tree) || !strings.HasPrefix(filepath.Base(calls[1]), ".merge-gate-") {
 			t.Errorf("suite cwds=%v, want the block gate in %s then one trial worktree", calls, tree)
 		}
-		if shape == "no-token" {
+	}
+	if shape != "plain" {
+		if mainMoved {
 			args, err := os.ReadFile(filepath.Join(home, "gate-args"))
 			must(err)
 			if got, want := string(args), "test/sample.test.mjs|\ntest/sample.test.mjs|\n"; got != want {

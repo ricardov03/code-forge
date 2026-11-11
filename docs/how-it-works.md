@@ -515,6 +515,13 @@ then rebuilds the tree's native binary with `node scripts/build-native.mjs --hos
 Node compat tests run that binary. A failed build exits 1 with one line naming `native-rebuild-failed`;
 the rebase stands, and the line gives the command to rebuild by hand.
 
+`gates run --run <run>` and `block rebase` (Go) wait for the run lock when another verb holds it,
+instead of failing at once (B393). They print one line,
+`<verb>: waiting for run lock held by pid <pid> (<verb>)` (or `an unknown process` when the holder
+left no owner record, such as a Node verb), poll until the lock is free and then go on. The wait
+ends after `--lock-wait <duration>` (default `15m`, e.g. `90s`); then they exit 1 with the same
+`run <run> is locked (...)` message as before.
+
 `block open <id> --attempt N` (N > 1) restores paths from the block's earlier signed
 `block claim` rows alongside `--owned`. `block attempt` keeps those claims too. Both print
 `kept claims: <n>`; a retry does not require claiming those paths again.
@@ -563,6 +570,12 @@ must match the resolved gate configuration, environment and Node version. The fu
 include a test gate that ran and passed. Partial, skipped, cancelled, timed-out or flaky results
 cannot authorize reuse. Old stamps that do not bind the exact tree cannot authorize it either.
 Reuse prints `merge gate: reused green full suite on tree <tree-id>` with a 12-character tree id.
+When the block's own last gate (the `--changed` gate land just ran, or an earlier one) ran green on
+a clean tree that equals the merged tree, and it ran every configured gate and every test file
+the merge selection below would pick (or the full suite), the merge gate runs nothing and prints
+`merge gate: reused green gate on tree <tree-id> (gate_reused)`; `land.timing` and the `--json`
+`landed` event carry `merge_gate_reason: "gate_reused"` (B393). A block on an older base merges
+into a new tree, so its merge gate still runs.
 
 Otherwise, land runs the configured gates in the trial with the Go selection above, taken from
 what the merge changed (`HEAD^1..HEAD` of the trial) and the block's tests and owned files; it
