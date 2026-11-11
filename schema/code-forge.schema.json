@@ -319,7 +319,10 @@
           "description": "Repository-relative untracked paths to symlink from the main checkout into the temporary merge-gate tree before setup and the full suite. Use for git-ignored local.properties or app/google-services.json. Absolute paths, .. segments, paths resolving outside the repository and tracked paths are refused at config load. Missing sources warn once per path and do not stop the gate. --copy-links copies instead; filesystems refusing symlinks also use copies. File contents are never printed. Gates using links or setup always rerun the full suite."
         },
         "merge_gate_setup": {
-          "$ref": "#/$defs/argvOrNull",
+          "anyOf": [
+            { "type": "array", "minItems": 1, "items": { "type": "string", "minLength": 1 } },
+            { "type": "null" }
+          ],
           "default": null,
           "description": "Optional argv (no shell) run in the temporary merge-gate workspace after links and before the full suite. Nonzero exit or the five-minute timeout stops landing. Output is discarded to protect local secrets."
         },

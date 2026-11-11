@@ -53,6 +53,9 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		fmt.Fprintln(os.Stdout, string(data))
 	}
 	stop := func(reason string) int {
+		if step == "merge-gate" && !strings.Contains(reason, landMergeHint) {
+			reason += "\n" + landMergeHint
+		}
 		if step == "join" && strings.Split(reason, "\n")[0] == "wait_timeout" {
 			argv := []string{"code-forge", "block", "land", id, "--run", run, "--report", report, "--transcript", transcript, "--max", fmt.Sprintf("%.0fs", math.Max(1800, math.Ceil(float64(maxMs)/500)))}
 			if merge {
@@ -60,6 +63,9 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 			}
 			if skip {
 				argv = append(argv, "--no-merge-gate")
+			}
+			if flags["copy-links"] == true {
+				argv = append(argv, "--copy-links")
 			}
 			if json {
 				argv = append(argv, "--json")

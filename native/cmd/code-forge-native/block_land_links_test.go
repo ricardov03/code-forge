@@ -3,6 +3,7 @@ package main
 import (
 	"encoding/json"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
 	"testing"
@@ -98,9 +99,29 @@ func TestLandAndroidIgnoredFiles(t *testing.T) {
 	}
 	gates := f.cfg["gates"].(map[string]any)
 	gates["merge_gate_links"] = []string{"local.properties", "app/google-services.json", "missing", "missing"}
-	gates["merge_gate_setup"] = []string{"/bin/sh", "-c", "touch prepared"}
+	gates["merge_gate_setup"] = []string{"/bin/sh", "-c", "test -f local.properties && test -f app/google-services.json && touch prepared"}
 	f.commitConfig(t)
+	capture, err := os.CreateTemp(f.home, "warnings-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderr := os.Stderr
+	os.Stderr = capture
 	green := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main")
+	os.Stderr = stderr
+	if err := capture.Close(); err != nil {
+		t.Fatal(err)
+	}
+	warnings, err := os.ReadFile(capture.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := strings.Count(string(warnings), "source missing: missing"); got != 1 {
+		t.Errorf("missing duplicate source must warn exactly once, got %d: %s", got, warnings)
+	}
+	if strings.Contains(string(warnings), "private-sdk") || strings.Contains(string(warnings), "private-google-config") {
+		t.Fatal("warnings printed ignored contents")
+	}
 	if green.reason != "" {
 		t.Fatalf("linked Android gate must pass: %s", green.reason)
 	}
@@ -167,9 +188,52 @@ func TestLandClosedUnmergedRetry(t *testing.T) {
 	if code != 1 || !strings.Contains(output, "gates.merge_gate_links") || landGit(t, f.repo, "rev-parse", "HEAD") != before {
 		t.Errorf("first retry must fail only at Android gate and keep main unchanged: exit=%d output=%q", code, output)
 	}
+	// The existing Node module is still reachable through native handover.
+	// Exercise its closed retry with an in-process fake gate dispatcher that
+	// executes the same reporter-shaped gradle fixture in the supplied tree.
+	fallback := func() (int, string) {
+		t.Helper()
+		module, err := filepath.Abs("../../../src/cli/land.mjs")
+		if err != nil {
+			t.Fatal(err)
+		}
+		script := `
+import {pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
+const {landBlock} = await import(pathToFileURL(process.argv[1]));
+const [repo, tree] = process.argv.slice(2);
+const unexpected = async () => { throw new Error('closed retry repeated join or close'); };
+const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+const code = await landBlock({id:'B1', runId:'r-fallback', record:{workspace:repo, project:'fixture', blocks:{B1:{status:'closed', base_branch:'main'}}}, report:'unused', transcript:'unused', maxMs:60000, merge:true, noMergeGate:false, json:false}, {
+  autoClaimChanges:unexpected, runReviewFile:unexpected, runBlock:unexpected,
+  blockTree:async () => ({path:tree, top:tree, workspace:tree, branch:'block-B1'}), repoTop:async () => repo,
+  configInForce:() => null, gitChildEnv:() => env, parseTapPassed:() => ({failed:[]}),
+  appendRow:async () => {}, signRow:(row) => row, loadKey:async () => Buffer.alloc(32),
+  runGatesVerb:async (args, streams) => {
+    const result = spawnSync('gradle', [], {cwd:args.at(-1), env, encoding:'utf8'});
+    streams.stdout.write(JSON.stringify({allOk:result.status===0, results:[{gate:'test', skipped:false, ok:result.status===0, stdout:result.stdout, stderr:result.stderr}]}));
+    return result.status ?? 1;
+  }
+});
+process.exitCode = code;
+`
+		cmd := exec.Command("node", "--input-type=module", "-e", script, module, f.repo, f.tree)
+		data, err := cmd.CombinedOutput()
+		if err == nil {
+			return 0, string(data)
+		}
+		if exit, ok := err.(*exec.ExitError); ok {
+			return exit.ExitCode(), string(data)
+		}
+		t.Fatal(err)
+		return -1, string(data)
+	}
+	if code, output := fallback(); code != 1 || !strings.Contains(output, "Android SDK not found") || strings.Count(output, "gates.merge_gate_links") != 1 {
+		t.Errorf("fallback without links must fail with SDK error and one hint: exit=%d output=%q", code, output)
+	}
 	gates := f.cfg["gates"].(map[string]any)
 	gates["merge_gate_links"] = []string{"local.properties", "app/google-services.json"}
-	gates["merge_gate_setup"] = []string{"/bin/sh", "-c", "touch prepared"}
+	gates["merge_gate_setup"] = []string{"/bin/sh", "-c", "test -f local.properties && test -f app/google-services.json && touch prepared"}
 	f.commitConfig(t)
 	code, output = land()
 	if code != 0 || !strings.Contains(output, "B1 landed") {
@@ -187,5 +251,15 @@ func TestLandClosedUnmergedRetry(t *testing.T) {
 	}
 	if strings.Contains(output, "private-sdk") || strings.Contains(output, "private-google-config") {
 		t.Fatal("land printed ignored file contents")
+	}
+	if code, output := fallback(); code != 0 || !strings.Contains(output, "B1 landed") {
+		t.Fatalf("fallback with links must land: exit=%d output=%q", code, output)
+	}
+	calls, err = os.ReadFile(filepath.Join(f.home, "suite-calls"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if lines := strings.Split(strings.TrimSpace(string(calls)), "\n"); len(lines) != 2 || !strings.HasSuffix(lines[1], " link") {
+		t.Fatalf("want native copy and fallback symlink suite, got %q", calls)
 	}
 }

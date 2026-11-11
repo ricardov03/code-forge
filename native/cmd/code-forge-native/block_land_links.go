@@ -74,6 +74,10 @@ func landPrepareMergeGate(main, temporary, workspace string, settings config.Mer
 }
 
 func landCopyLink(root, source, destination string) error {
+	return landCopyLinkTree(root, source, destination, map[string]bool{})
+}
+
+func landCopyLinkTree(root, source, destination string, ancestors map[string]bool) error {
 	rel, err := filepath.Rel(root, source)
 	if err != nil {
 		return err
@@ -87,6 +91,11 @@ func landCopyLink(root, source, destination string) error {
 		return err
 	}
 	if info.IsDir() {
+		if ancestors[source] {
+			return fmt.Errorf("directory cycle")
+		}
+		ancestors[source] = true
+		defer delete(ancestors, source)
 		if err := os.Mkdir(destination, info.Mode().Perm()); err != nil {
 			return err
 		}
@@ -95,7 +104,7 @@ func landCopyLink(root, source, destination string) error {
 			return err
 		}
 		for _, entry := range entries {
-			if err := landCopyLink(root, filepath.Join(source, entry.Name()), filepath.Join(destination, entry.Name())); err != nil {
+			if err := landCopyLinkTree(root, filepath.Join(source, entry.Name()), filepath.Join(destination, entry.Name()), ancestors); err != nil {
 				return err
 			}
 		}
