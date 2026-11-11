@@ -193,6 +193,7 @@ const (
 	hModelsRefreshInvalidJSON
 	hRemoveUnsafeTarget
 	hRemoveUnfinishable
+	hPipelineUnsupported
 )
 
 var handoverReasons = [...]string{
@@ -365,6 +366,7 @@ var handoverReasons = [...]string{
 	hModelsRefreshInvalidJSON:  "models-refresh-invalid-json",
 	hRemoveUnsafeTarget:        "remove-unsafe-target",
 	hRemoveUnfinishable:        "remove-unfinishable",
+	hPipelineUnsupported:       "pipeline-unsupported",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {

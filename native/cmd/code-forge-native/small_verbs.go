@@ -15,8 +15,10 @@ import (
 // effect, whether Go can finish the run; when it cannot, the whole run goes
 // to Node with the reason it returns.
 type smallVerb struct {
-	name     string
-	usage    string
+	name  string
+	usage string
+	// subs are the verb's words in SUBCOMMANDS (src/util/breadcrumbs.mjs),
+	// the only ones a breadcrumb or an errors.jsonl entry names.
 	subs     []string
 	subUsage map[string]string
 	prepare  func(args []string) (func(stdout, stderr io.Writer) int, handoverReason, bool)

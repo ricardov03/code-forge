@@ -69,40 +69,23 @@ func AcceptedOutcomes(root, id string, ids []string) ([]any, error) {
 	if err != nil {
 		return nil, err
 	}
-	pipeline := object(v)
-	if !stringField(pipeline, "root") || !only(pipeline, "root", "steps") {
-		return nil, blockops.ErrHandover
-	}
-	steps, ok := pipeline.Get("steps").([]any)
-	if !ok || len(steps) == 0 {
+	steps, ok := PipelineSteps(v)
+	if !ok {
 		return nil, blockops.ErrHandover
 	}
 	byID := map[string]ledger.Object{}
-	for _, v := range steps {
-		step := object(v)
-		name := text(step.Get("id"))
-		outcome := text(step.Get("outcome"))
-		if !only(step, "id", "skill", "needs", "outcome", "approval") || !regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`).MatchString(name) || !stringField(step, "skill") || !stringField(step, "outcome") || outcome == "" || strings.ContainsAny(outcome[:1], `/\`) || regexp.MustCompile(`^[A-Za-z]:`).MatchString(outcome) || strings.ContainsAny(outcome, "\r\n\u2028\u2029") || slices.Contains(strings.FieldsFunc(outcome, func(r rune) bool { return r == '/' || r == '\\' }), "..") || !slices.Contains([]any{"human", "none"}, step.Get("approval")) {
-			return nil, blockops.ErrHandover
-		}
-		for _, field := range step {
-			if field.Key == "needs" && !stringList(field.Value) {
-				return nil, blockops.ErrHandover
-			}
-		}
-		// Validate all schema shapes before reporting semantic pipeline errors.
-		byID[name] = step
+	for _, step := range steps {
+		byID[text(step.Get("id"))] = step
 	}
 	seen := map[string]bool{}
-	for _, v := range steps {
-		name := text(object(v).Get("id"))
+	for _, step := range steps {
+		name := text(step.Get("id"))
 		if seen[name] {
 			return nil, bad("duplicate step id " + quote(name))
 		}
 		seen[name] = true
 	}
-	for _, v := range steps {
-		step := object(v)
+	for _, step := range steps {
 		needs, _ := step.Get("needs").([]any)
 		for _, need := range needs {
 			if byID[text(need)] == nil {
@@ -130,8 +113,8 @@ func AcceptedOutcomes(root, id string, ids []string) ([]any, error) {
 		visited[name] = true
 		return nil
 	}
-	for _, v := range steps {
-		if err := visit(text(object(v).Get("id"))); err != nil {
+	for _, step := range steps {
+		if err := visit(text(step.Get("id"))); err != nil {
 			return nil, err
 		}
 	}
@@ -143,7 +126,7 @@ func AcceptedOutcomes(root, id string, ids []string) ([]any, error) {
 	out := []any{}
 	for _, name := range unique(ids) {
 		file := filepath.Join(root, text(byID[name].Get("outcome")))
-		problem, err := checkOutcome(file, root)
+		problem, err := CheckOutcome(file, root)
 		if err != nil {
 			return nil, err
 		}
@@ -184,7 +167,39 @@ func stringList(v any) bool {
 	return true
 }
 
-func checkOutcome(file, root string) (string, error) {
+// PipelineSteps returns the steps of a parsed code-forge.pipeline.yml whose
+// shape schema/pipeline.schema.json accepts; ok is false for any other shape,
+// whose AJV diagnostics stay with Node.
+func PipelineSteps(v any) ([]ledger.Object, bool) {
+	pipeline := object(v)
+	if !stringField(pipeline, "root") || !only(pipeline, "root", "steps") {
+		return nil, false
+	}
+	values, ok := pipeline.Get("steps").([]any)
+	if !ok || len(values) == 0 {
+		return nil, false
+	}
+	steps := []ledger.Object{}
+	for _, v := range values {
+		step := object(v)
+		name := text(step.Get("id"))
+		outcome := text(step.Get("outcome"))
+		if !only(step, "id", "skill", "needs", "outcome", "approval") || !regexp.MustCompile(`^[a-z0-9][a-z0-9-]*$`).MatchString(name) || !stringField(step, "skill") || !stringField(step, "outcome") || outcome == "" || strings.ContainsAny(outcome[:1], `/\`) || regexp.MustCompile(`^[A-Za-z]:`).MatchString(outcome) || strings.ContainsAny(outcome, "\r\n\u2028\u2029") || slices.Contains(strings.FieldsFunc(outcome, func(r rune) bool { return r == '/' || r == '\\' }), "..") || !slices.Contains([]any{"human", "none"}, step.Get("approval")) {
+			return nil, false
+		}
+		for _, field := range step {
+			if field.Key == "needs" && !stringList(field.Value) {
+				return nil, false
+			}
+		}
+		steps = append(steps, step)
+	}
+	return steps, true
+}
+
+// CheckOutcome is checkOutcome in src/outcome/outcome.mjs for a contract of
+// a supported shape: the first problem, or "" when it is ready.
+func CheckOutcome(file, root string) (string, error) {
 	if _, err := os.Stat(file); os.IsNotExist(err) {
 		return "missing outcome", nil
 	}
@@ -247,7 +262,10 @@ func checkOutcome(file, root string) (string, error) {
 	return "", nil
 }
 
-// Shape checks deliberately delegate invalid contracts to Node's AJV diagnostics.
+// ValidOutcome reports a contract schema/outcome.schema.json accepts. Shape
+// checks deliberately delegate invalid contracts to Node's AJV diagnostics.
+func ValidOutcome(o ledger.Object) bool { return validOutcome(o) }
+
 func validOutcome(o ledger.Object) bool {
 	if !only(o, "skill", "version", "request", "status", "approved_by", "artifact", "files", "decisions", "checks", "cost_usd", "minutes") || !stringField(o, "skill") || !slices.Contains([]any{"draft", "approved", "blocked", "failed"}, o.Get("status")) {
 		return false
