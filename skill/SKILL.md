@@ -55,6 +55,11 @@ for review again, and signs `accepted_landed` origins. No terminal is needed, in
 active autopilot grant. `--accept-changed <file> --reason <text>` stays human-only at a terminal
 and is refused during an active grant; foreign changes remain `owned-conflict`.
 
+Fail fast with `forge block ready <id> --run <r> --preflight`. Land one block with `--merge` or
+several with `forge block land <id> <id>... --run <r>`; the merge gate uses the Go test selection,
+never the full suite. Add `--push --watch-ci` to push main and watch CI. Retry queued lock and git
+failures with `forge heal run --run <r>`; see the test queue with `forge queue` (`references/code.md` §5.1).
+
 ## §4 Hard rules (the headings of `references/rules-core.md`)
 
 - **R1** Coder ≠ reviewer, always

@@ -92,15 +92,21 @@ Paths added by `block claim` survive retries: `block open <id> --attempt N` (N >
 restores earlier signed claims alongside `--owned`, and `block attempt` keeps them too.
 Both print `kept claims: <n>`. Do not claim the same paths again after a retry.
 
-The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]`
+The orchestrator can use `code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--json]`
 to join reviews, run changed gates in the recorded block worktree, then run the normal close checks.
 The first failure exits 1 and names the step, findings, gate output or close refusal, and the next
 command. Human checks must finish before a merge. With `--merge`, a closed block's branch is merged
 with `--no-ff` in the clean main checkout on the recorded base branch; the block worktree must also
 be clean. Before the real merge, land merges the current base branch HEAD and block branch in a
-temporary detached worktree under the run's worktree root and runs the configured full gates
-without block scope or `--changed`, using the shared gate runner. A green suite removes the
-temporary tree, prints `merge gate: full suite passed (<n>s)`, and permits the real merge.
+temporary detached worktree under the run's worktree root and runs the merge gate there. The merge
+gate never runs the full suite (B404). It runs the configured gates with the Go test selection
+(§5.1), taken from what the merge changed plus the block's tests and owned files. A pass prints
+`merge gate: scoped tests passed (<n> files, <reason>, <s>s)`; an empty selection prints
+`merge gate: no test selected (<reason>); test gate skipped`. It runs nothing when it can reuse
+earlier green evidence for the exact merged tree: `merge gate: reused green full suite on tree <id>`,
+or `merge gate: reused green gate on tree <id> (gate_reused)` when the block's own last green gate
+ran on a clean tree equal to the merged tree and covered the merge selection (B393). A block on an
+older base merges into a new tree, so its merge gate still runs.
 A red suite or conflict stops at `merge-gate` with the first ten failing TAP test names (or gate
 diagnostics) or conflict files and a `next:` action. Every outcome removes the temporary tree;
 a refusal leaves main clean and its HEAD unchanged. `gates.merge_gate` defaults to `true` in
@@ -115,6 +121,64 @@ prints one object with `block`, `event` and `merge`, or a refusal with `step`, `
 Land makes up to three join attempts while a held findings round remains open, all within one
 wait budget. Completed findings stop it. An exhausted wait stops at `join` with `wait_timeout`
 and prints a `next:` land command with a larger `--max`, preserving the report and transcript.
+
+### §5.1 Go gates, land, rebase, heal and the machine queue (0.22.0)
+
+**Changed-test selection (B404, B427).** `forge gates run --run <r> --block <id> --changed` stays
+in Go and never runs the full suite. It selects the block's `--tests`, its owned and stem-paired
+tests, every test that imports a changed file (a narrow import graph; `gates.import_graph.stop`
+names hub files where it stops), and for a `native/` change `test/compat/go.test.mjs` plus the
+tests that build or run the native binary. A test command without `{test_files}` gets the
+selection appended. An empty selection skips the test gate. The reason is `go_only` or
+`import_graph`. `forge gates run --run <r> --block <id> --full` is the only local full suite.
+
+**Fail fast (B392, B363, B418).** Run `forge block ready <id> --run <r> --preflight [--report <file>]`
+before a gate: in about a second it lists stale base, open findings, rule breaks and report
+blockers, exit 0 `block <id> preflight clean` or exit 1 with the list. `gates run --run --block`
+runs the same preflight first (`--no-preflight` skips it). A stale base stops the gate with the fix
+`forge block rebase <id> --run <r> --accept-landed`; `--auto-rebase` runs that rebase first,
+`--allow-stale-base` gates on the old base with a warning. `lint`, `types` and `format` run before
+the test gate; a red one skips the tests with `reason: pre_gate_failed`.
+
+**Close waits for review (B339, B405).** Native `block close` queues a review for each changed owned
+file that has none, waits once for all of them (`review.close_wait_s`, default 600), then stops
+with `not_approved` or `review_pending`. Close never approves a file itself. `block ready` and
+`block close` credit the latest done review-file ticket for the file's current content, so report
+ticket lines are optional.
+
+**Rebase replays first (B431).** `forge block rebase <id> --run <r>` runs in Go. When main changed
+owned files, it still replays the block's commits. A clean replay moves the base, lists those files
+as `upstream_owned` and queues them for review again. Only a real conflict refuses with
+`rebase-conflict` and the files: rebase the block worktree by hand (`git rebase <branch>`), resolve,
+then run `block rebase` again. For `CHANGELOG.md`, add-only edits on both sides keep both, main's
+lines first. Run the gates again after any rebase.
+
+**Batch land (B340, B397).** `forge block land <id> <id>... --run <r>` lands closed blocks in the given
+order. A block that would conflict is parked (`block <id> parked: block_rebase_conflict (<files>)`)
+and the others go on. Each block is rebased onto the trial merge before it and runs its own changed
+gates. One merge gate then runs on the merged trial tree with the selection for the whole batch,
+never the full suite. When it fails, land names the first failing block, lands only the blocks
+before it and prints `block <id> not landed (after <culprit>)` for the rest.
+
+**Push and CI watch (B430).** `--push` (a single block needs `--merge` too; a batch does not), or
+`land.push: true` in the run-start config, runs `git push origin <base>` from the main checkout
+after the merge and prints `pushed <sha> to origin/<base>`. A rejected push keeps the local merge,
+stops at step `push`, queues a heal item and exits 1. `--watch-ci` (needs push) starts a detached
+`forge ci watch --sha <sha> --run <r>` and returns at once; land never waits for CI. `ci watch`
+exits 0 when every run is green, and on a red run names the failing jobs and tests and queues a
+heal item of kind `ci`.
+
+**Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
+held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the
+last stderr line. Retry with `forge heal run --run <r>` (`--once` for one pass, `--watch` to keep
+going); inspect with `forge heal list --run <r>` and `forge heal show <id>`. An item that keeps
+failing, or fails for another reason, becomes `needs_coder`: fix the cause, then retry by hand.
+
+**Machine test queue (B352, B354).** Every `gates run` with a test command takes a slot in one
+machine-wide FIFO queue: a full run needs the whole machine, changed runs share slots. A waiting
+gate prints `queued #k`, and `forge status` shows it under the run. `forge queue` lists holders and
+waiters. Wrap any other test command in `forge queue run [--kind full|changed] -- <cmd>` so it waits
+its turn too.
 
 Land automatically claims changed files outside the owned set before joining reviews.
 `block close --auto-claim` also claims, queues reviews in the block worktree, waits, and

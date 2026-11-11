@@ -32,6 +32,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- the skill's `block land` text no longer says the merge gate runs the full suite: it uses the Go test selection
+  (B404); new `skill/references/code.md` §5.1 tells the orchestrator how to use the changed-test selection, preflight,
+  close review wait, Go rebase replay, batch land, `--push`/`--watch-ci`, the heal queue and the machine test queue,
+  with pointer lines in SKILL.md (B443)
 - native `block close` queues a review for each changed owned file that has no review (also after an acceptance
   amendment), waits once for all of them (`review.close_wait_s`, default 600), then stops with `not_approved` or
   `review_pending`; close never approves a file itself (B339)
