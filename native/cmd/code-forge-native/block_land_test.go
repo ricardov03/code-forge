@@ -55,7 +55,7 @@ func TestBlockLandFullDaemonChain(t *testing.T) {
 }
 
 func TestBlockLandMergeGateReuse(t *testing.T) {
-	for _, shape := range []string{"same-tree", "prior-green", "prior-docs", "prior-red", "prior-skipped", "prior-timeout", "prior-partial", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed"} {
+	for _, shape := range []string{"same-tree", "prior-green", "prior-docs", "prior-red", "prior-skipped", "prior-timeout", "prior-partial", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed", "no-token"} {
 		t.Run(shape, func(t *testing.T) { blockLandChain(t, shape) })
 	}
 }
@@ -108,6 +108,9 @@ func blockLandChain(t *testing.T, shape string) {
 	if shape == "prior-partial" {
 		must(os.WriteFile(filepath.Join(repo, "sample.test.mjs"), []byte("// fixture\n"), 0600))
 	}
+	// B404: the merge gate runs the tests that import the change.
+	must(os.MkdirAll(filepath.Join(repo, "test"), 0700))
+	must(os.WriteFile(filepath.Join(repo, "test/sample.test.mjs"), []byte("import '../sample.mjs';\n"), 0600))
 	if shape != "plain" {
 		command := `printf '%s\n' "$PWD" >> "$HOME/gate-cwds"`
 		if shape == "prior-red" || shape == "prior-timeout" {
@@ -119,6 +122,11 @@ func blockLandChain(t *testing.T, shape string) {
 			}
 		}
 		gate := []string{"/bin/sh", "-c", command, "gate", "{test_files}"}
+		if shape == "no-token" {
+			// B404: a test command without {test_files} still runs scoped;
+			// the selection is appended. Each call logs its arguments.
+			gate = []string{"/bin/sh", "-c", command + `; printf '%s|' "$@" >> "$HOME/gate-args"; echo >> "$HOME/gate-args"`, "gate"}
+		}
 		cfg, err := json.Marshal(landTestConfig(gate))
 		must(err)
 		must(os.WriteFile(filepath.Join(repo, ".code-forge.yml"), cfg, 0600))
@@ -170,7 +178,13 @@ func blockLandChain(t *testing.T, shape string) {
 	must(state.SaveRun(home, record))
 	must(os.WriteFile(filepath.Join(home, ".code-forge/runs", run+".key"), make([]byte, 32), 0600))
 	if strings.HasPrefix(shape, "prior-") {
-		args := []string{"run", "--run", run, "--block", "B1", "--changed", "--cwd", tree}
+		// Only an explicit --full run stamps a reusable full pass (B404).
+		mode := "--full"
+		if shape == "prior-partial" {
+			// A scoped prior run is never a reusable full pass.
+			mode = "--changed"
+		}
+		args := []string{"run", "--run", run, "--block", "B1", mode, "--cwd", tree}
 		if shape == "prior-timeout" {
 			args = append(args, "--timeout-ms", "100")
 		}
@@ -258,9 +272,15 @@ func blockLandChain(t *testing.T, shape string) {
 	report, transcript := filepath.Join(home, "report"), filepath.Join(home, "transcript")
 	must(os.WriteFile(report, []byte("TESTS go test exit=0\n===BLOCK B1 COMPLETE===\n"), 0600))
 	must(os.WriteFile(transcript, []byte("Completed implementation.\n"), 0600))
-	if shape != "plain" && shape != "same-tree" {
+	// same-tree and no-token run the whole land chain and check its output.
+	if shape != "plain" && shape != "same-tree" && shape != "no-token" {
 		if !strings.HasPrefix(shape, "prior-") {
-			args := []string{"run", "--run", run, "--block", "B1", "--changed", "--cwd", tree}
+			mode := "--changed"
+			if shape == "main-empty-commit" {
+				// A full pass on the block tree is reused when main gained no content.
+				mode = "--full"
+			}
+			args := []string{"run", "--run", run, "--block", "B1", mode, "--cwd", tree}
 			options, _ := gatesParse(args)
 			gate := landCapture(func(s *landStep) int {
 				code, safe := gatesNativeStep(args, options, s)
@@ -273,7 +293,7 @@ func blockLandChain(t *testing.T, shape string) {
 				t.Fatalf("block gates failed: %+v", gate)
 			}
 		}
-		result := landMergeGate(home, run, "B1", repo, tree, repo, "block-B1", "main")
+		result := landMergeGate(home, run, "B1", repo, tree, repo, "block-B1", "main", entry)
 		if result.reason != "" {
 			t.Fatalf("merge gate failed: %s", result.reason)
 		}
@@ -389,18 +409,30 @@ func blockLandChain(t *testing.T, shape string) {
 		}
 	}
 	if shape != "plain" {
-		line := "merge gate: reused green full suite on tree " + blockTree[:12] + "\n"
-		if got := strings.Count(string(output), "merge gate: reused green full suite on tree "); got != 1 || strings.Count(string(output), line) != 1 {
-			t.Errorf("reuse line count=%d, want 1 with exact tree %s: %s", got, blockTree[:12], output)
+		// B404: land's block gates are scoped (--changed), so nothing stamps a
+		// full pass; the merge gate runs the merged tree's selected tests in a
+		// trial worktree instead of reusing or running a full suite.
+		if got := strings.Count(string(output), "merge gate: scoped tests passed (1 files, import_graph, "); got != 1 || strings.Contains(string(output), "merge gate: reused") || strings.Contains(string(output), "full suite passed") {
+			t.Errorf("scoped merge gate line count=%d, want 1 and no reuse: %s", got, output)
 		}
-		if timing["merge_gate_reused"] != true || timing["merge_gate_tree"] != blockTree {
-			t.Errorf("land.timing reuse=%v tree=%v, want reuse=true tree=%s", timing["merge_gate_reused"], timing["merge_gate_tree"], blockTree)
+		if got := git(repo, "rev-parse", "HEAD^{tree}"); got != blockTree {
+			t.Errorf("landed tree=%s, want the block tree %s", got, blockTree)
+		}
+		if timing["merge_gate_reused"] == true {
+			t.Errorf("land.timing reuse=%v, want no reuse of a scoped run", timing["merge_gate_reused"])
 		}
 		cwds, err := os.ReadFile(filepath.Join(home, "gate-cwds"))
 		must(err)
 		calls := strings.Fields(string(cwds))
-		if len(calls) != 1 || calls[0] != tree {
-			t.Errorf("suite cwds=%v, want exactly one run in %s", calls, tree)
+		if len(calls) != 2 || calls[0] != tree || filepath.Dir(calls[1]) != filepath.Dir(tree) || !strings.HasPrefix(filepath.Base(calls[1]), ".merge-gate-") {
+			t.Errorf("suite cwds=%v, want the block gate in %s then one trial worktree", calls, tree)
+		}
+		if shape == "no-token" {
+			args, err := os.ReadFile(filepath.Join(home, "gate-args"))
+			must(err)
+			if got, want := string(args), "test/sample.test.mjs|\ntest/sample.test.mjs|\n"; got != want {
+				t.Errorf("gate args=%q, want %q (block gate and merge gate each get the selection appended, never the unscoped command)", got, want)
+			}
 		}
 		parents := strings.Fields(git(repo, "rev-list", "--parents", "-n", "1", "HEAD"))
 		if len(parents) != 3 || parents[2] != git(tree, "rev-parse", "HEAD") {

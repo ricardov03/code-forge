@@ -300,12 +300,6 @@ func gatesNumber(v any) (float64, bool) {
 func gatesNative(args []string, o gatesOptions) (int, bool) { return gatesNativeStep(args, o, nil) }
 
 func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*handoverReason) (int, bool) {
-	handoverReason := func(reason handoverReason) (int, bool) {
-		if len(reasons) > 0 {
-			*reasons[0] = reason
-		}
-		return 0, false
-	}
 	stdout, stderr := step.writers()
 	gatesErrf := func(format string, args ...any) {
 		if step == nil {
@@ -476,7 +470,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			base, _ = wt.Get("base_sha").(string)
 		}
 		p.Repeat = &gates.Repeat{N: int(n), Base: base, Block: block, OnSkip: func(s string) { gatesErrf("%s\n", s) }}
-		if c := p.Commands["test"]; c != nil && (!p.Restricted || gates.Has(p.Names, "test")) && gates.Has(c.Argv, "{test_files}") {
+		// B404: --changed appends the selection to a test command without
+		// {test_files}, so repeat_new_tests applies to it as well.
+		if c := p.Commands["test"]; c != nil && (!p.Restricted || gates.Has(p.Names, "test")) && (gates.Has(c.Argv, "{test_files}") || (o.changed && !o.full)) {
 			if _, safe := gates.RepeatFiles(cwd, p.Repeat); !safe {
 				return 0, false
 			}
@@ -502,33 +498,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			return 0, false
 		}
 	}
-	// B399: a block with no Node product file needs neither the import graph
-	// nor the full Node suite; its scope is fixed (gates_go_only.go). Batch land
-	// asks for the hand-over reason in its preflight and plans its own changed
-	// scope, so it keeps the full fallback until it adopts go_only.
-	goOnly := o.changed && o.run != "" && gatesGoOnly(block, p) && (step == nil || !step.preflight || len(reasons) == 0)
-	if o.changed && !goOnly {
-		if listErr != nil {
-			return 0, false
-		}
-		for _, file := range listed {
-			if !gates.IsChangedTest(file) {
-				continue
-			}
-			if strings.HasPrefix(file, "test/config/") || strings.HasPrefix(file, "test/doctor/") || !gatesEmptyTest(cwd, file) {
-				return handoverReason(hGatesChangedGraph)
-			}
-		}
-	}
-	// Implicit binary dependencies still require the oracle's graph. Base-aware
-	// scoping itself is native, including when composed by block land.
-	if o.changed && !goOnly {
-		for _, file := range gates.Strings(block.Get("owned_files")) {
-			if strings.HasPrefix(file, "native/") || file == "native" || file == "scripts/build-native.mjs" {
-				return handoverReason(hGatesChangedNative)
-			}
-		}
-	}
+	// B399/B404: --changed never hands over to Node and never widens to the
+	// full suite. A block with no Node product file keeps the go_only reason;
+	// every other block gets its tests from the Go import graph
+	// (gates_select.go). An explicit --full runs the full suite.
+	goOnly := o.changed && o.run != "" && gatesGoOnly(block, p)
+	selected := o.changed && !o.full && o.run != "" && listErr == nil && gatesSelectable(p)
 	// Child spawn errors and cwd errors have platform-specific Node text.
 	if st, e := os.Stat(cwd); e != nil || !st.IsDir() {
 		return 0, false
@@ -574,6 +549,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		scope := gates.Scope{Kind: "full", Reason: "no_tests"}
 		var current ledger.Object
 		treeStamp, fullStamp := "", ""
+		var delta []string
 		if o.run != "" && (gates.Scoped(p) || o.changed) {
 			scope = gates.TestScope(b, listed, threshold)
 			if listErr != nil {
@@ -583,7 +559,6 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			}
 			if o.changed {
 				base = gates.MergeBase(cwd, b)
-				var delta []string
 				if base != "" {
 					var err error
 					delta, err = gates.BaseDelta(cwd, base, b)
@@ -700,14 +675,35 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			}
 		}
 		// A text-only skip or a reused full run on the same tree costs less.
-		if goOnly && scope.Reason != "text_only" && !p.ReuseTest {
-			scope = gatesGoOnlyScope(b, listed)
+		if selected && scope.Reason != "text_only" && !p.ReuseTest {
+			changed := delta
+			if base == "" {
+				changed = gatesOwnedListed(b, listed)
+			}
+			scope = gatesChangedSelect(cwd, b, listed, changed, goOnly)
+			scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+			changedScope = &scope
+		}
+		if o.run == "" && o.scope != nil && gatesSelectable(p) {
+			scope = *o.scope
+			scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+		}
+		if o.full {
+			scope = gates.Scope{Kind: "full", Report: "full", Reason: "explicit", Files: []string{}, Changed: []string{}, Dependents: []string{}}
+			p.ReuseTest = false
 			changedScope = &scope
 		}
 		var err error
 		started = true
 		runPlan := p
-		if scope.Reason == "text_only" {
+		// A B404 selection always runs scoped: a test command without
+		// {test_files} takes the selected files appended. An empty selection
+		// skips the test gate; it never runs the unscoped (full) command.
+		if gatesSelectedReason(scope.Reason) {
+			runPlan = gatesWithTestFiles(p)
+		}
+		emptySelection := gatesSelectedReason(scope.Reason) && len(scope.Files) == 0
+		if scope.Reason == "text_only" || emptySelection {
 			runPlan.Commands = make(map[string]*gates.Command, len(p.Commands))
 			for name, command := range p.Commands {
 				if name != "test" {
@@ -735,7 +731,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		if err != nil {
 			return err
 		}
-		if scope.Reason == "text_only" {
+		if scope.Reason == "text_only" || emptySelection {
 			for i, result := range results {
 				r := result.(ledger.Object)
 				if r.Get("gate") == "test" {
@@ -889,7 +885,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			gatesAdd(&row, scoped)
 		} else if changedScope != nil {
 			gatesAdd(&row, changedScope.Fields(true))
-			if changedScope.Reason == "go_only" {
+			if gatesSelectedReason(changedScope.Reason) {
 				row.Set("test_files", changedScope.Files)
 			}
 		} else {

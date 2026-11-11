@@ -57,6 +57,9 @@ func newGoOnlyFixture(t *testing.T, owned []string, withNodeTest bool) goOnlyFix
 			write(filepath.Join(f.repo, file), "// base\n")
 		}
 	}
+	// go.test.mjs is in every repository that has native/ (B404 adds it only
+	// when the repository lists it).
+	write(filepath.Join(f.repo, gatesGoTest), "import test from 'node:test';\ntest('go', () => {});\n")
 	if withNodeTest {
 		write(filepath.Join(f.repo, "test/foo.test.mjs"), "import test from 'node:test';\ntest('foo', () => {});\n")
 		for _, file := range goOnlyFixtureCompat {
@@ -166,25 +169,28 @@ func goOnlyCase(t *testing.T, owned, want []string) {
 	}
 }
 
-func TestGatesGoOnlyNodeProductKeepsFallback(t *testing.T) {
+// B404: a block with a Node product file is not go_only, yet it no longer
+// hands over to Node's full suite; Go selects its tests by import graph.
+func TestGatesGoOnlyNodeProductSelectsInGo(t *testing.T) {
 	for _, owned := range [][]string{{"src/a.mjs", "native/x.go"}, {"package.json", "native/x.go"}} {
 		t.Run(owned[0], func(t *testing.T) {
 			f := newGoOnlyFixture(t, owned, false)
 			code, out := f.run(t)
-			if code != 127 {
-				t.Fatalf("exit %d, want 127 (hand-over to the missing Node): %s", code, out)
+			if code != 0 {
+				t.Fatalf("exit %d, want 0 without a hand-over to Node: %s", code, out)
 			}
-			if _, err := os.Stat(f.argvLog); !os.IsNotExist(err) {
-				t.Fatalf("the test command ran in Go; want the Node fallback only (stat err %v)", err)
-			}
-			rows, err := os.ReadFile(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl"))
+			logged, err := os.ReadFile(f.argvLog)
 			if err != nil {
-				t.Fatal(err)
+				t.Fatalf("the test command did not run in Go: %v; output %s", err, out)
 			}
-			lines := strings.Split(strings.TrimSpace(string(rows)), "\n")
-			var row handoverRow
-			if len(lines) != 1 || json.Unmarshal([]byte(lines[0]), &row) != nil || row.Verb != "gates" || row.Reason != "gates-changed-native-dependencies" {
-				t.Fatalf("want one gates hand-over row with reason gates-changed-native-dependencies, got %q", rows)
+			if got := strings.Split(strings.TrimSuffix(string(logged), "\n"), "\n"); !reflect.DeepEqual(got, []string{"test/compat/go.test.mjs"}) {
+				t.Fatalf("test command argv=%v, want only test/compat/go.test.mjs", got)
+			}
+			if !strings.Contains(out, `"reason":"import_graph"`) {
+				t.Fatalf("want reason import_graph: %s", out)
+			}
+			if _, err := os.Stat(filepath.Join(f.home, ".code-forge", "native", "handovers.jsonl")); !os.IsNotExist(err) {
+				t.Fatalf("want no hand-over row (stat err %v)", err)
 			}
 		})
 	}

@@ -60,11 +60,10 @@ func gatesGoOnlyPath(p string) bool {
 }
 
 // gatesGoOnly reports a block whose every owned entry is on the Go-only allow
-// list, gated by a test command that takes {test_files}. Changed paths are a
+// list, gated by a test command (gatesSelectable). Changed paths are a
 // subset of the owned entries (gates.BaseDelta keeps owned paths only).
 func gatesGoOnly(block ledger.Object, p gates.Plan) bool {
-	c := p.Commands["test"]
-	if c == nil || !gates.Has(c.Argv, "{test_files}") || (p.Restricted && !gates.Has(p.Names, "test")) {
+	if !gatesSelectable(p) {
 		return false
 	}
 	owned := gates.Strings(block.Get("owned_files"))
@@ -131,34 +130,4 @@ func gatesGoOnlyCompat(owned, listed []string) []string {
 	}
 	sort.Strings(out)
 	return out
-}
-
-// gatesGoOnlyScope: the block's --tests entries (Go test files run inside
-// test/compat/go.test.mjs), its owned runnable Node tests, go.test.mjs, then
-// the mapped compat tests, without duplicates.
-func gatesGoOnlyScope(block ledger.Object, listed []string) gates.Scope {
-	files := []string{}
-	seen := map[string]bool{}
-	add := func(f string) {
-		if !seen[f] {
-			seen[f] = true
-			files = append(files, f)
-		}
-	}
-	owned := gates.Strings(block.Get("owned_files"))
-	for _, f := range gates.Strings(block.Get("test_files")) {
-		if strings.HasPrefix(f, "test/") && !strings.HasPrefix(f, "-") && !strings.HasSuffix(f, "_test.go") {
-			add(f)
-		}
-	}
-	for _, f := range owned {
-		if gatesGoOnlyTest(f) {
-			add(f)
-		}
-	}
-	add(gatesGoTest)
-	for _, f := range gatesGoOnlyCompat(owned, listed) {
-		add(f)
-	}
-	return gates.Scope{Kind: "changed", Report: "related", Reason: "go_only", Files: files, Changed: []string{}, Dependents: []string{}}
 }

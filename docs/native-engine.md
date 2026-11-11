@@ -46,12 +46,18 @@ locks and signed ledger rows as Node.
 | `block ready`, `block waive`, `block reopen`, `block human close`, `block human-pass` | These commands. `block ready` uses the same review gate as `block close`. `block human-pass --help` and `-h` print the usage. | State that Go cannot read or does not expect. `waive --yes` and `reopen --yes` still run in Node. |
 | `context pack` | This command. | Other `context` subcommands and state that Go cannot read. |
 | `gates run` | Built-in and custom gates, `repeat_new_tests`, light blocks and flaky detection. A stop signal (SIGINT or SIGTERM) writes the same cancel rows. | A run with no `--run` and no `--block`, and other `gates` subcommands. |
-| `block land` | Plain land, `--merge` with the full merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | No compatible join daemon, unsupported state, a light block, or a run with `close.require_human` or an external reviewer. Read-only pre-checks finish before the first write. The B282 reason code names the step. |
+| `block land` | Plain land, `--merge` with the selected-test merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | No compatible join daemon, unsupported state, a light block, or a run with `close.require_human` or an external reviewer. Read-only pre-checks finish before the first write. The B282 reason code names the step. |
 
 The Go engine skips the test gate for proven text-only `gates run --changed` changes.
-For a block with no Node product file, `gates run --changed` stays in Go and runs only the
-block's tests, `test/compat/go.test.mjs` and the compat tests named after its Go files
-(reason `go_only`), never the full Node suite.
+`gates run --run R --block B --changed` always stays in Go: it selects the block's tests,
+the tests that import a changed file, and for a native change `test/compat/go.test.mjs` and
+every test that builds or runs the native binary (reason `go_only` or `import_graph`). A
+change under `test/fixtures/**`, `schema/**`, `scripts/compat-golden.mjs` or `src/config/**`
+also selects `test/compat/config-golden.test.mjs` (B409). A test command without
+`{test_files}` gets the selection appended. It never
+runs the full Node suite and never hands over; an empty selection skips the test gate. The
+merge gates of `block land --merge` and of a batch land use the same selection (B404).
+`gates run --run R --block B --full` is the only local full suite.
 Its merge gate can also reuse a green full run for the exact merged tree.
 See [how it works](how-it-works.md) for the scope rules and reuse checks.
 

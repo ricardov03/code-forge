@@ -52,6 +52,11 @@ type gatesOptions struct {
 	autoRebase, allowStaleBase   bool
 	timeout                      float64
 	timeoutGiven                 bool
+	// full is an explicit gates run --full (B404): the only local full suite.
+	full bool
+	// scope is a test scope planned by a caller (the land merge gates) for a
+	// run without --run/--block.
+	scope *gates.Scope
 }
 
 func gatesParse(args []string) (gatesOptions, string) {
@@ -94,15 +99,24 @@ func gatesParse(args []string) (gatesOptions, string) {
 	if !ok || r != b {
 		return o, "--run <id> and --block <id> go together, each with a value"
 	}
+	changedFlag := false
 	for _, s := range args {
 		switch s {
+		case "--full":
+			o.full, o.changed = true, true
 		case "--changed":
-			o.changed = true
+			o.changed, changedFlag = true, true
 		case "--auto-rebase":
 			o.autoRebase = true
 		case "--allow-stale-base":
 			o.allowStaleBase = true
 		}
+	}
+	if o.full && changedFlag {
+		return o, "--full and --changed cannot go together"
+	}
+	if o.full && !r {
+		return o, "--full needs --run <id> and --block <id>"
 	}
 	if o.changed && !r {
 		return o, "--changed needs --run <id> and --block <id>"
@@ -248,7 +262,15 @@ func runGates(args []string) int {
 	_, hasRun, _ := gatesFlag(args, "--run")
 	_, hasBlock, _ := gatesFlag(args, "--block")
 	if !hasRun && !hasBlock {
-		return gatesHandover(args, hGatesUnscoped)
+		// A run without --run/--block is the Node full suite already; Node
+		// does not know --full, so it is dropped on the way.
+		plain := []string{}
+		for _, a := range args {
+			if a != "--full" {
+				plain = append(plain, a)
+			}
+		}
+		return gatesHandover(plain, hGatesUnscoped)
 	}
 	if v, given, ok := gatesFlag(args, "--timeout-ms"); given && ok {
 		trimmed := strings.TrimSpace(v)
@@ -266,7 +288,7 @@ func runGates(args []string) int {
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
 				i++
 			}
-		case "--changed", "--json", "--auto-rebase", "--allow-stale-base":
+		case "--changed", "--full", "--json", "--auto-rebase", "--allow-stale-base":
 		default:
 			// Node's router passes argv through unchanged. Ordinary runs ignore
 			// --cwd=; worktree runs explicitly reject it in gatesNative.

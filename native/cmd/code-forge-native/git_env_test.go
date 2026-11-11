@@ -24,7 +24,7 @@ func envWithoutGit() []string {
 // gitFixtureTests build a fixture repo with git and start code-forge children.
 var gitFixtureTests = []string{
 	"TestGatesChangedTextOnlyAffectedGates",
-	"TestGatesGoOnlyNodeProductKeepsFallback",
+	"TestGatesGoOnlyNodeProductSelectsInGo",
 	"TestGatesGoOnlyRunsBlockTestsAndNativeCompat",
 	"TestReviewFileBlockScopeUnreadableIsNative",
 	"TestReviewFileWaitBlockLocalJoinIsNative",

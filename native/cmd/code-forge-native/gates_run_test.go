@@ -137,8 +137,10 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 				}
 				write("README.md", "changed\n")
 				test := run(true)[0]
-				if test.Gate != "test" || !test.OK || test.Skipped || test.Reused || test.Reason == "text_only" || test.Scope != "full" || test.Stdout != "suite\n" {
-					t.Fatalf("%s: want exactly one full suite execution instead of text_only, got %+v", baseline, test)
+				// B404: the change is not text-only, and --changed never widens
+				// to the full suite; with no selected test the test gate skips.
+				if test.Gate != "test" || !test.OK || !test.Skipped || test.Reused || test.Reason != "import_graph" || test.Scope != "related" || test.Stdout != "" {
+					t.Fatalf("%s: want an import_graph selection instead of text_only or a full suite, got %+v", baseline, test)
 				}
 				return
 			}
@@ -164,8 +166,9 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 			}
 			// A subsequent code edit must invalidate the text-only decision.
 			write("engine.go", "// changed\n")
-			if test := run(true)[0]; test.Skipped || test.Reused || test.Reason == "text_only" || test.Stdout != "suite\n" || !reflect.DeepEqual(test.Argv, []string{"/bin/echo", "suite"}) {
-				t.Fatalf("mixed code change: want exactly one full suite execution, got %+v", test)
+			// B404: it selects by import graph, never the full suite.
+			if test := run(true)[0]; !test.Skipped || test.Reused || test.Reason != "import_graph" || test.Stdout != "" || len(test.Argv) != 0 {
+				t.Fatalf("mixed code change: want an import_graph selection and no full suite, got %+v", test)
 			}
 		})
 	}
