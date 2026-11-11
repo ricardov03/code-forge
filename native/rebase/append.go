@@ -101,7 +101,25 @@ func AppendMerge(base, ours, theirs string) (merged string, ok bool, err error) 
 	if !addOnly(base, ours) || !addOnly(base, theirs) {
 		return "", false, nil
 	}
-	return threeWay(base, ours, theirs, true)
+	// git's diff sees an unterminated last line and the same line with a
+	// newline as different lines, so the union would keep the base's last
+	// line twice. addOnly already treats them as one line: terminate all
+	// three texts, merge, and drop the newline again when neither side had
+	// one.
+	if base == "" || strings.HasSuffix(base, "\n") {
+		return threeWay(base, ours, theirs, true)
+	}
+	terminate := func(text string) string {
+		if text == "" || strings.HasSuffix(text, "\n") {
+			return text
+		}
+		return text + "\n"
+	}
+	merged, ok, err = threeWay(base+"\n", terminate(ours), terminate(theirs), true)
+	if ok && !strings.HasSuffix(ours, "\n") && !strings.HasSuffix(theirs, "\n") {
+		merged = strings.TrimSuffix(merged, "\n")
+	}
+	return merged, ok, err
 }
 
 // threeWay runs git merge-file on the three texts; ok is false when a plain

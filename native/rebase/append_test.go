@@ -158,3 +158,72 @@ func TestUnionAttributeKeepsBlockRemoval(t *testing.T) {
 		}
 	})
 }
+
+// A CHANGELOG.md whose last line has no newline, both sides adding a line
+// after it (and one side also one before it): the last line stays once and
+// every added line is kept.
+func TestAppendMergeUnterminatedLastLine(t *testing.T) {
+	base := "# Changelog\n\n- older entry (B1)"
+	cases := []struct{ name, ours, theirs, want string }{
+		{"both add after", base + "\n- main entry (B2)\n", base + "\n- block entry (A)\n",
+			"# Changelog\n\n- older entry (B1)\n- main entry (B2)\n- block entry (A)\n"},
+		{"theirs also adds before", base + "\n- main entry (B2)\n", "# Changelog\n\n- block top (A)\n- older entry (B1)\n- block entry (A)\n",
+			"# Changelog\n\n- block top (A)\n- older entry (B1)\n- main entry (B2)\n- block entry (A)\n"},
+		{"ours also adds before", "# Changelog\n\n- main top (B2)\n- older entry (B1)\n- main entry (B2)\n", base + "\n- block entry (A)\n",
+			"# Changelog\n\n- main top (B2)\n- older entry (B1)\n- main entry (B2)\n- block entry (A)\n"},
+		{"no side ends with a newline", base + "\n- main entry (B2)", "# Changelog\n\n- block top (A)\n" + base[len("# Changelog\n\n"):] + "\n- block entry (A)",
+			"# Changelog\n\n- block top (A)\n- older entry (B1)\n- main entry (B2)\n- block entry (A)"},
+	}
+	for _, c := range cases {
+		got, ok, err := AppendMerge(base, c.ours, c.theirs)
+		if err != nil || !ok {
+			t.Fatalf("%s: AppendMerge ok=%v err=%v, want a merge", c.name, ok, err)
+		}
+		if got != c.want {
+			t.Fatalf("%s: merged =\n%q\nwant:\n%q", c.name, got, c.want)
+		}
+	}
+}
+
+// The same case through a real replay: main appends after the unterminated
+// last line, the block adds one line before it and one after it.
+func TestChangelogAppendAfterUnterminatedLastLine(t *testing.T) {
+	base := "# Changelog\n\n- older entry (B1)"
+	f := newOpenFixture(t, []string{"CHANGELOG.md"}, map[string]string{"CHANGELOG.md": base})
+	f.write(f.repo, "CHANGELOG.md", base+"\n- main entry (B2)\n")
+	f.commit(f.repo, "B2 lands")
+	f.write(f.tree, "CHANGELOG.md", "# Changelog\n\n- block top (A)\n- older entry (B1)\n- block entry (A)\n")
+	f.commit(f.tree, "A")
+	f.save()
+
+	_, err := Run(f.home, "unit", "A")
+	f.requireRebased(err, []string{"CHANGELOG.md"})
+	if got, want := f.read(f.tree, "CHANGELOG.md"), "# Changelog\n\n- block top (A)\n- older entry (B1)\n- main entry (B2)\n- block entry (A)\n"; got != want {
+		t.Fatalf("CHANGELOG.md =\n%q\nwant:\n%q", got, want)
+	}
+}
+
+// Each replayed commit keeps its own committer when an add-only CHANGELOG.md
+// stop is merged and the replay goes on.
+func TestChangelogAppendKeepsCommitters(t *testing.T) {
+	f := newOpenFixture(t, []string{"CHANGELOG.md"}, map[string]string{"CHANGELOG.md": changelogBase})
+	f.write(f.repo, "CHANGELOG.md", withLine(changelogBase, "## [Unreleased]\n\n", "- main one (B2)\n"))
+	f.commit(f.repo, "B2 lands")
+	for i, who := range []string{"First Committer <first@example.invalid>", "Second Committer <second@example.invalid>"} {
+		lines := []string{"- block one (A)\n", "- block one (A)\n- block two (A)\n"}
+		f.write(f.tree, "CHANGELOG.md", withLine(changelogBase, "## [Unreleased]\n\n", lines[i]))
+		name, email, _ := strings.Cut(strings.TrimSuffix(who, ">"), " <")
+		f.git(f.tree, "add", "-A")
+		env := append(gitEnv(), "GIT_COMMITTER_NAME="+name, "GIT_COMMITTER_EMAIL="+email)
+		if _, err := gitWithEnv(f.tree, env, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "A"); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f.save()
+
+	_, err := Run(f.home, "unit", "A")
+	f.requireRebased(err, []string{"CHANGELOG.md"})
+	if got, want := f.git(f.tree, "log", "--reverse", "--format=%cn <%ce>", "main..HEAD"), "First Committer <first@example.invalid>\nSecond Committer <second@example.invalid>"; got != want {
+		t.Fatalf("committers =\n%s\nwant:\n%s", got, want)
+	}
+}

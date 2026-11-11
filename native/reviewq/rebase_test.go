@@ -154,3 +154,47 @@ func TestRebaseCheckOpenBlockConflictNamesFiles(t *testing.T) {
 		t.Fatalf("refusal signed a checkpoint: %v", got)
 	}
 }
+
+// An add-only CHANGELOG.md conflict is merged and the cherry-pick goes on
+// with no git identity anywhere: the replayed commit keeps the committer of
+// the block's commit.
+func TestRebaseCheckAppendKeepsCommitterWithoutIdentity(t *testing.T) {
+	empty := t.TempDir()
+	global := filepath.Join(empty, "gitconfig")
+	if err := os.WriteFile(global, nil, 0600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("HOME", empty)
+	t.Setenv("XDG_CONFIG_HOME", empty)
+	t.Setenv("GIT_CONFIG_GLOBAL", global)
+	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("EMAIL", "")
+	f := newCheckFixture(t, map[string]string{"CHANGELOG.md": checkChangelog, "a.go": "a\n"})
+	f.write(f.repo, "CHANGELOG.md", strings.Replace(checkChangelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n- main entry (B2)\n", 1))
+	f.commit(f.repo, "B2 lands")
+	f.write(f.tree, "CHANGELOG.md", strings.Replace(checkChangelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n- block entry (A)\n", 1))
+	f.write(f.tree, "a.go", "a block\n")
+	f.git(f.tree, "add", "-A")
+	env := append(gitx.ChildEnv(), "GIT_COMMITTER_NAME=Original Committer", "GIT_COMMITTER_EMAIL=original@example.invalid")
+	if _, err := gitx.WithEnv("", env, "-C", f.tree, "-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "-c", "commit.gpgsign=false", "commit", "-qm", "A"); err != nil {
+		t.Fatal(err)
+	}
+	f.save("CHANGELOG.md", "a.go")
+
+	if _, err := f.check(); err != nil {
+		t.Fatalf("rebase check refused: %v", err)
+	}
+	if got, want := f.git(f.tree, "log", "-1", "--format=%cn <%ce>|%an <%ae>|%s"), "Original Committer <original@example.invalid>|Fixture <fixture@example.invalid>|A"; got != want {
+		t.Fatalf("replayed commit = %q, want %q", got, want)
+	}
+	if got := f.git(f.tree, "rev-list", "--count", "main..HEAD"); got != "1" {
+		t.Fatalf("replayed commits = %s, want 1", got)
+	}
+	data, err := os.ReadFile(filepath.Join(f.tree, "CHANGELOG.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Replace(checkChangelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n- main entry (B2)\n- block entry (A)\n", 1); string(data) != want {
+		t.Fatalf("CHANGELOG.md =\n%s\nwant:\n%s", data, want)
+	}
+}

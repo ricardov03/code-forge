@@ -170,6 +170,7 @@ func TestBlockRebaseOpenBlockConflictText(t *testing.T) {
 	f.git(f.tree, "commit", "-qam", "A edits x.go")
 	head := f.git(f.tree, "rev-parse", "HEAD")
 	f.save("x.go")
+	before := f.block()
 
 	code, stdout, stderr := f.rebase()
 	if code != 1 || stdout != "" || !strings.HasPrefix(stderr, "block rebase: rebase-conflict: ") || !strings.Contains(stderr, "x.go") || strings.Count(stderr, "\n") != 1 {
@@ -180,6 +181,23 @@ func TestBlockRebaseOpenBlockConflictText(t *testing.T) {
 	}
 	if base := f.block().Get("base_sha"); base != f.base {
 		t.Fatalf("base_sha = %v, want unchanged %s", base, f.base)
+	}
+	if status := f.git(f.tree, "status", "--porcelain"); status != "" {
+		t.Fatalf("worktree not clean after the refusal: %q", status)
+	}
+	verify := exec.Command("git", "-C", f.tree, "rev-parse", "-q", "--verify", "CHERRY_PICK_HEAD")
+	verify.Env = gitx.ChildEnv()
+	if out, err := verify.CombinedOutput(); err == nil {
+		t.Fatalf("cherry-pick left in progress: CHERRY_PICK_HEAD=%s", out)
+	}
+	for _, dir := range []string{"rebase-merge", "rebase-apply"} {
+		p := f.git(f.tree, "rev-parse", "--path-format=absolute", "--git-path", dir)
+		if _, err := os.Stat(p); !os.IsNotExist(err) {
+			t.Fatalf("rebase left in progress: %s exists (err=%v)", p, err)
+		}
+	}
+	if after := f.block(); !reflect.DeepEqual(after, before) {
+		t.Fatalf("block changed by the refusal:\nbefore %#v\nafter  %#v", before, after)
 	}
 }
 

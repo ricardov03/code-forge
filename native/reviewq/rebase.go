@@ -251,7 +251,7 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 			if _, err := gitx.WithEnv("", env, "-C", tree, "-c", rebase.UnionOff, "-c", "commit.gpgsign=false", "cherry-pick", "--allow-empty", parts[0]); err != nil {
 				// An add-only CHANGELOG.md is merged; anything else is a
 				// real conflict that names its files.
-				if err := rebase.Continue(tree, gitx.ChildEnv()); err != nil {
+				if err := rebase.Continue(tree, env); err != nil {
 					conflict, ok := err.(*rebase.ConflictError)
 					if !ok || len(conflict.Files) == 0 {
 						conflict = &rebase.ConflictError{Files: rebase.Conflicts(tree)}
