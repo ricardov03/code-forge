@@ -6,6 +6,7 @@ import os from 'node:os';
 import path from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { after, before, test } from 'node:test';
+import { GO_ONLY_VERBS } from '../src/cli/help.mjs';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const ROOT = path.join(__dirname, '..');
@@ -295,7 +296,10 @@ test('the real tree lists exactly the verb files present in src/cli (an independ
   const { status, stdout, stderr } = runCli(['--help'], BIN);
 
   assert.equal(status, 0, stderr);
-  assert.deepEqual(listedVerbNames(stdout), onDisk);
+  const listed = listedVerbNames(stdout);
+  assert.deepEqual(listed.filter((v) => onDisk.includes(v)), onDisk);
+  // B370: the only extra names are the Go-only verbs help.mjs lists (one source of truth).
+  assert.deepEqual(listed.filter((v) => !onDisk.includes(v)), [...GO_ONLY_VERBS].sort());
   assert.deepEqual(['help', 'version'].filter((v) => onDisk.includes(v)), ['help', 'version']);
 });
 

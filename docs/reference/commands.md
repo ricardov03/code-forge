@@ -5,7 +5,9 @@ This page lists the CLI commands and their usage. It is generated from the CLI. 
 - [author](#author)
 - [autopilot](#autopilot)
 - [block](#block)
+- [cloud-coder](#cloud-coder)
 - [context](#context)
+- [docs](#docs)
 - [doctor](#doctor)
 - [facts](#facts)
 - [gates](#gates)
@@ -266,6 +268,14 @@ usage: code-forge block amend-acceptance <id> --run <r> --acceptance <file> --re
                        Human checks use {clause, kind: human_check} without tests.
 ```
 
+## cloud-coder
+
+Hand a block to the configured cloud coder and commit its returned patch in the block worktree (served by the Go binary).
+
+```text
+usage: code-forge cloud-coder --run <r> --block <id>
+```
+
 ## context
 
 Build a context pack for a block in a run.
@@ -278,6 +288,14 @@ usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
 
 ```text
 usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
+```
+
+## docs
+
+Fetch the docs for the installed version (sync) or print the best local copy (path), served by the Go binary.
+
+```text
+usage: code-forge docs sync|path [--json]
 ```
 
 ## doctor
