@@ -8,8 +8,11 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"time"
 
+	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/blockclose"
+	"github.com/ricardov03/code-forge/native/blockend"
 	"github.com/ricardov03/code-forge/native/blockstate"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/gitx"
@@ -18,6 +21,36 @@ import (
 )
 
 func init() { blockSubs["ready"] = runBlockReady }
+
+// readyNow is the clock of the routine-close preview (a test seam).
+var readyNow = time.Now
+
+// readyHookMayHit is false only when Node's hook entry cannot match any line
+// of the transcript: no entry (hookForbidden's floor) or the command name is
+// absent even after quotes and backslashes are dropped, with no escape that
+// could spell it.
+func readyHookMayHit(argv []string, transcript string) bool {
+	first := strings.TrimSpace(argv[0])
+	if first == "" || strings.HasSuffix(first, "/") || strings.HasSuffix(first, "\\") {
+		return false
+	}
+	name := first
+	if i := strings.LastIndex(name, "/"); i >= 0 {
+		name = name[i+1:]
+	}
+	if len(name) >= 4 && strings.EqualFold(name[len(name)-4:], ".exe") {
+		name = name[:len(name)-4]
+	}
+	name = strings.TrimSpace(name)
+	if name == "" || name == "." || name == ".." || transcript == "" {
+		return false
+	}
+	if regexp.MustCompile(`\\[uUxX0-7]`).MatchString(transcript) {
+		return true
+	}
+	plain := strings.NewReplacer("'", "", "\"", "", "\\", "", "`", "").Replace(transcript)
+	return strings.Contains(strings.ToLower(plain), strings.ToLower(name))
+}
 
 func runBlockReady(args []string) int {
 	// B392: --preflight lists the close blockers a gate cannot fix, before any gate.
@@ -39,15 +72,22 @@ func runBlockReady(args []string) int {
 	if !ok {
 		return p.fallback()
 	}
-	if blockMap(cfg["hooks"])["on_block_end"] != nil {
-		return p.fallback()
-	}
 	// Preview does not run lazy expiry, so active grants alone need no effects.
-	// The delegated routine-close policy remains with Node.
+	// B449: under close.require_human an active grant previews the routine-close
+	// policy, as Node's routinePreview does.
 	external := blockMap(blockMap(cfg["review"])["external"])
 	externalReview := external["required"] == true && blockstate.Trim(blockString(external["name"])) != ""
+	routine := false
 	if blockMap(cfg["close"])["require_human"] == true && p.record.Get("autopilot") != nil {
-		return p.fallback()
+		grant, ok := p.record.Get("autopilot").(ledger.Object)
+		if !ok {
+			return p.fallback()
+		}
+		s, err := autopilot.GrantState(grant, readyNow())
+		if err != nil {
+			return p.fallback()
+		}
+		routine = s == "active"
 	}
 	workspace := blockString(p.record.Get("workspace"))
 	mainTop, err := gitx.RepoTop(workspace)
@@ -84,6 +124,12 @@ func runBlockReady(args []string) int {
 	}
 	hits, supported := gatecheck.Transcript(transcript)
 	if !supported {
+		return p.fallback()
+	}
+	// B449: Node's hook check (rule_break on the on_block_end command) adds a
+	// blocker only for a transcript that names the hook's command; such a
+	// transcript stays with Node.
+	if hook := blockend.FromConfig(cfg); hook != nil && readyHookMayHit(hook.Argv, transcript) {
 		return p.fallback()
 	}
 	highPaths, ok := closeHighPaths(workspace, base)
@@ -190,6 +236,17 @@ func runBlockReady(args []string) int {
 			blockers = append(blockers, check.Blockers...)
 		}
 	}
+	warnReviewed := len(reviewed) > 0 && !slices.ContainsFunc(changed, func(f string) bool { return gatecheck.Owns(prefix, entry, f) })
+	if routine {
+		// Node loads the gate again for this check; with no blocker before it
+		// that second load repeats the gate's warnings.
+		if len(blockers) == 0 && (warnReviewed || !scopeChecked || len(scopeWarnings) > 0) {
+			return p.fallback()
+		}
+		if problem := closeRoutineProblem(closeExternalReviewer(cfg), p.run, p.id, rows, key, gateInput.Files, gate, hits); problem != "" {
+			blockers = append(blockers, gatecheck.Blocker{Code: "close-not-routine", Detail: problem})
+		}
+	}
 	orphans, ok := current.Get("orphans").([]any)
 	if !ok {
 		return p.fallback()
@@ -206,7 +263,6 @@ func runBlockReady(args []string) int {
 	if !closeTextSafe(p.id + workspace + string(encoded) + strings.Join(scopeWarnings, "")) {
 		return p.fallback()
 	}
-	warnReviewed := len(reviewed) > 0 && !slices.ContainsFunc(changed, func(f string) bool { return gatecheck.Owns(prefix, entry, f) })
 	if reviewWaitLogging() && len(blockers) > 0 && !collectOnly && (warnReviewed || !scopeChecked || len(scopeWarnings) > 0) {
 		return p.fallback()
 	}
