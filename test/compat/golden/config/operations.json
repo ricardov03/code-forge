@@ -792,6 +792,21 @@
     }
   },
   {
+    "name": "validate-sample/test/fixtures/android-classes/code-forge.yml",
+    "files": {
+      "project/.code-forge.yml": "# B335 reporter sample (issue #35 P2): an Android project whose gates.test runs\n# only the block's own instrumented test classes through a fake gradle.\nversion: 1\ngates:\n  test: [gradle, connectedDebugAndroidTest, \"-Pandroid.testInstrumentationRunnerArguments.class={test_classes}\"]\n  test_class_map:\n    - glob: \"app/src/androidTest/java/**/*Test.kt\"\n      strip_prefix: app/src/androidTest/java/\n      strip_suffix: .kt\n      separator: \".\"\n"
+    },
+    "operation": "schema",
+    "group": "error",
+    "home": "home",
+    "cwd": "project",
+    "expected": {
+      "ok": false,
+      "error": "schema",
+      "message": "(root) must have required property 'provider'\n(root) must have required property 'levels'"
+    }
+  },
+  {
     "name": "validate-sample/test/fixtures/config/invalid-missing-level.code-forge.yml",
     "files": {
       "project/.code-forge.yml": "version: 1\nprovider: anthropic\nlevels:\n  L0:\n    model: claude-haiku-4-5-20251001\n  L1:\n    model: claude-sonnet-5\n  L2:\n    model: claude-opus-5-5\n"
