@@ -303,6 +303,19 @@ Only one `heal run` works on a run at a time. A second one stops at once with
 `heal run: busy: another heal run (pid N) is healing run R; this one stops`
 and exit 1.
 
+## Gate children start at nice 10
+
+Every gate child that the Go engine starts (the full test suite above all)
+runs at nice 10, or at the engine's own nice when that is higher, so a gate
+cannot starve the rest of the machine. The engine starts the child through a
+short copy of itself that sets its own nice and then runs the gate program,
+so the gate's first instruction already runs at nice 10 and every process it
+forks inherits that value. The gate keeps its argv, its environment and the
+same spawn errors (for example `gate terminated: spawn <path> ENOENT`). The
+engine used to lower the child after it started; on macOS that change could
+be lost while the child was still starting, and the gate then ran at nice 0
+(B420).
+
 ## Internal verbs
 
 The native binary reserves the `internal` namespace for its helpers.

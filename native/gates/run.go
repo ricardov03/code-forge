@@ -3,6 +3,7 @@ package gates
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"github.com/ricardov03/code-forge/native/filelock"
@@ -432,6 +433,86 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 // gateNice is the CPU priority (nice value) of every gate child.
 const gateNice = 10
 
+// gateNiceExecEnv tells a copy of this binary to act as the gate trampoline:
+// set its own nice to gateNice, then exec the program named by the value.
+// Setting the nice of a started child from the parent is not reliable: on
+// macOS a setpriority that lands while the child's exec is still finishing
+// returns success and is then lost, leaving the gate at nice 0 for its whole
+// life (B420). The trampoline sets the value on itself before exec, so the
+// gate's own code always starts at gateNice and every fork inherits it.
+const gateNiceExecEnv = "CODE_FORGE_GATE_NICE_EXEC"
+
+// afterGateStart runs in the parent once the gate child runs its own program.
+// It is a test seam: a slow parent step here must not change the child's nice.
+var afterGateStart = func(pid int) {}
+
+func init() {
+	if program, ok := os.LookupEnv(gateNiceExecEnv); ok {
+		niceExec(program)
+	}
+}
+
+// niceExec is the trampoline body. It never returns: it execs program with
+// this process's argv (argv[0] included) and environment minus the marker,
+// or writes the exec errno (4 bytes) to fd 3 and exits 127.
+func niceExec(program string) {
+	runtime.LockOSThread() // Linux keeps nice per thread; exec from this one
+	// Raising one's own nice is always allowed. A parent already above
+	// gateNice keeps its higher value: lowering fails and is ignored.
+	_ = syscall.Setpriority(syscall.PRIO_PROCESS, 0, gateNice)
+	env := make([]string, 0, len(os.Environ()))
+	for _, kv := range os.Environ() {
+		if !strings.HasPrefix(kv, gateNiceExecEnv+"=") {
+			env = append(env, kv)
+		}
+	}
+	syscall.CloseOnExec(3)
+	err := syscall.Exec(program, os.Args, env)
+	errno, ok := err.(syscall.Errno)
+	if !ok {
+		errno = syscall.EINVAL
+	}
+	var b [4]byte
+	binary.BigEndian.PutUint32(b[:], uint32(errno))
+	_, _ = syscall.Write(3, b[:])
+	os.Exit(127)
+}
+
+// startAtNice starts cmd so that its program begins at gateNice. Through the
+// trampoline, Start returns once the trampoline runs; the status pipe then
+// reports an exec error (returned like a Start error, with the trampoline
+// reaped) or closes on a successful exec. Without our own executable path it
+// falls back to a post-start setpriority on the child's process group.
+func startAtNice(cmd *exec.Cmd, program string) error {
+	self, selfErr := os.Executable()
+	if cmd.Err != nil || selfErr != nil {
+		if e := cmd.Start(); e != nil {
+			return e
+		}
+		_ = syscall.Setpriority(syscall.PRIO_PGRP, cmd.Process.Pid, gateNice)
+		return nil
+	}
+	statusRead, statusWrite, err := os.Pipe()
+	if err != nil {
+		return err
+	}
+	defer statusRead.Close()
+	cmd.Path = self
+	cmd.Env = append(cmd.Env, gateNiceExecEnv+"="+program)
+	cmd.ExtraFiles = []*os.File{statusWrite}
+	err = cmd.Start()
+	statusWrite.Close()
+	if err != nil {
+		return err
+	}
+	status, _ := io.ReadAll(statusRead)
+	if len(status) == 4 {
+		_ = cmd.Wait()
+		return &os.PathError{Op: "fork/exec", Path: program, Err: syscall.Errno(binary.BigEndian.Uint32(status))}
+	}
+	return nil
+}
+
 func execute(ctx context.Context, argv []string, env map[string]string, cwd, run string, timeout float64, failOnStdout bool) ledger.Object {
 	program, resolveErr := resolveExecutable(cwd, &Command{Argv: argv, Env: env})
 	// Always give exec.Command an absolute path. It must never search the
@@ -495,17 +576,16 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 	var code any
 	reason, diagnostic, message := "", "", ""
 	timed := false
-	if e := cmd.Start(); e != nil {
+	if e := startAtNice(cmd, program); e != nil {
 		outWrite.Close()
 		errWrite.Close()
 		reason = "spawn-error"
 		diagnostic = "gate terminated: spawn " + argv[0] + " " + spawnErrorCode(e)
 	} else {
 		// Gate commands (the full test suite above all) run at nice 10 so a
-		// gate cannot starve the rest of the machine. The child leads its own
-		// process group, so lowering the group also covers early forks.
-		// Unprivileged callers cannot lower a higher nice; errors are ignored.
-		_ = syscall.Setpriority(syscall.PRIO_PGRP, cmd.Process.Pid, gateNice)
+		// gate cannot starve the rest of the machine; startAtNice set it
+		// before the gate's own code ran, and every fork inherits it.
+		afterGateStart(cmd.Process.Pid)
 		outWrite.Close()
 		errWrite.Close()
 		done := make(chan error, 1)

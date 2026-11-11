@@ -70,19 +70,41 @@ func niceOf(t *testing.T, pid int) int {
 }
 
 func TestExecuteRunsTestChildAtNice10(t *testing.T) {
-	// The child waits until its own nice value settles (setpriority lands just
-	// after start), then prints it. A parent already above 10 keeps its value.
+	// The child reads its own nice value once, as its first step, and reports
+	// it in a file. The parent's post-start step is held until that report
+	// exists, so a slow parent can never set the value before the child reads
+	// it: only a child that started at nice 10 passes. A parent already above
+	// 10 keeps its value.
 	want := 10
 	if parent := niceOf(t, os.Getpid()); parent > want {
 		want = parent
 	}
-	script := "i=0; while [ $i -lt 50 ]; do n=$(/bin/ps -o nice= -p $$ | tr -d ' '); [ \"$n\" -ge " + strconv.Itoa(want) + " ] && break; i=$((i+1)); sleep 0.1; done; printf %s \"$n\""
-	p := Plan{Commands: map[string]*Command{"test": {Argv: []string{"/bin/sh", "-c", script}}}}
-	results, _, err := Run(context.Background(), p, t.TempDir(), "fixture", 30000, Scope{})
+	dir := t.TempDir()
+	report := filepath.Join(dir, "nice")
+	calls, reported := 0, ""
+	old := afterGateStart
+	afterGateStart = func(pid int) {
+		calls++
+		// Wait for the report event; the cap only ends a child that never reports.
+		for deadline := time.Now().Add(20 * time.Second); time.Now().Before(deadline); time.Sleep(5 * time.Millisecond) {
+			if data, err := os.ReadFile(report); err == nil {
+				reported = string(data)
+				return
+			}
+		}
+		reported = "no report"
+	}
+	defer func() { afterGateStart = old }()
+	script := "n=$(/bin/ps -o nice= -p $$ | tr -d ' '); printf %s \"$n\" > \"$0.tmp\"; mv \"$0.tmp\" \"$0\"; printf %s \"$n\""
+	p := Plan{Commands: map[string]*Command{"test": {Argv: []string{"/bin/sh", "-c", script, report}}}}
+	results, _, err := Run(context.Background(), p, dir, "fixture", 30000, Scope{})
 	if err != nil {
 		t.Fatal(err)
 	}
 	r := results[0].(interface{ Get(string) any })
+	if calls != 1 || reported != strconv.Itoa(want) {
+		t.Fatalf("post-start step: calls=%d child reported nice %q before it, want 1 call and %d", calls, reported, want)
+	}
 	if r.Get("gate") != "test" || r.Get("ok") != true || r.Get("stdout") != strconv.Itoa(want) {
 		t.Fatalf("test gate child nice: gate=%v ok=%v stdout=%q, want %d", r.Get("gate"), r.Get("ok"), r.Get("stdout"), want)
 	}
