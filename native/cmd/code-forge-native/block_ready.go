@@ -162,52 +162,11 @@ func runBlockReady(args []string) int {
 		blockers = append(blockers, check.Blockers...)
 	}
 	if entry.Get("kind") == "light" {
-		lines, count := 0, 0
-		for _, file := range changed {
-			if !gatecheck.Owns(prefix, entry, file) {
-				continue
-			}
-			// The packet reader refuses magic and secret-like paths. Preserve its
-			// diagnostics in Node rather than attempting a different diff dialect.
-			if strings.ContainsAny(file, "*?[]") || strings.HasPrefix(file, ":") || regexp.MustCompile(`(?i)(^|/)\.env|\.(pem|key|p12)$|(^|/)(credentials|id_rsa|id_ed25519|id_ecdsa)`).MatchString(file) {
-				return p.fallback()
-			}
-			count++
-			env := append(gitx.ChildEnv(), "GIT_LITERAL_PATHSPECS=1")
-			listed, e := gitx.WithEnv(top, env, "ls-files", "-z", "--", file)
-			if e != nil {
-				return p.fallback()
-			}
-			argv := []string{"diff", "--no-color", "--no-ext-diff", base, "--", file}
-			if listed == "" {
-				argv = []string{"diff", "--no-color", "--no-ext-diff", "--no-index", "--", "/dev/null", file}
-			}
-			diff, e := gitx.WithEnv(top, env, argv...)
-			if e != nil {
-				command, ok := e.(*gitx.CommandError)
-				if !ok || listed != "" || command.Code != 1 {
-					return p.fallback()
-				}
-			}
-			hunk := false
-			for _, line := range strings.Split(diff, "\n") {
-				if strings.HasPrefix(line, "@@") {
-					hunk = true
-				} else if hunk && (strings.HasPrefix(line, "+") || strings.HasPrefix(line, "-")) {
-					lines++
-				}
-			}
+		limit, ok := lightLimits(top, base, prefix, entry, changed, cfg)
+		if !ok {
+			return p.fallback()
 		}
-		maxFiles, maxLines := float64(5), float64(300)
-		if v, ok := blockMap(cfg["light"])["max_files"].(float64); ok {
-			maxFiles = v
-		}
-		if v, ok := blockMap(cfg["light"])["max_lines"].(float64); ok {
-			maxLines = v
-		}
-		if float64(count) > maxFiles || float64(lines) > maxLines {
-			blockers = append(blockers, gatecheck.Blocker{Code: "light_limits", Detail: fmt.Sprintf("%d files, %d lines exceed light block limits", count, lines)})
-		}
+		blockers = append(blockers, limit...)
 	}
 	collectOnly := len(blockers) > 0
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, p.id, p.run, blockObject(p.record.Get("blocks")), changed, rows, key, inTree)

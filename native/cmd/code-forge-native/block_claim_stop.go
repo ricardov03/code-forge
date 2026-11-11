@@ -32,9 +32,11 @@ func blockString(v any) string        { s, _ := v.(string); return s }
 
 // The shared parser's declarations for these two verbs. Unimplemented internal
 // flags go to Node before parsing, with the complete original argv.
+// blockValueFlags is Node's FLAG_VALUES: the block flags that take one value.
+var blockValueFlags = strings.Fields("run level acceptance brief attempt base lines head worker-pid reason file transcript kind report rule line note proof max")
+
 func blockFlags(args []string) (map[string]any, []string, string) {
 	flags, positionals := map[string]any{}, []string{}
-	values := " run level acceptance brief attempt base lines head worker-pid reason file transcript kind report rule line note proof max "
 	for i := 0; i < len(args); i++ {
 		arg := args[i]
 		if !strings.HasPrefix(arg, "--") {
@@ -44,7 +46,7 @@ func blockFlags(args []string) (map[string]any, []string, string) {
 		name, value, inline := strings.Cut(arg[2:], "=")
 		multi := name == "owned" || name == "tests"
 		boolean := name == "json" || name == "remove-worktree" || name == "no-require-reviews"
-		if !multi && !boolean && !slices.Contains(strings.Fields(values), name) {
+		if !multi && !boolean && !slices.Contains(blockValueFlags, name) {
 			return flags, positionals, "unknown flag " + statusQuote(arg)
 		}
 		if _, exists := flags[name]; exists && !multi {
@@ -210,8 +212,15 @@ func blockStorageSafe(home, run string, record ledger.Object) bool {
 }
 
 func blockClaimStop(sub string, args []string) int {
-	original := append([]string{sub}, args...)
-	fallback := func(reason handoverReason) int { return blockHandover(original, reason) }
+	// B451: a case the Go engine does not serve is refused; Node never runs.
+	fallback := func(reason handoverReason) int { return blockRefuse(sub, args, reason) }
+	// Node's router logs a failed verb with its last stderr line.
+	logged := func(code int, text string) int {
+		before := gatesBreadcrumbName("block " + sub)
+		fmt.Fprintln(os.Stderr, text)
+		nativeVerbFailure("block", sub, args, code, text, before)
+		return code
+	}
 	failure := func(err error) int {
 		var publication *blockops.PublicationError
 		var se *state.Error
@@ -221,25 +230,19 @@ func blockClaimStop(sub string, args []string) int {
 		// Signer StateErrors occur before append. Once publication may have
 		// begun, never execute the mutation a second time through Node.
 		if publishing && !isState {
-			fmt.Fprintf(os.Stderr, "block %s: %s\n", sub, blockIOMessage(err))
-			return 1
+			return logged(1, fmt.Sprintf("block %s: %s", sub, blockIOMessage(err)))
 		}
 		if errors.Is(err, blockops.ErrHandover) {
 			return fallback(hClaimStopStateChanged)
 		}
-		// The native error-log scrubber does not yet cover block messages with
-		// arbitrary user paths. Delegate before emitting or changing state.
-		if reviewWaitLogging() {
-			return fallback(hClaimStopErrorLog)
-		}
+		// The shared scrubber cleans the logged message, as Node's router does.
 		if !isState && !errors.As(err, &ge) {
-			return fallback(hClaimStopError)
+			return logged(1, fmt.Sprintf("block %s: %s", sub, blockIOMessage(err)))
 		}
-		fmt.Fprintf(os.Stderr, "block %s: %s\n", sub, err.Error())
 		if se != nil && se.Code == "usage" {
-			return 2
+			return logged(2, fmt.Sprintf("block %s: %s", sub, err.Error()))
 		}
-		return 1
+		return logged(1, fmt.Sprintf("block %s: %s", sub, err.Error()))
 	}
 	usage := func(message string) int { return failure(&state.Error{Code: "usage", Message: message}) }
 	for _, arg := range args {
@@ -251,12 +254,6 @@ func blockClaimStop(sub string, args []string) int {
 			}
 			fmt.Fprintf(os.Stdout, "usage: code-forge block %s %s [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n", sub, usage)
 			return 0
-		}
-	}
-	for _, arg := range args {
-		name, _, _ := strings.Cut(arg, "=")
-		if name == "--auto" || name == "--auto-claim" {
-			return fallback(handoverFlagReason(sub, name, hClaimStopAuto))
 		}
 	}
 	flags, positionals, message := blockFlags(args)

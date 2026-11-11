@@ -74,7 +74,7 @@ func closeMayHaveTerminal() bool {
 
 func closeWithFlags(args []string) int {
 	if !closeTextSafe(strings.Join(args, "\n")) {
-		return blockHandover(append([]string{"close"}, args...), hCloseUnsupportedFlag)
+		return blockRefuse("close", args, hCloseUnsupportedFlag)
 	}
 	var stdout bytes.Buffer
 	stderr := &closeErrorBuffer{}
@@ -82,7 +82,9 @@ func closeWithFlags(args []string) int {
 	var endHook func()
 	code := closeFlagsStep(args, &landStep{stdout: &stdout, stderr: stderr}, &reason, &endHook)
 	if code == landHandover {
-		return blockHandover(append([]string{"close"}, args...), reason)
+		// B451: a case the Go close does not serve is refused, never run by Node.
+		// Nothing was printed or written before the read-only boundary.
+		return blockRefuse("close", args, reason)
 	}
 	before := gatesBreadcrumbName("block close")
 	fmt.Fprint(os.Stdout, stdout.String())

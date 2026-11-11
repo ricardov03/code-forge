@@ -86,6 +86,11 @@ func landMax(raw string) (int64, bool) {
 
 func runBlockLand(args []string) int {
 	fallback := func(reason handoverReason) int {
+		// B451: only the gates step still hands over (B450 owns it); every
+		// other case Go does not serve is refused and Node never runs.
+		if reason != hLandStepHandoverGates {
+			return blockRefuse("land", args, reason)
+		}
 		// The legacy dispatcher predates --copy-links. Carry this native flag
 		// across the fallback boundary without changing that shared parser.
 		forward := []string{"land"}
@@ -111,9 +116,6 @@ func runBlockLand(args []string) int {
 		return blockHandover(forward, reason)
 	}
 	fail := func(message string, code int) int {
-		if reviewWaitLogging() && !closeTextSafe(message) {
-			return fallback(hLandErrorLog)
-		}
 		before := gatesBreadcrumbName("block")
 		text := "block land: " + message + "\n"
 		fmt.Fprint(os.Stderr, text)
@@ -122,7 +124,8 @@ func runBlockLand(args []string) int {
 	}
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			return fallback(hLandHelp)
+			fmt.Fprint(os.Stdout, blockLandUsage())
+			return 0
 		}
 	}
 	flags, pos, message := landFlags(args)
@@ -187,4 +190,20 @@ func runBlockLand(args []string) int {
 		return fallback(hLandEntryShape)
 	}
 	return landExecuteWithReason(args, flags, home, run, id, record, entry, fallback)
+}
+
+// blockLandUsage is Node's verbUsage("land").
+func blockLandUsage() string {
+	return blockVerbUsage("land", "<id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]") +
+		"  Join block reviews, run changed gates in its worktree, then close.\n" +
+		"  --max <dur>  Total review wait (default 30m); accepts 90s, 30m or 1500ms.\n" +
+		"  --merge     Run the merge gate on a trial merge, then merge with --no-ff in the clean main checkout.\n" +
+		"              The merge gate runs the Go test selection for the merge, never the full suite;\n" +
+		"              it runs nothing when a green gate already covers the merged tree (gate_reused).\n" +
+		"  --no-merge-gate  Skip the merge gate with a warning (one block only; a batch refuses it).\n" +
+		"  --push      After the merge, git push origin <base> from the main checkout\n" +
+		"              (one block: needs --merge; land.push: true does the same).\n" +
+		"  --watch-ci  After the push, start a detached code-forge ci watch (needs --push or land.push).\n" +
+		"  --copy-links  Copy gates.merge_gate_links paths into the merge-gate tree instead of linking them.\n" +
+		"  block land <id> <id>... --run <r> lands closed blocks in order with one merge gate (--merge implied).\n"
 }

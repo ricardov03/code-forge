@@ -28,46 +28,47 @@ func runBlockOpen(args []string) int {
 	// --allow-api-mismatch is native only: Node has no api-fit check, so a
 	// handover drops the flag instead of refusing it as unknown.
 	allowAPIMismatch := slices.Contains(args, "--allow-api-mismatch")
+	logArgs := args
 	args = slices.DeleteFunc(slices.Clone(args), func(arg string) bool { return arg == "--allow-api-mismatch" })
-	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"open"}, args...), reason) }
+	// B451: a case the Go engine does not serve is refused; Node never runs.
+	fallback := func(reason handoverReason) int { return blockRefuse("open", logArgs, reason) }
 	var flags map[string]any
 	var id string
+	// Node's router logs a failed verb with its last stderr line.
+	logged := func(code int, text string) int {
+		before := gatesBreadcrumbName("block open")
+		fmt.Fprintln(os.Stderr, text)
+		nativeVerbFailure("block", "open", logArgs, code, text, before)
+		return code
+	}
 	failure := func(err error) int {
 		var publishing *blockops.PublicationError
 		if errors.As(err, &publishing) {
-			fmt.Fprintln(os.Stderr, "block open:", blockIOMessage(err))
-			return 1
+			return logged(1, "block open: "+blockIOMessage(err))
 		}
 		if errors.Is(err, blockops.ErrHandover) {
 			return fallback(hOpenStateChanged)
 		}
 		var se *state.Error
 		var ge *gitx.Error
-		if reviewWaitLogging() || !errors.As(err, &se) && !errors.As(err, &ge) {
-			return fallback(hOpenErrorLog)
+		if !errors.As(err, &se) && !errors.As(err, &ge) {
+			return logged(1, "block open: "+blockIOMessage(err))
 		}
 		if se != nil && flags["json"] == true && id != "" && slices.Contains([]string{"after-not-done", "bad-after", "outcome-not-ready", "bad-after-outcome", "api-fit", "bad-uses"}, se.Code) {
 			out, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "refused"}, {Key: "code", Value: se.Code}, {Key: "message", Value: se.Message}}, false)
 			fmt.Fprintln(os.Stdout, string(out))
 		}
-		fmt.Fprintln(os.Stderr, "block open:", err.Error())
 		if se != nil && (se.Code == "usage" || se.Code == "api-fit") {
-			return 2
+			return logged(2, "block open: "+err.Error())
 		}
-		return 1
+		return logged(1, "block open: "+err.Error())
 	}
 	usage := func(message string) int { return failure(&state.Error{Code: "usage", Message: message}) }
-	for _, arg := range args {
-		if arg == "--help" || arg == "-h" {
-			return fallback(hOpenHelp)
-		}
-		if !strings.HasPrefix(arg, "--") {
-			continue
-		}
-		name, _, _ := strings.Cut(arg[2:], "=")
-		if !slices.Contains([]string{"run", "level", "owned", "acceptance", "tests", "brief", "base", "attempt", "lines", "kind", "json", "remove-worktree", "after", "after-outcome"}, name) {
-			return fallback(handoverFlagReason("open", name, hOpenUnsupportedFlag))
-		}
+	// Node prints the verb usage for an exact --help or -h anywhere in args,
+	// before breadcrumbs or the error log.
+	if slices.Contains(logArgs, "--help") || slices.Contains(logArgs, "-h") {
+		fmt.Fprint(os.Stdout, blockOpenUsage())
+		return 0
 	}
 	var positionals []string
 	var message string
@@ -159,7 +160,7 @@ func runBlockOpen(args []string) int {
 	if grantState == "active" {
 		data, err := os.ReadFile(acceptanceFile)
 		if err != nil {
-			return fallback(hOpenAcceptanceRead)
+			return failure(err)
 		}
 		value, err := blockopen.ParseAcceptance(data)
 		if err != nil {
@@ -204,7 +205,7 @@ func runBlockOpen(args []string) int {
 	}
 	data, err := os.ReadFile(acceptanceFile)
 	if err != nil {
-		return fallback(hOpenAcceptanceRead)
+		return failure(err)
 	}
 	acceptance, err := blockopen.ParseAcceptance(data)
 	if err != nil {
@@ -368,4 +369,17 @@ func runBlockOpen(args []string) int {
 		}
 	}
 	return 0
+}
+
+// blockOpenUsage is Node's verbUsage("open"), with its --acceptance and
+// --brief notes.
+func blockOpenUsage() string {
+	return blockVerbUsage("open", "<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch]") +
+		"  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n" +
+		"                       Human checks use {clause, kind: human_check} without tests.\n" +
+		"  --brief <file>       A file inside the repository, not inline text.\n" +
+		"                       Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:\n" +
+		"                       each named parameter exists, else exit 2 with an api-fit: line.\n" +
+		"                       Its extends: lines (<file>: <symbol>) own that file for additive change.\n" +
+		"  --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).\n"
 }

@@ -65,16 +65,14 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		if confirmed || step != nil {
 			return landHandover
 		}
-		return blockHandover(original, reason)
+		return blockRefuse("close", original[1:], reason)
 	}
 	fail := func(err error) int {
-		// Arbitrary filesystem messages still use Node's error-log redaction.
-		if reviewWaitLogging() && step == nil {
-			return fallback(hCloseErrorLog)
-		}
+		// B451: a filesystem error prints in Node's errno form; the caller logs it.
 		var se *state.Error
 		if !errors.As(err, &se) {
-			return fallback(hCloseError)
+			fmt.Fprintln(stderr, "block close:", blockIOMessage(err))
+			return 1
 		}
 		if expiryOnFailure != nil {
 			expiryOnFailure()
@@ -91,12 +89,6 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		if arg == "--help" || arg == "-h" {
 			fmt.Fprint(stdout, blockVerbUsage("close", "<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]"))
 			return 0
-		}
-	}
-	for _, arg := range args {
-		name, _, _ := strings.Cut(arg, "=")
-		if slices.Contains([]string{"--help", "-h"}, name) {
-			return fallback(handoverFlagReason("close", name, hCloseUnsupportedFlag))
 		}
 	}
 	flags, pos, message := closeFlags(args)
@@ -204,9 +196,6 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	if flags["remove-worktree"] == true && entry.Get("worktree") == nil {
 		return usage(fmt.Sprintf("block %s has no worktree (proof.isolation is not worktree); --remove-worktree does not apply", id))
-	}
-	if entry.Get("kind") == "light" {
-		return fallback(hCloseLight)
 	}
 	if checks := entry.Get("human_checks"); checks != nil {
 		values, ok := checks.([]any)
@@ -419,6 +408,16 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			return fallback(hCloseTestGate)
 		}
 		checks = append(checks, check)
+	}
+	// B451: Node checks a light block's size after the test gate, before reviews.
+	if entry.Get("kind") == "light" {
+		limit, ok := lightLimits(top, base, prefix, entry, changed, cfg)
+		if !ok {
+			return fallback(hCloseLight)
+		}
+		if len(limit) > 0 {
+			checks = append(checks, closeCheck{"light-limits " + strings.TrimSuffix(limit[0].Detail, " exceed light block limits"), limit})
+		}
 	}
 	// Review exclusions include lock-file validation. Keep that dialect with Node.
 	for _, f := range files {
@@ -1418,6 +1417,8 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 			argv = []string{"code-forge", "review-file", "--wait-block", id, "--run", run}
 		case "no_green_gates":
 			argv = []string{"code-forge", "gates", "run", "--run", run, "--block", id}
+		case "light_limits":
+			fix += "; stop this attempt, then reopen with --kind code --attempt <n+1> and the original base, ownership and acceptance, or split the block within light limits"
 		case "no_changes":
 			argv = []string{"code-forge", "block", "close", id, "--run", run, "--no-require-reviews"}
 		case "not_approved", "late_unruled", "review_cap", "autopilot_waiver_invalid":

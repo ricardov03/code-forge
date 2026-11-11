@@ -17,7 +17,11 @@ func blockOpenFlags(args []string) (map[string]any, []string, string) {
 		}
 		name, value, inline := strings.Cut(arg[2:], "=")
 		multi := slices.Contains([]string{"owned", "tests", "after", "after-outcome"}, name)
-		boolean := name == "json" || name == "remove-worktree"
+		boolean := name == "json" || name == "remove-worktree" || name == "no-require-reviews"
+		// Node's shared parser: every flag must be declared (B451).
+		if !multi && !boolean && !slices.Contains(blockValueFlags, name) {
+			return flags, pos, "unknown flag " + statusQuote(arg)
+		}
 		if _, exists := flags[name]; exists && !multi {
 			return flags, pos, "--" + name + " given more than once"
 		}
