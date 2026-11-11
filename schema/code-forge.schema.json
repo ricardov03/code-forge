@@ -311,7 +311,7 @@
         "merge_gate": {
           "type": "boolean",
           "default": true,
-          "description": "With block land --merge, run the configured full suite on a trial merge in a temporary detached worktree under the run worktree root before merging into main. Failure or conflict leaves main unchanged and removes the temporary tree. False or --no-merge-gate skips this check with a warning. Without --merge the gate does not run."
+          "description": "With block land --merge, and in every batch land, run the configured gates on a trial merge in a temporary detached worktree under the run worktree root before merging into main. The test gate runs the Go test selection taken from what the merge changed and the blocks' tests and owned files; it never runs the full suite (B404). A test command without {test_files} gets the selected files appended; an empty selection skips the test gate. A single-block land runs nothing when it can reuse green evidence for the exact merged tree: an earlier green full run, or the block's own last green gate on a clean tree equal to the merged tree that ran every configured gate and every selected test file (gate_reused, B393). Failure or conflict leaves main unchanged and removes the temporary tree. For a single block, false or --no-merge-gate skips this check with a warning, and without --merge the gate does not run. A batch always runs it, whatever this key says, and refuses --no-merge-gate."
         },
         "merge_gate_links": {
           "type": "array",

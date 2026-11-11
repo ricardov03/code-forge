@@ -137,7 +137,8 @@ usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --
        code-forge block ack-waivers <id> --run <r>
        code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]
        code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>
-       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate]
+       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]
+       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]
        every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text
 ```
 
@@ -200,13 +201,20 @@ usage: code-forge block close <id> --run <r> [--worker-pid <pid>] [--transcript 
 ### block land
 
 ```text
-usage: code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json] [--help|-h]
+usage: code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
   Join block reviews, run changed gates in its worktree, then close.
   --max <dur>  Total review wait (default 30m); accepts 90s, 30m or 1500ms.
-  --merge     Check the merged full suite, then merge with --no-ff in the clean main checkout.
-  --no-merge-gate  Skip the merged full suite with a warning.
+  --merge     Run the merge gate on a trial merge, then merge with --no-ff in the clean main checkout.
+              The merge gate runs the Go test selection for the merge, never the full suite;
+              it runs nothing when a green gate already covers the merged tree (gate_reused).
+  --no-merge-gate  Skip the merge gate with a warning (one block only; a batch refuses it).
+  --push      After the merge, git push origin <base> from the main checkout
+              (one block: needs --merge; land.push: true does the same).
+  --watch-ci  After the push, start a detached code-forge ci watch (needs --push or land.push).
+  --copy-links  Copy gates.merge_gate_links paths into the merge-gate tree instead of linking them.
+  block land <id> <id>... --run <r> lands closed blocks in order with one merge gate (--merge implied).
 ```
 
 ### block stop
@@ -343,9 +351,12 @@ Detect and run project gates or check secrets, scope, acceptance, and transcript
 
 ```text
 usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]
-  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
+  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.
   gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.
   gates run --run --block: when the block's base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.
+  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.
+  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.
+  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.
 ```
 
 ### gates detect
@@ -357,7 +368,7 @@ usage: code-forge gates detect [--cwd <dir>]
 ### gates run
 
 ```text
-usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed] [--auto-rebase | --allow-stale-base]
+usage: code-forge gates run [--cwd <dir>] [--timeout-ms <n>] [--slug <slug>] [--run <id>] [--block <id>] [--changed | --full] [--auto-rebase | --allow-stale-base] [--preflight | --no-preflight]
 ```
 
 ### gates secret-scan

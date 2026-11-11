@@ -12,6 +12,10 @@ waits on a second real consumer (plan §10.4, Q17).
   isolated worktree of the site repo, runs every site gate, commits only `src/data/site-data.json` on
   `release-site/v<version>` and deploys; a red gate deploys nothing; `--dry-run` stops before commit and deploy (B315)
 
+### Fixed
+
+- The config and command references now describe the merge gate as it runs: `gates.merge_gate` runs the Go test selection for the merge, never the full suite, reuses a green gate on the same tree (`gate_reused`) and is always on in a batch; `block land` usage lists `--push`, `--watch-ci`, `--copy-links` and batch land, and `gates run` usage lists `--full`, `--preflight` and `--no-preflight` (B444)
+
 ## [0.22.0] — 2026-11-11
 
 ### Added

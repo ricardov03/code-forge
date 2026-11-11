@@ -10,7 +10,8 @@
  *   block claim <id> <path> --run <r>
  *   block ready <id> --run <r> [--transcript <file>] [--report <file>] [--json]
  *   block close <id> --run <r> [--worker-pid <pid>] [--remove-worktree] [--auto-claim]
- *   block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]
+ *   block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links] [--json]
+ *   block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links] [--json]
  *   block stop <id> --run <r> --reason <text>
  *   block waive <id> <finding-id> --run <r> --file <path> --reason <text> [--yes]   (orchestrator --yes: evidence and a fresh judge)
  *   block reopen <id> --run <r> --file <path> --reason <text> [--yes]   (B124c: evidence and a fresh judge for the agent path)
@@ -362,7 +363,8 @@ export const USAGE =
   '       code-forge block ack-waivers <id> --run <r>\n' +
   '       code-forge block human-pass <id> --run <r> --note <text> [--proof <dir-or-file>]\n' +
   '       code-forge block amend-acceptance <id> --run <r> --acceptance <file> --reason <text>\n' +
-  '       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate]\n' +
+  '       code-forge block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]\n' +
+'       code-forge block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links]\n' +
   '       every block verb takes --json: one JSON line on stdout ({"block","event",…}) instead of the text\n';
 
 /** @type {Record<string, string>} */
@@ -373,7 +375,7 @@ const VERB_USAGE = {
   claim: '<id> <path> --run <r>',
   ready: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>]',
   close: '<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]',
-  land: '<id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate]',
+  land: '<id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links]',
   stop: '<id> --run <r> --reason <text>',
   waive: '<id> <finding-id> --run <r> --file <path> --reason <text> [--yes]',
   reopen: '<id> --run <r> --file <path> --reason <text> [--yes]',
@@ -401,8 +403,15 @@ function verbUsage(sub) {
       '  --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).\n' : '') +
     (sub === 'land' ? '  Join block reviews, run changed gates in its worktree, then close.\n' +
       '  --max <dur>  Total review wait (default 30m); accepts 90s, 30m or 1500ms.\n' +
-      '  --merge     Check the merged full suite, then merge with --no-ff in the clean main checkout.\n' +
-      '  --no-merge-gate  Skip the merged full suite with a warning.\n' : '');
+      '  --merge     Run the merge gate on a trial merge, then merge with --no-ff in the clean main checkout.\n' +
+      '              The merge gate runs the Go test selection for the merge, never the full suite;\n' +
+      '              it runs nothing when a green gate already covers the merged tree (gate_reused).\n' +
+      '  --no-merge-gate  Skip the merge gate with a warning (one block only; a batch refuses it).\n' +
+      '  --push      After the merge, git push origin <base> from the main checkout\n' +
+      '              (one block: needs --merge; land.push: true does the same).\n' +
+      '  --watch-ci  After the push, start a detached code-forge ci watch (needs --push or land.push).\n' +
+      '  --copy-links  Copy gates.merge_gate_links paths into the merge-gate tree instead of linking them.\n' +
+      '  block land <id> <id>... --run <r> lands closed blocks in order with one merge gate (--merge implied).\n' : '');
 }
 
 /** Refuse likely shell quoting slips before any row is written.
