@@ -220,12 +220,37 @@ test('plain agent close has native speed and byte parity for the complete close 
   assert.deepEqual(credit.diffs, [], 'B270 signed ticket credit and coder.tests publication have zero diffs');
 });
 
+/**
+ * B339: native close queues a review for a changed file without a current approval (here the
+ * acceptance amendment voided it) and waits review.close_wait_s; Node refuses at once. With no
+ * reviewer the wait times out: Go blocks with review_pending and leaves the queued ticket.
+ * @param {Array<Record<string, any>>} diffs @param {boolean} json @param {string} label
+ */
+function amendedQueuesReview(diffs, json, label) {
+  const queue = diffs.filter((d) => /^repo\/\.code-forge\/queue\/[0-9a-f]{24}\.json$/.test(d.where));
+  assert.deepEqual(queue.map((d) => [d.field, d.node, d.go]), [['$file', undefined, 'present']], `${label}: one queued ticket`);
+  const ticket = path.basename(queue[0].where, '.json');
+  const queued = `close: queued review sample.mjs ticket ${ticket}\n`;
+  const pending = `review wait timed out after 1s; reviewer may be unavailable (ticket ${ticket})`;
+  const rest = diffs.filter((d) => d !== queue[0]);
+  const by = Object.fromEntries(rest.map((d) => [`${d.where}:${d.field}`, d]));
+  assert.deepEqual(Object.keys(by).sort(), ['process:stderr', 'process:stdout'], `${label}, json=${json}: only stdout, stderr and the ticket differ`);
+  const unreviewed = { code: 'unreviewed', file: 'sample.mjs', detail: 'no review.approved row for sample.mjs at its current content (acceptance amended)', fix: `code-forge review-file --wait-block B1 --run ${RUN}` };
+  const blocked = { code: 'review_pending', file: 'sample.mjs', detail: pending, fix: 'no automatic fix: review_pending' };
+  const line = (b) => `${b.code} ${b.file} ${b.detail}\n  fix: ${b.fix}\n`;
+  const doc = (b) => JSON.stringify({ block: 'B1', ok: false, reason: `${b.code} sample.mjs`, blockers: [b] }) + '\n';
+  assert.equal(by['process:stdout'].node, json ? doc(unreviewed) : line(unreviewed), `${label}, json=${json}: Node refuses at once`);
+  assert.equal(by['process:stdout'].go, json ? doc(blocked) : queued + line(blocked), `${label}, json=${json}: Go queued, waited and blocks`);
+  assert.equal(by['process:stderr'].node, 'block B1 open: unreviewed sample.mjs\n');
+  assert.equal(by['process:stderr'].go, (json ? queued : '') + 'block B1 open: review_pending sample.mjs\n');
+}
+
 test('B380: agent waivers, agent reopens, accepted hits, require_ack and amended acceptance close and preview natively with Node parity', async () => {
   const ack = { review: { agent_waivers: { require_ack: true } } };
   /** @type {Array<[string, Record<string, any>, number]>} */
   const cases = [
     ['agent-waiver', {}, 0], ['agent-reopen', {}, 0], ['accepted-hit', {}, 0],
-    ['agent-waiver', ack, 1], ['acked', ack, 0], ['amended', {}, 1], ['amended-approved', {}, 0],
+    ['agent-waiver', ack, 1], ['acked', ack, 0], ['amended', { review: { close_wait_s: 1 } }, 1], ['amended-approved', {}, 0],
   ];
   for (const [kind, config, expected] of cases) {
     const label = `${kind} ${JSON.stringify(config)}`;
@@ -236,7 +261,8 @@ test('B380: agent waivers, agent reopens, accepted hits, require_ack and amended
     assert.equal(readyDirect.code, expected, `${label}: block ready verdict with no Node: ${readyDirect.stderr}`);
     for (const json of [false, true]) {
       const result = await runParity([...args, ...(json ? ['--json'] : [])], { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
-      assert.deepEqual(result.diffs, [], `${label}, json=${json}: zero exit, stdout, stderr, signed row, record and done-file diffs`);
+      if (kind === 'amended') amendedQueuesReview(result.diffs, json, label);
+      else assert.deepEqual(result.diffs, [], `${label}, json=${json}: zero exit, stdout, stderr, signed row, record and done-file diffs`);
     }
     const text = await launch(await fixture(kind, config), args);
     assert.equal(text.code, expected, `${label}: native close outcome with no Node: ${text.stderr}`);
@@ -259,7 +285,12 @@ test('B380: agent waivers, agent reopens, accepted hits, require_ack and amended
       assert.deepEqual(out.blockers.map((b) => [b.code, b.fix]), [['agent-waivers-not-acked', `code-forge block ack-waivers B1 --run ${RUN}`]]);
     }
     if (kind === 'acked') assert.deepEqual(out.agent_waivers.map((w) => w.finding), ['F2', 'F1'], 'audit keeps ledger order');
-    if (kind === 'amended') assert.match(out.blockers[0].detail, /\(acceptance amended\)/);
+    if (kind === 'amended') {
+      // The amendment voids the approval: ready (no wait) names it; close re-queues the review and times out.
+      assert.match(JSON.parse(readyDirect.stdout).blockers[0].detail, /\(acceptance amended\)/);
+      assert.deepEqual(out.blockers.map((b) => [b.code, b.file]), [['review_pending', 'sample.mjs']]);
+      assert.match(out.blockers[0].detail, /^review wait timed out after 1s; reviewer may be unavailable \(ticket [0-9a-f]{24}\)$/);
+    }
     if (expected === 0 && !['agent-waiver', 'acked'].includes(kind)) assert.equal('agent_waivers' in out, false, `${label}: no empty agent_waivers key`);
   }
 });
