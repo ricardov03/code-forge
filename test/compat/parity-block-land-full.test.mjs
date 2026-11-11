@@ -138,6 +138,7 @@ async function parity(shape, extra, json, expectedCode = 0) {
     },
     checkProcess: (engine, out) => {
       const actual = observed.at(-1);
+      actual.engine = engine;
       assert.equal(actual.handovers.rows.filter((row) => row.verb === 'block' && row.sub === 'land').reduce((n, row) => n + row.count, 0),
         0, `${engine} ${shape}: zero land hand-overs: ${JSON.stringify(actual.handovers)}`);
       assert.equal(out.code, expectedCode, `${engine} ${shape}: exact land exit; ${out.stderr}`);
@@ -179,6 +180,26 @@ async function parity(shape, extra, json, expectedCode = 0) {
   for (const d of expected) {
     const key = d.field.replace(/^\$\[\d+\]\./, '').replace(/^dependents\[\d+\]$/, 'dependents');
     assert.deepEqual(d.go, goValues[key], `${shape} json=${json}: Go ${d.field}`);
+  }
+  // The loop above is vacuous without diffs: read Go's gate.done row itself and
+  // require the B404 diffs. Without a test command (no-suite) the gate is
+  // skipped and both engines write the same row (scope full, reason unpaired).
+  const goRun = observed.find((o) => o.engine === 'Go');
+  assert.ok(goRun, `${shape} json=${json}: Go run observed`);
+  const goDone = goRun.rows.filter((row) => row.event === 'gate.done' && row.block === 'B1').at(-1);
+  assert.ok(goDone, `${shape} json=${json}: Go wrote a gate.done row`);
+  if (shape === 'no-suite') {
+    assert.deepEqual([goDone.scope, goDone.reason, expected.length], ['full', 'unpaired', 0], `${shape} json=${json}: no test command, no B404 difference`);
+  } else {
+    assert.equal(goDone.scope, 'related', `${shape} json=${json}: Go gate.done scope`);
+    assert.equal(goDone.reason, 'import_graph', `${shape} json=${json}: Go gate.done reason`);
+    assert.deepEqual(goDone.test_files, selected, `${shape} json=${json}: Go gate.done test_files`);
+    // Node runs the command unscoped: scope full with an empty selection, or
+    // scope related (reason no_baseline) with its dependents list for symlink.
+    const required = ['reason', ...(selected.length ? ['test_files'] : ['scope'])];
+    for (const field of required) {
+      assert.ok(expected.some((d) => d.field.endsWith('.' + field)), `${shape} json=${json}: B404 ${field} diff present: ${JSON.stringify(expected.map((d) => d.field))}`);
+    }
   }
   assert.deepEqual(result.diffs.filter((d) => !expected.includes(d)), [], `${shape} json=${json}: exact Node/Go bytes, exit, state and rows except the B404 test scope`);
 }
