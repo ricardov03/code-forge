@@ -171,6 +171,7 @@ func TestBlockRebaseOpenBlockConflictText(t *testing.T) {
 	head := f.git(f.tree, "rev-parse", "HEAD")
 	f.save("x.go")
 	before := f.block()
+	files := f.stateFiles()
 
 	code, stdout, stderr := f.rebase()
 	if code != 1 || stdout != "" || !strings.HasPrefix(stderr, "block rebase: rebase-conflict: ") || !strings.Contains(stderr, "x.go") || strings.Count(stderr, "\n") != 1 {
@@ -199,6 +200,34 @@ func TestBlockRebaseOpenBlockConflictText(t *testing.T) {
 	if after := f.block(); !reflect.DeepEqual(after, before) {
 		t.Fatalf("block changed by the refusal:\nbefore %#v\nafter  %#v", before, after)
 	}
+	if after := f.stateFiles(); !reflect.DeepEqual(after, files) {
+		t.Fatalf("the refusal changed the run state files:\nbefore %q\nafter  %q", files, after)
+	}
+}
+
+// stateFiles reads every file under <home>/.code-forge (run record, ledger,
+// key) and <workspace>/.code-forge (run mirror, review queue) as bytes, by
+// path. The rebase writes its state only there.
+func (f *rebaseCmdFixture) stateFiles() map[string]string {
+	f.t.Helper()
+	found := map[string]string{}
+	for _, root := range []string{filepath.Join(f.home, ".code-forge"), filepath.Join(f.repo, ".code-forge")} {
+		err := filepath.WalkDir(root, func(file string, entry os.DirEntry, err error) error {
+			if err != nil || entry.IsDir() {
+				return err
+			}
+			data, err := os.ReadFile(file)
+			found[file] = string(data)
+			return err
+		})
+		if err != nil && !os.IsNotExist(err) {
+			f.t.Fatal(err)
+		}
+	}
+	if _, ok := found[filepath.Join(f.home, ".code-forge", "runs", "r-rebase-unit.json")]; !ok {
+		f.t.Fatalf("no run record among the state files: %q", found)
+	}
+	return found
 }
 
 // A pending checkpoint from review-file --rebase-check is finished by the
