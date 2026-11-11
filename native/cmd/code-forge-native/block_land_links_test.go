@@ -42,6 +42,8 @@ func androidLand(t *testing.T) androidLandFixture {
 	landGit(t, f.repo, "config", "commit.gpgsign", "false")
 	landWrite(t, filepath.Join(f.repo, ".gitignore"), ".code-forge/\nlocal.properties\napp/google-services.json\nprepared\n")
 	landWrite(t, filepath.Join(f.repo, "sample.mjs"), "old\n")
+	// The merge gate runs the tests selected from the merge (B404); the block names this one.
+	landWrite(t, filepath.Join(f.repo, "sample.test.mjs"), "import './sample.mjs'\n")
 	f.cfg = landTestConfig([]string{"gradle"})
 	f.saveConfig(t)
 	landGit(t, f.repo, "add", ".")
@@ -101,9 +103,15 @@ func landDone(t *testing.T, home, run, commit string) {
 	landWrite(t, filepath.Join(home, ".code-forge/runs", run, "blocks", "B1.done.json"), string(data))
 }
 
+// landLinksEntry is the ledger entry of the fixture block: it owns sample.mjs
+// and names sample.test.mjs as its test, so the scoped merge gate runs a suite.
+func landLinksEntry() ledger.Object {
+	return ledger.Object{{Key: "owned_files", Value: []any{"sample.mjs"}}, {Key: "test_files", Value: []any{"sample.test.mjs"}}}
+}
+
 func TestLandAndroidIgnoredFiles(t *testing.T) {
 	f := androidLand(t)
-	red := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main")
+	red := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", landLinksEntry())
 	if !strings.Contains(red.reason, "Android SDK not found") || strings.Count(red.reason, "gates.merge_gate_links") != 1 {
 		t.Errorf("unconfigured gate must fail with SDK error and exactly one links hint: %q", red.reason)
 	}
@@ -117,7 +125,7 @@ func TestLandAndroidIgnoredFiles(t *testing.T) {
 	}
 	stderr := os.Stderr
 	os.Stderr = capture
-	green := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main")
+	green := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", landLinksEntry())
 	os.Stderr = stderr
 	if err := capture.Close(); err != nil {
 		t.Fatal(err)
@@ -303,7 +311,7 @@ func landCopyCalls(t *testing.T, f androidLandFixture) int {
 func TestLandCopyLinksChildNames(t *testing.T) {
 	f := androidLand(t)
 	landCacheFixture(t, f, map[string]string{"cache/a:b": "colon\n", "cache/back\\slash": "back\n", "cache/node_modules/pkg/.git/HEAD": "ref\n", "cache/plain.txt": "plain\n"})
-	if got := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", true); got.reason != "" {
+	if got := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", landLinksEntry(), true); got.reason != "" {
 		t.Errorf("go copy of children named a:b, back\\slash and a nested .git must pass the gate: %q", got.reason)
 	}
 	if got := landCopyCalls(t, f); got != 1 {
@@ -316,7 +324,7 @@ func TestLandCopyLinksChildNames(t *testing.T) {
 	if err := os.Symlink(outside, filepath.Join(f.repo, "cache", "escape")); err != nil {
 		t.Fatal(err)
 	}
-	if got := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", true); !strings.Contains(got.reason, "gates.merge_gate_links cannot copy: cache") {
+	if got := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", landLinksEntry(), true); !strings.Contains(got.reason, "gates.merge_gate_links cannot copy: cache") {
 		t.Errorf("go copy must refuse a child outside the repository: %q", got.reason)
 	}
 	if got := landCopyCalls(t, f); got != 1 {
@@ -331,7 +339,7 @@ func TestLandCopyLinksSymlinkedRepo(t *testing.T) {
 	if err := os.Symlink(f.repo, alias); err != nil {
 		t.Fatal(err)
 	}
-	if got := landMergeGate(f.home, "r-android-links", "B1", alias, f.tree, alias, "block-B1", "main", true); got.reason != "" {
+	if got := landMergeGate(f.home, "r-android-links", "B1", alias, f.tree, alias, "block-B1", "main", landLinksEntry(), true); got.reason != "" {
 		t.Errorf("go copy from a repository reached through a symlink must pass the gate: %q", got.reason)
 	}
 	if got := landCopyCalls(t, f); got != 1 {
