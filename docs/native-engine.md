@@ -126,8 +126,11 @@ waivers, reopens, accepted hits, acks or an amended acceptance.
 Since B416, `block close` and `block ready` check the `code-forge-runs-access` transcript rule in Go,
 for plain-text logs and Claude Code JSONL logs, with the same hits as Node: text a Bash command only
 writes to a file does not count, a home-relative spelling in a command word or tool path does.
-`close-transcript-format` still names Codex logs, other code-forge launcher or path rules, a
-`sh -c` wrapper or interpreter script, and non-ASCII text.
+Go also decides the git, gh, rm and code-forge launcher rules (`npx`, `./bin/code-forge`, a bare
+`forge` verb), `sh -c` wrappers, interpreter scripts and non-ASCII text, so a `coder-forge` path or
+a `forge/r-…` branch name no longer hands over.
+`close-transcript-format` still names Codex logs, `.code-forge/reviews` or `.code-forge/queue`
+text, invalid UTF-8, a lone surrogate escape, and line separators JavaScript reads differently.
 `close-help` now means only a `--help=value` or `-h=value` spelling.
 `land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
 The full code list is the `handoverReasons` table in

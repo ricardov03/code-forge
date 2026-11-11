@@ -9,34 +9,28 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 )
 
 var transcriptTokens = regexp.MustCompile(">>?|[^\\s\\x0b'\"`;|&(),{}\\[\\]>]+")
 
-// Transcript handles the plain-text grep and Claude Code JSONL logs. Codex logs, code-forge
-// launcher spellings, the .code-forge/reviews and .code-forge/queue paths, shell wrappers and
-// interpreter scripts stay with Node's full interpreter-aware scanner. code-forge-runs-access
-// is checked here with Node's rules after B415 (B416).
+// Transcript handles the plain-text grep and Claude Code JSONL logs with Node's list order and
+// hit rules: the git/gh/rm rules, the production marker, code-forge-runs-access (Node after B415,
+// B416) and the code-forge launcher verbs and flags a coder may not run. Codex logs, the
+// .code-forge/reviews and .code-forge/queue write rule, shell -c wrappers and interpreter scripts
+// Node may blank, and text whose tokens Go could split differently stay with Node's scanner.
 // Returning unsupported happens before any close warning is published.
 func Transcript(text string) ([]Blocker, bool) {
-	for _, needle := range []string{"thread.started", "--no-require-reviews", "--remove-worktree", ".code-forge/reviews", ".code-forge/queue"} {
-		if strings.Contains(text, needle) {
-			return nil, false
-		}
-	}
-	// "forge" may appear only inside ".code-forge": no launcher or forge verb can match then.
-	for i := strings.Index(text, "forge"); i >= 0; {
-		if i < 6 || text[i-6:i] != ".code-" {
-			return nil, false
-		}
-		next := strings.Index(text[i+5:], "forge")
-		if next < 0 {
-			break
-		}
-		i += 5 + next
-	}
-	if !transcriptASCII(text) {
+	if !utf8.ValidString(text) {
 		return nil, false
+	}
+	lines := strings.Split(text, "\n")
+	events, claude := claudeEvents(lines)
+	if !claude {
+		// A Codex log or plain text: Codex logs go to Node; plain text is split on JS whitespace.
+		if strings.Contains(text, "thread.started") || !transcriptJSSafe(text) {
+			return nil, false
+		}
 	}
 	runs := runsMatcher{}
 	if strings.Contains(text, ".code-forge") {
@@ -46,11 +40,9 @@ func Transcript(text string) ([]Blocker, bool) {
 		}
 		runs = newRunsMatcher(home)
 	}
-	lines := strings.Split(text, "\n")
-	events, claude := claudeEvents(lines)
 	hits := []Blocker{}
 	for lineNo, line := range lines {
-		command, runsHit := line, false
+		commands, runsHit := []string{line}, false
 		if claude {
 			ev := events[lineNo]
 			if ev == nil || ev.kind != "assistant" {
@@ -63,17 +55,29 @@ func Transcript(text string) ([]Blocker, bool) {
 			if !l.found {
 				continue
 			}
-			command = l.command
+			if transcriptReviewsPath(l.command) || transcriptReviewsPath(l.path) {
+				return nil, false
+			}
+			commands = []string{l.command}
 			runsHit = runs.enabled && (runs.anyToken(l.path) || runs.anyRelative(l.words))
-		} else if runs.enabled {
-			runsHit = runs.anyToken(line)
+		} else {
+			if transcriptReviewsPath(line) {
+				return nil, false
+			}
 			if variant := transcriptUnescaped(line); variant != line {
-				runsHit = runsHit || runs.anyToken(variant)
+				commands = append(commands, variant)
+			}
+			if runs.enabled {
+				for _, c := range commands {
+					runsHit = runsHit || runs.anyToken(c)
+				}
 			}
 		}
-		ids, ok := transcriptCommandIDs(command)
-		if !ok {
-			return nil, false
+		ids := map[string]bool{}
+		for _, c := range commands {
+			for id := range transcriptCommandIDs(c) {
+				ids[id] = true
+			}
 		}
 		if runsHit {
 			ids["code-forge-runs-access"] = true
@@ -87,104 +91,266 @@ func Transcript(text string) ([]Blocker, bool) {
 	return hits, true
 }
 
-var transcriptOrder = []string{"gh-pr-ready", "gh-pr-merge", "gh-pr-close", "gh-pr-base-retarget", "git-push-force", "git-reset-hard", "git-checkout-discard", "git-restore", "git-clean", "git-stash", "git-branch-force-delete", "git-branch-force-delete-long", "git-rm", "rm-rf", "production-marker", "code-forge-runs-access"}
+// transcriptReviewsPath: the text may name Node's code-forge-reviews-write paths, a write rule Go
+// does not port.
+func transcriptReviewsPath(text string) bool {
+	return strings.Contains(text, ".code-forge/reviews") || strings.Contains(text, ".code-forge/queue")
+}
 
-func transcriptASCII(text string) bool {
-	for i := 0; i < len(text); i++ {
-		if text[i] > 127 {
+// transcriptJSSafe: no rune JavaScript's \s treats as whitespace and Go's does not (and no U+0085,
+// which Go trims and JavaScript does not), so both split the text into the same tokens.
+func transcriptJSSafe(text string) bool {
+	for _, r := range text {
+		if r < 0x80 {
+			continue
+		}
+		switch {
+		case r == 0x85, r == 0xa0, r == 0x1680, r >= 0x2000 && r <= 0x200a, r == 0x2028, r == 0x2029, r == 0x202f, r == 0x205f, r == 0x3000, r == 0xfeff:
 			return false
 		}
 	}
 	return true
 }
 
-// transcriptCommandIDs runs the git/gh/rm and production-marker rules on one line's command text.
-func transcriptCommandIDs(line string) (map[string]bool, bool) {
+var transcriptOrder = []string{"gh-pr-ready", "gh-pr-merge", "gh-pr-close", "gh-pr-base-retarget", "git-push-force", "git-reset-hard", "git-checkout-discard", "git-restore", "git-clean", "git-stash", "git-branch-force-delete", "git-branch-force-delete-long", "git-rm", "rm-rf", "production-marker", "code-forge-runs-access", "code-forge-worker-from-coder",
+	"code-forge-block-waive-from-coder", "code-forge-block-reopen-from-coder", "code-forge-autopilot-from-coder", "code-forge-no-require-reviews", "code-forge-remove-worktree",
+	"code-forge-block-accept-hit-from-coder", "code-forge-block-unwaive-from-coder", "code-forge-block-ack-waivers-from-coder", "code-forge-block-human-pass-from-coder",
+	"code-forge-add-worker-from-coder", "code-forge-block-amend-acceptance-from-coder"}
+
+// commandName is Node's commandName: the basename without a trailing .exe (any case).
+func commandName(token string) string {
+	name := path.Base(token)
+	if token == "/" || strings.Trim(token, "/") == "" {
+		name = ""
+	}
+	if n := len(name); n >= 4 && name[n-4] == '.' && strings.ToLower(name[n-3:]) == "exe" {
+		name = name[:n-4]
+	}
+	return name
+}
+
+var (
+	codeForgeScoped   = regexp.MustCompile(`^@codedology/code-forge(@.*)?$`)
+	codeForgeBin      = regexp.MustCompile(`^code-forge(\.mjs)?(@.*)?$`)
+	codeForgePrefixes = []struct {
+		id    string
+		verbs [][]string
+	}{
+		{"code-forge-worker-from-coder", [][]string{{"worker"}, {"run", "start"}, {"run", "reload"}}},
+		{"code-forge-block-waive-from-coder", [][]string{{"block", "waive"}}},
+		{"code-forge-block-reopen-from-coder", [][]string{{"block", "reopen"}}},
+		{"code-forge-autopilot-from-coder", [][]string{{"autopilot"}}},
+		{"code-forge-block-accept-hit-from-coder", [][]string{{"block", "accept-hit"}}},
+		{"code-forge-block-unwaive-from-coder", [][]string{{"block", "unwaive"}}},
+		{"code-forge-block-ack-waivers-from-coder", [][]string{{"block", "ack-waivers"}}},
+		{"code-forge-block-human-pass-from-coder", [][]string{{"block", "human-pass"}}},
+		{"code-forge-block-amend-acceptance-from-coder", [][]string{{"block", "amend-acceptance"}}},
+	}
+)
+
+// codeForgeIDs is Node's anyPrefix and commandFlag code-forge entries on one command window:
+// unwrapLauncher (npx/bunx, pnpm/yarn exec|dlx, node, the package or bin read as code-forge,
+// option tokens dropped), then each entry's code-forge or forge prefixes.
+func codeForgeIDs(window []string, ids map[string]bool) {
+	reading := append([]string{commandName(window[0])}, window[1:]...)
+	if len(reading) >= 4 && reading[0] == "code-forge" && reading[1] == "run" && reading[2] == "start" && slices.Contains(reading[3:], "--add-worker") {
+		ids["code-forge-add-worker-from-coder"] = true
+	}
+	rest := reading
+	skipOptions := func() {
+		for len(rest) > 0 && strings.HasPrefix(rest[0], "-") {
+			if slices.Contains([]string{"-p", "--package", "-r", "--require"}, rest[0]) {
+				rest = rest[min(2, len(rest)):]
+			} else {
+				rest = rest[1:]
+			}
+		}
+	}
+	switch {
+	case rest[0] == "npx" || rest[0] == "bunx":
+		rest = rest[1:]
+		skipOptions()
+	case (rest[0] == "pnpm" || rest[0] == "yarn") && len(rest) > 1 && (rest[1] == "exec" || rest[1] == "dlx"):
+		rest = rest[2:]
+		skipOptions()
+	case rest[0] == "node":
+		rest = rest[1:]
+		skipOptions()
+	}
+	if len(rest) == 0 {
+		return
+	}
+	isPackage := func(t string) bool {
+		base := path.Base(t)
+		if strings.Trim(t, "/") == "" {
+			base = ""
+		}
+		return codeForgeScoped.MatchString(t) || codeForgeBin.MatchString(base)
+	}
+	head, tail := rest[0], rest[1:]
+	if isPackage(head) && len(tail) > 0 && isPackage(tail[0]) {
+		tail = tail[1:]
+	}
+	name := commandName(head)
+	if isPackage(head) {
+		name = "code-forge"
+	}
+	if name != "code-forge" && name != "forge" {
+		return
+	}
+	words := []string{}
+	for _, t := range tail {
+		if !strings.HasPrefix(t, "-") {
+			words = append(words, t)
+		}
+	}
+	for _, rule := range codeForgePrefixes {
+		for _, verb := range rule.verbs {
+			if len(words) >= len(verb) && slices.Equal(words[:len(verb)], verb) {
+				ids[rule.id] = true
+			}
+		}
+	}
+}
+
+// transcriptCommandIDs runs the git/gh/rm, production-marker and code-forge command rules on one
+// line's command text.
+func transcriptCommandIDs(line string) map[string]bool {
 	tokens := transcriptTokens.FindAllString(line, -1)
 	ids := map[string]bool{}
 	if strings.Contains(line, "--env=production") {
 		ids["production-marker"] = true
 	}
+	for _, flag := range []string{"no-require-reviews", "remove-worktree"} {
+		if strings.Contains(line, "--"+flag) {
+			ids["code-forge-"+flag] = true
+		}
+	}
 	for i, token := range tokens {
-		name := path.Base(token)
-		if strings.HasSuffix(strings.ToLower(name), ".exe") {
-			name = name[:len(name)-4]
+		name := commandName(token)
+		if slices.Contains([]string{"npx", "bunx", "pnpm", "yarn", "node", "code-forge", "forge"}, name) || strings.Contains(token, "code-forge") {
+			codeForgeIDs(tokens[i:min(len(tokens), i+64)], ids)
 		}
 		if !slices.Contains([]string{"git", "gh", "rm"}, name) {
 			continue
 		}
-		if token != name {
-			return nil, false
+		window := tokens[i:min(len(tokens), i+64)]
+		readings := [][]string{append([]string{name}, window[1:]...)}
+		if name == "git" {
+			readings = gitReadings(window)
 		}
-		end := min(len(tokens), i+64)
-		words := tokens[i:end]
-		if len(words) < 2 {
-			continue
+		for _, words := range readings {
+			commandRuleIDs(words, ids)
 		}
-		if strings.HasPrefix(words[1], "-") && name != "rm" {
-			return nil, false
-		}
-		flags := func(exact, prefix []string, short string) bool {
-			for _, w := range words[1:] {
-				if slices.Contains(exact, w) {
-					return true
-				}
-				for _, p := range prefix {
-					if strings.HasPrefix(w, p) {
-						return true
-					}
-				}
-				if strings.HasPrefix(w, "-") && !strings.HasPrefix(w, "--") && strings.ContainsAny(w[1:], short) {
-					return true
-				}
-			}
-			return false
-		}
-		switch name {
-		case "gh":
-			if words[1] != "pr" || len(words) < 3 {
-				continue
-			}
-			if strings.HasPrefix(words[2], "-") {
-				return nil, false
-			}
-			if slices.Contains([]string{"ready", "merge", "close"}, words[2]) {
-				ids["gh-pr-"+words[2]] = true
-			}
-			if words[2] == "edit" && flags([]string{"--base", "-B"}, []string{"--base=", "-B"}, "") {
-				ids["gh-pr-base-retarget"] = true
-			}
-		case "git":
-			switch words[1] {
-			case "push":
-				if flags([]string{"--force", "-f", "--force-with-lease", "--force-if-includes", "--mirror"}, []string{"--force-with-lease=", "--force-if-includes=", "+"}, "f") {
-					ids["git-push-force"] = true
-				}
-			case "reset":
-				if flags([]string{"--hard"}, nil, "") {
-					ids["git-reset-hard"] = true
-				}
-			case "checkout":
-				if flags([]string{"--", "--force"}, nil, "f") {
-					ids["git-checkout-discard"] = true
-				}
-			case "restore", "clean", "stash", "rm":
-				ids["git-"+words[1]] = true
-			case "branch":
-				if flags([]string{"-D"}, nil, "D") {
-					ids["git-branch-force-delete"] = true
-				}
-				if flags([]string{"--delete"}, nil, "d") && flags([]string{"--force"}, nil, "f") {
-					ids["git-branch-force-delete-long"] = true
-				}
-			}
-		case "rm":
-			if flags([]string{"--recursive", "--force"}, nil, "rRf") {
-				ids["rm-rf"] = true
+	}
+	return ids
+}
+
+var (
+	gitGlobalWithValue = []string{"-C", "-c", "--git-dir", "--work-tree", "--namespace", "--config-env", "--attr-source", "--super-prefix", "--list-cmds"}
+	gitGlobalNoValue   = []string{"-p", "-P", "--paginate", "--no-pager", "--bare", "--no-replace-objects", "--literal-pathspecs", "--glob-pathspecs",
+		"--noglob-pathspecs", "--icase-pathspecs", "--no-optional-locks", "--no-lazy-fetch", "--no-advice", "--exec-path", "--html-path", "--man-path", "--info-path"}
+	gitAttachedValue = regexp.MustCompile(`^-[Cc].`)
+)
+
+// gitReadings is Node's normalizedReadings for git: every plausible ["git", subcommand, ...]
+// after the global options (an unknown option read both alone and with a value, at most 64).
+func gitReadings(argv []string) [][]string {
+	tails := [][]string{}
+	var collect func(i int)
+	collect = func(i int) {
+		for i < len(argv) && len(tails) < 64 {
+			token := argv[i]
+			switch {
+			case !strings.HasPrefix(token, "-"):
+				tails = append(tails, argv[i:])
+				return
+			case token == "--" || strings.HasPrefix(token, "--") && strings.Contains(token, "=") || slices.Contains(gitGlobalNoValue, token):
+				i++
+			case slices.Contains(gitGlobalWithValue, token):
+				i += 2
+			case gitAttachedValue.MatchString(token):
+				i++
+			default:
+				collect(i + 2)
+				i++
 			}
 		}
 	}
-	return ids, true
+	collect(1)
+	if len(tails) == 0 {
+		return [][]string{{"git"}}
+	}
+	out := make([][]string, len(tails))
+	for k, tail := range tails {
+		out[k] = append([]string{"git"}, tail...)
+	}
+	return out
+}
+
+// commandRuleIDs is Node's prefix and commandFlag git/gh/rm entries on one normalized reading.
+func commandRuleIDs(words []string, ids map[string]bool) {
+	// rest: the tokens after the entry's command words.
+	flags := func(rest []string, exact, prefix []string, short string) bool {
+		for _, w := range rest {
+			if slices.Contains(exact, w) {
+				return true
+			}
+			for _, p := range prefix {
+				if strings.HasPrefix(w, p) {
+					return true
+				}
+			}
+			if short != "" && len(w) > 1 && w[0] == '-' && w[1] != '-' && strings.ContainsAny(w[1:], short) {
+				return true
+			}
+		}
+		return false
+	}
+	switch words[0] {
+	case "gh":
+		if len(words) < 3 || words[1] != "pr" {
+			return
+		}
+		if slices.Contains([]string{"ready", "merge", "close"}, words[2]) {
+			ids["gh-pr-"+words[2]] = true
+		}
+		if words[2] == "edit" && flags(words[3:], []string{"--base", "-B"}, []string{"--base=", "-B"}, "") {
+			ids["gh-pr-base-retarget"] = true
+		}
+	case "git":
+		if len(words) < 2 {
+			return
+		}
+		rest := words[2:]
+		switch words[1] {
+		case "push":
+			if flags(rest, []string{"--force", "-f", "--force-with-lease", "--force-if-includes", "--mirror"}, []string{"--force-with-lease=", "--force-if-includes=", "+"}, "f") {
+				ids["git-push-force"] = true
+			}
+		case "reset":
+			if flags(rest, []string{"--hard"}, nil, "") {
+				ids["git-reset-hard"] = true
+			}
+		case "checkout":
+			if flags(rest, []string{"--", "--force"}, nil, "f") {
+				ids["git-checkout-discard"] = true
+			}
+		case "restore", "clean", "stash", "rm":
+			ids["git-"+words[1]] = true
+		case "branch":
+			if flags(rest, []string{"-D"}, nil, "D") {
+				ids["git-branch-force-delete"] = true
+			}
+			if flags(rest, []string{"--delete"}, nil, "d") && flags(rest, []string{"--force"}, nil, "f") {
+				ids["git-branch-force-delete-long"] = true
+			}
+		}
+	case "rm":
+		if flags(words[1:], []string{"--recursive", "--force"}, nil, "rRf") {
+			ids["rm-rf"] = true
+		}
+	}
 }
 
 // runsMatcher is Node's code-forge-runs-access path rule (paths ['~/' + ".code-forge/runs"],
@@ -316,16 +482,17 @@ type claudeLine struct {
 var (
 	claudeWriteTools = []string{"Write", "Edit", "MultiEdit", "NotebookEdit"}
 	claudeFileTools  = []string{"Read", "Glob", "Grep", "LS", "NotebookRead"}
-	// Node's transcriptCommandText unwraps one sh -c script and blanks interpreter scripts; a
-	// command it may change goes to Node, so the command rules here read the command as given.
-	claudeShellWrapper = regexp.MustCompile(`^[\s\x0b]*(?:[^\s\x0b'"\;|&()<>` + "`" + `$]+/)?(?:sh|bash|zsh|dash|ksh)(?:[ \t]+-[li]+)*[ \t]+-[li]*c[ \t]+['"]`)
-	claudeInterpreter  = regexp.MustCompile(`node|python|ruby|perl`)
+	claudeSurrogate  = regexp.MustCompile(`\\u[dD][89a-fA-F]`)
 )
 
 // claudeAssistantLine is one assistant line as Node's Claude mode reads it: per tool_use, the
 // command text (Bash command; Write(<path>) for write tools; else the JSON input), the path text
 // (B415 transcriptPathText for Bash) and the words where the home-relative spelling counts.
 func claudeAssistantLine(message json.RawMessage) (claudeLine, bool) {
+	// A \uD800-\uDFFF escape: Go decodes a lone surrogate to U+FFFD, JavaScript keeps it.
+	if claudeSurrogate.Match(message) {
+		return claudeLine{}, false
+	}
 	var msg map[string]json.RawMessage
 	if json.Unmarshal(message, &msg) != nil {
 		return claudeLine{}, false
@@ -376,10 +543,7 @@ func claudeAssistantLine(message json.RawMessage) (claudeLine, bool) {
 		}
 		str := func(key string) (string, bool) { return jsonString(input[key]) }
 		if cmd, isStr := str("command"); p.name == "Bash" && isStr {
-			if !transcriptASCII(cmd) || claudeShellWrapper.MatchString(cmd) || claudeInterpreter.MatchString(cmd) {
-				return claudeLine{}, false
-			}
-			command = cmd
+			command = transcriptCommandText(cmd, true)
 			var words []string
 			pathText, words = transcriptPathText(cmd)
 			out.words = append(out.words, words...)
@@ -404,9 +568,6 @@ func claudeAssistantLine(message json.RawMessage) (claudeLine, bool) {
 			}
 			for _, key := range keys {
 				if v, isStr := str(key); isStr {
-					if !transcriptASCII(v) {
-						return claudeLine{}, false
-					}
 					out.words = append(out.words, v)
 				}
 			}
@@ -503,7 +664,7 @@ func jsStringify(raw json.RawMessage) (string, bool) {
 }
 
 func jsQuote(b *strings.Builder, s string) bool {
-	if !transcriptASCII(s) {
+	if !utf8.ValidString(s) || !transcriptJSSafe(s) {
 		return false
 	}
 	b.WriteByte('"')
@@ -890,4 +1051,386 @@ var CoderRules = []Rule{
 	{"code-forge-block-human-pass-from-coder", "Pass a human device check — human-only, confirmed in the human terminal (B137)"},
 	{"code-forge-add-worker-from-coder", "Add a review worker to a run — the orchestrator only (B107)"},
 	{"code-forge-block-amend-acceptance-from-coder", "Correct a block acceptance list — human-only, confirmed in the human terminal (B143)"},
+}
+
+var (
+	shellWrapperRe   = regexp.MustCompile(`^[\s\x0b]*(?:[^\s\x0b'"\;|&()<>` + "`" + `$]+/)?(?:sh|bash|zsh|dash|ksh)(?:[ \t]+-[li]+)*[ \t]+-[li]*c[ \t]+(['"])`)
+	spawnWordRe      = regexp.MustCompile(`\b(?:exec|execSync|execFile|execFileSync|spawn|spawnSync|fork|system|popen|subprocess|child_process|Popen)\b`)
+	interpreterRe    = regexp.MustCompile(`^(node|python|python3|ruby|perl)(?:\d+(?:\.\d+)*)?$`)
+	rubyPerlSpawnRe  = regexp.MustCompile("`|\\$\\(|%x")
+	perlQxRe         = regexp.MustCompile(`\bqx\b`)
+	dynamicLookupRe  = regexp.MustCompile(`\b(?:getattr|__import__|importlib|eval|exec|compile|globals|locals|vars|__builtins__|operator[\s\x0b]*\.[\s\x0b]*attrgetter|setattr)\b`)
+	pyStringPrefixRe = regexp.MustCompile(`^(?i:r|u|b|br|rb)$`)
+	envAssignRe      = regexp.MustCompile(`^[A-Za-z_][A-Za-z_0-9]*=`)
+)
+
+func wordByte(c byte) bool {
+	return c == '_' || c >= '0' && c <= '9' || c >= 'a' && c <= 'z' || c >= 'A' && c <= 'Z'
+}
+
+// pythonSpawnText is Node's pythonSpawnText: literal JSON data passed to json.loads is masked
+// so its spawn words count as data, unless dynamic lookup could use it.
+func pythonSpawnText(body string) string {
+	var chunks strings.Builder
+	end, i := 0, 0
+	for i < len(body) {
+		if body[i] == '#' {
+			nl := strings.IndexByte(body[i:], '\n')
+			if nl < 0 {
+				i = len(body)
+			} else {
+				i += nl + 1
+			}
+			continue
+		}
+		jsonArgument := false
+		if strings.HasPrefix(body[i:], "json.loads(") && (i == 0 || !(wordByte(body[i-1]) || body[i-1] == '.')) {
+			i += len("json.loads(")
+			for i < len(body) && shellSpace(body[i]) {
+				i++
+			}
+			jsonArgument = true
+		}
+		if i >= len(body) || body[i] != '"' && body[i] != '\'' {
+			i++
+			continue
+		}
+		quote := body[i]
+		start := i
+		prefixStart := start
+		for prefixStart > 0 && wordByte(body[prefixStart-1]) {
+			prefixStart--
+		}
+		prefix := body[prefixStart:start]
+		if prefix != "" && !pyStringPrefixRe.MatchString(prefix) {
+			return body
+		}
+		delimiter := string(quote)
+		if strings.HasPrefix(body[i:], strings.Repeat(delimiter, 3)) {
+			delimiter = strings.Repeat(delimiter, 3)
+		}
+		i += len(delimiter)
+		closed := false
+		for i < len(body) {
+			if strings.HasPrefix(body[i:], delimiter) {
+				i += len(delimiter)
+				closed = true
+				break
+			}
+			if len(delimiter) == 1 && (body[i] == '\r' || body[i] == '\n') {
+				return body
+			}
+			if body[i] == '\\' {
+				i += 2
+			} else {
+				i++
+			}
+		}
+		if !closed {
+			return body
+		}
+		if !jsonArgument || prefix != "" || delimiter != `"` {
+			continue
+		}
+		next := i
+		for next < len(body) && shellSpace(body[next]) {
+			next++
+		}
+		if next >= len(body) || body[next] != ')' {
+			continue
+		}
+		var inner string
+		if i > len(body) || json.Unmarshal([]byte(body[start:i]), &inner) != nil || !json.Valid([]byte(inner)) {
+			continue
+		}
+		chunks.WriteString(body[end:start])
+		chunks.WriteByte(' ')
+		end = i
+	}
+	if end < len(body) {
+		chunks.WriteString(body[end:])
+	}
+	masked := chunks.String()
+	if dynamicLookupRe.MatchString(masked) {
+		return body
+	}
+	return masked
+}
+
+func hasShellSubstitution(body string) bool {
+	for i := 0; i < len(body); i++ {
+		if body[i] == '\\' {
+			i++
+			continue
+		}
+		if body[i] == '`' || body[i] == '$' && i+1 < len(body) && body[i+1] == '(' {
+			return true
+		}
+	}
+	return false
+}
+
+func hasSpawn(body, language string, shellExpands bool) bool {
+	text := body
+	if language == "python" || language == "python3" {
+		text = pythonSpawnText(body)
+	}
+	return spawnWordRe.MatchString(text) || shellExpands && hasShellSubstitution(body) ||
+		(language == "ruby" || language == "perl") && rubyPerlSpawnRe.MatchString(body) ||
+		language == "perl" && perlQxRe.MatchString(body)
+}
+
+func shellBreak(c byte) bool {
+	return shellSpace(c) || strings.IndexByte(";|&()<>", c) >= 0
+}
+
+// transcriptCommandText is Node's transcriptCommandText: one sh/bash -c wrapper decoded, and
+// node/python/ruby/perl heredoc bodies and quoted eval bodies without a spawn word blanked, for
+// the command and contains rules only. Unknown or unfinished syntax returns the command whole.
+func transcriptCommandText(command string, unwrapShell bool) string {
+	if unwrapShell {
+		if m := shellWrapperRe.FindStringSubmatchIndex(command); m != nil {
+			open := command[m[2]]
+			quote := open
+			var parts strings.Builder
+			i := m[1]
+			for i < len(command) {
+				char := command[i]
+				i++
+				if char == quote {
+					other := byte('"')
+					if quote == '"' {
+						other = '\''
+					}
+					if i < len(command) && command[i] == other {
+						quote = command[i]
+						i++
+						continue
+					}
+					if quote != open || strings.TrimSpace(command[i:]) != "" {
+						return command
+					}
+					return command[:m[1]-1] + transcriptCommandText(parts.String(), false)
+				}
+				if quote == '"' && char == '\\' && i < len(command) && strings.IndexByte("\"\\$`\n", command[i]) >= 0 {
+					escaped := command[i]
+					i++
+					if escaped != '\n' {
+						parts.WriteByte(escaped)
+					}
+				} else {
+					if quote == '"' && (char == '`' || char == '$' && i < len(command) && command[i] == '(') {
+						return command
+					}
+					parts.WriteByte(char)
+				}
+			}
+			return command
+		}
+	}
+	type span struct{ start, end int }
+	type heredoc struct {
+		delimiter, language string
+		tabs, shellExpands  bool
+	}
+	evalFlags := []string{"-e", "-c", "--eval", "-p", "--print"}
+	inert := []span{}
+	heredocs := []heredoc{}
+	state, language, redirect := "command", "", ""
+	evalNext, envValue := false, false
+	i := 0
+	for i < len(command) {
+		char := command[i]
+		if char == '\n' {
+			i++
+			for _, doc := range heredocs {
+				start := i
+				closed := false
+				for i < len(command) {
+					nl := strings.IndexByte(command[i:], '\n')
+					end := len(command)
+					if nl >= 0 {
+						end = i + nl
+					}
+					line := command[i:end]
+					if doc.tabs {
+						line = strings.TrimLeft(line, "\t")
+					}
+					if line == doc.delimiter {
+						if doc.language != "" && !hasSpawn(command[start:i], doc.language, doc.shellExpands) {
+							inert = append(inert, span{start, i})
+						}
+						if nl < 0 {
+							i = end
+						} else {
+							i = end + 1
+						}
+						closed = true
+						break
+					}
+					if nl < 0 {
+						i = end
+					} else {
+						i = end + 1
+					}
+				}
+				if !closed {
+					return command
+				}
+			}
+			heredocs = heredocs[:0]
+			state, evalNext, redirect = "command", false, ""
+			continue
+		}
+		if shellSpace(char) {
+			i++
+			continue
+		}
+		if char == '#' {
+			nl := strings.IndexByte(command[i:], '\n')
+			if nl < 0 {
+				i = len(command)
+			} else {
+				i += nl
+			}
+			continue
+		}
+		if strings.IndexByte(";|&()", char) >= 0 {
+			state, evalNext = "command", false
+			i++
+			continue
+		}
+		if char == '<' || char == '>' {
+			redirect = string(char)
+			i++
+			if i < len(command) && command[i] == char {
+				redirect += string(char)
+				i++
+			}
+			if redirect == "<<" && i < len(command) && command[i] == '-' {
+				redirect += "-"
+				i++
+			}
+			if i < len(command) && command[i] == '<' {
+				return command
+			}
+			continue
+		}
+		start := i
+		var parts strings.Builder
+		quotes, quote := 0, byte(0)
+		escaped, unquoted := false, false
+		for i < len(command) && !shellBreak(command[i]) {
+			next := command[i]
+			i++
+			if next == '\'' || next == '"' {
+				quotes++
+				quote = next
+				closed := false
+				for i < len(command) {
+					inside := command[i]
+					i++
+					if inside == next {
+						closed = true
+						break
+					}
+					if inside == '\\' && next == '"' && i < len(command) {
+						parts.WriteByte(command[i])
+						i++
+					} else {
+						parts.WriteByte(inside)
+					}
+				}
+				if !closed {
+					return command
+				}
+			} else {
+				unquoted = true
+				if next == '\\' {
+					escaped = true
+				}
+				if next == '\\' && i < len(command) {
+					parts.WriteByte(command[i])
+					i++
+				} else {
+					parts.WriteByte(next)
+				}
+			}
+		}
+		word := parts.String()
+		if redirect != "" {
+			if strings.HasPrefix(redirect, "<<") {
+				lang := ""
+				if state == "interpreter" {
+					lang = language
+				}
+				heredocs = append(heredocs, heredoc{delimiter: word, tabs: redirect == "<<-", language: lang, shellExpands: quotes == 0 && !escaped})
+			}
+			redirect = ""
+			continue
+		}
+		if state == "env" {
+			if envValue {
+				envValue = false
+				continue
+			}
+			if envAssignRe.MatchString(word) || word == "-i" || word == "--ignore-environment" {
+				continue
+			}
+			if word == "-u" || word == "--unset" || word == "-C" || word == "--chdir" {
+				envValue = true
+				continue
+			}
+			if word == "--" {
+				state = "command"
+				continue
+			}
+			if strings.HasPrefix(word, "-") {
+				state = "other"
+				continue
+			}
+			state = "command"
+		}
+		if state == "command" {
+			if envAssignRe.MatchString(word) {
+				continue
+			}
+			name := word[strings.LastIndexByte(word, '/')+1:]
+			language = ""
+			if m := interpreterRe.FindStringSubmatch(name); m != nil {
+				language = m[1]
+			}
+			switch {
+			case name == "env":
+				state = "env"
+			case language != "":
+				state = "interpreter"
+			default:
+				state = "other"
+			}
+		} else if state == "interpreter" {
+			if evalNext {
+				if quotes == 1 && !unquoted && !hasSpawn(command[start:i], language, quote == '"') {
+					inert = append(inert, span{start, i})
+				}
+				evalNext = false
+			} else if slices.Contains(evalFlags, word) {
+				evalNext = true
+			} else if !strings.HasPrefix(word, "-") || word == "--" {
+				state = "other"
+			}
+		}
+	}
+	if len(heredocs) > 0 {
+		return command
+	}
+	var out strings.Builder
+	end := 0
+	for _, s := range inert {
+		out.WriteString(command[end:s.start])
+		out.WriteByte(' ')
+		end = s.end
+	}
+	out.WriteString(command[end:])
+	return out.String()
 }
