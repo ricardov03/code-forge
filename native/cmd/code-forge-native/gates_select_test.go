@@ -25,6 +25,13 @@ func newSelectFixture(t *testing.T, base map[string]string, changed map[string]s
 // {test_files}.
 func newSelectFixtureTest(t *testing.T, tokens bool, base map[string]string, changed map[string]string, owned []string) selectFixture {
 	t.Helper()
+	return newSelectFixtureRunner(t, "node", tokens, base, changed, owned)
+}
+
+// newSelectFixtureRunner names the fake runner: "node" takes only JavaScript
+// files; a name no runner filter knows (B394: "run-suite") takes any file.
+func newSelectFixtureRunner(t *testing.T, name string, tokens bool, base map[string]string, changed map[string]string, owned []string) selectFixture {
+	t.Helper()
 	root := t.TempDir()
 	f := selectFixture{repo: filepath.Join(root, "repo"), home: filepath.Join(root, "home"), log: filepath.Join(root, "calls.log")}
 	write := func(path, body string, mode os.FileMode) {
@@ -45,7 +52,7 @@ func newSelectFixtureTest(t *testing.T, tokens bool, base map[string]string, cha
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
 	}
-	runner := filepath.Join(root, "bin", "node")
+	runner := filepath.Join(root, "bin", name)
 	write(runner, "#!/bin/sh\n{ echo \"CALL $#\"; for a in \"$@\"; do echo \"$a\"; done; } >> '"+f.log+"'\n", 0755)
 	argv := []string{runner, "{test_files}"}
 	if !tokens {
@@ -283,5 +290,72 @@ func TestGatesSelectNoTokenAppends(t *testing.T) {
 	}
 	if g := selectTestResult(t, out); g.Skipped || g.Scope != "related" || g.Reason != "import_graph" {
 		t.Fatalf("test gate=%+v, want scope related and reason import_graph", g)
+	}
+}
+
+// B394: a changed file under test/ that is not a test file is never run; it
+// selects the tests that import it or name it by its repository path.
+func TestGatesSelectOnlyTestFiles(t *testing.T) {
+	cases := []struct {
+		name, runner  string
+		base, changed map[string]string
+		owned, want   []string
+	}{
+		{
+			name:    "imported helper",
+			runner:  "node",
+			base:    map[string]string{"test/helpers/x.mjs": "export const x = 1;\n", "test/a.test.mjs": "import { x } from './helpers/x.mjs';\n", "test/c.test.mjs": "// other\n"},
+			changed: map[string]string{"test/helpers/x.mjs": "export const x = 2;\n"},
+			owned:   []string{"test/helpers/x.mjs"},
+			want:    []string{"CALL 1", "test/a.test.mjs"},
+		},
+		{
+			name:    "script named by path",
+			runner:  "run-suite",
+			base:    map[string]string{"test/helpers/run.sh": "#!/bin/sh\n", "test/b.test.mjs": "spawnSync('sh', ['test/helpers/run.sh']);\n", "test/c.test.mjs": "// other\n"},
+			changed: map[string]string{"test/helpers/run.sh": "#!/bin/sh\necho changed\n"},
+			owned:   []string{"test/helpers/run.sh"},
+			want:    []string{"CALL 1", "test/b.test.mjs"},
+		},
+		{
+			name:    "changed test",
+			runner:  "node",
+			base:    map[string]string{"test/a.test.mjs": "// base\n", "test/c.test.mjs": "// other\n"},
+			changed: map[string]string{"test/a.test.mjs": "// changed\n"},
+			owned:   []string{"test/a.test.mjs"},
+			want:    []string{"CALL 1", "test/a.test.mjs"},
+		},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			f := newSelectFixtureRunner(t, c.runner, true, c.base, c.changed, c.owned)
+			code, out := f.gates(t, "--changed")
+			if code != 0 {
+				t.Fatalf("exit %d, want 0: %s", code, out)
+			}
+			if got := f.calls(t); !reflect.DeepEqual(got, c.want) {
+				t.Fatalf("runner calls=%q, want %q", got, c.want)
+			}
+		})
+	}
+}
+
+// B394: a non-test file under test/ is never a stem-paired test of a changed
+// source (test/a.mjs is a helper, not the test of src/a.mjs).
+func TestGatesSelectNoPairedHelper(t *testing.T) {
+	f := newSelectFixtureRunner(t, "node", true,
+		map[string]string{"src/a.mjs": "export const a = 1;\n", "test/a.mjs": "export const helper = 1;\n", "test/c.test.mjs": "// other\n"},
+		map[string]string{"src/a.mjs": "export const a = 2;\n"}, []string{"src/a.mjs"})
+	code, out := f.gates(t, "--changed")
+	if code != 0 {
+		t.Fatalf("exit %d, want 0: %s", code, out)
+	}
+	for _, line := range f.calls(t) {
+		if line == "test/a.mjs" {
+			t.Fatalf("runner got test/a.mjs as a paired test: calls=%q", f.calls(t))
+		}
+	}
+	if got := f.calls(t); got != nil && !reflect.DeepEqual(got, []string{"CALL 0"}) {
+		t.Fatalf("runner calls=%q, want no run or a run with 0 files", got)
 	}
 }

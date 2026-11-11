@@ -10,8 +10,11 @@ import (
 
 // B404: gates run --changed, batch land and the land merge gates never run the
 // full Node suite. Their test scope comes from what changed, read in Go:
-//   - the block's --tests entries, its owned and changed tests and the
-//     stem-paired tests of changed sources, in any language;
+//   - the block's --tests entries, its owned and changed test files and the
+//     stem-paired tests of changed sources, in any language; a changed helper,
+//     fixture or script under test/ is not a test file and is never run
+//     itself: the import graph below selects the tests that import or name
+//     it (B394);
 //   - every test that imports a changed file, directly or through other files
 //     (gates.Graph: static imports, literal import()/require(), new URL());
 //     B427: comments make no edge, named imports are followed through
@@ -99,7 +102,7 @@ func gatesSelectFiles(cwd string, listed []string, s gatesSelection) []string {
 		}
 	}
 	for _, f := range s.changed {
-		if exact(f) && (gates.IsTestName(f) || gates.IsChangedTest(f)) && inList[f] {
+		if exact(f) && gates.IsTestFile(f) && inList[f] {
 			add(f)
 		}
 	}
@@ -107,7 +110,7 @@ func gatesSelectFiles(cwd string, listed []string, s gatesSelection) []string {
 	// for Foo.swift, test_foo.py for foo.py); the runner filter later keeps
 	// the ones the test command can take.
 	for _, f := range s.changed {
-		if gates.IsChangedTest(f) {
+		if gates.InChangedTestTree(f) {
 			continue
 		}
 		for _, candidate := range listed {

@@ -286,8 +286,12 @@ func RepeatFiles(cwd string, r *Repeat) ([]string, bool) {
 		if f == "" || !owned.OwnsFile(entries, kinds, f) {
 			continue
 		}
-		if !IsChangedTest(f) {
+		if !InChangedTestTree(f) {
 			return nil, false
+		}
+		// A helper, fixture or script under test/ is not repeated (B394).
+		if !IsTestFile(f) {
+			continue
 		}
 		st, e := os.Lstat(filepath.Join(cwd, f))
 		if e == nil && st.Mode().IsRegular() {

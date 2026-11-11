@@ -8,6 +8,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"os"
+	"path"
 	"path/filepath"
 	"regexp"
 	"sort"
@@ -36,7 +37,10 @@ func Has(a []string, s string) bool {
 
 var testName = regexp.MustCompile(`\.(test|spec)\.[^/]+$|Test\.php$|_test\.go$|^test_.*\.py$`)
 
-func IsTest(p string) bool {
+// InTestTree reports a path that belongs to the tests: a test file, or any
+// file under a test/, tests/, __tests__ or spec/ folder (a helper, fixture or
+// script). It classifies a change; it never picks a file to run (B394).
+func InTestTree(p string) bool {
 	parts := strings.Split(p, "/")
 	for _, d := range parts[:len(parts)-1] {
 		if Has([]string{"test", "tests", "__tests__", "spec"}, d) {
@@ -46,9 +50,19 @@ func IsTest(p string) bool {
 	return testName.MatchString(parts[len(parts)-1])
 }
 
-// Node's changed-scope filter deliberately adds Swift, but not *_test.py.
-func IsChangedTest(p string) bool {
-	return IsTest(p) || strings.HasSuffix(p, "Tests.swift")
+// InChangedTestTree is InTestTree plus Swift *Tests.swift files. Node's
+// changed-scope filter deliberately adds Swift, but not *_test.py.
+func InChangedTestTree(p string) bool {
+	return InTestTree(p) || strings.HasSuffix(p, "Tests.swift")
+}
+
+// IsTestFile reports a file a test runner runs as a test, by its name only
+// (foo.test.mjs, foo.spec.ts, FooTest.php, foo_test.go, test_foo.py,
+// foo_test.py, FooTests.swift). A helper, fixture or script under test/ is not
+// one: a change to it selects the tests that import or name it (B394).
+func IsTestFile(p string) bool {
+	base := path.Base(p)
+	return testName.MatchString(base) || strings.HasSuffix(base, "Tests.swift") || strings.HasSuffix(base, "_test.py")
 }
 
 type Scope struct {
@@ -123,7 +137,7 @@ func TestScopeCount(block ledger.Object, count, threshold int) Scope {
 	files := Strings(block.Get("test_files"))
 	if len(files) == 0 {
 		for _, f := range Strings(block.Get("owned_files")) {
-			if owned.IsExactEntry(f) && !strings.HasSuffix(f, "/") && IsTest(f) {
+			if owned.IsExactEntry(f) && !strings.HasSuffix(f, "/") && IsTestFile(f) {
 				files = append(files, f)
 			}
 		}
@@ -181,7 +195,7 @@ func TextOnlyScope(old map[string]any, current ledger.Object, block ledger.Objec
 		if old != nil && old[file] == current.Get(file) {
 			continue
 		}
-		if !SafeFile(file) || IsChangedTest(file) {
+		if !SafeFile(file) || InChangedTestTree(file) {
 			return s, false
 		}
 		switch filepath.Ext(file) {
@@ -278,7 +292,7 @@ func ChangedEmptyGraph(old map[string]any, current ledger.Object, fallback Scope
 		if Has(listed, f) {
 			s.Changed = append(s.Changed, f)
 		}
-		if IsChangedTest(f) {
+		if IsTestFile(f) {
 			if Has(listed, f) {
 				s.Files = append(s.Files, f)
 			}
@@ -322,7 +336,7 @@ func unique(files []string) []string {
 }
 func pair(a, b string) bool {
 	ext := filepath.Ext(a)
-	if ext != filepath.Ext(b) || a == b || !IsChangedTest(b) {
+	if ext != filepath.Ext(b) || a == b || !IsTestFile(b) {
 		return false
 	}
 	// Match review/paired.mjs's identity before expand.mjs filters candidates

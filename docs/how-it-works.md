@@ -126,6 +126,12 @@ duplicates:
 5. `test/compat/config-golden.test.mjs` for a change under `test/fixtures/`, `schema/`,
    `scripts/compat-golden.mjs` or `src/config/` (B409).
 
+Only test files run: a file whose name marks a test (`*.test.*`, `*.spec.*`, `*_test.go`,
+`*Test.php`, `test_*.py`, `*_test.py`, `*Tests.swift`). A changed helper, fixture or script under
+`test/` (`test/helpers/x.mjs`, `test/helpers/run-suite.sh`) is never run itself and is never a
+stem-paired test; it selects, through step 4, the tests that import it or name it by its
+repository path (B394).
+
 Tests of any language count, including the stem-paired tests of changed sources (Node's
 pairing: `FooTests.swift` for `Foo.swift`, `test_foo.py` for `foo.py`). A selected test that
 the test runner cannot take (a PHP test under `node`, for example) is dropped; it never widens
