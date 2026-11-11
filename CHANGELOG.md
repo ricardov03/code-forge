@@ -6,6 +6,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+## [0.22.0] — 2026-11-11
+
 ### Added
 
 - **`gates.merge_gate_links`** — repository-relative git-ignored paths (for example `local.properties`,
