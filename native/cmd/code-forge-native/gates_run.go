@@ -502,7 +502,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			return 0, false
 		}
 	}
-	if o.changed {
+	// B399: a block with no Node product file needs neither the import graph
+	// nor the full Node suite; its scope is fixed (gates_go_only.go). Batch land
+	// asks for the hand-over reason in its preflight and plans its own changed
+	// scope, so it keeps the full fallback until it adopts go_only.
+	goOnly := o.changed && o.run != "" && gatesGoOnly(block, p) && (step == nil || !step.preflight || len(reasons) == 0)
+	if o.changed && !goOnly {
 		if listErr != nil {
 			return 0, false
 		}
@@ -517,7 +522,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	}
 	// Implicit binary dependencies still require the oracle's graph. Base-aware
 	// scoping itself is native, including when composed by block land.
-	if o.changed {
+	if o.changed && !goOnly {
 		for _, file := range gates.Strings(block.Get("owned_files")) {
 			if strings.HasPrefix(file, "native/") || file == "native" || file == "scripts/build-native.mjs" {
 				return handoverReason(hGatesChangedNative)
@@ -693,6 +698,11 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 				// above still require full scope, while missing evidence does not.
 				changedScope = &scope
 			}
+		}
+		// A text-only skip or a reused full run on the same tree costs less.
+		if goOnly && scope.Reason != "text_only" && !p.ReuseTest {
+			scope = gatesGoOnlyScope(b, listed)
+			changedScope = &scope
 		}
 		var err error
 		started = true
@@ -879,6 +889,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			gatesAdd(&row, scoped)
 		} else if changedScope != nil {
 			gatesAdd(&row, changedScope.Fields(true))
+			if changedScope.Reason == "go_only" {
+				row.Set("test_files", changedScope.Files)
+			}
 		} else {
 			gatesAdd(&row, scoped)
 		}
