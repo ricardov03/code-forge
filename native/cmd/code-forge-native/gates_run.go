@@ -372,6 +372,20 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			main = workspace
 		}
 	}
+	// B408: a code-forge worktree runs its own native binary in the compat
+	// tests; rebuild it first when native sources are newer or it is missing.
+	nativeRebuilt := false
+	if tree != nil && (step == nil || !step.preflight) {
+		rebuilt, e := nativeRebuildIfStale(tree.Path)
+		if e != nil {
+			gatesErrf("gates run: block %s of run %s: %s; no gate was run\n", o.block, o.run, strings.ReplaceAll(e.Error(), "\n", " "))
+			return 1, true
+		}
+		if rebuilt {
+			nativeRebuilt = true
+			gatesErrf("gates run: block %s of run %s: rebuilt the native binary (native sources were newer or it was missing)\n", o.block, o.run)
+		}
+	}
 	loaded, _ := config.Load(main)
 	configured, _ := loaded["gates"].(map[string]any)
 	p, safe := gates.Resolve(cwd, configured)
@@ -911,6 +925,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	out := ledger.Object{{Key: "stack", Value: p.Stack}}
 	if tree != nil {
 		out.Set("worktree", tree.Path)
+	}
+	if nativeRebuilt {
+		out.Set("native_rebuilt", true)
 	}
 	out.Set("results", results)
 	out.Set("allOk", all)
