@@ -1,4 +1,4 @@
-# Core rules — seventeen, each with its why
+# Core rules — eighteen, each with its why
 
 The headings below are the list in `SKILL.md` §4. A rule names levels and roles, never a model. Config keys are the ones `forge validate` accepts.
 
@@ -52,6 +52,9 @@ Red→green: each new or changed test must FAIL on the old code first (red), the
 
 ### R17 — Never relax a rule alone
 The orchestrator and any delegate never change, relax or remove a rule, limit, permission or check without the owner: config limits, thresholds, budgets, the forbidden list, gates, review requirements, or a local patch that loosens a check. When a limit blocks work: stop, show the data, propose options, wait. Only the owner raises a limit (the budget once per run, R6); during autopilot only the owner's own `forge autopilot approve` (`autopilot.md` §5). Why: a limit relaxed to finish the work protects nothing, and the owner learns of it too late.
+
+### R18 — Facts, not guesses
+Every cause the orchestrator states (a red gate, a slow run, a stuck block) names its proof: the error text, the log path, or the command and its exit code. Before labelling a failure load, flaky or stale, read the assertion of each failing test. Check a coder's report against its logs before relaying it. No work waits on a guess: without proof the cause is "not known yet", and the next step is to get the proof. At each report, check every background wait for staleness. Why: a gate log showed two real bugs, the orchestrator called them load and old-test noise, and about an hour was lost.
 
 ## What survives from the previous pipeline (14 rows)
 

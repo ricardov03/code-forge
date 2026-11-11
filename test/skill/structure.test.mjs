@@ -14,7 +14,7 @@ import { REFERENCES_DIR, ROOT, SKILL_DIR, listSkillFiles, readSkillFile, section
 
 const SKILL_MAX_LINES = 120;
 const SKILL_PLUS_CORE_MAX_LINES = 200;
-const RULE_COUNT = 17;
+const RULE_COUNT = 18;
 const SURVIVOR_ROWS = 14;
 
 test('B131: review references and the join guide describe outcomes and the split_required recovery', async () => {
@@ -148,7 +148,7 @@ test(`SKILL.md §4 lists ${RULE_COUNT} rules and they equal rules-core.md's head
   assert.equal(headings.length, RULE_COUNT);
   assert.deepEqual(listed, headings);
   assert.equal(listed[0].startsWith('R1 —'), true);
-  assert.equal(listed[RULE_COUNT - 1].startsWith('R17 —'), true);
+  assert.equal(listed[RULE_COUNT - 1], 'R18 — Facts, not guesses');
 });
 
 test('SKILL.md §3 names `forge facts` at a lower index than `forge author` (facts before design)', async () => {
@@ -290,7 +290,7 @@ test('B49b: every owner stop in the skill carries its Autopilot note (5 files, o
 
 test('B51: R17 "Never relax a rule alone" is in rules-core.md, SKILL.md §4, autopilot.md §5 and decisions.md §7', async () => {
   const core = await readSkillFile('references/rules-core.md');
-  assert.match(core, /^# Core rules — seventeen, each with its why$/m);
+  assert.match(core, /^# Core rules — eighteen, each with its why$/m);
   assert.equal(core.split('### R17 — Never relax a rule alone').length - 1, 1);
   assert.match(core, /When a limit blocks work: stop, show the data, propose options, wait\./);
   assert.match(core, /only the owner's own `forge autopilot approve`/);
@@ -1526,4 +1526,13 @@ test('B117 (5) boundary: light proof is required per test while only high proof 
   assert.equal(occurrences(proof, '| light | red→green required for every new or changed test; **optional at the gate** |'), 1);
   assert.equal(occurrences(proof, 'red→green recommended'), 0);
   assert.equal(occurrences(proof, 'Proof scales with risk; do not add more than the acceptance asks for.'), 1);
+});
+
+test('B362: R18 "Facts, not guesses" is the last rules-core.md heading and the last SKILL.md §4 rule, each exactly once', async () => {
+  const core = await readSkillFile('references/rules-core.md');
+  const skill = await readSkillFile('SKILL.md');
+  assert.equal(core.split('### R18 — Facts, not guesses').length - 1, 1);
+  assert.equal(section(skill, 4).split('- **R18** Facts, not guesses').length - 1, 1);
+  const headings = [...core.matchAll(/^### (R\d+) — /gm)].map((m) => m[1]);
+  assert.deepEqual(headings.slice(-2), ['R17', 'R18']);
 });
