@@ -2,6 +2,7 @@ package gatecheck
 
 import (
 	"encoding/json"
+	"math"
 	"os"
 	"path"
 	"regexp"
@@ -10,26 +11,37 @@ import (
 	"strconv"
 	"strings"
 	"unicode/utf8"
+
+	"github.com/ricardov03/code-forge/native/ledger"
 )
 
 var transcriptTokens = regexp.MustCompile(">>?|[^\\s\\x0b'\"`;|&(),{}\\[\\]>]+")
 
-// Transcript handles the plain-text grep and Claude Code JSONL logs with Node's list order and
-// hit rules: the git/gh/rm rules, the production marker, code-forge-runs-access (Node after B415,
-// B416) and the code-forge launcher verbs and flags a coder may not run. Codex logs, the
-// .code-forge/reviews and .code-forge/queue write rule, shell -c wrappers and interpreter scripts
-// Node may blank, and text whose tokens Go could split differently stay with Node's scanner.
-// Returning unsupported happens before any close warning is published.
+// Transcript handles the plain-text grep, Claude Code JSONL logs and Codex exec --json logs with
+// Node's list order and hit rules: the git/gh/rm rules, the production marker,
+// code-forge-runs-access (Node after B415, B416), code-forge-reviews-write (B466) and the
+// code-forge launcher verbs and flags a coder may not run. Text whose tokens Go could split
+// differently (JavaScript-only whitespace) stays with Node's scanner. Returning unsupported happens
+// before any close warning is published.
 func Transcript(text string) ([]Blocker, bool) {
 	if !utf8.ValidString(text) {
 		return nil, false
 	}
 	lines := strings.Split(text, "\n")
 	events, claude := claudeEvents(lines)
+	var codex []*codexLine
 	if !claude {
-		// A Codex log or plain text: Codex logs go to Node; plain text is split on JS whitespace.
-		if strings.Contains(text, "thread.started") || !transcriptJSSafe(text) {
+		var isCodex, ok bool
+		codex, isCodex, ok = codexLines(lines)
+		if !ok {
 			return nil, false
+		}
+		if !isCodex {
+			codex = nil
+			// Plain text is split on JavaScript whitespace.
+			if !transcriptJSSafe(text) {
+				return nil, false
+			}
 		}
 	}
 	runs := runsMatcher{}
@@ -42,8 +54,20 @@ func Transcript(text string) ([]Blocker, bool) {
 	}
 	hits := []Blocker{}
 	for lineNo, line := range lines {
-		commands, runsHit := []string{line}, false
-		if claude {
+		ids := map[string]bool{}
+		scan := func(command, pathText string, words []string) {
+			for id := range transcriptCommandIDs(command) {
+				ids[id] = true
+			}
+			if runs.enabled && (runs.anyToken(pathText) || runs.anyRelative(words)) {
+				ids["code-forge-runs-access"] = true
+			}
+			if reviewsWrite(pathText) {
+				ids["code-forge-reviews-write"] = true
+			}
+		}
+		switch {
+		case claude:
 			ev := events[lineNo]
 			if ev == nil || ev.kind != "assistant" {
 				continue
@@ -55,32 +79,21 @@ func Transcript(text string) ([]Blocker, bool) {
 			if !l.found {
 				continue
 			}
-			if transcriptReviewsPath(l.command) || transcriptReviewsPath(l.path) {
-				return nil, false
+			scan(l.command, l.path, l.words)
+		case codex != nil:
+			l := codex[lineNo]
+			if l == nil {
+				continue
 			}
-			commands = []string{l.command}
-			runsHit = runs.enabled && (runs.anyToken(l.path) || runs.anyRelative(l.words))
-		} else {
-			if transcriptReviewsPath(line) {
-				return nil, false
-			}
+			scan(l.command, l.path, l.words)
+		default:
+			commands := []string{line}
 			if variant := transcriptUnescaped(line); variant != line {
 				commands = append(commands, variant)
 			}
-			if runs.enabled {
-				for _, c := range commands {
-					runsHit = runsHit || runs.anyToken(c)
-				}
+			for _, c := range commands {
+				scan(c, c, nil)
 			}
-		}
-		ids := map[string]bool{}
-		for _, c := range commands {
-			for id := range transcriptCommandIDs(c) {
-				ids[id] = true
-			}
-		}
-		if runsHit {
-			ids["code-forge-runs-access"] = true
 		}
 		for _, id := range transcriptOrder {
 			if ids[id] {
@@ -91,10 +104,273 @@ func Transcript(text string) ([]Blocker, bool) {
 	return hits, true
 }
 
-// transcriptReviewsPath: the text may name Node's code-forge-reviews-write paths, a write rule Go
-// does not port.
-func transcriptReviewsPath(text string) bool {
-	return strings.Contains(text, ".code-forge/reviews") || strings.Contains(text, ".code-forge/queue")
+// codexLine is one Codex item line as Node's scanTranscript reads it: the command text, the text
+// path rules scan and the words where a home-relative spelling counts.
+type codexLine struct {
+	command, path string
+	words         []string
+}
+
+// codexLines is Node's Codex exec --json reading (B466): every non-empty line an object with a
+// string type, the first one thread.started (a trimmed stdin banner before the first JSON line is
+// allowed). isCodex false means Node scans the text as plain text. ok false: a scanned value Go
+// cannot render or split exactly like Node.
+func codexLines(lines []string) (out []*codexLine, isCodex, ok bool) {
+	type event struct {
+		kind string
+		item json.RawMessage
+	}
+	events := make([]*event, len(lines))
+	beforeJSON, first, seen := true, "", 0
+	for i, line := range lines {
+		trimmed := jsTrim(line)
+		if trimmed == "" {
+			continue
+		}
+		if beforeJSON && trimmed == "Reading additional input from stdin..." {
+			continue
+		}
+		if !json.Valid([]byte(line)) {
+			return nil, false, true
+		}
+		beforeJSON = false
+		var obj map[string]json.RawMessage
+		if !jsonIsObject(json.RawMessage(line)) || json.Unmarshal([]byte(line), &obj) != nil || obj == nil {
+			return nil, false, true
+		}
+		kind, isStr := jsonString(obj["type"])
+		if !isStr {
+			return nil, false, true
+		}
+		if seen == 0 {
+			first = kind
+		}
+		seen++
+		events[i] = &event{kind, obj["item"]}
+	}
+	if seen == 0 || first != "thread.started" {
+		return nil, false, true
+	}
+	out = make([]*codexLine, len(lines))
+	for i, ev := range events {
+		if ev == nil || !strings.HasPrefix(ev.kind, "item.") || !jsonTruthy(ev.item) {
+			continue
+		}
+		var item map[string]json.RawMessage
+		if jsonIsObject(ev.item) && json.Unmarshal(ev.item, &item) != nil {
+			return nil, false, false
+		}
+		kind, _ := jsonString(item["type"])
+		if kind == "agent_message" || kind == "reasoning" {
+			continue
+		}
+		l := &codexLine{}
+		switch kind {
+		case "command_execution":
+			if command, isStr := jsonString(item["command"]); isStr {
+				if !transcriptJSSafe(command) {
+					return nil, false, false
+				}
+				l.command = transcriptCommandText(command, true)
+				l.path, l.words = transcriptPathText(command)
+			} else {
+				text, good := jsStringifyWithout(ev.item, "aggregated_output")
+				if !good {
+					return nil, false, false
+				}
+				l.command, l.path = text, text
+			}
+		case "file_change":
+			var changes []json.RawMessage
+			if strings.HasPrefix(strings.TrimSpace(string(item["changes"])), "[") && json.Unmarshal(item["changes"], &changes) != nil {
+				return nil, false, false
+			}
+			parts := []string{}
+			for _, raw := range changes {
+				var change map[string]json.RawMessage
+				if !jsonIsObject(raw) || json.Unmarshal(raw, &change) != nil {
+					continue
+				}
+				file, isStr := jsonString(change["path"])
+				if !isStr {
+					continue
+				}
+				var quoted strings.Builder
+				if !jsQuote(&quoted, file) {
+					return nil, false, false
+				}
+				parts = append(parts, "Write("+quoted.String()+")")
+				l.words = append(l.words, file)
+			}
+			l.command = strings.Join(parts, " ")
+			l.path = l.command
+		default:
+			text, good := jsStringify(ev.item)
+			if !good {
+				return nil, false, false
+			}
+			l.command, l.path = text, text
+		}
+		out[i] = l
+	}
+	return out, true, true
+}
+
+// jsonTruthy is JavaScript truthiness of a parsed JSON value (a missing key is undefined).
+func jsonTruthy(raw json.RawMessage) bool {
+	if len(raw) == 0 {
+		return false
+	}
+	var v any
+	dec := json.NewDecoder(strings.NewReader(string(raw)))
+	dec.UseNumber()
+	if dec.Decode(&v) != nil {
+		return false
+	}
+	switch x := v.(type) {
+	case nil:
+		return false
+	case bool:
+		return x
+	case string:
+		return x != ""
+	case json.Number:
+		f, err := strconv.ParseFloat(x.String(), 64)
+		return err != nil || f != 0
+	}
+	return true
+}
+
+// jsStringifyWithout is JSON.stringify({...object, [key]: undefined}): the object's text with
+// that key left out (non-objects are stringified whole).
+func jsStringifyWithout(raw json.RawMessage, key string) (string, bool) {
+	if !jsonIsObject(raw) {
+		return jsStringify(raw)
+	}
+	obj, err := ledger.DecodeObject(raw)
+	if err != nil {
+		return "", false
+	}
+	obj.Delete(key)
+	data, err := json.Marshal(rawObject(obj))
+	if err != nil {
+		return "", false
+	}
+	return jsStringify(data)
+}
+
+// rawObject re-encodes an ordered object with its key order kept, for jsStringify to check.
+type rawObject ledger.Object
+
+func (o rawObject) MarshalJSON() ([]byte, error) {
+	var b strings.Builder
+	b.WriteByte('{')
+	for i, f := range o {
+		if i > 0 {
+			b.WriteByte(',')
+		}
+		k, _ := json.Marshal(f.Key)
+		b.Write(k)
+		b.WriteByte(':')
+		v, err := marshalOrdered(f.Value)
+		if err != nil {
+			return nil, err
+		}
+		b.Write(v)
+	}
+	b.WriteByte('}')
+	return []byte(b.String()), nil
+}
+
+func marshalOrdered(v any) ([]byte, error) {
+	switch x := v.(type) {
+	case ledger.Object:
+		return rawObject(x).MarshalJSON()
+	case []any:
+		var b strings.Builder
+		b.WriteByte('[')
+		for i, item := range x {
+			if i > 0 {
+				b.WriteByte(',')
+			}
+			data, err := marshalOrdered(item)
+			if err != nil {
+				return nil, err
+			}
+			b.Write(data)
+		}
+		b.WriteByte(']')
+		return []byte(b.String()), nil
+	}
+	return json.Marshal(v)
+}
+
+var (
+	reviewsWritePaths = []*regexp.Regexp{
+		regexp.MustCompile(`(?:^|[/=:\s\x0b'"])` + regexp.QuoteMeta(".code-forge/reviews") + `(?:/|$|[\s\x0b'";)])`),
+		regexp.MustCompile(`(?:^|[/=:\s\x0b'"])` + regexp.QuoteMeta(".code-forge/queue/") + `[^/\s\x0b]*` + regexp.QuoteMeta(".done") + `(?:/|$|[\s\x0b'";)])`),
+	}
+	writeVerbs        = []string{"cp", "mv", "tee", "touch", "rm", "ln", "install", "truncate", "dd", "rsync", "chmod", "chown", "unlink", "mkdir", "rmdir", ">", ">>", "Write", "Edit", "MultiEdit", "NotebookEdit"}
+	writeWrappers     = []string{"sudo", "env", "xargs", "nice", "timeout", "command", "nohup"}
+	writeWrapperValue = regexp.MustCompile(`^[A-Za-z_][A-Za-z0-9_]*=|^\d+(\.\d+)?[smhd]?$`)
+	writeInPlace      = regexp.MustCompile(`^-[a-zA-Z]*i|^--in-place(=|$)`)
+)
+
+// reviewsWrite is Node's code-forge-reviews-write path rule (access write) on one text: a token
+// naming .code-forge/reviews or .code-forge/queue/*.done after the first write command.
+func reviewsWrite(text string) bool {
+	if !strings.Contains(text, ".code-forge/") {
+		return false
+	}
+	tokens := transcriptTokens.FindAllString(text, -1)
+	firstWrite := -1
+	for i, t := range tokens {
+		name := commandName(t)
+		if (slices.Contains(writeVerbs, name) || slices.Contains(writeWrappers, name) || name == "sed" || name == "perl" || name == "git") && isWriteCommand(tokens[i:min(len(tokens), i+64)]) {
+			firstWrite = i
+			break
+		}
+	}
+	if firstWrite < 0 {
+		return false
+	}
+	for _, t := range tokens[firstWrite+1:] {
+		for _, p := range reviewsWritePaths {
+			if p.MatchString(t) {
+				return true
+			}
+		}
+	}
+	return false
+}
+
+// isWriteCommand is Node's isWriteCommand: wrappers skipped, then a write verb, sed/perl in place,
+// or a git subcommand that writes a path.
+func isWriteCommand(argv []string) bool {
+	i := 0
+	for i < len(argv) && slices.Contains(writeWrappers, commandName(argv[i])) {
+		i++
+		for i < len(argv) && (strings.HasPrefix(argv[i], "-") || writeWrapperValue.MatchString(argv[i])) {
+			i++
+		}
+	}
+	verb := ""
+	if i < len(argv) {
+		verb = commandName(argv[i])
+	}
+	switch {
+	case slices.Contains(writeVerbs, verb):
+		return true
+	case verb == "sed" || verb == "perl":
+		return slices.ContainsFunc(argv[i+1:], writeInPlace.MatchString)
+	case verb == "git":
+		for _, r := range gitReadings(argv[i:]) {
+			if len(r) > 1 && slices.Contains([]string{"mv", "rm", "restore", "checkout"}, r[1]) {
+				return true
+			}
+		}
+	}
+	return false
 }
 
 // transcriptJSSafe: no rune JavaScript's \s treats as whitespace and Go's does not (and no U+0085,
@@ -112,7 +388,7 @@ func transcriptJSSafe(text string) bool {
 	return true
 }
 
-var transcriptOrder = []string{"gh-pr-ready", "gh-pr-merge", "gh-pr-close", "gh-pr-base-retarget", "git-push-force", "git-reset-hard", "git-checkout-discard", "git-restore", "git-clean", "git-stash", "git-branch-force-delete", "git-branch-force-delete-long", "git-rm", "rm-rf", "production-marker", "code-forge-runs-access", "code-forge-worker-from-coder",
+var transcriptOrder = []string{"gh-pr-ready", "gh-pr-merge", "gh-pr-close", "gh-pr-base-retarget", "git-push-force", "git-reset-hard", "git-checkout-discard", "git-restore", "git-clean", "git-stash", "git-branch-force-delete", "git-branch-force-delete-long", "git-rm", "rm-rf", "production-marker", "code-forge-runs-access", "code-forge-worker-from-coder", "code-forge-reviews-write",
 	"code-forge-block-waive-from-coder", "code-forge-block-reopen-from-coder", "code-forge-autopilot-from-coder", "code-forge-no-require-reviews", "code-forge-remove-worktree",
 	"code-forge-block-accept-hit-from-coder", "code-forge-block-unwaive-from-coder", "code-forge-block-ack-waivers-from-coder", "code-forge-block-human-pass-from-coder",
 	"code-forge-add-worker-from-coder", "code-forge-block-amend-acceptance-from-coder"}
@@ -645,7 +921,11 @@ func jsStringify(raw json.RawMessage) (string, bool) {
 		case json.Number:
 			s := v.String()
 			if !jsSafeInt.MatchString(s) || s == "-0" {
-				return false
+				f, err := strconv.ParseFloat(s, 64)
+				if err != nil {
+					return false
+				}
+				s = jsNumber(f)
 			}
 			b.WriteString(s)
 		case bool:
@@ -661,6 +941,22 @@ func jsStringify(raw json.RawMessage) (string, bool) {
 		return "", false
 	}
 	return b.String(), true
+}
+
+// jsNumber is Number.prototype.toString for a finite JSON number: the shortest round-trip digits,
+// fixed notation from 1e-6 up to 1e21, else d.ddde+n.
+func jsNumber(f float64) string {
+	if f == 0 {
+		return "0"
+	}
+	if a := math.Abs(f); a >= 1e-6 && a < 1e21 {
+		return strconv.FormatFloat(f, 'f', -1, 64)
+	}
+	text := strconv.FormatFloat(f, 'e', -1, 64)
+	mantissa, exp, _ := strings.Cut(text, "e")
+	sign := exp[0]
+	exp = strings.TrimLeft(exp[1:], "0")
+	return mantissa + "e" + string(sign) + exp
 }
 
 func jsQuote(b *strings.Builder, s string) bool {

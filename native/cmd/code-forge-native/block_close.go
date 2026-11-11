@@ -320,7 +320,8 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	transcript, missing, err := closeTranscript(record, entry, id, blockString(flags["transcript"]))
 	if err != nil {
-		return fallback(hCloseTranscriptRead)
+		// B466: Node's readFile error ends the close (exit 1, no state written).
+		return fail(errors.New(closeTranscriptReadMessage(err)))
 	}
 	hits, supported := gatecheck.Transcript(transcript)
 	if !supported {
@@ -932,6 +933,17 @@ func closeTranscript(record, entry ledger.Object, id, given string) (string, boo
 		}
 	}
 	return "", true, nil
+}
+
+// closeTranscriptReadMessage is Node's readFile error text: errno, reason and
+// syscall, with the path only on open (a read of a directory has no path).
+func closeTranscriptReadMessage(err error) string {
+	message := blockIOMessage(err)
+	var pathErr *os.PathError
+	if errors.As(err, &pathErr) && pathErr.Op == "read" {
+		message = strings.TrimSuffix(message, " '"+pathErr.Path+"'")
+	}
+	return message
 }
 
 func closeTextSafe(text string) bool {

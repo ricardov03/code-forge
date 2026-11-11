@@ -3,6 +3,7 @@ package gatecheck
 import (
 	"encoding/json"
 	"slices"
+	"strconv"
 	"testing"
 )
 
@@ -85,20 +86,69 @@ func TestTranscriptRunsAccessInGo(t *testing.T) {
 	}
 }
 
-func TestTranscriptRunsAccessHandsOverOtherCodeForgeRules(t *testing.T) {
+// B466: Codex exec --json logs and the code-forge-reviews-write rule are decided in Go with the
+// hits Node's scanTranscript gives (checked against Node in a scratch parity run).
+const b466Reviews = ".code-" + "forge/" + "reviews"
+const b466Queue = ".code-" + "forge/" + "queue"
+
+func b466Codex(item string) string {
+	return `{"type":"thread.started","thread_id":"t"}` + "\n" + `{"type":"item.completed","item":` + item + `}`
+}
+
+func TestTranscriptCodexAndReviewsWriteInGo(t *testing.T) {
 	t.Setenv("HOME", "/home/tester")
-	cases := []struct{ name, text string }{
-		{"reviews dir", "cat x > .code-forge/reviews/a.json"},
-		{"queue done", "touch .code-forge/queue/a.done"},
-		{"codex log", `{"type":"thread.started","thread_id":"t"}` + "\n" + `{"type":"item.completed","item":{"type":"command_execution","command":"ls ` + b416Dir + `"}}`},
+	at := func(line, id string) []string { return []string{"transcript line " + line + ": " + id} }
+	cases := []struct {
+		name, text string
+		want       []string
+	}{
+		{"codex command reads runs", b466Codex(`{"type":"command_execution","command":"ls ` + b416Dir + `"}`), at("2", "code-forge-runs-access")},
+		{"codex output is not scanned", b466Codex(`{"type":"command_execution","command":"ls","aggregated_output":"git stash"}`), []string{}},
+		{"codex agent message skipped", b466Codex(`{"type":"agent_message","text":"git stash"}`) + "\n" + `{"type":"item.completed","item":{"type":"reasoning","text":"git stash"}}`, []string{}},
+		{"codex file_change into reviews", b466Codex(`{"type":"file_change","changes":[{"path":"` + b466Reviews + `/a.json","kind":"add"},{"path":5}]}`), at("2", "code-forge-reviews-write")},
+		{"codex non-string command", b466Codex(`{"type":"command_execution","command":["bash","-c","git stash"],"aggregated_output":"rm -rf /"}`), at("2", "git-stash")},
+		{"codex mcp call with float", b466Codex(`{"type":"mcp_tool_call","arguments":{"n":1.5,"cmd":"gh pr merge 1"}}`), at("2", "gh-pr-merge")},
+		{"codex banner then bash -lc", "OpenAI Codex v1\n" + b466Codex(`{"type":"command_execution","command":"bash -lc 'git stash'"}`), at("3", "git-stash")},
+		{"codex null item and turn.completed", `{"type":"thread.started","thread_id":"t"}` + "\n" + `{"type":"item.completed","item":null}` + "\n" + `{"type":"turn.completed"}`, []string{}},
+		{"plain echo into reviews", "echo x > " + b466Reviews + "/a.json", at("1", "code-forge-reviews-write")},
+		{"plain cat of reviews", "cat " + b466Reviews + "/a.json", []string{}},
+		{"plain touch queue done", "touch " + b466Queue + "/a.done", at("1", "code-forge-reviews-write")},
+		{"plain sed -i queue done", "sed -i s/a/b/ " + b466Queue + "/x.done", at("1", "code-forge-reviews-write")},
+		{"plain git -C mv into queue done", "git -C x mv a " + b466Queue + "/b.done", at("1", "code-forge-reviews-write")},
+		{"plain echo of the dir name", "echo " + b466Reviews, []string{}},
+		{"turn.started first is plain text", `{"type":"turn.started"}` + "\n" + `{"type":"item.completed","item":{"type":"command_execution","command":"git stash"}}`, at("2", "git-stash")},
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {
 			hits, ok := Transcript(c.text)
-			if ok {
-				t.Fatalf("Go decided %q; want a Node handover", b416Details(hits))
+			if !ok {
+				t.Fatalf("handed over to Node; want Go to decide %q", c.want)
+			}
+			if got := b416Details(hits); !slices.Equal(got, c.want) {
+				t.Fatalf("hits = %q, want %q", got, c.want)
 			}
 		})
+	}
+}
+
+func TestJSNumberMatchesNode(t *testing.T) {
+	cases := map[string]string{"1.5": "1.5", "0.1": "0.1", "1e21": "1e+21", "1e-7": "1e-7",
+		"123456789012345678": "123456789012345680", "-0": "0", "-0.0": "0", "1E5": "100000",
+		"2.5e-6": "0.0000025", "1e-6": "0.000001", "9.999e20": "999900000000000000000",
+		"1.7976931348623157e308": "1.7976931348623157e+308", "5e-324": "5e-324",
+		"-1.25e+30": "-1.25e+30", "100": "100", "1.0": "1"}
+	for in, want := range cases {
+		f, err := strconv.ParseFloat(in, 64)
+		if err != nil {
+			t.Fatal(err)
+		}
+		if got := jsNumber(f); got != want {
+			t.Errorf("jsNumber(%s) = %q want %q", in, got, want)
+		}
+	}
+	// 1e400 is Infinity in Node (stringified as null): Go keeps the Node hand-over there.
+	if hits, ok := Transcript(b466Codex(`{"type":"mcp_tool_call","arguments":{"n":1e400,"cmd":"git stash"}}`)); ok {
+		t.Errorf("Go decided %q for an out-of-range number; want the Node hand-over", b416Details(hits))
 	}
 }
 
