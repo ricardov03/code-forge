@@ -123,6 +123,11 @@ Grants and end hooks supported by native close no longer cause a land hand-over.
 Since B380, `block close` and `block ready` no longer hand over for review caps,
 waivers, reopens, accepted hits, acks or an amended acceptance.
 `close-gates-format` now means a review row or date Go cannot read exactly like Node.
+Since B416, `block close` and `block ready` check the `code-forge-runs-access` transcript rule in Go,
+for plain-text logs and Claude Code JSONL logs, with the same hits as Node: text a Bash command only
+writes to a file does not count, a home-relative spelling in a command word or tool path does.
+`close-transcript-format` still names Codex logs, other code-forge launcher or path rules, a
+`sh -c` wrapper or interpreter script, and non-ASCII text.
 `close-help` now means only a `--help=value` or `-h=value` spelling.
 `land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
 The full code list is the `handoverReasons` table in
