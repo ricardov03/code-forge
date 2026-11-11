@@ -20,6 +20,12 @@ in Keep-a-Changelog order (Added, Changed, Deprecated, Removed, Fixed, Security)
 Nothing else in the file changes. Empty text, an unknown type and an exact duplicate in the same
 subsection are refused.
 
+The repository's `.gitattributes` sets `CHANGELOG.md merge=union`. Parallel blocks often add their
+lines at the same place in `## [Unreleased]`, and a plain merge or rebase then stops on a conflict.
+The union driver keeps the lines from both sides, so these lands go through on every clone and in
+CI. It does not sort lines or remove duplicates, so read the `[Unreleased]` section before you
+release. The file is not in the npm package.
+
 ## Record a known fix
 
 When a release fixes an error users report through `code-forge logs report`, record its

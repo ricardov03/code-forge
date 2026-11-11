@@ -1,0 +1,2 @@
+# Every block adds its CHANGELOG line at the top of [Unreleased]; union keeps both sides (B396).
+CHANGELOG.md merge=union
