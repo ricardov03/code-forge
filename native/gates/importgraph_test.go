@@ -181,7 +181,7 @@ func TestGraphDependentsCLIEntryCoversEveryVerb(t *testing.T) {
 		"src/util/log.mjs":       "export const log = 1;\n",
 		"src/util/fmt.mjs":       "export const fmt = 1;\n",
 		"src/cli/help.mjs":       "export const help = 1;\n",
-		"src/cli/block.mjs":      "import { fmt } from '../util/fmt.mjs';\n",
+		"src/cli/block.mjs":      "import { fmt } from '../util/fmt.mjs';\nexport const block = () => fmt;\n",
 		"src/cli/sub/deep.mjs":   "export const d = 1;\n",
 		"test/spawn.test.mjs":    "spawnSync(process.execPath, [path.join(REPO, 'bin/code-forge.mjs')]);\n",
 		"test/shell.test.mjs":    "execFileSync(path.join(REPO, \"../bin/code-forge\"), ['help']);\n",
