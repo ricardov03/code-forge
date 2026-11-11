@@ -17,8 +17,8 @@ import (
 // fixture gives a temp HOME, a fake verb script and a fake clock.
 type fixture struct {
 	home, dir, exe, calls string
-	now               time.Time
-	sleeps            []time.Duration
+	now                   time.Time
+	sleeps                []time.Duration
 }
 
 func newFixture(t *testing.T, script string) *fixture {
