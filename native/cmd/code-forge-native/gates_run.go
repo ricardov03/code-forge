@@ -299,7 +299,9 @@ func gatesNumber(v any) (float64, bool) {
 }
 func gatesNative(args []string, o gatesOptions) (int, bool) { return gatesNativeStep(args, o, nil) }
 
-func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*handoverReason) (int, bool) {
+// gatesNativeStep runs gates run in Go. Every form runs here (B450): the bool
+// is always true, and a case Go cannot serve is a clear error, never Node.
+func gatesNativeStep(args []string, o gatesOptions, step *landStep) (int, bool) {
 	stdout, stderr := step.writers()
 	gatesErrf := func(format string, args ...any) {
 		if step == nil {
@@ -309,6 +311,10 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		fmt.Fprintf(stderr, format, args...)
 	}
 	gatesError := func(e error) (int, bool) { gatesErrf("gates run: %s\n", e); return 1, true }
+	// Node's TimeoutOverflowWarning, once per gate timer over 2^31-1 ms.
+	gates.TimerOverflow = func(ms float64) {
+		gatesErrf("(node:%d) TimeoutOverflowWarning: %s does not fit into a 32-bit signed integer.\nTimeout duration was set to 1.\n(Use `node --trace-warnings ...` to show where the warning was created)\n", os.Getpid(), gatesJSString(ms))
+	}
 	gatesSay := func(o ledger.Object, secrets []string) {
 		b, _ := ledger.Stringify(gates.Redact(o, secrets), false)
 		fmt.Fprintln(stdout, gates.Mask(string(b), secrets))
@@ -317,8 +323,13 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		here, _ := os.Getwd()
 		routerConfig, _ := config.Load(here)
 		tmp, _ := routerConfig["tmp"].(map[string]any)
+		// B450: the launcher's applyTmpRoot, done here: a relative tmp.root
+		// is resolved against the directory the config was loaded from.
 		if root, ok := tmp["root"].(string); ok && root != "" {
-			return 0, false
+			_ = os.Setenv("CODE_FORGE_TMP_ROOT", filepath.Join(here, root))
+			if filepath.IsAbs(root) {
+				_ = os.Setenv("CODE_FORGE_TMP_ROOT", filepath.Clean(root))
+			}
 		}
 	}
 	home := os.Getenv("HOME")
@@ -330,9 +341,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	if readErr != nil {
 		var stateErr *state.Error
 		if !errors.As(readErr, &stateErr) {
-			return 0, false
+			return gatesError(fmt.Errorf("block %s of run %s: cannot read the run record: %s; fix the record or open a new run; no gate was run", o.block, o.run, readErr))
 		}
 	} else if o.run != "" {
+		// Node still runs the gates of a record that names another run or
+		// has no workspace path (B450 keeps these two Node hand-overs: the
+		// gate slot and the proof rows of such a record are not ported).
 		if record.Get("run_id") != o.run {
 			return 0, false
 		}
@@ -350,12 +364,7 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		var e error
 		tree, e = proof.BlockTree(workspace, block)
 		if e != nil {
-			var commandError *gitx.CommandError
-			var gitError *gitx.Error
-			if errors.As(e, &commandError) || errors.As(e, &gitError) {
-				return 0, false
-			}
-			return gatesError(fmt.Errorf("block %s of run %s: %s; no gate was run", o.block, o.run, e))
+			return gatesError(fmt.Errorf("block %s of run %s: %s; no gate was run", o.block, o.run, strings.TrimSpace(e.Error())))
 		}
 		if tree != nil {
 			for _, a := range args {
@@ -392,12 +401,33 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		return 2, true
 	}
 	configured, _ := loaded["gates"].(map[string]any)
-	p, safe := gates.Resolve(cwd, configured)
-	if !safe {
-		return 0, false
+	// Node's order (B450): gates.timeout_s first, then the custom, kind and
+	// rerun_failed refusals joined by "; ", then a fixed gate Node cannot spawn.
+	timeout := 300000.0
+	if v, ok := configured["timeout_s"]; ok {
+		n, number := gatesNumber(v)
+		if !number || n < 30 || n > 7200 || n != float64(int(n)) {
+			return gatesError(fmt.Errorf("gates.timeout_s must be an integer 30..7200"))
+		}
+		timeout = n * 1000
 	}
-	if !gates.ResolveCustom(&p, configured) {
-		return 0, false
+	if configured != nil {
+		messages := append(gates.CustomMessages(configured), gates.KindMessages(configured)...)
+		if v, ok := configured["rerun_failed"]; ok {
+			if n, is := gatesNumber(v); !is || (n != 0 && n != 1) {
+				messages = append(messages, "gates.rerun_failed must be 0 or 1")
+			}
+		}
+		if len(messages) > 0 {
+			return gatesError(fmt.Errorf("%s", strings.Join(messages, "; ")))
+		}
+	}
+	p, resolveErr := gates.ResolveErr(cwd, configured)
+	if resolveErr != nil {
+		return gatesError(resolveErr)
+	}
+	if e := gates.ResolveCustomErr(&p, configured); e != nil {
+		return gatesError(e)
 	}
 	// B335: {test_classes} in a fixed gate's argv takes the block's own test
 	// classes from gates.test_class_map; an empty filter drops the item.
@@ -408,66 +438,31 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	if _, e := gates.WithClasses(p, ""); e != nil {
 		return gatesError(e)
 	}
-	timeout := 300000.0
-	if v, ok := configured["timeout_s"]; ok {
-		n, number := gatesNumber(v)
-		if !number || n < 30 || n > 7200 || n != float64(int(n)) {
-			return gatesError(fmt.Errorf("gates.timeout_s must be an integer 30..7200"))
-		}
-		timeout = n * 1000
-	}
 	if o.timeoutGiven {
 		timeout = o.timeout
 	}
 	threshold := 10
-	if n, ok := gatesNumber(configured["full_suite_threshold_files"]); ok && n >= 0 && n == float64(int(n)) {
-		threshold = int(n)
-	}
-	if n, ok := gatesNumber(configured["full_suite_threshold_files"]); ok && n >= float64(math.MaxInt64) {
-		return 0, false
+	// Node's thresholdOf: a whole number >= 0; one past the int range counts
+	// as no threshold at all.
+	if n, ok := gatesNumber(configured["full_suite_threshold_files"]); ok && n >= 0 && n == math.Trunc(n) {
+		threshold = math.MaxInt
+		if n < float64(math.MaxInt) {
+			threshold = int(n)
+		}
 	}
 	if v, ok := configured["rerun_failed"]; ok {
-		n, is := gatesNumber(v)
-		if !is || (n != 0 && n != 1) {
-			return 0, false
-		}
+		n, _ := gatesNumber(v)
 		p.Rerun = n != 0
 	}
-	kind, safe := gatesKind(block)
-	if !safe {
-		return 0, false
-	}
+	kind, _ := gatesKind(block)
+	// A kind list that is not an array, and a kind Node does not know, are
+	// left alone as in Node; its non-string names never match a gate.
 	if kinds, ok := configured["kinds"].(map[string]any); ok {
-		for k, v := range kinds {
-			if !gates.Has([]string{"code", "docs", "contract"}, k) {
-				return 0, false
-			}
-			a, ok := v.([]any)
-			if !ok || len(gates.Strings(a)) != len(a) {
-				return 0, false
-			}
-			for _, name := range gates.Strings(a) {
-				custom := false
-				for _, c := range p.Custom {
-					if c.Name == name {
-						custom = true
-					}
-				}
-				if !gates.Has(gates.Order, name) && !custom {
-					return 0, false
-				}
-				if value, present := configured[name]; present && value == nil {
-					return 0, false
-				}
-			}
-		}
 		if names, ok := kinds[kind].([]any); ok && !light && o.run != "" {
 			p.Kind = kind
 			p.Restricted = true
 			p.Names = gates.Strings(names)
 		}
-	} else if configured["kinds"] != nil {
-		return 0, false
 	}
 	if light {
 		scope := gates.TestScope(block, nil, math.MaxInt)
@@ -481,39 +476,29 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	if v, exists := configured["repeat_new_tests"]; exists && o.run != "" {
 		n, ok := gatesNumber(v)
 		if !ok || n < 2 || n > 10 || n != math.Trunc(n) {
-			return 0, false
+			return gatesError(fmt.Errorf("gates.repeat_new_tests must be an integer 2..10"))
 		}
 		base, _ := block.Get("base_sha").(string)
 		if wt := gatesObj(block.Get("worktree")); wt.Get("base_sha") != nil {
 			base, _ = wt.Get("base_sha").(string)
 		}
-		p.Repeat = &gates.Repeat{N: int(n), Base: base, Block: block, OnSkip: func(s string) { gatesErrf("%s\n", s) }}
+		p.Repeat = &gates.Repeat{N: int(n), Base: base, Block: block, OnSkip: func(s string) { gatesErrf("%s\n", s) }, Stop: gatesImportGraphStop(cwd)}
 		// B404: --changed appends the selection to a test command without
 		// {test_files}, so repeat_new_tests applies to it as well.
 		if c := p.Commands["test"]; c != nil && (!p.Restricted || gates.Has(p.Names, "test")) && (gates.Has(c.Argv, "{test_files}") || (o.changed && !o.full)) {
-			if _, safe := gates.RepeatFiles(cwd, p.Repeat); !safe {
-				return 0, false
+			if _, e := gates.RepeatFiles(cwd, p.Repeat); e != nil {
+				return gatesError(fmt.Errorf("%s; no gate was run", e))
 			}
 		}
 	}
-	// Preserve platform-specific spawn diagnostics in Node. Resolve against the
-	// child's cwd and PATH, including configured environment overrides.
-	for name, command := range p.Commands {
-		if command != nil && (!p.Restricted || gates.Has(p.Names, name)) && !gatesExecutable(cwd, command) {
-			return 0, false
-		}
-	}
-	for _, c := range p.Custom {
-		if (!p.Restricted || gates.Has(p.Names, c.Name)) && !gatesExecutable(cwd, c.Command) {
-			return 0, false
-		}
-	}
+	// B450: a command that cannot start (missing, not executable, not a
+	// program) is a red gate with reason spawn-error from gates.Run.
 	var listed []string
 	var listErr error
 	if o.run != "" && (gates.Scoped(p) || o.changed) {
 		listed, listErr = gates.List(cwd)
 		if listErr != nil {
-			return 0, false
+			return gatesError(fmt.Errorf("block %s of run %s: cannot list the files of %s: %s; no gate was run", o.block, o.run, cwd, strings.TrimSpace(listErr.Error())))
 		}
 	}
 	// B399/B404: --changed never hands over to Node and never widens to the
@@ -522,10 +507,6 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	// (gates_select.go). An explicit --full runs the full suite.
 	goOnly := o.changed && o.run != "" && gatesGoOnly(block, p)
 	selected := o.changed && !o.full && o.run != "" && listErr == nil && gatesSelectable(p)
-	// Child spawn errors and cwd errors have platform-specific Node text.
-	if st, e := os.Stat(cwd); e != nil || !st.IsDir() {
-		return 0, false
-	}
 	if step != nil && step.preflight {
 		return 0, true
 	}
@@ -824,8 +805,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 	if flaky != nil && !gates.Has(args, "--json") {
 		gatesErrf("flaky: %s\n", strings.Join(flaky.([]string), ", "))
 	}
-	owner := ledger.Object{{Key: "run", Value: o.run}, {Key: "block", Value: o.block}}
-	if tree != nil {
+	// Node's owner is {} with no --run: an unscoped run's rows name no run.
+	owner := ledger.Object{}
+	if o.run != "" {
+		owner = ledger.Object{{Key: "run", Value: o.run}, {Key: "block", Value: o.block}}
+	}
+	if tree != nil && o.run != "" {
 		owner.Set("worktree", tree.Path)
 	}
 	appendRow := func(row ledger.Object) error {
@@ -1048,9 +1033,6 @@ func gatesEmptyTest(cwd, file string) bool {
 	}
 	return true
 }
-func gatesExecutable(cwd string, c *gates.Command) bool {
-	return c.Argv[0] == "{test_files}" || c.Argv[0] == "{changed_files}" || gates.Executable(cwd, c) != ""
-}
 func gatesWarn(cwd string, writers ...io.Writer) {
 	warn := func(format string, args ...any) { gatesErrf(format, args...) }
 	if len(writers) > 0 {
@@ -1097,4 +1079,14 @@ func gatesWarn(cwd string, writers ...io.Writer) {
 			}
 		}
 	}
+}
+
+// gatesJSString is JavaScript's String(n) for a finite number.
+func gatesJSString(n float64) string {
+	if math.Abs(n) < 1e21 {
+		return strconv.FormatFloat(n, 'f', -1, 64)
+	}
+	text := strconv.FormatFloat(n, 'e', -1, 64)
+	mantissa, exp, _ := strings.Cut(text, "e")
+	return mantissa + "e" + strings.TrimLeft(strings.Replace(exp, "+0", "+", 1), "0")
 }

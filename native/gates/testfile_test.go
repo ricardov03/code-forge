@@ -67,12 +67,13 @@ func TestRepeatFilesSkipsTestFolderHelpers(t *testing.T) {
 	write("test/helpers/x.mjs", "export const x = 2;\n")
 	write("test/a.test.mjs", "import { x } from './helpers/x.mjs'; // changed\n")
 	block := ownedBlock("test/helpers/x.mjs", "test/a.test.mjs", "src/a.mjs")
-	files, safe := RepeatFiles(cwd, &Repeat{N: 2, Base: base, Block: block})
-	if !safe || !reflect.DeepEqual(files, []string{"test/a.test.mjs"}) {
-		t.Fatalf("RepeatFiles=%q safe=%v, want exactly [test/a.test.mjs] and safe", files, safe)
+	files, err := RepeatFiles(cwd, &Repeat{N: 2, Base: base, Block: block})
+	if err != nil || !reflect.DeepEqual(files, []string{"test/a.test.mjs"}) {
+		t.Fatalf("RepeatFiles=%q err=%v, want exactly [test/a.test.mjs]", files, err)
 	}
+	// B450: a changed source no test imports adds no test and is no error.
 	write("src/a.mjs", "export const a = 2;\n")
-	if files, safe := RepeatFiles(cwd, &Repeat{N: 2, Base: base, Block: block}); safe {
-		t.Fatalf("RepeatFiles=%q safe=true with a changed src/a.mjs, want unsafe", files)
+	if files, err := RepeatFiles(cwd, &Repeat{N: 2, Base: base, Block: block}); err != nil || !reflect.DeepEqual(files, []string{"test/a.test.mjs"}) {
+		t.Fatalf("RepeatFiles=%q err=%v with a changed src/a.mjs, want [test/a.test.mjs]", files, err)
 	}
 }

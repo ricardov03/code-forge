@@ -553,8 +553,7 @@ func landBatchCheckout(main, head, branch string) error {
 // dialect the native runner does not support refuses the batch. B404: there is
 // no full-suite fallback; the native scope planner covers every block.
 func landBatchGateScope(args []string, options gatesOptions) bool {
-	reason := hLandStepHandoverGates
-	code, safe := gatesNativeStep(args, options, &landStep{preflight: true}, &reason)
+	code, safe := gatesNativeStep(args, options, &landStep{preflight: true})
 	return safe && code == 0
 }
 

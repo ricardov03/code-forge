@@ -2,6 +2,8 @@ package gates
 
 import (
 	"encoding/json"
+	"errors"
+	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -42,6 +44,8 @@ type Repeat struct {
 	Base   string
 	Block  ledger.Object
 	OnSkip func(string)
+	// Stop is the import-graph stop list for changed sources (B450).
+	Stop []string
 }
 
 func argv(a ...string) *Command  { return &Command{Argv: a} }
@@ -144,10 +148,21 @@ func Detect(root string) Plan {
 	return p
 }
 
-// Resolve refuses shapes outside the runner's exact command representation.
+// Resolve is ResolveErr's plan and whether it has no refusal.
 func Resolve(cwd string, configured map[string]any) (Plan, bool) {
+	p, err := ResolveErr(cwd, configured)
+	return p, err == nil
+}
+
+// ResolveErr is the detected plan with every configured fixed gate on top. A
+// gate Node could not spawn (not an argv array, an object without argv, a NUL
+// byte, an env value that is not a string) is refused with one message per
+// problem, joined by "; " (B450). Keys Node does not read are ignored, as in
+// Node; an env that is not a non-empty map is no env.
+func ResolveErr(cwd string, configured map[string]any) (Plan, error) {
 	p := Detect(cwd)
 	p.Rerun = configured["rerun_failed"] != float64(0) && configured["rerun_failed"] != json.Number("0")
+	messages := []string{}
 	for _, name := range Order {
 		v, present := configured[name]
 		if !present {
@@ -157,59 +172,63 @@ func Resolve(cwd string, configured map[string]any) (Plan, bool) {
 			p.Commands[name] = nil
 			continue
 		}
-		c := &Command{}
-		switch v := v.(type) {
-		case []any:
-			c.Argv = Strings(v)
-			if len(c.Argv) != len(v) {
-				return p, false
-			}
-		case map[string]any:
-			for k := range v {
-				if k != "argv" && k != "env" && k != "failOnStdout" {
-					return p, false
-				}
-			}
-			a, ok := v["argv"].([]any)
-			if !ok {
-				return p, false
-			}
-			c.Argv = Strings(a)
-			if len(c.Argv) != len(a) {
-				return p, false
-			}
-			c.FailOnStdout = v["failOnStdout"] == true
-			if v["env"] != nil {
-				env, ok := v["env"].(map[string]any)
-				if !ok {
-					return p, false
-				}
-				c.Env = map[string]string{}
-				for k, v := range env {
-					s, ok := v.(string)
-					if !ok || k == "" || strings.ContainsAny(k, "=\x00") || strings.ContainsRune(s, 0) {
-						return p, false
-					}
+		c, problems := command(name, v)
+		messages = append(messages, problems...)
+		if c != nil {
+			p.Commands[name] = c
+		}
+	}
+	if len(messages) > 0 {
+		return p, errors.New(strings.Join(messages, "; "))
+	}
+	return p, nil
+}
+
+// command reads one configured gate: an argv array or an {argv, env,
+// failOnStdout} object.
+func command(key string, v any) (*Command, []string) {
+	c := &Command{}
+	switch v := v.(type) {
+	case []any:
+		argv, ok := argvArray(v)
+		if !ok {
+			return nil, []string{fmt.Sprintf("gates.%s must be a non-empty argv array of strings, an {argv, env} object, or null", key)}
+		}
+		c.Argv = argv
+	case map[string]any:
+		argv, ok := argvArray(v["argv"])
+		if !ok {
+			return nil, []string{fmt.Sprintf("gates.%s.argv must be a non-empty argv array of strings", key)}
+		}
+		c.Argv = argv
+		c.FailOnStdout = v["failOnStdout"] == true
+		if env, ok := v["env"].(map[string]any); ok && len(env) > 0 {
+			messages := []string{}
+			c.Env = map[string]string{}
+			for _, k := range sortedKeys(env) {
+				s, ok := env[k].(string)
+				switch {
+				case k == "" || strings.ContainsAny(k, "=\x00"):
+					messages = append(messages, fmt.Sprintf("gates.%s.env: %s is not a variable name (letters, digits and _, not starting with a digit)", key, quoted(k)))
+				case !ok:
+					messages = append(messages, fmt.Sprintf("gates.%s.env.%s must be a string", key, k))
+				case strings.ContainsRune(s, 0):
+					messages = append(messages, fmt.Sprintf("gates.%s.env.%s must not contain a NUL byte", key, k))
+				default:
 					c.Env[k] = s
 				}
 			}
-		default:
-			return p, false
-		}
-		if len(c.Argv) == 0 {
-			return p, false
-		}
-		for _, s := range c.Argv {
-			if strings.ContainsRune(s, 0) {
-				return p, false
+			if len(messages) > 0 {
+				return nil, messages
 			}
 		}
-		p.Commands[name] = c
+	default:
+		return nil, []string{fmt.Sprintf("gates.%s must be a non-empty argv array of strings, an {argv, env} object, or null", key)}
 	}
-	for _, c := range p.Commands {
-		if c != nil && c.Formatter != "" {
-			return p, false
+	for _, s := range c.Argv {
+		if strings.ContainsRune(s, 0) {
+			return nil, []string{fmt.Sprintf("gates.%s.argv must not contain a NUL byte", key)}
 		}
-	} // Git formatter batching stays with Node.
-	return p, true
+	}
+	return c, nil
 }

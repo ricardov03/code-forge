@@ -8,6 +8,7 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- `gates run` runs in Go for every form Node completes: a run with no `--run` and no `--block`, custom, kind and formatter gates (pint and prettier in argv batches), `repeat_new_tests` with changed sources, JS `Number` forms of `--timeout-ms` (`0x`, `0o`, `0b`, exponent), unknown flags, no `HOME` (the user's home folder), a `--timeout-ms` over the timer limit (1 ms timer and Node's warning), an empty `--run` or `--block` and a missing `--cwd`, all as Node; a bad gate config stops with one stderr line that names the cause and the fix; only a run record with a mismatched `run_id` or no `workspace` still hands over; a command that cannot start is a red `spawn-error` gate; the `block land` gates step and the batch land preflight run the same Go path (B450)
 - **`npm run release:site`** — after `npm publish`, waits until npm serves the version, builds the site data in an
   isolated worktree of the site repo, runs every site gate, commits only `src/data/site-data.json` on
   `release-site/v<version>` and deploys; a red gate deploys nothing; `--dry-run` stops before commit and deploy (B315)

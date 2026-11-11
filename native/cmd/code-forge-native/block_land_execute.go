@@ -165,6 +165,8 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if message != "" {
 			return fallback(hLandGatesParse)
 		}
+		// B450: only a run record that names another run or has no
+		// workspace path still hands the gates step over to Node.
 		if _, safe := gatesNativeStep(gateArgs, gateOptions, dry); !safe {
 			return fallback(hLandStepHandoverGates)
 		}

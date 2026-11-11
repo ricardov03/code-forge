@@ -6,9 +6,12 @@ import (
 	"io"
 	"math"
 	"os"
+	"os/user"
+	"regexp"
 	"slices"
 	"strconv"
 	"strings"
+	"unicode"
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gates"
@@ -79,12 +82,8 @@ func gatesParse(args []string) (gatesOptions, string) {
 		return o, "--timeout-ms requires a value"
 	}
 	if given {
-		n, e := strconv.ParseFloat(strings.TrimSpace(v), 64)
-		if strings.TrimSpace(v) == "" {
-			n = 0
-			e = nil
-		}
-		if e != nil || math.IsNaN(n) || math.IsInf(n, 0) || n <= 0 {
+		n, valid := gatesJSNumber(v)
+		if !valid || math.IsInf(n, 0) || n <= 0 {
 			return o, fmt.Sprintf("--timeout-ms must be a finite number > 0, got \"%s\"", v)
 		}
 		o.timeout = n
@@ -280,46 +279,25 @@ func runGates(args []string) int {
 			return 2
 		}
 	}
+	// B450: every gates run form runs in Go; none hands over to Node.
+	// Node's os.homedir() reads the user database when HOME is unset.
 	if os.Getenv("HOME") == "" {
-		return gatesHandover(args, hGatesHome)
+		u, err := user.Current()
+		if err != nil || u.HomeDir == "" {
+			gatesErrf("gates run: HOME is not set and the user database has no home folder, so the run records and the ledger cannot be found; set HOME to your home folder and rerun; no gate was run\n")
+			gatesFinish(args, 1)
+			return 1
+		}
+		_ = os.Setenv("HOME", u.HomeDir)
 	}
 	_, hasRun, _ := gatesFlag(args, "--run")
 	_, hasBlock, _ := gatesFlag(args, "--block")
 	if !hasRun && !hasBlock {
-		// A run without --run/--block is the Node full suite already; Node
-		// does not know --full, so it is dropped on the way.
-		plain := []string{}
-		for _, a := range args {
-			if a != "--full" {
-				plain = append(plain, a)
-			}
-		}
-		return gatesHandover(plain, hGatesUnscoped)
-	}
-	if v, given, ok := gatesFlag(args, "--timeout-ms"); given && ok {
-		trimmed := strings.TrimSpace(v)
-		if strings.HasPrefix(trimmed, "0x") || strings.HasPrefix(trimmed, "0X") || strings.HasPrefix(trimmed, "0b") || strings.HasPrefix(trimmed, "0B") || strings.HasPrefix(trimmed, "0o") || strings.HasPrefix(trimmed, "0O") {
-			return gatesHandover(args, hGatesTimeoutRadix)
-		}
-		if n, e := strconv.ParseFloat(trimmed, 64); e == nil && n > 2147483647 && !math.IsInf(n, 0) {
-			return gatesHandover(args, hGatesTimeoutOverflow)
-		}
-	}
-	for i := 1; i < len(args); i++ {
-		s := args[i]
-		switch s {
-		case "--run", "--block", "--cwd", "--slug", "--timeout-ms":
-			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
-				i++
-			}
-		case "--changed", "--full", "--json", "--auto-rebase", "--allow-stale-base", "--preflight", "--no-preflight":
-		default:
-			// Node's router passes argv through unchanged. Ordinary runs ignore
-			// --cwd=; worktree runs explicitly reject it in gatesNative.
-			if !strings.HasPrefix(s, "--cwd=") {
-				return gatesHandover(args, hGatesUnsupportedFlag)
-			}
-		}
+		// A run without --run/--block runs every configured gate; Node reads
+		// no --full, --preflight or --no-preflight there, so they are dropped.
+		args = slices.DeleteFunc(slices.Clone(args), func(s string) bool {
+			return s == "--full" || s == "--preflight" || s == "--no-preflight"
+		})
 	}
 	o, message := gatesParse(args)
 	if message != "" {
@@ -327,8 +305,11 @@ func runGates(args []string) int {
 		gatesFinish(args, 2)
 		return 2
 	}
-	if o.run == "" && o.block == "" {
-		return gatesHandover(args, hGatesEmptyScope)
+	// Node reads an empty --run as a run id and refuses it (assertRunId).
+	if hasRun && o.run == "" {
+		gatesErrf("gates run: run id must match /^[a-z0-9][a-z0-9-]{0,63}$/\n")
+		gatesFinish(args, 1)
+		return 1
 	}
 	// B392: the preflight is on by default (it reads the run, the ledger and
 	// the block's files, no gate result); --no-preflight skips it.
@@ -342,11 +323,61 @@ func runGates(args []string) int {
 		gatesFinish(args, code)
 		return code
 	}
-	reason := hGatesCustom
-	code, safe := gatesNativeStep(args, o, nil, &reason)
+	code, safe := gatesNativeStep(args, o, nil)
 	if !safe {
-		return gatesHandover(args, reason)
+		return gatesHandover(args, hGatesCustom)
 	}
 	gatesFinish(args, code)
 	return code
 }
+
+// gatesJSNumber is JavaScript's Number(text) (B450): surrounding white space
+// is dropped, "" is 0, 0x/0o/0b prefixes read hex, octal and binary, and any
+// other text is a decimal literal or Infinity. valid is false where Number
+// gives NaN.
+func gatesJSNumber(text string) (float64, bool) {
+	s := strings.TrimFunc(text, func(r rune) bool {
+		return unicode.IsSpace(r) || r == '\ufeff' || unicode.Is(unicode.Zs, r)
+	})
+	if s == "" {
+		return 0, true
+	}
+	if len(s) > 2 && s[0] == '0' {
+		base := 0
+		switch s[1] {
+		case 'x', 'X':
+			base = 16
+		case 'o', 'O':
+			base = 8
+		case 'b', 'B':
+			base = 2
+		}
+		if base != 0 {
+			n := 0.0
+			for _, r := range s[2:] {
+				d := strings.IndexRune("0123456789abcdef", unicode.ToLower(r))
+				if d < 0 || d >= base {
+					return math.NaN(), false
+				}
+				n = n*float64(base) + float64(d)
+			}
+			return n, true
+		}
+	}
+	switch s {
+	case "Infinity", "+Infinity":
+		return math.Inf(1), true
+	case "-Infinity":
+		return math.Inf(-1), true
+	}
+	if !gatesDecimal.MatchString(s) {
+		return math.NaN(), false
+	}
+	n, err := strconv.ParseFloat(s, 64)
+	if err != nil && !errors.Is(err, strconv.ErrRange) {
+		return math.NaN(), false
+	}
+	return n, true
+}
+
+var gatesDecimal = regexp.MustCompile(`^[+-]?(?:[0-9]+\.?[0-9]*|\.[0-9]+)(?:[eE][+-]?[0-9]+)?$`)

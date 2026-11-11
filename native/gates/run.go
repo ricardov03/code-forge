@@ -134,6 +134,8 @@ type planned struct {
 	argv   []string
 	scope  ledger.Object
 	reason string
+	// batches are a detected formatter's argv batches (B450).
+	batches [][]string
 }
 
 func Scoped(p Plan) bool {
@@ -274,6 +276,26 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 	if e != nil {
 		return nil, false, e
 	}
+	// B450: a detected formatter checks the supported Git files, in batches.
+	for i, item := range planned {
+		if item.name != "format" || item.c == nil || item.c.Formatter == "" {
+			continue
+		}
+		files, err := formatFiles(cwd, item.c.Formatter, s)
+		if err != nil {
+			return nil, false, err
+		}
+		if len(files) == 0 {
+			planned[i].c, planned[i].reason = nil, "no_changes"
+			continue
+		}
+		batches, err := formatBatches(item.argv, files, FormatArgvBudgetBytes)
+		if err != nil {
+			return nil, false, err
+		}
+		planned[i].batches = batches
+		planned[i].argv = append(append([]string{}, item.argv...), files...)
+	}
 	// B418: lint, types and format run before the test gate, so a cheap red
 	// gate stops a long suite from starting. Results keep the Order layout.
 	slots := make([]any, len(planned))
@@ -324,7 +346,12 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 		r = ledger.Object{{Key: "gate", Value: item.name}, {Key: "duration_ms", Value: int64(0)}, {Key: "argv", Value: item.argv}, {Key: "skipped", Value: false}}
 		merge(&r, item.scope)
 		started := time.Now()
-		outcome := execute(ctx, item.argv, c.Env, cwd, run, timeout, c.FailOnStdout)
+		var outcome ledger.Object
+		if item.batches != nil {
+			outcome = runBatches(ctx, item.batches, c, cwd, run, timeout)
+		} else {
+			outcome = execute(ctx, item.argv, c.Env, cwd, run, timeout, c.FailOnStdout)
+		}
 		merge(&r, outcome)
 		if item.name == "test" && p.ReuseReason != "" {
 			r.Set("reuse_reason", p.ReuseReason)
@@ -376,9 +403,9 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			} else if full {
 				skip("repeat_new_tests: skipped (no changed tests for this runner)")
 			} else {
-				changed, safe := RepeatFiles(cwd, p.Repeat)
-				if !safe {
-					return nil, false, fmt.Errorf("repeat_new_tests: unsupported changed test selection")
+				changed, err := RepeatFiles(cwd, p.Repeat)
+				if err != nil {
+					return nil, false, err
 				}
 				if p.Light != nil {
 					selected := []string{}
@@ -546,6 +573,13 @@ func startAtNice(cmd *exec.Cmd, program string) error {
 	return nil
 }
 
+// TimerMax is the largest timer delay in milliseconds (2^31-1).
+const TimerMax = 2147483647
+
+// TimerOverflow reports a gate timeout over TimerMax; gates run prints Node's
+// TimeoutOverflowWarning.
+var TimerOverflow = func(ms float64) {}
+
 func execute(ctx context.Context, argv []string, env map[string]string, cwd, run string, timeout float64, failOnStdout bool) ledger.Object {
 	program, resolveErr := resolveExecutable(cwd, &Command{Argv: argv, Env: env})
 	// Always give exec.Command an absolute path. It must never search the
@@ -626,6 +660,12 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		duration := time.Duration(timeout * float64(time.Millisecond))
 		if timeout > float64(math.MaxInt64)/float64(time.Millisecond) {
 			duration = time.Duration(math.MaxInt64)
+		}
+		// Node's setTimeout: a delay over 2^31-1 ms becomes 1 ms, with a
+		// TimeoutOverflowWarning on every such timer (B450).
+		if timeout > TimerMax {
+			duration = time.Millisecond
+			TimerOverflow(timeout)
 		}
 		if duration < time.Millisecond {
 			duration = time.Millisecond
