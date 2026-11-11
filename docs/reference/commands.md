@@ -5,6 +5,7 @@ This page lists the CLI commands and their usage. It is generated from the CLI. 
 - [author](#author)
 - [autopilot](#autopilot)
 - [block](#block)
+- [ci](#ci)
 - [cloud-coder](#cloud-coder)
 - [context](#context)
 - [docs](#docs)
@@ -271,6 +272,14 @@ usage: code-forge block amend-acceptance <id> --run <r> --acceptance <file> --re
   --json      Print one JSON line on success instead of text.
   --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.
                        Human checks use {clause, kind: human_check} without tests.
+```
+
+## ci
+
+Watch the GitHub Actions runs of one commit; a red run names the failing jobs and tests and queues a heal item (served by the Go binary).
+
+```text
+usage: code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]
 ```
 
 ## cloud-coder

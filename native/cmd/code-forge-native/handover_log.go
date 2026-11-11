@@ -369,6 +369,7 @@ var handoverCommands = map[string]string{
 	"author":        "",
 	"autopilot":     "start status stop ask waive round level approve binnacle log",
 	"block":         "open attempt rebase claim ready close land stop waive reopen accept-hit unwaive ack-waivers human-pass amend-acceptance",
+	"ci":            "watch",
 	"cloud-coder":   "",
 	"context":       "pack",
 	"docs":          "sync path",

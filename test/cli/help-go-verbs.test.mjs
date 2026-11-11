@@ -64,7 +64,7 @@ function goServes(binary, verb) {
 }
 
 // B371: cloud-coder and docs are Go routes with thin Node shims (src/cli/<verb>.mjs).
-const GO_ROUTED = ['cloud-coder', 'docs'];
+const GO_ROUTED = ['cloud-coder', 'docs', 'ci'];
 
 /** Run the shim through a Node entry with CODE_FORGE_NATIVE unset; returns the spawn result. */
 function viaNode(script, args, extraEnv = {}) {

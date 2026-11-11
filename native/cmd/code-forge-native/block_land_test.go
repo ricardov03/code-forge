@@ -54,6 +54,11 @@ func TestBlockLandFullDaemonChain(t *testing.T) {
 	blockLandChain(t, "plain")
 }
 
+// B430: land --merge --push puts the merge commit on the remote's main.
+func TestBlockLandPushSingle(t *testing.T) {
+	blockLandChain(t, "push")
+}
+
 func TestBlockLandMergeGateReuse(t *testing.T) {
 	for _, shape := range []string{"same-tree", "prior-green", "prior-docs", "prior-red", "prior-skipped", "prior-timeout", "prior-partial", "main-empty-commit", "main-moved", "docs-moved", "partial", "commands-changed", "no-token"} {
 		t.Run(shape, func(t *testing.T) { blockLandChain(t, shape) })
@@ -272,8 +277,8 @@ func blockLandChain(t *testing.T, shape string) {
 	report, transcript := filepath.Join(home, "report"), filepath.Join(home, "transcript")
 	must(os.WriteFile(report, []byte("TESTS go test exit=0\n===BLOCK B1 COMPLETE===\n"), 0600))
 	must(os.WriteFile(transcript, []byte("Completed implementation.\n"), 0600))
-	// same-tree and no-token run the whole land chain and check its output.
-	if shape != "plain" && shape != "same-tree" && shape != "no-token" {
+	// same-tree, no-token and push (B430) run the whole land chain and check its output.
+	if shape != "plain" && shape != "same-tree" && shape != "no-token" && shape != "push" {
 		if !strings.HasPrefix(shape, "prior-") {
 			mode := "--changed"
 			if shape == "main-empty-commit" {
@@ -372,6 +377,15 @@ func blockLandChain(t *testing.T, shape string) {
 	if shape != "plain" {
 		flags["merge"] = true
 	}
+	bare := ""
+	if shape == "push" {
+		// B430: the remote is a local bare repo holding main's base.
+		bare = t.TempDir()
+		git(bare, "init", "-q", "--bare")
+		git(repo, "remote", "add", "origin", bare)
+		git(repo, "push", "-q", "origin", "main")
+		flags["push"] = true
+	}
 	out, stderr := os.Stdout, os.Stderr
 	capture, err := os.CreateTemp(home, "land-output-")
 	must(err)
@@ -440,6 +454,18 @@ func blockLandChain(t *testing.T, shape string) {
 		}
 		if strings.Contains(git(repo, "worktree", "list", "--porcelain"), ".merge-gate-") {
 			t.Error("trial worktree count must be 0 after land")
+		}
+	}
+	if shape == "push" {
+		head := git(repo, "rev-parse", "HEAD")
+		if got := git(bare, "rev-parse", "refs/heads/main"); got != head {
+			t.Errorf("remote main=%s, want the landed merge %s", got, head)
+		}
+		if got := len(strings.Fields(git(repo, "rev-list", "--parents", "-n", "1", head))); got != 3 {
+			t.Errorf("pushed commit has %d fields, want a merge commit (sha + 2 parents)", got)
+		}
+		if got := strings.Count(string(output), "pushed "+head+" to origin/main\n"); got != 1 {
+			t.Errorf("push line count=%d, want 1: %s", got, output)
 		}
 	}
 	seen := map[string]int{}

@@ -392,6 +392,11 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	if err != nil {
 		return stop(err.Error())
 	}
+	// B430: push once after the run lock is released.
+	if pushed, err := landBatchPush(flags, home, run, ids); err != nil {
+		stoppedID, step = pushed, "push"
+		return stop(err.Error())
+	}
 	return code
 }
 

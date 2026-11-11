@@ -25,7 +25,7 @@ func landFlags(args []string) (map[string]any, []string, string) {
 			continue
 		}
 		name, _, inline := strings.Cut(arg[2:], "=")
-		if name == "merge" || name == "no-merge-gate" {
+		if name == "merge" || name == "no-merge-gate" || name == "push" || name == "watch-ci" {
 			if _, exists := flags[name]; exists {
 				return flags, pos, "--" + name + " given more than once"
 			}
@@ -109,7 +109,7 @@ func runBlockLand(args []string) int {
 	if len(pos) == 0 || pos[0] == "" || run == "" {
 		return fail("a block id and --run are required", 2)
 	}
-	allowed := " run report transcript max merge no-merge-gate json "
+	allowed := " run report transcript max merge no-merge-gate push watch-ci json "
 	valid := true
 	for name := range flags {
 		valid = valid && strings.Contains(allowed, " "+name+" ")
@@ -135,6 +135,9 @@ func runBlockLand(args []string) int {
 			return fallback(hLandReadRun)
 		}
 		return fail(err.Error(), 1)
+	}
+	if message := landPushCheck(flags, record, len(pos) > 1); message != "" {
+		return fail(message, 2)
 	}
 	if len(pos) > 1 {
 		// A stray trailing argument remains a usage error. Batch operands must

@@ -280,4 +280,6 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `coder.cloud.fetch` | array<string> | yes | — | minItems 1; argv that writes the finished patch to {patch_out}; while the task runs it exits 0 and writes nothing. |
 | `coder.cloud.timeout_s` | number |  | `3600` | > 0; Time limit in seconds for submit plus every fetch poll. |
 | `coder.cloud.poll_s` | number |  | `30` | > 0; Seconds between fetch polls. |
+| `land` | object |  | — | B430: main first. What `block land` does after it merges into main (single block with --merge, or a batch). |
+| `land.push` | boolean |  | `false` | After a successful merge, run `git push origin <base>` from the main checkout (the same as `block land --push`). A rejected push (the remote moved) leaves the local merge, appends one heal item of kind land to ~/.code-forge/heal/<run>.jsonl with the push argv, prints `heal: queued <id>` and exits non-zero. `--watch-ci` (flag only) then starts a detached `code-forge ci watch` for the pushed commit, logging to ~/.code-forge/heal/ci-<sha>.log; land never waits for CI. Authority: read from the run-start config snapshot. |
 | `telemetry` | const `"off"` |  | `"off"` |  |

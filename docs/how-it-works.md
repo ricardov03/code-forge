@@ -517,10 +517,10 @@ the tree after a successful close with `git worktree remove` (never `--force`) a
 It writes a signed `worktree.removed` row. A tree whose directory was already deleted by hand
 refuses the close itself (see below). A tree with uncommitted or untracked files stays where it
 is, with a `worktree.remove_failed` row and exit 1, and the block stays closed. Without the flag the
-tree stays. Coders may not use the flag. code-forge never pushes, and never deletes a
-branch except one a failed open made itself.
+tree stays. Coders may not use the flag. code-forge pushes only when `block land` is told to
+(`--push` or `land.push`, below), and never deletes a branch except one a failed open made itself.
 
-`code-forge block land <id> --run <run> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--json]`
+`code-forge block land <id> --run <run> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--json]`
 joins the block's reviews and, at the same time, runs `gates run --run <run> --block <id> --changed`
 in its recorded worktree. When the tree changes during the join, the gates run again. Land closes
 only when the join is clean and the gates pass. When both fail, one stop message names both.
@@ -592,6 +592,29 @@ here too; it never runs unscoped.
 A merge refusal leaves the block closed; correct the checkout
 and use the displayed next command. `--json` emits one JSON line: `event: landed` or `closed`
 and the merge command, or `event: refused` with `step`, `reason` and `next`.
+
+**Main first: push and CI watch (B430).** Work belongs on `main`, so land can push it. With
+`--push` (single block: together with `--merge`; a batch needs no `--merge`), or with
+`land.push: true` in the run-start config, land runs `git push origin <base>` from the main
+checkout after a successful merge and prints `pushed <sha> to origin/<base>`. A batch pushes once,
+after it releases the run lock, when at least one block landed. A rejected push (the remote moved)
+keeps the local merge, stops at step `push`, appends one heal item of kind `land` to
+`~/.code-forge/heal/<run>.jsonl` (fields `id`, `run`, `block`, `kind`, `argv` = the push to retry,
+`detail`, `tries: 0`, `status: open`, `times.created`), prints `heal: queued <id>` and exits 1.
+Land never fetches, rebases or force-pushes. `--watch-ci` (needs `--push` or `land.push`) then
+starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, logging to
+`~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
+once; land never waits for CI.
+
+`code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]` polls
+`gh run list --commit <sha> --json databaseId,status,conclusion,name` every 30 s, with `gh` from
+`PATH`. When every run is completed and each concluded `success`, `skipped` or `neutral`, it exits 0.
+Otherwise it reads `gh run view <id> --log-failed` (first 200 lines) of each failed run, names the
+failing jobs (`<workflow> / <job>`) and tests (`--- FAIL: <name>`, `not ok <n> - <name>`,
+`✖ <name>`), takes the block ids (`B<n>`) from the subjects of `git log --format=%s <sha>^..<sha>`
+(the commit and the commits it merged), appends one heal item of kind `ci` with those block ids and
+exits 1. No CI run for the commit after 5 minutes exits 2 with `no CI run for <sha>`; runs still
+going at `--timeout` exit 3. A failing `gh` call is retried until the timeout.
 
 Gates, reviews and the close check of a worktree block run in its tree (B62b):
 

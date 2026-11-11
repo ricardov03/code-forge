@@ -388,6 +388,14 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		next = closeCommand([]string{"git", "-C", main, "status"})
 		return stop(landFirst(landGitError(err, ""), output, "git merge failed; resolve the merge before continuing"))
 	}
+	// B430: main first; push after the merge (flag --push or land.push).
+	if landPushWanted(flags, cfg) {
+		step = "push"
+		next = closeCommand([]string{"git", "-C", main, "push", "origin", base})
+		if _, err := landPush(home, run, id, main, base, flags["watch-ci"] == true, print); err != nil {
+			return stop(err.Error())
+		}
+	}
 	if json {
 		emit(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "landed"}, {Key: "merge", Value: command}})
 	} else {
