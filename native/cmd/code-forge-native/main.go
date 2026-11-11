@@ -142,15 +142,11 @@ func stateGolden(home, runID, op string) error {
 		return err
 	}
 	if op == "save" {
-		return state.WithRunLock(home, runID, func() error {
-			record, err := state.ReadRun(home, runID)
-			if err != nil {
-				return err
-			}
+		return state.UpdateRun(home, runID, func(record *ledger.Object) error {
 			for _, field := range input {
 				record.Set(field.Key, field.Value)
 			}
-			return state.SaveRun(home, record)
+			return nil
 		})
 	}
 	slug, _ := input.Get("slug").(string)

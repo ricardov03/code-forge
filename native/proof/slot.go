@@ -8,16 +8,15 @@ import (
 	"os"
 )
 
-// WithSlot sets the running marker under the run lock and clears it even on error.
+// WithSlot sets the running marker with a short run-lock commit and clears it
+// the same way even on error.
 // The proof lock is a field of the record, not a separate file lock.
 func WithSlot(home, run, block string, fn func(ledger.Object, ledger.Object) error) (holder string, err error) {
 	var record, entry ledger.Object
-	err = state.WithRunLock(home, run, func() error {
-		var e error
-		record, e = state.ReadRun(home, run)
-		if e != nil {
-			return e
-		}
+	// B426: both marker writes are short UpdateRun commits; fn (the gates)
+	// runs with no run lock held.
+	err = state.UpdateRun(home, run, func(current *ledger.Object) error {
+		record = *current
 		if record.Get("status") != "active" {
 			return fmt.Errorf("run %s has ended", run)
 		}
@@ -29,34 +28,31 @@ func WithSlot(home, run, block string, fn func(ledger.Object, ledger.Object) err
 		lock, _ := record.Get("proof_lock").(ledger.Object)
 		holder, _ = lock.Get("block").(string)
 		if holder != "" && holder != block {
-			return nil
+			return state.ErrUnchanged
 		}
 		holder = ""
 		entry.Set("gate_running", true)
 		entry.Set("gate_pid", os.Getpid())
 		blocks.Set(block, entry)
 		record.Set("blocks", blocks)
-		return state.SaveRun(home, record)
+		*current = record
+		return nil
 	})
 	if err != nil || holder != "" {
 		return
 	}
 	defer func() {
-		clean := state.WithRunLock(home, run, func() error {
-			r, e := state.ReadRun(home, run)
-			if e != nil {
-				return e
-			}
+		clean := state.UpdateRun(home, run, func(r *ledger.Object) error {
 			bs, _ := r.Get("blocks").(ledger.Object)
 			b, ok := bs.Get(block).(ledger.Object)
 			if !ok {
-				return nil
+				return state.ErrUnchanged
 			}
 			b.Delete("gate_running")
 			b.Delete("gate_pid")
 			bs.Set(block, b)
 			r.Set("blocks", bs)
-			return state.SaveRun(home, r)
+			return nil
 		})
 		if clean != nil {
 			err = clean

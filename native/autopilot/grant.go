@@ -151,14 +151,14 @@ func CheckExpiry(home, run string, now time.Time) (Result, error) {
 	if err != nil || result.State != "expired" || result.Grant.Get("status") != "active" {
 		return result, err
 	}
-	err = state.WithRunLock(home, run, func() error {
-		record, err := state.ReadRun(home, run)
+	err = state.UpdateRun(home, run, func(record *ledger.Object) error {
+		var err error
+		result, err = Read(*record, now)
 		if err != nil {
 			return err
 		}
-		result, err = Read(record, now)
-		if err != nil || result.State != "expired" || result.Grant.Get("status") != "active" {
-			return err
+		if result.State != "expired" || result.Grant.Get("status") != "active" {
+			return state.ErrUnchanged
 		}
 		at := now.UTC().Format("2006-01-02T15:04:05.000Z")
 		_, err = state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "autopilot.expire"}, {Key: "grant_id", Value: result.Grant.Get("grant_id")}, {Key: "until", Value: result.Grant.Get("until")}, {Key: "ts", Value: at}})
@@ -168,12 +168,12 @@ func CheckExpiry(home, run string, now time.Time) (Result, error) {
 		result.Grant.Set("status", "expired")
 		result.Grant.Set("expired_at", at)
 		record.Set("autopilot", result.Grant)
-		if err := state.SaveRun(home, record); err != nil {
-			return err
-		}
 		result.ExpiredNow = true
 		return nil
 	})
+	if err != nil {
+		result.ExpiredNow = false
+	}
 	return result, err
 }
 

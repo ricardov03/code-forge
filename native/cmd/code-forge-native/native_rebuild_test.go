@@ -10,6 +10,9 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/state"
 )
 
 // b408Fixture is a code-forge-shaped repo (native/go.mod and
@@ -49,6 +52,7 @@ func newB408Fixture(t *testing.T) *b408Fixture {
 		"*scripts/build-native.mjs)\n" +
 		"  echo \"build $(pwd -P) $(cd \"$(dirname \"$1\")\" && pwd -P)/$(basename \"$1\") $2\" >> \"$CF_B408_LOG\"\n" +
 		"  if [ -n \"$CF_B408_BUILD_FAIL\" ]; then echo 'go: build broke' >&2; exit 1; fi\n" +
+		"  if [ -n \"$CF_B408_BUILD_SLEEP\" ]; then sleep \"$CF_B408_BUILD_SLEEP\"; fi\n" +
 		"  exit 0 ;;\n" +
 		"*)\n" +
 		"  echo \"node $2 $3\" >> \"$CF_B408_LOG\"\n" +
@@ -279,5 +283,66 @@ func TestBlockRebaseRebuildsNative(t *testing.T) {
 				t.Fatalf("no failure expected, got %q", stderr)
 			}
 		})
+	}
+}
+
+// B426: block rebase holds no run lock while its slow native build runs. A
+// block write on another block of the same run succeeds within 1 s meanwhile.
+func TestBlockRebaseSlowBuildLeavesRunUnlocked(t *testing.T) {
+	f := newB408Fixture(t)
+	record, err := state.ReadRun(f.home, "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := record.Get("blocks").(ledger.Object)
+	blocks.Set("B2", ledger.Object{{Key: "status", Value: "open"}, {Key: "owned_files", Value: []any{"README.md"}}})
+	record.Set("blocks", blocks)
+	if err := state.SaveRun(f.home, record); err != nil {
+		t.Fatal(err)
+	}
+	f.write(f.repo, "native/x.go", "// upstream change\n")
+	f.git(f.repo, "commit", "-qam", "upstream")
+	type outcome struct {
+		code   int
+		stderr string
+	}
+	done := make(chan outcome, 1)
+	go func() {
+		code, _, stderr := f.call([]string{"CF_B408_BUILD_SLEEP=3"}, "block", "rebase", "B1", "--run", "fixture")
+		done <- outcome{code, stderr}
+	}()
+	for deadline := time.Now().Add(60 * time.Second); !strings.Contains(f.calls(), "build "); {
+		if time.Now().After(deadline) {
+			t.Fatal("the slow build never started")
+		}
+		select {
+		case o := <-done:
+			t.Fatalf("block rebase ended before its build (exit %d): %s", o.code, o.stderr)
+		case <-time.After(20 * time.Millisecond):
+		}
+	}
+	begin := time.Now()
+	err = state.UpdateBlock(f.home, "fixture", "B2", func(_, block *ledger.Object) ([]ledger.Object, error) {
+		block.Set("note", "written during the build")
+		return nil, nil
+	})
+	elapsed := time.Since(begin)
+	if err != nil || elapsed > time.Second {
+		t.Fatalf("write on block B2 during the build: err=%v after %v, want success within 1s", err, elapsed)
+	}
+	select {
+	case o := <-done:
+		t.Fatalf("block rebase ended before the other write finished (exit %d), the test proves nothing: %s", o.code, o.stderr)
+	default:
+	}
+	if o := <-done; o.code != 0 || f.calls() != "node block rebase\n"+f.buildCall() {
+		t.Fatalf("want exit 0 and one rebase then one build, got exit %d calls %q stderr %s", o.code, f.calls(), o.stderr)
+	}
+	after, err := state.ReadRun(f.home, "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if note := after.Get("blocks").(ledger.Object).Get("B2").(ledger.Object).Get("note"); note != "written during the build" {
+		t.Fatalf("B2 note = %v, want the write made during the build", note)
 	}
 }

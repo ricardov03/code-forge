@@ -275,9 +275,12 @@ func replay(tree, oldBase, newBase, oldHead string) error {
 	return err
 }
 
-// Run holds the same lock as Node through validation, replay and state publication.
+// Run validates and replays on a snapshot of the run record while it holds
+// only the block's own lock (B426): the run lock is taken for the final short
+// publication, which refuses with block-changed if another verb changed this
+// block meanwhile. Other blocks of the run are never blocked by a rebase.
 func Run(home, runID, blockID string) (result Result, err error) {
-	err = state.WithRunLock(home, runID, func() (runErr error) {
+	err = state.WithBlockLock(home, runID, blockID, func() (runErr error) {
 		record, err := state.ReadRun(home, runID)
 		if err != nil {
 			return err
@@ -287,6 +290,7 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		}
 		blocks := object(record, "blocks")
 		block := object(blocks, blockID)
+		snapshot := state.CloneObject(block)
 		worktree := object(block, "worktree")
 		if text(block, "status") != "open" || worktree == nil {
 			return refusal("no-block", "block "+blockID+" is not open in run "+runID)
@@ -490,14 +494,9 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		block.Set("base_sha", newBase)
 		worktree.Set("base_sha", newBase)
 		block.Set("worktree", worktree)
-		blocks.Set(blockID, block)
-		record.Set("blocks", blocks)
 		result = Result{Block: blockID, Event: "rebased", OldBase: oldBase, NewBase: newBase, Accepted: accepted}
 		row := ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: blockID}, {Key: "old_base", Value: oldBase}, {Key: "new_base", Value: newBase}, {Key: "worktree", Value: true}, {Key: "accepted_landed", Value: accepted}}
-		if _, err := state.WriteSigned(home, runID, row); err != nil {
-			return err
-		}
-		return state.SaveRun(home, record)
+		return state.CommitBlocks(home, runID, map[string]ledger.Object{blockID: snapshot}, map[string]ledger.Object{blockID: block}, row)
 	})
 	return result, err
 }

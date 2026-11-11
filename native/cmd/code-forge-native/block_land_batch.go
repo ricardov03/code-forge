@@ -21,6 +21,7 @@ type landBatchBlock struct {
 	original, entryBase    string // head and entry base_sha before the batch
 	tree                   *proof.Tree
 	entry                  ledger.Object
+	saved                  ledger.Object // the entry as last read or committed (B426)
 	gatesMs                int64
 	rebased                bool
 	node                   bool // owns or changes a Node product file
@@ -44,8 +45,12 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	}
 	code := 0
 	// Closed-block checks cannot use proof.WithSlot (it requires open blocks).
-	// The run lock protects the recorded bases and claims through publication.
-	err := state.WithRunLock(home, run, func() (failed error) {
+	// B426: the batch holds only its own blocks' locks through the rebases,
+	// gates and merge gate, working on a snapshot of the run record. Each
+	// record change (a new base, landed, a restore) is one short commit of
+	// these blocks alone, refused with block-changed if another verb changed
+	// one of them meanwhile. Verbs on other blocks of the run never wait.
+	err := state.WithBlockLocks(home, run, ids, func() (failed error) {
 		record, err := state.ReadRun(home, run)
 		if err != nil {
 			return err
@@ -140,14 +145,14 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err != nil {
 				return err
 			}
-			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry, node: node})
+			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry, saved: state.CloneObject(entry), node: node})
 		}
 		// Block i is rebased onto trial prefix i. Only prefixes that reach main
 		// may remain as a base: every later block returns to its original head
 		// and base, so a not-landed branch never carries another block's commits.
 		keep := 0
 		defer func() {
-			if err := landBatchRestore(home, run, record, blocks, batch, keep); err != nil {
+			if err := landBatchRestore(home, run, batch, keep); err != nil {
 				fmt.Fprintln(os.Stderr, "cannot restore not-landed block:", err)
 				if failed == nil {
 					failed = err
@@ -198,12 +203,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			wt := blockObject(block.entry.Get("worktree"))
 			wt.Set("base_sha", tip)
 			block.entry.Set("worktree", wt)
-			blocks.Set(block.id, block.entry)
-			record.Set("blocks", blocks)
-			if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: block.id}, {Key: "old_base", Value: block.base}, {Key: "new_base", Value: tip}, {Key: "worktree", Value: true}}); err != nil {
-				return err
-			}
-			if err := state.SaveRun(home, record); err != nil {
+			if err := landBatchCommit(home, run, []*landBatchBlock{block}, ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: block.id}, {Key: "old_base", Value: block.base}, {Key: "new_base", Value: tip}, {Key: "worktree", Value: true}}); err != nil {
 				return err
 			}
 			step = "gates"
@@ -346,12 +346,12 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			}
 			// Single-block land keeps a landed block "closed" (dependents test
 			// for that status); the landed marker stops a second landing.
+			// B426: the merge gate and the merge ran without the run lock;
+			// only this "mark landed" commit takes it.
 			for i, block := range batch[:green] {
 				block.entry.Set("landed", ledger.Object{{Key: "merge", Value: prefixes[i+1]}, {Key: "main", Value: prefixes[green]}})
-				blocks.Set(block.id, block.entry)
 			}
-			record.Set("blocks", blocks)
-			if err := state.SaveRun(home, record); err != nil {
+			if err := landBatchCommit(home, run, batch[:green]); err != nil {
 				return err
 			}
 		}
@@ -395,10 +395,28 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 	return code
 }
 
+// landBatchCommit publishes the entries of these batch blocks, and the signed
+// rows, in one short run-lock commit (B426). It refuses with block-changed when
+// another verb changed one of them since the batch last read or committed it.
+func landBatchCommit(home, run string, list []*landBatchBlock, rows ...ledger.Object) error {
+	expected, updates := map[string]ledger.Object{}, map[string]ledger.Object{}
+	for _, block := range list {
+		expected[block.id] = block.saved
+		updates[block.id] = state.CloneObject(block.entry)
+	}
+	if err := state.CommitBlocks(home, run, expected, updates, rows...); err != nil {
+		return err
+	}
+	for _, block := range list {
+		block.saved = updates[block.id]
+	}
+	return nil
+}
+
 // landBatchRestore returns every block after index keep to the head and base
 // it had before the batch. A branch the user moved since is left untouched.
-func landBatchRestore(home, run string, record, blocks ledger.Object, batch []*landBatchBlock, keep int) error {
-	changed := false
+func landBatchRestore(home, run string, batch []*landBatchBlock, keep int) error {
+	restored, rows := []*landBatchBlock{}, []ledger.Object{}
 	var failed error
 	for i, block := range batch {
 		if i <= keep || !block.rebased {
@@ -422,15 +440,12 @@ func landBatchRestore(home, run string, record, blocks ledger.Object, batch []*l
 		wt := blockObject(block.entry.Get("worktree"))
 		wt.Set("base_sha", block.base)
 		block.entry.Set("worktree", wt)
-		blocks.Set(block.id, block.entry)
-		block.head, block.rebased, changed = block.original, false, true
-		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: block.id}, {Key: "old_base", Value: tip}, {Key: "new_base", Value: block.base}, {Key: "worktree", Value: true}}); err != nil {
-			return err
-		}
+		block.head, block.rebased = block.original, false
+		restored = append(restored, block)
+		rows = append(rows, ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: block.id}, {Key: "old_base", Value: tip}, {Key: "new_base", Value: block.base}, {Key: "worktree", Value: true}})
 	}
-	if changed {
-		record.Set("blocks", blocks)
-		if err := state.SaveRun(home, record); err != nil && failed == nil {
+	if len(restored) > 0 {
+		if err := landBatchCommit(home, run, restored, rows...); err != nil && failed == nil {
 			failed = err
 		}
 	}

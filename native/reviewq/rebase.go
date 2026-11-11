@@ -79,7 +79,9 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 			return nil, ErrUnsupported
 		}
 	}
-	err = state.WithRunLock(home, run, func() (runErr error) {
+	// B426: only the block lock is held through the git work; the run lock
+	// guards the final short publication of this block alone.
+	err = state.WithBlockLock(home, run, id, func() (runErr error) {
 		record, err := state.ReadRun(home, run)
 		if err != nil {
 			return err
@@ -89,6 +91,7 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 		}
 		blocks := rebaseObject(record, "blocks")
 		b := rebaseObject(blocks, id)
+		snapshot := state.CloneObject(b)
 		wt := rebaseObject(b, "worktree")
 		status := rebaseText(b, "status")
 		if (status != "open" && status != "closed" && status != "awaiting_human_check") || wt == nil {
@@ -320,9 +323,7 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 			}
 			queued = append(queued, row)
 		}
-		blocks.Set(id, b)
-		record.Set("blocks", blocks)
-		if err := state.SaveRun(home, record); err != nil {
+		if err := state.CommitBlocks(home, run, map[string]ledger.Object{id: snapshot}, map[string]ledger.Object{id: b}); err != nil {
 			return err
 		}
 		result = ledger.Object{{Key: "old_base", Value: oldBase}, {Key: "new_base", Value: newBase}, {Key: "files", Value: queued}, {Key: "pending", Value: true}}
