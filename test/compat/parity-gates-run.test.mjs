@@ -113,15 +113,18 @@ test('review spawn/PATH: unresolvable child commands hand over to Node before ru
   }
 });
 
-test('review F1 scope: changed Swift pairs, Python suffix follows Node filtering', async () => {
-  /** @type {[string, string, boolean][]} */
+test('review F1 scope: changed Swift and Python test pairs (Go also pairs *_test.py since B394)', async () => {
+  // [source, candidate, Node changed-test predicate, Go selects the pair].
+  // B394: Go's changed-test picker counts *_test.py as a real test file, so Go
+  // pairs foo.py with foo_test.py although Node's predicate filters it out.
+  /** @type {[string, string, boolean, boolean][]} */
   const cases = [
-    ['Foo.swift', 'FooTests.swift', true],
-    ['foo.py', 'foo_test.py', false],
-    ['foo.py', 'test_foo.py', true],
-    ['foo.py', 'tests/foo_test.py', true],
+    ['Foo.swift', 'FooTests.swift', true, true],
+    ['foo.py', 'foo_test.py', false, true],
+    ['foo.py', 'test_foo.py', true, true],
+    ['foo.py', 'tests/foo_test.py', true, true],
   ];
-  for (const [source, candidate, expected] of cases) {
+  for (const [source, candidate, expected, goSelects] of cases) {
     const f = await fixture({ test: ['/bin/echo', '{test_files}'] }, { owned_files: [source], test_files: [] });
     await writeFile(path.join(f.repo, source), '// before\n');
     await mkdir(path.dirname(path.join(f.repo, candidate)), { recursive: true });
@@ -135,8 +138,8 @@ test('review F1 scope: changed Swift pairs, Python suffix follows Node filtering
     // B404: Go selects --changed tests itself (no Node parity): the same
     // stem pair, and nothing (a skipped gate, never the full suite) without one.
     const result = JSON.parse((await launch(f, [...ARGS, '--changed']).ended).stdout).results[0];
-    assert.deepEqual([result.test_count, result.skipped, result.scope, result.reason], [expected ? 1 : 0, !expected, 'related', 'import_graph']);
-    assert.equal(result.stdout, expected ? `${candidate}\n` : '');
+    assert.deepEqual([result.test_count, result.skipped, result.scope, result.reason], [goSelects ? 1 : 0, !goSelects, 'related', 'import_graph']);
+    assert.equal(result.stdout, goSelects ? `${candidate}\n` : '');
   }
 });
 
@@ -273,6 +276,13 @@ test('gates run waits for a concurrent run writer and preserves its new proof lo
   assert.deepEqual(saved, data, 'waiting gate preserves every writer field and starts no gate');
 });
 
+// B418: drop skipped lint/types/format entries from each JSON line's results.
+const withoutSkippedPreGates = (text) => text.split('\n').map((line) => {
+  if (!line.trim()) return line;
+  const value = JSON.parse(line);
+  if (Array.isArray(value.results)) value.results = value.results.filter((r) => r.gate === 'test' || r.skipped !== true);
+  return JSON.stringify(value);
+}).join('\n');
 test('gates run cancellation stops the gate and records exactly one cancelled row', { timeout: 15_000 }, async () => {
   for (const signal of ['SIGINT', 'SIGTERM']) {
     const f = await fixture({ test: command('require("node:fs").writeFileSync("child.pid", String(process.pid)); setTimeout(()=>{}, 30000)') });
@@ -287,7 +297,14 @@ test('gates run cancellation stops the gate and records exactly one cancelled ro
     assert.equal(result.code, 1, `${signal}: cancelled exit`);
     assert.notEqual(result.stdout, '', `cancelled output: ${result.stderr}`);
     const out = JSON.parse(result.stdout);
-    assert.equal(out.cancelled, true); assert.equal(out.allOk, false); assert.equal(out.results.length, 1);
+    assert.equal(out.cancelled, true); assert.equal(out.allOk, false);
+    // B418: Go runs lint, types and format before the test gate, so the
+    // unconfigured (skipped) pre-gates are already in the result when the test
+    // gate is cancelled; Node runs test first and stops there. Results keep the
+    // gate order. Everything else must still match Node's abort byte for byte.
+    assert.deepEqual(out.results.map((r) => [r.gate, r.skipped, r.ok]),
+      [['test', false, false], ['lint', true, true], ['types', true, true], ['format', true, true]], `${signal}: cancelled test plus the skipped pre-gates`);
+    assert.equal(out.results[0].reason, 'SIGTERM', `${signal}: the test gate child was terminated`);
     assert.throws(() => process.kill(pid, 0), /ESRCH/, `${signal}: gate child reaped`);
     const rows = (await readFile(path.join(f.home, '.code-forge/ledger/fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     assert.equal(rows.length, 1); assert.equal(rows[0].event, 'gate.cancelled'); assert.equal(rows[0].cancelled, true);
@@ -307,7 +324,7 @@ test('gates run cancellation stops the gate and records exactly one cancelled ro
     await writeFile(path.join(f.repo, 'abort.marker'), 'abort');
     const reference = await node.ended;
     assert.equal(reference.code, result.code, `${signal}: same exit as Node abort`);
-    assert.equal(normalizeRows(result.stdout), normalizeRows(reference.stdout), `${signal}: stdout bytes match Node abort`);
-    assert.equal(normalizeRows(nativeRows), normalizeRows(await readFile(ledgerFile, 'utf8')), `${signal}: cancelled row bytes match Node abort`);
+    assert.equal(normalizeRows(withoutSkippedPreGates(result.stdout)), normalizeRows(withoutSkippedPreGates(reference.stdout)), `${signal}: stdout bytes match Node abort except B418's skipped pre-gates`);
+    assert.equal(normalizeRows(withoutSkippedPreGates(nativeRows)), normalizeRows(withoutSkippedPreGates(await readFile(ledgerFile, 'utf8'))), `${signal}: cancelled row bytes match Node abort except B418's skipped pre-gates`);
   }
 });
