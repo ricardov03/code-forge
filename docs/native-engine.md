@@ -220,6 +220,25 @@ Node from `CODE_FORGE_NODE` when it is set. A failed build stops the command
 with exit 1 and a line naming `native-rebuild-failed`. Other projects have no
 `native/` folder, so nothing is built for them (B408).
 
+## Run lock
+
+The run lock (`<run>.lock` next to the run record, shared with Node, 5 s wait)
+guards only a short read-modify-write of the run record, under a second (B426).
+A Go verb that does long work (git, tests, builds) reads the record first, does
+the work with no run lock, then commits only the blocks it owns in one short
+write. So a batch land in its merge gate, a `block rebase` or a
+`gates run --auto-rebase` never blocks a verb on another block of the run.
+
+- Two long verbs on the same block cannot overlap: each holds that block's own
+  lock (`<run>.block-<hex id>.lock`, same wait and stale-owner rules as the run
+  lock). The second one waits up to 5 s, then stops with `block-busy`.
+- If another verb changed the block while the verb worked, its commit saves
+  nothing for that block and stops with `block-changed`, naming the block. Run
+  the verb again.
+- Batch land: the rebases, each block's gates and the merge gate run without
+  the run lock; each new base, the final "mark landed" and any restore is one
+  short commit of the batch's blocks.
+
 ## Internal verbs
 
 The native binary reserves the `internal` namespace for its helpers.

@@ -67,12 +67,12 @@ func WithRunLock(home, runID string, fn func() error) (err error) {
 		time.Sleep(lockPoll)
 	}
 	defer func() {
+		// Release removes owner.json first, then the lock dir (B423/B426).
+		removeLockOwner(lock)
 		if releaseErr := os.Remove(lock); releaseErr != nil {
 			err = releaseErr
 		}
 	}()
-	// Runs before the dir removal above: the owner file goes first.
-	defer removeLockOwner(lock)
 	if err := writeLockOwner(lock); err != nil {
 		return err
 	}
@@ -96,7 +96,7 @@ func ReadRun(home, runID string) (ledger.Object, error) {
 }
 
 // SaveRun atomically replaces the private authoritative record, then its mirror
-// without worker. The caller uses WithRunLock for a read-modify-write sequence.
+// without worker. A read-modify-write goes through UpdateRun (B426).
 func SaveRun(home string, record ledger.Object) error {
 	runID, _ := record.Get("run_id").(string)
 	file, err := recordPath(home, runID)

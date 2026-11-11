@@ -8,9 +8,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"strconv"
-	"strings"
-	"syscall"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -99,9 +96,10 @@ func CommitBlocks(home, runID string, expected, updates map[string]ledger.Object
 }
 
 // WithBlockLock keeps two long verbs off the same block (a rebase or a land
-// works in its worktree for minutes) without holding the run lock. It waits
-// up to the run lock deadline, then refuses with block-busy. A lock left by
-// a process that no longer exists is removed, so the queue heals by itself.
+// works in its worktree for minutes) without holding the run lock. It is the
+// run lock's design on a per-block dir: owner.json names the holder, a lock
+// whose owner is gone is broken once (B423), a live one is waited on up to the
+// run lock deadline, then refused with block-busy.
 func WithBlockLock(home, runID, blockID string, fn func() error) (err error) {
 	if _, err := recordPath(home, runID); err != nil {
 		return err
@@ -110,24 +108,21 @@ func WithBlockLock(home, runID, blockID string, fn func() error) (err error) {
 		return err
 	}
 	lock := filepath.Join(runsDir(home), runID+".block-"+hex.EncodeToString([]byte(blockID))+".lock")
-	owner := filepath.Join(lock, "pid")
 	deadline := time.Now().Add(lockTimeout)
 	for {
-		err := os.Mkdir(lock, 0700)
+		err := os.Mkdir(lock, 0755)
 		if err == nil {
-			if werr := os.WriteFile(owner, []byte(strconv.Itoa(os.Getpid())), 0600); werr != nil {
-				_ = os.Remove(lock)
-				return werr
-			}
 			break
 		}
 		if !os.IsExist(err) {
 			return err
 		}
-		if staleBlockLock(owner) {
-			_ = os.Remove(owner)
-			_ = os.Remove(lock)
-			continue
+		took, breakErr := breakStaleLock(runsDir(home), lock)
+		if breakErr != nil {
+			return breakErr
+		}
+		if took {
+			break
 		}
 		if time.Now().After(deadline) {
 			return &Error{"block-busy", fmt.Sprintf("block-busy: block %s of run %s is in use by another verb (%s); try again when it ends", blockID, runID, lock)}
@@ -135,11 +130,15 @@ func WithBlockLock(home, runID, blockID string, fn func() error) (err error) {
 		time.Sleep(lockPoll)
 	}
 	defer func() {
-		_ = os.Remove(owner)
+		// owner.json goes first, then the dir.
+		removeLockOwner(lock)
 		if releaseErr := os.Remove(lock); releaseErr != nil && err == nil {
 			err = releaseErr
 		}
 	}()
+	if err := writeLockOwner(lock); err != nil {
+		return err
+	}
 	return fn()
 }
 
@@ -159,16 +158,4 @@ func WithBlockLocks(home, runID string, ids []string, fn func() error) error {
 		return WithBlockLock(home, runID, sorted[i], func() error { return take(i + 1) })
 	}
 	return take(0)
-}
-
-func staleBlockLock(owner string) bool {
-	data, err := os.ReadFile(owner)
-	if err != nil {
-		return false
-	}
-	pid, err := strconv.Atoi(strings.TrimSpace(string(data)))
-	if err != nil || pid <= 0 {
-		return false
-	}
-	return syscall.Kill(pid, 0) == syscall.ESRCH
 }

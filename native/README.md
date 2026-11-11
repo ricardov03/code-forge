@@ -6,7 +6,7 @@ This also avoids the macOS 26 LC_UUID linker error during local tests.
 
 `block-rebase-landed --home <dir> --run <id> --block <id> --json` implements
 `block rebase --accept-landed`; this feature requires the native binary and has no
-Node fallback. Under the shared run lock it checks owned upstream changes against
+Node fallback. Under the block's own lock (not the run lock, B426) it checks owned upstream changes against
 closed sibling branches, rebases with each original committer identity, queues
 changed owned content using Node ticket identities, then writes a signed
 `block.rebase` row before saving both bases. Failed replay aborts and restores the
@@ -19,9 +19,12 @@ cd native && CGO_ENABLED=0 go vet ./... && CGO_ENABLED=0 go test ./...
 ```
 
 `state.ReadRun(home, runID)` returns a `ledger.Object`, retaining nested JSON
-property order. Change properties with `Set`, then call `state.SaveRun(home,
-record)` inside `state.WithRunLock(home, runID, fn)`. The mkdir lock interoperates
-with Node (5-second timeout, 25ms polling). Saves replace the authoritative record
+property order. Change a record with `state.UpdateRun(home, runID, change)`: it
+takes the run lock, re-reads the record, applies `change` and saves, so it must
+stay short (no git, tests, builds, network or sleeps; B426). A long verb reads a
+snapshot, works without the lock and commits its own blocks with
+`state.CommitBlocks`, which refuses with `block-changed` if one of them changed
+meanwhile. The mkdir lock interoperates with Node (5-second timeout, 25ms polling). Saves replace the authoritative record
 at mode 0600 and write a workspace mirror without `worker`.
 
 `ledger.AppendObject(dir, slug, row, rotateAtBytes)` preserves input order and uses

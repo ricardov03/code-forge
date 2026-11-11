@@ -50,6 +50,10 @@ waits on a second real consumer (plan §10.4, Q17).
 - Gate child processes run at low priority (nice 10), and tests share one cached Go test binary (B354)
 - `gates run` keeps the full test scope when the block's base moves in an unsafe way or a baseline is rejected;
   text-only blocks stay scoped (B318R)
+- The run lock now guards only a short read-modify-write of the run record (Go): batch land (rebases, gates, merge
+  gate), block rebase and the rebase check work on a snapshot under the block's own lock and commit only their blocks in
+  one short write, so verbs on other blocks of the run never wait; a same-block change meanwhile stops the verb with
+  block-changed, a second long verb on the same block with block-busy (B426)
 
 ### Fixed
 
