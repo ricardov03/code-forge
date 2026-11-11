@@ -8,6 +8,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ricardov03/code-forge/native/gitx"
 )
 
 // Compat tests present in every fixture repo; the go_only scope picks from them by name.
@@ -40,7 +42,7 @@ func newGoOnlyFixture(t *testing.T, owned []string, withNodeTest bool) goOnlyFix
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = f.repo
-		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+		cmd.Env = gitx.ChildEnv()
 		if out, err := cmd.CombinedOutput(); err != nil {
 			t.Fatalf("git %v: %v: %s", args, err, out)
 		}
@@ -85,7 +87,7 @@ func (f goOnlyFixture) run(t *testing.T) (int, string) {
 	encoded, _ := json.Marshal([]string{"gates", "run", "--run", "fixture", "--block", "B1", "--changed"})
 	cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 	cmd.Dir = f.repo
-	cmd.Env = append(os.Environ(), "HOME="+f.home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_TEST_QUEUE=off", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
+	cmd.Env = append(envWithoutGit(), "HOME="+f.home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_TEST_QUEUE=off", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
 	out, err := cmd.CombinedOutput()
 	code := 0
 	if err != nil {

@@ -10,6 +10,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/gitx"
 )
 
 func TestReviewWaitBlockProcess(t *testing.T) {
@@ -20,7 +22,9 @@ func TestReviewWaitBlockProcess(t *testing.T) {
 
 func TestReviewWaitBlockDaemonRoute(t *testing.T) {
 	repo := t.TempDir()
-	if out, err := exec.Command("git", "init", "-q", repo).CombinedOutput(); err != nil {
+	initRepo := exec.Command("git", "init", "-q", repo)
+	initRepo.Dir, initRepo.Env = repo, gitx.ChildEnv()
+	if out, err := initRepo.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v %s", err, out)
 	}
 	dir := filepath.Join(repo, ".code-forge", "runs")
@@ -72,7 +76,7 @@ func TestReviewWaitBlockDaemonRoute(t *testing.T) {
 	cmd := exec.Command(os.Args[0], "-test.run=^TestReviewWaitBlockProcess$")
 	cmd.Dir = repo
 	for _, e := range os.Environ() {
-		if !strings.HasPrefix(e, "HOME=") && !strings.HasPrefix(e, "CODE_FORGE_NATIVE=") && !strings.HasPrefix(e, "CODE_FORGE_NODE=") {
+		if !strings.HasPrefix(e, "HOME=") && !strings.HasPrefix(e, "GIT_") && !strings.HasPrefix(e, "CODE_FORGE_NATIVE=") && !strings.HasPrefix(e, "CODE_FORGE_NODE=") {
 			cmd.Env = append(cmd.Env, e)
 		}
 	}

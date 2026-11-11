@@ -9,6 +9,8 @@ import (
 	"reflect"
 	"strings"
 	"testing"
+
+	"github.com/ricardov03/code-forge/native/gitx"
 )
 
 // Exercise the public router in a fresh process; a handover must never replace
@@ -47,7 +49,7 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 				t.Helper()
 				cmd := exec.Command("git", args...)
 				cmd.Dir = repo
-				cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+				cmd.Env = gitx.ChildEnv()
 				if out, err := cmd.CombinedOutput(); err != nil {
 					t.Fatalf("git %v: %v: %s", args, err, out)
 				}
@@ -99,7 +101,7 @@ func TestGatesChangedTextOnlyAffectedGates(t *testing.T) {
 				encoded, _ := json.Marshal(args)
 				cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 				cmd.Dir = repo
-				cmd.Env = append(os.Environ(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
+				cmd.Env = append(envWithoutGit(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
 				out, err := cmd.CombinedOutput()
 				if err != nil {
 					t.Fatalf("gates run: %v: %s", err, out)
@@ -192,7 +194,7 @@ func TestGatesNativeRoute(t *testing.T) {
 		encoded, _ := json.Marshal(args)
 		cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
+		cmd.Env = append(envWithoutGit(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
 		out, err := cmd.CombinedOutput()
 		code := 0
 		if err != nil {
@@ -261,7 +263,7 @@ func TestGatesRunExpandsTestClasses(t *testing.T) {
 		encoded, _ := json.Marshal([]string{"gates", "run", "--run", "fixture", "--block", tc.block})
 		cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 		cmd.Dir = repo
-		cmd.Env = append(os.Environ(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
+		cmd.Env = append(envWithoutGit(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("%s: %v: %s", tc.block, err, out)
