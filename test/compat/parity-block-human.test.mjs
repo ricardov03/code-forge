@@ -52,7 +52,8 @@ while fds:
         elif mutation == 'change-close-state':
             filename = os.path.join(os.environ['HOME'], '.code-forge/runs/r-human.json')
             with open(filename) as stream: record = json.load(stream)
-            record['blocks']['B1']['acceptance_revision'] = 'changed-during-confirmation'
+            # B380 closes acceptance revisions natively; a pending approval still hands over.
+            record['autopilot_approvals'] = [{'status': 'active', 'until': '2000-01-01T00:00:00.000Z'}]
             with open(filename, 'w') as stream: json.dump(record, stream)
         for key in bytes.fromhex(os.environ['HUMAN_KEYS']).split(b'|'):
             os.write(master, key)
@@ -145,6 +146,18 @@ test('human close, decide and human-pass have terminal, state, signed-row and ze
     await parity(await fixture(kind), argv(kind), '79', 0, { HUMAN_COLUMNS: kind === 'close' ? '80' : '240', NO_COLOR: undefined, FORCE_COLOR: '1' });
   }
   await parity(await fixture('human-pass'), ['block', 'human-pass', 'B1', '--run', RUN, '--note', 'checked'], '79', 0, { TERM: 'linux' });
+});
+
+test('B380: human-pass --help and -h print Node usage natively with no hand-over', async () => {
+  for (const flags of [['--help'], ['-h'], ['B1', '--run', RUN, '--help'], ['B1', '--note', 'x', '-h']]) {
+    const f = await fixture('human-pass'), args = ['block', 'human-pass', ...flags];
+    await parity(f, args, undefined, 0);
+    const native = launch(BIN, args, f, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' });
+    assert.equal(native.status, 0, `${flags}: usage exits 0 with Node unavailable: ${native.stderr}`);
+    assert.match(native.stdout, /block human-pass <id> --run <r> --note <text>/, `${flags}: human-pass usage on stdout`);
+    const report = launch(BIN, ['logs', 'handovers', '--json'], f);
+    assert.deepEqual(JSON.parse(report.stdout), { total: 0, rows: [] }, `${flags}: exactly zero handovers`);
+  }
 });
 
 async function assertNoClose(f) {

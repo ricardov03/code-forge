@@ -79,6 +79,13 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 	}
 	usage := func(text string) int { return fail(&state.Error{Code: "usage", Message: text}) }
 	for _, arg := range args {
+		// Node prints the verb usage for an exact --help or -h anywhere in args.
+		if arg == "--help" || arg == "-h" {
+			fmt.Fprint(stdout, blockVerbUsage("close", "<id> --run <r> [--worker-pid <pid>] [--transcript <file>] [--report <file>] [--no-require-reviews] [--remove-worktree] [--auto-claim] [--decide]"))
+			return 0
+		}
+	}
+	for _, arg := range args {
 		name, _, _ := strings.Cut(arg, "=")
 		if slices.Contains([]string{"--help", "-h"}, name) {
 			return fallback(handoverFlagReason("close", name, hCloseUnsupportedFlag))
@@ -173,9 +180,6 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 	}
 	if entry.Get("kind") == "light" {
 		return fallback(hCloseLight)
-	}
-	if entry.Get("acceptance_revision") != nil {
-		return fallback(hCloseAcceptanceRevision)
 	}
 	if checks := entry.Get("human_checks"); checks != nil {
 		values, ok := checks.([]any)
@@ -368,6 +372,17 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 			closeRows = append(closeRows, ledger.Object{{Key: "event", Value: "coder.tests"}, {Key: "block", Value: id}, {Key: "command", Value: command}, {Key: "exit", Value: 0}})
 		}
 	}
+	// Node's acknowledgement check runs after coder-tests and before the test gate.
+	acked, ackKnown := gatecheck.AgentWaiversAcked(blockMap(blockMap(cfg["review"])["agent_waivers"])["require_ack"] == true, run, id, rows, key)
+	if !ackKnown {
+		return fallback(hCloseGatesFormat)
+	}
+	if !acked {
+		if deciding && !confirmed {
+			return fallback(hCloseDecide)
+		}
+		checks = append(checks, closeCheck{"agent-waivers-not-acked", []gatecheck.Blocker{{Code: "agent-waivers-not-acked", Detail: "agent-waivers-not-acked"}}})
+	}
 	if blockMap(cfg["gates"])["test"] != nil {
 		check, supported := closeTestGate(top, base, run, id, entry, rows)
 		if !supported {
@@ -386,7 +401,16 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 	if deciding && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
 		return fallback(hCloseDecide)
 	}
-	gate := gatecheck.CheckTranscript(run, id, files, rows, key, highPaths, unowned, noChanges, hits)
+	gateInput := gatecheck.Input{Run: run, Block: id, Files: files, Rows: rows, Key: key, HighPaths: highPaths, Unowned: unowned, NoChanges: noChanges, Hits: hits, Transcript: transcript, ResultFiles: gatecheck.LoadResultFiles(mainTop, run, id, rows, key)}
+	if external != "" {
+		// Node judges an external reviewer's close with no review files; the
+		// files still prove the block changed something.
+		gateInput.Files, gateInput.ProofFiles = []gatecheck.File{}, files
+	}
+	gate := gatecheck.Evaluate(gateInput)
+	if gate.Unknown {
+		return fallback(hCloseGatesFormat)
+	}
 	var decisions []humanDecision
 	if deciding && !confirmed {
 		var supported bool
@@ -394,13 +418,11 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 		if !supported {
 			return fallback(hCloseDecide)
 		}
-		gate = gatecheck.CheckTranscript(run, id, files, rows, key, highPaths, unowned, noChanges, hits)
-	}
-	if external != "" {
-		gate.Blockers = slices.DeleteFunc(gate.Blockers, func(b gatecheck.Blocker) bool {
-			return b.Code == "unreviewed" || b.Code == "unsigned" || b.Code == "not_approved"
-		})
-		gate.Waived = []gatecheck.Waived{}
+		gateInput.Rows = rows
+		gate = gatecheck.Evaluate(gateInput)
+		if gate.Unknown {
+			return fallback(hCloseGatesFormat)
+		}
 	}
 	gateReason := gatecheck.Reason(gate.Blockers)
 	gateIndex := len(checks)
@@ -486,6 +508,10 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 			}
 			return code
 		}
+	}
+	audit, auditOK := closeAuditOf(id, rows, key, gate.Accepted, flags["json"] == true)
+	if !auditOK {
+		return fallback(hCloseGatesFormat)
 	}
 	// No deferred read may hand over past here. From the first append onward an
 	// error is reported directly, never retried through Node.
@@ -635,6 +661,9 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 				}
 				fmt.Fprintf(stdout, "block %s: %s reviewed_by_waiver (%s)\n", id, w.File, strings.Join(parts, "; "))
 			}
+			for _, line := range audit.text {
+				fmt.Fprint(stdout, line)
+			}
 		}
 	}
 	if result.Status == "awaiting_human_check" {
@@ -719,6 +748,9 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 			}
 			if len(lines) > 0 {
 				out.Set("reviewed", lines)
+			}
+			for _, item := range audit.json {
+				out.Set(item[0].(string), item[1])
 			}
 			if removedTree != nil {
 				out.Set("worktree", removedTree)
@@ -1274,6 +1306,8 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 					argv = append(argv, "--"+flag, value)
 				}
 			}
+		case "agent-waivers-not-acked":
+			argv = []string{"code-forge", "block", "ack-waivers", id, "--run", run}
 		case "git-failed":
 			argv = []string{"code-forge", "block", "rebase", id, "--run", run}
 		case "ledger.tamper":
@@ -1467,4 +1501,99 @@ func closeDoneRows(home, run, id string, record ledger.Object) ([]any, error) {
 		}
 	}
 	return ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), blockString(record.Get("project")))
+}
+
+// blockVerbUsage is Node's verbUsage for a block verb with no extra lines.
+func blockVerbUsage(sub, form string) string {
+	return "usage: code-forge block " + sub + " " + form + " [--json] [--help|-h]\n  --help, -h  Print this usage and exit without changing state.\n  --json      Print one JSON line on success instead of text.\n"
+}
+
+// closeAudit is Node's agent waiver, agent reopen and accepted hit report of a
+// close. ok is false when --json would print a value whose key order Go lost.
+type closeAudit struct {
+	text []string
+	json [][2]any
+}
+
+func closeScalar(v any) bool {
+	switch v.(type) {
+	case nil, string, float64, bool:
+		return true
+	}
+	return false
+}
+
+func closeAuditOf(id string, rows []gatecheck.Row, key []byte, accepted []gatecheck.AcceptedHit, jsonFlag bool) (closeAudit, bool) {
+	a := closeAudit{}
+	field := func(o *ledger.Object, r map[string]any, k string) bool {
+		v, has := r[k]
+		if has {
+			o.Set(k, v)
+		}
+		return !has || closeScalar(v)
+	}
+	waivers := []any{}
+	for _, r := range gatecheck.AgentWaivers(rows, id, key) {
+		o := ledger.Object{}
+		for _, k := range []string{"file", "finding", "severity", "reason", "verdict"} {
+			if !field(&o, r, k) && jsonFlag {
+				return a, false
+			}
+		}
+		waivers = append(waivers, o)
+		_, hasFile := r["file"]
+		_, hasFinding := r["finding"]
+		_, hasReason := r["reason"]
+		_, hasVerdict := r["verdict"]
+		a.text = append(a.text, fmt.Sprintf("block %s: agent waiver %s %s reason: %s; verdict: %s\n", id, gatecheck.JSString(r["file"], hasFile), gatecheck.JSString(r["finding"], hasFinding), gatecheck.JSString(r["reason"], hasReason), gatecheck.JSString(r["verdict"], hasVerdict)))
+	}
+	reopens := []any{}
+	for _, r := range gatecheck.AgentReopens(rows, id, key) {
+		o := ledger.Object{}
+		for _, k := range []string{"file", "reason"} {
+			if !field(&o, r, k) && jsonFlag {
+				return a, false
+			}
+		}
+		verdict, hasVerdict := r["verdict"]
+		said, saidOK := any(nil), false
+		if m, isMap := verdict.(map[string]any); isMap {
+			said, saidOK = m["verdict"]
+			// Node writes {verdict, reason}; any other shape keeps its order with Node.
+			ordered := ledger.Object{}
+			for k, v := range m {
+				if (k != "verdict" && k != "reason") || !closeScalar(v) {
+					if jsonFlag {
+						return a, false
+					}
+				}
+			}
+			for _, k := range []string{"verdict", "reason"} {
+				if v, has := m[k]; has {
+					ordered.Set(k, v)
+				}
+			}
+			o.Set("verdict", ordered)
+		} else if hasVerdict {
+			if !closeScalar(verdict) && jsonFlag {
+				return a, false
+			}
+			o.Set("verdict", verdict)
+		}
+		reopens = append(reopens, o)
+		_, hasFile := r["file"]
+		_, hasReason := r["reason"]
+		a.text = append(a.text, fmt.Sprintf("agent reopen %s: %s (verdict: %s)\n", gatecheck.JSString(r["file"], hasFile), gatecheck.JSString(r["reason"], hasReason), gatecheck.JSString(said, saidOK)))
+	}
+	hits := []any{}
+	for _, h := range accepted {
+		hits = append(hits, ledger.Object{{Key: "rule", Value: h.Rule}, {Key: "line", Value: h.Line}, {Key: "reason", Value: h.Reason}})
+		a.text = append(a.text, fmt.Sprintf("accepted rule_break %s transcript line %d: %s (by: human)\n", h.Rule, h.Line, gatecheck.JSString(h.Reason, true)))
+	}
+	for _, item := range [][2]any{{"agent_waivers", waivers}, {"agent_reopens", reopens}, {"accepted_hits", hits}} {
+		if len(item[1].([]any)) > 0 {
+			a.json = append(a.json, item)
+		}
+	}
+	return a, true
 }

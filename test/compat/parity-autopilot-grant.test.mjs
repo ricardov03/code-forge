@@ -163,8 +163,8 @@ test('grant boundaries preserve refusals and unsupported shapes hand over withou
   const invalid = args('open', true);
   invalid[2] = 'B3';
   await parity(await fixture('run-ended', { badAcceptance: true }), invalid);
-  // B196 clearing remains with Node until the native review gate ports agent
-  // waiver evidence. An active grant must not make Go guess at a critical.
+  // B380: the native review gate reads B196 agent waiver evidence, so a critical
+  // cleared by an autopilot waiver closes in Go with Node's exact result.
   const critical = await fixture('active');
   const initial = (await readFile(ledgerFile(critical), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
   const signed = [
@@ -173,10 +173,16 @@ test('grant boundaries preserve refusals and unsupported shapes hand over withou
     { event: 'review.waived', block: 'B1', file: 'sample.mjs', finding: 'F1', severity: 'critical', by: 'agent', verdict: 'agree', autopilot: true, test: 'sample', reason: 'signed evidence' },
   ].map((r) => signRow({ run: RUN, ...r }, KEY));
   await writeFile(ledgerFile(critical), [...initial.filter((r) => r.event !== 'review.approved'), ...signed].map((r) => JSON.stringify(r)).join('\n') + '\n');
-  const beforeCritical = await Promise.all([readFile(recordFile(critical)), readFile(ledgerFile(critical))]);
-  assert.equal(launch(critical, args('close', true)).status, 127, 'unported critical waiver dialect hands over');
-  assert.deepEqual(await Promise.all([readFile(recordFile(critical)), readFile(ledgerFile(critical))]), beforeCritical, 'critical waiver handover changes zero state or ledger bytes');
-  await parity(critical, args('close', true), { CODE_FORGE_NODE: process.execPath });
+  await parity(critical, args('close', true));
+  const closed = launch(critical, args('close', true), { CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NATIVE: '1' });
+  assert.equal(closed.status, 0, `critical autopilot waiver closes natively without Node: ${closed.stderr}`);
+  const criticalRows = (await readFile(ledgerFile(critical), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
+  const { mac: _mac, ts: _ts, ...lastRow } = criticalRows.at(-1);
+  assert.deepEqual(lastRow, { run: RUN, event: 'block.close', block: 'B1', status: 'complete', tokens_source: null, cost_source: null }, 'critical waiver close signs exactly Node\'s block.close row last');
+  assert.equal(verifyRow(criticalRows.at(-1), KEY).ok, true, 'block.close row verifies');
+  const criticalLog = launch(critical, ['logs', 'handovers', '--json']);
+  assert.equal(criticalLog.status, 0, criticalLog.stderr);
+  assert.deepEqual(JSON.parse(criticalLog.stdout), { total: 0, rows: [] }, 'critical waiver close: zero Node handovers');
   for (const verb of ['claim', 'stop', 'open', 'close']) {
     const f = await fixture('active', { unknown: true });
     const before = await Promise.all([readFile(recordFile(f)), readFile(ledgerFile(f))]);

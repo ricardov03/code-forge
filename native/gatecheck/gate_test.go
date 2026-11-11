@@ -1,6 +1,9 @@
 package gatecheck
 
 import (
+	"crypto/sha256"
+	"encoding/hex"
+	"maps"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -206,5 +209,208 @@ func TestB365NoChangeOnlyIsNoWork(t *testing.T) {
 	work, blockers = gate(signAll(noChangeRow(hash), refusal))
 	if !slices.Equal(work, []string{"src/a.mjs"}) || !slices.Equal(blockers, []string{"unreviewed src/a.mjs", "not_approved src/a.mjs F1"}) {
 		t.Fatalf("with a refusal: work = %v, blockers = %v; want [src/a.mjs], [unreviewed src/a.mjs, not_approved src/a.mjs F1]", work, blockers)
+	}
+}
+
+// b380Rows signs raw rows of run r1 block B1 in order.
+func b380Rows(t *testing.T, key []byte, raw ...Row) []Row {
+	t.Helper()
+	rows := []Row{}
+	for _, r := range raw {
+		r["run"], r["block"] = "r1", "B1"
+		signed, err := sign.SignRow(r, key)
+		if err != nil {
+			t.Fatal(err)
+		}
+		rows = append(rows, signed)
+	}
+	return rows
+}
+
+func b380Codes(res Result) []string {
+	codes := []string{}
+	for _, b := range res.Blockers {
+		codes = append(codes, strings.TrimSpace(b.Code+" "+b.File+" "+b.Finding))
+	}
+	return codes
+}
+
+func b380Eval(rows []Row, key []byte, hits []Blocker, transcript string) Result {
+	return Evaluate(Input{Run: "r1", Block: "B1", Files: []File{{File: "a.mjs", Hash: "h2"}}, Rows: rows, Key: key,
+		HighPaths: []any{}, Unowned: []string{}, Hits: hits, Transcript: transcript})
+}
+
+// B380: localeLess is String.prototype.localeCompare < 0 (values measured with Node 24).
+func TestB380LocaleLessMatchesNode(t *testing.T) {
+	for _, c := range []struct {
+		a, b string
+		less bool
+	}{
+		{"a", "B", true}, {"B", "a", false}, {"a", "A", true}, {"A", "a", false}, {"_", "a", true}, {"a", "_", false},
+		{"-", "_", false}, {`["b"]`, `["a","z"]`, false}, {`["a",null]`, `["a","b"]`, false}, {"abc", "ab", false},
+		{"F1", "f1", false}, {"1", "a", true}, {"x.mjs", "x-mjs", false}, {"[", `"`, false}, {"Z", "z", false}, {"a b", "ab", true},
+	} {
+		less, ok := localeLess(c.a, c.b)
+		if !ok || less != c.less {
+			t.Errorf("localeLess(%q, %q) = %v, %v; Node says %v", c.a, c.b, less, ok, c.less)
+		}
+	}
+	if _, ok := localeLess("café", "cafe"); ok {
+		t.Error("non-ASCII text must be unknown, not guessed")
+	}
+}
+
+// B380: jsDateParse equals Date.parse on the exact ISO subset and refuses to guess elsewhere.
+func TestB380JSDateParseMatchesNode(t *testing.T) {
+	for _, c := range []struct {
+		in string
+		ms float64
+	}{
+		{"2000-01-01T00:00:00.000Z", 946684800000}, {"2000-01-01T00:00:00+01:00", 946681200000},
+		{"2000-01-01", 946684800000}, {"2026-11-10T08:05:59.5Z", 1794297959500},
+	} {
+		ms, ok, known := jsDateParse(c.in, true)
+		if !ok || !known || ms != c.ms {
+			t.Errorf("jsDateParse(%q) = %v %v %v; Node says %v", c.in, ms, ok, known, c.ms)
+		}
+	}
+	for _, in := range []string{"Nov 10 2026", "2000-02-30", "2000-01-01T00:00:00+24:00"} {
+		if _, _, known := jsDateParse(in, true); known {
+			t.Errorf("jsDateParse(%q) must be unknown", in)
+		}
+	}
+	if _, ok, known := jsDateParse(nil, true); ok || !known {
+		t.Error("null is NaN in V8")
+	}
+}
+
+// B380: an agreeing agent waiver of a warning passes the gate until a human unwaives it,
+// and require_ack needs the signed digest of the counted waivers.
+func TestB380AgentWaiverUnwaiveAndAck(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	base := []Row{
+		{"event": "review.round", "file": "a.mjs", "content_hash": "h2", "open_after": 2},
+		{"event": "review.result", "file": "a.mjs", "content_hash": "h2", "status": "reviewed", "approved": false, "open": []any{map[string]any{"id": "F1", "severity": "warning"}, map[string]any{"id": "F2", "severity": "warning"}}},
+		{"event": "review.waived", "file": "a.mjs", "finding": "F2", "severity": "warning", "verdict": "agree", "by": "agent", "reason": "style"},
+		{"event": "review.waived", "file": "a.mjs", "finding": "F1", "severity": "warning", "verdict": "agree", "by": "agent", "reason": "style"},
+	}
+	rows := b380Rows(t, key, base...)
+	res := b380Eval(rows, key, nil, "")
+	if got := b380Codes(res); len(got) != 0 || res.Unknown || len(res.Waived) != 1 {
+		t.Fatalf("agent-waived file passes as reviewed_by_waiver: %v %+v", got, res)
+	}
+	if got := len(AgentWaivers(rows, "B1", key)); got != 2 {
+		t.Fatalf("counted agent waivers = %d, want 2", got)
+	}
+	if acked, known := AgentWaiversAcked(false, "r1", "B1", rows, key); !acked || !known {
+		t.Fatal("no require_ack: acked")
+	}
+	if acked, known := AgentWaiversAcked(true, "r1", "B1", rows, key); acked || !known {
+		t.Fatal("require_ack without a digest row is not acked")
+	}
+	// Node sorts [file, finding, mac] by the localeCompare of their JSON text: F1 before F2.
+	set := []any{}
+	for _, r := range []Row{rows[3], rows[2]} {
+		set = append(set, []any{r["file"], r["finding"], r["mac"]})
+	}
+	data, err := ledger.Stringify(set, false)
+	if err != nil {
+		t.Fatal(err)
+	}
+	sum := sha256.Sum256(data)
+	acked := append(slices.Clone(rows), b380Rows(t, key, Row{"event": "agent_waivers.acked", "digest": hex.EncodeToString(sum[:]), "by": "human"})...)
+	if ok, known := AgentWaiversAcked(true, "r1", "B1", acked, key); !ok || !known {
+		t.Fatal("the signed human digest row acknowledges the waivers")
+	}
+	wrong := append(slices.Clone(rows), b380Rows(t, key, Row{"event": "agent_waivers.acked", "digest": strings.Repeat("0", 64), "by": "human"})...)
+	if ok, _ := AgentWaiversAcked(true, "r1", "B1", wrong, key); ok {
+		t.Fatal("a stale digest does not acknowledge")
+	}
+	unwaived := append(slices.Clone(rows), b380Rows(t, key, Row{"event": "review.unwaived", "file": "a.mjs", "finding": "F1", "by": "human", "reason": "needs a fix"})...)
+	if got := b380Codes(b380Eval(unwaived, key, nil, "")); !slices.Contains(got, "not_approved a.mjs F1") {
+		t.Fatalf("unwaived finding refuses again: %v", got)
+	}
+	if got := len(AgentWaivers(unwaived, "B1", key)); got != 1 {
+		t.Fatalf("unwaived waiver is no longer counted: %d", got)
+	}
+	foreign := []Row{}
+	for _, r := range base {
+		c := maps.Clone(r)
+		c["file"] = "café.mjs"
+		foreign = append(foreign, c)
+	}
+	foreign = append(foreign, Row{"event": "agent_waivers.acked", "digest": strings.Repeat("0", 64), "by": "human"})
+	if _, known := AgentWaiversAcked(true, "r1", "B1", b380Rows(t, key, foreign...), key); known {
+		t.Fatal("a digest order that needs non-ASCII collation is unknown, so the caller hands over")
+	}
+}
+
+// B380: a signed human rule_break acceptance of the exact transcript line clears that hit.
+func TestB380AcceptedHitClearsRuleBreak(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	transcript := "git clean -fd\n"
+	hits, ok := Transcript(transcript)
+	if !ok || len(hits) != 1 {
+		t.Fatalf("one transcript hit: %v %v", hits, ok)
+	}
+	approved := b380Rows(t, key, Row{"event": "review.approved", "file": "a.mjs", "content_hash": "h2"})
+	if got := b380Codes(b380Eval(approved, key, hits, transcript)); !slices.Contains(got, "rule_break") {
+		t.Fatalf("unaccepted hit refuses: %v", got)
+	}
+	sum := sha256.Sum256([]byte("git clean -fd"))
+	rows := append(slices.Clone(approved), b380Rows(t, key, Row{"event": "rule_break.accepted", "rule": "git-clean", "line": 1, "line_sha256": hex.EncodeToString(sum[:]), "reason": "scratch dir", "by": "human"})...)
+	res := b380Eval(rows, key, hits, transcript)
+	if got := b380Codes(res); len(got) != 0 {
+		t.Fatalf("accepted hit passes: %v", got)
+	}
+	if len(res.Accepted) != 1 || res.Accepted[0].Rule != "git-clean" || res.Accepted[0].Line != 1 || res.Accepted[0].Reason != "scratch dir" {
+		t.Fatalf("accepted hit is reported: %+v", res.Accepted)
+	}
+}
+
+// B380: review caps, agent reopens and agent waivers give Node's verdicts. The
+// expected values were measured with Node's checkBlockReviews on the same rows.
+func TestB380CapReopenAndWaiverMatchNode(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	capRow := func(h string) Row {
+		return Row{"event": "review.cap", "file": "a.mjs", "content_hash": h, "open": []any{"F1"}}
+	}
+	approved := func() Row { return Row{"event": "review.approved", "file": "a.mjs", "content_hash": "h2"} }
+	reopen := func(v string) Row {
+		return Row{"event": "review.reopened", "file": "a.mjs", "from": "stopped", "from_hash": "h1", "to_hash": "h2", "reason": "fixed", "by": "agent", "verdict": map[string]any{"verdict": v, "reason": "x"}}
+	}
+	result := func() Row {
+		return Row{"event": "review.result", "file": "a.mjs", "content_hash": "h2", "status": "reviewed", "approved": false, "open": []any{map[string]any{"id": "F1", "severity": "warning"}}}
+	}
+	waived := func() Row {
+		return Row{"event": "review.waived", "file": "a.mjs", "finding": "F1", "severity": "warning", "verdict": "agree", "by": "agent", "reason": "style"}
+	}
+	round := func() Row {
+		return Row{"event": "review.round", "file": "a.mjs", "content_hash": "h2", "open_after": 1}
+	}
+	for _, c := range []struct {
+		label  string
+		rows   []Row
+		codes  []string
+		waived int
+	}{
+		{"cap-h1+approved", []Row{capRow("h1"), approved()}, []string{}, 0},
+		{"cap-h2+approved", []Row{capRow("h2"), approved()}, []string{}, 0},
+		{"approved+cap-h2", []Row{approved(), capRow("h2")}, []string{"not_approved a.mjs F1"}, 0},
+		{"cap-h2+reopen+approved", []Row{capRow("h2"), reopen("agree"), approved()}, []string{}, 0},
+		{"cap-h1-alone", []Row{capRow("h1")}, []string{"unreviewed a.mjs", "review_cap a.mjs F1"}, 0},
+		{"result+waived", []Row{result(), waived()}, []string{"unreviewed a.mjs"}, 0},
+		{"round+result+waived", []Row{round(), result(), waived()}, []string{}, 1},
+		{"cap+agree+round+result+waived", []Row{capRow("h2"), reopen("agree"), round(), result(), waived()}, []string{}, 1},
+		{"cap+disagree+round+result+waived", []Row{capRow("h2"), reopen("disagree"), round(), result(), waived()}, []string{}, 1},
+	} {
+		res := b380Eval(b380Rows(t, key, c.rows...), key, nil, "")
+		if got := b380Codes(res); res.Unknown || !slices.Equal(got, c.codes) || len(res.Waived) != c.waived {
+			t.Errorf("%s: blockers %v waived %d unknown %v; Node: %v waived %d", c.label, got, len(res.Waived), res.Unknown, c.codes, c.waived)
+		}
+	}
+	rows := b380Rows(t, key, capRow("h2"), reopen("agree"), reopen("disagree"), approved())
+	if got := AgentReopens(rows, "B1", key); len(got) != 2 {
+		t.Fatalf("every verified agent reopen is reported: %v", got)
 	}
 }

@@ -24,6 +24,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - The package test suite (`npm test`, `test/helpers/run-suite.sh`) runs one test file per core when it holds the machine
   test slot (`CODE_FORGE_TEST_QUEUE_HELD` set by `gates run` and `code-forge queue run`), and keeps `max(1, cores/2)`
   outside a slot; an explicit `--test-concurrency` or `CODE_FORGE_TEST_CONCURRENCY` still wins (B376)
+- `block close` and `block ready` judge review caps, reopened and unwaived findings, agent and autopilot waivers, `review.agent_waivers.require_ack` (`agent-waivers-not-acked` until a signed human ack row), accepted rule hits, old result-file rows and an amended acceptance in Go, with the same verdict and output as Node. Close prints the agent waiver, agent reopen and accepted hit lines and the `agent_waivers`, `agent_reopens` and `accepted_hits` JSON keys only when they are not empty. `block close --help|-h` and `block human-pass --help|-h` print the usage in Go and exit 0. Rows or dates Go cannot read exactly like Node still hand over as `close-gates-format` (B380)
 
 ## [0.21.0] — 2026-11-09
 

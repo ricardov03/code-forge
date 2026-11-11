@@ -53,7 +53,8 @@ func humanDecisions(run, id, reason string, gate gatecheck.Result, rows []gatech
 	preview := append([]gatecheck.Row{}, rows...)
 	seen := map[string]bool{}
 	for _, b := range gate.Blockers {
-		if b.Code == "rule_break" || b.Code == "agent_waivers_not_acked" {
+		// Cap, autopilot and acknowledgement decisions keep Node's preview.
+		if b.Code == "rule_break" || b.Code == "review_cap" || b.Code == "autopilot_waiver_invalid" || b.Code == "agent-waivers-not-acked" {
 			return nil, nil, false
 		}
 		if b.Code != "not_approved" && b.Code != "late_unruled" {
@@ -172,7 +173,8 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 	usage := func(s string) int { return fail(&state.Error{Code: "usage", Message: s}) }
 	for _, arg := range args {
 		if arg == "--help" || arg == "-h" {
-			return fallback()
+			fmt.Fprint(stdout, blockVerbUsage("human-pass", "<id> --run <r> --note <text> [--proof <dir-or-file>]"))
+			return 0
 		}
 	}
 	flags, pos, message := blockFlags(args)

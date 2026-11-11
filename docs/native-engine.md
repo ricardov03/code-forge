@@ -39,8 +39,8 @@ locks and signed ledger rows as Node.
 | `review-file <file> --block <id>` | Enqueue, with `--fresh`, `--answers`, `--of` and `--rebase-check`, and a cached result that needs a fresh ticket. | State that Go cannot read or does not expect. |
 | `block claim`, `block stop` | Plain claim and stop, active autopilot grants, pending approvals and `hooks.on_block_end`. | State that Go cannot read or does not expect. |
 | `block open` | Open with or without `--level`, `--after`, `--after-outcome` and autopilot grants, including the worktree. | State that Go cannot read or does not expect. |
-| `block close` | Agent close, `--decide`, `--no-require-reviews`, `--auto-claim`, `--remove-worktree`, human close, external review, hooks and grants. | A light block, `--auto-claim` on a run with an autopilot record, and `--auto-claim` with `close.require_human` at a terminal. |
-| `block ready`, `block waive`, `block reopen`, `block human close`, `block human-pass` | These commands. | State that Go cannot read or does not expect. |
+| `block close` | Agent close, `--decide`, `--no-require-reviews`, `--auto-claim`, `--remove-worktree`, human close, external review, hooks and grants. The review gate also judges review caps, reopened and unwaived findings, agent and autopilot waivers, `review.agent_waivers.require_ack`, accepted rule hits, old result files and an amended acceptance in Go. Close prints the agent waiver, agent reopen and accepted hit lines and JSON keys. `--help` and `-h` print the usage. | A light block, `--auto-claim` on a run with an autopilot record, `--auto-claim` with `close.require_human` at a terminal, a `--help=value` spelling, and review rows or dates Go cannot read exactly like Node (for example a date that is not ISO, or a non-ASCII file name in an ack digest). |
+| `block ready`, `block waive`, `block reopen`, `block human close`, `block human-pass` | These commands. `block ready` uses the same review gate as `block close`. `block human-pass --help` and `-h` print the usage. | State that Go cannot read or does not expect. `waive --yes` and `reopen --yes` still run in Node. |
 | `context pack` | This command. | Other `context` subcommands and state that Go cannot read. |
 | `gates run` | Built-in and custom gates, `repeat_new_tests`, light blocks and flaky detection. A stop signal (SIGINT or SIGTERM) writes the same cancel rows. | A run with no `--run` and no `--block`, and other `gates` subcommands. |
 | `block land` | Plain land, `--merge` with the full merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | No compatible join daemon, unsupported state, a light block, or a run with `close.require_human` or an external reviewer. Read-only pre-checks finish before the first write. The B282 reason code names the step. |
@@ -108,6 +108,10 @@ Reason codes are fixed names. For example, `unrouted` means Go has no route.
 `close-auto-claim` and `enqueue-fresh` name cases that still run in Node.
 `land-step-handover:close` means the close step needs Node.
 Grants and end hooks supported by native close no longer cause a land hand-over.
+Since B380, `block close` and `block ready` no longer hand over for review caps,
+waivers, reopens, accepted hits, acks or an amended acceptance.
+`close-gates-format` now means a review row or date Go cannot read exactly like Node.
+`close-help` now means only a `--help=value` or `-h=value` spelling.
 `land-merge-gate` is reserved for a full-suite gate configuration Go cannot run.
 The full code list is the `handoverReasons` table in
 [`handover_log.go`](../native/cmd/code-forge-native/handover_log.go).

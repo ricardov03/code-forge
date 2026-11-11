@@ -14,6 +14,7 @@ import { processStartTime } from '../../src/state/run.mjs';
 import { macFor, signRow, verifyRow } from '../../src/state/signer.mjs';
 import { newFileState } from '../../src/review/fixloop.mjs';
 import { saveState } from '../../src/worker/review-state.mjs';
+import { agentWaiverDigest } from '../../src/review/agent-waiver.mjs';
 import { linkGoBinary } from '../helpers/go-binary.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -86,7 +87,28 @@ async function fixture(kind = 'clean', config = {}) {
       rows.push({ event: 'review.approved', block: 'B1', file: 'answer.mjs', content_hash: hash(answering) });
       rows.push({ event: 'review.answered', block: 'B1', file: 'sample.mjs', finding: 'F1', content_hash: hash(current), by_file: 'answer.mjs', by_hash: hash(answering) });
     }
+  } else if (['agent-waiver', 'acked'].includes(kind)) {
+    // B380: the agent judge agreed with waiving each warning; no human row.
+    const ids = kind === 'acked' ? ['F2', 'F1'] : ['F1'];
+    rows.push({ event: 'review.round', block: 'B1', file: 'sample.mjs', content_hash: hash(current), open_after: ids.length });
+    rows.push({ event: 'review.result', block: 'B1', file: 'sample.mjs', content_hash: hash(current), approved: false, status: 'reviewed', open: ids.map((id) => ({ id, severity: 'warning' })) });
+    for (const id of ids) rows.push({ severity: 'warning', verdict: 'agree', judge_reason: `judge agrees on ${id}`, event: 'review.waived', block: 'B1', file: 'sample.mjs', finding: id, reason: `style only ${id}`, by: 'agent' });
+  } else if (kind === 'agent-reopen') {
+    // B380: a capped review at old bytes, reopened by an agreeing agent judge, then approved.
+    rows.push({ event: 'review.cap', block: 'B1', file: 'sample.mjs', content_hash: hash('old'), open: ['F1'] });
+    rows.push({ event: 'review.reopened', block: 'B1', file: 'sample.mjs', from: 'stopped', stop_reason: 'cap', at_seq: 0, from_hash: hash('old'), to_hash: hash(current), reason: 'fixed the capped finding', by: 'agent', verdict: { verdict: 'agree', reason: 'the fix holds' } });
+    rows.push({ event: 'review.approved', block: 'B1', file: 'sample.mjs', content_hash: hash(current) });
+  } else if (kind === 'amended') {
+    rows.push({ event: 'review.approved', block: 'B1', file: 'sample.mjs', content_hash: hash(current) });
+    rows.push({ event: 'block.acceptance_amended', block: 'B1', clauses: 2, by: 'human' });
+  } else if (kind === 'amended-approved') {
+    rows.push({ event: 'block.acceptance_amended', block: 'B1', clauses: 2, by: 'human' });
+    rows.push({ event: 'review.approved', block: 'B1', file: 'sample.mjs', content_hash: hash(current) });
   } else if (kind !== 'stopped') rows.push({ event: 'review.approved', block: 'B1', file: 'sample.mjs', content_hash: hash(current) });
+  if (kind.startsWith('amended')) record.blocks.B1.acceptance_revision = '00000000-0000-4000-8000-000000000380';
+  if (kind === 'accepted-hit') {
+    for (const line of [1, 2]) rows.push({ event: 'rule_break.accepted', block: 'B1', rule: 'git-clean', line, line_sha256: hash('git clean -fd'), reason: 'owner cleaned a scratch dir', by: 'human' });
+  }
   if (kind === 'reverted') await writeFile(path.join(f.repo, 'sample.mjs'), 'export const value = 1;\n');
   if (kind === 'unowned') await writeFile(path.join(f.repo, 'outsider.mjs'), 'unowned\n');
   if (kind === 'down') delete record.worker;
@@ -106,7 +128,16 @@ async function fixture(kind = 'clean', config = {}) {
   const savedHome = process.env.HOME;
   try {
     process.env.HOME = f.home;
-    for (const row of rows) await appendRow(signRow({ run: RUN, ...row }, KEY), { slug: SLUG });
+    const signed = [];
+    for (const row of rows) {
+      const r = signRow({ run: RUN, ...row }, KEY);
+      signed.push(r);
+      await appendRow(r, { slug: SLUG });
+    }
+    if (kind === 'acked') {
+      const digest = agentWaiverDigest(signed.filter((r) => r.event === 'review.waived' && r.by === 'agent'));
+      await appendRow(signRow({ run: RUN, event: 'agent_waivers.acked', block: 'B1', digest, by: 'human' }, KEY), { slug: SLUG });
+    }
     if (kind === 'stopped') {
       const state = newFileState({ file: 'sample.mjs', level: 'L2' });
       state.status = 'stopped'; state.reviewed_content = 'old';
@@ -122,7 +153,7 @@ async function fixture(kind = 'clean', config = {}) {
   if (kind !== 'missing-transcript') {
     const logs = path.join(f.repo, '.code-forge/runs', RUN);
     await mkdir(logs, { recursive: true });
-    await writeFile(path.join(logs, 'B1.log'), kind === 'transcript-hit' ? 'git clean -fd\ngit clean -fd\n' : 'Completed the requested implementation.\n');
+    await writeFile(path.join(logs, 'B1.log'), ['transcript-hit', 'accepted-hit'].includes(kind) ? 'git clean -fd\ngit clean -fd\n' : 'Completed the requested implementation.\n');
   }
   return f;
 }
@@ -187,6 +218,50 @@ test('plain agent close has native speed and byte parity for the complete close 
   await writeFile(reportFile, 'TESTS node --test exit=0\n===BLOCK B1 COMPLETE===\n');
   const credit = await runParity([...args, '--report', reportFile, '--json'], { fixture: report, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
   assert.deepEqual(credit.diffs, [], 'B270 signed ticket credit and coder.tests publication have zero diffs');
+});
+
+test('B380: agent waivers, agent reopens, accepted hits, require_ack and amended acceptance close and preview natively with Node parity', async () => {
+  const ack = { review: { agent_waivers: { require_ack: true } } };
+  /** @type {Array<[string, Record<string, any>, number]>} */
+  const cases = [
+    ['agent-waiver', {}, 0], ['agent-reopen', {}, 0], ['accepted-hit', {}, 0],
+    ['agent-waiver', ack, 1], ['acked', ack, 0], ['amended', {}, 1], ['amended-approved', {}, 0],
+  ];
+  for (const [kind, config, expected] of cases) {
+    const label = `${kind} ${JSON.stringify(config)}`;
+    const f = await fixture(kind, config);
+    const ready = await runParity(['block', 'ready', 'B1', '--run', RUN, '--json'], { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(ready.diffs, [], `${label}: block ready has zero diffs`);
+    const readyDirect = await launch(f, ['block', 'ready', 'B1', '--run', RUN, '--json']);
+    assert.equal(readyDirect.code, expected, `${label}: block ready verdict with no Node: ${readyDirect.stderr}`);
+    for (const json of [false, true]) {
+      const result = await runParity([...args, ...(json ? ['--json'] : [])], { fixture: f, goCommand: BINARY, env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+      assert.deepEqual(result.diffs, [], `${label}, json=${json}: zero exit, stdout, stderr, signed row, record and done-file diffs`);
+    }
+    const text = await launch(await fixture(kind, config), args);
+    assert.equal(text.code, expected, `${label}: native close outcome with no Node: ${text.stderr}`);
+    const direct = await launch(f, [...args, '--json']);
+    assert.equal(direct.code, expected, `${label}: native --json close outcome with no Node: ${direct.stderr}`);
+    const out = JSON.parse(direct.stdout);
+    if (kind === 'agent-waiver' && expected === 0) {
+      assert.deepEqual(out.agent_waivers, [{ file: 'sample.mjs', finding: 'F1', severity: 'warning', reason: 'style only F1', verdict: 'agree' }]);
+      assert.match(text.stdout, /^block B1: agent waiver sample\.mjs F1 reason: style only F1; verdict: agree$/m);
+    }
+    if (kind === 'agent-reopen') {
+      assert.deepEqual(out.agent_reopens, [{ file: 'sample.mjs', reason: 'fixed the capped finding', verdict: { verdict: 'agree', reason: 'the fix holds' } }]);
+      assert.match(text.stdout, /^agent reopen sample\.mjs: fixed the capped finding \(verdict: agree\)$/m);
+    }
+    if (kind === 'accepted-hit') {
+      assert.deepEqual(out.accepted_hits, [1, 2].map((line) => ({ rule: 'git-clean', line, reason: 'owner cleaned a scratch dir' })));
+      assert.match(text.stdout, /^accepted rule_break git-clean transcript line 2: owner cleaned a scratch dir \(by: human\)$/m);
+    }
+    if (kind === 'agent-waiver' && expected === 1) {
+      assert.deepEqual(out.blockers.map((b) => [b.code, b.fix]), [['agent-waivers-not-acked', `code-forge block ack-waivers B1 --run ${RUN}`]]);
+    }
+    if (kind === 'acked') assert.deepEqual(out.agent_waivers.map((w) => w.finding), ['F2', 'F1'], 'audit keeps ledger order');
+    if (kind === 'amended') assert.match(out.blockers[0].detail, /\(acceptance amended\)/);
+    if (expected === 0 && !['agent-waiver', 'acked'].includes(kind)) assert.equal('agent_waivers' in out, false, `${label}: no empty agent_waivers key`);
+  }
 });
 
 test('report safety, coder.tests and review tickets use the same snapshot despite atomic replacement', async () => {
