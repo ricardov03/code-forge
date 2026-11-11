@@ -170,3 +170,67 @@ func TestGraphInputs(t *testing.T) {
 		}
 	}
 }
+
+// B373b: the CLI router loads every src/cli/*.mjs by readdir, so a test that
+// spawns the entry (bin/code-forge.mjs) or the launcher (bin/code-forge) by
+// path depends on every verb module and on what each verb imports.
+func TestGraphDependentsCLIEntryCoversEveryVerb(t *testing.T) {
+	root, listed := graphFixture(t, map[string]string{
+		"bin/code-forge":         "#!/bin/sh\nexec node \"$0.mjs\" \"$@\"\n",
+		"bin/code-forge.mjs":     "import { readdir } from 'node:fs/promises';\nimport '../src/util/log.mjs';\n",
+		"src/util/log.mjs":       "export const log = 1;\n",
+		"src/util/fmt.mjs":       "export const fmt = 1;\n",
+		"src/cli/help.mjs":       "export const help = 1;\n",
+		"src/cli/block.mjs":      "import { fmt } from '../util/fmt.mjs';\n",
+		"src/cli/sub/deep.mjs":   "export const d = 1;\n",
+		"test/spawn.test.mjs":    "spawnSync(process.execPath, [path.join(REPO, 'bin/code-forge.mjs')]);\n",
+		"test/shell.test.mjs":    "execFileSync(path.join(REPO, \"../bin/code-forge\"), ['help']);\n",
+		"test/plain.test.mjs":    "import { log } from '../src/util/log.mjs';\n",
+		"test/unrelated.test.js": "const name = 'bin/code-forge-other.mjs';\n",
+	})
+	g := NewGraph(root, listed)
+	want := []string{"test/shell.test.mjs", "test/spawn.test.mjs"}
+	for _, changed := range []string{"src/cli/help.mjs", "src/util/fmt.mjs"} {
+		if got := g.Dependents([]string{changed}); !reflect.DeepEqual(got, want) {
+			t.Fatalf("Dependents(%s) = %v, want %v", changed, got, want)
+		}
+	}
+	// The entry's own imports reach the spawning tests and the importer.
+	if got, want := g.Dependents([]string{"src/util/log.mjs"}), []string{"test/plain.test.mjs", "test/shell.test.mjs", "test/spawn.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Dependents(src/util/log.mjs) = %v, want %v", got, want)
+	}
+	// Only direct src/cli/*.mjs files are verbs; a nested module is not loaded by readdir.
+	if got := g.Dependents([]string{"src/cli/sub/deep.mjs"}); len(got) != 0 {
+		t.Fatalf("Dependents(src/cli/sub/deep.mjs) = %v, want none", got)
+	}
+	// Without the entry there is no router, so no verb edge.
+	root, listed = graphFixture(t, map[string]string{
+		"src/cli/help.mjs":    "export const help = 1;\n",
+		"test/spawn.test.mjs": "spawnSync(process.execPath, ['bin/code-forge.mjs']);\n",
+	})
+	if got := NewGraph(root, listed).Dependents([]string{"src/cli/help.mjs"}); len(got) != 0 {
+		t.Fatalf("no entry: Dependents(src/cli/help.mjs) = %v, want none", got)
+	}
+}
+
+// B373b fact: on main 479a82e a change to src/cli/version.mjs (loaded only by
+// the router's readdir) selected 0 tests, so the gate skipped the CLI tests.
+func TestGraphDependentsRepositoryVerbSelectsCLITests(t *testing.T) {
+	root, err := filepath.Abs("../..")
+	if err != nil {
+		t.Fatal(err)
+	}
+	listed, err := List(root)
+	if err != nil {
+		t.Skipf("not a git checkout: %v", err)
+	}
+	g := NewGraph(root, listed)
+	for _, changed := range []string{"src/cli/help.mjs", "src/cli/version.mjs", "src/cli/doctor.mjs"} {
+		got := g.Dependents([]string{changed})
+		for _, want := range []string{"test/cli/verb-help.test.mjs", "test/docs-commands.test.mjs", "test/docs-verbs.test.mjs"} {
+			if !Has(got, want) {
+				t.Errorf("Dependents(%s) misses %s (got %d tests)", changed, want, len(got))
+			}
+		}
+	}
+}

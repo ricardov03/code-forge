@@ -169,6 +169,7 @@ func NewGraph(cwd string, listed []string) *Graph {
 			}
 		}
 	}
+	g.cliEdges(listed)
 	return g
 }
 
@@ -203,6 +204,46 @@ func (g *Graph) stopped(f string) bool {
 		}
 	}
 	return false
+}
+
+// CLIEntry is the Node CLI entry and CLILauncher the shell script that runs
+// it. The entry's router loads every src/cli/*.mjs by readdir, so no import
+// names those verb modules (B373b).
+const (
+	CLIEntry    = "bin/code-forge.mjs"
+	CLILauncher = "bin/code-forge"
+)
+
+// cliEdges adds the edges no import statement shows: the CLI entry depends on
+// every listed src/cli/*.mjs, and the launcher depends on the entry. A test
+// that names either path by text then reaches every verb module.
+func (g *Graph) cliEdges(listed []string) {
+	if !g.listed[CLIEntry] {
+		return
+	}
+	add := func(target, importer string) {
+		for _, f := range g.importers[target] {
+			if f == importer {
+				return
+			}
+		}
+		g.importers[target] = append(g.importers[target], importer)
+		// Dependents walks links (B427): the router loads the whole module.
+		if g.links[target] == nil {
+			g.links[target] = map[string]*link{}
+		}
+		if g.links[target][importer] == nil {
+			g.links[target][importer] = &link{all: true}
+		}
+	}
+	for _, f := range listed {
+		if path.Dir(f) == "src/cli" && path.Ext(f) == ".mjs" {
+			add(f, CLIEntry)
+		}
+	}
+	if g.listed[CLILauncher] {
+		add(CLIEntry, CLILauncher)
+	}
 }
 
 // graphJoin is the repository path a relative specifier in file names, without

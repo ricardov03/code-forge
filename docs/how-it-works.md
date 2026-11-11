@@ -106,8 +106,10 @@ duplicates:
    `import`/`export from`, literal `import()` and `require()`, `new URL('..', import.meta.url)`
    (a directory URL covers the files under it), and a file that names a path in the closure
    by its repository path (a test that spawns `scripts/s.mjs` reaches what that script
-   imports). An import of a deleted or renamed changed file still counts. The graph is narrow
-   (B427):
+   imports). An import of a deleted or renamed changed file still counts. The CLI entry
+   `bin/code-forge.mjs` counts as importing every `src/cli/*.mjs` (its router loads them by
+   readdir) and the launcher `bin/code-forge` as importing the entry, so a test that spawns
+   either reaches every verb module (B373c). The graph is narrow (B427):
    - comments make no edge: a path named in a comment or a JSDoc `import()` type is not read;
      a path named in a `src/` file is data, not an edge;
    - named imports are followed through re-export barrels (`export { a } from`,
