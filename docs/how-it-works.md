@@ -81,26 +81,54 @@ Rows carry `scope: changed`. Fallback rows also carry a reason:
 - `unpaired` uses the normal test scope when a changed source has no test pair.
 - `threshold` runs the full suite above `gates.full_suite_threshold_files` changed files.
 - `no_changes` uses the normal block scope when nothing is left to run.
-- `go_only` runs a fixed small scope for a block with no Node product file (B399b).
+- `go_only` and `import_graph` are the Go selection below (B399b, B404).
+
+The Go engine (`gates run --run <r> --block <id> --changed`) never runs the full suite and
+never hands `--changed` over to Node (B404). The test gate must take `{test_files}`. Go runs
+it once with, in this order and without duplicates:
+
+1. the block's `--tests` entries, its owned and changed tests, and the stem-paired tests of
+   its changed sources;
+2. for a change under `native/` or to `scripts/build-native.mjs`: `test/compat/go.test.mjs`
+   (it runs `go build`, `go vet` and `go test ./...`) and the compat tests named after the
+   changed Go files (see below);
+3. for a change to a native build input (a `native/` Go file other than `*_test.go`,
+   `native/go.mod`, `native/go.sum` or `scripts/build-native.mjs`): every other test that
+   builds or runs the native binary, found by its text (`code-forge-native`,
+   `cmd/code-forge-native`, `build-native.mjs`, `go-binary.mjs`) or by a `test/` helper it
+   imports (B330);
+4. every test that imports a changed file, directly or through other files: static
+   `import`/`export from`, literal `import()` and `require()`, `new URL('..', import.meta.url)`
+   (a directory URL covers the files under it), and a test that names the changed path;
+5. `test/compat/config-golden.test.mjs` for a change under `test/fixtures/`, `schema/`,
+   `scripts/compat-golden.mjs` or `src/config/` (B409).
+
+Tests of any language count, including the stem-paired tests of changed sources (Node's
+pairing: `FooTests.swift` for `Foo.swift`, `test_foo.py` for `foo.py`). A selected test that
+the test runner cannot take (a PHP test under `node`, for example) is dropped; it never widens
+the gate. When nothing is selected, the test gate is skipped and the command never
+starts. The result and `gate.done` carry `scope: related`, `test_count` and, on `gate.done`,
+`test_files`, with `reason: go_only` for a block with no Node product file and
+`reason: import_graph` otherwise. A text-only skip still wins.
 
 A block is Go-only when every owned path is under `native/`, `docs/`, `plans/` or
 `.github/`, is a runnable test file under `test/` (`*.test.*` or `*.spec.*`), is
 `CHANGELOG.md` or another `*.md` file, or is `scripts/build-native.mjs`. A Node product
 file is any path under `src/` or `bin/`, a `scripts/` `.mjs` file other than
-`scripts/build-native.mjs`, `package.json` or `package-lock.json`; one such file, or a test
-helper, fixture, directory or glob under `test/`, keeps the scope rules above. The test gate
-must take `{test_files}`. With `--changed`, Go then runs the test gate once with the block's
-`--tests` entries under `test/`, its owned runnable tests, `test/compat/go.test.mjs` (it runs
-`go test ./...`), and the compat tests named after the Go files the block owns. For
+`scripts/build-native.mjs`, `package.json` or `package-lock.json`.
+
+For the compat tests named after a Go file: for
 `native/cmd/code-forge-native/a_b_c.go` the names tried are `a-b-c`, then `a-b`, then `a`; the
 longest one that matches wins. A compat test `test/compat/[parity-]<name>.test.mjs` matches when
 `<name>` is that key or starts with key plus `-`. A file under `native/<package>/` tries the
 package name. So `status_direct.go` adds `parity-status-direct`, `status.go` adds
 `parity-status` and `parity-status-direct`, and `native/daemon/` adds `daemon`. A file with no
-match adds nothing. The gate result and `gate.done` carry `scope: related`, `reason: go_only`,
-`test_count` and, on `gate.done`, `test_files`. A text-only skip or a reused full run still wins.
-`block land` uses this scope for its changed gates; `block land --batch` keeps its own plan:
-a full fallback defers to the one batch merge gate (B398).
+match adds nothing.
+
+`code-forge gates run --run <r> --block <id> --full` is the only way to run the full suite
+locally: it runs the whole test command with no file list, and the gate carries `scope: full`
+and `reason: explicit`. `--full` cannot go with `--changed` (exit 2) and needs `--run` and
+`--block`. The full suite otherwise runs in CI.
 
 The orchestrator runs full gates before `block close` (D2).
 
@@ -158,11 +186,10 @@ not done yet credits nothing, and the check still says
 are still accepted. This credit only satisfies the report check; the review gate still decides
 whether the current content is approved.
 
-Block land gates use `{test_files}` to run impacted tests: changed tests, stem-paired
-tests and dependent tests, with the documented scope fallbacks above. The suite wrapper
-keeps its sandbox and both leak checks for scoped runs. The orchestrator runs `npm test`
-once per wave before push to check the full suite; plain `code-forge gates run` also
-keeps full scope when no run or block is given.
+Block land gates use `{test_files}` to run the Go selection above. The suite wrapper
+keeps its sandbox and both leak checks for scoped runs. The full suite runs in CI, or locally
+only with `gates run --run <r> --block <id> --full`; plain `code-forge gates run` with no run
+or block also keeps full scope.
 
 ### Block help
 
@@ -497,8 +524,14 @@ include a test gate that ran and passed. Partial, skipped, cancelled, timed-out 
 cannot authorize reuse. Old stamps that do not bind the exact tree cannot authorize it either.
 Reuse prints `merge gate: reused green full suite on tree <tree-id>` with a 12-character tree id.
 
-Otherwise, land runs the configured full gates through the shared gate runner without block
-scope or `--changed`. A passing run prints `merge gate: full suite passed (<n>s)`.
+Otherwise, land runs the configured gates in the trial with the Go selection above, taken from
+what the merge changed (`HEAD^1..HEAD` of the trial) and the block's tests and owned files; it
+never runs the full suite (B404). A passing run prints
+`merge gate: <n> selected test files passed (<reason>, <s>s)`; with nothing selected it prints
+`merge gate: no test selected (<reason>); test gate skipped`. A test command without
+`{test_files}` cannot be scoped: the merge gate runs it as configured, prints
+`merge gate: full suite passed (<s>s)`, and a merge with no test gate still refuses with
+`full suite unavailable: configure gates.test before merging`.
 A red suite or conflict stops at `merge-gate`. It names the first ten failing TAP tests
 (or gate diagnostics) or the conflict files, and prints a `next:` action.
 Land removes the temporary worktree on success or failure. It checks that both merge parents
@@ -510,17 +543,19 @@ It never forces or switches main's branch. Success ends with
 without changing the base branch, plus a hint that the merge gate runs only with `--merge`.
 
 `code-forge block land <id> <id>... --run <run>` lands several closed blocks as one batch, in the
-given order. Each block is rebased onto the trial merge of the blocks before it. A block whose
-changed gates are native-safe runs them as before (`gate.done`). A block whose changed scope needs
-the full-suite fallback (for example native files) runs no suite of its own: land writes a signed
-`gate.deferred` row with `scope: deferred` and `reason: merge-gate`. Then the merge gate runs the
-full suite once on the merged trial tree. When it fails, land tests trial prefixes to name the
-first failing block, lands only the blocks before it and prints `block <id> not landed (after
-<culprit>)` for each later block. When no block in the batch owns or changes a Node product file
-(`src/**`, `bin/**`, `scripts/**/*.mjs` except `scripts/build-native.mjs`, `package.json`,
-`package-lock.json`), the merge gate runs no suite, prints
-`merge gate: skipped full suite (go_only: no Node product file in the batch)` and every block
-lands. The signed `land.batch` row records `merge_gate_reason` (`go_only` or `node_product`).
+given order. Each block is rebased onto the trial merge of the blocks before it. Every block
+runs its own changed gates with the Go selection above (`gate.done`). Then the merge gate runs once
+on the merged trial tree with the selection for the union of the batch: the blocks' tests, owned
+files and every path the batch changed. It prints
+`merge gate: <n> selected test files (<reason>, <batch reason>)`, or
+`merge gate: no test selected (<batch reason>); test gate skipped` and every block lands; it never
+runs the full suite (B404). `--json` emits a `merge_gate` event. When the merge gate fails, land
+tests trial prefixes to name the first failing block, lands only the blocks before it and prints
+`block <id> not landed (after <culprit>)` for each later block. The batch reason is `go_only` when
+no block owns or changes a Node product file (`src/**`, `bin/**`, `scripts/**/*.mjs` except
+`scripts/build-native.mjs`, `package.json`, `package-lock.json`), else `node_product`; a `go_only`
+batch whose selection holds `test/compat/go.test.mjs` runs it (B407). The signed `land.batch` row
+records `merge_gate_reason`. A test command without `{test_files}` runs as configured here too.
 A merge refusal leaves the block closed; correct the checkout
 and use the displayed next command. `--json` emits one JSON line: `event: landed` or `closed`
 and the merge command, or `event: refused` with `step`, `reason` and `next`.

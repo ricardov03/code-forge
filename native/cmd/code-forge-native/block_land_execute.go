@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/daemonclient"
+	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
@@ -362,7 +363,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
 		started := time.Now()
-		failure := landMergeGate(home, run, id, main, tree.Path, workspace, branch, base)
+		failure := landMergeGate(home, run, id, main, tree.Path, workspace, branch, base, entry)
 		if failure.elapsed != nil {
 			mergeGateMs = *failure.elapsed
 		}
@@ -372,8 +373,13 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if failure.reusedTree != "" {
 			mergeGateTree = failure.reusedTree
 			fmt.Fprintf(print, "merge gate: reused green full suite on tree %.12s\n", mergeGateTree)
-		} else {
+		} else if failure.selected < 0 {
+			// A test command without {test_files} cannot be scoped.
 			fmt.Fprintf(print, "merge gate: full suite passed (%.1fs)\n", float64(time.Since(started).Milliseconds())/1000)
+		} else if failure.selected == 0 {
+			fmt.Fprintf(print, "merge gate: no test selected (%s); test gate skipped\n", failure.scopeReason)
+		} else {
+			fmt.Fprintf(print, "merge gate: %d selected test files passed (%s, %.1fs)\n", failure.selected, failure.scopeReason, float64(time.Since(started).Milliseconds())/1000)
 		}
 	} else {
 		fmt.Fprintln(stderr, "warning: merge gate skipped; merged full suite was not checked")
@@ -394,14 +400,19 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 }
 
 type landMergeResult struct {
-	reason     string
-	elapsed    *int64
-	reusedTree string
+	reason      string
+	elapsed     *int64
+	reusedTree  string
+	selected    int    // B404: test files the scoped merge gate ran; -1 unscoped
+	scopeReason string // import_graph or go_only
 }
 
-// The trial merge and full suite run in an isolated sibling worktree. Cleanup
-// finishes before the checked parent identities are compared or main is merged.
-func landMergeGate(home, run, id, main, treePath, workspace, branch, base string) (result landMergeResult) {
+// The trial merge and the merge gate run in an isolated sibling worktree.
+// Cleanup finishes before the checked parent identities are compared or main
+// is merged. B404: the gate runs the tests selected from what the merge
+// changed (landMergeScope), never the full suite; a green full suite already
+// recorded for the merged tree is still reused.
+func landMergeGate(home, run, id, main, treePath, workspace, branch, base string, entry ledger.Object) (result landMergeResult) {
 	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		result.reason = "cannot resolve merge parents"
@@ -464,8 +475,20 @@ func landMergeGate(home, run, id, main, treePath, workspace, branch, base string
 			result.reusedTree = mergedTree
 			return
 		}
-		fullArgs := []string{"run", "--cwd", filepath.Join(temporary, prefix)}
+		cwd := filepath.Join(temporary, prefix)
+		owned := gates.Strings(entry.Get("owned_files"))
+		scope, err := landMergeScope(cwd, "HEAD^1", "HEAD", gates.Strings(entry.Get("test_files")), owned, gatesAllGoOnly(owned))
+		if err != nil {
+			result.reason = err.Error()
+			return
+		}
+		result.selected, result.scopeReason = -1, scope.Reason
+		fullArgs := []string{"run", "--cwd", cwd}
 		options, _ := gatesParse(fullArgs)
+		if landMergeSelectable(cwd) {
+			options.scope = &scope
+			result.selected = len(scope.Files)
+		}
 		suite := landCapture(func(s *landStep) int {
 			code, safe := gatesNativeStep(fullArgs, options, s)
 			if !safe {
@@ -473,7 +496,7 @@ func landMergeGate(home, run, id, main, treePath, workspace, branch, base string
 			}
 			return code
 		}, nil)
-		result.reason = landSuiteFailure(home, run, id, suite)
+		result.reason = landMergeFailure(home, run, id, suite, result.selected)
 	}()
 	if result.reason != "" {
 		return
@@ -483,7 +506,7 @@ func landMergeGate(home, run, id, main, treePath, workspace, branch, base string
 	currentBranch, e3 := gitx.Run(main, "symbolic-ref", "-q", "HEAD")
 	currentStatus, e4 := gitx.Run(main, "status", "--porcelain", "--untracked-files=all")
 	if e1 != nil || e2 != nil || e3 != nil || e4 != nil || currentMain != mainHead || currentBlock != blockHead || strings.TrimSpace(currentBranch) != "refs/heads/"+base || currentStatus != "" {
-		result.reason = "merge parents or main checkout changed during the full suite; check the checkout and rerun the merge gate"
+		result.reason = "merge parents or main checkout changed during the merge gate; check the checkout and rerun the merge gate"
 	}
 	return
 }

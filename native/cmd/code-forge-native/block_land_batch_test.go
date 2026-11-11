@@ -36,10 +36,21 @@ func newLandBatchFixture(t *testing.T, bad int) *landBatchFixture {
 	f.git(f.repo, "config", "commit.gpgsign", "false")
 	f.write(f.repo, ".gitignore", ".code-forge/\n")
 	f.write(f.repo, "scoped.test.mjs", "// scoped fixture\n")
-	// Scoped checks and the full suite are counted independently. Every suite
-	// records main's tree too, so a failed trial cannot briefly reach main.
-	command := `if [ "$#" -gt 0 ]; then printf '%s\n' "$PWD" >> "$HOME/changed-calls"; exit 0; fi
-printf '%s\n' "$PWD" >> "$HOME/full-calls"
+	f.write(f.repo, gatesGoTest, "// go build, vet and test\n")
+	// Each block's import-graph dependent: it imports the file the block adds.
+	for i := 1; i <= 3; i++ {
+		f.write(f.repo, fmt.Sprintf("test/B%d.test.mjs", i), fmt.Sprintf("import '../src/B%d.mjs';\n", i))
+	}
+	// B404: every gate gets its selected test files. Calls are counted by
+	// where they run (block worktree or merge-gate trial); a call with no file
+	// is a full suite and must never happen. Only the merged trial sees the
+	// integration contract, and it records main's tree so a failed trial cannot
+	// briefly reach main.
+	command := `case "$PWD" in *.merge-gate-*) log=merge ;; *) log=changed ;; esac
+if [ "$#" -eq 0 ]; then printf '%s\n' "$PWD" >> "$HOME/full-calls"; fi
+printf '%s\n' "$PWD" >> "$HOME/$log-calls"
+printf '%s\n' "$*" >> "$HOME/$log-args"
+if [ "$log" = changed ]; then exit 0; fi
 if [ -f "$HOME/slow-full" ]; then sleep 30; fi
 git -C "$HOME/main-path" rev-parse HEAD >> "$HOME/observed-main"
 for id in B1 B2 B3; do
@@ -69,7 +80,7 @@ printf 'ok 1 - integration contract\n'`
 		if i == bad {
 			content = "bad\n"
 		}
-		// src/ is a Node product path, so the merge gate runs the full suite.
+		// src/ is a Node product path; the merge gate runs its selected tests (B404).
 		f.write(tree, "src/"+id+".mjs", content)
 		f.git(tree, "add", ".")
 		f.git(tree, "commit", "-qm", id)
@@ -143,6 +154,19 @@ func (f *landBatchFixture) lines(name string) []string {
 	return strings.Fields(string(data))
 }
 
+// argLines are the test-file arguments of each logged call, one line per call.
+func (f *landBatchFixture) argLines(name string) []string {
+	f.t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.home, name))
+	if os.IsNotExist(err) {
+		return nil
+	}
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	return strings.Split(strings.TrimSuffix(string(data), "\n"), "\n")
+}
+
 func (f *landBatchFixture) checkMain(ids []string) {
 	f.t.Helper()
 	commits := strings.Fields(f.git(f.repo, "rev-list", "--first-parent", "--reverse", f.base+"..main"))
@@ -177,11 +201,24 @@ func TestBlockLandBatchOrderedSuite(t *testing.T) {
 		t.Fatalf("batch exit=%d, want 0: %s", code, output)
 	}
 	f.checkMain(ids)
-	if calls := f.lines("full-calls"); len(calls) != 1 || !strings.Contains(calls[0], ".merge-gate-") {
-		t.Errorf("full suite calls=%v, want exactly one in the trial", calls)
+	if calls := f.lines("merge-calls"); len(calls) != 1 || !strings.Contains(calls[0], ".merge-gate-") {
+		t.Errorf("merge gate calls=%v, want exactly one in the trial", calls)
 	}
 	if calls := f.lines("changed-calls"); len(calls) != 3 {
 		t.Errorf("changed gate count=%d, want 3", len(calls))
+	}
+	// B404: no gate runs the full suite; each gets its import-graph tests.
+	if calls := f.lines("full-calls"); len(calls) != 0 {
+		t.Errorf("full suite calls=%v, want none", calls)
+	}
+	if got, want := f.argLines("changed-args"), []string{"scoped.test.mjs test/B3.test.mjs", "scoped.test.mjs test/B1.test.mjs", "scoped.test.mjs test/B2.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("per-block gate files=%q, want %q", got, want)
+	}
+	if got, want := f.argLines("merge-args"), []string{"scoped.test.mjs test/B1.test.mjs test/B2.test.mjs test/B3.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("merge gate files=%q, want %q", got, want)
+	}
+	if !strings.Contains(output, "merge gate: 4 selected test files (import_graph, node_product)\n") {
+		t.Errorf("want the merge gate selection line: %s", output)
 	}
 	rows, err := ledger.ReadAllRows(filepath.Join(f.home, ".code-forge/ledger"), "fixture")
 	if err != nil {
@@ -238,7 +275,7 @@ func TestBlockLandBatchBisectPrefix(t *testing.T) {
 					t.Errorf("%s must be reported once as not landed after %s: %s", id, culprit, output)
 				}
 			}
-			calls := f.lines("full-calls")
+			calls := f.lines("merge-calls")
 			wantCalls := 3
 			if bad == 1 {
 				wantCalls = 2
@@ -258,8 +295,8 @@ func TestBlockLandBatchBisectPrefix(t *testing.T) {
 				f.write(tree, "src/B2.mjs", "green\n")
 				f.git(tree, "commit", "-qam", "repair")
 				code, output = f.land("B2", "B3")
-				if code != 0 || strings.Count(output, " landed\n") != 2 || len(f.lines("full-calls")) != 4 {
-					t.Errorf("red then green retry exit=%d suite calls=%d, want 0 and 4: %s", code, len(f.lines("full-calls")), output)
+				if code != 0 || strings.Count(output, " landed\n") != 2 || len(f.lines("merge-calls")) != 4 {
+					t.Errorf("red then green retry exit=%d suite calls=%d, want 0 and 4: %s", code, len(f.lines("merge-calls")), output)
 				}
 				if count := f.git(f.repo, "rev-list", "--count", "--first-parent", f.base+"..main"); count != "3" {
 					t.Errorf("retry main merge count=%s, want 3", count)
@@ -317,7 +354,7 @@ func (f *landBatchFixture) rows(event string) []map[string]any {
 	return found
 }
 
-func TestBlockLandBatchDeferredScopeRunsOneSuite(t *testing.T) {
+func TestBlockLandBatchNativeScopeRunsSelectedTests(t *testing.T) {
 	f := newLandBatchFixture(t, 0)
 	ids := []string{"B1", "B2", "B3"}
 	f.nativeScope(ids, "B1")
@@ -326,20 +363,21 @@ func TestBlockLandBatchDeferredScopeRunsOneSuite(t *testing.T) {
 		t.Fatalf("native-owned batch exit=%d, want 0: %s", code, output)
 	}
 	f.checkMain(ids)
-	// Native imports need the full fallback; the batch defers it to the one
-	// merge-gate suite in the trial worktree (B398).
-	if calls := f.lines("full-calls"); len(calls) != 1 || !strings.Contains(calls[0], ".merge-gate-") || len(f.lines("changed-calls")) != 0 {
-		t.Errorf("full calls=%v changed calls=%v, want exactly one in the merge-gate trial and zero", calls, f.lines("changed-calls"))
+	// B404: a native/ change no longer defers to a full suite. Each block runs
+	// its own selection and the merge gate runs the batch's selection once.
+	if calls := f.lines("merge-calls"); len(calls) != 1 || !strings.Contains(calls[0], ".merge-gate-") || len(f.lines("changed-calls")) != 3 || len(f.lines("full-calls")) != 0 {
+		t.Errorf("merge calls=%v changed calls=%v full calls=%v, want 1, 3 and 0", calls, f.lines("changed-calls"), f.lines("full-calls"))
 	}
-	deferred := []string{}
-	for _, row := range f.rows("gate.deferred") {
-		deferred = append(deferred, row["block"].(string))
-		if row["scope"] != "deferred" || row["reason"] != "merge-gate" {
-			t.Errorf("deferred row=%v, want scope deferred and reason merge-gate", row)
-		}
+	// The moved src/Bn.mjs stem-pairs (and was imported by) test/Bn.test.mjs.
+	if got, want := f.argLines("merge-args"), []string{"scoped.test.mjs test/B1.test.mjs test/B2.test.mjs test/B3.test.mjs test/compat/go.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Errorf("merge gate files=%q, want %q", got, want)
 	}
-	if !reflect.DeepEqual(deferred, ids) || len(f.rows("gate.done")) != 0 {
-		t.Errorf("gate.deferred blocks=%v gate.done rows=%d, want %v and 0", deferred, len(f.rows("gate.done")), ids)
+	done := []string{}
+	for _, row := range f.rows("gate.done") {
+		done = append(done, row["block"].(string))
+	}
+	if !reflect.DeepEqual(done, ids) || len(f.rows("gate.deferred")) != 0 {
+		t.Errorf("gate.done blocks=%v gate.deferred rows=%d, want %v and 0", done, len(f.rows("gate.deferred")), ids)
 	}
 	if batch := f.rows("land.batch"); len(batch) != 1 || batch[0]["merge_gate_reason"] != "node_product" {
 		t.Errorf("land.batch rows=%v, want one with merge_gate_reason node_product", batch)
@@ -358,9 +396,9 @@ func TestBlockLandBatchDeferredBisectNamesCulprit(t *testing.T) {
 	if strings.Count(output, "block B1 landed\n") != 1 || strings.Count(output, "block B3 not landed (after B2)\n") != 1 || strings.Contains(output, "block B2 landed") {
 		t.Errorf("want B1 landed once, B2 not landed, B3 not landed after B2: %s", output)
 	}
-	calls := f.lines("full-calls")
-	if len(calls) != 3 {
-		t.Errorf("bisect calls=%v, want exactly 3", calls)
+	calls := f.lines("merge-calls")
+	if len(calls) != 3 || len(f.lines("full-calls")) != 0 {
+		t.Errorf("bisect calls=%v full calls=%v, want exactly 3 scoped and no full suite", calls, f.lines("full-calls"))
 	}
 	for _, call := range calls {
 		if !strings.Contains(call, ".merge-gate-") {
@@ -369,25 +407,62 @@ func TestBlockLandBatchDeferredBisectNamesCulprit(t *testing.T) {
 	}
 }
 
-func TestBlockLandBatchGoOnlySkipsMergeGate(t *testing.T) {
+func TestBlockLandBatchGoOnlyRunsGoTest(t *testing.T) {
 	f := newLandBatchFixture(t, 0)
 	ids := []string{"B1", "B2"}
 	f.nativeScope(ids, "")
 	code, output := f.land(ids...)
-	if code != 0 || strings.Count(output, "merge gate: skipped full suite (go_only: no Node product file in the batch)\n") != 1 {
-		t.Fatalf("Go-only batch exit=%d, want 0 with one skip line: %s", code, output)
+	if code != 0 || strings.Count(output, "merge gate: 4 selected test files (go_only, go_only)\n") != 1 {
+		t.Fatalf("Go-only batch exit=%d, want 0 with one selection line: %s", code, output)
 	}
 	f.checkMain(ids)
-	if calls := f.lines("full-calls"); len(calls) != 0 || len(f.lines("changed-calls")) != 0 {
-		t.Errorf("full calls=%v changed calls=%v, want zero suites", calls, f.lines("changed-calls"))
+	// B407/B404: a Go-only merge gate still runs go.test.mjs (go build, vet
+	// and test), never the full Node suite.
+	if got, want := f.argLines("merge-args"), []string{"scoped.test.mjs test/B1.test.mjs test/B2.test.mjs test/compat/go.test.mjs"}; !reflect.DeepEqual(got, want) || len(f.lines("full-calls")) != 0 {
+		t.Errorf("merge gate files=%q full calls=%v, want %q and none", got, f.lines("full-calls"), want)
 	}
 	for _, id := range ids {
 		if strings.Count(output, "block "+id+" landed\n") != 1 {
 			t.Errorf("%s landed lines != 1: %s", id, output)
 		}
 	}
-	if batch := f.rows("land.batch"); len(batch) != 1 || batch[0]["merge_gate_reason"] != "go_only" || batch[0]["suite_ms"] != float64(0) {
-		t.Errorf("land.batch rows=%v, want one with merge_gate_reason go_only and suite_ms 0", batch)
+	if batch := f.rows("land.batch"); len(batch) != 1 || batch[0]["merge_gate_reason"] != "go_only" {
+		t.Errorf("land.batch rows=%v, want one with merge_gate_reason go_only", batch)
+	}
+}
+
+func TestBlockLandBatchEmptySelectionSkipsMergeGate(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	record, err := state.ReadRun(f.home, "r-batch-unit")
+	if err != nil {
+		t.Fatal(err)
+	}
+	blocks := blockObject(record.Get("blocks"))
+	for _, id := range []string{"B1", "B2"} {
+		tree := filepath.Join(f.repo, ".code-forge/worktrees", id)
+		// A Node product file nothing imports and no test names.
+		f.write(tree, "bin/"+id+".txt", "notes "+id+"\n")
+		if err := os.Remove(filepath.Join(tree, "src", id+".mjs")); err != nil {
+			t.Fatal(err)
+		}
+		f.git(tree, "add", "-A")
+		f.git(tree, "commit", "-qm", "untested file only")
+		entry := blockObject(blocks.Get(id))
+		entry.Set("owned_files", []any{"bin/" + id + ".txt"})
+		entry.Set("test_files", []any{})
+		blocks.Set(id, entry)
+	}
+	record.Set("blocks", blocks)
+	if err := state.SaveRun(f.home, record); err != nil {
+		t.Fatal(err)
+	}
+	code, output := f.land("B1", "B2")
+	if code != 0 || strings.Count(output, "merge gate: no test selected (node_product); test gate skipped\n") != 1 {
+		t.Fatalf("untested-file batch exit=%d, want 0 with one skip line: %s", code, output)
+	}
+	f.checkMain([]string{"B1", "B2"})
+	if len(f.lines("merge-calls")) != 0 || len(f.lines("changed-calls")) != 0 || len(f.lines("full-calls")) != 0 {
+		t.Errorf("merge=%v changed=%v full=%v, want no test command", f.lines("merge-calls"), f.lines("changed-calls"), f.lines("full-calls"))
 	}
 }
 
@@ -417,8 +492,8 @@ func TestBlockLandBatchRefusesUncheckedBlock(t *testing.T) {
 				t.Fatal(err)
 			}
 			code, output := f.land(ids...)
-			if code == 0 || !strings.Contains(output, "block B2 land stopped at preflight: "+reasons[shape]) || f.git(f.repo, "rev-parse", "main") != f.base || len(f.lines("full-calls")) != 0 {
-				t.Errorf("%s refusal: exit=%d main=%s full calls=%d, want nonzero, unchanged main, 0 suites: %s", shape, code, f.git(f.repo, "rev-parse", "main"), len(f.lines("full-calls")), output)
+			if code == 0 || !strings.Contains(output, "block B2 land stopped at preflight: "+reasons[shape]) || f.git(f.repo, "rev-parse", "main") != f.base || len(f.lines("merge-calls")) != 0 {
+				t.Errorf("%s refusal: exit=%d main=%s full calls=%d, want nonzero, unchanged main, 0 suites: %s", shape, code, f.git(f.repo, "rev-parse", "main"), len(f.lines("merge-calls")), output)
 			}
 		})
 	}
@@ -456,7 +531,7 @@ func TestBlockLandBatchDuplicateIDUsage(t *testing.T) {
 	if code != 2 || !strings.Contains(output, landArguments) {
 		t.Errorf("duplicate ids exit=%d, want usage exit 2: %s", code, output)
 	}
-	if f.git(f.repo, "rev-parse", "main") != f.base || !reflect.DeepEqual(f.heads(), heads) || len(f.lines("full-calls")) != 0 {
+	if f.git(f.repo, "rev-parse", "main") != f.base || !reflect.DeepEqual(f.heads(), heads) || len(f.lines("merge-calls")) != 0 {
 		t.Errorf("duplicate ids must not change main, branches or run a suite: %s", output)
 	}
 }
@@ -503,12 +578,12 @@ func TestBlockLandBatchMarksLandedAndRefusesRelanding(t *testing.T) {
 			t.Errorf("%s status=%v landed=%v, want closed with landed main=%s", id, entry.Get("status"), entry.Get("landed"), main)
 		}
 	}
-	calls := len(f.lines("full-calls"))
+	calls := len(f.lines("merge-calls"))
 	code, output := f.land("B1", "B2")
 	if code == 0 || !strings.Contains(output, "block B1 has already landed") || strings.Contains(output, "block B1 landed\n") || strings.Contains(output, "block B2 landed\n") {
 		t.Errorf("relanding exit=%d, want refusal naming B1: %s", code, output)
 	}
-	if f.git(f.repo, "rev-parse", "main") != main || len(f.lines("full-calls")) != calls {
+	if f.git(f.repo, "rev-parse", "main") != main || len(f.lines("merge-calls")) != calls {
 		t.Errorf("relanding must not move main or run a suite: %s", output)
 	}
 }

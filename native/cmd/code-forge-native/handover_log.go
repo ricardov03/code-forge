@@ -37,8 +37,6 @@ const (
 	hGatesUnsupportedFlag
 	hGatesEmptyScope
 	hGatesCustom
-	hGatesChangedGraph
-	hGatesChangedNative
 	hLogsUnportedSubcommand
 	hLogsHelp
 	hLogsFlagsOrHome
@@ -194,8 +192,6 @@ var handoverReasons = [...]string{
 	hGatesUnsupportedFlag:      "gates-unsupported-flag",
 	hGatesEmptyScope:           "gates-empty-scope",
 	hGatesCustom:               "gates-custom",
-	hGatesChangedGraph:         "gates-changed-import-graph",
-	hGatesChangedNative:        "gates-changed-native-dependencies",
 	hLogsUnportedSubcommand:    "logs-unported-subcommand",
 	hLogsHelp:                  "logs-help",
 	hLogsFlagsOrHome:           "logs-flags-or-home",

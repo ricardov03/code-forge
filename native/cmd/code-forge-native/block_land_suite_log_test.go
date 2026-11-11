@@ -69,10 +69,12 @@ func newLandSuiteLogFixture(t *testing.T, bad int, output string) *landBatchFixt
 	f.git(f.repo, "config", "commit.gpgsign", "false")
 	f.write(f.repo, ".gitignore", ".code-forge/\n")
 	f.write(f.repo, "scoped.test.mjs", "// scoped fixture\n")
-	command := `if [ "$#" -gt 0 ]; then
+	// B404: every gate gets selected files. Block gates run in the block
+	// worktree; the merge gate runs in the merge-gate trial worktree.
+	command := `case "$PWD" in *.merge-gate-*) ;; *)
   if [ -f "$HOME/changed-fail" ]; then cat "$HOME/suite-output"; exit 1; fi
-  exit 0
-fi
+  exit 0 ;;
+esac
 for id in B1 B2 B3; do
   if [ -f "src/$id.mjs" ] && [ "$(cat "src/$id.mjs")" = bad ]; then cat "$HOME/suite-output"; exit 1; fi
 done

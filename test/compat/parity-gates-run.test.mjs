@@ -128,10 +128,11 @@ test('review F1 scope: changed Swift pairs, Python suffix follows Node filtering
     assert.equal(nodeScope.reason, expected ? undefined : 'unpaired');
     assert.equal((await launch(f).ended).code, 0, 'save native baseline');
     await writeFile(path.join(f.repo, source), '// after\n');
-    await parity(f, [...ARGS, '--changed']);
+    // B404: Go selects --changed tests itself (no Node parity): the same
+    // stem pair, and nothing (a skipped gate, never the full suite) without one.
     const result = JSON.parse((await launch(f, [...ARGS, '--changed']).ended).stdout).results[0];
-    assert.equal(result.test_count, expected ? 1 : 0);
-    assert.equal(result.reason, expected ? undefined : 'unpaired');
+    assert.deepEqual([result.test_count, result.skipped, result.scope, result.reason], [expected ? 1 : 0, !expected, 'related', 'import_graph']);
+    assert.equal(result.stdout, expected ? `${candidate}\n` : '');
   }
 });
 
@@ -203,10 +204,14 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
   }
   const scoped = { test: command('console.log(process.argv.slice(1).join(","))', '{test_files}') };
   const noTests = await fixture(scoped, { test_files: [] }); await parity(noTests);
-  const changed = await fixture(scoped); await parity(changed, [...ARGS, '--changed']);
+  // B404: --changed is selected in Go (no Node parity): the block's test,
+  // scope related, reason import_graph, before and after a change.
+  const changed = await fixture(scoped);
+  const goChanged = async () => JSON.parse((await launch(changed, [...ARGS, '--changed']).ended).stdout).results[0];
+  assert.deepEqual(await goChanged().then((r) => [r.stdout, r.scope, r.reason]), ['sample.test.mjs\n', 'related', 'import_graph']);
   assert.equal((await launch(changed).ended).code, 0, 'baseline succeeds');
   await writeFile(path.join(changed.repo, 'sample.mjs'), 'export const n = 2;\n');
-  await parity(changed, [...ARGS, '--changed']);
+  assert.deepEqual(await goChanged().then((r) => [r.stdout, r.scope, r.reason]), ['sample.test.mjs\n', 'related', 'import_graph']);
   const busy = await fixture({}, {}, { proof_lock: { block: 'B2', acquired_at: '2026-01-01T00:00:00.000Z' } });
   await parity(busy);
   const b = await launch(busy).ended; assert.equal(b.code, 1); assert.equal(b.stdout, '{"result":"proof.busy","holder":"B2"}\n');

@@ -132,33 +132,3 @@ func gatesGoOnlyCompat(owned, listed []string) []string {
 	sort.Strings(out)
 	return out
 }
-
-// gatesGoOnlyScope: the block's --tests entries (Go test files run inside
-// test/compat/go.test.mjs), its owned runnable Node tests, go.test.mjs, then
-// the mapped compat tests, without duplicates.
-func gatesGoOnlyScope(block ledger.Object, listed []string) gates.Scope {
-	files := []string{}
-	seen := map[string]bool{}
-	add := func(f string) {
-		if !seen[f] {
-			seen[f] = true
-			files = append(files, f)
-		}
-	}
-	owned := gates.Strings(block.Get("owned_files"))
-	for _, f := range gates.Strings(block.Get("test_files")) {
-		if strings.HasPrefix(f, "test/") && !strings.HasPrefix(f, "-") && !strings.HasSuffix(f, "_test.go") {
-			add(f)
-		}
-	}
-	for _, f := range owned {
-		if gatesGoOnlyTest(f) {
-			add(f)
-		}
-	}
-	add(gatesGoTest)
-	for _, f := range gatesGoOnlyCompat(owned, listed) {
-		add(f)
-	}
-	return gates.Scope{Kind: "changed", Report: "related", Reason: "go_only", Files: files, Changed: []string{}, Dependents: []string{}}
-}

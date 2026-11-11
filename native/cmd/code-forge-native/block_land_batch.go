@@ -22,7 +22,7 @@ type landBatchBlock struct {
 	tree                   *proof.Tree
 	entry                  ledger.Object
 	gatesMs                int64
-	fullScope, rebased     bool
+	rebased                bool
 	node                   bool // owns or changes a Node product file
 }
 
@@ -128,7 +128,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			}
 			args := []string{"run", "--run", run, "--block", id, "--changed", "--cwd", tree.Workspace}
 			options, _ := gatesParse(args)
-			if _, safe := landBatchGateScope(args, options); !safe {
+			if !landBatchGateScope(args, options) {
 				return fmt.Errorf("block %s changed gates are unsupported by native batch landing", id)
 			}
 			wt := blockObject(entry.Get("worktree"))
@@ -209,19 +209,13 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			step = "gates"
 			args := []string{"run", "--run", run, "--block", block.id, "--changed", "--cwd", block.tree.Workspace}
 			options, _ := gatesParse(args)
-			full, safe := landBatchGateScope(args, options)
-			if !safe {
+			if !landBatchGateScope(args, options) {
 				return fmt.Errorf("block %s changed gates are unsupported after rebasing", block.id)
 			}
-			block.fullScope = full
 			started := time.Now()
-			if full {
-				// B398: the merge gate below runs the full suite once for the
-				// whole batch and bisects to name a failing block.
-				err = landBatchDefer(home, run, block)
-			} else {
-				err = landBatchChanged(ctx, home, workspace, run, block)
-			}
+			// B404: every block runs its own selected tests; none waits for a
+			// full suite.
+			err = landBatchChanged(ctx, home, workspace, run, block)
 			block.gatesMs = time.Since(started).Milliseconds()
 			if err != nil {
 				return err
@@ -239,6 +233,14 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		step = "merge-gate"
 		suiteMs := int64(0)
 		tested := map[int]string{}
+		// B398/B407: a batch with no Node product file is go_only; its merge
+		// gate still runs test/compat/go.test.mjs (go build, vet and test).
+		mergeReason := "go_only"
+		for _, block := range batch {
+			if block.node {
+				mergeReason = "node_product"
+			}
+		}
 		testPrefix := func(n int) string {
 			if reason, ok := tested[n]; ok {
 				return reason
@@ -252,8 +254,31 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			tree := gatesCleanTree(temporary)
 			reason := ""
 			if !gatesReusableFull(cwd) {
+				tests, owned := []string{}, []string{}
+				for _, block := range batch[:n] {
+					tests = append(tests, gates.Strings(block.entry.Get("test_files"))...)
+					owned = append(owned, gates.Strings(block.entry.Get("owned_files"))...)
+				}
+				scope, err := landMergeScope(cwd, prefixes[0], prefixes[n], tests, owned, mergeReason == "go_only")
+				if err != nil {
+					return err.Error()
+				}
 				args := []string{"run", "--cwd", cwd}
 				options, _ := gatesParse(args)
+				selected := -1
+				if landMergeSelectable(cwd) {
+					options.scope = &scope
+					selected = len(scope.Files)
+				}
+				if n == len(batch) && selected >= 0 {
+					if json {
+						emit(ledger.Object{{Key: "event", Value: "merge_gate"}, {Key: "reason", Value: scope.Reason}, {Key: "batch", Value: mergeReason}, {Key: "test_count", Value: len(scope.Files)}, {Key: "skipped", Value: len(scope.Files) == 0}})
+					} else if len(scope.Files) == 0 {
+						fmt.Fprintf(os.Stdout, "merge gate: no test selected (%s); test gate skipped\n", mergeReason)
+					} else {
+						fmt.Fprintf(os.Stdout, "merge gate: %d selected test files (%s, %s)\n", len(scope.Files), scope.Reason, mergeReason)
+					}
+				}
 				suite := landCapture(func(s *landStep) int {
 					code, safe := gatesNativeStep(args, options, s)
 					if !safe {
@@ -261,13 +286,13 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 					}
 					return code
 				}, ctx)
-				reason = landSuiteFailure(home, run, batch[n-1].id, suite)
+				reason = landMergeFailure(home, run, batch[n-1].id, suite, selected)
 			}
 			if ctx.Err() != nil {
 				reason = ctx.Err().Error()
 			}
 			if tree == "" || gatesCleanTree(temporary) != tree {
-				reason = "merge-gate tree changed during the full suite"
+				reason = "merge-gate tree changed during the merge gate"
 			}
 			tested[n] = reason
 			return reason
@@ -279,23 +304,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 				return nil
 			}
 			stoppedID = strings.Join(ids, " ")
-			return fmt.Errorf("batch timed out after %dms during the full suite; no block landed", maxMs)
-		}
-		// B398: the full suite is the Node suite; a batch with no Node product
-		// file has nothing for it to check.
-		mergeReason := "go_only"
-		for _, block := range batch {
-			if block.node {
-				mergeReason = "node_product"
-			}
-		}
-		if mergeReason == "go_only" {
-			tested[len(batch)] = ""
-			if json {
-				emit(ledger.Object{{Key: "event", Value: "merge_gate"}, {Key: "skipped", Value: true}, {Key: "reason", Value: mergeReason}})
-			} else {
-				fmt.Fprintln(os.Stdout, "merge gate: skipped full suite (go_only: no Node product file in the batch)")
-			}
+			return fmt.Errorf("batch timed out after %dms during the merge gate; no block landed", maxMs)
 		}
 		green, culprit, failure := len(batch), -1, ""
 		if reason := testPrefix(len(batch)); reason != "" {
@@ -438,29 +447,63 @@ func landBatchCheckout(main, head, branch string) error {
 	return nil
 }
 
-// A closed batch cannot hand the whole command to Node. When native imports
-// or an executable test graph require the Node scope expander, running all
-// block gates is the conservative fallback. Other unsupported dialects refuse.
-func landBatchGateScope(args []string, options gatesOptions) (full, safe bool) {
+// A closed batch cannot hand the whole command to Node: a block whose gates
+// dialect the native runner does not support refuses the batch. B404: there is
+// no full-suite fallback; the native scope planner covers every block.
+func landBatchGateScope(args []string, options gatesOptions) bool {
 	reason := hLandStepHandoverGates
 	code, safe := gatesNativeStep(args, options, &landStep{preflight: true}, &reason)
-	if safe {
-		return false, code == 0
-	}
-	if reason != hGatesChangedGraph && reason != hGatesChangedNative {
-		return false, false
-	}
-	options.changed = false
-	code, safe = gatesNativeStep(args, options, &landStep{preflight: true})
-	return true, safe && code == 0
+	return safe && code == 0
 }
 
-// landBatchDefer records that a block's full-fallback gate is left to the
-// batch merge gate instead of running a full suite per block (B398).
-func landBatchDefer(home, run string, block *landBatchBlock) error {
-	row := ledger.Object{{Key: "event", Value: "gate.deferred"}, {Key: "block", Value: block.id}, {Key: "worktree", Value: block.tree.Path}, {Key: "scope", Value: "deferred"}, {Key: "reason", Value: "merge-gate"}, {Key: "test_base", Value: blockString(block.entry.Get("base_sha"))}}
-	_, err := state.WriteSigned(home, run, row)
-	return err
+// landMergeScope is a merge-gate test scope (B404): the B404 selection over
+// every file the trial merge changed since main (from..to, relative to cwd),
+// with the tests and owned files of the merged blocks.
+// landMergeFailure is the merge gate's failure text. An empty selection skips
+// the test gate on purpose (B404), so a green run with no test is a pass, not
+// a missing gates.test.
+func landMergeFailure(home, run, id string, suite landResult, selected int) string {
+	if selected < 0 {
+		return landSuiteFailure(home, run, id, suite)
+	}
+	if selected == 0 && suite.code == 0 && suite.data.Get("allOk") == true {
+		return ""
+	}
+	return landSuiteFailure(home, run, id, suite)
+}
+
+// landMergeSelectable reports a merge-trial test command that takes
+// {test_files}. Without the token the command cannot be scoped: the merge gate
+// runs it as configured and still needs a test gate (B404 keeps that rule).
+func landMergeSelectable(cwd string) bool {
+	loaded, err := config.Load(cwd)
+	if err != nil {
+		return false
+	}
+	p, _ := gates.Resolve(cwd, blockMap(loaded["gates"]))
+	return gatesSelectable(p)
+}
+
+func landMergeScope(cwd, from, to string, tests, owned []string, goOnly bool) (gates.Scope, error) {
+	listed, err := gates.List(cwd)
+	if err != nil {
+		return gates.Scope{}, err
+	}
+	out, err := gitx.Run(cwd, "diff", "--relative", "--name-only", "-z", from, to, "--")
+	if err != nil {
+		return gates.Scope{}, err
+	}
+	s := gatesSelection{tests: tests, owned: owned}
+	for _, f := range strings.Split(out, "\x00") {
+		if f = strings.TrimSpace(f); f != "" {
+			s.changed = append(s.changed, f)
+		}
+	}
+	reason := "import_graph"
+	if goOnly {
+		reason = "go_only"
+	}
+	return gates.Scope{Kind: "changed", Report: "related", Reason: reason, Files: gatesSelectFiles(cwd, listed, s), Changed: []string{}, Dependents: []string{}}, nil
 }
 
 // landBatchNodeProduct reports whether a block owns or changes a file the
@@ -527,12 +570,29 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	if err != nil {
 		return err
 	}
-	current := gates.Baseline(block.tree.Workspace, block.entry, listed)
-	old := gates.BaseHashes(block.tree.Workspace, base, delta)
-	scope := gates.ChangedEmptyGraph(old, current, gates.TestScopeCount(block.entry, len(delta), threshold), listed, threshold)
-	scope.Report = "full"
-	if len(scope.Files) > 0 {
-		scope.Report = "related"
+	var scope gates.Scope
+	if gatesSelectable(p) {
+		// B404: the same selection as gates run --changed; an empty one skips
+		// the test gate instead of running the full suite.
+		scope = gatesChangedSelect(block.tree.Workspace, block.entry, listed, delta, gatesGoOnly(block.entry, p))
+		scope.Files = gatesRunnerFiles(p.Commands["test"].Argv, scope.Files)
+		if len(scope.Files) == 0 {
+			commands := map[string]*gates.Command{}
+			for name, command := range p.Commands {
+				if name != "test" {
+					commands[name] = command
+				}
+			}
+			p.Commands = commands
+		}
+	} else {
+		current := gates.Baseline(block.tree.Workspace, block.entry, listed)
+		old := gates.BaseHashes(block.tree.Workspace, base, delta)
+		scope = gates.ChangedEmptyGraph(old, current, gates.TestScopeCount(block.entry, len(delta), threshold), listed, threshold)
+		scope.Report = "full"
+		if len(scope.Files) > 0 {
+			scope.Report = "related"
+		}
 	}
 	timeout := 300000.0
 	if n, ok := gatesNumber(configured["timeout_s"]); ok {
@@ -559,6 +619,9 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	}
 	row := ledger.Object{{Key: "event", Value: "gate.done"}, {Key: "block", Value: block.id}, {Key: "worktree", Value: block.tree.Path}, {Key: "all_ok", Value: all && ctx.Err() == nil}, {Key: "results", Value: summaries}, {Key: "test_base", Value: base}}
 	gatesAdd(&row, scope.Fields(true))
+	if gatesSelectedReason(scope.Reason) {
+		row.Set("test_files", scope.Files)
+	}
 	if _, err := state.WriteSigned(home, run, row); err != nil {
 		return err
 	}
