@@ -68,6 +68,7 @@ async function fixture(native, owned = ['src/a.mjs', 'test/a.test.mjs'], thresho
   await writeFile(path.join(f.home, '.code-forge/runs/fixture.json'), JSON.stringify(f.record));
   return f;
 }
+/** @param {any} f @param {boolean | 'full'} [changed] */
 function gate(f, changed = true) {
   const mode = changed === 'full' ? ['--full'] : changed ? ['--changed'] : [];
   const args = ['gates', 'run', '--run', 'fixture', '--block', 'B1', '--json', ...mode];
