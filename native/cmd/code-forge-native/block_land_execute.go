@@ -53,7 +53,8 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		fmt.Fprintln(os.Stdout, string(data))
 	}
 	stop := func(reason string) int {
-		if step == "merge-gate" && !strings.Contains(reason, landMergeHint) {
+		// No suite ran when gates.test is missing, so ignored files are not the cause.
+		if step == "merge-gate" && !strings.Contains(reason, landMergeHint) && !strings.HasPrefix(reason, landNoSuite) {
 			reason += "\n" + landMergeHint
 		}
 		if step == "join" && strings.Split(reason, "\n")[0] == "wait_timeout" {
@@ -125,6 +126,11 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		begin()
 		defer finish()
 		defer timing()
+		if retry {
+			// A closed block without a recorded worktree cannot be retried;
+			// keep the plain refusal a closed block had before B343.
+			return stop("block is closed, not open")
+		}
 		return stop("block has no recorded worktree and branch")
 	}
 	top, err := gitx.RepoTop(tree.Path)
@@ -584,7 +590,7 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 			return code
 		}, nil)
 		result.reason = landMergeFailure(home, run, id, suite, result.selected)
-		if result.reason != "" {
+		if result.reason != "" && !strings.HasPrefix(result.reason, landNoSuite) {
 			result.reason += "\n" + landMergeHint
 		}
 	}()

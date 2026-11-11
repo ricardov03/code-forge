@@ -1,13 +1,33 @@
 package config
 
 import (
+	"context"
 	"fmt"
 	"os"
+	"os/exec"
 	"path/filepath"
 	"strings"
-
-	"github.com/ricardov03/code-forge/native/gitx"
+	"time"
 )
+
+// mergeGateGit runs git with every inherited GIT_* variable removed, like
+// gitx.Run. The config package stays free of other native packages so its
+// golden checks build from native/config and native/canon alone.
+func mergeGateGit(dir string, args ...string) (string, error) {
+	ctx, cancel := context.WithTimeout(context.Background(), 30*time.Second)
+	defer cancel()
+	cmd := exec.CommandContext(ctx, "git", args...)
+	cmd.Dir = dir
+	env := []string{}
+	for _, v := range os.Environ() {
+		if !strings.HasPrefix(v, "GIT_") {
+			env = append(env, v)
+		}
+	}
+	cmd.Env = append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL="+os.DevNull, "GIT_TERMINAL_PROMPT=0")
+	out, err := cmd.Output()
+	return string(out), err
+}
 
 // MergeGateConfig keeps optional preparation separate from the suite commands.
 // Empty slices are the defaults; loading never inserts defaults into the map.
@@ -99,7 +119,7 @@ func MergeGatePath(root, name string) (string, error) {
 // MergeGateSource is the primary checkout, even when loading a linked or
 // detached worktree's config. Only the primary checkout supplies local files.
 func MergeGateSource(cwd string) (string, error) {
-	out, err := gitx.Run(cwd, "worktree", "list", "--porcelain", "-z")
+	out, err := mergeGateGit(cwd, "worktree", "list", "--porcelain", "-z")
 	if err != nil {
 		return "", fmt.Errorf("gates.merge_gate_links requires a git repository")
 	}
@@ -118,7 +138,11 @@ func ValidateMergeGateLinks(cwd string, settings MergeGateConfig) error {
 	if err != nil {
 		return err
 	}
-	top, err := gitx.RepoTop(cwd)
+	out, err := mergeGateGit(cwd, "rev-parse", "--show-toplevel")
+	if err != nil {
+		return fmt.Errorf("gates.merge_gate_links requires a git repository")
+	}
+	top, err := filepath.EvalSymlinks(strings.TrimSpace(out))
 	if err != nil {
 		return err
 	}
@@ -127,7 +151,7 @@ func ValidateMergeGateLinks(cwd string, settings MergeGateConfig) error {
 			return err
 		}
 		for _, root := range []string{source, top} {
-			tracked, err := gitx.Run(root, "ls-files", "-z", "--", ":(literal)"+name)
+			tracked, err := mergeGateGit(root, "ls-files", "-z", "--", ":(literal)"+name)
 			if err != nil {
 				return fmt.Errorf("gates.merge_gate_links cannot check tracked paths")
 			}
