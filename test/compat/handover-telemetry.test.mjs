@@ -54,7 +54,7 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
   assert.deepEqual({ ...row, at: 'time' }, { at: 'time', verb: 'unknown', sub: 'unknown', reason: 'unrouted', version: pkg.version }, 'unknown command tokens are replaced without flag values, paths or ids');
   assert.match(row.at, /^\d{4}-\d\d-\d\dT.*Z$/, 'timestamp is UTC ISO');
   assert.equal(Number.isNaN(Date.parse(row.at)), false, 'timestamp is valid');
-  const closeArgs = ['block', 'close', 'private-id', '--help'];
+  const closeArgs = ['block', 'close', 'private-id', '--help=private'];
   assert.deepEqual(run(f, closeArgs, {}, binary, input), run(f, closeArgs, { CODE_FORGE_HANDOVER_LOG: '0' }, binary, input), 'close hand-over preserves Node bytes');
   assert.equal(rows(f).length, 2, 'close adds exactly one row');
   assert.equal(rows(f)[1].reason, 'close-help', 'close has its own stable reason');

@@ -193,9 +193,20 @@ test('close flags run natively with byte parity for process, signed state and gi
 test('still-handed-over close flags record exactly one row with the boundary reason', async () => {
   /** @type {[Record<string, any>, string[], string][]} */
   const cases = [
-    [{}, ['--auto-claim', '--help'], 'close-help'],
-    [{}, ['--remove-worktree', '--help'], 'close-help'],
+    [{}, ['--auto-claim', '--help=yes'], 'close-help'],
+    [{}, ['--remove-worktree', '-h=1'], 'close-help'],
   ];
+  // B380: an exact --help or -h prints Node's close usage natively, with no hand-over row.
+  for (const flags of [['--help'], ['-h'], ['--auto-claim', '--help'], ['--remove-worktree', '-h']]) {
+    const f = await fixture('auto-tree');
+    const parity = await runParity([...args, ...flags, '--json'], { fixture: f, goCommand: BINARY,
+      env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: '/nonexistent' } });
+    assert.deepEqual(parity.diffs, [], `${flags}: native close usage matches Node`);
+    const result = await launch(f, [...args, ...flags, '--json'], { CODE_FORGE_HANDOVER_LOG: '1' });
+    assert.equal(result.code, 0, `${flags}: usage exits 0 with Node unavailable: ${result.stderr}`);
+    assert.match(result.stdout, /block close <id> --run <r>/, `${flags}: close usage on stdout`);
+    await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8'), { code: 'ENOENT' }, `${flags}: no hand-over row`);
+  }
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   for (const [config, flags, reason] of cases) {
     const f = await fixture('auto-tree', config);

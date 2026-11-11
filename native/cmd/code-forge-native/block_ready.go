@@ -143,6 +143,13 @@ func runBlockReady(args []string) int {
 			blockers = append(blockers, gatecheck.Blocker{Code: "coder_report_failed", Detail: why})
 		}
 	}
+	acked, ackKnown := gatecheck.AgentWaiversAcked(blockMap(blockMap(cfg["review"])["agent_waivers"])["require_ack"] == true, p.run, p.id, rows, key)
+	if !ackKnown {
+		return p.fallback()
+	}
+	if !acked {
+		blockers = append(blockers, gatecheck.Blocker{Code: "agent-waivers-not-acked", Detail: "agent-waivers-not-acked"})
+	}
 	if blockMap(cfg["gates"])["test"] != nil {
 		check, supported := closeTestGate(top, base, p.run, p.id, entry, rows)
 		if !supported {
@@ -201,12 +208,13 @@ func runBlockReady(args []string) int {
 	collectOnly := len(blockers) > 0
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, p.id, p.run, blockObject(p.record.Get("blocks")), changed, rows, key, inTree)
 	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedWork(top, rows, p.id), func(f string) bool { return gatecheck.Owns(prefix, entry, f) })
-	gate := gatecheck.CheckTranscript(p.run, p.id, files, rows, key, highPaths, unowned, noChanges, hits)
+	gateInput := gatecheck.Input{Run: p.run, Block: p.id, Files: files, Rows: rows, Key: key, HighPaths: highPaths, Unowned: unowned, NoChanges: noChanges, Hits: hits, Transcript: transcript, ResultFiles: gatecheck.LoadResultFiles(mainTop, p.run, p.id, rows, key)}
 	if externalReview {
-		gate.Blockers = slices.DeleteFunc(gate.Blockers, func(b gatecheck.Blocker) bool {
-			return !slices.Contains([]string{"unowned_change", "no_changes", "rule_break", "unproven"}, b.Code)
-		})
-		gate.Waived = nil
+		gateInput.Files, gateInput.ProofFiles = []gatecheck.File{}, files
+	}
+	gate := gatecheck.Evaluate(gateInput)
+	if gate.Unknown {
+		return p.fallback()
 	}
 	blockers = append(blockers, gate.Blockers...)
 	if _, has := p.flags["report"].(string); has && !externalReview {

@@ -163,8 +163,8 @@ test('grant boundaries preserve refusals and unsupported shapes hand over withou
   const invalid = args('open', true);
   invalid[2] = 'B3';
   await parity(await fixture('run-ended', { badAcceptance: true }), invalid);
-  // B196 clearing remains with Node until the native review gate ports agent
-  // waiver evidence. An active grant must not make Go guess at a critical.
+  // B380: the native review gate reads B196 agent waiver evidence, so a critical
+  // cleared by an autopilot waiver closes in Go with Node's exact result.
   const critical = await fixture('active');
   const initial = (await readFile(ledgerFile(critical), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
   const signed = [
@@ -173,10 +173,8 @@ test('grant boundaries preserve refusals and unsupported shapes hand over withou
     { event: 'review.waived', block: 'B1', file: 'sample.mjs', finding: 'F1', severity: 'critical', by: 'agent', verdict: 'agree', autopilot: true, test: 'sample', reason: 'signed evidence' },
   ].map((r) => signRow({ run: RUN, ...r }, KEY));
   await writeFile(ledgerFile(critical), [...initial.filter((r) => r.event !== 'review.approved'), ...signed].map((r) => JSON.stringify(r)).join('\n') + '\n');
-  const beforeCritical = await Promise.all([readFile(recordFile(critical)), readFile(ledgerFile(critical))]);
-  assert.equal(launch(critical, args('close', true)).status, 127, 'unported critical waiver dialect hands over');
-  assert.deepEqual(await Promise.all([readFile(recordFile(critical)), readFile(ledgerFile(critical))]), beforeCritical, 'critical waiver handover changes zero state or ledger bytes');
-  await parity(critical, args('close', true), { CODE_FORGE_NODE: process.execPath });
+  await parity(critical, args('close', true));
+  assert.notEqual(launch(critical, args('close', true)).status, 127, 'critical autopilot waiver closes natively without Node');
   for (const verb of ['claim', 'stop', 'open', 'close']) {
     const f = await fixture('active', { unknown: true });
     const before = await Promise.all([readFile(recordFile(f)), readFile(ledgerFile(f))]);

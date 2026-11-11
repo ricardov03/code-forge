@@ -25,9 +25,20 @@ func TestConfirmedBlockCloseNeverHandsOverToNode(t *testing.T) {
 	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
 	for _, step := range []*landStep{nil, {}} {
 		var reason handoverReason
-		code := blockCloseHumanStep([]string{"--help"}, step, &reason, true)
+		// B380: an exact --help is native usage; a --help=value spelling still hands over.
+		code := blockCloseHumanStep([]string{"--help=yes"}, step, &reason, true)
 		if code != landHandover || reason != handoverFlagReason("close", "--help", hCloseUnsupportedFlag) {
 			t.Fatalf("step=%v: code=%d reason=%v; want handover sentinel without invoking Node", step, code, reason)
+		}
+	}
+}
+
+func TestB380BlockCloseHelpIsNative(t *testing.T) {
+	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
+	for _, args := range [][]string{{"--help"}, {"-h"}, {"B1", "--run", "r-x", "--auto-claim", "--help"}} {
+		reason := handoverReason(-1)
+		if code := blockCloseHumanStep(args, nil, &reason, false); code != 0 || reason != -1 {
+			t.Errorf("%v: code=%d reason=%v; want native usage exit 0 with no hand-over", args, code, reason)
 		}
 	}
 }
