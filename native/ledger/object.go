@@ -40,6 +40,20 @@ func DecodeObject(data []byte) (Object, error) {
 	return obj, nil
 }
 
+// DecodeValue reads exactly one JSON value of any kind, keeping the property
+// order of every object inside it, as JSON.parse does.
+func DecodeValue(data []byte) (any, error) {
+	dec := json.NewDecoder(bytes.NewReader(data))
+	v, err := decodeValue(dec)
+	if err != nil {
+		return nil, err
+	}
+	if _, err := dec.Token(); err != io.EOF {
+		return nil, fmt.Errorf("expected exactly one JSON value")
+	}
+	return v, nil
+}
+
 func decodeValue(dec *json.Decoder) (any, error) {
 	token, err := dec.Token()
 	if err != nil {
