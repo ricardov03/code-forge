@@ -10,12 +10,14 @@ import (
 	"syscall"
 
 	"github.com/ricardov03/code-forge/native/filelock"
+	"github.com/ricardov03/code-forge/native/testslot"
 )
 
 var lockedPath = regexp.MustCompile(`is locked \(([^)]+)\)`)
 
 // OwnerFile is the owner record a lock directory may hold: JSON with pid and
-// start (or started_at), the `ps -o lstart=` start time of that pid.
+// start (or started_at): the B423 start token or the `ps -o lstart=` start
+// time of that pid.
 const OwnerFile = "owner.json"
 
 // Reap removes the lock named in a failure text ("... is locked (<path>)")
@@ -89,8 +91,11 @@ func ownerOf(data []byte) (int, string, bool) {
 	return int(owner.PID), strings.Join(strings.Fields(start), " "), true
 }
 
-// Dead is true when pid no longer exists, or exists with another start time
-// (the pid was reused). An unknown start time keeps the owner alive.
+// Dead is true when pid no longer exists (or is a zombie), or exists with
+// another start time (the pid was reused). start may be either form a lock
+// owner records: the B423 run-lock token (testslot.ProcessStart, e.g.
+// "darwin:<sec>.<usec>") or `ps -o lstart=` (ledger and file locks). A start
+// that matches either form, or that cannot be checked, keeps the owner alive.
 func Dead(pid int, start string) bool {
 	if pid <= 1 {
 		return false
@@ -98,9 +103,16 @@ func Dead(pid int, start string) bool {
 	if syscall.Kill(pid, 0) == syscall.ESRCH {
 		return true
 	}
-	if start == "" {
+	token, gone := testslot.ProcessStart(pid)
+	if gone {
+		return true
+	}
+	if start == "" || (token != "" && token == start) {
 		return false
 	}
-	actual := filelock.ProcessStartTime(pid)
-	return actual != nil && *actual != start
+	lstart := filelock.ProcessStartTime(pid)
+	if lstart != nil && *lstart == start {
+		return false
+	}
+	return token != "" || lstart != nil
 }

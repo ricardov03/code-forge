@@ -285,9 +285,11 @@ updates its own.
 
 For a `lock` item, `heal run` first removes the named lock when its owner is
 proven dead: a lock file whose JSON `pid` no longer runs (or runs with another
-start time), or a lock directory whose `owner.json` says so. A lock without an
-owner pid, like the run lock directory today, is never removed by `heal run`;
-the retry just tries again. Only paths under `~/.code-forge` are touched.
+start time), or a lock directory whose `owner.json` says so, such as the run
+and block lock directories with the owner file B423/B426 write. A live owner's
+lock stays. A lock without an owner pid (a Node holder) is never removed by
+`heal run`; the retry just tries again. Only paths under `~/.code-forge` are
+touched.
 
 Only one `heal run` works on a run at a time. A second one stops at once with
 `heal run: busy: another heal run (pid N) is healing run R; this one stops`
