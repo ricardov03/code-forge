@@ -18,7 +18,7 @@ import (
 // B408: block rebase stays in Node, but Go runs it as a child instead of
 // replacing itself, so that a rebase that brings native changes into a
 // code-forge worktree rebuilds that worktree's native binary afterwards.
-func init() { blockSubs["rebase"] = runBlockRebase }
+func init() { blockSubs["rebase"] = healWrap([]string{"block", "rebase"}, runBlockRebase) }
 
 func runBlockRebase(args []string) int {
 	full := append([]string{"rebase"}, args...)

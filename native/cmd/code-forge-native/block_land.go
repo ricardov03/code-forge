@@ -11,7 +11,7 @@ import (
 	"github.com/ricardov03/code-forge/native/state"
 )
 
-func init() { blockSubs["land"] = runBlockLand }
+func init() { blockSubs["land"] = healWrap([]string{"block", "land"}, runBlockLand) }
 
 const landArguments = "block land takes one block id, --run, --report, --transcript and optional --max/--merge/--no-merge-gate/--json"
 

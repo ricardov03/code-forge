@@ -16,7 +16,7 @@ import (
 	"github.com/ricardov03/code-forge/native/state"
 )
 
-func init() { routes["gates"] = runGates }
+func init() { routes["gates"] = healWrap([]string{"gates"}, runGates) }
 
 // gatesBaseCheckedEnv tells a Node handover that the stale-base check (B363)
 // already ran in this process; Node removes it before any gate starts.

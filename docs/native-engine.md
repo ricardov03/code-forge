@@ -239,6 +239,60 @@ write. So a batch land in its merge gate, a `block rebase` or a
   the run lock; each new base, the final "mark landed" and any restore is one
   short commit of the batch's blocks.
 
+## Heal queue
+
+Some failures pass by themselves: a run lock that another command holds for a
+moment, a ledger lock, a git `index.lock`, or a network error from git. Before
+B429 these stopped the work until a person ran the command again. Now the
+command adds the problem to a queue and still fails, so a script sees the same
+exit code as before. The last stderr line names the item:
+
+```text
+gates run: run r-1 is locked (…/runs/r-1.lock); remove it if no forge verb is running
+heal: queued h20261111t080000-1a2b3c
+```
+
+Three commands queue a problem: `gates run --run R --block B`,
+`block rebase <id> --run R` and `block land <id>… --run R` (one block or a
+batch). They queue only when they name a run, and only for these texts: a lock
+(`is locked (`, `lock timeout`, `index.lock`, `cannot lock ref`) or a
+transient git error (`could not resolve host`, `connection reset`,
+`the remote end hung up`, `early EOF`). Any other failure is not queued. A
+stale base is not queued either: `gates run` keeps its one-line refusal, and
+`--auto-rebase` fixes it.
+
+The queue of a run is one file, `~/.code-forge/heal/<run>.jsonl`. Each line is
+a full copy of one item, and the last line of an item wins. An item keeps its
+`id`, `run`, `block`, `kind` (`lock`, `gate`, `land`; `ci` and `worker` are
+reserved), the exact `argv` to run again, the `cwd`, the failure `detail`,
+`tries`, `status` (`open`, `retrying`, `healed`, `needs_coder`) and its times.
+
+```sh
+code-forge heal list [--run R] [--json]      # all items, or one run's
+code-forge heal show <id> [--run R] [--json] # one item with its failure text
+code-forge heal run --run R                  # retry until every item ends
+code-forge heal run --run R --once           # one pass over the items that are due
+code-forge heal run --run R --watch          # keep going (every 15 s) until stopped
+```
+
+`heal run` takes the items one by one and runs the stored argv again as a
+child of the same binary, in the stored `cwd`. Exit 0 marks the item
+`healed`. A failure waits 15 s, then 60 s, then 240 s before the next try.
+After `--max-tries` tries (3 by default), or at once when the new failure is
+not a retryable one, the item becomes `needs_coder`. `heal run` exits 1 when an
+item needed a coder in that call. A retry never queues a new item: the child
+updates its own.
+
+For a `lock` item, `heal run` first removes the named lock when its owner is
+proven dead: a lock file whose JSON `pid` no longer runs (or runs with another
+start time), or a lock directory whose `owner.json` says so. A lock without an
+owner pid, like the run lock directory today, is never removed by `heal run`;
+the retry just tries again. Only paths under `~/.code-forge` are touched.
+
+Only one `heal run` works on a run at a time. A second one stops at once with
+`heal run: busy: another heal run (pid N) is healing run R; this one stops`
+and exit 1.
+
 ## Internal verbs
 
 The native binary reserves the `internal` namespace for its helpers.

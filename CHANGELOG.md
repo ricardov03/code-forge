@@ -16,6 +16,10 @@ waits on a second real consumer (plan §10.4, Q17).
   at the deadline still lands (B342)
 - `code-forge report` has a pace section: per-block and run pace in minutes; text, `--json` and `--export` carry the
   same 18 sections (B341, B358)
+- heal queue: gates run, block rebase and block land queue a failure that passes by itself (a held lock, a transient git
+  error) in ~/.code-forge/heal/<run>.jsonl and print heal: queued <id>; code-forge heal list|show|run retries each item
+  with backoff (15 s, 60 s, 240 s), removes a lock whose owner pid is dead, and marks needs_coder after --max-tries
+  (B429)
 
 ### Changed
 

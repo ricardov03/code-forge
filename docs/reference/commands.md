@@ -11,6 +11,7 @@ This page lists the CLI commands and their usage. It is generated from the CLI. 
 - [doctor](#doctor)
 - [facts](#facts)
 - [gates](#gates)
+- [heal](#heal)
 - [help](#help)
 - [init](#init)
 - [jev](#jev)
@@ -369,6 +370,14 @@ usage: code-forge gates acceptance --clauses <file.json> --tap <file>
 
 ```text
 usage: code-forge gates transcript-grep --file <path> [--cwd <dir>]
+```
+
+## heal
+
+List, show and retry the heal queue: failures that pass by themselves (a held lock, a transient git error), served by the Go binary.
+
+```text
+usage: code-forge heal list [--run R] [--json] | show <id> [--run R] [--json] | run --run R [--once|--watch] [--max-tries N] [--json]
 ```
 
 ## help

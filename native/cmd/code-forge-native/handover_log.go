@@ -375,6 +375,7 @@ var handoverCommands = map[string]string{
 	"doctor":        "",
 	"facts":         "",
 	"gates":         "detect run secret-scan safe-edit scope acceptance transcript-grep",
+	"heal":          "list show run",
 	"help":          "",
 	"init":          "",
 	"jev":           "ask",
