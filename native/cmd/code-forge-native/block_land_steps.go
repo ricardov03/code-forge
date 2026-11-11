@@ -118,13 +118,7 @@ func landClaimFiles(home, run, id, top, main string, record, entry ledger.Object
 
 func landAutoClaim(home, run, id, top string, record ledger.Object, files []string, print io.Writer, preflight bool) error {
 	cfg, _ := blockSnapshot(record)
-	why := ""
-	external := blockMap(blockMap(cfg["review"])["external"])
-	if external["required"] == true && strings.TrimSpace(blockString(external["name"])) != "" {
-		why = "review.external.required is true"
-	} else if blockMap(cfg["proof"])["runners"] != nil {
-		why = "proof.runners is set"
-	}
+	why := autoClaimGuardWhy(cfg)
 	guarded, err := blockops.Guarded(record, why)
 	if err != nil {
 		return err
