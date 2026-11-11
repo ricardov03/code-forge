@@ -1,6 +1,7 @@
-import { copyFile, lstat, mkdir, mkdtemp, readdir, realpath, rm, stat, symlink } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, readFile, realpath, rm, stat, symlink } from 'node:fs/promises';
 import path from 'node:path';
 import { loadProjectConfig } from '../config/load.mjs';
+import { doneFilePath } from '../state/block-end.mjs';
 import { exec } from '../util/exec.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
@@ -55,15 +56,19 @@ async function mergeGatePath(root, name) {
   return resolved;
 }
 
-/** @param {string} root @param {string} source @param {string} destination @param {Set<string>} [ancestors] */
-async function copyMergeGatePath(root, source, destination, ancestors = new Set()) {
-  source = await mergeGatePath(root, path.relative(root, source));
+/** Copy a source already checked by mergeGatePath. Its children are any names on disk (a:b, a
+ * nested .git), so they are checked for containment only, under the resolved repository root.
+ * @param {string} realRoot realpath of the main checkout @param {string} source @param {string} destination @param {Set<string>} [ancestors] */
+async function copyMergeGatePath(realRoot, source, destination, ancestors = new Set()) {
+  source = await realpath(source);
+  const rel = path.relative(realRoot, source);
+  if (!rel || rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw new Error('gates.merge_gate_links paths must stay inside the repository');
   if (ancestors.has(source)) throw new Error('gates.merge_gate_links contains a directory cycle');
   const info = await stat(source);
   if (info.isDirectory()) {
     await mkdir(destination, { mode: info.mode });
     const next = new Set([...ancestors, source]);
-    for (const name of await readdir(source)) await copyMergeGatePath(root, path.join(source, name), path.join(destination, name), next);
+    for (const name of await readdir(source)) await copyMergeGatePath(realRoot, path.join(source, name), path.join(destination, name), next);
   } else if (info.isFile()) await copyFile(source, destination);
   else throw new Error('gates.merge_gate_links copies require regular files or directories');
 }
@@ -81,6 +86,7 @@ async function prepareMergeGate(main, temporary, workspace, stderr, env) {
   if (!Array.isArray(links) || links.some((name) => typeof name !== 'string' || !name)) throw new Error('gates.merge_gate_links must be an array of nonempty paths');
   if (setup != null && (!Array.isArray(setup) || setup.length === 0 || setup.some((arg) => typeof arg !== 'string' || !arg || arg.includes('\0')))) throw new Error('gates.merge_gate_setup must be an argv array');
   const seen = new Set();
+  const realMain = await realpath(main);
   for (const name of links) {
     const source = await mergeGatePath(main, name);
     if (seen.has(source)) continue;
@@ -100,7 +106,7 @@ async function prepareMergeGate(main, temporary, workspace, stderr, env) {
     if (process.env.CODE_FORGE_LAND_COPY_LINKS !== '1') {
       try { await symlink(source, destination); continue; } catch (err) { if (!['EPERM', 'EACCES', 'ENOTSUP', 'ENOSYS'].includes(err.code)) throw err; }
     }
-    await copyMergeGatePath(main, source, destination);
+    await copyMergeGatePath(realMain, source, destination);
   }
   if (setup != null) {
     const result = await exec(setup, { cwd: workspace, env: { ...env, CI: '1', npm_config_yes: 'false' }, timeoutMs: 300000 });
@@ -239,6 +245,24 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
     const mergeArgs = ['git', '-C', main, 'merge', '--no-ff', '--no-edit', '--', tree.branch];
     const command = landCommand(mergeArgs);
     next = command;
+    if (entry.status === 'closed') {
+      // A retry skips join, gates and close: merge only the branch head close checked (its done file's commit).
+      let recorded = null;
+      try {
+        const done = JSON.parse(await readFile(doneFilePath(runId, id), 'utf8'));
+        if (done?.status === 'closed' && typeof done.commit === 'string') recorded = done.commit;
+      } catch { /* no readable record: refused below */ }
+      if (!recorded || !/^[0-9a-f]{40,64}$/.test(recorded)) {
+        next = landCommand(['code-forge', 'status', '--run', runId]);
+        return stop('closed block has no recorded close commit; refusing to merge a branch head that close did not check');
+      }
+      const head = await exec(['git', 'rev-parse', '--verify', '--end-of-options', `refs/heads/${tree.branch}^{commit}`], { cwd: main, env: gitChildEnv(), timeoutMs: 120000 });
+      if (head.result !== 'ok') return stop(`cannot resolve block branch ${tree.branch}`);
+      if (head.stdout.trim() !== recorded) {
+        next = landCommand(['code-forge', 'status', '--run', runId]);
+        return stop(`branch ${tree.branch} moved after close (closed at ${recorded.slice(0, 12)}, now ${head.stdout.trim().slice(0, 12)}); commits added after close were not reviewed or gated`);
+      }
+    }
     if (!merge) {
       writeSafe(json ? stderr : stdout, 'hint: the merge gate runs only with --merge\n');
       if (json) emit({ block: id, event: 'closed', merge: command });

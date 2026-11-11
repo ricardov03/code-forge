@@ -5,6 +5,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 
@@ -89,6 +90,60 @@ func (f androidLandFixture) commitConfig(t *testing.T) {
 	f.saveConfig(t)
 	landGit(t, f.repo, "add", config.Filename)
 	landGit(t, f.repo, "commit", "-qm", "gate config")
+}
+
+// landDone writes the done file that block close leaves for a closed block.
+func landDone(t *testing.T, home, run, commit string) {
+	t.Helper()
+	data, err := json.Marshal(map[string]any{"block": "B1", "run_id": run, "status": "closed", "event": "block.close", "commit": commit})
+	if err != nil {
+		t.Fatal(err)
+	}
+	landWrite(t, filepath.Join(home, ".code-forge/runs", run, "blocks", "B1.done.json"), string(data))
+}
+
+// landNodeRetry runs the Node fallback's closed-block retry (run r-fallback)
+// with a fake gate dispatcher that runs gate in the merge-gate tree.
+func landNodeRetry(t *testing.T, repo, tree string, noMergeGate bool, gate string) (int, string) {
+	t.Helper()
+	module, err := filepath.Abs("../../../src/cli/land.mjs")
+	if err != nil {
+		t.Fatal(err)
+	}
+	script := `
+import {pathToFileURL} from 'node:url';
+import {spawnSync} from 'node:child_process';
+const {landBlock} = await import(pathToFileURL(process.argv[1]));
+const [repo, tree, skip, gate] = process.argv.slice(2);
+const unexpected = async () => { throw new Error('closed retry repeated join or close'); };
+const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
+const code = await landBlock({id:'B1', runId:'r-fallback', record:{workspace:repo, project:'fixture', blocks:{B1:{status:'closed', base_branch:'main'}}}, report:'unused', transcript:'unused', maxMs:60000, merge:true, noMergeGate:skip === 'true', json:false}, {
+  autoClaimChanges:unexpected, runReviewFile:unexpected, runBlock:unexpected,
+  blockTree:async () => ({path:tree, top:tree, workspace:tree, branch:'block-B1'}), repoTop:async () => repo,
+  configInForce:() => null, gitChildEnv:() => env, parseTapPassed:() => ({failed:[]}),
+  appendRow:async () => {}, signRow:(row) => row, loadKey:async () => Buffer.alloc(32),
+  runGatesVerb:async (args, streams) => {
+    const result = spawnSync(gate, [], {cwd:args.at(-1), env, encoding:'utf8'});
+    streams.stdout.write(JSON.stringify({allOk:result.status===0, results:[{gate:'test', skipped:false, ok:result.status===0, stdout:result.stdout, stderr:result.stderr}]}));
+    return result.status ?? 1;
+  }
+});
+process.exitCode = code;
+`
+	skip := "false"
+	if noMergeGate {
+		skip = "true"
+	}
+	cmd := exec.Command("node", "--input-type=module", "-e", script, module, repo, tree, skip, gate)
+	data, err := cmd.CombinedOutput()
+	if err == nil {
+		return 0, string(data)
+	}
+	if exit, ok := err.(*exec.ExitError); ok {
+		return exit.ExitCode(), string(data)
+	}
+	t.Fatal(err)
+	return -1, string(data)
 }
 
 func TestLandAndroidIgnoredFiles(t *testing.T) {
@@ -183,6 +238,8 @@ func TestLandClosedUnmergedRetry(t *testing.T) {
 		}
 		return code, string(data)
 	}
+	landDone(t, f.home, run, landGit(t, f.tree, "rev-parse", "HEAD"))
+	landDone(t, f.home, "r-fallback", landGit(t, f.tree, "rev-parse", "HEAD"))
 	before := landGit(t, f.repo, "rev-parse", "HEAD")
 	code, output := land()
 	if code != 1 || !strings.Contains(output, "gates.merge_gate_links") || landGit(t, f.repo, "rev-parse", "HEAD") != before {
@@ -193,40 +250,7 @@ func TestLandClosedUnmergedRetry(t *testing.T) {
 	// executes the same reporter-shaped gradle fixture in the supplied tree.
 	fallback := func() (int, string) {
 		t.Helper()
-		module, err := filepath.Abs("../../../src/cli/land.mjs")
-		if err != nil {
-			t.Fatal(err)
-		}
-		script := `
-import {pathToFileURL} from 'node:url';
-import {spawnSync} from 'node:child_process';
-const {landBlock} = await import(pathToFileURL(process.argv[1]));
-const [repo, tree] = process.argv.slice(2);
-const unexpected = async () => { throw new Error('closed retry repeated join or close'); };
-const env = Object.fromEntries(Object.entries(process.env).filter(([key]) => !key.startsWith('GIT_')));
-const code = await landBlock({id:'B1', runId:'r-fallback', record:{workspace:repo, project:'fixture', blocks:{B1:{status:'closed', base_branch:'main'}}}, report:'unused', transcript:'unused', maxMs:60000, merge:true, noMergeGate:false, json:false}, {
-  autoClaimChanges:unexpected, runReviewFile:unexpected, runBlock:unexpected,
-  blockTree:async () => ({path:tree, top:tree, workspace:tree, branch:'block-B1'}), repoTop:async () => repo,
-  configInForce:() => null, gitChildEnv:() => env, parseTapPassed:() => ({failed:[]}),
-  appendRow:async () => {}, signRow:(row) => row, loadKey:async () => Buffer.alloc(32),
-  runGatesVerb:async (args, streams) => {
-    const result = spawnSync('gradle', [], {cwd:args.at(-1), env, encoding:'utf8'});
-    streams.stdout.write(JSON.stringify({allOk:result.status===0, results:[{gate:'test', skipped:false, ok:result.status===0, stdout:result.stdout, stderr:result.stderr}]}));
-    return result.status ?? 1;
-  }
-});
-process.exitCode = code;
-`
-		cmd := exec.Command("node", "--input-type=module", "-e", script, module, f.repo, f.tree)
-		data, err := cmd.CombinedOutput()
-		if err == nil {
-			return 0, string(data)
-		}
-		if exit, ok := err.(*exec.ExitError); ok {
-			return exit.ExitCode(), string(data)
-		}
-		t.Fatal(err)
-		return -1, string(data)
+		return landNodeRetry(t, f.repo, f.tree, false, "gradle")
 	}
 	if code, output := fallback(); code != 1 || !strings.Contains(output, "Android SDK not found") || strings.Count(output, "gates.merge_gate_links") != 1 {
 		t.Errorf("fallback without links must fail with SDK error and one hint: exit=%d output=%q", code, output)
@@ -261,5 +285,139 @@ process.exitCode = code;
 	}
 	if lines := strings.Split(strings.TrimSpace(string(calls)), "\n"); len(lines) != 2 || !strings.HasSuffix(lines[1], " link") {
 		t.Fatalf("want native copy and fallback symlink suite, got %q", calls)
+	}
+}
+
+// landClosedGo lands B1 as a closed block of run through the native path.
+func landClosedGo(t *testing.T, f androidLandFixture, run string, flags map[string]any) (int, string) {
+	t.Helper()
+	entry := ledger.Object{{Key: "status", Value: "closed"}, {Key: "owned_files", Value: []any{"sample.mjs"}}, {Key: "base_branch", Value: "main"}, {Key: "worktree", Value: ledger.Object{{Key: "path", Value: f.tree}, {Key: "branch", Value: "block-B1"}, {Key: "base_sha", Value: f.base}}}}
+	record := ledger.Object{{Key: "run_id", Value: run}, {Key: "project", Value: "fixture"}, {Key: "workspace", Value: f.repo}, {Key: "blocks", Value: ledger.Object{{Key: "B1", Value: entry}}}, {Key: "orphans", Value: []any{}}}
+	if err := state.SaveRun(f.home, record); err != nil {
+		t.Fatal(err)
+	}
+	landWrite(t, filepath.Join(f.home, ".code-forge/runs", run+".key"), strings.Repeat("0", 32))
+	capture, err := os.CreateTemp(f.home, "output-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, stderr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = capture, capture
+	code := landExecuteWithReason(nil, flags, f.home, run, "B1", record, entry, func(reason handoverReason) int { t.Errorf("retry handed over: %v", reason); return 127 })
+	os.Stdout, os.Stderr = out, stderr
+	capture.Close()
+	data, err := os.ReadFile(capture.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	return code, string(data)
+}
+
+func TestLandClosedRetryRefusesMovedBranch(t *testing.T) {
+	f := androidLand(t)
+	const run = "r-android-moved"
+	flags := map[string]any{"report": "unused", "transcript": "unused", "merge": true, "no-merge-gate": true}
+	closed := landGit(t, f.tree, "rev-parse", "HEAD")
+	before := landGit(t, f.repo, "rev-parse", "HEAD")
+	// A close that recorded no commit: Go and Node must refuse, not merge blind.
+	if code, output := landClosedGo(t, f, run, flags); code != 1 || strings.Count(output, "no recorded close commit") != 1 || landGit(t, f.repo, "rev-parse", "HEAD") != before {
+		t.Errorf("go retry without close commit: exit=%d head moved=%v output=%q", code, landGit(t, f.repo, "rev-parse", "HEAD") != before, output)
+	}
+	if code, output := landNodeRetry(t, f.repo, f.tree, true, "gradle"); code != 1 || strings.Count(output, "no recorded close commit") != 1 || landGit(t, f.repo, "rev-parse", "HEAD") != before {
+		t.Errorf("node retry without close commit: exit=%d head moved=%v output=%q", code, landGit(t, f.repo, "rev-parse", "HEAD") != before, output)
+	}
+	landDone(t, f.home, run, closed)
+	landDone(t, f.home, "r-fallback", closed)
+	landWrite(t, filepath.Join(f.tree, "sample.mjs"), "after close\n")
+	landGit(t, f.tree, "commit", "-qam", "after close")
+	moved := landGit(t, f.tree, "rev-parse", "HEAD")
+	want := "branch block-B1 moved after close (closed at " + closed[:12] + ", now " + moved[:12] + ")"
+	if code, output := landClosedGo(t, f, run, flags); code != 1 || strings.Count(output, want) != 1 || landGit(t, f.repo, "rev-parse", "HEAD") != before {
+		t.Errorf("go retry after a post-close commit: exit=%d head moved=%v output=%q", code, landGit(t, f.repo, "rev-parse", "HEAD") != before, output)
+	}
+	if code, output := landNodeRetry(t, f.repo, f.tree, true, "gradle"); code != 1 || strings.Count(output, want) != 1 || landGit(t, f.repo, "rev-parse", "HEAD") != before {
+		t.Errorf("node retry after a post-close commit: exit=%d head moved=%v output=%q", code, landGit(t, f.repo, "rev-parse", "HEAD") != before, output)
+	}
+}
+
+// landCacheFixture links an ignored directory "cache" whose files are given
+// by slash path, and gates on a suite that counts the copied regular files.
+func landCacheFixture(t *testing.T, f androidLandFixture, files map[string]string) {
+	t.Helper()
+	for name, data := range files {
+		landWrite(t, filepath.Join(f.repo, filepath.FromSlash(name)), data)
+	}
+	bin := t.TempDir()
+	landWrite(t, filepath.Join(bin, "checkcopy"), "#!/bin/sh\n[ -L cache ] && { echo 'cache is a link'; exit 1; }\nn=$(find cache -type f | wc -l | tr -d ' ')\n[ \"$n\" = "+strconv.Itoa(len(files))+" ] || { echo \"copied $n files\"; exit 1; }\necho \"$PWD\" >> \"$HOME/copy-calls\"\n")
+	if err := os.Chmod(filepath.Join(bin, "checkcopy"), 0700); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODE_FORGE_LAND_COPY_LINKS", "1")
+	landWrite(t, filepath.Join(f.repo, ".gitignore"), ".code-forge/\nlocal.properties\napp/google-services.json\nprepared\ncache/\n")
+	landGit(t, f.repo, "add", ".gitignore")
+	gates := f.cfg["gates"].(map[string]any)
+	gates["test"] = []string{"checkcopy"}
+	gates["merge_gate_links"] = []string{"cache"}
+	f.commitConfig(t)
+	landDone(t, f.home, "r-fallback", landGit(t, f.tree, "rev-parse", "HEAD"))
+}
+
+func landCopyCalls(t *testing.T, f androidLandFixture) int {
+	t.Helper()
+	data, err := os.ReadFile(filepath.Join(f.home, "copy-calls"))
+	if os.IsNotExist(err) {
+		return 0
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	return len(strings.Split(strings.TrimSpace(string(data)), "\n"))
+}
+
+func TestLandCopyLinksChildNames(t *testing.T) {
+	f := androidLand(t)
+	landCacheFixture(t, f, map[string]string{"cache/a:b": "colon\n", "cache/back\\slash": "back\n", "cache/node_modules/pkg/.git/HEAD": "ref\n", "cache/plain.txt": "plain\n"})
+	if got := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", true); got.reason != "" {
+		t.Errorf("go copy of children named a:b, back\\slash and a nested .git must pass the gate: %q", got.reason)
+	}
+	if code, output := landNodeRetry(t, f.repo, f.tree, false, "checkcopy"); code != 0 || strings.Count(output, "B1 landed") != 1 {
+		t.Errorf("node copy of the same children must land: exit=%d output=%q", code, output)
+	}
+	if got := landCopyCalls(t, f); got != 2 {
+		t.Errorf("want 2 green copied suites (go, node), got %d", got)
+	}
+	// Containment still holds below the configured name: a child that resolves
+	// outside the repository is refused by both paths and runs no suite.
+	outside := t.TempDir()
+	landWrite(t, filepath.Join(outside, "secret"), "outside\n")
+	if err := os.Symlink(outside, filepath.Join(f.repo, "cache", "escape")); err != nil {
+		t.Fatal(err)
+	}
+	if got := landMergeGate(f.home, "r-android-links", "B1", f.repo, f.tree, f.repo, "block-B1", "main", true); !strings.Contains(got.reason, "gates.merge_gate_links cannot copy: cache") {
+		t.Errorf("go copy must refuse a child outside the repository: %q", got.reason)
+	}
+	if code, output := landNodeRetry(t, f.repo, f.tree, false, "checkcopy"); code != 1 || strings.Count(output, "must stay inside the repository") != 1 {
+		t.Errorf("node copy must refuse a child outside the repository: exit=%d output=%q", code, output)
+	}
+	if got := landCopyCalls(t, f); got != 2 {
+		t.Errorf("refused copies must run no suite, got %d suites", got)
+	}
+}
+
+func TestLandCopyLinksSymlinkedRepo(t *testing.T) {
+	f := androidLand(t)
+	landCacheFixture(t, f, map[string]string{"cache/plain.txt": "plain\n"})
+	alias := filepath.Join(t.TempDir(), "alias")
+	if err := os.Symlink(f.repo, alias); err != nil {
+		t.Fatal(err)
+	}
+	if got := landMergeGate(f.home, "r-android-links", "B1", alias, f.tree, alias, "block-B1", "main", true); got.reason != "" {
+		t.Errorf("go copy from a repository reached through a symlink must pass the gate: %q", got.reason)
+	}
+	if code, output := landNodeRetry(t, alias, f.tree, false, "checkcopy"); code != 0 || strings.Count(output, "B1 landed") != 1 {
+		t.Errorf("node copy from a repository reached through a symlink must land: exit=%d output=%q", code, output)
+	}
+	if got := landCopyCalls(t, f); got != 2 {
+		t.Errorf("want 2 green copied suites (go, node), got %d", got)
 	}
 }

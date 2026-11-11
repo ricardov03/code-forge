@@ -354,6 +354,12 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	branch := blockString(blockObject(entry.Get("worktree")).Get("branch"))
 	command := closeCommand([]string{"git", "-C", main, "merge", "--no-ff", "--no-edit", "--", branch})
 	next = command
+	if retry {
+		if reason := landClosedHeadMoved(home, run, id, main, branch); reason != "" {
+			next = closeCommand([]string{"code-forge", "status", "--run", run})
+			return stop(reason)
+		}
+	}
 	if !merge {
 		fmt.Fprintln(print, "hint: the merge gate runs only with --merge")
 		if json {
@@ -431,6 +437,31 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		fmt.Fprintf(os.Stdout, "block %s landed\n", id)
 	}
 	return 0
+}
+
+// landClosedHeadMoved guards a retried land, which skips join, gates and close:
+// it merges only the branch head that close checked, as recorded in the done
+// file's commit. A missing record or a moved branch refuses the merge.
+func landClosedHeadMoved(home, run, id, main, branch string) string {
+	recorded := ""
+	if id != "." && id != ".." && !strings.ContainsAny(id, "/\\\x00") {
+		if data, err := os.ReadFile(filepath.Join(home, ".code-forge", "runs", run, "blocks", id+".done.json")); err == nil {
+			if done, err := ledger.DecodeObject(data); err == nil && done.Get("status") == "closed" {
+				recorded, _ = done.Get("commit").(string)
+			}
+		}
+	}
+	if !blockCommit.MatchString(recorded) {
+		return "closed block has no recorded close commit; refusing to merge a branch head that close did not check"
+	}
+	current, err := gitx.Run(main, "rev-parse", "--verify", "--end-of-options", "refs/heads/"+branch+"^{commit}")
+	if err != nil {
+		return "cannot resolve block branch " + branch
+	}
+	if current = strings.TrimSpace(current); current != recorded {
+		return fmt.Sprintf("branch %s moved after close (closed at %.12s, now %.12s); commits added after close were not reviewed or gated", branch, recorded, current)
+	}
+	return ""
 }
 
 type landMergeResult struct {

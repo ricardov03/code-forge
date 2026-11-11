@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strings"
 	"syscall"
 	"time"
 
@@ -73,18 +74,25 @@ func landPrepareMergeGate(main, temporary, workspace string, settings config.Mer
 	return nil
 }
 
+// landCopyLink copies a source already checked by config.MergeGatePath. Its
+// children are any names on disk (a:b, a nested .git), so they are checked for
+// containment only: each must resolve inside the resolved repository root.
 func landCopyLink(root, source, destination string) error {
+	root, err := filepath.EvalSymlinks(root)
+	if err != nil {
+		return err
+	}
 	return landCopyLinkTree(root, source, destination, map[string]bool{})
 }
 
 func landCopyLinkTree(root, source, destination string, ancestors map[string]bool) error {
-	rel, err := filepath.Rel(root, source)
+	source, err := filepath.EvalSymlinks(source)
 	if err != nil {
 		return err
 	}
-	source, err = config.MergeGatePath(root, rel)
-	if err != nil {
-		return err
+	rel, err := filepath.Rel(root, source)
+	if err != nil || rel == "." || rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
+		return fmt.Errorf("gates.merge_gate_links paths must stay inside the repository")
 	}
 	info, err := os.Stat(source)
 	if err != nil {
