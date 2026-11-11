@@ -9,6 +9,7 @@ import (
 	"path/filepath"
 	"regexp"
 	"strings"
+	"time"
 
 	"github.com/ricardov03/code-forge/native/blockclose"
 	"github.com/ricardov03/code-forge/native/blockops"
@@ -157,7 +158,9 @@ func landAutoClaim(home, run, id, top string, record ledger.Object, files []stri
 	return nil
 }
 
-func landSuiteFailure(suite landResult) string {
+// landSuiteFailure names the failing tests of a red suite and saves its whole
+// output under the run folder, so a failed land never needs a rerun to read it.
+func landSuiteFailure(home, run, id string, suite landResult) string {
 	values, _ := suite.data.Get("results").([]any)
 	if suite.code == 0 && suite.data.Get("allOk") == true {
 		for _, value := range values {
@@ -168,31 +171,89 @@ func landSuiteFailure(suite landResult) string {
 		}
 		return "full suite unavailable: configure gates.test before merging"
 	}
-	outputs := []string{}
+	outputs, whole := []string{}, []string{}
 	for _, value := range values {
 		r := blockObject(value)
+		text := blockString(r.Get("stdout")) + "\n" + blockString(r.Get("stderr"))
+		whole = append(whole, fmt.Sprintf("== gate %s ok=%v ==\n%s", blockString(r.Get("gate")), r.Get("ok"), text))
 		if r.Get("ok") != true {
-			outputs = append(outputs, blockString(r.Get("stdout"))+"\n"+blockString(r.Get("stderr")))
+			outputs = append(outputs, text)
 		}
 	}
 	output := strings.Join(outputs, "\n")
-	failed, seen := []string{}, map[string]bool{}
-	linePattern := regexp.MustCompile(`^not ok\s+\d+\s+-\s+(.+)$`)
-	directive := regexp.MustCompile(`(?i)\s*#\s*(SKIP|TODO)\b`)
-	for _, line := range strings.Split(output, "\n") {
-		if match := linePattern.FindStringSubmatch(strings.TrimSpace(line)); match != nil {
-			name := strings.TrimSpace(directive.Split(match[1], 2)[0])
-			if !seen[name] && len(failed) < 10 {
-				failed = append(failed, name)
-				seen[name] = true
-			}
-		}
-	}
-	if len(failed) > 0 {
-		return "full suite failed:\n" + strings.Join(failed, "\n")
+	logLine := "full log: " + landSuiteLog(home, run, id, strings.Join(append(whole, suite.output, suite.error), "\n"))
+	if failed := landFailedTests(output); len(failed) > 0 {
+		return "full suite failed:\n" + strings.Join(failed, "\n") + "\n" + logLine
 	}
 	lines := strings.Split(strings.TrimSpace(landFirst(suite.error, output, suite.output)), "\n")
-	return "full suite failed:\n" + strings.Join(lines[max(0, len(lines)-20):], "\n")
+	return "full suite failed:\n" + strings.Join(lines[max(0, len(lines)-20):], "\n") + "\n" + logLine
+}
+
+var (
+	landTapFailure  = regexp.MustCompile(`^not ok\s+\d+\s+-\s+(.+)$`)
+	landTapSkip     = regexp.MustCompile(`(?i)\s*#\s*(SKIP|TODO)\b`)
+	landSpecWhere   = regexp.MustCompile(`^test at (.+):(\d+):\d+$`)
+	landSpecElapsed = regexp.MustCompile(`\s+\(\d+(?:\.\d+)?ms\)$`)
+)
+
+// landFailedTests reads TAP "not ok" lines and the node spec reporter's
+// "✖ failing tests:" summary. Spec names repeat in the running output, so only
+// unindented "✖" lines after the summary header count. At most 10, no repeats.
+func landFailedTests(output string) []string {
+	failed, seen := []string{}, map[string]bool{}
+	add := func(name string) {
+		if name != "" && !seen[name] && len(failed) < 10 {
+			failed = append(failed, name)
+			seen[name] = true
+		}
+	}
+	summary, where := false, ""
+	for _, line := range strings.Split(output, "\n") {
+		trimmed := strings.TrimSpace(line)
+		if match := landTapFailure.FindStringSubmatch(trimmed); match != nil {
+			add(strings.TrimSpace(landTapSkip.Split(match[1], 2)[0]))
+			continue
+		}
+		if trimmed == "✖ failing tests:" {
+			summary, where = true, ""
+			continue
+		}
+		if !summary {
+			continue
+		}
+		if match := landSpecWhere.FindStringSubmatch(line); match != nil {
+			where = match[1] + ":" + match[2]
+			continue
+		}
+		if name, ok := strings.CutPrefix(line, "✖ "); ok {
+			name = strings.TrimSpace(landSpecElapsed.ReplaceAllString(name, ""))
+			if where != "" {
+				name += " (" + where + ")"
+			}
+			add(name)
+			where = ""
+		}
+	}
+	return failed
+}
+
+// landSuiteLog writes the whole suite output to
+// <home>/.code-forge/runs/<run>/land-logs/<id>-<UTC time>.log and returns its
+// path, or why it could not be saved.
+func landSuiteLog(home, run, id, output string) string {
+	if !reviewBlockRun.MatchString(run) {
+		return "not saved (bad run id)"
+	}
+	dir := filepath.Join(home, ".code-forge", "runs", run, "land-logs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		return "not saved (" + err.Error() + ")"
+	}
+	name := strings.NewReplacer("/", "-", " ", "-").Replace(id) + "-" + time.Now().UTC().Format("20060102T150405.000000000Z") + ".log"
+	path := filepath.Join(dir, name)
+	if err := os.WriteFile(path, []byte(output), 0600); err != nil {
+		return "not saved (" + err.Error() + ")"
+	}
+	return path
 }
 
 func landFirst(values ...string) string {

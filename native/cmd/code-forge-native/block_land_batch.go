@@ -261,7 +261,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 					}
 					return code
 				}, ctx)
-				reason = landSuiteFailure(suite)
+				reason = landSuiteFailure(home, run, batch[n-1].id, suite)
 			}
 			if ctx.Err() != nil {
 				reason = ctx.Err().Error()
@@ -563,7 +563,7 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 		return err
 	}
 	if !all || ctx.Err() != nil {
-		return fmt.Errorf("changed gates failed: %s", landSuiteFailure(landResult{code: 1, data: ledger.Object{{Key: "results", Value: results}}}))
+		return fmt.Errorf("changed gates failed: %s", landSuiteFailure(home, run, block.id, landResult{code: 1, data: ledger.Object{{Key: "results", Value: results}}}))
 	}
 	return nil
 }
