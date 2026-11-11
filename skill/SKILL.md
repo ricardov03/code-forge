@@ -74,6 +74,7 @@ and is refused during an active grant; foreign changes remain `owned-conflict`.
 - **R15** Re-checks shrink: fix hunks only, four rounds, then a patch, then a human
 - **R16** Proof is exact assertions on the main behaviour
 - **R17** Never relax a rule alone
+- **R18** Facts, not guesses
 
 Red→green means an assertion failure on old code, then a pass on new code; no hand mutations; proof scales with risk; no extras beyond acceptance (R16).
 
