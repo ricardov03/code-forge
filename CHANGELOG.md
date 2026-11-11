@@ -6,6 +6,17 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ## [Unreleased]
 
+### Added
+
+- **`block open --allow-api-mismatch`** — block open (Go) checks the brief's uses/extends lines against the code
+  (api-fit). A missing name or parameter exits 2 with an `api-fit:` line; `--allow-api-mismatch` opens anyway and prints
+  each line as a note (B338)
+- **`code-forge cloud-coder --run <r> --block <id>`** (Go) — runs a cloud coder from config `coder.cloud` (submit, then
+  fetch until a patch or timeout), applies the patch to the block's owned files only and queues review; a patch fetched
+  at the deadline still lands (B342)
+- `code-forge report` has a pace section: per-block and run pace in minutes; text, `--json` and `--export` carry the
+  same 18 sections (B341, B358)
+
 ### Changed
 
 - Go tests that build a fixture repo (`gates run`, `gates` go-only scope, `review-file --wait`/`--wait-block`, `review wait-block`, `status` direct) run fixture git in the fixture repo without inherited `GIT_*` variables and start their code-forge children without them, so a `GIT_DIR`, `GIT_INDEX_FILE` or `GIT_WORK_TREE` from a hook or worktree no longer breaks them; a guard test reruns them with those variables set (B410)
@@ -33,6 +44,17 @@ waits on a second real consumer (plan §10.4, Q17).
   test slot (`CODE_FORGE_TEST_QUEUE_HELD` set by `gates run` and `code-forge queue run`), and keeps `max(1, cores/2)`
   outside a slot; an explicit `--test-concurrency` or `CODE_FORGE_TEST_CONCURRENCY` still wins (B376)
 - `block close` and `block ready` judge review caps, reopened and unwaived findings, agent and autopilot waivers, `review.agent_waivers.require_ack` (`agent-waivers-not-acked` until a signed human ack row), accepted rule hits, old result-file rows and an amended acceptance in Go, with the same verdict and output as Node. Close prints the agent waiver, agent reopen and accepted hit lines and the `agent_waivers`, `agent_reopens` and `accepted_hits` JSON keys only when they are not empty. `block close --help|-h` and `block human-pass --help|-h` print the usage in Go and exit 0. Rows or dates Go cannot read exactly like Node still hand over as `close-gates-format` (B380)
+- Batch `block land <id> <id>...` (Go) lands closed blocks as one checked batch: blocks that did not land are restored,
+  landed ones are marked, and a bad `--max`, a bad timeout or a duplicate id is refused (B340)
+- Gate child processes run at low priority (nice 10), and tests share one cached Go test binary (B354)
+- `gates run` keeps the full test scope when the block's base moves in an unsafe way or a baseline is rejected;
+  text-only blocks stay scoped (B318R)
+
+### Fixed
+
+- `npm run release`: when local `npm test` fails, only the failing files rerun alone; the release goes on only when each
+  passes alone and the CI run for HEAD is green (`local flaky (passed alone, CI green): <files>`). Worker test deadlines
+  scale with host load (B345)
 
 ## [0.21.0] — 2026-11-09
 
