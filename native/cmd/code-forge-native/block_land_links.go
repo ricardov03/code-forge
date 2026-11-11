@@ -58,7 +58,7 @@ func landPrepareMergeGate(main, temporary, workspace string, settings config.Mer
 			}
 		}
 		if err := landCopyLink(main, source, destination); err != nil {
-			return fmt.Errorf("gates.merge_gate_links cannot copy: %s", name)
+			return fmt.Errorf("gates.merge_gate_links cannot copy: %s: %w", name, err)
 		}
 	}
 	if len(settings.Setup) != 0 {

@@ -242,7 +242,7 @@ func TestLandClosedUnmergedRetry(t *testing.T) {
 	landDone(t, f.home, "r-fallback", landGit(t, f.tree, "rev-parse", "HEAD"))
 	before := landGit(t, f.repo, "rev-parse", "HEAD")
 	code, output := land()
-	if code != 1 || !strings.Contains(output, "gates.merge_gate_links") || landGit(t, f.repo, "rev-parse", "HEAD") != before {
+	if code != 1 || !strings.Contains(output, "Android SDK not found") || strings.Count(output, "gates.merge_gate_links") != 1 || landGit(t, f.repo, "rev-parse", "HEAD") != before {
 		t.Errorf("first retry must fail only at Android gate and keep main unchanged: exit=%d output=%q", code, output)
 	}
 	// The existing Node module is still reachable through native handover.
