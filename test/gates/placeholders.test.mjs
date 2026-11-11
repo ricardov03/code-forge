@@ -445,9 +445,12 @@ test('B60 (3): a {argv, env} gate runs with the variable set; the value never re
 test('B60 (3): the gates usage text states the env rule in the approved words', async () => {
   assert.deepEqual(await cli(runGatesVerb, ['nope']), [2, '', [
     'usage: code-forge gates detect|run|secret-scan|safe-edit|scope|acceptance|transcript-grep --cwd <dir> [...]\n',
-    "  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n",
+    "  gates run: an argv item exactly {test_files} runs the block's related tests (needs --run and --block); without --changed, over gates.full_suite_threshold_files owned files, or with no test file known, the full suite runs.\n",
     '  gates run: a gate may be {argv, env}. code-forge never prints or records an env value. Gate env is not a secret store. Child output is masked only for values of 8 or more characters.\n',
     '  gates run --run --block: when the block\'s base branch moved past its recorded base, no gate runs (exit 1) and the fix is printed: code-forge block rebase <id> --run <r> --accept-landed. --auto-rebase runs that rebase first; --allow-stale-base gates on the old base with a WARN line.\n',
+    "  gates run --run --block --changed: the Go test selection (the block's tests, tests that import a changed file); never the full suite; an empty selection skips the test gate.\n",
+    '  gates run --run --block --full: the only local full suite of a block (scope full, reason explicit); cannot go with --changed.\n',
+    '  gates run --run --block: the close-blocker preflight runs first by default; --no-preflight skips it, --preflight asks for it.\n',
   ].join('')]);
 });
 
