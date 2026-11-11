@@ -145,8 +145,9 @@ func blockPreflight(in preflightInput) (preflightResult, error) {
 		out.blockers = append(out.blockers, gatecheck.Blocker{Code: "coder_report_failed", Detail: "coder report FAILED: --report cannot be read"})
 		return out, nil
 	}
-	lines, _ := closeReviewedLines(in.run, in.id, top, filepath.Join(mainTop, ".code-forge/queue"), entry, files, gate.Waived, inTree, len(gate.Blockers) == 0)
-	check, _ := closeReport(string(data), in.run, in.id, files, lines, rows, key)
+	qdir := filepath.Join(mainTop, ".code-forge/queue")
+	lines, _ := closeReviewedLines(in.run, in.id, top, qdir, entry, files, gate.Waived, inTree, len(gate.Blockers) == 0)
+	check, _ := closeReport(string(data), in.run, in.id, qdir, files, lines, rows, key)
 	out.blockers = append(out.blockers, check.Blockers...)
 	return out, nil
 }
