@@ -55,7 +55,8 @@ export default async function help(_args, context = {}) {
   process.stdout.write('\nBlock usage: code-forge block <verb> --help (or -h).\n');
   process.stdout.write('  block open --acceptance <file>: JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n');
   process.stdout.write('  block open --brief <file>: a file inside the repository, not inline text.\n');
-  process.stdout.write('  block land <id> --run <r> --report <file> --transcript <file> [--merge] [--json]: join reviews, run changed gates, close, then optionally merge with --no-ff.\n');
+  process.stdout.write('  block land <id> --run <r> --report <file> --transcript <file> [--max <dur>] [--merge] [--no-merge-gate] [--push] [--watch-ci] [--copy-links] [--json]: join reviews, run changed gates, close, then with --merge run the merge gate and merge with --no-ff.\n');
+  process.stdout.write('  block land <id> <id>... --run <r> [--max <dur>] [--push] [--watch-ci] [--copy-links] [--json]: land closed blocks in order with one merge gate.\n');
   process.stdout.write('  Configuration fallback entries must be {provider, model} objects, not model-name strings (optional effort).\n');
   process.stdout.write('\nTest queue: gates wait in one machine-wide FIFO queue (code-forge queue shows it); wrap other test commands in `code-forge queue run -- <cmd>`.\n');
   return 0;

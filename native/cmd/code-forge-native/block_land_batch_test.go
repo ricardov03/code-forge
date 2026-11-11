@@ -262,7 +262,7 @@ func TestBlockLandBatchBisectPrefix(t *testing.T) {
 			ids := []string{"B1", "B2", "B3"}
 			code, output := f.land(ids...)
 			culprit := ids[bad-1]
-			if code != 1 || strings.Count(output, "block "+culprit+" land stopped at merge-gate: full suite failed:\n"+culprit+" integration contract") != 1 {
+			if code != 1 || strings.Count(output, "block "+culprit+" land stopped at merge-gate: tests failed:\n"+culprit+" integration contract") != 1 {
 				t.Fatalf("exit=%d, want 1 identifying %s and its failing test: %s", code, culprit, output)
 			}
 			f.checkMain(ids[:bad-1])
@@ -392,7 +392,7 @@ func TestBlockLandBatchDeferredBisectNamesCulprit(t *testing.T) {
 	ids := []string{"B1", "B2", "B3"}
 	f.nativeScope(ids, "B1")
 	code, output := f.land(ids...)
-	if code != 1 || strings.Count(output, "block B2 land stopped at merge-gate: full suite failed:\nB2 integration contract") != 1 {
+	if code != 1 || strings.Count(output, "block B2 land stopped at merge-gate: tests failed:\nB2 integration contract") != 1 {
 		t.Fatalf("exit=%d, want 1 naming B2 at merge-gate: %s", code, output)
 	}
 	f.checkMain(ids[:1])

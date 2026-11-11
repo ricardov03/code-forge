@@ -64,7 +64,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			return fmt.Errorf("batch run state or storage is unsupported")
 		}
 		if flags["no-merge-gate"] == true {
-			return fmt.Errorf("a batch requires the full merge-gate suite")
+			return fmt.Errorf("a batch always runs the merge gate; --no-merge-gate is refused")
 		}
 		if holder := blockString(blockObject(record.Get("proof_lock")).Get("block")); holder != "" {
 			return fmt.Errorf("proof.busy: %s", holder)
@@ -363,7 +363,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		for _, block := range batch {
 			head, err := gitx.Run(main, "rev-parse", "--verify", "refs/heads/"+block.branch)
 			if err != nil || head != block.head || gatesCleanTree(block.tree.Path) == "" {
-				return fmt.Errorf("block %s changed during the full suite", block.id)
+				return fmt.Errorf("block %s changed during the merge gate", block.id)
 			}
 		}
 		if green > 0 {

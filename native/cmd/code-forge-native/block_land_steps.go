@@ -163,7 +163,7 @@ func landSuiteFailure(home, run, id string, suite landResult) string {
 				return ""
 			}
 		}
-		return "full suite unavailable: configure gates.test before merging"
+		return "test gate unavailable: configure gates.test before merging"
 	}
 	outputs, whole := []string{}, []string{}
 	for _, value := range values {
@@ -177,10 +177,10 @@ func landSuiteFailure(home, run, id string, suite landResult) string {
 	output := strings.Join(outputs, "\n")
 	logLine := "full log: " + landSuiteLog(home, run, id, strings.Join(append(whole, suite.output, suite.error), "\n"))
 	if failed := landFailedTests(output); len(failed) > 0 {
-		return "full suite failed:\n" + strings.Join(failed, "\n") + "\n" + logLine
+		return "tests failed:\n" + strings.Join(failed, "\n") + "\n" + logLine
 	}
 	lines := strings.Split(strings.TrimSpace(landFirst(suite.error, output, suite.output)), "\n")
-	return "full suite failed:\n" + strings.Join(lines[max(0, len(lines)-20):], "\n") + "\n" + logLine
+	return "tests failed:\n" + strings.Join(lines[max(0, len(lines)-20):], "\n") + "\n" + logLine
 }
 
 var (

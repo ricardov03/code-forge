@@ -187,7 +187,7 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
       return stop('block worktree is dirty or unreadable; commit and review its changes before merging');
     }
     if (noMergeGate || configInForce(record)?.gates?.merge_gate === false) {
-      writeSafe(stderr, 'warning: merge gate skipped; merged full suite was not checked\n');
+      writeSafe(stderr, 'warning: merge gate skipped; the merged tree was not checked\n');
     } else {
       step = 'merge-gate';
       next = landCommand(['code-forge', 'gates', 'run', '--cwd', tree.workspace]);
@@ -220,10 +220,10 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
             const results = suite.data?.results ?? [];
             const output = results.filter((r) => !r.ok).map((r) => `${r.stdout}\n${r.stderr}`).join('\n');
             const failed = [...parseTapPassed(output).failed].slice(0, 10);
-            failure = failed.length ? `full suite failed:\n${failed.join('\n')}`
-              : `full suite failed:\n${(suite.error || output || suite.output).trim().split('\n').slice(-20).join('\n')}`;
+            failure = failed.length ? `tests failed:\n${failed.join('\n')}`
+              : `tests failed:\n${(suite.error || output || suite.output).trim().split('\n').slice(-20).join('\n')}`;
           } else if (!suite.data.results.some((r) => r.gate === 'test' && !r.skipped)) {
-            failure = 'full suite unavailable: configure gates.test before merging';
+            failure = 'test gate unavailable: configure gates.test before merging';
           }
         }
       } finally {
@@ -240,7 +240,7 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
       const currentStatus = await exec(['git', 'status', '--porcelain', '--untracked-files=all'], gitOptions);
       if (currentMain.result !== 'ok' || currentBlock.result !== 'ok' || currentBranch.result !== 'ok' || currentStatus.result !== 'ok'
         || currentMain.stdout !== mainHead.stdout || currentBlock.stdout !== blockHead.stdout || currentBranch.stdout !== branch.stdout || currentStatus.stdout) {
-        return stop('merge parents or main checkout changed during the full suite; check the checkout and rerun the merge gate');
+        return stop('merge parents or main checkout changed during the merge gate; check the checkout and rerun the merge gate');
       }
       writeSafe(json ? stderr : stdout, `merge gate: full suite passed (${((Date.now() - started) / 1000).toFixed(1)}s)\n`);
     }

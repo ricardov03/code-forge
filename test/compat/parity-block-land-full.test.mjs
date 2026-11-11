@@ -188,7 +188,7 @@ async function parity(shape, extra, json, expectedCode = 0) {
         assert.match(path.basename(actual.gateCwds[1]), /^\.merge-gate-/, `${engine}: full suite ran inside the trial tree`);
         assert.equal(actual.worktrees.includes('.merge-gate-'), false, `${engine}: trial worktree was removed`);
       }
-      if (expectedCode) assert.match(String(out.stderr), /land stopped at merge-gate: full suite unavailable: configure gates.test before merging/);
+      if (expectedCode) assert.match(String(out.stderr), /land stopped at merge-gate: test gate unavailable: configure gates.test before merging/);
     } });
   // B404: the block gate's gate.done row is the other expected difference:
   // Go selects the tests itself (scope related, reason import_graph) and appends

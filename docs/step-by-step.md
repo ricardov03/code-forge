@@ -667,8 +667,8 @@ See [review rules](../skill/references/review.md).
 
 Close checks ownership, current reviews, proof, and the coder's report and transcript.
 **Land** means bring the finished branch into the main checkout.
-`block land --merge` joins reviews, runs changed gates, closes, tests the merged full suite, and merges.
-When the suite fails, land names up to 10 failing tests (TAP `not ok` and the node spec `✖ failing tests:` list, with file:line) and prints `full log: <path>`, the whole suite output saved under the run folder in `land-logs/`.
+`block land --merge` joins reviews, runs changed gates, closes, runs the merge gate on a trial merge (the Go test selection, never the full suite), and merges.
+When the merge gate fails, land names up to 10 failing tests (TAP `not ok` and the node spec `✖ failing tests:` list, with file:line) and prints `full log: <path>`, the whole suite output saved under the run folder in `land-logs/`.
 
 **Run**
 
@@ -701,12 +701,12 @@ If same-run closed blocks changed owned files, see the `--accept-landed` path in
 
 ```text
 block B1 closed
-merge gate: full suite passed (<seconds>s)
+merge gate: scoped tests passed (<n> files, import_graph, <seconds>s)
 block B1 landed
 ```
 
 The Go engine can reuse a green full run for the exact merged tree. In that case it prints
-`merge gate: reused green full suite on tree <tree-id>` instead of the full-suite pass line.
+`merge gate: reused green full suite on tree <tree-id>` instead of the scoped-tests line.
 See [merge-gate reuse](how-it-works.md#one-worktree-per-block) for the evidence checks.
 
 **What changed**

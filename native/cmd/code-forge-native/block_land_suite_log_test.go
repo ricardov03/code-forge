@@ -139,7 +139,7 @@ func TestLandSuiteLogBatchMergeGateNamesSpecFailures(t *testing.T) {
 	suite := landSuiteRunningLine + "not ok 3 - tap contract\n" + landSuiteSpecSample
 	f := newLandSuiteLogFixture(t, 2, suite)
 	code, output := f.land("B1", "B2", "B3")
-	want := "block B2 land stopped at merge-gate: full suite failed:\ntap contract\n" + landSuiteSampleName + "\nfull log: "
+	want := "block B2 land stopped at merge-gate: tests failed:\ntap contract\n" + landSuiteSampleName + "\nfull log: "
 	if code != 1 || strings.Count(output, want) != 1 {
 		t.Fatalf("exit=%d, want 1 and exactly one block %q: %s", code, want, output)
 	}
@@ -153,7 +153,7 @@ func TestLandSuiteLogBatchChangedGatesKeepWholeLog(t *testing.T) {
 	f := newLandSuiteLogFixture(t, 0, landSuiteSpecSample)
 	f.write(f.home, "changed-fail", "1\n")
 	code, output := f.land("B1", "B2")
-	want := "block B1 land stopped at gates: changed gates failed: full suite failed:\n" + landSuiteSampleName + "\nfull log: "
+	want := "block B1 land stopped at gates: changed gates failed: tests failed:\n" + landSuiteSampleName + "\nfull log: "
 	if code != 1 || strings.Count(output, want) != 1 {
 		t.Fatalf("exit=%d, want 1 and exactly one block %q: %s", code, want, output)
 	}
@@ -174,7 +174,7 @@ func TestLandSuiteLogNamesAtMostTenOnce(t *testing.T) {
 	for i := 1; i <= 10; i++ {
 		names = append(names, fmt.Sprintf("case %d (test/t%d.test.mjs:%d)", i, i, i))
 	}
-	want := "block B2 land stopped at merge-gate: full suite failed:\n" + strings.Join(names, "\n") + "\nfull log: "
+	want := "block B2 land stopped at merge-gate: tests failed:\n" + strings.Join(names, "\n") + "\nfull log: "
 	if code != 1 || strings.Count(output, want) != 1 {
 		t.Fatalf("exit=%d, want 1 and exactly one block %q: %s", code, want, output)
 	}

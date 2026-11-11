@@ -614,7 +614,7 @@ files appended as its last arguments, the same as `gates run --changed`; it neve
 unscoped. A passing run prints
 `merge gate: scoped tests passed (<n> files, <reason>, <s>s)`; with nothing selected it prints
 `merge gate: no test selected (<reason>); test gate skipped`. A merge with no test command
-still refuses with `full suite unavailable: configure gates.test before merging`.
+still refuses with `test gate unavailable: configure gates.test before merging`.
 A red suite or conflict stops at `merge-gate`. It names the first ten failing TAP tests
 (or gate diagnostics) or the conflict files, and prints a `next:` action.
 Land removes the temporary worktree on success or failure. It checks that both merge parents

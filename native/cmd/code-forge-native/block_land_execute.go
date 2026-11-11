@@ -420,7 +420,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 			fmt.Fprintf(print, "merge gate: scoped tests passed (%d files, %s, %.1fs)\n", failure.selected, failure.scopeReason, float64(time.Since(started).Milliseconds())/1000)
 		}
 	} else {
-		fmt.Fprintln(stderr, "warning: merge gate skipped; merged full suite was not checked")
+		fmt.Fprintln(stderr, "warning: merge gate skipped; the merged tree was not checked")
 	}
 	step = "merge"
 	next = command

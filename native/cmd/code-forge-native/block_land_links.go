@@ -16,8 +16,8 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 )
 
-// landNoSuite starts the merge-gate reason when no full suite is configured.
-const landNoSuite = "full suite unavailable:"
+// landNoSuite starts the merge-gate reason when no test gate is configured.
+const landNoSuite = "test gate unavailable:"
 
 const landMergeHint = "the gate ran in a temporary tree with tracked files only; git-ignored files the suite needs go in gates.merge_gate_links"
 

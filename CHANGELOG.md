@@ -18,6 +18,7 @@ waits on a second real consumer (plan §10.4, Q17).
 - `npm run release:site` deploys the merged site folder `docs-site/site/.pages-out` (marketing pages plus `/docs`)
   instead of `dist`, which has no `/docs`; `--deploy-dir <path>` picks another folder inside the site root, and a
   missing folder or `index.html` after the gates stops before commit and deploy (B446)
+- `block land` output no longer says the merge gate runs the full suite: `--no-merge-gate` warns `merge gate skipped; the merged tree was not checked`, a batch refuses it with `a batch always runs the merge gate; --no-merge-gate is refused`, a red gate stops with `tests failed:` and a missing test command with `test gate unavailable: configure gates.test before merging`; `help` lists every `block land` flag and batch land (B447)
 
 ## [0.22.0] — 2026-11-11
 
