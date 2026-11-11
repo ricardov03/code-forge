@@ -32,6 +32,14 @@ async function discoverVerbs() {
 }
 
 /**
+ * B371: every public Go route has a thin src/cli shim (cloud-coder.mjs, docs.mjs), so the readdir
+ * above is the one source of the verb list. No verb is Go-only any more; this stays exported, and
+ * empty, for test/router.test.mjs ("help lists no name beyond the src/cli files"). A Go route added
+ * without a shim fails TestHelpListsEveryGoRoute.
+ */
+export const GO_ONLY_VERBS = Object.freeze([]);
+
+/**
  * @param {string[]} _args
  * @param {{verbs?: string[]}} [context] - the router already knows the verb list; reuse it when
  *   present instead of reading the directory a second time.
