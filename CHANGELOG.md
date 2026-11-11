@@ -80,6 +80,10 @@ waits on a second real consumer (plan §10.4, Q17).
   passes alone and the CI run for HEAD is green (`local flaky (passed alone, CI green): <files>`). Worker test deadlines
   scale with host load (B345)
 
+### Removed
+
+- Three Node modules that nothing ever imported, with their tests: `src/engines/alias-map.mjs`, `src/engines/isolation.mjs` and `src/gates/invariants.mjs`. `src/config/schema-paths.mjs` stays, because the config schema tests use it (B400)
+
 ## [0.21.0] — 2026-11-09
 
 ### Added
