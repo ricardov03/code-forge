@@ -346,3 +346,47 @@ func TestLandCopyLinksSymlinkedRepo(t *testing.T) {
 		t.Errorf("want 1 green copied suite, got %d", got)
 	}
 }
+
+// A closed block without a recorded worktree cannot be retried, so land refuses
+// in Go before any state check can hand the run over to Node. The record is
+// the bench-verbs fixture shape (scripts/bench-verbs.mjs "block land").
+func TestLandClosedWithoutWorktreeRefusesInGo(t *testing.T) {
+	home, repo := t.TempDir(), t.TempDir()
+	repo, _ = filepath.EvalSymlinks(repo)
+	t.Setenv("HOME", home)
+	t.Setenv("CODE_FORGE_NATIVE", "1")
+	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
+	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
+	landGit(t, repo, "init", "-q")
+	const run = "r-bench-verbs"
+	entry := ledger.Object{{Key: "status", Value: "closed"}, {Key: "owned_files", Value: []any{}}}
+	record := ledger.Object{{Key: "run_id", Value: run}, {Key: "project", Value: "bench-verbs"}, {Key: "workspace", Value: repo}, {Key: "status", Value: "active"}, {Key: "mode", Value: "plan"}, {Key: "started_at", Value: "2099-01-02T03:04:05.000Z"}, {Key: "blocks", Value: ledger.Object{{Key: "B1", Value: entry}}}}
+	if err := state.SaveRun(home, record); err != nil {
+		t.Fatal(err)
+	}
+	landWrite(t, filepath.Join(home, ".code-forge/runs", run+".key"), strings.Repeat("0", 32))
+	stdoutFile, err := os.CreateTemp(home, "stdout-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	stderrFile, err := os.CreateTemp(home, "stderr-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, stderr := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = stdoutFile, stderrFile
+	handovers := []handoverReason{}
+	flags := map[string]any{"report": "report.txt", "transcript": "transcript.txt", "json": true}
+	code := landExecuteWithReason(nil, flags, home, run, "B1", record, entry, func(reason handoverReason) int { handovers = append(handovers, reason); return 127 })
+	os.Stdout, os.Stderr = out, stderr
+	stdoutFile.Close()
+	stderrFile.Close()
+	data, err := os.ReadFile(stdoutFile.Name())
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := `{"block":"B1","event":"refused","step":"join","reason":"block is closed, not open","next":"code-forge review-file --wait-block B1 --run r-bench-verbs"}` + "\n"
+	if len(handovers) != 0 || code != 1 || string(data) != want {
+		t.Fatalf("closed block without worktree: handovers=%v exit=%d stdout=%q, want 0 handovers, exit 1, stdout %q", handovers, code, data, want)
+	}
+}

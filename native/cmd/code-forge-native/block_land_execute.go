@@ -111,6 +111,15 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		defer timing()
 		return stop("block is " + blockString(entry.Get("status")) + ", not open")
 	}
+	if retry && entry.Get("worktree") == nil {
+		// A closed block without a recorded worktree cannot be retried; keep
+		// the plain refusal a closed block had before B343, ahead of the state
+		// checks that hand over to Node.
+		begin()
+		defer finish()
+		defer timing()
+		return stop("block is closed, not open")
+	}
 	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
 		return fallback(blockStateHandoverReason(record, "land", hLandStateStorage))
 	}
@@ -126,11 +135,6 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		begin()
 		defer finish()
 		defer timing()
-		if retry {
-			// A closed block without a recorded worktree cannot be retried;
-			// keep the plain refusal a closed block had before B343.
-			return stop("block is closed, not open")
-		}
 		return stop("block has no recorded worktree and branch")
 	}
 	top, err := gitx.RepoTop(tree.Path)
