@@ -62,8 +62,12 @@ function launch(f, args = ARGS, extra = {}, program = BINARY, prefix = []) {
   child.stdout.on('data', (s) => { stdout += s; }); child.stderr.on('data', (s) => { stderr += s; });
   return { child, ended: once(child, 'close').then(([code, signal]) => ({ code, signal, stdout, stderr })) };
 }
+// B393: Go records on gate.done the clean Git tree a worktree gate ran on;
+// Node never writes it. The compare drops it from Go's rows only; the
+// worktree case below checks the Go value.
+const GO_ONLY = { 'gate.done': ['tree'], 'gate.cancelled': ['tree'] };
 async function parity(f, args = ARGS, fallback = false, env = {}) {
-  const result = await runParity(args, { fixture: f, goCommand: BINARY, env: isolatedEnv({ CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE, ...env }) });
+  const result = await runParity(args, { fixture: f, goCommand: BINARY, goOnlyFields: GO_ONLY, env: isolatedEnv({ CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: fallback ? process.execPath : NO_NODE, ...env }) });
   assert.deepEqual(result.diffs, [], `${args.join(' ')}: zero stream, exit and state differences`);
 }
 const normalizeRows = (bytes) => bytes.replace(/\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z/g, '<time>').replace(/("(?:total_)?duration_ms":)\d+/g, '$1<duration>');
@@ -222,6 +226,10 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
   git(tree, ['worktree', 'add', '-q', '-b', 'linked', treePath]);
   await record(tree, { run_id: 'fixture', project: 'fixture', workspace: tree.repo, status: 'active', blocks: { B1: { status: 'open', kind: 'code', owned_files: ['sample.mjs'], test_files: ['sample.test.mjs'], worktree: { path: treePath, branch: 'linked', base_sha: base } } } });
   for (const flags of [[], ['--cwd', treePath], ['--cwd', tree.repo], [`--cwd=${tree.repo}`]]) await parity(tree, [...ARGS, ...flags]);
+  assert.equal((await launch(tree, [...ARGS, '--cwd', treePath]).ended).code, 0, 'worktree gate runs green in Go');
+  const treeRows = (await readFile(path.join(tree.home, '.code-forge/ledger/fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
+  assert.deepEqual(treeRows.filter((row) => row.event === 'gate.done').map((row) => row.tree),
+    [git(tree, ['rev-parse', 'linked^{tree}'])], 'Go gate.done in a clean worktree records the commit tree it ran on (B393)');
   for (const flags of [['--timeout-ms'], ['--timeout-ms', 'bad'], ['--timeout-ms', '0'], ['--slug'], ['--cwd'], ['--run'], ['--block']]) {
     await parity(green, [...ARGS, ...flags]);
     await parity(green, [...ARGS, ...flags], false, { CODE_FORGE_NO_ERROR_LOG: '0' });

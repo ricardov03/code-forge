@@ -242,6 +242,18 @@ function normalize(value, copy, field = '') {
   return value;
 }
 
+/** Remove Go-only fields from Go's ledger rows of the named events (see runParity goOnlyFields). */
+function stripGoOnly(name, rows, goOnlyFields) {
+  if (!name.endsWith('.jsonl') || !Array.isArray(rows)) return rows;
+  return rows.map((row) => {
+    const fields = row !== null && typeof row === 'object' && !Array.isArray(row) ? goOnlyFields[row.event] : undefined;
+    if (!fields) return row;
+    const kept = { ...row };
+    for (const field of fields) delete kept[field];
+    return kept;
+  });
+}
+
 /** MACs may differ only when BOTH original rows verify and every other normalized field agrees. */
 async function normalizeSignatures(a, b, left, right, node, go) {
   if (a === null || b === null || typeof a !== 'object' || typeof b !== 'object' || Buffer.isBuffer(a) || Buffer.isBuffer(b)) return;
@@ -274,10 +286,13 @@ async function normalizeSignatures(a, b, left, right, node, go) {
  * even on errors. Diffs identify process streams or home/repo-relative state files and JSON
  * paths ($.field, $[row].field); raw files use $. Missing files use $file.
  * @param {string[]} verbArgs
- * @param {{fixture: Fixture, goCommand: string | string[], nodeCommand?: string | string[], env?: Record<string, string>, stdin?: string | Buffer, tempRoot?: string, samePaths?: boolean, prepare?: (copy: Fixture) => Promise<(() => Promise<void>) | void>, checkProcess?: (engine: 'Node' | 'Go', result: Awaited<ReturnType<typeof execute>>) => void}} options
+ * goOnlyFields names ledger row fields that only Go writes, by event (e.g. B393's gate.done
+ * `tree`): they are removed from Go's .jsonl rows of that event before the comparison, never
+ * from Node's, so a Node row that gains one still shows as a diff. Callers assert the Go value.
+ * @param {{fixture: Fixture, goCommand: string | string[], nodeCommand?: string | string[], env?: Record<string, string>, stdin?: string | Buffer, tempRoot?: string, samePaths?: boolean, prepare?: (copy: Fixture) => Promise<(() => Promise<void>) | void>, checkProcess?: (engine: 'Node' | 'Go', result: Awaited<ReturnType<typeof execute>>) => void, goOnlyFields?: Record<string, string[]>}} options
  * @returns {Promise<{equal: boolean, diffs: Diff[]}>}
  */
-export async function runParity(verbArgs, { fixture, goCommand, nodeCommand = [process.execPath, CLI], env = {}, stdin = '', tempRoot = os.tmpdir(), samePaths = false, prepare, checkProcess }) {
+export async function runParity(verbArgs, { fixture, goCommand, nodeCommand = [process.execPath, CLI], env = {}, stdin = '', tempRoot = os.tmpdir(), samePaths = false, prepare, checkProcess, goOnlyFields = {} }) {
   const root = await realpath(await mkdtemp(path.join(tempRoot, 'cf-parity-')));
   try {
     const node = await copyFixture(fixture, path.join(root, 'node'));
@@ -327,7 +342,7 @@ export async function runParity(verbArgs, { fixture, goCommand, nodeCommand = [p
         if (a.kind !== b.kind) { diffs.push({ where: name, field: '$type', node: a.kind, go: b.kind }); continue; }
         const rawA = a.kind === 'file' ? decode(a.name, a.value) : a.value;
         const rawB = b.kind === 'file' ? decode(b.name, b.value) : b.value;
-        const normA = normalize(rawA, node), normB = normalize(rawB, go);
+        const normA = normalize(rawA, node), normB = stripGoOnly(name, normalize(rawB, go), goOnlyFields);
         await normalizeSignatures(rawA, rawB, normA, normB, node, go);
         compare(normA, normB, name, '$', diffs);
       }

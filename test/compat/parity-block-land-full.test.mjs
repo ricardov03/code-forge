@@ -70,6 +70,12 @@ async function fixture(shape) {
   const content = 'export const value = 2;\n';
   await writeFile(path.join(tree, 'sample.mjs'), content);
   git(tree, ['commit', '-qam', 'change']);
+  if (shape === 'symlink') {
+    // B393: main moves past the block base, so the merged tree differs from the
+    // tree the block gate ran on and the merge gate must run (no gate_reused).
+    await writeFile(path.join(f.repo, 'notes.txt'), 'main moved\n');
+    git(f.repo, ['add', 'notes.txt']); git(f.repo, ['commit', '-qm', 'main moved']);
+  }
   const record = { run_id: RUN, project: SLUG, workspace: f.repo, status: 'active',
     config: initialConfigState(live), worker: { pid: process.pid, started_at: await processStartTime(process.pid) },
     blocks: { B1: { status: 'open', owned_files: ['sample.mjs'], owned_kinds: { 'sample.mjs': 'file' }, base_sha: base,
@@ -94,12 +100,18 @@ async function fixture(shape) {
   return f;
 }
 
+// B393: Go records on its gate row the clean Git tree the block gate ran on;
+// Node never writes it. The compare drops it from Go's rows only; parity()
+// checks the Go value against the block commit's tree.
+const GO_ONLY = { 'gate.done': ['tree'], 'gate.cancelled': ['tree'] };
+
 async function parity(shape, extra, json, expectedCode = 0) {
   const observed = [];
   const selected = shape === 'symlink' ? ['test/sample.test.mjs'] : [];
+  const reuses = shape === 'merge';
   const mergeLine = selected.length ? 'merge gate: scoped tests passed (1 files, import_graph, <duration>s)' : 'merge gate: no test selected (import_graph); test gate skipped';
   const result = await runParity([...argv, ...extra, ...(json ? ['--json'] : [])], { fixture: await fixture(shape),
-    goCommand: BINARY, tempRoot: '/tmp', samePaths: true, env,
+    goCommand: BINARY, tempRoot: '/tmp', samePaths: true, env, goOnlyFields: GO_ONLY,
     prepare: async (copy) => {
       if (shape === 'symlink') {
         const alias = copy.repo + '-link';
@@ -112,6 +124,7 @@ async function parity(shape, extra, json, expectedCode = 0) {
         assert.notEqual(record.workspace, git(record.workspace, ['rev-parse', '--show-toplevel']), 'workspace uses the symlink spelling');
       }
       const main = git(copy.repo, ['rev-parse', 'main']), tip = git(copy.repo, ['rev-parse', 'block-B1']);
+      const blockTree = git(copy.repo, ['rev-parse', 'block-B1^{tree}']);
       const daemon = await serveDaemon(copy, RUN, async (req) => {
         const rows = (await readFile(ledgerFile(copy), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
         if (req.method === 'rows') return { rows };
@@ -129,7 +142,7 @@ async function parity(shape, extra, json, expectedCode = 0) {
         const handovers = JSON.parse(logs.stdout);
         const record = JSON.parse(await readFile(runFile(copy), 'utf8'));
         const rows = (await readFile(ledgerFile(copy), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
-        observed.push({ handovers, record, rows, main, tip, after: git(copy.repo, ['rev-parse', 'main']),
+        observed.push({ handovers, record, rows, main, tip, blockTree, after: git(copy.repo, ['rev-parse', 'main']),
           parents: git(copy.repo, ['rev-list', '--parents', '-n', '1', 'main']).split(' '),
           gateCwds: shape === 'symlink' ? (await readFile(path.join(copy.home, 'gate-cwds.txt'), 'utf8')).trim().split('\n') : [],
           worktrees: git(copy.repo, ['worktree', 'list', '--porcelain']),
@@ -150,6 +163,13 @@ async function parity(shape, extra, json, expectedCode = 0) {
         // B404: Node runs the test command without {test_files} unscoped; Go
         // never does. Go's merge gate line is the one expected difference.
         if (engine === 'Node') out[stream] = out[stream].replace('merge gate: full suite passed (<duration>s)', mergeLine);
+        // B393: on 'merge' the merged tree is the block tree its gate already
+        // ran green on, so Go reuses that gate (gate_reused); Node reruns it.
+        // Go's reuse line and landed JSON reason are the expected difference.
+        if (engine === 'Node' && reuses) {
+          out[stream] = out[stream].replace(mergeLine, `merge gate: reused green gate on tree ${actual.blockTree.slice(0, 12)} (gate_reused)`)
+            .replace(/^(\{"block":"B1","event":"landed","merge":[^\n]*)\}$/m, '$1,"merge_gate_reason":"gate_reused"}');
+        }
       }
       assert.equal(actual.record.blocks.B1.status, 'closed', `${engine}: one closed block`);
       for (const event of ['block.close', 'land.timing', ...(shape === 'hook' ? ['hook.ran'] : []), ...(shape === 'grant' ? ['autopilot.close'] : [])]) {
@@ -188,6 +208,9 @@ async function parity(shape, extra, json, expectedCode = 0) {
   assert.ok(goRun, `${shape} json=${json}: Go run observed`);
   const goDone = goRun.rows.filter((row) => row.event === 'gate.done' && row.block === 'B1').at(-1);
   assert.ok(goDone, `${shape} json=${json}: Go wrote a gate.done row`);
+  assert.equal(goDone.tree, goRun.blockTree, `${shape} json=${json}: Go gate.done records the block commit tree it ran on (B393)`);
+  const nodeRun = observed.find((o) => o.engine === 'Node');
+  assert.deepEqual(nodeRun.rows.filter((row) => Object.hasOwn(row, 'tree')), [], `${shape} json=${json}: Node writes no gate tree`);
   if (shape === 'no-suite') {
     assert.deepEqual([goDone.scope, goDone.reason, expected.length], ['full', 'unpaired', 0], `${shape} json=${json}: no test command, no B404 difference`);
   } else {
@@ -201,7 +224,19 @@ async function parity(shape, extra, json, expectedCode = 0) {
       assert.ok(expected.some((d) => d.field.endsWith('.' + field)), `${shape} json=${json}: B404 ${field} diff present: ${JSON.stringify(expected.map((d) => d.field))}`);
     }
   }
-  assert.deepEqual(result.diffs.filter((d) => !expected.includes(d)), [], `${shape} json=${json}: exact Node/Go bytes, exit, state and rows except the B404 test scope`);
+  // B393: Go's signed land.timing row records the reused gate; Node's has no
+  // such fields, so the row's MAC differs too (both engines' MACs verify above).
+  const timing = goRun.rows.findIndex((row) => row.event === 'land.timing');
+  const b393Values = { merge_gate_reason: 'gate_reused', merge_gate_reused: true, merge_gate_tree: goRun.blockTree };
+  const b393 = reuses ? result.diffs.filter((d) => d.where.endsWith('ledger/land-full.jsonl') && d.field.startsWith(`$[${timing}].`)) : [];
+  if (reuses) {
+    assert.deepEqual(Object.fromEntries(b393.filter((d) => d.field !== `$[${timing}].mac`).map((d) => [d.field.slice(`$[${timing}].`.length), d.go])),
+      b393Values, `${shape} json=${json}: Go land.timing records exactly the reused gate tree`);
+    assert.ok(b393.every((d) => d.field === `$[${timing}].mac` || d.node === undefined), `${shape} json=${json}: Node writes no merge-gate reuse fields`);
+  } else {
+    assert.deepEqual(goRun.rows.filter((row) => Object.hasOwn(row, 'merge_gate_reused')), [], `${shape} json=${json}: no gate reuse without --merge`);
+  }
+  assert.deepEqual(result.diffs.filter((d) => !expected.includes(d) && !b393.includes(d)), [], `${shape} json=${json}: exact Node/Go bytes, exit, state and rows except the B404 test scope and B393 gate reuse`);
 }
 
 test('block land runs fully in Go for plain, --merge, --no-merge-gate, grant and hook shapes with Node parity and 0 land hand-overs', async (t) => {

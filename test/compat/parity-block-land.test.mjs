@@ -167,16 +167,34 @@ function assertLedgerSignatures(rows) {
   assert.deepEqual(unsigned, gates, 'exactly the gate rows are unsigned; every other row must carry a MAC');
   return unsigned.map(({ event, gate }) => ({ event, gate }));
 }
-function prepareParityLand(kind = 'clean', merge = false) {
-  let nodeUnsigned;
-  return (copy) => prepareLand(copy, kind, merge, (unsigned) => {
-    if (nodeUnsigned === undefined) nodeUnsigned = unsigned;
-    else assert.deepEqual(unsigned, nodeUnsigned, 'Node and Go have the same unsigned event/gate list');
-  });
+// B393: Go records on each gate row the clean Git tree the block gate ran on;
+// Node never writes it. The parity compare drops it from Go's rows only, and
+// gateTrees checks the Go value itself.
+const GO_ONLY = { 'gate.done': ['tree'], 'gate.cancelled': ['tree'] };
+function gateTrees(engine, rows, blockTree) {
+  const gateRows = rows.filter((r) => ['gate.red', 'gate.done', 'gate.cancelled'].includes(r.event));
+  if (engine === 'Node') {
+    assert.deepEqual(gateRows.filter((r) => Object.hasOwn(r, 'tree')), [], 'Node writes no gate tree');
+    return;
+  }
+  const done = gateRows.filter((r) => r.event !== 'gate.red');
+  assert.ok(done.length > 0, 'Go wrote a gate.done row');
+  assert.deepEqual(done.map((r) => r.tree), done.map(() => blockTree), 'every Go gate.done row records the block commit tree it ran on');
 }
-async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = (_unsigned) => {}) {
+function prepareParityLand(kind = 'clean', merge = false) {
+  let nodeUnsigned, calls = 0;
+  return (copy) => {
+    const engine = calls++ === 0 ? 'Node' : 'Go';
+    return prepareLand(copy, kind, merge, (unsigned) => {
+      if (nodeUnsigned === undefined) nodeUnsigned = unsigned;
+      else assert.deepEqual(unsigned, nodeUnsigned, 'Node and Go have the same unsigned event/gate list');
+    }, (rows, blockTree) => gateTrees(engine, rows, blockTree));
+  };
+}
+async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = (_unsigned) => {}, checkRows = (_rows, _blockTree) => {}) {
   const record = JSON.parse(await readFile(path.join(copy.home, '.code-forge/runs', RUN + '.json'), 'utf8'));
   const tree = record.blocks.B1.worktree.path;
+  const blockTree = git(copy.repo, ['rev-parse', 'block-B1^{tree}']);
   const mainBefore = git(copy.repo, ['rev-parse', 'main']);
   const blockTip = git(copy.repo, ['rev-parse', 'block-B1']);
   const blockContent = await readFile(path.join(tree, 'sample.mjs'), 'utf8');
@@ -226,6 +244,7 @@ async function prepareLand(copy, kind = 'clean', merge = false, checkUnsigned = 
     }
     const rows = (await readFile(path.join(copy.home, '.code-forge/ledger/land-fixture.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
     checkUnsigned(assertLedgerSignatures(rows));
+    checkRows(rows, blockTree);
     assert.equal(rows.filter((r) => r.event === 'land.timing').length, 1, 'exactly one signed timing row');
     assert.equal(rows.filter((r) => r.event === 'gate.done').length, kind === 'moved' ? 2 : 1, 'tree moves trigger exactly one gate rerun');
     assert.equal(rows.filter((r) => r.event === 'block.close').length, ['clean', 'moved', 'auto'].includes(kind) ? 1 : 0);
@@ -238,7 +257,7 @@ for (const kind of ['clean', 'findings', 'red', 'moved', 'timeout', 'auto', 'orp
     for (const json of [false, true]) {
       const f = await openFixture(kind), argv = [...args, '--max', '1800s', ...(json ? ['--json'] : [])];
       const result = await runParity(argv, { fixture: f, goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
-        env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand(kind),
+        env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand(kind), goOnlyFields: GO_ONLY,
         checkProcess: kind !== 'timeout' ? undefined : (engine, out) => {
           assert.equal(out.code, 1, `${engine}: wait_timeout refuses land`);
           assert.match(String(out.stderr), /land stopped at join: wait_timeout/);
@@ -274,7 +293,7 @@ test('ported land and optional merge succeed with Node unavailable', async () =>
       assertLedgerSignatures(rows);
     } finally { await cleanup(); await rm(short, { recursive: true, force: true }); }
     const result = await runParity([...args, ...extra], { fixture: await openFixture(), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
-      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand('clean', extra.includes('--merge')) });
+      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent' }, prepare: prepareParityLand('clean', extra.includes('--merge')), goOnlyFields: GO_ONLY });
     assert.deepEqual(result.diffs, [], `merge flow ${extra}: exact Node parity`);
   }
 });
@@ -357,7 +376,7 @@ async function snapshot(f) {
 test('composed land logs only the outer block invocation and matches Node failure logs', async () => {
   for (const kind of ['clean', 'findings', 'red', 'red-slow', 'orphan']) {
     const result = await runParity([...args, '--max', '1800s', '--json'], { fixture: await openFixture(kind), goCommand: BINARY, tempRoot: '/tmp', samePaths: true,
-      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '0' }, prepare: prepareParityLand(kind) });
+      env: { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: '/nonexistent', CODE_FORGE_NO_ERROR_LOG: '0' }, prepare: prepareParityLand(kind), goOnlyFields: GO_ONLY });
     assert.deepEqual(result.diffs, [], `${kind}: exact outer breadcrumb and error log, no child CLI logs`);
   }
 });
