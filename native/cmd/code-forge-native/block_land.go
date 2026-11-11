@@ -25,7 +25,7 @@ func landFlags(args []string) (map[string]any, []string, string) {
 			continue
 		}
 		name, _, inline := strings.Cut(arg[2:], "=")
-		if name == "merge" || name == "no-merge-gate" || name == "push" || name == "watch-ci" {
+		if name == "merge" || name == "no-merge-gate" || name == "push" || name == "watch-ci" || name == "copy-links" {
 			if _, exists := flags[name]; exists {
 				return flags, pos, "--" + name + " given more than once"
 			}
@@ -85,7 +85,31 @@ func landMax(raw string) (int64, bool) {
 }
 
 func runBlockLand(args []string) int {
-	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"land"}, args...), reason) }
+	fallback := func(reason handoverReason) int {
+		// The legacy dispatcher predates --copy-links. Carry this native flag
+		// across the fallback boundary without changing that shared parser.
+		forward := []string{"land"}
+		copyLinks := false
+		for _, arg := range args {
+			if arg == "--copy-links" {
+				copyLinks = true
+			} else {
+				forward = append(forward, arg)
+			}
+		}
+		if copyLinks {
+			previous, exists := os.LookupEnv("CODE_FORGE_LAND_COPY_LINKS")
+			_ = os.Setenv("CODE_FORGE_LAND_COPY_LINKS", "1")
+			defer func() {
+				if exists {
+					_ = os.Setenv("CODE_FORGE_LAND_COPY_LINKS", previous)
+				} else {
+					_ = os.Unsetenv("CODE_FORGE_LAND_COPY_LINKS")
+				}
+			}()
+		}
+		return blockHandover(forward, reason)
+	}
 	fail := func(message string, code int) int {
 		if reviewWaitLogging() && !closeTextSafe(message) {
 			return fallback(hLandErrorLog)
@@ -109,7 +133,7 @@ func runBlockLand(args []string) int {
 	if len(pos) == 0 || pos[0] == "" || run == "" {
 		return fail("a block id and --run are required", 2)
 	}
-	allowed := " run report transcript max merge no-merge-gate push watch-ci json "
+	allowed := " run report transcript max merge no-merge-gate push watch-ci copy-links json "
 	valid := true
 	for name := range flags {
 		valid = valid && strings.Contains(allowed, " "+name+" ")

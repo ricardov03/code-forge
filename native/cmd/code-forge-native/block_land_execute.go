@@ -97,7 +97,8 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	if _, ok := entry.Get("status").(string); !ok {
 		return fallback(hLandStatusShape)
 	}
-	if entry.Get("status") != "open" {
+	retry := entry.Get("status") == "closed"
+	if entry.Get("status") != "open" && !retry {
 		begin()
 		defer finish()
 		defer timing()
@@ -132,202 +133,213 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	if !ok || !daemonclient.Enabled(cfg) {
 		return fallback(hLandConfigDaemon)
 	}
-	dry := &landStep{preflight: true}
-	if reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", "0ms", "--cwd", tree.Workspace}, dry) == landHandover {
-		return fallback(hLandStepHandoverJoin)
-	}
-	gateArgs := []string{"run", "--run", run, "--block", id, "--changed", "--cwd", tree.Workspace}
-	gateOptions, message := gatesParse(gateArgs)
-	if message != "" {
-		return fallback(hLandGatesParse)
-	}
-	if _, safe := gatesNativeStep(gateArgs, gateOptions, dry); !safe {
-		return fallback(hLandStepHandoverGates)
-	}
 	mergeGate := merge && !skip && blockMap(cfg["gates"])["merge_gate"] != false
-	if mergeGate {
-		// Check the full-suite dialect before close can publish. The trial
-		// worktree will use the main checkout's committed gate configuration.
-		fullArgs := []string{"run", "--cwd", tree.Workspace}
-		fullOptions, _ := gatesParse(fullArgs)
-		if _, safe := gatesNativeStep(fullArgs, fullOptions, dry); !safe {
-			return fallback(hLandMergeGate)
+	if retry {
+		begin()
+		defer finish()
+		defer timing()
+	}
+	if !retry {
+		dry := &landStep{preflight: true}
+		if reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", "0ms", "--cwd", tree.Workspace}, dry) == landHandover {
+			return fallback(hLandStepHandoverJoin)
 		}
+		gateArgs := []string{"run", "--run", run, "--block", id, "--changed", "--cwd", tree.Workspace}
+		gateOptions, message := gatesParse(gateArgs)
+		if message != "" {
+			return fallback(hLandGatesParse)
+		}
+		if _, safe := gatesNativeStep(gateArgs, gateOptions, dry); !safe {
+			return fallback(hLandStepHandoverGates)
+		}
+		if mergeGate {
+			// Check the full-suite dialect before close can publish. The trial
+			// worktree will use the main checkout's committed gate configuration.
+			fullArgs := []string{"run", "--cwd", tree.Workspace}
+			fullOptions, _ := gatesParse(fullArgs)
+			if _, safe := gatesNativeStep(fullArgs, fullOptions, dry); !safe {
+				return fallback(hLandMergeGate)
+			}
+		}
+		files, err := landClaimFiles(home, run, id, top, main, record, entry)
+		if err != nil {
+			return fallback(hLandClaimFiles)
+		}
+		// Close must also accept the ownership that auto-claim will publish.
+		encoded, _ := ledger.Stringify(record, false)
+		predicted, _ := ledger.DecodeObject(encoded)
+		blocks := blockObject(predicted.Get("blocks"))
+		predictedEntry := blockObject(blocks.Get(id))
+		claimed, _ := predictedEntry.Get("owned_files").([]any)
+		kinds := blockObject(predictedEntry.Get("owned_kinds")).Clone()
+		for _, file := range files {
+			claimed = append(claimed, file)
+			kinds.Set(file, owned.PathKind(top, file))
+		}
+		predictedEntry.Set("owned_files", claimed)
+		predictedEntry.Set("owned_kinds", kinds)
+		blocks.Set(id, predictedEntry)
+		predicted.Set("blocks", blocks)
+		dry.record = predicted
+		closeArgs := []string{id, "--run", run, "--report", report, "--transcript", transcript, "--json"}
+		closeReason := hLandStepHandoverClose
+		if blockCloseStepWithReason(closeArgs, dry, &closeReason) == landHandover {
+			return fallback(closeReason)
+		}
+		if err := landAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
+			return fallback(hLandStepHandoverClaim)
+		}
+		// All hand-over predicates are settled. No code below this point starts Node.
+		begin()
+		defer finish()
+		defer timing()
+		deadline := time.Now().Add(time.Duration(maxMs) * time.Millisecond)
+		print := io.Writer(os.Stdout)
+		if json {
+			print = stderr
+		}
+		if err := landAutoClaim(home, run, id, top, record, files, print, false); err != nil {
+			return stop(err.Error())
+		}
+		stamp := func() (string, error) {
+			head, err := gitx.Run(top, "rev-parse", "--verify", "HEAD")
+			if err != nil {
+				return "", fmt.Errorf("cannot stamp block worktree")
+			}
+			status, err := gitx.Run(top, "status", "--porcelain", "--untracked-files=all")
+			if err != nil {
+				return "", fmt.Errorf("cannot stamp block worktree")
+			}
+			return head + "\n" + status, nil
+		}
+		before, err := stamp()
+		if err != nil {
+			return stop(err.Error())
+		}
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		gating := make(chan landResult, 1)
+		runGates := func() landResult {
+			started := time.Now()
+			defer func() { gatesMs += time.Since(started).Milliseconds() }()
+			return landCapture(func(s *landStep) int {
+				// B363: land merges onto the new tip and its merge gate tests the
+				// merged tree, so a stale base gates on with the one WARN line that
+				// gates run --allow-stale-base prints (land prints the gate stderr).
+				fmt.Fprint(s.stderr, gatesStaleWarning(home, run, id))
+				code, safe := gatesNativeStep(gateArgs, gateOptions, s)
+				if !safe {
+					return landHandover
+				}
+				return code
+			}, ctx)
+		}
+		go func() { gating <- runGates() }()
+		join := func() string {
+			started := time.Now()
+			defer func() { joinMs = time.Since(started).Milliseconds() }()
+			var joined landResult
+			for attempt := 0; attempt < 3; attempt++ {
+				remaining := max(int64(0), time.Until(deadline).Milliseconds())
+				if remaining == 0 {
+					return "wait_timeout"
+				}
+				duration := fmt.Sprintf("%dms", remaining)
+				if remaining > 9999999 {
+					duration = fmt.Sprintf("%ds", remaining/1000)
+				}
+				joined = landCapture(func(s *landStep) int {
+					return reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", duration, "--cwd", tree.Workspace}, s)
+				}, nil)
+				for _, line := range strings.Split(joined.error, "\n") {
+					if strings.HasPrefix(line, "auto-requeue ") {
+						fmt.Fprintln(stderr, line)
+					}
+				}
+				findings := false
+				values, _ := joined.data.Get("files").([]any)
+				for _, v := range values {
+					if blockObject(v).Get("status") == "findings" {
+						findings = true
+					}
+				}
+				if joined.code != 0 || joined.data.Get("done") != true || !findings {
+					break
+				}
+			}
+			if joined.code != 0 || joined.data.Get("done") != true {
+				if joined.data.Get("status") == "wait_timeout" || joined.data.Get("reason") == "wait_timeout" || !time.Now().Before(deadline) {
+					return "wait_timeout"
+				}
+				return landFirst(joined.error, blockString(joined.data.Get("message")), blockString(joined.data.Get("reason")), blockString(joined.data.Get("status")), "reviews did not finish")
+			}
+			values, _ := joined.data.Get("files").([]any)
+			details := []string{}
+			for _, v := range values {
+				f := blockObject(v)
+				if f.Get("status") == "excluded" || f.Get("outcome") == "approved" {
+					continue
+				}
+				if len(details) == 0 {
+					next = closeCommand([]string{"code-forge", "review-file", "--wait", blockString(f.Get("ticket"))})
+				}
+				outcome := blockString(f.Get("outcome"))
+				if f.Get("outcome") == nil {
+					outcome = blockString(f.Get("status"))
+				}
+				details = append(details, blockString(f.Get("file"))+": "+outcome)
+				if ticket := blockString(f.Get("ticket")); ticket != "" {
+					detail := landTicket(main, ticket)
+					details = append(details, landFirst(strings.TrimSpace(detail.output), strings.TrimSpace(detail.error)))
+				}
+			}
+			return strings.Join(details, "\n")
+		}
+		joinReason := join()
+		if joinReason != "" {
+			cancel()
+		}
+		gates := <-gating
+		if joinReason == "" {
+			after, err := stamp()
+			if err != nil {
+				return stop(err.Error())
+			}
+			if before != after {
+				gates = runGates()
+			}
+		}
+		gateReason := ""
+		if gates.data.Get("cancelled") != true && (gates.code != 0 || gates.data.Get("allOk") != true) {
+			gateReason = gates.error + landFirst(gates.output, "gates did not pass")
+		}
+		if joinReason != "" {
+			if gateReason != "" {
+				joinReason += "\ngates: " + gateReason
+			}
+			return stop(joinReason)
+		}
+		step = "gates"
+		next = closeCommand([]string{"code-forge", "gates", "run", "--run", run, "--block", id, "--changed"})
+		if gateReason != "" {
+			return stop(gateReason)
+		}
+		fmt.Fprint(stderr, gates.error)
+		step = "close"
+		next = closeCommand(append([]string{"code-forge", "block", "close"}, closeArgs[:len(closeArgs)-1]...))
+		closed := landCapture(func(s *landStep) int { return blockCloseStepWithReason(closeArgs, s, &closeReason) }, nil)
+		if closed.code != 0 || closed.data.Get("status") != "closed" {
+			if n, ok := closed.data.Get("next_command").(string); ok {
+				next = n
+			}
+			return stop(landFirst(closed.error, blockString(closed.data.Get("reason")), blockString(closed.data.Get("status")), "close refused"))
+		}
+		fmt.Fprint(stderr, closed.error)
 	}
-	files, err := landClaimFiles(home, run, id, top, main, record, entry)
-	if err != nil {
-		return fallback(hLandClaimFiles)
-	}
-	// Close must also accept the ownership that auto-claim will publish.
-	encoded, _ := ledger.Stringify(record, false)
-	predicted, _ := ledger.DecodeObject(encoded)
-	blocks := blockObject(predicted.Get("blocks"))
-	predictedEntry := blockObject(blocks.Get(id))
-	claimed, _ := predictedEntry.Get("owned_files").([]any)
-	kinds := blockObject(predictedEntry.Get("owned_kinds")).Clone()
-	for _, file := range files {
-		claimed = append(claimed, file)
-		kinds.Set(file, owned.PathKind(top, file))
-	}
-	predictedEntry.Set("owned_files", claimed)
-	predictedEntry.Set("owned_kinds", kinds)
-	blocks.Set(id, predictedEntry)
-	predicted.Set("blocks", blocks)
-	dry.record = predicted
-	closeArgs := []string{id, "--run", run, "--report", report, "--transcript", transcript, "--json"}
-	closeReason := hLandStepHandoverClose
-	if blockCloseStepWithReason(closeArgs, dry, &closeReason) == landHandover {
-		return fallback(closeReason)
-	}
-	if err := landAutoClaim(home, run, id, top, record, files, io.Discard, true); err != nil {
-		return fallback(hLandStepHandoverClaim)
-	}
-	// All hand-over predicates are settled. No code below this point starts Node.
-	begin()
-	defer finish()
-	defer timing()
-	deadline := time.Now().Add(time.Duration(maxMs) * time.Millisecond)
 	print := io.Writer(os.Stdout)
 	if json {
 		print = stderr
 	}
-	if err := landAutoClaim(home, run, id, top, record, files, print, false); err != nil {
-		return stop(err.Error())
-	}
-	stamp := func() (string, error) {
-		head, err := gitx.Run(top, "rev-parse", "--verify", "HEAD")
-		if err != nil {
-			return "", fmt.Errorf("cannot stamp block worktree")
-		}
-		status, err := gitx.Run(top, "status", "--porcelain", "--untracked-files=all")
-		if err != nil {
-			return "", fmt.Errorf("cannot stamp block worktree")
-		}
-		return head + "\n" + status, nil
-	}
-	before, err := stamp()
-	if err != nil {
-		return stop(err.Error())
-	}
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
-	gating := make(chan landResult, 1)
-	runGates := func() landResult {
-		started := time.Now()
-		defer func() { gatesMs += time.Since(started).Milliseconds() }()
-		return landCapture(func(s *landStep) int {
-			// B363: land merges onto the new tip and its merge gate tests the
-			// merged tree, so a stale base gates on with the one WARN line that
-			// gates run --allow-stale-base prints (land prints the gate stderr).
-			fmt.Fprint(s.stderr, gatesStaleWarning(home, run, id))
-			code, safe := gatesNativeStep(gateArgs, gateOptions, s)
-			if !safe {
-				return landHandover
-			}
-			return code
-		}, ctx)
-	}
-	go func() { gating <- runGates() }()
-	join := func() string {
-		started := time.Now()
-		defer func() { joinMs = time.Since(started).Milliseconds() }()
-		var joined landResult
-		for attempt := 0; attempt < 3; attempt++ {
-			remaining := max(int64(0), time.Until(deadline).Milliseconds())
-			if remaining == 0 {
-				return "wait_timeout"
-			}
-			duration := fmt.Sprintf("%dms", remaining)
-			if remaining > 9999999 {
-				duration = fmt.Sprintf("%ds", remaining/1000)
-			}
-			joined = landCapture(func(s *landStep) int {
-				return reviewWaitBlockStep([]string{"--wait-block", id, "--run", run, "--max", duration, "--cwd", tree.Workspace}, s)
-			}, nil)
-			for _, line := range strings.Split(joined.error, "\n") {
-				if strings.HasPrefix(line, "auto-requeue ") {
-					fmt.Fprintln(stderr, line)
-				}
-			}
-			findings := false
-			values, _ := joined.data.Get("files").([]any)
-			for _, v := range values {
-				if blockObject(v).Get("status") == "findings" {
-					findings = true
-				}
-			}
-			if joined.code != 0 || joined.data.Get("done") != true || !findings {
-				break
-			}
-		}
-		if joined.code != 0 || joined.data.Get("done") != true {
-			if joined.data.Get("status") == "wait_timeout" || joined.data.Get("reason") == "wait_timeout" || !time.Now().Before(deadline) {
-				return "wait_timeout"
-			}
-			return landFirst(joined.error, blockString(joined.data.Get("message")), blockString(joined.data.Get("reason")), blockString(joined.data.Get("status")), "reviews did not finish")
-		}
-		values, _ := joined.data.Get("files").([]any)
-		details := []string{}
-		for _, v := range values {
-			f := blockObject(v)
-			if f.Get("status") == "excluded" || f.Get("outcome") == "approved" {
-				continue
-			}
-			if len(details) == 0 {
-				next = closeCommand([]string{"code-forge", "review-file", "--wait", blockString(f.Get("ticket"))})
-			}
-			outcome := blockString(f.Get("outcome"))
-			if f.Get("outcome") == nil {
-				outcome = blockString(f.Get("status"))
-			}
-			details = append(details, blockString(f.Get("file"))+": "+outcome)
-			if ticket := blockString(f.Get("ticket")); ticket != "" {
-				detail := landTicket(main, ticket)
-				details = append(details, landFirst(strings.TrimSpace(detail.output), strings.TrimSpace(detail.error)))
-			}
-		}
-		return strings.Join(details, "\n")
-	}
-	joinReason := join()
-	if joinReason != "" {
-		cancel()
-	}
-	gates := <-gating
-	if joinReason == "" {
-		after, err := stamp()
-		if err != nil {
-			return stop(err.Error())
-		}
-		if before != after {
-			gates = runGates()
-		}
-	}
-	gateReason := ""
-	if gates.data.Get("cancelled") != true && (gates.code != 0 || gates.data.Get("allOk") != true) {
-		gateReason = gates.error + landFirst(gates.output, "gates did not pass")
-	}
-	if joinReason != "" {
-		if gateReason != "" {
-			joinReason += "\ngates: " + gateReason
-		}
-		return stop(joinReason)
-	}
-	step = "gates"
-	next = closeCommand([]string{"code-forge", "gates", "run", "--run", run, "--block", id, "--changed"})
-	if gateReason != "" {
-		return stop(gateReason)
-	}
-	fmt.Fprint(stderr, gates.error)
-	step = "close"
-	next = closeCommand(append([]string{"code-forge", "block", "close"}, closeArgs[:len(closeArgs)-1]...))
-	closed := landCapture(func(s *landStep) int { return blockCloseStepWithReason(closeArgs, s, &closeReason) }, nil)
-	if closed.code != 0 || closed.data.Get("status") != "closed" {
-		if n, ok := closed.data.Get("next_command").(string); ok {
-			next = n
-		}
-		return stop(landFirst(closed.error, blockString(closed.data.Get("reason")), blockString(closed.data.Get("status")), "close refused"))
-	}
-	fmt.Fprint(stderr, closed.error)
 	step = "merge"
 	base := blockString(entry.Get("base_branch"))
 	if base == "" {
@@ -367,7 +379,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		step = "merge-gate"
 		next = closeCommand([]string{"code-forge", "gates", "run", "--cwd", tree.Workspace})
 		started := time.Now()
-		failure := landMergeGate(home, blockString(record.Get("project")), run, id, main, tree.Path, workspace, branch, base, entry)
+		failure := landMergeGate(home, blockString(record.Get("project")), run, id, main, tree.Path, workspace, branch, base, entry, flags["copy-links"] == true)
 		if failure.elapsed != nil {
 			mergeGateMs = *failure.elapsed
 		}
@@ -429,7 +441,7 @@ type landMergeResult struct {
 // is merged. B404: the gate runs the tests selected from what the merge
 // changed (landMergeScope), never the full suite; a green full suite already
 // recorded for the merged tree is still reused.
-func landMergeGate(home, project, run, id, main, treePath, workspace, branch, base string, entry ledger.Object) (result landMergeResult) {
+func landMergeGate(home, project, run, id, main, treePath, workspace, branch, base string, entry ledger.Object, copyLinks ...bool) (result landMergeResult) {
 	mainHead, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		result.reason = "cannot resolve merge parents"
@@ -488,8 +500,23 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 			return
 		}
 		mergedTree = strings.TrimSpace(mergedTree)
-		if gatesReusableFull(filepath.Join(temporary, prefix)) {
+		gateWorkspace := filepath.Join(temporary, prefix)
+		loaded, err := config.Load(gateWorkspace)
+		if err != nil {
+			result.reason = err.Error()
+			return
+		}
+		settings, err := config.MergeGateSettings(loaded)
+		if err != nil {
+			result.reason = err.Error()
+			return
+		}
+		if len(settings.Links) == 0 && len(settings.Setup) == 0 && gatesReusableFull(gateWorkspace) {
 			result.reusedTree = mergedTree
+			return
+		}
+		if err := landPrepareMergeGate(main, temporary, gateWorkspace, settings, len(copyLinks) != 0 && copyLinks[0]); err != nil {
+			result.reason = err.Error()
 			return
 		}
 		cwd := filepath.Join(temporary, prefix)
@@ -520,6 +547,9 @@ func landMergeGate(home, project, run, id, main, treePath, workspace, branch, ba
 			return code
 		}, nil)
 		result.reason = landMergeFailure(home, run, id, suite, result.selected)
+		if result.reason != "" {
+			result.reason += "\n" + landMergeHint
+		}
 	}()
 	if result.reason != "" {
 		return

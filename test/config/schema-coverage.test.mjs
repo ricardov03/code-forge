@@ -342,6 +342,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
   'gates.custom.evidence',
   'gates.timeout_s',
   'gates.merge_gate',
+  'gates.merge_gate_links',
+  'gates.merge_gate_setup',
   // B427: the import-graph stop list (read by the Go gate selection).
   'gates.import_graph',
   'gates.import_graph.stop',
@@ -465,7 +467,8 @@ const KNOWN_SCHEMA_PATHS = Object.freeze([
 // B335: +5 = gates.test_class_map{,.glob,.strip_prefix,.strip_suffix,.separator} ⇒ 259.
 // B427: +2 = gates.import_graph{,.stop} ⇒ 261.
 // B430: +2 = land{,.push} ⇒ 263.
-const EXPECTED_SCHEMA_PATH_COUNT = 263;
+// B343: +2 = gates.merge_gate_links and gates.merge_gate_setup ⇒ 265.
+const EXPECTED_SCHEMA_PATH_COUNT = 265;
 
 test('B124b ack policy is an optional boolean schema key', () => {
   const node = schema.properties.review.properties.agent_waivers;

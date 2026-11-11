@@ -74,6 +74,13 @@ func LoadFile(path string) (map[string]any, error) {
 	}
 	mapping["version"] = float64(1)
 	jsonNumbers(mapping)
+	settings, err := MergeGateSettings(mapping)
+	if err == nil {
+		err = ValidateMergeGateLinks(filepath.Dir(path), settings)
+	}
+	if err != nil {
+		return nil, failure("schema", err.Error(), path)
+	}
 	return mapping, nil
 }
 

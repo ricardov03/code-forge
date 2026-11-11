@@ -1,5 +1,6 @@
-import { mkdtemp, rm } from 'node:fs/promises';
+import { copyFile, lstat, mkdir, mkdtemp, readdir, realpath, rm, stat, symlink } from 'node:fs/promises';
 import path from 'node:path';
+import { loadProjectConfig } from '../config/load.mjs';
 import { exec } from '../util/exec.mjs';
 import { writeSafe } from '../util/redact.mjs';
 
@@ -33,6 +34,76 @@ export function landCommand(argv) {
 export const USAGE = "usage: code-forge land\n  Used internally by code-forge block land; this module has no standalone handler.\n";
 
 export const SUMMARY = "Provide the block landing implementation used by block land.";
+
+const mergeGateHint = 'the gate ran in a temporary tree with tracked files only; git-ignored files the suite needs go in gates.merge_gate_links';
+
+/** @param {string} root @param {string} name @returns {Promise<string>} */
+async function mergeGatePath(root, name) {
+  const refuse = () => new Error('gates.merge_gate_links paths must stay inside the repository (no absolute paths or ..)');
+  if (!name || path.isAbsolute(name) || /[\\\0:]/.test(name) || name.split('/').some((part) => part === '..' || part === '.git') || path.normalize(name) === '.') throw refuse();
+  root = await realpath(root);
+  let ancestor = path.join(root, name);
+  const tail = [];
+  while (true) {
+    try { await lstat(ancestor); break; } catch (err) { if (err.code !== 'ENOENT') throw err; }
+    tail.unshift(path.basename(ancestor));
+    ancestor = path.dirname(ancestor);
+  }
+  const resolved = path.join(await realpath(ancestor), ...tail);
+  const rel = path.relative(root, resolved);
+  if (rel === '..' || rel.startsWith(`..${path.sep}`) || path.isAbsolute(rel)) throw refuse();
+  return resolved;
+}
+
+/** @param {string} root @param {string} source @param {string} destination @param {Set<string>} [ancestors] */
+async function copyMergeGatePath(root, source, destination, ancestors = new Set()) {
+  source = await mergeGatePath(root, path.relative(root, source));
+  if (ancestors.has(source)) throw new Error('gates.merge_gate_links contains a directory cycle');
+  const info = await stat(source);
+  if (info.isDirectory()) {
+    await mkdir(destination, { mode: info.mode });
+    const next = new Set([...ancestors, source]);
+    for (const name of await readdir(source)) await copyMergeGatePath(root, path.join(source, name), path.join(destination, name), next);
+  } else if (info.isFile()) await copyFile(source, destination);
+  else throw new Error('gates.merge_gate_links copies require regular files or directories');
+}
+
+/** Fallback-only preparation; the native land path owns normal product execution.
+ * @param {string} main @param {string} temporary @param {string} workspace
+ * @param {{write: (s: string) => unknown}} stderr @param {NodeJS.ProcessEnv} env
+ */
+async function prepareMergeGate(main, temporary, workspace, stderr, env) {
+  const loaded = await loadProjectConfig(workspace);
+  if (!loaded.ok) throw new Error(loaded.message);
+  const gates = loaded.config?.gates ?? {};
+  const links = gates.merge_gate_links ?? [];
+  const setup = gates.merge_gate_setup;
+  if (!Array.isArray(links) || links.some((name) => typeof name !== 'string' || !name)) throw new Error('gates.merge_gate_links must be an array of nonempty paths');
+  if (setup != null && (!Array.isArray(setup) || setup.length === 0 || setup.some((arg) => typeof arg !== 'string' || !arg || arg.includes('\0')))) throw new Error('gates.merge_gate_setup must be an argv array');
+  for (const name of new Set(links)) {
+    const source = await mergeGatePath(main, name);
+    const destination = await mergeGatePath(temporary, name);
+    for (const root of [main, temporary]) {
+      const tracked = await exec(['git', 'ls-files', '-z', '--', `:(literal)${name}`], { cwd: root, env, timeoutMs: 120000 });
+      if (tracked.result !== 'ok' || tracked.stdout) throw new Error('gates.merge_gate_links must not include tracked paths; they need no link');
+    }
+    try { await stat(source); } catch (err) {
+      if (err.code !== 'ENOENT') throw err;
+      writeSafe(stderr, `warning: gates.merge_gate_links source missing: ${name}\n`);
+      continue;
+    }
+    try { await lstat(destination); throw new Error('gates.merge_gate_links destination already exists'); } catch (err) { if (err.code !== 'ENOENT') throw err; }
+    await mkdir(path.dirname(destination), { recursive: true });
+    if (process.env.CODE_FORGE_LAND_COPY_LINKS !== '1') {
+      try { await symlink(source, destination); continue; } catch (err) { if (!['EPERM', 'EACCES', 'ENOTSUP', 'ENOSYS'].includes(err.code)) throw err; }
+    }
+    await copyMergeGatePath(main, source, destination);
+  }
+  if (setup != null) {
+    const result = await exec(setup, { cwd: workspace, env: { ...env, CI: '1', npm_config_yes: 'false' }, timeoutMs: 300000 });
+    if (result.result !== 'ok') throw new Error('gates.merge_gate_setup failed');
+  }
+}
 /** Join, gates and close share their existing CLI handlers, without spawning the CLI.
  * @param {{id: string, runId: string, record: Record<string, any>, report: string, transcript: string, maxMs: number, merge: boolean, noMergeGate: boolean, json: boolean}} options
  * @param {LandDeps} deps
@@ -70,9 +141,10 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
   try {
     const entry = record.blocks?.[id];
     if (!entry) return stop(`unknown block in run ${runId}`);
-    if (entry.status !== 'open') return stop(`block is ${entry.status}, not open`);
+    if (entry.status !== 'open' && entry.status !== 'closed') return stop(`block is ${entry.status}, not open`);
     const tree = await blockTree(record.workspace, entry);
     if (!tree) return stop('block has no recorded worktree and branch');
+    if (entry.status !== 'closed') {
     const deadline = Date.now() + maxMs;
     await autoClaimChanges({ record, runId, id, writeRow: (row) => appendRow(row, { slug: record.project }), print: (line) => writeSafe(json ? stderr : stdout, line), join: false });
     const stamp = async () => {
@@ -155,6 +227,7 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
       return stop(closed.error || closed.data?.reason || closed.data?.status || 'close refused');
     }
     if (closed.error) writeSafe(stderr, closed.error);
+    }
 
     step = 'merge';
     const main = await repoTop(record.workspace);
@@ -214,6 +287,7 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
           failure = conflicts.stdout.trim() ? `merge conflict:\n${conflicts.stdout.trim()}` : merged.stderr || merged.stdout || 'trial merge failed';
         } else {
           const workspace = path.join(temporary, prefix);
+          await prepareMergeGate(main, temporary, workspace, stderr, gitChildEnv());
           // No block scope: the shared gate runner drops scope tokens and runs the full suite.
           const suite = await capture((streams) => runGatesVerb(['run', '--cwd', workspace], streams));
           if (suite.code !== 0 || suite.data?.allOk !== true) {
@@ -232,7 +306,7 @@ export async function landBlock({ id, runId, record, report, transcript, maxMs, 
         if (added && removed.result !== 'ok') throw new Error(`cannot remove merge-gate worktree ${temporary}: ${removed.stderr}`);
         await rm(temporary, { recursive: true, force: true });
       }
-      if (failure) return stop(failure);
+      if (failure) return stop(`${failure}\n${mergeGateHint}`);
       // Refuse a moving target: only merge the same parents whose combined suite passed.
       const currentMain = await exec(['git', 'rev-parse', '--verify', 'HEAD'], gitOptions);
       const currentBlock = await exec(['git', 'rev-parse', '--verify', `refs/heads/${tree.branch}`], gitOptions);
