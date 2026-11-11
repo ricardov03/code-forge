@@ -10,6 +10,7 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -449,5 +450,77 @@ func TestB390AutopilotAcceptedHitNeedsGrant(t *testing.T) {
 	}
 	if len(res.Accepted) != 1 || res.Accepted[0].By != "autopilot" {
 		t.Fatalf("accepted hit names autopilot: %+v", res.Accepted)
+	}
+}
+
+// B466: the rest of ECMAScript's date time format is read like V8 (values from
+// node -e 'Date.parse(s)'); legacy forms V8 parses another way stay unknown.
+func TestB466JSDateParseFullISOFormat(t *testing.T) {
+	bogota, err := time.LoadLocation("America/Bogota")
+	if err != nil {
+		t.Skip("no zone data:", err)
+	}
+	kolkata, err := time.LoadLocation("Asia/Kolkata")
+	if err != nil {
+		t.Skip("no zone data:", err)
+	}
+	newYork, err := time.LoadLocation("America/New_York")
+	if err != nil {
+		t.Skip("no zone data:", err)
+	}
+	saved := dateLocal
+	t.Cleanup(func() { dateLocal = saved })
+	dateLocal = bogota
+	for _, c := range []struct {
+		in string
+		ms float64
+	}{
+		{"2026", 1767225600000}, {"2026-11", 1793491200000}, {"2026-11-11", 1794355200000},
+		{"2026-11-11T10:00", 1794409200000}, {"2026-11-11T10:00Z", 1794391200000},
+		{"2026-11-11T24:00", 1794459600000}, {"2026-11-11T24:00:00.000Z", 1794441600000},
+		{"2026-12-31T24:00Z", 1798761600000}, {"2026-11-11T24:00:00", 1794459600000},
+		{"2026-11-11T10:00:00.1234Z", 1794391200123}, {"2026-11-11T10:00:00.12345678Z", 1794391200123},
+		{"2026-11-11T23:59:59.9999Z", 1794441599999}, {"+002026-11-11T00:00:00Z", 1794355200000},
+		{"-000001-01-01T00:00:00Z", -62198755200000}, {"0000-01-01T00:00:00Z", -62167219200000},
+		{"+275760-09-13T00:00:00.000Z", 8640000000000000}, {"-271821-04-20T00:00:00.000Z", -8640000000000000},
+		{"+010000-01-01T00:00:00.000Z", 253402300800000}, {"2026-11-11T10:00:00+23:59", 1794304860000},
+		{"2026-11-11T10:00:00.000", 1794409200000}, {"2026-11-11T10:00+05:30", 1794371400000},
+		{"2026-11-11T10:00:00-00:00", 1794391200000}, {"2026-11T10:00Z", 1793527200000},
+		{"2026T10:00Z", 1767261600000}, {"2026-11-11T10:00:00.000+01:00", 1794387600000},
+	} {
+		ms, ok, known := jsDateParse(c.in, true)
+		if !ok || !known || ms != c.ms {
+			t.Errorf("jsDateParse(%q) = %v %v %v; Node says %v", c.in, ms, ok, known, c.ms)
+		}
+	}
+	for _, in := range []string{"-000000-01-01T00:00:00Z", "+275760-09-13T00:00:00.001Z", "-271821-04-19T23:59:59.999Z"} {
+		if _, ok, known := jsDateParse(in, true); ok || !known {
+			t.Errorf("jsDateParse(%q) = ok %v known %v; Node says NaN", in, ok, known)
+		}
+	}
+	// Legacy-parser forms and calendar roll-overs stay unknown.
+	for _, in := range []string{"2026-02-29", "2026-11-11t10:00Z", "2026-11-11 10:00Z", "2026-11-11T10:00:00+0100", "2026-1", "999", "2026-11-11T24:00:01Z", "2026-11-11T10:00:00z"} {
+		if _, _, known := jsDateParse(in, true); known {
+			t.Errorf("jsDateParse(%q) must be unknown", in)
+		}
+	}
+	dateLocal = kolkata
+	for _, c := range []struct {
+		in string
+		ms float64
+	}{{"2026-11-11T10:00", 1794371400000}, {"2026-11-11T24:00:00.000", 1794421800000}, {"2026-06-01T12:00:00.5", 1780295400500}} {
+		if ms, ok, known := jsDateParse(c.in, true); !ok || !known || ms != c.ms {
+			t.Errorf("Kolkata jsDateParse(%q) = %v %v %v; Node says %v", c.in, ms, ok, known, c.ms)
+		}
+	}
+	dateLocal = newYork
+	if ms, ok, known := jsDateParse("2026-06-01T12:00:00.5", true); !ok || !known || ms != 1780329600500 {
+		t.Errorf("New York summer time = %v %v %v; Node says 1780329600500", ms, ok, known)
+	}
+	// A local time next to a zone change stays unknown (Go and V8 may pick another instant).
+	for _, in := range []string{"2026-03-08T02:30", "2026-11-01T01:30"} {
+		if _, _, known := jsDateParse(in, true); known {
+			t.Errorf("New York jsDateParse(%q) near a zone change must be unknown", in)
+		}
 	}
 }
