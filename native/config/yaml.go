@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"reflect"
 	"regexp"
 	"strconv"
 	"strings"
@@ -46,13 +47,21 @@ func yamlError(code, message string, line, column int) error {
 }
 
 func parseYAML(source string) (any, error) {
+	value, _, err := parseYAMLOrdered(source)
+	return value, err
+}
+
+// parseYAMLOrdered also records each mapping's key insertion order, keyed by
+// the map's identity, so callers can rebuild JavaScript property order.
+func parseYAMLOrdered(source string) (any, map[uintptr][]string, error) {
+	order := map[uintptr][]string{}
 	var doc yaml.Node
 	decoder := yaml.NewDecoder(strings.NewReader(source))
 	if err := decoder.Decode(&doc); err != nil {
 		if err == io.EOF {
-			return nil, nil
+			return nil, order, nil
 		}
-		return nil, describeSyntax(source, err)
+		return nil, order, describeSyntax(source, err)
 	}
 	var next yaml.Node
 	if err := decoder.Decode(&next); err != io.EOF {
@@ -63,12 +72,13 @@ func parseYAML(source string) (any, error) {
 				break
 			}
 		}
-		return nil, yamlError("MULTIPLE_DOCS", "Source contains multiple documents; please use YAML.parseAllDocuments()", line, 1)
+		return nil, order, yamlError("MULTIPLE_DOCS", "Source contains multiple documents; please use YAML.parseAllDocuments()", line, 1)
 	}
 	if len(doc.Content) == 0 {
-		return nil, nil
+		return nil, order, nil
 	}
-	return (&yamlReader{active: map[*yaml.Node]bool{}, anchors: map[*yaml.Node]*yamlAnchor{}, source: source}).value(doc.Content[0])
+	value, err := (&yamlReader{active: map[*yaml.Node]bool{}, anchors: map[*yaml.Node]*yamlAnchor{}, source: source, order: order}).value(doc.Content[0])
+	return value, order, err
 }
 
 type yamlAnchor struct {
@@ -81,6 +91,7 @@ type yamlReader struct {
 	active  map[*yaml.Node]bool
 	anchors map[*yaml.Node]*yamlAnchor
 	source  string
+	order   map[uintptr][]string
 }
 
 func (r *yamlReader) value(node *yaml.Node) (any, error) {
@@ -157,7 +168,11 @@ func (r *yamlReader) readValue(node *yaml.Node) (any, error) {
 			if err != nil {
 				return nil, err
 			}
-			out[jsKey(key)] = value
+			name := jsKey(key)
+			if _, exists := out[name]; !exists && r.order != nil {
+				r.order[reflect.ValueOf(out).Pointer()] = append(r.order[reflect.ValueOf(out).Pointer()], name)
+			}
+			out[name] = value
 		}
 		return out, nil
 	case yaml.SequenceNode:

@@ -36,16 +36,41 @@ func Load(cwd string) (map[string]any, error) {
 
 // LoadFile parses a particular file without searching for a project root.
 func LoadFile(path string) (map[string]any, error) {
+	mapping, _, err := LoadFileOrdered(path)
+	if err != nil {
+		return nil, err
+	}
+	settings, err := MergeGateSettings(mapping)
+	if err == nil {
+		err = ValidateMergeGateLinks(filepath.Dir(path), settings)
+	}
+	if err != nil {
+		return nil, failure("schema", err.Error(), path)
+	}
+	return mapping, nil
+}
+
+// LoadOrdered is loadProjectConfig: the project root's config, parsed and
+// migrated only, plus the YAML key order of every mapping.
+func LoadOrdered(cwd string) (map[string]any, Ordered, error) {
+	return LoadFileOrdered(filepath.Join(ProjectRootFor(cwd), Filename))
+}
+
+// LoadFileOrdered is loadConfigFile in src/config/load.mjs: parse and migrate
+// only (no merge-gate checks), plus the YAML key order of every mapping, so a
+// caller can print config values in Node's JSON.stringify property order.
+func LoadFileOrdered(path string) (map[string]any, Ordered, error) {
+	none := Ordered{}
 	raw, err := os.ReadFile(path)
 	if err != nil {
 		if errors.Is(err, os.ErrNotExist) {
-			return nil, failure("not-found", "no config file at "+path, path)
+			return nil, none, failure("not-found", "no config file at "+path, path)
 		}
-		return nil, failure("read-error", "could not read "+path+": "+errno(err), path)
+		return nil, none, failure("read-error", "could not read "+path+": "+errno(err), path)
 	}
-	value, err := parseYAML(string(raw))
+	value, order, err := parseYAMLOrdered(string(raw))
 	if err != nil {
-		return nil, failure("parse-error", err.Error(), path)
+		return nil, none, failure("parse-error", err.Error(), path)
 	}
 	mapping, ok := value.(map[string]any)
 	if !ok {
@@ -55,7 +80,7 @@ func LoadFile(path string) (map[string]any, error) {
 		} else if _, ok := value.([]any); ok {
 			kind = "a list"
 		}
-		return nil, failure("parse-error", "config root must be a mapping, got "+kind, path)
+		return nil, none, failure("parse-error", "config root must be a mapping, got "+kind, path)
 	}
 	version := mapping["version"]
 	if version == nil {
@@ -67,21 +92,14 @@ func LoadFile(path string) (map[string]any, error) {
 		if _, ok := version.([]any); ok {
 			kind = "array"
 		}
-		return nil, failure("migrate-error", "migrateConfig: version must be a positive integer, got a "+kind, path)
+		return nil, none, failure("migrate-error", "migrateConfig: version must be a positive integer, got a "+kind, path)
 	}
 	if n > 1 {
-		return nil, failure("migrate-error", fmt.Sprintf("migrateConfig: config version %s is newer than this code-forge understands (1) — upgrade the package", jsKey(n)), path)
+		return nil, none, failure("migrate-error", fmt.Sprintf("migrateConfig: config version %s is newer than this code-forge understands (1) — upgrade the package", jsKey(n)), path)
 	}
 	mapping["version"] = float64(1)
 	jsonNumbers(mapping)
-	settings, err := MergeGateSettings(mapping)
-	if err == nil {
-		err = ValidateMergeGateLinks(filepath.Dir(path), settings)
-	}
-	if err != nil {
-		return nil, failure("schema", err.Error(), path)
-	}
-	return mapping, nil
+	return mapping, Ordered{order: order}, nil
 }
 
 func jsType(value any) string {

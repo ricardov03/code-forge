@@ -186,6 +186,13 @@ const (
 	hRunRegistry
 	hCloseAckDigestOrder
 	hReadyHookCommand
+	hSmallVerbUnported
+	hResolveFallbackShape
+	hConfigParseError
+	hModelsRefreshUnwritable
+	hModelsRefreshInvalidJSON
+	hRemoveUnsafeTarget
+	hRemoveUnfinishable
 )
 
 var handoverReasons = [...]string{
@@ -351,6 +358,13 @@ var handoverReasons = [...]string{
 	hRunRegistry:               "run-registry",
 	hCloseAckDigestOrder:       "close-ack-digest-order",
 	hReadyHookCommand:          "ready-hook-command",
+	hSmallVerbUnported:         "small-verb-unported",
+	hResolveFallbackShape:      "resolve-fallback-shape",
+	hConfigParseError:          "config-parse-error",
+	hModelsRefreshUnwritable:   "models-refresh-unwritable",
+	hModelsRefreshInvalidJSON:  "models-refresh-invalid-json",
+	hRemoveUnsafeTarget:        "remove-unsafe-target",
+	hRemoveUnfinishable:        "remove-unfinishable",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
