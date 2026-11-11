@@ -54,6 +54,13 @@ func WithRunLock(home, runID string, fn func() error) (err error) {
 		if !os.IsExist(err) {
 			return err
 		}
+		took, breakErr := breakStaleLock(runsDir(home), lock)
+		if breakErr != nil {
+			return breakErr
+		}
+		if took {
+			break
+		}
 		if time.Now().After(deadline) {
 			return &Error{"locked", fmt.Sprintf("run %s is locked (%s); remove it if no forge verb is running", runID, lock)}
 		}
@@ -64,6 +71,11 @@ func WithRunLock(home, runID string, fn func() error) (err error) {
 			err = releaseErr
 		}
 	}()
+	// Runs before the dir removal above: the owner file goes first.
+	defer removeLockOwner(lock)
+	if err := writeLockOwner(lock); err != nil {
+		return err
+	}
 	return fn()
 }
 

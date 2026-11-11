@@ -244,6 +244,8 @@ Small changes can use `block open <id> --kind light`. A light block may change a
 
 Red→green: each new or changed test must FAIL on the old code first (red), then PASS on the new code (green). A red caused by an import, compile or crash error proves nothing; the red must be an assertion failure.
 
+The run lock is a directory next to the run record (`<run>.lock`), shared by the Go and Node verbs, with a 5 s wait. A Go verb writes `owner.json` (pid, process start token, verb) inside it while it holds the lock and removes both on release. A Go verb that waits on a lock whose owner process is gone (or whose pid now belongs to another process) breaks it once, prints `code-forge: broke stale run lock (pid N)` on stderr and takes it; a lock with no owner file (an older binary or a Node holder) is broken only when it is older than 10 minutes. A lock whose owner is alive is never broken. So a verb that crashes while holding the lock no longer blocks every later verb (B423).
+
 ### Checking progress
 
 `code-forge status` (B64a) is how the orchestrator checks progress, instead of reading logs or

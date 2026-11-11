@@ -41,6 +41,9 @@ func alive(t Ticket) bool {
 	return t.Start == "" || start == "" || start == t.Start
 }
 
+// ProcessStart is processStart for other packages (the run lock owner file).
+func ProcessStart(pid int) (start string, gone bool) { return processStart(pid) }
+
 // processStart returns a stable start-time token for pid ("" when unknown),
 // and gone when the process does not exist or is a zombie. It makes no child
 // process: darwin reads kinfo_proc by sysctl, linux reads /proc/<pid>/stat.
