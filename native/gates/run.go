@@ -274,9 +274,24 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 	if e != nil {
 		return nil, false, e
 	}
-	results := []any{}
+	// B418: lint, types and format run before the test gate, so a cheap red
+	// gate stops a long suite from starting. Results keep the Order layout.
+	slots := make([]any, len(planned))
+	sequence := []int{}
+	for i, item := range planned {
+		if item.name != "test" {
+			sequence = append(sequence, i)
+		}
+	}
+	for i, item := range planned {
+		if item.name == "test" {
+			sequence = append(sequence, i)
+		}
+	}
 	all := true
-	for _, item := range planned {
+	redPre := []string{}
+	for _, index := range sequence {
+		item := planned[index]
 		if ctx.Err() != nil {
 			break
 		}
@@ -285,7 +300,7 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			if item.reason != "" {
 				r.Set("reason", item.reason)
 			}
-			results = append(results, r)
+			slots[index] = r
 			continue
 		}
 		c := item.c
@@ -294,7 +309,16 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			if reason := item.scope.Get("reason"); reason != nil {
 				r.Set("reason", reason)
 			}
-			results = append(results, r)
+			slots[index] = r
+			continue
+		}
+		if item.name == "test" && len(redPre) > 0 {
+			r = ledger.Object{{Key: "gate", Value: item.name}, {Key: "duration_ms", Value: int64(0)}, {Key: "argv", Value: item.argv}, {Key: "skipped", Value: true}, {Key: "ok", Value: false}, {Key: "code", Value: nil}, {Key: "stdout", Value: ""}, {Key: "stderr", Value: ""}}
+			r.Set("reason", "pre_gate_failed")
+			r.Set("pre_gates_failed", redPre)
+			r.Set("message", "test gate skipped: "+strings.Join(redPre, ", ")+" failed first")
+			slots[index] = r
+			all = false
 			continue
 		}
 		r = ledger.Object{{Key: "gate", Value: item.name}, {Key: "duration_ms", Value: int64(0)}, {Key: "argv", Value: item.argv}, {Key: "skipped", Value: false}}
@@ -391,9 +415,18 @@ func Run(ctx context.Context, p Plan, cwd, run string, timeout float64, s Scope)
 			}
 		}
 		r.Set("duration_ms", int64(math.Round(float64(time.Since(started))/float64(time.Millisecond))))
-		results = append(results, r)
+		slots[index] = r
 		if r.Get("ok") != true {
 			all = false
+			if item.name != "test" {
+				redPre = append(redPre, item.name)
+			}
+		}
+	}
+	results := []any{}
+	for _, r := range slots {
+		if r != nil {
+			results = append(results, r)
 		}
 	}
 	for _, custom := range p.Custom {

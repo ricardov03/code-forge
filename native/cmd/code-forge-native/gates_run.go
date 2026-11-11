@@ -843,6 +843,10 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		if r.Get("reason") == "text_only" {
 			summary.Set("reason", "text_only")
 		}
+		if r.Get("reason") == "pre_gate_failed" {
+			summary.Set("reason", "pre_gate_failed")
+			summary.Set("pre_gates_failed", r.Get("pre_gates_failed"))
+		}
 		if r.Get("custom") == true {
 			items, _ := r.Get("evidence").([]any)
 			entry := ledger.Object{{Key: "name", Value: r.Get("gate")}, {Key: "ok", Value: r.Get("ok")}, {Key: "evidence_count", Value: len(items)}}

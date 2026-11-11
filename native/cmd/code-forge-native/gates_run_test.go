@@ -284,3 +284,61 @@ func TestGatesRunExpandsTestClasses(t *testing.T) {
 		}
 	}
 }
+
+// B418: gates run --run --block with a red lint gate exits 1 and never starts
+// the test command; the test entry says why it was skipped.
+func TestGatesRunRedPreGateSkipsTest(t *testing.T) {
+	root := t.TempDir()
+	repo, home := filepath.Join(root, "repo"), filepath.Join(root, "home")
+	must := func(err error) {
+		t.Helper()
+		if err != nil {
+			t.Fatal(err)
+		}
+	}
+	must(os.MkdirAll(repo, 0755))
+	must(os.MkdirAll(filepath.Join(home, ".code-forge", "runs"), 0700))
+	log := filepath.Join(root, "starts.log")
+	gate := func(name, code string) []string {
+		return []string{"/bin/sh", "-c", "echo " + name + " >> '" + log + "'; exit " + code}
+	}
+	config, _ := json.Marshal(map[string]any{"gates": map[string]any{"test": gate("test", "0"), "lint": gate("lint", "1"), "types": nil, "format": gate("format", "0"), "rerun_failed": 0}})
+	must(os.WriteFile(filepath.Join(repo, ".code-forge.yml"), config, 0600))
+	record := map[string]any{"run_id": "fixture", "workspace": repo, "status": "active", "project": "fixture", "blocks": map[string]any{"B1": map[string]any{"status": "open", "kind": "code", "owned_files": []string{}}}}
+	data, _ := json.Marshal(record)
+	must(os.WriteFile(filepath.Join(home, ".code-forge", "runs", "fixture.json"), data, 0600))
+	exe, err := os.Executable()
+	must(err)
+	encoded, _ := json.Marshal([]string{"gates", "run", "--run", "fixture", "--block", "B1"})
+	cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
+	cmd.Dir = repo
+	cmd.Env = append(envWithoutGit(), "HOME="+home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_NODE=/nonexistent-code-forge-node", "CF_GATES_PROCESS=1", "CF_GATES_ARGS="+string(encoded))
+	var stdout strings.Builder
+	cmd.Stdout = &stdout
+	err = cmd.Run()
+	code := 0
+	if e, ok := err.(*exec.ExitError); ok {
+		code = e.ExitCode()
+	} else if err != nil {
+		t.Fatal(err)
+	}
+	if code != 1 {
+		t.Fatalf("exit = %d, want 1: %s", code, stdout.String())
+	}
+	starts, _ := os.ReadFile(log)
+	if got, want := strings.Fields(string(starts)), []string{"lint", "format"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("start log = %v, want %v (test must never start)", got, want)
+	}
+	var result struct {
+		AllOK   bool `json:"allOk"`
+		Results []map[string]any
+	}
+	must(json.Unmarshal([]byte(stdout.String()), &result))
+	if result.AllOK || len(result.Results) != 4 {
+		t.Fatalf("want allOk false and 4 gate entries, got %s", stdout.String())
+	}
+	test := result.Results[0]
+	if test["gate"] != "test" || test["skipped"] != true || test["reason"] != "pre_gate_failed" || !reflect.DeepEqual(test["pre_gates_failed"], []any{"lint"}) {
+		t.Fatalf("test entry = %v, want skipped with reason pre_gate_failed naming lint", test)
+	}
+}
