@@ -26,10 +26,13 @@ The public route table currently serves these read commands:
 - `logs path`, `logs [--last] [--json]` and `logs summary`. `logs clear` and
   `logs report` hand over to Node.
 - `ledger tail`. Other `ledger` commands hand over to Node.
-- `review-file --wait <ticket> [--max <n>s]`.
-- `review-file --wait-block <id> --run <id> [--max <n>s]` when a compatible
-  daemon answers. A stopped file, an unusual answer or no daemon hands over
-  to Node.
+- `review-file --wait <ticket> [--max <n>s]`, `review-file --help`, `--cwd`,
+  usage errors and the "not inside a git repository" refusal.
+- `review-file --wait-block <id> --run <id> [--max <n>s]`. When the daemon is
+  turned off, cannot be reached or gives an unusual answer, Go joins the block
+  itself: it enqueues each missing ticket and prints the same JSON as Node.
+  Go hands over to Node only when a live worker must restart a stopped review
+  that has findings, or when the run files have a shape Go does not read.
 
 Since 0.19.0, it also serves these write commands. Go writes the same files,
 locks and signed ledger rows as Node.

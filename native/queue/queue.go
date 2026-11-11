@@ -15,6 +15,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
 
@@ -309,36 +310,19 @@ func (idx *Index) Ensure(p ticket.Parts) error {
 		}
 	}
 	stamp := now.Format("2006-01-02T15:04:05.000Z")
-	t := Object{"ticket": id, "run": p.Run, "block": p.Block, "file": p.File, "content_hash": p.ContentHash, "enqueued_at": stamp, "queued_at": stamp, "started_at": nil, "finished_at": nil, "duration_ms": nil}
+	// enqueueHash's body: Node's key order and JSON.stringify bytes.
+	body := ledger.Object{{Key: "ticket", Value: id}, {Key: "run", Value: p.Run}, {Key: "block", Value: p.Block}, {Key: "file", Value: p.File}, {Key: "content_hash", Value: p.ContentHash},
+		{Key: "enqueued_at", Value: stamp}, {Key: "queued_at", Value: stamp}, {Key: "started_at", Value: nil}, {Key: "finished_at", Value: nil}, {Key: "duration_ms", Value: nil}}
 	if p.Tree != nil {
-		t["tree"] = *p.Tree
+		body.Set("tree", *p.Tree)
 	}
 	if p.AcceptanceRevision != nil {
-		t["acceptance_revision"] = *p.AcceptanceRevision
+		body.Set("acceptance_revision", *p.AcceptanceRevision)
 	}
 	if p.ReopenedAt != nil {
-		t["reopened_at"] = *p.ReopenedAt
+		body.Set("reopened_at", *p.ReopenedAt)
 	}
-	if err := os.MkdirAll(idx.Dir, 0755); err != nil {
-		return err
-	}
-	f, err := os.CreateTemp(idx.Dir, ".enqueue-*.tmp")
-	if err != nil {
-		return err
-	}
-	defer os.Remove(f.Name())
-	err = f.Chmod(0644)
-	if err == nil {
-		err = json.NewEncoder(f).Encode(t)
-	}
-	closeErr := f.Close()
-	if err != nil {
-		return err
-	}
-	if closeErr != nil {
-		return closeErr
-	}
-	if err := os.Link(f.Name(), filepath.Join(idx.Dir, id+".json")); err != nil && !os.IsExist(err) {
+	if err := publishObject(idx.Dir, filepath.Join(idx.Dir, id+".json"), body); err != nil {
 		return err
 	}
 	return idx.Refresh()

@@ -26,9 +26,6 @@ type handoverReason int
 const (
 	hUnrouted handoverReason = iota
 	hBlockUnportedSubcommand
-	hWaitGetcwd
-	hWaitCwd
-	hWaitRoot
 	hWaitResult
 	hWaitSummary
 	hWaitWorker
@@ -125,23 +122,15 @@ const (
 	hLandClaimFiles
 	hLandStepHandoverClose
 	hLandStepHandoverClaim
-	hWaitBlockFlagsDaemon
-	hWaitBlockMax
-	hWaitBlockGetcwd
-	hWaitBlockCwd
-	hWaitBlockRoot
 	hWaitBlockConfig
-	hWaitBlockConfigReload
-	hWaitBlockRequest
 	hWaitBlockAnswer
 	hWaitBlockEncoding
+	hWaitBlockStopped
+	hWaitBlockLocal
+	hReviewRoot
 	hEnqueueEncoding
 	hEnqueuePathError
-	hEnqueueHelpEncoding
-	hEnqueueMode
 	hEnqueueFlagRedaction
-	hEnqueueGetcwd
-	hEnqueueRoot
 	hEnqueueRepo
 	hEnqueueWorker
 	hEnqueueHome
@@ -165,8 +154,6 @@ const (
 	hEnqueueAnswers
 	hEnqueueOf
 	hEnqueueRebaseCheck
-	hEnqueueWait
-	hEnqueueWaitBlock
 	hClaimAuto
 	hClaimAutoClaim
 	hStopAuto
@@ -196,9 +183,6 @@ const (
 var handoverReasons = [...]string{
 	hUnrouted:                  "unrouted",
 	hBlockUnportedSubcommand:   "block-unported-subcommand",
-	hWaitGetcwd:                "wait-getcwd",
-	hWaitCwd:                   "wait-cwd",
-	hWaitRoot:                  "wait-root",
 	hWaitResult:                "wait-result",
 	hWaitSummary:               "wait-summary",
 	hWaitWorker:                "wait-worker",
@@ -295,23 +279,15 @@ var handoverReasons = [...]string{
 	hLandClaimFiles:            "land-claim-files",
 	hLandStepHandoverClose:     "land-step-handover:close",
 	hLandStepHandoverClaim:     "land-step-handover:claim",
-	hWaitBlockFlagsDaemon:      "wait-block-flags-daemon",
-	hWaitBlockMax:              "wait-block-max",
-	hWaitBlockGetcwd:           "wait-block-getcwd",
-	hWaitBlockCwd:              "wait-block-cwd",
-	hWaitBlockRoot:             "wait-block-root",
 	hWaitBlockConfig:           "wait-block-config",
-	hWaitBlockConfigReload:     "wait-block-config-reload",
-	hWaitBlockRequest:          "wait-block-request",
 	hWaitBlockAnswer:           "wait-block-answer",
 	hWaitBlockEncoding:         "wait-block-encoding",
+	hWaitBlockStopped:          "wait-block-stopped",
+	hWaitBlockLocal:            "wait-block-local",
+	hReviewRoot:                "review-root",
 	hEnqueueEncoding:           "enqueue-encoding",
 	hEnqueuePathError:          "enqueue-path-error",
-	hEnqueueHelpEncoding:       "enqueue-help-encoding",
-	hEnqueueMode:               "enqueue-mode",
 	hEnqueueFlagRedaction:      "enqueue-flag-redaction",
-	hEnqueueGetcwd:             "enqueue-getcwd",
-	hEnqueueRoot:               "enqueue-root",
 	hEnqueueRepo:               "enqueue-repo",
 	hEnqueueWorker:             "enqueue-worker",
 	hEnqueueHome:               "enqueue-home",
@@ -335,8 +311,6 @@ var handoverReasons = [...]string{
 	hEnqueueAnswers:            "enqueue-answers",
 	hEnqueueOf:                 "enqueue-of",
 	hEnqueueRebaseCheck:        "enqueue-rebase-check",
-	hEnqueueWait:               "enqueue-wait",
-	hEnqueueWaitBlock:          "enqueue-wait-block",
 	hClaimAuto:                 "claim-auto",
 	hClaimAutoClaim:            "claim-auto-claim",
 	hStopAuto:                  "stop-auto",

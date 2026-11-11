@@ -52,9 +52,12 @@ func reviewEnqueueRebase(args []string, flags map[string]string, paths []string,
 	}
 	if r != nil {
 		workspace, _ := r.Get("workspace").(string)
-		top, ok := reviewWaitRoot(context.Background(), workspace)
+		top, refusal, ok := reviewMainRoot(context.Background(), workspace)
 		if !ok {
-			return reviewWaitHandover(args, hEnqueueRoot)
+			return reviewWaitHandover(args, hReviewRoot)
+		}
+		if refusal != nil {
+			return reviewEnqueueSay(args, refusal, 1)
 		}
 		if top != root {
 			return reviewEnqueueSay(args, reviewEnqueueRefusal("other-workspace", "the run belongs to another workspace"), 1)
