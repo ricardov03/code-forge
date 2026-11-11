@@ -372,6 +372,7 @@ var handoverCommands = map[string]string{
 	"ci":            "watch",
 	"cloud-coder":   "",
 	"context":       "pack",
+	"decisions":     "list",
 	"docs":          "sync path",
 	"doctor":        "",
 	"facts":         "",

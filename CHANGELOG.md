@@ -23,6 +23,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - Main first: `block land --push` (or `land.push: true`) pushes main after the merge; a rejected push queues a heal item
   of kind land (argv `block land <ids> --run <r> --merge --push`; already landed blocks only push) and exits 1; `--watch-ci` starts a detached `code-forge ci watch`, a new Go verb that follows the
   commit's GitHub Actions runs and queues a heal item of kind ci naming the failing jobs, tests and block ids (B430)
+- Under an active autopilot grant an agent may run block close --decide without a terminal for transcript rule_break
+  hits and warning/nit findings; criticals stay with the owner; each decision is a signed close.decision row shown by
+  the new code-forge decisions list (B390)
 
 ### Changed
 

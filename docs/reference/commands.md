@@ -8,6 +8,7 @@ This page lists the CLI commands and their usage. It is generated from the CLI. 
 - [ci](#ci)
 - [cloud-coder](#cloud-coder)
 - [context](#context)
+- [decisions](#decisions)
 - [docs](#docs)
 - [doctor](#doctor)
 - [facts](#facts)
@@ -302,6 +303,14 @@ usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
 
 ```text
 usage: code-forge context pack --run <id> --block <id> [--json] [--path-only]
+```
+
+## decisions
+
+List the block-close decisions the autopilot signed for the owner (rule_break hits, warning and nit waivers), served by the Go binary.
+
+```text
+usage: code-forge decisions list [--run <r>] [--json]
 ```
 
 ## docs

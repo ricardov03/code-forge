@@ -109,6 +109,8 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 		return fail(err)
 	}
 	deciding := flags["decide"] == true
+	// B390: an active grant lets a non-TTY --decide stand in for the owner.
+	var decideGrant ledger.Object
 	if deciding {
 		reason, ok := flags["reason"].(string)
 		if len(pos) != 1 || !ok || humanTrim(reason) == "" || strings.ContainsFunc(reason, func(r rune) bool { return r < 32 || r == 127 }) {
@@ -117,18 +119,29 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 		if flags["no-require-reviews"] == true {
 			return usage("--decide cannot skip reviews")
 		}
-		if !humanask.Available() {
-			return humanNoTTY(stderr, "close")
-		}
+		active := false
 		if grant := blockObject(record.Get("autopilot")); grant != nil {
 			s, err := autopilot.GrantState(grant, time.Now())
 			if err != nil {
 				return fallback(hCloseDecide)
 			}
-			if s == "active" {
-				return fail(&state.Error{Code: "autopilot-active", Message: "block close --decide is refused while an autopilot grant is active"})
+			if active = s == "active" && record.Get("status") == "active"; active {
+				decideGrant = grant
 			}
 		}
+		if !humanask.Available() && !active {
+			return humanNoTTY(stderr, "close")
+		}
+		if active && humanask.Available() {
+			// The owner at a terminal is not the autopilot; keep their decide
+			// apart from the grant as before.
+			return fail(&state.Error{Code: "autopilot-active", Message: "block close --decide is refused while an autopilot grant is active"})
+		}
+	}
+	autoDecide := decideGrant != nil
+	refuseAuto := func(why string) int {
+		fmt.Fprintln(stderr, autopilotDecideRefusal(why))
+		return 1
 	}
 	if step != nil && step.preflight && step.record != nil {
 		record = step.record
@@ -150,6 +163,12 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 		return fallback(hCloseConfig)
 	}
 	requireHuman := blockMap(cfg["close"])["require_human"] == true
+	if autoDecide && requireHuman {
+		grant, _ := autopilot.Read(record, time.Now())
+		if why := autopilot.RoutineRefusal(grant); why != "" {
+			return refuseAuto("close.require_human is set and the grant does not allow close:routine (" + why + ")")
+		}
+	}
 	if requireHuman && step != nil && handover == nil {
 		return fallback(hCloseHuman)
 	}
@@ -378,6 +397,9 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 		return fallback(hCloseGatesFormat)
 	}
 	if !acked {
+		if autoDecide && !confirmed {
+			return refuseAuto("agent waivers are not acknowledged; the owner acknowledges them")
+		}
 		if deciding && !confirmed {
 			return fallback(hCloseDecide)
 		}
@@ -398,6 +420,9 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 	}
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, id, run, blockObject(record.Get("blocks")), changed, rows, key, inTree)
 	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedWork(top, rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
+	if autoDecide && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
+		return refuseAuto("the block's scope has warnings or reviewed work without changes; the owner decides it")
+	}
 	if deciding && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
 		return fallback(hCloseDecide)
 	}
@@ -414,7 +439,15 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 	var decisions []humanDecision
 	if deciding && !confirmed {
 		var supported bool
-		decisions, rows, supported = humanDecisions(run, id, blockString(flags["reason"]), gate, rows, key)
+		if autoDecide {
+			var why string
+			decisions, rows, why, supported = autopilotDecisions(run, id, blockString(flags["reason"]), transcript, decideGrant, gate, rows, key, time.Now())
+			if supported && why != "" {
+				return refuseAuto(why)
+			}
+		} else {
+			decisions, rows, supported = humanDecisions(run, id, blockString(flags["reason"]), gate, rows, key)
+		}
 		if !supported {
 			return fallback(hCloseDecide)
 		}
@@ -492,7 +525,20 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 				fmt.Fprintln(stderr, "cannot decide here: "+why)
 				return 1
 			}
-			if code := humanConfirm(stderr, "close", id, fmt.Sprintf("Apply these decisions and close block %s of run %s? Only the owner may say yes.", id, run)); code != 0 {
+			if autoDecide {
+				// The grant must still be active when the rows are signed.
+				now, err := state.ReadRun(home, run)
+				if err != nil {
+					return fail(err)
+				}
+				g := blockObject(now.Get("autopilot"))
+				if g == nil || blockString(g.Get("grant_id")) != blockString(decideGrant.Get("grant_id")) {
+					return refuseAuto("the autopilot grant changed")
+				}
+				if s, err := autopilot.GrantState(g, time.Now()); err != nil || s != "active" {
+					return refuseAuto("the autopilot grant is no longer active")
+				}
+			} else if code := humanConfirm(stderr, "close", id, fmt.Sprintf("Apply these decisions and close block %s of run %s? Only the owner may say yes.", id, run)); code != 0 {
 				return code
 			}
 			for _, decision := range decisions {
@@ -503,6 +549,10 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 			}
 			code := blockCloseHumanStep(args, step, handover, true, endHook...)
 			if code == landHandover {
+				if autoDecide {
+					fmt.Fprintln(stderr, "block close: state changed after the autopilot decision was recorded")
+					return 1
+				}
 				fmt.Fprintln(stderr, "block close: state changed after human confirmation")
 				return 1
 			}
@@ -1642,8 +1692,15 @@ func closeAuditOf(id string, rows []gatecheck.Row, key []byte, accepted []gatech
 	}
 	hits := []any{}
 	for _, h := range accepted {
-		hits = append(hits, ledger.Object{{Key: "rule", Value: h.Rule}, {Key: "line", Value: h.Line}, {Key: "reason", Value: h.Reason}})
-		a.text = append(a.text, fmt.Sprintf("accepted rule_break %s transcript line %d: %s (by: human)\n", h.Rule, h.Line, gatecheck.JSString(h.Reason, true)))
+		hit := ledger.Object{{Key: "rule", Value: h.Rule}, {Key: "line", Value: h.Line}, {Key: "reason", Value: h.Reason}}
+		by := "human"
+		if h.By == "autopilot" {
+			// B390: Node's JSON shape for human acceptances stays unchanged.
+			by = h.By
+			hit.Set("by", by)
+		}
+		hits = append(hits, hit)
+		a.text = append(a.text, fmt.Sprintf("accepted rule_break %s transcript line %d: %s (by: %s)\n", h.Rule, h.Line, gatecheck.JSString(h.Reason, true), by))
 	}
 	for _, item := range [][2]any{{"agent_waivers", waivers}, {"agent_reopens", reopens}, {"accepted_hits", hits}} {
 		if len(item[1].([]any)) > 0 {

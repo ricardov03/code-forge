@@ -739,6 +739,24 @@ nit, one extra fix round, the coder level. Every other question that would reach
 you. One live log (a Claude Docs page in Claude Code, or two Markdown files elsewhere) records
 every decision for your return. See [autopilot.md](autopilot.md).
 
+**Close decisions under autopilot (B390).** While a grant is active, an agent (no terminal) may run
+`code-forge block close <id> --run <r> --decide --reason <text>`. It decides for you only:
+- a transcript rule_break hit (a false hit): one signed `rule_break.accepted {by: autopilot, grant_id}`
+  row; the gate counts it only inside a signed `autopilot.grant` window of the run;
+- a warning (major) or nit (minor) finding the grant's `waive:<severity>` scope allows: one signed
+  `autopilot.decision` row and one `review.waived {by: autopilot}` row, the same rows as `autopilot waive`.
+
+A critical finding, a ledger `rule_break` row, a review cap, an invalid autopilot waiver and
+unacknowledged agent waivers stay with you: the close exits 1 with
+`block close: cannot decide under autopilot: <why>; nothing was recorded`. So do scope warnings,
+and `close.require_human` unless the grant allows `close:routine`. Before those rows, one signed
+`close.decision {block, actor: autopilot, grant_id, reason, rule_breaks: [{rule, line}],
+findings: [{file, finding, severity, decision_id}]}` row records the decision; then the normal close
+runs. Review them with `code-forge decisions list [--run <r>] [--json]` (all runs without `--run`;
+a row with no valid MAC is marked `UNVERIFIED`). Without a grant, `--decide` still needs you at a
+terminal. Today only the Go engine counts an autopilot `rule_break.accepted` row; a close handed to
+Node still refuses the hit (it fails closed).
+
 ### Review only
 
 `code-forge review` runs steps 6, 7 and 9 on changes you already have, then stops the block and ends
@@ -1213,7 +1231,7 @@ flowchart TD
   **One human step per block.** The human can run `forge block close <id> --run <r> --decide --reason <text>`.
   It shows every waivable finding, unacknowledged agent waiver and acceptable transcript hit in one numbered list.
   One yes writes the same signed human rows as the single verbs, then runs a normal close. A no writes nothing.
-  It has no `--yes` and is refused while an autopilot grant is active. Set `close.require_human: true` to make every
+  It has no `--yes`. At a terminal it is refused while an autopilot grant is active (B390 below). Set `close.require_human: true` to make every
   close need this terminal confirmation; an active `close:routine` grant lets a routine block close without it
   (all files approved, a green gate row, no waivers, no transcript hits). Otherwise close refuses with `close-not-routine: <reason>`.
 

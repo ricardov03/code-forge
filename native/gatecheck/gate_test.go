@@ -416,3 +416,38 @@ func TestB380CapReopenAndWaiverMatchNode(t *testing.T) {
 		t.Fatalf("every verified agent reopen is reported: %v", got)
 	}
 }
+
+// B390: an autopilot rule_break acceptance clears the hit only inside a signed
+// autopilot.grant window of the run; without that grant row it does not.
+func TestB390AutopilotAcceptedHitNeedsGrant(t *testing.T) {
+	key := []byte(strings.Repeat("k", 32))
+	transcript := "git clean -fd\n"
+	hits, ok := Transcript(transcript)
+	if !ok || len(hits) != 1 {
+		t.Fatalf("one transcript hit: %v %v", hits, ok)
+	}
+	sum := sha256.Sum256([]byte("git clean -fd"))
+	accept := func() Row {
+		return Row{"event": "rule_break.accepted", "rule": "git-clean", "line": 1, "line_sha256": hex.EncodeToString(sum[:]), "reason": "scratch dir", "by": "autopilot", "grant_id": "ag-1", "ts": "2026-11-11T10:00:00.000Z"}
+	}
+	approved := b380Rows(t, key, Row{"event": "review.approved", "file": "a.mjs", "content_hash": "h2"})
+	noGrant := append(slices.Clone(approved), b380Rows(t, key, accept())...)
+	if got := b380Codes(b380Eval(noGrant, key, hits, transcript)); !slices.Contains(got, "rule_break") {
+		t.Fatalf("an autopilot acceptance without a grant row must not clear the hit: %v", got)
+	}
+	grant := func(from, until string) Row {
+		return Row{"event": "autopilot.grant", "grant_id": "ag-1", "scopes": []any{}, "deny": []any{}, "delegate": "L2", "until": until, "ts": from}
+	}
+	outside := append(slices.Clone(approved), b380Rows(t, key, grant("2026-11-11T11:00:00.000Z", "2026-11-11T12:00:00.000Z"), accept())...)
+	if got := b380Codes(b380Eval(outside, key, hits, transcript)); !slices.Contains(got, "rule_break") {
+		t.Fatalf("an acceptance outside the grant window must not clear the hit: %v", got)
+	}
+	inside := append(slices.Clone(approved), b380Rows(t, key, grant("2026-11-11T09:00:00.000Z", "2026-11-11T12:00:00.000Z"), accept())...)
+	res := b380Eval(inside, key, hits, transcript)
+	if got := b380Codes(res); len(got) != 0 {
+		t.Fatalf("an acceptance inside the grant clears the hit: %v", got)
+	}
+	if len(res.Accepted) != 1 || res.Accepted[0].By != "autopilot" {
+		t.Fatalf("accepted hit names autopilot: %+v", res.Accepted)
+	}
+}

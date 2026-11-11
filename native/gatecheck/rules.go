@@ -26,11 +26,13 @@ const stopExitsLine = "exits: block reopen, block waive, review-file --answers, 
 // resultFilesFor). A nil *ResultFile is a missing or unverifiable file.
 type ResultFile struct{ Status, Approved, Findings jv }
 
-// AcceptedHit is a transcript hit a signed human rule_break.accepted row cleared.
+// AcceptedHit is a transcript hit a signed rule_break.accepted row cleared.
+// By is "human", or "autopilot" for a B390 decision under an active grant.
 type AcceptedHit struct {
 	Rule   string
 	Line   int
 	Reason any
+	By     string
 }
 
 // Input is the whole of checkBlockReviews' input. ProofFiles nil means Files.
@@ -397,7 +399,10 @@ func jsTrim(s string) string {
 }
 
 // acceptedHits is accept-hit.mjs acceptedTranscriptHits over the scanned hits.
-func acceptedHits(in Input, ok func(Row) bool) ([]Blocker, []AcceptedHit) {
+// B390: a row by "autopilot" also counts when it names a signed
+// autopilot.grant of this run whose window holds the row's time (autopilot
+// is the stand-in decider the owner granted; see grantProblem).
+func acceptedHits(in Input, ok func(Row) bool, autopilotOK func(Row) bool) ([]Blocker, []AcceptedHit) {
 	remaining, accepted := []Blocker{}, []AcceptedHit{}
 	if in.Transcript == "" {
 		return append(remaining, in.Hits...), accepted
@@ -405,7 +410,7 @@ func acceptedHits(in Input, ok func(Row) bool) ([]Blocker, []AcceptedHit) {
 	approvals := []Row{}
 	for _, r := range in.Rows {
 		reason, isString := r["reason"].(string)
-		if r["event"] == "rule_break.accepted" && r["run"] == in.Run && r["block"] == in.Block && r["by"] == "human" && isString && jsTrim(reason) != "" && ok(r) {
+		if r["event"] == "rule_break.accepted" && r["run"] == in.Run && r["block"] == in.Block && (r["by"] == "human" || r["by"] == "autopilot" && autopilotOK(r)) && isString && jsTrim(reason) != "" && ok(r) {
 			approvals = append(approvals, r)
 		}
 	}
@@ -424,7 +429,8 @@ func acceptedHits(in Input, ok func(Row) bool) ([]Blocker, []AcceptedHit) {
 		hash := hex.EncodeToString(sum[:])
 		at := slices.IndexFunc(approvals, func(r Row) bool { return r["rule"] == m[2] && r["line_sha256"] == hash })
 		if at >= 0 {
-			accepted = append(accepted, AcceptedHit{m[2], line, approvals[at]["reason"]})
+			by, _ := approvals[at]["by"].(string)
+			accepted = append(accepted, AcceptedHit{m[2], line, approvals[at]["reason"], by})
 		} else {
 			remaining = append(remaining, hit)
 		}
@@ -637,7 +643,8 @@ func (g *gate) grantProblem(grantID jv, scope string, at float64, what string) s
 	}
 	scopes, isList := grant["scopes"].([]any)
 	deny, denies := grant["deny"].([]any)
-	if !isList || !slices.Contains(scopes, any(scope)) || denies && slices.Contains(deny, any(scope)) {
+	// An empty scope asks only for the grant's window (B390 rule_break decisions).
+	if scope != "" && (!isList || !slices.Contains(scopes, any(scope)) || denies && slices.Contains(deny, any(scope))) {
 		return "grant " + id + " does not allow " + scope
 	}
 	for _, r := range g.in.Rows {
@@ -961,7 +968,13 @@ func Evaluate(in Input) Result {
 			add("rule_break", "", "", "rule_break row: "+fmt.Sprint(id))
 		}
 	}
-	remaining, accepted := acceptedHits(in, g.ok)
+	remaining, accepted := acceptedHits(in, g.ok, func(r Row) bool {
+		at, valid := math.NaN(), false
+		if ts, isString := r["ts"].(string); isString {
+			at, valid = g.date(str(ts))
+		}
+		return valid && g.ok(r) && g.grantProblem(prop(r, "grant_id"), "", at, "the acceptance") == ""
+	})
 	result.Blockers = append(result.Blockers, remaining...)
 	result.Accepted = accepted
 	notApproved := map[string]bool{}
