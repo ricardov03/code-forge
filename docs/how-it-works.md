@@ -515,13 +515,6 @@ then rebuilds the tree's native binary with `node scripts/build-native.mjs --hos
 Node compat tests run that binary. A failed build exits 1 with one line naming `native-rebuild-failed`;
 the rebase stands, and the line gives the command to rebuild by hand.
 
-`gates run --run <run>` and `block rebase` (Go) wait for the run lock when another verb holds it,
-instead of failing at once (B393). They print one line,
-`<verb>: waiting for run lock held by pid <pid> (<verb>)` (or `an unknown process` when the holder
-left no owner record, such as a Node verb), poll until the lock is free and then go on. The wait
-ends after `--lock-wait <duration>` (default `15m`, e.g. `90s`); then they exit 1 with the same
-`run <run> is locked (...)` message as before.
-
 `block open <id> --attempt N` (N > 1) restores paths from the block's earlier signed
 `block claim` rows alongside `--owned`. `block attempt` keeps those claims too. Both print
 `kept claims: <n>`; a retry does not require claiming those paths again.

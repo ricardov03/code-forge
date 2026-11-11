@@ -256,27 +256,8 @@ func runGates(args []string) int {
 	if len(args) == 0 || args[0] != "run" {
 		return gatesHandover(args, hGatesUnportedSubcommand)
 	}
-	// B393: wait for a run lock another verb holds (block land holds it for
-	// its whole merge gate) instead of failing after Node's 5 s.
-	args, lockWait, lockMessage := lockWaitFlag(args)
-	if lockMessage != "" {
-		gatesErrf("gates run: %s\n", lockMessage)
-		gatesFinish(args, 2)
-		return 2
-	}
-	useLockWait("gates run", lockWait, os.Stderr)
 	if os.Getenv("HOME") == "" {
 		return gatesHandover(args, hGatesHome)
-	}
-	if run, given, ok := gatesFlag(args, "--run"); given && ok && run != "" {
-		if err := state.AwaitRunLock(os.Getenv("HOME"), run); err != nil {
-			var stateErr *state.Error
-			if errors.As(err, &stateErr) && stateErr.Code == "locked" {
-				gatesErrf("gates run: %s\n", err)
-				gatesFinish(args, 1)
-				return 1
-			}
-		}
 	}
 	_, hasRun, _ := gatesFlag(args, "--run")
 	_, hasBlock, _ := gatesFlag(args, "--block")

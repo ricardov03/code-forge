@@ -21,23 +21,6 @@ import (
 func init() { blockSubs["rebase"] = healWrap([]string{"block", "rebase"}, runBlockRebase) }
 
 func runBlockRebase(args []string) int {
-	// B393: Node takes the run lock for the rebase and gives up after 5 s;
-	// wait here until no verb holds it (block land holds it for minutes).
-	args, wait, message := lockWaitFlag(args)
-	if message != "" {
-		fmt.Fprintf(os.Stderr, "block rebase: %s\n", message)
-		return 2
-	}
-	useLockWait("block rebase", wait, os.Stderr)
-	if run, given, ok := gatesFlag(args, "--run"); given && ok && run != "" && os.Getenv("HOME") != "" {
-		if err := state.AwaitRunLock(os.Getenv("HOME"), run); err != nil {
-			var stateErr *state.Error
-			if errors.As(err, &stateErr) && stateErr.Code == "locked" {
-				fmt.Fprintf(os.Stderr, "block rebase: %s\n", err)
-				return 1
-			}
-		}
-	}
 	full := append([]string{"rebase"}, args...)
 	tree, before := blockRebaseTree(args)
 	if tree == "" {
