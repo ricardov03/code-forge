@@ -166,7 +166,10 @@ after the merge and prints `pushed <sha> to origin/<base>`. A rejected push keep
 stops at step `push`, queues a heal item and exits 1. `--watch-ci` (needs push) starts a detached
 `forge ci watch --sha <sha> --run <r>` and returns at once; land never waits for CI. `ci watch`
 exits 0 when every run is green, and on a red run names the failing jobs and tests and queues a
-heal item of kind `ci`.
+heal item of kind `ci`. A GitHub API rate limit is not a CI result (B448): the watch waits for the
+reset (one `ci watch: GitHub API rate limit; retry at HH:MM UTC` line per wait) and, if the retry
+is past `--timeout`, exits 4 with `rate limit, gave up` and no heal item. One watch per repo and
+commit: a second start says another ci watch is already watching and exits 0.
 
 **Heal queue (B429).** `gates run --run --block`, `block rebase` and `block land` still fail on a
 held lock or a transient git error, but also queue the problem and print `heal: queued <id>` as the

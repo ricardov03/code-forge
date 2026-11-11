@@ -19,6 +19,7 @@ waits on a second real consumer (plan §10.4, Q17).
   instead of `dist`, which has no `/docs`; `--deploy-dir <path>` picks another folder inside the site root, and a
   missing folder or `index.html` after the gates stops before commit and deploy (B446)
 - `block land` output no longer says the merge gate runs the full suite: `--no-merge-gate` warns `merge gate skipped; the merged tree was not checked`, a batch refuses it with `a batch always runs the merge gate; --no-merge-gate is refused`, a red gate stops with `tests failed:` and a missing test command with `test gate unavailable: configure gates.test before merging`; `help` lists every `block land` flag and batch land (B447)
+- `code-forge ci watch` survives the GitHub API rate limit: a rate-limit reply is never a CI result; it waits until the reset from `gh api rate_limit` (else backs off 60 s doubling to 15 min), prints `ci watch: GitHub API rate limit; retry at HH:MM UTC` per wait, and past `--timeout` exits 4 with `rate limit, gave up` instead of a failure; polling stays at one call per 30 s, and a second watch for the same repo and commit exits 0 without starting (B448)
 
 ## [0.22.0] — 2026-11-11
 

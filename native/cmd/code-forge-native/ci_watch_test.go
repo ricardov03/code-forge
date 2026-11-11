@@ -4,6 +4,7 @@ import (
 	"os"
 	"os/exec"
 	"path/filepath"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
@@ -57,8 +58,10 @@ case "$1 $2" in
 "run list")
   n=$(cat "$HOME/list-n" 2>/dev/null || echo 0)
   if [ -f "$HOME/runs-$((n+1))" ]; then n=$((n+1)); echo "$n" > "$HOME/list-n"; fi
+  if [ -f "$HOME/runs-$n.err" ]; then cat "$HOME/runs-$n.err" >&2; exit 1; fi
   cat "$HOME/runs-$n" ;;
 "run view") cat "$HOME/log-$3" ;;
+"api rate_limit") [ -f "$HOME/rate_limit" ] || exit 9; cat "$HOME/rate_limit" ;;
 *) exit 9 ;;
 esac
 `
@@ -73,10 +76,10 @@ esac
 		f.write("log-77", log)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
-	poll, noRun, sleep := ciPollInterval, ciNoRunAfter, ciSleep
+	poll, noRun, sleep, now := ciPollInterval, ciNoRunAfter, ciSleep, ciNow
 	ciPollInterval, ciNoRunAfter = time.Millisecond, 50*time.Millisecond
 	ciSleep = func(time.Duration) { time.Sleep(5 * time.Millisecond) }
-	t.Cleanup(func() { ciPollInterval, ciNoRunAfter, ciSleep = poll, noRun, sleep })
+	t.Cleanup(func() { ciPollInterval, ciNoRunAfter, ciSleep, ciNow = poll, noRun, sleep, now })
 	return f
 }
 
@@ -158,5 +161,123 @@ func TestCIWatchNoRunExitsTwo(t *testing.T) {
 	}
 	if items := queuedHeal(t, f.home, "r-ci-unit"); len(items) != 0 {
 		t.Errorf("heal items=%d, want 0 when CI never started", len(items))
+	}
+}
+
+// fakeCIClock replaces the watch clock: each sleep moves it forward at once
+// and is recorded, so rate-limit waits of minutes take no real time.
+func fakeCIClock(start time.Time) *[]time.Duration {
+	now, slept := start, &[]time.Duration{}
+	ciNow = func() time.Time { return now }
+	ciSleep = func(d time.Duration) { *slept = append(*slept, d); now = now.Add(d) }
+	return slept
+}
+
+const ciRateLimitReply = "failed to get run: HTTP 403: API rate limit exceeded for user ID 1. (https://api.github.com/repos/o/r/actions/runs)\n"
+
+func TestCIWatchRateLimitThenSuccessWaitsForReset(t *testing.T) {
+	f := newCIFixture(t, []string{"", `[{"databaseId":77,"status":"completed","conclusion":"success","name":"CI"}]`}, "")
+	f.write("runs-1.err", ciRateLimitReply)
+	start := time.Date(2026, 11, 11, 22, 17, 0, 0, time.UTC)
+	f.write("rate_limit", `{"resources":{"core":{"limit":5000,"remaining":0,"reset":`+strconv.FormatInt(start.Add(90*time.Second).Unix(), 10)+`}}}`)
+	slept := fakeCIClock(start)
+	if code := f.watch(); code != 0 {
+		t.Fatalf("exit=%d, want 0; stdout=%q stderr=%q", code, f.stdout, f.stderr)
+	}
+	if f.stdout != "ci watch: CI passed for "+f.sha+" (1 runs)\n" {
+		t.Errorf("stdout=%q, want the success line only", f.stdout)
+	}
+	if want := "ci watch: GitHub API rate limit; retry at 22:18 UTC\n"; strings.Count(f.stderr, want) != 1 {
+		t.Errorf("stderr=%q, want one wait line %q", f.stderr, want)
+	}
+	if strings.Contains(f.stdout+f.stderr, "CI failed") {
+		t.Errorf("a rate limit must not read as a CI failure: %q %q", f.stdout, f.stderr)
+	}
+	if len(*slept) != 1 || (*slept)[0] != 95*time.Second {
+		t.Errorf("waits=%v, want one wait until the reset (95s)", *slept)
+	}
+	if items := queuedHeal(t, f.home, "r-ci-unit"); len(items) != 0 {
+		t.Errorf("heal items=%d, want 0", len(items))
+	}
+}
+
+func TestCIWatchRateLimitPastDeadlineGivesUp(t *testing.T) {
+	f := newCIFixture(t, []string{""}, "")
+	f.write("runs-1.err", ciRateLimitReply)
+	slept := fakeCIClock(time.Date(2026, 11, 11, 22, 17, 0, 0, time.UTC))
+	code := f.watch("--timeout", "5m")
+	if code != 4 {
+		t.Fatalf("exit=%d, want 4; stdout=%q stderr=%q", code, f.stdout, f.stderr)
+	}
+	if !strings.Contains(f.stdout, "rate limit, gave up") || strings.Contains(f.stdout, "CI failed") {
+		t.Errorf("stdout=%q, want a rate-limit give-up, not a CI failure", f.stdout)
+	}
+	calls, _ := os.ReadFile(filepath.Join(f.home, "gh-calls"))
+	if n := strings.Count(string(calls), "run list "); n != 3 {
+		t.Errorf("run list calls=%d, want 3 (60s and 120s backoff, then the 240s wait passes 5m)", n)
+	}
+	if want := []time.Duration{60 * time.Second, 120 * time.Second}; len(*slept) != 2 || (*slept)[0] != want[0] || (*slept)[1] != want[1] {
+		t.Errorf("waits=%v, want %v", *slept, want)
+	}
+	if n := strings.Count(f.stderr, "ci watch: GitHub API rate limit; retry at "); n != 2 {
+		t.Errorf("wait lines=%d, want 2; stderr=%q", n, f.stderr)
+	}
+	if items := queuedHeal(t, f.home, "r-ci-unit"); len(items) != 0 {
+		t.Errorf("heal items=%d, want 0 when CI was never read", len(items))
+	}
+}
+
+// TestCIWatchHelperProcess is the first watcher for the duplicate test; it
+// only runs as a child process.
+func TestCIWatchHelperProcess(t *testing.T) {
+	if os.Getenv("CF_CI_WATCH_HELPER") == "" {
+		t.Skip("child process only")
+	}
+	code, _ := run([]string{"ci", "watch", "--sha", os.Getenv("CF_CI_WATCH_SHA"), "--cwd", os.Getenv("CF_CI_WATCH_REPO")})
+	os.Exit(code)
+}
+
+func TestCIWatchSecondStartForSameShaDoesNotWatch(t *testing.T) {
+	f := newCIFixture(t, []string{
+		`[{"databaseId":77,"status":"in_progress","conclusion":"","name":"CI"}]`,
+		`[{"databaseId":77,"status":"completed","conclusion":"success","name":"CI"}]`,
+	}, "")
+	first := exec.Command(os.Args[0], "-test.run=^TestCIWatchHelperProcess$")
+	first.Env = append(os.Environ(), "CF_CI_WATCH_HELPER=1", "CF_CI_WATCH_SHA="+f.sha, "CF_CI_WATCH_REPO="+f.repo)
+	if err := first.Start(); err != nil {
+		t.Fatal(err)
+	}
+	stopped := false
+	stop := func() {
+		if !stopped {
+			stopped = true
+			_ = first.Process.Kill()
+			_ = first.Wait()
+		}
+	}
+	t.Cleanup(stop)
+	callsFile := filepath.Join(f.home, "gh-calls")
+	for deadline := time.Now().Add(20 * time.Second); ; time.Sleep(20 * time.Millisecond) {
+		if b, _ := os.ReadFile(callsFile); strings.Contains(string(b), "run list ") {
+			break
+		}
+		if time.Now().After(deadline) {
+			t.Fatal("first watcher never polled")
+		}
+	}
+	before, _ := os.ReadFile(callsFile)
+	if code := f.watch(); code != 0 {
+		t.Fatalf("second start exit=%d, want 0; stdout=%q stderr=%q", code, f.stdout, f.stderr)
+	}
+	if !strings.Contains(f.stdout, "already watching "+f.sha) {
+		t.Errorf("stdout=%q, want it to say a watch is already running", f.stdout)
+	}
+	if after, _ := os.ReadFile(callsFile); string(after) != string(before) {
+		t.Errorf("second start called gh: %q", strings.TrimPrefix(string(after), string(before)))
+	}
+	// Once the first watcher is gone, its lock no longer blocks a new watch.
+	stop()
+	if code := f.watch(); code != 0 || !strings.Contains(f.stdout, "CI passed for "+f.sha) {
+		t.Errorf("after the first watcher died: exit=%d stdout=%q stderr=%q, want a normal watch", code, f.stdout, f.stderr)
 	}
 }

@@ -677,6 +677,18 @@ failing jobs (`<workflow> / <job>`) and tests (`--- FAIL: <name>`, `not ok <n> -
 not written) and exits 1. No CI run for the commit after 5 minutes exits 2 with `no CI run for <sha>`; runs still
 going at `--timeout` exit 3. A failing `gh` call is retried until the timeout.
 
+A GitHub API rate-limit reply (`gh` stderr with `rate limit`, as in `HTTP 403: API rate limit
+exceeded`) is never read as a CI result (B448). `ci watch` asks `gh api rate_limit` (free; it does not
+count against the limit) for the reset time and waits until then; when that gives no reset it backs
+off 60 s, doubling to 15 min. Each wait prints one stderr line `ci watch: GitHub API rate limit; retry
+at HH:MM UTC`. When the next retry falls past `--timeout` it stops with status `rate_limited` and exit
+4 (`GitHub API rate limit, gave up watching <sha> ...; CI result unknown, not a CI failure`) and queues
+no heal item. Polling stays at one `gh run list` call per 30 s. Only one `ci watch` runs per repo and
+commit: it holds a code-forge lock file (the shared lock files, keyed by repo top and full sha) while
+it watches, and a second start prints `another ci watch is already watching <sha>; not starting a
+second one` (status `already_running`) and exits 0 without calling `gh`. A watch that died leaves no
+block: its lock is broken on the next start.
+
 Gates, reviews and the close check of a worktree block run in its tree (B62b):
 
 - `gates run --run <run> --block <id>` runs the gates with the tree as cwd, and `{test_files}` and the

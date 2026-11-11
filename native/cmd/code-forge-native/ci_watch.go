@@ -11,6 +11,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/healq"
 )
@@ -19,16 +20,27 @@ import (
 // through the gh CLI on PATH. Success exits 0; a failure names the failing
 // jobs and tests, queues a heal item of kind ci and exits 1; no run after
 // ciNoRunAfter exits 2; still running at --timeout exits 3.
+//
+// B448: a GitHub API rate-limit reply is never a CI result. The watch waits
+// until the limit resets (read from `gh api rate_limit`, which does not count
+// against the limit) or backs off 60s doubling to 15m, prints one wait line
+// each time, and gives up with status rate_limited (exit 4) only when the next
+// retry falls past --timeout. Polling makes one `gh run list` call per 30s.
+// One watch per repo and commit: a second start finds the first one's lock
+// (the shared code-forge lock files) and exits 0 without watching.
 
 func init() { routes["ci"] = runCI }
 
 const ciUsage = "usage: code-forge ci watch --sha <sha> [--run <r>] [--timeout 30m] [--cwd <dir>] [--json]"
 
-// Test seams: the poll interval, the no-run limit and the clock.
+// Test seams: the poll interval, the no-run limit, the rate-limit backoff and the clock.
 var (
 	ciPollInterval = 30 * time.Second
 	ciNoRunAfter   = 5 * time.Minute
+	ciBackoffStart = 60 * time.Second
+	ciBackoffMax   = 15 * time.Minute
 	ciSleep        = time.Sleep
+	ciNow          = time.Now
 )
 
 type ciRun struct {
@@ -134,6 +146,94 @@ func ciGh(cwd string, args ...string) (string, error) {
 	return out.String(), nil
 }
 
+// ciRateLimited reports a GitHub API rate-limit reply (HTTP 403 or 429 with
+// "rate limit" in the text, or gh's bare "API rate limit exceeded").
+func ciRateLimited(err error) bool {
+	return err != nil && strings.Contains(strings.ToLower(err.Error()), "rate limit")
+}
+
+// ciLimiter runs gh and sits out rate-limit replies until a deadline.
+type ciLimiter struct {
+	cwd      string
+	deadline time.Time
+	backoff  time.Duration
+	// gaveUp is set when a rate-limit wait would pass the deadline.
+	gaveUp  bool
+	retryAt time.Time
+}
+
+// gh runs one gh call; on a rate-limit reply it waits and retries the same call.
+func (l *ciLimiter) gh(args ...string) (string, error) {
+	for {
+		out, err := ciGh(l.cwd, args...)
+		if !ciRateLimited(err) {
+			if err == nil {
+				l.backoff = 0
+			}
+			return out, err
+		}
+		retry := l.next()
+		if retry.After(l.deadline) {
+			l.gaveUp, l.retryAt = true, retry
+			return out, err
+		}
+		fmt.Fprintf(os.Stderr, "ci watch: GitHub API rate limit; retry at %s UTC\n", retry.UTC().Format("15:04"))
+		ciSleep(retry.Sub(ciNow()))
+	}
+}
+
+// next is the reset time from `gh api rate_limit` when the core limit is used
+// up, else now plus a backoff of 60s doubling to 15m.
+func (l *ciLimiter) next() time.Time {
+	now := ciNow()
+	if out, err := ciGh(l.cwd, "api", "rate_limit"); err == nil {
+		var limits struct {
+			Resources struct {
+				Core struct {
+					Remaining *int  `json:"remaining"`
+					Reset     int64 `json:"reset"`
+				} `json:"core"`
+			} `json:"resources"`
+		}
+		if json.Unmarshal([]byte(out), &limits) == nil {
+			core := limits.Resources.Core
+			reset := time.Unix(core.Reset, 0).Add(5 * time.Second)
+			if core.Remaining != nil && *core.Remaining == 0 && reset.After(now) {
+				return reset
+			}
+		}
+	}
+	if l.backoff == 0 {
+		l.backoff = ciBackoffStart
+	} else if l.backoff *= 2; l.backoff > ciBackoffMax {
+		l.backoff = ciBackoffMax
+	}
+	return now.Add(l.backoff)
+}
+
+// ciLock takes the one-watch-per-repo-and-commit lock. ok false means another
+// live ci watch holds it; a lock that cannot be taken for another reason only
+// warns, so the watch still runs.
+func ciLock(cwd, sha string) (release func(), ok bool) {
+	repo, err := gitx.RepoTop(cwd)
+	if err != nil {
+		repo = cwd
+	}
+	full := sha
+	if out, err := gitx.Run(cwd, "rev-parse", "--verify", "--quiet", sha+"^{commit}"); err == nil && strings.TrimSpace(out) != "" {
+		full = strings.TrimSpace(out)
+	}
+	lock, err := filelock.TryLock("ci-watch "+repo+" "+full, filelock.Options{})
+	if err != nil {
+		fmt.Fprintln(os.Stderr, "ci watch: watch lock not taken: "+err.Error())
+		return func() {}, true
+	}
+	if !lock.OK {
+		return func() {}, false
+	}
+	return lock.Release, true
+}
+
 type ciReport struct {
 	SHA         string   `json:"sha"`
 	Status      string   `json:"status"`
@@ -163,10 +263,19 @@ func ciWatch(o ciOptions) int {
 	if cwd == "" {
 		cwd, _ = os.Getwd()
 	}
-	started := time.Now()
+	release, ok := ciLock(cwd, o.sha)
+	if !ok {
+		return finish("already_running", "another ci watch is already watching "+o.sha+"; not starting a second one", 0)
+	}
+	defer release()
+	started := ciNow()
+	limiter := &ciLimiter{cwd: cwd, deadline: started.Add(o.timeout)}
 	lastError := ""
 	for {
-		out, err := ciGh(cwd, "run", "list", "--commit", o.sha, "--json", "databaseId,status,conclusion,name")
+		out, err := limiter.gh("run", "list", "--commit", o.sha, "--json", "databaseId,status,conclusion,name")
+		if limiter.gaveUp {
+			return finish("rate_limited", fmt.Sprintf("GitHub API rate limit, gave up watching %s: the next retry (%s UTC) is past the %s timeout; CI result unknown, not a CI failure", o.sha, limiter.retryAt.UTC().Format("15:04"), o.timeout), 4)
+		}
 		runs := []ciRun{}
 		if err == nil {
 			if jerr := json.Unmarshal([]byte(out), &runs); jerr != nil {
@@ -179,7 +288,7 @@ func ciWatch(o ciOptions) int {
 			fmt.Fprintln(os.Stderr, "ci watch: "+lastError)
 		} else {
 			report.Runs = runs
-			if len(runs) == 0 && time.Since(started) >= ciNoRunAfter {
+			if len(runs) == 0 && ciNow().Sub(started) >= ciNoRunAfter {
 				return finish("no_run", "no CI run for "+o.sha, 2)
 			}
 			if len(runs) > 0 && ciAllDone(runs) {
@@ -192,10 +301,10 @@ func ciWatch(o ciOptions) int {
 				if len(failed) == 0 {
 					return finish("success", fmt.Sprintf("CI passed for %s (%d runs)", o.sha, len(runs)), 0)
 				}
-				return ciFailure(o, cwd, failed, &report, finish)
+				return ciFailure(o, cwd, limiter, failed, &report, finish)
 			}
 		}
-		if time.Since(started) >= o.timeout {
+		if ciNow().Sub(started) >= o.timeout {
 			message := "CI still running for " + o.sha + " after " + o.timeout.String()
 			if lastError != "" && len(report.Runs) == 0 {
 				message += " (last gh error: " + lastError + ")"
@@ -229,11 +338,11 @@ var (
 )
 
 // ciFailure reads the failed logs, names jobs and tests, queues one heal item.
-func ciFailure(o ciOptions, cwd string, failed []ciRun, report *ciReport, finish func(string, string, int) int) int {
+func ciFailure(o ciOptions, cwd string, limiter *ciLimiter, failed []ciRun, report *ciReport, finish func(string, string, int) int) int {
 	jobs, tests := []string{}, []string{}
 	seenJob, seenTest := map[string]bool{}, map[string]bool{}
 	for _, r := range failed {
-		log, err := ciGh(cwd, "run", "view", fmt.Sprint(r.DatabaseID), "--log-failed")
+		log, err := limiter.gh("run", "view", fmt.Sprint(r.DatabaseID), "--log-failed")
 		lines := strings.Split(log, "\n")
 		if len(lines) > 200 {
 			lines = lines[:200]
