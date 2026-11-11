@@ -20,6 +20,10 @@ import (
 func init() { blockSubs["ready"] = runBlockReady }
 
 func runBlockReady(args []string) int {
+	// B392: --preflight lists the close blockers a gate cannot fix, before any gate.
+	if i := slices.Index(args, "--preflight"); i >= 0 {
+		return runBlockPreflight(append(slices.Clone(args[:i]), args[i+1:]...))
+	}
 	p, code := prepareBlockPreview("ready", args)
 	if p == nil {
 		return code

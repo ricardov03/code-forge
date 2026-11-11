@@ -6,6 +6,7 @@ import (
 	"io"
 	"math"
 	"os"
+	"slices"
 	"strconv"
 	"strings"
 
@@ -28,6 +29,8 @@ func gatesHandover(args []string, reason handoverReason) int {
 	if gatesBaseChecked {
 		_ = os.Setenv(gatesBaseCheckedEnv, "1")
 	}
+	// B392: the preflight flags are Go only; Node never sees them.
+	args = slices.DeleteFunc(slices.Clone(args), func(s string) bool { return s == "--preflight" || s == "--no-preflight" })
 	code, e := handover(append([]string{"gates"}, args...), reason)
 	if e != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", e)
@@ -50,6 +53,7 @@ type gatesOptions struct {
 	cwd, run, block, slug        string
 	cwdGiven, slugGiven, changed bool
 	autoRebase, allowStaleBase   bool
+	preflight, noPreflight       bool
 	timeout                      float64
 	timeoutGiven                 bool
 	// full is an explicit gates run --full (B404): the only local full suite.
@@ -110,6 +114,10 @@ func gatesParse(args []string) (gatesOptions, string) {
 			o.autoRebase = true
 		case "--allow-stale-base":
 			o.allowStaleBase = true
+		case "--preflight":
+			o.preflight = true
+		case "--no-preflight":
+			o.noPreflight = true
 		}
 	}
 	if o.full && changedFlag {
@@ -117,6 +125,9 @@ func gatesParse(args []string) (gatesOptions, string) {
 	}
 	if o.full && !r {
 		return o, "--full needs --run <id> and --block <id>"
+	}
+	if o.preflight && o.noPreflight {
+		return o, "--preflight and --no-preflight cannot go together"
 	}
 	if o.changed && !r {
 		return o, "--changed needs --run <id> and --block <id>"
@@ -288,7 +299,7 @@ func runGates(args []string) int {
 			if i+1 < len(args) && !strings.HasPrefix(args[i+1], "--") {
 				i++
 			}
-		case "--changed", "--full", "--json", "--auto-rebase", "--allow-stale-base":
+		case "--changed", "--full", "--json", "--auto-rebase", "--allow-stale-base", "--preflight", "--no-preflight":
 		default:
 			// Node's router passes argv through unchanged. Ordinary runs ignore
 			// --cwd=; worktree runs explicitly reject it in gatesNative.
@@ -305,6 +316,14 @@ func runGates(args []string) int {
 	}
 	if o.run == "" && o.block == "" {
 		return gatesHandover(args, hGatesEmptyScope)
+	}
+	// B392: the preflight is on by default (it reads the run, the ledger and
+	// the block's files, no gate result); --no-preflight skips it.
+	if o.run != "" && o.block != "" && !o.noPreflight {
+		if code, stop := gatesPreflight(o); stop {
+			gatesFinish(args, code)
+			return code
+		}
 	}
 	if code, stop := gatesStaleBase(o); stop {
 		gatesFinish(args, code)

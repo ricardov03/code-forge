@@ -68,6 +68,24 @@ these rows go to the run's project ledger. More than 200 owned files means no re
 Unreadable inputs also leave no record. The next `--changed` falls back with `no_baseline`,
 unless the text-only rule below applies.
 
+Fail fast before the gate (B392). `code-forge block ready <id> --run <r> --preflight` needs no
+gate result and runs in about a second. It lists every close blocker that a gate cannot fix, in
+one list: `stale_base` (the block's base branch moved past its recorded base; the detail names
+the branch tip sha, the fix is `code-forge block rebase <id> --run <r> --accept-landed`), open
+review findings on the current content (`not_approved`, `late_unruled`,
+`autopilot_waiver_invalid`), `rule_break` (ledger rows and the transcript scan) and, with
+`--report`, `coder_report_failed` (missing review ticket ids, a failed TESTS line). A file with
+no review yet is not a preflight blocker, because review runs in parallel with the gate. A check
+it cannot decide in Go (for example a transcript that needs the Node rule scan) is printed as
+`skipped <check>: <why>` (`skipped` in `--json`), never as a blocker. It exits 0 with
+`block <id> preflight clean`, or 1 with the list; `--json` prints one line
+`{block, preflight: true, ready, blockers, skipped}`. There is no docs lint in `block ready`.
+`gates run --run <r> --block <id>` in Go runs the same preflight first, by default: a blocker
+stops it with exit 1, one stderr line per blocker ending in `no gate was run; fix: <fix>`, and
+no gate command starts. `--no-preflight` skips it; `--preflight` asks for it explicitly. With
+`--auto-rebase` or `--allow-stale-base` the stale base keeps its B363 handling below and the
+preflight checks the rest.
+
 `{test_files}` expands to changed tests and stem-paired tests of changed sources.
 `{changed_files}` expands to changed lint/format paths. Deleted files count for pairing and
 the threshold. Both tokens receive only files that exist now. Each token must be a whole
