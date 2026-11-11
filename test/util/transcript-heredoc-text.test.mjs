@@ -53,3 +53,24 @@ test('B415: real accesses still hit exactly once on their own line', () => {
     bash(`echo "$(cat ${RUNS}/x.key)" > plans/leak.md`),
   ), Array.from({ length: 11 }, (_, i) => runsHit(i + 1)[0]));
 });
+
+test('B415 fix: Grep pattern is a regex, not a path; Glob pattern still names files', () => {
+  assert.deepEqual(scan(
+    assistant(tool('Grep', { pattern: '.code-forge/runs' })),
+    assistant(tool('Glob', { pattern: '.code-forge/runs/*' })),
+  ), runsHit(2));
+});
+
+test('B415 fix: an executed heredoc body counts home-relative words; a heredoc written to a file does not', () => {
+  assert.deepEqual(scan(
+    bash(`bash <<'EOF'\ncd ~; cat .code-forge/runs/x.key\nEOF`),
+    bash(`cat > notes.md <<'EOF'\ncd ~; cat .code-forge/runs/x.key\nEOF`),
+  ), runsHit(1));
+});
+
+test('B415 fix: an env-prefixed tee with no file argument is not a file write', () => {
+  assert.deepEqual(scan(
+    bash(`X=1 tee <<'EOF'\n${RUNS}/x.key\nEOF`),
+    bash(`X=1 tee plans/x.md <<'EOF'\n${RUNS}/x.key\nEOF`),
+  ), runsHit(1));
+});

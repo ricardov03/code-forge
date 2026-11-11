@@ -1109,7 +1109,8 @@ function transcriptCommandText(command, unwrapShell = true) {
  * The command word, its other arguments and every redirect target stay scanned. Unknown syntax,
  * malformed quotes, here-strings and unfinished heredocs scan the whole command (fail closed).
  * Known limit: a script written this way and run later is seen only where it is run.
- * `words` are the command's own words and redirect targets (no heredoc body, no left-out text):
+ * `words` are the command's own words, redirect targets and the whitespace-split words of every
+ * heredoc body that is not left out (it may run, e.g. `bash <<'EOF'`; no left-out text):
  * the home-relative spelling of a `~/…` path counts only there (whole command when fail closed).
  * @param {string} command
  * @returns {{text: string, words: string[]}}
@@ -1142,11 +1143,16 @@ function transcriptPathText(command) {
     if (c.piped) return false;
     const n = name(c);
     if (n === 'cat') return c.targets.length > 0;
-    if (n === 'tee') return c.words.slice(1).some((w) => !w.text.startsWith('-'));
+    if (n === 'tee') {
+      const args = c.words.slice(c.words.findIndex((w) => !/^[A-Za-z_][A-Za-z_0-9]*=/.test(w.text)) + 1);
+      return args.some((w) => !w.text.startsWith('-'));
+    }
     return false;
   };
   /** @type {{start: number, end: number}[]} */
   const inert = [];
+  /** @type {string[]} words of heredoc bodies that are not left out (they may run, B415) */
+  const bodyWords = [];
   /** @type {{delimiter: string, tabs: boolean, expands: boolean, cmd: Cmd}[]} */
   let heredocs = [];
   let redirect = '';
@@ -1167,6 +1173,7 @@ function transcriptPathText(command) {
           if ((doc.tabs ? line.replace(/^\t+/, '') : line) === doc.delimiter) {
             const body = command.slice(start, i);
             if (writesHeredoc(doc.cmd) && !(doc.expands && substitutes(body))) inert.push({ start, end: i });
+            else bodyWords.push(...body.split(/\s+/).filter(Boolean));
             i = newline < 0 ? end : end + 1;
             closed = true;
             break;
@@ -1249,7 +1256,7 @@ function transcriptPathText(command) {
     for (const w of args) if (w.quoted) inert.push({ start: w.start, end: w.end });
   }
   const masked = (/** @type {Word} */ w) => inert.some((span) => span.start === w.start);
-  const words = cmds.flatMap((c) => [...c.words.filter((w) => !masked(w)).map((w) => w.text), ...c.inputs]);
+  const words = [...cmds.flatMap((c) => [...c.words.filter((w) => !masked(w)).map((w) => w.text), ...c.inputs]), ...bodyWords];
   if (inert.length === 0) return { text: command, words };
   inert.sort((a, b) => a.start - b.start);
   const chunks = [];
@@ -1380,7 +1387,8 @@ export function scanTranscript(text, list = FORBIDDEN) {
             if (typeof path === 'string') text = command = pathText = `Write(${JSON.stringify(path)})`;
           }
           if (CLAUDE_FILE_TOOLS.has(part.name) || CLAUDE_WRITE_TOOLS.has(part.name)) {
-            for (const key of ['file_path', 'notebook_path', 'path', 'pattern']) {
+            // Grep's `pattern` is a regex, not a path; only Glob's `pattern` names files
+            for (const key of ['file_path', 'notebook_path', 'path', ...(part.name === 'Glob' ? ['pattern'] : [])]) {
               if (typeof input?.[key] === 'string') words.push(input[key]);
             }
           }
