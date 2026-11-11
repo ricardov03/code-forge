@@ -1236,6 +1236,12 @@ holders and waiters with their wait times (`--json` for scripts). Wrap any other
 slot get `CODE_FORGE_TEST_QUEUE_HELD=1`, so a nested gate never waits on its parent.
 `CODE_FORGE_TEST_QUEUE=off` turns the queue off.
 
+The package suite (`npm test`, `test/helpers/run-suite.sh`) picks its `--test-concurrency` from
+the same signal: inside a slot (`CODE_FORGE_TEST_QUEUE_HELD` set) it runs one test file per core,
+because the queue already keeps other suites off the machine; outside a slot it runs
+`max(1, cores / 2)` files at once. An explicit `--test-concurrency` flag, or
+`CODE_FORGE_TEST_CONCURRENCY` (a positive integer), always wins.
+
 ### Rules the orchestrator keeps
 
 These come from real runs. The skill states each one (`skill/references/`):

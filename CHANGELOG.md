@@ -21,6 +21,9 @@ waits on a second real consumer (plan §10.4, Q17).
 - Every context pack (Node and Go, byte-equal) has a `## forbidden` section: one line per rule the close transcript scan enforces for a coder, built from the rule table, then the safe ways for a red run on base code, clean-up and run facts (B364)
 - `block close` no longer refuses `unreviewed` for an owned file the block did not change (equal to its base) when every review of its current content is a `no_change` result, as after `block rebase --accept-landed` onto a main that changed it. A changed file, or one whose current content has a refusal with findings, still needs an approval. Such a file is not counted as work either, so a block with no other change still refuses `no_changes`; Node and Go agree (B365)
 - Three tests no longer fail on a busy machine: the Go torn-tail recovery test is bounded only by `go test -timeout` (not 20 s) and `test/compat/go.test.mjs` gives Go 10 minutes and prints every output line of a failed Go test; `native-install` runs `npm pack` on a private package copy, so a file another test adds to and removes from `native/bin` no longer breaks it (B375)
+- The package test suite (`npm test`, `test/helpers/run-suite.sh`) runs one test file per core when it holds the machine
+  test slot (`CODE_FORGE_TEST_QUEUE_HELD` set by `gates run` and `code-forge queue run`), and keeps `max(1, cores/2)`
+  outside a slot; an explicit `--test-concurrency` or `CODE_FORGE_TEST_CONCURRENCY` still wins (B376)
 
 ## [0.21.0] — 2026-11-09
 
