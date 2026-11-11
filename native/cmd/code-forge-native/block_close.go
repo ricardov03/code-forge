@@ -433,7 +433,7 @@ func blockCloseHumanStep(args []string, step *landStep, handover *handoverReason
 			reason := "coder report FAILED: --report cannot be read"
 			checks = append(checks, closeCheck{reason, []gatecheck.Blocker{{Code: "coder_report_failed", Detail: reason}}})
 		} else {
-			check, warnings := closeReport(reportText, run, id, files, lines, rows, key)
+			check, warnings := closeReport(reportText, run, id, qdir, files, lines, rows, key)
 			checks = append(checks, check)
 			lineWarnings = append(lineWarnings, warnings...)
 		}
@@ -1005,7 +1005,7 @@ func closeReviewedLines(run, id, top, qdir string, entry ledger.Object, files []
 
 var closeHandLine = regexp.MustCompile(`^(?:(?:[-*]|[0-9]{1,9}\.)\s+)?reviewed\s+(\S+)\s+ticket\s+([0-9a-fA-F]{24})$`)
 
-func closeReport(text, run, id string, files []gatecheck.File, lines []any, rows []gatecheck.Row, key []byte) (closeCheck, []string) {
+func closeReport(text, run, id, qdir string, files []gatecheck.File, lines []any, rows []gatecheck.Row, key []byte) (closeCheck, []string) {
 	tickets := map[string]string{}
 	order := []string{}
 	current := map[string]string{}
@@ -1037,6 +1037,17 @@ func closeReport(text, run, id string, files []gatecheck.File, lines []any, rows
 			}
 		}
 	}
+	// B405: a file with neither a report line nor a tool or ledger ticket is
+	// credited by its latest done review-file ticket for the current content.
+	need := map[string]string{}
+	for _, f := range files {
+		if !hand[f.File] && tickets[f.File] == "" {
+			need[f.File] = f.Hash
+		}
+	}
+	for file, ticket := range closeDoneTickets(qdir, run, id, need) {
+		tickets[file] = ticket
+	}
 	missing := []string{}
 	blockers := []gatecheck.Blocker{}
 	for _, f := range files {
@@ -1056,6 +1067,50 @@ func closeReport(text, run, id string, files []gatecheck.File, lines []any, rows
 	}
 	return closeCheck{}, warnings
 }
+
+// closeDoneTickets returns, per wanted file, the latest (by enqueued_at, then
+// id) review-file ticket of this run and block for the wanted content hash that
+// has a done marker for a real review. It only reads the queue; an unreadable
+// queue, ticket or marker credits nothing.
+func closeDoneTickets(qdir, run, id string, want map[string]string) map[string]string {
+	found := map[string]string{}
+	if len(want) == 0 || qdir == "" {
+		return found
+	}
+	names, err := os.ReadDir(qdir)
+	if err != nil {
+		return found
+	}
+	at := map[string]string{}
+	for _, name := range names {
+		if !closeTicketFile.MatchString(name.Name()) {
+			continue
+		}
+		ticket := strings.TrimSuffix(name.Name(), ".json")
+		var t map[string]any
+		data, e := os.ReadFile(filepath.Join(qdir, name.Name()))
+		if e != nil || json.Unmarshal(data, &t) != nil || t == nil {
+			continue
+		}
+		file := blockString(t["file"])
+		hash, ok := want[file]
+		if !ok || t["run"] != run || t["block"] != id || t["content_hash"] != hash || t["kind"] != nil {
+			continue
+		}
+		var marker map[string]any
+		data, e = os.ReadFile(filepath.Join(qdir, ticket+".done"))
+		if e != nil || json.Unmarshal(data, &marker) != nil || marker == nil || marker["ticket"] != ticket || blockString(marker["status"]) == "" || gatecheck.NeverReviewed(marker) || marker["status"] == "refused" {
+			continue
+		}
+		when := blockString(t["enqueued_at"])
+		if prev, had := found[file]; !had || when > at[file] || when == at[file] && ticket > prev {
+			found[file], at[file] = ticket, when
+		}
+	}
+	return found
+}
+
+var closeTicketFile = regexp.MustCompile(`^[0-9a-f]{24}\.json$`)
 
 func closeWord(b byte) bool {
 	return b >= 'a' && b <= 'z' || b >= 'A' && b <= 'Z' || b >= '0' && b <= '9' || b == '_'
