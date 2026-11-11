@@ -176,6 +176,14 @@ const (
 	hLandPendingApproval
 	hLandEndHook
 	hStatusUnsupported
+	hRunStart
+	hRunAddWorker
+	hRunReload
+	hRunHome
+	hRunRecord
+	hRunShape
+	hRunLedger
+	hRunRegistry
 )
 
 var handoverReasons = [...]string{
@@ -331,6 +339,14 @@ var handoverReasons = [...]string{
 	hLandPendingApproval:       "land-pending-approval",
 	hLandEndHook:               "land-end-hook",
 	hStatusUnsupported:         "status-unsupported",
+	hRunStart:                  "run-start",
+	hRunAddWorker:              "run-add-worker",
+	hRunReload:                 "run-reload",
+	hRunHome:                   "run-home",
+	hRunRecord:                 "run-record",
+	hRunShape:                  "run-shape",
+	hRunLedger:                 "run-ledger",
+	hRunRegistry:               "run-registry",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
