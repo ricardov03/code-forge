@@ -143,7 +143,7 @@ func cloudCoder(run, block string) int {
 	defer os.RemoveAll(scratch)
 	values := map[string]string{"block": block, "base": blockString(entry.Get("base_sha")), "brief": brief, "patch_out": filepath.Join(scratch, "cloud.patch")}
 
-	ctx, cancel := context.WithTimeout(context.Background(), time.Duration(cloud.TimeoutS*float64(time.Second)))
+	ctx, cancel := cloudDeadline(time.Duration(cloud.TimeoutS * float64(time.Second)))
 	defer cancel()
 	out, code, err := cloudExec(ctx, tree, cloud.Submit, values)
 	if ctx.Err() != nil {
@@ -254,6 +254,13 @@ func cloudCoder(run, block string) int {
 		return cloudSay(result, 1)
 	}
 	return cloudSay(result, 0)
+}
+
+// cloudDeadline gives one cloud-coder call its coder.cloud.timeout_s deadline;
+// the submit and every fetch poll end when it does. Tests replace it so the
+// deadline expires after a known number of polls, not on the wall clock (B412).
+var cloudDeadline = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+	return context.WithTimeout(context.Background(), timeout)
 }
 
 // cloudExec runs one argv template with its placeholders filled in. It runs in

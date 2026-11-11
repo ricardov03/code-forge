@@ -1,6 +1,7 @@
 package main
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"os"
@@ -67,7 +68,7 @@ func newCloudFixture(t *testing.T, edits map[string]string, fetchBody string, cl
 	must(os.WriteFile(filepath.Join(repo, "other.txt"), []byte("other\n"), 0600))
 	must(os.WriteFile(filepath.Join(repo, ".gitignore"), []byte(".code-forge/\n"), 0600))
 	submit := script("submit.sh", `printf '%s|%s|%s\n' "$1" "$2" "$3" > "$HOME/submit-args"; echo task-42`)
-	fetch := script("fetch.sh", `n=$(cat "$HOME/fetches" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$HOME/fetches"; `+fetchBody)
+	fetch := script("fetch.sh", `n=$(cat "$HOME/fetches" 2>/dev/null || echo 0); n=$((n+1)); echo $n > "$HOME/fetches.tmp"; mv "$HOME/fetches.tmp" "$HOME/fetches"; `+fetchBody)
 	cloud["submit"] = []any{submit, "{block}", "{base}", "{brief}"}
 	cloud["fetch"] = []any{fetch, "{task}", "{patch_out}"}
 	cfg, err := json.Marshal(map[string]any{"version": 1, "coder": map[string]any{"cloud": cloud}})
@@ -215,19 +216,40 @@ func TestCloudCoderRefusesUnownedFile(t *testing.T) {
 	}
 }
 
+// The deadline here expires once the fetch script has run twice, not after 2 s
+// of wall time, so a loaded machine cannot starve the polls (B412). A 2-minute
+// ceiling keeps a broken loop from hanging the test.
 func TestCloudCoderFetchTimeoutExitsOne(t *testing.T) {
 	f := newCloudFixture(t, map[string]string{"src/owned.txt": "new\n"}, `exit 0`,
 		map[string]any{"timeout_s": 2, "poll_s": 0.05})
-	started := time.Now()
+	fetches := filepath.Join(f.home, "fetches")
+	asked := []time.Duration{}
+	before := cloudDeadline
+	t.Cleanup(func() { cloudDeadline = before })
+	cloudDeadline = func(timeout time.Duration) (context.Context, context.CancelFunc) {
+		asked = append(asked, timeout)
+		ctx, cancel := context.WithTimeout(context.Background(), 2*time.Minute)
+		go func() {
+			for ctx.Err() == nil {
+				data, _ := os.ReadFile(fetches)
+				if n, _ := strconv.Atoi(strings.TrimSpace(string(data))); n >= 2 {
+					cancel()
+					return
+				}
+				time.Sleep(10 * time.Millisecond)
+			}
+		}()
+		return ctx, cancel
+	}
 	code, out := runCloud(t)
+	if len(asked) != 1 || asked[0] != 2*time.Second {
+		t.Errorf("deadlines asked = %v; want exactly one of 2s (timeout_s)", asked)
+	}
 	if code != 1 || out.Get("status") != "timeout" || out.Get("reason") != "fetch-timeout" {
 		t.Fatalf("exit=%d out=%v; want exit 1 timeout fetch-timeout", code, out)
 	}
 	if message, _ := out.Get("message").(string); !strings.Contains(message, "task-42") || !strings.Contains(message, "within 2s") {
 		t.Errorf("message = %q; want the task id and the limit", message)
-	}
-	if elapsed := time.Since(started); elapsed > 15*time.Second {
-		t.Errorf("timeout took %v; want about 2s", elapsed)
 	}
 	got := readLines(t, filepath.Join(f.home, "fetches"))
 	if n, _ := strconv.Atoi(strings.Join(got, "")); len(got) != 1 || n < 2 {

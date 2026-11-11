@@ -17,6 +17,7 @@ import (
 func TestClaimAutoSymlinkedWorkspaceOverlap(t *testing.T) {
 	home, repo := t.TempDir(), t.TempDir()
 	cmd := exec.Command("git", "init", "-q", repo)
+	cmd.Dir = repo
 	cmd.Env = gitx.ChildEnv()
 	if out, err := cmd.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
