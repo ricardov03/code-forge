@@ -172,7 +172,7 @@ func ciWatchSpawn(home, run, sha, cwd string) (string, error) {
 	return log, nil
 }
 
-// landBatchPush runs after a batch released the run lock: when push is wanted
+// landBatchPush runs after a batch released its block and run locks: when push is wanted
 // and at least one of ids landed, it pushes the base branch once.
 func landBatchPush(flags map[string]any, home, run string, ids []string) (string, error) {
 	record, err := state.ReadRun(home, run)
