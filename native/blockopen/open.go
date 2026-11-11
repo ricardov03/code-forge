@@ -397,3 +397,7 @@ func Open(o Options) (result Result, err error) {
 	}
 	return result, err
 }
+
+// Claims are block.mjs signedClaims: the deduplicated paths of the block's
+// verified block.claim rows of the run, in ledger order.
+func Claims(home, run, project, id string) ([]string, error) { return claims(home, run, project, id) }

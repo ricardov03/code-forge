@@ -151,11 +151,13 @@ func (p *blockPreview) rows() ([]gatecheck.Row, []byte, int) {
 	return rows, key, -1
 }
 func (p *blockPreview) human() int {
-	// A terminal must be handled by Node's confirmation UI. Without one, Node
-	// refuses before checking even the path form or block identity.
-	a, ea := os.Stdin.Stat()
-	b, eb := os.Stdout.Stat()
-	if ea != nil || eb != nil || a.Mode()&os.ModeCharDevice != 0 && b.Mode()&os.ModeCharDevice != 0 {
+	// Without a terminal Node refuses before checking even the path form or
+	// block identity. At one, waive asks here (B453); reopen's queue work
+	// stays with Node.
+	if blockAskAvailable() {
+		if p.sub == "waive" {
+			return p.waiveHuman()
+		}
 		return p.fallback()
 	}
 	suffix := "--yes works only with evidence and agreement from a fresh judge"

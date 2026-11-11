@@ -367,11 +367,45 @@ func AgentWaiversAcked(requireAck bool, run, block string, rows []Row, key []byt
 	if len(candidates) == 0 {
 		return false, true
 	}
-	type entry struct {
-		text string
-		item []any
+	set, ordered, ok := agentWaiverSet(counted)
+	if !ok {
+		return false, false
 	}
-	set := []entry{}
+	if !ordered {
+		return ackedByAnyOrder(set, func(e waiverEntry) []any { return e.item }, candidates, key)
+	}
+	digest, ok := waiverSetDigest(set)
+	if !ok {
+		return false, false
+	}
+	for _, r := range candidates {
+		if r["digest"] == digest && Verified(r, key) {
+			return true, true
+		}
+	}
+	return false, true
+}
+
+// AgentWaiverDigest is agent-waiver.mjs agentWaiverDigest over the counted
+// rows. ok is false when the order needs a collation Go does not carry.
+func AgentWaiverDigest(counted []Row) (string, bool) {
+	set, ordered, ok := agentWaiverSet(counted)
+	if !ok || !ordered {
+		return "", false
+	}
+	return waiverSetDigest(set)
+}
+
+type waiverEntry struct {
+	text string
+	item []any
+}
+
+// agentWaiverSet is the [file, finding, mac] set of the counted rows in
+// Node's localeCompare order. ordered is false when two or more items need a
+// collation Go does not carry; ok is false when an item cannot be written.
+func agentWaiverSet(counted []Row) (set []waiverEntry, ordered, ok bool) {
+	set = []waiverEntry{}
 	for _, r := range counted {
 		item := []any{r["file"], r["finding"], r["mac"]}
 		for i, k := range []string{"file", "finding", "mac"} {
@@ -381,12 +415,12 @@ func AgentWaiversAcked(requireAck bool, run, block string, rows []Row, key []byt
 		}
 		text, err := ledger.Stringify(item, false)
 		if err != nil {
-			return false, false
+			return nil, false, false
 		}
-		set = append(set, entry{string(text), item})
+		set = append(set, waiverEntry{string(text), item})
 	}
-	known = true
-	slices.SortStableFunc(set, func(a, b entry) int {
+	known := true
+	slices.SortStableFunc(set, func(a, b waiverEntry) int {
 		if less, ok := localeLess(a.text, b.text); !ok {
 			known = false
 			return 0
@@ -398,25 +432,21 @@ func AgentWaiversAcked(requireAck bool, run, block string, rows []Row, key []byt
 		}
 		return 0
 	})
-	if !known && len(set) > 1 {
-		return ackedByAnyOrder(set, func(e entry) []any { return e.item }, candidates, key)
-	}
+	return set, known || len(set) <= 1, true
+}
+
+// waiverSetDigest is the sha256 hex of JSON.stringify of the ordered items.
+func waiverSetDigest(set []waiverEntry) (string, bool) {
 	items := []any{}
 	for _, e := range set {
 		items = append(items, e.item)
 	}
 	data, err := ledger.Stringify(items, false)
 	if err != nil {
-		return false, false
+		return "", false
 	}
 	sum := sha256.Sum256(data)
-	digest := hex.EncodeToString(sum[:])
-	for _, r := range candidates {
-		if r["digest"] == digest && Verified(r, key) {
-			return true, true
-		}
-	}
-	return false, true
+	return hex.EncodeToString(sum[:]), true
 }
 
 // ackedByAnyOrder decides an ack whose order needs a collation Go does not
@@ -1252,4 +1282,14 @@ func containsMap(v any) bool {
 		}
 	}
 	return false
+}
+
+// OpenFindingIDs are the ids gate-check.mjs openFindings reads from a
+// review.result open list (an id that is not a finding id reads as X<n>).
+func OpenFindingIDs(v any) []string {
+	out := []string{}
+	for _, f := range openFindings(v) {
+		out = append(out, f.id)
+	}
+	return out
 }
