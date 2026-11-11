@@ -12,40 +12,7 @@ import (
 // B402: gates.extra.invariants was accepted but no engine ran it. Go gates
 // refuse it before any gate command runs and never hand it to Node.
 func TestGatesRefuseExtraInvariants(t *testing.T) {
-	const config = `{"gates":{"test":["/usr/bin/touch","gate-ran"],"lint":null,"types":null,"format":null,"rerun_failed":0,"extra":%s}}`
-	setup := func(t *testing.T, extra string) (repo, home string) {
-		t.Helper()
-		root := t.TempDir()
-		repo, home = filepath.Join(root, "repo"), filepath.Join(root, "home")
-		if err := os.MkdirAll(repo, 0755); err != nil {
-			t.Fatal(err)
-		}
-		body := strings.Replace(config, "%s", extra, 1)
-		if err := os.WriteFile(filepath.Join(repo, ".code-forge.yml"), []byte(body), 0600); err != nil {
-			t.Fatal(err)
-		}
-		if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package a\n"), 0600); err != nil {
-			t.Fatal(err)
-		}
-		for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "."}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "base"}} {
-			cmd := exec.Command("git", args...)
-			cmd.Dir = repo
-			cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
-			if out, err := cmd.CombinedOutput(); err != nil {
-				t.Fatalf("git %v: %v: %s", args, err, out)
-			}
-		}
-		dir := filepath.Join(home, ".code-forge", "runs")
-		if err := os.MkdirAll(dir, 0700); err != nil {
-			t.Fatal(err)
-		}
-		block := map[string]any{"status": "open", "kind": "code", "base_branch": "main", "owned_files": []string{"a.go"}, "test_files": []string{}}
-		data, _ := json.Marshal(map[string]any{"run_id": "fixture", "workspace": repo, "status": "active", "project": "fixture", "blocks": map[string]any{"B1": block}})
-		if err := os.WriteFile(filepath.Join(dir, "fixture.json"), data, 0600); err != nil {
-			t.Fatal(err)
-		}
-		return repo, home
-	}
+	setup := invariantsFixture
 	gatesRun := func(t *testing.T, repo, home string, args ...string) (int, string, string) {
 		t.Helper()
 		exe, err := os.Executable()
@@ -71,7 +38,7 @@ func TestGatesRefuseExtraInvariants(t *testing.T) {
 		_, err := os.Stat(filepath.Join(repo, "gate-ran"))
 		return err == nil
 	}
-	const want = "gates run: gates.extra.invariants is not supported: no engine runs it, so its script would be skipped; remove it from .code-forge.yml and run the script as a gates.custom entry ({name, argv}); no gate was run"
+	want := invariantsRefusal
 
 	for _, c := range []struct {
 		name string
@@ -105,4 +72,72 @@ func TestGatesRefuseExtraInvariants(t *testing.T) {
 			t.Fatalf("want the test gate to run once, marker missing; stdout %q", stdout)
 		}
 	})
+}
+
+const invariantsConfig = `{"gates":{"test":["/usr/bin/touch","gate-ran"],"lint":null,"types":null,"format":null,"rerun_failed":0,"extra":%s}}`
+
+const invariantsRefusal = "gates run: gates.extra.invariants is not supported: no engine runs it, so its script would be skipped; remove it from .code-forge.yml and run the script as a gates.custom entry ({name, argv}); no gate was run"
+
+// invariantsFixture makes a git repo with one committed config and a run
+// record (run fixture, block B1) under a temporary HOME.
+func invariantsFixture(t *testing.T, extra string) (repo, home string) {
+	t.Helper()
+	root := t.TempDir()
+	repo, home = filepath.Join(root, "repo"), filepath.Join(root, "home")
+	if err := os.MkdirAll(repo, 0755); err != nil {
+		t.Fatal(err)
+	}
+	body := strings.Replace(invariantsConfig, "%s", extra, 1)
+	if err := os.WriteFile(filepath.Join(repo, ".code-forge.yml"), []byte(body), 0600); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(repo, "a.go"), []byte("package a\n"), 0600); err != nil {
+		t.Fatal(err)
+	}
+	for _, args := range [][]string{{"init", "-q", "-b", "main"}, {"add", "."}, {"-c", "user.name=Fixture", "-c", "user.email=fixture@example.invalid", "commit", "-qm", "base"}} {
+		cmd := exec.Command("git", args...)
+		cmd.Dir = repo
+		cmd.Env = append(os.Environ(), "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null")
+		if out, err := cmd.CombinedOutput(); err != nil {
+			t.Fatalf("git %v: %v: %s", args, err, out)
+		}
+	}
+	dir := filepath.Join(home, ".code-forge", "runs")
+	if err := os.MkdirAll(dir, 0700); err != nil {
+		t.Fatal(err)
+	}
+	block := map[string]any{"status": "open", "kind": "code", "base_branch": "main", "owned_files": []string{"a.go"}, "test_files": []string{}}
+	data, _ := json.Marshal(map[string]any{"run_id": "fixture", "workspace": repo, "status": "active", "project": "fixture", "blocks": map[string]any{"B1": block}})
+	if err := os.WriteFile(filepath.Join(dir, "fixture.json"), data, 0600); err != nil {
+		t.Fatal(err)
+	}
+	return repo, home
+}
+
+// The block land path calls gatesNativeStep directly with its own writers;
+// it refuses the key there too, before any gate command runs.
+func TestGatesNativeStepRefusesExtraInvariants(t *testing.T) {
+	repo, home := invariantsFixture(t, `{"invariants":"scripts/invariants.sh"}`)
+	t.Setenv("HOME", home)
+	t.Setenv("CODE_FORGE_TEST_QUEUE", "off")
+	t.Setenv("CODE_FORGE_NO_ERROR_LOG", "1")
+	args := []string{"run", "--run", "fixture", "--block", "B1", "--cwd", repo}
+	o, message := gatesParse(args)
+	if message != "" {
+		t.Fatalf("gatesParse: %s", message)
+	}
+	var stdout, stderr strings.Builder
+	code, safe := gatesNativeStep(args, o, &landStep{stdout: &stdout, stderr: &stderr})
+	if code != 2 || !safe {
+		t.Fatalf("want (2, true), got (%d, %v); stdout %q stderr %q", code, safe, stdout.String(), stderr.String())
+	}
+	if lines := strings.Split(strings.TrimRight(stderr.String(), "\n"), "\n"); len(lines) != 1 || lines[0] != invariantsRefusal {
+		t.Fatalf("want exactly one stderr line %q, got %q", invariantsRefusal, stderr.String())
+	}
+	if stdout.String() != "" {
+		t.Fatalf("want no stdout, got %q", stdout.String())
+	}
+	if _, err := os.Stat(filepath.Join(repo, "gate-ran")); err == nil {
+		t.Fatal("the test gate command ran; want no gate command before the refusal")
+	}
 }
