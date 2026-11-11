@@ -60,11 +60,10 @@ func gatesGoOnlyPath(p string) bool {
 }
 
 // gatesGoOnly reports a block whose every owned entry is on the Go-only allow
-// list, gated by a test command that takes {test_files}. Changed paths are a
+// list, gated by a test command (gatesSelectable). Changed paths are a
 // subset of the owned entries (gates.BaseDelta keeps owned paths only).
 func gatesGoOnly(block ledger.Object, p gates.Plan) bool {
-	c := p.Commands["test"]
-	if c == nil || !gates.Has(c.Argv, "{test_files}") || (p.Restricted && !gates.Has(p.Names, "test")) {
+	if !gatesSelectable(p) {
 		return false
 	}
 	owned := gates.Strings(block.Get("owned_files"))

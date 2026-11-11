@@ -23,11 +23,32 @@ import (
 // An empty selection skips the test gate; it never widens to the full suite.
 // The full suite runs locally only with an explicit gates run --full.
 
-// gatesSelectable reports a test command that takes {test_files} and runs
-// under the plan's kind.
+// gatesSelectable reports a test command that runs under the plan's kind. A
+// command without {test_files} is scoped too: gatesWithTestFiles appends the
+// selection to it, so no gate ever runs it unscoped by accident (B404).
 func gatesSelectable(p gates.Plan) bool {
 	c := p.Commands["test"]
-	return c != nil && gates.Has(c.Argv, "{test_files}") && (!p.Restricted || gates.Has(p.Names, "test"))
+	return c != nil && (!p.Restricted || gates.Has(p.Names, "test"))
+}
+
+// gatesWithTestFiles returns the plan whose test command takes the selected
+// files: a test command without {test_files} gets {test_files} appended as its
+// last argv item, so a scoped gate runs `<command> <selected files>`. The plan
+// passed in is not changed.
+func gatesWithTestFiles(p gates.Plan) gates.Plan {
+	c := p.Commands["test"]
+	if c == nil || gates.Has(c.Argv, "{test_files}") {
+		return p
+	}
+	commands := make(map[string]*gates.Command, len(p.Commands))
+	for name, command := range p.Commands {
+		commands[name] = command
+	}
+	scoped := *c
+	scoped.Argv = append(append([]string{}, c.Argv...), "{test_files}")
+	commands["test"] = &scoped
+	p.Commands = commands
+	return p
 }
 
 // gatesAllGoOnly reports paths that hold no Node product file (the B399 allow

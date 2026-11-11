@@ -51,7 +51,10 @@ locks and signed ledger rows as Node.
 The Go engine skips the test gate for proven text-only `gates run --changed` changes.
 `gates run --run R --block B --changed` always stays in Go: it selects the block's tests,
 the tests that import a changed file, and for a native change `test/compat/go.test.mjs` and
-every test that builds or runs the native binary (reason `go_only` or `import_graph`). It never
+every test that builds or runs the native binary (reason `go_only` or `import_graph`). A
+change under `test/fixtures/**`, `schema/**`, `scripts/compat-golden.mjs` or `src/config/**`
+also selects `test/compat/config-golden.test.mjs` (B409). A test command without
+`{test_files}` gets the selection appended. It never
 runs the full Node suite and never hands over; an empty selection skips the test gate. The
 merge gates of `block land --merge` and of a batch land use the same selection (B404).
 `gates run --run R --block B --full` is the only local full suite.

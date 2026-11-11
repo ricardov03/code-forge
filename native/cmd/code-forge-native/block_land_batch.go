@@ -472,9 +472,10 @@ func landMergeFailure(home, run, id string, suite landResult, selected int) stri
 	return landSuiteFailure(home, run, id, suite)
 }
 
-// landMergeSelectable reports a merge-trial test command that takes
-// {test_files}. Without the token the command cannot be scoped: the merge gate
-// runs it as configured and still needs a test gate (B404 keeps that rule).
+// landMergeSelectable reports a merge-trial test command (gatesSelectable). A
+// command without {test_files} gets the selection appended (gatesWithTestFiles),
+// so the merge gate never runs it unscoped. Without a test command the merge
+// gate still refuses: it needs a test gate.
 func landMergeSelectable(cwd string) bool {
 	loaded, err := config.Load(cwd)
 	if err != nil {
@@ -599,7 +600,11 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 		timeout = n * 1000
 	}
 	stamp := gatesFullStamp(gates.TreeStamp(block.tree.Workspace), p, configured, block.entry)
-	results, all, err := gates.Run(ctx, p, block.tree.Workspace, run, timeout, scope)
+	runPlan := p
+	if gatesSelectedReason(scope.Reason) {
+		runPlan = gatesWithTestFiles(p)
+	}
+	results, all, err := gates.Run(ctx, runPlan, block.tree.Workspace, run, timeout, scope)
 	if err != nil {
 		return err
 	}

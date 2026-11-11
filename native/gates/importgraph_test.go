@@ -45,9 +45,9 @@ func TestGraphDependentsFollowsImportsTransitively(t *testing.T) {
 	})
 	g := NewGraph(root, listed)
 	got := g.Dependents([]string{"src/a.mjs"})
-	// named-b names src/b.mjs, which is only in the closure: a path mention
-	// counts for the changed file itself, not for every file it reaches.
-	want := []string{"test/dir.test.mjs", "test/dynamic.test.mjs", "test/h.test.mjs", "test/named.test.mjs", "test/require.test.cjs", "test/url.test.mjs", "test/via-c.test.mjs", "test/x.test.mjs"}
+	// named-b names src/b.mjs, which imports src/a.mjs: a path mention is an
+	// edge for every file in the closure, not only the changed file.
+	want := []string{"test/dir.test.mjs", "test/dynamic.test.mjs", "test/h.test.mjs", "test/named-b.test.mjs", "test/named.test.mjs", "test/require.test.cjs", "test/url.test.mjs", "test/via-c.test.mjs", "test/x.test.mjs"}
 	if !reflect.DeepEqual(got, want) {
 		t.Fatalf("Dependents(src/a.mjs):\n got %v\nwant %v", got, want)
 	}
@@ -56,6 +56,44 @@ func TestGraphDependentsFollowsImportsTransitively(t *testing.T) {
 	}
 	if got := g.Dependents([]string{"README.md"}); len(got) != 0 {
 		t.Fatalf("an unreferenced file has no dependents; got %v", got)
+	}
+}
+
+// A test that names a script by path depends on what that script imports.
+func TestGraphDependentsFollowsMentionsInTheClosure(t *testing.T) {
+	root, listed := graphFixture(t, map[string]string{
+		"src/a.mjs":       "export const a = 1;\n",
+		"scripts/s.mjs":   "import { a } from '../src/a.mjs';\nconsole.log(a);\n",
+		"test/x.test.mjs": "spawnSync(process.execPath, [join(root, 'scripts/s.mjs')]);\n",
+		"test/y.test.mjs": "spawnSync(process.execPath, [join(root, 'scripts/other.mjs')]);\n",
+	})
+	got := NewGraph(root, listed).Dependents([]string{"src/a.mjs"})
+	if want := []string{"test/x.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Dependents(src/a.mjs) = %v, want %v (test/x names scripts/s.mjs, which imports src/a.mjs)", got, want)
+	}
+}
+
+// A change that deletes an imported file still selects the tests that reach it.
+func TestGraphDependentsKeepsEdgesToDeletedFiles(t *testing.T) {
+	root, listed := graphFixture(t, map[string]string{
+		"src/b.mjs":        "import { a } from './a.mjs';\nexport const b = a;\n",
+		"src/c.mjs":        "export * from './gone';\n",
+		"src/lib/user.mjs": "import '../index.mjs';\n",
+		"test/x.test.mjs":  "import { b } from '../src/b.mjs';\n",
+		"test/c.test.mjs":  "import '../src/c.mjs';\n",
+		"test/u.test.mjs":  "import '../src/lib/user.mjs';\n",
+		"test/y.test.mjs":  "import test from 'node:test';\n",
+	})
+	// src/a.mjs, src/gone.mjs and src/index.mjs were deleted: none is listed.
+	g := NewGraph(root, listed)
+	if got, want := g.Dependents([]string{"src/a.mjs"}), []string{"test/x.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Dependents(deleted src/a.mjs) = %v, want %v", got, want)
+	}
+	if got, want := g.Dependents([]string{"src/gone.mjs"}), []string{"test/c.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Dependents(deleted src/gone.mjs) = %v, want %v (extensionless specifier)", got, want)
+	}
+	if got, want := g.Dependents([]string{"src/index.mjs"}), []string{"test/u.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("Dependents(deleted src/index.mjs) = %v, want %v", got, want)
 	}
 }
 

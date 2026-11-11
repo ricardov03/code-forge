@@ -18,6 +18,13 @@ type selectFixture struct {
 
 func newSelectFixture(t *testing.T, base map[string]string, changed map[string]string, owned []string) selectFixture {
 	t.Helper()
+	return newSelectFixtureTest(t, true, base, changed, owned)
+}
+
+// newSelectFixtureTest takes tokens=false for a test command without
+// {test_files}.
+func newSelectFixtureTest(t *testing.T, tokens bool, base map[string]string, changed map[string]string, owned []string) selectFixture {
+	t.Helper()
 	root := t.TempDir()
 	f := selectFixture{repo: filepath.Join(root, "repo"), home: filepath.Join(root, "home"), log: filepath.Join(root, "calls.log")}
 	write := func(path, body string, mode os.FileMode) {
@@ -40,7 +47,11 @@ func newSelectFixture(t *testing.T, base map[string]string, changed map[string]s
 	}
 	runner := filepath.Join(root, "bin", "node")
 	write(runner, "#!/bin/sh\n{ echo \"CALL $#\"; for a in \"$@\"; do echo \"$a\"; done; } >> '"+f.log+"'\n", 0755)
-	config, _ := json.Marshal(map[string]any{"gates": map[string]any{"test": []string{runner, "{test_files}"}, "lint": nil, "types": nil, "format": nil, "rerun_failed": 0}})
+	argv := []string{runner, "{test_files}"}
+	if !tokens {
+		argv = []string{runner, "--test"}
+	}
+	config, _ := json.Marshal(map[string]any{"gates": map[string]any{"test": argv, "lint": nil, "types": nil, "format": nil, "rerun_failed": 0}})
 	write(filepath.Join(f.repo, ".code-forge.yml"), string(config), 0600)
 	for name, body := range base {
 		write(filepath.Join(f.repo, name), body, 0600)
@@ -138,14 +149,19 @@ func TestGatesSelectImportGraph(t *testing.T) {
 
 func TestGatesSelectChangedConfigTest(t *testing.T) {
 	t.Run("node", func(t *testing.T) {
-		f := newSelectFixture(t, map[string]string{"test/config/c.test.mjs": "// base\n", "test/y.test.mjs": "// other\n"},
-			map[string]string{"test/config/c.test.mjs": "// changed\n"}, []string{"test/config/c.test.mjs"})
+		// src/lonely.mjs is a Node product file no test reaches, so the
+		// reason is import_graph (a test-only block is go_only, B399b).
+		f := newSelectFixture(t, map[string]string{"test/config/c.test.mjs": "// base\n", "src/lonely.mjs": "export {};\n", "test/y.test.mjs": "// other\n"},
+			map[string]string{"test/config/c.test.mjs": "// changed\n", "src/lonely.mjs": "export const x = 1;\n"}, []string{"test/config/c.test.mjs", "src/lonely.mjs"})
 		code, out := f.gates(t, "--changed")
 		if code != 0 {
 			t.Fatalf("exit %d, want 0 with no hand-over: %s", code, out)
 		}
 		if got, want := f.calls(t), []string{"CALL 1", "test/config/c.test.mjs"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("runner calls=%q, want %q", got, want)
+		}
+		if g := selectTestResult(t, out); g.Skipped || g.Scope != "related" || g.Reason != "import_graph" {
+			t.Fatalf("test gate=%+v, want scope related and reason import_graph", g)
 		}
 	})
 	t.Run("native", func(t *testing.T) {
@@ -165,6 +181,10 @@ func TestGatesSelectChangedConfigTest(t *testing.T) {
 		}
 		if got, want := f.calls(t), []string{"CALL 3", "test/config/c.test.mjs", "test/compat/go.test.mjs", "test/n.test.mjs"}; !reflect.DeepEqual(got, want) {
 			t.Fatalf("runner calls=%q, want %q", got, want)
+		}
+		// This block owns no Node product file, so it keeps reason go_only.
+		if g := selectTestResult(t, out); g.Skipped || g.Scope != "related" || g.Reason != "go_only" {
+			t.Fatalf("test gate=%+v, want scope related and reason go_only", g)
 		}
 	})
 }
@@ -247,5 +267,21 @@ func TestGatesSelectStemPair(t *testing.T) {
 	}
 	if got, want := f.calls(t), []string{"CALL 1", "test/c.test.mjs"}; !reflect.DeepEqual(got, want) {
 		t.Fatalf("runner calls=%q, want %q (the stem pair of src/c.mjs)", got, want)
+	}
+}
+
+// B404: a test command without {test_files} never runs unscoped under
+// --changed; the selection is appended as its last arguments.
+func TestGatesSelectNoTokenAppends(t *testing.T) {
+	f := newSelectFixtureTest(t, false, selectGraphBase, map[string]string{"src/a.mjs": "export const a = 2;\n"}, []string{"src/a.mjs"})
+	code, out := f.gates(t, "--changed")
+	if code != 0 {
+		t.Fatalf("exit %d, want 0: %s", code, out)
+	}
+	if got, want := f.calls(t), []string{"CALL 2", "--test", "test/x.test.mjs"}; !reflect.DeepEqual(got, want) {
+		t.Fatalf("runner calls=%q, want %q (the selection appended, never the bare command)", got, want)
+	}
+	if g := selectTestResult(t, out); g.Skipped || g.Scope != "related" || g.Reason != "import_graph" {
+		t.Fatalf("test gate=%+v, want scope related and reason import_graph", g)
 	}
 }

@@ -373,13 +373,10 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		if failure.reusedTree != "" {
 			mergeGateTree = failure.reusedTree
 			fmt.Fprintf(print, "merge gate: reused green full suite on tree %.12s\n", mergeGateTree)
-		} else if failure.selected < 0 {
-			// A test command without {test_files} cannot be scoped.
-			fmt.Fprintf(print, "merge gate: full suite passed (%.1fs)\n", float64(time.Since(started).Milliseconds())/1000)
 		} else if failure.selected == 0 {
 			fmt.Fprintf(print, "merge gate: no test selected (%s); test gate skipped\n", failure.scopeReason)
 		} else {
-			fmt.Fprintf(print, "merge gate: %d selected test files passed (%s, %.1fs)\n", failure.selected, failure.scopeReason, float64(time.Since(started).Milliseconds())/1000)
+			fmt.Fprintf(print, "merge gate: scoped tests passed (%d files, %s, %.1fs)\n", failure.selected, failure.scopeReason, float64(time.Since(started).Milliseconds())/1000)
 		}
 	} else {
 		fmt.Fprintln(stderr, "warning: merge gate skipped; merged full suite was not checked")
@@ -403,7 +400,7 @@ type landMergeResult struct {
 	reason      string
 	elapsed     *int64
 	reusedTree  string
-	selected    int    // B404: test files the scoped merge gate ran; -1 unscoped
+	selected    int    // B404: test files the scoped merge gate ran; -1 without a test command
 	scopeReason string // import_graph or go_only
 }
 

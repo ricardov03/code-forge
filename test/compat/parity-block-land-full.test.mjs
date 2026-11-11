@@ -56,6 +56,11 @@ async function fixture(shape) {
   await writeFile(path.join(f.repo, '.code-forge.yml'), JSON.stringify(live) + '\n');
   await writeFile(path.join(f.repo, '.gitignore'), '.code-forge/\nreport.txt\ntranscript.txt\n');
   await writeFile(path.join(f.repo, 'sample.mjs'), 'export const value = 1;\n');
+  if (shape === 'symlink') {
+    // B404: a test that imports the change, so both Go gates select and run it.
+    await mkdir(path.join(f.repo, 'test'));
+    await writeFile(path.join(f.repo, 'test/sample.test.mjs'), "import '../sample.mjs';\n");
+  }
   git(f.repo, ['init', '-qb', 'main']);
   git(f.repo, ['config', 'user.name', 'Fixture']); git(f.repo, ['config', 'user.email', 'f@example.invalid']);
   git(f.repo, ['config', 'commit.gpgsign', 'false']);
@@ -91,6 +96,8 @@ async function fixture(shape) {
 
 async function parity(shape, extra, json, expectedCode = 0) {
   const observed = [];
+  const selected = shape === 'symlink' ? ['test/sample.test.mjs'] : [];
+  const mergeLine = selected.length ? 'merge gate: scoped tests passed (1 files, import_graph, <duration>s)' : 'merge gate: no test selected (import_graph); test gate skipped';
   const result = await runParity([...argv, ...extra, ...(json ? ['--json'] : [])], { fixture: await fixture(shape),
     goCommand: BINARY, tempRoot: '/tmp', samePaths: true, env,
     prepare: async (copy) => {
@@ -137,7 +144,12 @@ async function parity(shape, extra, json, expectedCode = 0) {
       assert.equal(out.signal, null, `${engine}: no signal`);
       // Only the displayed elapsed time is volatile; all surrounding bytes
       // still pass through the standard parity comparison.
-      for (const stream of ['stdout', 'stderr']) out[stream] = String(out[stream]).replace(/(merge gate: full suite passed \()\d+\.\d+s\)/g, '$1<duration>s)');
+      for (const stream of ['stdout', 'stderr']) {
+        out[stream] = String(out[stream]).replace(/(merge gate: (?:full suite passed \(|scoped tests passed \(1 files, import_graph, ))\d+\.\d+s\)/g, '$1<duration>s)');
+        // B404: Node runs the test command without {test_files} unscoped; Go
+        // never does. Go's merge gate line is the one expected difference.
+        if (engine === 'Node') out[stream] = out[stream].replace('merge gate: full suite passed (<duration>s)', mergeLine);
+      }
       assert.equal(actual.record.blocks.B1.status, 'closed', `${engine}: one closed block`);
       for (const event of ['block.close', 'land.timing', ...(shape === 'hook' ? ['hook.ran'] : []), ...(shape === 'grant' ? ['autopilot.close'] : [])]) {
         assert.equal(actual.rows.filter((row) => row.event === event).length, 1, `${engine}: exactly one ${event} row`);
@@ -148,7 +160,7 @@ async function parity(shape, extra, json, expectedCode = 0) {
       else assert.equal(actual.after, actual.main, `${engine}: main did not move`);
       if (shape === 'hook') assert.equal(actual.hooks, 'closed\n', `${engine}: hook ran once after done publication`);
       if (shape === 'symlink') {
-        assert.equal(actual.gateCwds.length, 2, `${engine}: scoped and full suite each ran once`);
+        assert.equal(actual.gateCwds.length, 2, `${engine}: block gate and merge gate each ran once`);
         const tree = actual.record.blocks.B1.worktree.path;
         assert.equal(actual.gateCwds[0], tree, `${engine}: scoped suite ran in block worktree`);
         assert.equal(path.dirname(actual.gateCwds[1]), path.dirname(tree), `${engine}: full suite ran in a sibling trial worktree`);
@@ -157,7 +169,18 @@ async function parity(shape, extra, json, expectedCode = 0) {
       }
       if (expectedCode) assert.match(String(out.stderr), /land stopped at merge-gate: full suite unavailable: configure gates.test before merging/);
     } });
-  assert.deepEqual(result.diffs, [], `${shape} json=${json}: exact Node/Go bytes, exit, state and rows`);
+  // B404: the block gate's gate.done row is the other expected difference:
+  // Go selects the tests itself (scope related, reason import_graph) and appends
+  // them to a test command without {test_files}; Node runs it unscoped.
+  // Go's selected scope keeps dependents [] (its list is in test_files).
+  const b404 = /^\$\[\d+\]\.(scope|reason|test_files|dependents\[\d+\]|results\[0\]\.(skipped|reuse_reason))$/;
+  const goValues = { scope: 'related', reason: 'import_graph', test_files: selected, 'results[0].skipped': selected.length === 0, 'results[0].reuse_reason': undefined, dependents: undefined };
+  const expected = result.diffs.filter((d) => d.where.endsWith('ledger/land-full.jsonl') && b404.test(d.field));
+  for (const d of expected) {
+    const key = d.field.replace(/^\$\[\d+\]\./, '').replace(/^dependents\[\d+\]$/, 'dependents');
+    assert.deepEqual(d.go, goValues[key], `${shape} json=${json}: Go ${d.field}`);
+  }
+  assert.deepEqual(result.diffs.filter((d) => !expected.includes(d)), [], `${shape} json=${json}: exact Node/Go bytes, exit, state and rows except the B404 test scope`);
 }
 
 test('block land runs fully in Go for plain, --merge, --no-merge-gate, grant and hook shapes with Node parity and 0 land hand-overs', async (t) => {

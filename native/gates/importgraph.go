@@ -23,6 +23,9 @@ var (
 	graphURL     = regexp.MustCompile(`\bnew\s+URL\s*\(\s*['"]([^'"\n]+)['"]`)
 	graphModule  = regexp.MustCompile(`\.(mjs|js|cjs)$`)
 	graphTest    = regexp.MustCompile(`\.(test|spec)\.(mjs|js|cjs)$`)
+	// graphToken is a run of path characters; a repository path named in a
+	// file's text is one of its '/'-boundary suffixes.
+	graphToken = regexp.MustCompile(`[A-Za-z0-9_@+.\-/]+`)
 )
 
 // NativeMarkers name the native build, the native binary or the native binary
@@ -36,12 +39,14 @@ type Graph struct {
 	content   map[string]string
 	importers map[string][]string // target file -> files that import it
 	dirs      map[string][]string // target directory ("x/") -> files that name it
+	missing   map[string][]string // unresolved relative specifier path -> files that import it
+	named     map[string][]string // path-like text ("a/b.mjs") -> files that name it
 }
 
 // NewGraph reads every listed .mjs/.js/.cjs file under cwd. A file that cannot
 // be read has no edges.
 func NewGraph(cwd string, listed []string) *Graph {
-	g := &Graph{listed: map[string]bool{}, content: map[string]string{}, importers: map[string][]string{}, dirs: map[string][]string{}}
+	g := &Graph{listed: map[string]bool{}, content: map[string]string{}, importers: map[string][]string{}, dirs: map[string][]string{}, missing: map[string][]string{}, named: map[string][]string{}}
 	for _, f := range listed {
 		g.listed[f] = true
 	}
@@ -59,7 +64,16 @@ func NewGraph(cwd string, listed []string) *Graph {
 		for _, re := range []*regexp.Regexp{graphFrom, graphBare, graphDynamic, graphURL} {
 			for _, m := range re.FindAllStringSubmatch(text, -1) {
 				target, dir := g.resolve(f, m[1])
-				if target == "" || seen[target] {
+				if target == "" {
+					// A specifier that names no listed file may name a file the
+					// change deleted or renamed: keep the edge by its path.
+					if joined := graphJoin(f, m[1]); joined != "" && !seen["\x00"+joined] {
+						seen["\x00"+joined] = true
+						g.missing[joined] = append(g.missing[joined], f)
+					}
+					continue
+				}
+				if seen[target] {
 					continue
 				}
 				seen[target] = true
@@ -70,22 +84,49 @@ func NewGraph(cwd string, listed []string) *Graph {
 				}
 			}
 		}
+		named := map[string]bool{}
+		for _, token := range graphToken.FindAllString(text, -1) {
+			for i := 0; i < len(token); i++ {
+				if i > 0 && token[i-1] != '/' {
+					continue
+				}
+				for _, candidate := range []string{token[i:], strings.TrimRight(token[i:], ".")} {
+					if strings.Contains(candidate, "/") && candidate != f && !named[candidate] {
+						named[candidate] = true
+						g.named[candidate] = append(g.named[candidate], f)
+					}
+				}
+			}
+		}
 	}
 	return g
 }
 
-// resolve turns a relative specifier in file into a listed repository path,
-// or a directory prefix ending in '/'.
-func (g *Graph) resolve(file, spec string) (string, bool) {
+// graphJoin is the repository path a relative specifier in file names, without
+// a query or hash; "" for a bare, absolute or escaping specifier.
+func graphJoin(file, spec string) string {
 	if !strings.HasPrefix(spec, "./") && !strings.HasPrefix(spec, "../") {
-		return "", false
+		return ""
 	}
 	if i := strings.IndexAny(spec, "?#"); i >= 0 {
 		spec = spec[:i]
 	}
 	joined := path.Clean(path.Join(path.Dir(file), spec))
-	if joined == "." || strings.HasPrefix(joined, "../") || joined == ".." {
+	if joined == "." || joined == ".." || strings.HasPrefix(joined, "../") {
+		return ""
+	}
+	return joined
+}
+
+// resolve turns a relative specifier in file into a listed repository path,
+// or a directory prefix ending in '/'.
+func (g *Graph) resolve(file, spec string) (string, bool) {
+	joined := graphJoin(file, spec)
+	if joined == "" {
 		return "", false
+	}
+	if i := strings.IndexAny(spec, "?#"); i >= 0 {
+		spec = spec[:i]
 	}
 	if strings.HasSuffix(spec, "/") {
 		return joined + "/", true
@@ -106,25 +147,33 @@ func (g *Graph) resolve(file, spec string) (string, bool) {
 }
 
 // Importers returns the files that import f directly, including through a
-// directory reference that covers f.
+// directory reference that covers f and a specifier that resolves to no listed
+// file but names f (a file the change deleted or renamed).
 func (g *Graph) Importers(f string) []string {
-	return append(append([]string{}, g.importers[f]...), g.dirImporters(f)...)
+	out := append(append([]string{}, g.importers[f]...), g.dirImporters(f)...)
+	keys := []string{f}
+	for _, ext := range []string{".mjs", ".js", ".cjs"} {
+		if strings.HasSuffix(f, ext) {
+			keys = append(keys, strings.TrimSuffix(f, ext))
+		}
+	}
+	if base := path.Base(f); base == "index.mjs" || base == "index.js" {
+		keys = append(keys, path.Dir(f))
+	}
+	for _, key := range keys {
+		out = append(out, g.missing[key]...)
+	}
+	return out
 }
 
 // mentions returns the files that name f by its repository path in their text
-// (a test that spawns a script or reads a fixture by path). Only the changed
-// files themselves are matched this way, not the whole closure.
+// (a test that spawns a script or reads a fixture by path). Dependents follows
+// these edges for every file in the closure, like imports.
 func (g *Graph) mentions(f string) []string {
-	out := []string{}
 	if !strings.Contains(f, "/") {
-		return out
+		return nil
 	}
-	for file, text := range g.content {
-		if file != f && strings.Contains(text, f) {
-			out = append(out, file)
-		}
-	}
-	return out
+	return g.named[f]
 }
 
 // IsTestName reports a file whose name marks a test (foo.test.mjs,
@@ -139,8 +188,10 @@ func IsRunnableTest(f string) bool {
 }
 
 // Dependents returns, sorted, every listed runnable test under test/ that
-// reaches a changed file through the reverse import closure, or that names a
-// changed file by its path. A changed runnable test is its own dependent.
+// reaches a changed file through the reverse closure of imports and path
+// mentions (a file that names another by its repository path). A changed
+// path that no longer exists (deleted or renamed) still has its importers. A
+// changed runnable test is its own dependent.
 func (g *Graph) Dependents(changed []string) []string {
 	seen := map[string]bool{}
 	queue := []string{}
@@ -150,18 +201,10 @@ func (g *Graph) Dependents(changed []string) []string {
 			queue = append(queue, f)
 		}
 	}
-	for _, f := range changed {
-		for _, file := range g.mentions(f) {
-			if !seen[file] {
-				seen[file] = true
-				queue = append(queue, file)
-			}
-		}
-	}
 	for len(queue) > 0 {
 		f := queue[0]
 		queue = queue[1:]
-		for _, importer := range g.Importers(f) {
+		for _, importer := range append(g.Importers(f), g.mentions(f)...) {
 			if !seen[importer] {
 				seen[importer] = true
 				queue = append(queue, importer)

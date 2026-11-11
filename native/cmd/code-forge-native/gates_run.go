@@ -470,7 +470,9 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 			base, _ = wt.Get("base_sha").(string)
 		}
 		p.Repeat = &gates.Repeat{N: int(n), Base: base, Block: block, OnSkip: func(s string) { gatesErrf("%s\n", s) }}
-		if c := p.Commands["test"]; c != nil && (!p.Restricted || gates.Has(p.Names, "test")) && gates.Has(c.Argv, "{test_files}") {
+		// B404: --changed appends the selection to a test command without
+		// {test_files}, so repeat_new_tests applies to it as well.
+		if c := p.Commands["test"]; c != nil && (!p.Restricted || gates.Has(p.Names, "test")) && (gates.Has(c.Argv, "{test_files}") || (o.changed && !o.full)) {
 			if _, safe := gates.RepeatFiles(cwd, p.Repeat); !safe {
 				return 0, false
 			}
@@ -694,8 +696,12 @@ func gatesNativeStep(args []string, o gatesOptions, step *landStep, reasons ...*
 		var err error
 		started = true
 		runPlan := p
-		// An empty B404 selection skips the test gate; it never runs the
-		// unscoped (full) command.
+		// A B404 selection always runs scoped: a test command without
+		// {test_files} takes the selected files appended. An empty selection
+		// skips the test gate; it never runs the unscoped (full) command.
+		if gatesSelectedReason(scope.Reason) {
+			runPlan = gatesWithTestFiles(p)
+		}
 		emptySelection := gatesSelectedReason(scope.Reason) && len(scope.Files) == 0
 		if scope.Reason == "text_only" || emptySelection {
 			runPlan.Commands = make(map[string]*gates.Command, len(p.Commands))
