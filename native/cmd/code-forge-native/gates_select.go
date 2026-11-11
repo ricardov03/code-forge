@@ -14,6 +14,8 @@ import (
 //     stem-paired tests of changed sources, in any language;
 //   - every test that imports a changed file, directly or through other files
 //     (gates.Graph: static imports, literal import()/require(), new URL());
+//     B427: comments make no edge, named imports are followed through
+//     re-export barrels, and the closure stops at gates.import_graph.stop;
 //   - for a change under native/: test/compat/go.test.mjs (go build, vet and
 //     test) and the compat tests named after the Go files (B399); for a native
 //     build input also every non-compat test that builds or runs the native
@@ -122,6 +124,7 @@ func gatesSelectFiles(cwd string, listed []string, s gatesSelection) []string {
 		golden = golden || gates.GoldenInput(p)
 	}
 	graph := gates.NewGraph(cwd, listed)
+	graph.SetStop(gatesImportGraphStop(cwd))
 	// go.test.mjs (go build, vet and test) runs for a native change only, and
 	// only when the repository has it; a block that changes only tests runs
 	// just those tests.

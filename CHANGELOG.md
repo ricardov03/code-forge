@@ -58,6 +58,10 @@ waits on a second real consumer (plan §10.4, Q17).
   gate), block rebase and the rebase check work on a snapshot under the block's own lock and commit only their blocks in
   one short write, so verbs on other blocks of the run never wait; a same-block change meanwhile stops the verb with
   block-changed, a second long verb on the same block with block-busy (B426)
+- The changed-test import graph is narrow (Go): comments make no edge, named imports are followed through re-export
+  barrels and to the exports of a module that reach the change, and the new gates.import_graph.stop list ends the
+  closure at hub files; this repository stops at 5 measured hubs, taking the B362b+B402 batch from 348 of 380 tests to
+  65 (B427)
 
 ### Fixed
 

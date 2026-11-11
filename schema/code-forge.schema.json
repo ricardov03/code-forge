@@ -294,6 +294,19 @@
         "lint": { "$ref": "#/$defs/argvOrNull" },
         "types": { "$ref": "#/$defs/argvOrNull" },
         "format": { "$ref": "#/$defs/argvOrNull" },
+        "import_graph": {
+          "type": "object",
+          "additionalProperties": false,
+          "description": "The import graph that picks the tests of gates run --changed, batch land and the land merge gates (B404, narrowed in B427). Comments make no edge; named imports are followed through re-export barrels, so an importer reaches a changed file only through the bindings it uses.",
+          "properties": {
+            "stop": {
+              "type": "array",
+              "default": [],
+              "items": { "type": "string", "minLength": 1 },
+              "description": "Hub files where the closure stops: it selects the tests and test helpers that import or name a stop file, but does not go on to the product files that import it, unless the stop file itself changed. Each entry is a repository path, a directory ending in / or a glob (path.Match). Empty by default."
+            }
+          }
+        },
         "merge_gate": {
           "type": "boolean",
           "default": true,

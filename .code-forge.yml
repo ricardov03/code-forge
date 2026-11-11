@@ -33,6 +33,15 @@ gates:
     - run
     - typecheck
   format: null
+  # B427: hubs measured on the B362b+B402 batch (most tests reach a change
+  # through them); their own tests still run when the closure reaches them.
+  import_graph:
+    stop:
+      - src/session/spawn.mjs
+      - src/config/validate.mjs
+      - src/worker/loop.mjs
+      - src/context/pack.mjs
+      - src/cli/block.mjs
 proof:
   tiers:
     high:

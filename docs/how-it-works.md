@@ -106,7 +106,23 @@ duplicates:
    `import`/`export from`, literal `import()` and `require()`, `new URL('..', import.meta.url)`
    (a directory URL covers the files under it), and a file that names a path in the closure
    by its repository path (a test that spawns `scripts/s.mjs` reaches what that script
-   imports). An import of a deleted or renamed changed file still counts;
+   imports). An import of a deleted or renamed changed file still counts. The graph is narrow
+   (B427):
+   - comments make no edge: a path named in a comment or a JSDoc `import()` type is not read;
+     a path named in a `src/` file is data, not an edge;
+   - named imports are followed through re-export barrels (`export { a } from`,
+     `export * from`): an importer reaches a changed file only through the bindings it imports
+     from it. A namespace, side-effect, dynamic or `require()` import uses the whole module;
+   - inside an ES module only the exports whose code reaches a changed binding carry the
+     change on. Code that runs when the module loads (an initializer with a call, a class, an
+     expression statement), CommonJS and a module it cannot split carry it to every importer;
+   - `gates.import_graph.stop` lists hub files (paths, `dir/` prefixes or globs) where the
+     closure stops: the tests and test helpers that import or name a stop file are selected,
+     the product files that import it are not, unless the stop file itself changed. It is empty
+     by default; this repository stops at the hubs measured on the B362b+B402 batch
+     (`src/session/spawn.mjs`, `src/config/validate.mjs`, `src/worker/loop.mjs`,
+     `src/context/pack.mjs`, `src/cli/block.mjs`), which took that batch from 348 of 380 tests
+     to 65;
 5. `test/compat/config-golden.test.mjs` for a change under `test/fixtures/`, `schema/`,
    `scripts/compat-golden.mjs` or `src/config/` (B409).
 
