@@ -14,7 +14,7 @@ import (
 
 // b408Fixture is a code-forge-shaped repo (native/go.mod and
 // scripts/build-native.mjs) with one open worktree block B1. A fake Node logs
-// every call: a build-native.mjs call logs "build <cwd>", a CLI call logs
+// every call: a build-native.mjs call logs "build <cwd> <script> <arg>", a CLI call logs
 // "node <verb> <sub>" and, for block rebase, rebases the worktree onto main.
 type b408Fixture struct {
 	t                          *testing.T
@@ -47,7 +47,7 @@ func newB408Fixture(t *testing.T) *b408Fixture {
 	script := "#!/bin/sh\n" +
 		"case \"$1\" in\n" +
 		"*scripts/build-native.mjs)\n" +
-		"  echo \"build $(pwd -P) $2\" >> \"$CF_B408_LOG\"\n" +
+		"  echo \"build $(pwd -P) $(cd \"$(dirname \"$1\")\" && pwd -P)/$(basename \"$1\") $2\" >> \"$CF_B408_LOG\"\n" +
 		"  if [ -n \"$CF_B408_BUILD_FAIL\" ]; then echo 'go: build broke' >&2; exit 1; fi\n" +
 		"  exit 0 ;;\n" +
 		"*)\n" +
@@ -138,6 +138,13 @@ func (f *b408Fixture) call(extra []string, args ...string) (code int, stdout, st
 	return code, out.String(), errOut.String()
 }
 
+// buildCall is the log line of one build-native.mjs call: cwd and the script
+// path must both be the real worktree, not any path ending in the script name.
+func (f *b408Fixture) buildCall() string {
+	real := f.realTree()
+	return "build " + real + " " + filepath.Join(real, "scripts", "build-native.mjs") + " --host\n"
+}
+
 func (f *b408Fixture) calls() string {
 	data, err := os.ReadFile(f.log)
 	if os.IsNotExist(err) {
@@ -164,6 +171,11 @@ func TestGatesNativeRebuildWhenSourcesAreNewer(t *testing.T) {
 	}{
 		{"older binary", func(f *b408Fixture) {
 			now := time.Now()
+			// Only x.go is newer than the binary, so a check that ignores
+			// .go files cannot pass on go.mod or x_test.go mtimes.
+			for _, file := range []string{"native/go.mod", "native/x_test.go"} {
+				f.touch(filepath.Join(f.tree, file), now.Add(-2*time.Hour))
+			}
 			f.touch(f.bin, now.Add(-time.Hour))
 			f.touch(filepath.Join(f.tree, "native", "x.go"), now)
 		}},
@@ -181,7 +193,7 @@ func TestGatesNativeRebuildWhenSourcesAreNewer(t *testing.T) {
 			f := newB408Fixture(t)
 			tc.setup(f)
 			code, stdout, stderr := f.call(nil, "gates", "run", "--run", "fixture", "--block", "B1")
-			want := "build " + f.realTree() + " --host\ntest\n"
+			want := f.buildCall() + "test\n"
 			if code != 0 || f.calls() != want {
 				t.Fatalf("want exit 0 and exactly one build before the test command (%q), got exit %d calls %q stderr %s", want, code, f.calls(), stderr)
 			}
@@ -224,7 +236,7 @@ func TestGatesNativeRebuildSkippedWhenBinaryIsNewer(t *testing.T) {
 func TestGatesNativeRebuildFailureRunsNoGate(t *testing.T) {
 	f := newB408Fixture(t)
 	code, stdout, stderr := f.call([]string{"CF_B408_BUILD_FAIL=1"}, "gates", "run", "--run", "fixture", "--block", "B1")
-	if code != 1 || f.calls() != "build "+f.realTree()+" --host\n" || stdout != "" {
+	if code != 1 || f.calls() != f.buildCall() || stdout != "" {
 		t.Fatalf("want exit 1, one build call, no gate command and no JSON, got exit %d calls %q stdout %q", code, f.calls(), stdout)
 	}
 	if lines := strings.Split(strings.TrimSpace(stderr), "\n"); len(lines) != 1 || !strings.Contains(lines[0], "native-rebuild-failed") || !strings.Contains(lines[0], "go: build broke") {
@@ -238,10 +250,10 @@ func TestBlockRebaseRebuildsNative(t *testing.T) {
 		fail              bool
 		code              int
 	}{
-		{name: "native change", file: "native/x.go", calls: "node block rebase\nbuild %s --host\n"},
-		{name: "build script change", file: "scripts/build-native.mjs", calls: "node block rebase\nbuild %s --host\n"},
+		{name: "native change", file: "native/x.go", calls: "node block rebase\n%s"},
+		{name: "build script change", file: "scripts/build-native.mjs", calls: "node block rebase\n%s"},
 		{name: "no native change", file: "README.md", calls: "node block rebase\n"},
-		{name: "build fails", file: "native/x.go", calls: "node block rebase\nbuild %s --host\n", fail: true, code: 1},
+		{name: "build fails", file: "native/x.go", calls: "node block rebase\n%s", fail: true, code: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			f := newB408Fixture(t)
@@ -252,7 +264,7 @@ func TestBlockRebaseRebuildsNative(t *testing.T) {
 				extra = append(extra, "CF_B408_BUILD_FAIL=1")
 			}
 			code, _, stderr := f.call(extra, "block", "rebase", "B1", "--run", "fixture")
-			want := strings.ReplaceAll(tc.calls, "%s", f.realTree())
+			want := strings.ReplaceAll(tc.calls, "%s", f.buildCall())
 			if code != tc.code || f.calls() != want {
 				t.Fatalf("want exit %d and calls %q, got exit %d calls %q stderr %s", tc.code, want, code, f.calls(), stderr)
 			}
