@@ -96,6 +96,7 @@ Every other key defaults as shown, or is entirely absent from a minimal file. `a
 | `escalation.after_rounds_with_warnings` | integer |  | `1` | min 0 |
 | `escalation.warning_threshold` | integer |  | `2` | min 1 |
 | `review` | object |  | — |  |
+| `review.close_wait_s` | integer |  | `600` | min 1; max 86400; One shared deadline in seconds for reviews queued by native block close. |
 | `review.exclude` | array<string> |  | `["**/package-lock.json","**/npm-shrinkwrap.json","**/yarn.lock","**/pnpm-lock.yaml","**/bun.lock","**/bun.lockb","**/composer.lock","**/Cargo.lock","**/Gemfile.lock","**/poetry.lock","**/uv.lock","**/go.sum","**/Package.resolved","**/Podfile.lock","**/pubspec.lock","**/mix.lock","**/flake.lock"]` | Repo-relative globs excluded from model code review, including scaffolding archives. Uses the ownership glob syntax (*, ?, ** and braces). A project list replaces the defaults; [] disables exclusion. Ownership and all other close checks still apply. A passing close signs gate.review_excluded per file. |
 | `review.lockfile_registries` | array<string> |  | `["registry.npmjs.org"]` | Allowed URL hosts for excluded package-lock.json and npm-shrinkwrap.json packages.*.resolved entries. Close requires HTTPS and integrity for each resolved package; link:true and entries without resolved are allowed. Other lock formats receive no safety check. |
 | `review.multimodel` | boolean |  | `false` |  |
