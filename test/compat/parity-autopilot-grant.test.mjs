@@ -174,7 +174,15 @@ test('grant boundaries preserve refusals and unsupported shapes hand over withou
   ].map((r) => signRow({ run: RUN, ...r }, KEY));
   await writeFile(ledgerFile(critical), [...initial.filter((r) => r.event !== 'review.approved'), ...signed].map((r) => JSON.stringify(r)).join('\n') + '\n');
   await parity(critical, args('close', true));
-  assert.notEqual(launch(critical, args('close', true)).status, 127, 'critical autopilot waiver closes natively without Node');
+  const closed = launch(critical, args('close', true), { CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NATIVE: '1' });
+  assert.equal(closed.status, 0, `critical autopilot waiver closes natively without Node: ${closed.stderr}`);
+  const criticalRows = (await readFile(ledgerFile(critical), 'utf8')).trim().split('\n').map((s) => JSON.parse(s));
+  const { mac: _mac, ts: _ts, ...lastRow } = criticalRows.at(-1);
+  assert.deepEqual(lastRow, { run: RUN, event: 'block.close', block: 'B1', status: 'complete', tokens_source: null, cost_source: null }, 'critical waiver close signs exactly Node\'s block.close row last');
+  assert.equal(verifyRow(criticalRows.at(-1), KEY).ok, true, 'block.close row verifies');
+  const criticalLog = launch(critical, ['logs', 'handovers', '--json']);
+  assert.equal(criticalLog.status, 0, criticalLog.stderr);
+  assert.deepEqual(JSON.parse(criticalLog.stdout), { total: 0, rows: [] }, 'critical waiver close: zero Node handovers');
   for (const verb of ['claim', 'stop', 'open', 'close']) {
     const f = await fixture('active', { unknown: true });
     const before = await Promise.all([readFile(recordFile(f)), readFile(ledgerFile(f))]);
