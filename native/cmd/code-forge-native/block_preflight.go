@@ -125,11 +125,20 @@ func blockPreflight(in preflightInput) (preflightResult, error) {
 		skip("review", "a review row needs the Node close check")
 		return out, nil
 	}
+	// unreviewed holds each file the gate flagged as not reviewed or unsigned:
+	// review runs in parallel with the gate, so neither it nor its missing
+	// ticket id is a preflight blocker.
+	unreviewed := map[string]bool{}
+	kept := []gatecheck.Blocker{}
 	for _, b := range gate.Blockers {
+		if b.Code == "unreviewed" || b.Code == "unsigned" {
+			unreviewed[b.File] = true
+		}
 		if slices.Contains(preflightCodes, b.Code) {
-			out.blockers = append(out.blockers, b)
+			kept = append(kept, b)
 		}
 	}
+	out.blockers = append(out.blockers, kept...)
 	if in.report == nil || externalReview {
 		return out, nil
 	}
@@ -145,11 +154,38 @@ func blockPreflight(in preflightInput) (preflightResult, error) {
 		out.blockers = append(out.blockers, gatecheck.Blocker{Code: "coder_report_failed", Detail: "coder report FAILED: --report cannot be read"})
 		return out, nil
 	}
+	// Ticket blockers are built only for files with a review.result row of
+	// this block that the gate did not flag as unreviewed or unsigned.
+	reviewed := []gatecheck.File{}
+	for _, f := range files {
+		if !unreviewed[f.File] && preflightHasResult(rows, in.run, in.id, f.File) {
+			reviewed = append(reviewed, f)
+		}
+	}
+	if len(reviewed) == 0 {
+		return out, nil
+	}
 	qdir := filepath.Join(mainTop, ".code-forge/queue")
-	lines, _ := closeReviewedLines(in.run, in.id, top, qdir, entry, files, gate.Waived, inTree, len(gate.Blockers) == 0)
-	check, _ := closeReport(string(data), in.run, in.id, qdir, files, lines, rows, key)
-	out.blockers = append(out.blockers, check.Blockers...)
+	lines, _ := closeReviewedLines(in.run, in.id, top, qdir, entry, reviewed, gate.Waived, inTree, len(kept) == 0)
+	check, _ := closeReport(string(data), in.run, in.id, qdir, reviewed, lines, rows, key)
+	for _, b := range check.Blockers {
+		if b.Code == "coder_report_failed" && unreviewed[b.File] {
+			continue
+		}
+		out.blockers = append(out.blockers, b)
+	}
 	return out, nil
+}
+
+// preflightHasResult says whether the ledger has a review.result row of this
+// run and block for file.
+func preflightHasResult(rows []gatecheck.Row, run, id, file string) bool {
+	for _, r := range rows {
+		if r["event"] == "review.result" && r["run"] == run && r["block"] == id && r["file"] == file {
+			return true
+		}
+	}
+	return false
 }
 
 // preflightRows reads this run's ledger rows and its signer key, or says why not.

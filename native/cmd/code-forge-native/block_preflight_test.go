@@ -232,3 +232,55 @@ func TestPreflightOpenFindingIsListed(t *testing.T) {
 		t.Fatalf("gates run --no-preflight: want exit 0 and one test run; got exit %d, %d runs, stderr=%q", gcode, f.gateRuns(), stderr)
 	}
 }
+
+// reportFile writes a coder report with no review ticket line and returns its path.
+func (f *preflightFixture) reportFile() string {
+	f.t.Helper()
+	path := filepath.Join(f.home, "report.txt")
+	f.write(f.home, "report.txt", "DONE B1\n")
+	return path
+}
+
+// B392 fix 2: with --report, an owned file that has no review yet is still not
+// a preflight blocker (no 'no review-file ticket id' coder_report_failed).
+func TestPreflightReportUnreviewedFileIsNotBlocker(t *testing.T) {
+	f := newPreflightFixture(t)
+	report := f.reportFile()
+	code, stdout, stderr := f.call("block", "ready", "B1", "--run", f.run, "--preflight", "--report", report)
+	if code != 0 || stdout != "block B1 preflight clean\n" || stderr != "" {
+		t.Fatalf("--report with an unreviewed file: want exit 0 and exactly one clean line; got exit %d stdout=%q stderr=%q", code, stdout, stderr)
+	}
+}
+
+// B392 fix 2: with --report, a reviewed file (a signed review.approved row,
+// then a review.result row that leaves F1 open) with no ticket id in the
+// report or the ledger keeps its coder_report_failed blocker next to
+// not_approved.
+func TestPreflightReportReviewedFileMissingTicketBlocks(t *testing.T) {
+	f := newPreflightFixture(t)
+	hash, err := gitx.ContentHash(f.tree, "sample.txt")
+	if err != nil {
+		t.Fatal(err)
+	}
+	f.sign(ledger.Object{{Key: "event", Value: "review.approved"}, {Key: "block", Value: "B1"}, {Key: "file", Value: "sample.txt"}, {Key: "content_hash", Value: hash}})
+	f.openFinding()
+	report := f.reportFile()
+	code, stdout, stderr := f.call("block", "ready", "B1", "--run", f.run, "--preflight", "--report", report, "--json")
+	var got preflightReport
+	if err := json.Unmarshal([]byte(stdout), &got); err != nil {
+		t.Fatalf("preflight --json: exit %d: %v\nstdout=%q\nstderr=%q", code, err, stdout, stderr)
+	}
+	codes := []string{}
+	for _, b := range got.Blockers {
+		if b.File == nil || *b.File != "sample.txt" {
+			t.Fatalf("reviewed file, no ticket: every blocker should name sample.txt, got %+v", got.Blockers)
+		}
+		codes = append(codes, b.Code)
+	}
+	if code != 1 || got.Ready || strings.Join(codes, ",") != "not_approved,coder_report_failed" {
+		t.Fatalf("reviewed file, no ticket: want exit 1 with not_approved then coder_report_failed, got exit %d %+v", code, got)
+	}
+	if !strings.Contains(got.Blockers[1].Detail, "no review-file ticket id for sample.txt") {
+		t.Fatalf("coder_report_failed detail: want the missing ticket for sample.txt, got %q", got.Blockers[1].Detail)
+	}
+}
