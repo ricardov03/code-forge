@@ -1,8 +1,12 @@
 package config
 
 import (
+	"crypto/rand"
+	"encoding/hex"
+
 	"encoding/json"
 	"errors"
+	"github.com/ricardov03/code-forge/native/ledger"
 	"os"
 	"path/filepath"
 	"sort"
@@ -173,23 +177,45 @@ func RefreshFromCLICaches(home string) (RefreshResult, error) {
 		sort.Slice(values, func(i, j int) bool { return utf16Less(values[i], values[j]) })
 		merged[provider] = values
 	}
-	if err := os.MkdirAll(filepath.Dir(result.CachePath), 0755); err != nil {
+	// JSON.stringify keeps the existing cache's provider order, then this
+	// run's providers (openai before xai); ledger.Object adds JS integer-key order.
+	seen := ledger.Object{}
+	placed := map[string]bool{}
+	place := func(provider string) {
+		if ids, ok := merged[provider]; ok && !placed[provider] {
+			placed[provider] = true
+			seen = append(seen, ledger.Field{Key: provider, Value: stringsToAny(ids)})
+		}
+	}
+	if data, err := os.ReadFile(result.CachePath); err == nil {
+		if parsed, err := ledger.DecodeObject(data); err == nil {
+			if object := parsed.Get("seen"); object != nil {
+				if fields, ok := object.(ledger.Object); ok {
+					for _, field := range fields {
+						place(field.Key)
+					}
+				}
+			}
+		}
+	}
+	for _, provider := range []string{"openai", "xai"} {
+		place(provider)
+	}
+	if err := os.MkdirAll(filepath.Dir(result.CachePath), 0o777); err != nil {
 		return result, err
 	}
-	file, err := os.CreateTemp(filepath.Dir(result.CachePath), ".models.json.*.tmp")
+	cache := ledger.Object{{Key: "status", Value: "seen-in-cache"}, {Key: "updated_at", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")}, {Key: "seen", Value: seen}}
+	data, err := ledger.Stringify(cache, true)
+	if err != nil {
+		return result, err
+	}
+	// writeFile's default mode is 0666 less the umask, as in Node.
+	file, err := os.OpenFile(filepath.Join(filepath.Dir(result.CachePath), ".models.json."+randomHex()+".tmp"), os.O_CREATE|os.O_EXCL|os.O_WRONLY, 0o666)
 	if err != nil {
 		return result, err
 	}
 	defer os.Remove(file.Name())
-	cache := struct {
-		Status    string              `json:"status"`
-		UpdatedAt string              `json:"updated_at"`
-		Seen      map[string][]string `json:"seen"`
-	}{"seen-in-cache", time.Now().UTC().Format("2006-01-02T15:04:05.000Z"), merged}
-	encoder := json.NewEncoder(file)
-	encoder.SetIndent("", "  ")
-	encoder.SetEscapeHTML(false)
-	writeErr := encoder.Encode(cache)
+	_, writeErr := file.Write(append(data, '\n'))
 	closeErr := file.Close()
 	if writeErr != nil {
 		return result, writeErr
@@ -201,4 +227,18 @@ func RefreshFromCLICaches(home string) (RefreshResult, error) {
 		return result, err
 	}
 	return result, nil
+}
+
+func stringsToAny(ids []string) []any {
+	out := make([]any, len(ids))
+	for i, id := range ids {
+		out[i] = id
+	}
+	return out
+}
+
+func randomHex() string {
+	buf := make([]byte, 16)
+	_, _ = rand.Read(buf)
+	return hex.EncodeToString(buf)
 }
