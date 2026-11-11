@@ -8,6 +8,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- **`gates.merge_gate_links`** — repository-relative git-ignored paths (for example `local.properties`,
+  `app/google-services.json`) are linked from the main checkout into the temporary merge-gate tree before setup; each
+  link must stay under the repository root. A retried land merges only the closed block head (B343b)
 - **`block open --allow-api-mismatch`** — block open (Go) checks the brief's uses/extends lines against the code
   (api-fit). A missing name or parameter exits 2 with an `api-fit:` line; `--allow-api-mismatch` opens anyway and prints
   each line as a note (B338)
@@ -29,6 +32,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Changed
 
+- native `block close` queues a review for each changed owned file that has no review (also after an acceptance
+  amendment), waits once for all of them (`review.close_wait_s`, default 600), then stops with `not_approved` or
+  `review_pending`; close never approves a file itself (B339)
 - A Go verb that holds the run lock writes an owner file (pid, start token, verb) in `<run>.lock` and removes it on release; a waiting Go verb breaks a lock whose owner process is gone or replaced (or, with no owner file, that is older than 10 minutes) once, logs `broke stale run lock (pid N)` and takes it, so a crashed holder no longer blocks every verb until a human removes the dir; a lock with a live owner is never broken (B423)
 - `block land` (Go) no longer stops with "land stopped at join: reviews did not finish" when a loaded machine misses the run daemon's fixed 2 s connect/ping deadline: the review join asks the daemon again until land's own `--max` deadline (then `wait_timeout`); a dead daemon (connect refused, connection closed, invalid answer) still stops the join at once with the same message (B417)
 - `block close` and `block ready` (Go) check the `code-forge-runs-access` transcript rule themselves instead of handing any transcript with `.code-forge` text to Node: plain-text logs and Claude Code JSONL logs get the same hits as Node after B415 (a Read/Bash/Glob/write-tool path or command word naming the run records, absolute or home-relative, hits; a heredoc body or quoted `echo` text a command only writes to a file does not; `.code-forge.yml` does not). Codex logs, `.code-forge/reviews` and `.code-forge/queue` text, other code-forge spellings, `sh -c` wrappers and interpreter scripts still hand over (B416)
@@ -85,6 +91,8 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- parity tests follow the Go-only behaviour of B393 (gate `tree` field, merge-gate reuse), B394, B418 and B339, so CI
+  is green again; Node parity is still checked for every other field (B437, B439, B440)
 - **`block rebase` replays first and refuses only a real conflict** (Go) — owned files main changed no longer refuse
   up front: a clean replay moves the base, names them `upstream_owned` and queues them for review again; a real conflict
   restores HEAD and refuses `rebase-conflict` naming the files; `CHANGELOG.md` lines both sides only added are kept (main
