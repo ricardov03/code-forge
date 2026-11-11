@@ -10,7 +10,9 @@ import (
 	"path/filepath"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -65,8 +67,21 @@ func TestBlockLandMergeGateReuse(t *testing.T) {
 	}
 }
 
+// B417: the join's daemon transport under load. Each shape lands the
+// same-tree block; only the daemon answering the join behaves differently.
+// The join's Request is the second ping (the first is land's preflight).
+func TestBlockLandJoinDaemonLoad(t *testing.T) {
+	for _, shape := range []string{"join-slow-ping", "join-hung-ping", "join-daemon-dies"} {
+		t.Run(shape, func(t *testing.T) { blockLandChain(t, shape) })
+	}
+}
+
 func blockLandChain(t *testing.T, shape string) {
 	t.Helper()
+	join := ""
+	if strings.HasPrefix(shape, "join-") {
+		join, shape = shape, "same-tree"
+	}
 	// The daemon's Unix socket needs a short private HOME on macOS.
 	home, err := os.MkdirTemp("/tmp", "cf-land-unit-")
 	if err != nil {
@@ -335,7 +350,11 @@ func blockLandChain(t *testing.T, shape string) {
 	must(err)
 	var connections sync.WaitGroup
 	serving := make(chan struct{})
-	requests := make(chan string, 16)
+	requests := make(chan string, 64)
+	var pings atomic.Int32
+	release := make(chan struct{})
+	var died time.Time
+	var diedMu sync.Mutex
 	go func() {
 		defer close(serving)
 		for {
@@ -355,6 +374,27 @@ func blockLandChain(t *testing.T, shape string) {
 					}
 					method, _ := request["method"].(string)
 					requests <- method
+					if method == "ping" {
+						n := pings.Add(1)
+						if join == "join-slow-ping" && n == 2 {
+							// Past daemonclient's fixed 2 s ping deadline, once.
+							time.Sleep(2200 * time.Millisecond)
+						}
+						if join == "join-hung-ping" && n >= 2 {
+							<-release
+							return
+						}
+					}
+					if method == "wait-block" && join == "join-daemon-dies" {
+						// The daemon crashes mid-join: no answer, no listener,
+						// the socket file stays (connect is refused).
+						diedMu.Lock()
+						died = time.Now()
+						diedMu.Unlock()
+						listener.(*net.UnixListener).SetUnlinkOnClose(false)
+						listener.Close()
+						return
+					}
 					var reply any
 					switch method {
 					case "ping":
@@ -372,8 +412,11 @@ func blockLandChain(t *testing.T, shape string) {
 			}()
 		}
 	}()
-	defer func() { listener.Close(); <-serving; connections.Wait() }()
+	defer func() { close(release); listener.Close(); <-serving; connections.Wait() }()
 	flags := map[string]any{"report": report, "transcript": transcript, "max": "60s", "json": true}
+	if join == "join-hung-ping" {
+		flags["max"] = "3s"
+	}
 	if shape != "plain" {
 		flags["merge"] = true
 	}
@@ -390,6 +433,7 @@ func blockLandChain(t *testing.T, shape string) {
 	capture, err := os.CreateTemp(home, "land-output-")
 	must(err)
 	os.Stdout, os.Stderr = capture, capture
+	started := time.Now()
 	code := landExecuteWithReason(nil, flags, home, run, "B1", record, entry, func(reason handoverReason) int {
 		t.Errorf("the complete chain must not hand over: %v", reason)
 		return 127
@@ -398,6 +442,14 @@ func blockLandChain(t *testing.T, shape string) {
 	must(capture.Close())
 	output, err := os.ReadFile(capture.Name())
 	must(err)
+	ended := time.Now()
+	if join == "join-hung-ping" || join == "join-daemon-dies" {
+		diedMu.Lock()
+		diedAt := died
+		diedMu.Unlock()
+		landJoinStopped(t, home, run, join, code, string(output), started, ended, diedAt, requests)
+		return
+	}
 	if code != 0 {
 		t.Fatalf("land exit=%d, want 0: %s", code, output)
 	}
@@ -474,6 +526,77 @@ func blockLandChain(t *testing.T, shape string) {
 	}
 	if seen["wait-block"] != 1 || seen["rows"] != 1 {
 		t.Fatalf("unexpected daemon steps: %v", seen)
+	}
+	if join == "join-slow-ping" && seen["ping"] < 3 {
+		t.Fatalf("slow join ping must be retried: %v", seen)
+	}
+	if join == "join-slow-ping" {
+		gates, cancelled := 0, 0
+		for _, v := range rows {
+			switch v.(map[string]any)["event"] {
+			case "gate.done":
+				gates++
+			case "gate.cancelled":
+				cancelled++
+			}
+		}
+		if gates != 1 || cancelled != 0 {
+			t.Fatalf("gate.done=%d gate.cancelled=%d, want 1 and 0", gates, cancelled)
+		}
+	}
+}
+
+// landJoinStopped checks a land that must stop at join with the block open.
+func landJoinStopped(t *testing.T, home, run, join string, code int, output string, started, ended, died time.Time, requests chan string) {
+	t.Helper()
+	if code != 1 {
+		t.Fatalf("land exit=%d, want 1: %s", code, output)
+	}
+	fresh, err := state.ReadRun(home, run)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := blockObject(blockObject(fresh.Get("blocks")).Get("B1")).Get("status"); got != "open" {
+		t.Fatalf("block status=%v, want open", got)
+	}
+	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), "fixture")
+	if err != nil {
+		t.Fatal(err)
+	}
+	closes := 0
+	for _, v := range rows {
+		if v.(map[string]any)["event"] == "block.close" {
+			closes++
+		}
+	}
+	if closes != 0 {
+		t.Fatalf("block.close count=%d, want 0", closes)
+	}
+	seen := map[string]int{}
+	for len(requests) > 0 {
+		seen[<-requests]++
+	}
+	switch join {
+	case "join-hung-ping":
+		if want := "block B1 land stopped at join: wait_timeout\n"; !strings.Contains(output, want) {
+			t.Fatalf("output must contain %q: %s", want, output)
+		}
+		if elapsed := ended.Sub(started); elapsed < 3*time.Second {
+			t.Fatalf("land stopped after %v, want at least its --max 3s", elapsed)
+		}
+		if seen["wait-block"] != 0 {
+			t.Fatalf("wait-block requests=%d, want 0: %v", seen["wait-block"], seen)
+		}
+	case "join-daemon-dies":
+		if want := "block B1 land stopped at join: reviews did not finish\n"; !strings.Contains(output, want) {
+			t.Fatalf("output must contain %q: %s", want, output)
+		}
+		if died.IsZero() || ended.Sub(died) >= 2*time.Second {
+			t.Fatalf("land must stop within 2 s of the daemon death; died=%v ended=%v", died, ended)
+		}
+		if seen["wait-block"] != 1 {
+			t.Fatalf("wait-block requests=%d, want 1: %v", seen["wait-block"], seen)
+		}
 	}
 }
 

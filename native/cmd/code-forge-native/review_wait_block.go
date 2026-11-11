@@ -74,6 +74,12 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 		}
 		remaining := max(int64(0), time.Until(deadline).Milliseconds())
 		answer, err := daemonclient.Request(run, map[string]any{"method": "wait-block", "block": block, "max_ms": remaining}, time.Duration(remaining+2500)*time.Millisecond)
+		// B417: a loaded machine can miss the fixed 2 s connect/ping deadline
+		// of a live daemon; ask again until the join's own --max deadline. A
+		// dead daemon (refused, closed, invalid answer) still stops at once.
+		if err != nil && daemonclient.Timeout(err) && time.Now().Before(deadline) {
+			continue
+		}
 		if err != nil || reviewBlockStopped(answer) {
 			return landHandover
 		}

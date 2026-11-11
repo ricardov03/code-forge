@@ -114,6 +114,15 @@ func Request(run string, req any, timeout time.Duration) (map[string]any, error)
 	return answer, nil
 }
 
+// Timeout reports a request that failed only because a fixed transport
+// deadline passed (connect, ping or answer): the daemon may be alive but
+// slow, as on a loaded machine. A refused connect, a closed connection or an
+// invalid answer is not a timeout.
+func Timeout(err error) bool {
+	var netErr net.Error
+	return errors.As(err, &netErr) && netErr.Timeout()
+}
+
 func validAnswer(run string, req, answer map[string]any) bool {
 	switch req["method"] {
 	case "status":
