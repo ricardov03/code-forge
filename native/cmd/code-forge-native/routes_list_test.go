@@ -43,6 +43,14 @@ func TestHelpListsEveryGoRoute(t *testing.T) {
 	if len(keys) == 0 {
 		t.Fatal("routes is empty; want the registered Go verbs")
 	}
+	for _, verb := range []string{"cloud-coder", "docs"} {
+		if _, ok := routes[verb]; !ok {
+			t.Errorf("Go route %q is missing; want it registered", verb)
+		}
+		if listed[verb] != 1 {
+			t.Errorf("help lists %q %d times; want exactly 1\n%s", verb, listed[verb], out)
+		}
+	}
 	for _, verb := range keys {
 		if listed[verb] != 1 {
 			t.Errorf("help lists Go route %q %d times; want exactly 1\n%s", verb, listed[verb], out)
