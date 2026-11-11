@@ -85,6 +85,21 @@ func closeExternalReviewer(cfg map[string]any) string {
 	return strings.Trim(blockString(external["name"]), "\t\n\v\f\r \u00a0\u1680\u2000\u2001\u2002\u2003\u2004\u2005\u2006\u2007\u2008\u2009\u200a\u2028\u2029\u202f\u205f\u3000\ufeff")
 }
 
+// autoClaimGuardWhy is Node's guardedConfigPaths reason, in Node's order:
+// externalReviewer (JS trim), then blockEndHook (a valid hook), then
+// proof.runners. Empty means .code-forge.yml is not guarded.
+func autoClaimGuardWhy(cfg map[string]any) string {
+	switch {
+	case closeExternalReviewer(cfg) != "":
+		return "review.external.required is true"
+	case blockend.FromConfig(cfg) != nil:
+		return "hooks.on_block_end is set"
+	case blockMap(cfg["proof"])["runners"] != nil:
+		return "proof.runners is set"
+	}
+	return ""
+}
+
 // Close's automatic claims can admit the end hook without widening land's
 // guard. Its read-only enqueue checks remain shared with landAutoClaim.
 func closeAutoClaim(home, run, id, top string, record ledger.Object, files []string, print io.Writer, preflight bool) error {
@@ -92,12 +107,7 @@ func closeAutoClaim(home, run, id, top string, record ledger.Object, files []str
 	if preflight || blockMap(cfg["hooks"])["on_block_end"] == nil {
 		return landAutoClaim(home, run, id, top, record, files, print, preflight)
 	}
-	why := ""
-	if closeExternalReviewer(cfg) != "" {
-		why = "review.external.required is true"
-	} else if blockMap(cfg["proof"])["runners"] != nil {
-		why = "proof.runners is set"
-	}
+	why := autoClaimGuardWhy(cfg)
 	guarded, err := blockops.Guarded(record, why)
 	if err != nil {
 		return err
