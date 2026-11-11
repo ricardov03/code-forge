@@ -88,11 +88,12 @@ test('package.json declares exactly the specified runtime/optional/dev dependenc
 test('R14: stryker.config.mjs does not exist and no npm script runs stryker', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(existsSync(path.join(ROOT, 'stryker.config.mjs')), false);
-  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['bench:block', 'bench:review', 'bench:verbs', 'changelog', 'docs-block', 'known-fix', 'release', 'test', 'typecheck']);
+  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['bench:block', 'bench:review', 'bench:verbs', 'changelog', 'docs-block', 'known-fix', 'release', 'release:site', 'test', 'typecheck']);
   assert.equal(pkg.scripts['bench:block'], 'node scripts/bench-block.mjs');
   assert.equal(pkg.scripts['bench:review'], 'node scripts/bench-review.mjs');
   assert.equal(pkg.scripts['bench:verbs'], 'node scripts/bench-verbs.mjs');
   assert.equal(pkg.scripts.release, 'node scripts/release.mjs');
+  assert.equal(pkg.scripts['release:site'], 'node scripts/release-site.mjs');
   assert.equal(pkg.scripts.changelog, 'node scripts/changelog.mjs');
   assert.equal(pkg.scripts['known-fix'], 'node scripts/known-fix.mjs');
 });

@@ -148,9 +148,16 @@ async function main() {
       mkdirSync(path.dirname(path.join(tree, DATA)), { recursive: true });
       writeFileSync(path.join(tree, DATA), data);
       const { custom, timeout } = siteGates(tree);
-      if (!existsSync(path.join(tree, 'node_modules'))) {
-        if (existsSync(path.join(site, 'node_modules'))) linkModules(path.join(site, 'node_modules'), path.join(tree, 'node_modules'));
-        else checked(tree, ['npm', 'ci'], 600000);
+      // Every tracked package (the root and nested ones such as docs-site/site) needs its own dependencies.
+      const packages = checked(tree, ['git', 'ls-files', '-z', '--', 'package.json', '*/package.json'])
+        .split('\0').filter(Boolean).map((file) => path.dirname(file))
+        .filter((dir) => !dir.split('/').includes('node_modules'));
+      for (const dir of packages) {
+        const target = path.join(tree, dir, 'node_modules');
+        const source = path.join(site, dir, 'node_modules');
+        if (existsSync(target)) continue;
+        if (existsSync(source)) linkModules(source, target);
+        else checked(path.join(tree, dir), ['npm', 'ci'], 600000);
       }
       const failures = [];
       for (const gate of [{ name: 'build:site', argv: ['npm', 'run', 'build:site'], env: {} }, ...custom]) {

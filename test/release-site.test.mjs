@@ -32,9 +32,13 @@ if (a[0] === 'view') {
   if (served) console.log('0.21.0');
   else { console.error('E404 not yet served'); process.exit(1); }
 } else if (a.join(' ') === 'ci') {
-  log('npm:ci'); fs.mkdirSync('node_modules');
+  log('npm:ci:' + path.basename(process.cwd())); fs.mkdirSync('node_modules'); fs.writeFileSync('node_modules/dep.txt', 'installed');
 } else if (a.join(' ') === 'run build:site') {
   log('build:site');
+  // Like the real site: a nested package (docs/) builds with its own installed dependencies.
+  if (fs.existsSync('docs/package.json') && !fs.existsSync('docs/node_modules/dep.txt')) {
+    console.error('Cannot find package dep imported from docs'); process.exit(5);
+  }
   for (const cache of ['.vite', '.astro', '.cache', '.vite-temp']) {
     fs.mkdirSync(path.join('node_modules', cache), {recursive: true});
     fs.writeFileSync(path.join('node_modules', cache, 'state'), 'new build cache');
@@ -57,8 +61,8 @@ if (fs.readFileSync('dist/index.html', 'utf8') !== 'new site') process.exit(8);
 console.log('Deployment complete: https://fixture.code-forge-ai.pages.dev');
 `;
 
-/** @param {{delay?: number, never?: boolean, fail?: string, modules?: boolean}} [opts] */
-function fixture({ delay = 0, never = false, fail = '', modules = false } = {}) {
+/** @param {{delay?: number, never?: boolean, fail?: string, modules?: boolean, nested?: boolean}} [opts] */
+function fixture({ delay = 0, never = false, fail = '', modules = false, nested = false } = {}) {
   const root = mkdtempSync(path.join(PARENT, 'case-'));
   const work = path.join(root, 'package');
   const site = path.join(root, 'code-forge-site');
@@ -111,6 +115,7 @@ if (process.argv[1]?.endsWith('/release-site.mjs')) {
   put(site, 'src/data/site-data.json', '{"version":"0.20.0"}\n');
   put(site, 'README.md', 'original site\n');
   put(site, 'package.json', '{"name":"fixture-site","version":"1.0.0"}\n');
+  if (nested) put(site, 'docs/package.json', '{"name":"fixture-docs","version":"1.0.0"}\n');
   put(site, '.code-forge.yml', `gates:
   test: [node, gate.mjs, test]
   custom:
@@ -137,6 +142,7 @@ if (process.env.FAIL_GATE === name) process.exit(3);
   if (modules) {
     put(site, 'node_modules/local.txt', 'existing dependencies\n');
     put(site, 'node_modules/.vite/state', 'existing build cache\n');
+    if (nested) put(site, 'docs/node_modules/dep.txt', 'existing docs dependencies\n');
   }
   const initialHead = git(site, ['rev-parse', 'HEAD']);
   /** @param {string[]} [args] */
@@ -186,7 +192,7 @@ test('green gates commit only the data file on the release branch and deploy dis
   const r = f.run(['--site', f.site]);
   t.diagnostic(`release:site fake-tool path: ${(performance.now() - start).toFixed(0)} ms`);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(f.events(), ['npm:served', 'generate:v0.21.0', 'npm:ci', 'build:site', 'gate:links', 'gate:accessibility', 'gate:test', 'deploy:Release site v0.21.0']);
+  assert.deepEqual(f.events(), ['npm:served', 'generate:v0.21.0', 'npm:ci:release-site-0.21.0', 'build:site', 'gate:links', 'gate:accessibility', 'gate:test', 'deploy:Release site v0.21.0']);
   assert.equal(f.git(f.site, ['diff-tree', '--no-commit-id', '--name-only', '-r', 'release-site/v0.21.0']), 'src/data/site-data.json', 'exactly one committed path');
   assert.equal(f.git(f.site, ['rev-list', '--count', 'main..release-site/v0.21.0']), '1', 'exactly one new commit');
   assert.equal(JSON.parse(f.git(f.site, ['show', 'release-site/v0.21.0:src/data/site-data.json'])).version, '0.21.0');
@@ -220,7 +226,7 @@ test('dirty main checkout, staged work, untracked bytes and existing node_module
   const status = f.git(f.site, ['status', '--porcelain']);
   const r = f.run();
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.equal(f.events().filter((e) => e === 'npm:ci').length, 0, 'zero dependency installs when main node_modules exists');
+  assert.equal(f.events().filter((e) => e.startsWith('npm:ci')).length, 0, 'zero dependency installs when main node_modules exists');
   assert.equal(f.events().filter((e) => e.startsWith('deploy:')).length, 1, 'one deploy despite dirty main');
   assert.deepEqual(snapshot(f.site), bytes, 'every main checkout file stays byte-identical');
   assert.deepEqual(readFileSync(path.join(f.site, '.git/index')), index, 'staging index stays byte-identical');
@@ -232,9 +238,23 @@ test('dry run executes generation and every gate but makes zero commits or deplo
   const f = fixture();
   const r = f.run(['--dry-run']);
   assert.equal(r.status, 0, r.stdout + r.stderr);
-  assert.deepEqual(f.events(), ['npm:served', 'generate:v0.21.0', 'npm:ci', 'build:site', 'gate:links', 'gate:accessibility', 'gate:test']);
+  assert.deepEqual(f.events(), ['npm:served', 'generate:v0.21.0', 'npm:ci:release-site-0.21.0', 'build:site', 'gate:links', 'gate:accessibility', 'gate:test']);
   assert.match(r.stdout, /Would commit src\/data\/site-data.json.*release-site\/v0.21.0/);
   assert.match(r.stdout, /npx wrangler pages deploy dist --project-name code-forge-ai --branch main/);
   assert.equal(f.git(f.site, ['show-ref', '--heads']), `${f.initialHead} refs/heads/main`);
   assert.equal(f.git(f.site, ['worktree', 'list', '--porcelain']).split('worktree ').length - 1, 1);
+});
+
+test('a nested site package builds with the main checkout dependencies linked, or installs its own when none exist', () => {
+  const linked = fixture({ modules: true, nested: true });
+  const bytes = snapshot(linked.site);
+  const r = linked.run(['--dry-run']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(linked.events(), ['npm:served', 'generate:v0.21.0', 'build:site', 'gate:links', 'gate:accessibility', 'gate:test'], 'zero installs, build green');
+  assert.deepEqual(snapshot(linked.site), bytes, 'main checkout stays byte-identical');
+  const fresh = fixture({ nested: true });
+  const r2 = fresh.run(['--dry-run']);
+  assert.equal(r2.status, 0, r2.stdout + r2.stderr);
+  assert.deepEqual(fresh.events().filter((e) => e.startsWith('npm:ci')).sort(), ['npm:ci:docs', 'npm:ci:release-site-0.21.0'], 'one install per package');
+  assert.equal(fresh.git(fresh.site, ['worktree', 'list', '--porcelain']).split('worktree ').length - 1, 1);
 });

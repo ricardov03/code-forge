@@ -10,6 +10,9 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Added
 
+- **`npm run release:site`** — after `npm publish`, waits until npm serves the version, builds the site data in an
+  isolated worktree of the site repo, runs every site gate, commits only `src/data/site-data.json` on
+  `release-site/v<version>` and deploys; a red gate deploys nothing; `--dry-run` stops before commit and deploy (B315)
 - **`gates.merge_gate_links`** — repository-relative git-ignored paths (for example `local.properties`,
   `app/google-services.json`) are linked from the main checkout into the temporary merge-gate tree before setup; each
   link must stay under the repository root. A retried land merges only the closed block head (B343b)
