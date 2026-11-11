@@ -110,8 +110,8 @@ test('B362: Node and Go packs are byte-equal and end the proof rule with the fac
   for (const [name, text] of [['Node', node.stdout], ['Go', go.stdout]]) {
     const lines = text.split('\n');
     const proofAt = lines.indexOf('## proof rule (code-forge)');
-    const acceptanceAt = lines.indexOf('## acceptance');
-    assert.deepEqual([proofAt > 0, acceptanceAt - proofAt, lines[acceptanceAt - 1]], [true, 7, FACTS_LINE], `${name}: six bullets, facts-not-guesses last`);
+    const forbiddenAt = lines.indexOf('## forbidden');
+    assert.deepEqual([proofAt > 0, forbiddenAt - proofAt, lines[forbiddenAt - 1]], [true, 7, FACTS_LINE], `${name}: six bullets, facts-not-guesses last (the forbidden section follows the proof rule)`);
     assert.equal(lines.filter((line) => line === FACTS_LINE).length, 1, `${name}: the bullet appears exactly once`);
   }
 });
