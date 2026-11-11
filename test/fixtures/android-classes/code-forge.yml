@@ -1,0 +1,10 @@
+# B335 reporter sample (issue #35 P2): an Android project whose gates.test runs
+# only the block's own instrumented test classes through a fake gradle.
+version: 1
+gates:
+  test: [gradle, connectedDebugAndroidTest, "-Pandroid.testInstrumentationRunnerArguments.class={test_classes}"]
+  test_class_map:
+    - glob: "app/src/androidTest/java/**/*Test.kt"
+      strip_prefix: app/src/androidTest/java/
+      strip_suffix: .kt
+      separator: "."

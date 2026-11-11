@@ -1,6 +1,7 @@
 package main
 
 import (
+	"bytes"
 	"os"
 	"os/exec"
 	"path/filepath"
@@ -58,5 +59,48 @@ func TestGatesStaleWarningNamesTheFixOnlyForAStaleBase(t *testing.T) {
 	}
 	if got := gatesStaleWarning(home, "r-missing", "B1"); got != "" {
 		t.Fatalf("missing run: want no line, got %q", got)
+	}
+}
+
+// B335: gates classes prints the block's test-class filter from the Android
+// reporter sample, and nothing on stdout (full suite) for a block with no test.
+func TestGatesClassesPrintsTheBlockFilter(t *testing.T) {
+	sample := filepath.Join("..", "..", "..", "test", "fixtures", "android-classes")
+	home, workspace := t.TempDir(), t.TempDir()
+	yml, err := os.ReadFile(filepath.Join(sample, "code-forge.yml"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workspace, ".code-forge.yml"), yml, 0600); err != nil {
+		t.Fatal(err)
+	}
+	raw, err := os.ReadFile(filepath.Join(sample, "block.json"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	android, err := ledger.DecodeObject(raw)
+	if err != nil {
+		t.Fatal(err)
+	}
+	plain := ledger.Object{{Key: "status", Value: "open"}, {Key: "owned_files", Value: []any{"app/src/main/java/a/b/Foo.kt"}}}
+	run := "r-classes"
+	record := ledger.Object{{Key: "run_id", Value: run}, {Key: "project", Value: "fixture"}, {Key: "workspace", Value: workspace},
+		{Key: "status", Value: "active"}, {Key: "blocks", Value: ledger.Object{{Key: "B1", Value: android}, {Key: "B2", Value: plain}}}, {Key: "orphans", Value: []any{}}}
+	if err := state.SaveRun(home, record); err != nil {
+		t.Fatal(err)
+	}
+	for _, tc := range []struct{ block, stdout, stderr string }{
+		{"B1", "a.b.FooTest,a.b.BarTest\n", ""},
+		{"B2", "", "gates classes: block B2 has no test class in gates.test_class_map; {test_classes} is dropped and the full suite runs\n"},
+	} {
+		var out, errOut bytes.Buffer
+		code := gatesClasses([]string{"--run", run, "--block", tc.block}, home, &out, &errOut)
+		if code != 0 || out.String() != tc.stdout || errOut.String() != tc.stderr {
+			t.Fatalf("%s: code=%d stdout=%q stderr=%q", tc.block, code, out.String(), errOut.String())
+		}
+	}
+	var out, errOut bytes.Buffer
+	if code := gatesClasses([]string{"--run", run}, home, &out, &errOut); code != 2 || errOut.String() != gatesClassesUsage+"\n" {
+		t.Fatalf("missing --block: code=%d stderr=%q", code, errOut.String())
 	}
 }
