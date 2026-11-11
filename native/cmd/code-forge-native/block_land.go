@@ -86,11 +86,6 @@ func landMax(raw string) (int64, bool) {
 
 func runBlockLand(args []string) int {
 	fallback := func(reason handoverReason) int {
-		// B451: only the gates step still hands over (B450 owns it); every
-		// other case Go does not serve is refused and Node never runs.
-		if reason != hLandStepHandoverGates {
-			return blockRefuse("land", args, reason)
-		}
 		// The legacy dispatcher predates --copy-links. Carry this native flag
 		// across the fallback boundary without changing that shared parser.
 		forward := []string{"land"}

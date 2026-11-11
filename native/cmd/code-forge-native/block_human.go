@@ -155,17 +155,16 @@ func runBlockHumanPass(args []string) int {
 }
 
 func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, endHook *func()) int {
-	// B451: a case the Go engine does not serve is refused with its cause;
-	// Node never runs. The caller logs the refusal as a failed verb.
-	refuse := func(cause string) int {
-		fmt.Fprintf(stderr, "block human-pass: refused: %s (%s); %s\n", cause, handoverReasons[hBlockUnportedSubcommand], blockRefusalFix("human-pass", hBlockUnportedSubcommand))
-		return 1
+	fallback := func() int {
+		*delegated = true
+		return blockHandover(append([]string{"human-pass"}, args...), hBlockUnportedSubcommand)
 	}
 	fail := func(err error) int {
 		code := 1
 		if se, ok := err.(*state.Error); ok && se.Code == "usage" {
 			code = 2
 		}
+		// B451: the error prints in Go; runBlockHumanPass logs it as Node does.
 		fmt.Fprintln(stderr, "block human-pass:", err)
 		return code
 	}
@@ -190,8 +189,7 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 	id := pos[0]
 	home, err := os.UserHomeDir()
 	if err != nil {
-		fmt.Fprintf(stderr, "block human-pass: refused: the home directory cannot be found (%s); %s\n", handoverReasons[hBlockUnportedSubcommand], blockRefusalFix("human-pass", hCloseHome))
-		return 1
+		return fallback()
 	}
 	record, err := state.ReadRun(home, run)
 	if err != nil {
@@ -215,22 +213,16 @@ func blockHumanPass(args []string, stdout, stderr io.Writer, delegated *bool, en
 	if entry.Get("status") != "awaiting_human_check" {
 		return fail(&state.Error{Code: "not-awaiting", Message: fmt.Sprintf("block %s is not awaiting a human check", id)})
 	}
-	if !blockGrantEndSafe(record) {
-		return refuse(blockRefusalCauses[hCloseAutopilotGrant])
-	}
-	if !blockStorageSafe(home, run, record) {
-		return refuse(blockRefusalCauses[hCloseStateStorage])
-	}
-	if !closeTextSafe(note) {
-		return refuse("the --note text holds a secret-like token or the run key")
+	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) || !closeTextSafe(note) {
+		return fallback()
 	}
 	checks, ok := entry.Get("human_checks").([]any)
 	if !ok {
-		return refuse(blockRefusalCauses[hCloseHumanChecksShape])
+		return fallback()
 	}
 	for _, check := range checks {
 		if _, ok := check.(string); !ok {
-			return refuse(blockRefusalCauses[hCloseHumanChecksValue])
+			return fallback()
 		}
 	}
 	grant, err := autopilot.CheckExpiry(home, run, time.Now())

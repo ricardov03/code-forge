@@ -12,10 +12,12 @@ import (
 	"testing"
 
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/state"
 )
 
-// B451: block open, claim, stop, close and land serve each former hand-over
-// case in Go or refuse it with one stderr line; Node never runs.
+// B451: block open, claim, stop, close and land serve help, flags, errors and
+// light limits in Go and never refuse a case Node completes; the cases B466
+// ports still hand over to Node.
 
 type b451Result struct {
 	code           int
@@ -26,6 +28,13 @@ type b451Result struct {
 // b451Run runs one block verb in this process with a fresh HOME, Node set to
 // a path that cannot start, and the error log on.
 func b451Run(t *testing.T, home string, args ...string) b451Result {
+	t.Helper()
+	return b451RunWith(t, home, false, args...)
+}
+
+// b451RunWith is b451Run; with handover true the case is one B451 keeps on
+// Node (B466 ports it), so a hand-over row is expected instead of refused.
+func b451RunWith(t *testing.T, home string, handover bool, args ...string) b451Result {
 	t.Helper()
 	if home == "" {
 		home = t.TempDir()
@@ -53,6 +62,9 @@ func b451Run(t *testing.T, home string, args ...string) b451Result {
 	_ = outW.Close()
 	_ = errW.Close()
 	res := b451Result{code: code, stdout: <-outC, stderr: <-errC, home: home}
+	if handover {
+		return res
+	}
 	if _, err := os.Stat(filepath.Join(home, ".code-forge", "native", "handovers.jsonl")); err == nil {
 		t.Errorf("%v: wrote a hand-over row; Node must never be asked", args)
 	}
@@ -195,9 +207,9 @@ func TestB451OpenAcceptanceReadError(t *testing.T) {
 	}
 }
 
-// stop-daemon: a case Go does not serve is one refusal line, exit 1, nothing
-// written to the run, and one error log row.
-func TestB451StopDaemonRefusal(t *testing.T) {
+// stop-daemon (fix1): Node stops a block with a daemon socket, so Go keeps
+// the hand-over until B466 ports it; no refusal, and Go writes nothing first.
+func TestB451StopDaemonHandoverKept(t *testing.T) {
 	home := t.TempDir()
 	record := map[string]any{"run_id": "r-stop", "project": "unit", "workspace": t.TempDir(), "status": "active", "orphans": []string{}, "blocks": map[string]any{"B1": map[string]any{"status": "open", "owned_files": []string{}}}}
 	b451WriteRun(t, home, "r-stop", record)
@@ -210,38 +222,34 @@ func TestB451StopDaemonRefusal(t *testing.T) {
 	}
 	runFile := filepath.Join(home, ".code-forge", "runs", "r-stop.json")
 	before, _ := os.ReadFile(runFile)
-	res := b451Run(t, home, "stop", "B1", "--run", "r-stop", "--reason", "done")
-	want := "block stop: refused: a code-forge daemon socket is present (stop-daemon); stop the daemon (code-forge daemon stop) and run it again\n"
-	if res.code != 1 || res.stderr != want || res.stdout != "" {
-		t.Fatalf("exit=%d stdout=%q stderr=%q; want exit 1 and %q", res.code, res.stdout, res.stderr, want)
+	res := b451RunWith(t, home, true, "stop", "B1", "--run", "r-stop", "--reason", "done")
+	if res.code != 127 || strings.Contains(res.stderr, "refused") {
+		t.Fatalf("exit=%d stdout=%q stderr=%q; want the Node hand-over (exit 127 with no Node), not a refusal", res.code, res.stdout, res.stderr)
+	}
+	data, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
+	if err != nil || !strings.Contains(string(data), `"stop-daemon"`) {
+		t.Fatalf("hand-over log %q %v; want a stop-daemon row", data, err)
 	}
 	if after, _ := os.ReadFile(runFile); string(after) != string(before) {
-		t.Fatal("a refusal changed the run file")
-	}
-	rows := b451ErrorRows(t, home)
-	if len(rows) != 1 || rows[0]["sub"] != "stop" || rows[0]["exit"] != float64(1) {
-		t.Fatalf("error log rows %v; want one block stop row with exit 1", rows)
+		t.Fatal("Go changed the run file before handing over")
 	}
 }
 
-// land-read-run: land refuses a run it cannot read, logged as Node's router
-// logs block land (no sub, land first in the args).
-func TestB451LandRefusalIsNative(t *testing.T) {
+// land-read-run (fix1): Go no longer refuses a run file it cannot read; the
+// case keeps its Node hand-over (exact Node error text) until B466.
+func TestB451LandReadRunHandoverKept(t *testing.T) {
 	home := t.TempDir()
 	dir := filepath.Join(home, ".code-forge", "runs")
 	if err := os.MkdirAll(filepath.Join(dir, "r-land.json"), 0700); err != nil {
 		t.Fatal(err)
 	}
-	res := b451Run(t, home, "land", "B1", "--run", "r-land", "--report", "r.md", "--transcript", "t.log")
-	if res.code == 0 || !strings.HasPrefix(res.stderr, "block land: ") || strings.Count(res.stderr, "\n") != 1 {
-		t.Fatalf("exit=%d stderr=%q; want one block land error line", res.code, res.stderr)
+	res := b451RunWith(t, home, true, "land", "B1", "--run", "r-land", "--report", "r.md", "--transcript", "t.log")
+	if res.code != 127 || strings.Contains(res.stderr, "refused") {
+		t.Fatalf("exit=%d stderr=%q; want the Node hand-over (exit 127 with no Node), not a refusal", res.code, res.stderr)
 	}
-	rows := b451ErrorRows(t, home)
-	if len(rows) != 1 || rows[0]["verb"] != "block" {
-		t.Fatalf("error log rows %v; want one block row", rows)
-	}
-	if sub, ok := rows[0]["sub"]; ok && sub != nil {
-		t.Fatalf("land row sub = %v; Node logs block land without a sub", sub)
+	data, err := os.ReadFile(filepath.Join(home, ".code-forge", "native", "handovers.jsonl"))
+	if err != nil || !strings.Contains(string(data), `"land-read-run"`) {
+		t.Fatalf("hand-over log %q %v; want a land-read-run row", data, err)
 	}
 }
 
@@ -284,5 +292,69 @@ func TestB451LightLimits(t *testing.T) {
 	}
 	if _, ok = lightLimits(top, sha, "", ledger.Object{{Key: "owned_files", Value: []any{".env"}}}, []string{".env"}, map[string]any{}); ok {
 		t.Fatal("a secret-like path must be refused (ok=false)")
+	}
+}
+
+// fix1 close-gates-format: Node's checks read only the closing block's rows,
+// so a row of another block whose shape Go once handed over (a late finding
+// that names no file or finding, a cap with no file) no longer sends the close
+// to Node; the close completes in Go.
+func TestB451CloseOtherBlockRowsStayNative(t *testing.T) {
+	for _, row := range []ledger.Object{
+		{{Key: "event", Value: "review.late_finding"}, {Key: "block", Value: "B2"}},
+		{{Key: "event", Value: "review.cap"}, {Key: "block", Value: "B2"}, {Key: "open", Value: []any{1}}},
+		{{Key: "event", Value: "rule_break"}, {Key: "block", Value: "B2"}, {Key: "id", Value: 3}},
+	} {
+		t.Run(fmt.Sprint(row.Get("event")), func(t *testing.T) {
+			f := newCloseReviewFixture(t, 1)
+			if _, err := state.WriteSigned(f.home, "r-close-fixture", row); err != nil {
+				t.Fatal(err)
+			}
+			done := f.reviewer("approved")
+			code, out, errs := f.close()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+			if code != 0 || !strings.Contains(out, "block B1 closed") || strings.Contains(errs, "close-gates-format") {
+				t.Fatalf("exit=%d out=%s err=%s; want the close to finish in Go", code, out, errs)
+			}
+		})
+	}
+}
+
+// fix1 rule_break ids: a rule_break row whose id or rule is not text is a
+// rule_break blocker with Node's String(r.id ?? r.rule ?? 'unnamed') detail,
+// not a hand-over.
+func TestB451CloseRuleBreakIdsAreNative(t *testing.T) {
+	for _, tc := range []struct {
+		row  ledger.Object
+		want string
+	}{
+		{ledger.Object{{Key: "id", Value: 7}}, "rule_break row: 7"},
+		{ledger.Object{{Key: "id", Value: []any{"a", nil, 2}}}, "rule_break row: a,,2"},
+		{ledger.Object{{Key: "id", Value: ledger.Object{{Key: "x", Value: 1}}}}, "rule_break row: [object Object]"},
+		{ledger.Object{{Key: "id", Value: nil}, {Key: "rule", Value: true}}, "rule_break row: true"},
+		{ledger.Object{{Key: "rule", Value: 1.5}}, "rule_break row: 1.5"},
+		{ledger.Object{}, "rule_break row: unnamed"},
+	} {
+		t.Run(tc.want, func(t *testing.T) {
+			f := newCloseReviewFixture(t, 1)
+			row := append(ledger.Object{{Key: "event", Value: "rule_break"}, {Key: "block", Value: "B1"}}, tc.row...)
+			if _, err := state.WriteSigned(f.home, "r-close-fixture", row); err != nil {
+				t.Fatal(err)
+			}
+			done := f.reviewer("approved")
+			code, out, errs := f.close()
+			if err := <-done; err != nil {
+				t.Error(err)
+			}
+			if code != 1 || !strings.Contains(out, tc.want+"\n") || strings.Contains(out, "block B1 closed") || strings.Contains(errs, "close-gates-format") {
+				t.Fatalf("exit=%d out=%s err=%s; want the %q blocker from Go", code, out, errs, tc.want)
+			}
+			record, err := state.ReadRun(f.home, "r-close-fixture")
+			if err != nil || blockObject(blockObject(record.Get("blocks")).Get("B1")).Get("status") != "open" {
+				t.Fatalf("refused block must remain open: %v %v", record, err)
+			}
+		})
 	}
 }

@@ -65,7 +65,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		if confirmed || step != nil {
 			return landHandover
 		}
-		return blockRefuse("close", original[1:], reason)
+		return blockHandover(original, reason)
 	}
 	fail := func(err error) int {
 		// B451: a filesystem error prints in Node's errno form; the caller logs it.
@@ -303,7 +303,15 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			rows = append(rows, r)
 		}
 	}
-	if !gatecheck.Supported(rows) {
+	// Node's checks read only this block's rows; another block's row never
+	// sends the close to Node (B451).
+	mineRows := []gatecheck.Row{}
+	for _, r := range rows {
+		if r["block"] == id {
+			mineRows = append(mineRows, r)
+		}
+	}
+	if !gatecheck.Supported(mineRows) {
 		return fallback(hCloseGatesFormat)
 	}
 	key, err := blockclose.ReadKey(home, run)

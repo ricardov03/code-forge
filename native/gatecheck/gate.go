@@ -40,20 +40,12 @@ func NeverReviewed(r Row) bool {
 }
 
 // Supported is false when a row has a shape whose Node reading Go does not
-// reproduce byte for byte (a non-string rule name, a late row or cap row that
-// names no file or finding). The close hands those over before any write.
+// reproduce byte for byte (a late row or cap row that names no file or
+// finding). The close passes only the block's own rows, the rows Node reads;
+// it hands the rest over before any write.
 func Supported(rows []Row) bool {
 	for _, r := range rows {
 		event := Text(r["event"])
-		if event == "rule_break" {
-			for _, name := range []string{"id", "rule"} {
-				if r[name] != nil {
-					if _, ok := r[name].(string); !ok {
-						return false
-					}
-				}
-			}
-		}
 		if event == "review.late_finding" || event == "review.late_ruling" {
 			if Text(r["file"]) == "" || Text(r["finding"]) == "" {
 				return false

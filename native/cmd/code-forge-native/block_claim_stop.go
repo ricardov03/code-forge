@@ -212,8 +212,9 @@ func blockStorageSafe(home, run string, record ledger.Object) bool {
 }
 
 func blockClaimStop(sub string, args []string) int {
-	// B451: a case the Go engine does not serve is refused; Node never runs.
-	fallback := func(reason handoverReason) int { return blockRefuse(sub, args, reason) }
+	// A case the Go engine does not serve yet still runs in Node (B466 ports
+	// it); help, flags, errors and the error log stay in Go (B451).
+	fallback := func(reason handoverReason) int { return blockHandover(append([]string{sub}, args...), reason) }
 	// Node's router logs a failed verb with its last stderr line.
 	logged := func(code int, text string) int {
 		before := gatesBreadcrumbName("block " + sub)

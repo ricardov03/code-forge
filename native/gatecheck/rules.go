@@ -965,7 +965,9 @@ func Evaluate(in Input) Result {
 			if id == nil {
 				id = "unnamed"
 			}
-			add("rule_break", "", "", "rule_break row: "+fmt.Sprint(id))
+			// String(r.id ?? r.rule ?? 'unnamed'): a number, list or object
+			// prints as Node prints it (B451).
+			add("rule_break", "", "", "rule_break row: "+jsString(jv{id, true}))
 		}
 	}
 	remaining, accepted := acceptedHits(in, g.ok, func(r Row) bool {

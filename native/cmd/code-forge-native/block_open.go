@@ -30,8 +30,9 @@ func runBlockOpen(args []string) int {
 	allowAPIMismatch := slices.Contains(args, "--allow-api-mismatch")
 	logArgs := args
 	args = slices.DeleteFunc(slices.Clone(args), func(arg string) bool { return arg == "--allow-api-mismatch" })
-	// B451: a case the Go engine does not serve is refused; Node never runs.
-	fallback := func(reason handoverReason) int { return blockRefuse("open", logArgs, reason) }
+	// A case the Go engine does not serve yet still runs in Node (B466 ports
+	// it); help, flags, errors and the error log stay in Go (B451).
+	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"open"}, args...), reason) }
 	var flags map[string]any
 	var id string
 	// Node's router logs a failed verb with its last stderr line.
