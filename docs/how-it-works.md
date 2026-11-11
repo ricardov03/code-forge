@@ -483,6 +483,12 @@ longer satisfy close. A block without a recorded base branch cannot rebase. A tr
 or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
 another branch or a detached HEAD refuses the re-open.
 
+In a worktree of code-forge itself (a tree with `native/go.mod` and `scripts/build-native.mjs`), a
+`block rebase` that moves the tree's HEAD across a change to `native/**` or `scripts/build-native.mjs`
+then rebuilds the tree's native binary with `node scripts/build-native.mjs --host` (B408), because the
+Node compat tests run that binary. A failed build exits 1 with one line naming `native-rebuild-failed`;
+the rebase stands, and the line gives the command to rebuild by hand.
+
 `block open <id> --attempt N` (N > 1) restores paths from the block's earlier signed
 `block claim` rows alongside `--owned`. `block attempt` keeps those claims too. Both print
 `kept claims: <n>`; a retry does not require claiming those paths again.
@@ -573,7 +579,11 @@ Gates, reviews and the close check of a worktree block run in its tree (B62b):
 
 - `gates run --run <run> --block <id>` runs the gates with the tree as cwd, and `{test_files}` and the
   full-suite threshold count the files there. Its rows name the tree (`worktree: <path>`). A `--cwd`
-  other than the tree is refused (exit 2) and no gate runs.
+  other than the tree is refused (exit 2) and no gate runs. In a worktree of code-forge itself, when
+  `native/bin/<os>-<arch>/code-forge-native` is missing or older than `native/go.mod` or any non-test
+  `native/**/*.go` file, the gates first rebuild it with `node scripts/build-native.mjs --host`; the gate
+  JSON then carries `native_rebuilt: true`. A failed build exits 1 naming `native-rebuild-failed`, and no
+  gate runs (B408).
 - `review-file` queues in the main tree, where the worker runs, but the worker reads the file and
   its diff against the block's base in the tree. The ticket names the tree, and so does the packet. A
   change made only in the main tree is never seen. The tree is part of the ticket id. A recorded tree

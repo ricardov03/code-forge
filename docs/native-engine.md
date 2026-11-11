@@ -203,6 +203,23 @@ Use an executable path or a command name found on `PATH`. If the setting is
 empty or absent, Go looks for `node` on `PATH`. This setting applies only to
 the Go hand-over. When the shell skips Go, it uses `node` on `PATH` instead.
 
+## A stale binary in a code-forge worktree
+
+This matters only when you work on code-forge itself. Each block worktree of
+the code-forge repo has its own `native/bin/<os>-<arch>/code-forge-native`,
+and the Node compat tests run that binary. Two commands keep it current:
+
+- `block rebase` rebuilds it when the rebase brought in a change to
+  `native/**` or `scripts/build-native.mjs`.
+- `gates run --run <run> --block <id>` rebuilds it before any gate when it is
+  missing or older than `native/go.mod` or a non-test `native/**/*.go` file.
+  The gate JSON then shows `native_rebuilt: true`.
+
+Both run `node scripts/build-native.mjs --host` in the worktree, with the
+Node from `CODE_FORGE_NODE` when it is set. A failed build stops the command
+with exit 1 and a line naming `native-rebuild-failed`. Other projects have no
+`native/` folder, so nothing is built for them (B408).
+
 ## Internal verbs
 
 The native binary reserves the `internal` namespace for its helpers.
