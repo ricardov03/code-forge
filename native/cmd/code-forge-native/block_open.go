@@ -25,6 +25,10 @@ func init() { blockSubs["open"] = runBlockOpen }
 
 // Keep the original argv until every pre-publication check has been mapped.
 func runBlockOpen(args []string) int {
+	// --allow-api-mismatch is native only: Node has no api-fit check, so a
+	// handover drops the flag instead of refusing it as unknown.
+	allowAPIMismatch := slices.Contains(args, "--allow-api-mismatch")
+	args = slices.DeleteFunc(slices.Clone(args), func(arg string) bool { return arg == "--allow-api-mismatch" })
 	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"open"}, args...), reason) }
 	var flags map[string]any
 	var id string
@@ -42,12 +46,12 @@ func runBlockOpen(args []string) int {
 		if reviewWaitLogging() || !errors.As(err, &se) && !errors.As(err, &ge) {
 			return fallback(hOpenErrorLog)
 		}
-		if se != nil && flags["json"] == true && id != "" && slices.Contains([]string{"after-not-done", "bad-after", "outcome-not-ready", "bad-after-outcome"}, se.Code) {
+		if se != nil && flags["json"] == true && id != "" && slices.Contains([]string{"after-not-done", "bad-after", "outcome-not-ready", "bad-after-outcome", "api-fit", "bad-uses"}, se.Code) {
 			out, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "refused"}, {Key: "code", Value: se.Code}, {Key: "message", Value: se.Message}}, false)
 			fmt.Fprintln(os.Stdout, string(out))
 		}
 		fmt.Fprintln(os.Stderr, "block open:", err.Error())
-		if se != nil && se.Code == "usage" {
+		if se != nil && (se.Code == "usage" || se.Code == "api-fit") {
 			return 2
 		}
 		return 1
@@ -208,6 +212,7 @@ func runBlockOpen(args []string) int {
 	}
 	opts := blockopen.Options{Home: home, Run: run, ID: id, Level: level, Kind: blockString(flags["kind"]), Owned: files, Tests: tests, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: safe, Decision: decision}
 	opts.After, _ = flags["after"].([]string)
+	opts.AllowAPIMismatch = allowAPIMismatch
 	if brief, ok := flags["brief"].(string); ok {
 		absolute, err := filepath.EvalSymlinks(brief)
 		if err != nil {
@@ -296,6 +301,9 @@ func runBlockOpen(args []string) int {
 		blockGrantExpiry(home, run, os.Stderr)
 	}
 	blockBreadcrumb("open")
+	for _, note := range result.Notes {
+		fmt.Fprintln(os.Stderr, note)
+	}
 	b := result.Block
 	tree := blockObject(b.Get("worktree"))
 	testCount := len(tests)
@@ -315,6 +323,9 @@ func runBlockOpen(args []string) int {
 		}
 		out.Set("worktree", wt)
 		out.Set("brief", brief)
+		if additive := b.Get("additive"); additive != nil {
+			out.Set("additive", additive)
+		}
 		encoded, _ := ledger.Stringify(out, false)
 		fmt.Fprintln(os.Stdout, string(encoded))
 	} else {
@@ -352,6 +363,9 @@ func runBlockOpen(args []string) int {
 			pointer = "brief: none given (--brief <file>)"
 		}
 		fmt.Fprintln(os.Stdout, pointer)
+		for _, rule := range result.Rules {
+			fmt.Fprintln(os.Stdout, rule)
+		}
 	}
 	return 0
 }

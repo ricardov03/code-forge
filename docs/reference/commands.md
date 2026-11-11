@@ -141,12 +141,16 @@ usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --
 ### block open
 
 ```text
-usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--json] [--help|-h]
+usage: code-forge block open <id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch] [--json] [--help|-h]
   --help, -h  Print this usage and exit without changing state.
   --json      Print one JSON line on success instead of text.
   --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.
                        Human checks use {clause, kind: human_check} without tests.
   --brief <file>       A file inside the repository, not inline text.
+                       Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:
+                       each named parameter exists, else exit 2 with an api-fit: line.
+                       Its extends: lines (<file>: <symbol>) own that file for additive change.
+  --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).
 ```
 
 ### block attempt

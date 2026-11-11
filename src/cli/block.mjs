@@ -367,7 +367,7 @@ export const USAGE =
 
 /** @type {Record<string, string>} */
 const VERB_USAGE = {
-  open: '<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>]',
+  open: '<id> --run <r> [--level L<n>] --owned <paths…> --acceptance <file> [--brief <file>] [--attempt <n>] [--base <sha>] [--lines <n>] [--kind code|docs|contract|light] [--tests <paths…>] [--after <ids…>] [--after-outcome <ids…>] [--allow-api-mismatch]',
   attempt: '<id> --run <r>',
   rebase: '<id> --run <r> [--head <ref>] [--accept-changed <file>… --reason <text>] [--accept-landed]',
   claim: '<id> <path> --run <r>',
@@ -394,7 +394,11 @@ function verbUsage(sub) {
     (sub === 'open' || sub === 'amend-acceptance'
       ? '  --acceptance <file>  JSON/YAML list [{clause, tests}]; tests is a nonempty list of test ids.\n' +
         '                       Human checks use {clause, kind: human_check} without tests.\n' : '') +
-    (sub === 'open' ? '  --brief <file>       A file inside the repository, not inline text.\n' : '') +
+    (sub === 'open' ? '  --brief <file>       A file inside the repository, not inline text.\n' +
+      '                       Its uses: lines (<file>: <symbol>(<param names>)) must fit the base:\n' +
+      '                       each named parameter exists, else exit 2 with an api-fit: line.\n' +
+      '                       Its extends: lines (<file>: <symbol>) own that file for additive change.\n' +
+      '  --allow-api-mismatch  Open anyway; print each api-fit: line as a note (native only).\n' : '') +
     (sub === 'land' ? '  Join block reviews, run changed gates in its worktree, then close.\n' +
       '  --max <dur>  Total review wait (default 30m); accepts 90s, 30m or 1500ms.\n' +
       '  --merge     Check the merged full suite, then merge with --no-ff in the clean main checkout.\n' +
@@ -487,7 +491,7 @@ export async function runBlock(args, deps = {}) {
   }
   let jsonOpenId;
   try {
-    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'rebase' ? ['accept-landed'] : []), ...(sub === 'land' ? ['merge', 'no-merge-gate'] : []), ...(sub === 'close' ? ['decide', 'auto-claim'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
+    const { flags, positionals } = parseFlags(rest, { values: FLAG_VALUES, multi: ['owned', 'tests', ...(sub === 'rebase' ? ['accept-changed'] : []), ...(sub === 'open' ? ['after', 'after-outcome'] : [])], booleans: ['no-require-reviews', 'remove-worktree', 'json', ...(sub === 'rebase' ? ['accept-landed'] : []), ...(sub === 'land' ? ['merge', 'no-merge-gate'] : []), ...(sub === 'close' ? ['decide', 'auto-claim'] : []), ...(sub === 'open' ? ['allow-api-mismatch'] : []), ...(['waive', 'reopen'].includes(sub) ? ['yes'] : [])] });
     // B64a: --json prints ONE JSON line on success instead of the text lines (`emit`, one object
     // per verb, built where the text is); without it every output is exactly as before (`say` is `out`)
     const json = flags.json === true;

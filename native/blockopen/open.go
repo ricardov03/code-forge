@@ -6,6 +6,7 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
+	"slices"
 	"strings"
 	"time"
 
@@ -26,6 +27,7 @@ type Options struct {
 	Attempt                                                               int64
 	Lines                                                                 any
 	BaseExplicit                                                          bool
+	AllowAPIMismatch                                                      bool
 	Settings                                                              *worktree.Settings
 	Safe                                                                  func(ledger.Object) bool
 	After                                                                 []string
@@ -37,6 +39,9 @@ type Result struct {
 	Pointer string
 	Reused  bool
 	Kept    int
+	// Notes are api-fit lines the open did not refuse on; Rules is the
+	// additive-only rule text for each extends: line of the brief.
+	Notes, Rules []string
 }
 
 func Resolve(cwd, ref string) (string, error) {
@@ -122,6 +127,18 @@ func Open(o Options) (result Result, err error) {
 	if o.Kind != "" && o.Kind != "light" && o.Kind != "code" && o.Kind != "docs" && o.Kind != "contract" {
 		return result, refusal("bad-kind", "kind must be one of code, docs, contract, light")
 	}
+	var fit APIFit
+	if o.BriefPath != "" {
+		if fit, err = ParseAPIFit(o.BriefData); err != nil {
+			return result, err
+		}
+		o.Owned = slices.Clone(o.Owned)
+		for _, extend := range fit.Extends {
+			if !slices.Contains(o.Owned, extend.File) {
+				o.Owned = append(o.Owned, extend.File)
+			}
+		}
+	}
 	if err := AssertOwned(o.Owned, "owned files", "bad-owned"); err != nil {
 		return result, err
 	}
@@ -170,6 +187,19 @@ func Open(o Options) (result Result, err error) {
 		if explicit != prior.Get("base_sha") {
 			return result, refusal("worktree-base", fmt.Sprintf("block %s: --base %s is not %s, the base of the block's worktree %s; a re-open keeps the worktree and its base — drop --base; nothing was recorded", o.ID, o.Base, stamped[:12], text(prior.Get("path"))))
 		}
+	}
+	mismatches, notes := CheckAPIFit(workspace, stamped, fit.Uses)
+	if len(mismatches) > 0 && !o.AllowAPIMismatch {
+		return result, refusal("api-fit", strings.Join(mismatches, "\n")+"\nthe brief's uses: lines do not fit base "+stamped[:12]+"; fix the brief or add an extends: line, or pass --allow-api-mismatch; nothing was recorded")
+	}
+	for _, line := range mismatches {
+		notes = append(notes, line+" (allowed by --allow-api-mismatch)")
+	}
+	rules := []string{}
+	additive := []any{}
+	for _, extend := range fit.Extends {
+		rules = append(rules, fmt.Sprintf("rules: %s %s is additive only: you may add parameters with defaults; do not remove, rename or reorder existing ones", extend.File, extend.Symbol))
+		additive = append(additive, ledger.Object{{Key: "path", Value: extend.File}, {Key: "symbol", Value: extend.Symbol}})
 	}
 	treeOpen, err := gitx.TreeAtOpen(workspace, stamped)
 	if err != nil {
@@ -305,6 +335,16 @@ func Open(o Options) (result Result, err error) {
 		if o.BriefPath != "" {
 			entry.Set("brief", ledger.Object{{Key: "path", Value: o.BriefPath}})
 		}
+		if len(additive) > 0 {
+			entry.Set("additive", additive)
+		}
+		if len(fit.Uses) > 0 {
+			recorded := []any{}
+			for _, note := range notes {
+				recorded = append(recorded, note)
+			}
+			entry.Set("api_fit", ledger.Object{{Key: "checked", Value: len(fit.Uses)}, {Key: "notes", Value: recorded}})
+		}
 		blocks.Set(o.ID, entry)
 		record.Set("blocks", blocks)
 		rows := []ledger.Object{}
@@ -341,7 +381,7 @@ func Open(o Options) (result Result, err error) {
 			dispatch.Set("after_outcome", o.AfterOutcome)
 		}
 		rows = append(rows, dispatch)
-		result = Result{Block: entry, Pointer: o.Pointer, Reused: made != nil && !made.Created, Kept: len(kept)}
+		result = Result{Block: entry, Pointer: o.Pointer, Reused: made != nil && !made.Created, Kept: len(kept), Notes: notes, Rules: rules}
 		prepared = true
 		return rows, nil
 	})
