@@ -34,13 +34,18 @@ test('Go canon, sign, ticket and ledger match every shared golden case', (t) => 
     return;
   }
   assert.equal(version.status, 0, `go version failed: ${version.error ?? version.stderr}`);
-  const result = spawnSync('go', ['test', '-count=1', '-json', './...'], {
+  // A busy machine can run the Go packages many times slower than an idle one.
+  // Go's own -timeout is the only bound; it stays below the spawn bound, so a
+  // hung Go test reports itself (and Node-driven tests stop their child first).
+  const result = spawnSync('go', ['test', '-count=1', '-timeout=10m', '-json', './...'], {
     cwd: fileURLToPath(new URL('../../native/', import.meta.url)),
-    encoding: 'utf8', timeout: 300_000, env: goEnv(),
+    encoding: 'utf8', timeout: 12 * 60_000, maxBuffer: 256 * 1024 * 1024, env: goEnv(),
   });
   const events = (result.stdout ?? '').split('\n').filter(Boolean).map((line) => JSON.parse(line));
-  const failures = events.filter((event) => event.Action === 'fail' || event.Action === 'output' && /got |want |FAIL/.test(event.Output));
-  assert.equal(result.status, 0, `Go golden assertions failed:\n${JSON.stringify(failures, null, 2)}\n${result.error ?? ''}\n${result.stderr ?? ''}`);
+  // Show every output line of each failed test, not only lines that look like got/want.
+  const failed = new Set(events.filter((event) => event.Action === 'fail').map((event) => `${event.Package} ${event.Test ?? ''}`));
+  const failures = events.filter((event) => event.Action === 'output' && failed.has(`${event.Package} ${event.Test ?? ''}`)).map((event) => event.Output).join('');
+  assert.equal(result.status, 0, `Go golden assertions failed:\n${failures}\n${result.error ?? ''}\n${result.stderr ?? ''}`);
   const packages = events.filter((event) => event.Action === 'pass' && !event.Test).map((event) => event.Package.split('/').at(-1)).sort();
   // Every package that has test files must run and pass; the core ten must always be among them.
   const listed = spawnSync('go', ['list', '-f', '{{if or .TestGoFiles .XTestGoFiles}}{{.ImportPath}}{{end}}', './...'], {
