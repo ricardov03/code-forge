@@ -614,6 +614,27 @@ function pathPattern(p) {
 /** @param {string} token @param {ForbiddenEntry} entry @returns {boolean} */
 const namesPath = (token, entry) => entry.paths.some((p) => pathPattern(p).test(token));
 
+/**
+ * The transcript scan's home-relative spelling of a `~/…` path (B415): `.code-forge/runs` or
+ * `./.code-forge/runs` at the start of a command word or after `=`, `:`, `(`, whitespace or a quote
+ * (`ls .code-forge/runs` after `cd ~`, or a project's own `.code-forge/runs`). Matched only in
+ * command words, redirect targets and file-tool paths, never in free text.
+ * @param {string} word @param {ForbiddenEntry} entry @returns {boolean}
+ */
+function namesHomeRelative(word, entry) {
+  return entry.paths.some((p) => {
+    if (!p.startsWith('~/')) return false;
+    const cacheKey = `relative\u0000${p}`;
+    let pattern = pathPatternCache.get(cacheKey);
+    if (!pattern) {
+      const glob = p.slice(2).split('*').map(escapeRegExp).join('[^/\\s]*');
+      pattern = new RegExp(`(?:^|[=:(\\s'"])(?:\\./)?${glob}(?:/|$|[\\s'";)])`);
+      pathPatternCache.set(cacheKey, pattern);
+    }
+    return pattern.test(word);
+  });
+}
+
 // ── Matching ─────────────────────────────────────────────────────────────────
 
 /**
@@ -1078,6 +1099,170 @@ function transcriptCommandText(command, unwrapShell = true) {
 }
 
 /**
+ * The text of a shell command that `path` rules scan (B415): text the command only WRITES to a
+ * file is left out, so a path named there is not an access. Two shapes are left out, nothing else:
+ *  - the body of a heredoc fed to `cat` (with a `>`/`>>` redirect) or `tee` (with a file argument),
+ *    when that command is not piped on and the body cannot run a shell substitution (quoted or
+ *    escaped delimiter, or no unescaped backtick / `$(` in the body);
+ *  - the fully quoted arguments of `echo`/`printf` whose every `>`/`>>` target is under `plans/`,
+ *    not piped on, with no backtick / `$(` inside double quotes.
+ * The command word, its other arguments and every redirect target stay scanned. Unknown syntax,
+ * malformed quotes, here-strings and unfinished heredocs scan the whole command (fail closed).
+ * Known limit: a script written this way and run later is seen only where it is run.
+ * `words` are the command's own words and redirect targets (no heredoc body, no left-out text):
+ * the home-relative spelling of a `~/…` path counts only there (whole command when fail closed).
+ * @param {string} command
+ * @returns {{text: string, words: string[]}}
+ */
+function transcriptPathText(command) {
+  const whole = { text: command, words: [command] };
+  /** @typedef {{text: string, start: number, end: number, quoted: boolean, subst: boolean}} Word */
+  /** @typedef {{words: Word[], targets: string[], inputs: string[], fdOnly: boolean, piped: boolean}} Cmd */
+  /** @returns {Cmd} */
+  const newCmd = () => ({ words: [], targets: [], inputs: [], fdOnly: false, piped: false });
+  /** @type {Cmd[]} */
+  const cmds = [newCmd()];
+  let cmd = cmds[0];
+  const next = () => { cmd = newCmd(); cmds.push(cmd); };
+  /** @param {Cmd} c */
+  const name = (c) => {
+    const first = c.words.find((w) => !/^[A-Za-z_][A-Za-z_0-9]*=/.test(w.text));
+    return first ? first.text.slice(first.text.lastIndexOf('/') + 1) : '';
+  };
+  /** @param {string} body */
+  const substitutes = (body) => {
+    for (let k = 0; k < body.length; k += 1) {
+      if (body[k] === '\\') { k += 1; continue; }
+      if (body[k] === '`' || (body[k] === '$' && body[k + 1] === '(')) return true;
+    }
+    return false;
+  };
+  /** @param {Cmd} c */
+  const writesHeredoc = (c) => {
+    if (c.piped) return false;
+    const n = name(c);
+    if (n === 'cat') return c.targets.length > 0;
+    if (n === 'tee') return c.words.slice(1).some((w) => !w.text.startsWith('-'));
+    return false;
+  };
+  /** @type {{start: number, end: number}[]} */
+  const inert = [];
+  /** @type {{delimiter: string, tabs: boolean, expands: boolean, cmd: Cmd}[]} */
+  let heredocs = [];
+  let redirect = '';
+  let i = 0;
+  while (i < command.length) {
+    const char = command[i];
+    if (char === '\n') {
+      if (redirect) return whole;
+      i += 1;
+      next();
+      for (const doc of heredocs) {
+        const start = i;
+        let closed = false;
+        while (i < command.length) {
+          const newline = command.indexOf('\n', i);
+          const end = newline < 0 ? command.length : newline;
+          const line = command.slice(i, end);
+          if ((doc.tabs ? line.replace(/^\t+/, '') : line) === doc.delimiter) {
+            const body = command.slice(start, i);
+            if (writesHeredoc(doc.cmd) && !(doc.expands && substitutes(body))) inert.push({ start, end: i });
+            i = newline < 0 ? end : end + 1;
+            closed = true;
+            break;
+          }
+          i = newline < 0 ? end : end + 1;
+        }
+        if (!closed) return whole;
+      }
+      heredocs = [];
+      continue;
+    }
+    if (/\s/.test(char)) { i += 1; continue; }
+    if (char === '#') {
+      const newline = command.indexOf('\n', i);
+      i = newline < 0 ? command.length : newline;
+      continue;
+    }
+    if (';|&()'.includes(char)) {
+      if (redirect) return whole;
+      if (char === '|' && command[i + 1] !== '|') cmd.piped = true;
+      i += (char === '|' || char === '&') && command[i + 1] === char ? 2 : 1;
+      next();
+      continue;
+    }
+    if (char === '<' || char === '>') {
+      if (redirect) return whole;
+      redirect = char;
+      i += 1;
+      if (command[i] === char) { redirect += char; i += 1; }
+      if (redirect === '<<' && command[i] === '-') { redirect += '-'; i += 1; }
+      if (redirect.startsWith('>') && command[i] === '&') { redirect += '&'; i += 1; }
+      if (command[i] === '<') return whole;
+      continue;
+    }
+    const start = i;
+    const parts = [];
+    let quotes = 0;
+    let unquoted = false;
+    let escaped = false;
+    let subst = false;
+    while (i < command.length && !/[\s;|&()<>]/.test(command[i])) {
+      const ch = command[i++];
+      if (ch === "'" || ch === '"') {
+        quotes += 1;
+        let closed = false;
+        while (i < command.length) {
+          const inside = command[i++];
+          if (inside === ch) { closed = true; break; }
+          if (ch === '"' && (inside === '`' || (inside === '$' && command[i] === '('))) subst = true;
+          if (inside === '\\' && ch === '"' && i < command.length) parts.push(command[i++]);
+          else parts.push(inside);
+        }
+        if (!closed) return whole;
+      } else {
+        unquoted = true;
+        if (ch === '`' || (ch === '$' && command[i] === '(')) subst = true;
+        if (ch === '\\') escaped = true;
+        parts.push(ch === '\\' && i < command.length ? command[i++] : ch);
+      }
+    }
+    const word = parts.join('');
+    if (redirect) {
+      if (redirect.startsWith('<<')) {
+        heredocs.push({ delimiter: word, tabs: redirect === '<<-', expands: quotes === 0 && !escaped, cmd });
+      } else if (redirect === '>' || redirect === '>>') cmd.targets.push(word);
+      else if (redirect.endsWith('&')) cmd.fdOnly = cmd.fdOnly || !/^\d+$|^-$/.test(word);
+      if (!redirect.startsWith('<<')) cmd.inputs.push(word);
+      redirect = '';
+      continue;
+    }
+    cmd.words.push({ text: word, start, end: i, quoted: quotes > 0 && !unquoted, subst });
+  }
+  if (redirect || heredocs.length > 0) return whole;
+  for (const c of cmds) {
+    const n = name(c);
+    if ((n !== 'echo' && n !== 'printf') || c.piped || c.fdOnly || c.targets.length === 0) continue;
+    if (!c.targets.every((t) => /(?:^|\/)plans\//.test(t) && !t.split('/').includes('..'))) continue;
+    const args = c.words.slice(c.words.findIndex((w) => w.text.slice(w.text.lastIndexOf('/') + 1) === n) + 1);
+    if (!args.every((w) => (w.quoted && !w.subst) || /^-[A-Za-z]+$/.test(w.text))) continue;
+    for (const w of args) if (w.quoted) inert.push({ start: w.start, end: w.end });
+  }
+  const masked = (/** @type {Word} */ w) => inert.some((span) => span.start === w.start);
+  const words = cmds.flatMap((c) => [...c.words.filter((w) => !masked(w)).map((w) => w.text), ...c.inputs]);
+  if (inert.length === 0) return { text: command, words };
+  inert.sort((a, b) => a.start - b.start);
+  const chunks = [];
+  let end = 0;
+  for (const span of inert) {
+    chunks.push(command.slice(end, span.start), ' ');
+    end = span.end;
+  }
+  chunks.push(command.slice(end));
+  return { text: chunks.join(''), words };
+}
+
+/**
  * Scan captured coder output (subprocess stdout, Solo `search_output` text, a harness log) for
  * any entry of `list`, line by line: each line is split into shell-ish tokens (whitespace,
  * quotes, `;|&(),{}[]`; `>`/`>>` kept as their own token), so a command anywhere in the line —
@@ -1090,7 +1275,9 @@ function transcriptCommandText(command, unwrapShell = true) {
  * force plain scanning. Other items scan whole, except agent_message and reasoning; a command_execution's aggregated_output
  * is never scanned; non-item events are skipped. For string commands, node/python/ruby/perl
  * heredocs and quoted -e/-c/--eval/-p/--print bodies without a process-spawn word are omitted
- * from command and contains rules only; path rules still scan the whole command. Spawn words
+ * from command and contains rules only. Path rules scan the whole command except text it only writes
+ * to a file (B415, `transcriptPathText`: a cat/tee heredoc body, quoted echo/printf arguments into
+ * `plans/`), and also match a `~/…` path's home-relative spelling (`ls .code-forge/runs`). Spawn words
  * inside a literal Python json.loads JSON argument count as data. Backticks and
  * $( count when unescaped and the shell expands the body (unquoted heredoc delimiter or double-quoted inline
  * script), or for Ruby/Perl; %x counts for Ruby/Perl, and qx for Perl. Quoted or backslash-escaped
@@ -1162,6 +1349,10 @@ export function scanTranscript(text, list = FORBIDDEN) {
   lines
     .forEach((lineText, index) => {
       let commandText;
+      /** @type {string | undefined} the text path rules scan (B415); undefined scans the line */
+      let pathLineText;
+      /** @type {string[]} words where a `~/…` path's home-relative spelling counts (B415) */
+      let relativeWords = [];
       if (claude) {
         const event = events?.[index];
         if (event?.type !== 'assistant') return;
@@ -1169,25 +1360,39 @@ export function scanTranscript(text, list = FORBIDDEN) {
         if (typeof content === 'string') return;
         const texts = [];
         const commands = [];
+        const paths = [];
+        const words = [];
         // content that is not an array is scanned whole (fail closed)
         for (const part of Array.isArray(content) ? content : [{ type: 'tool_use', input: event.message }]) {
           if (part?.type !== 'tool_use') continue;
           const input = part.input;
           let text = JSON.stringify(input) ?? '';
           let command = text;
+          let pathText = text;
           if (part.name === 'Bash' && typeof input?.command === 'string') {
             text = input.command;
             command = transcriptCommandText(text);
+            const scanned = transcriptPathText(text);
+            pathText = scanned.text;
+            words.push(...scanned.words);
           } else if (CLAUDE_WRITE_TOOLS.has(part.name)) {
             const path = input?.file_path ?? input?.notebook_path;
-            if (typeof path === 'string') text = command = `Write(${JSON.stringify(path)})`;
+            if (typeof path === 'string') text = command = pathText = `Write(${JSON.stringify(path)})`;
+          }
+          if (CLAUDE_FILE_TOOLS.has(part.name) || CLAUDE_WRITE_TOOLS.has(part.name)) {
+            for (const key of ['file_path', 'notebook_path', 'path', 'pattern']) {
+              if (typeof input?.[key] === 'string') words.push(input[key]);
+            }
           }
           texts.push(text);
           commands.push(command);
+          paths.push(pathText);
         }
         if (texts.length === 0) return;
         lineText = texts.join('\n');
         commandText = commands.join('\n');
+        pathLineText = paths.join('\n');
+        relativeWords = words;
       } else if (events !== null) {
         const event = events[index];
         if (!event?.type.startsWith('item.') || !event.item) return;
@@ -1196,12 +1401,17 @@ export function scanTranscript(text, list = FORBIDDEN) {
         // a command that is not a string is scanned with the rest of its item (fail closed), its output left out
         if (item.type === 'command_execution') {
           lineText = typeof item.command === 'string' ? item.command : JSON.stringify({ ...item, aggregated_output: undefined });
-          if (typeof item.command === 'string') commandText = transcriptCommandText(lineText);
+          if (typeof item.command === 'string') {
+            commandText = transcriptCommandText(lineText);
+            ({ text: pathLineText, words: relativeWords } = transcriptPathText(lineText));
+          }
         }
         else if (item.type === 'file_change') {
           lineText = (Array.isArray(item.changes) ? item.changes : [])
             .filter((change) => typeof change?.path === 'string')
             .map((change) => `Write(${JSON.stringify(change.path)})`).join(' ');
+          relativeWords = (Array.isArray(item.changes) ? item.changes : [])
+            .filter((change) => typeof change?.path === 'string').map((change) => change.path);
         } else lineText = JSON.stringify(item);
       }
       const ids = new Set();
@@ -1210,15 +1420,16 @@ export function scanTranscript(text, list = FORBIDDEN) {
       for (const variant of unescaped === lineText ? [lineText] : [lineText, unescaped]) {
         const tokens = variant.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
         const commandTokens = commandText === undefined ? tokens : commandText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
+        const pathTokens = pathLineText === undefined ? tokens : pathLineText.split(/(>>?)|[\s'"`;|&(),{}[\]]+/).filter((t) => typeof t === 'string' && t.length > 0);
         let firstWrite = -1;
-        for (let i = 0; i < tokens.length && firstWrite < 0; i += 1) {
-          if (writeStarts.has(commandName(tokens[i])) && isWriteCommand(tokens.slice(i, i + TRANSCRIPT_WINDOW))) firstWrite = i;
+        for (let i = 0; i < pathTokens.length && firstWrite < 0; i += 1) {
+          if (writeStarts.has(commandName(pathTokens[i])) && isWriteCommand(pathTokens.slice(i, i + TRANSCRIPT_WINDOW))) firstWrite = i;
         }
         for (const entry of list) {
           if (entry.kind === 'contains' && matchesEntry([], commandTokens, entry)) ids.add(entry.id);
           if (entry.kind !== 'path') continue;
-          const named = tokens.findIndex((t, i) => (entry.access === 'readwrite' || (firstWrite >= 0 && i > firstWrite)) && namesPath(t, entry));
-          if (named >= 0) ids.add(entry.id);
+          const named = pathTokens.findIndex((t, i) => (entry.access === 'readwrite' || (firstWrite >= 0 && i > firstWrite)) && namesPath(t, entry));
+          if (named >= 0 || (entry.access === 'readwrite' && relativeWords.some((w) => namesHomeRelative(w, entry)))) ids.add(entry.id);
         }
         for (let i = 0; i < commandTokens.length; i += 1) {
           if (!firstWords.has(commandName(commandTokens[i])) && !commandTokens[i].includes('code-forge')) continue;
@@ -1243,6 +1454,9 @@ const CLAUDE_LINE_TYPES = new Set([
   'user', 'assistant', 'system', 'summary', 'attachment', 'api-request', 'api-request-shape', 'api-request-blob',
   'file-history-snapshot', 'progress', 'queue-operation',
 ]);
+
+/** Claude Code file tools whose path inputs also count for a home-relative spelling (B415). */
+const CLAUDE_FILE_TOOLS = new Set(['Read', 'Glob', 'Grep', 'LS', 'NotebookRead']);
 
 /** Claude Code tools whose tool_use is scanned as a write of its file path only. */
 const CLAUDE_WRITE_TOOLS = new Set(['Write', 'Edit', 'MultiEdit', 'NotebookEdit']);
