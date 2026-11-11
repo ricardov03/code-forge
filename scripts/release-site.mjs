@@ -1,26 +1,52 @@
 #!/usr/bin/env node
 /** Maintainer release automation stays in Node, alongside release.mjs and gen-site-data.mjs. */
 import { spawnSync } from 'node:child_process';
-import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, symlinkSync, writeFileSync } from 'node:fs';
+import { existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, realpathSync, rmdirSync, statSync, symlinkSync, writeFileSync } from 'node:fs';
 import path from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { stripVTControlCharacters } from 'node:util';
 import { parse } from 'yaml';
 
-const USAGE = 'usage: npm run release:site -- [--site <dir>] [--wait-min <minutes>] [--dry-run]';
+const USAGE = 'usage: npm run release:site -- [--site <dir>] [--wait-min <minutes>] [--deploy-dir <path>] [--dry-run]';
 const DATA = 'src/data/site-data.json';
-const DEPLOY = ['wrangler', 'pages', 'deploy', 'dist', '--project-name', 'code-forge-ai', '--branch', 'main'];
+/** The site's build:site merges the marketing pages and /docs into this folder; `dist` alone has no /docs. */
+const DEPLOY_DIR = 'docs-site/site/.pages-out';
+/** @param {string} dir */
+const deployArgv = (dir) => ['wrangler', 'pages', 'deploy', dir, '--project-name', 'code-forge-ai', '--branch', 'main'];
+
+/** A deploy folder must be relative to the site root and stay inside it. @param {string} value */
+function deployDir(value) {
+  if (path.isAbsolute(value) || path.win32.isAbsolute(value)) throw new Error(`--deploy-dir must be relative to the site root: ${value}`);
+  const parts = value.split(/[\\/]+/);
+  if (parts.includes('..')) throw new Error(`--deploy-dir must stay inside the site root: ${value}`);
+  const dir = path.posix.normalize(parts.filter(Boolean).join('/'));
+  if (dir === '.' || dir === '') throw new Error('--deploy-dir must name a folder below the site root');
+  return dir;
+}
+
+/** After the gates: the deploy folder must exist inside the tree and hold index.html. @param {string} tree @param {string} dir */
+function checkDeployDir(tree, dir) {
+  const full = path.join(tree, dir);
+  const index = path.join(full, 'index.html');
+  const missing = `Deploy folder ${dir} is missing or has no index.html after the build; no commit or deploy; the old site remains live`;
+  if (!existsSync(full) || !statSync(full).isDirectory()) throw new Error(missing);
+  const realTree = realpathSync(tree);
+  const real = realpathSync(full);
+  if (real !== realTree && !real.startsWith(realTree + path.sep)) throw new Error(`Deploy folder ${dir} resolves outside the site tree; no commit or deploy`);
+  if (!existsSync(index) || !statSync(index).isFile()) throw new Error(missing);
+}
 
 /** @param {string[]} args */
 function options(args) {
-  const opts = { site: '../code-forge-site', waitMin: 20, dryRun: false };
+  const opts = { site: '../code-forge-site', waitMin: 20, dryRun: false, deployDir: DEPLOY_DIR };
   for (let i = 0; i < args.length; i++) {
     const flag = args[i];
     if (flag === '--dry-run') opts.dryRun = true;
-    else if (flag === '--site' || flag === '--wait-min') {
+    else if (flag === '--site' || flag === '--wait-min' || flag === '--deploy-dir') {
       const value = args[++i];
       if (!value || value.startsWith('--')) throw new Error(`${flag} needs a value\n${USAGE}`);
       if (flag === '--site') opts.site = value;
+      else if (flag === '--deploy-dir') opts.deployDir = deployDir(value);
       else {
         opts.waitMin = Number(value);
         if (!Number.isFinite(opts.waitMin) || opts.waitMin <= 0) throw new Error('--wait-min must be a positive number');
@@ -171,13 +197,15 @@ async function main() {
         }
       }
       if (failures.length) throw new Error(`Site gates failed: ${failures.join(', ')}; no commit or deploy; the old site remains live`);
+      checkDeployDir(tree, opts.deployDir);
+      const deploy = deployArgv(opts.deployDir);
       if (opts.dryRun) {
-        process.stdout.write(`Would commit ${DATA} on ${branch}\nWould deploy: npx ${DEPLOY.join(' ')}\n`);
+        process.stdout.write(`Would commit ${DATA} on ${branch}\nWould deploy: npx ${deploy.join(' ')}\n`);
       } else {
         checked(tree, ['git', 'switch', '-c', branch]);
         checked(tree, ['git', 'add', '--', DATA]);
         checked(tree, ['git', '-c', 'core.hooksPath=/dev/null', 'commit', '--only', '-m', `Release site ${tag}`, '--', DATA]);
-        const output = checked(tree, ['npx', ...DEPLOY], 600000);
+        const output = checked(tree, ['npx', ...deploy], 600000);
         process.stdout.write(output);
         const url = stripVTControlCharacters(output).match(/https:\/\/[^\s<>"']+/)?.[0];
         if (url) process.stdout.write(`Deploy URL: ${url}\n`);

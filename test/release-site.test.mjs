@@ -43,7 +43,13 @@ if (a[0] === 'view') {
     fs.mkdirSync(path.join('node_modules', cache), {recursive: true});
     fs.writeFileSync(path.join('node_modules', cache, 'state'), 'new build cache');
   }
-  fs.mkdirSync('dist', {recursive: true}); fs.writeFileSync('dist/index.html', 'new site');
+  // Like the real site: astro writes only the marketing pages to dist, then the merge step writes the full site.
+  fs.mkdirSync('dist', {recursive: true}); fs.writeFileSync('dist/index.html', 'marketing only');
+  const merged = 'docs-site/site/.pages-out';
+  if (process.env.MERGED !== 'none') fs.mkdirSync(merged + '/docs', {recursive: true});
+  if (process.env.MERGED === '') {
+    fs.writeFileSync(merged + '/index.html', 'merged site'); fs.writeFileSync(merged + '/docs/index.html', 'docs');
+  }
   // A build changing unrelated tracked files must never put them in the release commit.
   fs.writeFileSync('README.md', 'build changed this file');
   if (process.env.FAIL_GATE === 'build:site') process.exit(4);
@@ -54,15 +60,17 @@ const FAKE_WRANGLER = `#!/usr/bin/env node
 const fs = require('node:fs');
 const cp = require('node:child_process');
 const a = process.argv.slice(2);
-if (a.join(' ') !== 'pages deploy dist --project-name code-forge-ai --branch main') process.exit(9);
+const dir = a[2];
+if (a.length !== 7 || a.slice(0, 2).join(' ') !== 'pages deploy' || a.slice(3).join(' ') !== '--project-name code-forge-ai --branch main') process.exit(9);
 const commit = cp.execFileSync('git', ['log', '-1', '--format=%s'], {encoding:'utf8'}).trim();
 fs.appendFileSync(process.env.EVENTS, JSON.stringify('deploy:' + commit) + '\\n');
-if (fs.readFileSync('dist/index.html', 'utf8') !== 'new site') process.exit(8);
+fs.appendFileSync(process.env.DEPLOYED, JSON.stringify({ dir, index: fs.readFileSync(dir + '/index.html', 'utf8'),
+  docs: fs.existsSync(dir + '/docs/index.html') }) + '\\n');
 console.log('Deployment complete: https://fixture.code-forge-ai.pages.dev');
 `;
 
-/** @param {{delay?: number, never?: boolean, fail?: string, modules?: boolean, nested?: boolean}} [opts] */
-function fixture({ delay = 0, never = false, fail = '', modules = false, nested = false } = {}) {
+/** @param {{delay?: number, never?: boolean, fail?: string, modules?: boolean, nested?: boolean, merged?: '' | 'none' | 'noindex'}} [opts] */
+function fixture({ delay = 0, never = false, fail = '', modules = false, nested = false, merged = '' } = {}) {
   const root = mkdtempSync(path.join(PARENT, 'case-'));
   const work = path.join(root, 'package');
   const site = path.join(root, 'code-forge-site');
@@ -70,6 +78,7 @@ function fixture({ delay = 0, never = false, fail = '', modules = false, nested 
   const env = { ...process.env, HOME: path.join(root, 'home'),
     PATH: `${bin}${path.delimiter}${process.env.PATH}`, EVENTS: path.join(root, 'events'),
     POLLS: path.join(root, 'polls'), DELAY: String(delay), NEVER: never ? '1' : '', FAIL_GATE: fail,
+    DEPLOYED: path.join(root, 'deployed'), MERGED: merged,
     GIT_CONFIG_NOSYSTEM: '1', GIT_CONFIG_GLOBAL: os.devNull,
     GIT_AUTHOR_NAME: 'Test', GIT_AUTHOR_EMAIL: 'test@example.invalid',
     GIT_COMMITTER_NAME: 'Test', GIT_COMMITTER_EMAIL: 'test@example.invalid' };
@@ -111,7 +120,7 @@ if (process.argv[1]?.endsWith('/release-site.mjs')) {
     put(bin, name, content);
     chmodSync(path.join(bin, name), 0o755);
   }
-  put(site, '.gitignore', 'node_modules/\ndist/\n.code-forge-tmp/\n');
+  put(site, '.gitignore', 'node_modules/\ndist/\n.pages-out/\n.code-forge-tmp/\n');
   put(site, 'src/data/site-data.json', '{"version":"0.20.0"}\n');
   put(site, 'README.md', 'original site\n');
   put(site, 'package.json', '{"name":"fixture-site","version":"1.0.0"}\n');
@@ -149,7 +158,8 @@ if (process.env.FAIL_GATE === name) process.exit(3);
   const run = (args = []) => spawnSync(process.execPath, [NPM, 'run', 'release:site', '--if-present', '--', ...args],
     { cwd: work, env, encoding: 'utf8', timeout: 20000 });
   const events = () => existsSync(env.EVENTS) ? readFileSync(env.EVENTS, 'utf8').trim().split('\n').map((s) => JSON.parse(s)) : [];
-  return { root, work, site, run, events, git, initialHead };
+  const deployed = () => existsSync(env.DEPLOYED) ? readFileSync(env.DEPLOYED, 'utf8').trim().split('\n').map((s) => JSON.parse(s)) : [];
+  return { root, work, site, run, events, deployed, git, initialHead };
 }
 
 /** @param {string} dir @returns {Record<string, string>} */
@@ -186,7 +196,7 @@ test('wait limit exits 1 with a clear timeout and changes no site files or refs'
   assert.equal(existsSync(path.join(f.site, '.code-forge-tmp')), false, 'no temporary worktree on timeout');
 });
 
-test('green gates commit only the data file on the release branch and deploy dist once', (t) => {
+test('green gates commit only the data file on the release branch and deploy the merged site folder once', (t) => {
   const f = fixture();
   const start = performance.now();
   const r = f.run(['--site', f.site]);
@@ -196,6 +206,7 @@ test('green gates commit only the data file on the release branch and deploy dis
   assert.equal(f.git(f.site, ['diff-tree', '--no-commit-id', '--name-only', '-r', 'release-site/v0.21.0']), 'src/data/site-data.json', 'exactly one committed path');
   assert.equal(f.git(f.site, ['rev-list', '--count', 'main..release-site/v0.21.0']), '1', 'exactly one new commit');
   assert.equal(JSON.parse(f.git(f.site, ['show', 'release-site/v0.21.0:src/data/site-data.json'])).version, '0.21.0');
+  assert.deepEqual(f.deployed(), [{ dir: 'docs-site/site/.pages-out', index: 'merged site', docs: true }], 'the default folder holds the merged site with /docs');
   assert.match(r.stdout, /https:\/\/fixture\.code-forge-ai\.pages\.dev/);
   assert.match(r.stdout, /merge release-site\/v0\.21\.0/);
   assert.match(r.stdout, /push origin main/);
@@ -240,7 +251,8 @@ test('dry run executes generation and every gate but makes zero commits or deplo
   assert.equal(r.status, 0, r.stdout + r.stderr);
   assert.deepEqual(f.events(), ['npm:served', 'generate:v0.21.0', 'npm:ci:release-site-0.21.0', 'build:site', 'gate:links', 'gate:accessibility', 'gate:test']);
   assert.match(r.stdout, /Would commit src\/data\/site-data.json.*release-site\/v0.21.0/);
-  assert.match(r.stdout, /npx wrangler pages deploy dist --project-name code-forge-ai --branch main/);
+  assert.match(r.stdout, /Would deploy: npx wrangler pages deploy docs-site\/site\/\.pages-out --project-name code-forge-ai --branch main\n/);
+  assert.deepEqual(f.deployed(), [], 'zero deploy calls');
   assert.equal(f.git(f.site, ['show-ref', '--heads']), `${f.initialHead} refs/heads/main`);
   assert.equal(f.git(f.site, ['worktree', 'list', '--porcelain']).split('worktree ').length - 1, 1);
 });
@@ -257,4 +269,44 @@ test('a nested site package builds with the main checkout dependencies linked, o
   assert.equal(r2.status, 0, r2.stdout + r2.stderr);
   assert.deepEqual(fresh.events().filter((e) => e.startsWith('npm:ci')).sort(), ['npm:ci:docs', 'npm:ci:release-site-0.21.0'], 'one install per package');
   assert.equal(fresh.git(fresh.site, ['worktree', 'list', '--porcelain']).split('worktree ').length - 1, 1);
+});
+
+test('--deploy-dir dist deploys the dist folder instead of the merged one', () => {
+  const f = fixture();
+  const r = f.run(['--deploy-dir', 'dist']);
+  assert.equal(r.status, 0, r.stdout + r.stderr);
+  assert.deepEqual(f.deployed(), [{ dir: 'dist', index: 'marketing only', docs: false }]);
+  const dry = fixture().run(['--deploy-dir', 'dist', '--dry-run']);
+  assert.equal(dry.status, 0, dry.stdout + dry.stderr);
+  assert.match(dry.stdout, /Would deploy: npx wrangler pages deploy dist --project-name code-forge-ai --branch main\n/);
+});
+
+test('a missing deploy folder or index.html fails after the gates with no commit and no deploy', () => {
+  for (const merged of /** @type {const} */ (['none', 'noindex'])) {
+    for (const args of [[], ['--dry-run']]) {
+      const f = fixture({ merged });
+      const r = f.run(args);
+      assert.equal(r.status, 1, `${merged} ${args}: ${r.stdout}${r.stderr}`);
+      assert.match(r.stderr, /Deploy folder docs-site\/site\/\.pages-out is missing or has no index\.html after the build; no commit or deploy/);
+      assert.deepEqual(f.events().slice(-3), ['gate:links', 'gate:accessibility', 'gate:test'], `${merged}: every gate ran, zero deploys`);
+      assert.deepEqual(f.deployed(), [], `${merged}: zero deploy calls`);
+      assert.doesNotMatch(r.stdout, /Would deploy/);
+      assert.equal(f.git(f.site, ['show-ref', '--heads']), `${f.initialHead} refs/heads/main`, `${merged}: zero new commits or branches`);
+      assert.equal(f.git(f.site, ['worktree', 'list', '--porcelain']).split('worktree ').length - 1, 1, `${merged}: zero temporary worktrees`);
+    }
+  }
+});
+
+test('--deploy-dir rejects absolute paths and paths that leave the site root before any work', () => {
+  /** @type {Array<[string, RegExp]>} */
+  const cases = [['/tmp/site', /must be relative to the site root/], ['../outside', /must stay inside the site root/],
+    ['docs-site/../../outside', /must stay inside the site root/], ['.', /must name a folder below the site root/]];
+  for (const [value, message] of cases) {
+    const f = fixture();
+    const r = f.run(['--deploy-dir', value]);
+    assert.equal(r.status, 1, `${value}: ${r.stdout}${r.stderr}`);
+    assert.match(r.stderr, message, value);
+    assert.deepEqual(f.events(), [], `${value}: zero polls, gates or deploys`);
+    assert.equal(f.git(f.site, ['show-ref', '--heads']), `${f.initialHead} refs/heads/main`);
+  }
 });

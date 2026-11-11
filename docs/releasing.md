@@ -216,6 +216,8 @@ After publishing to npm, run:
 npm run release:site
 # Optional: another site checkout, or a check without committing or deploying
 npm run release:site -- --site ../code-forge-site --wait-min 20 --dry-run
+# Optional: deploy another folder, relative to the site root
+npm run release:site -- --deploy-dir dist --dry-run
 ```
 
 The command reads the package name and version from `package.json` and requires its local
@@ -233,9 +235,14 @@ links installed dependencies from the main checkout's `node_modules` if availabl
 and `gates.test` from that worktree's `.code-forge.yml`.
 
 Any failing gate is named, prevents both the commit and deploy, and leaves the old site live.
-After all gates pass, it creates `release-site/vX.Y.Z`, commits only `src/data/site-data.json`,
-and runs `npx wrangler pages deploy dist --project-name code-forge-ai --branch main`, printing
-the deploy URL. Wrangler must already be authenticated. The temporary worktree is removed
+After all gates pass, the deploy folder must exist and hold `index.html`; otherwise the command
+exits 1 with no commit and no deploy. The deploy folder defaults to `docs-site/site/.pages-out`,
+the full site that `build:site` merges (marketing pages plus `/docs`, `llms.txt` and `_headers`);
+`dist` alone holds only the marketing pages. `--deploy-dir <path>` picks another folder; it must
+be relative to the site root and may not contain `..`. Then it creates `release-site/vX.Y.Z`,
+commits only `src/data/site-data.json`, and runs
+`npx wrangler pages deploy <deploy folder> --project-name code-forge-ai --branch main`, printing
+the deploy URL. `--dry-run` prints this command as its `Would deploy:` line. Wrangler must already be authenticated. The temporary worktree is removed
 on success or failure. An existing release branch is refused; a deployment failure keeps
 the commit available for the owner to inspect and retry manually.
 

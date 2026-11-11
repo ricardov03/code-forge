@@ -15,6 +15,9 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Fixed
 
 - The config and command references now describe the merge gate as it runs: `gates.merge_gate` runs the Go test selection for the merge, never the full suite, reuses a green gate on the same tree (`gate_reused`) and is always on in a batch; `block land` usage lists `--push`, `--watch-ci`, `--copy-links` and batch land, and `gates run` usage lists `--full`, `--preflight` and `--no-preflight` (B444)
+- `npm run release:site` deploys the merged site folder `docs-site/site/.pages-out` (marketing pages plus `/docs`)
+  instead of `dist`, which has no `/docs`; `--deploy-dir <path>` picks another folder inside the site root, and a
+  missing folder or `index.html` after the gates stops before commit and deploy (B446)
 
 ## [0.22.0] — 2026-11-11
 
