@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -34,6 +35,7 @@ func newFitFixture(t *testing.T) fitFixture {
 		t.Helper()
 		cmd := exec.Command("git", args...)
 		cmd.Dir = repo
+		cmd.Env = gitx.ChildEnv()
 		out, err := cmd.CombinedOutput()
 		if err != nil {
 			t.Fatalf("git %v: %v %s", args, err, out)
@@ -171,6 +173,7 @@ func TestAPIFitLanguageDefinitions(t *testing.T) {
 	}
 	cmd := exec.Command("sh", "-c", "git add . && git -c user.name=F -c user.email=f@example.invalid -c commit.gpgsign=false commit -qm langs && git rev-parse HEAD")
 	cmd.Dir = repo.repo
+	cmd.Env = gitx.ChildEnv()
 	out, err := cmd.CombinedOutput()
 	if err != nil {
 		t.Fatalf("commit: %v %s", err, out)

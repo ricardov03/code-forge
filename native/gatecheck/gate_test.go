@@ -42,6 +42,7 @@ func b365Gate(t *testing.T, prepare func(repo, baseHash string) []Row) ([]string
 		}
 	}
 	gitInit := exec.Command("git", "init", "-q", repo)
+	gitInit.Dir = repo
 	gitInit.Env = gitx.ChildEnv()
 	if out, err := gitInit.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
@@ -145,6 +146,7 @@ func TestB365UnchangedFileWithFindingIsRefused(t *testing.T) {
 func TestB365NoChangeOnlyIsNoWork(t *testing.T) {
 	repo := t.TempDir()
 	gitInit := exec.Command("git", "init", "-q", repo)
+	gitInit.Dir = repo
 	gitInit.Env = gitx.ChildEnv()
 	if out, err := gitInit.CombinedOutput(); err != nil {
 		t.Fatalf("git init: %v: %s", err, out)
