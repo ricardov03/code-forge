@@ -148,6 +148,16 @@ refuses `coder report FAILED: no review-file ticket id for <files>` only when, u
 file the review gate accepts has no reviewed line from the close and no hand line for it in the
 report.
 
+`block ready` and `block close` find review tickets by themselves (B405). Under `--report`, a
+changed file with no `reviewed <path> ticket <id>` line, no reviewed line from the close and no
+signed approval is credited by the latest done review-file ticket of the same run, block and file
+whose content hash equals the file's current content: a queue ticket with a `.done` marker for a
+real review (not stale, unavailable or refused). A ticket for older content, another block, or one
+not done yet credits nothing, and the check still says
+`coder report FAILED: no review-file ticket id for <files>`. Report ticket lines stay optional and
+are still accepted. This credit only satisfies the report check; the review gate still decides
+whether the current content is approved.
+
 Block land gates use `{test_files}` to run impacted tests: changed tests, stem-paired
 tests and dependent tests, with the documented scope fallbacks above. The suite wrapper
 keeps its sandbox and both leak checks for scoped runs. The orchestrator runs `npm test`

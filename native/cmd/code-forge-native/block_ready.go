@@ -223,7 +223,7 @@ func runBlockReady(args []string) int {
 		} else {
 			// Report credit can inspect tickets but never enqueues or writes them.
 			lines, _ := closeReviewedLines(p.run, p.id, top, filepath.Join(mainTop, ".code-forge/queue"), entry, files, gate.Waived, inTree, len(gate.Blockers) == 0)
-			check, _ := closeReport(reportText, p.run, p.id, files, lines, rows, key)
+			check, _ := closeReport(reportText, p.run, p.id, filepath.Join(mainTop, ".code-forge/queue"), files, lines, rows, key)
 			blockers = append(blockers, check.Blockers...)
 		}
 	}
