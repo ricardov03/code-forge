@@ -74,7 +74,7 @@ func newLandSuiteLogFixture(t *testing.T, bad int, output string) *landBatchFixt
   exit 0
 fi
 for id in B1 B2 B3; do
-  if [ -f "$id.mjs" ] && [ "$(cat "$id.mjs")" = bad ]; then cat "$HOME/suite-output"; exit 1; fi
+  if [ -f "src/$id.mjs" ] && [ "$(cat "src/$id.mjs")" = bad ]; then cat "$HOME/suite-output"; exit 1; fi
 done
 printf 'ok 1 - integration contract\n'`
 	cfg := landTestConfig([]string{"/bin/sh", "-c", command, "gate", "{test_files}"})
@@ -96,10 +96,10 @@ printf 'ok 1 - integration contract\n'`
 		if i == bad {
 			content = "bad\n"
 		}
-		f.write(tree, id+".mjs", content)
+		f.write(tree, "src/"+id+".mjs", content)
 		f.git(tree, "add", ".")
 		f.git(tree, "commit", "-qm", id)
-		blocks.Set(id, ledger.Object{{Key: "status", Value: "closed"}, {Key: "owned_files", Value: []any{id + ".mjs"}}, {Key: "kind", Value: "code"}, {Key: "base_sha", Value: f.base}, {Key: "base_branch", Value: "main"}, {Key: "test_files", Value: []any{"scoped.test.mjs"}}, {Key: "worktree", Value: ledger.Object{{Key: "path", Value: tree}, {Key: "branch", Value: "block-" + id}, {Key: "base_sha", Value: f.base}}}})
+		blocks.Set(id, ledger.Object{{Key: "status", Value: "closed"}, {Key: "owned_files", Value: []any{"src/" + id + ".mjs"}}, {Key: "kind", Value: "code"}, {Key: "base_sha", Value: f.base}, {Key: "base_branch", Value: "main"}, {Key: "test_files", Value: []any{"scoped.test.mjs"}}, {Key: "worktree", Value: ledger.Object{{Key: "path", Value: tree}, {Key: "branch", Value: "block-" + id}, {Key: "base_sha", Value: f.base}}}})
 	}
 	record := ledger.Object{{Key: "run_id", Value: "r-batch-unit"}, {Key: "project", Value: "fixture"}, {Key: "workspace", Value: f.repo}, {Key: "status", Value: "active"}, {Key: "blocks", Value: blocks}, {Key: "orphans", Value: []any{}}}
 	if err := state.SaveRun(f.home, record); err != nil {
