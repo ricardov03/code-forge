@@ -81,6 +81,26 @@ Rows carry `scope: changed`. Fallback rows also carry a reason:
 - `unpaired` uses the normal test scope when a changed source has no test pair.
 - `threshold` runs the full suite above `gates.full_suite_threshold_files` changed files.
 - `no_changes` uses the normal block scope when nothing is left to run.
+- `go_only` runs a fixed small scope for a block with no Node product file (B399b).
+
+A block is Go-only when every owned path is under `native/`, `docs/`, `plans/` or
+`.github/`, is a runnable test file under `test/` (`*.test.*` or `*.spec.*`), is
+`CHANGELOG.md` or another `*.md` file, or is `scripts/build-native.mjs`. A Node product
+file is any path under `src/` or `bin/`, a `scripts/` `.mjs` file other than
+`scripts/build-native.mjs`, `package.json` or `package-lock.json`; one such file, or a test
+helper, fixture, directory or glob under `test/`, keeps the scope rules above. The test gate
+must take `{test_files}`. With `--changed`, Go then runs the test gate once with the block's
+`--tests` entries under `test/`, its owned runnable tests, `test/compat/go.test.mjs` (it runs
+`go test ./...`), and the compat tests named after the Go files the block owns. For
+`native/cmd/code-forge-native/a_b_c.go` the names tried are `a-b-c`, then `a-b`, then `a`; the
+longest one that matches wins. A compat test `test/compat/[parity-]<name>.test.mjs` matches when
+`<name>` is that key or starts with key plus `-`. A file under `native/<package>/` tries the
+package name. So `status_direct.go` adds `parity-status-direct`, `status.go` adds
+`parity-status` and `parity-status-direct`, and `native/daemon/` adds `daemon`. A file with no
+match adds nothing. The gate result and `gate.done` carry `scope: related`, `reason: go_only`,
+`test_count` and, on `gate.done`, `test_files`. A text-only skip or a reused full run still wins.
+`block land` uses this scope for its changed gates; `block land --batch` keeps its own plan:
+a full fallback defers to the one batch merge gate (B398).
 
 The orchestrator runs full gates before `block close` (D2).
 

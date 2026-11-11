@@ -49,6 +49,9 @@ locks and signed ledger rows as Node.
 | `block land` | Plain land, `--merge` with the full merge gate, `--no-merge-gate`, active grants and `hooks.on_block_end`. | No compatible join daemon, unsupported state, a light block, or a run with `close.require_human` or an external reviewer. Read-only pre-checks finish before the first write. The B282 reason code names the step. |
 
 The Go engine skips the test gate for proven text-only `gates run --changed` changes.
+For a block with no Node product file, `gates run --changed` stays in Go and runs only the
+block's tests, `test/compat/go.test.mjs` and the compat tests named after its Go files
+(reason `go_only`), never the full Node suite.
 Its merge gate can also reuse a green full run for the exact merged tree.
 See [how it works](how-it-works.md) for the scope rules and reuse checks.
 
