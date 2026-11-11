@@ -23,6 +23,7 @@ type landBatchBlock struct {
 	entry                  ledger.Object
 	gatesMs                int64
 	fullScope, rebased     bool
+	node                   bool // owns or changes a Node product file
 }
 
 // Batch landing consumes closed blocks. Keep the open/join/close single-block
@@ -135,7 +136,11 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if err != nil {
 				return err
 			}
-			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry})
+			node, err := landBatchNodeProduct(tree.Path, blockString(wt.Get("base_sha")), entry)
+			if err != nil {
+				return err
+			}
+			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry, node: node})
 		}
 		// Block i is rebased onto trial prefix i. Only prefixes that reach main
 		// may remain as a base: every later block returns to its original head
@@ -210,7 +215,13 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			}
 			block.fullScope = full
 			started := time.Now()
-			err = landBatchChanged(ctx, home, workspace, run, block)
+			if full {
+				// B398: the merge gate below runs the full suite once for the
+				// whole batch and bisects to name a failing block.
+				err = landBatchDefer(home, run, block)
+			} else {
+				err = landBatchChanged(ctx, home, workspace, run, block)
+			}
 			block.gatesMs = time.Since(started).Milliseconds()
 			if err != nil {
 				return err
@@ -269,6 +280,22 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			}
 			stoppedID = strings.Join(ids, " ")
 			return fmt.Errorf("batch timed out after %dms during the full suite; no block landed", maxMs)
+		}
+		// B398: the full suite is the Node suite; a batch with no Node product
+		// file has nothing for it to check.
+		mergeReason := "go_only"
+		for _, block := range batch {
+			if block.node {
+				mergeReason = "node_product"
+			}
+		}
+		if mergeReason == "go_only" {
+			tested[len(batch)] = ""
+			if json {
+				emit(ledger.Object{{Key: "event", Value: "merge_gate"}, {Key: "skipped", Value: true}, {Key: "reason", Value: mergeReason}})
+			} else {
+				fmt.Fprintln(os.Stdout, "merge gate: skipped full suite (go_only: no Node product file in the batch)")
+			}
 		}
 		green, culprit, failure := len(batch), -1, ""
 		if reason := testPrefix(len(batch)); reason != "" {
@@ -337,7 +364,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		if err != nil {
 			return err
 		}
-		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.batch"}, {Key: "blocks", Value: ids}, {Key: "tree", Value: strings.TrimSpace(tree)}, {Key: "suite_ms", Value: suiteMs}, {Key: "landed", Value: ids[:green]}}); err != nil {
+		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.batch"}, {Key: "blocks", Value: ids}, {Key: "tree", Value: strings.TrimSpace(tree)}, {Key: "suite_ms", Value: suiteMs}, {Key: "merge_gate_reason", Value: mergeReason}, {Key: "landed", Value: ids[:green]}}); err != nil {
 			return err
 		}
 		if culprit >= 0 {
@@ -428,6 +455,38 @@ func landBatchGateScope(args []string, options gatesOptions) (full, safe bool) {
 	return true, safe && code == 0
 }
 
+// landBatchDefer records that a block's full-fallback gate is left to the
+// batch merge gate instead of running a full suite per block (B398).
+func landBatchDefer(home, run string, block *landBatchBlock) error {
+	row := ledger.Object{{Key: "event", Value: "gate.deferred"}, {Key: "block", Value: block.id}, {Key: "worktree", Value: block.tree.Path}, {Key: "scope", Value: "deferred"}, {Key: "reason", Value: "merge-gate"}, {Key: "test_base", Value: blockString(block.entry.Get("base_sha"))}}
+	_, err := state.WriteSigned(home, run, row)
+	return err
+}
+
+// landBatchNodeProduct reports whether a block owns or changes a file the
+// Node suite tests: src/**, bin/**, scripts/**/*.mjs (not the native build
+// script), package.json or package-lock.json.
+func landBatchNodeProduct(tree, base string, entry ledger.Object) (bool, error) {
+	files := gates.Strings(entry.Get("owned_files"))
+	changed, err := gitx.Run(tree, "diff", "--name-only", "-z", base, "HEAD", "--")
+	if err != nil {
+		return false, err
+	}
+	files = append(files, strings.Split(changed, "\x00")...)
+	for _, file := range files {
+		file = strings.TrimPrefix(filepath.ToSlash(file), "./")
+		switch {
+		case file == "package.json" || file == "package-lock.json":
+			return true, nil
+		case strings.HasPrefix(file, "src/") || strings.HasPrefix(file, "bin/"):
+			return true, nil
+		case strings.HasPrefix(file, "scripts/") && strings.HasSuffix(file, ".mjs") && file != "scripts/build-native.mjs":
+			return true, nil
+		}
+	}
+	return false, nil
+}
+
 // Reuse the native changed-scope planner without the open-block proof slot.
 // Its dialect is checked for every block before the batch begins mutating Git.
 func landBatchChanged(ctx context.Context, home, workspace, run string, block *landBatchBlock) error {
@@ -474,9 +533,6 @@ func landBatchChanged(ctx context.Context, home, workspace, run string, block *l
 	scope.Report = "full"
 	if len(scope.Files) > 0 {
 		scope.Report = "related"
-	}
-	if block.fullScope {
-		scope = gates.Scope{Kind: "full", Reason: "native_scope_fallback"}
 	}
 	timeout := 300000.0
 	if n, ok := gatesNumber(configured["timeout_s"]); ok {

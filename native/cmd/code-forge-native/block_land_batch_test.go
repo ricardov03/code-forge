@@ -12,7 +12,6 @@ import (
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
-	"github.com/ricardov03/code-forge/native/proof"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -44,7 +43,9 @@ printf '%s\n' "$PWD" >> "$HOME/full-calls"
 if [ -f "$HOME/slow-full" ]; then sleep 30; fi
 git -C "$HOME/main-path" rev-parse HEAD >> "$HOME/observed-main"
 for id in B1 B2 B3; do
-  if [ -f "$id.mjs" ] && [ "$(cat "$id.mjs")" = bad ]; then printf 'not ok 1 - %s integration contract\n' "$id"; exit 1; fi
+  for file in "src/$id.mjs" "native/$id.mjs"; do
+    if [ -f "$file" ] && [ "$(cat "$file")" = bad ]; then printf 'not ok 1 - %s integration contract\n' "$id"; exit 1; fi
+  done
 done
 printf 'ok 1 - integration contract\n'`
 	command = strings.ReplaceAll(command, `"$HOME/main-path"`, closeCommand([]string{f.repo}))
@@ -63,14 +64,16 @@ printf 'ok 1 - integration contract\n'`
 		id := fmt.Sprintf("B%d", i)
 		tree := filepath.Join(f.repo, ".code-forge/worktrees", id)
 		f.git(f.repo, "worktree", "add", "-qb", "block-"+id, tree, f.base)
-		content := "green\n"
+		// Unique content keeps Git rename detection from pairing two blocks' files.
+		content := "green " + id + "\n"
 		if i == bad {
 			content = "bad\n"
 		}
-		f.write(tree, id+".mjs", content)
+		// src/ is a Node product path, so the merge gate runs the full suite.
+		f.write(tree, "src/"+id+".mjs", content)
 		f.git(tree, "add", ".")
 		f.git(tree, "commit", "-qm", id)
-		blocks.Set(id, ledger.Object{{Key: "status", Value: "closed"}, {Key: "owned_files", Value: []any{id + ".mjs"}}, {Key: "kind", Value: "code"}, {Key: "base_sha", Value: f.base}, {Key: "base_branch", Value: "main"}, {Key: "test_files", Value: []any{"scoped.test.mjs"}}, {Key: "worktree", Value: ledger.Object{{Key: "path", Value: tree}, {Key: "branch", Value: "block-" + id}, {Key: "base_sha", Value: f.base}}}})
+		blocks.Set(id, ledger.Object{{Key: "status", Value: "closed"}, {Key: "owned_files", Value: []any{"src/" + id + ".mjs"}}, {Key: "kind", Value: "code"}, {Key: "base_sha", Value: f.base}, {Key: "base_branch", Value: "main"}, {Key: "test_files", Value: []any{"scoped.test.mjs"}}, {Key: "worktree", Value: ledger.Object{{Key: "path", Value: tree}, {Key: "branch", Value: "block-" + id}, {Key: "base_sha", Value: f.base}}}})
 	}
 	record := ledger.Object{{Key: "run_id", Value: "r-batch-unit"}, {Key: "project", Value: "fixture"}, {Key: "workspace", Value: f.repo}, {Key: "status", Value: "active"}, {Key: "blocks", Value: blocks}, {Key: "orphans", Value: []any{}}}
 	if err := state.SaveRun(f.home, record); err != nil {
@@ -184,9 +187,15 @@ func TestBlockLandBatchOrderedSuite(t *testing.T) {
 	if err != nil {
 		t.Fatal(err)
 	}
-	timings, batches := []string{}, 0
+	timings, batches, done, deferred := []string{}, 0, 0, 0
 	for _, value := range rows {
 		row := value.(map[string]any)
+		switch row["event"] {
+		case "gate.done":
+			done++
+		case "gate.deferred":
+			deferred++
+		}
 		if row["event"] == "land.timing" {
 			timings = append(timings, row["block"].(string))
 		}
@@ -200,6 +209,9 @@ func TestBlockLandBatchOrderedSuite(t *testing.T) {
 	}
 	if !reflect.DeepEqual(timings, ids) || batches != 1 {
 		t.Errorf("timing blocks=%v batch rows=%d, want %v and 1", timings, batches, ids)
+	}
+	if done != 3 || deferred != 0 {
+		t.Errorf("native-safe blocks gate.done rows=%d gate.deferred rows=%d, want 3 and 0", done, deferred)
 	}
 }
 
@@ -243,7 +255,7 @@ func TestBlockLandBatchBisectPrefix(t *testing.T) {
 				// Repair and retry the remaining batch: the failed trial must not
 				// poison a subsequent green invocation or merge B1 twice.
 				tree := filepath.Join(f.repo, ".code-forge/worktrees/B2")
-				f.write(tree, "B2.mjs", "green\n")
+				f.write(tree, "src/B2.mjs", "green\n")
 				f.git(tree, "commit", "-qam", "repair")
 				code, output = f.land("B2", "B3")
 				if code != 0 || strings.Count(output, " landed\n") != 2 || len(f.lines("full-calls")) != 4 {
@@ -257,43 +269,125 @@ func TestBlockLandBatchBisectPrefix(t *testing.T) {
 	}
 }
 
-func TestBlockLandBatchNativeScopeReusesFinalTree(t *testing.T) {
-	f := newLandBatchFixture(t, 0)
+// nativeScope moves each block's file under native/, so its changed gates
+// need the full fallback. A block named in node also owns a bin/ file (bin/, not src/, so Git does
+// not read the src/ to native/ moves as a directory rename).
+func (f *landBatchFixture) nativeScope(ids []string, node string) {
+	f.t.Helper()
 	record, err := state.ReadRun(f.home, "r-batch-unit")
 	if err != nil {
-		t.Fatal(err)
+		f.t.Fatal(err)
 	}
 	blocks := blockObject(record.Get("blocks"))
-	ids := []string{"B1", "B2", "B3"}
 	for _, id := range ids {
 		tree := filepath.Join(f.repo, ".code-forge/worktrees", id)
 		if err := os.Mkdir(filepath.Join(tree, "native"), 0700); err != nil {
-			t.Fatal(err)
+			f.t.Fatal(err)
 		}
-		f.git(tree, "mv", id+".mjs", "native/"+id+".mjs")
+		f.git(tree, "mv", "src/"+id+".mjs", "native/"+id+".mjs")
+		owned := []any{"native/" + id + ".mjs"}
+		if id == node {
+			f.write(tree, "bin/"+id+"-node.mjs", "export {}\n")
+			f.git(tree, "add", ".")
+			owned = append(owned, "bin/"+id+"-node.mjs")
+		}
 		f.git(tree, "commit", "-qm", "native scope")
 		entry := blockObject(blocks.Get(id))
-		entry.Set("owned_files", []any{"native/" + id + ".mjs"})
+		entry.Set("owned_files", owned)
 		blocks.Set(id, entry)
 	}
 	record.Set("blocks", blocks)
 	if err := state.SaveRun(f.home, record); err != nil {
-		t.Fatal(err)
+		f.t.Fatal(err)
 	}
+}
+
+func (f *landBatchFixture) rows(event string) []map[string]any {
+	f.t.Helper()
+	rows, err := ledger.ReadAllRows(filepath.Join(f.home, ".code-forge/ledger"), "fixture")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	found := []map[string]any{}
+	for _, value := range rows {
+		if row := value.(map[string]any); row["event"] == event {
+			found = append(found, row)
+		}
+	}
+	return found
+}
+
+func TestBlockLandBatchDeferredScopeRunsOneSuite(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	ids := []string{"B1", "B2", "B3"}
+	f.nativeScope(ids, "B1")
 	code, output := f.land(ids...)
 	if code != 0 {
 		t.Fatalf("native-owned batch exit=%d, want 0: %s", code, output)
 	}
 	f.checkMain(ids)
-	// Native imports cannot be narrowed by the empty-graph planner. Its safe
-	// fallback checks each rebased block fully; the last tree is the final
-	// merge tree, so B317 must prevent a fourth suite in the trial worktree.
-	wantCalls := []string{}
-	for _, id := range ids {
-		wantCalls = append(wantCalls, proof.Real(filepath.Join(f.repo, ".code-forge/worktrees", id)))
+	// Native imports need the full fallback; the batch defers it to the one
+	// merge-gate suite in the trial worktree (B398).
+	if calls := f.lines("full-calls"); len(calls) != 1 || !strings.Contains(calls[0], ".merge-gate-") || len(f.lines("changed-calls")) != 0 {
+		t.Errorf("full calls=%v changed calls=%v, want exactly one in the merge-gate trial and zero", calls, f.lines("changed-calls"))
 	}
-	if calls := f.lines("full-calls"); !reflect.DeepEqual(calls, wantCalls) || len(f.lines("changed-calls")) != 0 {
-		t.Errorf("native full calls=%v changed calls=%v, want %v and zero (reuse final tree)", calls, f.lines("changed-calls"), wantCalls)
+	deferred := []string{}
+	for _, row := range f.rows("gate.deferred") {
+		deferred = append(deferred, row["block"].(string))
+		if row["scope"] != "deferred" || row["reason"] != "merge-gate" {
+			t.Errorf("deferred row=%v, want scope deferred and reason merge-gate", row)
+		}
+	}
+	if !reflect.DeepEqual(deferred, ids) || len(f.rows("gate.done")) != 0 {
+		t.Errorf("gate.deferred blocks=%v gate.done rows=%d, want %v and 0", deferred, len(f.rows("gate.done")), ids)
+	}
+	if batch := f.rows("land.batch"); len(batch) != 1 || batch[0]["merge_gate_reason"] != "node_product" {
+		t.Errorf("land.batch rows=%v, want one with merge_gate_reason node_product", batch)
+	}
+}
+
+func TestBlockLandBatchDeferredBisectNamesCulprit(t *testing.T) {
+	f := newLandBatchFixture(t, 2)
+	ids := []string{"B1", "B2", "B3"}
+	f.nativeScope(ids, "B1")
+	code, output := f.land(ids...)
+	if code != 1 || strings.Count(output, "block B2 land stopped at merge-gate: full suite failed:\nB2 integration contract") != 1 {
+		t.Fatalf("exit=%d, want 1 naming B2 at merge-gate: %s", code, output)
+	}
+	f.checkMain(ids[:1])
+	if strings.Count(output, "block B1 landed\n") != 1 || strings.Count(output, "block B3 not landed (after B2)\n") != 1 || strings.Contains(output, "block B2 landed") {
+		t.Errorf("want B1 landed once, B2 not landed, B3 not landed after B2: %s", output)
+	}
+	calls := f.lines("full-calls")
+	if len(calls) != 3 {
+		t.Errorf("bisect calls=%v, want exactly 3", calls)
+	}
+	for _, call := range calls {
+		if !strings.Contains(call, ".merge-gate-") {
+			t.Errorf("suite cwd=%s, want only the merge-gate trial", call)
+		}
+	}
+}
+
+func TestBlockLandBatchGoOnlySkipsMergeGate(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	ids := []string{"B1", "B2"}
+	f.nativeScope(ids, "")
+	code, output := f.land(ids...)
+	if code != 0 || strings.Count(output, "merge gate: skipped full suite (go_only: no Node product file in the batch)\n") != 1 {
+		t.Fatalf("Go-only batch exit=%d, want 0 with one skip line: %s", code, output)
+	}
+	f.checkMain(ids)
+	if calls := f.lines("full-calls"); len(calls) != 0 || len(f.lines("changed-calls")) != 0 {
+		t.Errorf("full calls=%v changed calls=%v, want zero suites", calls, f.lines("changed-calls"))
+	}
+	for _, id := range ids {
+		if strings.Count(output, "block "+id+" landed\n") != 1 {
+			t.Errorf("%s landed lines != 1: %s", id, output)
+		}
+	}
+	if batch := f.rows("land.batch"); len(batch) != 1 || batch[0]["merge_gate_reason"] != "go_only" || batch[0]["suite_ms"] != float64(0) {
+		t.Errorf("land.batch rows=%v, want one with merge_gate_reason go_only and suite_ms 0", batch)
 	}
 }
 

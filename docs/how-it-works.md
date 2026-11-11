@@ -478,6 +478,19 @@ and the main checkout stayed unchanged before the real merge. A failed check lea
 It never forces or switches main's branch. Success ends with
 `block <id> landed`. Without `--merge`, it closes and prints `block <id> closed; merge: <cmd>`
 without changing the base branch, plus a hint that the merge gate runs only with `--merge`.
+
+`code-forge block land <id> <id>... --run <run>` lands several closed blocks as one batch, in the
+given order. Each block is rebased onto the trial merge of the blocks before it. A block whose
+changed gates are native-safe runs them as before (`gate.done`). A block whose changed scope needs
+the full-suite fallback (for example native files) runs no suite of its own: land writes a signed
+`gate.deferred` row with `scope: deferred` and `reason: merge-gate`. Then the merge gate runs the
+full suite once on the merged trial tree. When it fails, land tests trial prefixes to name the
+first failing block, lands only the blocks before it and prints `block <id> not landed (after
+<culprit>)` for each later block. When no block in the batch owns or changes a Node product file
+(`src/**`, `bin/**`, `scripts/**/*.mjs` except `scripts/build-native.mjs`, `package.json`,
+`package-lock.json`), the merge gate runs no suite, prints
+`merge gate: skipped full suite (go_only: no Node product file in the batch)` and every block
+lands. The signed `land.batch` row records `merge_gate_reason` (`go_only` or `node_product`).
 A merge refusal leaves the block closed; correct the checkout
 and use the displayed next command. `--json` emits one JSON line: `event: landed` or `closed`
 and the merge command, or `event: refused` with `step`, `reason` and `next`.
