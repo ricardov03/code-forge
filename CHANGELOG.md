@@ -85,6 +85,10 @@ waits on a second real consumer (plan §10.4, Q17).
 
 ### Fixed
 
+- **`block rebase` replays first and refuses only a real conflict** (Go) — owned files main changed no longer refuse
+  up front: a clean replay moves the base, names them `upstream_owned` and queues them for review again; a real conflict
+  restores HEAD and refuses `rebase-conflict` naming the files; `CHANGELOG.md` lines both sides only added are kept (main
+  first), also under `merge=union`, in `--rebase-check`, `--accept-landed` and batch land (B431)
 - `npm run release`: when local `npm test` fails, only the failing files rerun alone; the release goes on only when each
   passes alone and the CI run for HEAD is green (`local flaky (passed alone, CI green): <files>`). Worker test deadlines
   scale with host load (B345)

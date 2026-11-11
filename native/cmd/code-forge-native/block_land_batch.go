@@ -13,6 +13,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/proof"
+	"github.com/ricardov03/code-forge/native/rebase"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
@@ -210,9 +211,16 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			if _, err := gitx.Run(block.tree.Path, "merge-base", "--is-ancestor", block.base, "HEAD"); err != nil {
 				return fmt.Errorf("block %s recorded base is not an ancestor", block.id)
 			}
-			if _, err := gitx.Run(block.tree.Path, "-c", "rebase.updateRefs=false", "rebase", "--no-autostash", "--onto", tip, block.base); err != nil {
-				_, _ = gitx.Run(block.tree.Path, "rebase", "--abort")
-				return fmt.Errorf("block %s rebase failed: %s", block.id, landGitError(err, err.Error()))
+			if _, err := gitx.Run(block.tree.Path, "-c", rebase.UnionOff, "-c", "rebase.updateRefs=false", "rebase", "--no-autostash", "--onto", tip, block.base); err != nil {
+				// B431: an add-only CHANGELOG.md is merged (earlier block's
+				// lines first) and the rebase goes on; anything else stops.
+				if cont := rebase.Continue(block.tree.Path, gitx.ChildEnv()); cont != nil {
+					_, _ = gitx.Run(block.tree.Path, "rebase", "--abort")
+					if conflict, ok := cont.(*rebase.ConflictError); ok && len(conflict.Files) > 0 {
+						return fmt.Errorf("block %s rebase failed: %s", block.id, cont.Error())
+					}
+					return fmt.Errorf("block %s rebase failed: %s", block.id, landGitError(err, err.Error()))
+				}
 			}
 			block.rebased = true
 			block.head, err = gitx.Run(block.tree.Path, "rev-parse", "HEAD")

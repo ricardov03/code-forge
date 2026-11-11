@@ -252,14 +252,18 @@ test('native refusal reports one redacted reason line, releases its lock, and pr
   writeFile(f.repo, file, '// foreign\n');
   await git(['add', '-A'], f.repo);
   await git(['commit', '-qm', 'foreign owned file'], f.repo);
-  const foreign = (await git(['rev-parse', 'HEAD'], f.repo)).trim();
+  // B431: main changing an owned file alone replays; the block adding the
+  // same file with other content is a real conflict.
+  writeFile(f.tree.path, file, '// block\n');
+  await git(['add', '-A'], f.tree.path);
+  await git(['-c', 'user.name=Block', '-c', 'user.email=block@example.invalid', 'commit', '-qm', 'block adds the file'], f.tree.path);
   const before = [await f.head(), await f.entry(), await f.rows()];
   assert.equal(lockExists(f.runId), false, 'native refusal starts with zero run lock directories');
   const result = await f.rebase();
   assert.equal(result.code, 1, 'native refusal preserves exit 1');
   assert.equal(result.out, '', 'native refusal has zero stdout bytes');
-  assert.match(result.err, /owned-conflict/);
-  assert.ok(result.err.includes(foreign), 'reason identifies the refused commit');
+  assert.match(result.err, /rebase-conflict/);
+  assert.ok(result.err.includes('second-line.mjs'), 'reason names the conflicted file');
   assert.equal(result.err.includes(secret), false, 'reason has zero registered secret occurrences');
   assert.equal(result.err.trimEnd().split('\n').length, 1, 'native reason occupies exactly one stderr line');
   assert.equal(lockExists(f.runId), false, 'native refusal leaves zero run lock directories');
@@ -297,7 +301,7 @@ test('landed siblings: five owned files queue again, bases move, row verifies an
   assert.deepEqual(verifyRow(rows[0], await loadKey(f.runId)), { ok: true });
 });
 
-test('no-ff landing credits the closed block exactly; an extra owned-file merge edit refuses without mutation', available, async () => {
+test('no-ff landing credits the closed block exactly; an extra owned-file merge edit is upstream_owned', available, async () => {
   for (const evil of [true, false]) {
     const f = await fixture(`merge-${evil}`, 'project');
     const branch = `forge/${f.runId}/B228`;
@@ -324,12 +328,15 @@ test('no-ff landing credits the closed block exactly; an extra owned-file merge 
     const before = [await f.head(), await f.entry(), await f.rows()];
     const result = await f.rebase();
     if (evil) {
-      assert.equal(result.code, 1, result.err || result.out);
-      assert.equal(lockExists(f.runId), false, 'evil landing refusal leaves zero run lock directories');
-      assert.equal(result.out, '');
-      assert.match(result.err, /owned-conflict/);
-      assert.ok(result.err.includes(merged), 'refusal names the evil merge commit');
-      assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'evil merge changes no HEAD, bases or rows');
+      // B431: the extra merge edit is not credited; it replays and is named
+      // upstream_owned (with every file of that uncredited merge) for re-review.
+      assert.equal(result.code, 0, result.err);
+      assert.equal(lockExists(f.runId), false, 'evil landing rebase leaves zero run lock directories');
+      const accepted = [{ file: f.files[0], blocks: ['B228'] }];
+      assert.deepEqual(JSON.parse(result.out), { block: 'B205b', event: 'rebased', old_base: f.base, new_base: merged, accepted_landed: accepted, upstream_owned: [f.files[0], f.files[1]] });
+      const tickets = blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B205b', tree: f.tree.path }).map((t) => t.file).sort();
+      assert.deepEqual(tickets, [f.files[0], f.files[1]], 'both changed owned files are queued for re-review');
+      assert.notDeepEqual(await f.head(), before[0]);
     } else {
       assert.equal(result.code, 0, result.err);
       const accepted = [{ file: f.files[0], blocks: ['B228'] }];
@@ -342,7 +349,7 @@ test('no-ff landing credits the closed block exactly; an extra owned-file merge 
   }
 });
 
-test('a sync merge cannot credit an evil landing edit to a file changed only on main', available, async () => {
+test('a sync merge cannot credit an evil landing edit to a file changed only on main: it is upstream_owned', available, async () => {
   const f = await fixture('sync-merge', 'project');
   const branch = `forge/${f.runId}/B228`;
   await git(['checkout', '-qb', branch], f.repo);
@@ -370,17 +377,19 @@ test('a sync merge cannot credit an evil landing edit to a file changed only on 
   record.blocks.B228 = { status: 'closed', base_sha: f.base, owned_files: [f.files[0]], worktree: { branch, base_sha: syncedBase } };
   record.blocks.B231 = { status: 'closed', base_sha: f.base, owned_files: [f.files[1]], worktree: { branch: mainBranch, base_sha: f.base } };
   await saveRun(record);
-  const before = [await f.head(), await f.entry(), await f.rows()];
   const result = await f.rebase();
-  assert.equal(result.code, 1, result.err || result.out);
-  assert.equal(lockExists(f.runId), false, 'sync merge refusal leaves zero run lock directories');
-  assert.equal(result.out, '');
-  assert.match(result.err, /owned-conflict/);
-  assert.ok(result.err.includes(merged), 'refusal names the evil landing merge, not the credited main commit');
-  assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'HEAD, bases and ledger stay unchanged');
+  // B431: the evil landing merge is not credited, so the file it changed is
+  // upstream_owned and queued for re-review instead of a refusal.
+  assert.equal(result.code, 0, result.err);
+  assert.equal(lockExists(f.runId), false, 'sync merge rebase leaves zero run lock directories');
+  const out = JSON.parse(result.out);
+  assert.equal(out.new_base, merged);
+  assert.ok(out.upstream_owned.includes(f.files[1]), 'the evil landing edit is named upstream_owned');
+  const tickets = blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B205b', tree: f.tree.path }).map((t) => t.file);
+  assert.ok(tickets.includes(f.files[1]), 'the evil landing edit is queued for re-review');
 });
 
-test('foreign owned commits before a sibling fork or recorded worktree base refuse without mutation', available, async (t) => {
+test('foreign owned commits before a sibling fork or recorded worktree base replay as upstream_owned', available, async (t) => {
   for (const base of ['block', 'worktree']) {
     await t.test(base, async () => {
       const f = await fixture(`foreign-before-${base}`);
@@ -399,14 +408,12 @@ test('foreign owned commits before a sibling fork or recorded worktree base refu
         for (const id of ['B228', 'B231']) record.blocks[id].base_sha = f.base;
         await saveRun(record);
       }
-      const before = [await f.head(), await f.entry(), await f.rows()];
       const result = await f.rebase();
-      assert.equal(result.code, 1, result.err || result.out);
-      assert.equal(lockExists(f.runId), false, 'foreign origin refusal leaves zero run lock directories');
-      assert.equal(result.out, '');
-      assert.match(result.err, /owned-conflict/);
-      assert.ok(result.err.includes(file) && result.err.includes(foreign), 'refusal names the foreign commit and owned file');
-      assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'HEAD, both bases and ledger stay unchanged');
+      assert.equal(result.code, 0, result.err);
+      assert.equal(lockExists(f.runId), false, 'foreign origin rebase leaves zero run lock directories');
+      assert.deepEqual(JSON.parse(result.out).upstream_owned, [file], `the foreign commit ${foreign} is not credited: its file is upstream_owned`);
+      const tickets = blockTickets({ repoRoot: f.repo, run: f.runId, block: 'B205b', tree: f.tree.path }).map((t) => t.file);
+      assert.ok(tickets.includes(file), 'the foreign-changed owned file is queued for re-review');
     });
   }
 });
@@ -443,7 +450,7 @@ test('errors after replay restore HEAD and leave bases and ledger unchanged', av
   }
 });
 
-test('foreign owned commits, including a reverted change after a landed commit, refuse with exact state unchanged', available, async () => {
+test('foreign owned commits, including a reverted change after a landed commit, replay as upstream_owned; a replay conflict refuses with exact state unchanged', available, async () => {
   for (const reverted of [false, true]) {
     const f = await fixture(`foreign-${reverted}`, 'project');
     if (reverted) await f.move();
@@ -457,14 +464,12 @@ test('foreign owned commits, including a reverted change after a landed commit, 
       await git(['add', '-A'], f.repo);
       await git(['commit', '-qm', 'revert foreign'], f.repo);
     }
-    const before = [await f.head(), await f.entry(), await f.rows()];
     const result = await f.rebase();
-    assert.equal(result.code, 1);
-    assert.equal(lockExists(f.runId), false, 'foreign commit refusal leaves zero run lock directories');
-    assert.equal(result.out, '');
-    assert.match(result.err, /owned-conflict/);
-    assert.ok(result.err.includes(file) && result.err.includes(foreign), 'refusal identifies the file and foreign commit');
-    assert.deepEqual([await f.head(), await f.entry(), await f.rows()], before, 'head, both bases and every row stay unchanged');
+    assert.equal(result.code, 0, result.err);
+    assert.equal(lockExists(f.runId), false, 'foreign commit rebase leaves zero run lock directories');
+    assert.deepEqual(JSON.parse(result.out).upstream_owned, [file], `foreign commit ${foreign} leaves its file upstream_owned`);
+    const rows = (await f.rows()).filter((row) => row.event === 'block.rebase');
+    assert.deepEqual(rows.map((row) => row.upstream_owned), [[file]], 'the signed row names the file upstream_owned');
   }
   const f = await fixture('replay-conflict');
   writeFile(f.tree.path, 'upstream.md', 'local conflict\n');

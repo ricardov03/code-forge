@@ -12,17 +12,93 @@ import (
 
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/rebase"
 	"github.com/ricardov03/code-forge/native/state"
 )
 
 // B408: block rebase stays in Node, but Go runs it as a child instead of
 // replacing itself, so that a rebase that brings native changes into a
 // code-forge worktree rebuilds that worktree's native binary afterwards.
+// B431: the plain rebase of an open worktree block runs in Go (rebase.RunPlain):
+// owned files main changed are replayed instead of refused up front.
 func init() { blockSubs["rebase"] = healWrap([]string{"block", "rebase"}, runBlockRebase) }
+
+// blockRebaseNative runs `block rebase <id> --run <r> [--json]` of an open
+// worktree block natively. handled is false when anything else is asked (a
+// closed block, --head, --accept-changed, --accept-landed, a guarded run
+// state) and Node keeps that path.
+func blockRebaseNative(args []string) (code int, handled bool) {
+	flags, positionals, message := blockFlags(args)
+	if message != "" || len(positionals) != 1 || positionals[0] == "" {
+		return 0, false
+	}
+	for name := range flags {
+		if name != "run" && name != "json" {
+			return 0, false
+		}
+	}
+	run, id := blockString(flags["run"]), positionals[0]
+	home := os.Getenv("HOME")
+	if run == "" || home == "" {
+		return 0, false
+	}
+	record, err := state.ReadRun(home, run)
+	if err != nil {
+		return 0, false
+	}
+	block := blockObject(blockObject(record.Get("blocks")).Get(id))
+	if blockString(block.Get("status")) != "open" || blockObject(block.Get("worktree")) == nil || blockString(block.Get("base_branch")) == "" {
+		return 0, false
+	}
+	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
+		return 0, false
+	}
+	blockGrantExpiry(home, run, os.Stderr)
+	result, err := rebase.RunPlain(home, run, id)
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "block rebase: %s\n", strings.Join(strings.Fields(err.Error()), " "))
+		return 1, true
+	}
+	blockBreadcrumb("rebase")
+	if flags["json"] == true {
+		out := ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "rebased"}, {Key: "old_base", Value: result.OldBase}, {Key: "new_base", Value: result.NewBase}}
+		if len(result.Upstream) > 0 {
+			files := []any{}
+			for _, file := range result.Upstream {
+				files = append(files, file)
+			}
+			out.Set("upstream_owned", files)
+		}
+		data, err := ledger.Stringify(out, false)
+		if err != nil {
+			return 1, true
+		}
+		fmt.Fprintln(os.Stdout, string(data))
+		return 0, true
+	}
+	fmt.Fprintf(os.Stdout, "block %s rebased %s → %s\n", id, short12(result.OldBase), short12(result.NewBase))
+	if len(result.Upstream) > 0 {
+		fmt.Fprintf(os.Stdout, "upstream_owned: %s (main changed these owned files; queued for re-review)\n", rebase.FileList(result.Upstream))
+	}
+	return 0, true
+}
+
+func short12(sha string) string {
+	if len(sha) > 12 {
+		return sha[:12]
+	}
+	return sha
+}
 
 func runBlockRebase(args []string) int {
 	full := append([]string{"rebase"}, args...)
 	tree, before := blockRebaseTree(args)
+	if code, handled := blockRebaseNative(args); handled {
+		if code != 0 || tree == "" {
+			return code
+		}
+		return blockRebaseRebuild(args[0], tree, before)
+	}
 	if tree == "" {
 		return blockHandover(full, hBlockUnportedSubcommand)
 	}
@@ -80,11 +156,16 @@ func runBlockRebase(args []string) int {
 		fmt.Fprintln(os.Stderr, "code-forge-native: node:", err)
 		return 1
 	}
+	return blockRebaseRebuild(args[0], tree, before)
+}
+
+// blockRebaseRebuild rebuilds the worktree's native binary when the rebase
+// brought native source changes (B408).
+func blockRebaseRebuild(id, tree, before string) int {
 	after, err := gitx.Run(tree, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return 0
 	}
-	id := args[0]
 	rebuilt, err := nativeRebuildAfterMove(tree, before, strings.TrimSpace(after))
 	if err != nil {
 		fmt.Fprintf(os.Stderr, "block rebase: block %s: %s; the rebase stands; rebuild by hand: node scripts/build-native.mjs --host in %s\n", id, strings.ReplaceAll(err.Error(), "\n", " "), tree)
