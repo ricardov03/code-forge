@@ -89,15 +89,22 @@ async function snapshot(f) {
   return files;
 }
 
-test('unported help flag records exactly one hand-over with its B282 reason', async () => {
+test('help runs in Go and an unported flag records exactly one hand-over with its reason', async () => {
   const f = await fixture();
-  const args = ['review-file', '--help'];
-  const expected = execute(f, args, true);
-  assert.deepEqual(execute(f, args, false, { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_HANDOVER_LOG: '1' }), expected, 'recording preserves Node output and exit');
+  for (const args of [['review-file', '--help'], ['review-file', '-h', '--wait-block', 'B1']]) {
+    const expected = execute(f, args, true);
+    assert.equal(expected.code, 0, 'Node prints help with exit 0');
+    assert.deepEqual(execute(f, args, false, { CODE_FORGE_NATIVE: '1', CODE_FORGE_HANDOVER_LOG: '1' }), expected, `${args.join(' ')}: Go help is byte-equal to Node without Node`);
+  }
+  await assert.rejects(readFile(path.join(f.home, '.code-forge/native/handovers.jsonl')), { code: 'ENOENT' }, 'native help records zero hand-overs');
+  const args = ['review-file', '--x=/private/value'];
+  const env = { CODE_FORGE_NATIVE: '1', CODE_FORGE_NODE: process.execPath, CODE_FORGE_HANDOVER_LOG: '1', CODE_FORGE_NO_ERROR_LOG: '0' };
+  const expected = execute(f, args, true, { CODE_FORGE_NO_ERROR_LOG: '0' });
+  assert.deepEqual(execute(f, args, false, env), expected, 'recording preserves Node output and exit');
   const rows = (await readFile(path.join(f.home, '.code-forge/native/handovers.jsonl'), 'utf8')).trim().split('\n').map((line) => JSON.parse(line));
   assert.equal(rows.length, 1, 'one hand-over writes exactly one JSONL row');
   const { version } = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
-  assert.deepEqual({ ...rows[0], at: '<time>' }, { at: '<time>', verb: 'review-file', sub: 'unknown', reason: 'enqueue-help-encoding', version }, 'help uses the existing reason and only safe telemetry fields');
+  assert.deepEqual({ ...rows[0], at: '<time>' }, { at: '<time>', verb: 'review-file', sub: 'unknown', reason: 'enqueue-flag-redaction', version }, 'the redaction case keeps its reason and only safe telemetry fields');
   assert.equal(Number.isNaN(Date.parse(rows[0].at)), false, 'row has a valid timestamp');
 });
 
@@ -214,9 +221,9 @@ test('enqueue flag refusals preserve cache bytes and unsupported cases hand over
     assert.deepEqual(await readFile(file), bytes, 'refusal changes zero cached marker bytes');
   }
   const before = await snapshot(f);
-  assert.equal(execute(f, ['review-file', '--help']).code, 127, 'help still hands over with Node unavailable');
-  assert.deepEqual(await snapshot(f), before, 'handover changes zero queue, ledger, run or log bytes and modes');
-  await parity(f, ['review-file', '--help'], { env: { CODE_FORGE_NATIVE: '0', CODE_FORGE_NODE: process.execPath } });
+  assert.equal(execute(f, ['review-file', '--help']).code, 0, 'help runs in Go with Node unavailable');
+  assert.deepEqual(await snapshot(f), before, 'help changes zero queue, ledger, run or log bytes and modes');
+  await parity(f, ['review-file', '--help']);
   await put(f.home, 'ledger/fixture.jsonl', JSON.stringify(signRow({ event: 'review.cap', run: RUN, block: 'B1', file: 'sample.mjs', open: ['f1'] }, Buffer.alloc(32, 7))) + '\n');
   const capArgs = ['review-file', 'answer.mjs', '--block=B1', `--run=${RUN}`, '--answers=f1', '--of=sample.mjs'];
   const capBefore = await snapshot(f);

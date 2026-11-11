@@ -268,23 +268,26 @@ test('plain enqueue and its usage errors stay native with byte-equal Node parity
   }
 });
 
-test('unknown wait flags and unported forms hand over with identical logs', async () => {
+test('unknown wait flags, --cwd, --help and wait-block refusals run in Go with identical logs', async () => {
   const f = await fixture();
   await done(f, { approved: true });
   const cases = [
     [...WAIT, '--json'], [...WAIT, '--unknown'], [...WAIT, '--'],
     [...WAIT, '--cwd', 'missing-dir'], [...WAIT, '--cwd', 'plain-file'],
-    [...WAIT, '--block', 'B1'], [...WAIT, 'sample.mjs'], [],
+    [...WAIT, '--block', 'B1'], [...WAIT, 'sample.mjs'],
     ['review-file', '--wait-block', 'B1', '--run', 'bad'],
     ['review-file', '--help'],
   ];
   await writeFile(path.join(f.repo, 'plain-file'), 'x');
   for (const args of cases) {
-    await parity(f, args, { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
+    await parity(f, args, { CODE_FORGE_NO_ERROR_LOG: '0' });
     const result = await launch(f, args).ended;
-    assert.equal(result.code, 127, `${args.join(' ')}: unported form requires Node`);
-    assert.match(result.stderr, /node executable .* not found/, 'handover identifies missing Node');
+    assert.notEqual(result.code, 127, `${args.join(' ')}: served without Node`);
+    assert.doesNotMatch(result.stderr, /node executable .* not found/, `${args.join(' ')}: no handover`);
   }
+  // No verb at all is not a review-file form; the router still hands it over.
+  await parity(f, [], { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
+  assert.equal((await launch(f, []).ended).code, 127, 'no verb still requires Node');
   const rebaseArgs = ['review-file', '--rebase-check'];
   await parity(f, rebaseArgs, { CODE_FORGE_NO_ERROR_LOG: '0' });
   const rebase = await launch(f, rebaseArgs).ended;
@@ -292,5 +295,8 @@ test('unknown wait flags and unported forms hand over with identical logs', asyn
   assert.equal(rebase.stdout, '', 'native rebase usage has zero stdout bytes');
   assert.ok(rebase.stderr.startsWith('review-file: --rebase-check takes --block and --run only\nusage:'), 'native rebase usage has the exact error prefix');
   await rm(path.join(f.repo, '.git'), { recursive: true });
-  await parity(f, WAIT, { CODE_FORGE_NODE: process.execPath, CODE_FORGE_NO_ERROR_LOG: '0' });
+  await parity(f, WAIT, { CODE_FORGE_NO_ERROR_LOG: '0' });
+  const noRepo = await launch(f, WAIT).ended;
+  assert.equal(noRepo.code, 1, 'no-repo refusal is native');
+  assert.doesNotMatch(noRepo.stderr, /node executable .* not found/, 'no-repo refusal does not hand over');
 });

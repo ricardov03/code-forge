@@ -35,46 +35,6 @@ const reviewWaitUsage = "usage: code-forge review-file [--cwd <dir>] <path> --bl
 	"       code-forge review-file <answering file> --block <id> --answers <id,id,…> --of <source> [--run <id>]\n" +
 	"       --cwd <dir> applies to queueing and both wait modes\n"
 
-// Only wait and its flags are owned here; help, enqueue and block joins stay
-// with Node. Keep parser errors separate from validation after root discovery.
-func reviewWaitFlags(args []string) (map[string]string, string, bool) {
-	flags := map[string]string{}
-	wait := false
-	for _, arg := range args {
-		if arg == "--wait" || strings.HasPrefix(arg, "--wait=") {
-			wait = true
-		}
-	}
-	if !wait {
-		return nil, "", false
-	}
-	for i := 0; i < len(args); i++ {
-		arg := args[i]
-		if !strings.HasPrefix(arg, "--") {
-			return nil, "", false
-		}
-		name, value, inline := strings.Cut(arg[2:], "=")
-		if name != "wait" && name != "max" && name != "cwd" && name != "run" {
-			return nil, "", false
-		}
-		if _, exists := flags[name]; exists {
-			return flags, "--" + name + " given more than once", true
-		}
-		if !inline {
-			i++
-			if i >= len(args) || strings.HasPrefix(args[i], "--") {
-				return flags, "--" + name + " needs a value", true
-			}
-			value = args[i]
-		}
-		if inline && value == "" {
-			return flags, "--" + name + " needs a value", true
-		}
-		flags[name] = value
-	}
-	return flags, "", true
-}
-
 func reviewWaitHandover(args []string, reason handoverReason) int {
 	code, err := handover(append([]string{"review-file"}, args...), reason)
 	if err != nil {
@@ -87,24 +47,97 @@ func runReviewFileWait(args []string) int {
 	return runReviewFileWaitWith(args, reviewWaitLive, reviewWaitSleep)
 }
 
-// Keep polling and sleeping injectable so tests can verify the down-poll count
-// and requested delays independently of process startup and scheduler load.
-func runReviewFileWaitWith(args []string, poll func(context.Context, string, time.Time) (bool, bool), sleep func(context.Context, time.Duration) bool) int {
-	for _, arg := range args {
-		if arg == "--wait-block" || strings.HasPrefix(arg, "--wait-block=") {
-			return runReviewWaitBlock(args)
+// reviewArgText decodes one argv entry as Node does (WHATWG UTF-8): each
+// maximal subpart of an ill-formed sequence becomes one U+FFFD.
+func reviewArgText(s string) string {
+	if utf8.ValidString(s) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, n := utf8.DecodeRuneInString(s[i:])
+		if r != utf8.RuneError || n > 1 {
+			b.WriteString(s[i : i+n])
+			i += n
+			continue
 		}
+		c, need, lo, hi := s[i], 0, byte(0x80), byte(0xbf)
+		switch {
+		case c >= 0xc2 && c <= 0xdf:
+			need = 1
+		case c == 0xe0:
+			need, lo = 2, 0xa0
+		case c == 0xed:
+			need, hi = 2, 0x9f
+		case c >= 0xe1 && c <= 0xef:
+			need = 2
+		case c == 0xf0:
+			need, lo = 3, 0x90
+		case c == 0xf4:
+			need, hi = 3, 0x8f
+		case c >= 0xf1 && c <= 0xf3:
+			need = 3
+		}
+		j := i + 1
+		for k := 0; k < need && j < len(s) && s[j] >= lo && s[j] <= hi; k++ {
+			lo, hi = 0x80, 0xbf
+			j++
+		}
+		b.WriteRune(utf8.RuneError)
+		i = j
 	}
-	flags, usage, ok := reviewWaitFlags(args)
-	if !ok {
-		return runReviewEnqueue(args)
+	return b.String()
+}
+
+// reviewParseMax is parseMax: 90s, 90 or 1500ms.
+func reviewParseMax(raw string, exists bool) (time.Duration, bool) {
+	if !exists {
+		return 90 * time.Second, true
 	}
+	match := reviewWaitMax.FindStringSubmatch(raw)
+	if match == nil {
+		return 0, false
+	}
+	n, _ := strconv.ParseInt(match[1], 10, 64)
+	if match[2] == "ms" {
+		return time.Duration(n) * time.Millisecond, true
+	}
+	return time.Duration(n) * time.Second, true
+}
+
+// runReviewFileWaitWith is runReviewFile's dispatch: one parser, then --cwd,
+// the main tree, --rebase-check, --wait-block, --wait and enqueue in Node's
+// order with Node's usage text, refusals and exit codes. Polling and sleeping
+// stay injectable so tests can check the down-poll count and the delays.
+func runReviewFileWaitWith(args []string, poll func(context.Context, string, time.Time) (bool, bool), sleep func(context.Context, time.Duration) bool) int {
+	decoded := make([]string, len(args))
+	for i, arg := range args {
+		decoded[i] = reviewArgText(arg)
+	}
+	args = decoded
+	// The router prints a verb's help before any breadcrumb or log.
+	if len(args) > 0 && (args[0] == "--help" || args[0] == "-h") {
+		fmt.Fprint(os.Stdout, reviewWaitUsage)
+		return 0
+	}
+	flags, paths, usage := reviewEnqueueFlags(args)
 	if usage != "" {
+		// The wait logger handles fixed usage text and ordinary flag names.
+		// Unknown flags containing arbitrary values need Node's full scrubber.
+		if reviewWaitLogging() && strings.HasPrefix(usage, "unknown flag ") {
+			var arg string
+			_ = json.Unmarshal([]byte(strings.TrimPrefix(usage, "unknown flag ")), &arg)
+			if arg != "--" && !reviewEnqueueSafeUnknown.MatchString(arg) {
+				return reviewWaitHandover(args, hEnqueueFlagRedaction)
+			}
+		}
 		return reviewWaitUsageError(args, usage)
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return reviewWaitHandover(args, hWaitGetcwd)
+		// Node fails before the verb runs (process.cwd() throws): exit 1.
+		fmt.Fprintln(os.Stderr, "review-file: the current directory cannot be read:", err)
+		return 1
 	}
 	if dir, exists := flags["cwd"]; exists {
 		if !filepath.IsAbs(dir) {
@@ -112,53 +145,89 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 		}
 		info, err := os.Stat(dir)
 		if err != nil || !info.IsDir() {
-			return reviewWaitHandover(args, hWaitCwd)
+			return reviewWaitUsageError(args, "--cwd must name an existing directory")
 		}
 		cwd = filepath.Clean(dir)
 	}
-	ctx, cancel := context.WithCancel(context.Background())
-	signals := make(chan os.Signal, 1)
-	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
-	var interrupted atomic.Int32
-	stopped := make(chan struct{})
-	go func() {
-		select {
-		case sig := <-signals:
-			interrupted.Store(int32(128 + sig.(syscall.Signal)))
-			cancel()
-		case <-stopped:
-		}
-	}()
-	defer func() { signal.Stop(signals); close(stopped); cancel() }()
-	root, ok := reviewWaitRoot(ctx, cwd)
+	// A ticket wait answers SIGINT/SIGTERM with 130/143 from its first git
+	// child on, so root discovery already runs under the signal context.
+	ctx := context.Background()
+	var interrupted func() int
+	_, waiting := flags["wait"]
+	_, joining := flags["wait-block"]
+	if waiting && !joining && flags["rebase-check"] != "true" {
+		var stop func()
+		ctx, interrupted, stop = reviewWaitSignals()
+		defer stop()
+	}
+	root, refusal, ok := reviewMainRoot(ctx, cwd)
 	if ctx.Err() != nil {
-		return int(interrupted.Load())
+		return interrupted()
 	}
 	if !ok {
-		return reviewWaitHandover(args, hWaitRoot)
+		return reviewWaitHandover(args, hReviewRoot)
+	}
+	if refusal != nil {
+		return reviewEnqueueSay(args, refusal, 1)
+	}
+	if flags["rebase-check"] == "true" {
+		return reviewEnqueueRebase(args, flags, paths, root)
+	}
+	if _, exists := flags["wait-block"]; exists {
+		return reviewWaitBlockDirect(args, flags, paths, cwd, root)
+	}
+	if _, exists := flags["wait"]; !exists {
+		return reviewEnqueueWith(args, nil, &reviewFileScope{flags: flags, paths: paths, cwd: cwd, root: root})
+	}
+	for _, key := range []string{"block", "answers", "of"} {
+		if _, exists := flags[key]; exists {
+			return reviewWaitUsageError(args, "--wait takes only a ticket and --max")
+		}
+	}
+	if len(paths) > 0 || flags["fresh"] == "true" {
+		return reviewWaitUsageError(args, "--wait takes only a ticket and --max")
 	}
 	if !reviewWaitTicket.MatchString(flags["wait"]) {
 		return reviewWaitUsageError(args, "a ticket id is 24 lowercase hex characters")
 	}
-	max := 90 * time.Second
-	if raw, exists := flags["max"]; exists {
-		match := reviewWaitMax.FindStringSubmatch(raw)
-		if match == nil {
-			return reviewWaitUsageError(args, "--max must look like 90s or 1500ms")
-		}
-		n, _ := strconv.ParseInt(match[1], 10, 64)
-		max = time.Duration(n) * time.Second
-		if match[2] == "ms" {
-			max = time.Duration(n) * time.Millisecond
-		}
+	maxWait, valid := reviewParseMax(flags["max"], reviewHas(flags, "max"))
+	if !valid {
+		return reviewWaitUsageError(args, "--max must look like 90s or 1500ms")
 	}
-	deadline := time.Now().Add(max)
-	ticket := flags["wait"]
+	return reviewWaitTicketLoop(ctx, interrupted, args, flags["wait"], root, maxWait, poll, sleep)
+}
+
+// reviewWaitSignals cancels the returned context on SIGINT or SIGTERM;
+// interrupted then reports the conventional 128+signal exit code.
+func reviewWaitSignals() (context.Context, func() int, func()) {
+	ctx, cancel := context.WithCancel(context.Background())
+	signals := make(chan os.Signal, 1)
+	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
+	var code atomic.Int32
+	stopped := make(chan struct{})
+	go func() {
+		select {
+		case sig := <-signals:
+			code.Store(int32(128 + sig.(syscall.Signal)))
+			cancel()
+		case <-stopped:
+		}
+	}()
+	return ctx, func() int { return int(code.Load()) }, func() { signal.Stop(signals); close(stopped); cancel() }
+}
+
+func reviewHas(flags map[string]string, key string) bool {
+	_, exists := flags[key]
+	return exists
+}
+
+func reviewWaitTicketLoop(ctx context.Context, interrupted func() int, args []string, ticket, root string, maxWait time.Duration, poll func(context.Context, string, time.Time) (bool, bool), sleep func(context.Context, time.Duration) bool) int {
+	deadline := time.Now().Add(maxWait)
 	marker := filepath.Join(root, ".code-forge", "queue", ticket+".done")
 	down := 0
 	for {
 		if ctx.Err() != nil {
-			return int(interrupted.Load())
+			return interrupted()
 		}
 		if _, err := os.Stat(marker); err == nil {
 			result, matched := reviewWaitResult(root, marker)
@@ -173,7 +242,7 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 		}
 		live, matched := poll(ctx, root, deadline)
 		if ctx.Err() != nil {
-			return int(interrupted.Load())
+			return interrupted()
 		}
 		if !matched {
 			return reviewWaitHandover(args, hWaitWorker)
@@ -202,7 +271,7 @@ func runReviewFileWaitWith(args []string, poll func(context.Context, string, tim
 			pause = maxDuration(0, time.Until(deadline))
 		}
 		if !sleep(ctx, pause) {
-			return int(interrupted.Load())
+			return interrupted()
 		}
 	}
 }
@@ -228,6 +297,11 @@ func maxDuration(a, b time.Duration) time.Duration {
 // Run waits for every child. Cancelling kills its process group as well as the
 // direct process, so neither inherited pipes nor descendants can outlive us.
 func reviewWaitCommand(ctx context.Context, cwd, name string, args []string, env []string, limit time.Duration) (string, bool) {
+	out, _, ok := reviewWaitCommandErr(ctx, cwd, name, args, env, limit)
+	return out, ok
+}
+
+func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, env []string, limit time.Duration) (string, string, bool) {
 	childCtx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	cmd := exec.CommandContext(childCtx, name, args...)
@@ -235,18 +309,26 @@ func reviewWaitCommand(ctx context.Context, cwd, name string, args []string, env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = 50 * time.Millisecond
-	var out bytes.Buffer
-	cmd.Stdout = &out
+	var out, errOut bytes.Buffer
+	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err := cmd.Run()
 	if cmd.Process != nil {
 		// A helper could exit before descendants close their inherited pipes.
 		// WaitDelay bounds the pipe wait; retire the group in that case too.
 		_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)
 	}
-	return out.String(), err == nil
+	return out.String(), errOut.String(), err == nil
 }
 
 func reviewWaitRoot(ctx context.Context, cwd string) (string, bool) {
+	root, refusal, ok := reviewMainRoot(ctx, cwd)
+	return root, ok && refusal == nil
+}
+
+// reviewMainRoot is mainRootOf in src/worker/ticket.mjs: the realpath of the
+// main working tree, or Node's refusal for it. ok=false: a realpath of git's
+// own top level failed, which Node reports with a raw error.
+func reviewMainRoot(ctx context.Context, cwd string) (string, ledger.Object, bool) {
 	env := []string{}
 	for _, entry := range os.Environ() {
 		if !strings.HasPrefix(entry, "GIT_") {
@@ -254,21 +336,28 @@ func reviewWaitRoot(ctx context.Context, cwd string) (string, bool) {
 		}
 	}
 	env = append(env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
-	git := func(args ...string) (string, bool) {
-		return reviewWaitCommand(ctx, cwd, "git", args, env, 10*time.Second)
+	git := func(args ...string) (string, string, bool) {
+		return reviewWaitCommandErr(ctx, cwd, "git", args, env, 10*time.Second)
 	}
-	top, ok := git("rev-parse", "--show-toplevel")
-	if !ok || strings.TrimSpace(top) == "" {
-		return "", false
+	refuse := func(code, message string) (string, ledger.Object, bool) {
+		return "", reviewEnqueueRefusal(code, message), true
 	}
-	top, err := filepath.EvalSymlinks(strings.TrimSpace(top))
+	top, _, ok := git("rev-parse", "--show-toplevel")
+	top = strings.TrimSpace(top)
+	if !ok || top == "" {
+		return refuse("no-repo", "not inside a git repository")
+	}
+	top, err := filepath.EvalSymlinks(top)
 	if err != nil {
-		return "", false
+		return "", nil, false
 	}
-	dirs, ok := git("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+	dirs, stderr, ok := git("rev-parse", "--path-format=absolute", "--git-dir", "--git-common-dir")
+	if !ok {
+		return refuse("no-repo", "not inside a git repository, or git is older than 2.36 (code-forge needs git >= 2.36): "+strings.TrimSpace(stderr))
+	}
 	parts := strings.Split(dirs, "\n")
-	if !ok || len(parts) < 2 || parts[0] == "" || parts[1] == "" {
-		return "", false
+	if len(parts) < 2 || parts[0] == "" || parts[1] == "" {
+		return refuse("no-repo", "git rev-parse printed no git directory")
 	}
 	real := func(s string) string {
 		if p, err := filepath.EvalSymlinks(s); err == nil {
@@ -277,27 +366,33 @@ func reviewWaitRoot(ctx context.Context, cwd string) (string, bool) {
 		return filepath.Clean(s)
 	}
 	if real(parts[0]) == real(parts[1]) {
-		return top, true
+		return top, nil, true
 	}
-	list, ok := git("worktree", "list", "--porcelain", "-z")
+	list, stderr, ok := git("worktree", "list", "--porcelain", "-z")
 	if !ok {
-		return "", false
+		return refuse("no-repo", "the main working tree of the repository cannot be listed (code-forge needs git >= 2.36): "+strings.TrimSpace(stderr))
 	}
 	first := strings.Split(strings.Split(list, "\x00\x00")[0], "\x00")
-	main := ""
+	main, bare := "", false
 	for _, field := range first {
 		if field == "bare" {
-			return "", false
+			bare = true
 		}
-		if strings.HasPrefix(field, "worktree ") {
+		if strings.HasPrefix(field, "worktree ") && main == "" {
 			main = strings.TrimPrefix(field, "worktree ")
 		}
 	}
 	if main == "" {
-		return "", false
+		return refuse("no-repo", "git worktree list printed no main working tree")
 	}
-	main, err = filepath.EvalSymlinks(main)
-	return main, err == nil
+	if bare {
+		return refuse("bare-main", "the repository's main entry "+main+" is bare: it has no main working tree for the review queue")
+	}
+	resolved, err := filepath.EvalSymlinks(main)
+	if err != nil {
+		return refuse("no-main-tree", "the repository's main working tree "+main+" does not exist (moved or removed): the review queue lives there")
+	}
+	return resolved, nil, true
 }
 
 // The existing ledger encoder preserves JS property order and scalar bytes.

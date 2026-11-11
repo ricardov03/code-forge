@@ -237,3 +237,35 @@ func TestPruneRun(t *testing.T) {
 		}
 	}
 }
+
+// Ensure writes enqueueHash's bytes: Node key order, named fields last, no
+// HTML escaping, one trailing newline.
+func TestEnsureWritesNodeTicketBytes(t *testing.T) {
+	for _, named := range []bool{false, true} {
+		idx := &Index{Dir: t.TempDir()}
+		p := ticket.Parts{Run: "r-test", Block: "B1", File: "café<&>.mjs", ContentHash: "h1"}
+		tail := ""
+		if named {
+			tree, revision, reopened := "/tree", "rev1", "2000-01-01T00:00:00.000Z"
+			p.Tree, p.AcceptanceRevision, p.ReopenedAt = &tree, &revision, &reopened
+			tail = `,"tree":"/tree","acceptance_revision":"rev1","reopened_at":"2000-01-01T00:00:00.000Z"`
+		}
+		if err := idx.Ensure(p); err != nil {
+			t.Fatal(err)
+		}
+		id := ticket.ReviewID(p)
+		data, err := os.ReadFile(filepath.Join(idx.Dir, id+".json"))
+		if err != nil {
+			t.Fatal(err)
+		}
+		var body map[string]any
+		if err := json.Unmarshal(data, &body); err != nil {
+			t.Fatal(err)
+		}
+		stamp, _ := body["enqueued_at"].(string)
+		want := `{"ticket":"` + id + `","run":"r-test","block":"B1","file":"café<&>.mjs","content_hash":"h1","enqueued_at":"` + stamp + `","queued_at":"` + stamp + `","started_at":null,"finished_at":null,"duration_ms":null` + tail + "}\n"
+		if string(data) != want {
+			t.Fatalf("named=%v ticket bytes\n got %s\nwant %s", named, data, want)
+		}
+	}
+}

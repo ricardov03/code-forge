@@ -183,9 +183,21 @@ func reviewEnqueueExclusion(home, root, run, file string) (string, bool) {
 	return reviewq.Exclusion(cfg, file)
 }
 
-func runReviewEnqueue(args []string) int { return reviewEnqueueStep(args, nil) }
+// reviewFileScope is what the review-file dispatcher already settled: the
+// parsed flags, the effective cwd and the main tree.
+type reviewFileScope struct {
+	flags     map[string]string
+	paths     []string
+	cwd, root string
+}
 
+// reviewEnqueueStep queues one file for a land or close step. Steps pass
+// generated argv; anything unusual returns landHandover to the Node step.
 func reviewEnqueueStep(args []string, step *landStep) int {
+	return reviewEnqueueWith(args, step, nil)
+}
+
+func reviewEnqueueWith(args []string, step *landStep, pre *reviewFileScope) int {
 	stdout, stderr := step.writers()
 	reviewWaitHandover := func(args []string, reason handoverReason) int {
 		if step != nil {
@@ -222,51 +234,45 @@ func reviewEnqueueStep(args []string, step *landStep) int {
 		fmt.Fprint(stderr, "review-file: "+message+"\n"+reviewWaitUsage)
 		return 2
 	}
-	for i, arg := range args {
-		if !utf8.ValidString(arg) || i < 2 && (arg == "--help" || arg == "-h") {
-			return reviewWaitHandover(args, hEnqueueHelpEncoding)
-		}
-	}
-	// Modes owned by Node or the wait dispatchers must retain original argv.
-	for _, arg := range args {
-		name, _, _ := strings.Cut(arg, "=")
-		switch name {
-		case "--wait", "--wait-block":
-			return reviewWaitHandover(args, handoverFlagReason("enqueue", name, hEnqueueMode))
-		}
-	}
-	flags, paths, usage := reviewEnqueueFlags(args)
-	if usage != "" {
-		// The wait logger handles fixed usage text and ordinary flag names.
-		// Unknown flags containing arbitrary values need Node's full scrubber.
-		if reviewWaitLogging() && strings.HasPrefix(usage, "unknown flag ") {
-			var arg string
-			_ = json.Unmarshal([]byte(strings.TrimPrefix(usage, "unknown flag ")), &arg)
-			if arg != "--" && !reviewEnqueueSafeUnknown.MatchString(arg) {
-				return reviewWaitHandover(args, hEnqueueFlagRedaction)
+	var flags map[string]string
+	var paths []string
+	var cwd, root string
+	if pre != nil {
+		flags, paths, cwd, root = pre.flags, pre.paths, pre.cwd, pre.root
+	} else {
+		for i, arg := range args {
+			if !utf8.ValidString(arg) || i < 2 && (arg == "--help" || arg == "-h") {
+				return landHandover
 			}
 		}
-		return reviewWaitUsageError(args, usage)
-	}
-	cwd, err := os.Getwd()
-	if err != nil {
-		return reviewWaitHandover(args, hEnqueueGetcwd)
-	}
-	if dir, exists := flags["cwd"]; exists {
-		if !filepath.IsAbs(dir) {
-			dir = filepath.Join(cwd, dir)
+		var usage string
+		flags, paths, usage = reviewEnqueueFlags(args)
+		if usage != "" {
+			return reviewWaitUsageError(args, usage)
 		}
-		info, err := os.Stat(dir)
-		if err != nil || !info.IsDir() {
-			return reviewWaitUsageError(args, "--cwd must name an existing directory")
+		if reviewHas(flags, "wait") || reviewHas(flags, "wait-block") {
+			return landHandover
 		}
-		cwd = filepath.Clean(dir)
+		var err error
+		if cwd, err = os.Getwd(); err != nil {
+			return landHandover
+		}
+		if dir, exists := flags["cwd"]; exists {
+			if !filepath.IsAbs(dir) {
+				dir = filepath.Join(cwd, dir)
+			}
+			info, err := os.Stat(dir)
+			if err != nil || !info.IsDir() {
+				return reviewWaitUsageError(args, "--cwd must name an existing directory")
+			}
+			cwd = filepath.Clean(dir)
+		}
+		var ok bool
+		if root, ok = reviewWaitRoot(context.Background(), cwd); !ok {
+			return landHandover
+		}
 	}
 	ctx := context.Background()
-	root, ok := reviewWaitRoot(ctx, cwd)
-	if !ok {
-		return reviewWaitHandover(args, hEnqueueRoot)
-	}
 	if flags["rebase-check"] == "true" {
 		if step != nil {
 			return reviewWaitHandover(args, hEnqueueRebaseCheck)

@@ -26,10 +26,13 @@ The public route table currently serves these read commands:
 - `logs path`, `logs [--last] [--json]` and `logs summary`. `logs clear` and
   `logs report` hand over to Node.
 - `ledger tail`. Other `ledger` commands hand over to Node.
-- `review-file --wait <ticket> [--max <n>s]`.
-- `review-file --wait-block <id> --run <id> [--max <n>s]` when a compatible
-  daemon answers. A stopped file, an unusual answer or no daemon hands over
-  to Node.
+- `review-file --wait <ticket> [--max <n>s]`, `review-file --help`, `--cwd`,
+  usage errors and the "not inside a git repository" refusal.
+- `review-file --wait-block <id> --run <id> [--max <n>s]`. When the daemon is
+  turned off, cannot be reached or gives an unusual answer, Go joins the block
+  itself: it enqueues each missing ticket and prints the same JSON as Node.
+  Go hands over to Node only when a live worker must restart a stopped review
+  that has findings, or when the run files have a shape Go does not read.
 
 Since 0.19.0, it also serves these write commands. Go writes the same files,
 locks and signed ledger rows as Node.
@@ -176,7 +179,7 @@ native:
 The daemon is enabled by default. This setting disables only the daemon.
 The Go entry and other native helpers can still run. Workers read this setting
 at startup. Clients use the run's current config snapshot, which is the stored
-copy of its settings. The setting makes block waits use Node. Status in Go does not use the daemon.
+copy of its settings. Block waits then run in Go without the daemon: Go reads the queue and ledger files and hands over to Node only in the cases listed above. Status in Go does not use the daemon.
 
 ### Choose Node for the hand-over
 
@@ -227,7 +230,7 @@ clients use the run's current snapshot.
 | The binary lacks execute permission. | The entry uses Node directly. Reinstall the npm package to restore its executable file. For a source checkout, rebuild the host binary. Check the full doctor's `native` row again. |
 | The binary is for the wrong platform or processor. | Install the package for this machine, or rebuild for this host. A missing matching file makes the entry use Node. If a wrong binary was put at the matching path, it can fail to start; set `CODE_FORGE_NATIVE=0` while you replace it. |
 | The Go hand-over says `node executable … not found`. | Put Node on `PATH`, or set `CODE_FORGE_NODE` to its real executable path. This failure exits 127. If Go is disabled or missing, fix `PATH`: the shell does not use `CODE_FORGE_NODE`. |
-| The doctor shows daemon `fallback`. | Check that a review worker is active and that the package versions match. With no active worker, `fallback` can be normal. Block waits still use Node; status in Go reads the disk. To keep the daemon off, set `native.daemon: false` before the next worker starts. |
+| The doctor shows daemon `fallback`. | Check that a review worker is active and that the package versions match. With no active worker, `fallback` can be normal. Block waits and status still run in Go from the files on disk. To keep the daemon off, set `native.daemon: false` before the next worker starts. |
 
 Contributors can rebuild from the repository root with Go installed:
 

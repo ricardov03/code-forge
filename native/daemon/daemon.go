@@ -46,6 +46,11 @@ type server struct {
 	statusProcess                                *statusProcess
 	psProcesses                                  int64
 	lastSweep                                    time.Time
+	// A local join (Join) has no socket: it reads the scope mirror the CLI
+	// found, asks the CLI's liveness probe and never sweeps the queue.
+	local bool
+	scope string
+	live  func() (bool, bool)
 }
 
 type treeState struct {
@@ -214,18 +219,26 @@ func failure(code string) object { return object{"ok": false, "error": code} }
 
 func (s *server) refresh() error {
 	file := filepath.Join(s.repo, ".code-forge", "runs", s.run+".json")
+	if s.scope != "" {
+		file = s.scope
+	}
 	stamp := fileStamp(file)
 	if s.record == nil || stamp != s.recordStamp {
 		record, err := readObject(file)
+		if err == nil && s.local && s.record == nil {
+			s.project = text(record, "project")
+		}
 		if err != nil || record["run_id"] != s.run || text(record, "project") != s.project {
 			return fmt.Errorf("block-scope-unreadable")
 		}
 		s.record, s.recordStamp = record, stamp
 	}
 	rows, err := s.ledger.Refresh(filepath.Join(s.home, ".code-forge", "ledger"), s.project)
-	if err != nil {
+	if err != nil && !s.local {
 		return err
 	}
+	// Node's join reads reopen rows best effort: sandboxed callers may not
+	// read the private ledger, and the worker verifies signed rows anyway.
 	s.rows = rows
 	return s.queue.Refresh()
 }
@@ -273,7 +286,9 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	if err := s.refresh(); err != nil {
 		return failure(err.Error()), true
 	}
-	s.sweep(time.Now())
+	if !s.local {
+		s.sweep(time.Now())
+	}
 	if req.Method == "rows" {
 		if req.Block != "" && !regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`).MatchString(req.Block) {
 			return failure("bad-request"), true
@@ -337,11 +352,26 @@ func (s *server) step(req request, deadline time.Time, down *int, delivered map[
 	if err != nil {
 		return failure(err.Error()), true
 	}
-	live := s.workerLive()
+	live := false
+	if s.live != nil {
+		var supported bool
+		if live, supported = s.live(); !supported {
+			return failure("worker-unsupported"), true
+		}
+	} else {
+		live = s.workerLive()
+	}
 	if live {
 		*down = 0
 	} else {
 		*down++
+	}
+	if s.local && live {
+		if stopped, err := s.stopped(files, owned, mapping(entry["owned_kinds"]), byFile); err != nil || stopped {
+			// Restarting a changed stopped review writes a signed reopen row;
+			// that mutation stays with Node (requeueStoppedFiles).
+			return failure("stopped"), true
+		}
 	}
 	states := []object{}
 	done := true
@@ -539,7 +569,7 @@ func (s *server) reopened(block, file string) string {
 		if row["event"] != "review.reopened" || row["run"] != s.run || row["block"] != block || row["file"] != file {
 			continue
 		}
-		if row["by"] != "human" && !(row["by"] == "agent" && mapping(row["verdict"])["verdict"] == "agree") {
+		if row["by"] != "human" && !(row["by"] == "agent" && mapping(row["verdict"])["verdict"] == "agree") && !(s.local && automaticReopen(row)) {
 			continue
 		}
 		ts := text(row, "ts")

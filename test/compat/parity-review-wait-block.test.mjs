@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { spawn, spawnSync } from 'node:child_process';
 import { once } from 'node:events';
-import { chmod, mkdir, mkdtemp, readFile, rm, symlink, writeFile } from 'node:fs/promises';
+import { chmod, mkdir, mkdtemp, readdir, readFile, rm, symlink, writeFile } from 'node:fs/promises';
 import net from 'node:net';
 import os from 'node:os';
 import path from 'node:path';
@@ -195,7 +195,7 @@ test('live daemon wait-block has byte and exit parity for every answer and timeo
   }
 });
 
-test('disabled, unreachable, invalid and stopped daemon answers hand over unchanged to Node', async (t) => {
+test('disabled, unreachable, invalid and stopped daemon answers join in Go with Node parity', async (t) => {
   const f = await fixture(t), responses = /** @type {any[]} */ ([approved]), d = await daemon(t, f, responses);
   await nativeRoute(f);
   const cases = [
@@ -210,6 +210,10 @@ test('disabled, unreachable, invalid and stopped daemon answers hand over unchan
     { answer: approved, args: [...ARGS, '--max=1ms'] },
     { answer: approved, args: [...ARGS, '--cwd', 'missing'] },
     { answer: approved, args: [...ARGS.slice(0, -1), '--max=-1'] },
+    { answer: approved, args: ['review-file', '--max=0ms', '--run', RUN, '--wait-block', BLOCK] },
+    { answer: approved, args: [...ARGS, '--fresh'] },
+    { answer: approved, args: ['review-file', '--wait-block', 'bad/id', '--run', RUN] },
+    { answer: approved, args: ['review-file', '--wait-block', BLOCK, '--run', 'BAD RUN'] },
   ];
   for (const c of cases) {
     f.record.config = initialConfigState(c.config ?? {});
@@ -217,21 +221,52 @@ test('disabled, unreachable, invalid and stopped daemon answers hand over unchan
     responses.splice(0, responses.length, c.answer);
     d.reset();
     const args = c.args ?? ARGS;
-    const go = await execute(f, args, { env: c.env });
-    const node = await execute(f, args, { node: true });
-    assert.deepEqual(go, node, `fallback bytes and exit match: ${JSON.stringify(c)}`);
-    const unavailable = await execute(f, args, { env: { ...c.env, CODE_FORGE_NODE: NO_NODE } });
-    assert.equal(unavailable.code, 127, 'each fallback requires Node');
-    const forwarded = await execute(f, args, { env: { ...c.env, CODE_FORGE_NODE: f.argvNode } });
-    assert.equal(forwarded.code, 0, 'handover executes the selected Node executable');
-    assert.equal(forwarded.stdout, `${JSON.stringify(args)}\n`, 'every original argv element is forwarded in order without extra output');
+    const go = await execute(f, args, { env: { ...c.env, CODE_FORGE_NODE: NO_NODE } });
+    // The Node oracle uses its daemon client unless the case disables the daemon.
+    const node = await execute(f, args, { node: true, client: !c.env && !c.config });
+    assert.deepEqual(go, node, `Go bytes and exit match Node without Node: ${JSON.stringify(c)}`);
     if (c.config || c.env) assert.equal(d.requests.length, 0, 'disabled daemon receives zero requests');
   }
   // No listener is reachable at this different run socket.
   const other = 'r-no-daemon';
-  await writeFile(path.join(f.runs, `${other}.json`), JSON.stringify({ ...f.record, run_id: other }));
+  const head = spawnSync('git', ['-C', f.repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  await writeFile(path.join(f.runs, `${other}.json`), JSON.stringify({ ...f.record, run_id: other, blocks: { [BLOCK]: { owned_files: ['sample.mjs'], base_sha: head } } }));
   const args = ['review-file', '--wait-block', BLOCK, '--run', other, '--max=0ms'];
-  assert.deepEqual(await execute(f, args), await execute(f, args, { node: true }), 'unreachable daemon has exact Node parity');
-  assert.equal((await execute(f, args, { env: { CODE_FORGE_NODE: NO_NODE } })).code, 127, 'unreachable daemon requires Node');
-  assert.equal((await execute(f, args, { env: { CODE_FORGE_NODE: f.argvNode } })).stdout, `${JSON.stringify(args)}\n`, 'unreachable daemon forwards the complete original argv');
+  const go = await execute(f, args, { env: { CODE_FORGE_NODE: NO_NODE } });
+  assert.deepEqual(go, await execute(f, args, { node: true }), 'unreachable daemon joins in Go with exact Node parity');
+  assert.equal(go.code, 3, 'no worker: the local join reports worker_down');
+  // Boundary: a scope Node cannot read is a refusal in both, never a hand-over.
+  const missing = ['review-file', '--wait-block', BLOCK, '--run', 'r-missing', '--max=0ms'];
+  const refused = await execute(f, missing, { env: { CODE_FORGE_NODE: NO_NODE } });
+  assert.deepEqual(refused, await execute(f, missing, { node: true }), 'missing scope has exact Node parity');
+  assert.equal(refused.stdout, `${JSON.stringify({ status: 'refused', reason: 'block-scope-unreadable', message: 'the block scope cannot be read' })}\n`, 'missing scope is the block-scope-unreadable refusal');
+});
+
+test('a live worker local join enqueues the missing ticket in Go like Node', async (t) => {
+  const f = await fixture(t, { native: { daemon: false } });
+  const head = spawnSync('git', ['-C', f.repo, 'rev-parse', 'HEAD'], { encoding: 'utf8' }).stdout.trim();
+  f.record.blocks[BLOCK].base_sha = head;
+  await writeFile(path.join(f.runs, `${RUN}.json`), JSON.stringify(f.record));
+  await writeFile(path.join(f.repo, 'sample.mjs'), 'export const sample = 1;\n');
+  const stamp = new Date().toISOString();
+  await mkdir(path.join(f.repo, '.code-forge/workers'), { recursive: true });
+  await writeFile(path.join(f.repo, '.code-forge/workers', `${process.pid}-unknown.json`), JSON.stringify({ pid: process.pid, start_time: 'unknown', run: RUN, started_at: stamp, heartbeat_at: stamp }));
+  const queue = path.join(f.repo, '.code-forge/queue');
+  const tickets = async () => (await readdir(queue)).filter((n) => n.endsWith('.json')).sort();
+  const ticketKeys = async (name) => Object.keys(JSON.parse(await readFile(path.join(queue, name), 'utf8')));
+  const node = await execute(f, ARGS, { node: true });
+  const nodeTickets = await tickets(), nodeKeys = await ticketKeys(nodeTickets[0]);
+  await rm(queue, { recursive: true, force: true });
+  const go = await execute(f, ARGS, { env: { CODE_FORGE_NODE: NO_NODE } });
+  assert.deepEqual(go, node, 'Go join bytes and exit match Node without Node');
+  const answer = JSON.parse(go.stdout);
+  assert.equal(answer.reason, 'wait_timeout', 'the zero deadline ends the join with wait_timeout');
+  assert.equal(answer.files[0].status, 'pending', 'the owned changed file is pending');
+  assert.deepEqual(await tickets(), nodeTickets, 'Go writes exactly the ticket Node writes');
+  assert.deepEqual(await ticketKeys(nodeTickets[0]), nodeKeys, 'the ticket keeps Node field order');
+  assert.equal(nodeTickets[0], `${answer.files[0].ticket}.json`, 'the answer names the written ticket');
+  // Boundary: the same join again finds its ticket and writes nothing new.
+  const again = await execute(f, ARGS, { env: { CODE_FORGE_NODE: NO_NODE } });
+  assert.equal(again.stdout, go.stdout, 'a second join answers the same pending ticket');
+  assert.deepEqual(await tickets(), nodeTickets, 'a second join adds zero tickets');
 });

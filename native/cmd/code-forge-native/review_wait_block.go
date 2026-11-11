@@ -6,10 +6,10 @@ import (
 	"os"
 	"path/filepath"
 	"regexp"
-	"strconv"
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/daemon"
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
@@ -18,50 +18,27 @@ var reviewBlockID = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$`)
 var reviewBlockRun = regexp.MustCompile(`^[a-z0-9][a-z0-9-]{0,63}$`)
 var reviewBlockControl = regexp.MustCompile(`[\x00-\x1f\x7f]`)
 
-// Translate only the mode name to reuse B266's strict value-flag parser.
-// All ambiguous forms and usage errors retain Node's validation and logging.
-func reviewBlockFlags(args []string) (map[string]string, bool) {
-	translated := append([]string{}, args...)
-	for i, arg := range translated {
-		if arg == "--wait" || strings.HasPrefix(arg, "--wait=") {
-			return nil, false
-		}
-		if arg == "--wait-block" || strings.HasPrefix(arg, "--wait-block=") {
-			translated[i] = strings.Replace(arg, "--wait-block", "--wait", 1)
-		}
-	}
-	flags, usage, ok := reviewWaitFlags(translated)
-	return flags, ok && usage == "" && reviewBlockID.MatchString(flags["wait"]) && reviewBlockRun.MatchString(flags["run"])
-}
-
-func runReviewWaitBlock(args []string) int { return reviewWaitBlockStep(args, nil) }
-
+// reviewWaitBlockStep joins a block for a land or close step through the run
+// daemon only. Any other answer returns landHandover to the Node step.
 func reviewWaitBlockStep(args []string, step *landStep) int {
 	stdout, _ := step.writers()
-	reviewWaitHandover := func(args []string, reason handoverReason) int {
-		if step != nil {
+	flags, paths, usage := reviewEnqueueFlags(args)
+	if usage != "" || len(paths) > 0 || !daemonclient.Enabled(nil) {
+		return landHandover
+	}
+	for key := range flags {
+		if key != "wait-block" && key != "run" && key != "max" && key != "cwd" {
 			return landHandover
 		}
-		return reviewWaitHandover(args, reason)
 	}
-	flags, ok := reviewBlockFlags(args)
-	if !ok || !daemonclient.Enabled(nil) {
-		return reviewWaitHandover(args, hWaitBlockFlagsDaemon)
-	}
-	maxMs := int64(90000)
-	if raw, exists := flags["max"]; exists {
-		match := reviewWaitMax.FindStringSubmatch(raw)
-		if match == nil {
-			return reviewWaitHandover(args, hWaitBlockMax)
-		}
-		maxMs, _ = strconv.ParseInt(match[1], 10, 64)
-		if match[2] != "ms" {
-			maxMs *= 1000
-		}
+	block, run := flags["wait-block"], flags["run"]
+	maxWait, valid := reviewParseMax(flags["max"], reviewHas(flags, "max"))
+	if !reviewBlockID.MatchString(block) || !reviewBlockRun.MatchString(run) || !valid {
+		return landHandover
 	}
 	cwd, err := os.Getwd()
 	if err != nil {
-		return reviewWaitHandover(args, hWaitBlockGetcwd)
+		return landHandover
 	}
 	if dir, exists := flags["cwd"]; exists {
 		if !filepath.IsAbs(dir) {
@@ -71,75 +48,185 @@ func reviewWaitBlockStep(args []string, step *landStep) int {
 	}
 	cwd, err = filepath.EvalSymlinks(cwd)
 	if err != nil {
-		return reviewWaitHandover(args, hWaitBlockCwd)
+		return landHandover
 	}
 	ctx := context.Background()
 	root, ok := reviewWaitRoot(ctx, cwd)
 	if !ok {
-		return reviewWaitHandover(args, hWaitBlockRoot)
+		return landHandover
 	}
-	block, run := flags["wait"], flags["run"]
-	// Like waitBlockScope, validate scope/config before starting the deadline,
-	// and re-read the workspace mirror on each join (run reload can change it).
-	cfg, ok := reviewBlockConfig(ctx, root, cwd, run, block)
-	if !ok || !daemonclient.Enabled(cfg) {
-		return reviewWaitHandover(args, hWaitBlockConfig)
+	cfg, _, scope := reviewBlockConfig(ctx, root, cwd, run, block)
+	if scope != reviewScopeOK || !daemonclient.Enabled(cfg) {
+		return landHandover
 	}
-	if step != nil && step.preflight {
+	if step.preflight {
 		_, err := daemonclient.Request(run, map[string]any{"method": "ping"}, 6500*time.Millisecond)
 		if err != nil {
 			return landHandover
 		}
 		return 0
 	}
-	deadline := time.Now().UnixMilli() + maxMs
+	deadline := time.Now().Add(maxWait)
 	for {
-		cfg, ok = reviewBlockConfig(ctx, root, cwd, run, block)
-		if !ok || !daemonclient.Enabled(cfg) {
-			return reviewWaitHandover(args, hWaitBlockConfigReload)
+		cfg, _, scope = reviewBlockConfig(ctx, root, cwd, run, block)
+		if scope != reviewScopeOK || !daemonclient.Enabled(cfg) {
+			return landHandover
 		}
-		remaining := max(int64(0), deadline-time.Now().UnixMilli())
+		remaining := max(int64(0), time.Until(deadline).Milliseconds())
 		answer, err := daemonclient.Request(run, map[string]any{"method": "wait-block", "block": block, "max_ms": remaining}, time.Duration(remaining+2500)*time.Millisecond)
-		if err != nil {
-			return reviewWaitHandover(args, hWaitBlockRequest)
+		if err != nil || reviewBlockStopped(answer) {
+			return landHandover
 		}
 		out, ok := reviewBlockAnswer(block, answer)
 		if !ok {
-			return reviewWaitHandover(args, hWaitBlockAnswer)
+			return landHandover
 		}
-		if answer["reason"] == "wait_timeout" && time.Now().UnixMilli() < deadline {
+		if answer["reason"] == "wait_timeout" && time.Now().Before(deadline) {
 			continue
 		}
-		// Validate encoding before publishing a breadcrumb or a partial answer.
 		data, err := ledger.Stringify(out, false)
 		if err != nil {
-			return reviewWaitHandover(args, hWaitBlockEncoding)
-		}
-		before := []any{}
-		if step == nil {
-			before = reviewWaitBreadcrumb()
+			return landHandover
 		}
 		fmt.Fprintln(stdout, string(data))
 		if answer["status"] == "worker_down" {
-			if step == nil {
-				reviewWaitFailure(args, 3, nil, before)
-			}
 			return 3
 		}
 		return 0
 	}
 }
 
+// reviewWaitBlockDirect is runReviewFile's --wait-block mode and waitBlock:
+// the run daemon answers when it can; when it is disabled, unreachable,
+// answers with an invalid envelope or reports a stopped review, the join runs
+// here without it, as Node's local loop does.
+func reviewWaitBlockDirect(args []string, flags map[string]string, paths []string, cwd, root string) int {
+	bad := len(paths) > 0 || flags["fresh"] == "true" || !reviewHas(flags, "run")
+	for _, key := range []string{"block", "wait", "answers", "of"} {
+		bad = bad || reviewHas(flags, key)
+	}
+	if bad {
+		return reviewWaitUsageError(args, "--wait-block takes a block, --run and --max only")
+	}
+	block, run := flags["wait-block"], flags["run"]
+	if !reviewBlockID.MatchString(block) {
+		return reviewWaitUsageError(args, "block id must match /^[A-Za-z0-9][A-Za-z0-9._-]{0,63}$/")
+	}
+	if !reviewBlockRun.MatchString(run) {
+		return reviewEnqueueSay(args, reviewEnqueueRefusal("bad-run-id", "run id must match /^[a-z0-9][a-z0-9-]{0,63}$/"), 1)
+	}
+	maxWait, valid := reviewParseMax(flags["max"], reviewHas(flags, "max"))
+	if !valid {
+		return reviewWaitUsageError(args, "--max must look like 90s or 1500ms")
+	}
+	ctx := context.Background()
+	real, err := filepath.EvalSymlinks(cwd)
+	if err != nil {
+		return reviewWaitHandover(args, hWaitBlockConfig)
+	}
+	readScope := func() (map[string]any, string, int) {
+		cfg, file, scope := reviewBlockConfig(ctx, root, real, run, block)
+		switch scope {
+		case reviewScopeUnreadable:
+			return nil, "", reviewEnqueueSay(args, reviewEnqueueRefusal("block-scope-unreadable", "the block scope cannot be read"), 1)
+		case reviewScopeUnsupported:
+			return nil, "", reviewWaitHandover(args, hWaitBlockConfig)
+		}
+		return cfg, file, -1
+	}
+	// waitBlockScope validates the scope before the deadline starts, then
+	// re-reads the workspace mirror on each join (run reload can change it).
+	if _, _, code := readScope(); code >= 0 {
+		return code
+	}
+	home, _ := os.UserHomeDir()
+	live := func() (bool, bool) {
+		w, ok := reviewEnqueueWorker(root)
+		return ok && w != nil && w.Get("run") == run, ok
+	}
+	deadline := time.Now().Add(maxWait)
+	for {
+		cfg, scopeFile, code := readScope()
+		if code >= 0 {
+			return code
+		}
+		var answer map[string]any
+		if daemonclient.Enabled(cfg) {
+			remaining := max(int64(0), time.Until(deadline).Milliseconds())
+			answer, _ = daemonclient.Request(run, map[string]any{"method": "wait-block", "block": block, "max_ms": remaining}, time.Duration(remaining+2500)*time.Millisecond)
+			if reviewBlockStopped(answer) {
+				answer = nil
+			}
+			if answer != nil && answer["reason"] == "wait_timeout" && time.Now().Before(deadline) {
+				continue
+			}
+		}
+		if answer == nil {
+			var failure string
+			answer, failure = daemon.Join(daemon.JoinOptions{Home: home, Repo: root, Scope: scopeFile, Run: run, Block: block, Deadline: deadline, Live: live,
+				Sleep: func(pause time.Duration) bool { time.Sleep(pause); return true }})
+			switch failure {
+			case "":
+			case "block-scope-unreadable":
+				return reviewEnqueueSay(args, reviewEnqueueRefusal("block-scope-unreadable", "the block scope cannot be read"), 1)
+			case "bad-ref":
+				// changedFiles → treeAtOpen refuses a base that is no commit id.
+				return reviewEnqueueSay(args, reviewEnqueueRefusal("bad-ref", "the block base must be a commit id"), 1)
+			case "stopped":
+				return reviewWaitHandover(args, hWaitBlockStopped)
+			default:
+				return reviewWaitHandover(args, hWaitBlockLocal)
+			}
+		}
+		out, ok := reviewBlockAnswer(block, answer)
+		if !ok {
+			return reviewWaitHandover(args, hWaitBlockAnswer)
+		}
+		// Validate encoding before publishing a breadcrumb or a partial answer.
+		data, err := ledger.Stringify(out, false)
+		if err != nil {
+			return reviewWaitHandover(args, hWaitBlockEncoding)
+		}
+		before := reviewWaitBreadcrumb()
+		fmt.Fprintln(os.Stdout, string(data))
+		if answer["status"] == "worker_down" {
+			reviewWaitFailure(args, 3, nil, before)
+			return 3
+		}
+		return 0
+	}
+}
+
+// reviewBlockStopped: Node leaves a daemon answer naming a stopped review to
+// its own join, which may restart it with a signed reopen.
+func reviewBlockStopped(answer map[string]any) bool {
+	files, _ := answer["files"].([]any)
+	for _, value := range files {
+		if file, _ := value.(map[string]any); file["outcome"] == "stopped" {
+			return true
+		}
+	}
+	return false
+}
+
+const (
+	reviewScopeOK = iota
+	reviewScopeUnreadable
+	reviewScopeUnsupported
+)
+
 // This is the informational workspace mirror, never the private run record.
 // The main tree wins, followed by cwd's ancestors up to its git top level.
-func reviewBlockConfig(ctx context.Context, root, cwd, run, block string) (map[string]any, bool) {
+// Like waitBlockScope it returns the mirror's path; a missing, unparsable or
+// mismatched scope is unreadable, and shapes only Node reads are unsupported.
+func reviewBlockConfig(ctx context.Context, root, cwd, run, block string) (map[string]any, string, int) {
 	top, ok := reviewBlockGit(ctx, cwd, "rev-parse", "--show-toplevel")
 	if !ok {
-		return nil, false
+		return nil, "", reviewScopeUnsupported
 	}
 	top, err := filepath.EvalSymlinks(top)
 	if err != nil {
-		return nil, false
+		return nil, "", reviewScopeUnsupported
 	}
 	candidates := []string{root}
 	for dir := cwd; ; dir = filepath.Dir(dir) {
@@ -156,24 +243,31 @@ func reviewBlockConfig(ctx context.Context, root, cwd, run, block string) (map[s
 			continue
 		}
 		record, ok := reviewWaitJSON(file)
+		if !ok {
+			return nil, "", reviewScopeUnsupported
+		}
 		blocks, _ := record.Get("blocks").(ledger.Object)
 		entry, _ := blocks.Get(block).(ledger.Object)
 		owned, owns := entry.Get("owned_files").([]any)
-		if !ok || record.Get("run_id") != run || !owns || len(owned) == 0 {
-			return nil, false
+		if record.Get("run_id") != run || !owns || len(owned) == 0 {
+			return nil, "", reviewScopeUnreadable
 		}
 		if entry.Get("worktree") != nil && !reviewBlockTree(ctx, root, record, entry) {
-			return nil, false
+			return nil, "", reviewScopeUnsupported
 		}
 		// configInForce returns null for pre-snapshot runs; it does not load
 		// the current project YAML as statusConfig's legacy fallback does.
 		state, _ := record.Get("config").(ledger.Object)
 		if _, snapshot := state.Get("hash").(string); !snapshot {
-			return nil, true
+			return nil, file, reviewScopeOK
 		}
-		return statusConfig(record)
+		cfg, ok := statusConfig(record)
+		if !ok {
+			return nil, "", reviewScopeUnsupported
+		}
+		return cfg, file, reviewScopeOK
 	}
-	return nil, false
+	return nil, "", reviewScopeUnreadable
 }
 
 func reviewBlockGit(ctx context.Context, cwd string, args ...string) (string, bool) {
@@ -256,7 +350,7 @@ func reviewBlockAnswer(block string, answer map[string]any) (ledger.Object, bool
 	files := []any{}
 	for _, value := range values {
 		file, ok := value.(map[string]any)
-		if !ok || file["outcome"] == "stopped" {
+		if !ok {
 			return nil, false
 		}
 		if _, ok := file["file"].(string); !ok {
