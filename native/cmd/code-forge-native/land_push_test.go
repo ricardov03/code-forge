@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/healq"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -26,22 +27,12 @@ func (f *landBatchFixture) bareRemote() string {
 	return bare
 }
 
-func healItems(t *testing.T, home, run string) []map[string]any {
+// queuedHeal reads the run's heal queue through healq.
+func queuedHeal(t *testing.T, home, run string) []healq.Item {
 	t.Helper()
-	data, err := os.ReadFile(filepath.Join(home, ".code-forge", "heal", run+".jsonl"))
-	if os.IsNotExist(err) {
-		return nil
-	}
+	items, err := healq.Load(home, run)
 	if err != nil {
 		t.Fatal(err)
-	}
-	items := []map[string]any{}
-	for _, line := range strings.Split(strings.TrimSuffix(string(data), "\n"), "\n") {
-		item := map[string]any{}
-		if err := json.Unmarshal([]byte(line), &item); err != nil {
-			t.Fatalf("heal line %q: %v", line, err)
-		}
-		items = append(items, item)
 	}
 	return items
 }
@@ -61,7 +52,7 @@ func TestLandPushBatchPutsMergeOnRemote(t *testing.T) {
 	if got := strings.Count(output, "pushed "+head+" to origin/main\n"); got != 1 {
 		t.Errorf("push line count=%d, want 1: %s", got, output)
 	}
-	if items := healItems(t, f.home, "r-batch-unit"); len(items) != 0 {
+	if items := queuedHeal(t, f.home, "r-batch-unit"); len(items) != 0 {
 		t.Errorf("heal items=%d, want 0 after a clean push: %v", len(items), items)
 	}
 }
@@ -127,17 +118,17 @@ func TestLandPushRejectedQueuesOneHealItem(t *testing.T) {
 	if got := f.git(bare, "rev-parse", "refs/heads/main"); got != other {
 		t.Errorf("remote main=%s, want it unchanged at %s", got, other)
 	}
-	items := healItems(t, f.home, "r-batch-unit")
+	items := queuedHeal(t, f.home, "r-batch-unit")
 	if len(items) != 1 {
 		t.Fatalf("heal items=%d, want 1: %v", len(items), items)
 	}
 	item := items[0]
-	argv, _ := item["argv"].([]any)
-	if item["kind"] != "land" || item["status"] != "open" || item["tries"] != float64(0) || item["block"] != "B1,B2" || item["run"] != "r-batch-unit" || len(argv) != 6 || argv[3] != "push" || argv[5] != "main" {
-		t.Errorf("heal item=%v, want kind land, status open, tries 0, block B1,B2 and the push argv", item)
+	wantArgv := "block land B1 B2 --run r-batch-unit --merge --push"
+	if item.Kind != healq.KindLand || item.Status != healq.StatusOpen || item.Tries != 0 || item.Block != "B1,B2" || item.Run != "r-batch-unit" || strings.Join(item.Argv, " ") != wantArgv || item.Cwd != f.git(f.repo, "rev-parse", "--show-toplevel") {
+		t.Errorf("heal item=%+v, want kind land, status open, tries 0, block B1,B2, argv %q and the repo as cwd", item, wantArgv)
 	}
-	if id, _ := item["id"].(string); id == "" || strings.Count(output, "heal: queued "+id+"\n") != 1 {
-		t.Errorf("output must name the queued item %v once: %s", item["id"], output)
+	if item.ID == "" || strings.Count(output, "heal: queued "+item.ID+"\n") != 1 {
+		t.Errorf("output must name the queued item %q once: %s", item.ID, output)
 	}
 	if !strings.Contains(output, "land stopped at push:") {
 		t.Errorf("output must say the land stopped at push: %s", output)
@@ -206,5 +197,53 @@ func TestLandWatchCIRefusals(t *testing.T) {
 		if code != 2 || string(data) != tc.want {
 			t.Errorf("%v: exit=%d stderr=%q, want 2 and %q", tc.args, code, data, tc.want)
 		}
+	}
+}
+
+// The queued retry argv is a real code-forge call: once the remote takes the
+// push again, running it (as the heal runner does, with the retry env) pushes
+// the already landed blocks and queues nothing new.
+func TestLandPushHealRetryPushesOnly(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	bare := f.bareRemote()
+	other := f.git(f.repo, "commit-tree", "-p", f.base, "-m", "remote moved", f.base+"^{tree}")
+	f.git(f.repo, "push", "-q", "origin", other+":refs/heads/main")
+	if code, output := f.landWith([]string{"--push"}, "B1", "B2"); code == 0 {
+		t.Fatalf("exit=0, want the rejected push first: %s", output)
+	}
+	items := queuedHeal(t, f.home, "r-batch-unit")
+	if len(items) != 1 {
+		t.Fatalf("heal items=%d, want 1", len(items))
+	}
+	// The remote is repaired: its main is back at the base.
+	f.git(bare, "update-ref", "refs/heads/main", f.base)
+	t.Setenv(healq.RetryEnv, items[0].ID)
+	argv := items[0].Argv
+	if len(argv) < 2 || argv[0] != "block" || argv[1] != "land" {
+		t.Fatalf("argv=%v, want a block land call", argv)
+	}
+	capture, err := os.CreateTemp(f.home, "retry-")
+	if err != nil {
+		t.Fatal(err)
+	}
+	out, errOut := os.Stdout, os.Stderr
+	os.Stdout, os.Stderr = capture, capture
+	code := runBlockLand(argv[2:])
+	os.Stdout, os.Stderr = out, errOut
+	_ = capture.Close()
+	data, _ := os.ReadFile(capture.Name())
+	if code != 0 {
+		t.Fatalf("retry exit=%d, want 0: %s", code, data)
+	}
+	head := f.git(f.repo, "rev-parse", "main")
+	if got := f.git(bare, "rev-parse", "refs/heads/main"); got != head {
+		t.Errorf("remote main=%s, want the landed main %s", got, head)
+	}
+	if !strings.Contains(string(data), "B1,B2 already landed; pushing main only") {
+		t.Errorf("retry output must say it only pushes: %s", data)
+	}
+	f.checkMain([]string{"B1", "B2"})
+	if items := queuedHeal(t, f.home, "r-batch-unit"); len(items) != 1 {
+		t.Errorf("heal items=%d after the retry, want still 1 (the runner updates its own)", len(items))
 	}
 }

@@ -392,7 +392,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 	if landPushWanted(flags, cfg) {
 		step = "push"
 		next = closeCommand([]string{"git", "-C", main, "push", "origin", base})
-		if _, err := landPush(home, run, id, main, base, flags["watch-ci"] == true, print); err != nil {
+		if _, err := landPush(home, run, []string{id}, main, base, flags["watch-ci"] == true, print); err != nil {
 			return stop(err.Error())
 		}
 	}

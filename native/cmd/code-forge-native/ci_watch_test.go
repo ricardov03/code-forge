@@ -9,6 +9,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/healq"
 )
 
 // ciFixture: a repo with a merge commit whose subjects name B501 and B502, a
@@ -114,7 +115,7 @@ func TestCIWatchSuccessExitsZero(t *testing.T) {
 	if f.stdout != "ci watch: CI passed for "+f.sha+" (2 runs)\n" {
 		t.Errorf("stdout=%q", f.stdout)
 	}
-	if items := healItems(t, f.home, "r-ci-unit"); len(items) != 0 {
+	if items := queuedHeal(t, f.home, "r-ci-unit"); len(items) != 0 {
 		t.Errorf("heal items=%d, want 0 on success", len(items))
 	}
 	calls, _ := os.ReadFile(filepath.Join(f.home, "gh-calls"))
@@ -130,17 +131,19 @@ func TestCIWatchFailureQueuesHealItem(t *testing.T) {
 	if code := f.watch(); code != 1 {
 		t.Fatalf("exit=%d, want 1; stdout=%q stderr=%q", code, f.stdout, f.stderr)
 	}
-	items := healItems(t, f.home, "r-ci-unit")
+	items := queuedHeal(t, f.home, "r-ci-unit")
 	if len(items) != 1 {
 		t.Fatalf("heal items=%d, want 1", len(items))
 	}
 	item := items[0]
-	detail, _ := item["detail"].(string)
 	want := "CI failed for " + f.sha + "; jobs: CI / test (ubuntu); tests: TestLandPush, land pushes main"
-	if item["kind"] != "ci" || item["status"] != "open" || item["tries"] != float64(0) || item["block"] != "B501,B502" || detail != want {
-		t.Errorf("heal item=%v, want kind ci, block B501,B502 and detail %q", item, want)
+	if item.Kind != healq.KindCI || item.Status != healq.StatusOpen || item.Tries != 0 || item.Block != "B501,B502" || item.Detail != want || item.Cwd != f.repo {
+		t.Errorf("heal item=%+v, want kind ci, block B501,B502, cwd the repo and detail %q", item, want)
 	}
-	if !strings.Contains(f.stdout, "heal: queued "+item["id"].(string)+"\n") {
+	if wantArgv := "ci watch --sha " + f.sha + " --cwd " + f.repo + " --run r-ci-unit"; strings.Join(item.Argv, " ") != wantArgv {
+		t.Errorf("argv=%q, want %q", item.Argv, wantArgv)
+	}
+	if !strings.Contains(f.stdout, "heal: queued "+item.ID+"\n") {
 		t.Errorf("stdout must name the heal item: %q", f.stdout)
 	}
 }
@@ -153,7 +156,7 @@ func TestCIWatchNoRunExitsTwo(t *testing.T) {
 	if f.stdout != "ci watch: no CI run for "+f.sha+"\n" {
 		t.Errorf("stdout=%q, want the no-run line", f.stdout)
 	}
-	if items := healItems(t, f.home, "r-ci-unit"); len(items) != 0 {
+	if items := queuedHeal(t, f.home, "r-ci-unit"); len(items) != 0 {
 		t.Errorf("heal items=%d, want 0 when CI never started", len(items))
 	}
 }

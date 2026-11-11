@@ -139,6 +139,10 @@ func runBlockLand(args []string) int {
 	if message := landPushCheck(flags, record, len(pos) > 1); message != "" {
 		return fail(message, 2)
 	}
+	// B430: a heal retry of a failed push: every block landed, push only.
+	if done, code := landPushOnly(flags, home, run, record, pos); done {
+		return code
+	}
 	if len(pos) > 1 {
 		// A stray trailing argument remains a usage error. Batch operands must
 		// name distinct blocks in this run, preserving the legacy malformed-call

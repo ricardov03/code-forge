@@ -1,20 +1,17 @@
 package main
 
 import (
-	"crypto/rand"
-	"encoding/hex"
-	"encoding/json"
 	"fmt"
 	"io"
 	"os"
 	"os/exec"
 	"path/filepath"
-	"regexp"
 	"strings"
 	"syscall"
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/healq"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -23,67 +20,25 @@ import (
 // after the merge; a rejected push becomes a heal item instead of a silent
 // local-only main. `--watch-ci` starts a detached `ci watch` and returns.
 
-// healItem is one line of <home>/.code-forge/heal/<run>.jsonl, the shape the
-// B429 heal queue reads.
-type healItem struct {
-	ID     string            `json:"id"`
-	Run    string            `json:"run"`
-	Block  string            `json:"block"`
-	Kind   string            `json:"kind"`
-	Argv   []string          `json:"argv"`
-	Detail string            `json:"detail"`
-	Tries  int               `json:"tries"`
-	Status string            `json:"status"`
-	Times  map[string]string `json:"times"`
+// healQueue queues one open item through healq. Inside a heal retry
+// (healq.RetryEnv set) it queues nothing: the runner updates its own item, so
+// a retry that fails again never adds a second one. It returns the item id.
+func healQueue(home, run, block, kind string, argv []string, cwd, detail string) (string, error) {
+	if id := os.Getenv(healq.RetryEnv); id != "" {
+		return id, nil
+	}
+	if run == "" {
+		return "", fmt.Errorf("heal: no run id (pass --run)")
+	}
+	item, err := healq.Enqueue(home, run, block, kind, argv, cwd, detail, time.Now())
+	return item.ID, err
 }
 
-var healRunName = regexp.MustCompile(`^[A-Za-z0-9][A-Za-z0-9._-]*$`)
-
-func healDir(home string) string { return filepath.Join(home, ".code-forge", "heal") }
-
-// healFile names the queue file of run; an empty run uses no-run.jsonl.
-func healFile(home, run string) (string, error) {
-	name := "no-run"
-	if run != "" {
-		if !healRunName.MatchString(run) {
-			return "", fmt.Errorf("heal: bad run id %q", run)
-		}
-		name = run
-	}
-	return filepath.Join(healDir(home), name+".jsonl"), nil
-}
-
-// healAppend appends one open item and returns its id. The line is written
-// with one O_APPEND write, so concurrent appenders never interleave a line.
-func healAppend(home, run, block, kind string, argv []string, detail string) (string, error) {
-	file, err := healFile(home, run)
-	if err != nil {
-		return "", err
-	}
-	if err := os.MkdirAll(filepath.Dir(file), 0o700); err != nil {
-		return "", err
-	}
-	random := make([]byte, 3)
-	_, _ = rand.Read(random)
-	now := time.Now().UTC()
-	item := healItem{
-		ID: "h-" + now.Format("20060102-150405") + "-" + hex.EncodeToString(random), Run: run, Block: block, Kind: kind,
-		Argv: argv, Detail: detail, Tries: 0, Status: "open", Times: map[string]string{"created": now.Format(time.RFC3339)},
-	}
-	line, err := json.Marshal(item)
-	if err != nil {
-		return "", err
-	}
-	out, err := os.OpenFile(file, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
-	if err != nil {
-		return "", err
-	}
-	_, werr := out.Write(append(line, '\n'))
-	cerr := out.Close()
-	if werr != nil {
-		return "", werr
-	}
-	return item.ID, cerr
+// landRetryArgv is the code-forge verb argv a heal retry runs for a land
+// whose push failed: land again with --push; already landed blocks only push.
+func landRetryArgv(run string, ids []string) []string {
+	argv := append([]string{"block", "land"}, ids...)
+	return append(argv, "--run", run, "--merge", "--push")
 }
 
 // landPushWanted: the --push flag, else land.push from the run-start config.
@@ -110,17 +65,16 @@ type landPushResult struct {
 
 // landPush pushes base from main to origin. A failed push appends a heal item
 // of kind land (argv: the push to retry) and returns an error naming its id.
-func landPush(home, run, block, main, base string, watch bool, print io.Writer) (landPushResult, error) {
+func landPush(home, run string, ids []string, main, base string, watch bool, print io.Writer) (landPushResult, error) {
 	result := landPushResult{}
 	sha, err := gitx.Run(main, "rev-parse", "--verify", "HEAD")
 	if err != nil {
 		return result, fmt.Errorf("cannot resolve main HEAD before push")
 	}
 	result.sha = strings.TrimSpace(sha)
-	argv := []string{"git", "-C", main, "push", "origin", base}
 	if output, err := gitx.Run(main, "push", "origin", base); err != nil {
 		detail := strings.TrimSpace(landFirst(landGitError(err, ""), output, err.Error()))
-		id, herr := healAppend(home, run, block, "land", argv, "push of "+base+" at "+result.sha+" rejected: "+detail)
+		id, herr := healQueue(home, run, strings.Join(ids, ","), healq.KindLand, landRetryArgv(run, ids), main, "push of "+base+" at "+result.sha+" rejected: "+detail)
 		if herr != nil {
 			return result, fmt.Errorf("merged into local %s but the push failed: %s; heal item not written: %v", base, detail, herr)
 		}
@@ -144,10 +98,10 @@ var landSelf = os.Executable
 // ciWatchSpawn starts `ci watch` as a detached child (own session) logging to
 // <home>/.code-forge/heal/ci-<sha>.log and returns without waiting for CI.
 func ciWatchSpawn(home, run, sha, cwd string) (string, error) {
-	if err := os.MkdirAll(healDir(home), 0o700); err != nil {
+	if err := os.MkdirAll(healq.Dir(home), 0o700); err != nil {
 		return "", err
 	}
-	log := filepath.Join(healDir(home), "ci-"+sha+".log")
+	log := filepath.Join(healq.Dir(home), "ci-"+sha+".log")
 	out, err := os.OpenFile(log, os.O_CREATE|os.O_WRONLY|os.O_APPEND, 0o600)
 	if err != nil {
 		return "", err
@@ -199,6 +153,28 @@ func landBatchPush(flags map[string]any, home, run string, ids []string) (string
 	if err != nil {
 		return landed[0], err
 	}
-	_, err = landPush(home, run, strings.Join(landed, ","), main, base, flags["watch-ci"] == true, os.Stderr)
+	_, err = landPush(home, run, landed, main, base, flags["watch-ci"] == true, os.Stderr)
 	return landed[0], err
+}
+
+// landPushOnly is the heal retry path: push is wanted and every named block
+// has already landed, so land only pushes main (0 pushed, 1 failed).
+func landPushOnly(flags map[string]any, home, run string, record ledger.Object, ids []string) (bool, int) {
+	cfg, _ := blockSnapshot(record)
+	if !landPushWanted(flags, cfg) {
+		return false, 0
+	}
+	blocks := blockObject(record.Get("blocks"))
+	for _, id := range ids {
+		entry := blockObject(blocks.Get(id))
+		if entry == nil || entry.Get("landed") == nil {
+			return false, 0
+		}
+	}
+	fmt.Fprintf(os.Stderr, "block land: %s already landed; pushing main only\n", strings.Join(ids, ","))
+	if _, err := landBatchPush(flags, home, run, ids); err != nil {
+		fmt.Fprintln(os.Stderr, "block land: "+err.Error())
+		return true, 1
+	}
+	return true, 0
 }

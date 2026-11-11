@@ -21,7 +21,7 @@ waits on a second real consumer (plan §10.4, Q17).
   with backoff (15 s, 60 s, 240 s), removes a lock whose owner pid is dead, and marks needs_coder after --max-tries
   (B429)
 - Main first: `block land --push` (or `land.push: true`) pushes main after the merge; a rejected push queues a heal item
-  of kind land and exits 1; `--watch-ci` starts a detached `code-forge ci watch`, a new Go verb that follows the
+  of kind land (argv `block land <ids> --run <r> --merge --push`; already landed blocks only push) and exits 1; `--watch-ci` starts a detached `code-forge ci watch`, a new Go verb that follows the
   commit's GitHub Actions runs and queues a heal item of kind ci naming the failing jobs, tests and block ids (B430)
 
 ### Changed

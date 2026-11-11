@@ -597,10 +597,13 @@ and the merge command, or `event: refused` with `step`, `reason` and `next`.
 `--push` (single block: together with `--merge`; a batch needs no `--merge`), or with
 `land.push: true` in the run-start config, land runs `git push origin <base>` from the main
 checkout after a successful merge and prints `pushed <sha> to origin/<base>`. A batch pushes once,
-after it releases the run lock, when at least one block landed. A rejected push (the remote moved)
-keeps the local merge, stops at step `push`, appends one heal item of kind `land` to
-`~/.code-forge/heal/<run>.jsonl` (fields `id`, `run`, `block`, `kind`, `argv` = the push to retry,
-`detail`, `tries: 0`, `status: open`, `times.created`), prints `heal: queued <id>` and exits 1.
+after it releases the block locks and the run lock, when at least one block landed. A rejected push
+(the remote moved) keeps the local merge, stops at step `push`, queues one heal item of kind `land`
+in `~/.code-forge/heal/<run>.jsonl` (B429 queue; `argv` = `block land <ids> --run <run> --merge
+--push`, `cwd` = the main checkout), prints `heal: queued <id>` and exits 1. When every named block
+has already landed and push is wanted, `block land` only pushes main, so `code-forge heal run` can
+re-run that argv. Inside a heal retry (`CODE_FORGE_HEAL_RETRY` set) a failed push queues nothing
+new; the heal runner updates its own item.
 Land never fetches, rebases or force-pushes. `--watch-ci` (needs `--push` or `land.push`) then
 starts `code-forge ci watch --sha <sha> --run <run>` as a detached child, logging to
 `~/.code-forge/heal/ci-<sha>.log`, prints `ci watch: started for <sha>; log <path>` and returns at
@@ -612,8 +615,9 @@ once; land never waits for CI.
 Otherwise it reads `gh run view <id> --log-failed` (first 200 lines) of each failed run, names the
 failing jobs (`<workflow> / <job>`) and tests (`--- FAIL: <name>`, `not ok <n> - <name>`,
 `✖ <name>`), takes the block ids (`B<n>`) from the subjects of `git log --format=%s <sha>^..<sha>`
-(the commit and the commits it merged), appends one heal item of kind `ci` with those block ids and
-exits 1. No CI run for the commit after 5 minutes exits 2 with `no CI run for <sha>`; runs still
+(the commit and the commits it merged), queues one heal item of kind `ci` with those block ids
+(`argv` = `ci watch --sha <sha> --cwd <dir> [--run <r>]`; needs `--run`, else it says the item was
+not written) and exits 1. No CI run for the commit after 5 minutes exits 2 with `no CI run for <sha>`; runs still
 going at `--timeout` exit 3. A failing `gh` call is retried until the timeout.
 
 Gates, reviews and the close check of a worktree block run in its tree (B62b):

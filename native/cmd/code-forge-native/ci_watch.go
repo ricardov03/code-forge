@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/healq"
 )
 
 // B430: `code-forge ci watch` follows the GitHub Actions runs of one commit
@@ -79,7 +80,7 @@ func ciParse(args []string) (ciOptions, string) {
 			}
 			o.sha = value
 		case "--run":
-			if !healRunName.MatchString(value) {
+			if !healq.ValidRun(value) {
 				return o, "--run must be a run id"
 			}
 			o.run = value
@@ -275,13 +276,13 @@ func ciFailure(o ciOptions, cwd string, failed []ciRun, report *ciReport, finish
 	if len(tests) > 0 {
 		detail += "; tests: " + strings.Join(tests, ", ")
 	}
-	argv := []string{"code-forge", "ci", "watch", "--sha", o.sha}
+	argv := []string{"ci", "watch", "--sha", o.sha, "--cwd", cwd}
 	if o.run != "" {
 		argv = append(argv, "--run", o.run)
 	}
 	home, err := os.UserHomeDir()
 	if err == nil {
-		report.Heal, err = healAppend(home, o.run, strings.Join(report.Blocks, ","), "ci", argv, detail)
+		report.Heal, err = healQueue(home, o.run, strings.Join(report.Blocks, ","), healq.KindCI, argv, cwd, detail)
 	}
 	if err != nil {
 		return finish("failure", detail+"; heal item not written: "+err.Error(), 1)
