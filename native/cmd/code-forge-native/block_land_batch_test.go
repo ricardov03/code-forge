@@ -37,6 +37,7 @@ func newLandBatchFixture(t *testing.T, bad int) *landBatchFixture {
 	f.git(f.repo, "config", "commit.gpgsign", "false")
 	f.write(f.repo, ".gitignore", ".code-forge/\n")
 	f.write(f.repo, "scoped.test.mjs", "// scoped fixture\n")
+	f.write(f.repo, "CHANGELOG.md", landChangelog)
 	f.write(f.repo, gatesGoTest, "// go build, vet and test\n")
 	// Each block's import-graph dependent: it imports the file the block adds.
 	for i := 1; i <= 3; i++ {
@@ -804,5 +805,44 @@ func TestBlockLandBatchAllConflictLandsNothing(t *testing.T) {
 	}
 	if got := f.heads(); got["B1"] != before["B1"] || got["B2"] != before["B2"] {
 		t.Errorf("heads=%v, want unchanged %v", got, before)
+	}
+}
+
+const landChangelog = "# Changelog\n\n## [Unreleased]\n\n- older entry (B0)\n"
+
+// B431: B1 and B2 both add a line under [Unreleased]. After B1 lands in the
+// trial, B2's rebase meets the same insertion point; both lines are kept and
+// the batch goes on.
+func TestBlockLandBatchChangelogAppendsDoNotStop(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	for _, id := range []string{"B1", "B2"} {
+		tree := filepath.Join(f.repo, ".code-forge/worktrees", id)
+		f.write(tree, "CHANGELOG.md", strings.Replace(landChangelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n- entry "+id+"\n", 1))
+		f.git(tree, "commit", "-qam", id+" changelog")
+		if err := state.UpdateRun(f.home, "r-batch-unit", func(record *ledger.Object) error {
+			blocks := blockObject(record.Get("blocks"))
+			entry := blockObject(blocks.Get(id))
+			entry.Set("owned_files", []any{"src/" + id + ".mjs", "CHANGELOG.md"})
+			blocks.Set(id, entry)
+			record.Set("blocks", blocks)
+			return nil
+		}); err != nil {
+			t.Fatal(err)
+		}
+	}
+	code, output := f.land("B1", "B2")
+	if code != 0 {
+		t.Fatalf("batch exit=%d, want 0: %s", code, output)
+	}
+	f.checkMain([]string{"B1", "B2"})
+	data, err := os.ReadFile(filepath.Join(f.repo, ".code-forge/worktrees", "B2", "CHANGELOG.md"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := strings.Replace(landChangelog, "## [Unreleased]\n\n", "## [Unreleased]\n\n- entry B1\n- entry B2\n", 1); string(data) != want {
+		t.Fatalf("B2 CHANGELOG.md =\n%s\nwant both lines, B1's first:\n%s", data, want)
+	}
+	if main := f.git(f.repo, "show", "main:CHANGELOG.md"); !strings.Contains(main, "- entry B1\n- entry B2") {
+		t.Fatalf("main CHANGELOG.md = %q, want both lines", main)
 	}
 }

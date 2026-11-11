@@ -527,8 +527,21 @@ If the open fails after the tree was made, the tree and the branch it made are r
 A re-open with `--attempt` reuses the same tree and branch, and the block keeps the tree's base; a
 `--base` naming another commit is refused. For an open worktree block, `block rebase <id> --run <run>`
 rebases its branch onto its recorded base branch's head and updates both recorded bases. Commit or
-clean the tree first. Any upstream commit touching an owned file refuses the rebase; a Git conflict
-aborts it and restores the old head. Run the gates again after rebasing: earlier green rows no
+clean the tree first. The rebase replays first and refuses only a real conflict (B431): when main
+changed owned files, the block's commits are still replayed onto the new head. On a clean replay the
+base moves, the signed `block.rebase` row lists those files as `upstream_owned`, the plain output adds
+`upstream_owned: <files>` and each changed owned file is queued for review again; no human verb is
+needed. A real conflict (main and the block changed the same lines) restores the old head and refuses
+with one line, `rebase-conflict: block <id>: replay conflicts in: <files>; nothing changed: …`; rebase
+the block worktree onto its base branch by hand (`git rebase <branch>`), resolve those files, then
+run `block rebase` again: the block's commits then replay cleanly. `CHANGELOG.md` has one extra rule: when
+main and the block only added lines (none removed or changed), the replay keeps both, main's lines
+first; a removed or changed line in the conflicted region stays a `rebase-conflict`. A repository
+`.gitattributes` with `CHANGELOG.md merge=union` does not bring back a line the block removed: the
+replay turns git's union driver off and keeps union only for other files marked `merge=union`. The
+same rules apply to `review-file --rebase-check`, `block rebase --accept-landed` (a commit outside
+the run's closed blocks is named `upstream_owned` instead of refused) and the rebase of each block in
+a batch `block land`. Run the gates again after rebasing: earlier green rows no
 longer satisfy close. A block without a recorded base branch cannot rebase. A tree that is gone (removed,
 or its directory deleted by hand) is added back at the same path on the same branch; a tree left on
 another branch or a detached HEAD refuses the re-open.

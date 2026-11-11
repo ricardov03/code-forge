@@ -316,6 +316,20 @@ engine used to lower the child after it started; on macOS that change could
 be lost while the child was still starting, and the gate then ran at nice 0
 (B420).
 
+## Rebase runs in Go (B431)
+
+`block rebase <id> --run <run>` (with only `--json`) of an open block with a
+worktree and a recorded base branch runs in Go. Other forms (a closed or
+awaiting block, `--head`, `--accept-changed`, a block without a worktree)
+still hand over to Node. The Go rebase, `block rebase --accept-landed`,
+`review-file --rebase-check` and the batch land rebase share one rule: replay
+first, refuse only a real conflict. Owned files main changed are named
+`upstream_owned` in the signed row and queued for review again. A conflict
+restores the old head and refuses `rebase-conflict` naming the files. A
+`CHANGELOG.md` where both sides only added lines keeps both sides, main's
+lines first; the replay runs with `-c merge.union.driver=false`, so a
+`merge=union` attribute cannot bring back a line the block removed.
+
 ## Internal verbs
 
 The native binary reserves the `internal` namespace for its helpers.

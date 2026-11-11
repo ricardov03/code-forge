@@ -1,4 +1,8 @@
-// Package rebase accepts upstream owned changes only from closed sibling blocks.
+// Package rebase moves an open worktree block onto its base branch. B431:
+// upstream changes to owned files never refuse up front; the block's commits
+// are replayed and only a real merge conflict refuses. Changes credited to a
+// closed sibling block are reported as accepted_landed, every other owned file
+// main changed as upstream_owned, and each changed owned file is re-reviewed.
 package rebase
 
 import (
@@ -13,6 +17,7 @@ import (
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
+	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
 )
@@ -28,6 +33,9 @@ type Result struct {
 	OldBase  string     `json:"old_base"`
 	NewBase  string     `json:"new_base"`
 	Accepted []Accepted `json:"accepted_landed"`
+	// Owned files changed by base-branch commits that no closed block of the
+	// run vouches for (B431); they replayed clean and go to re-review.
+	Upstream []string `json:"upstream_owned,omitempty"`
 }
 
 func text(obj ledger.Object, key string) string { s, _ := obj.Get(key).(string); return s }
@@ -63,7 +71,9 @@ func resolve(tree, ref string) (string, error) {
 // inherited history and commit messages prove nothing. A landing merge can also
 // vouch for a block when a non-first parent is credited to it and the merge adds
 // no files beyond those changed by that block's credited commits.
-func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns func(string) bool) ([]Accepted, error) {
+// B431: a commit no closed block vouches for is not refused; its owned files
+// are returned as upstream (sorted, once each) for the replay to settle.
+func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns func(string) bool) ([]Accepted, []string, error) {
 	originCommits := map[string]map[string]bool{}
 	for _, field := range blocks {
 		b, _ := field.Value.(ledger.Object)
@@ -99,7 +109,7 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 		args = append(args, "--not")
 		commits, err := git(tree, append(args, bases...)...)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		originCommits[field.Key] = map[string]bool{}
 		for _, commit := range strings.Fields(commits) {
@@ -108,7 +118,7 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 	}
 	commits, err := git(tree, "rev-list", "--reverse", oldBase+".."+newBase)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 	changedFiles := func(revisions ...string) (string, error) {
 		args := []string{"diff-tree", "--root", "--no-commit-id", "--no-renames", "--name-only", "-r", "-m", "-z"}
@@ -117,10 +127,11 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 	}
 	originFiles := map[string]map[string]bool{}
 	accepted := map[string]map[string]bool{}
+	upstream := map[string]bool{}
 	for _, commit := range strings.Fields(commits) {
 		changed, err := changedFiles(commit)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		files := []string{}
 		for _, file := range strings.Split(changed, "\x00") {
@@ -140,12 +151,12 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 		if len(ids) == 0 {
 			parents, err := git(tree, "show", "-s", "--format=%P", commit, "--")
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if parents := strings.Fields(parents); len(parents) > 1 {
 				changed, err := changedFiles(parents[0], commit)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				for id, commits := range originCommits {
 					creditedParent := false
@@ -160,7 +171,7 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 						for origin := range commits {
 							parents, err := git(tree, "show", "-s", "--format=%P", origin, "--")
 							if err != nil {
-								return nil, err
+								return nil, nil, err
 							}
 							// Sync merges expose main's files against other parents;
 							// only non-merge commits define the block's file set.
@@ -169,7 +180,7 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 							}
 							changed, err := changedFiles(origin)
 							if err != nil {
-								return nil, err
+								return nil, nil, err
 							}
 							for _, file := range strings.Split(changed, "\x00") {
 								if file != "" {
@@ -201,7 +212,10 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 				}
 			}
 			if len(ids) == 0 {
-				return nil, refusal("owned-conflict", fmt.Sprintf("%s changed by commit %s outside closed blocks of run %s", files[0], commit, runID))
+				for _, file := range files {
+					upstream[file] = true
+				}
+				continue
 			}
 		}
 		for _, file := range files {
@@ -223,7 +237,12 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 		result = append(result, Accepted{file, ids})
 	}
 	sort.Slice(result, func(i, j int) bool { return result[i].File < result[j].File })
-	return result, nil
+	uncredited := []string{}
+	for file := range upstream {
+		uncredited = append(uncredited, file)
+	}
+	sort.Strings(uncredited)
+	return result, uncredited, nil
 }
 
 func quote(s string) string { return "'" + strings.ReplaceAll(s, "'", "'\"'\"'") + "'" }
@@ -271,7 +290,12 @@ func replay(tree, oldBase, newBase, oldHead string) error {
 		return err
 	}
 	env := append(gitEnv(), "GIT_SEQUENCE_EDITOR="+quote(editor), "GIT_EDITOR=true", "GIT_COMMITTER_NAME="+id[0], "GIT_COMMITTER_EMAIL="+id[1])
-	_, err = gitWithEnv(tree, env, "-c", "rebase.updateRefs=false", "rebase", "--interactive", "--no-autosquash", "--no-autostash", "--onto", newBase, oldBase)
+	_, err = gitWithEnv(tree, env, "-c", UnionOff, "-c", "rebase.updateRefs=false", "rebase", "--interactive", "--no-autosquash", "--no-autostash", "--no-reschedule-failed-exec", "--onto", newBase, oldBase)
+	if err != nil {
+		// B431: an add-only CHANGELOG.md is merged and the replay goes on;
+		// any other stop is a real conflict naming its files.
+		err = Continue(tree, gitEnv())
+	}
 	return err
 }
 
@@ -279,7 +303,36 @@ func replay(tree, oldBase, newBase, oldHead string) error {
 // only the block's own lock (B426): the run lock is taken for the final short
 // publication, which refuses with block-changed if another verb changed this
 // block meanwhile. Other blocks of the run are never blocked by a rebase.
-func Run(home, runID, blockID string) (result Result, err error) {
+func Run(home, runID, blockID string) (Result, error) { return run(home, runID, blockID, false) }
+
+// RunPlain is the plain `block rebase <id> --run <r>` of an open worktree block
+// (B431). It is Run, except that a pending rebase checkpoint signed by
+// review-file --rebase-check is verified and finished instead of refused.
+func RunPlain(home, runID, blockID string) (Result, error) { return run(home, runID, blockID, true) }
+
+func signerKey(home, runID string) ([]byte, error) {
+	keyFile := filepath.Join(home, ".code-forge", "runs", runID+".key")
+	info, err := os.Stat(keyFile)
+	if os.IsNotExist(err) {
+		return nil, refusal("no-key", "run "+runID+" has no signer key")
+	}
+	if err != nil {
+		return nil, err
+	}
+	if info.Mode().Perm()&0077 != 0 {
+		return nil, refusal("bad-key-mode", fmt.Sprintf("run %s signer key is accessible to other users (mode %o); expected 600", runID, info.Mode().Perm()))
+	}
+	key, err := os.ReadFile(keyFile)
+	if err != nil {
+		return nil, err
+	}
+	if len(key) != 32 {
+		return nil, refusal("bad-key", "run "+runID+" signer key is not 32 bytes")
+	}
+	return key, nil
+}
+
+func run(home, runID, blockID string, plain bool) (result Result, err error) {
 	err = state.WithBlockLock(home, runID, blockID, func() (runErr error) {
 		record, err := state.ReadRun(home, runID)
 		if err != nil {
@@ -298,8 +351,19 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		if text(block, "base_branch") == "" {
 			return refusal("rebase-no-base", "block "+blockID+" has no recorded base branch")
 		}
+		checkpoint := object(block, "rebase_check")
 		if block.Get("rebase_check") != nil {
-			return refusal("rebase-check-invalid", "finish the pending rebase checkpoint first")
+			if !plain {
+				return refusal("rebase-check-invalid", "finish the pending rebase checkpoint first")
+			}
+			key, err := signerKey(home, runID)
+			if err != nil {
+				return err
+			}
+			verified, err := sign.VerifyRow(checkpoint.Map(), key)
+			if err != nil || !verified.OK || text(checkpoint, "run") != runID || text(checkpoint, "block") != blockID || text(checkpoint, "old_base") != text(block, "base_sha") {
+				return refusal("rebase-check-invalid", "the pending rebase checkpoint is invalid")
+			}
 		}
 		tree, workspace := text(worktree, "path"), text(record, "workspace")
 		branch, err := git(tree, "symbolic-ref", "--quiet", "HEAD")
@@ -316,6 +380,11 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		oldHead, err := resolve(tree, "HEAD")
 		if err != nil {
 			return err
+		}
+		if checkpoint != nil {
+			if _, err := git(tree, "merge-base", "--is-ancestor", text(checkpoint, "head"), oldHead); err != nil {
+				return refusal("rebase-check-invalid", "the worktree no longer contains the pending rebase")
+			}
 		}
 		oldBase, err := resolve(tree, text(block, "base_sha"))
 		if err != nil {
@@ -347,7 +416,7 @@ func Run(home, runID, blockID string) (result Result, err error) {
 		owns := func(file string) bool {
 			return ownsFile(owned, kinds, file) || prefix != "" && strings.HasPrefix(file, prefix+"/") && ownsFile(owned, kinds, strings.TrimPrefix(file, prefix+"/"))
 		}
-		accepted, err := origins(tree, runID, oldBase, newBase, blocks, owns)
+		accepted, upstream, err := origins(tree, runID, oldBase, newBase, blocks, owns)
 		if err != nil {
 			return err
 		}
@@ -444,9 +513,13 @@ func Run(home, runID, blockID string) (result Result, err error) {
 			}
 		}()
 		if err := replay(tree, replayFrom, newBase, oldHead); err != nil {
+			conflict, ok := err.(*ConflictError)
+			if !ok || len(conflict.Files) == 0 {
+				conflict = &ConflictError{Files: Conflicts(tree)}
+			}
 			_, _ = git(tree, "cherry-pick", "--abort")
 			_, _ = git(tree, "rebase", "--abort")
-			return refusal("rebase-conflict", "rebase-conflict")
+			return refusal("rebase-conflict", ConflictMessage(blockID, conflict))
 		}
 		changed, err := git(tree, "diff", "--no-renames", "--name-only", "-z", oldHead, "HEAD", "--")
 		if err != nil {
@@ -492,10 +565,11 @@ func Run(home, runID, blockID string) (result Result, err error) {
 			}
 		}
 		block.Set("base_sha", newBase)
+		block.Delete("rebase_check")
 		worktree.Set("base_sha", newBase)
 		block.Set("worktree", worktree)
-		result = Result{Block: blockID, Event: "rebased", OldBase: oldBase, NewBase: newBase, Accepted: accepted}
-		row := ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: blockID}, {Key: "old_base", Value: oldBase}, {Key: "new_base", Value: newBase}, {Key: "worktree", Value: true}, {Key: "accepted_landed", Value: accepted}}
+		result = Result{Block: blockID, Event: "rebased", OldBase: oldBase, NewBase: newBase, Accepted: accepted, Upstream: upstream}
+		row := ledger.Object{{Key: "event", Value: "block.rebase"}, {Key: "block", Value: blockID}, {Key: "old_base", Value: oldBase}, {Key: "new_base", Value: newBase}, {Key: "worktree", Value: true}, {Key: "accepted_landed", Value: accepted}, {Key: "upstream_owned", Value: upstream}}
 		return state.CommitBlocks(home, runID, map[string]ledger.Object{blockID: snapshot}, map[string]ledger.Object{blockID: block}, row)
 	})
 	return result, err

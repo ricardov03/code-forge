@@ -13,6 +13,7 @@ import (
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/queue"
+	"github.com/ricardov03/code-forge/native/rebase"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 	"github.com/ricardov03/code-forge/native/ticket"
@@ -199,20 +200,16 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 			if err != nil {
 				return err
 			}
-			conflicts := map[string]bool{}
+			// B431: owned files main changed are no refusal up front. The
+			// replay below settles them; those it changes go to re-review.
+			seen := map[string]bool{}
 			for _, file := range strings.Split(upstream, "\x00") {
-				if file != "" && owns(file) {
-					conflicts[file] = true
+				if file != "" && owns(file) && !seen[file] {
+					seen[file] = true
+					files = append(files, file)
 				}
 			}
-			if len(conflicts) > 0 {
-				names := []string{}
-				for file := range conflicts {
-					names = append(names, file)
-				}
-				sort.Strings(names)
-				return rebaseError("owned-conflict", "block "+id+": commits since its base changed owned files: "+strings.Join(names, ", "))
-			}
+			sort.Strings(files)
 		}
 		before := map[string]string{}
 		excluded := map[string]string{}
@@ -251,8 +248,16 @@ func RebaseCheck(home, root, run, id string, exclude func(string) (string, bool)
 				return rebaseError("rebase-conflict", "rebase-conflict")
 			}
 			env := append(gitx.ChildEnv(), "GIT_COMMITTER_NAME="+parts[1], "GIT_COMMITTER_EMAIL="+parts[2])
-			if _, err := gitx.WithEnv("", env, "-C", tree, "-c", "commit.gpgsign=false", "cherry-pick", "--allow-empty", parts[0]); err != nil {
-				return rebaseError("rebase-conflict", "rebase-conflict")
+			if _, err := gitx.WithEnv("", env, "-C", tree, "-c", rebase.UnionOff, "-c", "commit.gpgsign=false", "cherry-pick", "--allow-empty", parts[0]); err != nil {
+				// An add-only CHANGELOG.md is merged; anything else is a
+				// real conflict that names its files.
+				if err := rebase.Continue(tree, env); err != nil {
+					conflict, ok := err.(*rebase.ConflictError)
+					if !ok || len(conflict.Files) == 0 {
+						conflict = &rebase.ConflictError{Files: rebase.Conflicts(tree)}
+					}
+					return rebaseError("rebase-conflict", rebase.ConflictMessage(id, conflict))
+				}
 			}
 		}
 		changed := []string{}

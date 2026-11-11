@@ -88,23 +88,27 @@ func TestOrigins(t *testing.T) {
 				owned = []any{"?.go"}
 			}
 			owns := func(file string) bool { return ownsFile(owned, nil, file) }
-			accepted, err := origins(tree, "r-test", base, g("rev-parse", "HEAD"), blocks, owns)
+			accepted, upstream, err := origins(tree, "r-test", base, g("rev-parse", "HEAD"), blocks, owns)
 			if kind == "unicode-boundary" {
-				if err != nil || len(accepted) != 0 {
-					t.Fatalf("Node ? matches one UTF-16 unit; astral filename is unowned: got %v, %v", accepted, err)
+				if err != nil || len(accepted) != 0 || len(upstream) != 0 {
+					t.Fatalf("Node ? matches one UTF-16 unit; astral filename is unowned: got %v, %v, %v", accepted, upstream, err)
 				}
 			} else if kind == "closed" || kind == "custom" || kind == "rename" {
 				want := []Accepted{{File: file, Blocks: []string{"A"}}}
-				if err != nil || !reflect.DeepEqual(accepted, want) {
-					t.Fatalf("accepted = %v, %v; want exactly %v", accepted, err, want)
+				if err != nil || !reflect.DeepEqual(accepted, want) || len(upstream) != 0 {
+					t.Fatalf("accepted = %v, upstream = %v, %v; want exactly %v", accepted, upstream, err, want)
 				}
 			} else {
-				sha := landed
+				// B431: an uncredited change is no owned-conflict up front; the
+				// file is reported as upstream for the replay to settle.
+				// A reverted foreign change still counts as upstream even though
+				// the closed sibling's landing is credited for the same file.
+				wantAccepted := 0
 				if foreign != "" {
-					sha = foreign
+					wantAccepted = 1
 				}
-				if err == nil || !strings.Contains(err.Error(), "owned-conflict") || !strings.Contains(err.Error(), file) || !strings.Contains(err.Error(), sha) {
-					t.Fatalf("want owned-conflict naming %s and %s; got %v, %v", file, sha, accepted, err)
+				if err != nil || len(accepted) != wantAccepted || !reflect.DeepEqual(upstream, []string{file}) {
+					t.Fatalf("want no refusal, nothing accepted, upstream [%s]; got %v, %v, %v", file, accepted, upstream, err)
 				}
 			}
 		})
