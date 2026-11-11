@@ -589,7 +589,13 @@ It never forces or switches main's branch. Success ends with
 without changing the base branch, plus a hint that the merge gate runs only with `--merge`.
 
 `code-forge block land <id> <id>... --run <run>` lands several closed blocks as one batch, in the
-given order. Each block is rebased onto the trial merge of the blocks before it. Every block
+given order. Before any rebase or gate, land checks every block with `git merge-tree --write-tree`
+against the running result of the blocks before it (B397). A block that would conflict is parked:
+land prints `block <id> parked: block_rebase_conflict (<files>)` (`--json`: `event: parked`,
+`reason: block_rebase_conflict`, `files`), runs no gate for it and leaves its branch as it was; the
+other blocks go on and the signed `land.batch` row lists it under `parked`. When every block
+conflicts, nothing lands and land exits 1 naming each block and its files.
+Each block is rebased onto the trial merge of the blocks before it. Every block
 runs its own changed gates with the Go selection above (`gate.done`). Then the merge gate runs once
 on the merged trial tree with the selection for the union of the batch: the blocks' tests, owned
 files and every path the batch changed. It prints

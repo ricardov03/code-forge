@@ -692,3 +692,117 @@ func TestBlockLandBatchMergeGateLeavesRunUnlocked(t *testing.T) {
 		}
 	}
 }
+
+// addShared commits notes/shared.txt with content in each named block's
+// worktree and adds it to the block's owned files.
+func (f *landBatchFixture) addShared(content map[string]string) {
+	f.t.Helper()
+	record, err := state.ReadRun(f.home, "r-batch-unit")
+	if err != nil {
+		f.t.Fatal(err)
+	}
+	blocks := blockObject(record.Get("blocks"))
+	for id, text := range content {
+		tree := filepath.Join(f.repo, ".code-forge/worktrees", id)
+		f.write(tree, "notes/shared.txt", text)
+		f.git(tree, "add", ".")
+		f.git(tree, "commit", "-qm", id+" shared")
+		entry := blockObject(blocks.Get(id))
+		entry.Set("owned_files", append(gatesStringsAny(entry.Get("owned_files")), "notes/shared.txt"))
+		blocks.Set(id, entry)
+	}
+	record.Set("blocks", blocks)
+	if err := state.SaveRun(f.home, record); err != nil {
+		f.t.Fatal(err)
+	}
+}
+
+func gatesStringsAny(value any) []any {
+	out := []any{}
+	if list, ok := value.([]any); ok {
+		out = append(out, list...)
+	}
+	return out
+}
+
+// B397: a block that would conflict on rebase is parked before any gate; the
+// rest of the batch still lands.
+func TestBlockLandBatchParksConflictingBlockBeforeGates(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	f.addShared(map[string]string{"B1": "one\n", "B2": "two\n"})
+	before := f.heads()
+	code, output := f.landWith([]string{"--json"}, "B1", "B2", "B3")
+	if code != 0 {
+		t.Fatalf("batch exit=%d, want 0 with B2 parked: %s", code, output)
+	}
+	parked, landed := []map[string]any{}, []string{}
+	for _, line := range strings.Split(strings.TrimSpace(output), "\n") {
+		row := map[string]any{}
+		if json.Unmarshal([]byte(line), &row) != nil {
+			continue
+		}
+		switch row["event"] {
+		case "parked":
+			parked = append(parked, row)
+		case "landed":
+			landed = append(landed, fmt.Sprint(row["block"]))
+		}
+	}
+	if len(parked) != 1 || parked[0]["block"] != "B2" || parked[0]["reason"] != "block_rebase_conflict" || fmt.Sprint(parked[0]["files"]) != "[notes/shared.txt]" {
+		t.Errorf("parked events=%v, want exactly 1 for B2 with reason block_rebase_conflict and files [notes/shared.txt]: %s", parked, output)
+	}
+	if !reflect.DeepEqual(landed, []string{"B1", "B3"}) {
+		t.Errorf("landed events=%v, want [B1 B3]: %s", landed, output)
+	}
+	f.checkMain([]string{"B1", "B3"})
+	calls := f.lines("changed-calls")
+	if len(calls) != 2 {
+		t.Errorf("gate calls=%v, want exactly 2 (B1 and B3)", calls)
+	}
+	for _, call := range calls {
+		if strings.Contains(call, filepath.Join("worktrees", "B2")) {
+			t.Errorf("a gate ran in parked B2's worktree: %v", calls)
+		}
+	}
+	if got := f.git(f.repo, "rev-parse", "block-B2"); got != before["B2"] {
+		t.Errorf("B2 head=%s, want unchanged %s", got, before["B2"])
+	}
+	if b2 := f.entry("B2"); b2.Get("base_sha") != f.base || blockObject(b2.Get("worktree")).Get("base_sha") != f.base || b2.Get("landed") != nil {
+		t.Errorf("B2 base=%v worktree base=%v landed=%v, want %s, %s and not landed", b2.Get("base_sha"), blockObject(b2.Get("worktree")).Get("base_sha"), b2.Get("landed"), f.base, f.base)
+	}
+	batch := f.rows("land.batch")
+	if len(batch) != 1 || fmt.Sprint(batch[0]["landed"]) != "[B1 B3]" || fmt.Sprint(batch[0]["parked"]) != "[B2]" {
+		t.Errorf("land.batch rows=%v, want one with landed [B1 B3] and parked [B2]", batch)
+	}
+}
+
+func TestBlockLandBatchAllConflictLandsNothing(t *testing.T) {
+	f := newLandBatchFixture(t, 0)
+	f.addShared(map[string]string{"B1": "one\n", "B2": "two\n"})
+	before := f.heads()
+	f.write(f.repo, "notes/shared.txt", "main\n")
+	f.git(f.repo, "add", ".")
+	f.git(f.repo, "commit", "-qm", "main moved")
+	moved := f.git(f.repo, "rev-parse", "main")
+	code, output := f.land("B1", "B2")
+	if code == 0 {
+		t.Fatalf("all-conflict batch exit=0, want non-zero: %s", output)
+	}
+	for _, id := range []string{"B1", "B2"} {
+		if strings.Count(output, "block "+id+" block_rebase_conflict (notes/shared.txt)") != 1 {
+			t.Errorf("want one conflict reason for %s naming notes/shared.txt: %s", id, output)
+		}
+	}
+	if strings.Contains(output, " landed\n") {
+		t.Errorf("nothing may land: %s", output)
+	}
+	if got := f.git(f.repo, "rev-parse", "main"); got != moved {
+		t.Errorf("main=%s, want unchanged %s", got, moved)
+	}
+	if calls := f.lines("changed-calls"); len(calls) != 0 {
+		t.Errorf("gate calls=%v, want 0", calls)
+	}
+	if got := f.heads(); got["B1"] != before["B1"] || got["B2"] != before["B2"] {
+		t.Errorf("heads=%v, want unchanged %v", got, before)
+	}
+}

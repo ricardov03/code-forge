@@ -147,6 +147,26 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			}
 			batch = append(batch, &landBatchBlock{id: id, branch: blockString(wt.Get("branch")), head: head, original: strings.TrimSpace(head), entryBase: blockString(entry.Get("base_sha")), base: blockString(wt.Get("base_sha")), tree: tree, entry: entry, saved: state.CloneObject(entry), node: node})
 		}
+		// B397: before any rebase or gate, merge every block (in order) into
+		// the running result with git merge-tree. A block that conflicts is
+		// parked; the others go on. Nothing in Git moves here.
+		var parked []string
+		batch, parked, err = landBatchPrecheck(main, strings.TrimSpace(mainHead), batch, func(block *landBatchBlock, files []string) {
+			if json {
+				emit(ledger.Object{{Key: "block", Value: block.id}, {Key: "event", Value: "parked"}, {Key: "reason", Value: "block_rebase_conflict"}, {Key: "files", Value: files}})
+			} else {
+				fmt.Fprintf(os.Stdout, "block %s parked: block_rebase_conflict (%s)\n", block.id, strings.Join(files, ", "))
+			}
+		})
+		if err != nil {
+			stoppedID, step = strings.Join(ids, " "), "precheck"
+			return err
+		}
+		requested := ids
+		ids = make([]string, 0, len(batch))
+		for _, block := range batch {
+			ids = append(ids, block.id)
+		}
 		// Block i is rebased onto trial prefix i. Only prefixes that reach main
 		// may remain as a base: every later block returns to its original head
 		// and base, so a not-landed branch never carries another block's commits.
@@ -373,7 +393,7 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 		if err != nil {
 			return err
 		}
-		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.batch"}, {Key: "blocks", Value: ids}, {Key: "tree", Value: strings.TrimSpace(tree)}, {Key: "suite_ms", Value: suiteMs}, {Key: "merge_gate_reason", Value: mergeReason}, {Key: "landed", Value: ids[:green]}}); err != nil {
+		if _, err := state.WriteSigned(home, run, ledger.Object{{Key: "event", Value: "land.batch"}, {Key: "blocks", Value: requested}, {Key: "tree", Value: strings.TrimSpace(tree)}, {Key: "suite_ms", Value: suiteMs}, {Key: "merge_gate_reason", Value: mergeReason}, {Key: "landed", Value: ids[:green]}, {Key: "parked", Value: append([]string{}, parked...)}}); err != nil {
 			return err
 		}
 		if culprit >= 0 {
@@ -455,6 +475,50 @@ func landBatchRestore(home, run string, batch []*landBatchBlock, keep int) error
 		}
 	}
 	return failed
+}
+
+// landBatchPrecheck merges each block into the running result with
+// `git merge-tree --write-tree`, using the block's recorded base as the merge
+// base (what `rebase --onto <tip> <base>` replays). A conflicting block is
+// parked (reported through park) and skipped; a clean one becomes part of the
+// running result through an unreferenced commit object. It returns the blocks
+// that may go on. When every block conflicts it returns an error naming each
+// block and its files.
+func landBatchPrecheck(main, head string, batch []*landBatchBlock, park func(*landBatchBlock, []string)) ([]*landBatchBlock, []string, error) {
+	running := head
+	kept, parked, reasons := []*landBatchBlock{}, []string{}, []string{}
+	for _, block := range batch {
+		out, err := gitx.Run(main, "merge-tree", "--write-tree", "--name-only", "--no-messages", "--merge-base="+block.base, running, strings.TrimSpace(block.head))
+		lines := strings.Split(strings.TrimRight(out, "\n"), "\n")
+		if err != nil {
+			command, ok := err.(*gitx.CommandError)
+			if !ok || command.Code != 1 || len(lines) < 2 {
+				return nil, nil, fmt.Errorf("block %s merge-tree check failed: %s", block.id, landGitError(err, err.Error()))
+			}
+			files, seen := []string{}, map[string]bool{}
+			for _, file := range lines[1:] {
+				if file = strings.TrimSpace(file); file != "" && !seen[file] {
+					seen[file] = true
+					files = append(files, file)
+				}
+			}
+			park(block, files)
+			parked = append(parked, block.id)
+			reasons = append(reasons, fmt.Sprintf("block %s block_rebase_conflict (%s)", block.id, strings.Join(files, ", ")))
+			continue
+		}
+		tree := strings.TrimSpace(lines[0])
+		commit, err := gitx.Run(main, "commit-tree", tree, "-p", running, "-p", strings.TrimSpace(block.head), "-m", "code-forge batch precheck "+block.id)
+		if err != nil {
+			return nil, nil, err
+		}
+		running = strings.TrimSpace(commit)
+		kept = append(kept, block)
+	}
+	if len(kept) == 0 {
+		return nil, parked, fmt.Errorf("every block conflicts; no block landed: %s", strings.Join(reasons, "; "))
+	}
+	return kept, parked, nil
 }
 
 func landBatchCheckout(main, head, branch string) error {
