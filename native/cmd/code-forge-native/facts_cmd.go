@@ -59,6 +59,11 @@ func runFactsVerb(args []string) int {
 			if stderr.last != "" {
 				message = stderr.last
 			}
+			if plan.crash != nil {
+				// B568: an uncaught throw: kind crash, err.message and its stack
+				nativeReportedKind, message = "crash", plan.crash.message
+				nativeCrashStack = plan.crash.name + ": " + plan.crash.message
+			}
 			nativeVerbFailure("facts", "", args, code, message, before)
 		}
 		return code

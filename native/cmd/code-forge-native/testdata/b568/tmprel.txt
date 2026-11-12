@@ -1,0 +1,31 @@
+exit=1
+--- stdout
+--- stderr
+code-forge: verb "facts" failed: TypeError: tmp: tmp.root must be an absolute path
+    at tmpBase (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/util/tmp.mjs:127:11)
+    at runRootFor (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/spawn.mjs:158:25)
+    at runFactsVerb (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/cli/facts.mjs:92:27)
+    at async run (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:149:24)
+    at async file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:212:16
+--- files
+home
+home/.code-forge
+home/.code-forge/logs
+home/.code-forge/logs/breadcrumbs.json
+home/.code-forge/logs/errors.jsonl
+repo
+repo/.code-forge.yml
+repo/.env
+repo/.gitignore
+repo/brief.md
+repo/docs
+repo/docs/readme.md
+repo/ignored.txt
+repo/src
+repo/src/app.mjs
+repo/src/new.mjs
+tmp
+--- home/.code-forge/logs/breadcrumbs.json
+["facts"]
+--- home/.code-forge/logs/errors.jsonl
+{"ts":"2026-11-12T19:21:18.849Z","version":"0.22.1","node":"v24.22.1","platform":"darwin","arch":"arm64","verb":"facts","sub":null,"flags":["--brief","--run"],"exit":1,"kind":"crash","message":"tmp: tmp.root must be an absolute path","stack":"TypeError: tmp: tmp.root must be an absolute path\n    at tmpBase (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/util/tmp.mjs:127:11)\n    at runRootFor (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/spawn.mjs:158:25)\n    at runFactsVerb (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/cli/facts.mjs:92:27)\n    at async run (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:149:24)\n    at async file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:212:16","cleaned":[],"fp":"20cc38e6732b","before":[]}

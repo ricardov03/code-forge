@@ -1,0 +1,30 @@
+exit=1
+--- stdout
+--- stderr
+facts: facts cwd refused: inside a git work tree (<WS>/repo)
+--- files
+home
+home/.code-forge
+home/.code-forge/logs
+home/.code-forge/logs/breadcrumbs.json
+home/.code-forge/logs/errors.jsonl
+repo
+repo/.code-forge.yml
+repo/.env
+repo/.gitignore
+repo/brief.md
+repo/docs
+repo/docs/readme.md
+repo/ignored.txt
+repo/src
+repo/src/app.mjs
+repo/src/new.mjs
+repo/tmpcf
+repo/tmpcf/facts-16ccaf1515820766
+repo/tmpcf/facts-16ccaf1515820766/facts
+repo/tmpcf/facts-16ccaf1515820766/owner.json
+tmp
+--- home/.code-forge/logs/breadcrumbs.json
+["facts"]
+--- home/.code-forge/logs/errors.jsonl
+{"ts":"2026-11-12T19:21:15.913Z","version":"0.22.1","node":"v24.22.1","platform":"darwin","arch":"arm64","verb":"facts","sub":null,"flags":["--brief"],"exit":1,"kind":"error","message":"facts: facts cwd refused: inside a git work tree (<project>)","stack":null,"cleaned":[{"rule":"project_path","count":1}],"fp":"8791c3a967f5","before":[]}

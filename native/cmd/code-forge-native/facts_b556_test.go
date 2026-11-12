@@ -237,19 +237,9 @@ func TestB556FactsNarrowHandovers(t *testing.T) {
 		reason                string
 	}{
 		{"openai L0 runs the Codex CLI", "openai", fcBrief, nil, nil, "facts-codex-step"},
-		{"a glob path claim", "anthropic", "# Brief\n\nSee `src/*.mjs`.\n", nil, nil, "facts-glob-claim"},
-		{"a brief that is not UTF-8", "anthropic", "# Brief\n\nThe file `src/app.mjs` \xff\xfe.\n", nil, nil, "facts-brief-encoding"},
-		{"a source outside the project", "anthropic", fcBrief, nil, func(t *testing.T, base string) []string {
-			out := filepath.Join(base, "outside.md")
-			if err := os.WriteFile(out, []byte("x\n"), 0o644); err != nil {
-				t.Fatal(err)
-			}
-			return []string{"--sources", out}
-		}, "facts-outside-source"},
-		{"a run root inside a git work tree", "anthropic", fcBrief, nil, func(t *testing.T, base string) []string {
-			t.Setenv("CODE_FORGE_TMP_ROOT", filepath.Join(base, "repo", "tmpcf"))
-			return []string{"--run", "r9"}
-		}, "facts-root-in-git"},
+		// B568: the glob claim, the non-UTF-8 brief, the source outside the
+		// project and the run root in a git work tree run in Go now
+		// (TestB568FactsServedLikeNode)
 	}
 	for _, c := range cases {
 		t.Run(c.name, func(t *testing.T) {

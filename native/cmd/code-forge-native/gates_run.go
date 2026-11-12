@@ -203,6 +203,11 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 		afterLong = false
 	}
 	verb := clean(verbName)
+	var stack any
+	if text, ok := nativeCrashStack.(string); ok {
+		stack = clean(text) // B568: a crash's stack, scrubbed like the message
+	}
+	nativeCrashStack = nil
 	cleaned = counts()
 	kind := "error"
 	if code == 2 {
@@ -232,7 +237,7 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
 		{Key: "verb", Value: verb}, {Key: "sub", Value: sub}, {Key: "flags", Value: flags},
 		{Key: "exit", Value: code}, {Key: "kind", Value: kind}, {Key: "message", Value: message},
-		{Key: "stack", Value: nil}, {Key: "cleaned", Value: cleaned},
+		{Key: "stack", Value: stack}, {Key: "cleaned", Value: cleaned},
 		{Key: "fp", Value: fmt.Sprintf("%x", fp[:6])}, {Key: "before", Value: before},
 	}
 	data, err := ledger.Stringify(entry, false)
@@ -245,6 +250,9 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 // nativeReportedKind is reportErrorKind in src/util/error-kind.mjs: the kind
 // the error log takes when the verb then fails.
 var nativeReportedKind string
+
+// nativeCrashStack is the stack a crash row keeps (B568); nil for no crash.
+var nativeCrashStack any
 
 // appendErrorLogLine is appendLine in src/util/error-log.mjs: one line on
 // ~/.code-forge/logs/errors.jsonl, cut to its newer half past 1 MB.

@@ -1,0 +1,34 @@
+exit=1
+--- stdout
+--- stderr
+code-forge: verb "facts" failed: Error: resolveLevel: levels.L0 is missing or has no model
+    at resolveLevel (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/config/known-ids.mjs:160:11)
+    at sessionSteps (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/spawn.mjs:551:28)
+    at spawnSession (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/spawn.mjs:606:31)
+    at buildFacts (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/facts.mjs:1393:26)
+    at async runFactsVerb (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/cli/facts.mjs:96:16)
+    at async run (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:149:24)
+    at async file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:212:16
+--- files
+home
+home/.code-forge
+home/.code-forge/logs
+home/.code-forge/logs/breadcrumbs.json
+home/.code-forge/logs/errors.jsonl
+repo
+repo/.code-forge.yml
+repo/.env
+repo/.gitignore
+repo/brief.md
+repo/docs
+repo/docs/readme.md
+repo/ignored.txt
+repo/src
+repo/src/app.mjs
+repo/src/new.mjs
+tmp
+tmp/cf
+--- home/.code-forge/logs/breadcrumbs.json
+["facts"]
+--- home/.code-forge/logs/errors.jsonl
+{"ts":"2026-11-12T19:21:22.023Z","version":"0.22.1","node":"v24.22.1","platform":"darwin","arch":"arm64","verb":"facts","sub":null,"flags":["--brief"],"exit":1,"kind":"crash","message":"resolveLevel: levels.L0 is missing or has no model","stack":"Error: resolveLevel: levels.L0 is missing or has no model\n    at resolveLevel (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/config/known-ids.mjs:160:11)\n    at sessionSteps (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/spawn.mjs:551:28)\n    at spawnSession (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/spawn.mjs:606:31)\n    at buildFacts (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/session/facts.mjs:1393:26)\n    at async runFactsVerb (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/src/cli/facts.mjs:96:16)\n    at async run (file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:149:24)\n    at async file:///Users/ricardov/Code/Herd/SEISIGMA/coder-forge/.claude/worktrees/cf/b568/bin/code-forge.mjs:212:16","cleaned":[],"fp":"e26dbfe49713","before":[]}

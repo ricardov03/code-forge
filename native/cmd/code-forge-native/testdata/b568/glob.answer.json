@@ -1,0 +1,9 @@
+{"facts":[
+{"fact_id":"F1","claim":"src/*.mjs","kind":"path","command":"find src -name '*.mjs'","output_excerpt":"src/app.mjs\nsrc/new.mjs","tag":"VERIFIED","why":null},
+{"fact_id":"F2","claim":"docs/*.md","kind":"path","command":"find docs -name *.md","output_excerpt":"docs/readme.md","tag":"VERIFIED","why":null},
+{"fact_id":"F3","claim":"src/*/deep.mjs","kind":"path","command":"ls -d src/*/deep.mjs","output_excerpt":"ls: src/*/deep.mjs: No such file or directory","tag":"NOT-FOUND","why":null},
+{"fact_id":"F4","claim":"lib/*.js","kind":"path","command":"find lib -name \"*.js\"","output_excerpt":"find: lib: No such file or directory","tag":"NOT-FOUND","why":null},
+{"fact_id":"F5","claim":"src/[ab]*.mjs","kind":"path","command":"ls -d 'src/[ab]*.mjs'","output_excerpt":"./src/app.mjs","tag":"VERIFIED","why":null},
+{"fact_id":"F6","claim":"src/a?p.mjs","kind":"path","command":"find src -name 'a?p.mjs'","output_excerpt":"src/zzz.mjs","tag":"VERIFIED","why":null},
+{"fact_id":"F7","claim":"src/it's*.mjs","kind":"path","command":"find src -name 'it'\\''s*.mjs'","output_excerpt":"nothing","tag":"NOT-FOUND","why":null}
+]}

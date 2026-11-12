@@ -56,9 +56,17 @@ type fcPlan struct {
 	claims             []fcClaim
 	lines              int
 	run                *string
+	roots              []*fcRoot
 	opts               session.Opts
 	home               string
+	tmpRoot            *string // --run's tmp.root (runRootFor)
+	crash              *fcCrash
+	levelCrash         string // resolveLevel's throw inside spawnSession
 }
+
+// fcCrash is an error Node does not catch: the CLI prints its stack and logs
+// a crash row (B568).
+type fcCrash struct{ name, message string }
 
 // fcPortable is portable(): the schema without annotations and string-length keywords.
 func fcPortable(v any) any {
@@ -166,11 +174,8 @@ func fcPlanFacts(flags map[string]any, brief string) (*fcPlan, handoverReason) {
 		return nil, hFactsSession
 	}
 	p.mtime = fcISO(st.ModTime())
-	// Buffer#toString('utf8') replaces bad bytes; the claims would differ
-	if !utf8.Valid(p.brief) {
-		return nil, hFactsBriefEncoding
-	}
-	text := string(p.brief)
+	// Buffer#toString('utf8'): each bad sequence becomes one U+FFFD
+	text := fcDecodeUTF8(p.brief)
 	bins := []string{}
 	if data, err := os.ReadFile(filepath.Join(p.project, "package.json")); err == nil {
 		bins = fcProjectBins(data)
@@ -189,69 +194,39 @@ func fcPlanFacts(flags map[string]any, brief string) (*fcPlan, handoverReason) {
 		return nil, hFactsSession
 	}
 	// sourceRoots: a source outside the project is mounted under _sources
-	for _, source := range p.sources {
-		real, err := filepath.EvalSymlinks(source)
-		if err != nil {
-			return nil, hFactsSession
-		}
-		if !fcBelowRoot(p.real, real) {
-			return nil, hFactsOutsideSource
-		}
+	if p.roots, err = fcSourceRoots(p.real, p.sources); err != nil {
+		return nil, hFactsSession
 	}
-	root := &fcRoot{dir: p.real, label: filepath.Base(p.real)}
-	for _, claim := range fcExtractClaims(text, bins, topLevel) {
-		if claim.kind == "path" && fcHasGlob(claim.token) {
+	p.claims = fcMapClaims(fcExtractClaims(text, bins, topLevel), p.roots)
+	for _, claim := range p.claims {
+		check := claim.token
+		if claim.hasCheckPath {
+			check = claim.checkPath
+		}
+		// a glob path:matchesGlob does not model (fcGlobUnmodelled) hands over
+		if claim.kind == "path" && fcHasGlob(claim.token) && !strings.HasPrefix(claim.token, "~") && !fcDotDotSegment(claim.token) &&
+			fcGlobUnmodelled(fcRelPosix(check)) {
 			return nil, hFactsGlobClaim
 		}
-		// mapClaims with the project as the one root
-		if claim.kind == "path" && filepath.IsAbs(claim.token) {
-			if claim.token == "/dev" || strings.HasPrefix(claim.token, "/dev/") {
-				continue
-			}
-			if fcBelowRoot(root.dir, claim.token) {
-				claim.root = root
-				claim.checkPath, claim.hasCheckPath = filepath.ToSlash(fcRelative(root.dir, claim.token)), true
-				if claim.checkPath == "" {
-					claim.checkPath = "."
-				}
-			} else if !fcBelowAny(fcToolRoots, claim.token) {
-				if !fcIsDir("/" + strings.Split(claim.token, "/")[1]) {
-					continue
-				}
-				claim.unavailable = "outside every --sources root and the snapshot"
-			}
-		}
-		p.claims = append(p.claims, claim)
 	}
 	p.lines = strings.Count(text, "\n") + 1
 	if strings.HasSuffix(text, "\n") {
 		p.lines--
 	}
-	// the run root: --run's (made at run time), else the process's lazy root
+	// runRootFor(run, cfg.tmp.root): a tmp.root that is not an absolute
+	// path is a TypeError Node does not catch, thrown before any write
 	contextApplyTmpRoot()
-	base := session.TmpBase()
-	var runDir string
 	if p.run != nil {
-		var tmpRoot *string
 		if tmp, ok := cfg["tmp"].(map[string]any); ok {
 			if value, present := tmp["root"]; present && value != nil {
-				s, isString := value.(string)
-				if !isString || !filepath.IsAbs(s) {
-					return nil, hFactsSession
+				text, isString := value.(string)
+				if !isString || !filepath.IsAbs(text) {
+					p.crash = &fcCrash{"TypeError", "tmp: tmp.root must be an absolute path"}
+					return p, 0
 				}
-				tmpRoot = &s
+				p.tmpRoot = &text
 			}
 		}
-		if tmpRoot != nil {
-			base = *tmpRoot
-		}
-		runDir = filepath.Join(base, *p.run)
-	} else {
-		runDir = filepath.Join(base, "proc-"+strconv.Itoa(os.Getpid()))
-	}
-	// a run root inside a git work tree moves the snapshot to factsTmpRoot
-	if session.GitWorkTreeAncestor(session.RealOrResolved(runDir)) != "" {
-		return nil, hFactsRootInGit
 	}
 	schemaPath, err := fcSchemaPath()
 	if err != nil {
@@ -277,10 +252,75 @@ func fcPlanFacts(flags map[string]any, brief string) (*fcPlan, handoverReason) {
 	if session.HasCodexStep(probe) {
 		return nil, hFactsCodexStep
 	}
-	if err := session.Check(probe); session.IsUnsupported(err) {
+	err = session.Check(probe)
+	if p.levelCrash = session.LevelCrash(err); p.levelCrash != "" {
+		return p, 0
+	}
+	if session.IsUnsupported(err) {
+		return nil, hFactsSession
+	}
+	// B568: the run-pinned gate's Date.parse cases are found here, before
+	// any write, not in the middle of the run
+	if session.IsUnsupported(session.GatePreflight(p.opts, session.Deps{})) {
 		return nil, hFactsSession
 	}
 	return p, 0
+}
+
+// fcDecodeUTF8 is the WHATWG UTF-8 decoder Buffer#toString('utf8') uses:
+// one U+FFFD per maximal invalid subpart.
+func fcDecodeUTF8(data []byte) string {
+	if utf8.Valid(data) {
+		return string(data)
+	}
+	var out strings.Builder
+	needed, seen := 0, 0
+	cp := rune(0)
+	lower, upper := byte(0x80), byte(0xBF)
+	for i := 0; i < len(data); i++ {
+		b := data[i]
+		if needed == 0 {
+			switch {
+			case b <= 0x7F:
+				out.WriteByte(b)
+			case b >= 0xC2 && b <= 0xDF:
+				needed, cp = 1, rune(b&0x1F)
+			case b >= 0xE0 && b <= 0xEF:
+				if b == 0xE0 {
+					lower = 0xA0
+				} else if b == 0xED {
+					upper = 0x9F
+				}
+				needed, cp = 2, rune(b&0x0F)
+			case b >= 0xF0 && b <= 0xF4:
+				if b == 0xF0 {
+					lower = 0x90
+				} else if b == 0xF4 {
+					upper = 0x8F
+				}
+				needed, cp = 3, rune(b&0x07)
+			default:
+				out.WriteRune(utf8.RuneError)
+			}
+			continue
+		}
+		if b < lower || b > upper {
+			needed, seen, cp, lower, upper = 0, 0, 0, 0x80, 0xBF
+			out.WriteRune(utf8.RuneError)
+			i--
+			continue
+		}
+		lower, upper = 0x80, 0xBF
+		cp = cp<<6 | rune(b&0x3F)
+		if seen++; seen == needed {
+			out.WriteRune(cp)
+			needed, seen, cp = 0, 0, 0
+		}
+	}
+	if needed != 0 {
+		out.WriteRune(utf8.RuneError)
+	}
+	return out.String()
 }
 
 func fcBelowAny(roots []string, file string) bool {
@@ -522,8 +562,7 @@ func fcCopyNoFollow(src, dst, snapDir string) error {
 	return err
 }
 
-// fcBuildSnapshot is buildSnapshot for sources inside the project (an
-// outside source hands over in fcPlanFacts).
+// fcBuildSnapshot is buildSnapshot.
 func fcBuildSnapshot(p *fcPlan, snapDir, workDir string) (string, error) {
 	if err := os.MkdirAll(snapDir, 0o700); err != nil {
 		return "", err
@@ -581,6 +620,9 @@ func fcBuildSnapshot(p *fcPlan, snapDir, workDir string) (string, error) {
 			return "", err
 		}
 	}
+	if err := fcSnapshotSources(p.roots, sessionCwd, snapDir, workDir); err != nil {
+		return "", err
+	}
 	if err := fcSealTree(snapDir, ""); err != nil {
 		return "", err
 	}
@@ -595,66 +637,73 @@ func fcExitText(code int) string {
 	return strconv.Itoa(code)
 }
 
-// fcMarkUnavailable is markUnavailable with the project as the one root.
+// fcMarkUnavailable is markUnavailable: one git check-ignore per root.
 func fcMarkUnavailable(p *fcPlan, cwd string) error {
-	label := filepath.Base(p.real)
-	idx := []int{}
-	relatives := []string{}
-	for i, c := range p.claims {
-		if c.kind != "path" || c.unavailable != "" {
-			continue
+	directories := []*fcRoot{}
+	for _, r := range p.roots {
+		if r.file == "" {
+			directories = append(directories, r)
 		}
-		if !(c.root != nil || !filepath.IsAbs(c.token)) {
-			continue
+	}
+	for _, root := range p.roots {
+		idx := []int{}
+		relatives := []string{}
+		for i, c := range p.claims {
+			if c.kind != "path" || c.unavailable != "" {
+				continue
+			}
+			if !(c.root == root || c.root == nil && len(directories) == 1 && root == directories[0] && !filepath.IsAbs(c.token)) {
+				continue
+			}
+			check := c.token
+			if c.hasCheckPath {
+				check = c.checkPath
+			}
+			if fcPathViolation(check) != "" {
+				continue
+			}
+			rel := c.token
+			if filepath.IsAbs(c.token) {
+				if rel = fcRelative(root.dir, c.token); rel == "" {
+					rel = "."
+				}
+			}
+			idx = append(idx, i)
+			relatives = append(relatives, rel)
 		}
-		check := c.token
-		if c.hasCheckPath {
-			check = c.checkPath
+		input := ""
+		for _, r := range relatives {
+			input += r + "\x00"
 		}
-		if fcPathViolation(check) != "" {
-			continue
+		checked := fcExec([]string{"git", "check-ignore", "-z", "--stdin"}, root.dir, fcGitEnv(), input, 0, 1)
+		if !checked.ok && !(checked.code == 128 && strings.Contains(strings.ToLower(checked.stderr), "not a git repository")) {
+			return &fcRefused{"git check-ignore could not check the source paths"}
 		}
-		rel := c.token
-		if filepath.IsAbs(c.token) {
-			if rel = fcRelative(p.real, c.token); rel == "" {
-				rel = "."
+		ignored := map[string]bool{}
+		for _, name := range strings.Split(checked.stdout, "\x00") {
+			if name != "" {
+				ignored[name] = true
 			}
 		}
-		idx = append(idx, i)
-		relatives = append(relatives, rel)
-	}
-	input := ""
-	for _, r := range relatives {
-		input += r + "\x00"
-	}
-	checked := fcExec([]string{"git", "check-ignore", "-z", "--stdin"}, p.real, fcGitEnv(), input, 0, 1)
-	if !checked.ok && !(checked.code == 128 && strings.Contains(strings.ToLower(checked.stderr), "not a git repository")) {
-		return &fcRefused{"git check-ignore could not check the source paths"}
-	}
-	ignored := map[string]bool{}
-	for _, name := range strings.Split(checked.stdout, "\x00") {
-		if name != "" {
-			ignored[name] = true
-		}
-	}
-	for n, i := range idx {
-		c := &p.claims[i]
-		check := c.token
-		if c.hasCheckPath {
-			check = c.checkPath
-		}
-		if ignored[relatives[n]] {
-			c.unavailable = "git-ignored in " + label + ": the snapshot leaves ignored paths out"
-		} else if _, err := os.Lstat(filepath.Join(p.real, relatives[n])); err == nil {
-			if _, err := os.Lstat(filepath.Join(cwd, check)); err != nil {
-				c.unavailable = "not at HEAD in " + label + ": outside the snapshot"
+		for n, i := range idx {
+			c := &p.claims[i]
+			check := c.token
+			if c.hasCheckPath {
+				check = c.checkPath
+			}
+			if ignored[relatives[n]] {
+				c.unavailable = "git-ignored in " + root.label + ": the snapshot leaves ignored paths out"
+			} else if _, err := os.Lstat(filepath.Join(root.dir, relatives[n])); err == nil {
+				if _, err := os.Lstat(filepath.Join(cwd, check)); err != nil {
+					c.unavailable = "not at HEAD in " + root.label + ": outside the snapshot"
+				}
 			}
 		}
 	}
 	return nil
 }
 
-// fcPacket is buildFactsPacket for claims without a glob or a source.
+// fcPacket is buildFactsPacket.
 func fcPacket(claims []fcClaim) string {
 	lines := []string{}
 	for i, c := range claims {
@@ -662,8 +711,17 @@ func fcPacket(claims []fcClaim) string {
 			continue
 		}
 		line := "- F" + strconv.Itoa(i+1) + " " + c.kind + ": " + c.token
-		if c.hasCheckPath && c.checkPath != "" {
+		if c.hasSource {
+			line += " (source " + c.source + ", check at " + c.checkPath + ")"
+		} else if c.hasCheckPath && c.checkPath != "" {
 			line += " (check at " + c.checkPath + ")"
+		}
+		if c.kind == "path" && fcHasGlob(c.token) {
+			token := c.token
+			if c.hasCheckPath {
+				token = c.checkPath
+			}
+			line += fcGlobHint(token)
 		}
 		lines = append(lines, line)
 	}
@@ -699,13 +757,22 @@ func fcRunError(p *fcPlan, err error, stderr io.Writer) int {
 			return 1
 		}
 	}
-	fmt.Fprintf(stderr, "code-forge: verb \"facts\" failed: Error: %s\n", err.Error())
+	return fcCrashed(p, &fcCrash{"Error", err.Error()}, stderr)
+}
+
+// fcCrashed prints what bin/code-forge.mjs prints for an uncaught error
+// (its first stack line; Go has no JS frames) and keeps it for the crash row.
+func fcCrashed(p *fcPlan, c *fcCrash, stderr io.Writer) int {
+	fmt.Fprintf(stderr, "code-forge: verb \"facts\" failed: %s: %s\n", c.name, c.message)
+	p.crash = c
 	return 1
 }
 
 // fcRunFacts is buildFacts plus runFactsVerb's result handling; handover =
-// the session refused an option only after the run began (the run-pinned
-// gate's Date.parse cases): everything made here is removed first.
+// a run root Go could not make (an mkdir error) or, only if the gate's files
+// change between the plan's GatePreflight and the session, a gate Go cannot
+// read like Node: everything made here is removed first. B568: the gate's
+// Date.parse cases are decided in fcPlanFacts, before any write.
 func fcRunFacts(p *fcPlan, stdout, stderr io.Writer) (code int, handover bool) {
 	var procRoot string
 	lazyRoot := func() (string, error) {
@@ -721,10 +788,18 @@ func fcRunFacts(p *fcPlan, stdout, stderr io.Writer) (code int, handover bool) {
 			spawnReleaseRoot(procRoot)
 		}
 	}()
+	if p.crash != nil {
+		return fcCrashed(p, p.crash, stderr), false
+	}
 	var root string
 	if p.run != nil {
-		dir, ok := spawnRunRoot(p.cwd, *p.run)
-		if !ok {
+		dir, err := contextRunRoot(*p.run, p.tmpRoot)
+		if err != nil {
+			// tmp.mjs's trust refusals are Errors Node does not catch;
+			// anything else (an mkdir failure) stays with Node
+			if strings.HasPrefix(err.Error(), "tmp: refusing untrusted ") {
+				return fcCrashed(p, &fcCrash{"Error", err.Error()}, stderr), false
+			}
 			return 0, true
 		}
 		root = dir
@@ -739,9 +814,20 @@ func fcRunFacts(p *fcPlan, stdout, stderr io.Writer) (code int, handover bool) {
 		}
 		root = dir
 	}
+	// B9b.1: a run root inside a git work tree moves the facts area to the
+	// private root factsTmpRoot makes (left in place, as Node leaves it)
+	area := filepath.Join(root, "facts")
+	if real := session.RealOrResolved(root); session.GitWorkTreeAncestor(real) != "" {
+		sum := sha256.Sum256([]byte(real))
+		factsRoot, err := contextMakeRunRoot("facts-"+hex.EncodeToString(sum[:])[:16], nil)
+		if err != nil {
+			return fcRunError(p, err, stderr), false
+		}
+		area = filepath.Join(factsRoot, "facts")
+	}
 	suffix := make([]byte, 4)
 	_, _ = rand.Read(suffix)
-	dir := filepath.Join(root, "facts", strconv.FormatInt(time.Now().UnixMilli(), 10)+"-"+hex.EncodeToString(suffix))
+	dir := filepath.Join(area, strconv.FormatInt(time.Now().UnixMilli(), 10)+"-"+hex.EncodeToString(suffix))
 	if err := os.MkdirAll(dir, 0o700); err != nil {
 		return fcRunError(p, err, stderr), false
 	}
@@ -779,6 +865,14 @@ func fcSessionAndSheet(p *fcPlan, root, dir, snapDir string, stderr io.Writer, l
 	packetPath := filepath.Join(dir, "packet.md")
 	if err := os.WriteFile(packetPath, []byte(fcPacket(p.claims)), 0o600); err != nil {
 		return fail(err)
+	}
+	if p.levelCrash != "" {
+		// spawnSession: assertFactsCwd, then resolveLevel throws
+		if err := session.CheckFactsCwd(cwd, root); err != nil {
+			fmt.Fprintf(stderr, "facts: %s\n", err.Error())
+			return 1, false, nil
+		}
+		return fcCrashed(p, &fcCrash{"Error", p.levelCrash}, stderr), false, nil
 	}
 	opts := p.opts
 	opts.PromptPath, opts.RunRoot, opts.Cwd = packetPath, root, cwd

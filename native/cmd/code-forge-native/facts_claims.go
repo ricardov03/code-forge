@@ -681,7 +681,10 @@ type fcSplit struct {
 }
 
 // fcSplitCommand is splitCommand(command) (allowGlob false).
-func fcSplitCommand(command string) fcSplit {
+func fcSplitCommand(command string) fcSplit { return fcSplitCommandGlob(command, false) }
+
+// fcSplitCommandGlob is splitCommand(command, allowGlob).
+func fcSplitCommandGlob(command string, allowGlob bool) fcSplit {
 	refuse := func(why string) fcSplit { return fcSplit{refused: why} }
 	if strings.Contains(command, "`") {
 		return refuse("backticks are not allowed")
@@ -743,7 +746,7 @@ func fcSplitCommand(command string) fcSplit {
 		case ch == ' ' || ch == '\t':
 			flush()
 		default:
-			if fcIn(ch, "*?[]{}") {
+			if !allowGlob && fcIn(ch, "*?[]{}") {
 				return refuse("unquoted glob characters (* ? [ ] { }) are not allowed")
 			}
 			word += string(ch)
@@ -1421,8 +1424,7 @@ func fcSymbolRule(row fcFact, claim fcClaim, ctx fcCtx) string {
 	return ""
 }
 
-// fcRuleBroken is ruleBroken ("" = none). Glob path claims never reach it:
-// they hand over before the run.
+// fcRuleBroken is ruleBroken ("" = none).
 func fcRuleBroken(row fcFact, claim fcClaim, ctx fcCtx) string {
 	if row.tag == "UNVERIFIABLE" {
 		return ""
@@ -1435,6 +1437,9 @@ func fcRuleBroken(row fcFact, claim fcClaim, ctx fcCtx) string {
 	}
 	if claim.kind == "symbol" {
 		return fcSymbolRule(row, claim, ctx)
+	}
+	if claim.kind == "path" && fcHasGlob(claim.token) {
+		return fcGlobRule(row, claim)
 	}
 	if claim.kind == "env" {
 		if name, ok := fcEnvCheck(row.command); !ok || name != claim.token {

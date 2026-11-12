@@ -77,17 +77,30 @@ type Error struct{ Code, Message string }
 
 func (e *Error) Error() string { return e.Message }
 
-type unsupportedError struct{ why string }
+type unsupportedError struct{ why, crash string }
 
 func (e *unsupportedError) Error() string { return "session: not ported: " + e.why }
 
-func unsupported(why string) error { return &unsupportedError{why} }
+func unsupported(why string) error { return &unsupportedError{why: why} }
 
 // IsUnsupported reports a refusal made before anything ran: hand the session to Node.
 func IsUnsupported(err error) bool {
 	var u *unsupportedError
 	return errors.As(err, &u)
 }
+
+// LevelCrash is the message of the Error resolveLevel throws (a crash in
+// Node) for a level with no model or no provider, or "".
+func LevelCrash(err error) string {
+	var u *unsupportedError
+	if errors.As(err, &u) {
+		return u.crash
+	}
+	return ""
+}
+
+// CheckFactsCwd is assertFactsCwd: the facts role's cwd override check.
+func CheckFactsCwd(cwd, runRootDir string) error { return assertFactsCwd(cwd, runRootDir) }
 
 // codexSandboxWhy is the refusal of a Codex coder step under a coder.sandbox
 // config (B93's checkSandboxDirs, not ported).
@@ -226,12 +239,13 @@ func plan(o Opts) ([]step, int, error) {
 	}
 	// resolveLevel: a throw there is a crash in Node, not a refusal
 	level, ok := section(o.Cfg, "levels")[o.Level].(map[string]any)
+	missing := "resolveLevel: levels." + o.Level + " is missing or has no model"
 	if !ok {
-		return nil, 0, unsupported("levels." + o.Level + " is missing")
+		return nil, 0, &unsupportedError{"levels." + o.Level + " is missing", missing}
 	}
 	model, _ := level["model"].(string)
 	if model == "" {
-		return nil, 0, unsupported("levels." + o.Level + " has no model")
+		return nil, 0, &unsupportedError{"levels." + o.Level + " has no model", missing}
 	}
 	rawProvider, has := level["provider"]
 	if !has || rawProvider == nil {
@@ -239,7 +253,7 @@ func plan(o Opts) ([]step, int, error) {
 	}
 	provider, _ := rawProvider.(string)
 	if provider == "" {
-		return nil, 0, unsupported("levels." + o.Level + " has no provider")
+		return nil, 0, &unsupportedError{"levels." + o.Level + " has no provider", "resolveLevel: levels." + o.Level + " has no provider (neither per-level nor top-level)"}
 	}
 	first := step{provider: provider, model: model, effort: level["effort"]}
 	ladder := []step{first}
