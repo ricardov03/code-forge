@@ -69,13 +69,14 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	}
 	fail := func(err error) int {
 		// B451: a filesystem error prints in Node's errno form; the caller logs it.
+		// Node runs the expiry check before every close, so any refusal follows it.
+		if expiryOnFailure != nil {
+			expiryOnFailure()
+		}
 		var se *state.Error
 		if !errors.As(err, &se) {
 			fmt.Fprintln(stderr, "block close:", blockIOMessage(err))
 			return 1
-		}
-		if expiryOnFailure != nil {
-			expiryOnFailure()
 		}
 		fmt.Fprintln(stderr, "block close:", err)
 		if se.Code == "usage" {
@@ -217,35 +218,53 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if wt := entry.Get("worktree"); wt != nil {
 		tree := blockObject(wt)
 		p, branch, sha := blockString(tree.Get("path")), blockString(tree.Get("branch")), blockString(tree.Get("base_sha"))
-		if !filepath.IsAbs(p) || branch == "" || !regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`).MatchString(sha) || strings.ContainsAny(p+branch, "\x00\r\n\t") {
-			return fallback(hCloseWorktreeShape)
+		// B470: Node's blockTree refusals (worktree-*) run in Go with its text.
+		refuse := func(code, message string) int {
+			return fail(&state.Error{Code: code, Message: fmt.Sprintf("block %s: %s, so its work cannot be measured; nothing was recorded", id, message)})
+		}
+		if !filepath.IsAbs(p) || branch == "" || !regexp.MustCompile(`^(?:[0-9a-f]{40}|[0-9a-f]{64})$`).MatchString(sha) || strings.ContainsFunc(p+branch, func(r rune) bool { return r < 32 || r == 127 }) {
+			return refuse("worktree-malformed", "malformed worktree record (it needs an absolute path, a branch and a base_sha)")
 		}
 		real, e := filepath.EvalSymlinks(p)
 		if e != nil {
-			if !os.IsNotExist(e) {
-				return fallback(hCloseWorktreeResolve)
-			}
+			// realpathSync's every failure is the missing tree in Node.
 			return fail(&state.Error{Code: "worktree-missing", Message: fmt.Sprintf("block %s: its worktree %s is gone (removed or moved), so its work cannot be measured — restore it on branch %s (git worktree prune, then git worktree add %s %s) and close again; nothing was recorded", id, p, branch, p, branch)})
 		}
 		st, e := os.Stat(real)
-		if e != nil || !st.IsDir() {
-			return fallback(hCloseWorktreeStat)
+		if e != nil {
+			return fail(e)
 		}
-		actual, e := gitx.Run(real, "symbolic-ref", "--quiet", "--short", "HEAD")
-		if e != nil || strings.TrimSpace(actual) != branch {
+		if !st.IsDir() {
+			return refuse("worktree-not-dir", fmt.Sprintf("the worktree %s is not a directory", p))
+		}
+		head, known := closeTreeHead(real)
+		if !known {
 			return fallback(hCloseWorktreeBranch)
+		}
+		if head != "refs/heads/"+branch {
+			now := "its HEAD is detached, or it is not a git worktree"
+			if head != "" {
+				now = "it is on " + strings.TrimPrefix(head, "refs/heads/")
+			}
+			return refuse("worktree-branch-mismatch", fmt.Sprintf("the worktree %s is not on its branch %s (%s)", p, branch, now))
 		}
 		common, e := gitx.Run(real, "rev-parse", "--path-format=absolute", "--git-common-dir")
 		if e != nil {
 			return fallback(hCloseWorktreeCommonDir)
 		}
 		mainCommon, e := gitx.Run(workspace, "rev-parse", "--path-format=absolute", "--git-common-dir")
-		if e != nil || statusReal(strings.TrimSpace(common)) != statusReal(strings.TrimSpace(mainCommon)) {
+		if e != nil {
 			return fallback(hCloseWorktreeIdentity)
 		}
+		if statusReal(strings.TrimSpace(common)) != statusReal(strings.TrimSpace(mainCommon)) {
+			return refuse("worktree-foreign", fmt.Sprintf("the worktree %s belongs to another repository", p))
+		}
 		prefix := gatecheck.Prefix(mainTop, workspace)
-		if st, e := os.Stat(filepath.Join(real, prefix)); e != nil || !st.IsDir() {
-			return fallback(hCloseWorktreePrefix)
+		if prefix == ".." || strings.HasPrefix(prefix, "..") || filepath.IsAbs(prefix) {
+			return refuse("worktree-workspace-missing", fmt.Sprintf("the run's workspace %s is not inside its repository, so it has no place in the worktree %s", workspace, p))
+		}
+		if st, e := os.Stat(filepath.Join(real, prefix)); prefix != "" && (e != nil || !st.IsDir()) {
+			return refuse("worktree-workspace-missing", fmt.Sprintf("the worktree %s has no %s directory (the run's workspace)", p, filepath.FromSlash(prefix)))
 		}
 		top, base, inTree = real, sha, true
 	}
@@ -286,22 +305,33 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		}
 		return usage("--no-require-reviews needs the human at a terminal to confirm; the block stays open (there is no --yes)")
 	}
-	if record.Get("status") != "active" {
-		return fail(&state.Error{Code: "run-ended", Message: "run " + run + " has ended"})
-	}
-	all, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), blockString(record.Get("project")))
+	// Node reads the ledger before any run-ended write refusal (B470).
+	ledgerDir := filepath.Join(home, ".code-forge/ledger")
+	all, err := ledger.ReadAllRows(ledgerDir, blockString(record.Get("project")))
 	if err != nil {
-		return fallback(hCloseLedgerRead)
+		message, ok := closeLedgerReadMessage(err, ledgerDir)
+		if !ok {
+			return fallback(hCloseLedgerRead)
+		}
+		return fail(errors.New(message))
 	}
 	rows := []gatecheck.Row{}
 	for _, v := range all {
+		if v == nil {
+			// Node's rows.filter(row => row.run === runId) on a null row.
+			return fail(errors.New("Cannot read properties of null (reading 'run')"))
+		}
 		r, ok := v.(map[string]any)
 		if !ok {
-			return fallback(hCloseLedgerShape)
+			// A number, string or array row has no run; Node's filter drops it.
+			continue
 		}
 		if r["run"] == run {
 			rows = append(rows, r)
 		}
+	}
+	if record.Get("status") != "active" {
+		return fail(&state.Error{Code: "run-ended", Message: "run " + run + " has ended"})
 	}
 	// Node's checks read only this block's rows; another block's row never
 	// sends the close to Node (B451).
@@ -1759,4 +1789,35 @@ func closeAuditOf(id string, rows []gatecheck.Row, key []byte, accepted []gatech
 		}
 	}
 	return a, true
+}
+
+// closeTreeHead is Node's assertOnBranch read: git symbolic-ref -q HEAD in the
+// tree, never above it. "" is a detached HEAD or no worktree; known is false
+// when git could not run (Node's git-failed, which stays on the hand-over).
+func closeTreeHead(top string) (head string, known bool) {
+	env := append(gitx.ChildEnv(), "GIT_CEILING_DIRECTORIES="+filepath.Dir(top))
+	out, err := gitx.WithEnv(top, env, "-C", top, "symbolic-ref", "-q", "HEAD")
+	if err != nil {
+		var command *gitx.CommandError
+		if errors.As(err, &command) && command.Code > 0 {
+			return "", true
+		}
+		return "", false
+	}
+	return strings.TrimSpace(out), true
+}
+
+// closeLedgerReadMessage is Node's readAllRows errno text: readdir names the
+// ledger directory as scandir, readFile's read drops the path, open keeps it.
+// ok is false for anything else (a parse error), which stays on the hand-over.
+func closeLedgerReadMessage(err error, dir string) (string, bool) {
+	var pathErr *os.PathError
+	var errno syscall.Errno
+	if !errors.As(err, &pathErr) || !errors.As(err, &errno) {
+		return "", false
+	}
+	if pathErr.Path == dir {
+		return blockIOMessage(&os.PathError{Op: "scandir", Path: dir, Err: errno}), true
+	}
+	return closeTranscriptReadMessage(err), true
 }
