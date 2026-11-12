@@ -11,7 +11,6 @@ import (
 	"strings"
 	"unicode/utf8"
 
-	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -89,8 +88,8 @@ func runLedger(args []string) int {
 		}
 	}
 	result := ledgerRun(args)
-	if result.handover == 0 && result.code != 0 && result.code != 2 && ledgerHintShown() {
-		// Node prints a once-a-day hint on a terminal; that memory stays in Node.
+	if result.handover == 0 && result.code != 0 && result.code != 2 && !routerHintReadable() {
+		// Node's once-a-day hint memory holds a time only Date.parse reads.
 		result = ledgerHandedOver(hLedgerErrorHint)
 	}
 	if result.handover != 0 {
@@ -118,23 +117,9 @@ func runLedger(args []string) int {
 		if trimmed := strings.TrimFunc(errText, errorLogSpace); trimmed != "" {
 			message = trimmed
 		}
-		nativeVerbFailure("ledger", sub, args, result.code, message, before)
+		routerHint(nativeVerbFailure("ledger", sub, args, result.code, message, before), result.code)
 	}
 	return result.code
-}
-
-// ledgerHintShown: Node's maybeHint could print on this run (stderr is a
-// terminal, the log is on, not an agent session).
-func ledgerHintShown() bool {
-	if !reviewWaitLogging() || os.Getenv("HOME") == "" || !humanask.IsTTY(os.Stderr) {
-		return false
-	}
-	for _, name := range []string{"CLAUDECODE", "CLAUDE_CODE", "CURSOR_AGENT", "AI_AGENT"} {
-		if os.Getenv(name) != "" {
-			return false
-		}
-	}
-	return true
 }
 
 // ledgerRedact is Node's redact for one registered secret: every occurrence,

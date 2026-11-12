@@ -1,7 +1,6 @@
 package main
 
 import (
-	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -203,33 +202,27 @@ func pipelineOutcomeState(file, root string, unsupported *bool) (string, string)
 	if _, err := os.Stat(file); err != nil {
 		return "ready", ""
 	}
-	data, err := os.ReadFile(file)
-	if errors.Is(err, syscall.EISDIR) {
-		return "invalid", "Cannot read outcome " + jsQuote(file) + " (EISDIR)"
-	}
-	if err != nil {
-		*unsupported = true
-		return "", ""
-	}
-	if !json.Valid(data) {
-		return "invalid", "Outcome " + jsQuote(file) + " is not valid JSON"
-	}
-	outcome, err := ledger.DecodeObject(data)
-	if err != nil || !blockopen.ValidOutcome(outcome) {
-		*unsupported = true
-		return "", ""
-	}
-	status := outcome.Get("status").(string)
-	if status != "approved" {
-		return status, ""
-	}
-	problem, err := blockopen.CheckOutcome(file, root)
-	if err != nil {
+	// loadOutcome + validateOutcome, then checkOutcome's first problem for an
+	// approved one (outcome_cmd.go shares Node's read and hashFile errors).
+	outcome, problem, ok := loadOutcomeFile(file)
+	if !ok {
 		*unsupported = true
 		return "", ""
 	}
 	if problem != "" {
 		return "invalid", problem
+	}
+	status := outcome.Get("status").(string)
+	if status != "approved" {
+		return status, ""
+	}
+	problems, ok := checkOutcomeProblems(file, root)
+	if !ok {
+		*unsupported = true
+		return "", ""
+	}
+	if len(problems) > 0 {
+		return "invalid", problems[0]
 	}
 	return "approved", ""
 }

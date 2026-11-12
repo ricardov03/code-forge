@@ -298,6 +298,7 @@ const (
 	hSweepIdle
 	hDoctorLiveProbes
 	hDoctorFullNoConfig
+	hRouterHintState
 )
 
 var handoverReasons = [...]string{
@@ -575,6 +576,7 @@ var handoverReasons = [...]string{
 	hSweepIdle:                 "sweep-idle-unknown",
 	hDoctorLiveProbes:          "doctor-live-probes",
 	hDoctorFullNoConfig:        "doctor-full-no-config",
+	hRouterHintState:           "router-hint-state",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {

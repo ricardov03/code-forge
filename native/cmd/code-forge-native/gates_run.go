@@ -156,9 +156,12 @@ func gatesFailure(args []string, code int, message any, before []any) {
 	nativeVerbFailure("gates", "run", args, code, message, before)
 }
 
-func nativeVerbFailure(verbName, subName string, args []string, code int, message any, before []any) {
+// nativeVerbFailure is writeVerbFailure: it returns the logged entry's
+// fingerprint for maybeHint (routerHint), "" when nothing was logged or the
+// entry is a warning.
+func nativeVerbFailure(verbName, subName string, args []string, code int, message any, before []any) string {
 	if !reviewWaitLogging() || os.Getenv("HOME") == "" {
-		return
+		return ""
 	}
 	cleaned := []any{}
 	slug := ""
@@ -233,10 +236,10 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 		{Key: "fp", Value: fmt.Sprintf("%x", fp[:6])}, {Key: "before", Value: before},
 	}
 	data, err := ledger.Stringify(entry, false)
-	if err != nil {
-		return
+	if err != nil || !appendErrorLogLine(data) || kind == "warning" {
+		return ""
 	}
-	appendErrorLogLine(data)
+	return fmt.Sprintf("%x", fp[:6])
 }
 
 // nativeReportedKind is reportErrorKind in src/util/error-kind.mjs: the kind
@@ -245,27 +248,31 @@ var nativeReportedKind string
 
 // appendErrorLogLine is appendLine in src/util/error-log.mjs: one line on
 // ~/.code-forge/logs/errors.jsonl, cut to its newer half past 1 MB.
-func appendErrorLogLine(data []byte) {
+// It reports whether the line was written (Node's appendLine did not throw).
+func appendErrorLogLine(data []byte) bool {
 	file := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "errors.jsonl")
 	if os.MkdirAll(filepath.Dir(file), 0700) != nil {
-		return
+		return false
 	}
 	f, err := os.OpenFile(file, os.O_APPEND|os.O_CREATE|os.O_WRONLY, 0600)
 	if err != nil {
-		return
+		return false
 	}
 	_, err = f.Write(append(data, '\n'))
 	_ = f.Close()
 	if err != nil {
-		return
+		return false
 	}
 	info, err := os.Stat(file)
-	if err != nil || info.Size() <= 1024*1024 {
-		return
+	if err != nil {
+		return false
+	}
+	if info.Size() <= 1024*1024 {
+		return true
 	}
 	all, err := os.ReadFile(file)
 	if err != nil {
-		return
+		return false
 	}
 	lines := []string{}
 	for _, line := range strings.Split(string(all), "\n") {
@@ -287,6 +294,7 @@ func appendErrorLogLine(data []byte) {
 	if os.WriteFile(tmp, []byte(strings.Join(lines[start:], "\n")+"\n"), 0600) == nil {
 		_ = os.Rename(tmp, file)
 	}
+	return true
 }
 func gatesAdd(o *ledger.Object, fields ledger.Object) {
 	for _, f := range fields {

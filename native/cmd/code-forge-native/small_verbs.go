@@ -50,6 +50,10 @@ func (v smallVerb) run(args []string) int {
 	if !ok {
 		return smallVerbHandover(v.name, args, reason)
 	}
+	if !routerHintReadable() {
+		// maybeHint's state holds a time only Date.parse reads.
+		return smallVerbHandover(v.name, args, hRouterHintState)
+	}
 	contextApplyTmpRoot()
 	name := v.name
 	if sub != "" {
@@ -64,7 +68,7 @@ func (v smallVerb) run(args []string) int {
 		if stderr.last != "" {
 			message = stderr.last
 		}
-		nativeVerbFailure(v.name, sub, args, code, message, before)
+		routerHint(nativeVerbFailure(v.name, sub, args, code, message, before), code)
 	}
 	return code
 }
