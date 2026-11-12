@@ -295,6 +295,13 @@ const (
 	hRunReloadRecordShape
 	hRunReloadAutopilotGrant
 	hRunReloadReviewShape
+	hInitInteractive
+	hInitSetup
+	hInitArgEncoding
+	hInitJevLink
+	hInitConfigSyntax
+	hInitAnswers
+	hInitOutput
 )
 
 var handoverReasons = [...]string{
@@ -584,4 +591,11 @@ var handoverReasons = [...]string{
 	hRunReloadRecordShape:      "run-reload-record-shape",
 	hRunReloadAutopilotGrant:   "run-reload-autopilot-grant",
 	hRunReloadReviewShape:      "run-reload-review-shape",
+	hInitInteractive:           "init-interactive",
+	hInitSetup:                 "init-setup",
+	hInitArgEncoding:           "init-arg-encoding",
+	hInitJevLink:               "init-jev-link",
+	hInitConfigSyntax:          "init-config-syntax",
+	hInitAnswers:               "init-answers",
+	hInitOutput:                "init-output",
 }

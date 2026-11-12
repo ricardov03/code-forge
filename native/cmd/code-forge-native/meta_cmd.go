@@ -184,13 +184,6 @@ func runVersionVerb(args []string) int {
 	})
 }
 
-func runInitVerb(args []string) int {
-	if metaHelp(args, initUsage, nil) {
-		return 0
-	}
-	return metaHandover("init", args, hInitWizard)
-}
-
 func runNativeStatusVerb(args []string) int {
 	if metaHelp(args, nativeStatusUsage, nil) {
 		return 0
