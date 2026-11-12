@@ -9,6 +9,8 @@ import (
 	"regexp"
 	"runtime"
 	"strings"
+
+	"github.com/ricardov03/code-forge/native/childreg"
 )
 
 // B489/B533: JevKeyAbsent proves, without reading any secret, that a worker
@@ -96,7 +98,7 @@ func securityKeychain(service, account string) (found, decided bool) {
 		return false, false
 	}
 	cmd := exec.Command("/usr/bin/security", "find-generic-password", "-s", service, "-a", account)
-	err := cmd.Run()
+	err := childreg.Run(cmd)
 	if err == nil {
 		return true, true
 	}

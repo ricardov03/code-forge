@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
@@ -478,7 +479,7 @@ func keysSecurityAvailable() bool {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, keysSecurityBin, "help")
 	cmd.Stdout, cmd.Stderr = io.Discard, io.Discard
-	err := cmd.Run()
+	err := childreg.Run(cmd)
 	if err == nil {
 		return true
 	}

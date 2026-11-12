@@ -9,6 +9,8 @@ import (
 	"path/filepath"
 	"strings"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/childreg"
 )
 
 type Error struct{ Code, Message string }
@@ -55,17 +57,13 @@ func WithEnv(tree string, env []string, args ...string) (string, error) {
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = tree
-	cmd.Env = env
+	cmd.Env = childreg.ChildEnv(env)
 	var stdout, stderr strings.Builder
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	err := cmd.Start()
 	if err == nil {
-		clear := func() {}
-		if Started != nil {
-			if done := Started(cmd.Process.Pid, "git"); done != nil {
-				clear = done
-			}
-		}
+		// the doctor's own hook, else the CLI's registry (B573)
+		clear := childreg.Begin(Started, cmd.Process.Pid, "git")
 		err = cmd.Wait()
 		clear()
 	}

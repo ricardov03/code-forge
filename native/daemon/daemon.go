@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
@@ -808,7 +809,7 @@ func git(dir string, args ...string) (string, error) {
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
-	data, err := cmd.Output()
+	data, err := childreg.Output(cmd)
 	if err != nil {
 		return "", fmt.Errorf("git-failed")
 	}

@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf16"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
@@ -721,6 +722,7 @@ func proofExec(argv []string, cwd string, env map[string]string, runID string, t
 		res.err = "spawn " + argv[0] + " " + name
 		return res
 	}
+	settled := childreg.Begin(nil, cmd.Process.Pid, argv[0]) // exec.mjs registerPid (B573)
 	outWrite.Close()
 	errWrite.Close()
 	var drains sync.WaitGroup
@@ -759,6 +761,7 @@ func proofExec(argv []string, cwd string, env map[string]string, runID string, t
 	mu.Unlock()
 	close(done)
 	gates.StopRemaining(cmd.Process.Pid)
+	settled()
 	drains.Wait()
 	if cmd.ProcessState == nil {
 		res.err = waitErr.Error()

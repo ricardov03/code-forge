@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -125,7 +126,7 @@ func reviewTreeGit(ctx context.Context, cwd string, extra []string, args ...stri
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = reviewWaitPipeGrace
-	out, err := cmd.Output()
+	out, err := childreg.Output(cmd)
 	if childCtx.Err() != nil {
 		return "", false
 	}

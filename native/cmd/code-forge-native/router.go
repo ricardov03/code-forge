@@ -59,6 +59,7 @@ func handover(args []string, reasons ...handoverReason) (int, error) {
 	}
 	script := filepath.Join(filepath.Dir(executable), "..", "..", "..", "bin", "code-forge.mjs")
 	argv := append([]string{node, script}, args...)
+	childregRelease() // Node makes its own root
 	if err := syscall.Exec(nodePath, argv, os.Environ()); err != nil {
 		return 126, fmt.Errorf("exec node: %w", err)
 	}

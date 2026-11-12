@@ -36,6 +36,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
@@ -692,7 +693,7 @@ func (w *Watch) git(dir string, env []string, args ...string) ([]byte, bool) {
 	cmd.WaitDelay = time.Second
 	var stdout, stderr watchCapped
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
-	err := cmd.Run()
+	err := childreg.Run(cmd)
 	return stdout.buf, err == nil && !stdout.over && !stderr.over
 }
 

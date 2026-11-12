@@ -19,6 +19,7 @@ import (
 	"sort"
 	"strconv"
 	"strings"
+	"sync"
 	"syscall"
 	"time"
 	"unicode/utf16"
@@ -826,16 +827,27 @@ func lrOnPath(cmd string) bool {
 // child or body file, removed at the end when no child is registered.
 var lrRoot string
 
+// lrMu guards lrRoot's first making: children may start on several
+// goroutines (B573).
+var lrMu sync.Mutex
+
 func lrProcRoot() (string, error) {
+	lrMu.Lock()
+	defer lrMu.Unlock()
 	if lrRoot != "" {
 		return lrRoot, nil
 	}
 	root, err := contextRunRoot("proc-"+strconv.Itoa(os.Getpid())+"-"+strconv.FormatInt(time.Now().UnixMilli(), 10), nil)
 	if err == nil {
 		lrRoot = root
+		lrLazyRoots = append(lrLazyRoots, root)
 	}
 	return root, err
 }
+
+// lrLazyRoots are the lazy roots this process made (released at exit even
+// when a verb has since set its run root, B573).
+var lrLazyRoots []string
 
 // lrRegisterChild is exec's pid registry: <run-root>/pids/<pid>.json
 // (reaper.mjs registerPid) right after the spawn, removed once the child has

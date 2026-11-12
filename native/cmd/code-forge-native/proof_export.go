@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
@@ -50,7 +51,7 @@ func proofGit(cwd string, extra []string, input string, args ...string) (string,
 			_ = cmd.Process.Kill()
 		}
 	})
-	err := cmd.Run()
+	err := childreg.Run(cmd)
 	timer.Stop()
 	if err != nil {
 		var exit *exec.ExitError
@@ -307,7 +308,7 @@ func proofBuildExport(cwdGiven, blockID string, baseValue, ownedValue, kindsValu
 	}
 	extract := exec.Command("tar", "-xf", tar, "-C", dir)
 	extract.Stdout, extract.Stderr = io.Discard, io.Discard
-	if err := extract.Run(); err != nil {
+	if err := childreg.Run(extract); err != nil {
 		var exit *exec.ExitError
 		if errors.As(err, &exit) && exit.ExitCode() >= 0 {
 			return nil, &proofError{"tar-failed", fmt.Sprintf("tar -x failed (exit %d)", exit.ExitCode())}

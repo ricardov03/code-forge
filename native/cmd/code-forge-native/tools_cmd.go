@@ -16,6 +16,7 @@ import (
 	"unicode/utf16"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/humanask"
@@ -189,15 +190,11 @@ func runChild(argv []string, timeout time.Duration) childResult {
 	return runChildHooked(argv, timeout, nil)
 }
 
-// runChildHooked is runChild with exec's spawn hook: started runs with the
-// child's pid right after a successful spawn, and the function it returns
-// (when not nil) runs once the child has settled: leader reaped, remaining
-// group members stopped, output drained (exec.mjs settle).
-func runChildHooked(argv []string, timeout time.Duration, started func(pid int, argv0 string) func()) childResult {
-	cmd := exec.Command(argv[0], argv[1:]...)
-	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+// runChildOwnerEnv is exec.mjs's owner variables: CODE_FORGE_OWNER_PID and
+// its start time (dropped when ps cannot tell it).
+func runChildOwnerEnv(environ []string) []string {
 	env := []string{}
-	for _, kv := range os.Environ() {
+	for _, kv := range environ {
 		if !strings.HasPrefix(kv, "CODE_FORGE_OWNER_PID=") && !strings.HasPrefix(kv, "CODE_FORGE_OWNER_START_TIME=") {
 			env = append(env, kv)
 		}
@@ -206,7 +203,23 @@ func runChildHooked(argv []string, timeout time.Duration, started func(pid int, 
 	if start := filelock.ProcessStartTime(os.Getpid()); start != nil {
 		env = append(env, "CODE_FORGE_OWNER_START_TIME="+*start)
 	}
-	cmd.Env = env
+	return env
+}
+
+// runChildHooked is runChild with exec's spawn hook: started runs with the
+// child's pid right after a successful spawn, and the function it returns
+// (when not nil) runs once the child has settled: leader reaped, remaining
+// group members stopped, output drained (exec.mjs settle).
+func runChildHooked(argv []string, timeout time.Duration, started func(pid int, argv0 string) func()) childResult {
+	cmd := exec.Command(argv[0], argv[1:]...)
+	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
+	// the CLI's owner and run variables when it set them (B573)
+	env := childreg.Env
+	if env == nil {
+		env = runChildOwnerEnv
+	}
+	cmd.Env = env(os.Environ())
+	started = childreg.Pick(started) // no hook of its own: the CLI's registry (B573)
 	kill := func() {
 		if cmd.Process != nil {
 			_ = syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL)

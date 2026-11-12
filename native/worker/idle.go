@@ -19,6 +19,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -86,7 +87,7 @@ func runGit(dir string, args ...string) (string, error) {
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
 	cmd.Env = gitChildEnv()
-	out, err := cmd.Output()
+	out, err := childreg.Output(cmd)
 	return string(out), err
 }
 

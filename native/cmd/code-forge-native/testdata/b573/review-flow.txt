@@ -1,0 +1,4 @@
+cli git SEEN proc-<PID>-<PID> {"pid":<PID>,"start_time":"<START>","argv0":"git"} self=<PID> owner=<PID> start=<START> run=<RUN>
+cli git SEEN proc-<PID>-<PID> {"pid":<PID>,"start_time":"<START>","argv0":"git"} self=<PID> owner=<PID> start=<START> run=none
+worker git SEEN <RUN> {"pid":<PID>,"start_time":"<START>","argv0":"git"} self=<PID> owner=<PID> start=<START> run=<RUN>
+worker git SEEN proc-<PID>-<PID> {"pid":<PID>,"start_time":"<START>","argv0":"git"} self=<PID> owner=<PID> start=<START> run=<RUN>

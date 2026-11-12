@@ -16,6 +16,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/contextpack"
 	"github.com/ricardov03/code-forge/native/gatecheck"
@@ -368,7 +369,7 @@ func statusGit(cwd string, args ...string) (string, bool) {
 		}
 	}
 	cmd.Env = append(cmd.Env, "GIT_CONFIG_NOSYSTEM=1", "GIT_CONFIG_GLOBAL=/dev/null", "GIT_TERMINAL_PROMPT=0")
-	b, err := cmd.Output()
+	b, err := childreg.Output(cmd)
 	return strings.TrimSpace(string(b)), err == nil
 }
 func statusEndHint(record map[string]any) string {

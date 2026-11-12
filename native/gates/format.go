@@ -14,6 +14,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -50,7 +51,7 @@ func formatGit(cwd, input string, okCodes []int, args ...string) (stdout string,
 	}
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
-	err := cmd.Run()
+	err := childreg.Run(cmd)
 	code := 0
 	if err != nil {
 		var exit *exec.ExitError

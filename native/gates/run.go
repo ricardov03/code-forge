@@ -6,6 +6,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -655,6 +656,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		// gate cannot starve the rest of the machine; startAtNice set it
 		// before the gate's own code ran, and every fork inherits it.
 		afterGateStart(cmd.Process.Pid)
+		settled := childreg.Begin(nil, cmd.Process.Pid, argv[0]) // exec.mjs registerPid (B573)
 		outWrite.Close()
 		errWrite.Close()
 		done := make(chan error, 1)
@@ -696,6 +698,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		}
 		timer.Stop()
 		stopRemaining(cmd.Process.Pid)
+		settled()
 		if cmd.ProcessState.ExitCode() >= 0 {
 			code = cmd.ProcessState.ExitCode()
 		} else {

@@ -23,6 +23,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/contextpack"
 	"github.com/ricardov03/code-forge/native/gatecheck"
@@ -557,13 +558,15 @@ func gatesGit(cwd string, environ []string, args ...string) (gatesGitResult, err
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = cwd
-	cmd.Env = env
+	cmd.Env = childreg.ChildEnv(env)
 	var stdout, stderr bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &stdout, &stderr
 	if err := cmd.Start(); err != nil {
 		return gatesGitResult{code: "null"}, nil
 	}
+	settled := childreg.Begin(nil, cmd.Process.Pid, "git")
 	err := cmd.Wait()
+	settled()
 	if ctx.Err() != nil || stdout.Len() > gatesGitMaxBuffer || stderr.Len() > gatesGitMaxBuffer ||
 		!utf8.Valid(stdout.Bytes()) || !utf8.Valid(stderr.Bytes()) {
 		return gatesGitResult{}, &gatesHand{hGatesGit}

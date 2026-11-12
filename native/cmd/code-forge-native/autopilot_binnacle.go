@@ -19,6 +19,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/autopilot"
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
@@ -1370,7 +1371,7 @@ var bnGitOwner = func(workspace any) string {
 	if cmd.Env == nil {
 		cmd.Env = []string{}
 	}
-	out, err := cmd.Output()
+	out, err := childreg.Output(cmd)
 	if err != nil {
 		return ""
 	}

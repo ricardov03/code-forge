@@ -17,6 +17,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gatecheck"
 	"github.com/ricardov03/code-forge/native/ledger"
@@ -586,19 +587,14 @@ func sweepGitHooked(dir string, started func(pid int, argv0 string) func(), args
 	defer cancel()
 	cmd := exec.CommandContext(ctx, "git", args...)
 	cmd.Dir = dir
-	cmd.Env = env
+	cmd.Env = childreg.ChildEnv(env)
 	var out bytes.Buffer
 	cmd.Stdout = &out
 	err := cmd.Start()
 	if err == nil {
-		var settled func()
-		if started != nil {
-			settled = started(cmd.Process.Pid, "git")
-		}
+		settled := childreg.Begin(started, cmd.Process.Pid, "git") // else the CLI's registry (B573)
 		err = cmd.Wait()
-		if settled != nil {
-			settled()
-		}
+		settled()
 	}
 	if err != nil || out.Len() > 10*1024*1024 {
 		return "", false

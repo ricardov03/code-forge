@@ -12,6 +12,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
@@ -184,7 +185,7 @@ func add(top, id string, want ledger.Object, attach bool) (*Made, error) {
 	cmd.Dir, cmd.Env = top, gitx.ChildEnv()
 	var stderr strings.Builder
 	cmd.Stderr = &stderr
-	if err := cmd.Run(); err != nil {
+	if err := childreg.Run(cmd); err != nil {
 		code := -1
 		if e, ok := err.(*exec.ExitError); ok {
 			code = e.ExitCode()

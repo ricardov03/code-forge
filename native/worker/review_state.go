@@ -16,6 +16,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/sign"
@@ -42,7 +43,7 @@ func writeBlob(contentRoot, text string) any {
 	cmd.Stdin = strings.NewReader(text)
 	var out bytes.Buffer
 	cmd.Stdout = &out
-	if cmd.Run() != nil {
+	if childreg.Run(cmd) != nil {
 		return nil
 	}
 	id := strings.TrimSpace(out.String())

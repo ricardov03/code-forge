@@ -38,7 +38,9 @@ type verification struct {
 // runs ported verbs from the route table, and hands every other verb to Node.
 // runGuarded (panic_guard.go) turns a panic into a hand-over or one error line.
 func main() {
+	childregInstall(os.Args[1:])
 	code, err := runGuarded(os.Args[1:])
+	childregRelease()
 	if err != nil {
 		fmt.Fprintln(os.Stderr, "code-forge-native:", err)
 	}

@@ -213,6 +213,14 @@ func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
 // Node (B561); runWorkerVerb runs it when the exec into Node failed.
 var workerHandOverUndo func()
 
+// workerSetRunRoot is tmp.mjs setRunRoot (loop.mjs, right after runRoot):
+// the worker's later children are recorded in <run root>/pids (B573).
+func workerSetRunRoot(dir string) {
+	lrMu.Lock()
+	lrRoot = dir
+	lrMu.Unlock()
+}
+
 // workerServe boots and serves; handover is the reason to give the worker to
 // Node instead ("" none: the code is final).
 func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int, handoverReason) {
@@ -229,6 +237,7 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 		o.err("worker: " + err.Error() + "\n")
 		return 1, 0
 	}
+	workerSetRunRoot(runRootDir)
 	key, err := blockclose.ReadKey(home, a.runID)
 	if err != nil {
 		var stateErr *state.Error

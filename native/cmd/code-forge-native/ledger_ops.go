@@ -18,6 +18,7 @@ import (
 	"unicode/utf8"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/runstatus"
 	"github.com/ricardov03/code-forge/native/state"
@@ -362,7 +363,7 @@ func ledgerGit(dir string, args ...string) (stdout, stderr string, ok, usable bo
 	cmd.Env = env
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
-	err := cmd.Run()
+	err := childreg.Run(cmd)
 	if out.Len()+errOut.Len() > 10*1024*1024 || !utf8.Valid(out.Bytes()) || !utf8.Valid(errOut.Bytes()) {
 		return "", "", false, false
 	}

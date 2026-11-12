@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/childreg"
 	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"gopkg.in/yaml.v3"
@@ -318,7 +319,7 @@ func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, 
 	childCtx, cancel := context.WithTimeout(ctx, limit)
 	defer cancel()
 	cmd := exec.CommandContext(childCtx, name, args...)
-	cmd.Dir, cmd.Env = cwd, env
+	cmd.Dir, cmd.Env = cwd, childreg.ChildEnv(env)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	cmd.Cancel = func() error { return syscall.Kill(-cmd.Process.Pid, syscall.SIGKILL) }
 	cmd.WaitDelay = reviewWaitPipeGrace
@@ -326,12 +327,8 @@ func reviewWaitCommandErr(ctx context.Context, cwd, name string, args []string, 
 	cmd.Stdout, cmd.Stderr = &out, &errOut
 	err := cmd.Start()
 	if err == nil {
-		clear := func() {}
-		if reviewWaitStarted != nil {
-			if done := reviewWaitStarted(cmd.Process.Pid, name); done != nil {
-				clear = done
-			}
-		}
+		// the doctor's own hook, else the CLI's registry (B573)
+		clear := childreg.Begin(reviewWaitStarted, cmd.Process.Pid, name)
 		err = cmd.Wait()
 		clear()
 	}

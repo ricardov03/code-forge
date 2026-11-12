@@ -11,6 +11,8 @@ import (
 	"os/exec"
 	"strings"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/childreg"
 )
 
 // capDefaultBytes is exec.mjs DEFAULT_MAX_BUFFER_BYTES (10 MiB).
@@ -49,7 +51,7 @@ func gitCapped(root string, env []string, input []byte, okCodes []int, maxBytes 
 	out := &capBuffer{cap: maxBytes}
 	errOut := &capBuffer{cap: maxBytes}
 	cmd.Stdout, cmd.Stderr = out, errOut
-	err := cmd.Run()
+	err := childreg.Run(cmd)
 	code = 0
 	if err != nil {
 		code = -1
