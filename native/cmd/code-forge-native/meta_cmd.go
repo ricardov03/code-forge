@@ -286,11 +286,6 @@ func metaSessionVerb(verb, usage string, spec metaFlagSpec, required []string, r
 	})
 }
 
-func runFactsVerb(args []string) int {
-	spec := metaFlagSpec{values: []string{"brief", "out", "run", "timeout"}, multi: []string{"sources"}}
-	return metaSessionVerb("facts", factsUsage, spec, []string{"brief"}, hFactsSession, args)
-}
-
 func runAuthorVerb(args []string) int {
 	spec := metaFlagSpec{values: []string{"job", "brief", "facts", "draft", "answers", "out", "run", "timeout"}}
 	return metaSessionVerb("author", authorUsage, spec, []string{"job", "brief"}, hAuthorSession, args)

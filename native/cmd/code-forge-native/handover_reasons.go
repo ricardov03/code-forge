@@ -343,6 +343,7 @@ const (
 	hSpawnBackgroundStart
 	hGoPanic
 	hGoPanicStopped
+	hFactsConfig
 )
 
 var handoverReasons = [...]string{
@@ -685,4 +686,6 @@ var handoverReasons = [...]string{
 	hSpawnBackgroundStart: "spawn-background-start",
 	hGoPanic:              "go-panic",
 	hGoPanicStopped:       "go-panic-stopped",
+	// B555
+	hFactsConfig: "facts-config",
 }

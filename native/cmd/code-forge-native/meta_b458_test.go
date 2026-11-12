@@ -178,13 +178,18 @@ func TestB458GoAnswers(t *testing.T) {
 
 // The forms Go does not serve yet keep the hand-over, each with its own reason.
 func TestB458HandOvers(t *testing.T) {
+	// B555: Go now refuses an unreadable --brief as Node does; a readable one hands over.
+	brief := filepath.Join(t.TempDir(), "b.md")
+	if err := os.WriteFile(brief, []byte("# b\n"), 0o644); err != nil {
+		t.Fatal(err)
+	}
 	cases := []struct {
 		args   []string
 		reason string
 	}{
 		{[]string{"init"}, "init-jev-keychain"},
 		{[]string{"init", "--no-interaction"}, "init-jev-keychain"},
-		{[]string{"facts", "--brief", "b.md"}, "facts-session"},
+		{[]string{"facts", "--brief", brief}, "facts-session"},
 		{[]string{"author", "--job", "plan", "--brief", "b.md"}, "author-session"},
 		{[]string{"s2", "--packet", "p.json"}, "system-two-session"},
 		{[]string{"jev", "ask", "lane", "--state", "s.json"}, "jev-ask"},
