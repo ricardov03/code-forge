@@ -612,7 +612,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			return code
 		}
 	}
-	audit, auditOK := closeAuditOf(id, rows, key, gate.Accepted, flags["json"] == true)
+	audit, auditOK := closeAuditOf(id, rows, key, gate.Accepted, flags["json"] == true, gateInput.Ordered)
 	if !auditOK {
 		return fallback(hCloseGatesFormat)
 	}
@@ -944,9 +944,11 @@ func closeRoutineProblem(external, run, id string, rows []gatecheck.Row, key []b
 }
 
 func closeTranscript(record, entry ledger.Object, id, given string) (string, bool, error) {
+	// B583: Node reads the transcript with readFile(file, 'utf8'): each
+	// maximal invalid UTF-8 subpart is one U+FFFD (the WHATWG decoder).
 	if given != "" {
 		data, err := os.ReadFile(given)
-		return string(data), false, err
+		return jsDecode(data), false, err
 	}
 	workspace, run := blockString(record.Get("workspace")), blockString(record.Get("run_id"))
 	paths := []string{}
@@ -960,7 +962,7 @@ func closeTranscript(record, entry ledger.Object, id, given string) (string, boo
 	for _, p := range paths {
 		data, err := os.ReadFile(p)
 		if err == nil {
-			return string(data), false, nil
+			return jsDecode(data), false, nil
 		}
 		if !os.IsNotExist(err) {
 			return "", false, err
@@ -1740,14 +1742,32 @@ func closeScalar(v any) bool {
 	return false
 }
 
-func closeAuditOf(id string, rows []gatecheck.Row, key []byte, accepted []gatecheck.AcceptedHit, jsonFlag bool) (closeAudit, bool) {
+func closeAuditOf(id string, rows []gatecheck.Row, key []byte, accepted []gatecheck.AcceptedHit, jsonFlag bool, ordered map[uintptr]ledger.Object) (closeAudit, bool) {
 	a := closeAudit{}
-	field := func(o *ledger.Object, r map[string]any, k string) bool {
-		v, has := r[k]
-		if has {
-			o.Set(k, v)
+	// B583: an object value prints with JSON.stringify in the ledger line's
+	// key order (closeOrderedRows); an array of plain values keeps its order.
+	value := func(r map[string]any, k string) (any, bool) {
+		v := r[k]
+		if closeScalar(v) || !closeHoldsObject(v) {
+			return v, true
 		}
-		return !has || closeScalar(v)
+		if o, has := ordered[gatecheck.OrderedKey(r)]; has {
+			for _, f := range o {
+				if f.Key == k {
+					return f.Value, true
+				}
+			}
+		}
+		return v, false
+	}
+	field := func(o *ledger.Object, r map[string]any, k string) bool {
+		_, has := r[k]
+		if !has {
+			return true
+		}
+		v, known := value(r, k)
+		o.Set(k, v)
+		return known
 	}
 	waivers := []any{}
 	for _, r := range gatecheck.AgentWaivers(rows, id, key) {
@@ -1776,6 +1796,10 @@ func closeAuditOf(id string, rows []gatecheck.Row, key []byte, accepted []gatech
 		said, saidOK := any(nil), false
 		if m, isMap := verdict.(map[string]any); isMap {
 			said, saidOK = m["verdict"]
+		}
+		if v, known := value(r, "verdict"); hasVerdict && known && !closeScalar(verdict) {
+			o.Set("verdict", v)
+		} else if m, isMap := verdict.(map[string]any); isMap {
 			// Node writes {verdict, reason}; any other shape keeps its order with Node.
 			ordered := ledger.Object{}
 			for k, v := range m {

@@ -851,15 +851,15 @@ type claudeLine struct {
 var (
 	claudeWriteTools = []string{"Write", "Edit", "MultiEdit", "NotebookEdit"}
 	claudeFileTools  = []string{"Read", "Glob", "Grep", "LS", "NotebookRead"}
-	claudeSurrogate  = regexp.MustCompile(`\\u[dD][89a-fA-F]`)
 )
 
 // claudeAssistantLine is one assistant line as Node's Claude mode reads it: per tool_use, the
 // command text (Bash command; Write(<path>) for write tools; else the JSON input), the path text
 // (B415 transcriptPathText for Bash) and the words where the home-relative spelling counts.
 func claudeAssistantLine(message json.RawMessage) (claudeLine, bool) {
-	// A \uD800-\uDFFF escape: Go decodes a lone surrogate to U+FFFD, JavaScript keeps it.
-	if claudeSurrogate.Match(message) {
+	// A lone \uD800-\uDFFF escape: Go decodes it to U+FFFD, JavaScript keeps it.
+	// B583: a high-low escape pair is one code point in both.
+	if jsonLoneSurrogate(message) {
 		return claudeLine{}, false
 	}
 	var msg map[string]json.RawMessage
@@ -1822,4 +1822,40 @@ func transcriptCommandText(command string, unwrapShell bool) string {
 	}
 	out.WriteString(command[end:])
 	return out.String()
+}
+
+// jsonLoneSurrogate is true when raw JSON text has a \u escape of a UTF-16
+// surrogate that is not a high surrogate escape directly followed by a low
+// one (JSON.parse keeps it as a lone code unit; Go's decoder writes U+FFFD).
+func jsonLoneSurrogate(raw []byte) bool {
+	unit := func(i int) (int, bool) {
+		if i+6 > len(raw) || raw[i] != '\\' || raw[i+1] != 'u' {
+			return 0, false
+		}
+		n, err := strconv.ParseUint(string(raw[i+2:i+6]), 16, 16)
+		return int(n), err == nil
+	}
+	for i := 0; i < len(raw); i++ {
+		if raw[i] != '\\' {
+			continue
+		}
+		u, ok := unit(i)
+		if !ok {
+			i++ // a two-character escape such as \\ or \"
+			continue
+		}
+		switch {
+		case u >= 0xdc00 && u <= 0xdfff:
+			return true
+		case u >= 0xd800 && u <= 0xdbff:
+			low, ok := unit(i + 6)
+			if !ok || low < 0xdc00 || low > 0xdfff {
+				return true
+			}
+			i += 11
+		default:
+			i += 5
+		}
+	}
+	return false
 }

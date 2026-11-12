@@ -9,8 +9,9 @@ import (
 )
 
 // closeOrderedRows keeps JSON.parse's key order for the autopilot.decision
-// rows whose decision is an object or array holding an object (B498): Node
-// prints that value with JSON.stringify, in the order the ledger line has.
+// rows whose decision is an object or array holding an object (B498), and the
+// agent waiver and reopen rows whose fields hold one (B583): Node prints that
+// value with JSON.stringify, in the order the ledger line has.
 // It reads the ledger again only when such a row exists; a row whose second
 // reading differs (a concurrent rotation) is left out, and the gate then
 // reports the value unknown, as before.
@@ -18,13 +19,19 @@ func closeOrderedRows(ledgerDir, project string, all []any) map[uintptr]ledger.O
 	need := map[int]map[string]any{}
 	for i, v := range all {
 		r, ok := v.(map[string]any)
-		if !ok || r["event"] != "autopilot.decision" {
+		if !ok {
 			continue
 		}
-		switch d := r["decision"].(type) {
-		case map[string]any, []any:
-			if closeHoldsObject(d) {
-				need[i] = r
+		if r["event"] == "autopilot.decision" && closeHoldsObject(r["decision"]) {
+			need[i] = r
+		}
+		// B583: an agent waiver or reopen prints its fields in the --json
+		// close audit with JSON.stringify, so an object keeps the line's order.
+		if (r["event"] == "review.waived" || r["event"] == "review.reopened") && r["by"] == "agent" {
+			for _, k := range []string{"file", "finding", "reason", "verdict"} {
+				if closeHoldsObject(r[k]) {
+					need[i] = r
+				}
 			}
 		}
 	}
