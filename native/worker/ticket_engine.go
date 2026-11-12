@@ -141,6 +141,10 @@ type enginePlan struct {
 	request FixLoopRequest
 	input   review.Input
 	workDir string
+	// light: a light block's batch round (B545); ordinary is false when
+	// only the batch was planned
+	light    *lightPlan
+	ordinary bool
 }
 
 // jevAsk is engine.mjs jevWith: askJev with the worker's key bound (the key
@@ -259,9 +263,41 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 		}
 		return nil, nil, unsupported("the context digest: " + err.Error())
 	}
-	if e.kind == "light" {
-		return nil, nil, unsupported("a light block's batch round")
+	// B545: a light block's batch round (lightRound), re-decided under its
+	// lock in the run phase; the ordinary round is planned too
+	if e.kind == "light" && len(w.Key) > 0 {
+		budget, _ := obj(cfg["budget"])
+		if usd, ok := budget["usd"].(float64); ok && usd > 0 && !math.IsInf(usd, 0) && w.sessionDeps().Warn == nil {
+			return nil, nil, unsupported("budget.usd with no error-log warning seam")
+		}
+		light := &lightPlan{t: t, block: block, file: file, hash: hash, id: id, e: e, cfg: cfg, contentRoot: contentRoot, digest: digest, facts: facts,
+			workDir: filepath.Join(w.RunRootDir, "packets", id), sopts: w.sessionOpts(cfg, block, timeoutS), sdeps: w.sessionDeps()}
+		ordinary, err := w.lightDry(light)
+		if err != nil {
+			return nil, nil, err
+		}
+		out, plan, err := w.planOrdinary(t, cfg, contentRoot, timeoutS, e, facts, digest)
+		if ordinary {
+			if err != nil || plan == nil {
+				return out, plan, err
+			}
+		} else if err != nil || plan == nil {
+			// only the batch was planned: the cap reached between the dry
+			// pass and the lock is left to Node
+			plan = &enginePlan{workDir: light.workDir}
+		}
+		plan.light = light
+		return nil, plan, nil
 	}
+	return w.planOrdinary(t, cfg, contentRoot, timeoutS, e, facts, digest)
+}
+
+// planOrdinary is reviewTicket's fixLoopRound part of the dry pass.
+func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, contentRoot string, timeoutS float64, e blockEntry, facts, digest string) (ledger.Object, *enginePlan, error) {
+	block, _ := t.Get("block").(string)
+	file, _ := t.Get("file").(string)
+	hash, _ := t.Get("content_hash").(string)
+	id, _ := t.Get("ticket").(string)
 	if len(w.Key) == 0 {
 		return nil, nil, unsupported("a review with no run key (reviewFile without the fix loop)")
 	}
@@ -349,13 +385,28 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 			}
 		}
 	}
-	return nil, &enginePlan{ticket: tk, request: req, input: in, workDir: workDir}, nil
+	return nil, &enginePlan{ticket: tk, request: req, input: in, workDir: workDir, ordinary: true}, nil
 }
 
 // runEngine is the fixLoopRound call and loop.mjs reviewWith's outcome
 // mapping; the packet directory is removed after (reviewTicket's finally).
 func (w *TicketRunner) runEngine(p *enginePlan, base func(string, string) ledger.Object) (ledger.Object, error) {
 	defer os.RemoveAll(p.workDir)
+	if p.light != nil {
+		outcome, ordinary, err := w.lightRun(p.light)
+		if err != nil {
+			if IsUnsupported(err) {
+				return nil, err
+			}
+			return base("unavailable", "engine-error"), nil
+		}
+		if !ordinary {
+			return w.engineResult(outcome, base), nil
+		}
+		if !p.ordinary {
+			return nil, unsupported("a light ticket the batch cap sent to the ordinary loop after the dry pass")
+		}
+	}
 	outcome, err := FixLoopRound(p.ticket, p.request)
 	if err != nil {
 		if IsUnsupported(err) {

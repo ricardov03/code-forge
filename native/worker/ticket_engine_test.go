@@ -121,6 +121,9 @@ func b497Files(t *testing.T, fx *b488Fix, ids []string) string {
 	stateRoot := filepath.Join(h, "runs", "r1")
 	var states []string
 	if err := filepath.WalkDir(filepath.Join(stateRoot, "review-state"), func(p string, d fs.DirEntry, err error) error {
+		if os.IsNotExist(err) && p == filepath.Join(stateRoot, "review-state") {
+			return nil // B545: a light batch writes no fix-loop state
+		}
 		if err == nil && !d.IsDir() {
 			rel, _ := filepath.Rel(stateRoot, p)
 			states = append(states, rel)
