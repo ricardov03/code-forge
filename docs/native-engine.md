@@ -338,10 +338,17 @@ and the Node compat tests run that binary. Two commands keep it current:
   missing or older than `native/go.mod` or a non-test `native/**/*.go` file.
   The gate JSON then shows `native_rebuilt: true`.
 
-Both run `node scripts/build-native.mjs --host` in the worktree, with the
-Node from `CODE_FORGE_NODE` when it is set. A failed build stops the command
-with exit 1 and a line naming `native-rebuild-failed`. Other projects have no
-`native/` folder, so nothing is built for them (B408).
+Both build in Go, with no Node needed (B575). They do what
+`node scripts/build-native.mjs --host` does: check `go version`, read the
+version from `package.json`, run `go build -trimpath` with the same ldflags and
+`CGO_ENABLED=0`, `GOOS`, `GOARCH`, `GOTOOLCHAIN=local` and `GOPROXY=off`, write
+`<binary>.<pid>.tmp`, set mode 755 and rename it into place. The Node version
+stamped into the binary comes from `<node> --version` of the Node a hand-over
+uses (`CODE_FORGE_NODE` when it resolves, else `node` on PATH). With no Node the
+stamp is left out, so the binary reports `unknown`, as a plain `go build` does.
+A failed build stops the command with exit 1 and a line naming
+`native-rebuild-failed` and the script's `build-native:` message. Other
+projects have no `native/` folder, so nothing is built for them (B408).
 
 ## Run lock
 

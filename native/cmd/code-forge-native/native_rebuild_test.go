@@ -16,24 +16,27 @@ import (
 )
 
 // b408Fixture is a code-forge-shaped repo (native/go.mod and
-// scripts/build-native.mjs) with one open worktree block B1. A fake Node logs
-// every call: a build-native.mjs call logs "build <cwd> <script> <arg>", a CLI call logs
-// "node <verb> <sub>" and, for block rebase, rebases the worktree onto main.
+// scripts/build-native.mjs) with one open worktree block B1. A fake go on PATH
+// logs every build as "build <cwd> <argv> | <env>" (the -o temp name with its
+// pid as PID) and writes the -o file; a fake Node answers --version, logs a CLI
+// call as "node <verb> <sub>" and, for block rebase, rebases the worktree onto
+// main (B575: the rebuild itself no longer runs Node).
 type b408Fixture struct {
 	t                          *testing.T
 	repo, tree, home, log, bin string
-	fakeNode                   string
+	fakeNode, goDir            string
 }
 
 func newB408Fixture(t *testing.T) *b408Fixture {
 	t.Helper()
 	root := t.TempDir()
-	f := &b408Fixture{t: t, repo: filepath.Join(root, "repo"), tree: filepath.Join(root, "wt"), home: filepath.Join(root, "home"), log: filepath.Join(root, "calls.log"), fakeNode: filepath.Join(root, "fake-node")}
+	f := &b408Fixture{t: t, repo: filepath.Join(root, "repo"), tree: filepath.Join(root, "wt"), home: filepath.Join(root, "home"), log: filepath.Join(root, "calls.log"), fakeNode: filepath.Join(root, "fake-node"), goDir: filepath.Join(root, "gobin")}
 	config := `{"gates":{"test":["/bin/sh","-c","echo test >> '` + f.log + `'"],"lint":null,"types":null,"format":null,"rerun_failed":0}}`
 	f.write(f.repo, ".code-forge.yml", config)
 	f.write(f.repo, ".gitignore", "native/bin/\n")
 	f.write(f.repo, "README.md", "readme\n")
 	f.write(f.repo, "scripts/build-native.mjs", "// fixture\n")
+	f.write(f.repo, "package.json", `{"name":"fixture","version":"9.8.7"}`+"\n")
 	f.write(f.repo, "native/go.mod", "module fixture\n")
 	f.write(f.repo, "native/x.go", "package fixture\n")
 	f.write(f.repo, "native/x_test.go", "package fixture\n")
@@ -49,11 +52,7 @@ func newB408Fixture(t *testing.T) *b408Fixture {
 	f.bin = filepath.Join(f.tree, "native", "bin", runtime.GOOS+"-"+arch, "code-forge-native")
 	script := "#!/bin/sh\n" +
 		"case \"$1\" in\n" +
-		"*scripts/build-native.mjs)\n" +
-		"  echo \"build $(pwd -P) $(cd \"$(dirname \"$1\")\" && pwd -P)/$(basename \"$1\") $2\" >> \"$CF_B408_LOG\"\n" +
-		"  if [ -n \"$CF_B408_BUILD_FAIL\" ]; then echo 'go: build broke' >&2; exit 1; fi\n" +
-		"  if [ -n \"$CF_B408_BUILD_SLEEP\" ]; then sleep \"$CF_B408_BUILD_SLEEP\"; fi\n" +
-		"  exit 0 ;;\n" +
+		"--version) echo v24.22.1; exit 0 ;;\n" +
 		"*)\n" +
 		"  echo \"node $2 $3\" >> \"$CF_B408_LOG\"\n" +
 		"  if [ \"$2 $3\" = 'block rebase' ]; then git -C \"$CF_B408_TREE\" rebase -q main || exit 1; fi\n" +
@@ -62,6 +61,7 @@ func newB408Fixture(t *testing.T) *b408Fixture {
 	if err := os.WriteFile(f.fakeNode, []byte(script), 0700); err != nil {
 		t.Fatal(err)
 	}
+	b575WriteFakeGo(t, f.goDir)
 	if err := os.MkdirAll(filepath.Join(f.home, ".code-forge", "runs"), 0700); err != nil {
 		t.Fatal(err)
 	}
@@ -128,7 +128,7 @@ func (f *b408Fixture) call(extra []string, args ...string) (code int, stdout, st
 	cmd := exec.Command(exe, "-test.run=^TestGatesProcess$")
 	cmd.Dir = f.repo
 	cmd.Env = append(f.env(), "HOME="+f.home, "CODE_FORGE_NO_ERROR_LOG=1", "CODE_FORGE_TEST_QUEUE=off", "CODE_FORGE_NODE="+f.fakeNode,
-		"CF_B408_LOG="+f.log, "CF_B408_TREE="+f.tree, "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
+		"CF_B408_LOG="+f.log, "CF_B408_TREE="+f.tree, "PATH="+f.goDir+string(os.PathListSeparator)+os.Getenv("PATH"), "CF_GATES_PROCESS=1", "CF_GATES_NODE_VERSION=v24.22.1", "CF_GATES_ARGS="+string(encoded))
 	cmd.Env = append(cmd.Env, extra...)
 	var out, errOut bytes.Buffer
 	cmd.Stdout, cmd.Stderr = &out, &errOut
@@ -142,11 +142,11 @@ func (f *b408Fixture) call(extra []string, args ...string) (code int, stdout, st
 	return code, out.String(), errOut.String()
 }
 
-// buildCall is the log line of one build-native.mjs call: cwd and the script
-// path must both be the real worktree, not any path ending in the script name.
+// buildCall is the fake go log line of one host build: cwd is the real
+// worktree's native/, argv and env are the script's, and the temp name is
+// <binary>.<pid>.tmp.
 func (f *b408Fixture) buildCall() string {
-	real := f.realTree()
-	return "build " + real + " " + filepath.Join(real, "scripts", "build-native.mjs") + " --host\n"
+	return b575BuildLine(filepath.Join(f.realTree(), "native"), f.bin, "9.8.7", "v24.22.1")
 }
 
 func (f *b408Fixture) calls() string {
