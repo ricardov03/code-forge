@@ -588,5 +588,166 @@
    }
   ],
   "left": []
+ },
+ "rules-risk-quick": {
+  "result": "{\"status\":\"reviewed\",\"approved\":true,\"engine\":\"adaptive\",\"depth\":\"quick\",\"risk\":0,\"file\":\"notes.txt\",\"summary\":\"fine\",\"findings\":[],\"sessions\":[{\"lens\":\"quick\",\"role\":\"reviewer\",\"level\":\"L2\",\"slot\":null,\"context_mode\":\"whole\",\"ctx_tokens_in\":717,\"provider\":\"claude\",\"model\":\"m2\",\"fallback_step\":0,\"attempts\":1,\"tokens_in\":900,\"tokens_out\":150,\"status\":\"ok\",\"reason\":null,\"passed\":true,\"findings\":[]}]}",
+  "rows": [
+   "{\"event\":\"review.plan\",\"depth_unconstrained\":\"quick\",\"depth_chosen\":\"quick\",\"degrade_step\":0,\"risk\":0,\"context_mode\":\"whole\",\"forecast_tokens\":717}"
+  ],
+  "spawns": [
+   {
+    "level": "L2",
+    "role": "reviewer",
+    "name": "quick-X.md",
+    "inWorkDir": true,
+    "text": "# code-forge review packet\n## lens\n# Lens: quick\n\nYou are a code reviewer doing a QUICK pass on one small, low-risk change.\n\n## What to look for\n\n- Obvious bugs in the changed lines: wrong condition, wrong variable, off-by-one, a missing `await`, an unhandled error path.\n- A change that plainly does not do what its own code and names say.\n- Anything that leaks a secret or writes outside the paths the change is about.\n\nSkip style, naming and structure unless it hides a bug. Keep `findings` short.\n\nNever ask for hand mutations or for tests beyond the acceptance clauses.\nThe fix for a weak assertion is a stronger assertion.\nCode or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.\n\n## Rules for every answer\n\n- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.\n- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.\n- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. \"assumes no rule in src/styles/base.css\".\n- You have no tools and no project files. The packet is everything you get.\n- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under \"hunks\" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.\n- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).\n- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.\n- `passed` is true only when you found no `critical` and no `warning`.\n- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.\n- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim \"test reads source text; prove behaviour instead\", unless the read file is a fixture. The section is a hint, not a finding.\n## project rules\nrule one\nrule two\n## facts\nfacts here\n## context\n### notes.txt (whole file, 4 lines)\n1| alpha\n2| BETA ünïcode\n3| gamma\n4| delta\n## diff\nfile: notes.txt\nhunks:\n- @@ -1,3 +1,4 @@\n\ndiff --git a/notes.txt b/notes.txt\nindex 85c3040..4974467 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,3 +1,4 @@\n alpha\n-beta\n+BETA ünïcode\n gamma\n+delta\n",
+    "rowExtra": {
+     "lens": "quick",
+     "context_mode": "whole",
+     "ctx_tokens_in": 717
+    },
+    "cfgSame": true,
+    "schemaSame": true
+   }
+  ],
+  "left": []
+ },
+ "rules-risk-high-path": {
+  "result": "{\"status\":\"reviewed\",\"approved\":true,\"engine\":\"adaptive\",\"depth\":\"full\",\"risk\":3,\"file\":\"notes.txt\",\"summary\":\"fine\",\"findings\":[],\"sessions\":[{\"lens\":\"full\",\"role\":\"reviewer\",\"level\":\"L2\",\"slot\":null,\"context_mode\":\"whole\",\"ctx_tokens_in\":777,\"provider\":\"claude\",\"model\":\"m2\",\"fallback_step\":0,\"attempts\":1,\"tokens_in\":900,\"tokens_out\":150,\"status\":\"ok\",\"reason\":null,\"passed\":true,\"findings\":[]}]}",
+  "rows": [
+   "{\"event\":\"review.plan\",\"depth_unconstrained\":\"full\",\"depth_chosen\":\"full\",\"degrade_step\":0,\"risk\":3,\"context_mode\":\"whole\",\"forecast_tokens\":777}"
+  ],
+  "spawns": [
+   {
+    "level": "L2",
+    "role": "reviewer",
+    "name": "full-X.md",
+    "inWorkDir": true,
+    "text": "# code-forge review packet\n## lens\n# Lens: full\n\nYou are a code reviewer doing a FULL review of one changed file.\n\n## What to look for\n\n- Correctness: every changed branch, boundary and error path; inputs the code does not guard.\n- Contracts: what callers and callees expect (types, return shapes, units, null/empty cases).\n- Tests: whether the change is tested where the diff shows tests; a test that cannot fail.\n- Security: secrets, injection (shell strings, unescaped input), paths that escape a root, unsafe defaults.\n- Project rules given in the packet's rules digest.\n\nReport each real defect once, at the lines where it lives.\n\nNever ask for hand mutations or for tests beyond the acceptance clauses.\nThe fix for a weak assertion is a stronger assertion.\nCode or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.\n\n## Rules for every answer\n\n- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.\n- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.\n- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. \"assumes no rule in src/styles/base.css\".\n- A test named in `## paired` exists; do not report it as unseen; use `needs_file` when its body matters.\n- You have no tools and no project files. The packet is everything you get.\n- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under \"hunks\" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.\n- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).\n- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.\n- `passed` is true only when you found no `critical` and no `warning`.\n- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.\n- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim \"test reads source text; prove behaviour instead\", unless the read file is a fixture. The section is a hint, not a finding.\n## project rules\nrule one\nrule two\n## facts\nfacts here\n## context\n### notes.txt (whole file, 4 lines)\n1| alpha\n2| BETA ünïcode\n3| gamma\n4| delta\n## diff\nfile: notes.txt\nhunks:\n- @@ -1,3 +1,4 @@\n\ndiff --git a/notes.txt b/notes.txt\nindex 85c3040..4974467 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,3 +1,4 @@\n alpha\n-beta\n+BETA ünïcode\n gamma\n+delta\n",
+    "rowExtra": {
+     "lens": "full",
+     "context_mode": "whole",
+     "ctx_tokens_in": 777
+    },
+    "cfgSame": true,
+    "schemaSame": true
+   }
+  ],
+  "left": []
+ },
+ "docs-kind-no-consensus": {
+  "result": "{\"status\":\"reviewed\",\"approved\":true,\"engine\":\"adaptive\",\"depth\":\"full\",\"risk\":1.5,\"file\":\"notes.txt\",\"summary\":\"fine\",\"findings\":[],\"sessions\":[{\"lens\":\"full\",\"role\":\"reviewer\",\"level\":\"L2\",\"slot\":null,\"context_mode\":\"whole\",\"ctx_tokens_in\":777,\"provider\":\"claude\",\"model\":\"m2\",\"fallback_step\":0,\"attempts\":1,\"tokens_in\":900,\"tokens_out\":150,\"status\":\"ok\",\"reason\":null,\"passed\":true,\"findings\":[]}]}",
+  "rows": [
+   "{\"event\":\"review.plan\",\"depth_unconstrained\":\"full\",\"depth_chosen\":\"full\",\"degrade_step\":0,\"risk\":1.5,\"context_mode\":\"whole\",\"forecast_tokens\":777}"
+  ],
+  "spawns": [
+   {
+    "level": "L2",
+    "role": "reviewer",
+    "name": "full-X.md",
+    "inWorkDir": true,
+    "text": "# code-forge review packet\n## lens\n# Lens: full\n\nYou are a code reviewer doing a FULL review of one changed file.\n\n## What to look for\n\n- Correctness: every changed branch, boundary and error path; inputs the code does not guard.\n- Contracts: what callers and callees expect (types, return shapes, units, null/empty cases).\n- Tests: whether the change is tested where the diff shows tests; a test that cannot fail.\n- Security: secrets, injection (shell strings, unescaped input), paths that escape a root, unsafe defaults.\n- Project rules given in the packet's rules digest.\n\nReport each real defect once, at the lines where it lives.\n\nNever ask for hand mutations or for tests beyond the acceptance clauses.\nThe fix for a weak assertion is a stronger assertion.\nCode or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.\n\n## Rules for every answer\n\n- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.\n- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.\n- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. \"assumes no rule in src/styles/base.css\".\n- A test named in `## paired` exists; do not report it as unseen; use `needs_file` when its body matters.\n- You have no tools and no project files. The packet is everything you get.\n- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under \"hunks\" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.\n- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).\n- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.\n- `passed` is true only when you found no `critical` and no `warning`.\n- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.\n- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim \"test reads source text; prove behaviour instead\", unless the read file is a fixture. The section is a hint, not a finding.\n## project rules\nrule one\nrule two\n## facts\nfacts here\n## context\n### notes.txt (whole file, 4 lines)\n1| alpha\n2| BETA ünïcode\n3| gamma\n4| delta\n## diff\nfile: notes.txt\nhunks:\n- @@ -1,3 +1,4 @@\n\ndiff --git a/notes.txt b/notes.txt\nindex 85c3040..4974467 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,3 +1,4 @@\n alpha\n-beta\n+BETA ünïcode\n gamma\n+delta\n",
+    "rowExtra": {
+     "lens": "full",
+     "context_mode": "whole",
+     "ctx_tokens_in": 777
+    },
+    "cfgSame": true,
+    "schemaSame": true
+   }
+  ],
+  "left": []
+ },
+ "docs-kind-file": {
+  "result": "{\"status\":\"reviewed\",\"approved\":true,\"engine\":\"adaptive\",\"depth\":\"quick\",\"risk\":0,\"file\":\"docs/guide.txt\",\"summary\":\"fine\",\"findings\":[],\"sessions\":[{\"lens\":\"quick\",\"role\":\"reviewer\",\"level\":\"L2\",\"slot\":null,\"context_mode\":\"whole\",\"ctx_tokens_in\":717,\"provider\":\"claude\",\"model\":\"m2\",\"fallback_step\":0,\"attempts\":1,\"tokens_in\":900,\"tokens_out\":150,\"status\":\"ok\",\"reason\":null,\"passed\":true,\"findings\":[]}]}",
+  "rows": [
+   "{\"event\":\"review.plan\",\"depth_unconstrained\":\"quick\",\"depth_chosen\":\"quick\",\"degrade_step\":0,\"risk\":0,\"context_mode\":\"whole\",\"forecast_tokens\":717}"
+  ],
+  "spawns": [
+   {
+    "level": "L2",
+    "role": "reviewer",
+    "name": "quick-X.md",
+    "inWorkDir": true,
+    "text": "# code-forge review packet\n## lens\n# Lens: quick\n\nYou are a code reviewer doing a QUICK pass on one small, low-risk change.\n\n## What to look for\n\n- Obvious bugs in the changed lines: wrong condition, wrong variable, off-by-one, a missing `await`, an unhandled error path.\n- A change that plainly does not do what its own code and names say.\n- Anything that leaks a secret or writes outside the paths the change is about.\n\nSkip style, naming and structure unless it hides a bug. Keep `findings` short.\n\nNever ask for hand mutations or for tests beyond the acceptance clauses.\nThe fix for a weak assertion is a stronger assertion.\nCode or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.\n\n## Rules for every answer\n\n- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.\n- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.\n- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. \"assumes no rule in src/styles/base.css\".\n- You have no tools and no project files. The packet is everything you get.\n- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under \"hunks\" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.\n- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).\n- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.\n- `passed` is true only when you found no `critical` and no `warning`.\n- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.\n- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim \"test reads source text; prove behaviour instead\", unless the read file is a fixture. The section is a hint, not a finding.\n## project rules\nrule one\nrule two\n## facts\nfacts here\n## context\n### docs/guide.txt (whole file, 2 lines)\n1| one\n2| two\n## diff\nfile: docs/guide.txt\nhunks:\n- @@ -1,2 +1,2 @@\n\ndiff --git a/docs/guide.txt b/docs/guide.txt\nindex 814f4a4..9ed40b4 100644\n--- a/docs/guide.txt\n+++ b/docs/guide.txt\n@@ -1,2 +1,2 @@\n one\n-two\n+two\n\\ No newline at end of file\n",
+    "rowExtra": {
+     "lens": "quick",
+     "context_mode": "whole",
+     "ctx_tokens_in": 717
+    },
+    "cfgSame": true,
+    "schemaSame": true
+   }
+  ],
+  "left": []
+ },
+ "paired-owned-none": {
+  "result": "{\"status\":\"reviewed\",\"approved\":true,\"engine\":\"adaptive\",\"depth\":\"full\",\"risk\":1,\"file\":\"notes.txt\",\"summary\":\"fine\",\"findings\":[],\"sessions\":[{\"lens\":\"full\",\"role\":\"reviewer\",\"level\":\"L2\",\"slot\":null,\"context_mode\":\"whole\",\"ctx_tokens_in\":777,\"provider\":\"claude\",\"model\":\"m2\",\"fallback_step\":0,\"attempts\":1,\"tokens_in\":900,\"tokens_out\":150,\"status\":\"ok\",\"reason\":null,\"passed\":true,\"findings\":[]}]}",
+  "rows": [
+   "{\"event\":\"review.plan\",\"depth_unconstrained\":\"full\",\"depth_chosen\":\"full\",\"degrade_step\":0,\"risk\":1,\"context_mode\":\"whole\",\"forecast_tokens\":777}"
+  ],
+  "spawns": [
+   {
+    "level": "L2",
+    "role": "reviewer",
+    "name": "full-X.md",
+    "inWorkDir": true,
+    "text": "# code-forge review packet\n## lens\n# Lens: full\n\nYou are a code reviewer doing a FULL review of one changed file.\n\n## What to look for\n\n- Correctness: every changed branch, boundary and error path; inputs the code does not guard.\n- Contracts: what callers and callees expect (types, return shapes, units, null/empty cases).\n- Tests: whether the change is tested where the diff shows tests; a test that cannot fail.\n- Security: secrets, injection (shell strings, unescaped input), paths that escape a root, unsafe defaults.\n- Project rules given in the packet's rules digest.\n\nReport each real defect once, at the lines where it lives.\n\nNever ask for hand mutations or for tests beyond the acceptance clauses.\nThe fix for a weak assertion is a stronger assertion.\nCode or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.\n\n## Rules for every answer\n\n- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.\n- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.\n- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. \"assumes no rule in src/styles/base.css\".\n- A test named in `## paired` exists; do not report it as unseen; use `needs_file` when its body matters.\n- You have no tools and no project files. The packet is everything you get.\n- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under \"hunks\" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.\n- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).\n- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.\n- `passed` is true only when you found no `critical` and no `warning`.\n- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.\n- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim \"test reads source text; prove behaviour instead\", unless the read file is a fixture. The section is a hint, not a finding.\n## project rules\nrule one\nrule two\n## facts\nfacts here\n## context\n### notes.txt (whole file, 4 lines)\n1| alpha\n2| BETA ünïcode\n3| gamma\n4| delta\n## diff\nfile: notes.txt\nhunks:\n- @@ -1,3 +1,4 @@\n\ndiff --git a/notes.txt b/notes.txt\nindex 85c3040..4974467 100644\n--- a/notes.txt\n+++ b/notes.txt\n@@ -1,3 +1,4 @@\n alpha\n-beta\n+BETA ünïcode\n gamma\n+delta\n",
+    "rowExtra": {
+     "lens": "full",
+     "context_mode": "whole",
+     "ctx_tokens_in": 777
+    },
+    "cfgSame": true,
+    "schemaSame": true
+   }
+  ],
+  "left": []
+ },
+ "paired-py": {
+  "result": "{\"status\":\"reviewed\",\"approved\":true,\"engine\":\"adaptive\",\"depth\":\"full\",\"risk\":1,\"file\":\"lib/calc.py\",\"summary\":\"fine\",\"findings\":[],\"sessions\":[{\"lens\":\"full\",\"role\":\"reviewer\",\"level\":\"L2\",\"slot\":null,\"context_mode\":\"whole\",\"ctx_tokens_in\":893,\"provider\":\"claude\",\"model\":\"m2\",\"fallback_step\":0,\"attempts\":1,\"tokens_in\":900,\"tokens_out\":150,\"status\":\"ok\",\"reason\":null,\"passed\":true,\"findings\":[]}]}",
+  "rows": [
+   "{\"event\":\"review.plan\",\"depth_unconstrained\":\"full\",\"depth_chosen\":\"full\",\"degrade_step\":0,\"risk\":1,\"context_mode\":\"whole\",\"forecast_tokens\":893}"
+  ],
+  "spawns": [
+   {
+    "level": "L2",
+    "role": "reviewer",
+    "name": "full-X.md",
+    "inWorkDir": true,
+    "text": "# code-forge review packet\n## lens\n# Lens: full\n\nYou are a code reviewer doing a FULL review of one changed file.\n\n## What to look for\n\n- Correctness: every changed branch, boundary and error path; inputs the code does not guard.\n- Contracts: what callers and callees expect (types, return shapes, units, null/empty cases).\n- Tests: whether the change is tested where the diff shows tests; a test that cannot fail.\n- Security: secrets, injection (shell strings, unescaped input), paths that escape a root, unsafe defaults.\n- Project rules given in the packet's rules digest.\n\nReport each real defect once, at the lines where it lives.\n\nNever ask for hand mutations or for tests beyond the acceptance clauses.\nThe fix for a weak assertion is a stronger assertion.\nCode or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.\n\n## Rules for every answer\n\n- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.\n- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.\n- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. \"assumes no rule in src/styles/base.css\".\n- A test named in `## paired` exists; do not report it as unseen; use `needs_file` when its body matters.\n- You have no tools and no project files. The packet is everything you get.\n- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under \"hunks\" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.\n- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).\n- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.\n- `passed` is true only when you found no `critical` and no `warning`.\n- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.\n- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim \"test reads source text; prove behaviour instead\", unless the read file is a fixture. The section is a hint, not a finding.\n## project rules\nrule one\nrule two\n## facts\nfacts here\n## context\n### lib/calc.py (whole file, 5 lines)\n1| def add(a, b):\n2|     return a + b\n3| \n4| class Calc:\n5|     pass\n## paired\n- tests/test_calc.py\n  - test_add\n  - test_async_add\n  - [REDACTED]\n- lib/[REDACTED].py\n  - test_other\n- tests/calc.test.mjs\n  - adds two\n  - quoted 'inner' name\n  - uses [REDACTED] here\n  - xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n- pkg/[REDACTED].go\n  - TestAdd\n- spec/AppTest.php\n  - testBoots\n  - pest style\n## diff\nfile: lib/calc.py\nhunks:\n- @@ -0,0 +1,5 @@\n\ndiff --git a/lib/calc.py b/lib/calc.py\nnew file mode 100644\nindex 0000000..86f9520\n--- /dev/null\n+++ b/lib/calc.py\n@@ -0,0 +1,5 @@\n+def add(a, b):\n+    return a + b\n+\n+class Calc:\n+    pass\n",
+    "rowExtra": {
+     "lens": "full",
+     "context_mode": "whole",
+     "ctx_tokens_in": 893
+    },
+    "cfgSame": true,
+    "schemaSame": true
+   }
+  ],
+  "left": []
+ },
+ "paired-small-budget": {
+  "result": "{\"status\":\"reviewed\",\"approved\":true,\"engine\":\"adaptive\",\"depth\":\"full\",\"risk\":1,\"file\":\"lib/calc.py\",\"summary\":\"fine\",\"findings\":[],\"sessions\":[{\"lens\":\"full\",\"role\":\"reviewer\",\"level\":\"L2\",\"slot\":null,\"context_mode\":\"whole\",\"ctx_tokens_in\":864,\"provider\":\"claude\",\"model\":\"m2\",\"fallback_step\":0,\"attempts\":1,\"tokens_in\":900,\"tokens_out\":150,\"status\":\"ok\",\"reason\":null,\"passed\":true,\"findings\":[]}]}",
+  "rows": [
+   "{\"event\":\"review.plan\",\"depth_unconstrained\":\"full\",\"depth_chosen\":\"full\",\"degrade_step\":0,\"risk\":1,\"context_mode\":\"whole\",\"forecast_tokens\":864}"
+  ],
+  "spawns": [
+   {
+    "level": "L2",
+    "role": "reviewer",
+    "name": "full-X.md",
+    "inWorkDir": true,
+    "text": "# code-forge review packet\n## lens\n# Lens: full\n\nYou are a code reviewer doing a FULL review of one changed file.\n\n## What to look for\n\n- Correctness: every changed branch, boundary and error path; inputs the code does not guard.\n- Contracts: what callers and callees expect (types, return shapes, units, null/empty cases).\n- Tests: whether the change is tested where the diff shows tests; a test that cannot fail.\n- Security: secrets, injection (shell strings, unescaped input), paths that escape a root, unsafe defaults.\n- Project rules given in the packet's rules digest.\n\nReport each real defect once, at the lines where it lives.\n\nNever ask for hand mutations or for tests beyond the acceptance clauses.\nThe fix for a weak assertion is a stronger assertion.\nCode or tests beyond what the change needs (unused options, extra layers, speculative generality) is at most a `nit` unless it hides a bug.\n\n## Rules for every answer\n\n- Judge only what is in the packet; if you need a file you cannot see, return it in `needs_file` instead of guessing.\n- Only repo-relative paths inside this repo can be attached with `needs_file`; never request absolute paths or files from other repos.\n- A finding that claims something is missing or wrong across the project must say in `evidence` which related file it could not see, e.g. \"assumes no rule in src/styles/base.css\".\n- A test named in `## paired` exists; do not report it as unseen; use `needs_file` when its body matters.\n- You have no tools and no project files. The packet is everything you get.\n- `reviewed_hunks`: copy every `@@ … @@` hunk header listed under \"hunks\" in the packet, exactly and in the same order. A review whose `reviewed_hunks` does not match is discarded.\n- Answer with ONE JSON object that matches the answer schema: `passed`, `summary` (≤ 300 chars), `reviewed_hunks`, `findings[]`, and `needs_file[]` (empty when you need nothing).\n- Every finding names `file`, `line_start`, `line_end` (line numbers of the CURRENT file, as numbered in the context), `severity` (`critical` = wrong behaviour, data loss, security; `warning` = a real defect that is not critical; `nit` = style or preference), a short `category`, the `claim`, the `evidence` you read in the packet, and the `fix`. Each of `claim`, `evidence`, `fix` ≤ 300 chars.\n- `passed` is true only when you found no `critical` and no `warning`.\n- Do not invent a problem to look thorough. An empty `findings` list is a valid answer.\n- A `## test-quality` section names lines of a test that reads a source file and asserts on its text. Check those lines: such a test is a `warning` with the claim \"test reads source text; prove behaviour instead\", unless the read file is a fixture. The section is a hint, not a finding.\n## project rules\nrule one\nrule two\n## facts\nfacts here\n## context\n### lib/calc.py (whole file, 5 lines)\n1| def add(a, b):\n2|     return a + b\n3| \n4| class Calc:\n5|     pass\n## paired\n- tests/test_calc.py\n  - test_add\n  - test_async_add\n  - [REDACTED]\n- tests/calc.test.mjs\n  - adds two\n  - quoted 'inner' name\n  - uses s3cr3tvalue here\n  - xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx\n## diff\nfile: lib/calc.py\nhunks:\n- @@ -0,0 +1,5 @@\n\ndiff --git a/lib/calc.py b/lib/calc.py\nnew file mode 100644\nindex 0000000..86f9520\n--- /dev/null\n+++ b/lib/calc.py\n@@ -0,0 +1,5 @@\n+def add(a, b):\n+    return a + b\n+\n+class Calc:\n+    pass\n",
+    "rowExtra": {
+     "lens": "full",
+     "context_mode": "whole",
+     "ctx_tokens_in": 864
+    },
+    "cfgSame": true,
+    "schemaSame": true
+   }
+  ],
+  "left": []
  }
 }

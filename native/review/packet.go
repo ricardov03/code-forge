@@ -482,7 +482,7 @@ func diffSectionOf(d *FileDiff) string {
 	return strings.Join(append(parts, "", trimEnd(d.DiffText)), "\n")
 }
 
-func render(lens string, digest []string, facts, context, diff, moved string) string {
+func render(lens string, digest []string, facts, context, diff, moved string, paired ...string) string {
 	digestText := "(none)"
 	if len(digest) > 0 {
 		digestText = strings.Join(digest, "\n")
@@ -495,15 +495,19 @@ func render(lens string, digest []string, facts, context, diff, moved string) st
 		context = "(none)"
 	}
 	parts := []string{"# code-forge review packet", "## lens", lens, "## project rules", digestText, "## facts", factsText, "## context", context}
+	if len(paired) > 0 && paired[0] != "" {
+		parts = append(parts, paired[0])
+	}
 	if moved != "" {
 		parts = append(parts, moved)
 	}
 	return strings.Join(append(parts, "## diff", diff, ""), "\n")
 }
 
-// AssemblePacket is Node's assemblePacket with no related, definitions,
-// paired or moved sections (the cases ReadFileDiff accepts).
-func AssemblePacket(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any) (*Packet, error) {
+// AssemblePacket is Node's assemblePacket with no related, definitions or
+// moved sections (the cases ReadFileDiff accepts); paired is engine.mjs
+// pairedContext's text (” for none).
+func AssemblePacket(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map[string]any, paired string) (*Packet, error) {
 	lensText, err := LoadLens(lens)
 	if err != nil {
 		return nil, err
@@ -527,13 +531,19 @@ func AssemblePacket(d *FileDiff, lens, rulesDigest, factsExcerpt string, cfg map
 		digest = digest[:DigestMaxLines]
 	}
 	ctx := BuildContext(d.File, d.Content, d.Hunks, cfg, "auto")
+	pairedSection := boundedPaired(paired, BudgetFor(cfg, "full_in"))
 	if EstimateTokens(render(lensText, digest, factsExcerpt, ctx.Text, diff, "")) > limit {
+		pairedSection = ""
 		ctx = BuildContext(d.File, d.Content, d.Hunks, cfg, "minimal")
 	}
-	text := render(lensText, digest, factsExcerpt, ctx.Text, diff, "")
+	text := render(lensText, digest, factsExcerpt, ctx.Text, diff, "", pairedSection)
+	if EstimateTokens(text) > limit && pairedSection != "" {
+		pairedSection = ""
+		text = render(lensText, digest, factsExcerpt, ctx.Text, diff, "", pairedSection)
+	}
 	for EstimateTokens(text) > limit && len(digest) > 0 {
 		digest = digest[:len(digest)-1]
-		text = render(lensText, digest, factsExcerpt, ctx.Text, diff, "")
+		text = render(lensText, digest, factsExcerpt, ctx.Text, diff, "", pairedSection)
 	}
 	tokens := EstimateTokens(text)
 	return &Packet{"ok", text, headers, ctx.Mode, ctx.LineCount, len(digest), tokens, limit, tokens > limit}, nil

@@ -103,7 +103,7 @@ func TestPacketMatchesNodeGolden(t *testing.T) {
 				got["status"] = "no_change"
 			} else if err == nil {
 				var p *Packet
-				p, err = AssemblePacket(d, c.Lens, c.Digest, c.Facts, c.Cfg)
+				p, err = AssemblePacket(d, c.Lens, c.Digest, c.Facts, c.Cfg, "")
 				if err == nil {
 					got["status"] = p.Status
 					got["tokensIn"] = float64(p.TokensIn)

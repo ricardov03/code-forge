@@ -911,6 +911,338 @@
      }
     }
    ]
+  },
+  {
+   "name": "rules-risk-quick",
+   "file": "notes.txt",
+   "risk": null,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ],
+   "b497": true
+  },
+  {
+   "name": "rules-risk-high-path",
+   "file": "notes.txt",
+   "risk": null,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "proof": {
+     "tiers": {
+      "high": {
+       "paths": [
+        "notes.txt"
+       ]
+      }
+     }
+    },
+    "review": {
+     "single_reviewer_max_risk": 3
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ],
+   "b497": true
+  },
+  {
+   "name": "docs-kind-no-consensus",
+   "file": "notes.txt",
+   "risk": 1.5,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "multimodel": true,
+     "single_reviewer_max_risk": 0
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ],
+   "b497": true,
+   "kind": "docs"
+  },
+  {
+   "name": "docs-kind-file",
+   "file": "docs/guide.txt",
+   "risk": null,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ],
+   "b497": true
+  },
+  {
+   "name": "paired-owned-none",
+   "file": "notes.txt",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ],
+   "b497": true,
+   "owned": [
+    "notes.txt",
+    "big.txt"
+   ]
+  },
+  {
+   "name": "paired-py",
+   "file": "lib/calc.py",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ],
+   "b497": true,
+   "owned": [
+    "lib/calc.py",
+    "tests/test_calc.py",
+    "lib/calc_test.py",
+    "tests/calc.test.mjs",
+    "pkg/calc_test.go",
+    "config/.env.local",
+    "spec/AppTest.php",
+    "missing_test.py"
+   ],
+   "changed": [
+    "tests/test_calc.py",
+    "lib/calc_test.py",
+    "lib/calc.py"
+   ],
+   "tests": [
+    "tests/calc.test.mjs",
+    "pkg/calc_test.go",
+    "config/.env.local",
+    "spec/AppTest.php",
+    "missing_test.py",
+    "tests/not-owned.mjs"
+   ],
+   "secrets": [
+    "s3cr3tvalue",
+    "calc_test"
+   ]
+  },
+  {
+   "name": "paired-small-budget",
+   "file": "lib/calc.py",
+   "risk": 1,
+   "writer": true,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 1200
+     }
+    }
+   },
+   "digest": "rule one\nrule two",
+   "facts": "facts here",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ],
+   "b497": true,
+   "owned": [
+    "lib/calc.py",
+    "tests/test_calc.py",
+    "tests/calc.test.mjs"
+   ],
+   "changed": [
+    "tests/test_calc.py"
+   ],
+   "tests": [
+    "tests/calc.test.mjs"
+   ]
   }
- ]
+ ],
+ "after": {
+  "lib/calc.py": "def add(a, b):\n    return a + b\n\nclass Calc:\n    pass\n",
+  "tests/test_calc.py": "import calc\n\ndef test_add():\n    assert calc.add(1, 2) == 3\n\nasync def test_async_add():\n    pass\n\ndef test_Zx9Qw3Er5Ty7Ui1Op2As4Df6Gh8Jk0Lm():\n    pass\n",
+  "tests/calc.test.mjs": "import test from 'node:test';\ntest('adds two', () => {});\n  it(\"quoted 'inner' name\", () => {});\ntest.only(`uses s3cr3tvalue here`, () => {});\nawait test('', () => {});\nit('xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx', () => {});\n",
+  "pkg/calc_test.go": "package pkg\n\nfunc TestAdd(t *testing.T) {}\nfunc helper() {}\n",
+  "lib/calc_test.py": "def test_other():\n    pass\n",
+  "config/.env.local": "A=1\n",
+  "spec/AppTest.php": "<?php\nclass AppTest {\n  public function testBoots() {}\n  test('pest style', function () {});\n}\n"
+ }
 }

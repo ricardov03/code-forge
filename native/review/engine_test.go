@@ -130,9 +130,16 @@ var gapCases = map[string]string{"truncated": "schema-miss-diagnosis"}
 // byte, and leaves no packet file behind.
 func TestReviewFileMatchesNode(t *testing.T) {
 	useRepoLenses(t)
-	repo := buildRepo(t, readFixture(t, "packet_fixture.json"))
+	fx := readFixture(t, "packet_fixture.json")
+	engineFx := readOrdered(t, "engine_fixture.json")
+	if after, ok := engineFx.Get("after").(ledger.Object); ok {
+		for _, f := range after {
+			fx.After[f.Key] = f.Value.(string)
+		}
+	}
+	repo := buildRepo(t, fx)
 	golden := readOrdered(t, "engine_golden.json")
-	cases := readOrdered(t, "engine_fixture.json").Get("cases").([]any)
+	cases := engineFx.Get("cases").([]any)
 	if len(cases) != len(golden) {
 		t.Fatalf("cases %d, golden %d", len(cases), len(golden))
 	}
@@ -141,10 +148,28 @@ func TestReviewFileMatchesNode(t *testing.T) {
 		name := c.Get("name").(string)
 		t.Run(name, func(t *testing.T) {
 			want := golden.Get(name).(ledger.Object)
-			risk := c.Get("risk").(float64)
 			work := filepath.Join(t.TempDir(), name)
-			in := Input{RepoRoot: repo, File: c.Get("file").(string), Cfg: plainCfg(t, c.Get("cfg")), Risk: &risk,
+			in := Input{RepoRoot: repo, File: c.Get("file").(string), Cfg: plainCfg(t, c.Get("cfg")),
 				RulesDigest: c.Get("digest").(string), FactsExcerpt: c.Get("facts").(string), WorkDir: work}
+			if risk, ok := c.Get("risk").(float64); ok {
+				in.Risk = &risk
+			}
+			in.Kind, _ = c.Get("kind").(string)
+			strs := func(key string) []string {
+				list, ok := c.Get(key).([]any)
+				if !ok {
+					return nil
+				}
+				out := []string{}
+				for _, v := range list {
+					out = append(out, v.(string))
+				}
+				return out
+			}
+			in.OwnedFiles, in.ChangedFiles, in.TestFiles, in.Secrets = strs("owned"), strs("changed"), strs("tests"), strs("secrets")
+			if err := Check(in); err != nil {
+				t.Fatalf("Check refused a case Node reviews: %v", err)
+			}
 			run := runEngine(t, in, c.Get("script").([]any), c.Get("writer") == true)
 			wantRows := want.Get("rows").([]any)
 			if gap, ok := gapCases[name]; ok {
@@ -273,7 +298,6 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		name string
 		in   Input
 	}{
-		{"rules-risk", Input{File: "notes.txt", Cfg: baseCfg()}},
 		{"dual-lens", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(2)}},
 		{"risk-out-of-range", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(3.5)}},
 		{"consensus", Input{File: "notes.txt", Cfg: withReview(map[string]any{"multimodel": true}), Risk: f(3)}},
@@ -284,7 +308,7 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		{"no-provider", Input{File: "notes.txt", Cfg: map[string]any{"levels": map[string]any{"L2": map[string]any{"model": "m2"}}}, Risk: f(1)}},
 		{"moved-code", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(1), HasPeerDiffs: true}},
 		{"peers-with-base", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(1), Base: "HEAD", Peers: []string{"big.txt"}}},
-		{"paired", Input{File: "notes.txt", Cfg: baseCfg(), Risk: f(1), OwnedFiles: []string{"notes.txt", "big.txt"}}},
+		{"consensus-code-kind", Input{File: "notes.txt", Cfg: withReview(map[string]any{"multimodel": true, "single_reviewer_max_risk": 0.0}), Risk: f(2), Kind: "code"}},
 		{"deleted", Input{File: "same.txt", Cfg: baseCfg(), Risk: f(1)}},
 		{"test-file", Input{File: "pkg/thing_test.txt", Cfg: baseCfg(), Risk: f(1)}},
 		{"markdown-split", Input{File: "README.md", Cfg: withReview(map[string]any{"budgets": map[string]any{"full_in": 100.0}}), Risk: f(1)}},
@@ -294,6 +318,12 @@ func TestReviewFileUnsupportedBeforeSpawn(t *testing.T) {
 		t.Run(c.name, func(t *testing.T) {
 			c.in.RepoRoot = repo
 			c.in.WorkDir = filepath.Join(t.TempDir(), "w")
+			if err := Check(c.in); !IsUnsupported(err) {
+				t.Fatalf("Check: got %v, want ErrUnsupported", err)
+			}
+			if _, err := os.Stat(c.in.WorkDir); !os.IsNotExist(err) {
+				t.Fatalf("Check wrote the work dir: %v", err)
+			}
 			rows := 0
 			_, err := File(c.in, Deps{
 				Spawn:    func(SpawnOpts) (ledger.Object, error) { t.Fatal("spawned"); return nil, nil },

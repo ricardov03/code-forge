@@ -12,6 +12,7 @@ import (
 	"regexp"
 	"strings"
 
+	"github.com/ricardov03/code-forge/native/blockopen"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -53,13 +54,17 @@ type Input struct {
 	File         string
 	Base         string // "" = HEAD
 	Cfg          map[string]any
-	Risk         *float64 // nil: the rules risk, not ported (ErrUnsupported)
+	Risk         *float64 // nil: the rules risk (RulesRisk of the diff)
+	Kind         string   // the block kind; "" = blockKind of the reviewed file
 	RulesDigest  string
 	FactsExcerpt string
 	WorkDir      string
 	Peers        []string
 	HasPeerDiffs bool
 	OwnedFiles   []string
+	ChangedFiles []string // nil = Peers
+	TestFiles    []string
+	Secrets      []string // the registered redact values
 }
 
 // GapError: a session already ran and its result needs a step not ported yet.
@@ -87,15 +92,23 @@ func SingleReviewerMaxRisk(cfg map[string]any) float64 {
 	return 1
 }
 
+// errConsensus marks planSessions' consensus mode (not ported).
+var errConsensus = unsupported("consensus review is not ported")
+
+// blockKinds is escalation.mjs BLOCK_KINDS.
+func isDocsKind(kind string) bool { return kind == "docs" || kind == "contract" }
+
 // planSpec is planSessions for the adaptive single-session plans; anything
 // else (two lenses + judge, consensus) is unsupported.
-func planSpec(risk float64, cfg map[string]any) (sessionSpec, string, error) {
+func planSpec(risk float64, cfg map[string]any, kind string) (sessionSpec, string, error) {
 	if math.IsNaN(risk) || risk < 0 || risk > 3 {
 		return sessionSpec{}, "", unsupported("risk outside 0-3")
 	}
 	single := risk <= SingleReviewerMaxRisk(cfg)
-	if section(cfg, "review")["multimodel"] == true && !single {
-		return sessionSpec{}, "", unsupported("consensus review is not ported")
+	review := section(cfg, "review")
+	docsOff := isDocsKind(kind) && review["multimodel_for_docs"] != true
+	if review["multimodel"] == true && !single && !docsOff {
+		return sessionSpec{}, "", errConsensus
 	}
 	if risk < 1 {
 		return sessionSpec{"quick", "reviewer", "L2"}, "quick", nil
@@ -172,37 +185,64 @@ func (d Deps) note(row ledger.Object) {
 	}
 }
 
-// File reviews one file. The outcome is Node's reviewFile result object.
-func File(in Input, deps Deps) (ledger.Object, error) {
-	if in.Risk == nil {
-		return nil, unsupported("the rules risk is not ported")
+// prepared is File up to its first write: an early result (no_change,
+// split_required) or the session's spec and packet.
+type prepared struct {
+	early  ledger.Object // no session
+	mkdir  bool          // Node made the work dir before the early result
+	spec   sessionSpec
+	depth  string
+	risk   float64
+	packet *Packet
+	stepUp ledger.Object
+	head   ledger.Object
+}
+
+// prepare is reviewFile before any write: the diff, the risk, the plan, the
+// packet. Every part Go does not port is ErrUnsupported here.
+func prepare(in Input) (*prepared, error) {
+	diff, err := ReadFileDiff(in.RepoRoot, in.File, in.Base)
+	if err != nil {
+		return nil, err
 	}
-	risk := *in.Risk
-	spec, depth, err := planSpec(risk, in.Cfg)
+	risk := 0.0
+	if in.Risk != nil {
+		risk = *in.Risk
+	} else {
+		risk = RulesRisk(diff.File, diff.PlusCount, diff.MinusCount, in.Cfg)
+	}
+	kind := in.Kind
+	if kind == "" {
+		kind = blockopen.Kind([]string{diff.File}, "")
+	}
+	spec, depth, err := planSpec(risk, in.Cfg, kind)
 	if err != nil {
 		return nil, err
 	}
 	if err := preSpawnGuards(in); err != nil {
 		return nil, err
 	}
-	diff, err := ReadFileDiff(in.RepoRoot, in.File, in.Base)
-	if err != nil {
-		return nil, err
-	}
 	head := ledger.Object{{Key: "engine", Value: "adaptive"}, {Key: "depth", Value: depth}, {Key: "risk", Value: risk}, {Key: "file", Value: diff.File}}
+	p := &prepared{spec: spec, depth: depth, risk: risk, head: head}
 	result := func(fields ledger.Object, tail ...ledger.Field) ledger.Object {
 		out := append(ledger.Object{}, fields...)
-		out = append(out, head...)
+		out = append(out, p.head...)
 		return append(out, tail...)
 	}
 	if trimJS(diff.DiffText) == "" {
-		return result(ledger.Object{{Key: "status", Value: "no_change"}, {Key: "approved", Value: false}}, ledger.Field{Key: "sessions", Value: []any{}}), nil
+		p.early = result(ledger.Object{{Key: "status", Value: "no_change"}, {Key: "approved", Value: false}}, ledger.Field{Key: "sessions", Value: []any{}})
+		return p, nil
 	}
-	if err := os.MkdirAll(in.WorkDir, 0o700); err != nil {
-		return nil, err
-	}
-	if in.HasPeerDiffs || (in.Base != "" && len(in.Peers) > 0) {
+	p.mkdir = true
+	if in.HasPeerDiffs {
 		return nil, unsupported("moved-code hints are not ported")
+	}
+	if in.Base != "" {
+		for _, peer := range in.Peers {
+			if peer != diff.File {
+				return nil, unsupported("moved-code hints are not ported")
+			}
+		}
 	}
 	if diff.Content == nil {
 		return nil, unsupported("the deletion note is not ported")
@@ -210,33 +250,70 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 	if testLike(diff.File) {
 		return nil, unsupported("the test-quality hint is not ported")
 	}
-	if len(in.OwnedFiles) > 0 {
-		return nil, unsupported("paired context is not ported")
+	changed := in.ChangedFiles
+	if changed == nil {
+		changed = in.Peers
 	}
-	packet, err := AssemblePacket(diff, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg)
+	paired := PairedContext(PairedInput{RepoRoot: in.RepoRoot, File: in.File, OwnedFiles: in.OwnedFiles, ChangedFiles: changed, TestFiles: in.TestFiles, Secrets: in.Secrets})
+	packet, err := AssemblePacket(diff, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired)
 	if err != nil {
 		return nil, err
 	}
-	var stepUp ledger.Object
 	if packet.Status == "split_required" && depth == "quick" {
-		if fullSpec, fullDepth, err := planSpec(1, in.Cfg); err == nil && fullDepth == "full" {
-			stepUp = ledger.Object{{Key: "step_up", Value: ledger.Object{{Key: "from", Value: "quick"}, {Key: "tokens_in", Value: float64(packet.TokensIn)}, {Key: "budget", Value: float64(packet.Budget)}}}}
+		fullSpec, fullDepth, err := planSpec(1, in.Cfg, kind)
+		if err != nil && err != errConsensus {
+			return nil, err
+		}
+		if err == nil && fullDepth == "full" {
+			p.stepUp = ledger.Object{{Key: "step_up", Value: ledger.Object{{Key: "from", Value: "quick"}, {Key: "tokens_in", Value: float64(packet.TokensIn)}, {Key: "budget", Value: float64(packet.Budget)}}}}
 			spec, depth = fullSpec, fullDepth
-			head.Set("depth", depth)
-			head = append(head, stepUp...)
-			if packet, err = AssemblePacket(diff, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg); err != nil {
+			p.spec, p.depth = spec, depth
+			p.head.Set("depth", depth)
+			p.head = append(p.head, p.stepUp...)
+			if packet, err = AssemblePacket(diff, spec.lens, in.RulesDigest, in.FactsExcerpt, in.Cfg, paired); err != nil {
 				return nil, err
 			}
-		} else {
-			return nil, unsupported("a quick split that cannot step up to one full session is not ported")
 		}
 	}
 	if packet.Status == "split_required" {
 		if markdownFile.MatchString(diff.File) {
 			return nil, unsupported("Markdown section review is not ported")
 		}
-		return result(ledger.Object{{Key: "status", Value: "split_required"}, {Key: "approved", Value: false}},
-			ledger.Field{Key: "tokens_in", Value: float64(packet.TokensIn)}, ledger.Field{Key: "budget", Value: float64(packet.Budget)}, ledger.Field{Key: "sessions", Value: []any{}}), nil
+		p.early = result(ledger.Object{{Key: "status", Value: "split_required"}, {Key: "approved", Value: false}},
+			ledger.Field{Key: "tokens_in", Value: float64(packet.TokensIn)}, ledger.Field{Key: "budget", Value: float64(packet.Budget)}, ledger.Field{Key: "sessions", Value: []any{}})
+		return p, nil
+	}
+	p.packet = packet
+	return p, nil
+}
+
+// Check is File's dry pass: nil when File would serve the input (a session
+// may still end in a *GapError), ErrUnsupported when a part it needs is not
+// ported. Nothing is written.
+func Check(in Input) error {
+	_, err := prepare(in)
+	return err
+}
+
+// File reviews one file. The outcome is Node's reviewFile result object.
+func File(in Input, deps Deps) (ledger.Object, error) {
+	p, err := prepare(in)
+	if err != nil {
+		return nil, err
+	}
+	if p.mkdir {
+		if err := os.MkdirAll(in.WorkDir, 0o700); err != nil {
+			return nil, err
+		}
+	}
+	if p.early != nil {
+		return p.early, nil
+	}
+	spec, depth, risk, packet, stepUp := p.spec, p.depth, p.risk, p.packet, p.stepUp
+	result := func(fields ledger.Object, tail ...ledger.Field) ledger.Object {
+		out := append(ledger.Object{}, fields...)
+		out = append(out, p.head...)
+		return append(out, tail...)
 	}
 	plan := ledger.Object{{Key: "event", Value: "review.plan"}, {Key: "depth_unconstrained", Value: depth}, {Key: "depth_chosen", Value: depth},
 		{Key: "degrade_step", Value: 0.0}, {Key: "risk", Value: risk}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "forecast_tokens", Value: float64(packet.TokensIn)}}
