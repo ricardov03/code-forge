@@ -1,15 +1,14 @@
 package main
 
 import (
-	"errors"
 	"fmt"
 	"io"
 	"os"
 	"path"
 	"strings"
 
-	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/owned"
 )
 
 // B458: `proof` help, usage errors, `baseline` and `proof tier` without a
@@ -87,18 +86,24 @@ func proofPlan(args []string) (*proofOutcome, handoverReason) {
 		if !ok {
 			dir, _ = os.Getwd()
 		}
-		if _, err := config.Load(dir); err == nil || !proofNoConfig(err) {
-			// configAt validates the file with every domain rule; Node does that.
-			return nil, hProofConfig
+		cfg, refusal, handover := proofConfigAt(dir)
+		if handover != 0 {
+			return nil, handover
+		}
+		if refusal != "" {
+			return proofRefuse(sub, refusal, 1), 0
 		}
 		if file == "" {
 			return proofRefuse(sub, "tierFor: file must be a non-empty repo-relative path", 1), 0
 		}
+		highPaths, _ := jsObject(jsObject(jsObject(cfg["proof"])["tiers"])["high"])["paths"].([]any)
 		tier, reason := "light", "default"
 		if flags["security"] == true {
 			tier, reason = "high", "security"
 		} else if risk[0] >= '2' {
 			tier, reason = "high", "risk"
+		} else if len(highPaths) > 0 && owned.OwnsFile(highPaths, nil, file) {
+			tier, reason = "high", "path"
 		}
 		out, _ := ledger.Stringify(ledger.Object{{Key: "file", Value: file}, {Key: "tier", Value: tier}, {Key: "reason", Value: reason}}, false)
 		return &proofOutcome{stdout: string(out) + "\n"}, 0
@@ -148,11 +153,6 @@ func proofPlan(args []string) (*proofOutcome, handoverReason) {
 		return nil, hProofRun
 	}
 	return &proofOutcome{stderr: proofUsage, code: 2}, 0
-}
-
-func proofNoConfig(err error) bool {
-	var cfgErr *config.Error
-	return errors.As(err, &cfgErr) && cfgErr.Kind == "not-found"
 }
 
 func runProofVerb(args []string) int {

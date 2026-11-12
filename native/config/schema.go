@@ -123,7 +123,11 @@ func ValidateSchema(config map[string]any, version string) error {
 	if len(issues) == 0 {
 		return nil
 	}
-	return failure("schema", strings.Join(issues, "\n"), "")
+	texts := make([]string, len(issues))
+	for i, issue := range issues {
+		texts[i] = issue.Text
+	}
+	return failure("schema", strings.Join(texts, "\n"), "")
 }
 
 // SchemaIssues is runSchemaValidation in src/config/validate.mjs: every
@@ -227,9 +231,21 @@ func patternMatches(pattern, value string) bool {
 	return regexp.MustCompile(strings.ReplaceAll(pattern, `\u0000`, `\x00`)).MatchString(value)
 }
 
-func validate(s schemaObject, value any, path, version string) []string {
-	var out []string
-	add := func(detail string) { out = append(out, maskSecrets(pointer(path)+" "+detail)) }
+// SchemaIssue is one schema refusal: Node's safe instance pointer (the
+// issue's path) and its scrubbed message.
+type SchemaIssue struct{ Path, Text string }
+
+// SchemaIssues returns the schema layer's refusals with their paths, in the
+// order ValidateSchema prints them (B462: proof tier names the paths).
+func SchemaIssues(config map[string]any, version string) []SchemaIssue {
+	return validate(projectSchema, config, "", version)
+}
+
+func validate(s schemaObject, value any, path, version string) []SchemaIssue {
+	var out []SchemaIssue
+	add := func(detail string) {
+		out = append(out, SchemaIssue{pointer(path), maskSecrets(pointer(path) + " " + detail)})
+	}
 	if ref := text(s.get("$ref")); ref != "" {
 		node := projectSchema
 		for _, part := range strings.Split(strings.TrimPrefix(ref, "#/"), "/") {
@@ -244,7 +260,7 @@ func validate(s schemaObject, value any, path, version string) []string {
 		add("must NOT be valid")
 	}
 	if alternatives := list(s.get("anyOf")); alternatives != nil {
-		var failures []string
+		var failures []SchemaIssue
 		valid := false
 		for _, alternative := range alternatives {
 			errors := validate(object(alternative), value, path, version)
@@ -396,4 +412,13 @@ func validate(s schemaObject, value any, path, version string) []string {
 		}
 	}
 	return out
+}
+
+// LooksLikeSecret is Node's looksLikeSecret (src/config/secret-patterns.mjs):
+// a key reference (env:, op://, user) never is one.
+func LooksLikeSecret(value string) bool {
+	if strings.HasPrefix(value, "env:") || strings.HasPrefix(value, "op://") || value == "user" {
+		return false
+	}
+	return maskSecrets(value) != value
 }

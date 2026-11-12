@@ -179,7 +179,7 @@ func TestB458GoAnswers(t *testing.T) {
 // The forms Go does not serve yet keep the hand-over, each with its own reason.
 func TestB458HandOvers(t *testing.T) {
 	configDir := t.TempDir()
-	if err := os.WriteFile(filepath.Join(configDir, ".code-forge.yml"), []byte("version: 1\n"), 0o600); err != nil {
+	if err := os.WriteFile(filepath.Join(configDir, ".code-forge.yml"), []byte("version: 1\nproof:\n  runners: []\n"), 0o600); err != nil {
 		t.Fatal(err)
 	}
 	cases := []struct {
