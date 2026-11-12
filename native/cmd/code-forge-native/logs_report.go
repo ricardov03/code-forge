@@ -1015,7 +1015,7 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	switch {
 	case !lrFixesEmpty():
 		return logsHandover(args, hLogsReportKnownFixes)
-	case reviewWaitNodeVersion == "" || reviewWaitNodeVersion == "unknown" || platform == "" || release == "" || arch == "":
+	case platform == "" || release == "" || arch == "":
 		return logsHandover(args, hLogsReportSystem)
 	case tty && !dryRun && !(yes && allowOld):
 		return logsHandover(args, hLogsReportPrompt)
@@ -1044,7 +1044,7 @@ func logsReport(args []string, flags map[string]string, newest []ledger.Object, 
 	if repo == "" {
 		return failed(1, "logs: package.json names no GitHub repository to report to\n")
 	}
-	system := lrSystem{version: pkgVersion, node: reviewWaitNodeVersion, os: platform + " " + release + " " + arch}
+	system := lrSystem{version: pkgVersion, node: nodeRunVersion(), os: platform + " " + release + " " + arch}
 
 	latest, why := lrLatestOnNpm()
 	if why != "" {

@@ -225,7 +225,7 @@ func logNativeWarning(verb, warning, message string) {
 	}
 	entry := ledger.Object{
 		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
-		{Key: "version", Value: version}, {Key: "node", Value: reviewWaitNodeVersion},
+		{Key: "version", Value: version}, {Key: "node", Value: nodeRunVersion()},
 		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
 		{Key: "verb", Value: clean(verb)}, {Key: "sub", Value: nil}, {Key: "flags", Value: []any{}},
 		{Key: "exit", Value: 0}, {Key: "kind", Value: "warning"}, {Key: "warning", Value: warning},

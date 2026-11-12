@@ -82,7 +82,13 @@ func gatesReusableFull(cwd string) bool {
 // release versions. Legacy normalized stamps cannot authorize merge-gate reuse.
 // Canonical JSON avoids YAML map order and environment sorting differences.
 func gatesFullStamp(tree string, p gates.Plan, configured map[string]any, block ledger.Object) string {
-	if tree == "" || reviewWaitNodeVersion == "" || reviewWaitNodeVersion == "unknown" {
+	if tree == "" {
+		return ""
+	}
+	// B585: the running node; with none known no stamp (a gate run by node
+	// cannot be reused safely).
+	node := nodeRunVersion()
+	if node == "" || node == "unknown" {
 		return ""
 	}
 	path := blockString(blockObject(block.Get("worktree")).Get("path"))
@@ -133,9 +139,9 @@ func gatesFullStamp(tree string, p gates.Plan, configured map[string]any, block 
 			environment[key] = value
 		}
 	}
-	input := []any{"gate-tree-v2", tree, planned, environment, reviewWaitNodeVersion}
+	input := []any{"gate-tree-v2", tree, planned, environment, node}
 	if exactTree != "" {
-		input = []any{"gate-tree-v3", exactTree, tree, planned, environment, reviewWaitNodeVersion}
+		input = []any{"gate-tree-v3", exactTree, tree, planned, environment, node}
 	}
 	data, err := canon.Marshal(input)
 	if err != nil {

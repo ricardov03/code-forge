@@ -375,7 +375,6 @@ func TestB554LogsReportHandsOverWhatStaysInNode(t *testing.T) {
 		{"ai cleaning", "logs-report", []string{"--dry-run"}, nil},
 		{"doctor", "logs-report-doctor", []string{"--no-ai", "--with-doctor", "--dry-run"}, nil},
 		{"known fixes", "logs-report-known-fixes", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) { lrFixesEmpty = func() bool { return false } }},
-		{"node version unknown", "logs-report-system", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) { reviewWaitNodeVersion = "unknown" }},
 		{"os release unknown", "logs-report-system", []string{"--no-ai", "--dry-run"}, func(t *testing.T, c lrTestCase) {
 			lrHost = func() (string, string, string) { return "darwin", "", "arm64" }
 		}},

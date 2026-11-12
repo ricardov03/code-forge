@@ -233,7 +233,7 @@ func nativeVerbFailure(verbName, subName string, args []string, code int, messag
 	}
 	entry := ledger.Object{
 		{Key: "ts", Value: time.Now().UTC().Format("2006-01-02T15:04:05.000Z")},
-		{Key: "version", Value: version}, {Key: "node", Value: reviewWaitNodeVersion},
+		{Key: "version", Value: version}, {Key: "node", Value: nodeRunVersion()},
 		{Key: "platform", Value: runtime.GOOS}, {Key: "arch", Value: arch},
 		{Key: "verb", Value: verb}, {Key: "sub", Value: sub}, {Key: "flags", Value: flags},
 		{Key: "exit", Value: code}, {Key: "kind", Value: kind}, {Key: "message", Value: message},
