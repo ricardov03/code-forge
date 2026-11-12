@@ -20,33 +20,53 @@ while [ -L "$entry" ]; do
 done
 pkg=$(CDPATH= cd -P "${entry%/*}/.." && pwd) || exit 1
 
-host=$(uname -sm)
-case "$host" in
-  Darwin\ *) platform=darwin ;;
-  Linux\ *) platform=linux ;;
-  *) platform=unsupported ;;
+# CODE_FORGE_NATIVE=0 is the explicit maintainer and test switch: it runs the Node router.
+if [ "${CODE_FORGE_NATIVE:-}" = 0 ]; then
+  exec node "$pkg/bin/code-forge.mjs" "$@"
+fi
+
+# P4-0 (B569): the Go binary is required. Keep this mapping the same as scripts/install.sh.
+sys=$(uname -s)
+mach=$(uname -m)
+case "$sys" in
+  Darwin) platform=darwin ;;
+  Linux) platform=linux ;;
+  *) platform=$(printf '%s' "$sys" | tr '[:upper:]' '[:lower:]') ;;
 esac
-case "$host" in
-  *\ x86_64|*\ amd64) arch=x64 ;;
-  *\ arm64|*\ aarch64) arch=arm64 ;;
-  *) arch=unsupported ;;
+case "$mach" in
+  x86_64|amd64) arch=x64 ;;
+  arm64|aarch64) arch=arm64 ;;
+  *) arch=$mach ;;
 esac
-native=$pkg/native/bin/$platform-$arch/code-forge-native
-# `code-forge setup` (B463): the Go binary serves it. Its own exits are 0 (OK), 1 (problem) and
-# 2 (usage). When the binary is missing, not executable, disabled or exits any other way (a crash),
-# Node's scripts/setup.mjs checks it and names the fix.
+target=$platform-$arch
+native=$pkg/native/bin/$target/code-forge-native
+
+# No usable Go binary: one message on stderr that names the target, the expected path and the
+# fix, then exit 69 (no verb exits 69; it means "the Go engine is not available here").
+no_engine() {
+  printf 'code-forge: %s\n  expected: %s\n  fix: sh '\''%s/scripts/install.sh'\''\n  if that fails, reinstall: npm i -g @codedology/code-forge\n' \
+    "$1" "$native" "$pkg" >&2
+  exit 69
+}
+case "$target" in
+  darwin-arm64|darwin-x64|linux-arm64|linux-x64) ;;
+  *) no_engine "no Go engine is built for $target (built: darwin-arm64, darwin-x64, linux-arm64, linux-x64)" ;;
+esac
+if [ ! -f "$native" ]; then
+  no_engine "the Go engine for $target is missing"
+fi
+if [ ! -x "$native" ]; then
+  no_engine "the Go engine for $target is not executable"
+fi
+
+# `code-forge setup` (B463): the Go binary serves it and exits 0 (OK), 1 (problem) or 2 (usage).
+# Any other exit means the binary did not run (a crash), so the launcher names the fix itself.
 if [ "${1:-}" = setup ]; then
-  if [ "${CODE_FORGE_NATIVE:-}" != 0 ] && [ -f "$native" ] && [ -x "$native" ]; then
-    "$native" "$@"
-    status=$?
-    case $status in
-      0|1|2) exit $status ;;
-    esac
-  fi
-  shift
-  exec node "$pkg/scripts/setup.mjs" "$@"
+  "$native" "$@"
+  status=$?
+  case $status in
+    0|1|2) exit $status ;;
+  esac
+  no_engine "the Go engine for $target failed to run setup (exit $status)"
 fi
-if [ "${CODE_FORGE_NATIVE:-}" != 0 ] && [ -f "$native" ] && [ -x "$native" ]; then
-  exec "$native" "$@"
-fi
-exec node "$pkg/bin/code-forge.mjs" "$@"
+exec "$native" "$@"

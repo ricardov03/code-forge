@@ -1,7 +1,8 @@
 #!/bin/sh
 # code-forge skill shim: `forge <verb> [args…]` runs the package's `bin/code-forge` sh launcher,
-# which starts the Go engine (native/bin/<platform>-<arch>/code-forge-native) when it is there and
-# CODE_FORGE_NATIVE is not 0, else the Node router `bin/code-forge.mjs`.
+# which starts the Go engine (native/bin/<platform>-<arch>/code-forge-native); with no usable
+# binary it stops with exit 69 and names the fix (`sh <package>/scripts/install.sh`, B569), and
+# CODE_FORGE_NATIVE=0 runs the Node router `bin/code-forge.mjs`.
 #
 # Resolution order (first hit wins):
 #   1. $CODE_FORGE_BIN, when set and a file (a checkout or a pinned version): the sh launcher when

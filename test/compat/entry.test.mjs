@@ -67,16 +67,26 @@ test('npm entry selects Go or Node and preserves all process inputs and outputs'
   assert.equal(native.stderr, '', 'Go version emits no stderr');
   const args = ['unported', 'two words', 'single\'quote', 'double"quote', '', '$HOME; *'];
   const input = 'stdin with spaces, quotes "\' and unicode é\n';
-  for (const mode of ['native', 'disabled', 'missing']) {
+  // B569: a missing binary stops with the install fix; only CODE_FORGE_NATIVE=0 reaches Node.
+  for (const mode of ['native', 'disabled', 'missing', 'disabled-missing']) {
     if (mode === 'missing') rmSync(f.binary);
     for (const code of [0, 1, 2, 3]) {
-      const result = run(f.launcher, args, { cwd: f.dir, input, env: { ...env, ENTRY_TOKEN: 'kept "verbatim"', ENTRY_EXIT: String(code), CODE_FORGE_NATIVE: mode === 'disabled' ? '0' : '1' } });
+      const result = run(f.launcher, args, { cwd: f.dir, input, env: { ...env, ENTRY_TOKEN: 'kept "verbatim"', ENTRY_EXIT: String(code), CODE_FORGE_NATIVE: mode.startsWith('disabled') ? '0' : '1' } });
+      if (mode === 'missing') {
+        assert.deepEqual(output(result), { stdout: '', code: 69, stderr: missingEngine(f, 'missing') }, mode + ': no Node, one fix message, exit 69');
+        continue;
+      }
       assert.equal(result.code, code, mode + ': exit ' + code + ' passes through');
       assert.equal(result.stderr, 'probe stderr\n', mode + ': stderr passes through once');
       assert.deepEqual(JSON.parse(result.stdout), { args, input, cwd: realpathSync(f.dir), token: 'kept "verbatim"', pid: result.pid }, mode + ': argv, stdin, cwd, env, stdout and exec PID pass through');
     }
   }
 });
+
+/** B569: the launcher's message when the Go binary cannot run. @param {{dir: string, binary: string}} f @param {string} state */
+function missingEngine(f, state) {
+  return `code-forge: the Go engine for ${host} is ${state}\n  expected: ${f.binary}\n  fix: sh '${f.dir}/scripts/install.sh'\n  if that fails, reinstall: npm i -g @codedology/code-forge\n`;
+}
 
 test('empty public route table hands unknown verbs and aliases to Node through linked entries', (t) => {
   const f = fixture(t);
@@ -290,9 +300,7 @@ test('entry boundaries handle nonexecutable native files and missing Node with o
   assert.equal(unknown.stdout, '', 'unknown internal verb never reaches Node probe');
   assert.match(unknown.stderr, /usage: code-forge-native internal/, 'internal usage names the reserved namespace');
   chmodSync(f.binary, 0o644);
-  const fallback = run(f.launcher, ['nonexecutable fallback'], { input: 'boundary stdin' });
-  assert.equal(fallback.code, 0, 'nonexecutable binary uses Node successfully');
-  assert.equal(fallback.stderr, 'probe stderr\n', 'Node fallback emits its exact stderr');
-  assert.deepEqual(JSON.parse(fallback.stdout).args, ['nonexecutable fallback'], 'Node fallback preserves the one argument');
-  assert.equal(JSON.parse(fallback.stdout).input, 'boundary stdin', 'Node fallback receives stdin');
+  // B569: no silent Node run; the launcher names the install fix and exits 69.
+  const stopped = run(f.launcher, ['nonexecutable fallback'], { input: 'boundary stdin' });
+  assert.deepEqual(output(stopped), { stdout: '', code: 69, stderr: missingEngine(f, 'not executable') }, 'nonexecutable binary stops with one fix message, no Node');
 });

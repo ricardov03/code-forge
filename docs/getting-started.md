@@ -26,8 +26,12 @@ npm runs no install script, so run `code-forge setup` yourself after every insta
 It checks the Go binary for your system and prints one `OK` line. On a problem it
 prints the problem and one `fix:` line with the command to run, and exits 1.
 
-In 0.17.0, the command starts Go first and hands commands to Node when needed.
-You do not need to install Go. With no matching binary, it uses Node directly.
+The command starts Go first and hands commands to Node when needed.
+You do not need to install Go, but the package's Go binary is required: with no
+matching binary, or one that cannot run, `code-forge` stops with exit 69 and
+prints the fix. To check or repair the binary without the CLI, run the install
+script: `sh "$(npm root -g)/@codedology/code-forge/scripts/install.sh"`. If that
+fails, reinstall with `npm i -g @codedology/code-forge`.
 See [Go engine and Node fallback](native-engine.md).
 
 The scoped name `@codedology/code-forge` is used **only in this install line**. The command it

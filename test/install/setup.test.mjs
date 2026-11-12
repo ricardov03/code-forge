@@ -7,7 +7,7 @@
 
 import assert from 'node:assert/strict';
 import { spawnSync } from 'node:child_process';
-import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, copyFileSync, mkdirSync, mkdtempSync, readFileSync, realpathSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import os from 'node:os';
 import path from 'node:path';
 import { after, test } from 'node:test';
@@ -136,15 +136,16 @@ test('unknown argument: usage on stderr, exit 2', () => {
   assert.equal(help.stdout, 'usage: code-forge setup\n');
 });
 
-test('launcher: `code-forge setup` runs the setup script even when the Go binary is broken', { skip: !supported }, () => {
-  const { pkg } = makePackage({ binary: fake('kill -SEGV $$') });
-  const r = spawnSync(path.join(pkg, 'bin', 'code-forge'), ['setup'], { encoding: 'utf8', cwd: pkg });
-  assert.equal(r.status, 1);
-  assert.match(r.stderr, /Go binary failed to run \(signal SIGSEGV\)/);
-  const ok = makePackage({ binary: okBinary });
-  const r2 = spawnSync(path.join(ok.pkg, 'bin', 'code-forge'), ['setup'], { encoding: 'utf8', cwd: ok.pkg });
-  assert.equal(r2.status, 0, r2.stderr);
-  assert.match(r2.stdout, /^code-forge setup: OK Go binary/);
+test('launcher: `code-forge setup` with a broken or missing Go binary names the install fix, no Node (B569)', { skip: !supported }, () => {
+  for (const opts of [{ binary: fake('kill -SEGV $$') }, { binary: okBinary }, {}]) {
+    const { pkg, binary } = makePackage(opts);
+    const real = realpathSync(pkg);
+    const r = spawnSync(path.join(pkg, 'bin', 'code-forge'), ['setup'], { encoding: 'utf8', cwd: pkg });
+    const state = opts.binary === undefined ? 'is missing' : 'failed to run setup (exit 3)';
+    assert.equal(r.status, 69, r.stderr);
+    assert.equal(r.stdout, '');
+    assert.equal(r.stderr, `code-forge: the Go engine for ${HOST} ${state}\n  expected: ${path.join(real, path.relative(pkg, binary))}\n  fix: sh '${real}/scripts/install.sh'\n  if that fails, reinstall: npm i -g @codedology/code-forge\n`);
+  }
 });
 
 test('launcher: a Go binary that serves setup keeps its own result (exit 1 here), Node does not re-run', { skip: !supported }, () => {
