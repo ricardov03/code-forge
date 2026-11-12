@@ -396,6 +396,8 @@ const (
 	hOpenAcceptanceYAML
 	hOpenPipelineForm
 	hOpenOutcomeForm
+	// B587
+	hCloseLockfileFormat
 )
 
 var handoverReasons = [...]string{
@@ -795,4 +797,6 @@ var handoverReasons = [...]string{
 	hOpenAcceptanceYAML: "open-acceptance-yaml",
 	hOpenPipelineForm:   "open-pipeline-form",
 	hOpenOutcomeForm:    "open-outcome-form",
+	// B587
+	hCloseLockfileFormat: "close-lockfile-format",
 }

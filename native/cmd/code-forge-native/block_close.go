@@ -462,11 +462,13 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			checks = append(checks, closeCheck{"light-limits " + strings.TrimSuffix(limit[0].Detail, " exceed light block limits"), limit})
 		}
 	}
-	// Review exclusions include lock-file validation. Keep that dialect with Node.
-	for _, f := range files {
-		if closeExcluded(cfg, f.File) {
-			return fallback(hCloseExcludedFile)
-		}
+	// B587: Node's loadGate exclusions and their npm lock-file safety check.
+	kept, excluded, lockBlockers, rulesOK, lockOK := closeExclusions(cfg, top, files)
+	if !rulesOK {
+		return fallback(hCloseExcludedFile)
+	}
+	if !lockOK {
+		return fallback(hCloseLockfileFormat)
 	}
 	unowned, scopeWarnings, scopeChecked := gatecheck.Scope(top, prefix, id, run, blockObject(record.Get("blocks")), changed, rows, key, inTree)
 	noChanges := len(files) == 0 && !slices.ContainsFunc(gatecheck.ReviewedWork(top, rows, id), func(file string) bool { return gatecheck.Owns(prefix, entry, file) })
@@ -476,7 +478,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if deciding && !confirmed && (!scopeChecked || len(scopeWarnings) > 0 || len(reviewed) > 0 && !slices.ContainsFunc(changed, func(file string) bool { return gatecheck.Owns(prefix, entry, file) })) {
 		return fallback(hCloseDecide)
 	}
-	gateInput := gatecheck.Input{Run: run, Block: id, Files: files, Rows: rows, Key: key, HighPaths: highPaths, Unowned: unowned, NoChanges: noChanges, Hits: hits, Transcript: transcript, ResultFiles: gatecheck.LoadResultFiles(mainTop, run, id, rows, key), Ordered: closeOrderedRows(ledgerDir, blockString(record.Get("project")), all)}
+	gateInput := gatecheck.Input{Run: run, Block: id, Files: kept, ProofFiles: files, Rows: rows, Key: key, HighPaths: highPaths, Unowned: unowned, NoChanges: noChanges, Hits: hits, Transcript: transcript, ResultFiles: gatecheck.LoadResultFiles(mainTop, run, id, rows, key), Ordered: closeOrderedRows(ledgerDir, blockString(record.Get("project")), all)}
 	if external != "" {
 		// Node judges an external reviewer's close with no review files; the
 		// files still prove the block changed something.
@@ -510,20 +512,22 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 	if waited != nil {
 		gate.Blockers = waited.blockers(gate.Blockers)
 	}
-	gateReason := gatecheck.Reason(gate.Blockers)
+	gateReason := closeLockReason(lockBlockers, gatecheck.Reason(gate.Blockers))
 	gateIndex := len(checks)
-	checks = append(checks, closeCheck{gateReason, gate.Blockers})
-	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, files, gate.Waived, inTree, external == "" && len(gate.Blockers) == 0)
+	checks = append(checks, closeCheck{gateReason, append(append([]gatecheck.Blocker{}, lockBlockers...), gate.Blockers...)})
+	lines, lineWarnings := closeReviewedLines(run, id, top, qdir, entry, kept, gate.Waived, inTree, external == "" && len(gate.Blockers) == 0 && len(lockBlockers) == 0)
 	if _, has := flags["report"].(string); has && external == "" {
 		if reportErr != nil {
 			reason := "coder report FAILED: --report cannot be read"
 			checks = append(checks, closeCheck{reason, []gatecheck.Blocker{{Code: "coder_report_failed", Detail: reason}}})
 		} else {
-			check, warnings := closeReport(reportText, run, id, qdir, files, lines, rows, key)
+			check, warnings := closeReport(reportText, run, id, qdir, kept, lines, rows, key)
 			checks = append(checks, check)
 			lineWarnings = append(lineWarnings, warnings...)
 		}
 	}
+	excludedRows := closeExcludedRows(id, excluded)
+	closeRows = append(closeRows, excludedRows...)
 	for _, w := range gate.Waived {
 		r := ledger.Object{{Key: "event", Value: "gate.review_waived_all"}, {Key: "block", Value: id}}
 		for _, f := range w.Object(false) {
@@ -532,7 +536,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 		closeRows = append(closeRows, r)
 	}
 	if routineGrant != nil {
-		problem := closeRoutineProblem(external, run, id, rows, key, files, gate, hits)
+		problem := closeRoutineProblem(external, run, id, rows, key, kept, gate, hits)
 		if problem != "" {
 			checks = append(checks, closeCheck{problem, []gatecheck.Blocker{{Code: "close-not-routine", Detail: problem}}})
 		}
@@ -631,7 +635,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			if flags["json"] == true {
 				print = stderr
 			}
-			waited = closeWaitReviews(run, id, top, qdir, files, changed, gate.Blockers, cfg, inTree, print)
+			waited = closeWaitReviews(run, id, top, qdir, kept, changed, gate.Blockers, cfg, inTree, print)
 			if len(waited) > 0 {
 				// Re-measure everything, including hashes, signatures, worker pins,
 				// report, human requirements and grant rules after the single wait.
@@ -682,7 +686,7 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 				audit = append(audit, row)
 			}
 		}
-		closeRows = audit
+		closeRows = append(audit, excludedRows...)
 	}
 	if event != "" {
 		result, err = blockclose.Stop(home, run, id, event, reason)
@@ -772,6 +776,9 @@ func blockCloseReviewedStep(args []string, step *landStep, handover *handoverRea
 			for _, v := range lines {
 				l := v.(ledger.Object)
 				fmt.Fprintf(stdout, "reviewed %s ticket %s\n", l.Get("file"), l.Get("ticket"))
+			}
+			for _, f := range excluded {
+				fmt.Fprintf(stdout, "not reviewed (review.exclude %s): %s\n", f.Rule, f.File)
 			}
 			for _, w := range gate.Waived {
 				parts := []string{}
@@ -1509,6 +1516,13 @@ func closeBlockersJSON(problems []gatecheck.Blocker, id, run string, flags map[s
 			}
 		case "agent-waivers-not-acked":
 			argv = []string{"code-forge", "block", "ack-waivers", id, "--run", run}
+		case "lockfile":
+			lockfile := p.File
+			if lockfile == "" {
+				lockfile = "<lockfile>"
+			}
+			fix += "; repair or regenerate " + closeCommand([]string{lockfile}) + " as valid lock JSON with HTTPS resolved URLs on review.lockfile_registries and nonempty integrity for resolved packages"
+
 		case "git-failed":
 			argv = []string{"code-forge", "block", "rebase", id, "--run", run}
 		case "ledger.tamper":
