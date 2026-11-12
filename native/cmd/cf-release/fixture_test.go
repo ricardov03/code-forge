@@ -64,6 +64,8 @@ run)
     echo "built site with $(cat src/data/site-data.json)"; exit "${FAKE_BUILD_EXIT:-0}" ;;
   esac ;;
 pack)
+  seen pack
+  if [ -n "$FAKE_NPM_PACK_EXIT" ]; then echo "npm error pack broke" >&2; exit "$FAKE_NPM_PACK_EXIT"; fi
   name=$(sed -n 's/^  "name": "\(.*\)",$/\1/p' package.json | head -n 1)
   version=$(sed -n 's/^  "version": "\(.*\)",$/\1/p' package.json | head -n 1)
   files='{"path":"package.json"}'
@@ -83,12 +85,12 @@ const fakeGh = `#!/bin/sh
 echo "$(pwd) gh $*" >> "$FAKE_LOG"
 head=$(git rev-parse HEAD)
 case "$FAKE_GH" in
-green) printf '[{"headSha":"%s","status":"completed","conclusion":"success"}]\n' "$head" ;;
+''|green) printf '[{"headSha":"%s","status":"completed","conclusion":"success"}]\n' "$head" ;;
 red) printf '[{"headSha":"%s","status":"completed","conclusion":"failure"}]\n' "$head" ;;
 empty) echo '[]' ;;
 pending) printf '[{"headSha":"%s","status":"in_progress","conclusion":null}]\n' "$head" ;;
 foreign) echo '[{"headSha":"wrong","status":"completed","conclusion":"success"}]' ;;
-*) echo "fake gh: no runs" >&2; exit 1 ;;
+*) echo "fake gh: no runs" >&2; exit 1 ;; # fail
 esac
 `
 
@@ -104,8 +106,35 @@ if [ "$1" = plugin ] && [ "$2" = validate ]; then echo "Validation passed"; exit
 exit 9
 `
 
+// fakeGo is go for the release's native build (B580): it logs "go version" and every build's
+// argv and environment (the -o temp name's pid shown as <PID>; FAKE_GO_RAW_OUT gets the raw name), fails one GOOS-GOARCH named in
+// FAKE_GO_BUILD_FAIL, and writes "binary GOOS/GOARCH" into the -o file.
+const fakeGo = `#!/bin/sh
+if [ "$1" = version ]; then
+  echo "$(pwd) go version" >> "$FAKE_LOG"
+  if [ -n "$FAKE_GO_VERSION_FAIL" ]; then echo 'go: version broke' >&2; exit 2; fi
+  echo 'go version go0.0 fake'; exit 0
+fi
+line="$(pwd) go"
+out=""
+next=""
+for a in "$@"; do
+  if [ "$next" = o ]; then
+    out="$a"; next=""; line="$line ${a%.*.tmp}.<PID>.tmp"
+    [ -z "$FAKE_GO_RAW_OUT" ] || echo "$a" >> "$FAKE_GO_RAW_OUT"
+    continue
+  fi
+  [ "$a" = -o ] && next=o
+  line="$line $a"
+done
+echo "$line | CGO_ENABLED=$CGO_ENABLED GOOS=$GOOS GOARCH=$GOARCH GOTOOLCHAIN=$GOTOOLCHAIN GOPROXY=$GOPROXY" >> "$FAKE_LOG"
+if [ "$GOOS-$GOARCH" = "$FAKE_GO_BUILD_FAIL" ]; then echo "go: $GOOS/$GOARCH build broke" >&2; exit 1; fi
+printf 'binary %s/%s\n' "$GOOS" "$GOARCH" > "$out"
+`
+
 // fakeNode runs the case scripts' shell twin: <script>.mjs runs <script>.mjs.sh in both modes.
 const fakeNode = `#!/bin/sh
+if [ "$1" = --version ]; then echo v24.0.0; exit 0; fi
 script=$1
 shift
 exec sh "$script.sh" "$@"
@@ -186,7 +215,7 @@ type fixture struct {
 }
 
 type fixtureOpts struct {
-	native  bool // native/go.mod and scripts/build-native.mjs
+	native  bool // native/go.mod, native/bin/ ignored and a fake go on PATH
 	site    bool // the site repository at ../code-forge-site
 	noClaud bool // no claude on PATH
 }
@@ -213,6 +242,7 @@ func newFixture(t *testing.T, o fixtureOpts) *fixture {
 	f.env["HOME"] = filepath.Join(dir, "home")
 	f.env["TMPDIR"] = filepath.Join(dir, "tmp")
 	f.env["FAKE_LOG"] = filepath.Join(dir, "fake.log")
+	f.env["CODE_FORGE_NODE"] = "" // the build's node --version comes from PATH (B580)
 	f.env["PATH"] = f.bin + string(os.PathListSeparator) + "/usr/bin" + string(os.PathListSeparator) + "/bin"
 	for _, d := range []string{f.bin, f.env["HOME"], f.env["TMPDIR"]} {
 		f.mkdir(d)
@@ -226,6 +256,9 @@ func newFixture(t *testing.T, o fixtureOpts) *fixture {
 		t.Fatal(err)
 	}
 	fakes := map[string]string{"npm": fakeNpm, "gh": fakeGh, "npx": fakeNpx, "node": fakeNode}
+	if o.native {
+		fakes["go"] = fakeGo
+	}
 	if !o.noClaud {
 		fakes["claude"] = fakeClaude
 	}
@@ -258,8 +291,7 @@ func newFixture(t *testing.T, o fixtureOpts) *fixture {
 	}
 	if o.native {
 		files["native/go.mod"] = "module example.invalid/native\n\ngo 1.22\n"
-		files["scripts/build-native.mjs"] = caseScript
-		files["scripts/build-native.mjs.sh"] = "echo \"built darwin-arm64 darwin-x64 linux-x64 linux-arm64\"\n"
+		files[".gitignore"] = ".code-forge-tmp/\nnative/bin/\n"
 	}
 	for name, body := range files {
 		f.write(filepath.Join(f.repo, name), body)

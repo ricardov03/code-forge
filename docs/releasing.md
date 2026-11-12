@@ -87,7 +87,7 @@ The version argument is `patch`, `minor`, `major` or an explicit `x.y.z`. Option
 |---|---|
 | `--dry-run` | run the preflight, print the plan and the diffs, change nothing (no file, no commit, no tag, no fetch). Preflight failures are listed and the exit code is 1 |
 | `--date YYYY-MM-DD` | the date for the CHANGELOG heading (default: today, local time) |
-| `--no-checks` | skip the docs block preflight and the checks in step 4, with loud warnings. For emergencies only |
+| `--no-checks` | skip the docs block preflight and the checks in step 4 (the CI run for HEAD, npm pack, npm ls, plugin validate), with loud warnings. For emergencies only |
 | `--allow-branch <name>` | release from a branch other than `main` |
 
 ### The release tools run in Go
@@ -152,7 +152,8 @@ With no ancestor `v*` tag, release preflight skips the docs check with a warning
 ## Releasing checklist
 
 Build the optional native binaries with `node scripts/build-native.mjs` (`--host` for local
-testing). The native code is pure Go and standard library only; builds and compatibility tests
+testing); the release builds the four release targets itself in Go, with no Node (B580).
+The native code is pure Go and standard library only; builds and compatibility tests
 force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller configuration.
 
 1. Every landed block has a CHANGELOG entry under `## [Unreleased]`.
@@ -193,21 +194,21 @@ force `CGO_ENABLED=0`, avoiding the macOS 26 LC_UUID linker error without caller
    **README.** Only the version in the optional `Latest:` line is updated; all other bytes stay the same.
    Without that line, README is unchanged and omitted from the release commit.
    Per-version notes live only in CHANGELOG, with no per-block additions to README.
-4. **Checks.** `node scripts/gen-config-doc.mjs --check` first, immediately followed by
-   `node scripts/gen-commands-doc.mjs --check` (a stale reference or a missing script fails),
-   then `npm test`, `npm run typecheck`,
-   `npm pack --dry-run` (the name and version must match; the file count is printed),
-   `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the `claude` CLI
-   is installed (otherwise a warning).
-   If local `npm test` fails with identifiable Node TAP/spec file locations, the tool prints
-   the original result and reruns only those files, once each in separate serial invocations
-   (`npm test -- --test-concurrency=1 <file>`). It prints each rerun's output and exit code.
-   It accepts the failure only when every isolated rerun passes and the latest `CI` workflow
-   run returned by `gh run list --commit <HEAD>` is completed with conclusion `success` for
-   that exact pre-release HEAD. It then prints
-   `local flaky (passed alone, CI green): <files>`. Missing `gh`, unreadable or absent CI,
-   pending/failed CI, unknown file locations, or any failing rerun still fail and roll back.
-   No retry runs after a green local test run.
+4. **Checks.** The release runs no Node suite on the laptop (B580). Before it writes any file it
+   reads the latest `CI` workflow run for HEAD (`gh run list --commit <HEAD> --workflow CI
+   --limit 1`). CI runs `npm test` (which includes the `gen-config-doc --check` and
+   `gen-commands-doc --check` tests) and `npm run typecheck`, so the run must be `completed` with
+   conclusion `success` for that exact HEAD. A missing, running or failed run, or a `gh` error,
+   refuses with exit 1 and one line that names HEAD and the run state, for example
+   `CI for HEAD <sha> is not green: run status in_progress; push HEAD and wait for a green CI run`.
+   Nothing is written or tagged. After the version edits it builds the four native targets with
+   `go build` (the same targets, flags and output lines as `scripts/build-native.mjs`, run from Go;
+   the Node version stamp is `node --version` of `CODE_FORGE_NODE` or node on PATH, and stays
+   `unknown` with no usable node), then runs `npm pack --dry-run` (the name and version must match; the file count is
+   printed), `npm ls --json` (0 invalid, 0 missing), and `claude plugin validate .` when the
+   `claude` CLI is installed (otherwise a warning). A failure here rolls back the version edits.
+   CI covers HEAD before the release commit; the release commit only changes version fields,
+   CHANGELOG and README.
 
    Real-process worker test deadlines use `test/helpers/load.mjs`: the one-minute host load
    divided by available CPUs, rounded up with a minimum of one (load 25 on 10 CPUs gives

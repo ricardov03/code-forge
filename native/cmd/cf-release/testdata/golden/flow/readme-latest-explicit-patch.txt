@@ -84,7 +84,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.21.3
     + @codedology/code-forge 0.21.3
 
 == plan (dry run) ==
-would run the checks: gen-config-doc --check, gen-commands-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate .
+would run the checks: green CI run for HEAD (gh run list --workflow CI: npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check), npm pack --dry-run, npm ls --json, claude plugin validate .
 would commit "Release v0.21.3" (7 files) and create the annotated tag v0.21.3
 would print: git push origin main --follow-tags
 dry run: 0 files changed, 0 commits, 0 tags
@@ -272,11 +272,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.21.3
     + @codedology/code-forge 0.21.3
 
 == 4. checks ==
-ok    gen-config-doc --check
-ok    gen-commands-doc --check
-check npm test …
-ok    npm test
-ok    npm run typecheck
+ok    CI for HEAD 65185a7ad12dfd6383161a9a517ec841565b4688: completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)
 ok    package size: 1234567 bytes (1.23 MB; limit <20 MB)
 ok    npm pack --dry-run: @example/pkg@0.21.3, 7 files
 ok    npm ls: 0 invalid, 0 missing
@@ -441,8 +437,7 @@ Release v0.21.3
 --- fake log
 <CASE>/repo npm view @example/pkg version
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo npm test
-<CASE>/repo npm run typecheck
+<CASE>/repo gh run list --commit 65185a7ad12dfd6383161a9a517ec841565b4688 --workflow CI --limit 1 --json headSha,status,conclusion
 <CASE>/repo npm pack --dry-run --json
 <CASE>/repo npm ls --json
 <CASE>/repo claude plugin validate .

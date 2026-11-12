@@ -69,38 +69,10 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.21.1
     + @codedology/code-forge 0.21.1
 
 == 4. checks ==
-ok    gen-config-doc --check
-ok    gen-commands-doc --check
-check npm test …
-npm test failed (exit 1)
-failing tests:
-  - flaky thing
-Full output: <CASE>/repo/.code-forge-tmp/release-npm-test-<MS>-<PID>.log
-Last 30 lines:
-TAP version 13
-not ok 1 - flaky thing
-  ---
-  location: 'test/a.test.mjs:3:1'
-  ...
-fake npm test failed
-check npm test (alone: test/a.test.mjs) …
-alone test -- --test-concurrency=1 test/a.test.mjs
-npm test (alone: test/a.test.mjs) exit 0
 --- stderr
 
-FAILED: npm test failed (exit 1)
-failing tests:
-  - flaky thing
-Full output: <CASE>/repo/.code-forge-tmp/release-npm-test-<MS>-<PID>.log
-Last 30 lines:
-TAP version 13
-not ok 1 - flaky thing
-  ---
-  location: 'test/a.test.mjs:3:1'
-  ...
-fake npm test failed
-CI for HEAD 8a15962788ece72ef64a2215357f61f94b9682f7 is not green
-rolled back 7 files; nothing was committed or tagged
+FAILED: CI for HEAD 8a15962788ece72ef64a2215357f61f94b9682f7 is not green: no CI run; push HEAD and wait for a green CI run
+rolled back 0 files; nothing was committed or tagged
 --- repo refs
 refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
 refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
@@ -194,12 +166,8 @@ refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
 --- release temp files
 --- fake log
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo npm test
-<CASE>/repo npm test -- --test-concurrency=1 test/a.test.mjs
 <CASE>/repo gh run list --commit 8a15962788ece72ef64a2215357f61f94b9682f7 --workflow CI --limit 1 --json headSha,status,conclusion
 --- repo .code-forge-tmp
-# release-npm-test-<MS>-<PID>.log
-"TAP version 13\nnot ok 1 - flaky thing\n  ---\n  location: 'test/a.test.mjs:3:1'\n  ...\nfake npm test failed\n"
 --- seen
 --- repo HEAD
 docs: stamp

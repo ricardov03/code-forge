@@ -7,7 +7,6 @@ package main
 import (
 	"errors"
 	"fmt"
-	"net/url"
 	"os"
 	"path/filepath"
 	"regexp"
@@ -607,11 +606,11 @@ func (a *app) buildNative(root string) string {
 	if !hasNative(root) {
 		return ""
 	}
-	r := runCmd(root, 0, "node", filepath.Join(root, "scripts", "build-native.mjs"))
-	if r.code != 0 {
-		return fmt.Sprintf("build-native failed (exit %d): %s", r.code, jsTrim(or(r.stderr, r.stdout)))
+	printed, failure := a.bnBuild(root)
+	if failure != "" {
+		return "build-native failed (exit 1): " + jsTrim("build-native: "+failure)
 	}
-	a.out(r.stdout)
+	a.out(printed)
 	a.ok("build-native: all four release targets")
 	return ""
 }
@@ -708,57 +707,6 @@ func toFixed2(f float64) string {
 	return strconv.FormatFloat(f, 'f', 2, 64)
 }
 
-var (
-	locationRe = regexp.MustCompile(`^\s*location: ['"](.+?)['"]\s*$`)
-	testAtRe   = regexp.MustCompile(`^test at (.+?)\s*$`)
-	lineColRe  = regexp.MustCompile(`:\d+(?::\d+)?$`)
-	jsFileRe   = regexp.MustCompile(`\.(?:mjs|cjs|js)$`)
-	failingRe  = regexp.MustCompile(`^\s*(?:[ℹ✖]\s+)?failing tests:\s*$`)
-	tapNotOkRe = regexp.MustCompile(`^\s*not ok \d+ - (.+?)\s*$`)
-	specFailRe = regexp.MustCompile(`^\s*✖ (.+?)\s*$`)
-	specMsRe   = regexp.MustCompile(` \(\d+(?:\.\d+)?ms\)$`)
-)
-
-// failingTestFiles reads the file locations Node's TAP diagnostics or spec summary print; any
-// unknown or outside path gives none.
-func failingTestFiles(root, output string) []string {
-	var files []string
-	seen := map[string]bool{}
-	for _, line := range strings.Split(stripVT(output), "\n") {
-		m := locationRe.FindStringSubmatch(line)
-		if m == nil {
-			m = testAtRe.FindStringSubmatch(line)
-		}
-		if m == nil {
-			continue
-		}
-		loc := lineColRe.ReplaceAllString(m[1], "")
-		var absolute string
-		if strings.HasPrefix(loc, "file:") {
-			u, err := url.Parse(loc)
-			if err != nil || u.Scheme != "file" || (u.Host != "" && u.Host != "localhost") || !strings.HasPrefix(u.Path, "/") {
-				return nil
-			}
-			absolute = filepath.Clean(u.Path)
-		} else {
-			absolute = resolvePath(root, loc)
-		}
-		rel, err := filepath.Rel(root, absolute)
-		if err != nil || rel == "" || rel == "." || strings.HasPrefix(rel, "..") || filepath.IsAbs(rel) || !jsFileRe.MatchString(rel) {
-			return nil
-		}
-		st, err := os.Stat(absolute)
-		if err != nil || !st.Mode().IsRegular() {
-			return nil
-		}
-		if !seen[rel] {
-			seen[rel] = true
-			files = append(files, rel)
-		}
-	}
-	return files
-}
-
 func tail30(output string) string {
 	lines := strings.Split(jsTrimEnd(output), "\n")
 	if len(lines) > 30 {
@@ -770,42 +718,6 @@ func tail30(output string) string {
 func (a *app) failed(root, label string, r result) string {
 	output := r.stdout + r.stderr
 	tail := tail30(output)
-	if label == "npm test" {
-		var names []string
-		seen := map[string]bool{}
-		summary := false
-		for _, line := range strings.Split(stripVT(output), "\n") {
-			if failingRe.MatchString(line) {
-				summary = true
-				continue
-			}
-			name := ""
-			if m := tapNotOkRe.FindStringSubmatch(line); m != nil {
-				name = m[1]
-			} else if summary {
-				if m := specFailRe.FindStringSubmatch(line); m != nil {
-					name = specMsRe.ReplaceAllString(m[1], "")
-				}
-			}
-			if name != "" && !seen[name] {
-				seen[name] = true
-				names = append(names, name)
-			}
-		}
-		temp := filepath.Join(root, ".code-forge-tmp")
-		_ = os.MkdirAll(temp, 0o755)
-		log := filepath.Join(temp, fmt.Sprintf("release-npm-test-%d-%d.log", a.now().UnixMilli(), a.pid))
-		_ = os.WriteFile(log, []byte(output), 0o644)
-		failures := ""
-		if len(names) > 0 {
-			failures = "\nfailing tests:\n" + strings.Join(prefixAll("  - ", names), "\n")
-		}
-		msg := fmt.Sprintf("%s failed (exit %d)%s\nFull output: %s", label, r.code, failures, log)
-		if tail != "" {
-			msg += "\nLast 30 lines:\n" + tail
-		}
-		return msg
-	}
 	msg := fmt.Sprintf("%s failed (exit %d)", label, r.code)
 	if tail != "" {
 		msg += ":\n" + tail
@@ -813,99 +725,15 @@ func (a *app) failed(root, label string, r result) string {
 	return msg
 }
 
-func prefixAll(p string, items []string) []string {
-	out := make([]string, len(items))
-	for i, s := range items {
-		out[i] = p + s
-	}
-	return out
-}
-
+// runChecks runs the package checks: npm pack --dry-run, npm ls --json and claude plugin validate.
+// The Node checks (gen-config-doc and gen-commands-doc --check, npm test, npm run typecheck) run in
+// GitHub CI, and ciCheck reads that run before anything is written (B580).
 func (a *app) runChecks(root, name, version string) (string, error) {
-	genDoc := filepath.Join(root, "scripts", "gen-config-doc.mjs")
-	if !exists(genDoc) {
-		return "gen-config-doc --check failed: scripts/gen-config-doc.mjs not found", nil
-	}
-	r := runCmd(root, 120*time.Second, "node", genDoc, "--check")
-	if r.code != 0 {
-		return a.failed(root, "gen-config-doc --check", r), nil
-	}
-	a.ok("gen-config-doc --check")
-
-	commandsDoc := filepath.Join(root, "scripts", "gen-commands-doc.mjs")
-	if !exists(commandsDoc) {
-		return "gen-commands-doc --check failed: scripts/gen-commands-doc.mjs not found", nil
-	}
-	r = runCmd(root, 120*time.Second, "node", commandsDoc, "--check")
-	if r.code != 0 {
-		return a.failed(root, "gen-commands-doc --check", r), nil
-	}
-	a.ok("gen-commands-doc --check")
-
-	a.out("check npm test …\n")
-	r = runCmd(root, 0, "npm", "test")
-	if r.code != 0 {
-		failure := a.failed(root, "npm test", r)
-		files := failingTestFiles(root, r.stdout+r.stderr)
-		if len(files) == 0 || r.failed() {
-			return failure, nil
-		}
-		a.out(failure + "\n")
-		passed := true
-		for _, file := range files {
-			a.out("check npm test (alone: " + file + ") …\n")
-			alone := runCmd(root, 0, "npm", "test", "--", "--test-concurrency=1", file)
-			a.out(alone.stdout)
-			a.err(alone.stderr)
-			a.out(fmt.Sprintf("npm test (alone: %s) exit %d\n", file, alone.code))
-			if alone.code != 0 {
-				passed = false
-			}
-		}
-		if !passed {
-			return failure + "\nisolated rerun failed", nil
-		}
-		headOut, err := a.gitOk(root, "rev-parse", "HEAD")
-		if err != nil {
-			return "", err
-		}
-		head := jsTrim(headOut)
-		ci := runCmd(root, 60*time.Second, "gh", "run", "list", "--commit", head, "--workflow", "CI", "--limit", "1",
-			"--json", "headSha,status,conclusion")
-		green := false
-		if runs, err := jsParse(ci.stdout); err == nil && ci.code == 0 {
-			if arr, isArr := runs.([]any); isArr && len(arr) == 1 {
-				if o, isObj := arr[0].(*jsObject); isObj {
-					sha, _ := o.get("headSha")
-					st, _ := o.get("status")
-					concl, _ := o.get("conclusion")
-					green = sha == head && st == "completed" && concl == "success"
-				}
-			}
-		}
-		if !green {
-			extra := ""
-			if e := jsTrim(ci.stderr); e != "" {
-				extra = ": " + e
-			}
-			return failure + "\nCI for HEAD " + head + " is not green" + extra, nil
-		}
-		a.out("local flaky (passed alone, CI green): " + strings.Join(files, ", ") + "\n")
-	} else {
-		a.ok("npm test")
-	}
-
-	r = runCmd(root, 0, "npm", "run", "typecheck")
-	if r.code != 0 {
-		return a.failed(root, "npm run typecheck", r), nil
-	}
-	a.ok("npm run typecheck")
-
 	if f := a.checkPack(root, name, version); f != "" {
 		return f, nil
 	}
 
-	r = runCmd(root, 0, "npm", "ls", "--json")
+	r := runCmd(root, 0, "npm", "ls", "--json")
 	tree, err := jsParse(r.stdout)
 	if err != nil {
 		return a.failed(root, "npm ls --json (no JSON)", r), nil
@@ -964,6 +792,58 @@ func (a *app) runChecks(root, name, version string) (string, error) {
 	} else {
 		a.warn(`the claude CLI is not on PATH: "claude plugin validate ." was skipped; install it and run "claude plugin validate ." before you publish`)
 	}
+	return "", nil
+}
+
+// ciCheck reads the latest CI workflow run of HEAD (B580). CI runs npm test, which holds the
+// gen-config-doc and gen-commands-doc --check tests (test/docs-config.test.mjs,
+// test/docs-commands.test.mjs), and npm run typecheck on every main push, so a completed, successful
+// run of HEAD stands for those four checks; the laptop runs no Node suite. It returns one line that
+// names HEAD and the run state when the run is missing, running or not green.
+func (a *app) ciCheck(root string) (string, error) {
+	headOut, err := a.gitOk(root, "rev-parse", "HEAD")
+	if err != nil {
+		return "", err
+	}
+	head := jsTrim(headOut)
+	ci := runCmd(root, 60*time.Second, "gh", "run", "list", "--commit", head, "--workflow", "CI", "--limit", "1",
+		"--json", "headSha,status,conclusion")
+	state := ""
+	switch {
+	case ci.failed():
+		state = "gh run list could not run (" + ci.errMsg + ")"
+	case ci.code != 0:
+		state = fmt.Sprintf("gh run list failed (exit %d): %s", ci.code, firstLine(jsTrim(or(ci.stderr, ci.stdout, "no output"))))
+	default:
+		runs, perr := jsParse(ci.stdout)
+		arr, isArr := runs.([]any)
+		switch {
+		case perr != nil || !isArr:
+			state = "gh run list printed no JSON list"
+		case len(arr) == 0:
+			state = "no CI run"
+		default:
+			o, isObj := arr[0].(*jsObject)
+			if !isObj {
+				o = &jsObject{vals: map[string]any{}}
+			}
+			sha, shaOK := o.get("headSha")
+			st, stOK := o.get("status")
+			concl, conclOK := o.get("conclusion")
+			switch {
+			case sha != head:
+				state = "no CI run (the latest run is for " + jsTemplate(sha, shaOK) + ")"
+			case st != "completed":
+				state = "run status " + jsTemplate(st, stOK)
+			case concl != "success":
+				state = "run completed with conclusion " + jsTemplate(concl, conclOK)
+			}
+		}
+	}
+	if state != "" {
+		return "CI for HEAD " + head + " is not green: " + state + "; push HEAD and wait for a green CI run", nil
+	}
+	a.ok("CI for HEAD " + head + ": completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)")
 	return "", nil
 }
 
@@ -1045,7 +925,7 @@ func readPackage(root string) (*jsObject, string, error) {
 
 func (a *app) notesMain(argv []string, root string) int {
 	version, out := "", ""
-	usage := "usage: node scripts/release.mjs notes <vX.Y.Z> [--out <file>]\n"
+	usage := "usage: sh scripts/cf-release.sh release notes <vX.Y.Z> [--out <file>]\n"
 	for i := 0; i < len(argv); i++ {
 		switch {
 		case argv[i] == "--out" && i+1 < len(argv) && argv[i+1] != "":
@@ -1242,7 +1122,7 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 		}
 		checks := "none (--no-checks)"
 		if opts.checks {
-			checks = "gen-config-doc --check, gen-commands-doc --check, npm test, npm run typecheck, npm pack --dry-run, npm ls --json, claude plugin validate ."
+			checks = "green CI run for HEAD (gh run list --workflow CI: npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check), npm pack --dry-run, npm ls --json, claude plugin validate ."
 		}
 		a.out("would run the checks: " + checks + "\n")
 		a.out(fmt.Sprintf("would commit \"Release %s\" (%d files) and create the annotated tag %s\n", tag, len(plan), tag))
@@ -1259,12 +1139,6 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 		return 0, nil
 	}
 
-	for _, f := range plan {
-		if err := os.WriteFile(filepath.Join(root, f.file), []byte(f.after), 0o644); err != nil {
-			return 0, err
-		}
-		*written = append(*written, f)
-	}
 	rollback := func(failure string) (int, error) {
 		restore()
 		a.err(fmt.Sprintf("\nFAILED: %s\nrolled back %d files; nothing was committed or tagged\n", failure, len(*written)))
@@ -1272,6 +1146,21 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 	}
 
 	a.out("\n== 4. checks ==\n")
+	if opts.checks {
+		f, err := a.ciCheck(root)
+		if err != nil {
+			return 0, err
+		}
+		if f != "" {
+			return rollback(f)
+		}
+	}
+	for _, f := range plan {
+		if err := os.WriteFile(filepath.Join(root, f.file), []byte(f.after), 0o644); err != nil {
+			return 0, err
+		}
+		*written = append(*written, f)
+	}
 	if f := a.buildNative(root); f != "" {
 		return rollback(f)
 	}
@@ -1288,9 +1177,9 @@ func (a *app) release(root string, opts releaseOpts, written *[]planFile, restor
 			if f := a.checkPack(root, name, next); f != "" {
 				return rollback(f)
 			}
-			a.warn("!!! --no-checks: gen-config-doc --check, gen-commands-doc --check, npm test, typecheck, npm ls and plugin validate were NOT run; native build and package size checked !!!")
+			a.warn("!!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!")
 		} else {
-			a.warn("!!! --no-checks: gen-config-doc --check, gen-commands-doc --check, npm test, typecheck, npm pack, npm ls and plugin validate were NOT run !!!")
+			a.warn("!!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm pack, npm ls and plugin validate were NOT checked !!!")
 		}
 	}
 

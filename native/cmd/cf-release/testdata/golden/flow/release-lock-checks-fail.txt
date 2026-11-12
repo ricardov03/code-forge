@@ -70,38 +70,10 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.22.0
     + @codedology/code-forge 0.22.0
 
 == 4. checks ==
-ok    gen-config-doc --check
-ok    gen-commands-doc --check
-check npm test …
-npm test failed (exit 1)
-failing tests:
-  - flaky thing
-Full output: <CASE>/repo/.code-forge-tmp/release-npm-test-<MS>-<PID>.log
-Last 30 lines:
-TAP version 13
-not ok 1 - flaky thing
-  ---
-  location: 'test/a.test.mjs:3:1'
-  ...
-fake npm test failed
-check npm test (alone: test/a.test.mjs) …
-alone test -- --test-concurrency=1 test/a.test.mjs
-npm test (alone: test/a.test.mjs) exit 0
 --- stderr
 
-FAILED: npm test failed (exit 1)
-failing tests:
-  - flaky thing
-Full output: <CASE>/repo/.code-forge-tmp/release-npm-test-<MS>-<PID>.log
-Last 30 lines:
-TAP version 13
-not ok 1 - flaky thing
-  ---
-  location: 'test/a.test.mjs:3:1'
-  ...
-fake npm test failed
-CI for HEAD 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77 is not green: fake gh: no runs
-rolled back 8 files; nothing was committed or tagged
+FAILED: CI for HEAD 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77 is not green: run completed with conclusion failure; push HEAD and wait for a green CI run
+rolled back 0 files; nothing was committed or tagged
 --- repo refs
 refs/heads/main 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77 docs stamp
 refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
@@ -192,23 +164,9 @@ refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
 --- release temp files
 --- fake log
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo npm test
-<CASE>/repo npm test -- --test-concurrency=1 test/a.test.mjs
 <CASE>/repo gh run list --commit 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77 --workflow CI --limit 1 --json headSha,status,conclusion
 --- repo .code-forge-tmp
-# release-npm-test-<MS>-<PID>.log
-"TAP version 13\nnot ok 1 - flaky thing\n  ---\n  location: 'test/a.test.mjs:3:1'\n  ...\nfake npm test failed\n"
 --- seen
-# test/CHANGELOG.md
-"# Changelog\n\n## [Unreleased]\n\n## [0.22.0] — 2026-11-12\n\n### Added\n\n- A new verb.\n\n### Fixed\n\n- A fixed bug.\n\n## [0.21.0] — 2026-11-01\n\n### Added\n\n- The first verb.\n\n[Unreleased]: https://github.com/example/pkg/compare/v0.22.0...HEAD\n[0.22.0]: https://github.com/example/pkg/compare/v0.21.0...v0.22.0\n[0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0\n"
-# test/README.md
-"# pkg\n\nLatest: 0.22.0 - see [CHANGELOG](CHANGELOG.md)\n"
-# test/docs/step-by-step.md
-"# Step by step\n\nInstall:\n\n    npx @codedology/code-forge@0.22.0 init\n\n```\n@codedology/code-forge 0.22.0\n```\n\nNot a pin: @codedology/code-forge@0.21.0x stays.\n"
-# test/package-lock.json
-"{\n  \"name\": \"@example/pkg\",\n  \"version\": \"0.22.0\",\n  \"lockfileVersion\": 3,\n  \"requires\": true,\n  \"packages\": {\n    \"\": {\n      \"name\": \"@example/pkg\",\n      \"version\": \"0.22.0\"\n    }\n  }\n}\n"
-# test/package.json
-"{\n  \"name\": \"@example/pkg\",\n  \"version\": \"0.22.0\",\n  \"type\": \"module\",\n  \"repository\": {\n    \"type\": \"git\",\n    \"url\": \"git+https://github.com/example/pkg.git\"\n  }\n}\n"
 --- file package-lock.json
 {
   "name": "@example/pkg",
@@ -298,14 +256,10 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.22.0
     + @codedology/code-forge 0.22.0
 
 == 4. checks ==
-ok    gen-config-doc --check
-ok    gen-commands-doc --check
-check npm test …
-ok    npm test
+ok    CI for HEAD 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77: completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)
 --- stderr
 
-FAILED: npm run typecheck failed (exit 1):
-type error in src/x.js
+FAILED: npm pack --dry-run failed (exit 1): npm error pack broke
 rolled back 8 files; nothing was committed or tagged
 --- repo refs
 refs/heads/main 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77 docs stamp
@@ -397,35 +351,21 @@ refs/tags/v0.21.0 dd7acf1da35dab23c1f2c98fc4071920c53c411b
 --- release temp files
 --- fake log
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo npm test
-<CASE>/repo npm test -- --test-concurrency=1 test/a.test.mjs
 <CASE>/repo gh run list --commit 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77 --workflow CI --limit 1 --json headSha,status,conclusion
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo npm test
-<CASE>/repo npm run typecheck
+<CASE>/repo gh run list --commit 1ae17105b8f4c01db1d42dc0c0563c5e8d97df77 --workflow CI --limit 1 --json headSha,status,conclusion
+<CASE>/repo npm pack --dry-run --json
 --- repo .code-forge-tmp
-# release-npm-test-<MS>-<PID>.log
-"TAP version 13\nnot ok 1 - flaky thing\n  ---\n  location: 'test/a.test.mjs:3:1'\n  ...\nfake npm test failed\n"
 --- seen
-# test/CHANGELOG.md
+# pack/CHANGELOG.md
 "# Changelog\n\n## [Unreleased]\n\n## [0.22.0] — 2026-11-12\n\n### Added\n\n- A new verb.\n\n### Fixed\n\n- A fixed bug.\n\n## [0.21.0] — 2026-11-01\n\n### Added\n\n- The first verb.\n\n[Unreleased]: https://github.com/example/pkg/compare/v0.22.0...HEAD\n[0.22.0]: https://github.com/example/pkg/compare/v0.21.0...v0.22.0\n[0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0\n"
-# test/README.md
+# pack/README.md
 "# pkg\n\nLatest: 0.22.0 - see [CHANGELOG](CHANGELOG.md)\n"
-# test/docs/step-by-step.md
+# pack/docs/step-by-step.md
 "# Step by step\n\nInstall:\n\n    npx @codedology/code-forge@0.22.0 init\n\n```\n@codedology/code-forge 0.22.0\n```\n\nNot a pin: @codedology/code-forge@0.21.0x stays.\n"
-# test/package-lock.json
+# pack/package-lock.json
 "{\n  \"name\": \"@example/pkg\",\n  \"version\": \"0.22.0\",\n  \"lockfileVersion\": 3,\n  \"requires\": true,\n  \"packages\": {\n    \"\": {\n      \"name\": \"@example/pkg\",\n      \"version\": \"0.22.0\"\n    }\n  }\n}\n"
-# test/package.json
-"{\n  \"name\": \"@example/pkg\",\n  \"version\": \"0.22.0\",\n  \"type\": \"module\",\n  \"repository\": {\n    \"type\": \"git\",\n    \"url\": \"git+https://github.com/example/pkg.git\"\n  }\n}\n"
-# typecheck/CHANGELOG.md
-"# Changelog\n\n## [Unreleased]\n\n## [0.22.0] — 2026-11-12\n\n### Added\n\n- A new verb.\n\n### Fixed\n\n- A fixed bug.\n\n## [0.21.0] — 2026-11-01\n\n### Added\n\n- The first verb.\n\n[Unreleased]: https://github.com/example/pkg/compare/v0.22.0...HEAD\n[0.22.0]: https://github.com/example/pkg/compare/v0.21.0...v0.22.0\n[0.21.0]: https://github.com/example/pkg/compare/v0.20.0...v0.21.0\n"
-# typecheck/README.md
-"# pkg\n\nLatest: 0.22.0 - see [CHANGELOG](CHANGELOG.md)\n"
-# typecheck/docs/step-by-step.md
-"# Step by step\n\nInstall:\n\n    npx @codedology/code-forge@0.22.0 init\n\n```\n@codedology/code-forge 0.22.0\n```\n\nNot a pin: @codedology/code-forge@0.21.0x stays.\n"
-# typecheck/package-lock.json
-"{\n  \"name\": \"@example/pkg\",\n  \"version\": \"0.22.0\",\n  \"lockfileVersion\": 3,\n  \"requires\": true,\n  \"packages\": {\n    \"\": {\n      \"name\": \"@example/pkg\",\n      \"version\": \"0.22.0\"\n    }\n  }\n}\n"
-# typecheck/package.json
+# pack/package.json
 "{\n  \"name\": \"@example/pkg\",\n  \"version\": \"0.22.0\",\n  \"type\": \"module\",\n  \"repository\": {\n    \"type\": \"git\",\n    \"url\": \"git+https://github.com/example/pkg.git\"\n  }\n}\n"
 --- file package-lock.json
 {

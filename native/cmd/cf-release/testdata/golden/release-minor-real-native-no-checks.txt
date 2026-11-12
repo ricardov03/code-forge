@@ -68,11 +68,14 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.22.0
     + @codedology/code-forge 0.22.0
 
 == 4. checks ==
-built darwin-arm64 darwin-x64 linux-x64 linux-arm64
+native darwin-arm64: 20 bytes (v0.22.0)
+native darwin-x64: 20 bytes (v0.22.0)
+native linux-x64: 19 bytes (v0.22.0)
+native linux-arm64: 19 bytes (v0.22.0)
 ok    build-native: all four release targets
 ok    package size: 1234567 bytes (1.23 MB; limit <20 MB)
 ok    npm pack --dry-run: @example/pkg@0.22.0, 7 files
-WARN  !!! --no-checks: gen-config-doc --check, gen-commands-doc --check, npm test, typecheck, npm ls and plugin validate were NOT run; native build and package size checked !!!
+WARN  !!! --no-checks: the CI run for HEAD (npm test, typecheck, gen-config-doc and gen-commands-doc --check), npm ls and plugin validate were NOT checked; native build and package size checked !!!
 
 == 5. commit + tag ==
 ok    committed "Release v0.22.0" (7 files)
@@ -87,20 +90,20 @@ ok    annotated tag v0.22.0
       gh release create v0.22.0 --title v0.22.0 --notes-file <CASE>/tmp/code-forge-release-<RAND>/release-notes-v0.22.0.md --verify-tag
 --- stderr
 --- repo refs
-refs/heads/main aa3cbc1c9aca1aee581ee49cc0bdf31b95fc01b0 Release v0.22.0
-refs/remotes/origin/main b6911b3b4ec69b82258125c70eb1f84b19f54367 docs: stamp
-refs/tags/v0.21.0 349ea992e9c7b0310b7ffc30358697efacb3b118 Release v0.21.0
-refs/tags/v0.22.0 b59d62da982b051fea766c7c9f8df79f0931ccb4 Release v0.22.0
+refs/heads/main 87434ed980c3d8dfdfe4c42c8877530e2a85f320 Release v0.22.0
+refs/remotes/origin/main 55ae49b370863bb9670a985aaecdd6a4dfebde08 docs: stamp
+refs/tags/v0.21.0 9ba933710fc6c42cfd5030502bb61f86d8fab67b Release v0.21.0
+refs/tags/v0.22.0 8d8de85e885185c7b2c742597541fe440bb52ca8 Release v0.22.0
 --- repo status
 --- tag v0.21.0
-object a8facc749d9334b88aea1e0c0fca3c23c6d7ed64
+object 12f42bc2a84c1098217018bd7eb4a0a9d4df1700
 type commit
 tag v0.21.0
 tagger Test <test@example.invalid> 1794477600 +0000
 
 Release v0.21.0
 --- tag v0.22.0
-object aa3cbc1c9aca1aee581ee49cc0bdf31b95fc01b0
+object 87434ed980c3d8dfdfe4c42c8877530e2a85f320
 type commit
 tag v0.22.0
 tagger Test <test@example.invalid> 1794477600 +0000
@@ -189,12 +192,12 @@ Install:
 Not a pin: @codedology/code-forge@0.21.0x stays.
 --- file docs/release-docs.json
 {
-  "through": "a8facc749d9334b88aea1e0c0fca3c23c6d7ed64",
+  "through": "12f42bc2a84c1098217018bd7eb4a0a9d4df1700",
   "tag": "v0.21.0"
 }
 --- origin refs
-refs/heads/main b6911b3b4ec69b82258125c70eb1f84b19f54367
-refs/tags/v0.21.0 349ea992e9c7b0310b7ffc30358697efacb3b118
+refs/heads/main 55ae49b370863bb9670a985aaecdd6a4dfebde08
+refs/tags/v0.21.0 9ba933710fc6c42cfd5030502bb61f86d8fab67b
 --- release temp files
 # <CASE>/tmp/code-forge-release-<RAND>/release-notes-v0.22.0.md
 ### Added
@@ -219,4 +222,9 @@ Release v0.22.0
 - A fixed bug.
 --- fake log
 <CASE>/repo npm view @example/pkg version
+<CASE>/repo go version
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/darwin-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=darwin GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/linux-x64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=amd64 GOTOOLCHAIN=local GOPROXY=off
+<CASE>/repo/native go build -trimpath -ldflags -s -w -X main.version=0.22.0 -X main.reviewWaitNodeVersion=v24.0.0 -o <CASE>/repo/native/bin/linux-arm64/code-forge-native.<PID>.tmp ./cmd/code-forge-native | CGO_ENABLED=0 GOOS=linux GOARCH=arm64 GOTOOLCHAIN=local GOPROXY=off
 <CASE>/repo npm pack --dry-run --json

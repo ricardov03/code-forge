@@ -65,11 +65,7 @@ docs/step-by-step.md: version pins: 0.21.0 → 0.21.1
     + @codedology/code-forge 0.21.1
 
 == 4. checks ==
-ok    gen-config-doc --check
-ok    gen-commands-doc --check
-check npm test …
-ok    npm test
-ok    npm run typecheck
+ok    CI for HEAD da73e7deca25a0f36f9b5f8bfec88cb6f4ac81db: completed, success (npm test, npm run typecheck, gen-config-doc and gen-commands-doc --check)
 ok    package size: 1234567 bytes (1.23 MB; limit <20 MB)
 ok    npm pack --dry-run: @example/pkg@0.21.1, 7 files
 ok    npm ls: 0 invalid, 0 missing
@@ -221,8 +217,7 @@ Release v0.21.1
 - A fixed bug.
 --- fake log
 <CASE>/repo npm view @example/pkg version
-<CASE>/repo npm test
-<CASE>/repo npm run typecheck
+<CASE>/repo gh run list --commit da73e7deca25a0f36f9b5f8bfec88cb6f4ac81db --workflow CI --limit 1 --json headSha,status,conclusion
 <CASE>/repo npm pack --dry-run --json
 <CASE>/repo npm ls --json
 <CASE>/repo claude plugin validate .

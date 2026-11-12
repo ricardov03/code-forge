@@ -511,7 +511,10 @@ The maintainer commands `npm run release`, `release:site`, `docs-block` and `cha
 separate Go program, `native/cmd/cf-release`, built from source by `scripts/cf-release.sh` on each
 call. It is not part of the code-forge binary or the npm package, and it has no hand-over: it
 does not fall back to Node. Since B574 the Node scripts it replaced are deleted and the release
-workflow runs it for the GitHub release notes. See [Releasing](releasing.md).
+workflow runs it for the GitHub release notes. Since B580 `npm run release` runs no Node on the
+laptop: it builds the four native targets with `go build` itself and accepts a green `CI` run for
+HEAD in place of the local `npm test`, `npm run typecheck` and generated-doc checks. See
+[Releasing](releasing.md).
 
 ## How we keep Go and Node the same
 

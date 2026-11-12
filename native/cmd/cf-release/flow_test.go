@@ -9,6 +9,8 @@ package main
 // Record with a checkout that still has the Node scripts (B570, 5c2510a7):
 //
 //	CF_RELEASE_NODE_GOLDENS=<repo root> go test ./cmd/cf-release -run TestNodeFlowParity -count=1
+//
+// B580 re-recorded the release goldens from Go (see golden_test.go: CF_RELEASE_UPDATE_GOLDENS).
 
 import (
 	"bytes"
@@ -107,30 +109,12 @@ func flowBothModes(args ...string) []flowStep {
 }
 
 var flowCases = []flowCase{
-	// test/release.test.mjs: B345 retry of failing files and the CI answer.
-	{name: "release-b345-tap", prep: flowB345Prep("not ok 1 - first\n  location: 'test/a.test.mjs:2:1'\nnot ok 2 - second\n" +
-		"  location: 'test/b.test.mjs:3:1'\nnot ok 3 - duplicate\n  location: 'test/a.test.mjs:4:1'\n"),
-		steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_GH": "green"}, "release", "patch", "--date", date)}},
-	{name: "release-b345-spec", prep: func(f *fixture) {
-		flowB345Prep("✖ first (1ms)\nℹ failing tests:\n\ntest at test/a.test.mjs:2:1\n✖ first (1ms)\ntest at " +
-			filepath.Join(f.repo, "test/b.test.mjs") + ":3:1\n✖ second (2ms)\ntest at test/a.test.mjs:4:1\n✖ duplicate (1ms)\n")(f)
-	}, steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_GH": "green"}, "release", "patch", "--date", date)}},
-	{name: "release-ci-empty", steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_GH": "empty"}, "release", "patch", "--date", date)}},
-	{name: "release-ci-pending", steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_GH": "pending"}, "release", "patch", "--date", date)}},
-	{name: "release-ci-foreign", steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_GH": "foreign"}, "release", "patch", "--date", date)}},
+	// B580: the release reads HEAD's CI run instead of running the Node checks.
+	{name: "release-ci-empty", steps: []flowStep{flowEnvStep(map[string]string{"FAKE_GH": "empty"}, "release", "patch", "--date", date)}},
+	{name: "release-ci-pending", steps: []flowStep{flowEnvStep(map[string]string{"FAKE_GH": "pending"}, "release", "patch", "--date", date)}},
+	{name: "release-ci-foreign", steps: []flowStep{flowEnvStep(map[string]string{"FAKE_GH": "foreign"}, "release", "patch", "--date", date)}},
 
-	// B263: named failures, the full log, docs pins and their rollback.
-	{name: "release-named-failures", prep: func(f *fixture) {
-		flowSeenDir(f)
-		var noise []string
-		for i := 1; i <= 100; i++ {
-			noise = append(noise, "noise "+strconv.Itoa(i))
-		}
-		flowCaseFile(f, "npm-test.out", strings.Join(append([]string{"✖ outside summary (1ms)", "✖ failing tests:",
-			"✖ keeps docs current (1.25ms)", "✖ keeps docs current (2ms)", "  ✖ reports nested failure (3ms)",
-			"not ok 1 - keeps docs current", "    not ok 2 - TAP only failure"}, noise...), "\n")+"\n")
-		flowCaseFile(f, "npm-test.err", "stderr sentinel\n")
-	}, steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1"}, "release", "minor", "--date", date)}},
+	// B263: docs pins and their rollback.
 	{name: "release-minor-dry-then-real", steps: []flowStep{{args: []string{"release", "minor", "--dry-run", "--date", date}},
 		{args: []string{"release", "minor", "--date", date}}}},
 	{name: "release-docs-crlf", prep: func(f *fixture) {
@@ -142,8 +126,7 @@ var flowCases = []flowCase{
 			text, _ := os.ReadFile(filepath.Join(f.repo, "CHANGELOG.md"))
 			flowCommitFile(f, "CHANGELOG.md", strings.Replace(string(text), "## [Unreleased]\n", "## [Unreleased]\n\n### Fixed\n\n- Next fix.\n", 1))
 			flowRestamp(f, "v0.22.0")
-			flowCaseFile(f, "npm-test.out", "fake npm test\n")
-		}, env: map[string]string{"FAKE_NPM_TEST_EXIT": "1"}, args: []string{"release", "patch", "--date", date}}}},
+		}, env: map[string]string{"FAKE_NPM_PACK_EXIT": "1"}, args: []string{"release", "patch", "--date", date}}}},
 
 	// Preflight refusals.
 	{name: "release-explicit-not-greater", steps: []flowStep{{args: []string{"release", "0.21.0"}}, {args: []string{"release", "0.20.9"}}}},
@@ -172,24 +155,8 @@ var flowCases = []flowCase{
 		flowCommitFile(f, "package-lock.json", flowCanonicalLock)
 		flowRestamp(f, "v0.21.0")
 		flowSeenDir(f)
-	}, steps: []flowStep{flowEnvStep(map[string]string{"FAKE_NPM_TEST_EXIT": "1"}, "release", "minor", "--date", date),
-		flowEnvStep(map[string]string{"FAKE_NPM_TYPECHECK_EXIT": "1"}, "release", "minor", "--date", date)}},
-	{name: "release-config-doc-missing", prep: func(f *fixture) {
-		flowRemove(f, filepath.Join(f.repo, "scripts/gen-config-doc.mjs"))
-		flowRemove(f, filepath.Join(f.repo, "scripts/gen-config-doc.mjs.sh"))
-		flowCommitAll(f, "no config generator")
-		flowRestamp(f, "v0.21.0")
-	}, steps: flowOne("release", "minor")},
-	{name: "release-commands-doc-stale", prep: func(f *fixture) {
-		flowCommitFile(f, "package-lock.json", flowCanonicalLock)
-		flowCommitFile(f, "scripts/gen-commands-doc.mjs.sh", "echo \"gen-commands-doc --check: command reference is stale\" >&2\nexit 1\n")
-		flowRestamp(f, "v0.21.0")
-	}, steps: flowOne("release", "minor")},
-	{name: "release-commands-doc-missing", prep: func(f *fixture) {
-		flowRemove(f, filepath.Join(f.repo, "scripts/gen-commands-doc.mjs"))
-		flowCommitAll(f, "missing command generator")
-		flowRestamp(f, "v0.21.0")
-	}, steps: flowOne("release", "minor")},
+	}, steps: []flowStep{flowEnvStep(map[string]string{"FAKE_GH": "red"}, "release", "minor", "--date", date),
+		flowEnvStep(map[string]string{"FAKE_NPM_PACK_EXIT": "1"}, "release", "minor", "--date", date)}},
 
 	// B312: the docs stamp preflight, in real and dry-run mode.
 	{name: "release-stamp-missing", prep: func(f *fixture) {
@@ -371,17 +338,6 @@ var flowCases = []flowCase{
 		}, args: []string{"release", "patch", "--date", date}}}},
 }
 
-func flowB345Prep(output string) func(f *fixture) {
-	return func(f *fixture) {
-		for _, file := range []string{"b.test.mjs", "passing.test.mjs"} {
-			f.write(filepath.Join(f.repo, "test", file), "// fixture\n")
-		}
-		flowCommitAll(f, "tests")
-		flowRestamp(f, "v0.21.0")
-		flowCaseFile(f, "npm-test.out", output)
-	}
-}
-
 func flowReadmeLatest() string {
 	return flowReadmeIntro + "Latest: 0.21.0 - see [CHANGELOG.md](CHANGELOG.md)\n" + flowReadmeLegacy
 }
@@ -441,6 +397,7 @@ func (f *fixture) leftovers() string {
 
 func TestNodeFlowParity(t *testing.T) {
 	nodeRoot := os.Getenv("CF_RELEASE_NODE_GOLDENS")
+	update := os.Getenv("CF_RELEASE_UPDATE_GOLDENS") != ""
 	for _, c := range flowCases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFixture(t, c.opts)
@@ -464,7 +421,7 @@ func TestNodeFlowParity(t *testing.T) {
 				got.WriteString(f.leftovers())
 			}
 			golden := filepath.Join("testdata", "golden", "flow", c.name+".txt")
-			if nodeRoot != "" {
+			if nodeRoot != "" || update {
 				f.mkdir(filepath.Dir(golden))
 				if err := os.WriteFile(golden, []byte(got.String()), 0o644); err != nil {
 					t.Fatal(err)

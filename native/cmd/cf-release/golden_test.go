@@ -7,6 +7,14 @@ package main
 //
 //	CF_RELEASE_NODE_GOLDENS=<that checkout's root> go test ./cmd/cf-release -run TestNodeParity -count=1
 //
+// B580 changed the release's checks (the native build runs go build in Go; a green CI run of HEAD
+// replaces the local gen-config-doc, gen-commands-doc, npm test and typecheck runs), so the goldens
+// of the cases those touch are Go's own now. Re-record every golden from the Go tool with
+//
+//	CF_RELEASE_UPDATE_GOLDENS=1 go test ./cmd/cf-release -run 'TestNodeParity|TestNodeFlowParity' -count=1
+//
+// and review the diff: only the lines B580 meant to change may move.
+//
 // Masks: the fixture folder is <CASE>, the release temp folder's random suffix is <RAND>, and the
 // npm test log's time and pid are <MS> and <PID>.
 
@@ -49,17 +57,15 @@ var parityCases = []parityCase{
 		args: []string{"release", "v1.0.0", "--date", date}},
 	{name: "release-dirty-dry", prep: dirty, args: []string{"release", "patch", "--dry-run", "--date", date}},
 	{name: "release-dirty-real", prep: dirty, args: []string{"release", "patch", "--date", date}},
-	{name: "release-ci-green", env: map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_GH": "green"},
+	{name: "release-ci-green", env: map[string]string{"FAKE_GH": "green"},
 		args: []string{"release", "patch", "--date", date}},
-	{name: "release-ci-red", env: map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_GH": "red"},
+	{name: "release-ci-red", env: map[string]string{"FAKE_GH": "red"},
 		args: []string{"release", "patch", "--date", date}},
-	{name: "release-ci-no-runs", env: map[string]string{"FAKE_NPM_TEST_EXIT": "1"},
+	{name: "release-ci-no-runs", env: map[string]string{"FAKE_GH": "fail"},
 		args: []string{"release", "patch", "--date", date}},
-	{name: "release-alone-fails", env: map[string]string{"FAKE_NPM_TEST_EXIT": "1", "FAKE_NPM_ALONE_EXIT": "1", "FAKE_GH": "green"},
-		args: []string{"release", "patch", "--date", date}},
-	{name: "release-doc-check-fails", env: map[string]string{"FAKE_DOC_FAIL": "1"},
-		args: []string{"release", "patch", "--date", date}},
-	{name: "release-typecheck-fails", env: map[string]string{"FAKE_NPM_TYPECHECK_EXIT": "2"},
+	{name: "release-native-build-fails", opts: fixtureOpts{native: true}, env: map[string]string{"FAKE_GO_BUILD_FAIL": "linux-amd64"},
+		args: []string{"release", "minor", "--date", date}},
+	{name: "release-pack-fails", env: map[string]string{"FAKE_NPM_PACK_EXIT": "1"},
 		args: []string{"release", "patch", "--date", date}},
 	{name: "release-npm-newer", env: map[string]string{"FAKE_NPM_VIEW": "0.22.0"},
 		args: []string{"release", "patch", "--date", date}},
@@ -174,6 +180,7 @@ func (f *fixture) report(r runResult) string {
 
 func TestNodeParity(t *testing.T) {
 	nodeRoot := os.Getenv("CF_RELEASE_NODE_GOLDENS")
+	update := os.Getenv("CF_RELEASE_UPDATE_GOLDENS") != ""
 	for _, c := range parityCases {
 		t.Run(c.name, func(t *testing.T) {
 			f := newFixture(t, c.opts)
@@ -192,10 +199,16 @@ func TestNodeParity(t *testing.T) {
 				return
 			}
 			want, err := os.ReadFile(golden)
-			if err != nil {
+			if err != nil && !update {
 				t.Fatalf("missing golden %s (record it from Node): %v", golden, err)
 			}
 			got := f.report(f.runGo(c))
+			if update {
+				if err := os.WriteFile(golden, []byte(got), 0o644); err != nil {
+					t.Fatal(err)
+				}
+				return
+			}
 			if got != string(want) {
 				t.Errorf("Go output differs from the Node golden %s\n%s", golden, firstDiff(string(want), got))
 			}

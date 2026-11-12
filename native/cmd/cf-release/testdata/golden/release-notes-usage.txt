@@ -1,7 +1,7 @@
 exit 2
 --- stdout
 --- stderr
-usage: node scripts/release.mjs notes <vX.Y.Z> [--out <file>]
+usage: sh scripts/cf-release.sh release notes <vX.Y.Z> [--out <file>]
 --- repo refs
 refs/heads/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
 refs/remotes/origin/main 8a15962788ece72ef64a2215357f61f94b9682f7 docs: stamp
