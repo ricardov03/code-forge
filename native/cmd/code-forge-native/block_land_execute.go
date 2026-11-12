@@ -121,7 +121,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 		defer timing()
 		return stop("block is closed, not open")
 	}
-	if !blockGrantEndSafe(record) || !blockStorageSafe(home, run, record) {
+	if !landRetryStateSafe(record, retry) || !blockStorageSafe(home, run, record) {
 		return fallback(blockStateHandoverReason(record, "land", hLandStateStorage))
 	}
 	workspace := blockString(record.Get("workspace"))
@@ -725,4 +725,18 @@ func landGateCovers(g landGreenGate, tree, cwd string, files []string) bool {
 		}
 	}
 	return true
+}
+
+// landRetryStateSafe is land's state guard. An open block's land ends the
+// block (close), so it keeps blockGrantEndSafe. A closed-block retry ends no
+// block and reads no approval: active autopilot approvals stay with the run
+// and do not send it to Node, whose land refuses every closed block
+// (B589, issue #36).
+func landRetryStateSafe(record ledger.Object, retry bool) bool {
+	if !retry {
+		return blockGrantEndSafe(record)
+	}
+	without := record.Clone()
+	without.Delete("autopilot_approvals")
+	return blockGrantEndSafe(without)
 }

@@ -260,6 +260,25 @@ func landBatch(flags map[string]any, home, run string, ids []string) int {
 			prefixes = append(prefixes, strings.TrimSpace(head))
 		}
 		step = "merge-gate"
+		// B589 (issue #36): the batch merge gate gets gates.merge_gate_links,
+		// gates.merge_gate_setup and --copy-links like a single land. They are
+		// prepared once, on the whole batch's tree; links are git-ignored, so
+		// every prefix checkout below keeps them.
+		if _, err := gitx.Run(temporary, "checkout", "--detach", "--force", prefixes[len(batch)]); err != nil {
+			return err
+		}
+		gateWorkspace := filepath.Join(temporary, prefix)
+		loaded, err := config.Load(gateWorkspace)
+		if err != nil {
+			return err
+		}
+		settings, err := config.MergeGateSettings(loaded)
+		if err != nil {
+			return err
+		}
+		if err := landPrepareMergeGate(main, temporary, gateWorkspace, settings, flags["copy-links"] == true); err != nil {
+			return err
+		}
 		suiteMs := int64(0)
 		tested := map[int]string{}
 		// B398/B407: a batch with no Node product file is go_only; its merge

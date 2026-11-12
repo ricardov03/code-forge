@@ -200,14 +200,14 @@ func origins(tree, runID, oldBase, newBase string, blocks ledger.Object, owns fu
 						ids = append(ids, id)
 					}
 				}
-				if len(ids) > 0 {
-					// Only the first-parent delta belongs to this landing. Main's
-					// changes relative to other parents retain their own origins.
-					files = nil
-					for _, file := range strings.Split(changed, "\x00") {
-						if file != "" && owns(file) {
-							files = append(files, file)
-						}
+				// Only the first-parent delta belongs to this merge, credited or
+				// not. Main's changes relative to other parents were already on
+				// the old base (B589, issue #36: a plain feature merge must not
+				// report owned files that main already had as upstream).
+				files = nil
+				for _, file := range strings.Split(changed, "\x00") {
+					if file != "" && owns(file) {
+						files = append(files, file)
 					}
 				}
 			}

@@ -4,8 +4,10 @@
 The build is pure Go, uses only the standard library, and keeps CGO off (`CGO_ENABLED=0`).
 This also avoids the macOS 26 LC_UUID linker error during local tests.
 
-`block-rebase-landed --home <dir> --run <id> --block <id> --json` implements
-`block rebase --accept-landed`; this feature requires the native binary and has no
+`internal block-rebase-landed --home <dir> --run <id> --block <id> --json` implements
+`block rebase --accept-landed` (the `internal` prefix is required; without it the
+binary hands the unknown verb to Node, which prints `unknown verb`). Users run
+`code-forge block rebase <id> --run <r> --accept-landed`; this feature requires the native binary and has no
 Node fallback. Under the block's own lock (not the run lock, B426) it checks owned upstream changes against
 closed sibling branches, rebases with each original committer identity, queues
 changed owned content using Node ticket identities, then writes a signed

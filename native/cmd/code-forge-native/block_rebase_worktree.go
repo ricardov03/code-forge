@@ -235,7 +235,7 @@ func rebaseWorktreeBlock(home, run, id string, accept []string, reason string) (
 			}
 			sort.Strings(files)
 		} else {
-			upstream, err := rebaseNodeGit(tree, nil, "log", "--format=", "--no-renames", "--name-only", "-z", "-m", base+".."+resolved, "--")
+			upstream, err := rebaseNodeGit(tree, nil, "log", "--format=", "--no-renames", "--name-only", "-z", "-m", "--first-parent", base+".."+resolved, "--")
 			if err != nil {
 				return err
 			}
