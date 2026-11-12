@@ -256,7 +256,9 @@ func TestRunStartLaunchFailures(t *testing.T) {
 		if code != 1 || out != "" || errs != want {
 			t.Fatalf("other run = %d %q %q", code, out, errs)
 		}
-		deadline := time.Now().Add(3 * time.Second)
+		// The loop ends as soon as the worker is gone; the long bound keeps a
+		// loaded machine from failing it (B539).
+		deadline := time.Now().Add(30 * time.Second)
 		for syscall.Kill(launched[0], 0) == nil && time.Now().Before(deadline) {
 			var status syscall.WaitStatus
 			_, _ = syscall.Wait4(launched[0], &status, syscall.WNOHANG, nil)

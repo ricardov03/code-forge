@@ -110,7 +110,9 @@ func TestKeyedFIFOAndFailureRelease(t *testing.T) {
 		i := i
 		wg.Add(1)
 		go func() { defer wg.Done(); _ = KeyedLock("fifo", func() error { order = append(order, i); return nil }) }()
-		deadline := time.Now().Add(time.Second)
+		// Returns as soon as the waiter enqueues; the long bound only stops a
+		// broken lock, so a loaded machine cannot fail it (B539).
+		deadline := time.Now().Add(30 * time.Second)
 		for {
 			keyed.Lock()
 			next := keyed.tails["fifo"]

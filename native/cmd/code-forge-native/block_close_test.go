@@ -26,6 +26,9 @@ import (
 type closeReviewFixture struct {
 	home, top, report, transcript string
 	parts                         []ticket.Parts
+	// closed is closed when close() returns, so the fake reviewer stops
+	// waiting at once instead of on a short wall-clock deadline (B539).
+	closed chan struct{}
 }
 
 func newCloseReviewFixture(t *testing.T, count int) *closeReviewFixture {
@@ -136,22 +139,43 @@ func (f *closeReviewFixture) result(p ticket.Parts, outcome string) error {
 // completing any, so a sequential enqueue-and-wait implementation cannot pass.
 func (f *closeReviewFixture) reviewer(outcome string) <-chan error {
 	done := make(chan error, 1)
+	f.closed = make(chan struct{})
+	closed := f.closed
 	go func() {
-		deadline := time.Now().Add(2 * time.Second)
-		for {
+		// The safety deadline only bounds a broken close; a normal run ends
+		// as soon as every ticket is queued or close returns (B539).
+		safety := time.After(30 * time.Second)
+		queued := func() (bool, error) {
 			idx := queue.Index{Dir: filepath.Join(f.top, ".code-forge/queue")}
 			if err := idx.Refresh(); err != nil {
+				return false, err
+			}
+			return len(idx.Block("r-close-fixture", "B1", nil, nil)) == len(f.parts), nil
+		}
+		for ready := false; !ready; {
+			ok, err := queued()
+			if err != nil {
 				done <- err
 				return
 			}
-			if len(idx.Block("r-close-fixture", "B1", nil, nil)) == len(f.parts) {
+			if ok {
 				break
 			}
-			if time.Now().After(deadline) {
+			select {
+			case <-closed:
+				// close returned: take one last look, then give up.
+				if ready, err = queued(); err == nil && !ready {
+					err = fmt.Errorf("reviewer saw fewer than %d tickets", len(f.parts))
+				}
+				if err != nil {
+					done <- err
+					return
+				}
+			case <-safety:
 				done <- fmt.Errorf("reviewer saw fewer than %d tickets", len(f.parts))
 				return
+			case <-time.After(10 * time.Millisecond):
 			}
-			time.Sleep(10 * time.Millisecond)
 		}
 		for _, p := range f.parts {
 			if err := f.result(p, outcome); err != nil {
@@ -168,6 +192,10 @@ func (f *closeReviewFixture) close() (int, string, string) {
 	var out, errs bytes.Buffer
 	var reason handoverReason
 	code := blockCloseStepWithReason([]string{"B1", "--run", "r-close-fixture", "--report", f.report, "--transcript", f.transcript}, &landStep{stdout: &out, stderr: &errs}, &reason)
+	if f.closed != nil {
+		close(f.closed)
+		f.closed = nil
+	}
 	return code, out.String(), errs.String() + fmt.Sprint(reason)
 }
 

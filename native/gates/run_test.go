@@ -144,7 +144,10 @@ func TestRunTimeoutWithLeakedDescendant(t *testing.T) {
 		}
 	}()
 	const timeoutMs = 500.0
-	deadline := 3 * time.Second // includes TERM grace and bounded pipe drain
+	// Includes TERM grace and bounded pipe drain. A run that waited on the
+	// leaked descendant would take its full 30 s sleep, so 10 s still tells
+	// the two apart while leaving room for a loaded machine (B539).
+	deadline := 10 * time.Second
 	done := make(chan error, 1)
 	started := time.Now()
 	go func() {

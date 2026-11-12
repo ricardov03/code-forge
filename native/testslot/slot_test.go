@@ -137,6 +137,11 @@ func waitTickets(t *testing.T, q *Queue, n int) {
 	}
 }
 
+// admitWait bounds a positive admission check. It returns as soon as the
+// entrant is admitted, so a long bound costs nothing on a normal run and keeps
+// a loaded machine from failing the check (B539).
+const admitWait = 30 * time.Second
+
 func admittedWithin(e *entrant, d time.Duration) bool {
 	select {
 	case <-e.admitted:
@@ -156,7 +161,7 @@ func TestSlotFullRunsOneAtATimeInArrivalOrder(t *testing.T) {
 	q := testQueue(t, idle)
 	rec := &recorder{holding: map[string]string{}}
 	a := start(t, q, rec, "A", Full)
-	if !admittedWithin(a, 2*time.Second) {
+	if !admittedWithin(a, admitWait) {
 		t.Fatal("A: the first full run on an idle queue must be admitted")
 	}
 	waitTickets(t, q, 1)
@@ -168,14 +173,14 @@ func TestSlotFullRunsOneAtATimeInArrivalOrder(t *testing.T) {
 		t.Fatalf("B and C must wait while A holds the machine; order %v", rec.snapshot())
 	}
 	finish(t, a)
-	if !admittedWithin(b, 2*time.Second) {
+	if !admittedWithin(b, admitWait) {
 		t.Fatal("B: the first waiter must be admitted once A releases")
 	}
 	if admittedWithin(c, 150*time.Millisecond) {
 		t.Fatalf("C must wait while B holds the machine; order %v", rec.snapshot())
 	}
 	finish(t, b)
-	if !admittedWithin(c, 2*time.Second) {
+	if !admittedWithin(c, admitWait) {
 		t.Fatal("C: must be admitted once B releases")
 	}
 	finish(t, c)
@@ -263,7 +268,7 @@ func TestSlotReusedPidWithOtherStartTimeIsDead(t *testing.T) {
 	}
 	rec := &recorder{holding: map[string]string{}}
 	w := start(t, q, rec, "W", Full)
-	if !admittedWithin(w, 2*time.Second) {
+	if !admittedWithin(w, admitWait) {
 		t.Fatal("W must be admitted: the stale holder's start time does not match")
 	}
 	if _, err := os.Stat(filepath.Join(q.Dir, "tickets", stale.ID+".json")); !os.IsNotExist(err) {
@@ -279,7 +284,7 @@ func TestSlotChangedPassesWaitingFullOnlyWhenSlotMathAllows(t *testing.T) {
 	}
 	rec := &recorder{holding: map[string]string{}}
 	h := start(t, q, rec, "H", Changed)
-	if !admittedWithin(h, 2*time.Second) {
+	if !admittedWithin(h, admitWait) {
 		t.Fatal("H: first changed run must be admitted")
 	}
 	waitTickets(t, q, 1)
@@ -290,7 +295,7 @@ func TestSlotChangedPassesWaitingFullOnlyWhenSlotMathAllows(t *testing.T) {
 	}
 	// Skip 1: a full run cannot start now (H holds) and a changed slot is free.
 	c1 := start(t, q, rec, "C1", Changed)
-	if !admittedWithin(c1, 2*time.Second) {
+	if !admittedWithin(c1, admitWait) {
 		t.Fatal("C1 must pass the waiting full run: H holds and 1 of 2 slots is free")
 	}
 	// Both slots taken: C2 must wait even though it may skip.
@@ -301,7 +306,7 @@ func TestSlotChangedPassesWaitingFullOnlyWhenSlotMathAllows(t *testing.T) {
 	}
 	finish(t, h)
 	// Skip 2: one slot free again, C1 still holds, skips 1 < N=2.
-	if !admittedWithin(c2, 2*time.Second) {
+	if !admittedWithin(c2, admitWait) {
 		t.Fatal("C2 must pass the full run as the second skip")
 	}
 	finish(t, c1)
@@ -312,14 +317,14 @@ func TestSlotChangedPassesWaitingFullOnlyWhenSlotMathAllows(t *testing.T) {
 		t.Fatalf("C3 must not pass F after N=2 skips in a row; order %v", rec.snapshot())
 	}
 	finish(t, c2)
-	if !admittedWithin(f, 2*time.Second) {
+	if !admittedWithin(f, admitWait) {
 		t.Fatal("F must be admitted once no slot is held")
 	}
 	if admittedWithin(c3, 150*time.Millisecond) {
 		t.Fatal("C3 must wait while the full run F holds the machine")
 	}
 	finish(t, f)
-	if !admittedWithin(c3, 2*time.Second) {
+	if !admittedWithin(c3, admitWait) {
 		t.Fatal("C3 must be admitted after F")
 	}
 	finish(t, c3)
@@ -342,7 +347,7 @@ func TestSlotBusyLoadHoldsWaitersOnlyWhileASlotIsHeld(t *testing.T) {
 	q := testQueue(t, busy)
 	rec := &recorder{holding: map[string]string{}}
 	h := start(t, q, rec, "H", Changed)
-	if !admittedWithin(h, time.Second) {
+	if !admittedWithin(h, admitWait) {
 		t.Fatal("a lone run on an empty queue must start at once, even on a busy machine")
 	}
 	w1 := start(t, q, rec, "W1", Changed)
@@ -353,14 +358,14 @@ func TestSlotBusyLoadHoldsWaitersOnlyWhileASlotIsHeld(t *testing.T) {
 		t.Fatal("W1 started beside H although the load is above the core count")
 	}
 	finish(t, h)
-	if !admittedWithin(w1, time.Second) {
+	if !admittedWithin(w1, admitWait) {
 		t.Fatal("W1 must start once nothing holds a slot, whatever the load")
 	}
 	if admittedWithin(w2, 200*time.Millisecond) {
 		t.Fatal("W2 started beside W1 although the load is above the core count")
 	}
 	finish(t, w1)
-	if !admittedWithin(w2, time.Second) {
+	if !admittedWithin(w2, admitWait) {
 		t.Fatal("W2 must start once W1 released")
 	}
 	finish(t, w2)
