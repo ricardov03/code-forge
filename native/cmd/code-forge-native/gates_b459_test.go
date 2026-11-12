@@ -276,11 +276,15 @@ func TestB459GatesKeptHandovers(t *testing.T) {
 		code, out, errOut := f.call(nil, "gates", "transcript-grep", "--file", "tr.txt", "--cwd", ".")
 		b459Handover(t, f, code, out, errOut, "gates-transcript-extras")
 	})
+	// A Codex exec --json log runs in Go since B466 (gatecheck reads it), with
+	// Node's output: {"ok":true,"hits":[]} and exit 0 for this input.
 	t.Run("transcript codex log", func(t *testing.T) {
 		f := b459Setup(t)
 		f.write("tr.txt", "{\"type\":\"thread.started\"}\n", 0644)
 		code, out, errOut := f.call(nil, "gates", "transcript-grep", "--file", "tr.txt")
-		b459Handover(t, f, code, out, errOut, "gates-transcript-unsupported")
+		if code != 0 || out != "{\"ok\":true,\"hits\":[]}\n" || errOut != "" {
+			t.Fatalf("exit=%d stdout=%q stderr=%q, want Node's {\"ok\":true,\"hits\":[]} exit 0", code, out, errOut)
+		}
 	})
 	for name, c := range map[string]struct {
 		record map[string]any
