@@ -206,6 +206,14 @@ const (
 	hUpgradeRelink
 	hUpgradeControlChars
 	hPlanCheckUnported
+	hDoctorFullRun
+	hDoctorConfigSchema
+	hDoctorConfigSecrets
+	hDoctorSandboxDirs
+	hDoctorKeyStore
+	hDoctorKeyRefresh
+	hDoctorLedgerShape
+	hDoctorNoHome
 )
 
 var handoverReasons = [...]string{
@@ -391,6 +399,14 @@ var handoverReasons = [...]string{
 	hUpgradeRelink:             "upgrade-relink",
 	hUpgradeControlChars:       "upgrade-control-chars",
 	hPlanCheckUnported:         "plan-check-unported",
+	hDoctorFullRun:             "doctor-full-run",
+	hDoctorConfigSchema:        "doctor-config-schema",
+	hDoctorConfigSecrets:       "doctor-config-secrets",
+	hDoctorSandboxDirs:         "doctor-sandbox-dirs",
+	hDoctorKeyStore:            "doctor-key-store",
+	hDoctorKeyRefresh:          "doctor-key-refresh",
+	hDoctorLedgerShape:         "doctor-ledger-shape",
+	hDoctorNoHome:              "doctor-no-home",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
