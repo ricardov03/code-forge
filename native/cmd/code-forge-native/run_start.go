@@ -269,12 +269,19 @@ func runLiveWorker(root string, pid float64, registeredOnly bool) (ledger.Object
 // `<binary> worker --run <id>` detached in the repository (the caller's env,
 // no stdio), until the queue announces that pid.
 func runLaunchWorker(runID, workspace, binary string) (int, string, error) {
+	return runLaunchWorkerEnv(runID, workspace, binary, nil)
+}
+
+// runLaunchWorkerEnv is launchWorker({env}): the worker gets env (nil: this
+// process's environment).
+func runLaunchWorkerEnv(runID, workspace, binary string, env []string) (int, string, error) {
 	repoRoot, err := gitx.RepoTop(workspace)
 	if err != nil {
 		return 0, "", &runFail{"not inside a git repository", false}
 	}
 	cmd := exec.Command(binary, "worker", "--run", runID)
 	cmd.Dir = repoRoot
+	cmd.Env = env
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	pid := 0
 	exited := make(chan struct{})
@@ -512,75 +519,16 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 			}
 			worker = ledger.Object{{Key: "pid", Value: workerPid}, {Key: "started_at", Value: *started}}
 		}
-		workers := []any{}
-		if worker != nil {
-			workers = []any{worker}
-		}
-		fallback := any("rules")
-		if system1, ok := cfg.Get("system1").(ledger.Object); ok && system1.Get("fallback") != nil {
-			fallback = system1.Get("fallback")
-		}
-		provider, levels := cfg.Get("provider"), cfg.Get("levels")
-		hash := config.Hash(runDeepMap(cfg))
-		record := ledger.Object{
-			{Key: "version", Value: float64(1)},
-			{Key: "run_id", Value: runID},
-			{Key: "project", Value: project},
-			{Key: "workspace", Value: ws},
-			{Key: "engine", Value: engine},
-			{Key: "provider", Value: provider},
-			{Key: "levels", Value: levels},
-			{Key: "fallback_mode", Value: fallback},
-			{Key: "started_at", Value: now.Format("2006-01-02T15:04:05.000Z")},
-			{Key: "orchestrator_pid", Value: float64(os.Getpid())},
-			{Key: "solo_pid", Value: nil},
-			{Key: "worker", Value: worker},
-			{Key: "workers", Value: workers},
-			{Key: "status", Value: "active"},
-			{Key: "blocks", Value: ledger.Object{}},
-			{Key: "orphans", Value: []any{}},
-		}
 		brief := flags.values["mode"] == "brief"
+		record := runNewRecord(cfg, runID, project, ws, engine, worker, brief, now)
+		rows := []ledger.Object{{{Key: "event", Value: "run.start"}, {Key: "engine", Value: engine}, {Key: "worker_pinned", Value: worker != nil}}}
 		if brief {
-			record.Set("mode", "brief")
+			rows = append(rows, ledger.Object{{Key: "event", Value: "run.mode"}, {Key: "mode", Value: "brief"}, {Key: "plan", Value: "none"}})
 		}
-		record.Set("config", ledger.Object{
-			{Key: "hash", Value: hash},
-			{Key: "snapshots", Value: ledger.Object{{Key: hash, Value: cfg}}},
-			{Key: "pins", Value: ledger.Object{}},
-		})
-		err = state.WithRunLock(home, runID, func() error {
-			if _, err := state.ReadRun(home, runID); err == nil {
-				return &runFail{fmt.Sprintf("run %s already exists", runID), false}
-			} else {
-				var stateErr *state.Error
-				if !errors.As(err, &stateErr) {
-					return errRunHandover
-				}
-				if stateErr.Code != "no-run" {
-					return err
-				}
-			}
-			if err := runGenerateKey(home, runID); err != nil {
-				return err
-			}
-			if err := state.SaveRun(home, record); err != nil {
-				return err
-			}
-			rows := []ledger.Object{{{Key: "event", Value: "run.start"}, {Key: "engine", Value: engine}, {Key: "worker_pinned", Value: worker != nil}}}
-			if brief {
-				rows = append(rows, ledger.Object{{Key: "event", Value: "run.mode"}, {Key: "mode", Value: "brief"}, {Key: "plan", Value: "none"}})
-			}
-			if reviewer != "" {
-				rows = append(rows, ledger.Object{{Key: "event", Value: "review.external"}, {Key: "required", Value: true}, {Key: "reviewer", Value: reviewer}})
-			}
-			for _, row := range rows {
-				if _, err := state.WriteSigned(home, runID, row); err != nil {
-					return err
-				}
-			}
-			return nil
-		})
+		if reviewer != "" {
+			rows = append(rows, ledger.Object{{Key: "event", Value: "review.external"}, {Key: "required", Value: true}, {Key: "reviewer", Value: reviewer}})
+		}
+		err = runCreateLocked(home, runID, record, rows, true)
 		if errors.Is(err, errRunHandover) {
 			return runHandover(append([]string{"start"}, runStartArgs(flags, workerPid)...), hRunShape)
 		}
@@ -620,6 +568,86 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		}
 		return 0
 	}, 0
+}
+
+// runNewRecord is startRun's run record (src/state/run.mjs): worker is the
+// pin, or nil when no worker is pinned yet.
+func runNewRecord(cfg ledger.Object, runID, project, ws string, engine, worker any, brief bool, now time.Time) ledger.Object {
+	workers := []any{}
+	if worker != nil {
+		workers = []any{worker}
+	}
+	fallback := any("rules")
+	if system1, ok := cfg.Get("system1").(ledger.Object); ok && system1.Get("fallback") != nil {
+		fallback = system1.Get("fallback")
+	}
+	provider, levels := cfg.Get("provider"), cfg.Get("levels")
+	hash := config.Hash(runDeepMap(cfg))
+	record := ledger.Object{
+		{Key: "version", Value: float64(1)},
+		{Key: "run_id", Value: runID},
+		{Key: "project", Value: project},
+		{Key: "workspace", Value: ws},
+		{Key: "engine", Value: engine},
+		{Key: "provider", Value: provider},
+		{Key: "levels", Value: levels},
+		{Key: "fallback_mode", Value: fallback},
+		{Key: "started_at", Value: now.Format("2006-01-02T15:04:05.000Z")},
+		{Key: "orchestrator_pid", Value: float64(os.Getpid())},
+		{Key: "solo_pid", Value: nil},
+		{Key: "worker", Value: worker},
+		{Key: "workers", Value: workers},
+		{Key: "status", Value: "active"},
+		{Key: "blocks", Value: ledger.Object{}},
+		{Key: "orphans", Value: []any{}},
+	}
+	if brief {
+		record.Set("mode", "brief")
+	}
+	record.Set("config", ledger.Object{
+		{Key: "hash", Value: hash},
+		{Key: "snapshots", Value: ledger.Object{{Key: hash, Value: cfg}}},
+		{Key: "pins", Value: ledger.Object{}},
+	})
+	return record
+}
+
+// runCreateLocked is startRun's part under the run lock: refuse a run that
+// exists, then the key, the record and each row signed. write false signs a
+// row without appending it (startRun with a writeRow that keeps nothing, as
+// doctor's worker probe calls it).
+func runCreateLocked(home, runID string, record ledger.Object, rows []ledger.Object, write bool) error {
+	return state.WithRunLock(home, runID, func() error {
+		if _, err := state.ReadRun(home, runID); err == nil {
+			return &runFail{fmt.Sprintf("run %s already exists", runID), false}
+		} else {
+			var stateErr *state.Error
+			if !errors.As(err, &stateErr) {
+				return errRunHandover
+			}
+			if stateErr.Code != "no-run" {
+				return err
+			}
+		}
+		if err := runGenerateKey(home, runID); err != nil {
+			return err
+		}
+		if err := state.SaveRun(home, record); err != nil {
+			return err
+		}
+		for _, row := range rows {
+			var err error
+			if write {
+				_, err = state.WriteSigned(home, runID, row)
+			} else {
+				_, err = state.SignRow(home, runID, row)
+			}
+			if err != nil {
+				return err
+			}
+		}
+		return nil
+	})
 }
 
 func runStartArgs(flags runFlags, workerPid float64) []string {
