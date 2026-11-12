@@ -207,6 +207,29 @@ it starts Node directly. It does the same if the file is missing or lacks
 execute permission. There is no extra option to set. Node must be on `PATH`,
 the list of directories where the shell looks for programs.
 
+## Check the binary: `code-forge setup`
+
+`code-forge setup` checks the binary for this system and processor. It runs
+in Node, not through the binary, so it also works when the binary is broken.
+It works offline; it downloads nothing.
+
+1. It picks `native/bin/<platform>-<arch>/code-forge-native` from the package.
+2. It checks that the file exists. If the file lost its execute permission,
+   setup restores mode 755.
+3. It runs `code-forge-native internal version` and compares the version with
+   the package version.
+
+On success it prints one line, `code-forge setup: OK Go binary <platform>-<arch> v<version> (<path>)`,
+and exits 0. On a failure it prints the problem and one `fix:` line, then exits 1.
+For an npm install the fix is `npm install -g @codedology/code-forge@<version>`.
+In a source checkout it is `node scripts/build-native.mjs --host`.
+Usage errors exit 2. The same check runs as `npm run setup` in a checkout.
+
+npm runs `node scripts/setup.mjs --postinstall` after every install. In this
+mode a failure prints a warning and exits 0, so it never stops the install.
+npm 7 and later hide install script output unless you pass `--foreground-scripts`.
+Run `code-forge setup` yourself to see the result.
+
 ## Switches
 
 ### Use Node only
@@ -402,7 +425,8 @@ clients use the run's current snapshot.
 
 | Problem | What to do |
 |---|---|
-| The binary lacks execute permission. | The entry uses Node directly. Reinstall the npm package to restore its executable file. For a source checkout, rebuild the host binary. Check the full doctor's `native` row again. |
+| Not sure the binary works. | Run `code-forge setup`. It prints `OK`, or the problem and the `fix:` command to run. |
+| The binary lacks execute permission. | The entry uses Node directly. Run `code-forge setup` to restore mode 755, or reinstall the npm package to restore its executable file. For a source checkout, rebuild the host binary. Check the full doctor's `native` row again. |
 | The binary is for the wrong platform or processor. | Install the package for this machine, or rebuild for this host. A missing matching file makes the entry use Node. If a wrong binary was put at the matching path, it can fail to start; set `CODE_FORGE_NATIVE=0` while you replace it. |
 | The Go hand-over says `node executable … not found`. | Put Node on `PATH`, or set `CODE_FORGE_NODE` to its real executable path. This failure exits 127. If Go is disabled or missing, fix `PATH`: the shell does not use `CODE_FORGE_NODE`. |
 | The doctor shows daemon `fallback`. | Check that a review worker is active and that the package versions match. With no active worker, `fallback` can be normal. Block waits and status still run in Go from the files on disk. To keep the daemon off, set `native.daemon: false` before the next worker starts. |

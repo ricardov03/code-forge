@@ -88,7 +88,7 @@ test('package.json declares exactly the specified runtime/optional/dev dependenc
 test('R14: stryker.config.mjs does not exist and no npm script runs stryker', async () => {
   const pkg = JSON.parse(await readFile(path.join(ROOT, 'package.json'), 'utf8'));
   assert.equal(existsSync(path.join(ROOT, 'stryker.config.mjs')), false);
-  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['bench:block', 'bench:review', 'bench:verbs', 'changelog', 'docs-block', 'known-fix', 'release', 'release:site', 'test', 'typecheck']);
+  assert.deepEqual(Object.keys(pkg.scripts).sort(), ['bench:block', 'bench:review', 'bench:verbs', 'changelog', 'docs-block', 'known-fix', 'postinstall', 'release', 'release:site', 'setup', 'test', 'typecheck']);
   assert.equal(pkg.scripts['bench:block'], 'node scripts/bench-block.mjs');
   assert.equal(pkg.scripts['bench:review'], 'node scripts/bench-review.mjs');
   assert.equal(pkg.scripts['bench:verbs'], 'node scripts/bench-verbs.mjs');
@@ -96,6 +96,8 @@ test('R14: stryker.config.mjs does not exist and no npm script runs stryker', as
   assert.equal(pkg.scripts['release:site'], 'node scripts/release-site.mjs');
   assert.equal(pkg.scripts.changelog, 'node scripts/changelog.mjs');
   assert.equal(pkg.scripts['known-fix'], 'node scripts/known-fix.mjs');
+  assert.equal(pkg.scripts.setup, 'node scripts/setup.mjs');
+  assert.equal(pkg.scripts.postinstall, 'node scripts/setup.mjs --postinstall');
 });
 
 test('package.json declares no peer or bundled dependencies, under either npm spelling', async () => {

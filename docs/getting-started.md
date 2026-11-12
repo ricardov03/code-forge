@@ -18,8 +18,12 @@ Install the CLI once, globally:
 
 ```bash
 npm install -g @codedology/code-forge
+code-forge setup
 code-forge version
 ```
+
+`code-forge setup` checks the Go binary for your system. It prints one `OK` line,
+or the problem and one `fix:` line with the command to run, and then exits 1.
 
 In 0.17.0, the command starts Go first and hands commands to Node when needed.
 You do not need to install Go. With no matching binary, it uses Node directly.

@@ -20,6 +20,12 @@ while [ -L "$entry" ]; do
 done
 pkg=$(CDPATH= cd -P "${entry%/*}/.." && pwd) || exit 1
 
+# `code-forge setup` checks and repairs the Go binary, so it never runs through it (B463).
+if [ "${1:-}" = setup ]; then
+  shift
+  exec node "$pkg/scripts/setup.mjs" "$@"
+fi
+
 host=$(uname -sm)
 case "$host" in
   Darwin\ *) platform=darwin ;;

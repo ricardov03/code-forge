@@ -729,11 +729,11 @@ describe('scripts/release.mjs (B23)', () => {
     assert.deepEqual(state(work), st);
   });
 
-  test('npm pack --dry-run ships neither release tool but still ships scripts/first-use.mjs', () => {
+  test('npm pack --dry-run ships neither release tool but still ships scripts/first-use.mjs and scripts/setup.mjs (B463)', () => {
     const res = spawnSync('npm', ['pack', '--dry-run', '--json'], { cwd: REPO, encoding: 'utf8', timeout: 120000 });
     assert.equal(res.status, 0, res.stderr);
     const paths = JSON.parse(res.stdout)[0].files.map((/** @type {{path: string}} */ f) => f.path);
-    assert.deepEqual(paths.filter((p) => p.startsWith('scripts/')).sort(), ['scripts/first-use.mjs', 'scripts/gen-config-doc.mjs']);
+    assert.deepEqual(paths.filter((p) => p.startsWith('scripts/')).sort(), ['scripts/first-use.mjs', 'scripts/gen-config-doc.mjs', 'scripts/setup.mjs']);
   });
 });
 
