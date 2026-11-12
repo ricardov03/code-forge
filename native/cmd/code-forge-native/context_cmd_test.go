@@ -286,15 +286,8 @@ func TestB452ContextFormerHandoverRefusals(t *testing.T) {
 		}
 		return dir
 	}
-	t.Run("no node on PATH is a clear refusal", func(t *testing.T) {
-		newContextFixture(t, map[string]any{"B1": map[string]any{}}, "version: 1\n")
-		t.Setenv("CODE_FORGE_NODE", "/nonexistent-b452-node")
-		t.Setenv("PATH", pathWith(t, ""))
-		code, _, errText := runCaptured(t, "context", "pack", "--run", "r-ctx", "--block", "B1")
-		if code != 1 || !strings.Contains(errText, "cannot be found on PATH; install Node or set CODE_FORGE_NODE; nothing was written") {
-			t.Fatalf("code=%d stderr=%q", code, errText)
-		}
-	})
+	// B572: no node anywhere is no longer a refusal; context_b572_test.go
+	// checks the pack that names the install's bin/code-forge instead.
 	// B469: a CODE_FORGE_NODE that names no executable (the /nonexistent
 	// speed-proof setting) falls back to node on PATH, as before B452.
 	t.Run("an unresolvable CODE_FORGE_NODE uses node on PATH", func(t *testing.T) {

@@ -1,0 +1,13 @@
+# code-forge context pack
+## block
+run: r-ctx
+block: B1
+level: L1
+owned files:
+- a.go
+## code-forge
+run code-forge verbs with exactly: <BASE>/nodebin/node <BASE>/pkg/bin/code-forge.mjs
+version: 9.8.7
+do not use another code-forge from PATH
+## commands (never run by code-forge)
+test: go test

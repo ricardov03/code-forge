@@ -218,9 +218,17 @@ func contextPack(args []string, stderr io.Writer) int {
 	// B469: a CODE_FORGE_NODE that resolves names the header's node; one that
 	// does not (e.g. /nonexistent) is skipped for node on PATH, as before B452.
 	// Go never starts it, and Node's own pack always has an execPath.
+	// B572: the header line is the command a coder runs code-forge verbs
+	// with (Node's argv of process.execPath and bin/code-forge.mjs). With no
+	// node at all, that command cannot work, so the pack names this install's
+	// own launcher bin/code-forge (npm's "bin" entry; it runs this Go binary
+	// and needs no node for a verb Go serves) instead of refusing.
 	node, err := contextNode()
 	if err != nil {
-		return refuse("the node executable " + statusQuote("node") + " for the pack header cannot be found on PATH; install Node or set CODE_FORGE_NODE")
+		node = ""
+		if bin, err = filepath.EvalSymlinks(filepath.Join(filepath.Dir(bin), "code-forge")); err != nil {
+			return refuse("this install's bin/code-forge cannot be found (" + contextpack.Errno(err) + "); reinstall code-forge")
+		}
 	}
 	metadata, err := os.ReadFile(filepath.Join(filepath.Dir(bin), "..", "package.json"))
 	var info struct {

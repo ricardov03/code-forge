@@ -23,8 +23,9 @@ import (
 // B342: `code-forge cloud-coder --run <r> --block <id>` hands a block to a
 // cloud coder through the coder.cloud submit/fetch argv templates, then lands
 // the returned patch in the block worktree as one commit. Reviews and spend go
-// through the existing Node verbs (review-file, ledger add coder), started the
-// same way as a handover (CODE_FORGE_NODE and the package's bin/code-forge.mjs).
+// through the review-file and ledger add coder verbs of this same Go binary
+// (B572; before, the Node router), so no node is needed; a case Go hands over
+// still reaches Node through that child's own handover.
 func init() { routes["cloud-coder"] = runCloudCoder }
 
 const cloudCoderUsage = "usage: code-forge cloud-coder --run <r> --block <id>\n"
@@ -228,7 +229,7 @@ func cloudCoder(run, block string) int {
 		if _, err := os.Lstat(filepath.Join(tree, file)); err != nil {
 			continue // a deleted file has nothing to review
 		}
-		stdout, code := cloudNode(tree, "review-file", file, "--block", block, "--run", run)
+		stdout, code := cloudSelfVerb(tree, "review-file", file, "--block", block, "--run", run)
 		row := ledger.Object{{Key: "file", Value: file}, {Key: "exit", Value: float64(code)}}
 		if result, err := ledger.DecodeObject([]byte(strings.TrimSpace(stdout))); err == nil {
 			if ticket, ok := result.Get("ticket").(string); ok {
@@ -242,7 +243,7 @@ func cloudCoder(run, block string) int {
 	}
 	result := ledger.Object{{Key: "block", Value: block}, {Key: "status", Value: "landed"}, {Key: "task", Value: task}, {Key: "commit", Value: strings.TrimSpace(head)}, {Key: "files", Value: stringsAny(files)}, {Key: "reviews", Value: reviews}, {Key: "elapsed_ms", Value: float64(elapsed.Milliseconds())}}
 	if usd != "" {
-		_, code := cloudNode(tree, "ledger", "add", "coder", "--run", run, "--block", block, "--usd", usd, "--note", "cloud coder task "+task)
+		_, code := cloudSelfVerb(tree, "ledger", "add", "coder", "--run", run, "--block", block, "--usd", usd, "--note", "cloud coder task "+task)
 		result.Set("usd", usd)
 		result.Set("spend_recorded", code == 0)
 		if code != 0 {
@@ -332,22 +333,21 @@ func cloudPatchFiles(tree, patch string) ([]string, error) {
 	return files, nil
 }
 
-// cloudNode runs a Node-only verb the way a handover does, and returns its
-// stdout and exit code (-1 when it could not start).
-func cloudNode(dir string, args ...string) (string, int) {
-	node := os.Getenv("CODE_FORGE_NODE")
-	if node == "" {
-		node = "node"
-	}
-	executable, err := os.Executable()
+// cloudSelf locates this Go binary; tests point it at a built binary or a fake.
+var cloudSelf = os.Executable
+
+// cloudSelfVerb runs one verb (review-file, ledger add coder) as a child of
+// this Go binary in dir (B572), and returns its stdout and exit code (-1 when
+// it could not start). Its stderr goes to ours, as the Node child's did.
+func cloudSelfVerb(dir string, args ...string) (string, int) {
+	executable, err := cloudSelf()
 	if err == nil {
 		executable, err = filepath.EvalSymlinks(executable)
 	}
 	if err != nil {
 		return "", -1
 	}
-	script := filepath.Join(filepath.Dir(executable), "..", "..", "..", "bin", "code-forge.mjs")
-	cmd := exec.Command(node, append([]string{script}, args...)...)
+	cmd := exec.Command(executable, args...)
 	cmd.Dir = dir
 	var stdout bytes.Buffer
 	cmd.Stdout = &stdout

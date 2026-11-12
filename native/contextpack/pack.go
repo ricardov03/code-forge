@@ -467,7 +467,13 @@ func Assemble(root, run, id string, entry ledger.Object, cfg map[string]any, nod
 		}
 		header = append(header, "worktree: "+str(tree.Get("path")), "branch: "+branch)
 	}
-	header = append(header, "## code-forge", "run code-forge verbs with exactly: "+argvText([]string{node, bin}), "version: "+version, "do not use another code-forge from PATH")
+	// B572: an empty node means no node exists; bin is then the install's
+	// bin/code-forge launcher, run on its own.
+	command := []string{node, bin}
+	if node == "" {
+		command = []string{bin}
+	}
+	header = append(header, "## code-forge", "run code-forge verbs with exactly: "+argvText(command), "version: "+version, "do not use another code-forge from PATH")
 	if s != nil {
 		header = append(header, "## commands (never run by code-forge)")
 		if len(s.commands) == 0 {

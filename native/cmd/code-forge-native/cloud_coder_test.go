@@ -90,9 +90,13 @@ func newCloudFixture(t *testing.T, edits map[string]string, fetchBody string, cl
 	git(tree, "reset", "-q", "--hard", "HEAD")
 	must(os.WriteFile(filepath.Join(home, "patch-src"), []byte(patch), 0600))
 
-	// Node-only verbs (review-file, ledger add) go to this fake node.
-	node := script("node.sh", `shift; printf '%s\n' "$*" >> "$HOME/node-calls"; if [ "$1" = review-file ]; then echo '{"ticket":"t-'"$2"'","status":"queued"}'; fi`)
-	t.Setenv("CODE_FORGE_NODE", node)
+	// review-file and ledger add coder run as children of this Go binary
+	// (B572); here a fake binary records them. No node is ever started.
+	self := script("self.sh", `printf '%s\n' "$*" >> "$HOME/self-calls"; if [ "$1" = review-file ]; then echo '{"ticket":"t-'"$2"'","status":"queued"}'; fi`)
+	previous := cloudSelf
+	cloudSelf = func() (string, error) { return self, nil }
+	t.Cleanup(func() { cloudSelf = previous })
+	t.Setenv("CODE_FORGE_NODE", "/nonexistent-b572-node")
 
 	entry := ledger.Object{{Key: "status", Value: "open"}, {Key: "owned_files", Value: []any{"src/owned.txt", "src/new.txt"}}, {Key: "base_sha", Value: base}, {Key: "base_branch", Value: "main"}, {Key: "brief", Value: ledger.Object{{Key: "path", Value: "plans/b1.md"}}},
 		{Key: "worktree", Value: ledger.Object{{Key: "path", Value: tree}, {Key: "branch", Value: "block-B1"}, {Key: "base_sha", Value: base}}}}
@@ -179,8 +183,8 @@ func TestCloudCoderOwnedPatchLandsAsOneCommit(t *testing.T) {
 		"review-file src/owned.txt --block B1 --run r-cloud-unit",
 		"ledger add coder --run r-cloud-unit --block B1 --usd 0.42 --note cloud coder task task-42",
 	}
-	if got := readLines(t, filepath.Join(f.home, "node-calls")); strings.Join(got, "\n") != strings.Join(want, "\n") {
-		t.Errorf("node calls =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
+	if got := readLines(t, filepath.Join(f.home, "self-calls")); strings.Join(got, "\n") != strings.Join(want, "\n") {
+		t.Errorf("self calls =\n%s\nwant\n%s", strings.Join(got, "\n"), strings.Join(want, "\n"))
 	}
 	reviews, _ := out.Get("reviews").([]any)
 	if len(reviews) != 2 {
@@ -211,8 +215,8 @@ func TestCloudCoderRefusesUnownedFile(t *testing.T) {
 	if data, _ := os.ReadFile(filepath.Join(f.tree, "src/owned.txt")); string(data) != "old\n" {
 		t.Errorf("src/owned.txt = %q; want it untouched", data)
 	}
-	if got := readLines(t, filepath.Join(f.home, "node-calls")); len(got) != 0 {
-		t.Errorf("node calls = %q; want none", got)
+	if got := readLines(t, filepath.Join(f.home, "self-calls")); len(got) != 0 {
+		t.Errorf("self calls = %q; want none", got)
 	}
 }
 
@@ -258,7 +262,74 @@ func TestCloudCoderFetchTimeoutExitsOne(t *testing.T) {
 	if got := f.git(f.tree, "rev-parse", "HEAD"); got != f.base {
 		t.Errorf("HEAD moved to %s; want base %s", got, f.base)
 	}
-	if got := readLines(t, filepath.Join(f.home, "node-calls")); len(got) != 0 {
-		t.Errorf("node calls = %q; want none", got)
+	if got := readLines(t, filepath.Join(f.home, "self-calls")); len(got) != 0 {
+		t.Errorf("self calls = %q; want none", got)
+	}
+}
+
+// b572NodelessPath is a PATH of the system tool dirs only (git and the fake
+// provider scripts' sh tools); the test fails when node is found on it.
+func b572NodelessPath(t *testing.T) string {
+	t.Helper()
+	path := "/usr/bin:/bin"
+	t.Setenv("PATH", path)
+	if p, err := exec.LookPath("node"); err == nil {
+		t.Fatalf("node %s is on the test PATH %s", p, path)
+	}
+	return path
+}
+
+// B572: with no node anywhere (PATH without node, CODE_FORGE_NODE naming no
+// file), the cloud coder's review-file and ledger add coder run in the real Go
+// binary: each file gets a queued ticket and the coder spend is a signed row.
+func TestB572CloudCoderReviewAndSpendRunInGoWithoutNode(t *testing.T) {
+	binary := b511BuildNative(t)
+	f := newCloudFixture(t, map[string]string{"src/owned.txt": "new\n", "src/new.txt": "added\n"},
+		`cp "$(cat "$HOME/patch-src")" "$2"; echo usd=0.42`,
+		map[string]any{"timeout_s": 20, "poll_s": 0.05})
+	cloudSelf = func() (string, error) { return binary, nil }
+	if err := os.WriteFile(filepath.Join(f.home, ".code-forge", "runs", "r-cloud-unit.key"), []byte(strings.Repeat("k", 32)), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	// A live worker for this run (this test process, a fresh heartbeat), so
+	// review-file queues a ticket.
+	stamp := time.Now().UTC().Format("2006-01-02T15:04:05.000Z")
+	pid := strconv.Itoa(os.Getpid())
+	workers := filepath.Join(f.repo, ".code-forge", "workers")
+	if err := os.MkdirAll(workers, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.WriteFile(filepath.Join(workers, pid+"-unknown.json"), []byte(`{"pid":`+pid+`,"start_time":"unknown","run":"r-cloud-unit","started_at":"`+stamp+`","heartbeat_at":"`+stamp+`"}`), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	t.Setenv("PATH", b572NodelessPath(t))
+	t.Setenv("CODE_FORGE_NODE", "/nonexistent-b572-node")
+	code, out := runCloud(t)
+	if code != 0 || out.Get("status") != "landed" || out.Get("spend_recorded") != true {
+		t.Fatalf("exit=%d out=%v; want exit 0, landed, spend recorded", code, out)
+	}
+	reviews, _ := out.Get("reviews").([]any)
+	if len(reviews) != 2 {
+		t.Fatalf("reviews = %v; want 2", reviews)
+	}
+	for _, r := range reviews {
+		row, _ := r.(ledger.Object)
+		ticket, _ := row.Get("ticket").(string)
+		if row.Get("exit") != float64(0) || !reviewWaitTicket.MatchString(ticket) {
+			t.Errorf("review row %v; want exit 0 and a queued ticket", row)
+		}
+	}
+	var data []byte
+	_ = filepath.WalkDir(filepath.Join(f.home, ".code-forge"), func(p string, d os.DirEntry, err error) error {
+		if err == nil && !d.IsDir() && strings.HasSuffix(p, ".jsonl") {
+			text, _ := os.ReadFile(p)
+			data = append(data, text...)
+		}
+		return nil
+	})
+	for _, want := range []string{`"role":"coder"`, `"block":"B1"`, `"usd":0.42`, `"note":"cloud coder task task-42"`, `"mac":"`} {
+		if !strings.Contains(string(data), want) {
+			t.Errorf("ledger rows hold no signed coder spend row with %s:\n%s", want, data)
+		}
 	}
 }

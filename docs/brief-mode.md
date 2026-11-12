@@ -203,7 +203,8 @@ the path, token estimate and hash.
 The pack holds the block header (run, block, level, owned files, test files, worktree), a
 `## code-forge` section, the project's commands, the built-in proof rule, `AGENTS.md` and
 `docs/lessons.md`. The `## code-forge` section names the exact Node executable, absolute
-code-forge bin path and version of the install that built the pack. Use that exact command for
+code-forge bin path and version of the install that built the pack (with no Node at all, it names
+the install's `bin/code-forge` launcher alone). Use that exact command for
 code-forge verbs; do not use another code-forge from PATH. Without a
 `context` key, it holds the block header, code-forge section and proof rule, with a 300-line cap and no
 commands, rules or lessons section. A bad `context` value still refuses the pack. It lives in the run's temp folder
