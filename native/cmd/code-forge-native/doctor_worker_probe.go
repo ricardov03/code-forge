@@ -13,9 +13,9 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/config"
-	"github.com/ricardov03/code-forge/native/filelock"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -76,11 +76,39 @@ func dwpCode(err error) string {
 			return "key-exists"
 		}
 	case errors.As(err, &errno):
-		if name := blockErrno(errno); name != "UNKNOWN" {
-			return name
+		for _, e := range dwpErrnoNames {
+			if e.no == errno {
+				return e.name
+			}
 		}
+		return "UNKNOWN" // Node's uvUnmappedError
 	}
 	return "error"
+}
+
+// dwpErrnoNames is libuv's err.code (uv_err_name) for each errno libuv maps
+// on darwin and linux (B532); Node names any other errno UNKNOWN. The first
+// match wins where two names share a number (ENOTSUP/EOPNOTSUPP on linux).
+var dwpErrnoNames = []struct {
+	no   syscall.Errno
+	name string
+}{
+	{syscall.E2BIG, "E2BIG"}, {syscall.EACCES, "EACCES"}, {syscall.EADDRINUSE, "EADDRINUSE"}, {syscall.EADDRNOTAVAIL, "EADDRNOTAVAIL"},
+	{syscall.EAFNOSUPPORT, "EAFNOSUPPORT"}, {syscall.EAGAIN, "EAGAIN"}, {syscall.EALREADY, "EALREADY"}, {syscall.EBADF, "EBADF"},
+	{syscall.EBUSY, "EBUSY"}, {syscall.ECANCELED, "ECANCELED"}, {syscall.ECONNABORTED, "ECONNABORTED"},
+	{syscall.ECONNREFUSED, "ECONNREFUSED"}, {syscall.ECONNRESET, "ECONNRESET"}, {syscall.EDESTADDRREQ, "EDESTADDRREQ"},
+	{syscall.EEXIST, "EEXIST"}, {syscall.EFAULT, "EFAULT"}, {syscall.EFBIG, "EFBIG"}, {syscall.EHOSTUNREACH, "EHOSTUNREACH"},
+	{syscall.EILSEQ, "EILSEQ"}, {syscall.EINTR, "EINTR"}, {syscall.EINVAL, "EINVAL"}, {syscall.EIO, "EIO"},
+	{syscall.EISCONN, "EISCONN"}, {syscall.EISDIR, "EISDIR"}, {syscall.ELOOP, "ELOOP"}, {syscall.EMFILE, "EMFILE"},
+	{syscall.EMLINK, "EMLINK"}, {syscall.EMSGSIZE, "EMSGSIZE"}, {syscall.ENAMETOOLONG, "ENAMETOOLONG"}, {syscall.ENETDOWN, "ENETDOWN"},
+	{syscall.ENETUNREACH, "ENETUNREACH"}, {syscall.ENFILE, "ENFILE"}, {syscall.ENOBUFS, "ENOBUFS"}, {syscall.ENODEV, "ENODEV"},
+	{syscall.ENOENT, "ENOENT"}, {syscall.ENOMEM, "ENOMEM"}, {syscall.ENOPROTOOPT, "ENOPROTOOPT"}, {syscall.ENOSPC, "ENOSPC"},
+	{syscall.ENOSYS, "ENOSYS"}, {syscall.ENOTCONN, "ENOTCONN"}, {syscall.ENOTDIR, "ENOTDIR"}, {syscall.ENOTEMPTY, "ENOTEMPTY"},
+	{syscall.ENOTSOCK, "ENOTSOCK"}, {syscall.ENOTSUP, "ENOTSUP"}, {syscall.ENOTTY, "ENOTTY"}, {syscall.ENXIO, "ENXIO"},
+	{syscall.EOVERFLOW, "EOVERFLOW"}, {syscall.EPERM, "EPERM"}, {syscall.EPIPE, "EPIPE"}, {syscall.EPROTO, "EPROTO"},
+	{syscall.EPROTONOSUPPORT, "EPROTONOSUPPORT"}, {syscall.EPROTOTYPE, "EPROTOTYPE"}, {syscall.ERANGE, "ERANGE"}, {syscall.EROFS, "EROFS"},
+	{syscall.ESPIPE, "ESPIPE"}, {syscall.ESRCH, "ESRCH"}, {syscall.ETIMEDOUT, "ETIMEDOUT"}, {syscall.ETXTBSY, "ETXTBSY"},
+	{syscall.EXDEV, "EXDEV"}, {syscall.ESHUTDOWN, "ESHUTDOWN"}, {syscall.EHOSTDOWN, "EHOSTDOWN"}, {syscall.ENODATA, "ENODATA"},
 }
 
 func dwpEnvGet(env []string, name string) (string, bool) {
@@ -141,22 +169,6 @@ func dwpCopyFile(src, dst string) error {
 		return err
 	}
 	return os.Chmod(dst, st.Mode().Perm())
-}
-
-// dwpRegisterPid is reaper.mjs registerPid, with its error (Node throws).
-func dwpRegisterPid(dir string, pid int, argv0 string) error {
-	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return err
-	}
-	start := "unknown"
-	if t := filelock.ProcessStartTime(pid); t != nil {
-		start = *t
-	}
-	data, err := ledger.Stringify(ledger.Object{{Key: "pid", Value: float64(pid)}, {Key: "start_time", Value: start}, {Key: "argv0", Value: argv0}}, false)
-	if err != nil {
-		return err
-	}
-	return os.WriteFile(filepath.Join(dir, strconv.Itoa(pid)+".json"), append(data, '\n'), 0o600)
 }
 
 func dwpWaitGone(pid int, within time.Duration) bool {
@@ -239,8 +251,10 @@ func dwpStartRun(c dwpCtx, repo string) error {
 }
 
 // doctorWorkerProbe is probeWorkerAndSigner: the `signer key` row, the
-// `worker` row and the `signer` line. ok false means Node runs the probe;
-// that is decided before anything is written or started.
+// `worker` row and the `signer` line. ok false means Node runs the probe:
+// decided before anything is written or started, except a worker registry
+// Go cannot judge after the launch (B532), where the probe first stops its
+// worker and removes everything it made.
 func doctorWorkerProbe(c dwpCtx) ([]doctorRow, bool) {
 	if c.home == "" || !filepath.IsAbs(c.home) || !runIDPattern.MatchString(c.runID) || c.cfg.Ordered == nil {
 		return nil, false
@@ -337,17 +351,23 @@ func doctorWorkerProbe(c dwpCtx) ([]doctorRow, bool) {
 		}
 		pid = launched
 		pids := filepath.Join(c.runRootDir, "pids")
-		if err := dwpRegisterPid(pids, pid, "code-forge worker"); err != nil { // a killed doctor's worker is reaped by the next sweep
+		if err := session.RegisterPid(pids, pid, "code-forge worker"); err != nil { // a killed doctor's worker is reaped by the next sweep
 			return err
 		}
-		live, ok := runLiveWorker(repoRoot, 0, false)
-		announced := ok && live != nil && live.Get("pid") == float64(pid)
+		live, err := dwpLiveWorker(repoRoot)
+		if err != nil {
+			return err
+		}
+		announced := live != nil && live.Get("pid") == float64(pid)
 		clean := dwpStopWorker(pid)
 		_ = os.Remove(filepath.Join(pids, strconv.Itoa(pid)+".json"))
 		workerPid := pid
 		pid = 0
-		after, ok := runLiveWorker(repoRoot, 0, false)
-		gone := ok && after == nil
+		after, err := dwpLiveWorker(repoRoot)
+		if err != nil {
+			return err
+		}
+		gone := after == nil
 		if announced && clean && gone {
 			rows = append(rows, doctorRow{"worker", "OK", "worker", fmt.Sprintf("pid %d started, announced itself and stopped on SIGTERM", workerPid)})
 		} else {
@@ -355,7 +375,8 @@ func doctorWorkerProbe(c dwpCtx) ([]doctorRow, bool) {
 		}
 		return nil
 	}()
-	if err != nil {
+	undecided := errors.Is(err, errDwpUndecided)
+	if err != nil && !undecided {
 		code := dwpCode(err)
 		if !signerKey {
 			rows = append(rows, doctorRow{"signer-key", "FAIL", "signer key", "run key could not be generated (" + code + ")"})
@@ -372,5 +393,26 @@ func doctorWorkerProbe(c dwpCtx) ([]doctorRow, bool) {
 		_ = os.RemoveAll(filepath.Join(base, c.runID)) // the worker's own run root
 	}
 	_ = os.RemoveAll(repo)
+	if undecided {
+		return nil, false
+	}
 	return append(rows, dwpSignerRow), true
+}
+
+// errDwpUndecided: a worker registry entry Go cannot judge the way Node's
+// liveWorker reads it (B532). The probe cleans up and the run hands over.
+var errDwpUndecided = errors.New("worker registry undecided")
+
+// dwpLiveWorker is liveWorker(repoRoot): the error is the one Node throws
+// (the workers folder cannot be listed); errDwpUndecided when Go cannot
+// judge an entry.
+func dwpLiveWorker(repoRoot string) (ledger.Object, error) {
+	if _, err := os.ReadDir(filepath.Join(repoRoot, ".code-forge", "workers")); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return nil, err
+	}
+	w, ok := runLiveWorker(repoRoot, 0, false)
+	if !ok {
+		return nil, errDwpUndecided
+	}
+	return w, nil
 }

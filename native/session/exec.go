@@ -98,10 +98,11 @@ func childPath(env []string) (string, bool) {
 	return "", false
 }
 
-// registerPid is reaper.mjs registerPid: {"pid","start_time","argv0"}\n, 0600.
-func registerPid(dir string, pid int, argv0 string) bool {
+// RegisterPid is reaper.mjs registerPid: <dir>/<pid>.json (0600) with the
+// pid, its start time and argv0; the error is what Node throws.
+func RegisterPid(dir string, pid int, argv0 string) error {
 	if err := os.MkdirAll(dir, 0o700); err != nil {
-		return false
+		return err
 	}
 	start := "unknown"
 	if t := filelock.ProcessStartTime(pid); t != nil {
@@ -109,10 +110,13 @@ func registerPid(dir string, pid int, argv0 string) bool {
 	}
 	data, err := ledger.Stringify(ledger.Object{{Key: "pid", Value: float64(pid)}, {Key: "start_time", Value: start}, {Key: "argv0", Value: argv0}}, false)
 	if err != nil {
-		return false
+		return err
 	}
-	return os.WriteFile(filepath.Join(dir, strconv.Itoa(pid)+".json"), append(data, '\n'), 0o600) == nil
+	return os.WriteFile(filepath.Join(dir, strconv.Itoa(pid)+".json"), append(data, '\n'), 0o600)
 }
+
+// registerPid is RegisterPid for exec, which ignores the error.
+func registerPid(dir string, pid int, argv0 string) bool { return RegisterPid(dir, pid, argv0) == nil }
 
 func run(o execOpts) execResult {
 	name := o.Argv[0]

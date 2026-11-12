@@ -296,8 +296,35 @@ var (
 // keychain chain hands over. The returned resolver runs the side effects and
 // gives the row with every value Node registers for redaction.
 func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctorRow, []string), handoverReason) {
-	fixed := func(row doctorRow, secrets ...string) func() (doctorRow, []string) {
-		return func() (doctorRow, []string) { return row, secrets }
+	resolve, _, reason := doctorKeysResolve(cfg, home, now)
+	if reason != 0 {
+		return nil, reason
+	}
+	return func() (doctorRow, []string) { r := resolve(); return r.row, r.secrets }, 0
+}
+
+// doctorKeyResult is checkKeys' answer: the row, the values Node registers
+// for redaction and the key (hasKey false is Node's null key).
+type doctorKeyResult struct {
+	row     doctorRow
+	secrets []string
+	key     string
+	hasKey  bool
+}
+
+// doctorKeyPlan is what is known of the key before the resolver runs (B525):
+// maybe false means the key is null whatever happens; empty means it is the
+// empty string (Node's askJev throws on it).
+type doctorKeyPlan struct{ maybe, empty bool }
+
+// doctorKeysResolve is doctorKeysRow with the key itself.
+func doctorKeysResolve(cfg map[string]any, home string, now float64) (func() doctorKeyResult, doctorKeyPlan, handoverReason) {
+	none := doctorKeyPlan{}
+	fixed := func(row doctorRow, secrets ...string) func() doctorKeyResult {
+		return func() doctorKeyResult { return doctorKeyResult{row: row, secrets: secrets} }
+	}
+	keyed := func(row doctorRow, key string) (func() doctorKeyResult, doctorKeyPlan, handoverReason) {
+		return func() doctorKeyResult { return doctorKeyResult{row, []string{key}, key, true} }, doctorKeyPlan{true, key == ""}, 0
 	}
 	var ref string
 	hasRef := false
@@ -327,12 +354,12 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 	if hasRef && strings.HasPrefix(ref, "keychain:") {
 		storeName = ref[9:]
 		if !keyNamePattern.MatchString(storeName) {
-			return fixed(failed), 0
+			return fixed(failed), none, 0
 		}
 	}
 	if hasRef && strings.HasPrefix(ref, "op://") {
 		if !opRefPattern.MatchString(ref) {
-			return fixed(failed), 0
+			return fixed(failed), none, 0
 		}
 		opRef = ref
 	}
@@ -341,10 +368,10 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 		suffix = fmt.Sprintf(" (cache %d h)", int(hours))
 	}
 	if value := os.Getenv(envName); envName != "" && value != "" {
-		return fixed(doctorRow{"keys", "OK", "keys", "jev key from env, no expiry" + suffix}, value), 0
+		return keyed(doctorRow{"keys", "OK", "keys", "jev key from env, no expiry" + suffix}, value)
 	}
 	if os.Getenv("CODE_FORGE_KEY_BACKEND") != "file" {
-		return nil, hDoctorKeyStore
+		return nil, none, hDoctorKeyStore
 	}
 	okRow := func(source string, exp *float64) doctorRow {
 		if exp != nil && *exp-now < 3_600_000 {
@@ -365,7 +392,7 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 	switch {
 	case err == nil:
 		if !utf8.Valid(raw) {
-			return nil, hDoctorKeyStore
+			return nil, none, hDoctorKeyStore
 		}
 		text := strings.TrimSuffix(string(raw), "\n")
 		if text == "" {
@@ -373,14 +400,14 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 		}
 		value, exp, ok := decodeKeyEntry(text)
 		if !ok {
-			return nil, hDoctorKeyStore
+			return nil, none, hDoctorKeyStore
 		}
 		secrets = append(secrets, value)
 		switch {
 		case exp != nil && *exp <= now:
 			// dropped as expired: the file goes, then its index row
 			if !keyIndexReadable(home, storeName, false) {
-				return nil, hDoctorKeyRefresh
+				return nil, none, hDoctorKeyRefresh
 			}
 			before = func() {
 				if err := os.Remove(keyFile); err != nil && !errors.Is(err, os.ErrNotExist) {
@@ -393,9 +420,9 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 		case exp != nil && *exp > latest:
 			// D2: the shorter expiry applies now; the index row moves only when it exists
 			if !keyIndexReadable(home, storeName, true) {
-				return nil, hDoctorKeyRefresh
+				return nil, none, hDoctorKeyRefresh
 			}
-			return func() (doctorRow, []string) {
+			return func() doctorKeyResult {
 				if writePrivateFile(keyFile, encodeKeyEntry(value, latest)) == nil {
 					_ = updateKeyIndex(home, func(index *ledger.Object) {
 						if row, ok := index.Get(storeName).(ledger.Object); ok {
@@ -406,10 +433,10 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 						}
 					})
 				}
-				return okRow("file", &latest), secrets
-			}, 0
+				return doctorKeyResult{okRow("file", &latest), secrets, value, true}
+			}, doctorKeyPlan{true, value == ""}, 0
 		default:
-			return fixed(okRow("file", exp), value), 0
+			return keyed(okRow("file", exp), value)
 		}
 	case errors.Is(err, os.ErrNotExist):
 	default:
@@ -417,24 +444,24 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 	}
 	if opRef == "" {
 		if before == nil {
-			return fixed(doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets...), 0
+			return fixed(doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets...), none, 0
 		}
-		return func() (doctorRow, []string) {
+		return func() doctorKeyResult {
 			before()
-			return doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets
-		}, 0
+			return doctorKeyResult{row: doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets: secrets}
+		}, none, 0
 	}
 	if before == nil && !keyIndexReadable(home, storeName, false) {
-		return nil, hDoctorKeyRefresh
+		return nil, none, hDoctorKeyRefresh
 	}
-	return func() (doctorRow, []string) {
+	return func() doctorKeyResult {
 		if before != nil {
 			before()
 		}
 		value, kind := opRead(opRef)
 		if kind != "" {
 			reasons = append(reasons, opMessages[kind])
-			return doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets
+			return doctorKeyResult{row: doctorRow{"keys", "WARN", "keys", "jev key not resolved" + keyReasons(reasons) + "; System 1 falls back to rules"}, secrets: secrets}
 		}
 		secrets = append(secrets, value)
 		exp := latest
@@ -443,8 +470,8 @@ func doctorKeysRow(cfg map[string]any, home string, now float64) (func() (doctor
 				index.Set(storeName, ledger.Object{{Key: "source", Value: "op"}, {Key: "backend", Value: "file"}, {Key: "exp", Value: exp}, {Key: "ref", Value: opRef}})
 			})
 		}
-		return okRow("op", &exp), secrets
-	}, 0
+		return doctorKeyResult{okRow("op", &exp), secrets, value, true}
+	}, doctorKeyPlan{maybe: true}, 0 // opRead never answers ""
 }
 
 // decodeKeyEntry is decodeEntry: our {v, exp} JSON, else the raw text with no
