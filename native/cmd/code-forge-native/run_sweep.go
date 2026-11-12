@@ -234,7 +234,9 @@ func runStartTime(pid float64) *string {
 }
 
 var (
-	runWorkerCommand = regexp.MustCompile(`^(?:\S*/)?node(?:js)?\s+(?:\S*/)?code-forge\.mjs\s+worker\s+--run(?:=|\s+)([a-z0-9][a-z0-9-]{0,63})(?:\s|$)`)
+	// Node's worker, and (B511) the Go worker run start launches:
+	// `<dir>/code-forge-native worker --run <id>`.
+	runWorkerCommand = regexp.MustCompile(`^(?:(?:\S*/)?node(?:js)?\s+(?:\S*/)?code-forge\.mjs|(?:\S*/)?code-forge-native)\s+worker\s+--run(?:=|\s+)([a-z0-9][a-z0-9-]{0,63})(?:\s|$)`)
 	runOwnerPid      = regexp.MustCompile(`^[1-9]\d*$`)
 )
 

@@ -17,18 +17,19 @@ import (
 	"github.com/ricardov03/code-forge/native/config"
 )
 
-// fakeNodeScript stands in for `node bin/code-forge.mjs worker --run <id>`: it
-// announces itself in the queue's worker registry the way the worker does,
-// then keeps running. FAKE_WORKER_MODE=exit makes it die at once;
-// FAKE_WORKER_RUN makes it announce another run. A hand-over to it (which
-// replaces the test process) fails the test run with exit 127.
+// fakeNodeScript stands in for the worker run start launches
+// (`<binary> worker --run <id>`, B511): it announces itself in the queue's
+// worker registry the way the worker does, then keeps running.
+// FAKE_WORKER_MODE=exit makes it die at once; FAKE_WORKER_RUN makes it
+// announce another run. Node is never needed: CODE_FORGE_NODE names a missing
+// file, so a hand-over fails the call with exit 127.
 const fakeNodeScript = `#!/bin/sh
-if [ "$2" != "worker" ]; then echo "fake node: handed over: $*" >&2; exit 127; fi
+if [ "$1" != "worker" ] || [ "$2" != "--run" ]; then echo "fake worker: bad argv: $*" >&2; exit 127; fi
 echo $$ >> "$FAKE_PIDS"
 if [ "$FAKE_WORKER_MODE" = "exit" ]; then exit 3; fi
 st=$(LC_ALL=C /bin/ps -o lstart= -p $$ | tr -s ' ' | sed 's/^ //;s/ $//')
 now=$(date -u +%Y-%m-%dT%H:%M:%S.000Z)
-run=$4
+run=$3
 if [ -n "$FAKE_WORKER_RUN" ]; then run=$FAKE_WORKER_RUN; fi
 mkdir -p .code-forge/workers
 printf '{"pid":%s,"start_time":"%s","run":"%s","started_at":"%s","heartbeat_at":"%s"}' $$ "$st" "$run" "$now" "$now" > ".code-forge/workers/$$-$st.json"
@@ -56,11 +57,11 @@ func newStartFixture(t *testing.T, config string) startFixture {
 			t.Fatal(err)
 		}
 	}
-	node := filepath.Join(f.home, "fake-node")
-	if err := os.WriteFile(node, []byte(fakeNodeScript), 0755); err != nil {
+	fake := filepath.Join(f.home, "fake-worker")
+	if err := os.WriteFile(fake, []byte(fakeNodeScript), 0755); err != nil {
 		t.Fatal(err)
 	}
-	t.Setenv("CODE_FORGE_NODE", node)
+	t.Setenv("CODE_FORGE_NODE", filepath.Join(f.home, "missing-node"))
 	t.Setenv("FAKE_PIDS", f.pids)
 	t.Setenv("FAKE_WORKER_MODE", "")
 	t.Setenv("FAKE_WORKER_RUN", "")
@@ -69,11 +70,12 @@ func newStartFixture(t *testing.T, config string) startFixture {
 	if err := os.Chdir(t.TempDir()); err != nil {
 		t.Fatal(err)
 	}
-	beforeProcs, beforeTimeout := runReadProcesses, runLaunchTimeout
+	beforeProcs, beforeTimeout, beforeBinary := runReadProcesses, runLaunchTimeout, runWorkerBinary
 	runReadProcesses = func() []runProc { return []runProc{} }
 	runLaunchTimeout = 5 * time.Second
+	runWorkerBinary = func() (string, error) { return fake, nil }
 	t.Cleanup(func() {
-		runReadProcesses, runLaunchTimeout = beforeProcs, beforeTimeout
+		runReadProcesses, runLaunchTimeout, runWorkerBinary = beforeProcs, beforeTimeout, beforeBinary
 		_ = os.Chdir(here)
 		data, _ := os.ReadFile(f.pids)
 		for _, line := range strings.Fields(string(data)) {

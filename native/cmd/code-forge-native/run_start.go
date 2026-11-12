@@ -25,7 +25,8 @@ import (
 // B468: a plain `run start` (record, key, signed rows, worker launch and pin),
 // `run start --add-worker` and the refusals of `run reload` in Go
 // (src/cli/run.mjs, src/state/run.mjs startRun, src/worker/loop.mjs
-// launchWorker/repinWorker).
+// launchWorker/repinWorker). B511/B512: the worker they launch is this
+// binary's `worker --run <id>` (the Go worker, B489), so neither needs node.
 
 // Seams for tests: how long a launched worker has to announce itself, and the clock.
 var (
@@ -138,35 +139,17 @@ func runDeepMap(v any) any {
 	return v
 }
 
-// runNodeLauncher finds what launchWorker spawns: the node binary
-// (process.execPath; CODE_FORGE_NODE names it here) and bin/code-forge.mjs.
-func runNodeLauncher() (string, string, bool) {
-	node := os.Getenv("CODE_FORGE_NODE")
-	if node == "" {
-		node = "node"
-	}
-	nodePath, err := exec.LookPath(node)
-	if err != nil {
-		return "", "", false
-	}
-	if real, err := filepath.EvalSymlinks(nodePath); err == nil {
-		nodePath = real
-	}
-	if abs, err := filepath.Abs(nodePath); err == nil {
-		nodePath = abs
-	}
+// runWorkerBinary is the binary `run start` launches as the worker (B511):
+// this one, symlinks resolved. Its `worker --run <id>` serves the queue in Go
+// and, for a run Go does not serve (B489's split rule), becomes the Node
+// worker in place (exec: same pid and start time), so the announce wait and
+// the pin below see one process either way. A test points it at a stand-in.
+var runWorkerBinary = func() (string, error) {
 	executable, err := os.Executable()
 	if err != nil {
-		return "", "", false
+		return "", err
 	}
-	if executable, err = filepath.EvalSymlinks(executable); err != nil {
-		return "", "", false
-	}
-	script := filepath.Join(filepath.Dir(executable), "..", "..", "..", "bin", "code-forge.mjs")
-	if real, err := filepath.EvalSymlinks(script); err == nil {
-		script = real
-	}
-	return nodePath, script, true
+	return filepath.EvalSymlinks(executable)
 }
 
 // --- the worker registry (src/worker/queue.mjs) ---
@@ -281,14 +264,15 @@ func runLiveWorker(root string, pid float64, registeredOnly bool) (ledger.Object
 	return w, true
 }
 
-// runLaunchWorker is launchWorker: `node bin/code-forge.mjs worker --run <id>`
-// detached in the repository, until the queue announces that pid.
-func runLaunchWorker(runID, workspace, node, script string) (int, string, error) {
+// runLaunchWorker is launchWorker with this binary as the worker:
+// `<binary> worker --run <id>` detached in the repository (the caller's env,
+// no stdio), until the queue announces that pid.
+func runLaunchWorker(runID, workspace, binary string) (int, string, error) {
 	repoRoot, err := gitx.RepoTop(workspace)
 	if err != nil {
 		return 0, "", &runFail{"not inside a git repository", false}
 	}
-	cmd := exec.Command(node, script, "worker", "--run", runID)
+	cmd := exec.Command(binary, "worker", "--run", runID)
 	cmd.Dir = repoRoot
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setsid: true}
 	pid := 0
@@ -463,10 +447,9 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 	if baseErr != nil {
 		return func(o *runOut) int { return runReport(o, "start", baseErr) }, 0
 	}
-	var node, script string
+	var binary string
 	if workerPid == 0 {
-		var ok bool
-		if node, script, ok = runNodeLauncher(); !ok {
+		if binary, err = runWorkerBinary(); err != nil {
 			return nil, hRunStart
 		}
 	}
@@ -605,7 +588,7 @@ func runStartPlan(home string, flags runFlags, workerPid float64) (func(o *runOu
 		}
 		pinned := worker
 		if worker == nil {
-			pid, repoRoot, err := runLaunchWorker(runID, workspace, node, script)
+			pid, repoRoot, err := runLaunchWorker(runID, workspace, binary)
 			if err != nil {
 				return runReport(o, "start", err)
 			}
@@ -709,8 +692,8 @@ func runConfigInForce(record ledger.Object) (ledger.Object, error) {
 
 func runAddWorkerPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 	runApplyTmpRoot()
-	node, script, ok := runNodeLauncher()
-	if !ok {
+	binary, err := runWorkerBinary()
+	if err != nil {
 		return nil, hRunAddWorker
 	}
 	return func(o *runOut) int {
@@ -788,7 +771,7 @@ func runAddWorkerPlan(home, runID string) (func(o *runOut) int, handoverReason) 
 			if count >= limit {
 				return &runFail{fmt.Sprintf("review.workers limit %s reached", runNumber(limit)), false}
 			}
-			pid, launchedRoot, err := runLaunchWorker(runID, workspace, node, script)
+			pid, launchedRoot, err := runLaunchWorker(runID, workspace, binary)
 			if err != nil {
 				return err
 			}
