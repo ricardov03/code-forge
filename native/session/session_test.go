@@ -82,7 +82,7 @@ func TestSpawnRateLimitRetriesThroughSleepSeam(t *testing.T) {
 func TestSpawnTimeoutStopsTheChild(t *testing.T) {
 	o, dir := testSetup(t)
 	o.Cfg = map[string]any{"levels": map[string]any{"L1": map[string]any{"provider": "anthropic", "model": "claude-x"}}}
-	o.TimeoutMs = 2000 // room for a loaded machine to start the shell
+	o.TimeoutMs = 6000 // B531: room for a loaded machine (4 coders running go test) to start the shell; 2000 flaked at land 07:34
 	bin := filepath.Join(dir, "claude")
 	script := "#!/bin/sh\necho '{\"type\":\"system\"}'\necho waiting >&2\nexec sleep 30\n"
 	if err := os.WriteFile(bin, []byte(script), 0o755); err != nil {
