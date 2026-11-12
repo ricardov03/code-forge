@@ -82,15 +82,27 @@ test('B248 boundary: missing state and unported ledger subcommands preserve Node
   }, 'a missing ledger directory is a native error, without creating state');
   assert.deepEqual(await runParity(['ledger', 'tail', '--slug', 'absent'], { fixture: f, goCommand: binary,
     env: { CODE_FORGE_NODE: unavailable } }), { equal: true, diffs: [] }, 'missing directory yields zero state and process differences');
+  // B541: B500 runs calibration, outcome, add and outside-review in Go, so these forms answer
+  // without Node and still match Node's bytes.
   for (const sub of ['calibration', 'outcome', 'add', 'outside-review']) {
     const args = [sub, '--slug', 'absent'];
     const result = native(f, args);
-    assert.equal(result.code, 127, sub + ': exactly exit 127 when Node is unavailable');
-    assert.equal(result.stdout, '', sub + ': no stdout before handover');
-    assert.match(result.stderr, /code-forge-native: node executable .* not found:/, sub + ': Node lookup failed');
+    assert.doesNotMatch(result.stderr, /node executable/, sub + ': Go answers without Node');
+    assert.notEqual(result.code, 127, sub + ': no failed Node lookup');
     assert.deepEqual(await runParity(['ledger', ...args], { fixture: f, goCommand: binary,
-      env: { CODE_FORGE_NODE: process.execPath } }), { equal: true, diffs: [] }, sub + ': working Node handover yields zero differences');
+      env: { CODE_FORGE_NODE: unavailable } }), { equal: true, diffs: [] }, sub + ': Go without Node yields zero differences');
   }
+  // A form Go still hands over (a review.done timestamp that is not a string: ledger-js-value).
+  await mkdir(f.ledger, { recursive: true });
+  await writeFile(path.join(f.ledger, 'odd.jsonl'), JSON.stringify({ event: 'review.done', file: 'a.mjs', ts: { at: 1 } }) + '\n');
+  const oddArgs = ['outcome', '--slug', 'odd', '--scan-git'];
+  const handed = native(f, oddArgs);
+  assert.equal(handed.code, 127, 'odd row: exactly exit 127 when Node is unavailable');
+  assert.equal(handed.stdout, '', 'odd row: no stdout before handover');
+  assert.match(handed.stderr, /code-forge-native: node executable .* not found:/, 'odd row: Node lookup failed');
+  assert.deepEqual(await runParity(['ledger', ...oddArgs], { fixture: f, goCommand: binary,
+    env: { CODE_FORGE_NODE: process.execPath } }), { equal: true, diffs: [] }, 'odd row: working Node handover yields zero differences');
+  await rm(f.ledger, { recursive: true });
   // Enable router logging in both harness copies (the harness normally disables it).
   const preload = path.join(f.repo, 'logging.cjs');
   await writeFile(preload, 'delete process.env.CODE_FORGE_NO_ERROR_LOG;');

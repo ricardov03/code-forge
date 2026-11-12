@@ -259,10 +259,19 @@ test('land records the specific close preflight hand-over reason without private
   const record = JSON.parse(await readFile(runFile(f), 'utf8'));
   record.blocks.B1.kind = 'light';
   await writeFile(runFile(f), JSON.stringify(record) + '\n');
+  // B541: since B466 Go answers an unreadable --transcript itself (Node's readFile error), so
+  // this case uses a close preflight that still hands over: a report that needs Node's secret
+  // scrubber (close-report-redaction). Both files live in a private customer folder.
+  const privateDir = path.join(f.home, 'private-customer');
+  await mkdir(privateDir);
+  const reportPath = path.join(privateDir, 'secret-report');
+  const transcriptPath = path.join(privateDir, 'secret-transcript');
+  await writeFile(reportPath, 'tests passed; token sk-private-report-value\n');
+  await writeFile(transcriptPath, '');
   const daemon = await serveDaemon(f, RUN, async () => null);
   try {
-    const args = ['block', 'land', 'B1', '--run', RUN, '--report', '/private/customer/secret-report',
-      '--transcript', '/private/customer/secret-transcript', '--json'];
+    const args = ['block', 'land', 'B1', '--run', RUN, '--report', reportPath,
+      '--transcript', transcriptPath, '--json'];
     const out = await new Promise((resolve, reject) => {
       const child = spawn(BINARY, args, { cwd: f.repo, env: isolatedEnv({ HOME: f.home, ...env }), stdio: ['ignore', 'pipe', 'pipe'] });
       let stdout = '', stderr = '';
@@ -282,10 +291,8 @@ test('land records the specific close preflight hand-over reason without private
     assert.deepEqual(Object.keys(rows[0]).sort(), ['at', 'reason', 'sub', 'verb', 'version']);
     assert.equal(rows[0].verb, 'block');
     assert.equal(rows[0].sub, 'land');
-    // B451 checks light limits in Go, so the first close preflight that still hands
-    // over here is the unreadable private transcript.
-    assert.equal(rows[0].reason, 'close-transcript-read', 'specific close reason survives the land fallback');
-    for (const privateValue of ['B1', RUN, f.repo, f.home, '/private/customer', 'secret-report', 'secret-transcript']) {
+    assert.equal(rows[0].reason, 'close-report-redaction', 'specific close reason survives the land fallback');
+    for (const privateValue of ['B1', RUN, f.repo, f.home, privateDir, 'secret-report', 'secret-transcript', 'sk-private-report-value']) {
       assert.equal(data.includes(privateValue), false, 'hand-over record omits private values');
     }
     assert.equal((await readFile(runFile(f), 'utf8')), JSON.stringify(record) + '\n', 'preflight leaves run state unchanged');

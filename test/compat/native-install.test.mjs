@@ -29,7 +29,12 @@ const goEnv = {
  */
 async function packageSnapshot(pkg) {
   const dest = await mkdtemp(path.join(os.tmpdir(), 'native-pack-'));
+  // B541: config-golden.test.mjs builds all four release targets into the shared native/bin
+  // while this file runs, so the packed size depended on test timing (21.9 MB in CI with four
+  // binaries). This test packs what it installs: the host binary only.
+  const hostBin = path.join('native/bin', `${process.platform}-${process.arch}`);
   async function copy(relative) {
+    if (path.dirname(relative) === path.join('native', 'bin') && relative !== hostBin) return;
     const from = path.join(root, relative), to = path.join(dest, relative);
     let info;
     try { info = await lstat(from); } catch (err) { if (err.code === 'ENOENT') return; throw err; }

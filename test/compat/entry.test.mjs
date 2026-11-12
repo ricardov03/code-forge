@@ -167,28 +167,38 @@ async function fullCpuLoad(t) {
   t.diagnostic(`CPU load: ${workers.length} busy workers for ${cpus().length} logical CPUs`);
 }
 
+// B541: --version runs in Go since B458, so timing it measured Go against Node, not a
+// hand-over. An unknown verb has no Go route and always hands over to Node.
+const handoverVerb = ['unknown-timing-verb'];
+
 function handoverOverhead(t, f, slow = false) {
   const npmLink = path.join(f.dir, 'temp bin/npm-code-forge');
   symlinkSync(path.join('..', pkg.bin['code-forge']), npmLink);
   const delayed = path.join(f.dir, 'slow-handover');
   writeFileSync(delayed, '#!/bin/sh\nsleep 0.04\nexec "$@"\n', { mode: 0o755 });
   const entry = slow ? delayed : npmLink;
-  const entryArgs = slow ? [npmLink, '--version'] : ['--version'];
+  const entryArgs = slow ? [npmLink, ...handoverVerb] : handoverVerb;
   // Both modes use the same npm link, shell resolution and Node executable.
   // Comparing against bare Node charges the Go budget for shell subprocesses
   // waiting to be scheduled, which grows with machine load.
   const timingEnv = { ...env, PATH: `${path.dirname(process.execPath)}${path.delimiter}${process.env.PATH || ''}` };
+  // Node's own answer for the unknown verb: exit 1 and its usage text on stderr.
+  const expected = output(run(process.execPath, [f.script, ...handoverVerb]));
+  assert.equal(expected.code, 1, 'Node refuses the unknown timing verb with exit 1');
+  assert.match(expected.stderr, /unknown verb/, 'Node names the unknown timing verb');
   const measure = (file, args, native = '1') => {
     const start = performance.now();
     const result = run(file, args, { env: { ...timingEnv, CODE_FORGE_NATIVE: native } });
     const elapsed = performance.now() - start;
-    assert.equal(result.code, 0, 'version timing command succeeds: ' + result.stderr);
-    assert.equal(result.stdout, pkg.name + ' ' + pkg.version + '\n', 'timed command prints exactly the package name and version');
+    assert.deepEqual(output(result), expected, 'timed command gives exactly Node\'s stdout, stderr and exit');
     return elapsed;
   };
-  // Assert Go actually hands over before measuring the public linked entry.
-  assert.deepEqual(output(run(f.binary, ['--version'])), output(run(process.execPath, [f.script, '--version'])), 'timing measures a working Go handover');
-  measure(npmLink, ['--version'], '0');
+  // Assert Go actually hands over before measuring the public linked entry:
+  // without a Node executable the Go binary cannot answer this verb itself.
+  const noNode = run(f.binary, handoverVerb, { env: { ...env, CODE_FORGE_HANDOVER_LOG: '0', CODE_FORGE_NODE: 'entry-node-does-not-exist' } });
+  assert.equal(noNode.code, 127, 'Go hands the timing verb to Node (exit 127 when Node is missing)');
+  assert.deepEqual(output(run(f.binary, handoverVerb)), expected, 'timing measures a working Go handover');
+  measure(npmLink, handoverVerb, '0');
   measure(entry, entryArgs);
   const median = (values) => { values.sort((a, b) => a - b); return (values[4] + values[5]) / 2; };
   const attempts = [];
@@ -196,7 +206,7 @@ function handoverOverhead(t, f, slow = false) {
     const direct = [], entries = [], differences = [];
     // Pair samples under the same load, alternating which mode runs first.
     for (let i = 0; i < 10; i++) {
-      const control = () => direct.push(measure(npmLink, ['--version'], '0'));
+      const control = () => direct.push(measure(npmLink, handoverVerb, '0'));
       const handover = () => entries.push(measure(entry, entryArgs));
       if (i % 2 === 0) { control(); handover(); } else { handover(); control(); }
       differences.push(entries[i] - direct[i]);

@@ -56,7 +56,7 @@ test('verb bench measures the npm entry in paired isolated lanes with parity and
     assert.deepEqual(report.host, { platform: process.platform, arch: process.arch, node: process.version, cpus: os.cpus().length });
     assert.deepEqual(report.leftover_processes, { count: 0, list: [] }, 'zero live descendants or fixture workers');
     assert.deepEqual(report.native_sockets, [], 'zero native sockets before fixture removal');
-    const engines = { 'logs path': 'go', 'logs --last 5 --json': 'go', 'logs summary --json': 'go', 'ledger tail': 'go', '--version': 'node-handover', 'status --json': 'go', 'block land': 'go' };
+    const engines = { 'logs path': 'go', 'logs --last 5 --json': 'go', 'logs summary --json': 'go', 'ledger tail': 'go', '--version': 'go', 'status --json': 'go', 'block land': 'go' };
     assert.deepEqual(report.cases.map((entry) => entry.case), Object.keys(engines), 'all seven verb cases in order, including native land');
     for (const entry of report.cases) {
       assert.equal(entry.parity, native ? true : null, `${entry.case}: parity is true, or unmeasured without native`);

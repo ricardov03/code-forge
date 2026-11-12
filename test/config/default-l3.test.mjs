@@ -13,6 +13,19 @@ import { validateConfig } from '../../src/config/validate.mjs';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const goEnv = { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' };
 
+// B541: copy every module package native/config imports (config/ordered.go imports ledger since
+// B455), read from `go list -deps`, so a new import cannot break this fixture again.
+function configPackages() {
+  const listed = spawnSync('go', ['list', '-deps', '-f', '{{if not .Standard}}{{.Dir}}{{end}}', './config'], {
+    cwd: path.join(root, 'native'), encoding: 'utf8', env: goEnv,
+  });
+  assert.equal(listed.status, 0, `go list -deps ./config: ${listed.stderr}`);
+  const packages = listed.stdout.split('\n').filter(Boolean).map((dir) => path.relative(root, dir))
+    .filter((relative) => relative.startsWith(`native${path.sep}`) && !relative.startsWith(`native${path.sep}vendor${path.sep}`));
+  assert.ok(packages.includes(path.join('native', 'config')), 'go list names native/config itself');
+  return packages;
+}
+
 /** @param {string} l3 @returns {Record<string, any>} a minimal anthropic config naming `l3` at L3. */
 function cfgWithL3(l3) {
   return {
@@ -62,7 +75,7 @@ test('Node boundary: claude-fable-5-3 at L3 gives exactly 1 unknown-model-id war
 test('Go: DefaultsForProvider("anthropic") gives the same matrix with L3 model claude-fable-5-2', async (t) => {
   const repo = await mkdtemp(path.join(os.tmpdir(), 'b353-default-l3-'));
   t.after(() => rm(repo, { recursive: true, force: true }));
-  for (const relative of ['package.json', 'native/config', 'native/canon', 'native/vendor', 'native/go.mod', 'native/go.sum']) {
+  for (const relative of ['package.json', ...configPackages(), 'native/vendor', 'native/go.mod', 'native/go.sum']) {
     const target = path.join(repo, relative);
     await mkdir(path.dirname(target), { recursive: true });
     await cp(path.join(root, relative), target, { recursive: true });

@@ -84,6 +84,14 @@ jobs:
       - uses: actions/setup-node@v4
         with:
           node-version: 24
+          cache: npm
+          cache-dependency-path: npm-shrinkwrap.json
+
+      # B541: the Go parity tests run the Node reference (bin/code-forge.mjs), which imports
+      # npm packages such as yaml. Without node_modules they die with ERR_MODULE_NOT_FOUND.
+      - name: Install npm deps for the Node reference (shrinkwrap-checked)
+        working-directory: .
+        run: npm ci
 
       - name: gofmt (no unformatted files)
         run: test -z "$(find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l)" || { find . -path ./vendor -prune -o -name '*.go' -print | xargs gofmt -l; exit 1; }

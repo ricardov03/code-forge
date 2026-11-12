@@ -74,6 +74,7 @@ waits on a second real consumer (plan §10.4, Q17).
 ### Fixed
 
 - `block land` and `review-file --wait-block` no longer stop at the join with "reviews did not finish" on a busy machine: a git helper that exited 0 counted as failed when its output pipes were read more than 50 ms after it exited (`exec.ErrWaitDelay`); the pipe grace is now 2 s. The doctor golden tests read a sealed process table, so a zombie of another program on the machine no longer changes their `sweep` row (B544)
+- CI fixes for the red main runs: the Go job installs the npm packages (`npm ci`, Node 24, npm cache) so the Go parity tests can run the Node reference, and 12 Node tests now expect what moved to Go (`--version`, `logs clear`/empty `logs report`/no `HOME`, ledger calibration/outcome/add/outside-review, an unreadable land transcript), copy every native package the config imports into their fixtures, measure the hand-over budget on a verb that still hands over, and size the npm package for the host binary only (B541)
 
 ## [0.22.1] — 2026-11-11
 

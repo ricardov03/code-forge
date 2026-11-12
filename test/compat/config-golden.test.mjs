@@ -9,6 +9,19 @@ import { test } from 'node:test';
 const root = fileURLToPath(new URL('../../', import.meta.url));
 const goEnv = { ...process.env, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off' };
 
+// B541: copy every module package native/config imports (config/ordered.go imports ledger since
+// B455), read from `go list -deps`, so a new import cannot break this fixture again.
+function configPackages() {
+  const listed = spawnSync('go', ['list', '-deps', '-f', '{{if not .Standard}}{{.Dir}}{{end}}', './config'], {
+    cwd: path.join(root, 'native'), encoding: 'utf8', env: goEnv,
+  });
+  assert.equal(listed.status, 0, `go list -deps ./config: ${listed.stderr}`);
+  const packages = listed.stdout.split('\n').filter(Boolean).map((dir) => path.relative(root, dir))
+    .filter((relative) => relative.startsWith(`native${path.sep}`) && !relative.startsWith(`native${path.sep}vendor${path.sep}`));
+  assert.ok(packages.includes(path.join('native', 'config')), 'go list names native/config itself');
+  return packages;
+}
+
 test('Go embedded config schema equals the source schema byte for byte', async () => {
   const [source, embedded] = await Promise.all([
     readFile(path.join(root, 'schema/code-forge.schema.json')),
@@ -65,7 +78,7 @@ async function versionFixture(t) {
   t.after(() => rm(repo, { recursive: true, force: true }));
   // Copy only the oracle's tracked inputs and Go config dependencies, never local state or binaries.
   for (const relative of ['package.json', 'scripts/compat-golden.mjs', 'src', 'schema', 'examples',
-    'test/fixtures', 'test/compat/golden/config', 'native/config', 'native/canon', 'native/vendor', 'native/go.mod', 'native/go.sum']) {
+    'test/fixtures', 'test/compat/golden/config', ...configPackages(), 'native/vendor', 'native/go.mod', 'native/go.sum']) {
     const target = path.join(repo, relative);
     await mkdir(path.dirname(target), { recursive: true });
     await cp(path.join(root, relative), target, { recursive: true });

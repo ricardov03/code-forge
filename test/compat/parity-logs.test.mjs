@@ -99,10 +99,14 @@ test('B247 clause: logs read verbs run without Node with byte parity; clear and 
   const launcher = path.join(scratch, 'package/bin/code-forge');
   await parity(['logs', 'path'], false, launcher);
   assert.deepEqual(invoke(['logs', 'path'], { native: launcher }), invoke(['logs', 'path'], { node: true }), 'private npm entry matches Node output');
+  // B457/B500 moved `logs clear --yes` and a report with nothing to report to Go.
   for (const args of [['clear', '--yes'], ['report']]) {
     await seed(null); // report has no entries: no network, model, or terminal.
     await parity(['logs', ...args], true);
-    assert.equal(invoke(['logs', ...args]).code, 127, `${args[0]} requires Node`);
+    await seed(null);
+    const expected = invoke(['logs', ...args], { node: true });
+    await seed(null);
+    assert.deepEqual(invoke(['logs', ...args]), expected, `${args[0]} runs without Node with Node's output`);
   }
 });
 
@@ -133,7 +137,9 @@ test('B247 boundary: empty/missing logs match; unsupported arguments and legacy 
   }
   await parity(['logs', '--json']); // raw JSON needs no fingerprint computation.
   assert.equal(invoke(['logs', '--json']).code, 0, 'legacy JSON listing runs in Go');
-  assert.equal(invoke(['logs', 'path'], { home: '' }).code, 127, 'missing HOME hands its error logging to Node');
+  // B457 answers a missing HOME in Go, error log included.
+  assert.deepEqual(invoke(['logs', 'path'], { home: '' }), invoke(['logs', 'path'], { home: '', node: true }),
+    'missing HOME runs without Node with Node exit code and both streams');
   assert.deepEqual(invoke(['logs', 'path'], { home: '', nodePath: process.execPath }),
     invoke(['logs', 'path'], { home: '', node: true }), 'missing HOME preserves exit code and both streams');
   for (const text of [

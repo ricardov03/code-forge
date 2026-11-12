@@ -24,6 +24,8 @@ process.stderr.write('probe stderr\\n'); process.exitCode=Number(process.env.PRO
 });
 after(() => rmSync(scratch, { recursive: true, force: true }));
 
+// B541: these tests need a known verb with no Go route. doctor runs in Go since B504/B525
+// (B487 gave its hand-overs their own reasons), so they use land, which has no Go route.
 function fixture() {
   const home = mkdtempSync(path.join(scratch, 'home-'));
   return { home, repo: home, file: path.join(home, '.code-forge/native/handovers.jsonl') };
@@ -63,7 +65,7 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
   run(f, args);
   assert.equal(rows(f).length, 3, 'repeat hand-over adds exactly one row');
   const beforeExec = fixture();
-  assert.equal(JSON.parse(run(beforeExec, ['doctor'], { PROBE_FILE: beforeExec.file }).stdout).recorded, true, 'row exists before Node starts');
+  assert.equal(JSON.parse(run(beforeExec, ['land'], { PROBE_FILE: beforeExec.file }).stdout).recorded, true, 'row exists before Node starts');
   assert.equal(statSync(f.file).mode & 0o777, 0o600, 'log mode is 0600');
   assert.equal(statSync(path.dirname(f.file)).mode & 0o777, 0o700, 'directory mode is 0700');
   const report = run(f, ['logs', 'handovers', '--json'], { CODE_FORGE_NODE: '/nonexistent' });
@@ -94,34 +96,34 @@ test('B282 clause: hand-overs record private-safe reasons before exec and Go rep
 
 test('B282 privacy: only known verbs and their own subcommands reach the log', () => {
   const f = fixture();
-  for (const args of [['my-secret-project-name'], ['doctor'], ['block', 'my-secret-project-name'], ['doctor', 'close']]) {
+  for (const args of [['my-secret-project-name'], ['land'], ['block', 'my-secret-project-name'], ['land', 'close']]) {
     assert.equal(run(f, args).code, 0, 'hand-over succeeds');
   }
   assert.deepEqual(rows(f).map(({ verb, sub }) => ({ verb, sub })), [
     { verb: 'unknown', sub: '' },
-    { verb: 'doctor', sub: '' },
+    { verb: 'land', sub: '' },
     { verb: 'block', sub: 'unknown' },
-    { verb: 'doctor', sub: 'unknown' },
+    { verb: 'land', sub: 'unknown' },
   ], 'known verbs are preserved and subcommands are scoped to their verb');
   assert.equal(readFileSync(f.file, 'utf8').includes('my-secret-project-name'), false, 'private command tokens are absent from the entire log');
 });
 
 test('B282 boundary: disabled and failed recording preserve behavior; cap and parallel execs keep complete rows', async () => {
   const f = fixture();
-  const expected = run(f, ['doctor'], { CODE_FORGE_HANDOVER_LOG: '0' });
+  const expected = run(f, ['land'], { CODE_FORGE_HANDOVER_LOG: '0' });
   assert.equal(rows(f).length, 0, 'opt-out writes zero rows');
-  assert.deepEqual(run(f, ['doctor'], { CODE_FORGE_NATIVE: '0' }, path.join(scratch, 'bin/code-forge')), expected, 'Node-only entry preserves bytes');
+  assert.deepEqual(run(f, ['land'], { CODE_FORGE_NATIVE: '0' }, path.join(scratch, 'bin/code-forge')), expected, 'Node-only entry preserves bytes');
   assert.equal(rows(f).length, 0, 'Node-only entry writes zero rows');
   assert.equal(run(f, ['internal', 'version'], { CODE_FORGE_NODE: '/nonexistent' }).code, 0, 'Go command does not start Node');
   assert.equal(rows(f).length, 0, 'Go command writes zero rows');
   chmodSync(f.home, 0o500);
-  try { assert.deepEqual(run(f, ['doctor']), expected, 'read-only home preserves output and exit'); }
+  try { assert.deepEqual(run(f, ['land']), expected, 'read-only home preserves output and exit'); }
   finally { chmodSync(f.home, 0o700); }
   assert.equal(rows(f).length, 0, 'read-only home writes zero rows');
   mkdirSync(path.dirname(f.file), { recursive: true });
-  const old = Array.from({ length: 5000 }, (_, i) => ({ at: new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString(), verb: 'doctor', sub: '', reason: 'unrouted', version: pkg.version }));
+  const old = Array.from({ length: 5000 }, (_, i) => ({ at: new Date(Date.UTC(2020, 0, 1, 0, 0, i)).toISOString(), verb: 'land', sub: '', reason: 'unrouted', version: pkg.version }));
   writeFileSync(f.file, old.map((r) => JSON.stringify(r)).join('\n') + '\n');
-  assert.deepEqual(run(f, ['doctor']), expected, 'trim preserves Node output and exit');
+  assert.deepEqual(run(f, ['land']), expected, 'trim preserves Node output and exit');
   assert.equal(rows(f).length, 4000, '5001 rows trim to exactly 4000');
   assert.deepEqual(rows(f)[0], old[1001], 'trim keeps the newest 3999 prior rows');
   assert.equal(rows(f).at(-1).reason, 'unrouted', 'trim includes this hand-over');
@@ -131,11 +133,11 @@ test('B282 boundary: disabled and failed recording preserve behavior; cap and pa
   assert.equal(filtered.rows[0].count, 2, 'since counts exactly two matching rows');
   const parallel = fixture();
   const child = () => new Promise((resolve, reject) => {
-    const p = spawn(binary, ['doctor'], { cwd: parallel.home, env: env(parallel), stdio: ['ignore', 'ignore', 'pipe'] });
+    const p = spawn(binary, ['land'], { cwd: parallel.home, env: env(parallel), stdio: ['ignore', 'ignore', 'pipe'] });
     p.on('error', reject); p.on('close', resolve);
   });
   assert.deepEqual(await Promise.all([child(), child()]), [0, 0], 'both parallel hand-overs succeed');
   assert.equal(rows(parallel).length, 2, 'two parallel execs produce exactly two valid JSON lines');
   assert.deepEqual(rows(parallel).map((r) => r.reason), ['unrouted', 'unrouted'], 'both complete rows have the right reason');
-  assert.equal(run(parallel, ['doctor'], { CODE_FORGE_NODE: '/nonexistent' }).code, 127, 'hand-over requires Node');
+  assert.equal(run(parallel, ['land'], { CODE_FORGE_NODE: '/nonexistent' }).code, 127, 'hand-over requires Node');
 });
