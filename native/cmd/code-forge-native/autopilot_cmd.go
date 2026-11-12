@@ -283,9 +283,17 @@ func autopilotPlan(home, sub string, flags autopilotFlags) (func(o *runOut) int,
 	if _, ok := record.Get("workspace").(string); !ok {
 		return nil, hAutopilotRecord
 	}
-	read, err := autopilot.Read(record, now)
+	// checkApprovals: an approval whose window is over is restored by Node
+	// (the YAML edit and reload); one that is not due yet changes nothing.
+	switch err := autopilot.Approvals(record, now); {
+	case errors.Is(err, autopilot.ErrApprovalDue):
+		return nil, hAutopilotRestore
+	case err != nil:
+		return nil, hAutopilotShape
+	}
+	read, err := autopilot.ReadGrant(record, now)
 	if err != nil {
-		return nil, hAutopilotShape // approvals to restore, or a grant shape Go does not read
+		return nil, hAutopilotShape // a grant shape Go does not read
 	}
 	if sub == "round" {
 		project, _ := record.Get("project").(string)

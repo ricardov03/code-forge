@@ -115,6 +115,52 @@ func Read(record ledger.Object, now time.Time) (Result, error) {
 	if !blockops.QuietExpiry(without) {
 		return Result{}, ErrUnsupported
 	}
+	return ReadGrant(record, now)
+}
+
+// ErrApprovalDue: an active approval whose window is over; checkApprovals
+// (src/autopilot/limits.mjs) restores it, which stays with Node.
+var ErrApprovalDue = errors.New("autopilot approval due for restore")
+
+// Approvals is checkApprovals' read: nil when no approval is due at now
+// (Node then writes nothing), ErrApprovalDue when one is, ErrUnsupported for
+// an entry Node would read differently (a null entry throws in Node; an
+// until Go does not date the way Date.parse does).
+func Approvals(record ledger.Object, now time.Time) error {
+	values, ok := record.Get("autopilot_approvals").([]any)
+	if !ok {
+		return nil // approvalsOf: not an array is no approvals
+	}
+	due := false
+	for _, value := range values {
+		if value == nil {
+			return ErrUnsupported
+		}
+		a, ok := value.(ledger.Object)
+		if !ok || a.Get("status") != "active" {
+			continue
+		}
+		until := a.Get("until")
+		if until == nil {
+			continue // Date.parse(undefined) and Date.parse(null) are NaN: never due
+		}
+		t, ok := timestamp(until)
+		if !ok {
+			return ErrUnsupported
+		}
+		if !now.Before(t) {
+			due = true
+		}
+	}
+	if due {
+		return ErrApprovalDue
+	}
+	return nil
+}
+
+// ReadGrant is Read without the approvals check: Node's checkExpiry never
+// reads approvals (checkApprovals ran once, at the start of the command).
+func ReadGrant(record ledger.Object, now time.Time) (Result, error) {
 	if record.Get("autopilot") == nil {
 		return Result{State: "none"}, nil
 	}
@@ -140,12 +186,21 @@ func Supported(record ledger.Object) bool {
 // CheckExpiry re-reads under Node's shared run lock. Publish the signed row
 // before saving the expired state, with the original check time in both.
 func CheckExpiry(home, run string, now time.Time) (Result, error) {
+	return checkExpiry(home, run, now, Read)
+}
+
+// CheckGrantExpiry is CheckExpiry that reads the grant only (ReadGrant).
+func CheckGrantExpiry(home, run string, now time.Time) (Result, error) {
+	return checkExpiry(home, run, now, ReadGrant)
+}
+
+func checkExpiry(home, run string, now time.Time, reader func(ledger.Object, time.Time) (Result, error)) (Result, error) {
 	read := func() (Result, error) {
 		r, err := state.ReadRun(home, run)
 		if err != nil {
 			return Result{}, err
 		}
-		return Read(r, now)
+		return reader(r, now)
 	}
 	result, err := read()
 	if err != nil || result.State != "expired" || result.Grant.Get("status") != "active" {
@@ -153,7 +208,7 @@ func CheckExpiry(home, run string, now time.Time) (Result, error) {
 	}
 	err = state.UpdateRun(home, run, func(record *ledger.Object) error {
 		var err error
-		result, err = Read(*record, now)
+		result, err = reader(*record, now)
 		if err != nil {
 			return err
 		}

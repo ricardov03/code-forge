@@ -252,6 +252,7 @@ const (
 	hAutopilotAction
 	hAutopilotApprove
 	hAutopilotBinnacle
+	hAutopilotRestore
 )
 
 var handoverReasons = [...]string{
@@ -483,6 +484,7 @@ var handoverReasons = [...]string{
 	hAutopilotAction:           "autopilot-action",
 	hAutopilotApprove:          "autopilot-approve",
 	hAutopilotBinnacle:         "autopilot-binnacle",
+	hAutopilotRestore:          "autopilot-restore",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {

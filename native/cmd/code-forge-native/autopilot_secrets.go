@@ -72,13 +72,13 @@ func autopilotRedact(text string) string {
 // the key. A failed check registers it too when the write was due (an
 // active grant past its window).
 func autopilotCheckExpiry(home, runID string, now time.Time) (autopilot.Result, error) {
-	result, err := autopilot.CheckExpiry(home, runID, now)
+	result, err := autopilot.CheckGrantExpiry(home, runID, now)
 	switch {
 	case result.ExpiredNow:
 		autopilotRegisterKey(home, runID)
 	case err != nil:
 		if record, readErr := state.ReadRun(home, runID); readErr == nil {
-			if due, dueErr := autopilot.Read(record, now); dueErr == nil && due.State == "expired" && due.Grant.Get("status") == "active" {
+			if due, dueErr := autopilot.ReadGrant(record, now); dueErr == nil && due.State == "expired" && due.Grant.Get("status") == "active" {
 				autopilotRegisterKey(home, runID)
 			}
 		}
