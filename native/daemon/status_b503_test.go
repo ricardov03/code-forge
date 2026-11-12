@@ -12,15 +12,23 @@ import (
 )
 
 // fakeStatusNode puts a `node` on PATH that answers every companion line with
-// a marker, so a test sees whether the daemon still starts Node's companion.
+// a marker and leaves a file behind, so a test sees whether the daemon starts
+// Node at all. CODE_FORGE_NODE points nowhere.
 func fakeStatusNode(t *testing.T) {
 	t.Helper()
 	bin := t.TempDir()
-	script := "#!/bin/sh\nwhile read line; do echo '{\"from\":\"node\"}'; done\n"
+	marker := filepath.Join(bin, "started")
+	script := "#!/bin/sh\n: > '" + marker + "'\nwhile read line; do echo '{\"from\":\"node\"}'; done\n"
 	if err := os.WriteFile(filepath.Join(bin, "node"), []byte(script), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	t.Setenv("PATH", bin+string(os.PathListSeparator)+os.Getenv("PATH"))
+	t.Setenv("CODE_FORGE_NODE", "/nonexistent")
+	t.Cleanup(func() {
+		if _, err := os.Stat(marker); err == nil {
+			t.Error("status started Node")
+		}
+	})
 }
 
 func statusServer(t *testing.T, record object, rows []ledger.Row) *server {
@@ -28,9 +36,7 @@ func statusServer(t *testing.T, record object, rows []ledger.Row) *server {
 	home := t.TempDir()
 	workspace := t.TempDir()
 	record["workspace"] = workspace
-	s := &server{run: "r-test", home: home, workspace: workspace, record: record, rows: rows}
-	t.Cleanup(s.closeStatus)
-	return s
+	return &server{run: "r-test", home: home, workspace: workspace, record: record, rows: rows}
 }
 
 // B503: Node's companion catches statusOf's throw on a null row or a null
@@ -53,9 +59,6 @@ func TestStatusB503UnreadableInGo(t *testing.T) {
 			if !jsonEqual(t, got, want) {
 				t.Fatalf("status = %v, want %v", got, want)
 			}
-			if s.statusProcess != nil {
-				t.Fatal("status started Node's companion")
-			}
 		})
 	}
 }
@@ -73,9 +76,6 @@ func TestStatusB503InfiniteSpendInGo(t *testing.T) {
 	}
 	s := statusServer(t, record, rows)
 	got := s.status()
-	if s.statusProcess != nil {
-		t.Fatal("status started Node's companion")
-	}
 	want := `{"runs":[{"run_id":"r-test","status":"running","mode":"plan","spent_usd":null,"unknown_usd_sessions":0,"budget_usd":null,` +
 		`"blocks":[{"id":"B1","state":"open","level":"L1","model":null,"gate":{"result":"timeout","name":"test"},"findings":0}],` +
 		`"more":0,"closed":0,"stopped":0,"flaky":["a.test.mjs","b.test.mjs"]}]}`
@@ -86,19 +86,6 @@ func TestStatusB503InfiniteSpendInGo(t *testing.T) {
 	if !jsonEqual(t, got, wantObj) {
 		data, _ := json.Marshal(got)
 		t.Fatalf("status = %s\nwant     %s", data, want)
-	}
-}
-
-// A block id outside printable ASCII still needs Node's ICU order: the
-// companion keeps answering it.
-func TestStatusB503UnorderedBlockKeepsCompanion(t *testing.T) {
-	fakeStatusNode(t)
-	record := object{"run_id": "r-test", "project": "p", "blocks": map[string]any{"Bé": map[string]any{"status": "open"}}}
-	rows := []ledger.Row{}
-	s := statusServer(t, record, rows)
-	got := s.status()
-	if !jsonEqual(t, got, object{"from": "node"}) {
-		t.Fatalf("status = %v, want the companion's answer", got)
 	}
 }
 

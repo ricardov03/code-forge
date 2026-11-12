@@ -44,7 +44,6 @@ type server struct {
 	record                                       object
 	recordStamp                                  string
 	trees                                        map[string]*treeState
-	statusProcess                                *statusProcess
 	psProcesses                                  int64
 	lastSweep                                    time.Time
 	// A local join (Join) has no socket: it reads the scope mirror the CLI
@@ -76,7 +75,6 @@ func Serve(home, run, version string, idle time.Duration) error {
 		return fmt.Errorf("idle duration must be positive")
 	}
 	s := &server{home: home, run: run, version: version, trees: make(map[string]*treeState)}
-	defer s.closeStatus()
 	record, err := readObject(filepath.Join(home, ".code-forge", "runs", run+".json"))
 	if err != nil {
 		return fmt.Errorf("read run record: %w", err)

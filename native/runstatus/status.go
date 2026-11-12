@@ -61,8 +61,9 @@ func Compute(record Object, rows []ledger.Row, home string) (ledger.Object, bool
 	return summary, err == nil
 }
 
-// ErrUnorderedBlockID: a block id outside printable ASCII needs Node's ICU
-// localeCompare to order the blocks; Go has no collator for it.
+// ErrUnorderedBlockID: a block id outside printable ASCII among two or more
+// listed (not closed, not stopped) blocks needs Node's ICU localeCompare to
+// order them; Go has no collator for it (stdlib only, no ICU or UCA tables).
 var ErrUnorderedBlockID = errors.New("block id outside printable ASCII")
 
 // ComputeErr is Node's statusOf (briefStatus plus the gate's open findings and
@@ -143,27 +144,40 @@ func compute(record Object, rows []ledger.Row, home string, gateDetails bool) (l
 	if _, isText := record["blocks"].(string); !isText {
 		ids = append(ids, keys...)
 	}
-	for _, bid := range ids {
-		if _, ok := blockIDCompare(bid, bid); !ok {
-			return nil, fmt.Errorf("%w: %s", ErrUnorderedBlockID, strconv.Quote(bid))
-		}
-	}
-	sort.SliceStable(ids, func(i, j int) bool { c, _ := blockIDCompare(ids[i], ids[j]); return c < 0 })
-	blocks := []any{}
+	// Node sorts every id, then skips closed and stopped blocks. The order is
+	// total (localeCompare, then code units), so sorting only the listed ids
+	// gives the same list; their order is needed only when two or more are
+	// listed.
+	listed := []string{}
 	closed, stopped := 0, 0
 	for _, bid := range ids {
+		status := "open"
+		if s, ok := obj(entries[bid])["status"].(string); ok {
+			status = s
+		}
+		switch status {
+		case "closed":
+			closed++
+		case "stopped":
+			stopped++
+		default:
+			listed = append(listed, bid)
+		}
+	}
+	if len(listed) > 1 {
+		for _, bid := range listed {
+			if _, ok := blockIDCompare(bid, bid); !ok {
+				return nil, fmt.Errorf("%w: %s", ErrUnorderedBlockID, strconv.Quote(bid))
+			}
+		}
+	}
+	sort.SliceStable(listed, func(i, j int) bool { c, _ := blockIDCompare(listed[i], listed[j]); return c < 0 })
+	blocks := []any{}
+	for _, bid := range listed {
 		entry := obj(entries[bid])
 		status := "open"
 		if s, ok := entry["status"].(string); ok {
 			status = s
-		}
-		if status == "closed" {
-			closed++
-			continue
-		}
-		if status == "stopped" {
-			stopped++
-			continue
 		}
 		state := status
 		if n, ok := entry["attempt"].(float64); status == "open" && ok && math.Trunc(n) == n && n > 1 {

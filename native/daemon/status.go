@@ -5,39 +5,16 @@ package daemon
 import (
 	"encoding/json"
 	"errors"
-	"io"
 	"math"
-	"os"
-	"os/exec"
-	"path/filepath"
-	"strings"
-	"time"
 
-	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/runstatus"
 )
 
-// The status answer is computed in Go over the daemon's cached rows. Only a
-// block id that needs Node's ICU order still uses one long-lived Node
-// companion (src/cli/native-status.mjs).
-type statusProcess struct {
-	cmd    *exec.Cmd
-	input  io.WriteCloser
-	output io.ReadCloser
-	encode *json.Encoder
-	decode *json.Decoder
-}
-
-func (s *server) closeStatus() {
-	if p := s.statusProcess; p != nil {
-		p.input.Close()
-		p.output.Close()
-		p.cmd.Process.Kill()
-		p.cmd.Wait()
-		s.statusProcess = nil
-	}
-}
-
+// The status answer is computed in Go over the daemon's cached rows (B576: no
+// Node companion). The one case Go cannot order like Node, a block id outside
+// printable ASCII among two or more listed blocks (ICU localeCompare), answers
+// status-unreadable, as the daemon did with no Node; the status client then
+// computes the run's status itself.
 func (s *server) status() object {
 	if summary, ok := runstatus.Compute(s.record, s.rows, s.home); ok {
 		// Decode once to preserve the daemon's map-shaped protocol envelope.
@@ -50,63 +27,6 @@ func (s *server) status() object {
 	if result, ok := s.statusBrief(); ok {
 		return result
 	}
-	if s.statusProcess == nil {
-		executable, err := os.Executable()
-		if err != nil {
-			return failure("status-unreadable")
-		}
-		// Release binaries live at <package>/native/bin/<platform>/.
-		helper := filepath.Join(filepath.Dir(executable), "..", "..", "..", "src", "cli", "native-status.mjs")
-		cmd := exec.Command("node", helper)
-		cmd.Dir = s.workspace
-		for _, env := range os.Environ() {
-			if !strings.HasPrefix(env, "HOME=") {
-				cmd.Env = append(cmd.Env, env)
-			}
-		}
-		cmd.Env = append(cmd.Env, "HOME="+s.home)
-		input, err := cmd.StdinPipe()
-		if err != nil {
-			return failure("status-unreadable")
-		}
-		output, err := cmd.StdoutPipe()
-		if err != nil {
-			input.Close()
-			return failure("status-unreadable")
-		}
-		if err := cmd.Start(); err != nil {
-			input.Close()
-			output.Close()
-			return failure("status-unreadable")
-		}
-		s.statusProcess = &statusProcess{cmd, input, output, json.NewEncoder(input), json.NewDecoder(output)}
-	}
-	p := s.statusProcess
-	payload := object{"record": s.record, "rows": s.rows}
-	response := make(chan object, 1)
-	gosafe.Go("daemon-status-helper", func() {
-		var result object
-		if err := p.encode.Encode(payload); err != nil {
-			response <- nil
-			return
-		}
-		if err := p.decode.Decode(&result); err != nil {
-			result = nil
-		}
-		response <- result
-	})
-	timer := time.NewTimer(5 * time.Second)
-	defer timer.Stop()
-	select {
-	case result := <-response:
-		if result != nil {
-			s.statusGateDetails(result)
-			return result
-		}
-	case <-timer.C:
-		// Killing and reaping the helper also unblocks the pipe goroutine.
-	}
-	s.closeStatus()
 	return failure("status-unreadable")
 }
 
@@ -114,8 +34,8 @@ func (s *server) status() object {
 // native-status rules): statusOf(record, rows, {gateDetails: false}), a throw
 // written as status-unreadable, a non-finite spend written as null by
 // JSON.stringify, then the daemon's own gate details. ok is false only for a
-// block id outside printable ASCII, which needs Node's ICU localeCompare, or a
-// summary Go cannot encode.
+// block id outside printable ASCII among two or more listed blocks, which
+// needs Node's ICU localeCompare, or a summary Go cannot encode.
 func (s *server) statusBrief() (object, bool) {
 	summary, err := runstatus.ComputeBriefErr(s.record, s.rows, s.home)
 	if errors.Is(err, runstatus.ErrUnorderedBlockID) {
