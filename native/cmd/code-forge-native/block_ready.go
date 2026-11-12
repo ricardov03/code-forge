@@ -1,6 +1,7 @@
 package main
 
 import (
+	"encoding/hex"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -231,11 +232,16 @@ func runBlockReady(args []string) int {
 		}
 		blockers = append(blockers, gatecheck.Blocker{Code: "unowned_change", File: file, Detail: "orphan in run registry: " + file})
 	}
-	// Preserve Node's error-log capture for unusual warning diagnostics.
+	// B565: Node's ready writes stdout and stderr through writeSafe, which masks
+	// only registered secrets; in this command that is the run's signer key in
+	// hex. Text that holds it stays with Node. A secret-like prefix in a path
+	// (a random temp dir with "eyJ") is printed by Node as it is.
 	encoded, _ := ledger.Stringify(closeBlockersJSON(blockers, p.id, p.run, p.flags, entry), false)
-	if !closeTextSafe(p.id + workspace + string(encoded) + strings.Join(scopeWarnings, "")) {
+	printed := p.id + workspace + string(encoded) + strings.Join(scopeWarnings, "") + blockString(blockObject(entry.Get("worktree")).Get("path"))
+	if strings.Contains(printed, hex.EncodeToString(key)) {
 		return p.fallback()
 	}
+	// Preserve Node's error-log capture for unusual warning diagnostics.
 	if reviewWaitLogging() && len(blockers) > 0 && !collectOnly && (warnReviewed || !scopeChecked || len(scopeWarnings) > 0) {
 		return p.fallback()
 	}

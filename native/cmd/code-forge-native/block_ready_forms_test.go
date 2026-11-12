@@ -21,7 +21,12 @@ import (
 // .code-forge.yml (the run's snapshot is its config).
 func newReadyFixture(t *testing.T) *preflightFixture {
 	t.Helper()
-	root := t.TempDir()
+	return newReadyFixtureAt(t, t.TempDir())
+}
+
+// newReadyFixtureAt builds newReadyFixture's run under root.
+func newReadyFixtureAt(t *testing.T, root string) *preflightFixture {
+	t.Helper()
 	f := &preflightFixture{t: t, home: filepath.Join(root, "home"), repo: filepath.Join(root, "repo"), tree: filepath.Join(root, "tree"), argvLog: filepath.Join(root, "argv.log"), run: "r-ready"}
 	for _, dir := range []string{f.home, f.repo} {
 		if err := os.MkdirAll(dir, 0o755); err != nil {
