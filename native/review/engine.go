@@ -251,33 +251,6 @@ func testLike(file string) bool {
 	return strings.Contains(low, "test") || strings.Contains(low, "spec")
 }
 
-// preSpawnGuards is the recheck session's guard (recheck.go): its ladder,
-// routes recovery and second level are not ported (B538 ports them for File).
-func preSpawnGuards(in Input) error {
-	review := section(in.Cfg, "review")
-	if routes, ok := review["routes"].([]any); ok && len(routes) > 0 {
-		return unsupported("review.routes recovery is not ported")
-	}
-	if review["second_levels"] != nil {
-		return unsupported("review.second_levels is not ported")
-	}
-	level, _ := section(in.Cfg, "levels")["L2"].(map[string]any)
-	if fb, ok := level["fallback"].([]any); ok && len(fb) > 0 {
-		return unsupported("a levels.L2 fallback ladder is not ported")
-	}
-	if level == nil {
-		return unsupported("levels.L2 is not configured")
-	}
-	if m, _ := level["model"].(string); m == "" {
-		return unsupported("levels.L2 has no model")
-	}
-	p, _ := level["provider"].(string)
-	if top, _ := in.Cfg["provider"].(string); p == "" && top == "" {
-		return unsupported("levels.L2 has no provider")
-	}
-	return nil
-}
-
 func randomHex(r io.Reader) (string, error) {
 	if r == nil {
 		r = rand.Reader
@@ -677,21 +650,6 @@ type brokenTry struct {
 }
 
 var errFellBack = errors.New("fell back")
-
-// afterSchemaMiss with no second level (Go refuses review.second_levels):
-// under the packet's lock, the history read (an unreadable one is one
-// warning line) and the signed review.schema_invalid row with its diagnosis.
-func afterSchemaMiss(spec sessionSpec, res ledger.Object, hash string, deps Deps) {
-	_ = deps.lock("schema-fallback\x00"+hash+"\x00"+spec.level+"\x00"+spec.role, func() error {
-		if deps.SchemaHistory != nil {
-			if _, _, err := deps.SchemaHistory(hash, spec.level, spec.role); err != nil && deps.Warn != nil {
-				deps.Warn("review_schema_history", "the schema-miss history could not be read; no second-level try")
-			}
-		}
-		_ = deps.WriteRow(schemaInvalidRow(spec, res, hash, false))
-		return nil
-	})
-}
 
 // needsFileRound is engine.mjs run's needs_file step: a valid reviewer
 // answer that asks for files gets ONE more session with them attached

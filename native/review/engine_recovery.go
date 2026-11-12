@@ -371,9 +371,13 @@ type oneRun struct {
 	in             Input
 	deps           Deps
 	schemaFallback bool
-	attempts       int
-	tried          ledger.Object
-	timeouts       map[string]int
+	// recheck: fixloop.mjs recheckSession (B545): no field truncation, and
+	// every broken answer goes to afterSchemaMiss (allowed, never the
+	// timeout fallback)
+	recheck  bool
+	attempts int
+	tried    ledger.Object
+	timeouts map[string]int
 }
 
 func (r *oneRun) rowExtra() ledger.Object {
@@ -385,6 +389,9 @@ func (r *oneRun) spawn(cfg map[string]any) (ledger.Object, bool) {
 	res, err := r.deps.Spawn(SpawnOpts{Level: r.spec.level, Role: r.spec.role, PromptPath: r.promptPath, RowExtra: r.rowExtra(), Cfg: cfg})
 	if err != nil {
 		return nil, false
+	}
+	if r.recheck {
+		return res, true
 	}
 	out, _ := TruncateReviewFields(res)
 	return out, true
@@ -515,13 +522,17 @@ func (r *oneRun) timeoutRetry(cfg map[string]any, done int, secondLevel bool) (r
 // tryNext is runOne's tryNext(missed, trigger).
 func (r *oneRun) tryNext(missed ledger.Object, trigger string) (*brokenTry, error) {
 	cfg := r.in.Cfg
+	spawnAt := func(c map[string]any, to ledger.Object) (retryResult, error) {
+		r.tried = to // the try started: whatever happens next, the session fell back
+		return r.timeoutRetry(c, r.attempts, true)
+	}
+	if r.recheck {
+		return r.afterMiss(missed, cfg, true, trigger, spawnAt)
+	}
 	if trigger == "timeout" && r.schemaFallback && r.spec.cfg == nil && !secondLevelSet(cfg, r.spec.level) && r.deps.WriteRow != nil {
 		return r.timeoutFallback(missed)
 	}
-	return r.afterMiss(missed, r.baseCfg(), r.schemaFallback && r.spec.cfg == nil, trigger, func(c map[string]any, to ledger.Object) (retryResult, error) {
-		r.tried = to // the try started: whatever happens next, the session fell back
-		return r.timeoutRetry(c, r.attempts, true)
-	})
+	return r.afterMiss(missed, r.baseCfg(), r.schemaFallback && r.spec.cfg == nil, trigger, spawnAt)
 }
 
 // timeoutFallback is tryNext's timeout branch with no second level: at the

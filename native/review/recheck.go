@@ -13,8 +13,9 @@ package review
 // Not ported (ErrUnsupported before anything runs): review.recheck_scope
 // file, moved-code hints and cross-file evidence (a base with peers), the
 // import-header context of a JS/TS/CSS/HTML/Astro/Vue packet, Markdown
-// section rechecks (a Markdown packet over the budget), and every case
-// preSpawnGuards refuses for the session (second levels, routes, a ladder).
+// section rechecks (a Markdown packet over the budget), and every config
+// shape levelGuards refuses. B545: review.second_levels, a levels.L2 ladder
+// and review.routes run like Node's recheckSession.
 
 import (
 	"crypto/sha256"
@@ -258,9 +259,9 @@ func planRecheck(state ledger.Object, kind string, deps LoopDeps, dry bool) (*re
 		return nil, unsupported("a Markdown recheck section by section is not ported")
 	}
 	if whole.Status == "ok" {
-		guard := deps.Input
-		guard.Cfg = deps.Cfg
-		if err := preSpawnGuards(guard); err != nil {
+		// B545: the session's ladder, second level and routes run like
+		// Node's; only a config shape the port does not read stays with Node
+		if err := levelGuards(deps.Cfg, "L2"); err != nil {
 			return nil, err
 		}
 	}
@@ -278,10 +279,12 @@ type recheckResult struct {
 	tokensIn, tokensOut any
 }
 
-// recheckSession is fixloop.mjs recheckSession with no second level (Go
-// refuses review.second_levels before any session): the prompt file, B30's
-// same-model timeout retry with its notes, the stub guard plus the
-// open-findings coverage check, and a schema miss's signed row.
+// recheckSession is fixloop.mjs recheckSession (B545: with its recovery):
+// the prompt file, spawnWithTimeoutRetry on the run's config (B30's
+// same-model timeout retry; a timed-out packet's second broken result tries
+// review.second_levels.L2 through afterSchemaMiss), the stub guard plus the
+// open-findings coverage check, and a schema miss's signed row and its one
+// second-level try (that level's own ladder on a timeout or capacity).
 func recheckSession(packet *Packet, deps LoopDeps, open []any) (recheckResult, error) {
 	sd := deps.Session
 	sd.WriteRow = deps.WriteRow
@@ -300,31 +303,13 @@ func recheckSession(packet *Packet, deps LoopDeps, open []any) (recheckResult, e
 	defer os.Remove(promptPath)
 	spec := sessionSpec{lens: "recheck", role: "reviewer", level: "L2"}
 	sum := sha256.Sum256([]byte(packet.Text))
-	hash := hex.EncodeToString(sum[:])
-	rowExtra := ledger.Object{{Key: "lens", Value: "recheck"}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)}}
-	var res ledger.Object
-	for attempts := 1; sd.Spawn != nil; attempts++ {
-		out, err := sd.Spawn(SpawnOpts{Level: spec.level, Role: spec.role, PromptPath: promptPath, RowExtra: rowExtra.Clone()})
-		if err != nil {
-			res = nil // a throw is an `exit` failure, never retried
-			break
+	r := &oneRun{spec: spec, text: packet.Text, hash: hex.EncodeToString(sum[:]), promptPath: promptPath, packet: packet,
+		in: Input{Cfg: deps.Cfg, WorkDir: workDir}, deps: sd, recheck: true, timeouts: map[string]int{}}
+	validate := func(res ledger.Object) Verdict {
+		verdict := ValidateReview(res, packet.HunkHeaders, MinTokensOut(deps.Cfg))
+		if !verdict.OK {
+			return verdict
 		}
-		res = out
-		if res == nil || res.Get("status") != "timeout" {
-			break
-		}
-		retried := attempts <= timeoutRetries
-		sd.note(timeoutRow(spec, res, attempts, retried, hash))
-		// onBroken: afterSchemaMiss(timeout) tries nothing without a second level
-		if !retried {
-			break
-		}
-		if sd.Warn != nil {
-			sd.Warn("review_retry", "a review session timed out; it was retried once")
-		}
-	}
-	verdict := ValidateReview(res, packet.HunkHeaders, MinTokensOut(deps.Cfg))
-	if verdict.OK {
 		ids := map[string]bool{}
 		resolved, _ := verdict.Review.Get("resolved").([]any)
 		for _, entry := range resolved {
@@ -332,16 +317,46 @@ func recheckSession(packet *Packet, deps LoopDeps, open []any) (recheckResult, e
 		}
 		for _, f := range open {
 			if !ids[idKey(asObject(f).Get("id"))] {
-				verdict = Verdict{Reason: "schema", Detail: "resolved does not cover the packet open findings"}
-				break
+				return Verdict{Reason: "schema", Detail: "resolved does not cover the packet open findings"}
+			}
+		}
+		return verdict
+	}
+	var first retryResult
+	if sd.Spawn != nil {
+		// the first attempt runs on the spawner's own config (no cfg: no ladder)
+		if first, err = r.timeoutRetry(nil, 0, false); err != nil {
+			return recheckResult{}, err
+		}
+	}
+	res := first.res
+	verdict := validate(res)
+	var tokensIn, tokensOut any
+	if first.to != nil {
+		if !verdict.OK && verdict.Reason == "schema" {
+			sd.note(schemaInvalidRow(spec, res, r.hash, true))
+		}
+		tokensIn = addTokens(get(usageOf(first.broken), "tokens_in"), get(usageOf(res), "tokens_in"))
+		tokensOut = addTokens(get(usageOf(first.broken), "tokens_out"), get(usageOf(res), "tokens_out"))
+	} else {
+		tokensIn = get(usageOf(res), "tokens_in")
+		tokensOut = get(usageOf(res), "tokens_out")
+	}
+	if first.to == nil && !verdict.OK && verdict.Reason == "schema" {
+		second, err := r.tryNext(res, "schema")
+		if err != nil {
+			return recheckResult{}, err
+		}
+		if second != nil {
+			verdict = validate(second.res)
+			tokensIn = addTokens(tokensIn, get(usageOf(second.res), "tokens_in"))
+			tokensOut = addTokens(tokensOut, get(usageOf(second.res), "tokens_out"))
+			if !verdict.OK && verdict.Reason == "schema" {
+				sd.note(schemaInvalidRow(spec, second.res, r.hash, true))
 			}
 		}
 	}
-	out := recheckResult{verdict: verdict, tokensIn: orDefault(get(usageOf(res), "tokens_in"), nil), tokensOut: orDefault(get(usageOf(res), "tokens_out"), nil)}
-	if !verdict.OK && verdict.Reason == "schema" && sd.WriteRow != nil {
-		afterSchemaMiss(spec, res, hash, sd)
-	}
-	return out, nil
+	return recheckResult{verdict: verdict, tokensIn: tokensIn, tokensOut: tokensOut}, nil
 }
 
 // stopBeforeRound is fixloop.mjs stopBeforeRound: a non-ok recheck packet is

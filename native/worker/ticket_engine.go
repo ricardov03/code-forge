@@ -367,8 +367,13 @@ func (w *TicketRunner) planOrdinary(t ledger.Object, cfg map[string]any, content
 		return nil, nil, err
 	}
 	if spawns && kind != "full" {
-		if err := session.CheckReview(sopts, "L2", "reviewer"); err != nil {
-			return nil, nil, unsupported("the recheck session: " + err.Error())
+		// B545: the run's level, and the second level with its ladder
+		for _, c := range review.RecheckSpawnChecks(cfg) {
+			o := sopts
+			o.Cfg = c.Cfg
+			if err := session.CheckReview(o, c.Level, c.Role); err != nil {
+				return nil, nil, unsupported("the recheck session: " + err.Error())
+			}
 		}
 	} else if spawns {
 		// B538: every config the session may spawn on (the level, its pinned

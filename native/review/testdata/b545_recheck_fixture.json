@@ -1,0 +1,555 @@
+{
+ "commit": {
+  "a.go": "package a\n\nfunc F1() int { return 1 }\nfunc F2() int { return 2 }\nfunc F3() int { return 3 }\nfunc F4() int { return 4 }\nfunc F5() int { return 5 }\nfunc F6() int { return 6 }\nfunc F7() int { return 7 }\nfunc F8() int { return 8 }\nfunc F9() int { return 9 }\nfunc F10() int { return 10 }\nfunc F11() int { return 11 }\nfunc F12() int { return 12 }\nfunc F13() int { return 13 }\nfunc F14() int { return 14 }\nfunc F15() int { return 15 }\nfunc F16() int { return 16 }\nfunc F17() int { return 17 }\nfunc F18() int { return 18 }\nfunc F19() int { return 19 }\nfunc F20() int { return 20 }\nfunc F21() int { return 21 }\nfunc F22() int { return 22 }\nfunc F23() int { return 23 }\nfunc F24() int { return 24 }\nfunc F25() int { return 25 }\nfunc F26() int { return 26 }\nfunc F27() int { return 27 }\nfunc F28() int { return 28 }\nfunc F29() int { return 29 }\n"
+ },
+ "after": {
+  "a.go": "package a\n\nfunc F1() int { return 1 }\nfunc F2() int { return 2 }\nfunc F3() int { return 3 }\nfunc F4() int { return 4 }\nfunc F5() int { return 5 }\nfunc F6() int { return 6 }\nfunc F7() int { return 7 }\nfunc F8() int { return 8 }\nfunc F9() int { return 9 }\nfunc F10() int { return 100 }\nfunc F11() int { return 11 }\nfunc F12() int { return 12 }\nfunc F13() int { return 13 }\nfunc F14() int { return 14 }\nfunc F15() int { return 15 }\nfunc F16() int { return 16 }\nfunc F17() int { return 17 }\nfunc F18() int { return 18 }\nfunc F19() int { return 19 }\nfunc F20() int { return 20 }\nfunc F21() int { return 21 }\nfunc F22() int { return 22 }\nfunc F23() int { return 23 }\nfunc F24() int { return 24 }\nfunc F25() int { return 25 }\nfunc F26() int { return 26 }\nfunc F27() int { return 27 }\nfunc F28() int { return 28 }\nfunc F29() int { return 29 }\n"
+ },
+ "state": {
+  "file": "a.go",
+  "level": "L2",
+  "round": 1,
+  "rounds_at_level": 1,
+  "warn_rounds_at_level": 1,
+  "open": [
+   {
+    "id": "f1",
+    "file": "a.go",
+    "line_start": 12,
+    "line_end": 12,
+    "severity": "warning",
+    "category": "correctness",
+    "claim": "c f1",
+    "evidence": "e f1",
+    "fix": "f"
+   }
+  ],
+  "late": [],
+  "reviewed_content": "package a\n\nfunc F1() int { return 1 }\nfunc F2() int { return 2 }\nfunc F3() int { return 3 }\nfunc F4() int { return 4 }\nfunc F5() int { return 5 }\nfunc F6() int { return 6 }\nfunc F7() int { return 7 }\nfunc F8() int { return 8 }\nfunc F9() int { return 9 }\nfunc F10() int { return 10 }\nfunc F11() int { return 11 }\nfunc F12() int { return 12 }\nfunc F13() int { return 13 }\nfunc F14() int { return 14 }\nfunc F15() int { return 15 }\nfunc F16() int { return 16 }\nfunc F17() int { return 17 }\nfunc F18() int { return 18 }\nfunc F19() int { return 19 }\nfunc F20() int { return 20 }\nfunc F21() int { return 21 }\nfunc F22() int { return 22 }\nfunc F23() int { return 23 }\nfunc F24() int { return 24 }\nfunc F25() int { return 25 }\nfunc F26() int { return 26 }\nfunc F27() int { return 27 }\nfunc F28() int { return 28 }\nfunc F29() int { return 29 }\n",
+  "l3_rung_used": false,
+  "status": "open",
+  "next": {
+   "action": "fix",
+   "level": "L2",
+   "trigger": null
+  },
+  "last_packet": null,
+  "pending_kind": null,
+  "finding_history": [],
+  "finding_ids": [
+   "f1"
+  ]
+ },
+ "cases": [
+  {
+   "name": "second-level-after-schema",
+   "seed": 1,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "provider": "q",
+       "model": "mq"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 90,
+      "tokens_out": 400
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "q",
+     "model": "mq",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 100,
+      "tokens_out": 500
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": [
+       {
+        "id": "f1",
+        "resolved": true,
+        "why": "fixed"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-level-misses-too",
+   "seed": 1,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "provider": "q",
+       "model": "mq"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 90,
+      "tokens_out": 400
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "q",
+     "model": "mq",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 90,
+      "tokens_out": 400
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     }
+    }
+   ]
+  },
+  {
+   "name": "first-miss-no-try",
+   "seed": 0,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "provider": "q",
+       "model": "mq"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 90,
+      "tokens_out": 400
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     }
+    }
+   ]
+  },
+  {
+   "name": "timeout-tries-second-level",
+   "seed": 2,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "provider": "q",
+       "model": "mq"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "p",
+     "model": "m",
+     "duration_ms": 5,
+     "stderr_tail": "slow"
+    },
+    {
+     "status": "ok",
+     "provider": "q",
+     "model": "mq",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 100,
+      "tokens_out": 500
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": [
+       {
+        "id": "f1",
+        "resolved": true,
+        "why": "fixed"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-level-ladder-on-timeout",
+   "seed": 1,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "provider": "q",
+       "model": "mq",
+       "fallback": [
+        {
+         "provider": "p",
+         "model": "skip"
+        },
+        {
+         "provider": "r",
+         "model": "mr"
+        }
+       ]
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 90,
+      "tokens_out": 400
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     }
+    },
+    {
+     "status": "timeout",
+     "provider": "q",
+     "model": "mq",
+     "duration_ms": 5,
+     "stderr_tail": "slow"
+    },
+    {
+     "status": "ok",
+     "provider": "r",
+     "model": "mr",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 100,
+      "tokens_out": 500
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": [
+       {
+        "id": "f1",
+        "resolved": true,
+        "why": "fixed"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-level-same-provider",
+   "seed": 1,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "second_levels": {
+      "L2": {
+       "provider": "p",
+       "model": "mq"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 90,
+      "tokens_out": 400
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     }
+    }
+   ]
+  },
+  {
+   "name": "second-provider-key",
+   "seed": 1,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "second_provider": "q",
+     "second_levels": {
+      "L2": {
+       "model": "mq"
+      }
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 90,
+      "tokens_out": 400
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "q",
+     "model": "mq",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 100,
+      "tokens_out": 500
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": [
+       {
+        "id": "f1",
+        "resolved": true,
+        "why": "fixed"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "l2-ladder-plain-retry",
+   "seed": 0,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m",
+      "fallback": [
+       {
+        "model": "m2"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "p",
+     "model": "m",
+     "duration_ms": 5,
+     "stderr_tail": "slow"
+    },
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 100,
+      "tokens_out": 500
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": [
+       {
+        "id": "f1",
+        "resolved": true,
+        "why": "fixed"
+       }
+      ]
+     }
+    }
+   ]
+  },
+  {
+   "name": "l2-ladder-two-timeouts",
+   "seed": 0,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m",
+      "fallback": [
+       {
+        "model": "m2"
+       }
+      ]
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "p",
+     "model": "m",
+     "duration_ms": 5,
+     "stderr_tail": "slow"
+    },
+    {
+     "status": "timeout",
+     "provider": "p",
+     "model": "m",
+     "duration_ms": 5,
+     "stderr_tail": "slow"
+    }
+   ]
+  },
+  {
+   "name": "routes-plain",
+   "seed": 0,
+   "cfg": {
+    "levels": {
+     "L2": {
+      "provider": "p",
+      "model": "m"
+     }
+    },
+    "review": {
+     "routes": [
+      {
+       "min_lines": 1,
+       "provider": "q",
+       "model": "m9"
+      }
+     ]
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "p",
+     "model": "m",
+     "fallback_step": 0,
+     "usage": {
+      "tokens_in": 100,
+      "tokens_out": 500
+     },
+     "answer": {
+      "passed": true,
+      "summary": "s",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "resolved": [
+       {
+        "id": "f1",
+        "resolved": true,
+        "why": "fixed"
+       }
+      ]
+     }
+    }
+   ]
+  }
+ ]
+}

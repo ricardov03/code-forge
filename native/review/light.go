@@ -122,6 +122,26 @@ func LightSpawnChecks(cfg map[string]any) []SpawnCheck {
 	return out
 }
 
+// RecheckSpawnChecks are the configs a recheck session may spawn on (B545):
+// the run's L2 level (its first attempt pins nothing), and the second level
+// with each of its runnable ladder entries pinned.
+func RecheckSpawnChecks(cfg map[string]any) []SpawnCheck {
+	out := []SpawnCheck{{Level: "L2", Role: "reviewer", Cfg: cfg}}
+	second := secondLevelFor(cfg, "L2", nil, nil, "reviewer")
+	if !second.ok {
+		return out
+	}
+	out = append(out, SpawnCheck{Level: "L2", Role: "reviewer", Cfg: second.cfg})
+	if lv, ok := resolveLevelOf(second.cfg, "L2"); ok {
+		for _, e := range lv.entries() {
+			if !reviewClosedBook(e.provider, "reviewer", openBookAllowed(second.cfg)) {
+				out = append(out, SpawnCheck{Level: "L2", Role: "reviewer", Cfg: pinLevel(second.cfg, "L2", e, []any{})})
+			}
+		}
+	}
+	return out
+}
+
 // Run is reviewLightBatch after its reads: the split result, or one full
 // L2 reviewer session (no schema fallback) and its verdict.
 func (b *LightBatch) Run(deps Deps) (ledger.Object, error) {
