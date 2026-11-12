@@ -163,10 +163,11 @@ func TestB555FactsPreRunRefusalsMatchNode(t *testing.T) {
 	}
 }
 
-// A call that passes every pre-run check still runs buildFacts in Node, for
-// every provider and level (anthropic, xai and the openai/Codex level alike):
-// Go hands over before it writes anything. A YAML parse error hands over too:
-// Go's parser words it differently from Node's yaml package.
+// B556: Go now runs buildFacts (facts_b556_test.go). These configs set only
+// a top-level provider and no levels.L0, so Node's resolveLevel throws (a
+// crash line Go does not copy): Go hands over facts-session before it writes
+// anything, for every provider. A YAML parse error hands over too: Go's
+// parser words it differently from Node's yaml package.
 func TestB555FactsSessionAndParseErrorHandOver(t *testing.T) {
 	cases := []struct {
 		name, dir, provider string

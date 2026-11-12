@@ -373,6 +373,11 @@ const (
 	hReviewWorkerHandOff
 	// B551r
 	hSpawnCodexSandbox
+	hFactsCodexStep
+	hFactsGlobClaim
+	hFactsBriefEncoding
+	hFactsRootInGit
+	hFactsOutsideSource
 )
 
 var handoverReasons = [...]string{
@@ -748,4 +753,10 @@ var handoverReasons = [...]string{
 	hReviewWorkerHandOff:   "review-worker-handoff",
 	// B551r
 	hSpawnCodexSandbox: "spawn-codex-sandbox",
+	// B556
+	hFactsCodexStep:     "facts-codex-step",
+	hFactsGlobClaim:     "facts-glob-claim",
+	hFactsBriefEncoding: "facts-brief-encoding",
+	hFactsRootInGit:     "facts-root-in-git",
+	hFactsOutsideSource: "facts-outside-source",
 }

@@ -5,19 +5,19 @@ import (
 	"fmt"
 	"io"
 	"os"
+	"path/filepath"
 	"syscall"
 
 	"github.com/ricardov03/code-forge/native/config"
 )
 
-// B555: runFactsVerb is runFactsVerb in src/cli/facts.mjs up to buildFacts.
-// Go serves every refusal Node makes before the session starts (usage, the
-// project config, an unreadable --brief or --sources path, a bad --timeout, a
-// bad --run id): same stderr, exit 2, breadcrumb and error-log row, and no
-// file written. A call that passes those checks still runs buildFacts (the
-// snapshot, the L0 facts session, the sheet and the ledger row) in Node with
-// facts-session, decided before any side effect: Go's session package does
-// not serve the facts role on this base (B549 adds it).
+// B555: runFactsVerb is runFactsVerb in src/cli/facts.mjs. Go serves every
+// refusal Node makes before the session starts (usage, the project config, an
+// unreadable --brief or --sources path, a bad --timeout, a bad --run id):
+// same stderr, exit 2, breadcrumb and error-log row, and no file written.
+// B556: a call that passes those checks runs buildFacts in Go (facts_build.go)
+// for anthropic and xai; the cases Go does not serve byte-equal hand over
+// with a named reason decided before any write.
 func runFactsVerb(args []string) int {
 	if metaHelp(args, factsUsage, nil) {
 		return 0
@@ -36,8 +36,32 @@ func runFactsVerb(args []string) int {
 		})
 	}
 	refusal, reason := fcPreRunRefusal(flags, brief)
-	if refusal == "" {
+	if refusal == "" && reason != hFactsSession {
 		return metaHandover("facts", args, reason)
+	}
+	if refusal == "" {
+		// B556: buildFacts in Go; every hand-over is decided here, before any write
+		plan, reason := fcPlanFacts(flags, brief)
+		if plan == nil {
+			return metaHandover("facts", args, reason)
+		}
+		crumbFile := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "breadcrumbs.json")
+		crumbBytes, crumbErr := os.ReadFile(crumbFile)
+		before := gatesBreadcrumbName("facts")
+		stderr := &contextErrWriter{}
+		code, handover := fcRunFacts(plan, os.Stdout, stderr)
+		if handover {
+			fcRestoreCrumbs(crumbBytes, crumbErr == nil)
+			return metaHandover("facts", args, hFactsSession)
+		}
+		if code != 0 {
+			var message any
+			if stderr.last != "" {
+				message = stderr.last
+			}
+			nativeVerbFailure("facts", "", args, code, message, before)
+		}
+		return code
 	}
 	return metaServe("facts", "", args, func(_, stderr io.Writer) int {
 		fmt.Fprint(stderr, refusal)

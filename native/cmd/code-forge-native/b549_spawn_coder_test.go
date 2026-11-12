@@ -286,7 +286,6 @@ func TestB549SpawnNarrowHandovers(t *testing.T) {
 		// B551r: a Codex coder step runs in Go unless coder.sandbox is set
 		{"codex coder sandbox --run", "spawn-codex-sandbox", "", []string{"--level", "L3", "--role", "coder", "--brief", "brief.md", "--run", "r1"}},
 		{"codex coder sandbox fallback", "spawn-codex-sandbox", "", []string{"--level", "L0", "--role", "coder", "--brief", "brief.md"}},
-		{"facts --cwd", "spawn-facts-cwd", "", []string{"--level", "L1", "--role", "facts", "--brief", "brief.md", "--cwd", "."}},
 		{"unreadable run record", "spawn-coder-run", "{not json", []string{"--level", "L1", "--role", "coder", "--brief", "brief.md", "--run", "r1"}},
 		{"non-object block", "spawn-coder-run", b549RecordHead + `"blocks":{"B1":"x"}}`, []string{"--level", "L1", "--role", "coder", "--brief", "brief.md", "--run", "r1", "--block", "B1"}},
 		{"background cli missing", "spawn-background-start", "", []string{"--level", "L2", "--role", "reviewer", "--brief", "brief.md", "--background"}},

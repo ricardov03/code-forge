@@ -1,0 +1,91 @@
+exit=0
+--- stdout
+{"out":"<WS>/repo/plans/brief.facts.md","claims":6,"verified":2}
+--- stderr
+level=L0 provider=xai model=m-x effort=none fallback_step=0
+facts: F3 not counted — check command not allowed: one command per row: no pipe or list (| ; && || & or a newline); not counted
+--- log/grok.argv
+--prompt-file
+<WS>/tmp/cf/proc-P-T/facts/T-H/packet.md
+-m
+m-x
+--json-schema
+{"type":"object","properties":{"facts":{"type":"array","items":{"type":"object","properties":{"fact_id":{"type":"string"},"claim":{"type":"string"},"kind":{"type":"string","enum":["flag","command","path","version","endpoint","package","env","symbol"]},"command":{"type":"string"},"output_excerpt":{"type":"string"},"tag":{"type":"string","enum":["VERIFIED","NOT-FOUND","UNVERIFIABLE"]},"why":{"type":["string","null"]}},"required":["fact_id","claim","kind","command","output_excerpt","tag","why"],"additionalProperties":false}}},"required":["facts"],"additionalProperties":false}
+--disallowed-tools
+Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch
+--deny
+*
+--no-plan
+--no-subagents
+--max-turns
+1
+--permission-mode
+dontAsk
+--cwd
+<WS>/tmp/cf/proc-P-T/facts/T-H/snapshot
+--- log/grok.cwd
+<WS>/tmp/cf/proc-P-T/facts/T-H/snapshot
+--- log/snapshot.txt
+dr-xr-xr-x .
+-r--r--r-- ./.code-forge.yml
+-r--r--r-- ./.gitignore
+-r--r--r-- ./brief.md
+dr-xr-xr-x ./docs
+-r--r--r-- ./docs/readme.md
+dr-xr-xr-x ./src
+-r--r--r-- ./src/app.mjs
+--- files
+home
+home/.code-forge
+home/.code-forge/ledger
+home/.code-forge/ledger/unit.jsonl
+home/.code-forge/logs
+home/.code-forge/logs/breadcrumbs.json
+repo
+repo/.code-forge.yml
+repo/.env
+repo/.gitignore
+repo/brief.md
+repo/docs
+repo/docs/readme.md
+repo/ignored.txt
+repo/plans
+repo/plans/brief.facts.md
+repo/src
+repo/src/app.mjs
+repo/src/new.mjs
+tmp
+tmp/cf
+--- home/.code-forge/ledger/unit.jsonl
+{"event":"session","role":"facts","level":"L0","provider":"xai","model":"m-x","effort":null,"fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":7,"tokens_out":3,"tokens_source":"reported","usd":0,"cost_source":"estimated","duration_ms":D,"ts":"T"}
+{"event":"facts.built","role":"facts","run":null,"claims":6,"verified":2,"tokens_in":7,"tokens_out":3,"ts":"T","tokens_source":"estimated","cost_source":null}
+--- home/.code-forge/logs/breadcrumbs.json
+["facts"]
+--- repo/plans/brief.facts.md
+# Facts sheet
+
+- brief: `../brief.md`
+- brief_sha256: `1c9a8a33b80ac3a8ecc090e0683653719145e8fe56a0b23e01c4ff41ab964596`
+- brief_mtime: `T`
+- built_at: `T`
+- claims: 6 (VERIFIED 2 · NOT-FOUND 0 · UNVERIFIABLE 4)
+
+| fact_id | tag | kind | claim | command | output | why |
+|---|---|---|---|---|---|---|
+| F1 | VERIFIED | path | `src/app.mjs` | `ls src/app.mjs` | src/app.mjs | — |
+| F2 | VERIFIED | flag | `--alpha` | `grep -rn -- --alpha src` | src/app.mjs:1:const a = '--alpha'; | — |
+| F3 | UNVERIFIABLE | path | `docs/missing.md` | `cat docs/missing.md \| head` | No such file | check command not allowed: one command per row: no pipe or list (\| ; && \|\| & or a newline); not counted |
+| F4 | UNVERIFIABLE | path | `src/new.mjs` | — | — | not at HEAD in repo: outside the snapshot |
+| F5 | UNVERIFIABLE | env | `NODE_ENV` | — | — | no answer from the delegate |
+| F6 | UNVERIFIABLE | path | `/usr/bin/env` | — | — | no answer from the delegate |
+
+<!-- facts-json
+[
+{"fact_id":"F1","claim":"src/app.mjs","kind":"path","command":"ls src/app.mjs","output_excerpt":"src/app.mjs","tag":"VERIFIED","why":null},
+{"fact_id":"F2","claim":"--alpha","kind":"flag","command":"grep -rn -- --alpha src","output_excerpt":"src/app.mjs:1:const a = '--alpha';","tag":"VERIFIED","why":null},
+{"fact_id":"F3","claim":"docs/missing.md","kind":"path","command":"cat docs/missing.md | head","output_excerpt":"No such file","tag":"UNVERIFIABLE","why":"check command not allowed: one command per row: no pipe or list (| ; && || & or a newline); not counted"},
+{"fact_id":"F4","claim":"src/new.mjs","kind":"path","command":"","output_excerpt":"","tag":"UNVERIFIABLE","why":"not at HEAD in repo: outside the snapshot"},
+{"fact_id":"F5","claim":"NODE_ENV","kind":"env","command":"","output_excerpt":"","tag":"UNVERIFIABLE","why":"no answer from the delegate"},
+{"fact_id":"F6","claim":"/usr/bin/env","kind":"path","command":"","output_excerpt":"","tag":"UNVERIFIABLE","why":"no answer from the delegate"}
+]
+-->

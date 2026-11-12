@@ -132,6 +132,9 @@ type Opts struct {
 	// not served.
 	CoderPrompt    *string
 	CoderPromptErr error
+	// MaxBudgetUsd is spawn.mjs maxBudgetUsd (B556): claude --max-budget-usd;
+	// 0 = none.
+	MaxBudgetUsd float64
 }
 
 // Deps are the seams (SessionDeps).
@@ -370,8 +373,17 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 	if o.Role == "coder" {
 		return buildCoder(o, s, sessionDir, effort)
 	}
+	// B556: the facts delegate may run in the caller's read-only snapshot
+	// (validated by assertFactsCwd); every other closed-book role gets an
+	// empty cwd in the session dir
 	cwd := filepath.Join(sessionDir, "cwd")
-	if err := os.Mkdir(cwd, 0o700); err != nil {
+	if o.Role == "facts" && o.Cwd != "" {
+		snapshot, err := factsSnapshot(o.Cwd)
+		if err != nil {
+			return built{}, err
+		}
+		cwd = snapshot
+	} else if err := os.Mkdir(cwd, 0o700); err != nil {
 		return built{}, err
 	}
 	switch s.provider {
@@ -399,6 +411,9 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 				return built{}, err
 			}
 			argv = append(argv, "--json-schema", string(text))
+		}
+		if o.MaxBudgetUsd > 0 {
+			argv = append(argv, "--max-budget-usd", jsNum(o.MaxBudgetUsd))
 		}
 		argv = append(argv, "--permission-mode", "dontAsk")
 		if o.Role == "facts" {
@@ -489,6 +504,26 @@ func checkBuiltArgv(o Opts, b built) error {
 // Preview is previewArgv: step 0's argv with the session dir as <session>.
 func Preview(o Opts, deps Deps) (ledger.Object, error) {
 	steps, skipped, err := plan(o)
+	var sessionErr *Error
+	if err != nil && (IsUnsupported(err) || (errors.As(err, &sessionErr) && sessionErr.Code == "usage")) {
+		return nil, err
+	}
+	// previewArgv checks a facts cwd after the usage checks, before the ladder
+	if o.Role == "facts" && o.Cwd != "" {
+		root := o.RunRoot
+		if root == "" {
+			if deps.RunRoot == nil {
+				return nil, errors.New("session: no run root")
+			}
+			var rerr error
+			if root, rerr = deps.RunRoot(); rerr != nil {
+				return nil, rerr
+			}
+		}
+		if ferr := assertFactsCwd(o.Cwd, root); ferr != nil {
+			return nil, ferr
+		}
+	}
 	if err != nil {
 		return nil, err
 	}
@@ -624,6 +659,11 @@ func Spawn(o Opts, deps Deps) (ledger.Object, error) {
 			return nil, err
 		}
 		o.RunRoot = runRoot
+	}
+	if o.Role == "facts" && o.Cwd != "" {
+		if err := assertFactsCwd(o.Cwd, runRoot); err != nil {
+			return nil, err
+		}
 	}
 	if perr != nil {
 		return nil, perr

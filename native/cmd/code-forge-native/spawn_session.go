@@ -80,11 +80,9 @@ func spawnSessionPlan(cwd string, parsed cliParsed, makeRoot func() (string, boo
 	role := parsed.values["role"]
 	opts := session.Opts{Cfg: cfg, Level: parsed.values["level"], Role: role, PromptPath: brief,
 		Slug: session.SlugFor(cfg, config.ProjectRootFor(cwd)), Background: parsed.booleans["background"]}
-	// B549: --cwd is the coder's tree; a facts session's --cwd check stays with Node
+	// B549: --cwd is the coder's tree; B556: a facts session's --cwd is its
+	// snapshot, checked by session.Spawn/Preview (assertFactsCwd)
 	if dir, ok := parsed.values["cwd"]; ok {
-		if role == "facts" {
-			return nil, hSpawnFactsCwd
-		}
 		opts.Cwd = spawnResolve(cwd, dir)
 	}
 	if raw, ok := parsed.values["timeout"]; ok {
