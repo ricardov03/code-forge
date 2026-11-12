@@ -16,6 +16,7 @@ import (
 	"text/tabwriter"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/healq"
 )
 
@@ -296,10 +297,10 @@ func healTee() (stop func() string) {
 	os.Stderr = w
 	kept := &healKept{}
 	done := make(chan struct{})
-	go func() {
+	gosafe.Go("heal-stderr-tee", func() {
 		defer close(done)
 		_, _ = io.Copy(io.MultiWriter(real, kept), r)
-	}()
+	})
 	return func() string {
 		os.Stderr = real
 		_ = w.Close()

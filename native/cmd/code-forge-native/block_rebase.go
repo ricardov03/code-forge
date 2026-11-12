@@ -12,6 +12,7 @@ import (
 	"syscall"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
 )
@@ -92,7 +93,7 @@ func runBlockRebase(args []string) int {
 		return 126
 	}
 	done := make(chan struct{})
-	go func() {
+	gosafe.Go("block-rebase-signals", func() {
 		for {
 			select {
 			case s := <-signals:
@@ -103,7 +104,7 @@ func runBlockRebase(args []string) int {
 				return
 			}
 		}
-	}()
+	})
 	err = cmd.Wait()
 	close(done)
 	if err != nil {

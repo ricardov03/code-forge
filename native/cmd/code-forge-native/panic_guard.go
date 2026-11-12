@@ -3,9 +3,10 @@ package main
 import (
 	"fmt"
 	"os"
-	"path/filepath"
-	"runtime"
 	"strings"
+	"sync/atomic"
+
+	"github.com/ricardov03/code-forge/native/gosafe"
 )
 
 // panicSeam is nil in the product binary. Tests set it, and a binary built
@@ -21,26 +22,22 @@ var panicSeam func(args []string)
 //     a second time: one error line names the command and the panic site
 //     (never the panic value or an argument), a go-panic-stopped row, exit 1.
 func runGuarded(args []string) (code int, err error) {
+	guardStderr = os.Stderr
+	panicClaimed.Store(false)
+	// B509: a panic in a goroutine the command started (gosafe.Go) gets the
+	// same answer; the handler stays until the process ends.
+	gosafe.SetHandler(func(_, site string) { goroutinePanic(args, site) })
 	defer func() {
 		value := recover()
 		if value == nil {
 			return
 		}
 		site := panicSite()
-		if panicRerunSafe(args) {
-			code, err = handover(args, hGoPanic)
-			return
+		if !panicClaimed.CompareAndSwap(false, true) {
+			// A goroutine panic is already being handled; it ends the process.
+			select {}
 		}
-		recordHandover(args, handoverReasons[hGoPanicStopped])
-		name, sub := handoverCommand(args)
-		if sub != "" && sub != "unknown" {
-			name += " " + sub
-		}
-		if name == "" {
-			name = "no command"
-		}
-		fmt.Fprintf(os.Stderr, "code-forge: internal error in the Go engine (%s, at %s); Node did not re-run it because it may have changed state; check `code-forge status` before you retry\n", name, site)
-		code, err = 1, nil
+		code, err = panicOutcome(args, site)
 	}()
 	if panicSeam != nil {
 		panicSeam(args)
@@ -48,26 +45,53 @@ func runGuarded(args []string) (code int, err error) {
 	return run(args)
 }
 
+// guardStderr is the standard error the command started with. A command
+// that copies its stderr through a pipe (healWrap) has moved os.Stderr; the
+// panic line must still reach the terminal.
+var guardStderr = os.Stderr
+
+// panicClaimed makes sure one panic is handled: the first one, on the main
+// goroutine or on any goroutine started with gosafe.Go.
+var panicClaimed atomic.Bool
+
+// goroutineExit ends the process after a goroutine panic; tests replace it.
+var goroutineExit = os.Exit
+
+// goroutinePanic handles a panic in a goroutine a command started (B509)
+// with the B508 rules, then ends the process the way main does: a read-only
+// command is handed to Node (exec replaces this process), any other command
+// prints one error line, writes a go-panic-stopped row and exits 1.
+func goroutinePanic(args []string, site string) {
+	if !panicClaimed.CompareAndSwap(false, true) {
+		select {}
+	}
+	code, err := panicOutcome(args, site)
+	if err != nil {
+		fmt.Fprintln(guardStderr, "code-forge-native:", err)
+	}
+	goroutineExit(code)
+}
+
+// panicOutcome is the B508 answer to a panic at site.
+func panicOutcome(args []string, site string) (int, error) {
+	if panicRerunSafe(args) {
+		return handover(args, hGoPanic)
+	}
+	recordHandover(args, handoverReasons[hGoPanicStopped])
+	name, sub := handoverCommand(args)
+	if sub != "" && sub != "unknown" {
+		name += " " + sub
+	}
+	if name == "" {
+		name = "no command"
+	}
+	fmt.Fprintf(guardStderr, "code-forge: internal error in the Go engine (%s, at %s); Node did not re-run it because it may have changed state; check `code-forge status` before you retry\n", name, site)
+	return 1, nil
+}
+
 // panicSite names the first frame outside the Go runtime below the panic:
 // function, file base name and line. Called from the deferred recover.
-func panicSite() string {
-	pcs := make([]uintptr, 64)
-	frames := runtime.CallersFrames(pcs[:runtime.Callers(1, pcs)])
-	panicking := false
-	for {
-		frame, more := frames.Next()
-		if frame.Function == "runtime.gopanic" {
-			panicking = true
-		} else if panicking && !strings.HasPrefix(frame.Function, "runtime.") {
-			name := frame.Function[strings.LastIndex(frame.Function, "/")+1:]
-			name = strings.TrimPrefix(strings.TrimPrefix(name, "main."), "code-forge-native.")
-			return fmt.Sprintf("%s %s:%d", name, filepath.Base(frame.File), frame.Line)
-		}
-		if !more {
-			return "unknown site"
-		}
-	}
-}
+func panicSite() string { return gosafe.Site() }
 
 // panicRerunSafe lists the commands whose Go path writes no state (only
 // read-only checks, plus the breadcrumb and error-log lines Node also

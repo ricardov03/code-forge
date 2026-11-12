@@ -7,6 +7,7 @@ import (
 	"errors"
 	"fmt"
 	"github.com/ricardov03/code-forge/native/filelock"
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/procguard"
 	"io"
@@ -639,8 +640,8 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 	cmd.Stderr = errWrite
 	var drains sync.WaitGroup
 	drains.Add(2)
-	go func() { defer drains.Done(); _, _ = io.Copy(stdout, outRead) }()
-	go func() { defer drains.Done(); _, _ = io.Copy(stderr, errRead) }()
+	gosafe.Go("gate-stdout", func() { defer drains.Done(); _, _ = io.Copy(stdout, outRead) })
+	gosafe.Go("gate-stderr", func() { defer drains.Done(); _, _ = io.Copy(stderr, errRead) })
 	var code any
 	reason, diagnostic, message := "", "", ""
 	timed := false
@@ -657,7 +658,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 		outWrite.Close()
 		errWrite.Close()
 		done := make(chan error, 1)
-		go func() { done <- cmd.Wait() }()
+		gosafe.Go("gate-wait", func() { done <- cmd.Wait() })
 		duration := time.Duration(timeout * float64(time.Millisecond))
 		if timeout > float64(math.MaxInt64)/float64(time.Millisecond) {
 			duration = time.Duration(math.MaxInt64)
@@ -713,7 +714,7 @@ func execute(ctx context.Context, argv []string, env map[string]string, cwd, run
 	// cleanup. An escaped descendant (or failed ps) must not hold this run open.
 	// Allow queued bytes to drain, then close the read ends to unblock io.Copy.
 	drained := make(chan struct{})
-	go func() { drains.Wait(); close(drained) }()
+	gosafe.Go("gate-drained", func() { drains.Wait(); close(drained) })
 	drainTimer := time.NewTimer(100 * time.Millisecond)
 	select {
 	case <-drained:

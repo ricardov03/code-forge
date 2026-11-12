@@ -13,6 +13,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/runstatus"
 )
 
@@ -83,7 +84,7 @@ func (s *server) status() object {
 	p := s.statusProcess
 	payload := object{"record": s.record, "rows": s.rows}
 	response := make(chan object, 1)
-	go func() {
+	gosafe.Go("daemon-status-helper", func() {
 		var result object
 		if err := p.encode.Encode(payload); err != nil {
 			response <- nil
@@ -93,7 +94,7 @@ func (s *server) status() object {
 			result = nil
 		}
 		response <- result
-	}()
+	})
 	timer := time.NewTimer(5 * time.Second)
 	defer timer.Stop()
 	select {

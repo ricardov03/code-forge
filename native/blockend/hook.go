@@ -13,6 +13,8 @@ import (
 	"strings"
 	"syscall"
 	"time"
+
+	"github.com/ricardov03/code-forge/native/gosafe"
 )
 
 type Hook struct {
@@ -143,7 +145,7 @@ func Run(hook *Hook, cwd string, env []string) (result Result) {
 		return
 	}
 	done := make(chan error, 1)
-	go func() { done <- cmd.Wait() }()
+	gosafe.Go("end-hook-wait", func() { done <- cmd.Wait() })
 	timer := time.NewTimer(hook.Timeout)
 	defer timer.Stop()
 	select {

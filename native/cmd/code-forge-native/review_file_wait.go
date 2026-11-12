@@ -19,6 +19,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"gopkg.in/yaml.v3"
 )
@@ -205,14 +206,14 @@ func reviewWaitSignals() (context.Context, func() int, func()) {
 	signal.Notify(signals, syscall.SIGINT, syscall.SIGTERM)
 	var code atomic.Int32
 	stopped := make(chan struct{})
-	go func() {
+	gosafe.Go("review-wait-signals", func() {
 		select {
 		case sig := <-signals:
 			code.Store(int32(128 + sig.(syscall.Signal)))
 			cancel()
 		case <-stopped:
 		}
-	}()
+	})
 	return ctx, func() int { return int(code.Load()) }, func() { signal.Stop(signals); close(stopped); cancel() }
 }
 

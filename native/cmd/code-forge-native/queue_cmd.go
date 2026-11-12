@@ -15,6 +15,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gates"
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/testslot"
 )
 
@@ -214,7 +215,7 @@ func queueRun(args []string) int {
 		return 127
 	}
 	done := make(chan struct{})
-	go func() {
+	gosafe.Go("queue-run-signals", func() {
 		for {
 			select {
 			case s := <-signals:
@@ -223,7 +224,7 @@ func queueRun(args []string) int {
 				return
 			}
 		}
-	}()
+	})
 	err = cmd.Wait()
 	close(done)
 	var exit *exec.ExitError

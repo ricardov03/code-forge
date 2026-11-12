@@ -83,8 +83,17 @@ func blockLandChain(t *testing.T, shape string) {
 	if strings.HasPrefix(shape, "join-") {
 		join, shape = shape, "same-tree"
 	}
+	// B509: a child process lands (or gates) the same-tree block through
+	// runGuarded with a goroutine that panics; the parent names its HOME.
+	panicChild := ""
+	if strings.HasSuffix(shape, "-panic") {
+		panicChild, shape = shape, "same-tree"
+	}
 	// The daemon's Unix socket needs a short private HOME on macOS.
 	home, err := os.MkdirTemp("/tmp", "cf-land-unit-")
+	if panicChild != "" {
+		home, err = os.Getenv("B509_HOME"), nil
+	}
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -451,6 +460,9 @@ func blockLandChain(t *testing.T, shape string) {
 		git(repo, "remote", "add", "origin", bare)
 		git(repo, "push", "-q", "origin", "main")
 		flags["push"] = true
+	}
+	if panicChild != "" {
+		b509PanicChild(t, panicChild, repo, tree, run, report, transcript)
 	}
 	out, stderr := os.Stdout, os.Stderr
 	capture, err := os.CreateTemp(home, "land-output-")

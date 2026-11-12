@@ -26,6 +26,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/canon"
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/queue"
 	"github.com/ricardov03/code-forge/native/sign"
@@ -148,7 +149,7 @@ func Serve(home, run, version string, idle time.Duration) error {
 	var connectionsMu sync.Mutex
 	var clients sync.WaitGroup
 	defer clients.Wait()
-	go func() {
+	gosafe.Go("daemon-idle", func() {
 		tick := time.NewTicker(min(idle, 200*time.Millisecond))
 		defer tick.Stop()
 		for {
@@ -170,7 +171,7 @@ func Serve(home, run, version string, idle time.Duration) error {
 				}
 			}
 		}
-	}()
+	})
 	for {
 		conn, err := listener.Accept()
 		if err != nil {
@@ -189,7 +190,7 @@ func Serve(home, run, version string, idle time.Duration) error {
 		connections[conn] = true
 		connectionsMu.Unlock()
 		clients.Add(1)
-		go func() {
+		gosafe.Go("daemon-connection", func() {
 			defer clients.Done()
 			defer conn.Close()
 			defer func() { connectionsMu.Lock(); delete(connections, conn); connectionsMu.Unlock() }()
@@ -211,7 +212,7 @@ func Serve(home, run, version string, idle time.Duration) error {
 					return
 				}
 			}
-		}()
+		})
 	}
 }
 

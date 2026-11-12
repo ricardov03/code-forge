@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/healq"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/state"
@@ -122,7 +123,7 @@ func ciWatchSpawn(home, run, sha, cwd string) (string, error) {
 		return "", err
 	}
 	// Reap the child if this process outlives it; land itself never waits.
-	go func() { _ = cmd.Wait() }()
+	gosafe.Go("ci-watch-reap", func() { _ = cmd.Wait() })
 	return log, nil
 }
 

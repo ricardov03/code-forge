@@ -14,6 +14,7 @@ import (
 	"github.com/ricardov03/code-forge/native/daemonclient"
 	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/gitx"
+	"github.com/ricardov03/code-forge/native/gosafe"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/proof"
@@ -252,7 +253,7 @@ func landExecuteWithReason(args []string, flags map[string]any, home, run, id st
 				return code
 			}, ctx)
 		}
-		go func() { gating <- runGates() }()
+		gosafe.Go("land-gates", func() { gating <- runGates() })
 		join := func() string {
 			started := time.Now()
 			defer func() { joinMs = time.Since(started).Milliseconds() }()

@@ -178,9 +178,8 @@ state in Go (`setup`, `status`, `run status`, `queue` and `queue status`, `heal 
 `go-panic` row. Any other command may already have changed state, so Node never runs it a
 second time: Go prints one line that names the command and the code site, never the panic
 text or an argument, writes a `go-panic-stopped` row and exits 1. Check `code-forge status`
-before you retry. A panic in a background goroutine (for example the merge gate that
-`block land` runs next to its review wait) is not caught and still ends with Go's stack
-trace and exit 2.
+before you retry. A panic in a goroutine a command starts (for example the gates that
+`block land` runs next to its review wait) gets the same answer, rows and exit codes (B509).
 The full code list is the `handoverReasons` table in
 [`handover_reasons.go`](../native/cmd/code-forge-native/handover_reasons.go).
 
