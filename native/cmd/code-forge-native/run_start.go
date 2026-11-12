@@ -819,12 +819,25 @@ var (
 	runReloadErrno = regexp.MustCompile(`could not read .*: (E[A-Z]+)$`)
 )
 
-// runYAMLSyntax is a YAML syntax error: Node's parser words it (and counts
-// its line) its own way, so that report stays with Node. A document that
-// parses to something other than a mapping is worded the same by both.
+// runYAMLSyntax is a YAML syntax error Node's parser words (and counts its
+// line) its own way, so that report stays with Node. A document that parses
+// to something other than a mapping, a duplicate key and a tag that does not
+// resolve are worded the same by both (B472: compared on broken fixtures).
 func runYAMLSyntax(e *config.Error) bool {
-	return e.Kind == "parse-error" && !strings.HasPrefix(e.Message, "config root must be a mapping")
+	if e.Kind != "parse-error" {
+		return false
+	}
+	for _, same := range []string{"config root must be a mapping", "DUPLICATE_KEY: ", "TAG_RESOLVE_FAILED: "} {
+		if strings.HasPrefix(e.Message, same) {
+			return false
+		}
+	}
+	return true
 }
+
+// runYAMLLine is Node's reload line: the line of "(line N, column M)" at the
+// end of the parser's message, never the message itself.
+var runYAMLLine = regexp.MustCompile(`\(line (\d+), column \d+\)$`)
 
 func runReloadPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 	record, readErr, ok := runReadRecord(home, runID)
@@ -854,6 +867,9 @@ func runReloadPlan(home, runID string) (func(o *runOut) int, handoverReason) {
 		text = "no .code-forge.yml in the workspace"
 	case "parse-error":
 		text = "the config could not be parsed (.code-forge.yml)" // a root that is not a mapping has no line
+		if m := runYAMLLine.FindStringSubmatch(cfgErr.Message); m != nil {
+			text = "the config could not be parsed (.code-forge.yml:" + m[1] + ")"
+		}
 	case "migrate-error":
 		text = ".code-forge.yml could not be migrated to the current format"
 	default:
