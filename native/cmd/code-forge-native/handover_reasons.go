@@ -389,6 +389,13 @@ const (
 	hRebaseKey
 	hRebaseLedger
 	hRebaseContentHash
+	// B581
+	hOpenHomeLookup
+	hOpenLevelLedger
+	hOpenBriefCwd
+	hOpenAcceptanceYAML
+	hOpenPipelineForm
+	hOpenOutcomeForm
 )
 
 var handoverReasons = [...]string{
@@ -781,4 +788,11 @@ var handoverReasons = [...]string{
 	hRebaseKey:            "rebase-key-unreadable",
 	hRebaseLedger:         "rebase-ledger-unreadable",
 	hRebaseContentHash:    "rebase-content-hash",
+	// B581
+	hOpenHomeLookup:     "open-home-lookup",
+	hOpenLevelLedger:    "open-level-ledger",
+	hOpenBriefCwd:       "open-brief-cwd",
+	hOpenAcceptanceYAML: "open-acceptance-yaml",
+	hOpenPipelineForm:   "open-pipeline-form",
+	hOpenOutcomeForm:    "open-outcome-form",
 }

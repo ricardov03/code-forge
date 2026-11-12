@@ -362,6 +362,11 @@ func blockIOMessage(err error) string {
 		why = "file already exists"
 	case syscall.EISDIR:
 		why = "illegal operation on a directory"
+	case syscall.ENAMETOOLONG:
+		// libuv's text, as Node prints it (B581).
+		why = "name too long"
+	case syscall.ELOOP:
+		why = "too many symbolic links encountered"
 	}
 	if errors.As(err, &pathErr) {
 		return fmt.Sprintf("%s: %s, %s '%s'", code, why, pathErr.Op, pathErr.Path)

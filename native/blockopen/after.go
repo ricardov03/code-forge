@@ -2,15 +2,16 @@ package blockopen
 
 import (
 	"crypto/sha256"
-	"encoding/json"
+	"errors"
 	"fmt"
 	"os"
 	"path/filepath"
 	"regexp"
 	"slices"
+	"strconv"
 	"strings"
+	"syscall"
 
-	"github.com/ricardov03/code-forge/native/blockops"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -38,11 +39,7 @@ func CheckAfter(record ledger.Object, id string, ids []string) error {
 		}
 		label := "not in run"
 		if status != nil {
-			var ok bool
-			label, ok = status.(string)
-			if !ok {
-				return blockops.ErrHandover
-			}
+			label = jsValueString(status)
 		}
 		blocking = append(blocking, dependency+" ("+label+")")
 	}
@@ -52,26 +49,64 @@ func CheckAfter(record ledger.Object, id string, ids []string) error {
 	return nil
 }
 
-// Unsupported schema and YAML forms are delegated before any state mutation;
-// valid pipeline contracts and their readiness errors are evaluated locally.
-func AcceptedOutcomes(root, id string, ids []string) ([]any, error) {
+// ErrPipelineForm: code-forge.pipeline.yml has a YAML form, a shape outside
+// schema/pipeline.schema.json (AJV's wording stays with Node) or a read
+// error code the port does not name (B581).
+var ErrPipelineForm = errors.New("block open: a pipeline form Go does not serve")
+
+// ErrOutcomeForm: an outcome contract checkOutcome reports in wording Go
+// does not reproduce: AJV diagnostics, bytes that are not UTF-8 or an
+// unnamed read error code (B581).
+var ErrOutcomeForm = errors.New("block open: an outcome form Go does not serve")
+
+// OutcomeCheck is checkOutcome in src/outcome/outcome.mjs: every problem in
+// Node's order; ok is false where Go does not reproduce Node's wording.
+type OutcomeCheck func(file, root string) (problems []string, ok bool)
+
+// boErrnoCode is the err.code Node reports for a failed fs call; ok is false
+// for an error the port does not name.
+func boErrnoCode(err error) (string, bool) {
+	var errno syscall.Errno
+	if !errors.As(err, &errno) {
+		return "", false
+	}
+	name, ok := map[syscall.Errno]string{
+		syscall.ENOENT: "ENOENT", syscall.EISDIR: "EISDIR", syscall.ENOTDIR: "ENOTDIR", syscall.EACCES: "EACCES",
+		syscall.EPERM: "EPERM", syscall.ENAMETOOLONG: "ENAMETOOLONG", syscall.ELOOP: "ELOOP",
+	}[errno]
+	return name, ok
+}
+
+// AcceptedOutcomes is acceptedOutcomes in src/cli/block.mjs: the pipeline
+// is read and checked, then every named step's outcome, before state open
+// writes anything. Forms whose wording stays with Node return
+// ErrPipelineForm or ErrOutcomeForm (B581).
+func AcceptedOutcomes(root, id string, ids []string, check OutcomeCheck) ([]any, error) {
 	bad := func(problem string) error {
 		return refusal("bad-after-outcome", "block "+id+": --after-outcome: "+problem)
 	}
+	oneLine := strings.NewReplacer("\r", " ", "\n", " ")
 	data, err := os.ReadFile(filepath.Join(root, "code-forge.pipeline.yml"))
-	if os.IsNotExist(err) {
+	if errors.Is(err, syscall.ENOENT) {
 		return nil, bad("no code-forge.pipeline.yml in " + root)
 	}
 	if err != nil {
-		return nil, blockops.ErrHandover
+		code, ok := boErrnoCode(err)
+		if !ok {
+			return nil, ErrPipelineForm
+		}
+		return nil, bad("Cannot read pipeline (" + code + ")")
 	}
-	v, err := ParseAcceptance(data)
+	v, err := ParseYAMLJS(data)
+	if errors.Is(err, ErrYAMLForm) {
+		return nil, ErrPipelineForm
+	}
 	if err != nil {
-		return nil, err
+		return nil, bad(oneLine.Replace("Invalid pipeline YAML: " + err.Error()))
 	}
 	steps, ok := PipelineSteps(v)
 	if !ok {
-		return nil, blockops.ErrHandover
+		return nil, ErrPipelineForm
 	}
 	byID := map[string]ledger.Object{}
 	for _, step := range steps {
@@ -125,17 +160,28 @@ func AcceptedOutcomes(root, id string, ids []string) ([]any, error) {
 	}
 	out := []any{}
 	for _, name := range unique(ids) {
-		file := filepath.Join(root, text(byID[name].Get("outcome")))
-		problem, err := CheckOutcome(file, root)
-		if err != nil {
-			return nil, err
+		notReady := func(problem string) error {
+			return refusal("outcome-not-ready", "block "+id+": --after-outcome step "+name+": "+problem)
 		}
-		if problem != "" {
-			return nil, refusal("outcome-not-ready", "block "+id+": --after-outcome step "+name+": "+problem)
+		file := filepath.Join(root, text(byID[name].Get("outcome")))
+		// existsSync: any stat error is a missing outcome.
+		if _, err := os.Stat(file); err != nil {
+			return nil, notReady("missing outcome")
+		}
+		problems, ok := check(file, root)
+		if !ok {
+			return nil, ErrOutcomeForm
+		}
+		if len(problems) > 0 {
+			return nil, notReady(problems[0])
 		}
 		data, err := os.ReadFile(file)
 		if err != nil {
-			return nil, blockops.ErrHandover
+			code, ok := boErrnoCode(err)
+			if !ok {
+				return nil, ErrOutcomeForm
+			}
+			return nil, notReady("cannot read outcome (" + code + ")")
 		}
 		out = append(out, ledger.Object{{Key: "step", Value: name}, {Key: "sha256", Value: fmt.Sprintf("%x", sha256.Sum256(data))}})
 	}
@@ -197,71 +243,6 @@ func PipelineSteps(v any) ([]ledger.Object, bool) {
 	return steps, true
 }
 
-// CheckOutcome is checkOutcome in src/outcome/outcome.mjs for a contract of
-// a supported shape: the first problem, or "" when it is ready.
-func CheckOutcome(file, root string) (string, error) {
-	if _, err := os.Stat(file); os.IsNotExist(err) {
-		return "missing outcome", nil
-	}
-	data, err := os.ReadFile(file)
-	if err != nil {
-		return "", blockops.ErrHandover
-	}
-	if !json.Valid(data) {
-		return "Outcome " + quote(file) + " is not valid JSON", nil
-	}
-	o, err := ledger.DecodeObject(data)
-	if err != nil || !validOutcome(o) {
-		return "", blockops.ErrHandover
-	}
-	if o.Get("status") != "approved" {
-		return "status " + quote(text(o.Get("status"))) + ": must be approved", nil
-	}
-	checks, _ := o.Get("checks").([]any)
-	for _, v := range checks {
-		check := object(v)
-		if check.Get("result") == "fail" {
-			return "check " + quote(text(check.Get("name"))) + ": result is fail", nil
-		}
-	}
-	files, _ := o.Get("files").([]any)
-	for _, v := range files {
-		entry := object(v)
-		name := text(entry.Get("path"))
-		label := "file " + quote(name) + ": "
-		if strings.HasPrefix(name, "/") || strings.HasPrefix(name, `\`) || regexp.MustCompile(`^[A-Za-z]:[/\\]`).MatchString(name) || slices.Contains(strings.FieldsFunc(name, func(r rune) bool { return r == '/' || r == '\\' }), "..") {
-			return label + "path must be relative to root without ..", nil
-		}
-		target := filepath.Join(root, name)
-		realRoot, err := filepath.EvalSymlinks(root)
-		if err != nil {
-			return "", blockops.ErrHandover
-		}
-		real, err := filepath.EvalSymlinks(target)
-		if os.IsNotExist(err) {
-			return label + "missing file", nil
-		}
-		if err != nil {
-			return "", blockops.ErrHandover
-		}
-		rel, err := filepath.Rel(realRoot, real)
-		if err != nil {
-			return "", blockops.ErrHandover
-		}
-		if rel == ".." || strings.HasPrefix(rel, ".."+string(filepath.Separator)) || filepath.IsAbs(rel) {
-			return label + "path leaves root through a symlink", nil
-		}
-		bytes, err := os.ReadFile(target)
-		if err != nil {
-			return "", blockops.ErrHandover
-		}
-		if text(entry.Get("sha256")) != fmt.Sprintf("%x", sha256.Sum256(bytes)) {
-			return label + "sha256 does not match", nil
-		}
-	}
-	return "", nil
-}
-
 // ValidOutcome reports a contract schema/outcome.schema.json accepts. Shape
 // checks deliberately delegate invalid contracts to Node's AJV diagnostics.
 func ValidOutcome(o ledger.Object) bool { return validOutcome(o) }
@@ -317,4 +298,29 @@ func validOutcome(o ledger.Object) bool {
 		}
 	}
 	return true
+}
+
+// jsValueString is JavaScript's String(value) for a decoded JSON value, as a
+// template literal prints it (B581).
+func jsValueString(v any) string {
+	switch x := v.(type) {
+	case nil:
+		return "null"
+	case string:
+		return x
+	case bool:
+		return strconv.FormatBool(x)
+	case float64:
+		data, _ := ledger.Stringify(x, false)
+		return string(data)
+	case []any:
+		parts := make([]string, len(x))
+		for i, item := range x {
+			if item != nil {
+				parts[i] = jsValueString(item)
+			}
+		}
+		return strings.Join(parts, ",")
+	}
+	return "[object Object]"
 }

@@ -1,17 +1,20 @@
 package blockopen
 
 import (
-	"os"
+	"errors"
 	"path/filepath"
 	"regexp"
 	"strconv"
 	"strings"
 
-	"github.com/ricardov03/code-forge/native/blockops"
 	"github.com/ricardov03/code-forge/native/ledger"
 	"github.com/ricardov03/code-forge/native/owned"
 	"github.com/ricardov03/code-forge/native/sign"
 )
+
+// ErrLevelLedger: the ledger could not be read for the recorded level; Node
+// prints V8's JSON.parse message, which Go does not reproduce (B581).
+var ErrLevelLedger = errors.New("block open: the ledger cannot be read for the recorded level")
 
 // PickLevel reads only local state. Brief runs use rules; other runs use the last
 // signed recorded level. No model, worker or daemon participates in this choice.
@@ -64,7 +67,8 @@ func PickLevel(home, run, id string, flags map[string]any, record ledger.Object,
 	}
 	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), text(record.Get("project")))
 	if err != nil {
-		return "", "", nil, blockops.ErrHandover
+		// Node's message is V8's JSON.parse text for a torn middle line.
+		return "", "", nil, ErrLevelLedger
 	}
 	level := ""
 	found := false
@@ -79,14 +83,9 @@ func PickLevel(home, run, id string, flags map[string]any, record ledger.Object,
 			continue
 		}
 		if key == nil {
-			file := filepath.Join(home, ".code-forge/runs", run+".key")
-			info, err := os.Stat(file)
-			if err != nil || info.Mode().Perm()&0077 != 0 {
-				return "", "", nil, blockops.ErrHandover
-			}
-			key, err = os.ReadFile(file)
-			if err != nil || len(key) != 32 {
-				return "", "", nil, blockops.ErrHandover
+			var err error
+			if key, err = loadKey(home, run); err != nil {
+				return "", "", nil, err
 			}
 		}
 		verified, err := sign.VerifyRow(r, key)
@@ -96,11 +95,6 @@ func PickLevel(home, run, id string, flags map[string]any, record ledger.Object,
 	}
 	if !found {
 		return "", "", nil, refusal("usage", "no --level given and no autopilot level recorded for "+id)
-	}
-	// The CLI already delegates an explicit trailing-newline level because JS's
-	// regexp end anchor differs from Go's. Recorded levels need the same guard.
-	if strings.HasSuffix(level, "\n") {
-		return "", "", nil, blockops.ErrHandover
 	}
 	return level, "autopilot", nil, nil
 }

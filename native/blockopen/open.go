@@ -64,7 +64,10 @@ func previous(record ledger.Object, o Options) ledger.Object {
 	}
 	return object(object(object(record.Get("blocks")).Get(o.ID)).Get("worktree"))
 }
-func claims(home, run, project, id string) ([]string, error) {
+
+// loadKey is Node's loadKey: stat, the mode check, then the read; a missing
+// key is no-key, any other error is the raw one (B581).
+func loadKey(home, run string) ([]byte, error) {
 	keyPath := filepath.Join(home, ".code-forge/runs", run+".key")
 	st, err := os.Stat(keyPath)
 	if os.IsNotExist(err) {
@@ -77,11 +80,22 @@ func claims(home, run, project, id string) ([]string, error) {
 		return nil, refusal("bad-key-mode", fmt.Sprintf("run %s signer key is accessible to other users (mode %o); expected 600", run, st.Mode().Perm()))
 	}
 	key, err := os.ReadFile(keyPath)
+	if os.IsNotExist(err) {
+		return nil, refusal("no-key", "run "+run+" has no signer key")
+	}
 	if err != nil {
 		return nil, err
 	}
 	if len(key) != 32 {
 		return nil, refusal("bad-key", "run "+run+" signer key is not 32 bytes")
+	}
+	return key, nil
+}
+
+func claims(home, run, project, id string) ([]string, error) {
+	key, err := loadKey(home, run)
+	if err != nil {
+		return nil, err
 	}
 	rows, err := ledger.ReadAllRows(filepath.Join(home, ".code-forge/ledger"), project)
 	if err != nil {
@@ -89,7 +103,7 @@ func claims(home, run, project, id string) ([]string, error) {
 	}
 	out := []string{}
 	seen := map[string]bool{}
-	for _, v := range rows {
+	for i, v := range rows {
 		r, ok := v.(map[string]any)
 		if !ok || r["event"] != "block.claim" || r["run"] != run || r["block"] != id {
 			continue
@@ -100,7 +114,24 @@ func claims(home, run, project, id string) ([]string, error) {
 		}
 		file, ok := r["path"].(string)
 		if !ok {
-			return nil, blockops.ErrHandover
+			// Node's assertOwned names the value as JSON.stringify prints it,
+			// in its parsed key order (B581).
+			shown := "undefined"
+			if _, present := r["path"]; present {
+				ordered, err := ledger.ReadAllOrdered(filepath.Join(home, ".code-forge/ledger"), project)
+				if err != nil {
+					return nil, err
+				}
+				if i >= len(ordered) {
+					return nil, blockops.ErrHandover
+				}
+				data, err := ledger.Stringify(object(ordered[i]).Get("path"), false)
+				if err != nil {
+					return nil, blockops.ErrHandover
+				}
+				shown = string(data)
+			}
+			return nil, refusal("bad-owned", "owned files: invalid path "+shown+": must be a non-empty string")
 		}
 		if err := AssertOwned([]string{file}, "owned files", "bad-owned"); err != nil {
 			return nil, err
@@ -271,7 +302,8 @@ func Open(o Options) (result Result, err error) {
 			baseBranch = strings.TrimSpace(branch)
 		} else if e, ok := err.(*gitx.CommandError); !ok || e.Code != 1 {
 			if !ok {
-				return nil, blockops.ErrHandover
+				// gitx.Run fails only with a *CommandError (B581).
+				return nil, err
 			}
 			return nil, refusal("git-failed", fmt.Sprintf("git symbolic-ref failed (exit %d)", e.Code))
 		}

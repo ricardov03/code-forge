@@ -4,6 +4,7 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"os/user"
 	"path/filepath"
 	"regexp"
 	"slices"
@@ -25,6 +26,15 @@ import (
 func init() { blockSubs["open"] = runBlockOpen }
 
 // Keep the original argv until every pre-publication check has been mapped.
+// boUserHome is the user database home folder (a seam for tests, B581).
+var boUserHome = func() (string, error) {
+	u, err := user.Current()
+	if err != nil {
+		return "", err
+	}
+	return u.HomeDir, nil
+}
+
 func runBlockOpen(args []string) int {
 	// --allow-api-mismatch is native only: Node has no api-fit check, so a
 	// handover drops the flag instead of refusing it as unknown.
@@ -36,11 +46,11 @@ func runBlockOpen(args []string) int {
 	fallback := func(reason handoverReason) int { return blockHandover(append([]string{"open"}, args...), reason) }
 	var flags map[string]any
 	var id string
-	// Node's router logs a failed verb with its last stderr line.
+	// Node's router logs a failed verb with its last stderr write, trimmed.
 	logged := func(code int, text string) int {
 		before := gatesBreadcrumbName("block open")
 		fmt.Fprintln(os.Stderr, text)
-		nativeVerbFailure("block", "open", logArgs, code, text, before)
+		nativeVerbFailure("block", "open", logArgs, code, jsTrim(text), before)
 		return code
 	}
 	failure := func(err error) int {
@@ -54,7 +64,8 @@ func runBlockOpen(args []string) int {
 		var se *state.Error
 		var ge *gitx.Error
 		if !errors.As(err, &se) && !errors.As(err, &ge) {
-			return logged(1, "block open: "+blockIOMessage(err))
+			// Node's readFile names the path for open errors, not read errors.
+			return logged(1, "block open: "+closeTranscriptReadMessage(err))
 		}
 		if se != nil && flags["json"] == true && id != "" && slices.Contains([]string{"after-not-done", "bad-after", "outcome-not-ready", "bad-after-outcome", "api-fit", "bad-uses"}, se.Code) {
 			out, _ := ledger.Stringify(ledger.Object{{Key: "block", Value: id}, {Key: "event", Value: "refused"}, {Key: "code", Value: se.Code}, {Key: "message", Value: se.Message}}, false)
@@ -92,10 +103,6 @@ func runBlockOpen(args []string) int {
 		return usage("a block id and --run are required")
 	}
 	id = positionals[0]
-	// JS regexp end anchors and inherited object keys need Node's semantics.
-	if id == "__proto__" || strings.HasSuffix(id, "\n") || strings.HasSuffix(blockString(flags["level"]), "\n") {
-		return fallback(hOpenJsSemantics)
-	}
 	files, hasOwned := flags["owned"].([]string)
 	acceptanceFile, hasAcceptance := flags["acceptance"].(string)
 	if !hasAcceptance || !hasOwned {
@@ -104,9 +111,15 @@ func runBlockOpen(args []string) int {
 	if flags["remove-worktree"] == true {
 		return usage("--remove-worktree is a block close flag")
 	}
-	home, err := os.UserHomeDir()
-	if err != nil {
-		return fallback(hOpenHome)
+	// Node's os.homedir(): $HOME as set (an empty one too), else the user
+	// database (B581).
+	home, hasHome := os.LookupEnv("HOME")
+	if !hasHome {
+		var err error
+		if home, err = boUserHome(); err != nil {
+			// libuv's lookup error text is not reproduced byte-equal.
+			return fallback(hOpenHomeLookup)
+		}
 	}
 	record, err := state.ReadRun(home, run)
 	if err != nil {
@@ -159,14 +172,24 @@ func runBlockOpen(args []string) int {
 	if grant.Grant != nil {
 		grantState, _ = autopilot.GrantState(grant.Grant, time.Now())
 	}
+	// A YAML form Go does not serve hands over before anything is written; a
+	// read or parse error is reported where Node reads the file (B581).
+	if data, err := os.ReadFile(acceptanceFile); err == nil {
+		if _, err := blockopen.ParseYAMLJS(data); errors.Is(err, blockopen.ErrYAMLForm) {
+			return fallback(hOpenAcceptanceYAML)
+		}
+	}
 	if grantState == "active" {
 		data, err := os.ReadFile(acceptanceFile)
 		if err != nil {
 			return failure(err)
 		}
-		value, err := blockopen.ParseAcceptance(data)
+		value, err := blockopen.ParseYAMLJS(data)
+		if errors.Is(err, blockopen.ErrYAMLForm) {
+			return fallback(hOpenAcceptanceYAML)
+		}
 		if err != nil {
-			return fallback(hOpenAcceptanceFormat)
+			return failure(err)
 		}
 		clauses, err := blockopen.Acceptance(value)
 		if err != nil {
@@ -200,8 +223,8 @@ func runBlockOpen(args []string) int {
 	cfg, _ := blockSnapshot(record)
 	level, source, decision, err := blockopen.PickLevel(home, run, id, flags, record, cfg)
 	if err != nil {
-		if errors.Is(err, blockops.ErrHandover) {
-			return fallback(hOpenNoLevel)
+		if errors.Is(err, blockopen.ErrLevelLedger) {
+			return fallback(hOpenLevelLedger)
 		}
 		return failure(err)
 	}
@@ -209,9 +232,12 @@ func runBlockOpen(args []string) int {
 	if err != nil {
 		return failure(err)
 	}
-	acceptance, err := blockopen.ParseAcceptance(data)
+	acceptance, err := blockopen.ParseYAMLJS(data)
+	if errors.Is(err, blockopen.ErrYAMLForm) {
+		return fallback(hOpenAcceptanceYAML)
+	}
 	if err != nil {
-		return fallback(hOpenAcceptanceFormat)
+		return failure(err)
 	}
 	opts := blockopen.Options{Home: home, Run: run, ID: id, Level: level, Kind: blockString(flags["kind"]), Owned: files, Tests: tests, Acceptance: acceptance, Attempt: 1, Floor: "L1", Safe: safe, Decision: decision}
 	opts.After, _ = flags["after"].([]string)
@@ -219,20 +245,29 @@ func runBlockOpen(args []string) int {
 	if brief, ok := flags["brief"].(string); ok {
 		absolute, err := filepath.EvalSymlinks(brief)
 		if err != nil {
-			// Node's realpath names the path as given, whatever part failed (B470).
+			// Node's realpath names the path as given, whatever part failed
+			// (B470); Go's link limit is realpath's ELOOP (B581).
 			var errno syscall.Errno
 			if !errors.As(err, &errno) {
-				return fallback(hOpenBriefResolve)
+				errno = syscall.ELOOP
 			}
 			return failure(&os.PathError{Op: "realpath", Path: brief, Err: errno})
 		}
-		absolute, err = filepath.Abs(absolute)
-		if err != nil {
-			return fallback(hOpenBriefAbsolute)
+		// path.relative resolves both sides against the working directory.
+		workspace := blockString(record.Get("workspace"))
+		var cwdErr error
+		if absolute, err = filepath.Abs(absolute); err != nil {
+			cwdErr = err
+		} else if workspace, err = filepath.Abs(workspace); err != nil {
+			cwdErr = err
 		}
-		relative, err := filepath.Rel(blockString(record.Get("workspace")), absolute)
+		if cwdErr != nil {
+			// Node's process.cwd() failure text (uv_cwd) is not reproduced.
+			return fallback(hOpenBriefCwd)
+		}
+		relative, err := filepath.Rel(workspace, absolute)
 		if err != nil {
-			return fallback(hOpenBriefRelative)
+			return fallback(hOpenBriefCwd)
 		}
 		if strings.HasPrefix(relative, "..") || filepath.IsAbs(relative) {
 			return usage("--brief must be a file inside the workspace")
@@ -240,10 +275,6 @@ func runBlockOpen(args []string) int {
 		body, err := os.ReadFile(absolute)
 		if err != nil {
 			// Node's readFile: open errors name the path, read errors do not (B470).
-			var errno syscall.Errno
-			if !errors.As(err, &errno) {
-				return fallback(hOpenBriefRead)
-			}
 			return logged(1, "block open: "+closeTranscriptReadMessage(err))
 		}
 		opts.BriefPath, opts.BriefData = relative, body
@@ -255,24 +286,22 @@ func runBlockOpen(args []string) int {
 		if !ok {
 			branch = "forge/{run}/{block}"
 		}
-		// Empty configured values have semantics distinct from an absent setting.
-		if wt["dir"] == "" || wt["base"] == "" {
-			return fallback(hOpenWorktreeSettings)
-		}
-		opts.Settings = &worktree.Settings{Dir: blockString(wt["dir"]), Branch: branch, Base: blockString(wt["base"])}
+		// An empty configured value is not an absent one (B581).
+		dir, dirSet := wt["dir"].(string)
+		base, baseSet := wt["base"].(string)
+		opts.Settings = &worktree.Settings{Dir: dir, Branch: branch, Base: base, DirSet: dirSet, BaseSet: baseSet}
 	}
 	if steps, ok := flags["after-outcome"].([]string); ok {
 		if err := blockopen.CheckAfter(record, id, opts.After); err != nil {
-			if errors.Is(err, blockops.ErrHandover) {
-				return fallback(hOpenAfter)
-			}
 			return failure(err)
 		}
-		opts.AfterOutcome, err = blockopen.AcceptedOutcomes(blockString(record.Get("workspace")), id, steps)
-		if err != nil {
-			if errors.Is(err, blockops.ErrHandover) {
-				return fallback(hOpenAfterOutcome)
-			}
+		opts.AfterOutcome, err = blockopen.AcceptedOutcomes(blockString(record.Get("workspace")), id, steps, checkOutcomeProblems)
+		switch {
+		case errors.Is(err, blockopen.ErrPipelineForm):
+			return fallback(hOpenPipelineForm)
+		case errors.Is(err, blockopen.ErrOutcomeForm):
+			return fallback(hOpenOutcomeForm)
+		case err != nil:
 			return failure(err)
 		}
 	}

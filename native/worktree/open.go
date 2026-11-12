@@ -18,7 +18,13 @@ import (
 	"github.com/ricardov03/code-forge/native/state"
 )
 
-type Settings struct{ Dir, Branch, Base string }
+// Settings are proof.worktree from the snapshot. DirSet and BaseSet say the
+// value was configured as a string, an empty one too: Node keeps "" apart
+// from an absent setting (B581).
+type Settings struct {
+	Dir, Branch, Base string
+	DirSet, BaseSet   bool
+}
 type Plan struct {
 	Path string
 	Make func() (*Made, error)
@@ -98,7 +104,7 @@ func registered(top, where string) (*registration, error) {
 }
 func directory(top string, s Settings, run string) (string, bool, error) {
 	old := realFuture(filepath.Join(filepath.Dir(top), filepath.Base(top)+"-worktrees"))
-	if s.Dir != "" {
+	if s.Dir != "" || s.DirSet {
 		dir := s.Dir
 		if !filepath.IsAbs(dir) {
 			dir = filepath.Join(top, dir)
@@ -291,7 +297,7 @@ func Prepare(cwd string, s Settings, run, id, base string, explicit bool, previo
 	if err != nil {
 		return nil, err
 	}
-	if !explicit && s.Base != "" {
+	if !explicit && (s.Base != "" || s.BaseSet) {
 		out, err := gitx.Run(top, "rev-parse", "--verify", "--quiet", s.Base+"^{commit}")
 		if strings.HasPrefix(s.Base, "-") || err != nil {
 			return nil, fail(fmt.Sprintf("block %s: proof.worktree.base %s is not a commit of the repository; nothing was recorded", id, quote(s.Base)))
