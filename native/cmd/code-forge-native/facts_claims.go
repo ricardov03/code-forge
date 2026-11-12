@@ -1587,10 +1587,10 @@ func fcValidateFacts(answer any, claims []fcClaim, ctx fcCtx) ([]fcFact, []fcDow
 		}
 		rows[i] = row
 		if !fcFactIDPattern(row.factID) {
-			errs = append(errs, "/facts/"+itoa(i)+"/fact_id must match pattern \"^F[0-9]+$\"")
+			errs = append(errs, "/facts/"+factsItoa(i)+"/fact_id must match pattern \"^F[0-9]+$\"")
 		}
 		if row.claim == "" {
-			errs = append(errs, "/facts/"+itoa(i)+"/claim must NOT have fewer than 1 characters")
+			errs = append(errs, "/facts/"+factsItoa(i)+"/claim must NOT have fewer than 1 characters")
 		}
 	}
 	if len(errs) > 0 {
@@ -1602,7 +1602,7 @@ func fcValidateFacts(answer any, claims []fcClaim, ctx fcCtx) ([]fcFact, []fcDow
 	taken := make([]bool, len(rows))
 	chosen := make([]int, len(claims))
 	for i, claim := range claims {
-		id := "F" + itoa(i+1)
+		id := "F" + factsItoa(i+1)
 		chosen[i] = -1
 		for k, r := range rows {
 			if !taken[k] && r.factID == id && r.kind == claim.kind {
@@ -1646,7 +1646,7 @@ func fcValidateFacts(answer any, claims []fcClaim, ctx fcCtx) ([]fcFact, []fcDow
 	facts := []fcFact{}
 	downgraded := []fcDowngrade{}
 	for i, claim := range claims {
-		base := fcFact{factID: "F" + itoa(i+1), claim: claim.token, kind: claim.kind, source: claim.source, hasSource: claim.hasSource}
+		base := fcFact{factID: "F" + factsItoa(i+1), claim: claim.token, kind: claim.kind, source: claim.source, hasSource: claim.hasSource}
 		if claim.unavailable != "" || chosen[i] < 0 {
 			why := claim.unavailable
 			if why == "" {
@@ -1672,7 +1672,7 @@ func fcValidateFacts(answer any, claims []fcClaim, ctx fcCtx) ([]fcFact, []fcDow
 	return facts, downgraded, nil
 }
 
-func itoa(n int) string {
+func factsItoa(n int) string {
 	if n == 0 {
 		return "0"
 	}
@@ -1801,7 +1801,7 @@ func fcRenderSheet(briefRef, briefSha, briefMtime, builtAt string, facts []fcFac
 		"- brief_sha256: `" + briefSha + "`",
 		"- brief_mtime: `" + briefMtime + "`",
 		"- built_at: `" + builtAt + "`",
-		"- claims: " + itoa(len(facts)) + " (VERIFIED " + itoa(count("VERIFIED")) + " · NOT-FOUND " + itoa(count("NOT-FOUND")) + " · UNVERIFIABLE " + itoa(count("UNVERIFIABLE")) + ")",
+		"- claims: " + factsItoa(len(facts)) + " (VERIFIED " + factsItoa(count("VERIFIED")) + " · NOT-FOUND " + factsItoa(count("NOT-FOUND")) + " · UNVERIFIABLE " + factsItoa(count("UNVERIFIABLE")) + ")",
 		""}
 	head, rule := "| fact_id | tag | kind |", "|---|---|---|---|---|---|---|"
 	if sources {

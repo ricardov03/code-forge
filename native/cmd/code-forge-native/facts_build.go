@@ -274,9 +274,10 @@ func fcPlanFacts(flags map[string]any, brief string) (*fcPlan, handoverReason) {
 	// the packet path is set at run time; Check only needs an absolute one
 	probe := p.opts
 	probe.PromptPath = filepath.Join(p.project, "facts.packet.md")
-	if err := session.Check(probe); session.IsCodexStep(err) {
+	if session.HasCodexStep(probe) {
 		return nil, hFactsCodexStep
-	} else if session.IsUnsupported(err) {
+	}
+	if err := session.Check(probe); session.IsUnsupported(err) {
 		return nil, hFactsSession
 	}
 	return p, 0
