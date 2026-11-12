@@ -35,17 +35,17 @@ func levelJSOnlySpace(r rune) bool {
 	return r == '\v' || r == '\uFEFF' || r != '\u0085' && r > 0x7f && unicode.IsSpace(r)
 }
 
-// jsTrim is String.prototype.trim (see jsTrimEmpty).
-func jsTrim(s string) string {
+// apJSTrim is String.prototype.trim (see jsTrimEmpty).
+func apJSTrim(s string) string {
 	return strings.TrimFunc(s, func(r rune) bool { return r == '\uFEFF' || r != '\u0085' && unicode.IsSpace(r) })
 }
 
 // levelPlain is plan-check's plain(): no ** and trimmed.
-func levelPlain(s string) string { return jsTrim(strings.ReplaceAll(s, "**", "")) }
+func levelPlain(s string) string { return apJSTrim(strings.ReplaceAll(s, "**", "")) }
 
 // levelCells is cells(): the cells of a table row, `\|` kept inside a cell.
 func levelCells(line string) []string {
-	text := jsTrim(line)
+	text := apJSTrim(line)
 	parts := []string{}
 	start := 0
 	for i := 0; i < len(text); i++ {
@@ -60,7 +60,7 @@ func levelCells(line string) []string {
 	}
 	out := []string{}
 	for _, part := range parts[1 : len(parts)-1] {
-		out = append(out, jsTrim(part))
+		out = append(out, apJSTrim(part))
 	}
 	return out
 }
@@ -82,7 +82,7 @@ func levelPlanEntry(text, block string) (found bool, level string, known bool) {
 		if levelHead.MatchString(line) || levelDispatch.MatchString(levelPlain(line)) {
 			continue
 		}
-		if !strings.HasPrefix(jsTrim(line), "|") || i+1 >= len(lines) || !levelRule.MatchString(lines[i+1]) {
+		if !strings.HasPrefix(apJSTrim(line), "|") || i+1 >= len(lines) || !levelRule.MatchString(lines[i+1]) {
 			continue
 		}
 		header := []string{}
@@ -117,7 +117,7 @@ func levelPlanEntry(text, block string) (found bool, level string, known bool) {
 		}
 		levelCol := col("level")
 		j := i + 2
-		for ; j < len(lines) && strings.HasPrefix(jsTrim(lines[j]), "|"); j++ {
+		for ; j < len(lines) && strings.HasPrefix(apJSTrim(lines[j]), "|"); j++ {
 			row := levelCells(lines[j])
 			at := func(c int) string {
 				if c >= 0 && c < len(row) {
@@ -136,8 +136,8 @@ func levelPlanEntry(text, block string) (found bool, level string, known bool) {
 	return false, "", true
 }
 
-// jsBasename is path.basename (POSIX).
-func jsBasename(p string) string {
+// apJSBasename is path.basename (POSIX).
+func apJSBasename(p string) string {
 	p = strings.TrimRight(p, "/")
 	if p == "" {
 		return ""
@@ -164,7 +164,7 @@ func levelRecordedLane(rows []ledger.Row, planName, block string) (lane *levelLa
 		}
 		if plan, has := row["plan"]; has {
 			name, isName := plan.(string)
-			if !isName || jsBasename(name) != jsBasename(planName) {
+			if !isName || apJSBasename(name) != apJSBasename(planName) {
 				continue
 			}
 		}
@@ -173,7 +173,7 @@ func levelRecordedLane(rows []ledger.Row, planName, block string) (lane *levelLa
 				return nil, false
 			}
 		}
-		normalised := jsTrim(answer)
+		normalised := apJSTrim(answer)
 		if token := levelToken.FindString(strings.ToUpper(normalised)); token != "" {
 			normalised = token
 		}
@@ -347,6 +347,6 @@ func autopilotLevel(o *runOut, home, runID string, flags autopilotFlags) int {
 	if err != nil {
 		return report(err)
 	}
-	o.out("autopilot level run " + runID + ": block " + jsString(row.Get("block")) + " codes at " + jsString(row.Get("level")) + " (lane " + jsString(row.Get("lane")) + ", plan " + jsString(row.Get("plan_level")) + ", grant " + jsString(row.Get("grant_id")) + "); block open without --level uses it\n")
+	o.out("autopilot level run " + runID + ": block " + bnJSString(row.Get("block")) + " codes at " + bnJSString(row.Get("level")) + " (lane " + bnJSString(row.Get("lane")) + ", plan " + bnJSString(row.Get("plan_level")) + ", grant " + bnJSString(row.Get("grant_id")) + "); block open without --level uses it\n")
 	return 0
 }

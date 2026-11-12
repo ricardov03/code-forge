@@ -223,7 +223,7 @@ func roundDecisionProblem(rows []map[string]any, id, grantID, scope, decision, b
 		return "decision " + id + " is under another grant"
 	}
 	if row["scope"] != scope {
-		return "decision " + id + " is for " + jsString(roundValue(row, "scope")) + ", not " + scope
+		return "decision " + id + " is for " + bnJSString(roundValue(row, "scope")) + ", not " + scope
 	}
 	if row["decision"] != decision {
 		decided := "undefined"
@@ -333,6 +333,6 @@ func autopilotRound(o *runOut, home, runID string, flags autopilotFlags) int {
 	if err != nil {
 		return report(err)
 	}
-	o.out("autopilot round run " + runID + ": one extra fix round for " + jsString(row.Get("file")) + " in block " + jsString(row.Get("block")) + " (grant " + jsString(row.Get("grant_id")) + ")\n")
+	o.out("autopilot round run " + runID + ": one extra fix round for " + bnJSString(row.Get("file")) + " in block " + bnJSString(row.Get("block")) + " (grant " + bnJSString(row.Get("grant_id")) + ")\n")
 	return 0
 }

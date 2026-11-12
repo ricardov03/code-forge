@@ -71,8 +71,8 @@ func bnObject(v any) bool {
 	return false
 }
 
-// jsString is String(v).
-func jsString(v any) string {
+// bnJSString is String(v).
+func bnJSString(v any) string {
 	switch x := v.(type) {
 	case jsUndefined:
 		return "undefined"
@@ -89,7 +89,7 @@ func jsString(v any) string {
 		parts := make([]string, len(x))
 		for i, item := range x {
 			if !bnNullish(item) {
-				parts[i] = jsString(item)
+				parts[i] = bnJSString(item)
 			}
 		}
 		return strings.Join(parts, ",")
@@ -101,10 +101,10 @@ func jsString(v any) string {
 func bnCo(vs ...any) string {
 	for _, v := range vs[:len(vs)-1] {
 		if !bnNullish(v) {
-			return jsString(v)
+			return bnJSString(v)
 		}
 	}
-	return jsString(vs[len(vs)-1])
+	return bnJSString(vs[len(vs)-1])
 }
 
 func bnStr(v any) bool { s, ok := v.(string); return ok && s != "" }
@@ -129,7 +129,7 @@ func bnU(v any, fallback string) string {
 	if bnNullish(v) || v == "" {
 		return fallback
 	}
-	return jsString(v)
+	return bnJSString(v)
 }
 
 func bnList(v any) string {
@@ -140,7 +140,7 @@ func bnList(v any) string {
 	parts := make([]string, len(list))
 	for i, item := range list {
 		if !bnNullish(item) {
-			parts[i] = jsString(item)
+			parts[i] = bnJSString(item)
 		}
 	}
 	return strings.Join(parts, ", ")
@@ -185,8 +185,8 @@ func bnEq(a, b any) bool {
 
 var bnDecimal = regexp.MustCompile(`^[+-]?(?:\d+\.?\d*|\.\d+)(?:[eE][+-]?\d+)?$`)
 
-// jsNumber is Number(v).
-func jsNumber(v any) float64 {
+// apJSNumber is Number(v).
+func apJSNumber(v any) float64 {
 	switch x := v.(type) {
 	case jsUndefined:
 		return math.NaN()
@@ -224,7 +224,7 @@ func jsNumber(v any) float64 {
 		n, _ := strconv.ParseFloat(s, 64)
 		return n
 	case []any:
-		return jsNumber(jsString(x))
+		return apJSNumber(bnJSString(x))
 	}
 	return math.NaN()
 }
@@ -490,7 +490,7 @@ func bnGateScope(row any) string {
 	g := func(k string) any { return bnGet(row, k) }
 	if bnEq(g("scope"), "related") {
 		if n, ok := g("test_count").(float64); ok && n == math.Trunc(n) {
-			return " · related tests (" + jsString(n) + ")"
+			return " · related tests (" + bnJSString(n) + ")"
 		}
 		return " · related tests"
 	}
@@ -542,7 +542,7 @@ func bnDescribe(row any) (string, string, any) {
 		}
 		return "Question to the owner", scope + " · to owner (" + bnCo(g("owner_reason"), "unknown") + ")" + conf + " · " + bnU(g("decision_id"), "unknown"), nil
 	case "autopilot.pause":
-		return "Budget category paused", bnU(g("category"), "unknown") + " · spent " + bnUSD(jsNumber(bnCoV(g("spent_usd"), 0.0))) + " of " + bnUSD(jsNumber(bnCoV(g("cap_usd"), 0.0))) + " USD", nil
+		return "Budget category paused", bnU(g("category"), "unknown") + " · spent " + bnUSD(apJSNumber(bnCoV(g("spent_usd"), 0.0))) + " of " + bnUSD(apJSNumber(bnCoV(g("cap_usd"), 0.0))) + " USD", nil
 	case "autopilot.approve":
 		return "Owner approval", bnU(g("key"), "unknown") + " · until " + bnU(g("until"), "unknown") + " · " + bnU(g("approval_id"), "unknown"), nil
 	case "autopilot.restore":
@@ -602,7 +602,7 @@ func bnDescribe(row any) (string, string, any) {
 		}
 		return "Gates finished", bnCo(g("stack"), "stack") + " · " + green + bnGateScope(row), nil
 	}
-	return jsString(g("event")), "", nil
+	return bnJSString(g("event")), "", nil
 }
 
 // bnCoV is `a ?? fallback` as a value.
@@ -755,7 +755,7 @@ func (b *bnBuild) blockLine(blockRows []any, entry any, id string) ledger.Object
 			status = "closed"
 		}
 	}
-	stateText := jsString(status)
+	stateText := bnJSString(status)
 	switch {
 	case bnEq(status, "closed"):
 		stateText = "Closed, ready for you to mark ready and merge"
@@ -837,10 +837,10 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		oa, ob := bnGet(entry(ids[i]), "opened_at"), bnGet(entry(ids[j]), "opened_at")
 		ta, tb := "", ""
 		if !bnNullish(oa) {
-			ta = jsString(oa)
+			ta = bnJSString(oa)
 		}
 		if !bnNullish(ob) {
-			tb = jsString(ob)
+			tb = bnJSString(ob)
 		}
 		c, ok := bnCollate(ta, tb)
 		if c == 0 {
@@ -886,7 +886,7 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 			if g("acted") == true {
 				conf := "no confidence"
 				if _, ok := g("confidence").(float64); ok {
-					conf = "confidence " + jsString(g("confidence"))
+					conf = "confidence " + bnJSString(g("confidence"))
 				}
 				decision(x.time, bnU(g("scope"), "unknown scope")+": the delegate chose \""+bnU(g("decision"), "no decision")+"\""+bnWhere(bnGet(g("subject"), "block"), bnGet(g("subject"), "file")),
 					bnCo(g("reason"), "no reason recorded")+" ("+conf+")", "Overrule it: undo the action it allowed (see its own entry) and, to stop further ones, run "+stopCmd)
@@ -930,7 +930,7 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		if bnEvent(x.row) != "review.done" {
 			continue
 		}
-		k := jsString(bnGet(x.row, "block")) + "\x00" + jsString(bnGet(x.row, "file"))
+		k := bnJSString(bnGet(x.row, "block")) + "\x00" + bnJSString(bnGet(x.row, "file"))
 		if _, seen := latestDone[k]; !seen {
 			doneKeys = append(doneKeys, k)
 		}
@@ -938,7 +938,7 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	}
 	for _, k := range doneKeys {
 		x := latestDone[k]
-		if !(jsNumber(bnGet(bnGet(x.row, "findings_by_severity"), "critical")) > 0) {
+		if !(apJSNumber(bnGet(bnGet(x.row, "findings_by_severity"), "critical")) > 0) {
 			continue
 		}
 		cleared := false
@@ -994,7 +994,7 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 			}
 		}
 		if runTruthy(bnJSONish(p)) {
-			questions = append(questions, "Budget "+bnU(c, "unknown category")+" stopped at "+bnUSD(jsNumber(bnCoV(bnGet(p, "spent_usd"), 0.0)))+" of "+bnUSD(jsNumber(bnCoV(bnGet(p, "cap_usd"), 0.0)))+" USD: raise the cap or leave it?")
+			questions = append(questions, "Budget "+bnU(c, "unknown category")+" stopped at "+bnUSD(apJSNumber(bnCoV(bnGet(p, "spent_usd"), 0.0)))+" of "+bnUSD(apJSNumber(bnCoV(bnGet(p, "cap_usd"), 0.0)))+" USD: raise the cap or leave it?")
 		}
 	}
 	for _, r := range all {
@@ -1043,7 +1043,7 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 		case "budget.refused":
 			incidents = append(incidents, bnIncident(x.time, "A "+bnCo(g("role"), "session")+" session was refused: budget "+bnMoneyOr(g("spent_usd"))+" of "+bnMoneyOr(g("budget_usd"))+" USD", "The session did not run.", "Raise the budget (only you can) or finish by hand."))
 		case "autopilot.pause":
-			incidents = append(incidents, bnIncident(x.time, "Budget category "+bnU(g("category"), "unknown")+" reached its stop at "+bnUSD(jsNumber(bnCoV(g("spent_usd"), 0.0)))+" of "+bnUSD(jsNumber(bnCoV(g("cap_usd"), 0.0)))+" USD", "Delegated actions in "+bnU(g("category"), "unknown")+" stopped.", "Raise the cap or leave it paused."))
+			incidents = append(incidents, bnIncident(x.time, "Budget category "+bnU(g("category"), "unknown")+" reached its stop at "+bnUSD(apJSNumber(bnCoV(g("spent_usd"), 0.0)))+" of "+bnUSD(apJSNumber(bnCoV(g("cap_usd"), 0.0)))+" USD", "Delegated actions in "+bnU(g("category"), "unknown")+" stopped.", "Raise the cap or leave it paused."))
 		}
 	}
 
@@ -1150,7 +1150,7 @@ func (b *bnBuild) binnacle(rows []ledger.Row, record ledger.Object, now time.Tim
 	var spendText string
 	if g, ok := grant.(ledger.Object); ok {
 		caps := bnGet(g, "caps")
-		since, _ := time.Parse("2006-01-02T15:04:05.000Z", jsString(g.Get("started_at")))
+		since, _ := time.Parse("2006-01-02T15:04:05.000Z", bnJSString(g.Get("started_at")))
 		parts := []string{}
 		for _, c := range []string{"coding", "review"} {
 			spent := bnUSD(autopilotCategorySpend(rows, runID, c, since))
@@ -1232,7 +1232,7 @@ func bnJSONish(v any) any {
 func bnCell(v any) string {
 	text := ""
 	if !bnNullish(v) {
-		text = jsString(v)
+		text = bnJSString(v)
 	}
 	text = strings.ReplaceAll(text, "\r\n", " ")
 	text = strings.ReplaceAll(text, "\n", " ")
@@ -1479,7 +1479,7 @@ func autopilotFilesValue(files ledger.Object) any {
 // autopilotRecordText is recordText.
 func autopilotRecordText(link any, files ledger.Object) string {
 	if runTruthy(link) {
-		return "  link      " + jsString(link) + "\n"
+		return "  link      " + bnJSString(link) + "\n"
 	}
 	if files != nil {
 		return "  link      none\n  binnacle  " + files.Get("binnacle").(string) + "\n  full log  " + files.Get("log").(string) + "\n"
