@@ -23,8 +23,12 @@ import (
 // with a config snapshot, a fake `claude` reviewer on PATH (no model, no
 // network), a temp HOME with the file key store and a temp run root.
 
+// The pid entry is written just after the start (B552: on a slow CI box the
+// child ran ls first), so the fake waits for it, up to 5 s.
 const b489FakeClaude = `#!/bin/sh
-ls "%s" >> "%s" 2>/dev/null
+d="%s"; i=0
+while [ -z "$(ls "$d" 2>/dev/null)" ] && [ $i -lt 50 ]; do sleep 0.1; i=$((i+1)); done
+ls "$d" >> "%s" 2>/dev/null
 in=$(cat)
 heads=$(printf '%%s\n' "$in" | grep -E '^@@ -[0-9]+(,[0-9]+)? \+[0-9]+(,[0-9]+)? @@' | sed -E 's/^(@@ -[0-9,]+ \+[0-9,]+ @@).*/\1/' | awk '!s[$0]++' | sed 's/.*/"&"/' | paste -sd, -)
 printf '%%s' '{"type":"result","is_error":false,"result":"done","structured_output":{"passed":true,"summary":"fake review","reviewed_hunks":['"$heads"'],"findings":[]},"usage":{"input_tokens":1000,"output_tokens":300}}'

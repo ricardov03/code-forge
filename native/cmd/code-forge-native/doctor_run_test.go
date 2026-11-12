@@ -97,6 +97,7 @@ func b525Setup(t *testing.T, c b525Case, version string) *b525Env {
 	// B544: the sweep and memory rows read a sealed (empty) process table,
 	// never the machine's: a zombie of another program is not in the golden.
 	runReadProcesses = func() []runProc { return []runProc{} }
+	b552SealApps(t)
 	t.Cleanup(func() {
 		runWorkerBinary, runLaunchTimeout, doctorJevOpts, runReadProcesses = beforeBinary, beforeTimeout, beforeJev, beforeProcs
 		for _, pid := range e.launched() {

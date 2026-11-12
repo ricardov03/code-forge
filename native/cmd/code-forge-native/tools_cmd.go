@@ -59,6 +59,11 @@ func toolIDs() []string {
 	return ids
 }
 
+// toolSystemApps is the machine-wide app folder detectTool looks in (macOS).
+// Tests point it at a missing folder so the rows never depend on the apps
+// this machine has (B552: Solo.app on a Mac, none on Linux CI).
+var toolSystemApps = "/Applications"
+
 // detectTool is detectTool: the command on PATH, or (macOS) its app bundle.
 func detectTool(tool toolRow) bool {
 	if commandOnPath(tool.command, os.Getenv("PATH")) {
@@ -67,7 +72,7 @@ func detectTool(tool toolRow) bool {
 	if tool.app == "" || runtime.GOOS != "darwin" {
 		return false
 	}
-	places := []string{filepath.Join("/Applications", tool.app)}
+	places := []string{filepath.Join(toolSystemApps, tool.app)}
 	if home := os.Getenv("HOME"); home != "" {
 		places = append(places, filepath.Join(home, "Applications", tool.app))
 	}

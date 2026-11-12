@@ -88,7 +88,7 @@ func b528Collect(t *testing.T, home, cwd, repo string) (log, files string) {
 		data, _ := os.ReadFile(file)
 		log += filepath.Base(b502Normalize(file, home, cwd)) + ":" + b528Mask(string(data), home, cwd, repo)
 	}
-	files = "project:\n" + b528Tree(t, cwd, home, cwd) + "\nhome:\n" + b528Tree(t, home, home, cwd)
+	files = "project:\n" + b552SkillRows(t, b528Tree(t, cwd, home, cwd), cwd) + "\nhome:\n" + b552SkillRows(t, b528Tree(t, home, home, cwd), home)
 	return log, strings.ReplaceAll(files, repo, "<REPO>")
 }
 
@@ -230,6 +230,7 @@ func TestB528InitWizardMatchesNode(t *testing.T) {
 			if got.Log != want.Log {
 				t.Errorf("init log differs from Node:\n%s", b528Diff(want.Log, got.Log))
 			}
+			want.Files = b552SkillRows(t, want.Files, "")
 			if got.Files != want.Files {
 				t.Errorf("files differ from Node:\n%s", b528Diff(want.Files, got.Files))
 			}

@@ -255,8 +255,9 @@ test('gates run: native speed and byte parity for gates, scope, lock, worktrees,
     await parity(f, args);
   }
   const detect = await fixture();
-  assert.equal((await launch(detect, ['gates', 'detect']).ended).code, 127, 'gates detect still requires Node');
-  await parity(detect, ['gates', 'detect'], true);
+  // B459 serves gates detect in Go (B552: the test said it hands over).
+  assert.notEqual((await launch(detect, ['gates', 'detect']).ended).code, 127, 'gates detect runs in Go without Node');
+  await parity(detect, ['gates', 'detect']);
 });
 
 test('gates run waits for a concurrent run writer and preserves its new proof lock', async () => {

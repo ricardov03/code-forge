@@ -7,7 +7,7 @@ WARN code-forge: not on PATH (the skill shim calls it)
 INFO solo: UNVERIFIED (no Solo probe in this version)
 WARN gates: no gate command configured
 WARN jev: live call skipped (no key)
-INFO tools: missing recommended tools: codex, gemini, op — run code-forge tools install
+INFO tools: missing recommended tools: codex, gemini, op, solo — run code-forge tools install
 OK   ledger: writable
 OK   locks: no unreadable or malformed locks
 OK   tmp: 0 stale roots, 0 stale pids

@@ -19,6 +19,7 @@ func b504NoConfigRows(home string) []string {
 		"FAIL config: not-found: .code-forge.yml cannot be loaded (run code-forge init)",
 		"WARN links: no harness link recorded (run code-forge init)",
 		"WARN keys: jev key not resolved; System 1 falls back to rules",
+		"INFO tools: missing recommended tools: claude, codex, gemini, grok, op, solo — run code-forge tools install",
 		"OK   ledger: writable",
 		"OK   locks: no unreadable or malformed locks",
 		"OK   tmp: 0 stale roots, 0 stale pids",
@@ -55,7 +56,9 @@ func b504NoConfig(t *testing.T) (home, repo string) {
 	t.Helper()
 	home, repo = b474Project(t, "", 0)
 	t.Setenv("CODE_FORGE_NATIVE", "0") // Node's own run says "not found" too
-	t.Setenv("PATH", os.Getenv("PATH"))
+	// B552: no provider CLI and no app of this machine shows in the rows.
+	t.Setenv("PATH", "/usr/bin:/bin")
+	b552SealApps(t)
 	return home, repo
 }
 
@@ -100,7 +103,7 @@ func TestB504DoctorNoConfigJSON(t *testing.T) {
 	for _, r := range doc.Rows {
 		ids = append(ids, r.ID)
 	}
-	want := "config links keys ledger locks tmp sweep memory review-concurrency probes signer native native_daemon"
+	want := "config links keys tools ledger locks tmp sweep memory review-concurrency probes signer native native_daemon"
 	if strings.Join(ids, " ") != want {
 		t.Errorf("ids = %s\nwant %s", strings.Join(ids, " "), want)
 	}
