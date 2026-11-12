@@ -16,8 +16,10 @@ import (
 // B460 (phase 1): `code-forge spawn` in Go (src/cli/spawn.mjs). Go answers
 // --help, every usage error, a config that does not load, a bad --timeout,
 // an unreadable or non-JSON --schema, a bad --run id, and a bad --level or
-// --role when no --run is given. Building and running the session (and
-// --print-argv) keeps its hand-over to Node.
+// --role when no --run is given. B477: a foreground closed-book session with
+// no --run (spawn_session.go) runs in Go too, and so does --print-argv for it;
+// --run, --background, the coder and facts roles, a schema other than
+// finding.schema.json and every case session.Check refuses hand over.
 func init() { routes["spawn"] = runSpawnVerb }
 
 var spawnRoles = []string{"coder", "reviewer", "judge", "s2", "author", "facts", "delegate"}
@@ -91,7 +93,7 @@ func spawnPlan(args []string) (func(o *runOut) int, handoverReason) {
 	if !cliContains(spawnRoles, role) {
 		return fail(2, "spawn: role must be one of "+strings.Join(spawnRoles, ", ")+"\n")
 	}
-	return nil, hSpawnSession
+	return spawnSessionPlan(cwd, parsed)
 }
 
 // spawnResolve is path.resolve(file) against the process cwd.
