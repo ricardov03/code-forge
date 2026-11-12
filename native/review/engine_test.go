@@ -74,11 +74,13 @@ type engineRun struct {
 	rows     []string
 	spawns   []ledger.Object
 	warnings []string
+	cfgL2    []any // each spawn's levels.L2 (B514)
 }
 
 // runEngine runs File with a fake session that plays the script.
-func runEngine(t *testing.T, in Input, script []any, writer bool) engineRun {
+func runEngine(t *testing.T, in Input, script []any, writer bool, more ...func(*Deps)) engineRun {
 	t.Helper()
+	t.Setenv("HOME", t.TempDir()) // the schema-miss mark's lock lives under $HOME
 	var run engineRun
 	i := 0
 	deps := Deps{
@@ -95,6 +97,8 @@ func runEngine(t *testing.T, in Input, script []any, writer bool) engineRun {
 				{Key: "name", Value: hex12.ReplaceAllString(filepath.Base(o.PromptPath), "X")},
 				{Key: "inWorkDir", Value: filepath.Dir(o.PromptPath) == in.WorkDir}, {Key: "text", Value: string(text)},
 				{Key: "rowExtra", Value: o.RowExtra}, {Key: "cfgSame", Value: fmt.Sprintf("%p", o.Cfg) == fmt.Sprintf("%p", in.Cfg)}})
+			levels, _ := o.Cfg["levels"].(map[string]any)
+			run.cfgL2 = append(run.cfgL2, levels["L2"])
 			if i >= len(script) {
 				t.Fatalf("spawn %d: script has %d items", i+1, len(script))
 			}
@@ -117,13 +121,16 @@ func runEngine(t *testing.T, in Input, script []any, writer bool) engineRun {
 			return nil
 		}
 	}
+	for _, f := range more {
+		f(&deps)
+	}
 	run.result, run.err = File(in, deps)
 	return run
 }
 
 // gapCases are the cases Node finishes after the session with code Go does not
 // port; Go stops there with a GapError and the rows written so far.
-var gapCases = map[string]string{"truncated": "schema-miss-diagnosis"}
+var gapCases = map[string]string{}
 
 // TestReviewFileMatchesNode: on 25 tickets the Go review gives Node's result
 // object, ledger rows, session calls, packet text and retry warnings, byte for
@@ -241,39 +248,34 @@ func baseCfg() map[string]any {
 	return map[string]any{"provider": "claude", "levels": map[string]any{"L2": map[string]any{"provider": "claude", "model": "m2"}}}
 }
 
-// TestReviewFileGapAfterSpawn: the cases Node handles with code Go lacks
-// (needs_file round, second same-model timeout with a ledger, schema miss with
-// a ledger) stop with a GapError after the review.plan row, never a wrong result.
+// TestReviewFileGapAfterSpawn: the one case Node finishes with code Go may
+// not model (timeoutFallbackFor on a config the seam cannot read, or no seam)
+// stops with a GapError after the second timeout's rows, never a wrong result.
+// B514: needs_file and the schema-miss diagnosis are no longer gaps
+// (TestB514ReviewFileMatchesNode).
 func TestReviewFileGapAfterSpawn(t *testing.T) {
 	useRepoLenses(t)
 	repo := buildRepo(t, readFixture(t, "packet_fixture.json"))
 	risk := 1.0
-	bad := okSession()
-	answer := bad.Get("answer").(ledger.Object)
-	answer.Delete("summary")
-	bad.Set("answer", answer)
 	for _, c := range []struct {
-		name   string
-		script []any
-		gap    string
-		rows   int
+		name string
+		seam func(TimeoutFallbackInput) (*Fallback, error)
 	}{
-		{"needs-file", []any{okSession(ledger.Field{Key: "needs_file", Value: []any{"src/a.txt"}})}, "needs-file", 1},
-		{"same-model-twice", []any{timeoutSession(), timeoutSession()}, "timeout-fallback", 3},
-		{"schema-miss", []any{bad}, "schema-miss-diagnosis", 1},
+		{"no-seam", nil},
+		{"seam-unsure", func(TimeoutFallbackInput) (*Fallback, error) { return nil, errors.New("route unsure") }},
 	} {
 		t.Run(c.name, func(t *testing.T) {
 			in := Input{RepoRoot: repo, File: "notes.txt", Cfg: baseCfg(), Risk: &risk, WorkDir: filepath.Join(t.TempDir(), "w")}
-			run := runEngine(t, in, c.script, true)
+			run := runEngine(t, in, []any{timeoutSession(), timeoutSession()}, true, func(d *Deps) { d.TimeoutFallback = c.seam })
 			var ge *GapError
-			if !errors.As(run.err, &ge) || ge.Case != c.gap {
-				t.Fatalf("got %v, want GapError %s", run.err, c.gap)
+			if !errors.As(run.err, &ge) || ge.Case != "timeout-fallback" {
+				t.Fatalf("got %v, want GapError timeout-fallback", run.err)
 			}
 			if IsUnsupported(run.err) {
 				t.Errorf("a gap after spawn must not read as a pre-spawn refusal")
 			}
-			if len(run.rows) != c.rows {
-				t.Errorf("rows %d %v, want %d", len(run.rows), run.rows, c.rows)
+			if len(run.rows) != 3 {
+				t.Errorf("rows %d %v, want 3", len(run.rows), run.rows)
 			}
 		})
 	}

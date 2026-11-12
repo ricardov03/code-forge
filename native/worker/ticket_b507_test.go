@@ -195,15 +195,60 @@ func b507Git(t *testing.T, dir string, args ...string) {
 	}
 }
 
-// A review session that ran and needs a step Go has not ported
-// (*review.GapError, here a needs_file answer) is never handed to Node (Node
-// would spawn again): the ticket is recorded in Go and nothing is left queued.
-func TestB507GapErrorNeverHandsOver(t *testing.T) {
+// B514: a needs_file answer is played in Go as Node plays it (B507 handed
+// the step back as *review.GapError): the requested file is attached, a
+// second session reviews with it, and the ticket is recorded in Go.
+func TestB514NeedsFileReviewedInGo(t *testing.T) {
 	clock := fixedNow
 	fx, w, stderr := b497Fixture(t, &clock)
-	needs := strings.Replace(b497FakeClaude, `"findings":[]}`, `"findings":[],"needs_file":["b.txt"]}`, 1)
+	// first call asks for b.txt; the second (its packet holds the attached
+	// section) passes
+	needs := strings.Replace(b497FakeClaude, "case \"$in\" in\n", "case \"$in\" in\n*'## attached files'*'### b.txt'*) printf '%s' '{\"type\":\"result\",\"is_error\":false,\"result\":\"done\",\"structured_output\":{\"passed\":true,\"summary\":\"with b\",\"reviewed_hunks\":['\"$heads\"'],\"findings\":[]},\"usage\":{\"input_tokens\":1000,\"output_tokens\":300}}' ;;\n", 1)
+	needs = strings.Replace(needs, `"findings":[]}`, `"findings":[],"needs_file":["b.txt"]}`, 2)
+	needs = strings.Replace(needs, `"summary":"with b","reviewed_hunks":['"$heads"'],"findings":[],"needs_file":["b.txt"]}`, `"summary":"with b","reviewed_hunks":['"$heads"'],"findings":[]}`, 1)
+	// each call logs whether its packet held the attached b.txt
+	calls := filepath.Join(t.TempDir(), "calls")
+	needs = strings.Replace(needs, "in=$(cat)\n", "in=$(cat)\ncase \"$in\" in *'### b.txt'*) echo attached >> "+calls+" ;; *) echo plain >> "+calls+" ;; esac\n", 1)
 	bin := filepath.Join(t.TempDir(), "claude")
 	if err := os.WriteFile(bin, []byte(needs), 0o755); err != nil {
+		t.Fatal(err)
+	}
+	w.SessionDeps.Bins = map[string]string{"claude": bin}
+	id := fx.ticket(t, "r1", "B1", "a.txt", sha("hello\nworld\n"))
+	n, poison, err := w.RunTicket(id)
+	if err != nil || n != 1 || poison {
+		t.Fatalf("RunTicket = %d, %v, %v; want the ticket recorded in Go", n, poison, err)
+	}
+	if got := readFile(t, calls); got != "plain\nattached\n" {
+		t.Fatalf("sessions %q, want a plain one then one with b.txt attached", got)
+	}
+	if !IsDone(fx.root, id) {
+		t.Fatal("no done marker")
+	}
+	if stderr.Len() == 0 {
+		t.Fatal("no session ran")
+	}
+	res := readFile(t, filepath.Join(fx.root, ".code-forge", "reviews", "r1", id+".json"))
+	for _, want := range []string{`"status":"reviewed","approved":true`, `"needs_file_requested":["b.txt"],"needs_file_round":true,"passed":true`} {
+		if !strings.Contains(res, want) {
+			t.Fatalf("result lacks %s: %s", want, res)
+		}
+	}
+	if strings.Contains(res, "not ported to Go") {
+		t.Fatalf("result = %s", res)
+	}
+}
+
+// B514: an answer that misses the schema (no summary) is played in Go as Node
+// plays it (B507 handed it back as *review.GapError): the signed
+// review.schema_invalid row with its diagnosis (answer_kind, parse_error)
+// goes to the ledger and the ticket is recorded in Go as unavailable: schema.
+func TestB514SchemaMissRecordedInGo(t *testing.T) {
+	clock := fixedNow
+	fx, w, _ := b497Fixture(t, &clock)
+	miss := strings.Replace(b497FakeClaude, `"summary":"fake review",`, ``, 2)
+	bin := filepath.Join(t.TempDir(), "claude")
+	if err := os.WriteFile(bin, []byte(miss), 0o755); err != nil {
 		t.Fatal(err)
 	}
 	w.SessionDeps.Bins = map[string]string{"claude": bin}
@@ -215,11 +260,14 @@ func TestB507GapErrorNeverHandsOver(t *testing.T) {
 	if !IsDone(fx.root, id) {
 		t.Fatal("no done marker")
 	}
-	if stderr.Len() == 0 {
-		t.Fatal("no session ran: the fixture did not reach the gap")
-	}
 	res := readFile(t, filepath.Join(fx.root, ".code-forge", "reviews", "r1", id+".json"))
-	if !strings.Contains(res, `"status":"unavailable"`) || !strings.Contains(res, "needs-file is not ported to Go") {
+	if strings.Contains(res, "not ported to Go") {
 		t.Fatalf("result = %s", res)
+	}
+	led := readFile(t, filepath.Join(fx.home, ".code-forge", "ledger", "unit.jsonl"))
+	if !strings.Contains(led, `"event":"review.schema_invalid","lens":"quick","role":"reviewer","level":"L2","provider":"anthropic","model":"claude-x","fallback_step":0,"packet_hash":`) ||
+		!strings.Contains(led, `"second_level":false,"answer_bytes":4,"answer_kind":"not-json","parse_error":"Unexpected token","parse_offset":null`) ||
+		!strings.Contains(res, `"status":"unavailable","reason":"schema"`) {
+		t.Fatalf("no schema_invalid row with a diagnosis: %s", led)
 	}
 }

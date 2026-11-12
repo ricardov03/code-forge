@@ -1,0 +1,1757 @@
+{
+ "cases": [
+  {
+   "name": "needs-attached",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "big.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-mixed",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "big.txt",
+       "../x",
+       "docs",
+       ".env.local",
+       "nope.txt",
+       "new.yaml",
+       "app.js",
+       "/abs/path",
+       "a*.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-refused",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "../x",
+       "nope.txt",
+       "docs",
+       "a/../../b"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-owned",
+   "owned": [
+    "new.yaml"
+   ],
+   "changed": [
+    "new.yaml"
+   ],
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "new.yaml"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-owned-not-changed",
+   "owned": [
+    "new.yaml"
+   ],
+   "changed": [
+    "notes.txt"
+   ],
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "new.yaml"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-gitignored",
+   "owned": [
+    "secret.txt"
+   ],
+   "changed": [
+    "secret.txt"
+   ],
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "secret.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-peers",
+   "peers": [
+    "new.yaml"
+   ],
+   "owned": [
+    "new.yaml"
+   ],
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "new.yaml"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-secret-path",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       ".env.local"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-budget",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     }
+    },
+    "review": {
+     "budgets": {
+      "full_in": 1200
+     }
+    }
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "big.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-mask-long",
+   "secrets": [
+    "s3cr3tvalue"
+   ],
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "dir/s3cr3tvalue.txt",
+       "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+       "éééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+       "n1",
+       "n2",
+       "n3",
+       "n4",
+       "n5",
+       "n6",
+       "big.txt",
+       "docs/guide.txt",
+       "app.js"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-second-needs",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "big.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "docs/guide.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-second-schema",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "big.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-second-timeout",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "big.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "needs-nowriter",
+   "writer": false,
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "big.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [
+       {
+        "id": "F1",
+        "file": "notes.txt",
+        "line_start": 1,
+        "line_end": 1,
+        "severity": "warning",
+        "category": "logic",
+        "claim": "c",
+        "evidence": "e",
+        "fix": "f"
+       }
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-quick",
+   "risk": 0.5,
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": [
+       "docs/guide.txt"
+      ]
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "needs-empty-list",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": [],
+      "needs_file": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "schema-missing-summary",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "schema-history-throws",
+   "history": "throw",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "schema-history-one",
+   "history": {
+    "failures": 1,
+    "fellBack": false
+   },
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "schema-not-json",
+   "script": [
+    {
+     "status": "invalid-output",
+     "provider": "claude",
+     "model": "m2",
+     "answer": null,
+     "text": "{\"passed\": true, \"summary\": ",
+     "usage": {
+      "tokens_in": 5,
+      "tokens_out": 9
+     }
+    }
+   ]
+  },
+  {
+   "name": "schema-write-fails",
+   "failEvent": "review.schema_invalid",
+   "script": [
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m2",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "tf-ok",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "tf-effort",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3",
+      "effort": "high"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "tf-review-result",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "review.result",
+     "sessions": [
+      {
+       "role": "reviewer",
+       "model": "m3",
+       "provider": "claude"
+      }
+     ]
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "tf-throws",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    "throw"
+   ]
+  },
+  {
+   "name": "tf-schema-miss",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 800,
+      "tokens_out": 120
+     }
+    }
+   ]
+  },
+  {
+   "name": "tf-timeout-again",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m3",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-none-confirmed",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-fellback",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "history": {
+    "failures": 2,
+    "fellBack": true
+   },
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-read-fails",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": "throw",
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-history-throws",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "history": "throw",
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-openai",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "openai",
+      "model": "m4"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m4",
+     "provider": "openai",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-no-identity",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m3",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  },
+  {
+   "name": "tf-write-fails",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "failEvent": "review.schema_fallback",
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-nowriter",
+   "writer": false,
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-other-role",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "judge",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    }
+   ]
+  },
+  {
+   "name": "tf-two-candidates",
+   "cfg": {
+    "provider": "claude",
+    "levels": {
+     "L2": {
+      "provider": "claude",
+      "model": "m2"
+     },
+     "L3": {
+      "provider": "claude",
+      "model": "m3"
+     },
+     "L1": {
+      "provider": "claude",
+      "model": "m1"
+     }
+    }
+   },
+   "ledger": [
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m1",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    },
+    {
+     "event": "session",
+     "role": "reviewer",
+     "model": "m3",
+     "provider": "claude",
+     "run": "r1",
+     "block": "B1",
+     "lens": "full"
+    }
+   ],
+   "script": [
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "timeout",
+     "provider": "claude",
+     "model": "m2",
+     "duration_ms": 600000,
+     "stderr_tail": "stalled",
+     "stdout_bytes": 12,
+     "stdout_events": [
+      "init"
+     ]
+    },
+    {
+     "status": "ok",
+     "provider": "claude",
+     "model": "m1",
+     "fallback_step": 0,
+     "exit_code": 0,
+     "answer": {
+      "passed": true,
+      "summary": "fine",
+      "reviewed_hunks": "$HUNKS",
+      "findings": []
+     },
+     "usage": {
+      "tokens_in": 900,
+      "tokens_out": 150
+     }
+    }
+   ]
+  }
+ ]
+}

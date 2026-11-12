@@ -13,6 +13,8 @@ import (
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/blockopen"
+	"github.com/ricardov03/code-forge/native/filelock"
+	"github.com/ricardov03/code-forge/native/gates"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -23,6 +25,9 @@ import (
 // does not port is refused BEFORE any session is spawned (ErrUnsupported), so a
 // caller can still hand the ticket to Node. Three cases are only known after a
 // session ran; File stops there with a *GapError (see its doc).
+// B514: a valid answer with needs_file gets Node's one attachFiles round, a
+// schema miss its signed review.schema_invalid row with the diagnosis, and a
+// second timeout of one model timeoutFallbackFor's one other model.
 
 // SpawnOpts is what reviewFile passes to deps.spawn (schema is always
 // finding.schema.json).
@@ -46,6 +51,18 @@ type Deps struct {
 	Warn func(warning, message string)
 	// Rand names packet files; nil = crypto/rand.
 	Rand io.Reader
+	// ReadRows is the worker's ctx.readRows (every ledger row, for
+	// timeoutFallbackFor); nil = no rows.
+	ReadRows func() ([]any, error)
+	// SchemaHistory is the worker's ledgerSchemaHistory for one packet at one
+	// level and role; nil = none.
+	SchemaHistory func(hash, level, role string) (failures int, fellBack bool, err error)
+	// TimeoutFallback is route.mjs timeoutFallbackFor: nil when no other
+	// model may run; an error when Go does not model the choice (the session
+	// then ends in a *GapError). A nil seam is that error too.
+	TimeoutFallback func(TimeoutFallbackInput) (*Fallback, error)
+	// Lock is withLock (the schema-miss mark); nil = filelock.WithLock.
+	Lock func(key string, fn func() error) error
 }
 
 // Input is one ticket's review input (Node's ReviewInput).
@@ -68,11 +85,12 @@ type Input struct {
 }
 
 // GapError: a session already ran and its result needs a step not ported yet.
-// The review.plan row is written and the packet file removed; Node would go on
-// with Case: "schema-miss-diagnosis" (signed review.schema_invalid row with the
-// Ajv/V8 diagnosis), "timeout-fallback" (a second timeout on one model:
-// timeoutFallbackFor over the ledger) or "needs-file" (attachFiles round).
-// A caller must not hand such a ticket to Node (that would spawn again).
+// The review.plan row is written and the packet file removed. B514 ported the
+// schema-miss diagnosis and the needs_file round; the one Case left is
+// "timeout-fallback" when Deps.TimeoutFallback is nil or cannot model the
+// choice (an adaptive config Go does not read, a model the session layer
+// cannot run). A caller must not hand such a ticket to Node (that would spawn
+// again).
 type GapError struct{ Case string }
 
 func (e *GapError) Error() string { return "review: " + e.Case + " is not ported to Go" }
@@ -328,8 +346,11 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 	plan := ledger.Object{{Key: "event", Value: "review.plan"}, {Key: "depth_unconstrained", Value: depth}, {Key: "depth_chosen", Value: depth},
 		{Key: "degrade_step", Value: 0.0}, {Key: "risk", Value: risk}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "forecast_tokens", Value: float64(packet.TokensIn)}}
 	deps.note(append(plan, stepUp...))
-	done, err := runOne(spec, packet, in, deps)
+	done, err := runOne(spec, packet.Text, packet, in, deps)
 	if err != nil {
+		return nil, err
+	}
+	if done, err = needsFileRound(done, spec, packet, in, deps); err != nil {
 		return nil, err
 	}
 	sessions := []any{publicSummary(done)}
@@ -353,21 +374,83 @@ func File(in Input, deps Deps) (ledger.Object, error) {
 // timeoutRetries is B30's same-model retry count.
 const timeoutRetries = 1
 
-func runOne(spec sessionSpec, packet *Packet, in Input, deps Deps) (ledger.Object, error) {
+// TimeoutFallbackInput is timeoutFallbackFor's arguments.
+type TimeoutFallbackInput struct {
+	Cfg                     map[string]any
+	Level, Role             string
+	FromProvider, FromModel any
+	Rows                    []any
+	TicketID                string // the packet hash
+}
+
+// Fallback is timeoutFallbackFor's answer: the one-attempt config and why.
+type Fallback struct {
+	Cfg                     map[string]any
+	Provider, Model, Reason string
+}
+
+func (d Deps) lock(key string, fn func() error) error {
+	if d.Lock != nil {
+		return d.Lock(key, fn)
+	}
+	return filelock.WithLock(key, fn, filelock.Options{})
+}
+
+// addTokens is engine.mjs addTokens.
+func addTokens(a, b any) any {
+	x, aok := a.(float64)
+	y, bok := b.(float64)
+	if !aok {
+		if bok {
+			return y
+		}
+		return nil
+	}
+	if bok {
+		return x + y
+	}
+	return a
+}
+
+func usageOf(res ledger.Object) ledger.Object {
+	u, _ := get(res, "usage").(ledger.Object)
+	return u
+}
+
+func stringOrNull(v any) any {
+	if s, ok := v.(string); ok {
+		return s
+	}
+	return nil
+}
+
+// schemaInvalidRow is the review.schema_invalid row afterSchemaMiss and
+// logSecondLevelMiss write.
+func schemaInvalidRow(spec sessionSpec, res ledger.Object, hash string, second bool) ledger.Object {
+	row := ledger.Object{{Key: "event", Value: "review.schema_invalid"}, {Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role}, {Key: "level", Value: spec.level},
+		{Key: "provider", Value: stringOrNull(get(res, "provider"))}, {Key: "model", Value: stringOrNull(get(res, "model"))},
+		{Key: "fallback_step", Value: orDefault(get(res, "fallback_step"), 0.0)}, {Key: "packet_hash", Value: hash}, {Key: "second_level", Value: second}}
+	for _, f := range DiagnoseAnswer(res) {
+		row.Set(f.Key, f.Value)
+	}
+	return row
+}
+
+func runOne(spec sessionSpec, text string, packet *Packet, in Input, deps Deps) (ledger.Object, error) {
 	suffix, err := randomHex(deps.Rand)
 	if err != nil {
 		return nil, err
 	}
 	promptPath := filepath.Join(in.WorkDir, spec.lens+"-"+suffix+".md")
-	if err := os.WriteFile(promptPath, []byte(packet.Text), 0o600); err != nil {
+	if err := os.WriteFile(promptPath, []byte(text), 0o600); err != nil {
 		return nil, err
 	}
 	defer os.Remove(promptPath)
-	sum := sha256.Sum256([]byte(packet.Text))
+	sum := sha256.Sum256([]byte(text))
 	hash := hex.EncodeToString(sum[:])
 	rowExtra := ledger.Object{{Key: "lens", Value: spec.lens}, {Key: "context_mode", Value: packet.ContextMode}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)}}
-	spawn := func() (ledger.Object, bool) {
-		res, err := deps.Spawn(SpawnOpts{Level: spec.level, Role: spec.role, PromptPath: promptPath, RowExtra: rowExtra.Clone(), Cfg: in.Cfg})
+	spawnWith := func(cfg map[string]any) (ledger.Object, bool) {
+		res, err := deps.Spawn(SpawnOpts{Level: spec.level, Role: spec.role, PromptPath: promptPath, RowExtra: rowExtra.Clone(), Cfg: cfg})
 		if err != nil {
 			return nil, false
 		}
@@ -375,13 +458,13 @@ func runOne(spec sessionSpec, packet *Packet, in Input, deps Deps) (ledger.Objec
 		return out, true
 	}
 	// spawnWithTimeoutRetry with no ladder; tryNext('timeout') counts timeouts
-	// per provider/model and only acts (timeoutFallbackFor) at the second one.
+	// per provider/model and acts (timeoutFallbackFor) at the second one.
 	timeouts := map[string]int{}
-	var res ledger.Object
+	var res, broken, fellBackTo ledger.Object
 	attempts := 0
 	for {
 		attempts++
-		out, ok := spawn()
+		out, ok := spawnWith(in.Cfg)
 		if !ok {
 			res = nil
 			break
@@ -420,20 +503,17 @@ func runOne(spec sessionSpec, packet *Packet, in Input, deps Deps) (ledger.Objec
 		note.Set("packet_hash", hash)
 		deps.note(note)
 		if deps.WriteRow != nil {
-			provider, model := res.Get("provider"), res.Get("model")
-			if provider == nil || model == nil {
-				level := section(in.Cfg, "levels")["L2"].(map[string]any)
-				if provider == nil {
-					provider = orDefault(level["provider"], in.Cfg["provider"])
-				}
-				if model == nil {
-					model = level["model"]
-				}
+			taken, err := timeoutTry(spec, res, hash, timeouts, in, deps, func(cfg map[string]any) ledger.Object {
+				out, _ := spawnWith(cfg)
+				return out
+			})
+			if err != nil {
+				return nil, err
 			}
-			key := jsString(provider, true) + "\x00" + jsString(model, true)
-			timeouts[key]++
-			if timeouts[key] >= 2 {
-				return nil, &GapError{"timeout-fallback"}
+			if taken != nil {
+				broken, res, fellBackTo = res, taken.res, taken.to
+				attempts++
+				break
 			}
 		}
 		if !retried {
@@ -443,13 +523,24 @@ func runOne(spec sessionSpec, packet *Packet, in Input, deps Deps) (ledger.Objec
 			deps.Warn("review_retry", "a review session timed out; it was retried once")
 		}
 	}
-	verdict := ValidateReview(res, packet.HunkHeaders, MinTokensOut(in.Cfg))
-	if !verdict.OK && verdict.Reason == "schema" && deps.WriteRow != nil {
-		return nil, &GapError{"schema-miss-diagnosis"}
-	}
-	var usage ledger.Object
-	if res != nil {
-		usage, _ = res.Get("usage").(ledger.Object)
+	var verdict Verdict
+	var tokensIn, tokensOut any
+	if fellBackTo != nil {
+		// B91: the second timeout's one other model ran; a schema miss of it is
+		// logged, never counted, never tried again
+		verdict = ValidateReview(res, packet.HunkHeaders, MinTokensOut(in.Cfg))
+		tokensIn = addTokens(orDefault(get(usageOf(broken), "tokens_in"), nil), get(usageOf(res), "tokens_in"))
+		tokensOut = addTokens(orDefault(get(usageOf(broken), "tokens_out"), nil), get(usageOf(res), "tokens_out"))
+		if !verdict.OK && verdict.Reason == "schema" {
+			deps.note(schemaInvalidRow(spec, res, hash, true))
+		}
+	} else {
+		tokensIn = orDefault(get(usageOf(res), "tokens_in"), nil)
+		tokensOut = orDefault(get(usageOf(res), "tokens_out"), nil)
+		verdict = ValidateReview(res, packet.HunkHeaders, MinTokensOut(in.Cfg))
+		if !verdict.OK && verdict.Reason == "schema" && deps.WriteRow != nil {
+			afterSchemaMiss(spec, res, hash, deps)
+		}
 	}
 	meta := ledger.Object{{Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role}, {Key: "level", Value: spec.level}, {Key: "slot", Value: nil},
 		{Key: "context_mode", Value: packet.ContextMode}, {Key: "ctx_tokens_in", Value: float64(packet.TokensIn)},
@@ -461,21 +552,173 @@ func runOne(spec sessionSpec, packet *Packet, in Input, deps Deps) (ledger.Objec
 	if verdict.PassedCoerced {
 		meta.Set("passed_coerced", true)
 	}
-	meta.Set("tokens_in", orDefault(get(usage, "tokens_in"), nil))
-	meta.Set("tokens_out", orDefault(get(usage, "tokens_out"), nil))
+	if fellBackTo != nil {
+		meta.Set("schema_fallback", fellBackTo)
+	}
+	meta.Set("tokens_in", tokensIn)
+	meta.Set("tokens_out", tokensOut)
 	if !verdict.OK {
 		meta.Set("status", "unavailable")
 		meta.Set("reason", verdict.Reason)
 		meta.Set("review", nil)
 		return meta, nil
 	}
-	if needs, ok := verdict.Review.Get("needs_file").([]any); ok && len(needs) > 0 {
-		return nil, &GapError{"needs-file"}
-	}
 	meta.Set("status", "ok")
 	meta.Set("reason", nil)
 	meta.Set("review", verdict.Review)
 	return meta, nil
+}
+
+type brokenTry struct {
+	res ledger.Object
+	to  ledger.Object
+}
+
+// timeoutTry is runOne's tryNext(res, 'timeout') with no second level: nil
+// below the second timeout of one provider/model, when the packet already
+// fell back, when timeoutFallbackFor names no other model or when its mark
+// cannot be written.
+func timeoutTry(spec sessionSpec, res ledger.Object, hash string, timeouts map[string]int, in Input, deps Deps, spawn func(map[string]any) ledger.Object) (*brokenTry, error) {
+	provider, model := res.Get("provider"), res.Get("model")
+	if provider == nil || model == nil {
+		level := section(in.Cfg, "levels")["L2"].(map[string]any)
+		if provider == nil {
+			provider = orDefault(level["provider"], in.Cfg["provider"])
+		}
+		if model == nil {
+			model = level["model"]
+		}
+	}
+	key := jsString(provider, true) + "\x00" + jsString(model, true)
+	timeouts[key]++
+	count := timeouts[key]
+	if count < 2 {
+		return nil, nil
+	}
+	if deps.TimeoutFallback == nil {
+		return nil, &GapError{"timeout-fallback"}
+	}
+	rows := []any{}
+	var routingError any
+	readErr := func() error {
+		if deps.SchemaHistory != nil {
+			_, fellBack, err := deps.SchemaHistory(hash, spec.level, spec.role)
+			if err != nil {
+				return err
+			}
+			if fellBack {
+				return errFellBack
+			}
+		}
+		if deps.ReadRows != nil {
+			got, err := deps.ReadRows()
+			if err != nil {
+				return err
+			}
+			if got != nil {
+				rows = got
+			}
+		}
+		return nil
+	}()
+	if readErr == errFellBack {
+		return nil, nil
+	}
+	if readErr != nil {
+		// a read failure must not strand the ticket: the local count still
+		// proves two timeouts; the degraded choice is recorded
+		rows, routingError = []any{}, "ledger-read-failed"
+	}
+	fb, err := deps.TimeoutFallback(TimeoutFallbackInput{Cfg: in.Cfg, Level: spec.level, Role: spec.role, FromProvider: provider, FromModel: model, Rows: rows, TicketID: hash})
+	if err != nil {
+		return nil, &GapError{"timeout-fallback"}
+	}
+	if fb == nil {
+		return nil, nil
+	}
+	mark := ledger.Object{{Key: "event", Value: "review.schema_fallback"}, {Key: "lens", Value: spec.lens}, {Key: "role", Value: spec.role}, {Key: "level", Value: spec.level},
+		{Key: "packet_hash", Value: hash}, {Key: "from_provider", Value: provider}, {Key: "from_model", Value: model}, {Key: "to", Value: "review.timeout_fallback"},
+		{Key: "to_provider", Value: fb.Provider}, {Key: "to_model", Value: fb.Model}, {Key: "attempts", Value: float64(count)},
+		{Key: "trigger", Value: "timeout"}, {Key: "reason", Value: "repeated-timeout"}, {Key: "routing_reason", Value: fb.Reason}}
+	if routingError != nil {
+		mark.Set("routing_error", routingError)
+	}
+	if err := deps.WriteRow(mark); err != nil {
+		return nil, nil // never run a recovery that could not be recorded
+	}
+	to := ledger.Object{{Key: "level", Value: "review.timeout_fallback"}, {Key: "provider", Value: fb.Provider}, {Key: "model", Value: fb.Model}}
+	return &brokenTry{res: spawn(fb.Cfg), to: to}, nil
+}
+
+var errFellBack = errors.New("fell back")
+
+// afterSchemaMiss with no second level (Go refuses review.second_levels):
+// under the packet's lock, the history read (an unreadable one is one
+// warning line) and the signed review.schema_invalid row with its diagnosis.
+func afterSchemaMiss(spec sessionSpec, res ledger.Object, hash string, deps Deps) {
+	_ = deps.lock("schema-fallback\x00"+hash+"\x00"+spec.level+"\x00"+spec.role, func() error {
+		if deps.SchemaHistory != nil {
+			if _, _, err := deps.SchemaHistory(hash, spec.level, spec.role); err != nil && deps.Warn != nil {
+				deps.Warn("review_schema_history", "the schema-miss history could not be read; no second-level try")
+			}
+		}
+		_ = deps.WriteRow(schemaInvalidRow(spec, res, hash, false))
+		return nil
+	})
+}
+
+// needsFileRound is engine.mjs run's needs_file step: a valid reviewer
+// answer that asks for files gets ONE more session with them attached
+// (attachFiles), or needs_file-refused when none could be attached and none
+// was refused by policy.
+func needsFileRound(summary ledger.Object, spec sessionSpec, packet *Packet, in Input, deps Deps) (ledger.Object, error) {
+	review, _ := summary.Get("review").(ledger.Object)
+	needs, _ := get(review, "needs_file").([]any)
+	if spec.role != "reviewer" || summary.Get("status") != "ok" || len(needs) == 0 {
+		return summary, nil
+	}
+	paths := make([]string, 0, len(needs))
+	for _, n := range needs {
+		s, _ := n.(string) // the finding schema's items are strings
+		paths = append(paths, s)
+	}
+	requested := []any{}
+	for _, p := range paths[:min(10, len(paths))] {
+		requested = append(requested, cutUTF16(gates.Mask(p, in.Secrets), 200))
+	}
+	changed := in.ChangedFiles
+	if changed == nil {
+		changed = in.Peers
+	}
+	var d AttachDiagnostics
+	extra := AttachFiles(in.RepoRoot, paths, BudgetFor(in.Cfg, "full_in"), in.OwnedFiles, changed, &d)
+	fields := ledger.Object{{Key: "needs_file_requested", Value: requested}}
+	if len(d.Errors) > 0 {
+		errs := make([]any, len(d.Errors))
+		for i, e := range d.Errors {
+			errs[i] = e
+		}
+		fields.Set("needs_file_errors", errs)
+	}
+	if d.Attached+d.PolicyRefused == 0 {
+		out := summary.Clone()
+		for _, f := range fields {
+			out.Set(f.Key, f.Value)
+		}
+		out.Set("status", "unavailable")
+		out.Set("reason", "needs_file-refused")
+		out.Set("review", nil)
+		return out, nil
+	}
+	out, err := runOne(spec, packet.Text+extra, packet, in, deps)
+	if err != nil {
+		return nil, err
+	}
+	for _, f := range fields {
+		out.Set(f.Key, f.Value)
+	}
+	out.Set("needs_file_round", true)
+	return out, nil
 }
 
 // publicSummary drops the answer and adds its verdict and findings.
