@@ -190,6 +190,14 @@ func b553Run(t *testing.T, f b553Fix, argv []string, env []string) b553Side {
 // --keep-run: a binary built for a test (B529) may signal only processes
 // that descend from the test, and the run's worker is a session leader
 // whose parent is init, so `run end` could not stop it here.
+//
+// The worker (Go and Node alike) made its lazy root proc-<pid>-<ms> with
+// its first git child, before it set the run root, and removes it only in
+// its own exit path (tmp.mjs releaseLazyRoot, Go childregRelease). So the
+// reap waits for the SIGTERM drain to end, up to b553ReapGrace, and stops
+// polling as soon as the worker is gone. A SIGKILL skips that exit path and
+// leaves the root: B592 saw this on a loaded machine with the former 5 s
+// grace. A worker still alive after the grace is an error of its own.
 func b553Reap(t *testing.T, f b553Fix) {
 	t.Helper()
 	runs, _ := filepath.Glob(filepath.Join(f.repo, ".code-forge", "workers", "*.json"))
@@ -202,15 +210,19 @@ func b553Reap(t *testing.T, f b553Fix) {
 			continue
 		}
 		_ = syscall.Kill(-pid, syscall.SIGTERM)
-		deadline := time.Now().Add(5 * time.Second)
+		deadline := time.Now().Add(b553ReapGrace)
 		for b511Command(pid) != "" && time.Now().Before(deadline) {
 			time.Sleep(50 * time.Millisecond)
 		}
-		if b511Command(pid) != "" {
+		if command := b511Command(pid); command != "" {
 			_ = syscall.Kill(-pid, syscall.SIGKILL)
+			t.Errorf("worker %d (%s) still ran %v after SIGTERM: killed, so its lazy root stays", pid, command, b553ReapGrace)
 		}
 	}
 }
+
+// b553ReapGrace bounds the wait for a worker's SIGTERM drain (B592).
+const b553ReapGrace = 30 * time.Second
 
 func b553Go(t *testing.T, bin string, mode string, args []string, extra ...string) (b553Fix, b553Side) {
 	t.Helper()
