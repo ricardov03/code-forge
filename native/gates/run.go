@@ -963,3 +963,10 @@ func stopRemaining(pgid int) {
 	}
 	wait(time.Now().Add(2 * time.Second))
 }
+
+// SignalName is the Node name of a signal ("SIGTERM"), or "".
+func SignalName(sig syscall.Signal) string { return signalName(sig) }
+
+// StopRemaining stops the members a child's process group still holds after
+// its leader exited, as Node's exec does.
+func StopRemaining(pgid int) { stopRemaining(pgid) }

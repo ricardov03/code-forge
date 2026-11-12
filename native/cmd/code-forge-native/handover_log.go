@@ -196,6 +196,8 @@ const (
 	hPipelineUnsupported
 	hOutcomeUnsupported
 	hOutcomeRecordUnported
+	hToolsUnsupported
+	hToolsConfirm
 )
 
 var handoverReasons = [...]string{
@@ -371,6 +373,8 @@ var handoverReasons = [...]string{
 	hPipelineUnsupported:       "pipeline-unsupported",
 	hOutcomeUnsupported:        "outcome-unsupported",
 	hOutcomeRecordUnported:     "outcome-record-unported",
+	hToolsUnsupported:          "tools-unsupported",
+	hToolsConfirm:              "tools-confirm",
 }
 
 func handoverFlagReason(prefix, flag string, fallback handoverReason) handoverReason {
