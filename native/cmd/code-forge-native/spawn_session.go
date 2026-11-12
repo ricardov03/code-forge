@@ -65,24 +65,28 @@ func spawnRunRoot(cwd, run string) (string, bool) {
 	return dir, true
 }
 
-// spawnSessionPlan plans the session; runRoot is the --run's root ("" = none).
-func spawnSessionPlan(cwd string, parsed cliParsed, runRoot string) (func(o *runOut) int, handoverReason) {
-	if parsed.booleans["background"] {
-		return nil, hSpawnSession
-	}
-	if _, ok := parsed.values["run"]; ok && runRoot == "" {
-		return nil, hSpawnSession
-	}
+// spawnSessionPlan plans the session; makeRoot makes the --run's root (nil =
+// no --run), called once every hand-over is decided (B549).
+func spawnSessionPlan(cwd string, parsed cliParsed, makeRoot func() (string, bool)) (func(o *runOut) int, handoverReason) {
 	cfg, err := config.Load(cwd)
 	if err != nil {
 		return nil, hSpawnSession
 	}
 	brief := spawnResolve(cwd, parsed.values["brief"])
-	if _, err := os.ReadFile(brief); err != nil {
+	briefData, err := os.ReadFile(brief)
+	if err != nil {
 		return nil, hSpawnSession // Node throws reading the packet (a stack trace)
 	}
-	opts := session.Opts{Cfg: cfg, Level: parsed.values["level"], Role: parsed.values["role"], PromptPath: brief,
-		Slug: session.SlugFor(cfg, config.ProjectRootFor(cwd))}
+	role := parsed.values["role"]
+	opts := session.Opts{Cfg: cfg, Level: parsed.values["level"], Role: role, PromptPath: brief,
+		Slug: session.SlugFor(cfg, config.ProjectRootFor(cwd)), Background: parsed.booleans["background"]}
+	// B549: --cwd is the coder's tree; a facts session's --cwd check stays with Node
+	if dir, ok := parsed.values["cwd"]; ok {
+		if role == "facts" {
+			return nil, hSpawnFactsCwd
+		}
+		opts.Cwd = spawnResolve(cwd, dir)
+	}
 	if raw, ok := parsed.values["timeout"]; ok {
 		n, _ := cliIntFlag(raw, "timeout")
 		opts.TimeoutMs = n * 1000
@@ -91,7 +95,14 @@ func spawnSessionPlan(cwd string, parsed cliParsed, runRoot string) (func(o *run
 		opts.Block = &block
 	}
 	if run, ok := parsed.values["run"]; ok {
-		opts.Run, opts.RunRoot = &run, runRoot
+		opts.Run = &run
+	}
+	if role == "coder" && opts.Block != nil {
+		text, refusal, reason := spawnCoderPrompt(briefData, *opts.Block, opts.Run)
+		if reason != 0 {
+			return nil, reason
+		}
+		opts.CoderPrompt, opts.CoderPromptErr = text, refusal
 	}
 	if file, ok := parsed.values["schema"]; ok {
 		data, err := os.ReadFile(spawnResolve(cwd, file))
@@ -104,10 +115,45 @@ func spawnSessionPlan(cwd string, parsed cliParsed, runRoot string) (func(o *run
 		}
 		opts.Schema = schema
 	}
-	if err := session.Check(opts); session.IsUnsupported(err) {
+	if err := session.Check(opts); session.IsCodexStep(err) && (role == "coder" || role == "facts") {
+		return nil, hSpawnCodexStep
+	} else if session.IsUnsupported(err) {
 		return nil, hSpawnSession
 	}
 	preview := parsed.booleans["print-argv"]
+	// B549: a coder tree that is not a directory (spawn-session), or a
+	// background program Go cannot find (Node's spawn gets no pid and throws)
+	// stays with Node
+	if role == "coder" && !preview {
+		dir := opts.Cwd
+		if dir == "" {
+			dir = cwd
+		}
+		if info, err := os.Stat(dir); err != nil || !info.IsDir() {
+			return nil, hSpawnSession
+		}
+	}
+	if opts.Background {
+		dir := opts.Cwd
+		if role != "coder" || dir == "" {
+			dir = cwd
+		}
+		for _, entry := range filepath.SplitList(os.Getenv("PATH")) {
+			if role != "coder" && entry != "" && !filepath.IsAbs(entry) {
+				return nil, hSpawnBackgroundStart // resolved in the session dir Node makes later
+			}
+		}
+		if cli := session.FirstCLI(opts); cli == "" || session.BackgroundProgram(cli, dir, os.Environ()) == "" {
+			return nil, hSpawnBackgroundStart
+		}
+	}
+	if makeRoot != nil {
+		runRoot, ok := makeRoot()
+		if !ok {
+			return nil, hSpawnSession
+		}
+		opts.RunRoot = runRoot
+	}
 	return func(o *runOut) int { return spawnSessionRun(o, opts, preview) }, 0
 }
 
@@ -148,6 +194,10 @@ func spawnSessionRun(o *runOut, opts session.Opts, preview bool) int {
 	var sessionErr *session.Error
 	if errors.As(err, &sessionErr) {
 		o.err("spawn: " + sessionErr.Message + "\n")
+		switch sessionErr.Code {
+		case "forbidden", "sandbox-changed", "sandbox-dir-refused":
+			return 1
+		}
 		return 2
 	}
 	if err != nil {

@@ -337,6 +337,10 @@ const (
 	hInitWizardTools
 	hInitWizardModels
 	hInitJevKeychain
+	hSpawnCodexStep
+	hSpawnCoderRun
+	hSpawnFactsCwd
+	hSpawnBackgroundStart
 )
 
 var handoverReasons = [...]string{
@@ -672,4 +676,9 @@ var handoverReasons = [...]string{
 
 	// B548
 	hInitJevKeychain: "init-jev-keychain",
+	// B549
+	hSpawnCodexStep:       "spawn-codex-step",
+	hSpawnCoderRun:        "spawn-coder-run",
+	hSpawnFactsCwd:        "spawn-facts-cwd",
+	hSpawnBackgroundStart: "spawn-background-start",
 }

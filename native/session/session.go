@@ -88,6 +88,13 @@ func IsUnsupported(err error) bool {
 	return errors.As(err, &u)
 }
 
+// IsCodexStep reports an unsupported ladder because a step runs on openai
+// (the Codex CLI, left to Node).
+func IsCodexStep(err error) bool {
+	var u *unsupportedError
+	return errors.As(err, &u) && u.why == `provider "openai"`
+}
+
 // Opts is spawn.mjs SessionOpts for the ported path.
 type Opts struct {
 	Cfg        map[string]any
@@ -110,6 +117,16 @@ type Opts struct {
 	// Validate is matchesSchema for a Schema other than finding.schema.json
 	// (B536): the answer is kept as given (no review coercion) when it passes.
 	Validate func(answer any) bool
+	// Cwd is the coder's project tree, already resolved ("" = the process cwd).
+	Cwd string
+	// Background is spawn --background (B549): step 0 only, a detached child.
+	Background bool
+	// CoderPrompt is coderPromptFor's text for a coder with a Block (B549),
+	// computed by the caller; CoderPromptErr is its refusal, returned after
+	// the run-pinned gate as Node does. A coder with a Block and neither is
+	// not served.
+	CoderPrompt    *string
+	CoderPromptErr error
 }
 
 // Deps are the seams (SessionDeps).
@@ -148,6 +165,7 @@ type step struct {
 	provider, model string
 	effort          any // nil or a string
 	fallbackStep    int
+	flagFallback    string // ladderFor's flagFallback model (an anthropic coder), "" = none
 }
 
 func (s step) effortValue() any { return s.effort }
@@ -189,8 +207,8 @@ func plan(o Opts) ([]step, int, error) {
 	if !filepath.IsAbs(o.PromptPath) {
 		return nil, 0, &Error{"usage", "promptPath must be an absolute path"}
 	}
-	if o.Role == "coder" || o.Role == "facts" {
-		return nil, 0, unsupported("the " + o.Role + " role")
+	if o.Role == "coder" && o.Block != nil && o.CoderPrompt == nil && o.CoderPromptErr == nil {
+		return nil, 0, unsupported("a coder block prompt the caller did not build")
 	}
 	if o.Schema != nil && o.Schema.Get("$id") != FindingSchemaID && o.Validate == nil {
 		return nil, 0, unsupported("a schema other than finding.schema.json")
@@ -222,7 +240,25 @@ func plan(o Opts) ([]step, int, error) {
 		if !ok {
 			return nil, 0, unsupported("a fallback that is not a list")
 		}
+		// ladderFor: an anthropic coder's first anthropic fallback with another
+		// model rides on --fallback-model instead of being a step
+		onFlag := false
+		if o.Role == "coder" && provider == "anthropic" && len(list) > 0 {
+			if entry, ok := list[0].(map[string]any); ok && entry["provider"] == "anthropic" {
+				m, isString := entry["model"].(string)
+				if !isString || m == "" {
+					return nil, 0, unsupported("a fallback entry without provider and model")
+				}
+				onFlag = m != model
+				if onFlag {
+					ladder[0].flagFallback = m
+				}
+			}
+		}
 		for k, raw := range list {
+			if onFlag && k == 0 {
+				continue
+			}
 			entry, ok := raw.(map[string]any)
 			if !ok {
 				return nil, 0, unsupported("a fallback entry that is not an object")
@@ -236,17 +272,27 @@ func plan(o Opts) ([]step, int, error) {
 		}
 	}
 	openBook := section(o.Cfg, "review")["allow_open_book_codex"] == true
+	// closedBookRefused: only a no-tools role (NO_TOOL_ROLES); a coder or a
+	// facts session on openai is not refused, and Go leaves it to Node
+	noTool := contains([]string{"reviewer", "judge", "s2", "author", "delegate"}, o.Role)
 	refused := func(s step) bool {
-		return norm(s.provider) == "openai" && (!openBook || o.Role == "delegate")
+		return noTool && norm(s.provider) == "openai" && (!openBook || o.Role == "delegate")
 	}
 	if refused(ladder[0]) {
 		return nil, 0, &Error{"closed-book", ClosedBookRefusal}
 	}
-	var steps []step
+	var kept []step
 	for _, s := range ladder {
-		if refused(s) {
-			continue
+		if !refused(s) {
+			kept = append(kept, s)
 		}
+	}
+	skipped := len(ladder) - len(kept)
+	if o.Background {
+		kept = kept[:1]
+	}
+	var steps []step
+	for _, s := range kept {
 		if s.provider != "anthropic" && s.provider != "xai" {
 			return nil, 0, unsupported("provider " + strconv.Quote(s.provider))
 		}
@@ -261,7 +307,7 @@ func plan(o Opts) ([]step, int, error) {
 		}
 		steps = append(steps, s)
 	}
-	return steps, len(ladder) - len(steps), nil
+	return steps, skipped, nil
 }
 
 // Check tells, before anything runs, whether Spawn serves these options.
@@ -270,28 +316,52 @@ func Check(o Opts) error {
 	return err
 }
 
-type built struct {
-	cli   string
-	argv  []string
-	cwd   string
-	stdin bool // pipe the prompt file's bytes
-	env   []string
+// FirstCLI is the CLI name of the ladder's first step ("claude" or "grok";
+// "" when plan refuses the options).
+func FirstCLI(o Opts) string {
+	steps, _, err := plan(o)
+	if err != nil {
+		return ""
+	}
+	if steps[0].provider == "anthropic" {
+		return "claude"
+	}
+	return "grok"
 }
 
-// buildStep is spawn.mjs buildStep + the claude/grok closed-book builders.
+type built struct {
+	cli       string
+	argv      []string
+	cwd       string
+	stdin     bool   // pipe the prompt file's bytes
+	stdinFile string // the file piped (closed-book roles)
+	env       []string
+}
+
+// factsExtraWriteVerbRules is claude.mjs FACTS_EXTRA_WRITE_VERB_RULES.
+var factsExtraWriteVerbRules = []string{"Bash(rm*)", "Bash(git push*)", "Bash(git commit*)", "Bash(git merge*)", "Bash(mv*)", "Bash(cp*)"}
+
+// buildStep is spawn.mjs buildStep + the claude/grok builders.
 func buildStep(o Opts, s step, sessionDir string) (built, error) {
+	effort, _ := s.effort.(string)
+	if o.Role == "coder" {
+		return buildCoder(o, s, sessionDir, effort)
+	}
 	cwd := filepath.Join(sessionDir, "cwd")
 	if err := os.Mkdir(cwd, 0o700); err != nil {
 		return built{}, err
 	}
-	effort, _ := s.effort.(string)
 	switch s.provider {
 	case "anthropic":
 		argv := []string{"claude", "-p", "--model", s.model}
 		if effort != "" {
 			argv = append(argv, "--effort", effort)
 		}
-		argv = append(argv, "--safe-mode", "--tools", "", "--strict-mcp-config", "--no-session-persistence")
+		tools := ""
+		if o.Role == "facts" {
+			tools = "Bash"
+		}
+		argv = append(argv, "--safe-mode", "--tools", tools, "--strict-mcp-config", "--no-session-persistence")
 		if o.SystemPrompt != nil {
 			argv = append(argv, "--system-prompt", *o.SystemPrompt)
 		}
@@ -306,7 +376,13 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 			argv = append(argv, "--json-schema", string(text))
 		}
 		argv = append(argv, "--permission-mode", "dontAsk")
-		return built{cli: "claude", argv: argv, cwd: cwd, stdin: true}, nil
+		if o.Role == "facts" {
+			argv = append(argv, "--disallowedTools")
+			argv = append(argv, claudeRuleStrings(forbiddenStatic)...)
+			argv = append(argv, factsExtraWriteVerbRules...)
+			argv = append(argv, "--restricted")
+		}
+		return built{cli: "claude", argv: argv, cwd: cwd, stdin: true, stdinFile: o.PromptPath}, nil
 	default: // xai
 		argv := []string{"grok", "--prompt-file", o.PromptPath, "-m", s.model}
 		if effort != "" {
@@ -327,6 +403,61 @@ func buildStep(o Opts, s step, sessionDir string) (built, error) {
 	}
 }
 
+// buildCoder is buildStep for the coder role: the project tree as cwd, the
+// brief (or coderPromptFor's text in <session>/coder-brief.md) as the prompt.
+func buildCoder(o Opts, s step, sessionDir, effort string) (built, error) {
+	cwd := o.Cwd
+	if cwd == "" {
+		wd, err := os.Getwd()
+		if err != nil {
+			return built{}, err
+		}
+		cwd = wd
+	}
+	promptPath := o.PromptPath
+	if o.CoderPrompt != nil {
+		promptPath = filepath.Join(sessionDir, "coder-brief.md")
+		if err := os.WriteFile(promptPath, []byte(*o.CoderPrompt), 0o600); err != nil {
+			return built{}, err
+		}
+	}
+	rules := claudeRuleStrings(forbiddenMerged())
+	if s.provider == "anthropic" {
+		argv := []string{"claude", "-p", "--model", s.model}
+		if effort != "" {
+			argv = append(argv, "--effort", effort)
+		}
+		argv = append(argv, "--permission-mode", "bypassPermissions", "--output-format", "json", "--no-session-persistence", "--disallowedTools")
+		argv = append(argv, rules...)
+		if s.flagFallback != "" {
+			argv = append(argv, "--fallback-model", s.flagFallback)
+		}
+		argv = append(argv, "--", promptPath)
+		return built{cli: "claude", argv: argv, cwd: cwd}, nil
+	}
+	argv := []string{"grok", "--prompt-file", promptPath, "-m", s.model}
+	if effort != "" {
+		argv = append(argv, "--reasoning-effort", effort)
+	}
+	argv = append(argv, "--permission-mode", "bypassPermissions", "--cwd", cwd)
+	for _, rule := range rules {
+		argv = append(argv, "--deny", rule)
+	}
+	return built{cli: "grok", argv: argv, cwd: cwd, env: []string{"GROK_CURSOR_MCPS_ENABLED=false", "GROK_CLAUDE_MCPS_ENABLED=false"}}, nil
+}
+
+// checkBuiltArgv is spawn.mjs checkBuiltArgv after the bins override: a
+// coder argv the forbidden list matches is refused before spawn.
+func checkBuiltArgv(o Opts, b built) error {
+	if o.Role != "coder" {
+		return nil
+	}
+	if id := forbiddenHit(b.argv, forbiddenMerged()); id != "" {
+		return &Error{"forbidden", "coder argv refused before spawn: forbidden entry " + id}
+	}
+	return nil
+}
+
 // Preview is previewArgv: step 0's argv with the session dir as <session>.
 func Preview(o Opts, deps Deps) (ledger.Object, error) {
 	steps, skipped, err := plan(o)
@@ -335,6 +466,9 @@ func Preview(o Opts, deps Deps) (ledger.Object, error) {
 	}
 	deps.skipNote(skipped)
 	s := steps[0]
+	if o.Role == "coder" && o.CoderPromptErr != nil {
+		return nil, o.CoderPromptErr
+	}
 	dir, err := os.MkdirTemp(tempDir(), "code-forge-preview-")
 	if err != nil {
 		return nil, err
@@ -346,6 +480,9 @@ func Preview(o Opts, deps Deps) (ledger.Object, error) {
 	}
 	if bin, ok := deps.Bins[b.cli]; ok {
 		b.argv[0] = bin
+	}
+	if err := checkBuiltArgv(o, b); err != nil {
+		return nil, err
 	}
 	argv := make([]any, len(b.argv))
 	for i, a := range b.argv {
@@ -504,6 +641,12 @@ func Spawn(o Opts, deps Deps) (ledger.Object, error) {
 			}
 			releaseGate = rel
 		}
+		// coderPromptFor runs after the budget gate (a refusal there wins)
+		if o.Role == "coder" && o.CoderPromptErr != nil {
+			releaseGate()
+			release()
+			return nil, o.CoderPromptErr
+		}
 		res, waitMs, err := attempt(o, deps, s, i+1 == len(steps), runRoot, writeRow, &attempts, &waits, random, releaseGate)
 		releaseGate()
 		release()
@@ -534,13 +677,21 @@ func attempt(o Opts, deps Deps, s step, isLast bool, runRoot string, writeRow fu
 	if err := os.MkdirAll(sessionDir, 0o700); err != nil {
 		return nil, -1, err
 	}
-	defer os.RemoveAll(sessionDir)
+	keep := false
+	defer func() {
+		if !keep {
+			os.RemoveAll(sessionDir)
+		}
+	}()
 	b, err := buildStep(o, s, sessionDir)
 	if err != nil {
 		return nil, -1, err
 	}
 	if bin, ok := deps.Bins[b.cli]; ok {
 		b.argv[0] = bin
+	}
+	if err := checkBuiltArgv(o, b); err != nil {
+		return nil, -1, err
 	}
 	deps.stderr(fmt.Sprintf("level=%s provider=%s model=%s effort=%s fallback_step=%d\n", o.Level, s.provider, s.model, s.effortText(), s.fallbackStep))
 	base := ledger.Object{{Key: "role", Value: o.Role}, {Key: "level", Value: o.Level}, {Key: "provider", Value: s.provider}, {Key: "model", Value: s.model},
@@ -554,6 +705,38 @@ func attempt(o Opts, deps Deps, s step, isLast bool, runRoot string, writeRow fu
 	}
 	for _, f := range o.RowExtra {
 		base.Set(f.Key, f.Value)
+	}
+	if o.Background {
+		keep = true
+		bg, err := startBackground(b, sessionDir, runRoot, deps)
+		if err != nil {
+			return nil, -1, err
+		}
+		if writeRow != nil {
+			row := ledger.Object{{Key: "event", Value: "session.background"}}
+			for _, f := range base {
+				row.Set(f.Key, f.Value)
+			}
+			row.Set("pid", bg.Get("pid"))
+			row.Set("status", "started")
+			row.Set("usd", nil)
+			row.Set("usd_unknown", true)
+			err := writeRow(row)
+			releaseGate()
+			if err != nil {
+				return nil, -1, err
+			}
+		}
+		out := ledger.Object{{Key: "status", Value: "started"}}
+		for _, f := range bg {
+			out.Set(f.Key, f.Value)
+		}
+		out.Set("provider", s.provider)
+		out.Set("model", s.model)
+		out.Set("effort", s.effortValue())
+		out.Set("fallback_step", float64(s.fallbackStep))
+		out.Set("attempts", append([]any{}, *attempts...))
+		return out, -1, nil
 	}
 	res, err := foreground(b, o, deps)
 	if err != nil {
@@ -740,6 +923,13 @@ func foreground(b built, o Opts, deps Deps) (ledger.Object, error) {
 			code = jsNum(c)
 		}
 		return with(ledger.Object{{Key: "status", Value: "failed"}, {Key: "reason", Value: "exit " + code}, {Key: "answer", Value: nil}}), nil
+	}
+	if o.Role == "coder" {
+		var value any = text
+		if hasAnswer && answer != nil {
+			value = answer
+		}
+		return with(ledger.Object{{Key: "status", Value: "ok"}, {Key: "answer", Value: value}, {Key: "sentinel", Value: ParseSentinel(text)}}), nil
 	}
 	if o.Schema != nil && o.Validate != nil {
 		if !hasAnswer || !o.Validate(answer) {

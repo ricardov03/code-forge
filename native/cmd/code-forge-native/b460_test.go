@@ -206,7 +206,6 @@ func TestB460SpawnSessionHandsOver(t *testing.T) {
 	b460Chdir(t, f.workspace)
 	for _, args := range [][]string{
 		{"spawn", "--level", "L1", "--role", "coder", "--brief", "b.md"},
-		{"spawn", "--level", "L9", "--role", "coder", "--brief", "b.md", "--run", "r-x"},
 		{"spawn", "--level", "L1", "--role", "reviewer", "--brief", "b.md", "--print-argv"},
 	} {
 		if code, out, _ := b460Call(t, args...); code != 127 || out != "" {
@@ -214,7 +213,7 @@ func TestB460SpawnSessionHandsOver(t *testing.T) {
 		}
 	}
 	got := strings.Join(b460Handovers(t, f.home), ",")
-	if got != "spawn spawn-session,spawn spawn-session,spawn spawn-session" {
+	if got != "spawn spawn-session,spawn spawn-session" {
 		t.Fatalf("hand-overs = %s", got)
 	}
 }

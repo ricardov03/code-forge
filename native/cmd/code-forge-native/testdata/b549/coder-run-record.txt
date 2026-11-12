@@ -1,0 +1,136 @@
+== code 0
+== out
+{"status":"ok","answer":"built it\nTESTS go test ./... exit=0\n===BLOCK B1 COMPLETE===","sentinel":{"status":"complete","blockId":"B1","tests":{"command":"go test ./...","exit":0}},"usage":{"tokens_in":100,"tokens_out":20,"tokens_source":"reported"},"duration_ms":N,"exit_code":0,"stderr":"","provider":"anthropic","model":"claude-x","effort":"high","fallback_step":0,"row":{"event":"session","role":"coder","level":"L1","provider":"anthropic","model":"claude-x","effort":"high","fallback_step":0,"run":"r1","block":"B1","status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.0004,"cost_source":"estimated","duration_ms":N},"attempts":[{"fallback_step":0,"provider":"anthropic","model":"claude-x","status":"ok","reason":null}]}
+== err
+level=L1 provider=anthropic model=claude-x effort=high fallback_step=0
+== ledger
+{"event":"session","role":"coder","level":"L1","provider":"anthropic","model":"claude-x","effort":"high","fallback_step":0,"run":"r1","block":"B1","status":"ok","tokens_in":100,"tokens_out":20,"tokens_source":"reported","usd":0.0004,"cost_source":"estimated","duration_ms":N}
+== claude.argv
+-p
+--model
+claude-x
+--effort
+high
+--permission-mode
+bypassPermissions
+--output-format
+json
+--no-session-persistence
+--disallowedTools
+Bash(gh pr ready:*)
+Bash(gh pr merge:*)
+Bash(gh pr close:*)
+Bash(gh pr edit --base:*)
+Bash(gh pr edit -B:*)
+Bash(git push --force:*)
+Bash(git push -f:*)
+Bash(git push --force-with-lease:*)
+Bash(git push --force-if-includes:*)
+Bash(git push --mirror:*)
+Bash(git reset --hard:*)
+Bash(git checkout --:*)
+Bash(git checkout --force:*)
+Bash(git checkout -f:*)
+Bash(git restore:*)
+Bash(git clean:*)
+Bash(git stash:*)
+Bash(git branch -D:*)
+Bash(git branch --delete --force:*)
+Bash(git branch --delete -f:*)
+Bash(git branch -d --force:*)
+Bash(git branch -d -f:*)
+Bash(git branch --force --delete:*)
+Bash(git branch --force -d:*)
+Bash(git branch -f --delete:*)
+Bash(git branch -f -d:*)
+Bash(git rm:*)
+Bash(rm --recursive:*)
+Bash(rm --force:*)
+Bash(rm -r:*)
+Bash(rm -R:*)
+Bash(rm -f:*)
+Bash(rm -rR:*)
+Bash(rm -rf:*)
+Bash(rm -Rr:*)
+Bash(rm -Rf:*)
+Bash(rm -fr:*)
+Bash(rm -fR:*)
+Read(~/.code-forge/runs/**)
+Edit(~/.code-forge/runs/**)
+Write(~/.code-forge/runs/**)
+Bash(code-forge worker:*)
+Bash(npx code-forge worker:*)
+Bash(npx @codedology/code-forge worker:*)
+Bash(forge worker:*)
+Bash(code-forge run start:*)
+Bash(npx code-forge run start:*)
+Bash(npx @codedology/code-forge run start:*)
+Bash(forge run start:*)
+Bash(code-forge run reload:*)
+Bash(npx code-forge run reload:*)
+Bash(npx @codedology/code-forge run reload:*)
+Bash(forge run reload:*)
+Edit(.code-forge/reviews/**)
+Write(.code-forge/reviews/**)
+Edit(.code-forge/queue/*.done)
+Write(.code-forge/queue/*.done)
+Bash(code-forge block waive:*)
+Bash(npx code-forge block waive:*)
+Bash(npx @codedology/code-forge block waive:*)
+Bash(forge block waive:*)
+Bash(code-forge block reopen:*)
+Bash(npx code-forge block reopen:*)
+Bash(npx @codedology/code-forge block reopen:*)
+Bash(forge block reopen:*)
+Bash(code-forge autopilot:*)
+Bash(npx code-forge autopilot:*)
+Bash(npx @codedology/code-forge autopilot:*)
+Bash(forge autopilot:*)
+Bash(code-forge block accept-hit:*)
+Bash(npx code-forge block accept-hit:*)
+Bash(npx @codedology/code-forge block accept-hit:*)
+Bash(forge block accept-hit:*)
+Bash(code-forge block unwaive:*)
+Bash(npx code-forge block unwaive:*)
+Bash(npx @codedology/code-forge block unwaive:*)
+Bash(forge block unwaive:*)
+Bash(code-forge block ack-waivers:*)
+Bash(npx code-forge block ack-waivers:*)
+Bash(npx @codedology/code-forge block ack-waivers:*)
+Bash(forge block ack-waivers:*)
+Bash(code-forge block human-pass:*)
+Bash(npx code-forge block human-pass:*)
+Bash(npx @codedology/code-forge block human-pass:*)
+Bash(forge block human-pass:*)
+Bash(code-forge run start --add-worker:*)
+Bash(code-forge block amend-acceptance:*)
+Bash(npx code-forge block amend-acceptance:*)
+Bash(npx @codedology/code-forge block amend-acceptance:*)
+Bash(forge block amend-acceptance:*)
+--fallback-model
+claude-y
+--
+<ws>/tmp/code-forge/r1/sessions/coder-T-R/coder-brief.md
+== claude.cwd
+<ws>/repo
+== prompt.txt
+Build block one.
+Keep it small.
+
+## brief: docs/b1.md
+The block brief.
+Line two.
+## acceptance
+- it builds
+  tests: TestBuild
+- owner looks
+  kind: human_check
+
+Report the changed files and pass/fail counts. Print TESTS <command> exit=<n> on its own line before the sentinel. On success, print this exact sentinel as your last line:
+===BLOCK B1 COMPLETE===
+== stdin.txt
+== files
+home/.code-forge/ledger/repo.jsonl
+home/.code-forge/runs/r1.json
+home/.code-forge/runs/r1.key
+tmp/code-forge/r1/owner.json

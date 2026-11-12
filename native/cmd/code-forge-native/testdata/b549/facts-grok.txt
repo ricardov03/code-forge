@@ -1,0 +1,30 @@
+== code 0
+== out
+{"status":"ok","answer":"grok did it\n===BLOCK B1 FAILED: no tests===","usage":{"tokens_in":7,"tokens_out":3,"tokens_source":"reported"},"duration_ms":N,"exit_code":0,"stderr":"","provider":"xai","model":"grok-x","effort":"high","fallback_step":0,"row":{"event":"session","role":"facts","level":"L2","provider":"xai","model":"grok-x","effort":"high","fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":7,"tokens_out":3,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":N},"attempts":[{"fallback_step":0,"provider":"xai","model":"grok-x","status":"ok","reason":null}]}
+== err
+level=L2 provider=xai model=grok-x effort=high fallback_step=0
+== ledger
+{"event":"session","role":"facts","level":"L2","provider":"xai","model":"grok-x","effort":"high","fallback_step":0,"run":null,"block":null,"status":"ok","tokens_in":7,"tokens_out":3,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":N}
+== grok.argv
+--prompt-file
+<ws>/repo/brief.md
+-m
+grok-x
+--reasoning-effort
+high
+--disallowed-tools
+Bash,Read,Write,Edit,Glob,Grep,WebFetch,WebSearch
+--deny
+*
+--no-plan
+--no-subagents
+--max-turns
+1
+--permission-mode
+dontAsk
+--cwd
+<ws>/tmp/code-forge/proc-N/sessions/facts-T-R/cwd
+== grok.cwd
+<ws>/tmp/code-forge/proc-N/sessions/facts-T-R/cwd
+== files
+home/.code-forge/ledger/repo.jsonl

@@ -1,0 +1,9 @@
+== code 1
+== out
+== err
+spawn: sandbox-changed: coder.sandbox in the live config differs from the run r1 snapshot — put it back, or end the run and start a new one
+== ledger
+== files
+home/.code-forge/runs/r1.json
+home/.code-forge/runs/r1.key
+tmp/code-forge/r1/owner.json

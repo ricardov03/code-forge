@@ -1,0 +1,202 @@
+== code 0
+== out
+{"status":"ok","answer":"grok did it\n===BLOCK B1 FAILED: no tests===","sentinel":{"status":"failed","blockId":"B1","reason":"no tests"},"usage":{"tokens_in":7,"tokens_out":3,"tokens_source":"reported"},"duration_ms":N,"exit_code":0,"stderr":"","provider":"xai","model":"grok-x","effort":"high","fallback_step":0,"row":{"event":"session","role":"coder","level":"L2","provider":"xai","model":"grok-x","effort":"high","fallback_step":0,"run":null,"block":"B1","status":"ok","tokens_in":7,"tokens_out":3,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":N},"attempts":[{"fallback_step":0,"provider":"xai","model":"grok-x","status":"ok","reason":null}]}
+== err
+level=L2 provider=xai model=grok-x effort=high fallback_step=0
+== ledger
+{"event":"session","role":"coder","level":"L2","provider":"xai","model":"grok-x","effort":"high","fallback_step":0,"run":null,"block":"B1","status":"ok","tokens_in":7,"tokens_out":3,"tokens_source":"reported","usd":0.0001,"cost_source":"estimated","duration_ms":N}
+== grok.argv
+--prompt-file
+<ws>/tmp/code-forge/proc-N/sessions/coder-T-R/coder-brief.md
+-m
+grok-x
+--reasoning-effort
+high
+--permission-mode
+bypassPermissions
+--cwd
+<ws>/repo
+--deny
+Bash(gh pr ready:*)
+--deny
+Bash(gh pr merge:*)
+--deny
+Bash(gh pr close:*)
+--deny
+Bash(gh pr edit --base:*)
+--deny
+Bash(gh pr edit -B:*)
+--deny
+Bash(git push --force:*)
+--deny
+Bash(git push -f:*)
+--deny
+Bash(git push --force-with-lease:*)
+--deny
+Bash(git push --force-if-includes:*)
+--deny
+Bash(git push --mirror:*)
+--deny
+Bash(git reset --hard:*)
+--deny
+Bash(git checkout --:*)
+--deny
+Bash(git checkout --force:*)
+--deny
+Bash(git checkout -f:*)
+--deny
+Bash(git restore:*)
+--deny
+Bash(git clean:*)
+--deny
+Bash(git stash:*)
+--deny
+Bash(git branch -D:*)
+--deny
+Bash(git branch --delete --force:*)
+--deny
+Bash(git branch --delete -f:*)
+--deny
+Bash(git branch -d --force:*)
+--deny
+Bash(git branch -d -f:*)
+--deny
+Bash(git branch --force --delete:*)
+--deny
+Bash(git branch --force -d:*)
+--deny
+Bash(git branch -f --delete:*)
+--deny
+Bash(git branch -f -d:*)
+--deny
+Bash(git rm:*)
+--deny
+Bash(rm --recursive:*)
+--deny
+Bash(rm --force:*)
+--deny
+Bash(rm -r:*)
+--deny
+Bash(rm -R:*)
+--deny
+Bash(rm -f:*)
+--deny
+Bash(rm -rR:*)
+--deny
+Bash(rm -rf:*)
+--deny
+Bash(rm -Rr:*)
+--deny
+Bash(rm -Rf:*)
+--deny
+Bash(rm -fr:*)
+--deny
+Bash(rm -fR:*)
+--deny
+Read(~/.code-forge/runs/**)
+--deny
+Edit(~/.code-forge/runs/**)
+--deny
+Write(~/.code-forge/runs/**)
+--deny
+Bash(code-forge worker:*)
+--deny
+Bash(npx code-forge worker:*)
+--deny
+Bash(npx @codedology/code-forge worker:*)
+--deny
+Bash(forge worker:*)
+--deny
+Bash(code-forge run start:*)
+--deny
+Bash(npx code-forge run start:*)
+--deny
+Bash(npx @codedology/code-forge run start:*)
+--deny
+Bash(forge run start:*)
+--deny
+Bash(code-forge run reload:*)
+--deny
+Bash(npx code-forge run reload:*)
+--deny
+Bash(npx @codedology/code-forge run reload:*)
+--deny
+Bash(forge run reload:*)
+--deny
+Edit(.code-forge/reviews/**)
+--deny
+Write(.code-forge/reviews/**)
+--deny
+Edit(.code-forge/queue/*.done)
+--deny
+Write(.code-forge/queue/*.done)
+--deny
+Bash(code-forge block waive:*)
+--deny
+Bash(npx code-forge block waive:*)
+--deny
+Bash(npx @codedology/code-forge block waive:*)
+--deny
+Bash(forge block waive:*)
+--deny
+Bash(code-forge block reopen:*)
+--deny
+Bash(npx code-forge block reopen:*)
+--deny
+Bash(npx @codedology/code-forge block reopen:*)
+--deny
+Bash(forge block reopen:*)
+--deny
+Bash(code-forge autopilot:*)
+--deny
+Bash(npx code-forge autopilot:*)
+--deny
+Bash(npx @codedology/code-forge autopilot:*)
+--deny
+Bash(forge autopilot:*)
+--deny
+Bash(code-forge block accept-hit:*)
+--deny
+Bash(npx code-forge block accept-hit:*)
+--deny
+Bash(npx @codedology/code-forge block accept-hit:*)
+--deny
+Bash(forge block accept-hit:*)
+--deny
+Bash(code-forge block unwaive:*)
+--deny
+Bash(npx code-forge block unwaive:*)
+--deny
+Bash(npx @codedology/code-forge block unwaive:*)
+--deny
+Bash(forge block unwaive:*)
+--deny
+Bash(code-forge block ack-waivers:*)
+--deny
+Bash(npx code-forge block ack-waivers:*)
+--deny
+Bash(npx @codedology/code-forge block ack-waivers:*)
+--deny
+Bash(forge block ack-waivers:*)
+--deny
+Bash(code-forge block human-pass:*)
+--deny
+Bash(npx code-forge block human-pass:*)
+--deny
+Bash(npx @codedology/code-forge block human-pass:*)
+--deny
+Bash(forge block human-pass:*)
+--deny
+Bash(code-forge run start --add-worker:*)
+--deny
+Bash(code-forge block amend-acceptance:*)
+--deny
+Bash(npx code-forge block amend-acceptance:*)
+--deny
+Bash(npx @codedology/code-forge block amend-acceptance:*)
+--deny
+Bash(forge block amend-acceptance:*)
+== grok.cwd
+<ws>/repo
+== files
+home/.code-forge/ledger/repo.jsonl

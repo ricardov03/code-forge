@@ -36,6 +36,11 @@ func reviewOpts(base Opts, in review.SpawnOpts) (Opts, error) {
 	if err != nil {
 		return Opts{}, err
 	}
+	if in.Role == "coder" || in.Role == "facts" {
+		// the review spawner never builds a coder or facts session (B549 serves
+		// them only through spawn)
+		return Opts{}, unsupported("the " + in.Role + " role")
+	}
 	o := base
 	if in.Cfg != nil {
 		o.Cfg = in.Cfg

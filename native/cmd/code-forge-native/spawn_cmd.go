@@ -21,7 +21,10 @@ import (
 // B482: so does one with --run (the run root, then session's budget.usd and
 // autopilot gate). --run with the coder role, --background, the facts role,
 // a schema other than finding.schema.json and every case session.Check
-// refuses hand over.
+// refuses hand over. B549: the coder role (--run included), the facts role
+// without --cwd and --background run in Go too; a Codex (openai) step, facts
+// with --cwd, a run record Go cannot read and a background program it cannot
+// find keep narrow handovers.
 func init() { routes["spawn"] = runSpawnVerb }
 
 var spawnRoles = []string{"coder", "reviewer", "judge", "s2", "author", "facts", "delegate"}
@@ -86,22 +89,34 @@ func spawnPlan(args []string) (func(o *runOut) int, handoverReason) {
 		if !spawnRunID.MatchString(runID) {
 			return fail(2, "spawn: a run id is one path segment of letters, digits, \".\", \"_\" or \"-\"\n")
 		}
+		// B549: a ladder with a Codex step is decided before the run root is made
+		if spawnCodexLadder(cwd, parsed) {
+			return nil, hSpawnCodexStep
+		}
+		// B549: checkRunSandbox (a coder only) is decided before the run root
+		// is made, so its hand-over writes nothing
+		code, text := 0, ""
+		if role == "coder" {
+			var reason handoverReason
+			if code, text, reason = spawnCheckRunSandbox(cwd, runID); reason != 0 {
+				return nil, reason
+			}
+		}
 		// runRootFor makes the run's temp root before the level and role are checked.
-		// B482: a coder (checkRunSandbox) and --background still hand over.
-		if role == "coder" || parsed.booleans["background"] {
+		makeRoot := func() (string, bool) { return spawnRunRoot(cwd, runID) }
+		if code == 0 && cliContains(spawnLevels, level) && cliContains(spawnRoles, role) {
+			return spawnSessionPlan(cwd, parsed, makeRoot)
+		}
+		if _, ok := makeRoot(); !ok {
 			return nil, hSpawnSession
 		}
-		runRoot, ok := spawnRunRoot(cwd, runID)
-		if !ok {
-			return nil, hSpawnSession
+		if code != 0 {
+			return fail(code, text)
 		}
 		if !cliContains(spawnLevels, level) {
 			return fail(2, "spawn: level must be one of "+strings.Join(spawnLevels, ", ")+"\n")
 		}
-		if !cliContains(spawnRoles, role) {
-			return fail(2, "spawn: role must be one of "+strings.Join(spawnRoles, ", ")+"\n")
-		}
-		return spawnSessionPlan(cwd, parsed, runRoot)
+		return fail(2, "spawn: role must be one of "+strings.Join(spawnRoles, ", ")+"\n")
 	}
 	if !cliContains(spawnLevels, level) {
 		return fail(2, "spawn: level must be one of "+strings.Join(spawnLevels, ", ")+"\n")
@@ -109,7 +124,7 @@ func spawnPlan(args []string) (func(o *runOut) int, handoverReason) {
 	if !cliContains(spawnRoles, role) {
 		return fail(2, "spawn: role must be one of "+strings.Join(spawnRoles, ", ")+"\n")
 	}
-	return spawnSessionPlan(cwd, parsed, "")
+	return spawnSessionPlan(cwd, parsed, nil)
 }
 
 // spawnResolve is path.resolve(file) against the process cwd.

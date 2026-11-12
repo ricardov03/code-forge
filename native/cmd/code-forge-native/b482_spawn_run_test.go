@@ -178,17 +178,3 @@ func TestB482SpawnRunAutopilotPause(t *testing.T) {
 		t.Fatalf("second spawn = %d, rows %v", code, got)
 	}
 }
-
-// A coder (checkRunSandbox) and --background with --run still hand over.
-func TestB482SpawnRunCoderStillHandsOver(t *testing.T) {
-	f := b482Fixture(t, "", "", "")
-	for _, args := range [][]string{{"--role", "coder"}, {"--role", "reviewer", "--background"}} {
-		code, out, _ := b460Call(t, append([]string{"spawn", "--level", "L1", "--brief", "brief.md", "--run", "r1"}, args...)...)
-		if code != 127 || out != "" {
-			t.Fatalf("%v = %d %q, want the Node hand-over (127)", args, code, out)
-		}
-	}
-	if got := b460Handovers(t, f.home); strings.Join(got, ",") != "spawn spawn-session,spawn spawn-session" {
-		t.Fatalf("handovers = %v", got)
-	}
-}

@@ -1,0 +1,42 @@
+== code 0
+== out
+{"status":"started","pid":N,"pidFile":"<ws>/tmp/code-forge/proc-N/sessions/reviewer-T-R/pid.json","logPath":"<ws>/tmp/code-forge/proc-N/sessions/reviewer-T-R/session.log","errLogPath":"<ws>/tmp/code-forge/proc-N/sessions/reviewer-T-R/session.err.log","sessionDir":"<ws>/tmp/code-forge/proc-N/sessions/reviewer-T-R","provider":"anthropic","model":"claude-x","effort":"high","fallback_step":0,"attempts":[]}
+== err
+level=L1 provider=anthropic model=claude-x effort=high fallback_step=0
+== ledger
+{"event":"session.background","role":"reviewer","level":"L1","provider":"anthropic","model":"claude-x","effort":"high","fallback_step":0,"run":null,"block":null,"pid":N,"status":"started","usd":null,"usd_unknown":true,"tokens_source":null,"cost_source":null}
+== claude.argv
+-p
+--model
+claude-x
+--effort
+high
+--safe-mode
+--tools
+
+--strict-mcp-config
+--no-session-persistence
+--output-format
+json
+--permission-mode
+dontAsk
+== claude.cwd
+<ws>/tmp/code-forge/proc-N/sessions/reviewer-T-R/cwd
+== stdin.txt
+Build block one.
+Keep it small.
+
+== files
+home/.code-forge/ledger/repo.jsonl
+tmp/code-forge/proc-N/owner.json
+tmp/code-forge/proc-N/pids/N.json
+tmp/code-forge/proc-N/sessions/reviewer-T-R/pid.json
+tmp/code-forge/proc-N/sessions/reviewer-T-R/session.err.log
+tmp/code-forge/proc-N/sessions/reviewer-T-R/session.log
+== pid.json
+{"pid":N,"start_time":"S","argv0":"claude","log":"<ws>/tmp/code-forge/proc-N/sessions/reviewer-T-R/session.log","errLog":"<ws>/tmp/code-forge/proc-N/sessions/reviewer-T-R/session.err.log"}
+== pids entry
+{"pid":N,"start_time":"S","argv0":"claude"}
+== session.err.log
+== session.log
+{"type":"result","is_error":false,"result":"built it\nTESTS go test ./... exit=0\n===BLOCK B1 COMPLETE===","usage":{"input_tokens":100,"output_tokens":20}}

@@ -1,0 +1,9 @@
+== code 2
+== out
+== err
+spawn: run r1: the config snapshot in force does not match its hash
+== ledger
+== files
+home/.code-forge/runs/r1.json
+home/.code-forge/runs/r1.key
+tmp/code-forge/r1/owner.json
