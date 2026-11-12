@@ -25,6 +25,7 @@ import (
 
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/session"
 )
 
 // lrAIReportMaxBytes is AI_REPORT_MAX_BYTES in src/session/scrub.mjs:
@@ -53,7 +54,9 @@ var (
 		return filepath.Join(filepath.Dir(exe), "..", "..", "..", "package.json")
 	}
 	lrNow = time.Now
-	lrRun = runChild
+	lrRun = func(argv []string, timeout time.Duration) childResult {
+		return runChildHooked(argv, timeout, lrRegisterChild)
+	}
 	// lrHost is process.platform, os.release() and process.arch ("" = unknown).
 	lrHost       = func() (string, string, string) { return runtime.GOOS, lrKernelRelease(), lrArch() }
 	lrFixesEmpty = logsEmptyFixes
@@ -832,6 +835,22 @@ func lrProcRoot() (string, error) {
 		lrRoot = root
 	}
 	return root, err
+}
+
+// lrRegisterChild is exec's pid registry: <run-root>/pids/<pid>.json
+// (reaper.mjs registerPid) right after the spawn, removed once the child has
+// settled. A run root or entry that cannot be written never fails the spawn,
+// and an entry never written is never removed (registry hygiene only).
+func lrRegisterChild(pid int, argv0 string) func() {
+	root, err := lrProcRoot()
+	if err != nil {
+		return nil
+	}
+	dir := filepath.Join(root, "pids")
+	if session.RegisterPid(dir, pid, argv0) != nil {
+		return nil
+	}
+	return func() { _ = os.Remove(filepath.Join(dir, strconv.Itoa(pid)+".json")) }
 }
 
 // lrExec is exec: the run root first (Node's pid registry lives there).

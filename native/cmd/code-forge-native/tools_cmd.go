@@ -148,6 +148,14 @@ func (b *cappedBuffer) Write(p []byte) (int, error) {
 // process group, the owner variables, SIGTERM then SIGKILL on timeout,
 // remaining group members stopped once the leader exits.
 func runChild(argv []string, timeout time.Duration) childResult {
+	return runChildHooked(argv, timeout, nil)
+}
+
+// runChildHooked is runChild with exec's spawn hook: started runs with the
+// child's pid right after a successful spawn, and the function it returns
+// (when not nil) runs once the child has settled: leader reaped, remaining
+// group members stopped, output drained (exec.mjs settle).
+func runChildHooked(argv []string, timeout time.Duration, started func(pid int, argv0 string) func()) childResult {
 	cmd := exec.Command(argv[0], argv[1:]...)
 	cmd.SysProcAttr = &syscall.SysProcAttr{Setpgid: true}
 	env := []string{}
@@ -185,6 +193,11 @@ func runChild(argv []string, timeout time.Duration) childResult {
 	if err != nil {
 		drains.Wait()
 		return childResult{}
+	}
+	if started != nil {
+		if settled := started(cmd.Process.Pid, argv[0]); settled != nil {
+			defer settled()
+		}
 	}
 	done := make(chan struct{})
 	go func() { _ = cmd.Wait(); close(done) }()
