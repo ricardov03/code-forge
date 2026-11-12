@@ -1,0 +1,1268 @@
+{
+ "validate": [
+  {
+   "name": "no-session",
+   "session": null,
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "timeout",
+   "session": {
+    "status": "timeout"
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "budget",
+   "session": {
+    "status": "unavailable",
+    "reason": "budget",
+    "message": "budget.usd 5 reached"
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "budget-nomsg",
+   "session": {
+    "status": "unavailable",
+    "reason": "budget"
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "failed-exit",
+   "session": {
+    "status": "failed",
+    "exit_code": 2
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "unavail",
+   "session": {
+    "status": "unavailable",
+    "reason": "provider"
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "exit-null",
+   "session": {
+    "status": "ok",
+    "exit_code": null,
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "exit-nonzero-ok",
+   "session": {
+    "status": "ok",
+    "exit_code": 1,
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "no-status",
+   "session": {
+    "exit_code": 3
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "invalid-output",
+   "session": {
+    "status": "invalid-output",
+    "answer": null
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "answer-array",
+   "session": {
+    "status": "ok",
+    "answer": [
+     1
+    ]
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "missing-summary",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "extra-key",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [],
+     "extra": 1
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "summary-301",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "ééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééééé",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "summary-300-emoji",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀😀",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "bad-severity",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "major",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "line-float",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1.5,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "line-intfloat",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 3.0,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 200
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "line-negative",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": -1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "id-empty",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "agreement-ok",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x",
+       "agreement": "both"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 130
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "agreement-bad",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x",
+       "agreement": "none"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "resolved-ok",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [],
+     "resolved": [
+      {
+       "id": "F1",
+       "resolved": true,
+       "why": "done",
+       "current_lines": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 50
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "resolved-missing-why",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [],
+     "resolved": [
+      {
+       "id": "F1",
+       "resolved": true
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "needs-file",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [],
+     "needs_file": [
+      "b.txt"
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 60
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "needs-file-bad",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [],
+     "needs_file": [
+      1
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "passed-null-findings",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": null,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 130
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "passed-null-nofindings",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": null,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "passed-null-badfinding",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": null,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "x",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "passed-coerced-flag",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 50
+    },
+    "passed_coerced": true
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "hunks-short",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "hunks-order",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -10,2 +11,2 @@",
+      "@@ -1,3 +1,4 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 150
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "clean-39",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 39
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "clean-40",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 40
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "clean-blank-summary",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "  \n",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 100
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "finding-119",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 119
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "finding-120",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 120
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "row-tokens",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "row": {
+     "tokens_out": 45
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "usage-null-row",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_out": null
+    },
+    "row": {
+     "tokens_out": 41
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "no-tokens",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "tokens-string",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_out": "77"
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "tokens-float",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": false,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "warning",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 119.5
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "passed-true-findings",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": [
+      {
+       "id": "F1",
+       "file": "a.txt",
+       "line_start": 1,
+       "line_end": 2,
+       "severity": "nit",
+       "category": "logic",
+       "claim": "c",
+       "evidence": "e",
+       "fix": "x"
+      }
+     ]
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 121
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 120
+  },
+  {
+   "name": "min-30",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 35
+    }
+   },
+   "hunks": [
+    "@@ -1,3 +1,4 @@",
+    "@@ -10,2 +11,2 @@"
+   ],
+   "min": 30
+  },
+  {
+   "name": "no-hunks",
+   "session": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [],
+     "findings": []
+    },
+    "usage": {
+     "tokens_in": 10,
+     "tokens_out": 45
+    }
+   },
+   "hunks": [],
+   "min": 120
+  }
+ ],
+ "truncate": [
+  {
+   "name": "plain",
+   "res": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    }
+   }
+  },
+  {
+   "name": "nothing-cut",
+   "res": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    }
+   }
+  },
+  {
+   "name": "invalid-output-text",
+   "res": {
+    "status": "invalid-output",
+    "answer": null,
+    "text": "{\"passed\": false, \"summary\": \"s\", \"reviewed_hunks\": [\"@@ -1,3 +1,4 @@\", \"@@ -10,2 +11,2 @@\"], \"findings\": [{\"id\": \"iiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiiii\", \"file\": \"a.txt\", \"line_start\": 1, \"line_end\": 2, \"severity\": \"warning\", \"category\": \"ccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc\", \"claim\": \"\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\\ud83d\\ude00\", \"evidence\": \"ok\", \"fix\": \"x\"}], \"resolved\": [{\"id\": \"r\", \"resolved\": false, \"why\": \"wwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwwww\", \"current_lines\": \"lllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllllll\"}]}"
+   }
+  },
+  {
+   "name": "invalid-output-nocut",
+   "res": {
+    "status": "invalid-output",
+    "text": "{\"passed\": true, \"summary\": \"fine\", \"reviewed_hunks\": [\"@@ -1,3 +1,4 @@\", \"@@ -10,2 +11,2 @@\"], \"findings\": []}"
+   }
+  },
+  {
+   "name": "invalid-output-badjson",
+   "res": {
+    "status": "invalid-output",
+    "text": "{nope"
+   }
+  },
+  {
+   "name": "text-array",
+   "res": {
+    "status": "invalid-output",
+    "text": "[1,2]"
+   }
+  },
+  {
+   "name": "failed",
+   "res": {
+    "status": "failed",
+    "answer": {
+     "passed": true,
+     "summary": "xxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxxx",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    }
+   }
+  },
+  {
+   "name": "answer-string",
+   "res": {
+    "status": "ok",
+    "answer": "hello"
+   }
+  },
+  {
+   "name": "wrong-types",
+   "res": {
+    "status": "ok",
+    "answer": {
+     "summary": 5,
+     "findings": "no",
+     "reviewed_hunks": [
+      {
+       "a": "bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"
+      }
+     ],
+     "zz": "qqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqqq",
+     "passed": true
+    }
+   }
+  },
+  {
+   "name": "answer-first",
+   "res": {
+    "answer": {
+     "passed": true,
+     "summary": "yyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyyy",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "status": "ok",
+    "tail": 1
+   }
+  },
+  {
+   "name": "text-and-answer",
+   "res": {
+    "status": "ok",
+    "answer": {
+     "passed": true,
+     "summary": "fine",
+     "reviewed_hunks": [
+      "@@ -1,3 +1,4 @@",
+      "@@ -10,2 +11,2 @@"
+     ],
+     "findings": []
+    },
+    "text": "{\"passed\": true, \"summary\": \"zzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzzz\", \"reviewed_hunks\": [\"@@ -1,3 +1,4 @@\", \"@@ -10,2 +11,2 @@\"], \"findings\": []}"
+   }
+  }
+ ]
+}
