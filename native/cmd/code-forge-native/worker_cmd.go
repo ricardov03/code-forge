@@ -91,7 +91,12 @@ func runWorkerVerb(args []string) int {
 		var handTo handoverReason
 		code, handTo = workerServe(home, args, a, o)
 		if handTo != 0 {
-			return workerHandover(args, handTo)
+			code := workerHandover(args, handTo)
+			if undo := workerHandOverUndo; undo != nil {
+				workerHandOverUndo = nil
+				undo()
+			}
+			return code
 		}
 	} else {
 		code = plan(o)

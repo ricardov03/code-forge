@@ -431,5 +431,28 @@ func (w *Worker) Release() error {
 	return Retract(w.o.Root, w.o.Pid, &start, w.o.Probes)
 }
 
+// HandOver is Release for a worker that hands its run to Node in this same
+// process (B561): the hand-over announcement is written first, then this
+// worker's own announcements are withdrawn, so a waiter never sees the queue
+// unserved while Node starts. Without a hand-over announcement it is Release.
+func (w *Worker) HandOver() error {
+	w.StopDaemon()
+	w.stopBeating()
+	w.mu.Lock()
+	self := w.self
+	w.self = nil
+	w.mu.Unlock()
+	if self == nil {
+		return nil
+	}
+	_, _ = AnnounceHandOver(w.o.Root, self, w.o.Probes)
+	start, _ := self.Get("start_time").(string)
+	return Retract(w.o.Root, w.o.Pid, &start, w.o.Probes)
+}
+
+// RetractHandOver withdraws the hand-over announcement when the hand-over
+// to Node failed (this process is about to exit).
+func (w *Worker) RetractHandOver() { RetractHandOver(w.o.Root, w.o.Pid, w.o.Probes) }
+
 // IsUndecided reports an input Node must judge.
 func IsUndecided(err error) bool { return errors.Is(err, ErrUndecided) }

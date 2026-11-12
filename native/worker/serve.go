@@ -11,8 +11,10 @@ package worker
 //      released by the pool with no done marker, so it stays pending);
 //   2. the tickets already running in Go finish (each writes its own done
 //      marker, so Node's queue scan skips them);
-//   3. the worker releases its announcement and daemon, and the CLI replaces
-//      this process (same pid, same start time) with the Node worker.
+//   3. the worker releases its daemon and swaps its announcement for the
+//      hand-over one (B561: a waiter keeps seeing the queue served; Node's
+//      boot prunes it), and the CLI replaces this process (same pid, same
+//      start time) with the Node worker.
 // Node then boots on the same pin and reviews every pending ticket, the
 // unported one included, once. A ticket is never lost (its file stays queued)
 // and never reviewed twice (a done marker exists only for Go's own reviews,
@@ -160,10 +162,20 @@ func (l *Loop) waitFor(d time.Duration) {
 	}
 }
 
+// release withdraws the announcement; a worker handing its run to Node
+// leaves the hand-over announcement until Node's boot prunes it (B561).
+func (l *Loop) release() {
+	if l.Handoff() != "" {
+		_ = l.Worker.HandOver()
+		return
+	}
+	_ = l.Worker.Release()
+}
+
 // Run serves the queue until Stop (run()). Go has no queue watcher, so it
 // polls every PollMs: loop.mjs's interval when fs.watch is unavailable.
 func (l *Loop) Run() {
-	defer func() { _ = l.Worker.Release() }()
+	defer l.release()
 	poll := l.PollMs
 	if poll <= 0 {
 		poll = DefaultPollMs
@@ -188,7 +200,7 @@ func (l *Loop) Run() {
 func (l *Loop) Once() (int, error) {
 	defer func() {
 		l.Stop()
-		_ = l.Worker.Release()
+		l.release()
 	}()
 	done, err := l.Pool.Drain()
 	if err != nil {

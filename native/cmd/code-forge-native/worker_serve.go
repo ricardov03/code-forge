@@ -209,6 +209,10 @@ func startNativeDaemon(run string, cfg map[string]any) (func(), error) {
 	}, nil
 }
 
+// workerHandOverUndo withdraws the hand-over announcement a worker left for
+// Node (B561); runWorkerVerb runs it when the exec into Node failed.
+var workerHandOverUndo func()
+
 // workerServe boots and serves; handover is the reason to give the worker to
 // Node instead ("" none: the code is final).
 func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int, handoverReason) {
@@ -290,6 +294,7 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	if a.once {
 		done, err := loop.Once()
 		if reason := loop.Handoff(); reason != "" {
+			workerHandOverUndo = wk.RetractHandOver
 			return 0, workerHandoffReason(reason)
 		}
 		if err != nil {
@@ -322,6 +327,7 @@ func workerServe(home string, args []string, a workerServeArgs, o *runOut) (int,
 	loop.Run()
 	stopSignals()
 	if reason := loop.Handoff(); reason != "" {
+		workerHandOverUndo = wk.RetractHandOver
 		return 0, workerHandoffReason(reason)
 	}
 	o.err("worker: stopped\n")

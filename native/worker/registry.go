@@ -507,3 +507,45 @@ func Retract(root string, pid int, startTime *string, p Probes) error {
 	}
 	return nil
 }
+
+// HandOverSuffix ends the start_time of the announcement a Go worker leaves
+// while it hands its run to Node in this same process (B561).
+const HandOverSuffix = " hand-over"
+
+// AnnounceHandOver keeps a worker visible while the same pid turns into the
+// Node worker (B561). Go's own announcement cannot stay: Node's boot counts a
+// live entry and refuses (review.workers limit). This entry has the body of
+// announceWorker with start_time "<ps start time> hand-over": a waiter
+// (liveWorker) reads it as live while its pid runs with a fresh heartbeat,
+// and Node's boot prunes it at once (workerLiveAtBoot: ps start time differs).
+// Without a ps start time there is nothing Node's boot could prune by, so it
+// writes nothing and reports false.
+func AnnounceHandOver(root string, self ledger.Object, p Probes) (bool, error) {
+	pid, _ := self.Get("pid").(float64)
+	start, _ := self.Get("start_time").(string)
+	if start == "" || start == UnknownStartTime {
+		return false, nil
+	}
+	if actual := p.startTime(pidInt(pid)); actual == nil || *actual != start {
+		return false, nil
+	}
+	body := ledger.Object{{Key: "pid", Value: pid}, {Key: "start_time", Value: start + HandOverSuffix}, {Key: "run", Value: self.Get("run")}, {Key: "started_at", Value: self.Get("started_at")}, {Key: "heartbeat_at", Value: ISO(p.now())}}
+	data, err := line(body)
+	if err != nil {
+		return false, err
+	}
+	if err := writeAtomic(entryPath(root, pid, start+HandOverSuffix), data, 0o600); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+// RetractHandOver removes pid's hand-over announcement (the hand-over to Node
+// failed before Node started).
+func RetractHandOver(root string, pid int, p Probes) {
+	start := p.startTime(pid)
+	if start == nil {
+		return
+	}
+	_ = os.Remove(entryPath(root, float64(pid), *start+HandOverSuffix))
+}
