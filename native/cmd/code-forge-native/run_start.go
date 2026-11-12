@@ -275,6 +275,17 @@ func runLaunchWorker(runID, workspace, binary string) (int, string, error) {
 // runLaunchWorkerEnv is launchWorker({env}): the worker gets env (nil: this
 // process's environment).
 func runLaunchWorkerEnv(runID, workspace, binary string, env []string) (int, string, error) {
+	return runLaunchWorkerJudged(runID, workspace, binary, env, false)
+}
+
+// errRunLaunchUndecided: strict launch met a worker registry runLiveWorker
+// cannot judge (B532); the child is killed and the caller hands over.
+var errRunLaunchUndecided = errors.New("worker registry undecided at launch")
+
+// runLaunchWorkerJudged is runLaunchWorkerEnv; strict stops at a worker
+// registry Go cannot judge (errRunLaunchUndecided) instead of reading it as
+// "not announced yet".
+func runLaunchWorkerJudged(runID, workspace, binary string, env []string, strict bool) (int, string, error) {
 	repoRoot, err := gitx.RepoTop(workspace)
 	if err != nil {
 		return 0, "", &runFail{"not inside a git repository", false}
@@ -292,8 +303,13 @@ func runLaunchWorkerEnv(runID, workspace, binary string, env []string) (int, str
 	deadline := time.Now().Add(runLaunchTimeout)
 	for time.Now().Before(deadline) {
 		if pid != 0 {
-			if w, _ := runLiveWorker(repoRoot, float64(pid), true); w != nil {
+			w, judged := runLiveWorker(repoRoot, float64(pid), true)
+			if w != nil {
 				return pid, repoRoot, nil
+			}
+			if strict && !judged {
+				_ = procguard.Kill(-pid, syscall.SIGKILL)
+				return 0, "", errRunLaunchUndecided
 			}
 			select {
 			case <-exited:
@@ -307,7 +323,11 @@ func runLaunchWorkerEnv(runID, workspace, binary string, env []string) (int, str
 	if pid != 0 {
 		_ = procguard.Kill(-pid, syscall.SIGKILL)
 	}
-	if other, _ := runLiveWorker(repoRoot, 0, false); other != nil {
+	other, judged := runLiveWorker(repoRoot, 0, false)
+	if strict && !judged {
+		return 0, "", errRunLaunchUndecided
+	}
+	if other != nil {
 		if run, _ := other.Get("run").(string); run != runID {
 			return 0, "", &runFail{fmt.Sprintf("the worker did not start: run %s still has a live worker (pid %s); end it with: code-forge run end --run %s", run, runNumber(other.Get("pid")), run), false}
 		}

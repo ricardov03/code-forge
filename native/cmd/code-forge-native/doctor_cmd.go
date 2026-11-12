@@ -4,9 +4,10 @@ package main
 // Go serves help, every usage error and the `--quick` run (config, harness
 // links, Jev key resolution and the reviewer performance rows) with Node's
 // text, JSON, redaction and exit codes. B504: the full run without a loadable
-// config runs in Go too (doctor_local.go); the full run with a config (live
-// Jev call, provider CLI probes, worker start/stop) keeps the Node hand-over
-// (doctor_full.go names why), as do the --quick cases named in prepareDoctor.
+// config runs in Go too (doctor_local.go). B525: the full run with a valid
+// config (live Jev call, provider CLI probes, pings, worker start/stop) runs
+// in Go (doctor_run.go); the cases doctor_full.go and prepareDoctorRun name
+// keep the Node hand-over, as do the --quick cases named in prepareDoctor.
 
 import (
 	"encoding/json"
@@ -98,12 +99,15 @@ func prepareDoctor(args []string) (func(stdout, stderr io.Writer) int, handoverR
 	}
 	home := os.Getenv("HOME")
 	if flags["quick"] != true {
-		rows, reason := doctorFullRunReason(cwd)
+		rows, cfg, reason := doctorFullRunReason(cwd)
 		if reason == 0 && home == "" {
 			reason = hDoctorNoHome // Node falls back to the passwd entry
 		}
 		if reason != 0 {
 			return nil, reason, false
+		}
+		if cfg != nil {
+			return prepareDoctorRun(args, cwd, home, rows, cfg, flags["json"] == true)
 		}
 		return prepareDoctorNoConfig(cwd, home, rows, flags["json"] == true)
 	}

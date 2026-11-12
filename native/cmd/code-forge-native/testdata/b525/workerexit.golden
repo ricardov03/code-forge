@@ -1,0 +1,31 @@
+exit=1
+--- stdout
+OK   config: valid
+WARN links: no harness link recorded (run code-forge init)
+WARN keys: jev key not resolved; System 1 falls back to rules
+WARN code-forge: not on PATH (the skill shim calls it)
+INFO solo: UNVERIFIED (no Solo probe in this version)
+WARN gates: no gate command configured
+WARN jev: live call skipped (no key)
+INFO tools: missing recommended tools: codex, gemini, op — run code-forge tools install
+OK   ledger: writable
+OK   locks: no unreadable or malformed locks
+OK   tmp: 0 stale roots, 0 stale pids
+OK   sweep: 0 stale workers, 0 orphans, 0 zombies
+INFO memory: code-forge N MB, children N MB, orphans N MB
+INFO review concurrency: 6 tickets at once; provider slots anthropic 4 · openai 2 · xai 2
+OK   claude: present, 9.9.9 (fake claude)
+OK   claude flags: every builder flag is in --help
+OK   ping facts (anthropic/claude-haiku-4-5-20251001): ping=ok
+OK   ping coder (anthropic/claude-sonnet-5): ping=ok
+OK   ping reviewer (anthropic/claude-opus-5-5): ping=ok
+OK   ping s2 (anthropic/claude-fable-5-1): ping=ok
+INFO isolation: skipped (the project has no CLAUDE.md or AGENTS.md to leak)
+OK   path deny: claude: the coder could not read the denied file
+OK   signer key: generated; a signed row verifies, a changed one is refused
+FAIL worker: could not start (worker_down)
+INFO signer: same-user boundary only
+INFO native binary: not found, using Node
+INFO native daemon: off
+--- stderr
+doctor: 13 ok, 5 warn, 1 fail

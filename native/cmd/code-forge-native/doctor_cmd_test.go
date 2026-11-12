@@ -166,11 +166,8 @@ func TestB474DoctorQuickReviewerRows(t *testing.T) {
 
 // The cases Go does not serve go to Node with their own reasons.
 func TestB474DoctorHandsOverUnportedCases(t *testing.T) {
+	// B525: the full run with a valid config runs in Go (doctor_run_test.go).
 	plain := "provider: anthropic\n" + b474Levels
-	b474Project(t, plain, 0)
-	expectHandover(t, "doctor-live-probes", "doctor")
-	expectHandover(t, "doctor-live-probes", "doctor", "--json")
-
 	b474Project(t, plain, 0)
 	t.Setenv("CODE_FORGE_KEY_BACKEND", "")
 	expectHandover(t, "doctor-key-store", "doctor", "--quick")

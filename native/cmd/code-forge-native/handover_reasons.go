@@ -316,6 +316,15 @@ const (
 	hInitConfigShape
 	hInitConfigCheck
 	hInitUserConfig
+	hDoctorRunTmpRoot
+	hDoctorRunRoot
+	hDoctorRunJev
+	hDoctorRunPing
+	hDoctorRunIsolation
+	hDoctorRunPathDeny
+	hDoctorRunCodexRules
+	hDoctorRunCliVersion
+	hDoctorRunWorkerProbe
 )
 
 var handoverReasons = [...]string{
@@ -626,4 +635,13 @@ var handoverReasons = [...]string{
 	hInitConfigShape:           "init-config-shape",
 	hInitConfigCheck:           "init-config-check",
 	hInitUserConfig:            "init-user-config",
+	hDoctorRunTmpRoot:          "doctor-run-tmp-root",
+	hDoctorRunRoot:             "doctor-run-root",
+	hDoctorRunJev:              "doctor-run-jev",
+	hDoctorRunPing:             "doctor-run-ping",
+	hDoctorRunIsolation:        "doctor-run-isolation",
+	hDoctorRunPathDeny:         "doctor-run-path-deny",
+	hDoctorRunCodexRules:       "doctor-run-codex-rules",
+	hDoctorRunCliVersion:       "doctor-run-cli-version",
+	hDoctorRunWorkerProbe:      "doctor-run-worker-probe",
 }

@@ -15,6 +15,7 @@ import (
 	"github.com/ricardov03/code-forge/native/config"
 	"github.com/ricardov03/code-forge/native/gitx"
 	"github.com/ricardov03/code-forge/native/ledger"
+	"github.com/ricardov03/code-forge/native/procguard"
 	"github.com/ricardov03/code-forge/native/session"
 	"github.com/ricardov03/code-forge/native/sign"
 	"github.com/ricardov03/code-forge/native/state"
@@ -27,7 +28,8 @@ import (
 // (runWorkerBinary, as `run start` launches it) starts detached and announces
 // itself, then it is stopped (SIGTERM; SIGKILL of its group after 5 s). The
 // run's record, key, lock and the worker's temp root are removed afterwards.
-// The probe signals only the pid it launched (and that pid's group).
+// The probe signals only the pid it launched (and that pid's group), through
+// procguard (B529).
 
 // dwpCtx is probeWorkerAndSigner's ctx: cfg is the loaded config, env the
 // doctor's environment (the worker and git get it), home the HOME whose
@@ -188,13 +190,13 @@ func dwpStopWorker(pid int) bool {
 	if pid <= 1 {
 		return true
 	}
-	if err := syscall.Kill(pid, syscall.SIGTERM); err != nil {
+	if err := procguard.Kill(pid, syscall.SIGTERM); err != nil {
 		return true // already gone
 	}
 	if dwpWaitGone(pid, dwpStopWait) {
 		return true
 	}
-	_ = syscall.Kill(-pid, syscall.SIGKILL)
+	_ = procguard.Kill(-pid, syscall.SIGKILL)
 	dwpWaitGone(pid, dwpKillWait)
 	return false
 }
@@ -345,7 +347,10 @@ func doctorWorkerProbe(c dwpCtx) ([]doctorRow, bool) {
 		if _, err := gitx.RepoTop(repo); err != nil {
 			return &dwpErr{"no-repo"}
 		}
-		launched, repoRoot, err := runLaunchWorkerEnv(c.runID, repo, binary, workerEnv)
+		launched, repoRoot, err := runLaunchWorkerJudged(c.runID, repo, binary, workerEnv, true)
+		if errors.Is(err, errRunLaunchUndecided) {
+			return errDwpUndecided
+		}
 		if err != nil {
 			return &dwpErr{"worker_down"}
 		}

@@ -1,0 +1,13 @@
+Usage: grok [options]
+  --prompt-file <PATH>
+  -m, --model <MODEL>
+  --reasoning-effort <EFFORT>
+  --permission-mode <MODE>
+  --cwd <CWD>
+  --deny <RULE>
+  --json-schema <SCHEMA>
+  --disallowed-tools <TOOLS>
+  --no-plan
+  --no-subagents
+  --max-turns <N>
+  --system-prompt-override <PROMPT>

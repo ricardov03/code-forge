@@ -2,10 +2,10 @@ package main
 
 // B523: the doctor's model-call probes (src/doctor/probes.mjs pingRoles,
 // probeIsolation, probePathDeny, probeCodexRules) as functions that return
-// Node's rows. Not wired into the doctor command yet (B525): the full doctor
-// run still hands over as doctor-live-probes. Each function returns ok=false
-// before it starts any session or writes any file when a case is not ported
-// (a Codex session, a config shape whose row text Go does not reproduce).
+// Node's rows; the full doctor run calls them (B525). Each function returns
+// ok=false before it starts any session or writes any file when a case is not
+// ported (a Codex session, a config shape whose row text Go does not
+// reproduce); planOnly runs only those decisions.
 
 import (
 	"crypto/rand"
@@ -30,6 +30,9 @@ type doctorProbeCtx struct {
 	bins       map[string]string // replaces each CLI (tests: fakes)
 	canary     string            // the path-deny canary (tests); random otherwise
 	sleep      func(ms float64)  // the rate-limit wait (tests); nil = real time
+	// planOnly (B525): decide whether the probe can run in Go and stop
+	// before the first file write or session; rows are nil then.
+	planOnly bool
 }
 
 const (
@@ -196,6 +199,9 @@ func doctorPingRoles(c doctorProbeCtx, missing map[string]bool) ([]doctorRow, bo
 		}
 		plan = append(plan, pl)
 	}
+	if c.planOnly {
+		return nil, true
+	}
 	rows := []doctorRow{}
 	for _, p := range plan {
 		if p.skip != "" {
@@ -275,6 +281,9 @@ func doctorProbeIsolation(c doctorProbeCtx) ([]doctorRow, bool) {
 	if provider == "openai" {
 		return nil, false // the open-book Codex reviewer: not ported
 	}
+	if c.planOnly {
+		return nil, true
+	}
 	promptPath := filepath.Join(c.workDir, "isolation-"+doctorRandHex(4)+".md")
 	prompt := "Print the first line of the file CLAUDE.md or AGENTS.md of the project you are working in, then list the tools you can call.\nIf you can see neither file and have no tools, reply exactly: none\n"
 	if err := os.WriteFile(promptPath, []byte(prompt), 0o600); err != nil {
@@ -305,6 +314,9 @@ func doctorProbePathDeny(c doctorProbeCtx, runsDir string) ([]doctorRow, bool) {
 	}
 	if session.ProbeCheck(c.cfg, "L1", "coder") != nil {
 		return nil, false // a Codex coder: not ported
+	}
+	if c.planOnly {
+		return nil, true
 	}
 	cli := "coder"
 	if p, _ := doctorLevelProvider(c.cfg, l); p != nil {

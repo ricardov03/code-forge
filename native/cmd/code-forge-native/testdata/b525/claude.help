@@ -1,0 +1,16 @@
+Usage: claude [options]
+  -p, --print
+  --model <model>
+  --effort <level>
+  --permission-mode <mode>
+  --output-format <format>
+  --no-session-persistence
+  --max-budget-usd <amount>
+  --disallowedTools, --disallowed-tools <tools...>
+  --fallback-model <model>
+  --safe-mode
+  --tools <tools...>
+  --strict-mcp-config
+  --json-schema <schema>
+  --system-prompt <prompt>
+  --restricted
