@@ -1,0 +1,20 @@
+{
+ "node": {
+  "exit": 1,
+  "stdout": "",
+  "stderr": "autopilot: WARN approval apr-1: its signed row could not be written yet (restore-incomplete); the next check writes it\nblock rebase: rebase-conflict\n",
+  "record": "{\n  \"run_id\": \"r-b578\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<root>/repo\",\n  \"status\": \"active\",\n  \"blocks\": {\n    \"A\": {\n      \"status\": \"closed\",\n      \"owned_files\": [\n        \"a.go\"\n      ],\n      \"kind\": \"code\",\n      \"base_sha\": \"<sha>\",\n      \"base_branch\": \"main\",\n      \"worktree\": {\n        \"path\": \"<root>/wt\",\n        \"branch\": \"forge/r-b578/A\",\n        \"base_sha\": \"<sha>\"\n      }\n    }\n  },\n  \"orphans\": [],\n  \"autopilot_approvals\": [\n    {\n      \"approval_id\": \"apr-1\",\n      \"key\": \"review.max_rounds_per_file\",\n      \"new\": 4,\n      \"old\": 3,\n      \"old_absent\": false,\n      \"prune\": 0,\n      \"until\": \"2026-11-11T09:00:00.000Z\",\n      \"approved_at\": \"2026-11-11T08:00:00.000Z\",\n      \"status\": \"active\",\n      \"ended_at\": null,\n      \"finish_pending\": {\n        \"status\": \"restore_skipped\",\n        \"row\": {\n          \"approval_id\": \"apr-1\",\n          \"key\": \"review.max_rounds_per_file\",\n          \"until\": \"2026-11-11T09:00:00.000Z\",\n          \"event\": \"autopilot.restore_skipped\",\n          \"reason\": \"changed-by-hand\",\n          \"ts\": \"<masked>\"\n        }\n      }\n    }\n  ]\n}\n",
+  "ledger": "",
+  "tree": "<sha>",
+  "handovers": ""
+ },
+ "go": {
+  "exit": 1,
+  "stdout": "",
+  "stderr": "autopilot: WARN approval apr-1: its signed row could not be written yet (restore-incomplete); the next check writes it\nblock rebase: rebase-conflict\n",
+  "record": "{\n  \"run_id\": \"r-b578\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<root>/repo\",\n  \"status\": \"active\",\n  \"blocks\": {\n    \"A\": {\n      \"status\": \"closed\",\n      \"owned_files\": [\n        \"a.go\"\n      ],\n      \"kind\": \"code\",\n      \"base_sha\": \"<sha>\",\n      \"base_branch\": \"main\",\n      \"worktree\": {\n        \"path\": \"<root>/wt\",\n        \"branch\": \"forge/r-b578/A\",\n        \"base_sha\": \"<sha>\"\n      }\n    }\n  },\n  \"orphans\": [],\n  \"autopilot_approvals\": [\n    {\n      \"approval_id\": \"apr-1\",\n      \"key\": \"review.max_rounds_per_file\",\n      \"new\": 4,\n      \"old\": 3,\n      \"old_absent\": false,\n      \"prune\": 0,\n      \"until\": \"2026-11-11T09:00:00.000Z\",\n      \"approved_at\": \"2026-11-11T08:00:00.000Z\",\n      \"status\": \"active\",\n      \"ended_at\": null,\n      \"finish_pending\": {\n        \"status\": \"restore_skipped\",\n        \"row\": {\n          \"approval_id\": \"apr-1\",\n          \"key\": \"review.max_rounds_per_file\",\n          \"until\": \"2026-11-11T09:00:00.000Z\",\n          \"event\": \"autopilot.restore_skipped\",\n          \"reason\": \"changed-by-hand\",\n          \"ts\": \"<masked>\"\n        }\n      }\n    }\n  ]\n}\n",
+  "ledger": "",
+  "tree": "<sha>",
+  "handovers": ""
+ }
+}

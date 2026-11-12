@@ -369,6 +369,10 @@ func blockIOMessage(err error) string {
 		why = "too many symbolic links encountered"
 	}
 	if errors.As(err, &pathErr) {
+		if pathErr.Op == "read" {
+			// B584: Node reads through an open fd; its read errors name no path.
+			return fmt.Sprintf("%s: %s, read", code, why)
+		}
 		return fmt.Sprintf("%s: %s, %s '%s'", code, why, pathErr.Op, pathErr.Path)
 	}
 	if errors.As(err, &linkErr) {

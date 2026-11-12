@@ -147,15 +147,44 @@ func rebaseRecordShape(record ledger.Object, id string) bool {
 	return true
 }
 
+// rebaseHeldStderr holds the expiry check lines Node's own check prints
+// again after a hand-over (B584): a failed grant expiry and the approvals
+// that could not be restored yet stay as they were, so the Node process
+// retries them and reports them itself. Any later write prints them first.
+type rebaseHeldStderr struct {
+	out  io.Writer
+	held string
+}
+
+func (w *rebaseHeldStderr) hold(text string) { w.held += text }
+
+func (w *rebaseHeldStderr) flush() {
+	if w.held != "" {
+		fmt.Fprint(w.out, w.held)
+		w.held = ""
+	}
+}
+
+func (w *rebaseHeldStderr) Write(data []byte) (int, error) {
+	w.flush()
+	return w.out.Write(data)
+}
+
 // rebaseStep runs one `block rebase` call, or returns the reason a guarded
-// run state stays with Node before anything was printed or changed.
+// run state stays with Node before anything was changed. B584: on a
+// hand-over the held expiry lines are dropped (Node prints its own), so the
+// user sees each line once, as Node alone prints it.
 func rebaseStep(args []string, stdout, stderr io.Writer) (int, handoverReason) {
 	var reason handoverReason
-	code := rebaseStepBody(args, stdout, stderr, &reason)
+	held := &rebaseHeldStderr{out: stderr}
+	code := rebaseStepBody(args, stdout, held, &reason)
+	if reason == 0 {
+		held.flush()
+	}
 	return code, reason
 }
 
-func rebaseStepBody(args []string, stdout, stderr io.Writer, handed *handoverReason) int {
+func rebaseStepBody(args []string, stdout io.Writer, stderr *rebaseHeldStderr, handed *handoverReason) int {
 	handOver := func(reason handoverReason) int { *handed = reason; return 0 }
 	fail := func(err error) int {
 		var h *rebaseHandoverError
@@ -223,17 +252,19 @@ func rebaseStepBody(args []string, stdout, stderr io.Writer, handed *handoverRea
 	if _, reason := autopilotRestorePlan(home, run, record, now); reason != 0 {
 		return handOver(reason)
 	}
+	// B584: the lines of a check Node runs again after a hand-over are held.
 	if _, err := autopilot.CheckGrantExpiry(home, run, now); err != nil {
-		fmt.Fprintf(stderr, "autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(err))
+		stderr.hold(fmt.Sprintf("autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(err)))
 	} else if fresh, err := state.ReadRun(home, run); err == nil && errors.Is(autopilot.Approvals(fresh, now), autopilot.ErrApprovalDue) {
 		check, restoreErr, reason := autopilotRestore(home, run, fresh, now)
 		if reason != 0 {
 			return handOver(reason)
 		}
 		if restoreErr != nil {
-			fmt.Fprintf(stderr, "autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(restoreErr))
+			stderr.hold(fmt.Sprintf("autopilot: WARN the expiry check failed (%s)\n", blockIOMessage(restoreErr)))
 		} else {
-			fmt.Fprint(stderr, check.text(true))
+			fmt.Fprint(stderr, check.text(false))
+			stderr.hold(strings.TrimPrefix(check.text(true), check.text(false)))
 		}
 	}
 	accept := []string{}

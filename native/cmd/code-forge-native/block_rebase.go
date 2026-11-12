@@ -56,9 +56,9 @@ func runBlockRebase(args []string) int {
 	code, reason := rebaseStep(args, &stdout, stderr)
 	if reason != 0 {
 		// B578: a narrow guarded state Go does not serve yet; nothing of the
-		// rebase was kept, and Node runs the whole command. The expiry lines
-		// Go already printed are not printed again by Node (its checks find
-		// nothing left to do).
+		// rebase was kept, and Node runs the whole command. B584: stderr holds
+		// only the expiry lines Node does not print again (approvals restored
+		// or skipped); the failed checks Node retries and reports itself.
 		fmt.Fprint(os.Stderr, stderr.String())
 		return blockHandover(full, reason)
 	}

@@ -1,0 +1,20 @@
+{
+ "node": {
+  "exit": 1,
+  "stdout": "",
+  "stderr": "block rebase: the review queue cannot be read\n",
+  "record": "{\n  \"run_id\": \"r-b578\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<root>/repo\",\n  \"status\": \"active\",\n  \"blocks\": {\n    \"A\": {\n      \"status\": \"closed\",\n      \"owned_files\": [\n        \"a.go\"\n      ],\n      \"kind\": \"code\",\n      \"base_sha\": \"<sha>\",\n      \"base_branch\": \"main\",\n      \"worktree\": {\n        \"path\": \"<root>/wt\",\n        \"branch\": \"forge/r-b578/A\",\n        \"base_sha\": \"<sha>\"\n      }\n    }\n  },\n  \"orphans\": [],\n  \"autopilot\": {\n    \"grant_id\": \"g1\",\n    \"status\": \"expired\",\n    \"scopes\": [\n      \"close:routine\"\n    ],\n    \"deny\": [],\n    \"delegate\": \"L2\",\n    \"until\": \"2026-01-02T00:00:00.000Z\",\n    \"started_at\": \"2026-01-01T00:00:00.000Z\",\n    \"caps\": {},\n    \"stop_at\": 0.5,\n    \"expired_at\": \"<masked>\"\n  }\n}\n",
+  "ledger": "{\"run\":\"r-b578\",\"event\":\"autopilot.expire\",\"grant_id\":\"g1\",\"until\":\"2026-01-02T00:00:00.000Z\",\"ts\": \"<masked>\",\"mac\": \"<masked>\",\"tokens_source\":null,\"cost_source\":null}\n",
+  "tree": "<sha>",
+  "handovers": ""
+ },
+ "go": {
+  "exit": 1,
+  "stdout": "",
+  "stderr": "block rebase: the review queue cannot be read\n",
+  "record": "{\n  \"run_id\": \"r-b578\",\n  \"project\": \"fixture\",\n  \"workspace\": \"<root>/repo\",\n  \"status\": \"active\",\n  \"blocks\": {\n    \"A\": {\n      \"status\": \"closed\",\n      \"owned_files\": [\n        \"a.go\"\n      ],\n      \"kind\": \"code\",\n      \"base_sha\": \"<sha>\",\n      \"base_branch\": \"main\",\n      \"worktree\": {\n        \"path\": \"<root>/wt\",\n        \"branch\": \"forge/r-b578/A\",\n        \"base_sha\": \"<sha>\"\n      }\n    }\n  },\n  \"orphans\": [],\n  \"autopilot\": {\n    \"grant_id\": \"g1\",\n    \"status\": \"expired\",\n    \"scopes\": [\n      \"close:routine\"\n    ],\n    \"deny\": [],\n    \"delegate\": \"L2\",\n    \"until\": \"2026-01-02T00:00:00.000Z\",\n    \"started_at\": \"2026-01-01T00:00:00.000Z\",\n    \"caps\": {},\n    \"stop_at\": 0.5,\n    \"expired_at\": \"<masked>\"\n  }\n}\n",
+  "ledger": "{\"run\":\"r-b578\",\"event\":\"autopilot.expire\",\"grant_id\":\"g1\",\"until\":\"2026-01-02T00:00:00.000Z\",\"ts\": \"<masked>\",\"mac\": \"<masked>\",\"tokens_source\":null,\"cost_source\":null}\n",
+  "tree": "<sha>",
+  "handovers": "{\"at\": \"<masked>\",\"verb\":\"block\",\"sub\":\"rebase\",\"reason\":\"rebase-queue-unreadable\",\"version\":\"0.22.1\"}\n"
+ }
+}
