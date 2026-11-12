@@ -513,3 +513,20 @@ func (p *Pool) Drain() (int, error) {
 	}
 	return done, nil
 }
+
+// TakeTicketSinceCheck is checkIdle's first test: whether a ticket was seen
+// since the last idle check; the flag is cleared.
+func (p *Pool) TakeTicketSinceCheck() bool {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	seen := p.TicketSinceCheck
+	p.TicketSinceCheck = false
+	return seen
+}
+
+// LastActivityAt is the last time the drain saw ticket work (zero: never).
+func (p *Pool) LastActivityAt() time.Time {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	return p.LastActivity
+}

@@ -287,7 +287,7 @@ func (w *TicketRunner) planEngineDry(t ledger.Object, rec ledger.Object, cfg map
 	req := FixLoopRequest{Home: w.Home, RunID: w.RunID, RunRootDir: w.RunRootDir, ContentRoot: contentRoot, Level: e.level, Cfg: cfg, Key: w.Key,
 		Base: e.base, Owned: e.owned, OwnedKinds: e.ownedKinds, Secrets: w.secrets(), ReadRows: w.readObjects, WriteRow: stamp, Now: w.now,
 		Review: func(write func(ledger.Object) error) (ledger.Object, error) {
-			return review.File(in, review.Deps{Spawn: session.ReviewSpawn(sopts, sdeps), WriteRow: write, Warn: w.Warn})
+			return review.File(in, review.Deps{Spawn: w.pooled(id, cfg, session.ReviewSpawn(sopts, sdeps)), WriteRow: write, Warn: w.Warn})
 		}}
 	spawns, err := FixLoopCheck(tk, req)
 	if err != nil {

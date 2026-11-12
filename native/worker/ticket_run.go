@@ -71,6 +71,9 @@ type TicketRunner struct {
 	SessionDeps session.Deps
 	Warn        func(warning, message string)
 	JevKey      string
+	// Pool (B489) holds every review session to the worker's caps
+	// (loop.mjs spawnPooled); nil runs sessions without them.
+	Pool *Pool
 }
 
 type attempt struct {
