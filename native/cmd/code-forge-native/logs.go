@@ -14,6 +14,7 @@ import (
 	"time"
 	"unicode/utf8"
 
+	"github.com/ricardov03/code-forge/native/humanask"
 	"github.com/ricardov03/code-forge/native/ledger"
 )
 
@@ -35,28 +36,98 @@ var logsWord = regexp.MustCompile(`^[a-z]+$`)
 var logsCrumb = regexp.MustCompile(`^[a-z][a-z0-9-]{0,39}( [a-z][a-z0-9-]{0,39})?$`)
 var logsSurrogate = regexp.MustCompile(`(?i)\\ud[89ab][0-9a-f]{2}|\\ud[cdef][0-9a-f]{2}`)
 
+const logsUsage = "usage: code-forge logs [--last N] [--json] | logs summary [--days N] [--json] | logs clear [--yes] | logs path\n" +
+	"       code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n"
+
+var logsSubUsage = map[string]string{
+	"summary": "usage: code-forge logs summary [--days N] [--json]\n",
+	"clear":   "usage: code-forge logs clear [--yes]\n",
+	"path":    "usage: code-forge logs path\n",
+	"report":  "usage: code-forge logs report [--last N] [--kind K] [--verb V] [--note \"text\"] [--include-warnings] [--with-doctor] [--no-ai] [--allow-old] [--force] [--dry-run] [--yes]\n",
+}
+
+// logsSpecs is Node's parseFlags spec per subcommand: value flags, then booleans.
+var logsSpecs = map[string][2][]string{
+	"list":    {{"last"}, {"json"}},
+	"summary": {{"days"}, {"json"}},
+	"clear":   {nil, {"yes"}},
+	"path":    {nil, nil},
+	"report":  {{"last", "kind", "verb", "note"}, {"dry-run", "yes", "no-ai", "allow-old", "include-warnings", "with-doctor", "force"}},
+}
+
+func logsHelpFlag(s string) bool { return s == "--help" || s == "-h" }
+
 func runLogs(args []string) int {
 	if len(args) > 0 && args[0] == "handovers" {
 		return runHandoverLogs(args[1:])
 	}
-	name, rest := "list", args
+	// The Node router answers help before parsing or touching any state.
+	if len(args) > 0 && logsHelpFlag(args[0]) {
+		fmt.Fprint(os.Stdout, logsUsage)
+		return 0
+	}
+	if len(args) > 1 && logsHelpFlag(args[1]) {
+		if usage, ok := logsSubUsage[args[0]]; ok {
+			fmt.Fprint(os.Stdout, usage)
+			return 0
+		}
+	}
+	for _, arg := range args {
+		if !utf8.ValidString(arg) {
+			return logsHandover(args, hLogsFlagsOrHome) // Node sees U+FFFD in argv
+		}
+	}
+	sub := ""
 	if len(args) > 0 && !strings.HasPrefix(args[0], "-") {
-		name, rest = args[0], args[1:]
-		if name != "path" && name != "summary" {
-			return logsHandover(args, hLogsUnportedSubcommand)
+		sub = args[0]
+	}
+	crumb, logSub := "logs", ""
+	if _, known := logsSubUsage[sub]; known {
+		crumb, logSub = "logs "+sub, sub
+	}
+	fail := func(code int, text string) int {
+		before := gatesBreadcrumbName(crumb)
+		fmt.Fprint(os.Stderr, text)
+		var message any
+		if trimmed := strings.TrimFunc(text, errorLogSpace); trimmed != "" {
+			message = trimmed
 		}
+		nativeVerbFailure("logs", logSub, args, code, message, before)
+		return code
 	}
-	// The Node router handles help before parsing or touching any state.
-	for i := 0; i < len(args) && i < 2; i++ {
-		if args[i] == "--help" || args[i] == "-h" {
-			return logsHandover(args, hLogsHelp)
-		}
+	name, rest := "list", args
+	if sub != "" {
+		name, rest = sub, args[1:]
 	}
-	n, asJSON, ok := logsFlags(name, rest)
-	if !ok || os.Getenv("HOME") == "" {
-		return logsHandover(args, hLogsFlagsOrHome)
+	spec, known := logsSpecs[name]
+	if !known || name == "list" && sub != "" {
+		quoted, _ := ledger.Stringify(sub, false)
+		return fail(2, "logs: unknown subcommand "+string(quoted)+"\n"+logsUsage)
 	}
+	flags, message := logsFlags(rest, spec)
+	if message != "" {
+		return fail(2, "logs: "+message+"\n"+logsUsage)
+	}
+	if os.Getenv("HOME") == "" {
+		return fail(1, "logs: HOME is not set; there is no error log\n")
+	}
+	n := int64(0)
+	if value, ok := flags["days"]; ok {
+		n, _ = strconv.ParseInt(value, 10, 64)
+	} else if value, ok := flags["last"]; ok {
+		n, _ = strconv.ParseInt(value, 10, 64)
+	} else if name == "summary" {
+		n = 30
+	} else if name == "report" {
+		n = 5
+	} else {
+		n = 10
+	}
+	_, asJSON := flags["json"]
 	file := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "errors.jsonl")
+	if name == "clear" {
+		return logsClear(args, file, flags, crumb, fail)
+	}
 	var output string
 	if name == "path" {
 		output = file + "\n"
@@ -77,9 +148,16 @@ func runLogs(args []string) int {
 			for i, j := 0, len(entries)-1; i < j; i, j = i+1, j-1 {
 				entries[i], entries[j] = entries[j], entries[i]
 			}
-			if name == "summary" {
+			ok := true
+			switch name {
+			case "summary":
 				output, ok = logsSummary(entries, n, asJSON)
-			} else {
+			case "report":
+				if logsReportPicks(entries, flags, n) {
+					return logsHandover(args, hLogsReport) // the npm check, AI scrub and gh stay in Node
+				}
+				output = "no matching errors to report\n"
+			default:
 				if n < int64(len(entries)) {
 					entries = entries[:int(n)]
 				}
@@ -90,47 +168,123 @@ func runLogs(args []string) int {
 			}
 		}
 	}
-	logsBreadcrumb(name)
+	gatesBreadcrumbName(crumb)
 	fmt.Fprint(os.Stdout, output)
 	return 0
 }
 
-func logsFlags(name string, args []string) (int64, bool, bool) {
-	n := int64(10)
-	valueFlag := "last"
-	if name == "summary" {
-		n, valueFlag = 30, "days"
+// logsReportPicks reports whether `logs report` selects any entry (newest
+// first): warnings only with --include-warnings, then --kind and --verb.
+func logsReportPicks(newest []ledger.Object, flags map[string]string, last int64) bool {
+	_, warnings := flags["include-warnings"]
+	kind, byKind := flags["kind"]
+	verb, byVerb := flags["verb"]
+	for _, entry := range newest {
+		entryKind, kindString := entry.Get("kind").(string)
+		if !warnings && kindString && entryKind == "warning" {
+			continue
+		}
+		if byKind && (!kindString || entryKind != kind) {
+			continue
+		}
+		if byVerb && logsString(entry, "verb") != verb {
+			continue
+		}
+		return last > 0
 	}
-	seen := map[string]bool{}
+	return false
+}
+
+// logsClear is Node's clear: a missing log is nothing to do, --yes deletes it,
+// no terminal refuses. The terminal prompt stays in Node.
+func logsClear(args []string, file string, flags map[string]string, crumb string, fail func(int, string) int) int {
+	if _, err := os.ReadFile(file); err != nil {
+		gatesBreadcrumbName(crumb)
+		fmt.Fprint(os.Stdout, "no errors logged\n")
+		return 0
+	}
+	if _, yes := flags["yes"]; !yes {
+		if humanask.IsTTY(os.Stdin) {
+			return logsHandover(args, hLogsClearPrompt)
+		}
+		return fail(2, "logs: no terminal to confirm; nothing deleted — pass --yes to delete the error log\n")
+	}
+	gatesBreadcrumbName(crumb)
+	if err := os.Remove(file); err != nil && !errors.Is(err, fs.ErrNotExist) {
+		return logsHandover(args, hLogsClearPrompt)
+	}
+	fmt.Fprint(os.Stdout, "deleted "+file+"\n")
+	return 0
+}
+
+// logsFlags is Node's parseFlags with intFlag for --last/--days; a non-empty
+// message is Node's usage error.
+func logsFlags(args []string, spec [2][]string) (map[string]string, string) {
+	has := func(list []string, name string) bool {
+		for _, item := range list {
+			if item == name {
+				return true
+			}
+		}
+		return false
+	}
+	flags := map[string]string{}
+	positionals := []string{}
 	for i := 0; i < len(args); i++ {
-		key, value, inline := strings.Cut(args[i], "=")
-		if seen[key] || name == "path" {
-			return 0, false, false
+		arg := args[i]
+		if !strings.HasPrefix(arg, "--") {
+			positionals = append(positionals, arg)
+			continue
 		}
-		seen[key] = true
-		switch key {
-		case "--json":
-			if inline {
-				return 0, false, false
+		name, inline, hasInline := strings.Cut(arg[2:], "=")
+		if !has(spec[0], name) && !has(spec[1], name) {
+			quoted, _ := ledger.Stringify(arg, false)
+			return nil, "unknown flag " + string(quoted)
+		}
+		if _, seen := flags[name]; seen {
+			return nil, "--" + name + " given more than once"
+		}
+		switch {
+		case has(spec[1], name):
+			if hasInline {
+				return nil, "--" + name + " takes no value"
 			}
-		case "--" + valueFlag:
-			if !inline {
-				i++
-				if i >= len(args) {
-					return 0, false, false
-				}
-				value = args[i]
+			flags[name] = ""
+		case hasInline:
+			if inline == "" {
+				return nil, "--" + name + " needs a value"
 			}
-			var err error
-			n, err = strconv.ParseInt(value, 10, 64)
-			if err != nil || !logsPositive.MatchString(value) || n > 9007199254740991 {
-				return 0, false, false
-			}
+			flags[name] = inline
 		default:
-			return 0, false, false
+			if i+1 >= len(args) || strings.HasPrefix(args[i+1], "--") {
+				return nil, "--" + name + " needs a value"
+			}
+			flags[name] = args[i+1]
+			i++
 		}
 	}
-	return n, seen["--json"], true
+	if len(positionals) > 0 {
+		quoted, _ := ledger.Stringify(positionals[0], false)
+		return nil, "unexpected argument " + string(quoted)
+	}
+	for _, name := range []string{"last", "days"} {
+		_, isLast := flags["last"]
+		if name == "days" && isLast {
+			break // Node reads flags.last ?? flags.days
+		}
+		if value, given := flags[name]; given {
+			n, err := strconv.ParseInt(value, 10, 64)
+			if !logsPositive.MatchString(value) || err != nil || n > 9007199254740991 {
+				label := "last"
+				if _, days := flags["days"]; days {
+					label = "days"
+				}
+				return nil, "--" + label + " must be a positive integer"
+			}
+			break
+		}
+	}
+	return flags, ""
 }
 
 func logsRead(file string) ([]ledger.Object, bool) {
@@ -367,43 +521,4 @@ func logsSummary(entries []ledger.Object, days int64, asJSON bool) (string, bool
 		}
 	}
 	return out.String(), true
-}
-
-func logsBreadcrumb(name string) {
-	flag := os.Getenv("CODE_FORGE_NO_ERROR_LOG")
-	if flag != "" && flag != "0" {
-		return
-	}
-	file := filepath.Join(os.Getenv("HOME"), ".code-forge", "logs", "breadcrumbs.json")
-	var before []json.RawMessage
-	data, _ := os.ReadFile(file)
-	if json.Unmarshal(data, &before) != nil {
-		before = nil
-	}
-	next := []any{}
-	for _, value := range before {
-		var crumb string
-		if json.Unmarshal(value, &crumb) == nil && logsCrumb.MatchString(crumb) {
-			next = append(next, crumb)
-		}
-	}
-	crumb := "logs"
-	if name != "list" {
-		crumb += " " + name
-	}
-	next = append(next, crumb)
-	if len(next) > 5 {
-		next = next[len(next)-5:]
-	}
-	dir := filepath.Dir(file)
-	if os.MkdirAll(dir, 0700) != nil {
-		return
-	}
-	_ = os.Chmod(dir, 0700)
-	text, _ := logsJSON(next)
-	tmp := fmt.Sprintf("%s.tmp-%d", file, os.Getpid())
-	defer os.Remove(tmp)
-	if os.WriteFile(tmp, []byte(text), 0600) == nil {
-		_ = os.Rename(tmp, file)
-	}
 }
