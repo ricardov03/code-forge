@@ -1,0 +1,10 @@
+{"cases":[
+{"name":"dropped-no-multimodel","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b"},{"model":"m-c","provider":"pc"}]}}},"rows":[]},
+{"name":"kept-second-level-provider","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b","effort":"high"},{"model":"m-c","provider":"pc"}]}},"review":{"multimodel":true,"second_levels":{"L2":{"model":"m-s","provider":"ps"}}}},"rows":[]},
+{"name":"kept-second-provider-null","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b"}]}},"review":{"multimodel":true,"second_provider":null}},"rows":[]},
+{"name":"dropped-multimodel-no-second","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b"},{"model":"m-c","provider":"pc"}]}},"review":{"multimodel":true}},"rows":[]},
+{"name":"kept-second-provider-key","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b"}]}},"review":{"multimodel":true,"second_provider":"ps"}},"rows":[]},
+{"name":"prior-row-keeps-primary","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b"},{"model":"m-c","provider":"pc"}]}},"review":{"multimodel":true,"second_provider":"ps"}},"rows":[{"event":"review.route","level":"L2","ticket":"t1","run":"r1","model":"m-c","provider":"pc","reason":"configured-order"}]},
+{"name":"prior-row-no-provider-chosen","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b"}]}},"review":{"multimodel":true,"second_provider":"ps"}},"rows":[{"event":"review.route","level":"L2","ticket":"t1","run":"r1","model":"m-b","reason":"performance"}],"go":"unsure"},
+{"name":"first-candidate-no-provider","cfg":{"levels":{"L2":{"model":"m-a","provider":"pa","fallback":[{"model":"m-b"}]}},"review":{"multimodel":true,"second_provider":"pa"}},"rows":[],"go":"unsure"}
+]}

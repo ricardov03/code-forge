@@ -1,0 +1,60 @@
+{
+ "cases": {
+  "dropped-no-multimodel": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"provider\":\"pa\",\"model\":\"m-a\",\"reason\":\"configured-order\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-a\",\"provider\":\"pa\",\"fallback\":[{\"model\":\"m-c\",\"provider\":\"pc\"}]}}}"
+  },
+  "kept-second-level-provider": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"provider\":\"pa\",\"model\":\"m-a\",\"reason\":\"configured-order\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-a\",\"provider\":\"pa\",\"fallback\":[{\"model\":\"m-b\",\"effort\":\"high\"},{\"model\":\"m-c\",\"provider\":\"pc\"}]}},\"review\":{\"multimodel\":true,\"second_levels\":{\"L2\":{\"model\":\"m-s\",\"provider\":\"ps\"}}}}"
+  },
+  "kept-second-provider-null": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"provider\":\"pa\",\"model\":\"m-a\",\"reason\":\"configured-order\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-a\",\"provider\":\"pa\",\"fallback\":[{\"model\":\"m-b\"}]}},\"review\":{\"multimodel\":true,\"second_provider\":null}}"
+  },
+  "dropped-multimodel-no-second": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"provider\":\"pa\",\"model\":\"m-a\",\"reason\":\"configured-order\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-a\",\"provider\":\"pa\",\"fallback\":[{\"model\":\"m-c\",\"provider\":\"pc\"}]}},\"review\":{\"multimodel\":true}}"
+  },
+  "kept-second-provider-key": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"provider\":\"pa\",\"model\":\"m-a\",\"reason\":\"configured-order\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-a\",\"provider\":\"pa\",\"fallback\":[{\"model\":\"m-b\"}]}},\"review\":{\"multimodel\":true,\"second_provider\":\"ps\"}}"
+  },
+  "prior-row-keeps-primary": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"provider\":\"pc\",\"model\":\"m-c\",\"reason\":\"configured-order\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-c\",\"provider\":\"pc\",\"fallback\":[{\"model\":\"m-a\",\"provider\":\"pa\"},{\"model\":\"m-b\"}]}},\"review\":{\"multimodel\":true,\"second_provider\":\"ps\"}}"
+  },
+  "prior-row-no-provider-chosen": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"model\":\"m-b\",\"reason\":\"performance\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-b\",\"fallback\":[{\"model\":\"m-a\",\"provider\":\"pa\"}]}},\"review\":{\"multimodel\":true,\"second_provider\":\"ps\"}}"
+  },
+  "first-candidate-no-provider": {
+   "timeoutS": 300,
+   "rows": [
+    "{\"event\":\"review.route\",\"level\":\"L2\",\"min_lines\":null,\"lines\":10,\"model\":\"m-b\",\"reason\":\"configured-order\",\"session_timeout_s\":300,\"second_model\":null}"
+   ],
+   "cfg": "{\"levels\":{\"L2\":{\"model\":\"m-b\",\"fallback\":[]}},\"review\":{\"multimodel\":true,\"second_provider\":\"pa\"}}"
+  }
+ }
+}

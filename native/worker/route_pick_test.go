@@ -42,7 +42,7 @@ func f(v float64) *float64 { return &v }
 
 func TestPickReviewerExploreMatchesNode(t *testing.T) {
 	g := loadPickGolden(t)
-	cands := []candidate{{"a", "p"}, {"b", "p"}, {"c", "q"}}
+	cands := []candidate{{model: "a", provider: "p"}, {model: "b", provider: "p"}, {model: "c", provider: "q"}}
 	sets := map[string]map[string]*modelStat{
 		"c-unmeasured":     {"a": stat(12, f(30), 1, 0), "b": stat(15, f(10), 0.9, 0.1), "c": stat(2, f(5), 1, 0)},
 		"all-equal":        {"a": stat(12, f(30), 1, 0), "b": stat(12, f(10), 0.9, 0.1), "c": stat(12, f(5), 1, 0)},

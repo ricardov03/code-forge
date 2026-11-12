@@ -295,7 +295,12 @@ func explicitRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 	return routed{timeoutS: timeout, rows: rows, cfg: routedCfg}, nil
 }
 
-type candidate struct{ model, provider string }
+// candidate is one reviewer; noProvider is an L2 ladder entry with no
+// provider key (B545: Node's candidate has provider undefined).
+type candidate struct {
+	model, provider string
+	noProvider      bool
+}
 
 // adaptiveOpts are the `review.adaptive` keys model-stats reads, with Node's
 // destructuring defaults; any other type is errRouteUnsure.
@@ -389,9 +394,9 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 		if err != nil {
 			return routed{}, err
 		}
-		add(candidate{rule["model"].(string), p}, rule)
+		add(candidate{model: rule["model"].(string), provider: p}, rule)
 	}
-	add(candidate{l2["model"].(string), primaryProvider.(string)}, l2)
+	add(candidate{model: l2["model"].(string), provider: primaryProvider.(string)}, l2)
 	if fb, ok := l2["fallback"]; ok && fb != nil {
 		list, ok := fb.([]any)
 		if !ok {
@@ -399,11 +404,19 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 		}
 		for _, item := range list {
 			m, ok := obj(item)
-			// an item with no provider string would route to `provider: undefined`
-			if !ok || !isText(m["model"]) || !isText(m["provider"]) {
+			if !ok || !isText(m["model"]) {
 				return routed{}, errRouteUnsure
 			}
-			add(candidate{m["model"].(string), m["provider"].(string)}, m)
+			// B545: an item with no provider key is Node's `provider: undefined`
+			// candidate; a provider key that is not text stays with Node.
+			if !has(m, "provider") {
+				add(candidate{model: m["model"].(string), noProvider: true}, m)
+				continue
+			}
+			if !isText(m["provider"]) {
+				return routed{}, errRouteUnsure
+			}
+			add(candidate{model: m["model"].(string), provider: m["provider"].(string)}, m)
 		}
 	}
 	if rule != nil {
@@ -416,23 +429,31 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 						return routed{}, err
 					}
 				}
-				add(candidate{m["model"].(string), p}, m)
+				add(candidate{model: m["model"].(string), provider: p}, m)
 			}
 		}
 	}
 	review := reviewOf(cfg)
 	var secondProvider any
+	// secondUndefined: Node's secondProvider is undefined (not null), so a
+	// candidate with no provider is equal to it and dropped
+	secondUndefined := true
 	if review["multimodel"] == true {
 		sl, _ := obj(review["second_levels"])
 		l2s, _ := obj(sl["L2"])
 		secondProvider = l2s["provider"]
+		secondUndefined = !has(l2s, "provider")
 		if secondProvider == nil {
 			secondProvider = review["second_provider"]
+			secondUndefined = !has(review, "second_provider")
 		}
 	}
 	candidates := []candidate{}
 	for _, c := range entries {
-		if sp, ok := secondProvider.(string); ok && sp == c.provider {
+		if c.noProvider && secondUndefined {
+			continue
+		}
+		if sp, ok := secondProvider.(string); ok && !c.noProvider && sp == c.provider {
 			continue
 		}
 		dup := false
@@ -476,7 +497,11 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 	prior := -1
 	if previous != nil {
 		for i, c := range candidates {
-			if previous["model"] == c.model && previous["provider"] == c.provider {
+			sameProvider := previous["provider"] == c.provider && !c.noProvider
+			if c.noProvider {
+				sameProvider = !has(previous, "provider")
+			}
+			if previous["model"] == c.model && sameProvider {
 				prior = i
 				break
 			}
@@ -497,6 +522,11 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 			return routed{}, err
 		}
 		chosen, reason = pickReviewer(candidates, stats, opts, ticketID)
+	}
+	if chosen.noProvider {
+		// Node routes the ticket to `provider: undefined` and writes a row
+		// with no provider; Go keeps that choice with Node (decided before any write).
+		return routed{}, errRouteUnsure
 	}
 	var second any
 	for _, r := range legacy.rows {
@@ -520,6 +550,9 @@ func adaptiveRoutes(cfg map[string]any, lines int, deleted bool, timeoutS float6
 	}
 	entry := func(c candidate) map[string]any {
 		e := map[string]any{"model": c.model, "provider": c.provider}
+		if c.noProvider {
+			delete(e, "provider") // JSON.stringify drops `provider: undefined`
+		}
 		if v := efforts[c]; v != undefinedEffort {
 			e["effort"] = v
 		}
