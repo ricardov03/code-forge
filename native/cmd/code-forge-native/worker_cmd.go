@@ -8,14 +8,16 @@ import (
 	"strings"
 
 	"github.com/ricardov03/code-forge/native/state"
+	"github.com/ricardov03/code-forge/native/worker"
 )
 
 // B460 (phase 1): `code-forge worker` in Go (src/cli/worker.mjs). Go answers
 // --help, every usage error, and the refusals Node makes before the worker
-// boots (a bad or unknown run id, a run that has ended). Serving the queue
-// (boot lock, registry, daemon, pins, ticket reviews, signed rows, stop) keeps
-// its hand-over to Node, so a ticket is never lost or reviewed twice: the Node
-// worker is still the only process that takes tickets.
+// boots (a bad or unknown run id, a run that has ended).
+// B489: Go also serves the queue (boot lock, registry, daemon, pins, ticket
+// reviews, signed rows, idle exit, stop) when every part it reaches is
+// ported; see worker_serve.go for the cases that still go to Node and the
+// ticket split rule that keeps a ticket from being lost or reviewed twice.
 func init() { routes["worker"] = runWorkerVerb }
 
 const workerUsage = "usage: code-forge worker --run <id> [--cwd <dir>] [--poll-ms <n>] [--once]\n"
@@ -56,7 +58,8 @@ func workerPlan(home string, args []string) (func(o *runOut) int, handoverReason
 	if status, _ := record.Get("status").(string); status != "active" {
 		return func(o *runOut) int { o.err("worker: run " + runID + " has ended\n"); return 1 }, 0
 	}
-	return nil, hWorkerServe
+	// B489: serve in Go; workerServe decides what still goes to Node.
+	return func(*runOut) int { return 0 }, hWorkerServe
 }
 
 func runWorkerVerb(args []string) int {
@@ -75,7 +78,24 @@ func runWorkerVerb(args []string) int {
 	}
 	before := gatesBreadcrumbName("worker")
 	o := &runOut{}
-	code := plan(o)
+	var code int
+	if reason == hWorkerServe {
+		parsed, _ := cliParseFlags(args, cliSpec{values: []string{"run", "cwd", "poll-ms"}, booleans: []string{"once"}})
+		a := workerServeArgs{runID: parsed.values["run"], pollMs: worker.DefaultPollMs, once: parsed.booleans["once"]}
+		a.cwd, a.hasCwd = parsed.values["cwd"]
+		if raw, ok := parsed.values["poll-ms"]; ok {
+			n, _ := cliIntFlag(raw, "poll-ms")
+			a.pollMs = int(n)
+		}
+		spawnWarnBefore = before
+		var handTo handoverReason
+		code, handTo = workerServe(home, args, a, o)
+		if handTo != 0 {
+			return workerHandover(args, handTo)
+		}
+	} else {
+		code = plan(o)
+	}
 	if code != 0 {
 		var message any
 		if o.last != "" {

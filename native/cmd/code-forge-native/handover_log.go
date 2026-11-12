@@ -236,6 +236,12 @@ const (
 	hWorkerServe
 	hWorkerHome
 	hWorkerRecord
+	hWorkerShape
+	hWorkerConfig
+	hWorkerWatch
+	hWorkerJev
+	hWorkerBoot
+	hWorkerTicket
 	hSpawnSession
 	hSpawnHome
 	hSpawnConfig
@@ -505,6 +511,12 @@ var handoverReasons = [...]string{
 	hWorkerServe:               "worker-serve",
 	hWorkerHome:                "worker-home",
 	hWorkerRecord:              "worker-record",
+	hWorkerShape:               "worker-shape",
+	hWorkerConfig:              "worker-config",
+	hWorkerWatch:               "worker-watch",
+	hWorkerJev:                 "worker-jev-key",
+	hWorkerBoot:                "worker-boot",
+	hWorkerTicket:              "worker-ticket-unported",
 	hSpawnSession:              "spawn-session",
 	hSpawnHome:                 "spawn-home",
 	hSpawnConfig:               "spawn-config",

@@ -357,6 +357,30 @@ func contextRunRoot(run string, root *string) (string, error) {
 	if contextUntrusted(dir) == "" {
 		return filepath.EvalSymlinks(dir)
 	}
+	return contextMakeRoot(base, dir)
+}
+
+// contextMakeRunRoot is tmp.mjs runRoot (B489, the worker's boot): the run
+// root is made or re-checked and owner.json names this process every time.
+func contextMakeRunRoot(run string, root *string) (string, error) {
+	if !contextRunID.MatchString(run) {
+		return "", errors.New(`a run id is one path segment of letters, digits, ".", "_" or "-"`)
+	}
+	var base string
+	if root == nil {
+		base = os.Getenv("CODE_FORGE_TMP_ROOT")
+		if !filepath.IsAbs(base) {
+			base = filepath.Join(contextTempDir(), "code-forge")
+		}
+	} else if !filepath.IsAbs(*root) {
+		return "", errors.New("tmp: tmp.root must be an absolute path")
+	} else {
+		base = *root
+	}
+	return contextMakeRoot(base, filepath.Join(base, run))
+}
+
+func contextMakeRoot(base, dir string) (string, error) {
 	for attempt := 0; ; attempt++ {
 		if err := contextMkdirAll(dir); err != nil {
 			return "", err

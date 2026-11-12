@@ -132,13 +132,16 @@ func TestB460WorkerServingHandsOver(t *testing.T) {
 		t.Fatal(err)
 	}
 	b460Chdir(t, f.workspace)
-	for _, args := range [][]string{{"worker", "--run", "r-live", "--once"}, {"worker", "--run", "r-junk"}} {
-		if code, out, _ := b460Call(t, args...); code != 127 || out != "" {
-			t.Fatalf("%v = %d %q, want the Node hand-over (127)", args, code, out)
-		}
+	// B489: Go serves the worker now; a workspace outside git is Node's
+	// own refusal, answered in Go.
+	if code, out, errText := b460Call(t, "worker", "--run", "r-live", "--once"); code != 1 || out != "" || errText != "worker: not inside a git repository\n" {
+		t.Fatalf("r-live = %d %q %q", code, out, errText)
+	}
+	if code, out, _ := b460Call(t, "worker", "--run", "r-junk"); code != 127 || out != "" {
+		t.Fatalf("r-junk = %d %q, want the Node hand-over (127)", code, out)
 	}
 	got := strings.Join(b460Handovers(t, f.home), ",")
-	if got != "worker worker-serve,worker worker-record" {
+	if got != "worker worker-record" {
 		t.Fatalf("hand-overs = %s", got)
 	}
 	if record := f.read(t, "r-live"); record["status"] != "active" {

@@ -24,6 +24,9 @@ var (
 	spawnWarnMu     sync.Mutex
 	spawnWarned     = map[string]bool{}
 	spawnWarnBefore = []any{}
+	// spawnWarnVerb is the verb the warning line names (B489: the worker
+	// logs its own warnings under "worker").
+	spawnWarnVerb = "spawn"
 )
 
 func spawnLogWarning(warning, message string) {
@@ -47,7 +50,7 @@ func spawnLogWarning(warning, message string) {
 		}
 		text = text[:end]
 	}
-	verb := clean("spawn")
+	verb := clean(spawnWarnVerb)
 	normalized := reviewWaitLogQuotes.ReplaceAllString(text, " ")
 	normalized = reviewWaitLogPlaceholders.ReplaceAllString(normalized, " ")
 	normalized = reviewWaitLogPaths.ReplaceAllString(normalized, " ")
