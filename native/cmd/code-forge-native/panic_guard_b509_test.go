@@ -7,6 +7,7 @@ import (
 	"os/exec"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/ricardov03/code-forge/native/gosafe"
 )
@@ -65,7 +66,19 @@ func TestB509GoroutinePanicStopsWritingVerb(t *testing.T) {
 			if err != nil {
 				t.Fatal(err)
 			}
-			defer os.RemoveAll(home)
+			defer func() {
+				// The gate process the child started outlives it (its own
+				// process group); let it write its one line before cleanup.
+				if c.shape == "gates-run-panic" {
+					for i := 0; i < 100; i++ {
+						if _, err := os.Stat(home + "/gate-cwds"); err == nil {
+							break
+						}
+						time.Sleep(50 * time.Millisecond)
+					}
+				}
+				os.RemoveAll(home)
+			}()
 			fakeBin := t.TempDir()
 			record := home + "/node-ran"
 			if err := os.WriteFile(fakeBin+"/node", []byte("#!/bin/sh\n: > "+record+"\nexit 0\n"), 0o755); err != nil {
