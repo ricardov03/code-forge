@@ -61,6 +61,7 @@ locks and signed ledger rows as Node.
 | `sweep` | `--help`, `-h` and usage errors (B471). | The process scan, dry run or `--apply` (`sweep-unported`). |
 | `upgrade` | `--help`, `-h`, usage errors and a `--source` that is missing or not a folder (B471). | Re-pointing the recorded installs with the release notes and docs sync, also with no `--source` (`upgrade-relink`), and a `--source` path holding control characters (`upgrade-control-chars`). |
 | `tools`, `tools install` | The tool list in text and `--json`, `install` with `--dry-run` and `--yes`, the plan, each install command and its result, and every usage error (B455). | `install` at a terminal without `--yes`, which asks Node's yes prompt (`tools-confirm`), and a `--version` line whose cut splits an emoji (`tools-unsupported`). |
+| `doctor` | `--help`, `-h`, usage errors and unknown flags, and the whole `--quick` run in text and `--json` (B474): the config row, harness links, the Jev key from its env variable or the file store (`CODE_FORGE_KEY_BACKEND=file`), its expiry warning, a malformed key reference, and the reviewer rows from the project ledger, with the resolved key masked as Node does. | The full run with its live checks (`doctor-full-run`); a config the schema rejects, one holding a secret-shaped value or a non-empty `coder.sandbox.add_dirs` (`doctor-config-schema`, `doctor-config-secrets`, `doctor-sandbox-dirs`); a YAML syntax error (`config-parse-error`); the OS keychain key store (`doctor-key-store`); a cached key that is expired or must be shortened, or a 1Password read (`doctor-key-refresh`); ledger rows whose dates or keys Go does not read exactly like Node (`doctor-ledger-shape`); and no `HOME` (`doctor-no-home`). |
 
 The Go engine skips the test gate for proven text-only `gates run --changed` changes.
 `gates run --run R --block B --changed` always stays in Go: it selects the block's tests,
@@ -77,7 +78,7 @@ See [how it works](how-it-works.md) for the scope rules and reuse checks.
 
 A hand-over always passes the original arguments. Node then runs the command
 exactly as before. When Go is not sure it gives the same answer, it hands over.
-Commands such as `code-forge version` and `code-forge doctor` also go through
+Commands such as `code-forge version` and the full `code-forge doctor` also go through
 Go to Node. Go additionally runs private helpers and the optional background
 daemon.
 
